@@ -384,7 +384,85 @@ moved them.
 > (`a_block_less_a_prism_lying_inside_it_along_its_edge_is_refused_and_the_rest_answer`)
 > and a solid lying on a block along one edge and reaching into it elsewhere
 > (`a_solid_lying_on_a_block_along_an_edge_and_reaching_into_it_is_refused_united`)
-> stay refused `ResultIsNotManifold { count: 4 }`.
+> stay refused `ResultIsNotManifold { count: 4 }` (answered since Q1901, in the
+> note below).
+
+> **2026-10-13 note (Q1901, from Q1116): a solid touching itself along a line
+> is an answer.** The two guards of the Q803 note are gone:
+> `rest_on_the_outer_side_of` in `the_two_pairs_along`, and
+> `a_line_whose_two_sides_are_joined_some_other_way` in
+> `part_each_line_two_faces_rest_against_each_other_along`, both in
+> `fuse/assemble.rs`, with `side_of_a_corner_of` and
+> `the_three_planes_meeting_at_a_corner_of`, which only the first reached
+> (§438's note of the same day). Refusing that answer was a **gap** by §16.10,
+> not a limit. Q1116's lane argued it, and the dispatcher took it:
+>
+> 1. **The answer exists as a point set.** The block less the prism lying
+>    inside it along its edge is `240 − 24 = 216`, the block united with the
+>    solid that lies on it along one edge and reaches into it elsewhere
+>    `240 + 42 − 6 = 276`.
+> 2. **It can be written down.** §17.4 refuses a result that is not a
+>    manifold because `check_touched_edge` asserts two coedges along each
+>    edge, and a parted line has two along each of its two edges.
+> 3. **Parting cannot pass two faces through each other.** Faces round a line
+>    alternate in which way they walk it, and `the_two_pairs_along` pairs only
+>    darts walking it opposite ways, which leaves out the one pairing that
+>    would cross. So Q803's two guards were a choice of what to answer, not
+>    what kept an answer sound.
+> 4. **The kernel already wrote such answers.** Q953's wedge less the frustum
+>    fuses on with a far cube: the union two solids, the difference one, the
+>    intersection none. Q760's parting answers the stepped block `(0, 0)`,
+>    `(6, 0)`, `(6, 1)`, `(4, 1)`, `(4, 4)`, `(0, 4)`, 4 high, united with a
+>    round bar of radius 1 at `(5, 1.75, 1)`, 2 high, as one shell of 11
+>    faces, `77.807457349804`, and it validates. Both as Q1116's lane
+>    measured them.
+> 5. **§80.9 is untouched.** It is about a line that is an edge of both
+>    inputs, four darts from four input faces, and that stays refused: where
+>    neither pair is pieces of one input face, `the_two_pairs_along` still
+>    asks for two flat faces on one plane facing one way.
+>
+> Measured with the guards gone, in `a_prism_lying_on_one_edge.rs`: the block
+> less the prism inside it is one solid of two shells, the block's six faces
+> and the hollow's five, touching along the prism's edge; the block united
+> with the hook is one shell of 13 faces; each validates
+> (`each_answer_touching_itself_along_a_line_is_the_shells_its_faces_part_into`).
+> Each fused with a cube of 1 far from it, every rule both ways round, gives
+> the union as the two as they stand, the intersection as no solid, and each
+> difference as its first solid whole
+> (`each_answer_touching_itself_along_a_line_fuses_on_with_a_far_cube`). The
+> two pins of the Q803 note now answer every rule both ways round, as
+> `a_block_less_a_prism_lying_inside_it_along_its_edge_answers_every_rule_both_ways_round`
+> and
+> `a_solid_lying_on_a_block_along_an_edge_and_reaching_into_it_answers_every_rule_both_ways_round`.
+> §417.9's block less the tipped cube, refused `ResultIsNotManifold { count:
+> 4 }` under a tolerant policy at the five tilts
+> `TILTS_THE_UNION_WAS_REFUSED_AT` of
+> `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`, is one solid of
+> `1000` less what the two cubes share under either policy there
+> (`the_block_less_the_tipped_cube_is_the_block_less_what_they_share_where_the_union_was_refused`).
+> Queue row Q1902 says Q760's touching answer for the stepped block is
+> refused `ArgumentIntersectsItself` by every fuse after it; these two
+> answers are not, and that row stays open.
+>
+> The decision moved five pins outside Q1901's own files, which queue row
+> Q1910 moved, each answer validating and holding its volume worked by hand.
+> In `a_block_edge_grazing_a_ball_at_cx_16.rs`, the union either way round
+> and the difference with the ball first, refused
+> `ResultIsNotManifold { count: 4 }` before, now go on to the next refusal:
+> `CannotMeshAFace` `CornersCoincide` at position 5, like the other three
+> fuses there, except the union with the block first, which is refused
+> `Invalid::FacesDoNotAgreeWhichWayTheyFace`, under either policy
+> (`every_fuse_refuses_on_the_two_places_f64_holds_as_one_corner`). In
+> `a_sliver_along_an_edge_of_a_face_it_lies_on.rs`, the leaning frame
+> united with the comb answers one solid of `19`, both ways round. In
+> `a_lens_whose_hole_is_half_a_disk.rs`, the bar at `(−3, 0)` less the half
+> bar of radius 1 at `(0, −3)` answers `98.5π`, and less the half bar of
+> radius 4 at the origin `76π`; the file had called the second a limit. Two
+> kinds stay refused `ResultIsNotManifold { count: 4 }` under point 5 above,
+> each one solid touching itself along a line that is an edge of both
+> inputs, four input faces round it: the frame less the comb, `8`, and the
+> two bars united less either half bar, `200π − 4L − 1.5π` and `176π − 4L`
+> for the lens's area `L`.
 
 > **2026-10-04 note (Q473): a plane lying along a cone's ruling runs along the
 > ruling.** The gap above, closed: `AlongATouch` carries the ruling,

@@ -20,15 +20,20 @@
 //! and now parts off the top face's pair too, so the union is the two solids as
 //! they stood.
 //!
-//! Two shapes that also reach four darts that way are pinned refused, because
-//! their answer is one solid pinched along the line rather than two lumps:
-//! a block less a prism lying inside it along its edge, and a block united
-//! with a solid lying on it along one edge and reaching down into it somewhere
-//! else. Both validate if they are parted, which is why the parting asks.
+//! **Two shapes that also reach four darts that way answer one solid touching
+//! itself along the line** (queue row Q1901): a block less a prism lying
+//! inside it along its edge, and a block united with a solid lying on it along
+//! one edge and reaching down into it somewhere else. Both were refused
+//! `ResultIsNotManifold { count: 4 }` from Q803 on, which parted the line only
+//! where the prism's walls rested on the outer side of the top and nothing
+//! else joined the two sides into one shell. Parted, each has two faces along
+//! every edge, validates, and fuses on with a cube far from it
+//! (`docs/decisions.md` §39.4). The parting asks no corner of either pair
+//! since, so the corners the paragraphs below say it read are no longer read.
 //!
 //! **A solid whose upright wall rests along the edge and turns back below the
 //! top past the block's end answers too** (queue row Q1117, which guessed it
-//! refused): the parting asks every corner of a piece of the wall, and the
+//! refused): the parting asked every corner of a piece of the wall, and the
 //! top's plane cuts the wall into pieces each on one side of it.
 //!
 //! **Moved elsewhere along `x`, the edge need not lie on the top at all**
@@ -54,7 +59,7 @@
 //! 24 turns: the parting asked a corner at an end of the edge which side of the
 //! top it was on by the point it is written down as, the middle of a box, and
 //! on a tilted top that can sit a rounding inside. A corner of the top's own
-//! pieces is no longer asked.
+//! pieces was no longer asked after that.
 //!
 //! **Turned, the resting prism has its ends a rounding above the top or a
 //! rounding inside it** (queue row Q1582). With the triangle above in place of
@@ -64,7 +69,7 @@
 //! refuses most rules `DynamicRangeTooWide` or `HoleWindsWithTheOuterWire`:
 //! limits under `Policy::certified()`. One was a gap: at the turn `0.625` the
 //! parting read the prism's wall's far corner by its written point, a rounding
-//! inside the top, and now asks where the corner's three planes meet
+//! inside the top, and then asked where the corner's three planes meet
 //! (`docs/decisions.md` §438).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -80,6 +85,11 @@ const BLOCK: f64 = 240.0;
 
 /// The prism's triangle, its corner at the origin, both walls leaning up.
 const RESTING: [[f64; 2]; 3] = [[0.0, 0.0], [3.0, 2.0], [-1.0, 2.0]];
+
+/// The prism's triangle turned over, its corner at the origin and both walls
+/// leaning down, so moved into the block it lies inside with its edge on the
+/// top.
+const INSIDE: [[f64; 2]; 3] = [[0.0, 0.0], [-1.0, -2.0], [3.0, -2.0]];
 
 /// Where each prism is moved to, and how long it is. The first two leave its
 /// edge on the block's top, and the last three, six long, a rounding above it.
@@ -268,14 +278,14 @@ fn the_prism_with_its_edge_a_rounding_into_the_blocks_top_answers_as_if_on_it() 
 /// **The union was refused `ResultIsNotManifold { count: 4 }`, both ways
 /// round, at 14 of the first 24 turns** (queue row Q1281), all [`TURNS`] were
 /// then. Queue row Q1582 ran them on to 60, and the wedge answered at each.
-/// `rest_on_the_outer_side_of` in `fuse/assemble.rs` asked each corner of the
-/// wedge's two walls which side of the top it was on, by the point the corner
-/// is written down as: the middle of the box round where three planes meet.
-/// On a tilted top that middle can be a rounding inside the top. At a turn of
-/// `0.075` the wedge's corner at the end `z = 2`, an end of its edge, was
-/// written down as `(0, −0.14985941454548474, 1.994377636224415)` and read as
-/// inside. A corner of the top's own pieces lies on the top by how it
-/// was made, and is no longer asked.
+/// The parting in `fuse/assemble.rs` then asked each corner of the wedge's two
+/// walls which side of the top it was on, by the point the corner is written
+/// down as: the middle of the box round where three planes meet. On a tilted
+/// top that middle can be a rounding inside the top. At a turn of `0.075` the
+/// wedge's corner at the end `z = 2`, an end of its edge, was written down as
+/// `(0, −0.14985941454548474, 1.994377636224415)` and read as inside. A corner
+/// of the top's own pieces lies on the top by how it was made, and was no
+/// longer asked; since queue row Q1901 no corner is.
 #[test]
 fn a_wedge_lying_on_its_edge_on_a_turned_blocks_top_answers_every_rule_both_ways_round() {
     let mut wrong = Vec::new();
@@ -358,7 +368,8 @@ fn the_turned_wedges_edge_is_on_the_turned_blocks_top_at_every_turn() {
 /// `docs/decisions.md` §417.4 writes it, and the four darts along the edge from
 /// where it crosses the top to that end are the top's two pieces and the
 /// prism's two walls. The union was refused `ResultIsNotManifold { count: 4 }`:
-/// `rest_on_the_outer_side_of` in `fuse/assemble.rs` read the wall's corner at
+/// the parting in `fuse/assemble.rs`, which asked until queue row Q1901 that
+/// the walls rest on the outer side of the top, read the wall's corner at
 /// `z = 8`, the meet of the two walls and that end, by the point it is written
 /// down as, `(3.36e-16, −4.680778183523698, 6.487704956041742)`, a rounding
 /// inside the top, where the three planes meet strictly above it.
@@ -581,26 +592,28 @@ fn every_end_of_the_resting_prisms_edge_inside_the_turned_top_is_under_two_round
 
 /// The prism turned over and moved into the block, its edge on the top face
 /// from below: the triangle `(0, 0)`, `(−1, −2)`, `(3, −2)`, from `z = 2` to
-/// `z = 8`. The union is the block, the intersection the prism, and the prism
-/// less the block nothing.
+/// `z = 8`. The union is the block, the intersection the prism, the prism
+/// less the block nothing, and the block less the prism 216, the block with a
+/// prism-shaped hollow whose edge touches the top face.
 ///
-/// The block less the prism has a prism-shaped hollow whose edge touches the
-/// top face, which is one solid pinched along the line, and it stays refused.
-/// The four darts are the same two pairs as on top, but the prism's walls,
-/// turned round, lie on the inner side of the top face; parted, the answer
-/// came back as one solid of two shells, 216, that validates.
+/// **The block less the prism was refused `ResultIsNotManifold { count: 4 }`**
+/// until queue row Q1901. The four darts along the edge are the same two pairs
+/// as on top, but the prism's walls, turned round, lie on the inner side of
+/// the top face, and the parting asked that they lie on the outer side. A
+/// solid touching itself along a line is an answer (`docs/decisions.md`
+/// §39.4): parted, it is one solid of two shells touching along the line (the
+/// test below).
 #[test]
-fn a_block_less_a_prism_lying_inside_it_along_its_edge_is_refused_and_the_rest_answer() {
+fn a_block_less_a_prism_lying_inside_it_along_its_edge_answers_every_rule_both_ways_round() {
     let mut wrong = Vec::new();
-    let inside = [[0.0, 0.0], [-1.0, -2.0], [3.0, -2.0]];
     for swapped in [false, true] {
         for rule in EVERY_RULE {
             let what = format!("{rule:?}, prism first {swapped}");
             let (model, answer) = fuse(swapped, rule, |model| {
-                [a_block(model), a_prism(model, inside, [0.0, 0.0, 2.0], 6.0)]
+                [a_block(model), a_prism_inside_the_block(model)]
             });
             let outcome = match (rule, swapped) {
-                (Rule::Difference, false) => refused_as_four_faces_along_one_edge(answer),
+                (Rule::Difference, false) => differs(&model, answer, &[BLOCK - 24.0]),
                 (Rule::Union, _) => differs(&model, answer, &[BLOCK]),
                 (Rule::Intersection, _) => differs(&model, answer, &[24.0]),
                 _ => differs(&model, answer, &[]),
@@ -618,24 +631,174 @@ fn a_block_less_a_prism_lying_inside_it_along_its_edge_is_refused_and_the_rest_a
 /// `(2, 1)`, `(2, −1)`, `(3, −1)`, `(3, 2)`, `(−1, 2)`, area 7, from `z = 2` to
 /// `z = 8`, volume 42, of which `1 × 1 × 6` is inside the block.
 ///
-/// The union is one solid that touches itself along the line, and it stays
-/// refused. Parted, it came back as one shell of 276 that validates. The
-/// intersection is the bit inside, 6, and the differences are 234 and 36.
+/// The union is one solid that touches itself along the line, `240 + 42 − 6 =
+/// 276`, the intersection the bit inside, 6, and the differences 234 and 36.
+///
+/// **The union was refused `ResultIsNotManifold { count: 4 }`** until queue
+/// row Q1901: the parting asked that nothing but the line join the block's
+/// side of it to the hook's, and the bit reaching into the block joins them.
+/// Parted, the union is one shell of 13 faces touching itself along the line
+/// (the test below).
 #[test]
-fn a_solid_lying_on_a_block_along_an_edge_and_reaching_into_it_is_refused_united() {
+fn a_solid_lying_on_a_block_along_an_edge_and_reaching_into_it_answers_every_rule_both_ways_round()
+{
     let mut wrong = Vec::new();
     for swapped in [false, true] {
         for rule in EVERY_RULE {
             let what = format!("{rule:?}, hook first {swapped}");
             let (model, answer) = fuse(swapped, rule, |model| [a_block(model), a_hook(model)]);
             let outcome = match (rule, swapped) {
-                (Rule::Union, _) => refused_as_four_faces_along_one_edge(answer),
+                (Rule::Union, _) => differs(&model, answer, &[BLOCK + 42.0 - 6.0]),
                 (Rule::Intersection, _) => differs(&model, answer, &[6.0]),
                 (Rule::Difference, false) => differs(&model, answer, &[234.0]),
                 _ => differs(&model, answer, &[36.0]),
             };
             if let Some(why) = outcome {
                 wrong.push(format!("{what}: {why}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// An L-shaped plate, the outline `(0, 0)`, `(2, 0)`, `(2, 1)`, `(1, 1)`,
+/// `(1, 2)`, `(0, 2)` from `z = 0` to `z = 1`, volume 3, and a pocket cut up
+/// into its corner square, the unit square at the origin from `z = −1` to
+/// `z = 0.5`, volume 1.5, half of it inside the plate.
+///
+/// The union is 4, the intersection 0.5, and the pocket less the plate 1, and
+/// each answers. **The plate less the pocket is refused
+/// `ResultIsNotManifold { count: 4 }`**, though its answer exists: the plate's
+/// two arms, joined above the pocket by the top half of the corner square,
+/// `3 − 0.5 = 2.5`, one solid touching itself along `x = 1, y = 1` from
+/// `z = 0` to `z = 0.5`. That line is the plate's inner corner and the
+/// pocket's corner both, an edge of both inputs, so the four faces along it
+/// are four input faces, and §39.4's note of Q1901 leaves such a line refused
+/// (its point 5). Queue row Q1910 ran it as a shape a designer draws on
+/// purpose that meets the refusal of the leaning frame less the comb in
+/// `a_sliver_along_an_edge_of_a_face_it_lies_on.rs` and of the two bars less a
+/// half bar in `a_lens_whose_hole_is_half_a_disk.rs` (§440.3).
+#[test]
+fn an_l_plate_less_a_pocket_in_its_corner_square_touches_itself_along_an_edge_of_both_and_is_refused()
+ {
+    let mut wrong = Vec::new();
+    for swapped in [false, true] {
+        for rule in EVERY_RULE {
+            let what = format!("{rule:?}, pocket first {swapped}");
+            let (model, answer) = fuse(swapped, rule, |model| {
+                [
+                    a_prism(
+                        model,
+                        [
+                            [0.0, 0.0],
+                            [2.0, 0.0],
+                            [2.0, 1.0],
+                            [1.0, 1.0],
+                            [1.0, 2.0],
+                            [0.0, 2.0],
+                        ],
+                        [0.0, 0.0, 0.0],
+                        1.0,
+                    ),
+                    a_prism(
+                        model,
+                        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                        [0.0, 0.0, -1.0],
+                        1.5,
+                    ),
+                ]
+            });
+            let outcome = match (rule, swapped) {
+                (Rule::Union, _) => differs(&model, answer, &[4.0]),
+                (Rule::Intersection, _) => differs(&model, answer, &[0.5]),
+                (Rule::Difference, false) => match answer {
+                    Err(Error::ResultIsNotManifold { count: 4 }) => None,
+                    Err(why) => Some(format!("refused {why:?}, not count 4")),
+                    Ok(fused) => Some(format!(
+                        "answers {:?}; pin it as one solid of 2.5",
+                        fused.solids()
+                    )),
+                },
+                _ => differs(&model, answer, &[1.0]),
+            };
+            if let Some(why) = outcome {
+                wrong.push(format!("{what}: {why}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// **Each answer touching itself along a line is parted where it touches**:
+/// the block less the prism inside it is the block's six faces round the
+/// hollow's five, two shells meeting only along the prism's edge, and the
+/// block united with the hook is one shell of 13 faces. Each validates.
+#[test]
+fn each_answer_touching_itself_along_a_line_is_the_shells_its_faces_part_into() {
+    for (what, touching, faces) in [
+        (
+            "the block less the prism inside it",
+            the_block_less_the_prism_inside_it as fn(&mut Model) -> SolidKey,
+            vec![5, 6],
+        ),
+        (
+            "the block united with the hook",
+            the_block_united_with_the_hook,
+            vec![13],
+        ),
+    ] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let solid = touching(&mut model);
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: {why}"));
+        let mut found: Vec<usize> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .shells()
+            .map(|shell| shell.faces().count())
+            .collect();
+        found.sort_unstable();
+        assert_eq!(found, faces, "{what}: faces of each shell");
+    }
+}
+
+/// **Each answer touching itself along a line fuses on**: the block less the
+/// prism inside it, 216, and the block united with the hook, 276, each fused
+/// with a cube of 1 far from it, every rule both ways round. The union is the
+/// two as they stand, the intersection no solid, and each difference its
+/// first solid whole. Queue row Q1902 says the answer the parting gives a bar
+/// resting on a stepped block's wall is refused `ArgumentIntersectsItself` by
+/// every fuse after it; these two are not.
+#[test]
+fn each_answer_touching_itself_along_a_line_fuses_on_with_a_far_cube() {
+    let mut wrong = Vec::new();
+    for (what, touching, volume) in [
+        (
+            "the block less the prism inside it",
+            the_block_less_the_prism_inside_it as fn(&mut Model) -> SolidKey,
+            BLOCK - 24.0,
+        ),
+        (
+            "the block united with the hook",
+            the_block_united_with_the_hook,
+            BLOCK + 36.0,
+        ),
+    ] {
+        for swapped in [false, true] {
+            for rule in EVERY_RULE {
+                let (model, answer) =
+                    fuse(swapped, rule, |model| [touching(model), a_far_cube(model)]);
+                let should: &[f64] = match (rule, swapped) {
+                    (Rule::Union, _) => &[volume, 1.0],
+                    (Rule::Intersection, _) => &[],
+                    (Rule::Difference, false) => &[volume],
+                    (Rule::Difference, true) => &[1.0],
+                    _ => unreachable!("EVERY_RULE holds only these three"),
+                };
+                if let Some(why) = differs(&model, answer, should) {
+                    wrong.push(format!("{what}, {rule:?}, the cube first {swapped}: {why}"));
+                }
             }
         }
     }
@@ -712,20 +875,12 @@ fn the_wall_that_turns_back_is_one_face_reaching_two_below_the_blocks_top() {
 /// first solid whole.
 ///
 /// **Queue row Q1117 guessed the union refused** `ResultIsNotManifold { count:
-/// 4 }`: `rest_on_the_outer_side_of` in `fuse/assemble.rs` parts the line only
-/// where every corner of the two faces resting along it is on the outer side
-/// of the top or a corner of the top's own pieces (queue row Q1281), and this
-/// wall has two corners at `y = −2`. It answers because
-/// what is asked is a piece of the wall, never the wall whole, and the fuse
-/// cuts each flat face along the line of every plane that crosses it, its own
-/// solid's and the other's (`fuse/cuts.rs`). That makes the piece along the
-/// edge lie on one side of the edge twice over. The lines the wall's own edges
-/// lie on cut it, so each piece is convex, and a convex piece with a side on a
-/// line lies on one side of that line. And the top's plane cuts it along
-/// `y = 0` right across, past the block's end too, since the top touches the
-/// wall along the edge and so is not a face that misses the wall's plane. On
-/// one side of the top's plane, every corner of the piece being on the outer
-/// side is the side the face leaves the line to.
+/// 4 }`: the parting in `fuse/assemble.rs` then parted the line only where
+/// every corner of the two faces resting along it was on the outer side of the
+/// top, and this wall has two corners at `y = −2`. It answered because what was
+/// asked was a piece of the wall, cut along the top's plane `y = 0` right
+/// across, never the wall whole. Since queue row Q1901 the parting asks no
+/// corner (`docs/decisions.md` §39.4).
 #[test]
 fn a_wall_that_turns_back_below_the_top_past_the_blocks_end_answers_every_rule_both_ways_round() {
     let mut wrong = Vec::new();
@@ -911,17 +1066,6 @@ fn measured(model: &Model, solid: SolidKey) -> Measurement {
         .expect("a flat solid this size measures")
 }
 
-fn refused_as_four_faces_along_one_edge(answer: rcad_topo::Result<Fused>) -> Option<String> {
-    match answer {
-        Err(Error::ResultIsNotManifold { count: 4 }) => None,
-        Err(why) => Some(format!("refused {why:?}, not as four faces along one edge")),
-        Ok(fused) => Some(format!(
-            "answered {:?}, which is one solid pinched along a line",
-            fused.solids()
-        )),
-    }
-}
-
 /// Which side of the block's top each end of the prism's edge lies on, the
 /// prism moved by `at` and `length` long: the meet of its two walls and that
 /// end's plane, asked of the planes exactly. [`Decision::Pos`] is above.
@@ -1051,6 +1195,38 @@ fn a_turn(fortieths: u8) -> f64 {
     f64::from(fortieths) * 0.025
 }
 
+/// The prism of [`INSIDE`] moved to `z = 2`, six long, in the block with its
+/// edge on the top.
+fn a_prism_inside_the_block(model: &mut Model) -> SolidKey {
+    a_prism(model, INSIDE, [0.0, 0.0, 2.0], 6.0)
+}
+
+fn the_block_less_the_prism_inside_it(model: &mut Model) -> SolidKey {
+    let block = a_block(model);
+    let prism = a_prism_inside_the_block(model);
+    one_solid(model, Rule::Difference, block, prism)
+}
+
+fn the_block_united_with_the_hook(model: &mut Model) -> SolidKey {
+    let block = a_block(model);
+    let hook = a_hook(model);
+    one_solid(model, Rule::Union, block, hook)
+}
+
+/// A cube of 1 at `(20, 20, 20)`, far from the block and anything on it.
+fn a_far_cube(model: &mut Model) -> SolidKey {
+    let cube = model
+        .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(20.0, 20.0, 20.0)).expect("a finite shift"),
+        )
+        .expect("this model made the key");
+    cube
+}
+
 fn a_hook(model: &mut Model) -> SolidKey {
     a_prism(
         model,
@@ -1089,25 +1265,23 @@ fn a_solid_whose_wall_turns_back_past_the_blocks_end(model: &mut Model) -> Solid
         [0.0, 0.0, 11.0],
         1.0,
     );
-    let one = united(model, wedge, bar);
-    united(model, one, tab)
+    let one = one_solid(model, Rule::Union, wedge, bar);
+    one_solid(model, Rule::Union, one, tab)
 }
 
-fn united(model: &mut Model, one: SolidKey, other: SolidKey) -> SolidKey {
+/// Two flat solids fused under `rule`, where that is one solid.
+fn one_solid(model: &mut Model, rule: Rule, one: SolidKey, other: SolidKey) -> SolidKey {
     let fused = model
         .fuse(
             &[one],
             &[other],
-            Rule::Union,
+            rule,
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
-        .expect("two flat solids that overlap unite");
+        .unwrap_or_else(|why| panic!("{rule:?} refused: {why}"));
     let &[solid] = fused.solids() else {
-        panic!(
-            "two solids that overlap unite into one, not {:?}",
-            fused.solids()
-        );
+        panic!("{rule:?} answers {:?}, not one solid", fused.solids());
     };
     solid
 }

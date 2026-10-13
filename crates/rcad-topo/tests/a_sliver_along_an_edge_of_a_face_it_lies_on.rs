@@ -36,11 +36,22 @@ use pairs::{Configuration, Elsewhere, Placed, Shape, Skew};
 /// out of the frame's wall `y = 1`, holding no `f64` point, along the edge of
 /// the tooth's top. Q1606's rule places it by that edge.
 ///
-/// Neither the union nor the frame less the comb is a solid: each has two
-/// parts that touch only along a line, with four faces along it. In the frame
-/// less the comb, the near wall left of the right tooth and the side wall above
-/// it touch along `x = 2, y = 1`. In the union, the comb's left tooth touches
-/// the frame's leaning outer wall along `x = −1, y = 1`.
+/// The union and the frame less the comb each touch themselves along a line,
+/// with four faces along it. In the union, the comb's left tooth touches the
+/// frame's leaning outer wall along `x = −1, y = 1`, an edge of the comb and
+/// not of the frame. Since queue row Q1901 that is an answer
+/// (`docs/decisions.md` §39.4): one solid holding the frame's 10 and the
+/// comb's 11 less the 2 they share, 19. Until then it was refused
+/// `ResultIsNotManifold { count: 4 }`.
+///
+/// In the frame less the comb, the near wall left of the right tooth and the
+/// side wall above it touch along `x = 2, y = 1`. That line is an edge of both,
+/// the corner of the frame's hole and of the tooth's top, so the four faces
+/// along it are four faces of the two inputs: the hole's walls `y = 1` and
+/// `x + y = 3`, and the tooth's top `y = 1` and its wall `x = 2`. §39.4's note
+/// of Q1901 leaves such a line refused, and it is still refused
+/// `ResultIsNotManifold { count: 4 }`. The answer would be one solid of
+/// `10 − 2`.
 #[test]
 fn a_leaning_frame_and_a_comb_meet_in_two_squares() {
     let (model, keys) = frame_and_comb().build();
@@ -51,12 +62,17 @@ fn a_leaning_frame_and_a_comb_meet_in_two_squares() {
     assert_eq!(solids.len(), 2, "the intersection is two squares");
     holds_exactly(&met, &solids, 2.0, "the intersection");
 
-    is_not_a_solid(&model, keys[0], keys[1], Rule::Union);
+    let (either, solids) = fused(&model, keys[0], keys[1], Rule::Union);
+    assert_eq!(solids.len(), 1, "the union is one solid");
+    holds_exactly(&either, &solids, 10.0 + 11.0 - 2.0, "the union");
+
     is_not_a_solid(&model, keys[0], keys[1], Rule::Difference);
 }
 
 /// The same two with the comb first: the comb less the frame holds 9, the
-/// comb's 11 less the 2 they share, and the union is still not a solid.
+/// comb's 11 less the 2 they share, and the union is one solid of 19 touching
+/// itself along `x = −1, y = 1`, as with the frame first, since queue row
+/// Q1901.
 #[test]
 fn a_comb_and_a_leaning_frame_meet_in_two_squares() {
     let (model, keys) = frame_and_comb().build();
@@ -68,7 +84,9 @@ fn a_comb_and_a_leaning_frame_meet_in_two_squares() {
     let (less, solids) = fused(&model, keys[1], keys[0], Rule::Difference);
     holds_exactly(&less, &solids, 9.0, "the difference");
 
-    is_not_a_solid(&model, keys[1], keys[0], Rule::Union);
+    let (either, solids) = fused(&model, keys[1], keys[0], Rule::Union);
+    assert_eq!(solids.len(), 1, "the union is one solid");
+    holds_exactly(&either, &solids, 10.0 + 11.0 - 2.0, "the union");
 }
 
 /// A comb of two teeth three high, leaning forward one along `x` for each step

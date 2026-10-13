@@ -36,6 +36,14 @@
 //! (`leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways` in
 //! `fuse/assemble.rs`).
 //!
+//! **The block less the tipped cube was refused** `ResultIsNotManifold {
+//! count: 4 }` at those five tilts, under a tolerant policy, until queue row
+//! Q1901. There the block keeps a thin wedge under the cube's bottom face and
+//! a wide one beside its side, and the two touch along the edge the cube
+//! stands on: one solid touching itself along a line. That is an answer
+//! (`docs/decisions.md` §39.4), and the fuse parts the line into one edge for
+//! each wedge.
+//!
 //! **The tipped cube less the block was two solids**, under a tolerant
 //! policy, at the four tilts of
 //! [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`] (queue row Q1687).
@@ -131,6 +139,29 @@ fn the_union_is_both_cubes_less_what_they_share_where_it_was_refused() {
                 let volume = volume_of_a_fuse(tilt, Rule::Union, order, &policy, &asked);
                 assert_about(volume, 2000.0 - what_the_two_share(tilt), &asked);
             }
+        }
+    }
+}
+
+/// Refused `ResultIsNotManifold { count: 4 }` under a tolerant policy until
+/// queue row Q1901: the block touches itself along the cube's edge there, and
+/// a solid touching itself along a line is an answer (`docs/decisions.md`
+/// §39.4). One solid under either policy since.
+#[test]
+fn the_block_less_the_tipped_cube_is_the_block_less_what_they_share_where_the_union_was_refused() {
+    for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
+        for policy in [certified(), tolerant()] {
+            let asked = format!("{tilt:?}, {policy:?}");
+            let volumes = volumes_of_a_fuse(
+                tilt,
+                Rule::Difference,
+                Order::BlockFirst,
+                &policy,
+                &mut ProvenanceLog::new(),
+                &asked,
+            );
+            assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+            assert_about(volumes[0], 1000.0 - what_the_two_share(tilt), &asked);
         }
     }
 }
@@ -316,9 +347,13 @@ fn the_block_less_the_tipped_cube_is_one_solid_where_the_cubes_edge_rounds_below
 }
 
 /// Every tilt of this file, every rule, either way round, under a tolerant
-/// policy, but for the five fuses
-/// [`the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant`]
-/// pins: one solid, within §417.8's allowance of the volume worked by hand.
+/// policy: one solid, within §417.8's allowance of the volume worked by hand.
+///
+/// **The block less the tipped cube was refused `ResultIsNotManifold { count:
+/// 4 }` at the five [`TILTS_THE_UNION_WAS_REFUSED_AT`]** until queue row
+/// Q1901, with the fold tried and refused too. There the block touches itself
+/// along the cube's edge, and a solid touching itself along a line is an
+/// answer (`docs/decisions.md` §39.4).
 ///
 /// **The floor is taken as running through the ends of the cube's edge only
 /// where the answer was refused without it** (queue row Q1711,
@@ -348,11 +383,6 @@ fn every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_o
                 (Rule::Intersection, share, refused_without),
                 (Rule::Difference, 1000.0 - share, false),
             ] {
-                if matches!((rule, order), (Rule::Difference, Order::BlockFirst))
-                    && TILTS_THE_UNION_WAS_REFUSED_AT.contains(&tilt)
-                {
-                    continue;
-                }
                 let asked = format!("{tilt:?}, {rule:?}, {order:?}");
                 let mut log = ProvenanceLog::new();
                 let volumes = volumes_of_a_fuse(tilt, rule, order, &tolerant(), &mut log, &asked);
@@ -383,25 +413,35 @@ fn every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_o
     }
 }
 
-/// Refused as before Q1711, with the fold tried and refused too: the block
-/// touches itself along the cube's edge, and an edge with four faces along it
-/// is queue row Q1116's to judge, not this file's.
+/// [`what_the_two_share`], which every pin here measures the kernel against,
+/// worked again by hand in `T = tan t`, so those pins do not rest on its five
+/// corners alone.
+///
+/// With `φ = 2t`, `sin φ = 2T / (1 + T²)` and `cos φ = (1 − T²) / (1 + T²)`,
+/// the shoelace sum over its corners comes to `25 tan φ − 100 − 200T`, and
+/// `tan φ = 2T / (1 − T²)`. So the two share
+/// `5 · (100 + 200T − 25 tan φ) / 2 = 250 + 500T − 125T / (1 − T²)`. At
+/// `t = 0` that is the block's half of the upright cube, `5 · 10 · 5 = 250`.
+/// In `t` it is `250 + 375t − 200t⁵` and terms smaller still, so at
+/// `t = 0.01` the two share `253.75` less about `2e−8`, and the block less the
+/// tipped cube is `746.25` and about as much more.
 #[test]
-fn the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant() {
+fn what_the_two_share_is_250_and_500_tan_t_less_125_tan_t_over_one_less_its_square() {
     for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
-        let asked = format!("{tilt:?}");
-        let why = refusal(
-            tilt,
-            Rule::Difference,
-            Order::BlockFirst,
-            &tolerant(),
-            &asked,
-        );
+        let [_, _, s, c] = tilt;
+        let tan = s / c;
+        let worked = 250.0 + 500.0 * tan - 125.0 * tan / (1.0 - tan * tan);
+        let shared = what_the_two_share(tilt);
         assert!(
-            matches!(why, Error::ResultIsNotManifold { count: 4 }),
-            "{asked}: {why:?}"
+            (shared - worked).abs() <= 1e-12 * worked,
+            "{tilt:?}: the five corners give {shared}, the tangent {worked}"
         );
     }
+    let at_a_hundredth = what_the_two_share(TILTS_THE_UNION_WAS_REFUSED_AT[3]);
+    assert!(
+        (at_a_hundredth - 253.75).abs() <= 1e-7,
+        "at t = 0.01 the two share {at_a_hundredth}"
+    );
 }
 
 /// The volume the block and the tipped cube share.
