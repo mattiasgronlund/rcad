@@ -3311,6 +3311,18 @@ impl<'f> Arrangement<'f> {
     /// order round: the order they give every pair of other nodes is the order
     /// round the loop from the place the start stands for.
     ///
+    /// **A node square to the way the loop runs at the start is left**, one
+    /// every point of whose box reads exactly nought along `∇S × ∇T` there
+    /// ([`square_to_the_run_at_the_start`]). It is the start, or the place the
+    /// start was rounded off, and the argument above holds for it, but
+    /// [`round_a_closed_crossing_and_what_it_measures`] leaves it too, for what
+    /// lies past it: the rim of the lid in
+    /// `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model` has
+    /// such a node, the box `[−0, 0] × [3 − 1.8e-15, 3 + 1.3e-15] × [4, 4]`
+    /// round the start `(0, 3, 4)`. Counted from it, the fuse goes on to the
+    /// half disc leaning `2e-12` off the lid, whose arc and chord both run
+    /// along its one straight crossing with the lid, and panics there (Q1914).
+    ///
     /// A round bar of radius 3 notched by a block and turned with it by
     /// `Isometry::rotation(y, π)` is the shape (Q1737). `sin π` rounds to
     /// `1.2e-16`, so the bar's seam corner on its bottom cap is a box `±8.5e-14`
@@ -3366,6 +3378,9 @@ impl<'f> Arrangement<'f> {
         let (Some(held), None) = (holding.next(), holding.next()) else {
             return None;
         };
+        if square_to_the_run_at_the_start(wound_as, from, place(held)) {
+            return None;
+        }
         let near = the_box_round_both(place(held), node);
         if !turns_on_four_times_the_diagonal_at_least(flat, pipe, near) {
             return None;
@@ -8672,6 +8687,20 @@ fn turns_on_four_times_the_diagonal_at_least(
             * dot_of(normal, normal)
             * dot_of(along, along);
     room.sign() == Decision::Pos
+}
+
+/// Whether every point of `place` lies square to the way the crossing of
+/// `pair` runs at its start `from`: the step to it, read along `∇S × ∇T` at
+/// `from`, is exactly nought.
+fn square_to_the_run_at_the_start(
+    pair: &[Surface; 2],
+    from: PredicatePoint,
+    place: PredicatePoint,
+) -> bool {
+    let runs = cross_of(gradient_at(&pair[0], from), gradient_at(&pair[1], from));
+    let start = from.enclosure();
+    let step = [0, 1, 2].map(|axis| place.enclosure()[axis] - start[axis]);
+    dot_of(step, runs).sign() == Decision::Zero
 }
 
 /// Whether two boxes have any point in common, so that one may be the other.
