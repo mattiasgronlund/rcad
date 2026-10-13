@@ -219,6 +219,71 @@ fn every_fuse_gets_past_the_order_of_the_two_places_and_is_refused_naming_a_piec
     }
 }
 
+/// The fin the bar leaves outside `x = −17`, reached on `main` without the walk
+/// fix: the same bar, and a block on the same square standing straight up from
+/// `z = −1` to `z = 11`, so that it holds the whole bar but the fin. The fin is
+/// `2⁻⁵¹` thick, so every point of it rounds to `x = −17`, and its bottom and top
+/// faces are each three corners on one line: `(−17, ±2⁻²⁵)` and the bar's rim
+/// corner `(−17, ∓6.1e-17)`. The triangulator hands such a face back with no
+/// triangles, and the chord and both halves of the arc round it were then used
+/// by one triangle each, so the union and the bar less the block, under either
+/// policy, were refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)` by
+/// `every_side_of_the_skin_is_used_both_ways` on the coarsest mesh.
+///
+/// The intersection, and the block less the bar, are refused
+/// `CannotNameWhichPieceOfACrossingThisIs` before any mesh, and are not this.
+#[test]
+fn the_fin_a_bar_leaves_beside_an_upright_block_is_drawn_and_the_fuse_answers() {
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        for (rule, bar_first) in [
+            (Rule::Union, true),
+            (Rule::Union, false),
+            (Rule::Difference, true),
+        ] {
+            let case = format!("{policy:?} {rule:?}, bar first {bar_first}");
+            let (mut model, bar, block) = the_bar_and_an_upright_block();
+            let mut log = ProvenanceLog::new();
+            let fused = if bar_first {
+                model.fuse(&[bar], &[block], rule, &policy, &mut log)
+            } else {
+                model.fuse(&[block], &[bar], rule, &policy, &mut log)
+            };
+            let fused = fused.unwrap_or_else(|why| panic!("{case}: {why:?}"));
+            assert_eq!(fused.solids().len(), 1, "{case}");
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{case}: {why:?}"));
+        }
+    }
+}
+
+fn the_bar_and_an_upright_block() -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+    let bar = model
+        .add_round_bar(
+            1.0 + f64::powi(2.0, -51),
+            10.0,
+            &Isometry::translation(Vector::new(-16.0, 0.0, 0.0)).expect("a finite shift"),
+        )
+        .expect("a positive radius and height");
+    let square = ProfileBuilder::new(vec![
+        [-17.0, -6.0],
+        [-13.0, -6.0],
+        [-13.0, 6.0],
+        [-17.0, 6.0],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a square");
+    let block = model
+        .add_extrusion(
+            &square,
+            12.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -1.0)).expect("a finite shift"),
+        )
+        .expect("a positive height");
+    (model, bar, block)
+}
+
 fn fuse_the_bar_and_the_block(
     rule: Rule,
     bar_first: bool,
