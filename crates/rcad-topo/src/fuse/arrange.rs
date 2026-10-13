@@ -89,6 +89,7 @@ use rcad_predicates::{
 
 use smallvec::SmallVec;
 
+use crate::classify::stretched_to_the_plane;
 use crate::holds::{how_the_axis_lies_on, lie_along_one_line, the_way_into_an_arc};
 use crate::mesh::the_surface_pinches_at;
 use crate::validate::{name_of_surface, side_of_surface};
@@ -5978,7 +5979,7 @@ impl<'f> Arrangement<'f> {
         let rim = core::slice::from_ref(&corners);
         let by_the_corners = match picture {
             Picture::Flat(in_plane) => {
-                how_often_the_rim_winds_round(in_plane, self.normal_of_the_flat_face(), rim, point)?
+                how_often_the_rim_winds_round(in_plane, self.plane_of_the_flat_face(), rim, point)?
             }
             Picture::OpenedOut { ball, from } => corners
                 .iter()
@@ -6550,7 +6551,7 @@ impl<'f> Arrangement<'f> {
             return None;
         }
         let mut wound =
-            how_often_the_rim_winds_round(in_plane, self.normal_of_the_flat_face(), rim, point)?;
+            how_often_the_rim_winds_round(in_plane, self.plane_of_the_flat_face(), rim, point)?;
         for (wire, sides) in ways.iter().enumerate() {
             for (position, &way) in sides.iter().enumerate() {
                 wound += self.how_often_a_side_and_its_chord_wind_round(
@@ -6564,18 +6565,17 @@ impl<'f> Arrangement<'f> {
         Some(wound)
     }
 
-    /// The normal of the plane the face is on.
+    /// The plane the face is on.
     ///
     /// # Panics
     ///
     /// If the face is curved: only a winding counted on a flat face reads a
-    /// normal, and the [`InPlane`] every caller holds was built from this same
+    /// plane, and the [`InPlane`] every caller holds was built from this same
     /// plane.
-    fn normal_of_the_flat_face(&self) -> Vector {
+    fn plane_of_the_flat_face(&self) -> &Plane {
         self.surface
             .as_plane()
             .expect("a winding is counted on a flat face alone")
-            .normal()
     }
 
     /// The lumps of the drawing holding a curve that runs on for ever, other
@@ -7979,15 +7979,38 @@ fn where_a_ball_pinches(ball: &Sphere, at_the_top: bool) -> PredicatePoint {
 /// it has (Q1161). Aimed at a corner or a middle, the half-line ran along the
 /// line and could not be counted; aimed square to it, it can.
 ///
+/// **The point and every corner are read over their boxes stretched to
+/// `flat`** ([`stretched_to_the_plane`]), as `select.rs`'s `the_piece_holds`
+/// reads them. [`InPlane`] reads a point off the plane where the line from its
+/// reference point through it meets the plane, and on a plane through the
+/// origin `2²⁰` out that is `2²⁰` times its height from its foot. A turn
+/// settled over the stretched box is the turn of the point and of a point of
+/// the plane beside it, so nothing is read away from where it is, and a point
+/// or a corner on the plane is read as before. Wound round a point a spacing
+/// off a square two across there, or round a square with one corner a spacing
+/// off, the count went by whichever side of the square's side the misreading
+/// put it (`a_rim_wound_round_a_point_off_its_plane`, Q1108).
+///
 /// `None` when the point sits on one of the rim's own sides, or when no
 /// half-line settles. Both mean "ask about another point", which the caller
 /// may have.
 fn how_often_the_rim_winds_round(
     in_plane: &InPlane,
-    normal: Vector,
+    flat: &Plane,
     rim: &[Vec<PredicatePoint>],
     point: PredicatePoint,
 ) -> Option<i32> {
+    let point = stretched_to_the_plane(flat, point)?;
+    let rim = rim
+        .iter()
+        .map(|ring| {
+            ring.iter()
+                .map(|&corner| stretched_to_the_plane(flat, corner))
+                .collect::<Option<Vec<PredicatePoint>>>()
+        })
+        .collect::<Option<Vec<Vec<PredicatePoint>>>>()?;
+    let rim = &rim[..];
+    let normal = flat.normal();
     let sides = || {
         rim.iter().flat_map(|ring| {
             (0..ring.len())
@@ -17076,7 +17099,7 @@ mod a_rim_wound_round_a_point_off_its_plane {
             .iter()
             .map(|&corner| PredicatePoint::from(corner))
             .collect::<Vec<_>>()];
-        how_often_the_rim_winds_round(&in_plane, flat.normal(), &rim, PredicatePoint::from(point))
+        how_often_the_rim_winds_round(&in_plane, &flat, &rim, PredicatePoint::from(point))
     }
 
     fn off_the_plane(point: [f64; 3]) -> Decision {
