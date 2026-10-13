@@ -1895,6 +1895,9 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
+    if let Some(held) = what_a_face_cut_by_a_ball_and_a_pipe_holds(solid, face, point)? {
+        return Ok(held);
+    }
     let surface = face.stored_surface();
     let Readings {
         sides: readings,
@@ -1947,6 +1950,449 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
         }
     }
+}
+
+/// Whether a face on a ball or on a pipe, cut by the other along part of the
+/// one loop the two cross in and by planes square to the pipe, holds `point`;
+/// `None` for any other face, which the steps of
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`] then take as before.
+///
+/// The ball half sunk in a block's floor and driven into a bar is the face
+/// (`tests/a_ball_and_a_bar_in_one_block.rs`, row Q1863): the ball's lower half
+/// is cut by the floor and by the bar's wall, and the bar's lower wall by the
+/// floor, the bar's bottom cap and the ball. Every point whose ray met either
+/// was refused before, since no reading of a side along the loop says which of
+/// its two pieces it is.
+///
+/// # Why the face is the part in front of all its cuts
+///
+/// It is the argument of [`what_a_face_cut_by_part_of_a_crossing_holds`]: the
+/// face is the part in front of all its cuts when the part behind each cut is
+/// one piece, the part in front of all of them is one piece, and every side
+/// lies on its own cut and strictly in front of every other. Slice the ball and
+/// the pipe square to the pipe's axis. Each slice is two circles: the ball's,
+/// of radius `ρ` that rises and then falls with height, and the pipe's, of
+/// radius `r`, their centres `d` apart.
+///
+/// - On the ball's circle the points outside the pipe are one arc, the side
+///   away from the pipe, and there are some when `ρ > r − d`. The points inside
+///   it are one arc too, and there are some when `d − r < ρ < d + r`, which
+///   holds over one run of heights only when the ball's radius is below
+///   `d + r`.
+/// - On the pipe's circle the points outside the ball are one arc, and there
+///   are some when `ρ < d + r`, at every height once the ball's radius is below
+///   `d + r`. The points inside it are one arc, and there are some when
+///   `ρ > |d − r|`.
+///
+/// Each set of heights is where `ρ` is above some number, which, `ρ` rising
+/// and then falling, is one run. A plane square to the axis keeps the heights
+/// past one height, so planes cut that run down to a run. One run of heights
+/// with one arc at each is one piece, on either side of the loop and in front
+/// of or behind any plane. That the ball's radius `R` is between `|d − r|` and
+/// `d + r` is the loop being one: [`crosses_in_one_loop`].
+///
+/// # Why each side lies where it is read to
+///
+/// - **An arc or a whole circle on a plane square to the axis**, against
+///   another such plane: the two planes never meet, so it is on the side its
+///   ends are.
+/// - **An arc against the other round surface**: on its own plane the arc's
+///   circle and the other surface's are two circles with different centres,
+///   which meet in two points at most. So the arc meets the other surface only
+///   at an end it holds, and is on the side it leaves that end on
+///   ([`the_side_an_arc_leaves_its_end_on`]), or, holding neither end, on the
+///   side its ends are when its plane misses the ball altogether.
+/// - **A piece of the loop against a plane holding both its ends**: the plane
+///   meets the loop in those two points at most, the slice there being two
+///   circles, so the loop is two pieces either side of it. The piece's own
+///   picker is a plane square to the axis through both ends, so it is that
+///   plane, and the piece is the one in front of it: the side of the cut the
+///   picker's normal points to. Against a plane holding neither end, the piece
+///   is on the side its ends are when the plane misses the ball.
+///
+/// **Which side a piece of the loop keeps** is read as
+/// [`which_side_of_its_neighbour_a_side_keeps`] reads it, with the way the
+/// piece leaves its start for the way into an arc: the loop crosses its
+/// picker's plane there, so the piece leaves along `∇S × ∇T` turned to read
+/// positive against the picker's normal. It reads zero where the loop only
+/// touches that plane, and that is refused. **A whole circle** is the whole of
+/// where its plane cuts the face's surface, so the face is on one side of it,
+/// the side every other corner off its plane is on.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when which side a side keeps, or which side of a cut
+/// `point` is on, could not be settled, and whatever [`the_face_across`] gives.
+fn what_a_face_cut_by_a_ball_and_a_pipe_holds(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    point: PredicatePoint,
+) -> Result<Option<OnAFace>> {
+    let surface = face.stored_surface();
+    if surface.as_plane().is_some() {
+        return Ok(None);
+    }
+    let mut found = Vec::new();
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            continue;
+        };
+        if across.location() != face.location() {
+            return Ok(None);
+        }
+        let ends = [coedge.start(), coedge.end()].map(|corner| Corner {
+            key: corner.key(),
+            at: where_it_is_stored(solid, corner.key()),
+            placed: corner.point(),
+        });
+        found.push((across.stored_surface(), across.surface(), ends, edge));
+    }
+    let mut round = found
+        .iter()
+        .map(|(across, ..)| *across)
+        .filter(|across| across.as_plane().is_none());
+    let Some(other) = round.next() else {
+        return Ok(None);
+    };
+    if round.any(|one| one != other) {
+        return Ok(None);
+    }
+    let ((Surface::Sphere(ball), Surface::Cylinder(pipe))
+    | (Surface::Cylinder(pipe), Surface::Sphere(ball))) = (surface, other)
+    else {
+        return Ok(None);
+    };
+    if !crosses_in_one_loop(&ball, &pipe) {
+        return Ok(None);
+    }
+    let up = pipe.axis().direction().components();
+    let mut sides = Vec::with_capacity(found.len());
+    for (across, across_placed, ends, edge) in found {
+        let Some(runs) = how_a_side_runs_round(&surface, &across, ends, edge.stored_run(), up)
+        else {
+            return Ok(None);
+        };
+        sides.push(RoundSide {
+            across,
+            across_placed,
+            ends,
+            runs,
+        });
+    }
+    if !sides
+        .iter()
+        .any(|side| matches!(side.runs, RunsRound::AlongTheLoop { .. }))
+    {
+        return Ok(None);
+    }
+    let mut cuts: Vec<Cut> = Vec::new();
+    for side in &sides {
+        let Some(kept) = which_side_a_round_side_keeps(face, &surface, side, &sides)? else {
+            return Ok(None);
+        };
+        let corners = side.ends.map(|end| end.key);
+        match cuts.iter_mut().find(|known| known.surface == side.across) {
+            Some(known) if known.kept == kept => known.corners_on_it.extend(corners),
+            Some(_) => return Ok(None),
+            None => cuts.push(Cut {
+                surface: side.across,
+                placed: side.across_placed,
+                kept,
+                corners_on_it: corners.to_vec(),
+            }),
+        }
+    }
+    for side in &sides {
+        for cut in cuts.iter().filter(|cut| cut.surface != side.across) {
+            if where_a_round_side_lies(&surface, &ball, side, cut) != Some(cut.kept) {
+                return Ok(None);
+            }
+        }
+    }
+    held_in_front_of_all(&cuts, point).map(Some)
+}
+
+/// One side of a face on a ball or a pipe the other cuts in one loop, as
+/// [`what_a_face_cut_by_a_ball_and_a_pipe_holds`] reads it: the surface across
+/// it where the face is stored and once moved, its two corners, and what it
+/// runs along.
+struct RoundSide {
+    across: Surface,
+    across_placed: Surface,
+    ends: [Corner; 2],
+    runs: RunsRound,
+}
+
+impl RoundSide {
+    /// This side as the [`Side`] an arc is to the readers the other steps
+    /// share.
+    fn as_an_arc(&self, into_the_arc: [Interval; 3]) -> Side {
+        Side {
+            across: self.across,
+            across_placed: self.across_placed,
+            start: self.ends[0],
+            end: self.ends[1],
+            run: SideRun::Arc { into_the_arc },
+        }
+    }
+}
+
+/// What a [`RoundSide`] runs along.
+enum RunsRound {
+    /// An arc of where a plane square to the pipe cuts the face's surface,
+    /// with the way into it ([`the_way_into_an_arc`]).
+    AnArc { into_the_arc: [Interval; 3] },
+    /// The whole of where a plane square to the pipe cuts the face's surface.
+    RightRound,
+    /// A piece of the loop, picked by `half`, a plane square to the pipe
+    /// through both its ends.
+    AlongTheLoop { half: HalfSpace },
+}
+
+/// Whether the ball and the pipe cross in one loop: the ball's radius `R`
+/// strictly between `|d − r|` and `d + r`, with `d` how far the centre is from
+/// the axis and `r` the pipe's radius. That is
+/// `(R² − (d − r)²)((d + r)² − R²) > 0`, which is `4d²r² − (d² + r² − R²)²`,
+/// and with `d² = |x × w|²/(w·w)`, `x` the centre less the axis origin, it is
+/// multiplied through by `(w·w)²` so that nothing is divided. Interval
+/// arithmetic: a sign it cannot settle is `false`.
+fn crosses_in_one_loop(ball: &rcad_geom::Sphere, pipe: &rcad_geom::Cylinder) -> bool {
+    let centre = exactly(ball.centre().coordinates());
+    let origin = exactly(pipe.axis().origin().coordinates());
+    let off: [Interval; 3] = core::array::from_fn(|axis| centre[axis] - origin[axis]);
+    let along = exactly(pipe.axis().direction().components());
+    let squared = dot(along, along);
+    let sideways = cross(off, along);
+    let apart = dot(sideways, sideways);
+    let [big, small] = [ball.radius(), pipe.radius()].map(Interval::exactly);
+    let middle = apart + (small * small - big * big) * squared;
+    let four = Interval::exactly(4.0);
+    (four * apart * small * small * squared - middle * middle).sign() == Decision::Pos
+}
+
+/// What a side of a face on `surface` runs along, with `across` across it
+/// between `ends`, or `None` when it is not one of the three
+/// [`RunsRound`] names: every plane across must be square to the pipe, `up`
+/// its axis, and the edge must lie where the face's surface and `across` cross.
+fn how_a_side_runs_round(
+    surface: &Surface,
+    across: &Surface,
+    ends: [Corner; 2],
+    run: &EdgeRun,
+    up: [f64; 3],
+) -> Option<RunsRound> {
+    let on_both = which_two_surfaces_a_run_is_between(run, [surface, across])
+        .iter()
+        .all(|one| one == surface || one == across);
+    if !on_both {
+        return None;
+    }
+    let at = ends.map(|end| PredicatePoint::from(end.at.coordinates()));
+    let one_corner = ends[0].key == ends[1].key;
+    if let Some(flat) = across.as_plane() {
+        if !lie_along_one_line(flat.normal().components(), up) {
+            return None;
+        }
+        return match run {
+            EdgeRun::PartOfWhereItCrosses { picked_by, .. } if !one_corner => {
+                the_way_into_an_arc(surface, across, at, picked_by)
+                    .map(|into_the_arc| RunsRound::AnArc { into_the_arc })
+            }
+            EdgeRun::PartOfWhereItCrosses { .. }
+            | EdgeRun::RightRoundWhereItsFacesCross
+            | EdgeRun::RightRoundWhereItCrosses { .. }
+                if one_corner =>
+            {
+                Some(RunsRound::RightRound)
+            }
+            EdgeRun::Straight
+            | EdgeRun::PartOfWhereItCrosses { .. }
+            | EdgeRun::RightRoundWhereItsFacesCross
+            | EdgeRun::RightRoundWhereItCrosses { .. }
+            | _ => None,
+        };
+    }
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run else {
+        return None;
+    };
+    if one_corner {
+        return None;
+    }
+    picked_by.iter().find_map(|picker| match picker {
+        Picker::InFrontOf(half)
+            if holds_both_ends(half, at) && lie_along_one_line(half.normal().components(), up) =>
+        {
+            Some(RunsRound::AlongTheLoop { half: *half })
+        }
+        Picker::InFrontOf(_)
+        | Picker::OutsideABall(_)
+        | Picker::OutsideAPipe(_)
+        | Picker::InsideAPipe(_)
+        | _ => None,
+    })
+}
+
+/// Which side of the surface across `side` the face keeps, as
+/// [`what_a_face_cut_by_a_ball_and_a_pipe_holds`] sets out; `None` where that
+/// cannot be read.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when a sign could not be settled, and whatever
+/// [`which_side_of_its_neighbour_a_side_keeps`] refuses for an arc.
+fn which_side_a_round_side_keeps(
+    face: FaceView<'_>,
+    surface: &Surface,
+    side: &RoundSide,
+    sides: &[RoundSide],
+) -> Result<Option<Decision>> {
+    match side.runs {
+        RunsRound::AnArc { into_the_arc } => {
+            which_side_of_its_neighbour_a_side_keeps(face, surface, &side.as_an_arc(into_the_arc))
+                .map(Some)
+        }
+        RunsRound::AlongTheLoop { half } => {
+            let at = side.ends[0].at;
+            let Some(along) = the_way_the_crossing_runs(surface, &side.across, at) else {
+                return Ok(None);
+            };
+            match dot(along, exactly(half.normal().components())).sign() {
+                Decision::Pos => Ok(Some(Decision::Neg)),
+                Decision::Neg => Ok(Some(Decision::Pos)),
+                Decision::Zero => Ok(None),
+                Decision::Undecidable { enclosure } => Err(gave_up(
+                    WHICH_SIDE_A_SIDE_KEEPS,
+                    PredicatePoint::from(at.coordinates()),
+                    Level::Interval,
+                    enclosure,
+                    Measures::Volume,
+                )),
+                other => panic!("a sign came back with a decision nothing here knows: {other:?}"),
+            }
+        }
+        RunsRound::RightRound => {
+            let its_own = side.ends[0].key;
+            let mut found = None;
+            for corner in sides
+                .iter()
+                .flat_map(|one| one.ends)
+                .filter(|corner| corner.key != its_own)
+            {
+                let at = PredicatePoint::from(corner.at.coordinates());
+                match side_of_surface(&side.across, at) {
+                    Decision::Zero => {}
+                    sits @ (Decision::Pos | Decision::Neg) => {
+                        if found.is_some_and(|known| known != sits) {
+                            return Ok(None);
+                        }
+                        found = Some(sits);
+                    }
+                    Decision::Undecidable { enclosure } => {
+                        return Err(gave_up_on_a_side(&side.across, at, enclosure));
+                    }
+                    other => {
+                        panic!("a side came back with a decision nothing here knows: {other:?}")
+                    }
+                }
+            }
+            Ok(found)
+        }
+    }
+}
+
+/// The side of `cut` the whole of `side` lies strictly on, as
+/// [`what_a_face_cut_by_a_ball_and_a_pipe_holds`] argues it, or `None` where
+/// that argument does not reach. A corner of an edge along `cut` is on it by
+/// topology, as [`where_a_side_lies`] reads it.
+fn where_a_round_side_lies(
+    surface: &Surface,
+    ball: &rcad_geom::Sphere,
+    side: &RoundSide,
+    cut: &Cut,
+) -> Option<Decision> {
+    let [start, end] = side.ends.map(|corner| {
+        if cut.corners_on_it.contains(&corner.key) {
+            Decision::Zero
+        } else {
+            side_of_surface(&cut.surface, PredicatePoint::from(corner.at.coordinates()))
+        }
+    });
+    let is_beside = |sits: Decision| sits == Decision::Pos || sits == Decision::Neg;
+    let beside_at_both = (is_beside(start) && start == end).then_some(start);
+    let its_plane_misses_the_ball = || {
+        cut.surface == Surface::Sphere(*ball)
+            && side
+                .across
+                .as_plane()
+                .is_some_and(|own| misses_the_ball(ball, own))
+    };
+    match (&side.runs, cut.surface.as_plane()) {
+        (RunsRound::AnArc { .. } | RunsRound::RightRound, Some(_)) => beside_at_both,
+        (RunsRound::RightRound, None) => beside_at_both.filter(|_| its_plane_misses_the_ball()),
+        (RunsRound::AnArc { into_the_arc }, None) => {
+            let arc = side.as_an_arc(*into_the_arc);
+            let leaves = |corner: Corner, far: Option<Decision>| {
+                the_side_an_arc_leaves_its_end_on(
+                    surface,
+                    &arc,
+                    *into_the_arc,
+                    &cut.surface,
+                    corner.at,
+                )
+                .filter(|&sits| is_beside(sits) && far.is_none_or(|far| far == sits))
+            };
+            if start == Decision::Zero && end == Decision::Zero {
+                leaves(side.ends[0], None)
+            } else if start == Decision::Zero {
+                leaves(side.ends[0], Some(end))
+            } else if end == Decision::Zero {
+                leaves(side.ends[1], Some(start))
+            } else {
+                beside_at_both.filter(|_| its_plane_misses_the_ball())
+            }
+        }
+        (RunsRound::AlongTheLoop { half }, Some(flat)) => {
+            if start == Decision::Zero && end == Decision::Zero {
+                the_side_a_piece_of_the_loop_is_on(half, flat, side.ends)
+            } else {
+                beside_at_both.filter(|_| misses_the_ball(ball, flat))
+            }
+        }
+        (RunsRound::AlongTheLoop { .. }, None) => None,
+    }
+}
+
+/// The side of `flat` a piece of the loop with both `ends` on it lies on:
+/// the side `half`'s normal points to, once `flat` holds both ends exactly
+/// where they are stored and lies along `half`, so that the two are one plane.
+/// The topology that puts the ends on `flat` is not taken for that, since a
+/// plane through one end is not the picker's unless it is square to the same
+/// line and holds that end exactly.
+fn the_side_a_piece_of_the_loop_is_on(
+    half: &HalfSpace,
+    flat: &Plane,
+    ends: [Corner; 2],
+) -> Option<Decision> {
+    let holds_both = ends.iter().all(|corner| {
+        flat.side_of_point(PredicatePoint::from(corner.at.coordinates())) == Decision::Zero
+    });
+    let [normal, its_own] = [half.normal(), flat.normal()].map(|one| one.components());
+    if !holds_both || !lie_along_one_line(normal, its_own) {
+        return None;
+    }
+    let sits = dot(exactly(normal), exactly(its_own)).sign();
+    (sits == Decision::Pos || sits == Decision::Neg).then_some(sits)
+}
+
+/// Whether `flat` misses `ball` altogether: `(n·c − e)² > R²|n|²`, with
+/// `n·x = e` the plane, `c` the centre and `R` the radius. Interval
+/// arithmetic: a sign it cannot settle is `false`.
+fn misses_the_ball(ball: &rcad_geom::Sphere, flat: &Plane) -> bool {
+    let normal = exactly(flat.normal().components());
+    let off = dot(normal, exactly(ball.centre().coordinates())) - Interval::exactly(flat.offset());
+    let radius = Interval::exactly(ball.radius());
+    (off * off - radius * radius * dot(normal, normal)).sign() == Decision::Pos
 }
 
 /// [`OnAFace::NotHeld`] for a point strictly in front of a plane cutting a
