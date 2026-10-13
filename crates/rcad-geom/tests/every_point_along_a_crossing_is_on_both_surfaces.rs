@@ -134,11 +134,11 @@ const THE_DISTANCE_TO_THE_CURVE_CLIMBS_PAST_THIS: f64 = 100.0;
 ///
 /// | row | shipped | ×2 | ×8 |
 /// |---|---|---|---|
-/// | the control | 0.006 | 0.006 | 0.006 |
-/// | leaning | 0.008 | 0.008 | 0.010 |
+/// | the control | 0.006 | 0.006 | 0.008 |
+/// | leaning | 0.008 | 0.008 | 0.011 |
 /// | turned | 0.012 | 0.012 | 0.013 |
 /// | the quartic control | 0.738 | 0.738 | 0.738 |
-/// | the quartic headline | 0.541 | 0.726 | 0.726 |
+/// | the quartic headline | 0.552 | 0.726 | 0.726 |
 /// | the band | 0.389 | 0.389 | 0.477 |
 ///
 /// **The two marched rows were re-measured when the marcher stopped measuring
@@ -151,7 +151,7 @@ const THE_DISTANCE_TO_THE_CURVE_CLIMBS_PAST_THIS: f64 = 100.0;
 ///
 /// **Those six measure per-surface distance, which is not what the bound is
 /// named after.** The leaning-cap row below them measures distance to the curve
-/// and worst-shares `0.0075`, at a fixed sweep the soak factor does not widen.
+/// and worst-shares `0.0074`, at a fixed sweep the soak factor does not widen.
 /// A share that small next to the quartic control's `0.738` is not a tighter
 /// bound; it is a different quantity being divided by the same number.
 ///
@@ -267,7 +267,7 @@ fn every_point_along_a_crossing_a_hair_from_tangency_is_on_both_the_surfaces_tha
 /// Two halves, and the second is the one that makes the row worth keeping:
 ///
 /// - `POINT_ALONG_A_CROSSING_ROUNDOFF` still bounds the distance to the curve,
-///   at every lean. Worst share of it found here: `0.0075`.
+///   at every lean. Worst share of it found here: `0.0074`.
 /// - **The per-surface distance cannot see any of it.** It stays pinned under
 ///   [`A_PER_SURFACE_DISTANCE_STAYS_THIS_FLAT`] roundings of the bar's radius
 ///   across the whole sweep — worst measured, two — while the distance to the

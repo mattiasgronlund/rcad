@@ -460,9 +460,13 @@ moved them.
 > `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`, is one solid of
 > `1000` less what the two cubes share under either policy there
 > (`the_block_less_the_tipped_cube_is_the_block_less_what_they_share_where_the_union_was_refused`).
-> Queue row Q1902 says Q760's touching answer for the stepped block is
-> refused `ArgumentIntersectsItself` by every fuse after it; these two
-> answers are not, and that row stays open.
+> Queue row Q1902 asked whether Q760's touching answer for the stepped
+> block is refused `ArgumentIntersectsItself` by every fuse after it;
+> these two answers are not, and since Q1902 the input check reads two
+> faces resting on each other along a line as no crossing, so that
+> answer fuses on too
+> (`a_bar_resting_on_a_stepped_blocks_wall_fuses_on_with_a_far_cube`,
+> `a_bar_resting_on_a_stepped_blocks_wall_fuses_with_a_slab_across_the_touch`).
 >
 > The decision moved five pins outside Q1901's own files, which queue row
 > Q1910 moved, each answer validating and holding its volume worked by hand.

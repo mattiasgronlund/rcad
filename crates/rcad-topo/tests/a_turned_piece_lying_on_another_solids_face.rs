@@ -35,11 +35,12 @@
 //! §351 — and six of these twelve fuses are not a solid again where upright
 //! they answer, three of each pair, the two above among them at `count: 3`.
 //!
-//! One fuse here is not a solid upright either: the frame less the block
-//! leaves two walls of the frame meeting along one edge, the hole's corner at
-//! `x = 2, y = 4`, and four faces along it. No `Model` holds that, so
-//! `ResultIsNotManifold { count: 4 }` is the right answer both ways, and it is
-//! compared like the rest.
+//! The frame less the block used to be not a solid upright either, `count: 4`:
+//! two walls of the frame met along one edge at the hole's corner, `x = 2, y =
+//! 4`, and no `Model` held that. Since Q1913 it is one solid of volume 11, one
+//! shell of 12 faces, validating both upright and turned: the frame ring cut
+//! open at the corner and touching itself along `x = 2, y = 4`
+//! (`a_frame_with_a_block_over_one_corner_fuses_turned_as_it_does_upright`).
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 mod cones;
@@ -57,6 +58,8 @@ fn a_comb_standing_in_a_block_fuses_turned_as_it_does_upright() {
     every_fuse_is_the_upright_one(&a_comb_standing_in_a_block());
 }
 
+/// The frame less the block is one solid of volume 11, one shell of 12 faces,
+/// validating, upright and turned (Q1913).
 #[test]
 fn a_frame_with_a_block_over_one_corner_fuses_turned_as_it_does_upright() {
     every_fuse_is_the_upright_one(&a_frame_with_a_block_over_one_corner());

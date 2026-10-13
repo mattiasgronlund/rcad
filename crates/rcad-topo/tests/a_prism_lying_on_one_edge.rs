@@ -761,9 +761,12 @@ fn each_answer_touching_itself_along_a_line_is_the_shells_its_faces_part_into() 
 /// prism inside it, 216, and the block united with the hook, 276, each fused
 /// with a cube of 1 far from it, every rule both ways round. The union is the
 /// two as they stand, the intersection no solid, and each difference its
-/// first solid whole. Queue row Q1902 says the answer the parting gives a bar
-/// resting on a stepped block's wall is refused `ArgumentIntersectsItself` by
-/// every fuse after it; these two are not.
+/// first solid whole. Queue row Q1902 asked whether the answer the parting
+/// gives a bar resting on a stepped block's wall is refused
+/// `ArgumentIntersectsItself` by every fuse after it; these two are not, and
+/// since Q1902 that answer fuses on too
+/// (`a_bar_resting_on_a_stepped_blocks_wall_fuses_on_with_a_far_cube`,
+/// `a_bar_resting_on_a_stepped_blocks_wall_fuses_with_a_slab_across_the_touch`).
 #[test]
 fn each_answer_touching_itself_along_a_line_fuses_on_with_a_far_cube() {
     let mut wrong = Vec::new();
