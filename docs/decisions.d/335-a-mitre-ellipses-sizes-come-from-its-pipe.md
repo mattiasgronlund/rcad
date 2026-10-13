@@ -294,3 +294,43 @@ pieces it cannot tell apart. This is the circle arm's row, not this one.
 > The pin end in
 > `a_circle_the_file_puts_off_its_pipe_past_the_allowance.rs` still passes as
 > refused `CannotNameWhichPieceOfACrossingThisIs`, since it never uses `#1030`.
+
+> **2026-10-13 note (Q1889, `march.rs`, `walk.rs`): the pin end is refused at
+> its corners, and it is still a limit.** Q1889's first fix (`1983b8c8`) stops
+> `march`'s `one_step` keeping a trial that came back short behind its start.
+> With it the coarse walk of the pin end's rim no longer stopped at the gap
+> between the two strands, and the pin end imported and validated. The arc on
+> the `x > 10.05` side of the rim was walked at `f64::MAX` as 7 points with
+> `x − 10.05` from `0.044` to `0.1`, each certified outside the ball, under a
+> claimed deviation of `7.9e-7`. Every point where the two cross has
+> `x − 10.05` at most `q/2 = 3.8e-14`, so each was at least `0.044` off the
+> crossing. A wrong answer, worse than the refusal it replaced. The coarse mesh
+> measured the volume `0.631 ± 4.27` against `0.789` by hand, so the volume
+> could not tell.
+>
+> What let it through is the bound `march.rs`'s `how_far_off_the_crossing`
+> puts on a settled point, `(d₁ + d₂)/s`. It is the widest the region two flat
+> slabs leave, so it holds only where neither surface bends away within its
+> own reach. At the rim's two corners, where the thin loop's two strands meet,
+> the ball and the pipe lean `s = 7.6e-13` apart, and that reach is far wider
+> than the gap they rest on. Q1889's second fix bounds an open run's two
+> corners by Kantorovich's theorem with the two radii counted
+> (`settled_with_a_bound_where_they_bend`): it refuses
+> `CannotFollowACrossingWhereItsSurfacesAreTangent { at:
+> BoundingHowFarOffTheCrossingAPointIs }` where `h = √2·L·η/s` is over a
+> half, with `L = Σ 1/(rᵢ − |d| − 2η)`. At these corners `h` is far over a
+> half, so both halves of the rim are refused before the march, at every
+> deflection and in either order of the surfaces
+> (`both_halves_of_a_rim_where_a_ball_and_a_pipe_off_its_centre_turn_tangent_are_refused`
+> in `walk.rs`). The pin end is refused `ThisEntityOfTheSolidWasRefused` at
+> its first arc `#32` with that error
+> (`a_circle_centred_off_its_leaning_pipe_is_refused_where_its_ball_and_pipe_turn_tangent`).
+> The quarter arc to `#1030` is refused the same way at `#2404`, which is now
+> asked first, and `how_often_a_real_file_imports` prints "… asked while
+> bounding how far off a point sits" for both relay files.
+>
+> It is still a limit (§16.10). No curve on both faces runs along the rim's
+> `x > 10.05` side, so that arc has no answer. The `x < 10.05` side holds two
+> strands, `1.2e-7` either side of the rim, and the file says which neither
+> is. Elsewhere the flat bound is left as it was: an open run's corners are
+> the only points the bend is counted at, and filed as a row of its own.
