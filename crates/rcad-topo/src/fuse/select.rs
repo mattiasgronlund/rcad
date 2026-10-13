@@ -1175,12 +1175,24 @@ fn is_off_every_surface_of(solid: SolidView<'_>, point: PredicatePoint) -> bool 
 /// was refused, though the cubes share no point
 /// (`tests/two_turned_cubes_a_rounding_apart.rs`).
 ///
-/// A corner of the input is the meet of the surfaces round it when they are
-/// exactly three planes, since bake solved it from those three
-/// ([`BakedCorner::around`](super::bake::BakedCorner)); a meet the arrangement
-/// placed is the meet of the three surfaces it names. Any other corner, a
+/// A corner of `S` is the meet of the three planes bake solved it from
+/// ([`BakedCorner::solved_from`](super::bake::BakedCorner)). With exactly three
+/// round it those are the three; with four or more, as at a square pyramid's
+/// apex, they are the three whose meet the corner's box holds, and four planes
+/// written in `f64` need not meet in one point. The arrangement asks those
+/// same three where it cuts a face by the corner (`passes_through`) and where
+/// it puts the corner in order along an edge (`as_the_planes_say`), §294.19
+/// and §294.20, so the `S` it cut the pieces against has its corner at that
+/// meet, and so does the hull above. A corner of `P` that is a corner of the
+/// input is the meet of the surfaces round it when they are exactly three
+/// planes ([`BakedCorner::around`](super::bake::BakedCorner)); a meet the
+/// arrangement placed is the meet of the three surfaces it names. A corner of
+/// `S` read out of the model, which nothing solved, any other corner of `P`, a
 /// corner of `P` not on `P`'s own plane, or a curved surface on `P` or on `S`
-/// leaves this rule out.
+/// leaves this rule out. Until Q1936 a corner of `S` was read from the planes
+/// round it too, so a solid with four planes round a corner was never asked,
+/// and the pyramid placed and cut through its apex refused on a speck of the
+/// cut a rounding across (§294.21).
 ///
 /// **And inside a solid whose every face plane has all of it on or behind,
 /// with every corner of the piece on or behind every one of them and, for
@@ -1299,9 +1311,9 @@ fn placed_by_the_planes_of(solid: &BakedSolid, corners: &[[[f64; 4]; 3]]) -> Opt
     inside_every_one.then_some(true)
 }
 
-/// The three planes each corner of every face of `solid` is the one meeting
-/// point of, as coefficients, or `None` where a face is curved or a corner
-/// has other than three planes round it.
+/// The three planes bake solved each corner of every face of `solid` from, as
+/// coefficients, or `None` where a face is curved or a corner was read out of
+/// the model and not solved, or solved from a curved surface.
 fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Vec<[[f64; 4]; 3]>> {
     if solid
         .faces
