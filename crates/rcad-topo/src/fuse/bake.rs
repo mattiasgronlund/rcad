@@ -171,7 +171,9 @@ pub(crate) struct BakedFace {
     /// Each cap this face is, or has a side along, that is square to its own
     /// pipe's axis through where the axis starts, as stored, with that pipe
     /// ([`the_cap_through_the_start_of_its_axis`]). Empty for every face but a
-    /// round bar's wall and its near cap.
+    /// round bar's wall and its near cap, until the cuts are gathered: `gather`
+    /// in `fuse/cuts.rs` then also puts on each face the caps carried by the
+    /// faces that cut it.
     ///
     /// **Carried because the move breaks it, as a seam corner's plane is**
     /// ([`BakedCorner::is_on_by_construction`], §294.9). A bar starting where
