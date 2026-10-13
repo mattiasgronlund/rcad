@@ -98,7 +98,7 @@ pub use crate::de_boor::EVALUATION_ROUNDOFF;
 pub use crate::deflection::Deflection;
 pub use crate::enclosure::root_enclosing;
 pub use crate::error::{Error, LimitOrGap, Result, WhereFollowingACrossingGaveUp};
-pub use crate::half_space::{HalfSpace, Picker, SIDE_OF_A_HALF_SPACE};
+pub use crate::half_space::{HalfSpace, HalfSpaceThroughAPoint, Picker, SIDE_OF_A_HALF_SPACE};
 pub use crate::intersect::{
     WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
     WHERE_A_PLANE_AND_A_TORUS_CROSS, WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS,

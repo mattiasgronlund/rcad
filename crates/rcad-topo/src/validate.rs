@@ -5774,6 +5774,52 @@ mod tests {
         assert_eq!(refusal(&model), Invalid::EdgeOutsideWhatPickedIt);
     }
 
+    /// The same check, asked about a flat surface that holds its point, the
+    /// picker §443 added for where two pipes of one width meet.
+    ///
+    /// The seam's own half-space, held as its point at the centre and its
+    /// facing, picks the same half of the meridian, so the seam is sound.
+    /// Through `(5, 0, 0)` facing `+x` the surface leaves the whole ball
+    /// behind it, and the seam is caught.
+    #[test]
+    fn an_edge_outside_a_flat_surface_holding_its_point_that_picked_it_is_caught() {
+        let elsewhere = rcad_geom::HalfSpaceThroughAPoint::new(
+            Point::new(5.0, 0.0, 0.0),
+            Vector::new(1.0, 0.0, 0.0),
+        )
+        .expect("the x axis has length");
+
+        for far_off in [false, true] {
+            let mut model = an_empty_model();
+            model
+                .add_ball(2.0, &Isometry::identity())
+                .expect("a ball of radius two");
+
+            let edge = model.data().edges.keys().next().expect("the seam");
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } =
+                &mut model.data_mut().edges[edge].run
+            else {
+                panic!("a ball's seam is named by a crossing")
+            };
+            let at_the_centre = rcad_geom::HalfSpaceThroughAPoint::new(
+                Point::origin(),
+                picked_by[0]
+                    .facing_of_a_flat()
+                    .expect("a ball's seam is picked by a flat half-space"),
+            )
+            .expect("a half-space's normal has length");
+            picked_by[0] = rcad_geom::Picker::from(if far_off { elsewhere } else { at_the_centre });
+
+            if far_off {
+                assert_eq!(refusal(&model), Invalid::EdgeOutsideWhatPickedIt);
+            } else {
+                model
+                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    .expect("the poles lie on the surface through the centre");
+            }
+        }
+    }
+
     /// The same check, asked about a curved half-space, which is what §24.5
     /// widened the field to hold.
     ///

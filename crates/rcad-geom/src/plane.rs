@@ -934,6 +934,131 @@ const SIDE_OF_PLANE_ERROR_BOUND: f64 = {
 /// Three exact products of two entries each, and the offset.
 const LONGEST_PLANE_TOTAL: usize = 7;
 
+/// Which side of the flat surface through `through` facing `facing` the point
+/// is on: the sign of `facing · point − facing · through`, with neither dot
+/// rounded.
+///
+/// [`which_side_of_a_flat_surface`] takes the second dot as one number the
+/// caller has already rounded. This takes the point itself, so the surface
+/// passes exactly through it whatever `f64` makes of the dot
+/// (`docs/decisions.md` §443).
+pub(crate) fn which_side_of_a_flat_surface_through(
+    named: &'static str,
+    through: [f64; 3],
+    facing: [f64; 3],
+    point: PredicatePoint,
+) -> Decision {
+    if !(is_a_real_point(point) && are_real_numbers(through) && are_real_numbers(facing)) {
+        return NOTHING_IS_KNOWN;
+    }
+    decide(&SideOfAFlatSurfaceThroughAPoint {
+        named,
+        through,
+        facing,
+        point,
+    })
+    .0
+}
+
+/// `facing · point − facing · through`, evaluated three ways for the cascade.
+struct SideOfAFlatSurfaceThroughAPoint {
+    named: &'static str,
+    through: [f64; 3],
+    facing: [f64; 3],
+    point: PredicatePoint,
+}
+
+impl Predicate for SideOfAFlatSurfaceThroughAPoint {
+    fn name(&self) -> &'static str {
+        self.named
+    }
+
+    fn on_floats(&self) -> Option<Filtered> {
+        let point = self.point.exact_coordinates()?;
+        let [facing, through] = [self.facing, self.through];
+
+        if !(0..3).all(|axis| {
+            product_is_normal(facing[axis], point[axis])
+                && product_is_normal(facing[axis], through[axis])
+        }) {
+            return None;
+        }
+
+        let terms = [0, 1, 2]
+            .map(|axis| facing[axis] * point[axis])
+            .into_iter()
+            .chain([0, 1, 2].map(|axis| -(facing[axis] * through[axis])));
+        let (value, permanent) = terms.fold((0.0, 0.0), |(value, permanent), term: f64| {
+            (value + term, permanent + term.abs())
+        });
+
+        Some(Filtered {
+            value,
+            error_bound: SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND * permanent,
+        })
+    }
+
+    fn on_intervals(&self) -> Interval {
+        let point = self.point.enclosure();
+        let [facing, through] = [self.facing, self.through];
+        let term = |axis: usize| {
+            Interval::exactly(facing[axis]) * (point[axis] - Interval::exactly(through[axis]))
+        };
+        term(0) + term(1) + term(2)
+    }
+
+    fn exactly(&self) -> Option<Decision> {
+        let point = self.point.exact_coordinates()?;
+        let [facing, through] = [self.facing, self.through];
+
+        let mut total = [0.0f64; LONGEST_TOTAL_THROUGH_A_POINT];
+        let mut total_len = 0;
+        let mut merged = [0.0f64; LONGEST_TOTAL_THROUGH_A_POINT];
+
+        let products = (0..3)
+            .map(|axis| (point[axis], facing[axis]))
+            .chain((0..3).map(|axis| (-through[axis], facing[axis])));
+        for (coordinate, along) in products {
+            if !product_is_exact(coordinate, along) {
+                return None;
+            }
+            let (product, roundoff) = two_product(coordinate, along);
+            total_len = expansion_sum(&total[..total_len], &[roundoff, product], &mut merged);
+            core::mem::swap(&mut total, &mut merged);
+        }
+
+        match expansion_sign(&total[..total_len]) {
+            Decision::Neg => Some(Decision::Neg),
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Pos => Some(Decision::Pos),
+            // A product overflowed, so this level cannot run.
+            Decision::Undecidable { .. } => None,
+            other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+        }
+    }
+}
+
+/// Level 1's forward error bound for
+/// [`SideOfAFlatSurfaceThroughAPoint::on_floats`], as a multiple of the
+/// permanent.
+///
+/// The longest chain of roundings from an input to `value` is one product and
+/// then the five additions of the fold, six in all, so the first-order term is
+/// `6ε` times the permanent and the higher-order terms of `(1 + ε)⁶ − 1` are
+/// `15ε²` and less. The permanent is itself folded from six rounded numbers in
+/// five additions, so the computed one can sit up to about `6ε` under the true
+/// one, which costs another `36ε²` against the `6ε`, and multiplying by this
+/// constant rounds once more. The `128ε²` covers those 52 and change with room.
+/// The same relative argument as [`SIDE_OF_PLANE_ERROR_BOUND`], so it holds only
+/// while every product is a normal number, which `on_floats` checks.
+const SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND: f64 = {
+    let epsilon = f64::EPSILON / 2.0;
+    (6.0 + 128.0 * epsilon) * epsilon
+};
+
+/// Six exact products of two entries each, each two numbers long.
+const LONGEST_TOTAL_THROUGH_A_POINT: usize = 12;
+
 impl TryFrom<[f64; 4]> for Plane {
     type Error = Error;
 
@@ -960,6 +1085,59 @@ mod tests {
 
     fn plane_at_height_two() -> Plane {
         Plane::from_point_and_normal(Point::new(0.0, 0.0, 2.0), Vector::new(0.0, 0.0, 1.0)).unwrap()
+    }
+
+    /// **The bound [`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND`]
+    /// publishes**, checked against the exact level: wherever the float level
+    /// certifies a sign, it is the exact sign. The points sit a few units in the
+    /// last place off surfaces through points up to 40 out, where the six
+    /// products cancel hardest, and the float level is made to certify some of
+    /// them and decline the rest.
+    #[test]
+    fn the_float_level_never_certifies_a_wrong_side_of_a_surface_through_a_point() {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+        };
+        let (mut certified, mut declined) = (0, 0);
+        for _ in 0..20_000 {
+            let through = [next() * 40.0, next() * 40.0, next() * 40.0];
+            let facing = [next(), next(), next()];
+            let wander = [next(), next(), next()];
+            let lean = (0..3).map(|axis| wander[axis] * facing[axis]).sum::<f64>()
+                / (0..3).map(|axis| facing[axis] * facing[axis]).sum::<f64>();
+            let along: [f64; 3] = core::array::from_fn(|axis| wander[axis] - lean * facing[axis]);
+            let off_by = next() * f64::EPSILON * 1024.0;
+            let point: [f64; 3] = core::array::from_fn(|axis| {
+                through[axis] + along[axis] * 10.0 + facing[axis] * off_by
+            });
+            let asked = SideOfAFlatSurfaceThroughAPoint {
+                named: "test",
+                through,
+                facing,
+                point: PredicatePoint::from(point),
+            };
+            let exact = asked.exactly().expect("no product here is subnormal");
+            let filtered = asked.on_floats().expect("every product here is normal");
+            if filtered.value.abs() > filtered.error_bound {
+                certified += 1;
+                let sign = if filtered.value > 0.0 {
+                    Decision::Pos
+                } else {
+                    Decision::Neg
+                };
+                assert_eq!(sign, exact, "{through:?} {facing:?} {point:?}");
+            } else {
+                declined += 1;
+            }
+        }
+        assert!(
+            certified > 1000 && declined > 1000,
+            "{certified} {declined}"
+        );
     }
 
     #[test]

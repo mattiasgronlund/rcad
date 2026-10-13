@@ -55,8 +55,8 @@ use crate::enclosure::{
 use crate::exact::{Exact, Nearly, binary_exponent, multiplied_by_a_power_of_two};
 use crate::half_space::normals_exactly_square_to;
 use crate::{
-    Cone, Cylinder, EdgeRun, Error, HalfSpace, NamedRun, Picker, Plane, Point, Result, Sphere,
-    Surface, SurfaceMeet, Torus, Vector,
+    Cone, Cylinder, EdgeRun, Error, HalfSpace, HalfSpaceThroughAPoint, NamedRun, Picker, Plane,
+    Point, Result, Sphere, Surface, SurfaceMeet, Torus, Vector,
 };
 
 /// The name the two-plane crossing goes by in provenance records.
@@ -1805,29 +1805,29 @@ fn where_two_leaning_pipes_cross(
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when `c`, worked out in
-/// `f64`, is not exactly on both axes or no facing tried for either surface
-/// passes exactly through it, and whatever [`HalfSpace::through_a_point_facing`]
-/// refuses. A **gap** (§16.10): the four halves are there and four corners
-/// apart, and what runs out is a point in `f64` that is exactly where the axes
-/// meet, or a flat surface in `f64` that passes exactly through it. Bores on
-/// `(3, 4, 0)` and `(3, 0, 4)` through `(11, −3.25, 0.5)` were refused for the
-/// second until Q1645 slid each facing a few `2⁻⁵³` along `(0, 1, −1)`
-/// (`bores_on_3_4_0_and_3_0_4_are_picked_by_their_directions_slid_until_they_pass_exactly`).
-/// Q1653 solved for the step count rather than searching it, and tried each
-/// stored direction in its lowest terms, which named bores on `(0, 3, 4)` and
-/// `(4, 3, 0)` (`bores_on_0_3_4_and_4_3_0_are_picked_by_a_slide_solved_for`)
-/// and bores on `(−2, 3, 6)` and `(−2, 6, 3)`
+/// `f64`, is not exactly on both axes, and whatever
+/// [`a_surface_through_where_the_walls_touch`] refuses. A **gap** (§16.10): the
+/// four halves are there and four corners apart, and what runs out is a point
+/// in `f64` that is exactly where the axes meet.
+///
+/// # Where no flat surface written in `f64` will do
+///
+/// A surface is a [`HalfSpace`] wherever one of the facings tried passes
+/// exactly through `c`. Bores on `(3, 4, 0)` and `(3, 0, 4)` through
+/// `(11, −3.25, 0.5)` are picked by facings slid a few `2⁻⁵³` along
+/// `(0, 1, −1)`
+/// (`bores_on_3_4_0_and_3_0_4_are_picked_by_their_directions_slid_until_they_pass_exactly`),
+/// bores on `(0, 3, 4)` and `(4, 3, 0)` by a slide whose step count is solved
+/// for (`bores_on_0_3_4_and_4_3_0_are_picked_by_a_slide_solved_for`), and bores
+/// on `(−2, 3, 6)` and `(−2, 6, 3)` by a direction in its lowest terms
 /// (`bores_on_2_3_6_and_2_6_3_are_picked_by_the_whole_number_triple_one_is_a_multiple_of`).
-/// At a middle in decimal millimetres, `(11.85, −3.15, 0.45)`, most pairs are
-/// still refused, and whether a flat surface in `f64` exists for them has not
-/// been asked
-/// (`the_namer_names_this_family_crossing_at_a_middle_in_decimal_millimetres`).
-/// Bores on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)` are refused, and
-/// no other facing would do: up to a power of two, `f64` holds twelve facings
-/// in their flat, and none of them passes exactly through `c`
+/// Bores on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)` have none:
+/// up to a power of two, `f64` holds twelve facings in their flat, and none of
+/// them passes exactly through `c`
 /// (`no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`).
-/// Naming those takes a picker that holds the exact `c` and a facing, rather
-/// than a flat surface written in `f64`.
+/// Such a surface is a [`HalfSpaceThroughAPoint`] instead, which holds `c`
+/// itself and the pipe's own direction and so passes exactly through `c` for
+/// every facing (`docs/decisions.md` §443).
 fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     one: &Cylinder,
     other: &Cylinder,
@@ -1850,8 +1850,8 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     }
     let [first_way, second_way] = [first, second].map(|pipe| pipe.axis().direction());
     let (Some(towards_first), Some(towards_second)) = (
-        a_flat_surface_through_where_the_walls_touch(middle, first_way, second_way)?,
-        a_flat_surface_through_where_the_walls_touch(middle, second_way, first_way)?,
+        a_surface_through_where_the_walls_touch(middle, first_way, second_way)?,
+        a_surface_through_where_the_walls_touch(middle, second_way, first_way)?,
     ) else {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     };
@@ -1867,17 +1867,49 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
                     if corner[which] {
                         surfaces[which]
                     } else {
-                        surfaces[which].reversed()
+                        surfaces[which]
+                            .reversed()
+                            .expect("both surfaces are flat, so each has another side")
                     }
                 });
                 NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
                     and,
-                    picked_by: smallvec![Picker::from(mine), Picker::from(theirs)],
+                    picked_by: smallvec![mine, theirs],
                 })
-                .expect("picked_by always holds the two half-spaces just built")
+                .expect("picked_by always holds the two flat pickers just built")
             })
             .collect(),
     ))
+}
+
+/// The flat surface [`a_flat_surface_through_where_the_walls_touch`] finds, or
+/// where it finds none, a [`HalfSpaceThroughAPoint`] through the exact `middle`
+/// facing `own` — or `None` when `own` fails the same two exact checks every
+/// facing tried there passes.
+///
+/// `own` lies in the flat of `own` and `other`, being one of them, and leans
+/// towards itself, so the checks fail only where an exact sum cannot be formed.
+/// A half-space found is taken first so that every pair named before this
+/// picker existed keeps the pickers it had (`docs/decisions.md` §443).
+///
+/// # Errors
+///
+/// Whatever [`HalfSpace::through_a_point_facing`] and
+/// [`HalfSpaceThroughAPoint::new`] refuse.
+fn a_surface_through_where_the_walls_touch(
+    middle: Point,
+    own: Vector,
+    other: Vector,
+) -> Result<Option<Picker>> {
+    if let Some(surface) = a_flat_surface_through_where_the_walls_touch(middle, own, other)? {
+        return Ok(Some(Picker::from(surface)));
+    }
+    if !(it_lies_exactly_in_the_flat_of(own, own, other) && it_leans_towards(own, own, other)) {
+        return Ok(None);
+    }
+    Ok(Some(Picker::from(HalfSpaceThroughAPoint::new(
+        middle, own,
+    )?)))
 }
 
 /// A flat surface through `middle` that holds both points where the walls touch
