@@ -1,7 +1,7 @@
 //! A box whose top corner, where three planes meet, a pyramid whose apex,
 //! where four planes meet, and a half bar whose corner, where a cap, a round
 //! wall and a cut meet, are moved in their file, read back, and fused.
-//! `docs/decisions.md` §294.16 to §294.20 are the record
+//! `docs/decisions.md` §294.16 to §294.21 are the record
 //! and this file is their measurement.
 //!
 //! §294 moved a round bar's top corner, which has only two surfaces round it,
@@ -35,9 +35,10 @@
 //! place an apex a millimetre away. The sound pyramid answers every partner
 //! but one, a block whose face runs exactly through the apex. Cut by that, it
 //! answers where it stands. Placed, its four side planes cut the cut's face
-//! into specks a rounding across by the apex, and it cannot find a point
-//! inside one of them, which is a defect of its own and pinned here as it
-//! stands (§294.20).
+//! into specks a rounding across by the apex, and the half pyramid built round
+//! them keeps an edge a rounding long, which `certified` refuses and
+//! `tolerant(100)` mostly takes: a defect of its own, pinned here as it stands
+//! (§294.21).
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -59,18 +60,14 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, SIDE_OF_PLANE, Scale, Surface,
-    Vector, WHERE_THREE_SURFACES_MEET,
+    Axis, DYNAMIC_RANGE_CHECK, Deflection, EdgeRun, Isometry, Orientation, Plane, Point,
+    SIDE_OF_PLANE, Scale, Surface, Vector, WHERE_THREE_SURFACES_MEET,
 };
 use rcad_predicates::{ORIENT3D, Policy, ProvenanceLog};
 use rcad_topo::{
     DraftEdge, DraftStep, Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidBuilder,
     SolidKey,
 };
-
-/// What a fuse's record names when it cannot say whether a point is inside a
-/// piece of a face. `rcad-topo` keeps the name private, in `fuse/select.rs`.
-const A_POINT_INSIDE_A_PIECE_OF_A_FACE: &str = "a point inside a piece of a face";
 
 /// What a fuse's record names when it cannot say which of two points comes
 /// first along a crossing. `rcad-topo` keeps the name private, in
@@ -352,7 +349,7 @@ fn a_pyramid_whose_apex_is_moved_a_millimetre_in_its_file_reads_back_and_does_no
 /// The control for the pyramid's refusals, as for the box's: the same bytes
 /// with the apex left alone answer every partner but one, and the answer holds
 /// what the pyramid and the block hold. The one left out is the cut through
-/// the apex, which answers only where the pyramid stands, below.
+/// the apex, which answers cleanly only where the pyramid stands, below.
 #[test]
 fn the_sound_pyramid_answers_every_partner_but_a_cut_through_its_apex_with_what_the_two_hold() {
     let not_through_the_apex: Vec<(Block, Rule)> = EVERY_PARTNER
@@ -395,30 +392,56 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
     }
 }
 
-/// **Placed, the sound pyramid cut through its apex refuses**, which is a
-/// defect and not the moved apex's refusal (§294.19, §294.20). Shifted, turned, or
-/// turned and then shifted, the four side planes as written meet three by
-/// three at points a rounding apart, and the three bake solved the apex from
-/// put it a rounding off the cut: inside the block shifted, outside it turned.
-/// The cut crosses each edge at the apex a rounding from the apex, and the
-/// fuse puts the two in order along the edge from the planes (Q1911). But the
-/// four side planes also cross the cut's own face in four lines that pass a
-/// rounding from one another by the apex, and cut it into specks. One of them,
-/// a triangle with every corner within `1e−12` of the apex, has no point inside
-/// it that can be written down, and under both policies the fuse refuses
-/// there, with one record. Before Q1911, `certified` refused the order instead,
-/// and `tolerant(100)` took twenty such orders and then refused the speck.
+/// **Placed, the sound pyramid cut through its apex keeps a speck of the cut
+/// in what it builds**, which is a defect and not the moved apex's refusal
+/// (§294.19 to §294.21). Shifted, turned, or turned and then shifted, the four
+/// side planes as written meet three by three at points a rounding apart, and
+/// the three bake solved the apex from put it a rounding off the cut. The four
+/// side planes cross the cut's own face in four lines that pass a rounding
+/// from one another by the apex, and cut it into specks a rounding across.
+/// Each speck is now placed, from the planes, as the three bake solved each
+/// corner of the pyramid from (Q1936), but the half pyramid built round them
+/// keeps an edge a rounding long by the apex:
+///
+/// - Under `certified` every fuse refuses that edge as too short beside the
+///   coordinates, `DynamicRangeTooWide`, and leaves the model as it was.
+/// - Under `tolerant(100)` four fuses answer half the pyramid, 60, in one
+///   solid that validates, and the log's one record is the range check that
+///   took the short edge. Turned and shifted for the difference, and shifted
+///   for the intersection, the answer the fuse built has a face whose outline
+///   winds against its normal, and it refuses that and writes nothing.
+///
+/// Before Q1936, all twelve refused `Undecidable`, "a point inside a piece of a
+/// face", on one of the specks.
 #[test]
-fn a_sound_pyramid_placed_and_cut_through_its_apex_cannot_place_a_speck_of_the_cut() {
+fn a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut() {
     let [_, shift, turn, turn_then_shift] = every_placement();
+    let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
     for rule in [Rule::Difference, Rule::Intersection] {
         for placement in [shift, turn, turn_then_shift] {
-            for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-                assert_eq!(
-                    the_refusal_cutting_through_the_apex(placement, rule, &policy),
-                    [A_POINT_INSIDE_A_PIECE_OF_A_FACE],
-                    "{policy:?}, {placement:?}, {rule:?}"
-                );
+            let case = format!("{placement:?}, {rule:?}");
+            match the_cut_through_the_apex(placement, rule, &certified) {
+                Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+                    assert!(ratio > 1e15, "certified, {case}: a range of {ratio}");
+                }
+                other => panic!("certified, {case} came back {other:?}"),
+            }
+            let wound_against_its_normal = match rule {
+                Rule::Difference => placement == turn_then_shift,
+                _ => placement == shift,
+            };
+            match the_cut_through_the_apex(placement, rule, &tolerant) {
+                Ok(named) if !wound_against_its_normal => {
+                    assert_eq!(named, [DYNAMIC_RANGE_CHECK], "tolerant, {case}");
+                }
+                Err(Error::TheFuseWroteABrokenAnswer { broken }) if wound_against_its_normal => {
+                    assert_eq!(
+                        broken,
+                        Invalid::OuterWireWindsAgainstTheNormal,
+                        "tolerant, {case}"
+                    );
+                }
+                other => panic!("tolerant, {case} came back {other:?}"),
             }
         }
     }
@@ -675,13 +698,34 @@ fn fuses_into_what_the_two_hold(
     let answer = model
         .fuse(&[solid], &[block], rule, policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|error| panic!("{case} refused: {error:?}"));
+    the_answer_holds_what_the_two_hold(
+        &model,
+        &answer,
+        (partner, rule),
+        policy,
+        what_the_two_hold,
+        &case,
+    );
+}
+
+/// `answer`, in `model`, validates and holds what `what_the_two_hold` says the
+/// solid and the block `partner` names hold under its rule: as many solids,
+/// and a volume within `1e-12` relative and the bound the measure publishes.
+fn the_answer_holds_what_the_two_hold(
+    model: &Model,
+    answer: &Fused,
+    (partner, rule): (Block, Rule),
+    policy: &Policy,
+    what_the_two_hold: fn(Block, Rule) -> (usize, f64),
+    case: &str,
+) {
     model
         .validate(policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|error| panic!("{case}: the answer does not validate: {error:?}"));
 
     let (solids, volume) = what_the_two_hold(partner, rule);
     assert_eq!(answer.solids().len(), solids, "{case}: how many solids");
-    let (measured, bound) = the_volume_of(&model, &answer, policy, &case);
+    let (measured, bound) = the_volume_of(model, answer, policy, case);
     assert!(
         (measured - volume).abs() <= 1e-12 * volume + bound,
         "{case}: the answer holds {measured} to {bound}, the two {volume}"
@@ -689,56 +733,44 @@ fn fuses_into_what_the_two_hold(
 }
 
 /// The sound pyramid at `placement` fused with `THE_HALF_PAST_THE_SEAM` under
-/// `rule`, which has to refuse and leave the model as it was. Returns the
-/// predicates the refusal's records name, each checked to have been asked of
-/// points within `1e-12` of the placed apex.
-fn the_refusal_cutting_through_the_apex(
+/// `rule`. An answer has to validate and hold what the pyramid and the block
+/// hold, and comes back as the predicates the fuse's log names. A refusal has
+/// to leave the model byte for byte as it was, and comes back as it is.
+fn the_cut_through_the_apex(
     placement: Isometry,
     rule: Rule,
     policy: &Policy,
-) -> Vec<&'static str> {
+) -> Result<Vec<&'static str>, Error> {
     let case = format!("{policy:?}, {placement:?}, {rule:?}");
-    let [x, y, z] = WHERE_THE_PYRAMID_PUTS_ITS_APEX;
-    let apex = placement.apply_to_point(Point::new(x, y, z)).coordinates();
     let (mut model, solid) = the_pyramid_read_back(placement, WHERE_THE_PYRAMID_PUTS_ITS_APEX);
     let block = a_block(&mut model, THE_HALF_PAST_THE_SEAM, &placement);
     let before = postcard::to_allocvec(&model).expect("a model writes out");
-    let Err(Error::Undecidable { records }) =
-        model.fuse(&[solid], &[block], rule, policy, &mut ProvenanceLog::new())
-    else {
-        panic!("{case}: the cut through the apex did not refuse Undecidable");
-    };
-    assert_eq!(
-        postcard::to_allocvec(&model).expect("a model writes out"),
-        before,
-        "{case}: a refused fuse leaves the model as it was"
-    );
-    for record in records.records() {
-        assert!(
-            !record.inputs().is_empty(),
-            "{case}: {} asked of no point",
-            record.predicate()
-        );
-        for asked in record.inputs() {
-            let by_the_apex = asked
-                .enclosure()
-                .iter()
-                .zip(apex)
-                .all(|(side, coordinate)| {
-                    coordinate - 1e-12 <= side.lo() && side.hi() <= coordinate + 1e-12
-                });
-            assert!(
-                by_the_apex,
-                "{case}: {} asked of {asked:?}, not by the apex {apex:?}",
-                record.predicate()
+    let mut log = ProvenanceLog::new();
+    match model.fuse(&[solid], &[block], rule, policy, &mut log) {
+        Ok(answer) => {
+            the_answer_holds_what_the_two_hold(
+                &model,
+                &answer,
+                (THE_HALF_PAST_THE_SEAM, rule),
+                policy,
+                what_the_pyramid_and_a_block_hold,
+                &case,
             );
+            Ok(log
+                .records()
+                .iter()
+                .map(|record| record.predicate())
+                .collect())
+        }
+        Err(refused) => {
+            assert_eq!(
+                postcard::to_allocvec(&model).expect("a model writes out"),
+                before,
+                "{case}: a refused fuse leaves the model as it was"
+            );
+            Err(refused)
         }
     }
-    records
-        .records()
-        .iter()
-        .map(|record| record.predicate())
-        .collect()
 }
 
 /// The half bar with its corner moved to `corner` in its file, at `placement`,
