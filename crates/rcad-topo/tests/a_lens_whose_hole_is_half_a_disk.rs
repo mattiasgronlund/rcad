@@ -38,26 +38,40 @@
 //! **What still refuses.** A half bar whose corner is the lens's own corner —
 //! `(0, −4)`, where its flat side runs from that corner to `(0, −2)` — puts
 //! four surfaces round the one vertical line through it. Built from one bar
-//! and the half bar directly, the fold now answers the union, the
-//! intersection (both ways round), and the half bar less the bar; only the bar
-//! less the half bar still fails, now `ResultIsNotManifold { count: 4 }`
-//! rather than a touch in the arrangement — the pocket it would cut pinches to
-//! a point at the lens's own corner. Built by uniting or overlapping the two
-//! bars first, the fuse meets the half bar across the one line where the
-//! lens's two walls and the half bar's pipe all run, three curved surfaces,
-//! and `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` refused every one of those
+//! and the half bar directly, every fuse answers. The fold answers the union,
+//! the intersection (both ways round), and the half bar less the bar. The bar
+//! less the half bar was refused `ResultIsNotManifold { count: 4 }` until
+//! queue row Q1901, and answers `98.5π` since: the pocket it cuts meets the
+//! bar's rim at the lens's own corner, so the answer is one solid touching
+//! itself along the vertical line through `(0, −4)` from `z = 1` to the cap.
+//! This file called that refusal a limit. By §16.10 it was a gap, since the
+//! answer exists: a solid touching itself along a line is one
+//! (`docs/decisions.md` §39.4).
+//!
+//! Built by uniting or overlapping the two bars first, the fuse meets the half
+//! bar across the one line where the lens's two walls and the half bar's pipe
+//! all run, three curved surfaces, and
+//! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` refused every one of those
 //! twelve fuses until Q1284 read three pipes up `z` as the plane two of them
-//! differ by and two pipes. Now every one answers but two: the bars less the
-//! half bar pinches as against one bar, and **the union of the bars united
-//! and the half bar panics, both ways round**, in `rings_round`.
+//! differ by and two pipes. Now every one answers but the bars united less the
+//! half bar, still refused `ResultIsNotManifold { count: 4 }`, and **the union
+//! of the bars united and the half bar, which panics, both ways round**, in
+//! `rings_round`. The bars less the half bar would be `200π − 4L − 1.5π`, for
+//! the lens's area `L`, again one solid touching itself along that line. But
+//! there the line is an edge of both inputs: the bars' two walls meet along
+//! it, and so do the half bar's flat side and its pipe. So four input faces
+//! lie round it, and §39.4's note of Q1901 leaves that refused (its point 5).
 //!
 //! A half bar of radius 4 at the origin, whose flat side is the whole chord,
-//! puts both of its corners on the lens's own. Against the two bars united or
-//! where they overlap it was refused the same way, and since Q1284 answers,
-//! bar the one fuse whose answer pinches. Against one bar alone it answers,
-//! bar the same one; so do the two D's side by side without the half bar.
-//! Q625 found both refused `TwoCurvesTouchWithoutCrossing` before Q930 and
-//! did not pin them.
+//! puts both of its corners on the lens's own. Against one bar alone every
+//! fuse answers, the bar less the half bar since Q1901: `76π`, one solid
+//! touching itself along the vertical lines through `(0, ±4)`. Against the two
+//! bars united or where they overlap it was refused the same way as the half
+//! bar above, and since Q1284 answers, bar the bars united less the half bar,
+//! `176π − 4L`, still refused for the same four input faces round each of
+//! those lines. The two D's side by side without the half bar answer too.
+//! Q625 found the half bar against one bar, and the two D's, refused
+//! `TwoCurvesTouchWithoutCrossing` before Q930 and did not pin them.
 //!
 //! **Which ring is the outline, run rather than read.** On base `90c2e6a9`,
 //! with a print in `rings_round` and `holds_the_other_rings` in
@@ -299,14 +313,17 @@ fn the_two_ds_side_by_side_answer_by_every_rule() {
 /// of its corners. The union is the bar and the half bar's two units above
 /// the cap, `100π + 16π`; the intersection both ways round is the half bar's
 /// three units up to the cap, `24π`; the half bar less the bar is `16π`. The
-/// bar less the half bar refuses `ResultIsNotManifold { count: 4 }`, and that
-/// is a limit, since the answer is not a manifold. What is left of the bar's
+/// bar less the half bar is `100π − 24π = 76π`. What is left of the bar's
 /// section holds `(0.1, 3.9)` on one side of `x = 0` and `(−0.1, 4)` on the
 /// other, and near `(0, 4)` it cannot cross that line: just below the corner
 /// the line is the half disk's flat side, and just above it is outside the
 /// bar. So the section is two pieces meeting at a point there, and at
-/// `(0, −4)` the same, and the solid pinches along the vertical lines through
-/// `(0, ±4)` from `z = 1` to the cap.
+/// `(0, −4)` the same, and the solid touches itself along the vertical lines
+/// through `(0, ±4)` from `z = 1` to the cap. It was refused
+/// `ResultIsNotManifold { count: 4 }` until queue row Q1901, and this doc
+/// called that a limit, since the answer is not a manifold. By §16.10 it was
+/// a gap, since the answer exists: a solid touching itself along a line is
+/// one (`docs/decisions.md` §39.4).
 ///
 /// The half disk holds the part of the bar at `(3, 0)` on its side of
 /// `x = 0`, half the lens, so the two share `1.5L` from `z = 1` to the cap:
@@ -321,9 +338,13 @@ fn the_two_ds_side_by_side_answer_by_every_rule() {
 /// answers but the one that pinches. The half bar's half disk is inside the
 /// bar at `(−3, 0)`, so against the two bars united, `U = 200π − 4L`, they
 /// share `24π` as against that one bar: union `216π − 4L`, intersection
-/// `24π`, the half bar less the bars `16π`, and the bars less the half bar
-/// `ResultIsNotManifold { count: 4 }`, pinched at `(0, ±4)` as against the
-/// one bar. Where the two bars overlap, the lens `4L`, they share `1.5L` as
+/// `24π`, and the half bar less the bars `16π`. The bars less the half bar
+/// would be `176π − 4L`, one solid touching itself at `(0, ±4)` as against
+/// the one bar, and is still refused `ResultIsNotManifold { count: 4 }`. Each
+/// of those lines is an edge of both inputs, where the bars' two walls meet
+/// and where the half bar's flat side meets its pipe, so four input faces lie
+/// round it, and §39.4's note of Q1901 leaves that refused (its point 5).
+/// Where the two bars overlap, the lens `4L`, they share `1.5L` as
 /// against the bar at `(3, 0)`: union `40π + 2.5L`, intersection `1.5L`, the
 /// lens less the half bar `2.5L`, and the half bar less the lens
 /// `40π − 1.5L`.
@@ -475,15 +496,18 @@ fn assert_every_fuse_answers(
 /// corner `(0, −4)` to `(0, −2)`: four surfaces round the one vertical line
 /// through `(0, −4)`.
 ///
-/// Built straight from one bar and the half bar, the fold answers three of
-/// the four fuses: the union (`101π`, the bar plus the half bar's part above
-/// the cap, since the half bar's footprint is entirely inside the bar's,
-/// tangent to its rim at the corner), the intersection both ways round
-/// (`1.5π`, the half bar's part up to the cap), and the half bar less the bar
-/// (`π`, its part above the cap, outside the bar entirely). The bar less the
-/// half bar still fails, now `ResultIsNotManifold { count: 4 }`: the pocket it
-/// would cut pinches to a single point at the corner where the half bar's
-/// footprint is tangent to the bar's own rim.
+/// Built straight from one bar and the half bar, every fuse answers: the union
+/// (`101π`, the bar plus the half bar's part above the cap, since the half
+/// bar's footprint is entirely inside the bar's and meets its rim only at the
+/// corner), the intersection both ways round (`1.5π`, the half bar's part up
+/// to the cap), the half bar less the bar (`π`, its part above the cap,
+/// outside the bar entirely), and the bar less the half bar (`98.5π`). The
+/// pocket that last one cuts meets the bar's rim at the corner, so it is one
+/// solid touching itself along the vertical line through `(0, −4)` from
+/// `z = 1` to the cap. It was refused `ResultIsNotManifold { count: 4 }` until
+/// queue row Q1901, a gap by §16.10 rather than a limit, since the answer
+/// exists: a solid touching itself along a line is one (`docs/decisions.md`
+/// §39.4).
 ///
 /// Built by uniting or overlapping the two bars first, the fuse meets the half
 /// bar along the one line through `(0, −4)` where the lens's two walls and the
@@ -500,9 +524,13 @@ fn assert_every_fuse_answers(
 /// lens `4L` and the half bar `2.5π` share `3A`.
 ///
 /// United first, the two bars answer the intersection both ways round,
-/// `1.5π`, and the half bar less the bars, `π`, as against the one bar, and
-/// the bars less the half bar pinches the same way, `ResultIsNotManifold
-/// { count: 4 }`. **The union panics, both ways round**, in `rings_round` in
+/// `1.5π`, and the half bar less the bars, `π`, as against the one bar. The
+/// bars less the half bar would be `200π − 4L − 1.5π`, one solid touching
+/// itself along the same line, and is still refused `ResultIsNotManifold
+/// { count: 4 }`. That line is an edge of both inputs, where the bars' two
+/// walls meet and where the half bar's flat side meets its pipe, so four
+/// input faces lie round it, and §39.4's note of Q1901 leaves that refused
+/// (its point 5). **The union panics, both ways round**, in `rings_round` in
 /// `fuse/assemble.rs`: every ring of a joined face answers that it holds
 /// none of the others, which that function says no face can bring. It would
 /// be the bars and the half bar's part above the cap, `201π − 4L`.

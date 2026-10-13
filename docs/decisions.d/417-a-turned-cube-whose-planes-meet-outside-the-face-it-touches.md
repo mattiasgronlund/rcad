@@ -826,7 +826,7 @@ temporary print in that pin, since taken out).
 `every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_only_where_refused_without`
 pins the volumes, the counts and where each record is, and
 `the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant`
-the five refusals.
+pinned the five refusals until Q1901 answered them (below).
 
 **Under `Policy::certified()`** nothing is asked and nothing is folded, as for
 417.7: the fold returns before any work, and `Policy::take_as_one_point`
@@ -837,7 +837,13 @@ answers `false` there.
 - The block less the tipped cube at `t = 0.002`, `0.003`, `0.008`, `0.01` and
   `0.015`, refused `ResultIsNotManifold { count: 4 }` before and after, the
   fold tried and refused too: the block touches itself along the cube's edge,
-  queue row Q1116's.
+  queue row Q1116's. Answered since Q1901 (§39.4's note of 2026-10-13): one
+  solid of `1000` less what the two share under either policy,
+  `the_block_less_the_tipped_cube_is_the_block_less_what_they_share_where_the_union_was_refused`.
+  What the two share is worked again by hand in `tan t`, as
+  `250 + 500 tan t − 125 tan t / (1 − tan² t)`, `253.75` less about `2e−8`
+  at `t = 0.01`
+  (`what_the_two_share_is_250_and_500_tan_t_less_125_tan_t_over_one_less_its_square`).
 - An edge *nearly*, not exactly, parallel to a plane a rounding off it. The
   fold needs the three normals proved to lie in one plane, so it leaves that
   case alone. Not run.

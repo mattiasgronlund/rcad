@@ -443,6 +443,26 @@ moved them.
 > Queue row Q1902 says Q760's touching answer for the stepped block is
 > refused `ArgumentIntersectsItself` by every fuse after it; these two
 > answers are not, and that row stays open.
+>
+> The decision moved five pins outside Q1901's own files, which queue row
+> Q1910 moved, each answer validating and holding its volume worked by hand.
+> In `a_block_edge_grazing_a_ball_at_cx_16.rs`, the union either way round
+> and the difference with the ball first, refused
+> `ResultIsNotManifold { count: 4 }` before, now go on to the next refusal:
+> `CannotMeshAFace` `CornersCoincide` at position 5, like the other three
+> fuses there, except the union with the block first, which is refused
+> `Invalid::FacesDoNotAgreeWhichWayTheyFace`, under either policy
+> (`every_fuse_refuses_on_the_two_places_f64_holds_as_one_corner`). In
+> `a_sliver_along_an_edge_of_a_face_it_lies_on.rs`, the leaning frame
+> united with the comb answers one solid of `19`, both ways round. In
+> `a_lens_whose_hole_is_half_a_disk.rs`, the bar at `(−3, 0)` less the half
+> bar of radius 1 at `(0, −3)` answers `98.5π`, and less the half bar of
+> radius 4 at the origin `76π`; the file had called the second a limit. Two
+> kinds stay refused `ResultIsNotManifold { count: 4 }` under point 5 above,
+> each one solid touching itself along a line that is an edge of both
+> inputs, four input faces round it: the frame less the comb, `8`, and the
+> two bars united less either half bar, `200π − 4L − 1.5π` and `176π − 4L`
+> for the lens's area `L`.
 
 > **2026-10-04 note (Q473): a plane lying along a cone's ruling runs along the
 > ruling.** The gap above, closed: `AlongATouch` carries the ruling,
