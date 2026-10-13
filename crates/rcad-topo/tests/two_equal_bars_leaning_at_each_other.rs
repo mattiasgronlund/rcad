@@ -145,13 +145,23 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 
 /// The second bar starts where the axes meet, at 50°, 60°, 70°, 100° or 120°.
 ///
-/// **Every fuse is refused `Undecidable` `order along a crossing` on the
-/// second bar's near cap**, ordering the two points `c ± r·ẑ` where the pipes
-/// touch round the cap's closed crossing with the first pipe. That crossing
-/// starts at `(11, −3.25, 0.25)`, inside the `3.1e−13` box of the cap's corner
-/// there, and the box reaches as far behind the start as ahead of it along
-/// the way the crossing runs, so whether the corner comes first or last is
-/// not read off it (`round_a_closed_crossing_and_what_it_measures`).
+/// **Every fuse is refused `Undecidable` `orient3d` on the second bar's near
+/// cap** (Q1908), asking which way the cap turns at a point where the pipes
+/// touch, from its crossing with the first pipe to its own circle round the
+/// second. The two pipes are tangent there, so their gradients are parallel,
+/// and the determinant of the cap's normal and the two is nought, which their
+/// boxes cannot prove. The two curves touch there too. Not traced further.
+///
+/// **Until Q1898 every fuse was refused `order along a crossing` on the
+/// near cap**, ordering the two points `c ± r·ẑ` where the pipes touch round
+/// the cap's closed crossing with the first pipe. That crossing starts at
+/// `(11, −3.25, 0.25)`, inside the `3.1e−13` box of the cap's corner there,
+/// and the box reaches as far behind the start as ahead of it along the way
+/// the crossing runs, so whether the corner comes first or last is not read
+/// off it (`round_a_closed_crossing_and_what_it_measures`). Those two are the
+/// only nodes on that crossing, and their boxes are clear of each other: two
+/// places on a loop cut it into the same two arcs whichever is called first,
+/// so `nodes_along` in `fuse/arrange.rs` no longer asks.
 ///
 /// Each bar's faces are split in the order the bars are handed in, and the
 /// first bar's are all split before the near cap is reached, its wall in six.
@@ -205,36 +215,26 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 #[test]
 fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
     for degrees in [50.0, 60.0, 70.0, 100.0, 120.0] {
+        let mut model =
+            Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let [_, second] = two_bars(&mut model, degrees, [11.0, -3.25, 0.5]);
+        let facing = PredicatePoint::from(the_near_cap(&model, second).normal().components());
         for (rule, first_first) in six_fuses() {
             let said = fuse(degrees, [11.0, -3.25, 0.5], rule, first_first);
             let what = format!("{degrees}° {rule:?} (first first: {first_first})");
             let Err(Error::Undecidable { records }) = &said else {
                 panic!("{what}: {said:?}");
             };
-            let Some(last) = records.records().last() else {
-                panic!("{what}: a refusal names nothing it refused on");
-            };
-            let &[touch, corner] = last.inputs() else {
-                panic!("{what}: {said:?}");
-            };
-            assert!(
-                last.predicate() == "order along a crossing"
-                    && holds(touch, [11.0, -3.25, 0.75])
-                    && holds(corner, [11.0, -3.25, 0.25])
-                    && corner.uncertainty() > 1e-13,
+            assert_eq!(
+                records
+                    .records()
+                    .last()
+                    .map(|record| (record.predicate(), record.inputs()[0])),
+                Some(("orient3d", facing)),
                 "{what}: {said:?}"
             );
         }
     }
-}
-
-/// Whether `place`'s box holds `point`.
-fn holds(place: PredicatePoint, point: [f64; 3]) -> bool {
-    place
-        .enclosure()
-        .iter()
-        .zip(point)
-        .all(|(side, at)| side.lo() <= at && at <= side.hi())
 }
 
 /// The second bar's near cap, as the model hands it out, is proved off both
