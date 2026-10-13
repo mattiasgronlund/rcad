@@ -48,10 +48,11 @@ use pairs::{Configuration, Elsewhere, Placed, Shape, Skew};
 /// side wall above it touch along `x = 2, y = 1`. That line is an edge of both,
 /// the corner of the frame's hole and of the tooth's top, so the four faces
 /// along it are four faces of the two inputs: the hole's walls `y = 1` and
-/// `x + y = 3`, and the tooth's top `y = 1` and its wall `x = 2`. §39.4's note
-/// of Q1901 leaves such a line refused, and it is still refused
-/// `ResultIsNotManifold { count: 4 }`. The answer would be one solid of
-/// `10 − 2`.
+/// `x + y = 3`, and the tooth's top `y = 1` and its wall `x = 2`. It was
+/// refused `ResultIsNotManifold { count: 4 }` until queue row Q1913. The four
+/// faces are one shell without the line, so the answer is one solid touching
+/// itself, `10 − 2`, and not the two touching solids §80.9 leaves unbuilt
+/// (`docs/decisions.md` §39.4).
 #[test]
 fn a_leaning_frame_and_a_comb_meet_in_two_squares() {
     let (model, keys) = frame_and_comb().build();
@@ -66,7 +67,9 @@ fn a_leaning_frame_and_a_comb_meet_in_two_squares() {
     assert_eq!(solids.len(), 1, "the union is one solid");
     holds_exactly(&either, &solids, 10.0 + 11.0 - 2.0, "the union");
 
-    is_not_a_solid(&model, keys[0], keys[1], Rule::Difference);
+    let (less, solids) = fused(&model, keys[0], keys[1], Rule::Difference);
+    assert_eq!(solids.len(), 1, "the frame less the comb is one solid");
+    holds_exactly(&less, &solids, 10.0 - 2.0, "the difference");
 }
 
 /// The same two with the comb first: the comb less the frame holds 9, the

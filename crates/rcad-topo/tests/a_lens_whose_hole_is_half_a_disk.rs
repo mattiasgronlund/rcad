@@ -53,22 +53,23 @@
 //! all run, three curved surfaces, and
 //! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` refused every one of those
 //! twelve fuses until Q1284 read three pipes up `z` as the plane two of them
-//! differ by and two pipes. Now every one answers but the bars united less the
-//! half bar, still refused `ResultIsNotManifold { count: 4 }`, and **the union
-//! of the bars united and the half bar, which panics, both ways round**, in
-//! `rings_round`. The bars less the half bar would be `200π − 4L − 1.5π`, for
-//! the lens's area `L`, again one solid touching itself along that line. But
-//! there the line is an edge of both inputs: the bars' two walls meet along
-//! it, and so do the half bar's flat side and its pipe. So four input faces
-//! lie round it, and §39.4's note of Q1901 leaves that refused (its point 5).
+//! differ by and two pipes. Now every one answers but **the union of the bars
+//! united and the half bar, which panics, both ways round**, in `rings_round`.
+//! The bars less the half bar is `200π − 4L − 1.5π`, for the lens's area `L`,
+//! again one solid touching itself along that line. There the line is an edge
+//! of both inputs: the bars' two walls meet along it, and so do the half bar's
+//! flat side and its pipe. So four input faces lie round it, and it was
+//! refused `ResultIsNotManifold { count: 4 }` until queue row Q1913, which
+//! parts such a line where its four faces are one shell without it
+//! (`docs/decisions.md` §39.4).
 //!
 //! A half bar of radius 4 at the origin, whose flat side is the whole chord,
 //! puts both of its corners on the lens's own. Against one bar alone every
 //! fuse answers, the bar less the half bar since Q1901: `76π`, one solid
 //! touching itself along the vertical lines through `(0, ±4)`. Against the two
 //! bars united or where they overlap it was refused the same way as the half
-//! bar above, and since Q1284 answers, bar the bars united less the half bar,
-//! `176π − 4L`, still refused for the same four input faces round each of
+//! bar above, and since Q1284 answers, the bars united less the half bar,
+//! `176π − 4L`, since Q1913, with the same four input faces round each of
 //! those lines. The two D's side by side without the half bar answer too.
 //! Q625 found the half bar against one bar, and the two D's, refused
 //! `TwoCurvesTouchWithoutCrossing` before Q930 and did not pin them.
@@ -335,16 +336,16 @@ fn the_two_ds_side_by_side_answer_by_every_rule() {
 /// down the vertical lines through `(0, ±4)`. Three pipes up `z` bend the same
 /// way, so since Q1284 their meet is the plane the lens's two walls differ by,
 /// `x = 0`, and two pipes, and they share those whole lines. Every fuse then
-/// answers but the one that pinches. The half bar's half disk is inside the
-/// bar at `(−3, 0)`, so against the two bars united, `U = 200π − 4L`, they
-/// share `24π` as against that one bar: union `216π − 4L`, intersection
-/// `24π`, and the half bar less the bars `16π`. The bars less the half bar
-/// would be `176π − 4L`, one solid touching itself at `(0, ±4)` as against
-/// the one bar, and is still refused `ResultIsNotManifold { count: 4 }`. Each
-/// of those lines is an edge of both inputs, where the bars' two walls meet
-/// and where the half bar's flat side meets its pipe, so four input faces lie
-/// round it, and §39.4's note of Q1901 leaves that refused (its point 5).
-/// Where the two bars overlap, the lens `4L`, they share `1.5L` as
+/// answers. The half bar's half disk is inside the bar at `(−3, 0)`, so
+/// against the two bars united, `U = 200π − 4L`, they share `24π` as against
+/// that one bar: union `216π − 4L`, intersection `24π`, and the half bar less
+/// the bars `16π`. The bars less the half bar is `176π − 4L`, one solid
+/// touching itself at `(0, ±4)` as against the one bar. Each of those lines is
+/// an edge of both inputs, where the bars' two walls meet and where the half
+/// bar's flat side meets its pipe, so four input faces lie round it; it was
+/// refused `ResultIsNotManifold { count: 4 }` until queue row Q1913
+/// (`docs/decisions.md` §39.4). Where the two bars overlap, the lens `4L`,
+/// they share `1.5L` as
 /// against the bar at `(3, 0)`: union `40π + 2.5L`, intersection `1.5L`, the
 /// lens less the half bar `2.5L`, and the half bar less the lens
 /// `40π − 1.5L`.
@@ -357,12 +358,12 @@ fn a_half_bar_whose_flat_side_is_the_whole_chord_answers_against_either_bar_alon
             [bar, a_half_bar_bulging_left(model, 4.0, 0.0)]
         },
         &[
-            (Rule::Union, true, Some(116.0 * PI)),
-            (Rule::Union, false, Some(116.0 * PI)),
-            (Rule::Intersection, true, Some(24.0 * PI)),
-            (Rule::Intersection, false, Some(24.0 * PI)),
-            (Rule::Difference, true, Some(76.0 * PI)),
-            (Rule::Difference, false, Some(16.0 * PI)),
+            (Rule::Union, true, 116.0 * PI),
+            (Rule::Union, false, 116.0 * PI),
+            (Rule::Intersection, true, 24.0 * PI),
+            (Rule::Intersection, false, 24.0 * PI),
+            (Rule::Difference, true, 76.0 * PI),
+            (Rule::Difference, false, 16.0 * PI),
         ],
     );
     let shared = 1.5 * the_lens();
@@ -387,12 +388,12 @@ fn a_half_bar_whose_flat_side_is_the_whole_chord_answers_against_either_bar_alon
             [bars, a_half_bar_bulging_left(model, 4.0, 0.0)]
         },
         &[
-            (Rule::Union, true, Some(the_bars + 16.0 * PI)),
-            (Rule::Union, false, Some(the_bars + 16.0 * PI)),
-            (Rule::Intersection, true, Some(24.0 * PI)),
-            (Rule::Intersection, false, Some(24.0 * PI)),
-            (Rule::Difference, true, None),
-            (Rule::Difference, false, Some(16.0 * PI)),
+            (Rule::Union, true, the_bars + 16.0 * PI),
+            (Rule::Union, false, the_bars + 16.0 * PI),
+            (Rule::Intersection, true, 24.0 * PI),
+            (Rule::Intersection, false, 24.0 * PI),
+            (Rule::Difference, true, the_bars - 24.0 * PI),
+            (Rule::Difference, false, 16.0 * PI),
         ],
     );
     assert_every_fuse_answers(
@@ -525,12 +526,12 @@ fn assert_every_fuse_answers(
 ///
 /// United first, the two bars answer the intersection both ways round,
 /// `1.5π`, and the half bar less the bars, `π`, as against the one bar. The
-/// bars less the half bar would be `200π − 4L − 1.5π`, one solid touching
-/// itself along the same line, and is still refused `ResultIsNotManifold
-/// { count: 4 }`. That line is an edge of both inputs, where the bars' two
-/// walls meet and where the half bar's flat side meets its pipe, so four
-/// input faces lie round it, and §39.4's note of Q1901 leaves that refused
-/// (its point 5). **The union panics, both ways round**, in `rings_round` in
+/// bars less the half bar is `200π − 4L − 1.5π`, one solid touching itself
+/// along the same line. That line is an edge of both inputs, where the bars'
+/// two walls meet and where the half bar's flat side meets its pipe, so four
+/// input faces lie round it; it was refused `ResultIsNotManifold { count: 4 }`
+/// until queue row Q1913 (`docs/decisions.md` §39.4). **The union panics, both
+/// ways round**, in `rings_round` in
 /// `fuse/assemble.rs`: every ring of a joined face answers that it holds
 /// none of the others, which that function says no face can bring. It would
 /// be the bars and the half bar's part above the cap, `201π − 4L`.
@@ -543,12 +544,12 @@ fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
             [bar, a_half_bar_bulging_left(model, 1.0, -3.0)]
         },
         &[
-            (Rule::Union, true, Some(101.0 * PI)),
-            (Rule::Union, false, Some(101.0 * PI)),
-            (Rule::Intersection, true, Some(1.5 * PI)),
-            (Rule::Intersection, false, Some(1.5 * PI)),
-            (Rule::Difference, true, Some(98.5 * PI)),
-            (Rule::Difference, false, Some(PI)),
+            (Rule::Union, true, 101.0 * PI),
+            (Rule::Union, false, 101.0 * PI),
+            (Rule::Intersection, true, 1.5 * PI),
+            (Rule::Intersection, false, 1.5 * PI),
+            (Rule::Difference, true, 98.5 * PI),
+            (Rule::Difference, false, PI),
         ],
     );
 
@@ -575,10 +576,14 @@ fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
         "the two bars united, then the half bar",
         the_bars_and_the_half_bar,
         &[
-            (Rule::Intersection, true, Some(1.5 * PI)),
-            (Rule::Intersection, false, Some(1.5 * PI)),
-            (Rule::Difference, true, None),
-            (Rule::Difference, false, Some(PI)),
+            (Rule::Intersection, true, 1.5 * PI),
+            (Rule::Intersection, false, 1.5 * PI),
+            (
+                Rule::Difference,
+                true,
+                200.0 * PI - 4.0 * the_lens() - 1.5 * PI,
+            ),
+            (Rule::Difference, false, PI),
         ],
     );
     for first_first in [true, false] {
@@ -608,14 +613,13 @@ fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
 }
 
 /// The pair `build` makes, fused by each rule and way round in `answers`:
-/// one solid holding the volume it gives, or where it gives `None`, a refusal
-/// `ResultIsNotManifold { count: 4 }`.
+/// one solid holding the volume it gives.
 fn assert_each_fuse(
     route: &str,
     build: impl Fn(&mut Model) -> [SolidKey; 2],
-    answers: &[(Rule, bool, Option<f64>)],
+    answers: &[(Rule, bool, f64)],
 ) {
-    for &(rule, first_first, answers) in answers {
+    for &(rule, first_first, volume) in answers {
         let asked = format!("{route}, {rule:?}, the first first {first_first}");
         let mut model = a_model();
         let [first, second] = build(&mut model);
@@ -624,18 +628,10 @@ fn assert_each_fuse(
         } else {
             [second, first]
         };
-        match (fuse(&mut model, one, other, rule), answers) {
-            (Ok(answer), Some(volume)) => {
-                assert_eq!(answer.len(), 1, "{asked} came back as {answer:?}");
-                assert_total_holds(&model, &answer, volume, &asked);
-            }
-            (Err(why), None) => assert!(
-                matches!(why, Error::ResultIsNotManifold { count: 4 }),
-                "{asked} refused another way: {why:?}"
-            ),
-            (Ok(answer), None) => panic!("{asked} answers {answer:?}; pin what it answers"),
-            (Err(why), Some(_)) => panic!("{asked}: {why}"),
-        }
+        let answer =
+            fuse(&mut model, one, other, rule).unwrap_or_else(|why| panic!("{asked}: {why:?}"));
+        assert_eq!(answer.len(), 1, "{asked} came back as {answer:?}");
+        assert_total_holds(&model, &answer, volume, &asked);
     }
 }
 
