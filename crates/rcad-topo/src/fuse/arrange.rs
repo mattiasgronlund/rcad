@@ -4804,6 +4804,20 @@ impl<'f> Arrangement<'f> {
     /// nothing; the touch is proved by [`a_plane_rests_along_a_cone`], so it is
     /// read as nothing and the order of the two is left to how they bend.
     ///
+    /// **Where the two partners are pipes of one radius and the node is one of
+    /// the two places they touch, nothing is what the determinant is too.**
+    /// Their axes meet at `c` and the places are `c ± r·n̂`, for `n̂` square to
+    /// both axes, so both pipes' gradients there run along `n̂`: two rows
+    /// parallel, whatever the face. The node's name says it is one of those
+    /// places ([`Arrangement::is_where_two_pipes_touch`]), proved where it was
+    /// placed, so the touch is read as nothing and the order of the two left
+    /// to how they bend, as for a plane resting along a cone. A bar's near cap
+    /// square to its axis through where that axis crosses another bar's of its
+    /// radius holds both places, and there its circle touches its crossing
+    /// with the other pipe: every fuse of two bars of radius `1/4`, the second
+    /// starting where the axes meet turned 50° about `z`, was refused here,
+    /// the box straddling nothing (Q1908).
+    ///
     /// **Where two of the three are planes and the third is curved**, a
     /// determinant the box cannot settle is read off which way the planes' line
     /// runs through the curved one at the node
@@ -4856,7 +4870,8 @@ impl<'f> Arrangement<'f> {
             turn = proved;
         }
         if matches!(turn, Decision::Undecidable { .. })
-            && a_plane_rests_along_a_cone(&first_partner, &second_partner)
+            && (a_plane_rests_along_a_cone(&first_partner, &second_partner)
+                || self.is_where_two_pipes_touch(node, &first_partner, &second_partner))
         {
             return Ok(Decision::Zero);
         }
@@ -5334,7 +5349,25 @@ impl<'f> Arrangement<'f> {
     /// of the face's pipe and `crossing`'s partner meet
     /// ([`Arrangement::place_where_two_halves_meet`]).
     fn is_an_end_of_the_halves(&self, node: usize, crossing: usize) -> bool {
-        let name = where_two_halves_meet(&self.surface, &self.crossings[crossing].partner);
+        self.is_where_two_pipes_touch(node, &self.surface, &self.crossings[crossing].partner)
+    }
+
+    /// Whether `node` is one of the two places `c ± r·n̂` where the pipes `one`
+    /// and `other`, of one radius and with axes meeting at `c`, touch: named
+    /// so by [`Arrangement::place_where_two_halves_meet`] or
+    /// [`Arrangement::place_where_a_cap_meets_two_halves`].
+    ///
+    /// **Only two pipes are asked about.** The name repeats one surface, and
+    /// so does the name of a cone's apex, the plane and the cone twice
+    /// ([`Arrangement::place_where_two_rulings_cross`]). Of two pipes no other
+    /// node is named so with `which` under 2: the middle of a half carries the
+    /// name with 2 to 5 ([`Arrangement::place_the_middle_of_each_half`]), and
+    /// every other name is of three different surfaces.
+    fn is_where_two_pipes_touch(&self, node: usize, one: &Surface, other: &Surface) -> bool {
+        let (Surface::Cylinder(_), Surface::Cylinder(_)) = (one, other) else {
+            return false;
+        };
+        let name = where_two_halves_meet(one, other);
         let Node { made_of, also, .. } = &self.nodes[node];
         made_of
             .iter()
