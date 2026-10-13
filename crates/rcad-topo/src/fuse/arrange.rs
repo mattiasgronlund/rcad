@@ -3476,9 +3476,10 @@ impl<'f> Arrangement<'f> {
     /// when `first` does, [`Decision::Zero`] when they are the same point.
     ///
     /// The boxes are asked first, and the planes
-    /// ([`Arrangement::as_the_planes_say`]) and a quadric
-    /// ([`Arrangement::as_the_quadric_says`]) only where the boxes cannot say,
-    /// because the boxes are cheaper and nearly always enough.
+    /// ([`Arrangement::as_the_planes_say`]), a quadric
+    /// ([`Arrangement::as_the_quadric_says`]) and a pipe's axis
+    /// ([`Arrangement::as_the_pipes_axis_says`]) only where the boxes cannot
+    /// say, because the boxes are cheaper and nearly always enough.
     ///
     /// **A refusal is filed under what its enclosure measures.** Along an axis
     /// it is a step between two boxes, and across a bend the same step read
@@ -3507,9 +3508,30 @@ impl<'f> Arrangement<'f> {
         {
             decided = proved;
         }
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) = self.as_the_pipes_axis_says(crossing, first, second)
+        {
+            decided = proved;
+        }
         let Decision::Undecidable { .. } = decided else {
             return Ok(decided);
         };
+        if std::env::var_os("Q1884_PROBE").is_some()
+            && let HowItRuns::RoundAClosedCurve {
+                from, ref wound_as, ..
+            } = self.crossings[crossing].order
+        {
+            eprintln!(
+                "PROBE refused {first} {second} wound {:?} from {from:?}\n  one {:?} made {:?} vertex {:?}\n  other {:?} made {:?} vertex {:?}",
+                wound_as,
+                self.nodes[first].point,
+                self.nodes[first].made_of,
+                self.nodes[first].vertex,
+                self.nodes[second].point,
+                self.nodes[second].made_of,
+                self.nodes[second].vertex
+            );
+        }
         must_decide(
             decided,
             ALONG_A_CROSSING,
@@ -3793,6 +3815,181 @@ impl<'f> Arrangement<'f> {
         } else {
             Decision::Neg
         })
+    }
+
+    /// Which of two nodes round the loop a plane cuts a pipe in comes first,
+    /// read off how far up the pipe's axis each is and which half of the loop
+    /// it is on: `None` for every other crossing, and wherever a sign it reads
+    /// is not proved.
+    ///
+    /// **Going round the loop climbs the axis on one half and comes down it on
+    /// the other.** Write `t` for how far a point is up the axis, its dot with
+    /// the axis direction `w`, and say the loop climbs at a point where the way
+    /// it runs there, `∇S × ∇T`, has a positive dot with `w`. From a start
+    /// where it climbs, going round climbs from the start's `t` to the top of
+    /// the loop, comes down the other half to the bottom, and climbs back up
+    /// to the start. So:
+    ///
+    /// - of two points either side of the start's `t`, the one the loop climbs
+    ///   towards from the start comes first, whichever half each is on;
+    /// - of two points on one side of the start's `t`, the nearer to it comes
+    ///   first where the loop there runs on towards the other's `t`, and last
+    ///   where it runs back.
+    ///
+    /// Both hold from a start where the loop comes down, with up and down
+    /// swapped, and the second does not ask which way it runs at the start.
+    ///
+    /// **This is for a plane that leans against the pipe by a rounding.** Its
+    /// loop is an ellipse some `10¹⁶` long. A side of a block notched into a
+    /// round bar, both turned one radian about `(1, 1, 1)`, leans so, and the
+    /// line where two neighbouring sides of the block cross leaves the pipe on
+    /// that ellipse `4e16` off. Its boxes there are hundreds wide, the sweep
+    /// and the angle round the axis cannot read them, and every certified
+    /// union of the two was refused ordering them against each other and
+    /// against where the side meets the bar's caps. Up the axis those nodes are
+    /// `1e15` and more from each other and from the start, which their boxes
+    /// prove. Which way the loop runs at each the boxes do not prove, and the
+    /// line the node lies on does ([`Arrangement::which_way_the_loop_climbs_at`]).
+    ///
+    /// **It reads the start where it is held**, as the sweep does. From a
+    /// start on the loop the two count from one place. From one held off it,
+    /// they count from two places about as far apart as the start is off the
+    /// loop, and a node between them would be put first by one and last by the
+    /// other: none of the nodes this is for is near that.
+    fn as_the_pipes_axis_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve {
+            from, ref wound_as, ..
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let ([Surface::Plane(_), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(_)]) = &**wound_as
+        else {
+            return None;
+        };
+        if std::env::var_os("Q1884_PROBE").is_some() {
+            for node in [first, second] {
+                let Node { point, made_of, .. } = &self.nodes[node];
+                let flat = wound_as.iter().find_map(Surface::as_plane).unwrap();
+                let name = name_of_the_surface_either_way_round(&Surface::Plane(*flat));
+                let line = made_of.as_ref().and_then(|(surfaces, _)| {
+                    surfaces
+                        .iter()
+                        .filter(|s| name_of_the_surface_either_way_round(s) != name)
+                        .find_map(Surface::as_plane)
+                        .and_then(|other| {
+                            climbs_where_two_planes_cross(
+                                wound_as,
+                                other,
+                                self.narrowed_box_of(node),
+                            )
+                        })
+                });
+                eprintln!(
+                    "PROBE node {node} at {point:?} box {:?} narrowed {:?} line {line:?} up {:?}",
+                    climbs_at(wound_as, *point),
+                    climbs_at(wound_as, self.narrowed_box_of(node)),
+                    dot_of(
+                        point.enclosure(),
+                        pipe.axis().direction().components().map(Interval::exactly)
+                    )
+                );
+            }
+            eprintln!(
+                "PROBE start {from:?} box {:?} exact {:?}",
+                climbs_at(wound_as, from),
+                climbs_at_the_start(wound_as, from)
+            );
+        }
+        let along = pipe.axis().direction().components().map(Interval::exactly);
+        let climbs = |low: PredicatePoint, high: PredicatePoint| {
+            let [low, high] = [low, high].map(|place| place.enclosure());
+            dot_of([0, 1, 2].map(|axis| high[axis] - low[axis]), along).sign()
+        };
+        let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
+        let mine_first = |yes: bool| if yes { Decision::Pos } else { Decision::Neg };
+        let [mine, theirs] = [first, second].map(|node| self.nodes[node].point);
+        let [mine_up, theirs_up] = [mine, theirs].map(|place| climbs(from, place));
+        // Compared rather than matched: only proved signs are read, and every
+        // other answer leaves the pair to the policy (§40).
+        if !(proved(mine_up) && proved(theirs_up)) {
+            return None;
+        }
+        if mine_up != theirs_up {
+            let at_the_start = climbs_at_the_start(wound_as, from);
+            if std::env::var_os("Q1884_PROBE").is_some() {
+                eprintln!(
+                    "PROBE rule A {first} {second} up {mine_up:?} {theirs_up:?} start climbs {at_the_start:?}"
+                );
+            }
+            return proved(at_the_start).then(|| mine_first(at_the_start == mine_up));
+        }
+        let theirs_past_mine = climbs(mine, theirs);
+        if !proved(theirs_past_mine) {
+            return None;
+        }
+        // Both are on one side of the start, so from the nearer the farther
+        // lies the way `mine_up` says.
+        let mine_is_nearer = theirs_past_mine == mine_up;
+        let nearer = if mine_is_nearer { first } else { second };
+        let at_the_nearer = self.which_way_the_loop_climbs_at(wound_as, nearer);
+        if std::env::var_os("Q1884_PROBE").is_some() {
+            eprintln!(
+                "PROBE rule B {first} {second} up {mine_up:?} past {theirs_past_mine:?} nearer {nearer} climbs {at_the_nearer:?}"
+            );
+        }
+        proved(at_the_nearer).then(|| mine_first((at_the_nearer == mine_up) == mine_is_nearer))
+    }
+
+    /// Whether the loop a plane cuts a pipe in climbs the pipe's axis at a
+    /// node of it, [`Decision::Pos`], or comes down it, [`Decision::Neg`]:
+    /// read off the node's box, then off its tighter box
+    /// ([`Arrangement::narrowed_box_of`]), and then, for a meet of the loop's
+    /// plane and one plane more, off the line the two cross in
+    /// ([`climbs_where_two_planes_cross`]).
+    ///
+    /// A node `4e16` up the axis has a box hundreds wide, and the way the loop
+    /// runs there, worked out over the box, is that wide too, while it is
+    /// about `3` long. The line holds the node to one way through the box, and
+    /// read along that line the box's width is multiplied by how far the
+    /// other plane leans against the pipe, about `1e-16`.
+    fn which_way_the_loop_climbs_at(&self, pair: &[Surface; 2], node: usize) -> Decision {
+        let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
+        let read = climbs_at(pair, self.nodes[node].point);
+        if proved(read) {
+            return read;
+        }
+        let narrowed = self.narrowed_box_of(node);
+        let read_narrowed = climbs_at(pair, narrowed);
+        if proved(read_narrowed) {
+            return read_narrowed;
+        }
+        let (Some((surfaces, _)), Some(flat)) = (
+            &self.nodes[node].made_of,
+            pair.iter().find_map(Surface::as_plane),
+        ) else {
+            return read;
+        };
+        let the_loops_plane = name_of_the_surface_either_way_round(&Surface::Plane(*flat));
+        let is_the_loops_plane =
+            |surface: &Surface| name_of_the_surface_either_way_round(surface) == the_loops_plane;
+        if !surfaces.iter().any(is_the_loops_plane) {
+            return read;
+        }
+        let Some(other) = surfaces
+            .iter()
+            .filter(|surface| !is_the_loops_plane(surface))
+            .find_map(Surface::as_plane)
+        else {
+            return read;
+        };
+        climbs_where_two_planes_cross(pair, other, narrowed).unwrap_or(read)
     }
 
     /// Fold each cut that runs straight along a straight crossing drawn before
@@ -8607,6 +8804,142 @@ fn along_the_stretch_between_the_two(
     // every other answer leaves the pair to the policy (§40).
     let proved = at_one == Decision::Pos || at_one == Decision::Neg;
     (off_the_stretch && proved && at_one == at_other).then_some(at_one)
+}
+
+/// Whether the loop `pair` cross in, a plane's round a pipe, climbs the pipe's
+/// axis at `place`, read off its box: the sign of `(∇S × ∇T) · w`, for `w` the
+/// axis direction.
+///
+/// # Panics
+///
+/// If `pair` is not a plane and a pipe, which the caller has checked.
+fn climbs_at(pair: &[Surface; 2], place: PredicatePoint) -> Decision {
+    let ([Surface::Plane(_), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Plane(_)]) = pair
+    else {
+        unreachable!("only a plane's loop round a pipe climbs its axis: {pair:?}")
+    };
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let runs = cross_of(gradient_at(&pair[0], place), gradient_at(&pair[1], place));
+    dot_of(runs, along).sign()
+}
+
+/// Whether the loop climbs the pipe's axis at the start: off its box, and,
+/// where that cannot say and the start is a point, worked out exactly.
+///
+/// With `x` the start less the axis origin `o`, `n` the plane's normal and
+/// `w` the axis direction, the pipe's gradient is `|w|²x − (w·x)w`
+/// ([`gradient_at`]), so `(∇pipe × n) · w` is `|w|² det[x, n, w]`, and the
+/// plane first is that turned round ([`the_way_a_plane_and_a_pipe_wind`]).
+/// `det[x, n, w]` is formed exactly. A start `4e16` up the axis is no box, but
+/// the pipe's gradient there worked out over it is a box `16` wide round
+/// something about `3` long.
+fn climbs_at_the_start(pair: &[Surface; 2], from: PredicatePoint) -> Decision {
+    let read = climbs_at(pair, from);
+    if read == Decision::Pos || read == Decision::Neg {
+        return read;
+    }
+    let exactly = || {
+        let start = from.exact_coordinates()?;
+        let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
+        else {
+            unreachable!("only a plane's loop round a pipe climbs its axis: {pair:?}")
+        };
+        let origin = pipe.axis().origin().coordinates();
+        let along = pipe.axis().direction().components();
+        let normal = flat.normal().components();
+        (0..3).try_fold(Vec::new(), |so_far, axis| {
+            let [next, after] = [(axis + 1) % 3, (axis + 2) % 3];
+            let (square, used) =
+                difference_of_two_products(normal[next], along[after], normal[after], along[next])?;
+            let off = exactly_added(&[start[axis]], &[-origin[axis]]);
+            Some(exactly_added(
+                &so_far,
+                &exactly_multiplied(&off, &square[..used])?,
+            ))
+        })
+    };
+    exactly().map_or(read, |across| {
+        the_way_a_plane_and_a_pipe_wind(pair, expansion_sign(&across))
+    })
+}
+
+/// Whether the loop climbs the pipe's axis at `place`, a point of the loop's
+/// plane `P` and of `other`, `Q`, read along the line the two cross in:
+/// `None` where an exact product cannot be formed ([`product_is_exact`]).
+///
+/// The loop climbs where `det[x, n, w]` has the sign
+/// [`climbs_at_the_start`] says, for `x = place − o`. Write `m` for `Q`'s
+/// normal, `d = n × m`, `c_n = n·x` and `c_m = m·x`, which the two planes fix
+/// as `−d_P − n·o` and `−d_Q − m·o`, and `λ = d·x`, which is how far along
+/// the line `place` is. `n`, `m` and `d` are a basis with `det[n, m, d] =
+/// |d|²`, so `|d|² x = c_n (m × d) + c_m (d × n) + λ d`, and dotting with
+/// `n × w`, with `d · n = 0`:
+///
+/// `|d|² det[x, n, w] = det[m, n, w] (|n|² c_m − (m·n) c_n) + λ (|n|² (m·w) − (n·w)(m·n))`.
+///
+/// Only `λ` depends on where the place is, and `place`'s box enters through
+/// it alone. Where both planes lean against the pipe by a rounding,
+/// `|n|² (m·w) − (n·w)(m·n)` is about `1e-16`, and it is formed exactly and
+/// only then made a box: in intervals it is as wide as it is long.
+fn climbs_where_two_planes_cross(
+    pair: &[Surface; 2],
+    other: &Plane,
+    place: PredicatePoint,
+) -> Option<Decision> {
+    let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
+    else {
+        unreachable!("only a plane's loop round a pipe climbs its axis: {pair:?}")
+    };
+    let [mine, theirs] = [flat, other].map(Plane::coefficients);
+    let [n, m] = [mine, theirs].map(|[a, b, c, _]| [a, b, c]);
+    let w = pipe.axis().direction().components();
+    let exactly_dotted = |one: [f64; 3], other: [f64; 3]| {
+        (0..3).try_fold(Vec::new(), |so_far, axis| {
+            Some(exactly_added(
+                &so_far,
+                &exactly_scaled(&[one[axis]], other[axis])?,
+            ))
+        })
+    };
+    let leaning = exactly_multiplied(&exactly_dotted(n, n)?, &exactly_dotted(m, w)?)?;
+    let tipped = exactly_multiplied(&exactly_dotted(n, w)?, &exactly_dotted(m, n)?)?;
+    let against: Vec<f64> = tipped.iter().map(|entry| -entry).collect();
+    let leans = exactly_added(&leaning, &against)
+        .iter()
+        .fold(Interval::exactly(0.0), |so_far, &entry| {
+            so_far + Interval::exactly(entry)
+        });
+    let [normal, facing, along] = [n, m, w].map(|vector| vector.map(Interval::exactly));
+    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let off_the_origin =
+        |offset: f64, facing: [Interval; 3]| -(Interval::exactly(offset) + dot_of(facing, origin));
+    let [mine_off, theirs_off] = [
+        off_the_origin(mine[3], normal),
+        off_the_origin(theirs[3], facing),
+    ];
+    let at = place.enclosure();
+    let how_far_along = dot_of(
+        cross_of_intervals(normal, facing),
+        [0, 1, 2].map(|axis| at[axis] - origin[axis]),
+    );
+    let across = dot_of(cross_of_intervals(facing, normal), along)
+        * (dot_of(normal, normal) * theirs_off - dot_of(facing, normal) * mine_off)
+        + how_far_along * leans;
+    Some(the_way_a_plane_and_a_pipe_wind(pair, across.sign()))
+}
+
+/// `(∇S × ∇T) · w` read from the sign of `det[x, n, w]`, for the pair as it is
+/// written: the pipe first gives `|w|² det[x, n, w]`, and the plane first the
+/// same turned round.
+fn the_way_a_plane_and_a_pipe_wind(pair: &[Surface; 2], across: Decision) -> Decision {
+    if matches!(pair[0], Surface::Plane(_)) {
+        the_other_way(across)
+    } else {
+        across
+    }
 }
 
 /// Whether two nodes whose boxes share a point are that one point.
