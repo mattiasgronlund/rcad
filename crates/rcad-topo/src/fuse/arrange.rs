@@ -8528,8 +8528,8 @@ fn round_a_closed_crossing_by_its_angle(
 /// the axis, so `w·(a × b)` is not proved either way, and the sweep from that
 /// start came out with an enclosure of `15`. Here `−(n·w)(u·w)` is
 /// `2⁻⁵²·0.38`, proved by `u·w` alone, and `n·(w × s)` is `2√1.75`, so the two
-/// are in order (Q1818). The union is refused later, walking that ellipse
-/// (`a_square_bar_standing_on_an_edge_along_y_is_refused_walking_its_long_ellipse`
+/// are in order (Q1818). The union answers now, walking that ellipse
+/// (`a_square_bar_standing_on_an_edge_along_y_unites_with_the_bar`
 /// in `two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`).
 fn turned_as_far_apart_up_the_axis(
     flat: &Plane,
