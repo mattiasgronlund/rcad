@@ -25,7 +25,7 @@ use crate::holds::{
     the_picker_naming_the_circle_through, the_side_this_face_lies_on, what_trims_this_face,
 };
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
-use crate::measure::signed_volume_over;
+use crate::measure::signed_volume_over_and_how_far_it_rounded;
 use crate::mesh::Mesh;
 use crate::model::{ModelData, WireData, WireStep};
 use crate::view::{CoedgeView, FaceView, SolidView, WireStepView, WireView};
@@ -2478,8 +2478,8 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 ) -> Result<f64> {
     let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(view, policy, log)?;
     every_side_of_the_skin_is_used_both_ways(&coarsest)?;
-    let enclosed = signed_volume_over(&coarsest);
-    if the_sum_answers(view, &coarsest, enclosed) {
+    let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&coarsest);
+    if the_sum_answers(view, &coarsest, enclosed, rounding) {
         return Ok(enclosed);
     }
     let mut room = how_far_across(&coarsest) / 2.0;
@@ -2487,8 +2487,8 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         let mut this_rung = ProvenanceLog::new();
         match view.mesh(less, policy, &mut this_rung) {
             Ok(finer) => {
-                let finer_encloses = signed_volume_over(&finer);
-                if the_sum_answers(view, &finer, finer_encloses) {
+                let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(&finer);
+                if the_sum_answers(view, &finer, finer_encloses, rounding) {
                     this_rung.drain_into(log);
                     return Ok(finer_encloses);
                 }
@@ -2509,11 +2509,19 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 }
 
 /// Whether what a mesh of this solid encloses says which way the solid's faces
-/// point: it is not zero, and either the mesh does not lie flat or the sum is
-/// larger than all the space the mesh can leave out.
-fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64) -> bool {
+/// point: it is not zero, and either the mesh does not lie flat or the sum,
+/// less `rounding`, how far it can be from what the mesh's triangles enclose
+/// exactly, is still larger than all the space the mesh can leave out.
+///
+/// **The rounding is charged because the size is read, not only the sign.**
+/// [`signed_volume_over_and_how_far_it_rounded`] keeps a rounded sum whenever
+/// it is further from zero than its own slack, so a sum just past that slack
+/// can be off by nearly all of itself, and a mesh whose exact volume is under
+/// the hidden space would then pass.
+fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64, rounding: f64) -> bool {
     enclosed != 0.0
-        && (!it_lies_flat(mesh) || enclosed.abs() > how_much_space_hides_under(view, mesh))
+        && (!it_lies_flat(mesh)
+            || enclosed.abs() > (how_much_space_hides_under(view, mesh) + rounding).next_up())
 }
 
 /// The most space there can be between a mesh of this solid and the solid,
