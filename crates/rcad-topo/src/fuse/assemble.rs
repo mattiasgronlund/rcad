@@ -1256,11 +1256,12 @@ impl Assembly {
     /// faces' input faces. Every one was named by a side of a piece of one of
     /// them, along that face's own boundary or its seam.
     fn part_each_line_two_faces_rest_against_each_other_along(&mut self, model: &Model) {
-        let partings: Vec<Option<[[Dart; 2]; 2]>> = self
-            .claimants_of_each_edge()
+        let claimants = self.claimants_of_each_edge();
+        let mut partings: Vec<Option<[[Dart; 2]; 2]>> = claimants
             .iter()
             .map(|by| self.the_two_pairs_along(by))
             .collect();
+        self.pair_each_line_one_solid_touches_itself_along(model, &claimants, &mut partings);
         for (kept, parting) in partings.into_iter().enumerate() {
             let Some([staying, moving]) = parting else {
                 continue;
@@ -1299,6 +1300,103 @@ impl Assembly {
                 self.faces[dart.face].wires[dart.wire][dart.position].edge = parted;
             }
         }
+    }
+
+    /// Pair the four darts along each line that is an edge of both inputs,
+    /// where the solid either side of it is one solid already.
+    ///
+    /// **Faces round a line alternate in which way they walk it, and so do the
+    /// full and empty wedges between them**, so the two darts that walk it the
+    /// same way always bound the two different full wedges, whichever wedges
+    /// are full. Where the faces of those two are joined without the line, the
+    /// two wedges are one solid, and parting the line leaves it touching itself
+    /// there, which is an answer (`docs/decisions.md` §39.4). Two cubes touching
+    /// along an edge are joined only round each cube, never forward to forward,
+    /// so the line stays one edge and is refused (§80.9).
+    ///
+    /// Joined means across an edge with two faces along it, or across a line
+    /// this has already paired, so it runs until a pass pairs nothing more. A
+    /// line the other rules part is not crossed: an empty wedge between its
+    /// pair may sit between two solids.
+    fn pair_each_line_one_solid_touches_itself_along(
+        &self,
+        model: &Model,
+        claimants: &[Vec<Dart>],
+        partings: &mut [Option<[[Dart; 2]; 2]>],
+    ) {
+        let mut one_solid = Sameness::of(self.faces.len());
+        for by in claimants {
+            if let &[one, other] = by.as_slice() {
+                one_solid.join(one.face, other.face);
+            }
+        }
+        let mut waiting: Vec<(usize, [[Dart; 2]; 2])> = claimants
+            .iter()
+            .enumerate()
+            .filter(|&(edge, _)| partings[edge].is_none())
+            .filter_map(|(edge, by)| {
+                Some((edge, self.the_pairs_round_two_input_edges(model, edge, by)?))
+            })
+            .collect();
+        loop {
+            let before = waiting.len();
+            waiting.retain(|&(edge, [staying, moving])| {
+                let one_wedge_reaches_the_other = staying.iter().any(|&mine| {
+                    moving.iter().any(|&theirs| {
+                        self.side_of(mine).forward == self.side_of(theirs).forward
+                            && one_solid.leader(mine.face) == one_solid.leader(theirs.face)
+                    })
+                });
+                if !one_wedge_reaches_the_other {
+                    return true;
+                }
+                for dart in staying.iter().chain(&moving) {
+                    one_solid.join(staying[0].face, dart.face);
+                }
+                partings[edge] = Some([staying, moving]);
+                false
+            });
+            if waiting.len() == before {
+                return;
+            }
+        }
+    }
+
+    /// The two faces round one input's edge and the two round the other's,
+    /// where the four darts along `edge` are those, the pair holding the first
+    /// dart first; `None` where they are not.
+    ///
+    /// Two faces round one input edge walk it opposite ways, so neither pair
+    /// is the one that would pass two faces through each other.
+    fn the_pairs_round_two_input_edges(
+        &self,
+        model: &Model,
+        edge: usize,
+        by: &[Dart],
+    ) -> Option<[[Dart; 2]; 2]> {
+        let &[first, second, third, fourth] = by else {
+            return None;
+        };
+        let round_one_input_edge = |pair: [Dart; 2]| {
+            self.side_of(pair[0]).forward != self.side_of(pair[1]).forward
+                && !self.pieces_of_one_input_face(pair)
+                && self.edges[edge].from.iter().any(|&input| {
+                    pair.iter().all(|dart| {
+                        model
+                            .edge(input)
+                            .expect("a side of a piece runs along an edge of the model the fuse was given")
+                            .neighbouring_faces()
+                            .any(|face| self.faces[dart.face].ancestors.contains(&face))
+                    })
+                })
+        };
+        [
+            [[first, second], [third, fourth]],
+            [[first, third], [second, fourth]],
+            [[first, fourth], [second, third]],
+        ]
+        .into_iter()
+        .find(|&[staying, moving]| round_one_input_edge(staying) && round_one_input_edge(moving))
     }
 
     /// The two pairs four darts along one edge part into, the pair holding the
