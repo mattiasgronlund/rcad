@@ -2448,6 +2448,19 @@ impl BuildingAMesh {
     /// already has and a corner the other already has, and the points strictly
     /// along it are made once and handed to the two patches either side.
     ///
+    /// **A straight cut crosses neither loop.** It is taken first between the
+    /// corners nearest its quarter, but a loop can reach back past that
+    /// longitude between its corners, and then the straight line runs through
+    /// the hole. A ball of radius 3 at `(0, 3, 5)` fused ball first with a bar
+    /// of radius 2 up `z` capped at `z = 6` leaves the bar's wall a ring whose
+    /// top loop dips down the U the ball cuts in it. The cut at the quarter
+    /// `u = 0` ran to the cap's corner at `u = 0.43`, and so passed `z = 5` at
+    /// `u = 0.37`, where the U's side reaches back to `u = 0.34`: the patch it
+    /// cut off crossed itself, and the mesh was refused `BoundaryCrossesItself`
+    /// (Q1862). Such a cut is moved to the pair nearest its quarter whose
+    /// straight line crosses neither loop
+    /// ([`with_no_straight_cut_across_a_loop`]).
+    ///
     /// **Round the first coordinate of the corners it is handed**, which `chart`
     /// says is the surface's own first or its second. A torus band between two
     /// circles round the tube's middle goes right round the ring instead, and
@@ -2466,8 +2479,8 @@ impl BuildingAMesh {
     /// quarter turn is cut into more than four patches. An island no cut meets
     /// goes whole into the one patch it lies in, as a hole of it, as on a cap
     /// ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). With no islands every cut
-    /// is straight, and the patches are the ones a ring was always cut into,
-    /// bit for bit.
+    /// is straight, and where no straight cut crosses a loop the patches are
+    /// the ones a ring was always cut into, bit for bit.
     ///
     /// `None` when the face is not a ring: two loops is not enough, they both
     /// have to go right round, or there is nothing across to cut to. `None` as
@@ -2554,30 +2567,26 @@ impl BuildingAMesh {
                 &nearest_longitude(&down, in_the_turn_of(&down, at, whole_turn)),
             )
         });
-        let along_the_top = picked.map(|[top, _]| top);
-        let along_the_bottom = picked.map(|[_, bottom]| bottom);
-
-        let mut ends = Vec::with_capacity(4);
-        for step in 0..4 {
-            let leaving = up.corners[along_the_top[step]];
-            let landing = down.corners[along_the_bottom[step]];
-            // The same place on the surface, at whichever of its longitudes
-            // lies nearest the corner the cut sets off from, so the cut runs
-            // across the band and not a whole turn round it. A shift of no
-            // turns leaves the longitude byte for byte, which is why the turns
-            // are taken off rather than the difference added back on.
-            let arriving = [
-                landing[0] - whole_turns_between(landing[0], leaving[0], whole_turn),
-                landing[1],
-            ];
-            self.on_a_cut.insert(up.points[along_the_top[step]]);
-            self.on_a_cut.insert(down.points[along_the_bottom[step]]);
-            ends.push([leaving, arriving]);
-        }
         let islands: Vec<WalkedLoop> = islands
             .iter()
             .map(|island| in_the_same_turn_as(island, &up, whole_turn))
             .collect();
+        let picked = with_no_straight_cut_across_a_loop(
+            [&up, &down],
+            &islands,
+            picked,
+            quarters,
+            whole_turn,
+        );
+        let along_the_top = picked.map(|[top, _]| top);
+        let along_the_bottom = picked.map(|[_, bottom]| bottom);
+
+        let mut ends = Vec::with_capacity(4);
+        for pair in picked {
+            self.on_a_cut.insert(up.points[pair[0]]);
+            self.on_a_cut.insert(down.points[pair[1]]);
+            ends.push(a_straight_cut_across([&up, &down], pair, whole_turn));
+        }
         let Some(through) = where_a_rings_cuts_go_round_islands(&ends, &islands, whole_turn) else {
             return Ok(None);
         };
@@ -5218,6 +5227,102 @@ fn the_two_nearest_across(
         .flat_map(|&one| bottom.iter().map(move |&other| [one, other]))
         .min_by(|&one, &other| apart(one).total_cmp(&apart(other)))
         .expect("a walked loop has a corner")
+}
+
+/// The pairs of corners a ring's four cuts run between, one per quarter, with
+/// each pair whose straight cut crosses a loop moved to one whose cut crosses
+/// neither loop and no island.
+///
+/// A pair whose cut meets an island is kept, since that cut goes round the
+/// island and its legs are checked instead
+/// ([`the_legs_round_islands_stay_inside_a_ring`]), and so is a pair for which
+/// no other is clear, so that the mesh is refused as it was. **A new pair lies
+/// round each loop between the pairs of the quarters either side**, which
+/// keeps the four cuts in the order the patches between them are walked in,
+/// and is never either of those two pairs. Of those, the one taken is the one
+/// whose farther corner is nearest the quarter, either way round, and of two
+/// as near, the one whose corners are nearest each other along the second
+/// coordinate, as [`the_two_nearest_across`] takes them.
+fn with_no_straight_cut_across_a_loop(
+    rims: [&WalkedLoop; 2],
+    islands: &[WalkedLoop],
+    mut picked: [[usize; 2]; 4],
+    quarters: [f64; 4],
+    whole: f64,
+) -> [[usize; 2]; 4] {
+    let [up, down] = rims;
+    let crosses_a_loop = |[leaving, arriving]: [[f64; 2]; 2]| {
+        a_leg_meets_the_rim(up, [leaving, arriving], whole)
+            || a_leg_meets_the_rim(down, [arriving, leaving], whole)
+    };
+    let meets_an_island = |cut: [[f64; 2]; 2]| {
+        islands
+            .iter()
+            .any(|island| a_leg_meets_an_island(island, cut, None, whole))
+    };
+    for step in 0..picked.len() {
+        let cut = a_straight_cut_across(rims, picked[step], whole);
+        if !crosses_a_loop(cut) || meets_an_island(cut) {
+            continue;
+        }
+        let behind = picked[(step + picked.len() - 1) % picked.len()];
+        let ahead = picked[(step + 1) % picked.len()];
+        let at = quarters[step];
+        let off_the_quarter = |[top, bottom]: [usize; 2]| {
+            let away = |corner: [f64; 2]| the_short_way_round(corner[0] - at, whole).abs();
+            away(up.corners[top]).max(away(down.corners[bottom]))
+        };
+        let apart =
+            |[top, bottom]: [usize; 2]| (up.corners[top][1] - down.corners[bottom][1]).abs();
+        let mut pairs: Vec<[usize; 2]> = the_corners_from(up, behind[0], ahead[0])
+            .flat_map(|top| {
+                the_corners_from(down, behind[1], ahead[1]).map(move |bottom| [top, bottom])
+            })
+            .filter(|&pair| pair != behind && pair != ahead)
+            .collect();
+        pairs.sort_by(|&one, &other| {
+            off_the_quarter(one)
+                .total_cmp(&off_the_quarter(other))
+                .then(apart(one).total_cmp(&apart(other)))
+        });
+        if let Some(clear) = pairs.into_iter().find(|&pair| {
+            let cut = a_straight_cut_across(rims, pair, whole);
+            !crosses_a_loop(cut) && !meets_an_island(cut)
+        }) {
+            picked[step] = clear;
+        }
+    }
+    picked
+}
+
+/// The straight cut across a ring from corner `top` of the loop running up to
+/// corner `bottom` of the loop running down, that corner taken at whichever of
+/// its longitudes lies nearest the corner the cut sets off from, so that the
+/// cut runs across the band and not a whole turn round it.
+///
+/// A shift of no turns leaves the longitude byte for byte, which is why the
+/// turns are taken off rather than the difference added back on.
+fn a_straight_cut_across(
+    [up, down]: [&WalkedLoop; 2],
+    [top, bottom]: [usize; 2],
+    whole: f64,
+) -> [[f64; 2]; 2] {
+    let leaving = up.corners[top];
+    let landing = down.corners[bottom];
+    [
+        leaving,
+        [
+            landing[0] - whole_turns_between(landing[0], leaving[0], whole),
+            landing[1],
+        ],
+    ]
+}
+
+/// The places of a loop's corners from `from` round to `to`, both kept, in
+/// the order [`WalkedLoop::between`] walks them.
+fn the_corners_from(around: &WalkedLoop, from: usize, to: usize) -> impl Iterator<Item = usize> {
+    let count = around.corners.len();
+    (0..=(to + count - from) % count).map(move |step| (from + step) % count)
 }
 
 /// Which corners of a loop sit nearest a longitude: every one as near as the
