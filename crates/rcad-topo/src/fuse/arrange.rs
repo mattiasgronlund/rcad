@@ -8165,6 +8165,48 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// ahead and the other behind are the two ordered: two places either side of a
 /// point are two places.
 ///
+/// **A node whose box holds the start comes before one whose box is clear of
+/// both, where every point of its box is at the start or ahead of it.** The
+/// sweep cannot say: the step from the start to that node may be nothing, so
+/// it straddles nought however far round the other node is. Read along the
+/// way the crossing runs at the start, `∇S × ∇T`, the step to every point of
+/// the box is nought or more instead, and more for some. A point of the
+/// crossing a short way behind the start, or behind the place the start was
+/// rounded off, reads less than nought, so the node is there or a hair ahead,
+/// and it comes first unless the other node lies on the stretch of the
+/// crossing between. That stretch runs between two points of the node's box,
+/// bent off the straight line between them by about `κd²/8`, for `κ` how
+/// sharply the crossing turns and `d` the box's width. At the shape below the
+/// start is an end of the ellipse's short axis, where `κ` is at most `4`, and
+/// `d` is under `5e-16`, so the bend is under `1.3e-31`. The other node's box
+/// is clear of this one, so it is at least an ulp away along some axis, and
+/// two floats are as close as that bend only within about `1e-15` of nought.
+/// No side of this box is that near nought, so the other node is not on the
+/// stretch. The arm does not check either number: a box with a side that near
+/// nought, or a crossing turning on a radius near `d`, has not been shown
+/// clear of the stretch.
+///
+/// **A box reaching behind the start is left as it was**, since its node may
+/// be a hair behind and come last: the `3.1e-13` box of the second bar's near
+/// cap corner in `a_bar_starting_where_it_crosses_another_at_a_slant_is_refused`
+/// is one. So is a box every point of which reads exactly nought. Its node is
+/// square to the run from the start, so it is the start or the place the start
+/// was rounded off, and [`the_start_is_a_rounding_off`] has already declined
+/// it. The lid of `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model`
+/// has such a node on its rim, exactly the start; read first there, the fuse
+/// goes on to a half disc leaning `2e-12` off the lid, whose arc and chord run
+/// along one stretch of its crossing with the lid, and panics. Two nodes whose
+/// boxes share a point are left as they were too.
+///
+/// Two bars of radius `1/4`, the second starting where their axes meet and
+/// turned 120° about `z`, are the shape (Q1900, Q1907). The second bar's near
+/// cap crosses the first bar's wall in an ellipse walked from `(11, −3.25,
+/// 0.25)`, exactly where the two pipes touch, and the node there is `c − r·n̂`,
+/// a box under `5e-16` wide holding the start, as the second pipe's direction
+/// is stored `2.2e-16` off `z = 0`. Read along the run, the step to it is
+/// `[0, 5.6e-17]`. The node where they touch across the ellipse is clear of
+/// it, and the two were refused on the order until this arm.
+///
 /// **Every arm but the sweep answers as wide as a box**, which is a length:
 /// [`one_point_if_both_are_exact`], [`the_one_the_start_is`] and the
 /// [`the_one_ahead_of_the_start`] behind it each hand back the wider of the two
@@ -8209,6 +8251,20 @@ fn round_a_closed_crossing_and_what_it_measures(
         && let Some(read) = round_a_closed_crossing_by_its_angle(pair, from, one, other)
     {
         return Ok((read, Measures::Volume));
+    }
+    if matches!(decided, Decision::Undecidable { .. }) && !boxes_overlap(one, other) {
+        let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+        let start = from.enclosure();
+        let a_hair_ahead = |place: PredicatePoint| {
+            let step = [0, 1, 2].map(|axis| place.enclosure()[axis] - start[axis]);
+            let along = dot_of(step, runs);
+            along.lo() >= 0.0 && along.hi() > 0.0
+        };
+        match (boxes_overlap(one, from), boxes_overlap(other, from)) {
+            (true, false) if a_hair_ahead(one) => return Ok((Decision::Pos, Measures::Length)),
+            (false, true) if a_hair_ahead(other) => return Ok((Decision::Neg, Measures::Length)),
+            (true, false) | (false, true) | (true, true) | (false, false) => {}
+        }
     }
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
@@ -12703,8 +12759,8 @@ mod curved {
     use super::super::MeetPoint;
     use super::super::bake::{BakedFace, BakedSolid, bake};
     use super::super::cuts;
-    use super::{ALONG_A_CROSSING, Piece, split_a_face};
-    use crate::{DraftStep, Error, Model, Rule, SolidBuilder};
+    use super::{Piece, split_a_face};
+    use crate::{DraftStep, Model, Rule, SolidBuilder};
 
     /// A block eight across sitting on the origin with a round bar of radius
     /// one straight through the middle of it, both already cut against each
@@ -12941,15 +12997,17 @@ mod curved {
     /// two sides are one piece, joined round the points beyond every arc:
     /// `2 + 2 + 2`.
     ///
-    /// **At 120° the meets are named, and the order round the cap's crossing
-    /// is refused.** The second pipe's direction is stored `2.2e-16` off
-    /// `z = 0` there, so `n̂` is too, and the place `c − r·n̂` is a box `2e-16`
-    /// wide round `(11, −3.25, 0.25)`. The cap's crossing starts at
-    /// `(11, −3.25, 0.25)` exactly, inside that box, so which of the two
-    /// places comes first round it from there is a sweep that straddles nought,
-    /// and it is refused `Undecidable` on the order along a crossing. At 50°
-    /// to 100° the places are `f64` triples and the start is the one below,
-    /// bit for bit, and named so.
+    /// **At 120° the place below holds the start in its box.** The second
+    /// pipe's direction is stored `2.2e-16` off `z = 0` there, so `n̂` is too,
+    /// and the place `c − r·n̂` is a box `2e-16` wide round `(11, −3.25,
+    /// 0.25)`. The cap's crossing starts at `(11, −3.25, 0.25)` exactly, inside
+    /// that box, so which of the two places comes first round it from there is
+    /// a sweep that straddles nought. Until Q1900 that was refused
+    /// `Undecidable` on the order along a crossing; the place whose box holds
+    /// the start now comes first, as the other's box is clear of it
+    /// (`round_a_closed_crossing_and_what_it_measures`). At 50° to 100° the
+    /// places are `f64` triples and the start is the one below, bit for bit,
+    /// and named so.
     ///
     /// Gathering the cuts tells the wall: the second bar's near cap and wall
     /// both cut it and both carry the cap, and the wall is told it once,
@@ -12970,18 +13028,7 @@ mod curved {
             );
             let split = split_a_face(wall, &Policy::certified(), &mut ProvenanceLog::new())
                 .map(|split| split.pieces.len());
-            if degrees < 110.0 {
-                assert!(matches!(split, Ok(6)), "{degrees}°: {split:?}");
-                continue;
-            }
-            let Err(Error::Undecidable { records }) = &split else {
-                panic!("{degrees}°: {split:?}");
-            };
-            assert_eq!(
-                records.records().last().map(|record| record.predicate()),
-                Some(ALONG_A_CROSSING),
-                "{degrees}°"
-            );
+            assert!(matches!(split, Ok(6)), "{degrees}°: {split:?}");
         }
     }
 
