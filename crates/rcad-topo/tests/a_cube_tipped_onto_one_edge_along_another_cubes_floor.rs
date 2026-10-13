@@ -413,6 +413,37 @@ fn every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_o
     }
 }
 
+/// [`what_the_two_share`], which every pin here measures the kernel against,
+/// worked again by hand in `T = tan t`, so those pins do not rest on its five
+/// corners alone.
+///
+/// With `φ = 2t`, `sin φ = 2T / (1 + T²)` and `cos φ = (1 − T²) / (1 + T²)`,
+/// the shoelace sum over its corners comes to `25 tan φ − 100 − 200T`, and
+/// `tan φ = 2T / (1 − T²)`. So the two share
+/// `5 · (100 + 200T − 25 tan φ) / 2 = 250 + 500T − 125T / (1 − T²)`. At
+/// `t = 0` that is the block's half of the upright cube, `5 · 10 · 5 = 250`.
+/// In `t` it is `250 + 375t − 200t⁵` and terms smaller still, so at
+/// `t = 0.01` the two share `253.75` less about `2e−8`, and the block less the
+/// tipped cube is `746.25` and about as much more.
+#[test]
+fn what_the_two_share_is_250_and_500_tan_t_less_125_tan_t_over_one_less_its_square() {
+    for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
+        let [_, _, s, c] = tilt;
+        let tan = s / c;
+        let worked = 250.0 + 500.0 * tan - 125.0 * tan / (1.0 - tan * tan);
+        let shared = what_the_two_share(tilt);
+        assert!(
+            (shared - worked).abs() <= 1e-12 * worked,
+            "{tilt:?}: the five corners give {shared}, the tangent {worked}"
+        );
+    }
+    let at_a_hundredth = what_the_two_share(TILTS_THE_UNION_WAS_REFUSED_AT[3]);
+    assert!(
+        (at_a_hundredth - 253.75).abs() <= 1e-7,
+        "at t = 0.01 the two share {at_a_hundredth}"
+    );
+}
+
 /// The volume the block and the tipped cube share.
 ///
 /// The tipped cube's square cross-section, in `(y, z)`, has its corner at
