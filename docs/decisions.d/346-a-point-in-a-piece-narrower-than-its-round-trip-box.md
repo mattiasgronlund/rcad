@@ -631,6 +631,16 @@ read as before. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1474 run,
   (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
   Each corner and chord end is now `stretched_to_the_plane` before it is
   wound round.
+- `how_often_the_rim_winds_round` in `fuse/arrange.rs` read the point and every
+  rim corner at their stored coordinates, not over the box
+  `stretched_to_the_plane` builds. *Q1108 (2026-10-13): run.* Wound round a
+  point a spacing off a square two across there, or round a square with one
+  corner a spacing off, the count went by whichever side of the square's side
+  the misreading put it (**`wrong/C`**; `a_rim_wound_round_a_point_off_its_plane`).
+  The point and every corner are now read over their boxes stretched to the
+  plane before counting, as `select.rs`'s `the_piece_holds` reads them. A
+  throwaway probe over `just t -p rcad-topo` saw no fuse pass it a point or
+  corner off the plane, in 24557 calls.
 
 ### 346.7 A point in one face's sliver whose ray crosses the neighbour — 2026-10-06
 
