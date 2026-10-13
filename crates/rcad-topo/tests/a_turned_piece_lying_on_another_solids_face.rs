@@ -48,6 +48,7 @@ mod pairs;
 
 use std::collections::BTreeMap;
 
+use rcad_geom::Deflection;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
@@ -63,6 +64,48 @@ fn a_comb_standing_in_a_block_fuses_turned_as_it_does_upright() {
 #[test]
 fn a_frame_with_a_block_over_one_corner_fuses_turned_as_it_does_upright() {
     every_fuse_is_the_upright_one(&a_frame_with_a_block_over_one_corner());
+}
+
+/// `every_fuse_is_the_upright_one` only compares the turned answer against the
+/// upright one, so it would still pass if both went back to
+/// `ResultIsNotManifold` (Q1925). Pin the upright answer itself: one solid of
+/// volume 11, one shell of 12 faces, validating.
+#[test]
+fn the_upright_frame_less_the_block_is_one_solid_of_volume_11() {
+    let upright = Configuration {
+        turn: None,
+        ..a_frame_with_a_block_over_one_corner()
+    };
+    let (mut model, keys) = upright.build();
+
+    let fused = model
+        .fuse(
+            &[keys[0]],
+            &[keys[1]],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the frame less the block is a solid");
+    let solids = fused.solids().to_vec();
+    assert_eq!(solids.len(), 1, "one solid, not {}", solids.len());
+
+    let solid = model.solid(solids[0]).expect("the fuse made it");
+    assert_eq!(solid.shells().count(), 1, "one shell");
+    assert_eq!(solid.faces().count(), 12, "12 faces");
+
+    let measurement = solid
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("both solids are flat, so the measure is certified");
+    assert_eq!(measurement.volume(), 11.0, "volume 11");
+
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the frame less the block validates");
 }
 
 /// All three rules, each solid first in turn, against the same fuse upright.
