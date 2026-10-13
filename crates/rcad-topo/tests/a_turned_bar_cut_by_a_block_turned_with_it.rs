@@ -33,11 +33,16 @@
 //! to the axis is why.** The turn rounds each side's normal and the bar's axis
 //! apart, so every side leans against the pipe by a rounding. Its plane's
 //! crossing with the pipe is then named a closed one, an ellipse whose sweep
-//! starts more than `1e15` from the bar. Every fuse, under either policy, is
-//! refused *order along a crossing* between the two points where one side's
-//! plane crosses the wall at the two caps, `5` apart, with an enclosure past
-//! `100`. The seam notch tilted off the axis answers every fuse under the same
-//! turn, with the volume it has unturned.
+//! starts more than `1e15` from the bar. Every fuse, under either policy, was
+//! refused *order along a crossing*: first between the two points where one
+//! side's plane crosses the wall at the two caps, `5` apart, with an enclosure
+//! past `100`, and then, once those were ordered, between a cap's and where
+//! the line two sides of the notch cross in leaves the pipe, `1e16` off.
+//! `fuse/arrange.rs` orders both now (`along_the_stretch_between_the_two` and
+//! `Arrangement::as_the_pipes_axis_says`), and every fuse is then refused
+//! `CannotNameWhichPieceOfACrossingThisIs` (Q1885). The seam notch tilted off
+//! the axis answers every fuse under the same turn, with the volume it has
+//! unturned.
 //!
 //! **Both are gaps, not limits** (§16.10). A turn moves no material, so each
 //! answer exists and is the unturned one. The exact half turn reaches it for
@@ -45,7 +50,7 @@
 //! tilted notch shows that the rounded turn alone stops nothing.
 //!
 //! *Where a plane and a pipe cross*, the predicate Q765 named, refuses none of
-//! these fuses at this base: every refusal here is *order along a crossing*.
+//! these fuses.
 
 use core::f64::consts::PI;
 
@@ -238,24 +243,25 @@ fn turned_one_radian_about_a_diagonal_every_notch_side_leans_by_a_rounding_and_c
 /// Every fuse of either notch, under either policy, puts the nodes round each
 /// side's long ellipse in order: where a side meets the caps and the notch's
 /// ends, near the bar, and where the line two sides of the notch cross in
-/// leaves the pipe, `1e16` off.
+/// leaves the pipe, `1e16` off. Each is then refused naming which piece of a
+/// crossing an edge is, which Q1885 has as a wall edge on a side's ellipse.
 #[test]
-fn turned_one_radian_about_a_diagonal_no_fuse_is_refused_ordering_round_a_sides_ellipse() {
+fn turned_one_radian_about_a_diagonal_every_fuse_is_refused_naming_a_piece_of_a_crossing() {
     let turn = one_radian_about_a_diagonal();
     for notch in BOTH_NOTCHES {
         for tolerant in [false, true] {
             for rule in RULES {
-                let what = format!("notch at {notch:?}, tolerant {tolerant}, {rule:?}");
                 let (_, fused, _) =
                     notched_and_fused(&turn, notch, &Isometry::identity(), rule, tolerant);
-                let refused_on_the_order = match &fused {
-                    Err(Error::Undecidable { records }) => records
-                        .records()
-                        .iter()
-                        .any(|record| record.predicate() == ALONG_A_CROSSING),
-                    Ok(_) | Err(_) => false,
-                };
-                assert!(!refused_on_the_order, "{what}: {fused:?}");
+                assert!(
+                    matches!(
+                        fused,
+                        Err(Error::Geometry(
+                            rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+                        ))
+                    ),
+                    "notch at {notch:?}, tolerant {tolerant}, {rule:?}: {fused:?}"
+                );
             }
         }
     }
@@ -289,81 +295,6 @@ fn turned_one_radian_about_a_diagonal_a_notch_tilted_off_the_axis_answers_every_
             assert!(
                 (turned - unturned).abs() <= turned_error + unturned_error,
                 "{what}: turned {turned} ± {turned_error}, unturned {unturned} ± {unturned_error}"
-            );
-        }
-    }
-}
-
-#[test]
-fn probe_what_each_fuse_does() {
-    let turn = one_radian_about_a_diagonal();
-    for notch in BOTH_NOTCHES {
-        for tolerant in [false, true] {
-            for rule in RULES {
-                let what = format!("notch at {notch:?}, tolerant {tolerant}, {rule:?}");
-                let (model, fused, log) =
-                    notched_and_fused(&turn, notch, &Isometry::identity(), rule, tolerant);
-                match fused {
-                    Ok(solids) => {
-                        let (v, e) = the_volume_of_the_one_solid(&model, Ok(solids), &what);
-                        eprintln!(
-                            "{what}: volume {v} ± {e}, by hand {}, log {}",
-                            what_it_holds_by_hand(rule),
-                            log.len()
-                        );
-                    }
-                    Err(Error::Undecidable { records }) => {
-                        for record in records.records() {
-                            let points: Vec<[f64; 3]> = record
-                                .inputs()
-                                .iter()
-                                .map(|p| where_it_was_before_the_turn(*p, &turn))
-                                .collect();
-                            eprintln!(
-                                "{what}: refused {} enclosure {:e} at {points:?} boxes {:?}",
-                                record.predicate(),
-                                record.enclosure(),
-                                record.inputs()
-                            );
-                        }
-                    }
-                    Err(other) => eprintln!("{what}: {other:?}"),
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn probe_where_the_start_is() {
-    let turn = one_radian_about_a_diagonal();
-    for notch in BOTH_NOTCHES {
-        let (model, bar, notch_key) = a_notched_bar(&turn, notch, &Isometry::identity());
-        let pipe = the_pipe(&model, bar);
-        let wall = Surface::Cylinder(pipe);
-        for side in the_sides(&model, notch_key, &turn) {
-            let flat = Surface::Plane(side);
-            let SurfaceMeet::Curves(runs) = intersect(
-                &flat,
-                &wall,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap() else {
-                panic!()
-            };
-            let start =
-                where_a_closed_crossing_starts(&runs[0], [&flat, &wall], &mut ProvenanceLog::new())
-                    .unwrap();
-            let back = turn.inverse().apply_to_point(start).coordinates();
-            eprintln!(
-                "notch {notch:?} side n={:?} off={} lean={:e} start={:?} back={back:?} plane {:e} pipe {:e}",
-                side.normal(),
-                side.offset(),
-                side.normal().dot(pipe.axis().direction()),
-                start.coordinates(),
-                side.signed_distance_to(start),
-                pipe.axis().distance_to_point(start) - RADIUS
             );
         }
     }
