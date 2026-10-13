@@ -227,6 +227,7 @@ fn the_tipped_cube_less_the_block_is_one_solid_where_its_corner_rounds_below_the
             Rule::Difference,
             Order::TippedFirst,
             &tolerant(),
+            &mut ProvenanceLog::new(),
             &asked,
         );
         assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
@@ -269,6 +270,7 @@ fn the_tipped_cube_less_the_block_is_one_solid_where_the_cubes_edge_rounds_below
             Rule::Difference,
             Order::TippedFirst,
             &tolerant(),
+            &mut ProvenanceLog::new(),
             &asked,
         );
         assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
@@ -291,10 +293,100 @@ fn the_block_less_the_tipped_cube_is_one_solid_where_the_cubes_edge_rounds_below
             Rule::Difference,
             Order::BlockFirst,
             &tolerant(),
+            &mut ProvenanceLog::new(),
             &asked,
         );
         assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
         assert_about(volumes[0], 1000.0 - what_the_two_share(tilt), &asked);
+    }
+}
+
+/// Every tilt of this file, every rule, either way round, under a tolerant
+/// policy, but for the five fuses
+/// [`the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant`]
+/// pins: one solid, within §417.8's allowance of the volume worked by hand.
+///
+/// **The floor is taken as running through the ends of the cube's edge only
+/// where the answer was refused without it** (queue row Q1711,
+/// `docs/decisions.md` §417.9): the union and the intersection at
+/// [`TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`], and the union at
+/// `t = 0.142`, the last of [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`].
+/// Each of those logs two records, one at each end of the edge the cube
+/// stands on, `(−5, 5, 0)` and `(5, 5, 0)`: the floor's plane cuts the cube's
+/// bottom and side the edge's whole length, past the block at `x = −5` too.
+/// Every other answer logs none.
+///
+/// The allowance is the one `a_turned_cube_with_its_corner_on_a_face.rs`
+/// works out for its own pair of cubes: four roundings at 16 for each corner,
+/// over faces of no more than 1200.
+#[test]
+fn every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_only_where_refused_without()
+ {
+    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
+    for tilt in every_tilt() {
+        let share = what_the_two_share(tilt);
+        let refused_without = TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT.contains(&tilt);
+        let the_union_refused_without =
+            refused_without || tilt == TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT[3];
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            for (rule, worked, folded) in [
+                (Rule::Union, 2000.0 - share, the_union_refused_without),
+                (Rule::Intersection, share, refused_without),
+                (Rule::Difference, 1000.0 - share, false),
+            ] {
+                if matches!((rule, order), (Rule::Difference, Order::BlockFirst))
+                    && TILTS_THE_UNION_WAS_REFUSED_AT.contains(&tilt)
+                {
+                    continue;
+                }
+                let asked = format!("{tilt:?}, {rule:?}, {order:?}");
+                let mut log = ProvenanceLog::new();
+                let volumes = volumes_of_a_fuse(tilt, rule, order, &tolerant(), &mut log, &asked);
+                assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+                assert!(
+                    (volumes[0] - worked).abs() <= allowed,
+                    "{asked}: measured {}, worked by hand {worked}",
+                    volumes[0]
+                );
+                let ends = the_ends_the_floor_was_taken_through(&log);
+                let wanted: &[[f64; 3]] = if folded {
+                    &[[-5.0, 5.0, 0.0], [5.0, 5.0, 0.0]]
+                } else {
+                    &[]
+                };
+                assert_eq!(ends.len(), wanted.len(), "{asked}: {ends:?}");
+                for (end, corner) in ends.iter().zip(wanted) {
+                    let off = (0..3)
+                        .map(|axis| (end[axis] - corner[axis]).abs())
+                        .fold(0.0, f64::max);
+                    assert!(
+                        off <= 1e-12,
+                        "{asked}: taken through {end:?}, not {corner:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Refused as before Q1711, with the fold tried and refused too: the block
+/// touches itself along the cube's edge, and an edge with four faces along it
+/// is queue row Q1116's to judge, not this file's.
+#[test]
+fn the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant() {
+    for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
+        let asked = format!("{tilt:?}");
+        let why = refusal(
+            tilt,
+            Rule::Difference,
+            Order::BlockFirst,
+            &tolerant(),
+            &asked,
+        );
+        assert!(
+            matches!(why, Error::ResultIsNotManifold { count: 4 }),
+            "{asked}: {why:?}"
+        );
     }
 }
 
@@ -343,23 +435,24 @@ enum Order {
 }
 
 fn volume_of_a_fuse(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, asked: &str) -> f64 {
-    volumes_of_a_fuse(tilt, rule, order, policy, asked)
+    volumes_of_a_fuse(tilt, rule, order, policy, &mut ProvenanceLog::new(), asked)
         .iter()
         .sum()
 }
 
 /// The volume of each solid of the answer, once the model it is written into
-/// validates.
+/// validates. The fuse's records go into `log`.
 fn volumes_of_a_fuse(
     tilt: [f64; 4],
     rule: Rule,
     order: Order,
     policy: &Policy,
+    log: &mut ProvenanceLog,
     asked: &str,
 ) -> Vec<f64> {
     let mut model = a_model();
     let pair = the_block_and_the_tipped_cube(&mut model, tilt);
-    let answer = fuse(&mut model, pair, rule, order, policy)
+    let answer = fuse(&mut model, pair, rule, order, policy, log)
         .unwrap_or_else(|why| panic!("{asked}, {rule:?}: {why}"));
     model
         .validate(policy, &mut ProvenanceLog::new())
@@ -381,10 +474,48 @@ fn volumes_of_a_fuse(
         .collect()
 }
 
+/// Every tilt of this file, each once.
+fn every_tilt() -> impl Iterator<Item = [f64; 4]> {
+    TILTS
+        .into_iter()
+        .chain(TILTS_THE_UNION_WAS_REFUSED_AT)
+        .chain(TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT)
+        .chain(TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT)
+}
+
+/// The middle of each end of an edge `log` says the fuse took as one point
+/// with the two meets of a plane running beside the edge, along `x`.
+fn the_ends_the_floor_was_taken_through(log: &ProvenanceLog) -> Vec<[f64; 3]> {
+    let mut ends: Vec<[f64; 3]> = log
+        .records()
+        .iter()
+        .filter(|record| {
+            record.predicate() == "two meets of one plane beside an edge taken as its end"
+        })
+        .map(|record| {
+            record
+                .inputs()
+                .first()
+                .expect("the record names the end first")
+                .enclosure()
+                .map(|side| f64::midpoint(side.lo(), side.hi()))
+        })
+        .collect();
+    ends.sort_by(|one, other| one[0].total_cmp(&other[0]));
+    ends
+}
+
 fn refusal(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, asked: &str) -> Error {
     let mut model = a_model();
     let pair = the_block_and_the_tipped_cube(&mut model, tilt);
-    match fuse(&mut model, pair, rule, order, policy) {
+    match fuse(
+        &mut model,
+        pair,
+        rule,
+        order,
+        policy,
+        &mut ProvenanceLog::new(),
+    ) {
         Ok(solids) => panic!("{asked}, {rule:?} answers {} solids", solids.len()),
         Err(why) => why,
     }
@@ -396,13 +527,14 @@ fn fuse(
     rule: Rule,
     order: Order,
     policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> Result<Vec<SolidKey>, Error> {
     let (one, other) = match order {
         Order::BlockFirst => (block, tipped),
         Order::TippedFirst => (tipped, block),
     };
     model
-        .fuse(&[one], &[other], rule, policy, &mut ProvenanceLog::new())
+        .fuse(&[one], &[other], rule, policy, log)
         .map(|answer| answer.solids().to_vec())
 }
 
@@ -430,87 +562,4 @@ fn a_cube(model: &mut Model) -> SolidKey {
     model
         .add_cube(10.0, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a cube")
-}
-
-#[test]
-fn probe_q1711() {
-    let all: Vec<[f64; 4]> = TILTS
-        .iter()
-        .chain(&TILTS_THE_UNION_WAS_REFUSED_AT)
-        .chain(&TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT)
-        .chain(&TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT)
-        .copied()
-        .collect();
-    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
-    let further = 2.0_f64.powi(-30);
-    for tilt in all {
-        let share = what_the_two_share(tilt);
-        for (rule, order, worked) in [
-            (Rule::Union, Order::BlockFirst, 2000.0 - share),
-            (Rule::Union, Order::TippedFirst, 2000.0 - share),
-            (Rule::Intersection, Order::BlockFirst, share),
-            (Rule::Intersection, Order::TippedFirst, share),
-            (Rule::Difference, Order::BlockFirst, 1000.0 - share),
-            (Rule::Difference, Order::TippedFirst, 1000.0 - share),
-        ] {
-            let mut out = Vec::new();
-            for dz in [0.0, further, -further] {
-                let mut model = a_model();
-                let block = a_cube(&mut model);
-                let tipped = a_cube(&mut model);
-                let placement = Isometry::try_from(([5.0, 5.0, dz], tilt)).expect("a placement");
-                model.place_solid(tipped, &placement).expect("a placement");
-                let (one, other) = match order {
-                    Order::BlockFirst => (block, tipped),
-                    Order::TippedFirst => (tipped, block),
-                };
-                let mut log = ProvenanceLog::new();
-                match model.fuse(&[one], &[other], rule, &tolerant(), &mut log) {
-                    Ok(answer) => {
-                        let volumes: Vec<f64> = answer
-                            .solids()
-                            .iter()
-                            .map(|&solid| {
-                                model
-                                    .solid(solid)
-                                    .unwrap()
-                                    .measure(
-                                        Deflection::of(0.1).unwrap(),
-                                        &Policy::certified(),
-                                        &mut ProvenanceLog::new(),
-                                    )
-                                    .unwrap()
-                                    .volume()
-                            })
-                            .collect();
-                        let folds: Vec<_> = log
-                            .records()
-                            .iter()
-                            .filter(|record| {
-                                record.predicate()
-                                    == "two meets of one plane beside an edge taken as its end"
-                            })
-                            .collect();
-                        let off: Vec<f64> = volumes.iter().map(|v| v - worked).collect();
-                        out.push(format!(
-                            "dz {dz:e}: {} solids {volumes:?} off {off:?} (allowed {allowed:e}) folds {} records {}",
-                            volumes.len(),
-                            folds.len(),
-                            log.records().len()
-                        ));
-                        if dz == 0.0 {
-                            for fold in folds {
-                                out.push(format!("    fold {:?}", fold.inputs()));
-                            }
-                        }
-                    }
-                    Err(why) => out.push(format!("dz {dz:e}: refused {why}")),
-                }
-            }
-            println!("t {:.4} {rule:?} {order:?}", tilt[2].asin() * 2.0 / 2.0);
-            for line in out {
-                println!("  {line}");
-            }
-        }
-    }
 }
