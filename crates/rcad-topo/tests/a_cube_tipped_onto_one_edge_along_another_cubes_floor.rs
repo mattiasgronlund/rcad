@@ -48,6 +48,19 @@
 //! within the policy's wobble of one of its own planes
 //! (`leave_out_each_shell_thinner_than_the_wobble` in `fuse/assemble.rs`).
 //!
+//! **The union and the intersection were refused**, under a tolerant policy,
+//! either way round, at the four tilts of
+//! [`TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`], and the union at
+//! `t = 0.142`, as a face whose outline winds against its normal (queue rows
+//! Q1686 and Q1711). There the cube's bottom and its side meet in an edge
+//! parallel to the floor and a rounding below it, so the floor cuts both
+//! faces in lines a rounding either side of the edge, and the strip between
+//! them winds no way. A tolerant fuse refused otherwise now takes the two
+//! meets where the floor cuts those lines at each end of the edge as that
+//! end, and the strip is one edge walked out and back
+//! (`fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it` in
+//! `fuse/assemble.rs`, `docs/decisions.md` §417.9).
+//!
 //! What the two cubes share is the cube's square cross-section, clipped to
 //! the block, along the five of its ten that lie over the block:
 //! [`what_the_two_share`] works it out from the tilt.
@@ -91,6 +104,22 @@ const TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT: [[f64; 4]; 4] = [
     [0.0, 0.0, 0.088_384_519_545_367_51, 0.996_086_430_338_62],
     [0.0, 0.0, 0.131_121_339_064_130_45, 0.991_366_327_066_856_5],
     [0.0, 0.0, 0.141_523_266_230_237_75, 0.989_934_929_738_073_8],
+];
+
+/// Four tilts at which the union and the intersection, under a tolerant
+/// policy, either way round, were refused `TheFuseWroteABrokenAnswer {
+/// broken: OuterWireWindsAgainstTheNormal }` (queue rows Q1686 and Q1711):
+/// `t = 0.024`, `0.0955`, `0.1015` and `0.154`, as `f64::sin` and `f64::cos`
+/// give them. The tipped cube's bottom and its side `y = 5` meet in an edge
+/// parallel to the floor, `3.7e−18` below it at `t = 0.024`, so the floor
+/// cuts the cube in a strip `7.8e−17` wide whose corners all round onto
+/// `y = 5`, and the strip, a face of the intersection, winds `Zero`. Both
+/// answer since Q1711, with the floor taken through both ends of the edge.
+const TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT: [[f64; 4]; 4] = [
+    [0.0, 0.0, 0.023_997_696_066_354_29, 0.999_712_013_823_734_5],
+    [0.0, 0.0, 0.095_354_902_203_049_7, 0.995_443_339_736_545_1],
+    [0.0, 0.0, 0.101_325_810_022_482_75, 0.994_853_295_829_735_8],
+    [0.0, 0.0, 0.153_392_010_734_994_53, 0.988_165_416_842_076_7],
 ];
 
 #[test]
@@ -212,10 +241,166 @@ fn the_tipped_cube_less_the_block_is_one_solid_where_its_corner_rounds_below_the
             Rule::Difference,
             Order::TippedFirst,
             &tolerant(),
+            &mut ProvenanceLog::new(),
             &asked,
         );
         assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
         assert_about(volumes[0], 1000.0 - what_the_two_share(tilt), &asked);
+    }
+}
+
+#[test]
+fn the_union_is_both_cubes_less_what_they_share_where_the_cubes_edge_rounds_below_the_floor_tolerant()
+ {
+    for tilt in TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT {
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            let asked = format!("{tilt:?}, {order:?}");
+            let volume = volume_of_a_fuse(tilt, Rule::Union, order, &tolerant(), &asked);
+            assert_about(volume, 2000.0 - what_the_two_share(tilt), &asked);
+        }
+    }
+}
+
+#[test]
+fn the_intersection_is_what_they_share_where_the_cubes_edge_rounds_below_the_floor_tolerant() {
+    for tilt in TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT {
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            let asked = format!("{tilt:?}, {order:?}");
+            let volume = volume_of_a_fuse(tilt, Rule::Intersection, order, &tolerant(), &asked);
+            assert_about(volume, what_the_two_share(tilt), &asked);
+        }
+    }
+}
+
+/// Answered one solid since queue row Q1687, `741.0000015943825` at
+/// `t = 0.024` against `741.0000015943831` worked by hand.
+#[test]
+fn the_tipped_cube_less_the_block_is_one_solid_where_the_cubes_edge_rounds_below_the_floor_tolerant()
+ {
+    for tilt in TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT {
+        let asked = format!("{tilt:?}");
+        let volumes = volumes_of_a_fuse(
+            tilt,
+            Rule::Difference,
+            Order::TippedFirst,
+            &tolerant(),
+            &mut ProvenanceLog::new(),
+            &asked,
+        );
+        assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+        let worked = 1000.0 - what_the_two_share(tilt);
+        assert!(
+            (volumes[0] - worked).abs() <= 1e-12,
+            "{asked}: measured {}, worked by hand {worked}",
+            volumes[0]
+        );
+    }
+}
+
+#[test]
+fn the_block_less_the_tipped_cube_is_one_solid_where_the_cubes_edge_rounds_below_the_floor_tolerant()
+ {
+    for tilt in TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT {
+        let asked = format!("{tilt:?}");
+        let volumes = volumes_of_a_fuse(
+            tilt,
+            Rule::Difference,
+            Order::BlockFirst,
+            &tolerant(),
+            &mut ProvenanceLog::new(),
+            &asked,
+        );
+        assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+        assert_about(volumes[0], 1000.0 - what_the_two_share(tilt), &asked);
+    }
+}
+
+/// Every tilt of this file, every rule, either way round, under a tolerant
+/// policy, but for the five fuses
+/// [`the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant`]
+/// pins: one solid, within §417.8's allowance of the volume worked by hand.
+///
+/// **The floor is taken as running through the ends of the cube's edge only
+/// where the answer was refused without it** (queue row Q1711,
+/// `docs/decisions.md` §417.9): the union and the intersection at
+/// [`TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`], and the union at
+/// `t = 0.142`, the last of [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`].
+/// Each of those logs two records, one at each end of the edge the cube
+/// stands on, `(−5, 5, 0)` and `(5, 5, 0)`: the floor's plane cuts the cube's
+/// bottom and side the edge's whole length, past the block at `x = −5` too.
+/// Every other answer logs none.
+///
+/// The allowance is the one `a_turned_cube_with_its_corner_on_a_face.rs`
+/// works out for its own pair of cubes: four roundings at 16 for each corner,
+/// over faces of no more than 1200.
+#[test]
+fn every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_only_where_refused_without()
+ {
+    let allowed = 1200.0 * 3.0_f64.sqrt() * 4.0 * 16.0 * f64::EPSILON;
+    for tilt in every_tilt() {
+        let share = what_the_two_share(tilt);
+        let refused_without = TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT.contains(&tilt);
+        let the_union_refused_without =
+            refused_without || tilt == TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT[3];
+        for order in [Order::BlockFirst, Order::TippedFirst] {
+            for (rule, worked, folded) in [
+                (Rule::Union, 2000.0 - share, the_union_refused_without),
+                (Rule::Intersection, share, refused_without),
+                (Rule::Difference, 1000.0 - share, false),
+            ] {
+                if matches!((rule, order), (Rule::Difference, Order::BlockFirst))
+                    && TILTS_THE_UNION_WAS_REFUSED_AT.contains(&tilt)
+                {
+                    continue;
+                }
+                let asked = format!("{tilt:?}, {rule:?}, {order:?}");
+                let mut log = ProvenanceLog::new();
+                let volumes = volumes_of_a_fuse(tilt, rule, order, &tolerant(), &mut log, &asked);
+                assert_eq!(volumes.len(), 1, "{asked}: {volumes:?}");
+                assert!(
+                    (volumes[0] - worked).abs() <= allowed,
+                    "{asked}: measured {}, worked by hand {worked}",
+                    volumes[0]
+                );
+                let ends = the_ends_the_floor_was_taken_through(&log);
+                let wanted: &[[f64; 3]] = if folded {
+                    &[[-5.0, 5.0, 0.0], [5.0, 5.0, 0.0]]
+                } else {
+                    &[]
+                };
+                assert_eq!(ends.len(), wanted.len(), "{asked}: {ends:?}");
+                for (end, corner) in ends.iter().zip(wanted) {
+                    let off = (0..3)
+                        .map(|axis| (end[axis] - corner[axis]).abs())
+                        .fold(0.0, f64::max);
+                    assert!(
+                        off <= 1e-12,
+                        "{asked}: taken through {end:?}, not {corner:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Refused as before Q1711, with the fold tried and refused too: the block
+/// touches itself along the cube's edge, and an edge with four faces along it
+/// is queue row Q1116's to judge, not this file's.
+#[test]
+fn the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant() {
+    for tilt in TILTS_THE_UNION_WAS_REFUSED_AT {
+        let asked = format!("{tilt:?}");
+        let why = refusal(
+            tilt,
+            Rule::Difference,
+            Order::BlockFirst,
+            &tolerant(),
+            &asked,
+        );
+        assert!(
+            matches!(why, Error::ResultIsNotManifold { count: 4 }),
+            "{asked}: {why:?}"
+        );
     }
 }
 
@@ -264,23 +449,24 @@ enum Order {
 }
 
 fn volume_of_a_fuse(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, asked: &str) -> f64 {
-    volumes_of_a_fuse(tilt, rule, order, policy, asked)
+    volumes_of_a_fuse(tilt, rule, order, policy, &mut ProvenanceLog::new(), asked)
         .iter()
         .sum()
 }
 
 /// The volume of each solid of the answer, once the model it is written into
-/// validates.
+/// validates. The fuse's records go into `log`.
 fn volumes_of_a_fuse(
     tilt: [f64; 4],
     rule: Rule,
     order: Order,
     policy: &Policy,
+    log: &mut ProvenanceLog,
     asked: &str,
 ) -> Vec<f64> {
     let mut model = a_model();
     let pair = the_block_and_the_tipped_cube(&mut model, tilt);
-    let answer = fuse(&mut model, pair, rule, order, policy)
+    let answer = fuse(&mut model, pair, rule, order, policy, log)
         .unwrap_or_else(|why| panic!("{asked}, {rule:?}: {why}"));
     model
         .validate(policy, &mut ProvenanceLog::new())
@@ -302,10 +488,48 @@ fn volumes_of_a_fuse(
         .collect()
 }
 
+/// Every tilt of this file, each once.
+fn every_tilt() -> impl Iterator<Item = [f64; 4]> {
+    TILTS
+        .into_iter()
+        .chain(TILTS_THE_UNION_WAS_REFUSED_AT)
+        .chain(TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT)
+        .chain(TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT)
+}
+
+/// The middle of each end of an edge `log` says the fuse took as one point
+/// with the two meets of a plane running beside the edge, along `x`.
+fn the_ends_the_floor_was_taken_through(log: &ProvenanceLog) -> Vec<[f64; 3]> {
+    let mut ends: Vec<[f64; 3]> = log
+        .records()
+        .iter()
+        .filter(|record| {
+            record.predicate() == "two meets of one plane beside an edge taken as its end"
+        })
+        .map(|record| {
+            record
+                .inputs()
+                .first()
+                .expect("the record names the end first")
+                .enclosure()
+                .map(|side| f64::midpoint(side.lo(), side.hi()))
+        })
+        .collect();
+    ends.sort_by(|one, other| one[0].total_cmp(&other[0]));
+    ends
+}
+
 fn refusal(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, asked: &str) -> Error {
     let mut model = a_model();
     let pair = the_block_and_the_tipped_cube(&mut model, tilt);
-    match fuse(&mut model, pair, rule, order, policy) {
+    match fuse(
+        &mut model,
+        pair,
+        rule,
+        order,
+        policy,
+        &mut ProvenanceLog::new(),
+    ) {
         Ok(solids) => panic!("{asked}, {rule:?} answers {} solids", solids.len()),
         Err(why) => why,
     }
@@ -317,13 +541,14 @@ fn fuse(
     rule: Rule,
     order: Order,
     policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> Result<Vec<SolidKey>, Error> {
     let (one, other) = match order {
         Order::BlockFirst => (block, tipped),
         Order::TippedFirst => (tipped, block),
     };
     model
-        .fuse(&[one], &[other], rule, policy, &mut ProvenanceLog::new())
+        .fuse(&[one], &[other], rule, policy, log)
         .map(|answer| answer.solids().to_vec())
 }
 

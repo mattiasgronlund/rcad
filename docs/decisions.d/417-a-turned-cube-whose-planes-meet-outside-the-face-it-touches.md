@@ -724,3 +724,120 @@ open. Nothing else.
 > before it keeps any. A shape whose intersection's put-together panics
 > would now panic in its difference too: not seen in `rcad-topo`'s tests, and
 > not run.
+
+### 417.9 Two meets beside an edge taken as its end, only for an answer refused without them
+
+*2026-10-13, queue row Q1711, in two lanes: `lane-q1711-a-cube-tipped-onto-an-edge-along-another-cubes-floor`
+built the fold and wired it into every fuse, and
+`lane-q1711-b-finish-the-edge-fold-and-land`, off `bda1bbb2`, in relays (§416),
+took it only where it belongs and pinned it. Each count below says which ran
+it and with what.*
+
+**The shape.** `a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`:
+the block `[0, 10]³` and a second cube stood on its edge `y = 5`, `z = 0`,
+`−5 ≤ x ≤ 5`, tipped by `2t`. At `t = 0.024`, `0.0955`, `0.1015` and `0.154`,
+under `Policy::tolerant(100.0)`, the union and the intersection were refused
+`TheFuseWroteABrokenAnswer { broken: OuterWireWindsAgainstTheNormal }` either
+way round, and so was the union at `t = 0.142`. The cube's bottom and its side
+are stored with `0.0` as the `x` of their normals, so the edge they meet in
+runs exactly parallel to the floor `z = 0`, and at those tilts it is stored a
+rounding below it (`3.7e−18` at `t = 0.024`). The floor then cuts the bottom
+and the side in two lines either side of the edge, and the strip between them,
+`7.8e−17` wide at `t = 0.024`, is a face whose corners all round onto
+`y = 5`, so it winds no way.
+
+**The rule.** `fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it`
+in `fuse/assemble.rs`, under a tolerant policy only. Where a third plane ends
+the edge, the cube's end `x = ±5`, the floor cuts the two lines at two meets of
+three planes. When the floor's normal and the edge's two faces' normals are
+proved to lie in one plane, each line runs parallel to the edge and is as far
+from it all along as at the end. When both meets are points some piece runs
+to, the end is proved off the floor, and both are within `Policy::max_wobble`
+of the end, both are taken as the end, with one record, *"two meets of one
+plane beside an edge taken as its end"*, whose first input is the end. The
+strip is then one edge walked out and back, and the fuse leaves it out.
+
+**Not 417.7's excluded case.** 417.7 does not fold a plane parallel to one of a
+corner's faces: it cuts one of the corner's three edges near the corner and
+runs beside the other two, and folding that one meet closes a sliver as wide as
+the face, which a tolerant fuse keeps (417.8 (c)). Here the floor runs parallel
+to one *edge* and cuts both of that edge's faces, so at the end it cuts two of
+the corner's three edges near it, and both meets are folded or neither. What
+they close is the strip between the two lines, no wider anywhere than at the
+end, since the lines are proved parallel to the edge. 417.7's corner fold needs
+a meet on each of the corner's three edges, and the floor, the bottom and the
+side meet nowhere, so it cannot take these two.
+
+**The order, chosen by measuring.** Wired into every fuse and read by `select`
+too (`761680d3`), the fold moved three tests (the second lane's relay 0, `mise
+exec -- just t -p rcad-topo --no-fail-fast`, 2055 run, 2052 passed; quoted from
+its report, not run again): the block less the tipped cube was pinched along
+the edge, the floor kept either side of the strip with the strip closed, and
+refused `ResultIsNotManifold`, in this file's two pins of it; and the skewed
+combs' union (`two_skewed_combs_touching_along_one_line.rs`,
+`under_a_tolerant_policy_the_union_answers_the_intersection_is_nothing_and_each_difference_is_the_comb_it_starts_from`)
+was refused `Undecidable` on *a point inside a piece of a face*. So the fold's
+names are kept apart, in `Scratch::ends_of_edges` with a log of their own, and
+`select` never reads them. That leaves two orders, which differ wherever the
+answer puts itself together both ways:
+
+- *With the fold first, and without it on a refusal*: 2054 passed and the
+  combs' union failed, answering with three records where its pin asks for one
+  (the same run, with the order flipped by a temporary edit; quoted).
+- *Without the fold first, and with it only on a refusal*: all 2055 passed
+  (the same run; quoted).
+
+The second is taken (`Model::fused_under` in `fuse/mod.rs`). A fuse that
+answers without the fold answers exactly as before: the first try is the old
+code on the caller's log. Only when it is refused, and the fold found
+something, is the answer put together again with the fold's names chained on,
+on a copy of the log taken before the first try with the fold's records added.
+When that answers, its log replaces the caller's. When it is refused too, the
+fuse returns the first try's refusal with the log the first try left, so
+trying the fold never renames a refusal and never adds a record to one. The
+model is untouched by a refused try, since `Assembly::commit` writes nothing
+unless the answer validates.
+
+**Before and after, under `Policy::tolerant(100.0)`**, over the file's 15
+tilts, every rule, either way round: `probe_q1711_count`, a probe at the end of
+the test file, never committed, run by this lane on the branch and with the
+test file laid on `bda1bbb2`'s code: `mise exec -- just t -p rcad-topo --test
+a_cube_tipped_onto_one_edge_along_another_cubes_floor --no-capture
+probe_q1711_count`.
+
+| fuse                       | before (`bda1bbb2`)    | after                                     |
+|----------------------------|------------------------|-------------------------------------------|
+| union, either order        | 10 one, 5 outline      | 15 one, 5 of them with two fold records   |
+| intersection, either order | 11 one, 4 outline      | 15 one, 4 of them with two fold records   |
+| block less the tipped cube | 10 one, 5 `count: 4`   | 10 one, 5 `count: 4`                      |
+| tipped cube less the block | 15 one                 | 15 one                                    |
+
+"One" is an answer of one solid; "outline" is the refusal above. So 67 of 90
+answered before and 85 after, and the 18 that moved are each refused before
+and answered after with exactly two fold records, one at each end of the edge,
+`(5, 5, 0)` and `(−5, 5, 0)`. The end at `x = −5` lies past the block, and folds
+because the arrangement cuts the cube's bottom and side along the floor's plane
+the edge's whole length. Every answer, all 85, is one solid within
+`1200·√3·4·16ε`, about `2.95e−11`, of the volume worked by hand, the allowance
+`a_turned_cube_with_its_corner_on_a_face.rs` works out for its own two cubes.
+The largest miss is `1.1368683772161603e−12`, the union at `t = 0.0955` with
+the tipped cube first and at `t = 0.1015` with the block first (this lane, a
+temporary print in that pin, since taken out).
+`every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_only_where_refused_without`
+pins the volumes, the counts and where each record is, and
+`the_block_less_the_tipped_cube_is_refused_where_the_union_was_refused_tolerant`
+the five refusals.
+
+**Under `Policy::certified()`** nothing is asked and nothing is folded, as for
+417.7: the fold returns before any work, and `Policy::take_as_one_point`
+answers `false` there.
+
+**What this leaves.**
+
+- The block less the tipped cube at `t = 0.002`, `0.003`, `0.008`, `0.01` and
+  `0.015`, refused `ResultIsNotManifold { count: 4 }` before and after, the
+  fold tried and refused too: the block touches itself along the cube's edge,
+  queue row Q1116's.
+- An edge *nearly*, not exactly, parallel to a plane a rounding off it. The
+  fold needs the three normals proved to lie in one plane, so it leaves that
+  case alone. Not run.
