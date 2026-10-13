@@ -8280,7 +8280,7 @@ fn back_out_of_the_frame_this_face_is_cut_up_in(face: FaceView<'_>) -> Isometry 
 ///
 /// A face at no placement at all is a different thing: there is nothing to undo,
 /// and the movement is [`a_shift_that_loses_nothing`], which is exact.
-fn the_surface_this_face_is_meshed_on(face: FaceView<'_>) -> Surface {
+pub(crate) fn the_surface_this_face_is_meshed_on(face: FaceView<'_>) -> Surface {
     if face.location() != Isometry::identity() {
         return face.stored_surface();
     }
