@@ -533,6 +533,11 @@ catch-ups in 79 merges, so at most 22% of merges needed a second try.
 - **§372.4's counting stands:** read-only rows, verifiers and mergers each
   count toward the four.
 
+**2026-10-13: the first bar is passed, so it is three slots again.** From
+10-05 to 10-13, 43% of 716 busy daytime samples were at load 24 or more, and
+no single day was under 23%. §447 has the measurement, and the rows that set
+the cap back to three and keep one of the three for a Sonnet row.
+
 ### 397.8 The claims this rests on (§16.10)
 
 - **"Nothing reaches `main` without the whole gate"** is a sufficiency claim.
