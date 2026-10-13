@@ -146,10 +146,11 @@ as it grows, so that a relay picks up from the file.
 
 ### 448.5 The nine rows at the base
 
-*Being written. Q1954's first lane ran step 1 for all nine and stopped at its
-budget. Its third lane wrote steps 2 to 4 below for Q1834, Q1765, Q1854,
-Q1842, Q1839 and Q1867; Q1936, Q1958's fix and Q1734 are still to do, and
-so are 448.6 and the Result.*
+*Being written. Q1954's first lane ran step 1 for all nine. Its third wrote
+steps 2 to 4 below for Q1834, Q1765, Q1854, Q1842, Q1839 and Q1867, and its
+fourth checked Q1842's aim. Q1936, Q1958's fix and Q1734 are measured, in
+the fourth lane's handoff, and still to write here, and so are 448.6 and the
+Result.*
 
 **Step 1, run at `283ddff8`.** Q1930's probes from `/tmp/q1930-probes/` were
 copied into `crates/rcad-topo/tests/` unchanged, but for a report that prints
@@ -241,8 +242,15 @@ comes from probes added to the copied files and run at `283ddff8`
   `C + (A - C)/4` on the half bar's flat face `y = 0`, with `C = (3, 0, 10)`
   and `A = (-3, 0, 0)` its opposite corners. It is on no diagonal of the
   block's face. *Which*: none, the same as Q1834: the fuse's own test
-  point, if the aim is `A` or `C`. Whether it is has not been checked yet.
-  Unplaced and shifted, every number is exact and it answers.
+  point. The half bar's flat face, stored as `[0, 0.9210609940028851,
+  0.38941834230865047, 0]`, has the wire `(-3, 0, 0)`, `(-3, -3.894…,
+  9.2106…)`, `(3, -3.894…, 9.2106…)`, `(3, 0, 0)`, so its aim is `A`, and
+  the point lies on the line from `A` through `C`. From the block's first
+  corner, `(-5, 0, -1)` turned, it lies on no line through another corner,
+  so the orient3d that refuses is the one at `C`. Unplaced and shifted,
+  every number is exact and it answers. Both solids are turned by the one
+  turn, so (c) would answer it too: in the frame before the turn it is the
+  unplaced shape.
 - **Q1842 turned then shifted.** *The question*: is the half bar's corner
   `(3, 0, 0)`, placed at `(10, -5, 2.5)`, on the block's face `y = 0`? It is
   asked in `Arrangement::passes_through`, as for Q1765. *Its exact answer*:
