@@ -8582,9 +8582,13 @@ fn a_plane_cuts_this_cone_or_pipe_in_an_ellipse_its_ends_are_walked_by(
     let EdgeRun::PartOfWhereItCrosses { .. } = edge.stored_run() else {
         return false;
     };
-    let reach_past = match (ours, other) {
-        (Surface::Cone(_), Surface::Plane(_)) => its_ends,
-        (Surface::Cylinder(_), Surface::Plane(_)) => its_ends.max(radius),
+    let Surface::Plane(_) = other else {
+        return false;
+    };
+    let reach_past = match ours {
+        Surface::Cone(_) => its_ends,
+        Surface::Cylinder(_) => its_ends.max(radius),
+        Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) => return false,
         _ => return false,
     };
     let reaches_far_past_its_ends = whole.is_none_or(|whole| {

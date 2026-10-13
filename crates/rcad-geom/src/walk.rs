@@ -3360,7 +3360,6 @@ impl AnArcRoundACone {
 /// so neither arc is ruled out and the walk refuses it, as it did before.
 #[derive(Clone, Debug)]
 struct AnArcAlongAPipe {
-    flat: Plane,
     picked_by: SmallVec<[Picker; 1]>,
     origin: Point,
     /// `ŵ`, the pipe's axis direction scaled to length one.
@@ -3461,7 +3460,6 @@ impl AnArcAlongAPipe {
             return None;
         };
         let arc = Self {
-            flat,
             picked_by: picked_by.clone(),
             origin,
             up,
