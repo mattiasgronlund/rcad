@@ -8713,11 +8713,11 @@ fn turned_as_far_apart_up_the_axis(
 /// rounding, so the way it runs at each has a dot with `d` of order one, and
 /// the start is `10¹⁶` outside either plane. With them in order, and the node
 /// `4e16` off put in order by [`Arrangement::as_the_pipes_axis_says`], every
-/// fuse of the two is now refused later, naming which piece of a crossing an
-/// edge is (Q1885). A block resting `2e-10` above a round bar tipped `1e-9`
-/// has a side that leans by the tip, and the block's bottom and the bar's top
-/// cut its loop `3e-10` apart; every fuse of those two was refused there with
-/// an enclosure of `4.4e-7`, and each now answers (§346.7).
+/// fuse of the two answers what it holds by hand, since Q1882 walks the wall
+/// edges along such a loop up the pipe. A block resting `2e-10` above a round
+/// bar tipped `1e-9` has a side that leans by the tip, and the block's bottom
+/// and the bar's top cut its loop `3e-10` apart; every fuse of those two was
+/// refused there with an enclosure of `4.4e-7`, and each now answers (§346.7).
 ///
 /// **It reads the start where it is held, as the sweep does.** The order it
 /// gives is the one from every point of the loop outside the two planes, so a
