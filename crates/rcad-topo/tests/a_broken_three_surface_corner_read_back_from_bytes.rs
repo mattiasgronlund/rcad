@@ -400,16 +400,22 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
 /// side planes cross the cut's own face in four lines that pass a rounding
 /// from one another by the apex, and cut it into specks a rounding across.
 /// Each speck is now placed, from the planes, as the three bake solved each
-/// corner of the pyramid from (Q1936), but the half pyramid built round them
-/// keeps an edge a rounding long by the apex:
+/// corner of the pyramid from (Q1936), and what is built is what those numbers
+/// hold: half of a pyramid whose apex is a rounding off the cut. The half
+/// without the apex is 5 faces and 18 sides, its cut face keeping an edge a
+/// rounding long under the apex. The half with it is 6 faces and 22 sides,
+/// the sixth a triangle a rounding across. Where the pyramid stands, each half
+/// is 5 faces and 16 sides.
 ///
-/// - Under `certified` every fuse refuses that edge as too short beside the
-///   coordinates, `DynamicRangeTooWide`, and leaves the model as it was.
+/// - Under `certified` every fuse refuses the short edge as too short beside
+///   the coordinates, `DynamicRangeTooWide`, and leaves the model as it was.
 /// - Under `tolerant(100)` four fuses answer half the pyramid, 60, in one
 ///   solid that validates, and the log's one record is the range check that
-///   took the short edge. Turned and shifted for the difference, and shifted
-///   for the intersection, the answer the fuse built has a face whose outline
-///   winds against its normal, and it refuses that and writes nothing.
+///   took the short edge. In the other two the half holding the apex is
+///   built, and its speck face has three corners within `3e−15` of one
+///   another, which wind against its normal: on one line, shifted for the
+///   intersection, and the wrong way round, turned and shifted for the
+///   difference. The fuse refuses that and writes nothing.
 ///
 /// Before Q1936, all twelve refused `Undecidable`, "a point inside a piece of a
 /// face", on one of the specks.
@@ -417,33 +423,44 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
 fn a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut() {
     let [_, shift, turn, turn_then_shift] = every_placement();
     let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
-    let where_it_winds_against_its_normal = [
-        (Rule::Difference, turn_then_shift),
-        (Rule::Intersection, shift),
+    let without_the_apex = Some(FacesAndSides {
+        faces: 5,
+        sides: 18,
+    });
+    let with_the_apex = Some(FacesAndSides {
+        faces: 6,
+        sides: 22,
+    });
+    let wound_against_its_normal = None;
+    let what_tolerant_builds = [
+        (Rule::Difference, shift, without_the_apex),
+        (Rule::Difference, turn, with_the_apex),
+        (Rule::Difference, turn_then_shift, wound_against_its_normal),
+        (Rule::Intersection, shift, wound_against_its_normal),
+        (Rule::Intersection, turn, without_the_apex),
+        (Rule::Intersection, turn_then_shift, without_the_apex),
     ];
-    for (rule, where_it_winds) in where_it_winds_against_its_normal {
-        for placement in [shift, turn, turn_then_shift] {
-            let case = format!("{placement:?}, {rule:?}");
-            match the_cut_through_the_apex(placement, rule, &certified) {
-                Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
-                    assert!(ratio > 1e15, "certified, {case}: a range of {ratio}");
-                }
-                other => panic!("certified, {case} came back {other:?}"),
+    for (rule, placement, built) in what_tolerant_builds {
+        let case = format!("{placement:?}, {rule:?}");
+        match the_cut_through_the_apex(placement, rule, &certified) {
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+                assert!(ratio > 1e15, "certified, {case}: a range of {ratio}");
             }
-            let wound_against_its_normal = placement == where_it_winds;
-            match the_cut_through_the_apex(placement, rule, &tolerant) {
-                Ok(named) if !wound_against_its_normal => {
-                    assert_eq!(named, [DYNAMIC_RANGE_CHECK], "tolerant, {case}");
-                }
-                Err(Error::TheFuseWroteABrokenAnswer { broken }) if wound_against_its_normal => {
-                    assert_eq!(
-                        broken,
-                        Invalid::OuterWireWindsAgainstTheNormal,
-                        "tolerant, {case}"
-                    );
-                }
-                other => panic!("tolerant, {case} came back {other:?}"),
+            other => panic!("certified, {case} came back {other:?}"),
+        }
+        match (the_cut_through_the_apex(placement, rule, &tolerant), built) {
+            (Ok((named, shape)), Some(expected)) => {
+                assert_eq!(named, [DYNAMIC_RANGE_CHECK], "tolerant, {case}");
+                assert_eq!(shape, expected, "tolerant, {case}");
             }
+            (Err(Error::TheFuseWroteABrokenAnswer { broken }), None) => {
+                assert_eq!(
+                    broken,
+                    Invalid::OuterWireWindsAgainstTheNormal,
+                    "tolerant, {case}"
+                );
+            }
+            (other, _) => panic!("tolerant, {case} came back {other:?}"),
         }
     }
 }
@@ -735,13 +752,14 @@ fn the_answer_holds_what_the_two_hold(
 
 /// The sound pyramid at `placement` fused with `THE_HALF_PAST_THE_SEAM` under
 /// `rule`. An answer has to validate and hold what the pyramid and the block
-/// hold, and comes back as the predicates the fuse's log names. A refusal has
-/// to leave the model byte for byte as it was, and comes back as it is.
+/// hold, and comes back as the predicates the fuse's log names and how many
+/// faces and sides it has. A refusal has to leave the model byte for byte as it
+/// was, and comes back as it is.
 fn the_cut_through_the_apex(
     placement: Isometry,
     rule: Rule,
     policy: &Policy,
-) -> Result<Vec<&'static str>, Error> {
+) -> Result<(Vec<&'static str>, FacesAndSides), Error> {
     let case = format!("{policy:?}, {placement:?}, {rule:?}");
     let (mut model, solid) = the_pyramid_read_back(placement, WHERE_THE_PYRAMID_PUTS_ITS_APEX);
     let block = a_block(&mut model, THE_HALF_PAST_THE_SEAM, &placement);
@@ -757,11 +775,12 @@ fn the_cut_through_the_apex(
                 what_the_pyramid_and_a_block_hold,
                 &case,
             );
-            Ok(log
+            let named = log
                 .records()
                 .iter()
                 .map(|record| record.predicate())
-                .collect())
+                .collect();
+            Ok((named, the_faces_and_sides_of(&model, &answer)))
         }
         Err(refused) => {
             assert_eq!(
@@ -771,6 +790,31 @@ fn the_cut_through_the_apex(
             );
             Err(refused)
         }
+    }
+}
+
+/// How many faces an answer has, and how many sides their outlines and holes
+/// have between them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FacesAndSides {
+    faces: usize,
+    sides: usize,
+}
+
+fn the_faces_and_sides_of(model: &Model, answer: &Fused) -> FacesAndSides {
+    let faces: Vec<_> = answer
+        .solids()
+        .iter()
+        .flat_map(|&solid| model.solid(solid).expect("this model made the key").faces())
+        .collect();
+    let sides = faces
+        .iter()
+        .flat_map(|face| face.wires())
+        .map(|wire| wire.coedges().count())
+        .sum();
+    FacesAndSides {
+        faces: faces.len(),
+        sides,
     }
 }
 
