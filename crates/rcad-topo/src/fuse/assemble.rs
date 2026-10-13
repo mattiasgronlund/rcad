@@ -23,17 +23,22 @@
 //! edges, and an edge claimed by anything other than exactly two faces is
 //! [`Error::ResultIsNotManifold`]. That is the whole manifold check, and it
 //! lands here because this is where an edge with three claimants is *discovered*
-//! rather than searched for. The one edge with four claimants that is not
-//! refused is a line two faces rest against each other along, with both sides
-//! of each kept: its four claimants pair off into two that walk it opposite
-//! ways, and one pair is two pieces of one input face, or two flat faces on
-//! one plane facing one way. It is no edge of either input, or — since Q803 —
-//! one input's own edge resting on a face of the other, kept as that input's
-//! edge; either way
+//! rather than searched for. Two kinds of edge with four claimants are not
+//! refused, and in both the four pair off into two that walk the line opposite
+//! ways. One is a line two faces rest against each other along, with both
+//! sides of each kept, where one pair is two pieces of one input face, or two
+//! flat faces on one plane facing one way. It is no edge of either input, or —
+//! since Q803 — one input's own edge resting on a face of the other, kept as
+//! that input's edge. The other, since Q1913, is a line that is an edge of
+//! both inputs, with two faces round each input's edge, where the solid on
+//! one side of the line is joined to the solid on the other without it.
+//! Either way
 //! [`Assembly::part_each_line_two_faces_rest_against_each_other_along`] gives
 //! each pair its own before anything is counted. What that answers may be one
 //! solid touching itself along the line, which is an answer
-//! (`docs/decisions.md` §39.4).
+//! (`docs/decisions.md` §39.4). A line that is an edge of both inputs with a
+//! different solid on each side stays refused: §80.9 leaves two touching
+//! solids unbuilt.
 //!
 //! # Two pieces on one plane are one face
 //!
@@ -1236,12 +1241,17 @@ impl Assembly {
     /// are one flat floor with an edge across it where it changes owner, and
     /// the line is where the part touches it.
     ///
-    /// **Four darts from four input faces stay one edge and are refused
-    /// otherwise**: a line both solids have an edge along — two cubes touching
-    /// along part of an edge, or the frame and the comb of
-    /// `degenerate_fuses.rs`. No `Model` holds four faces along one edge, and
-    /// §80.9 leaves two touching solids as an answer for that relation
-    /// unbuilt.
+    /// **Four darts from four input faces, along a line both solids have an
+    /// edge along, are parted only where one solid lies on both sides of it**
+    /// (queue row Q1913): an L plate less a pocket cut into its corner square,
+    /// whose two arms the plate's floor joins (`a_prism_lying_on_one_edge.rs`).
+    /// [`Assembly::pair_each_line_one_solid_touches_itself_along`] decides it.
+    /// Elsewhere they stay one edge and are refused: two cubes touching along
+    /// part of an edge, the frame and the comb of `degenerate_fuses.rs`, or the
+    /// leaning frame less the comb, whose square between two teeth touches the
+    /// frame's ring (`a_sliver_along_an_edge_of_a_face_it_lies_on.rs`). No
+    /// `Model` holds four faces along one edge, and §80.9 leaves two touching
+    /// solids as an answer for that relation unbuilt.
     ///
     /// Which pair keeps the edge is the one whose first dart comes first; the
     /// other is moved onto a copy. **Each takes the input edges of its own input
@@ -1407,7 +1417,10 @@ impl Assembly {
     /// are pieces of one input face, the two are pieces of different ones: a
     /// bar's skin on a wall or on another bar. Which side of the other pair's
     /// faces either pair lies on is not asked, so the answer may touch itself
-    /// along the line (`docs/decisions.md` §39.4).
+    /// along the line (`docs/decisions.md` §39.4). Four faces of four input
+    /// faces, no pair of them flat on one plane facing one way, answer `None`
+    /// here, and [`Assembly::pair_each_line_one_solid_touches_itself_along`]
+    /// pairs them where one solid lies on both sides of the line.
     fn the_two_pairs_along(&self, by: &[Dart]) -> Option<[[Dart; 2]; 2]> {
         let &[first, second, third, fourth] = by else {
             return None;

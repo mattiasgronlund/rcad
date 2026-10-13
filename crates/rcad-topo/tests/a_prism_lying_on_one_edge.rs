@@ -672,11 +672,12 @@ fn a_solid_lying_on_a_block_along_an_edge_and_reaching_into_it_answers_every_rul
 /// touching itself along `x = 1, y = 1` from `z = 0` to `z = 0.5`. That line
 /// is the plate's inner corner and the pocket's corner both, an edge of both
 /// inputs, so the four faces along it are four input faces. It was refused
-/// `ResultIsNotManifold { count: 4 }` until queue row Q1913: the four faces
-/// are one shell without the line, through the plate's floor, so the answer is
-/// one solid and not the two touching solids §80.9 leaves unbuilt
-/// (`docs/decisions.md` §39.4). Queue row Q1910 ran it as a shape a designer
-/// draws on purpose that met the refusal of the leaning frame less the comb in
+/// `ResultIsNotManifold { count: 4 }` until queue row Q1913: without the line
+/// the four faces are one shell, joined round the plate's top and the top half
+/// of the corner square, so the answer is one solid and not the two touching
+/// solids §80.9 leaves unbuilt (`docs/decisions.md` §39.4). Queue row Q1910
+/// ran it as a shape a designer draws on purpose that met the refusal of the
+/// leaning frame less the comb in
 /// `a_sliver_along_an_edge_of_a_face_it_lies_on.rs` and of the two bars less a
 /// half bar in `a_lens_whose_hole_is_half_a_disk.rs` (§440.3).
 #[test]
