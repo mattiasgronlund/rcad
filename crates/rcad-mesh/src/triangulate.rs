@@ -2850,4 +2850,66 @@ mod tests {
              {HOW_FAR_THE_EVALUATOR_ROUNDS}, which is not a bound on anything"
         );
     }
+
+    /// The band of torus wall that two quarter bends of ring 4 and tube 1 leave
+    /// half a turn round from each other (Q1734): two meridian circles at one
+    /// angle round the ring, each four corners a quarter of the tube apart, the
+    /// outline walked up the tube angle and the hole down it, starting half a
+    /// turn apart and read a whole turn apart. A quarter of a tube of 1 strays
+    /// under 1, and well over a tenth.
+    #[test]
+    fn a_band_between_two_circles_at_one_angle_round_the_ring_is_zipped_up() {
+        use core::f64::consts::{FRAC_PI_2, PI};
+        let ring = Surface::from(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube inside its ring"));
+        let at_one_angle = |round_the_tube: [f64; 4]| {
+            Loop::through(round_the_tube.map(|at| [at, FRAC_PI_2]).to_vec()).expect("four corners")
+        };
+        let outline = at_one_angle([PI, 1.5 * PI, 2.0 * PI, 2.5 * PI]);
+        let hole = at_one_angle([0.0, -FRAC_PI_2, -PI, -1.5 * PI]);
+        let deflection = |length| Deflection::of(length).expect("a positive length");
+
+        let patch = zip_up_a_band(&ring, &outline, &hole, deflection(1.0)).expect("a band");
+        assert_eq!(patch.triangles().len(), 8);
+        let mut used: HashMap<(u32, u32), u32> = HashMap::new();
+        for &[one, two, three] in patch.triangles() {
+            for side in [(one, two), (two, three), (three, one)] {
+                *used.entry(side).or_default() += 1;
+            }
+        }
+        let the_loops_way: Vec<(u32, u32)> = (0..4)
+            .flat_map(|at| [(at, (at + 1) % 4), (4 + at, 4 + (at + 1) % 4)])
+            .collect();
+        for side in &the_loops_way {
+            assert_eq!(used.get(side), Some(&1), "the side {side:?}");
+        }
+        for (&(from, to), &times) in &used {
+            if the_loops_way.contains(&(from, to)) {
+                continue;
+            }
+            assert!(
+                (from < 4) != (to < 4),
+                "the side from {from} to {to} joins two corners of one loop"
+            );
+            assert_eq!(
+                (times, used.get(&(to, from))),
+                (1, Some(&1)),
+                "the rung from {from} to {to}"
+            );
+        }
+
+        let the_outlines_way = at_one_angle([0.0, FRAC_PI_2, PI, 1.5 * PI]);
+        assert_eq!(
+            zip_up_a_band(&ring, &outline, &the_outlines_way, deflection(1.0)),
+            Err(CannotTriangulate::BoundaryCrossesItself { at: 6 })
+        );
+        let refused = zip_up_a_band(&ring, &outline, &hole, deflection(0.1));
+        assert!(
+            matches!(
+                refused,
+                Err(CannotTriangulate::BoundarySideStraysFurtherThanTheDeflection { side: 0, strays })
+                    if strays > 0.1 && strays < 1.0
+            ),
+            "{refused:?}"
+        );
+    }
 }
