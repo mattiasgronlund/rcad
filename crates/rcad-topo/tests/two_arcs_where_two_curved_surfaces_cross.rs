@@ -687,7 +687,7 @@ fn a_half_thin_bar_reaching_out_of_a_fat_ones_side_answers_every_rule() {
 /// every rule answers, and turned about its own axis the thin bar answers
 /// every rule both ways round, as the test below has it.
 #[test]
-fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_every_rule_but_two_thin_bar_first() {
+fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_every_rule() {
     let gives = what_each_rule_gives(|model| {
         let thin = thin_bar_out_of_a_fat_ones_side(model);
         let fat = model
@@ -695,42 +695,22 @@ fn a_whole_thin_bar_reaching_out_of_a_fat_ones_side_answers_every_rule_but_two_t
             .expect("a bar of radius four");
         [thin, fat]
     });
-    let [
-        union_thin_first,
-        Ok(union_fat_first),
-        Ok(shared_thin_first),
-        Ok(shared_fat_first),
-        thin_less_fat,
-        Ok(fat_less_thin),
-    ] = &gives[..]
-    else {
-        panic!("every rule fat bar first and the intersection thin bar first answer: {gives:?}");
-    };
-    assert!(
-        matches!(
-            union_thin_first,
-            Err(Error::AWireWillNotLieFlatOnItsFace { .. })
-        ) && matches!(
-            thin_less_fat,
-            Err(Error::AWireWillNotLieFlatOnItsFace { .. })
-        ),
-        "{gives:?}"
-    );
     let shared = 2.0 * what_a_half_thin_bar_out_of_a_fat_ones_side_shares_with_it();
-    for (solids, volume, faces) in [
-        (union_fat_first, 180.0 * PI - shared, 6),
-        (shared_thin_first, shared, 2),
-        (shared_fat_first, shared, 2),
-        (fat_less_thin, 160.0 * PI - shared, 4),
-    ] {
-        let [solid] = solids[..] else {
-            panic!("one solid: {gives:?}");
-        };
-        assert!(
-            solid.faces == faces && (solid.volume - volume).abs() <= solid.error,
-            "{gives:?}"
-        );
-    }
+    let wanted = [
+        (180.0 * PI - shared, 6),
+        (180.0 * PI - shared, 6),
+        (shared, 2),
+        (shared, 2),
+        (20.0 * PI - shared, 4),
+        (160.0 * PI - shared, 4),
+    ];
+    let answers = gives.iter().zip(wanted).all(|(answer, (volume, faces))| {
+        matches!(
+            answer.as_deref(),
+            Ok([solid]) if solid.faces == faces && (solid.volume - volume).abs() <= solid.error
+        )
+    });
+    assert!(answers, "{gives:?}");
 }
 
 /// The whole thin bar of the test above against the same bar of radius 4,
