@@ -302,6 +302,57 @@ fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
     }
 }
 
+/// The two tests above measure every answer, and a band of wall a rounding
+/// wide encloses no volume whichever way its triangles turn: drawn inside out,
+/// it would still measure. So every side of each answer's mesh, ring 4 and
+/// tube 1 placed each of the three ways round, is checked to be used once each
+/// way, which a band turned the wrong way fails along both its rims.
+#[test]
+fn every_side_of_a_bend_placed_round_from_another_is_used_once_each_way() {
+    let policy = Policy::certified();
+    let deflection = rcad_geom::Deflection::of(0.01).expect("a deflection");
+    for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
+        for rule in EVERY_RULE {
+            for the_first_first in [true, false] {
+                let what = format!("{turn} round, {rule:?}, the first first {the_first_first}");
+                let mut model = a_model();
+                let first = a_quarter_bend(&mut model, 4.0, 1.0);
+                let placed = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, turn);
+                let (arguments, tools) = if the_first_first {
+                    ([first], [placed])
+                } else {
+                    ([placed], [first])
+                };
+                let answer = model
+                    .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                for &solid in answer.solids() {
+                    let mesh = model
+                        .solid(solid)
+                        .and_then(|solid| {
+                            solid.mesh(deflection, &policy, &mut ProvenanceLog::new())
+                        })
+                        .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                    let mut used: BTreeMap<(u32, u32), u32> = BTreeMap::new();
+                    for triangle in mesh.triangles() {
+                        let [one, two, three] = triangle.corners();
+                        for side in [(one, two), (two, three), (three, one)] {
+                            *used.entry(side).or_default() += 1;
+                        }
+                    }
+                    for (&(from, to), &times) in &used {
+                        assert_eq!(
+                            (times, used.get(&(to, from))),
+                            (1, Some(&1)),
+                            "{what}: the side from {from} to {to}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// A quarter of a round bar of radius 6, `z` from −2 to 2, holds a quarter
 /// bend of ring 4 and tube 1 whole, its two flat faces on the planes of the
 /// bend's two caps. Where it sits, every rule both ways round answers and
