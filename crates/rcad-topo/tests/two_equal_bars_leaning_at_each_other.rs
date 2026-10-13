@@ -145,25 +145,33 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 
 /// The second bar starts where the axes meet, at 50°, 60°, 70°, 100° or 120°.
 ///
-/// **Every fuse is refused**: with the first bar first
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, and with the second first
-/// `Undecidable`, asking which side of a pipe a box round `(11, −3.25, 0.25)`
-/// is on. Neither moved in Q1646 or Q1660. At 120° both stand since Q1645
-/// named the crossing there; before it, `intersect` refused all six
+/// **Every fuse is refused `Undecidable`**, pinned by what it gave up on: at
+/// 120° with the first bar first, `order along a crossing`, and everywhere
+/// else `side of cylinder`, asking which side of the first pipe a box round
+/// `(11, −3.25, 0.25)` is on. At 120° the refusals stand since Q1645 named
+/// the crossing there; before it, `intersect` refused all six
 /// `CannotNameWhichPieceOfACrossingThisIs`.
 ///
-/// **Where each is refused (Q1663).** With the first bar first,
-/// `place_the_meets` in `fuse/arrange.rs`, splitting the first bar's pipe,
-/// asks `meet_of_three_surfaces` where that pipe, the second bar's near cap
-/// and the second pipe meet: the pair is the cap's cut across the first pipe
-/// and one half ellipse of the two pipes. They do share points, so it is not
-/// waved through as two cuts that share nothing. With the second first,
-/// `place_the_corners`, splitting a face of the second bar, asks through
+/// **Where each is refused.** Each bar's faces are split in the order the
+/// bars are handed in. The second bar's near cap and wall are both refused
+/// in `place_the_corners` in `fuse/arrange.rs`, which asks through
 /// `passes_through` whether the first pipe runs through the corner of the
-/// near cap. That corner is the bottom of `add_round_bar`'s seam, at `(r, 0,
-/// 0)` before the move, and the turn onto `x` puts it at `c − r·ẑ`, one of the two points where
-/// the pipes touch; its box is `3.1e−13` either way and straddles the first
-/// pipe.
+/// near cap (Q1663). That corner is the bottom of `add_round_bar`'s seam, at
+/// `(r, 0, 0)` before the move, and the turn onto `x` puts it at `c − r·ẑ`,
+/// one of the two points where the pipes touch; its box is `3.1e−13` either
+/// way and straddles the first pipe. The first bar's faces are all split at
+/// 50° to 100°, its wall in six, and at 120° its wall is refused on the order
+/// round the cap's crossing, which starts inside the box round `c − r·n̂`
+/// (`a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves`
+/// in `fuse/arrange.rs`).
+///
+/// **Until Q1820 every fuse with the first bar first was refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`** on the first bar's wall:
+/// `place_the_meets` asked `meet_of_three_surfaces` where that pipe, the
+/// second bar's near cap and the second pipe meet, which it cannot solve for
+/// one plane and two pipes (Q1663). The cap's cut across the first pipe and
+/// one half ellipse of the two pipes do share points, so the pair is not
+/// waved through as two cuts that share nothing.
 ///
 /// The second bar's near cap is square to its axis through the meeting point
 /// `c`, so it holds both points `c ± r·ẑ` where the two pipes touch, `(11,
@@ -181,36 +189,32 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 /// own incidence, cap through the start of its axis, kept by its move as a
 /// seam corner's is on the seam plane (§294.9). Since Q1814 `fuse/bake.rs`
 /// reads it on the numbers before the move and carries it, moved, on the
-/// second bar's near cap and wall (`caps_through_the_start_of_their_axis`).
-/// A first bar's wall told it names the cap's meet with the two pipes as the
-/// node where the four halves meet, and is split in six at 50° to 100°
-/// (`a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves`
-/// in `fuse/arrange.rs`). **The first bar's wall is not told yet**: gathering
-/// the cuts in `fuse/cuts.rs` does not copy it from the face that cuts onto
-/// the face cut, so the refusal with the first bar first stands. At 120° a
-/// wall told it is refused on the order round the cap's crossing instead,
-/// which starts inside the box round `c − r·n̂`. The corner at `c − r·ẑ`
-/// needs the same: it is on the cap's circle by construction, and that circle
-/// meets the first pipe at `c ± r·ẑ` because the cap holds `c`. Then the
-/// cells of the pipes meet the half-planes of the test above.
+/// second bar's near cap and wall (`caps_through_the_start_of_their_axis`),
+/// and since Q1820 gathering the cuts in `fuse/cuts.rs` tells it to every
+/// face those two cut, the first bar's wall among them. That wall names the
+/// cap's meet with the two pipes as the node where the four halves meet. The
+/// corner at `c − r·ẑ` needs the same: it is on the cap's circle by
+/// construction, and that circle meets the first pipe at `c ± r·ẑ` because
+/// the cap holds `c`. Then the cells of the pipes meet the half-planes of the
+/// test above.
 #[test]
 fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
     for degrees in [50.0, 60.0, 70.0, 100.0, 120.0] {
         for (rule, first_first) in six_fuses() {
             let said = fuse(degrees, [11.0, -3.25, 0.5], rule, first_first);
-            let pinned = if first_first {
-                matches!(
-                    said,
-                    Err(Error::Geometry(
-                        rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                    ))
-                )
+            let pinned = if degrees > 110.0 && first_first {
+                "order along a crossing"
             } else {
-                matches!(said, Err(Error::Undecidable { .. }))
+                "side of cylinder"
             };
-            assert!(
-                pinned,
-                "{degrees}° {rule:?} (first first: {first_first}): {said:?}"
+            let what = format!("{degrees}° {rule:?} (first first: {first_first})");
+            let Err(Error::Undecidable { records }) = &said else {
+                panic!("{what}: {said:?}");
+            };
+            assert_eq!(
+                records.records().last().map(|record| record.predicate()),
+                Some(pinned),
+                "{what}: {said:?}"
             );
         }
     }
