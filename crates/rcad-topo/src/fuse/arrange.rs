@@ -3780,7 +3780,7 @@ impl<'f> Arrangement<'f> {
     /// cut cannot disagree. A block face run through a square pyramid's apex
     /// meets each side of the pyramid a rounding from the apex, and every
     /// placed certified cut refused on that order while the planes were asked
-    /// only about a corner with exactly three round it (§294.19).
+    /// only about a corner with exactly three round it (§294.20).
     fn as_the_planes_say(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let partner = self.crossings[crossing].partner;
         let (Some(flat), Some(partner)) = (self.surface.as_plane(), partner.as_plane()) else {

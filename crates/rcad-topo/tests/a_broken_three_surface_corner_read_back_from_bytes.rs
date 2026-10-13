@@ -1,7 +1,7 @@
 //! A box whose top corner, where three planes meet, a pyramid whose apex,
 //! where four planes meet, and a half bar whose corner, where a cap, a round
 //! wall and a cut meet, are moved in their file, read back, and fused.
-//! `docs/decisions.md` §294.16, §294.17, §294.18 and §294.19 are the record
+//! `docs/decisions.md` §294.16 to §294.20 are the record
 //! and this file is their measurement.
 //!
 //! §294 moved a round bar's top corner, which has only two surfaces round it,
@@ -37,7 +37,7 @@
 //! answers where it stands. Placed, its four side planes cut the cut's face
 //! into specks a rounding across by the apex, and it cannot find a point
 //! inside one of them, which is a defect of its own and pinned here as it
-//! stands (§294.19).
+//! stands (§294.20).
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -396,7 +396,7 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
 }
 
 /// **Placed, the sound pyramid cut through its apex refuses**, which is a
-/// defect and not the moved apex's refusal (§294.19). Shifted, turned, or
+/// defect and not the moved apex's refusal (§294.19, §294.20). Shifted, turned, or
 /// turned and then shifted, the four side planes as written meet three by
 /// three at points a rounding apart, and the three bake solved the apex from
 /// put it a rounding off the cut: inside the block shifted, outside it turned.

@@ -1420,3 +1420,70 @@ passed.
 
 - The pyramid placed and cut through its apex refusing "order along a
   crossing", above. A row, tier 1, `refuses/B`.
+
+### 294.20 Q1911: placed, the apex is put in order along each edge from its planes, and a speck of the cut is left — 2026-10-13
+
+*Queue row Q1911, from §294.19. Lane
+`lane-q1911-a-placed-pyramid-cut-through-its-apex`, base `8fac3497`, carried
+on by a second and a third lane (§416). Code changed in `fuse/arrange.rs`;
+pinned in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`.*
+
+**The order, decided.** `Arrangement::as_the_planes_say` put two nodes on the
+line where the face's plane `S` and a partner plane `Q` meet in order only
+when each was the meet of `S`, `Q` and one plane more, and it read a corner's
+planes from the ones round it, so a corner with four or more was never asked.
+It now reads the three bake solved a corner from (`BakedCorner::solved_from`).
+For a corner with exactly three round it those are the three, and a corner
+read out of the model has none, so both are asked as before. When the three
+hold `S` and `Q`, the corner is on the line exactly and is the meet with the
+third. When they do not, as with the apex solved from planes 0, 1 and 2 on the
+edge where planes 0 and 3 meet, the corner is a rounding off the line.
+`where_a_corner_off_a_line_comes_along_it` then puts it before the meet of
+`S`, `Q` and `R` exactly when the sign of `R` at the corner
+(`side_of_a_plane_where_three_planes_meet`) and the sign of
+`det(n_S, n_Q, n_R)` differ. That is the rule
+`which_meet_comes_first_along_a_line` follows for a point on the line, and the
+side it reads is the side `passes_through` reads. So the face that puts the
+apex on one side of the cut, and the face that puts it in order along where
+the cut crosses an edge, cannot disagree.
+
+Two cuts by a corner off a line are each put in order against it by their own
+plane, so the two orders need not agree with the order of the two cuts.
+`nodes_along` proves only neighbouring pairs. Here there is one cut.
+
+`as_the_planes_say` is asked only where the boxes cannot say, so only an
+order that was undecided before can change. Every `rcad-topo` test and the
+slow tier pass.
+
+**What comes back placed.** Shifted, turned, and turned then shifted, − and ∩,
+under `certified` and under `tolerant(100)` alike, refuse `Undecidable` with
+one record, "a point inside a piece of a face", and leave the model as it was.
+Every record's points are within `1e-12` of the placed apex. No order is left
+for `tolerant(100)` to fold. A print put in `select::choose` and taken out
+found the piece: piece 31 of the block's face through the apex, of 53 pieces
+shifted and 51 turned, a triangle whose corners lie within `1e-14` of the
+apex. Placed, the four side planes cross that face in four lines that pass a
+rounding from one another by the apex, so they cut it into specks a rounding
+across, and no point inside this one can be written down. Where it stands,
+the pyramid still answers 60 under both policies.
+
+**Whether it is a limit.** Not settled. The answer, half the pyramid, 60, has
+nothing small in it, and the speck is a rounding across. What was tried is the
+exact order above. What was not: folding the specks of the cut's face in its
+arrangement, placing the speck by a side it shares with a side face of the
+pyramid in `select`, or taking the apex as on the cut under `tolerant` with
+`Policy::take_as_one_point`. The last changes what the side faces are cut
+into, not the cut's face, where the speck is. So it stays `refuses/B`.
+
+The pin: `a_sound_pyramid_placed_and_cut_through_its_apex_cannot_place_a_speck_of_the_cut`,
+which replaces §294.19's
+`a_sound_pyramid_placed_and_cut_through_its_apex_cannot_order_two_points_by_the_apex`.
+`mise exec -- just t -E
+'binary(a_broken_three_surface_corner_read_back_from_bytes)'`: 13 tests run,
+13 passed.
+
+**What this leaves.**
+
+- The pyramid placed and cut through its apex refusing "a point inside a piece
+  of a face" on a speck of the cut's face, above. A row, tier 1, `refuses/B`.
