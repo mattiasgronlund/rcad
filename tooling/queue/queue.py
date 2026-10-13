@@ -1087,7 +1087,7 @@ def the_hold_it_meets(row_id, widened, others):
     sep = "\037"
     records = "".join(
         sep.join(["R", "elsewhere", "", "6", other, "-", f"lane:{hold['branch']}", "-", hold["write_set"],
-                  f"(held in {hold['tree']})", other]) + "\n"
+                  f"(held in {hold['tree']})", "-", other]) + "\n"
         for other, hold in sorted(others.items()))
     asked = subprocess.run(
         [os.environ.get("QUEUE_JUST", "just"), "--justfile", os.environ["QUEUE_JUSTFILE"],
@@ -1273,8 +1273,14 @@ def elsewhere(here, args):
     copy has not caught up: the fill must not offer it either, but its write
     set is free, since the work behind it is finished (§263.9). A hold its
     lane has narrowed is busy only on the narrowed set (§424.7).
+
+    A held row's model is not in the claims file's `take` line, so it comes
+    from whichever copy of `docs/queue.md` still has the row's text — this
+    one or another dispatcher's — for §447.3's kept-Sonnet-slot rule to read
+    (`heldelse`, `emodel` in the `queue` recipe's fill).
     """
     queue = here.read()
+    model_of = {row.id: row.model for row in queue.rows}
     held = {}
     for row_id, hold in Claims(here.claims).holds().items():
         if hold["tree"] != here.top:
@@ -1283,6 +1289,7 @@ def elsewhere(here, args):
     closed = {}
     for tree, text in here.other_copies(lanes_too=False):
         for row in Queue(text).rows:
+            model_of[row.id] = row.model
             if row.state.startswith("lane:"):
                 held.setdefault(row.id, (row.state, row.write_set, tree.path))
             elif row.is_closed():
@@ -1292,8 +1299,9 @@ def elsewhere(here, args):
         mine = queue.find(row_id)
         if mine and (mine.is_closed() or mine.state.startswith("lane:")):
             continue
+        model = model_of.get(row_id, "-")
         raw = f"{row_id}  -  {state}  -  {write_set}  (held in {where})"
-        print(sep.join(["R", "elsewhere", "", "6", row_id, "-", state, "-", write_set, f"(held in {where})", raw]))
+        print(sep.join(["R", "elsewhere", "", "6", row_id, "-", state, "-", write_set, f"(held in {where})", model, raw]))
     for row_id, (state, where) in sorted(closed.items()):
         mine = queue.find(row_id)
         if mine is None or mine.is_closed():
