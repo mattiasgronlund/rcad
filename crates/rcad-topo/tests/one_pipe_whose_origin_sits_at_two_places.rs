@@ -349,7 +349,9 @@ fn the_stacked_bars_unite_into_one_bar_however_the_wall_is_written() {
 /// and it does not. A probe print in that branch confirmed it, in both
 /// orders: the two stored ways read `(true, false)` at `(−2, 0, 15.5)` and
 /// `(false, false)` at `(2, 0, 15.5)`, and for the slanted pin `(true, false)`
-/// at `(−2, 0, 6.125)`.
+/// at `(−2, 0, 6.125)`. With that branch reading the wall's old spelling
+/// twice, so that nothing turns round, the pin right through with two
+/// spellings, lower bar first, comes back `AWireWillNotLieFlatOnItsFace`.
 #[test]
 fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_unite_as_one_spelling_does() {
     for pinned in [a_pin_right_through(), a_slanted_pin_from_the_axis()] {
