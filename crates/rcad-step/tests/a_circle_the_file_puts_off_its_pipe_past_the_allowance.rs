@@ -13,8 +13,11 @@
 //! (under edge `#2708`; `#2385` under `#2384` in `FTR-F1A`) on the ball. That
 //! is `17.42` roundings of `19.75` off the pipe in `f64`, where the reader
 //! allows `16`, so the reader does not take the circle to be on the pipe and
-//! names the run by the ball. A ball and a pipe that touch leave the walk two
-//! pieces it cannot tell apart, and the solid is refused.
+//! names the run by the ball. The ball and the pipe cross in one thin loop
+//! over the half of the ball with `x < 10.05`, whose two strands meet at the
+//! rim's two corners, and the two surfaces lean `7.6e-13` apart there. No
+//! bound on how far off the crossing a corner is holds once their bend is
+//! counted, and the solid is refused at the rim's first arc.
 //!
 //! The file writes `#2708` as a quarter arc, and the pins cut their rims in
 //! two arcs for that reason. A rim written closed takes another road through
@@ -27,7 +30,10 @@
 //! the last bit wherever between the two the centre is taken, and its circle on
 //! the ball is `17.42` roundings off the pipe while its circle on the pipe is
 //! `20.98` off the ball in `f64` (`21.03` in exact arithmetic).
-//! `how_far_the_file_puts_the_circle_off_its_pipe` holds those figures.
+//! `how_far_the_file_puts_the_circle_off_its_pipe` holds those figures. Nor
+//! does any curve on both faces run along the half of the rim with
+//! `x > 10.05`: every point where the ball and the pipe cross has `x − 10.05`
+//! at most half the miss, `3.8e-14`.
 //!
 //! The two pins hold each side: widening the reader's allowance to `18` lets
 //! the first pin end import and fails the first test, and the second shows
@@ -36,195 +42,61 @@
 
 mod written_by_hand;
 
-use rcad_geom::{Axis, Cylinder, EdgeRun, Plane, Point, Sphere, Surface, Vector};
+use rcad_geom::{
+    Axis, Cylinder, EdgeRun, Plane, Point, Sphere, Surface, Vector, WhereFollowingACrossingGaveUp,
+};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
-use rcad_step::{Import, Refusal, StepFile};
+use rcad_step::{EntityId, Import, Refusal, StepFile};
 use rcad_topo::Error;
 use written_by_hand::a_header;
 
 /// The end of the leaning pipe, rounded by its ball, with the file's circle
 /// `#2709` between them in the file's own decimals. The circle is on the ball
 /// and `17.42` roundings off the pipe, so the reader names each arc by the
-/// ball, and the walk then cannot tell the two pieces of the ball's crossing
-/// with the pipe apart. Widening the reader's allowance to `18` roundings lets
-/// the pin end import, and fails this test.
+/// ball, and the ball and the pipe cross in one thin loop over the half of the
+/// rim with `x < 10.05` (§335.5). The rim's two corners, `#2404` and the point
+/// across from it, are where that loop's two strands meet, and the ball and the
+/// pipe lean `7.6e-13` apart there, so no bound on how far off the crossing a
+/// corner is holds once the two surfaces' bend is counted. The first arc,
+/// `#32`, is refused at its corners before it is walked. Widening the reader's
+/// allowance to `18` roundings lets the pin end import, and fails this test.
+///
+/// Between Q1889's two fixes the pin end imported. The march crossed the half
+/// of the rim with `x > 10.05`, where the ball and the pipe are within `1e-13`
+/// of each other and do not cross, and at `f64::MAX` handed back seven points
+/// `0.044` to `0.1` past `x = 10.05`, each certified outside the ball, under a
+/// bound of `7.9e-7`. Every point of the crossing has `x − 10.05` at most
+/// `q/2 = 3.8e-14`.
 #[test]
-fn a_circle_centred_off_its_leaning_pipe_is_named_by_the_ball() {
+fn a_circle_centred_off_its_leaning_pipe_is_refused_where_its_ball_and_pipe_turn_tangent() {
     let text = a_rounded_pin_end(&ROUND_THE_LEANING_PIPE);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
     let refused = match Import::read(&file, &Policy::certified(), &mut ProvenanceLog::new()) {
         Ok(_) => panic!(
-            "#2709 is centred 17.42 roundings off its pipe's axis, and was read as on the pipe"
+            "#2709 is centred 17.42 roundings off its pipe's axis, and half its rim runs where \
+             its ball and its pipe do not cross, and the pin end was imported"
         ),
         Err(refused) => refused,
     };
     assert!(
         matches!(
             &refused,
-            Refusal::TheSolidTheFileDescribesIsNotOne { why, .. }
+            Refusal::ThisEntityOfTheSolidWasRefused { entity: EntityId(32), why, .. }
                 if matches!(
-                    **why,
-                    Error::Geometry(rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs)
+                    &**why,
+                    Error::ADraftEdgeHasACrossingThatCannotBeFollowed { why, .. }
+                        if matches!(
+                            **why,
+                            rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+                                at: WhereFollowingACrossingGaveUp::BoundingHowFarOffTheCrossingAPointIs,
+                                ..
+                            }
+                        )
                 )
         ),
-        "a pin end whose circle is named by the ball and the pipe is refused for the two \
-         pieces of their crossing, not {refused:?}"
+        "a rim whose corners are where its ball and its pipe turn tangent is refused there, \
+         not {refused:?}"
     );
-}
-
-#[test]
-fn probe_what_the_leaning_pin_end_imports_as() {
-    let text = a_rounded_pin_end(&ROUND_THE_LEANING_PIPE);
-    let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
-    let policy = Policy::certified();
-    let mut log = ProvenanceLog::new();
-    let import = Import::read(&file, &policy, &mut log).expect("probe: imports");
-    let [(_, pin)] = import.solids() else {
-        panic!("one solid");
-    };
-    let model = import.model();
-    let solid = model.solid(*pin).expect("key");
-    println!("validate: {:?}", model.validate(&policy, &mut log).is_ok());
-    let radius = 0.1;
-    let leaning = Vector::new(3.663_735_981_263e-15, 1.0, 0.0);
-    let pipe = Axis::as_written(Point::new(10.05, -19.75, 16.4), leaning)
-        .and_then(|axis| Cylinder::new(axis, radius))
-        .expect("pipe");
-    let ball = Sphere::new(Point::new(10.05, 1.15, 16.4), radius).expect("ball");
-    for face in solid.faces() {
-        println!("face {:?}", face.surface());
-    }
-    let surfaces = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
-    let mut seen = Vec::new();
-    for face in solid.faces() {
-        for wire in face.wires() {
-            for coedge in wire.coedges() {
-                let edge = coedge.edge();
-                if seen.contains(&edge.key()) {
-                    continue;
-                }
-                seen.push(edge.key());
-                let ends = [edge.start(), edge.end()].map(|end| end.point());
-                println!("edge {:?} ends {ends:?} run {:?}", edge.key(), edge.run());
-                if ends[0] == ends[1] || edge.run() == EdgeRun::Straight {
-                    continue;
-                }
-                for deflection in [f64::MAX, 1.0, 0.1, 0.01] {
-                    for along in [[&surfaces[0], &surfaces[1]]] {
-                        let run = rcad_geom::NamedRun::new(
-                            edge.run(),
-                            ends.map(rcad_predicates::Point::from),
-                        )
-                        .expect("a run");
-                        match rcad_geom::walk(
-                            &run,
-                            along,
-                            rcad_geom::Deflection::of(deflection).expect("a length"),
-                            &policy,
-                            &mut log,
-                        ) {
-                            Err(e) => println!("  deflection {deflection}: walk refused {e:?}"),
-                            Ok(walked) => {
-                                println!(
-                                    "  deflection {deflection}: {} points, deviation {:?}",
-                                    walked.points().len(),
-                                    walked.deviation()
-                                );
-                                let mut xs: Vec<f64> = Vec::new();
-                                let mut tally = std::collections::BTreeMap::new();
-                                for point in walked.points() {
-                                    let [x, y, z] = point.coordinates();
-                                    xs.push(x - 10.05);
-                                    let key = format!(
-                                        "ball {:?} pipe {:?}",
-                                        ball.side_of((*point).into()),
-                                        pipe.side_of((*point).into())
-                                    );
-                                    *tally.entry(key).or_insert(0) += 1;
-                                    if walked.points().len() < 40 {
-                                        println!(
-                                            "    ({x:.17}, {y:.17}, {z:.17}) x-10.05 {:+.4e} \
-                                             ball {:?} pipe {:?}",
-                                            x - 10.05,
-                                            ball.side_of((*point).into()),
-                                            pipe.side_of((*point).into())
-                                        );
-                                    }
-                                }
-                                let most = xs.iter().copied().fold(f64::MIN, f64::max);
-                                let least = xs.iter().copied().fold(f64::MAX, f64::min);
-                                println!("    x-10.05 from {least:+.4e} to {most:+.4e}; {tally:?}");
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    for deflection in [f64::MAX, 0.01, 0.001, 0.0001] {
-        let mesh = match solid.mesh(
-            rcad_geom::Deflection::of(deflection).expect("a length"),
-            &policy,
-            &mut log,
-        ) {
-            Ok(mesh) => mesh,
-            Err(e) => {
-                println!("deflection {deflection}: mesh refused {e:?}");
-                continue;
-            }
-        };
-        println!(
-            "deflection {deflection}: deviation {:?}, {} points, {} triangles",
-            mesh.deviation(),
-            mesh.points().len(),
-            mesh.triangles().len()
-        );
-        let mut six_volume = 0.0;
-        for triangle in mesh.triangles() {
-            let [a, b, c] = triangle
-                .corners()
-                .map(|at| mesh.points()[at as usize] - Point::new(10.05, 1.15, 16.4));
-            six_volume += a.dot(b.cross(c));
-        }
-        println!("  mesh signed volume {:.10}", six_volume / 6.0);
-        let mut seen = Vec::new();
-        for face in solid.faces() {
-            for wire in face.wires() {
-                for coedge in wire.coedges() {
-                    let edge = coedge.edge();
-                    if seen.contains(&edge.key()) {
-                        continue;
-                    }
-                    seen.push(edge.key());
-                    let ends = [edge.start(), edge.end()].map(|end| end.point().coordinates());
-                    println!("edge {:?} ends {ends:?} run {:?}", edge.key(), edge.run());
-                    for &at in mesh.points_along_edge(edge.key()) {
-                        let point = mesh.points()[at as usize];
-                        let [x, y, z] = point.coordinates();
-                        println!(
-                            "  ({x:.17}, {y:.17}, {z:.17}) x-10.05 {:+.4e} ball {:?} pipe {:?}",
-                            x - 10.05,
-                            ball.side_of(point.into()),
-                            pipe.side_of(point.into())
-                        );
-                    }
-                }
-            }
-        }
-        match solid.measure(
-            rcad_geom::Deflection::of(deflection).expect("a length"),
-            &policy,
-            &mut log,
-        ) {
-            Ok(measured) => println!(
-                "deflection {deflection}: volume {:.10} +- {:.3e}, area {:.10}",
-                measured.volume(),
-                measured.volume_error(),
-                measured.surface_area()
-            ),
-            Err(e) => println!("deflection {deflection}: measure refused {e:?}"),
-        }
-    }
 }
 
 /// The same ball on the upright pipe, with the file's circle `#2692` between
