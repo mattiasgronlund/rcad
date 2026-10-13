@@ -48,10 +48,16 @@ use pairs::{Configuration, Elsewhere, Placed, Shape, Skew};
 /// side wall above it touch along `x = 2, y = 1`. That line is an edge of both,
 /// the corner of the frame's hole and of the tooth's top, so the four faces
 /// along it are four faces of the two inputs: the hole's walls `y = 1` and
-/// `x + y = 3`, and the tooth's top `y = 1` and its wall `x = 2`. §39.4's note
-/// of Q1901 leaves such a line refused, and it is still refused
-/// `ResultIsNotManifold { count: 4 }`. The answer would be one solid of
-/// `10 − 2`.
+/// `x + y = 3`, and the tooth's top `y = 1` and its wall `x = 2`. The frame
+/// less the comb, `10 − 2`, is three lumps and not one solid: the ring with
+/// the near wall's piece left of the middle tooth, 6.5; the square between
+/// the teeth, `x` from 1 to 2 and `y` from 0 to 1, 1; and the triangle
+/// `(3, 0), (4, 0), (3, 1)` right of the right tooth, 0.5. The square is the
+/// lump that touches the ring along `x = 2, y = 1`, so the two sides of that
+/// line are two solids, and it stays refused
+/// `ResultIsNotManifold { count: 4 }`: §80.9 leaves two touching solids
+/// unbuilt, and since queue row Q1913 only a line with one solid on both
+/// sides is parted (`docs/decisions.md` §39.4).
 #[test]
 fn a_leaning_frame_and_a_comb_meet_in_two_squares() {
     let (model, keys) = frame_and_comb().build();
@@ -94,10 +100,16 @@ fn a_comb_and_a_leaning_frame_meet_in_two_squares() {
 /// by three, leaning back two, three high on the comb's top at `(1, 1, 1)`.
 ///
 /// They touch only across `z = 1`, so the intersection holds nothing and each
-/// less the other is itself: the comb's 9 and the ell's 51. The union is not a
-/// solid: the ell's near wall `y = 1` runs along the bottom of the comb's gap
-/// between its teeth, from `x = 2` to `3`, the ell above it and the comb below,
-/// so four faces meet along that line.
+/// less the other is itself: the comb's 9 and the ell's 51. The union is one
+/// solid of 60 touching itself along a line: the ell's near wall `y = 1` runs
+/// along the bottom of the comb's gap between its teeth, from `x = 2` to `3`,
+/// the ell above it and the comb below, so four faces meet along that line.
+/// The line is an edge of both, the comb's gap floor meeting its top and the
+/// ell's near wall meeting its floor, so the four are four input faces. The
+/// ell stands on both teeth, so the comb and the ell are one solid without
+/// the line. It was refused `ResultIsNotManifold { count: 4 }` until queue
+/// row Q1913, which parts such a line where one solid lies on both sides of
+/// it (`docs/decisions.md` §39.4).
 #[test]
 fn a_leaning_comb_and_a_leaning_ell_standing_on_it_share_no_space() {
     let (model, keys) = comb_and_ell().build();
@@ -110,11 +122,13 @@ fn a_leaning_comb_and_a_leaning_ell_standing_on_it_share_no_space() {
     let (less, solids) = fused(&model, keys[0], keys[1], Rule::Difference);
     holds_exactly(&less, &solids, 9.0, "the difference");
 
-    is_not_a_solid(&model, keys[0], keys[1], Rule::Union);
+    let (either, solids) = fused(&model, keys[0], keys[1], Rule::Union);
+    assert_eq!(solids.len(), 1, "the union is one solid");
+    holds_exactly(&either, &solids, 9.0 + 51.0, "the union");
 }
 
 /// The same two with the ell first: the intersection still holds nothing, the
-/// ell less the comb is the ell, and the union is still not a solid.
+/// ell less the comb is the ell, and the union is the same one solid of 60.
 #[test]
 fn a_leaning_ell_standing_on_a_leaning_comb_shares_no_space_with_it() {
     let (model, keys) = comb_and_ell().build();
@@ -125,7 +139,9 @@ fn a_leaning_ell_standing_on_a_leaning_comb_shares_no_space_with_it() {
     let (less, solids) = fused(&model, keys[1], keys[0], Rule::Difference);
     holds_exactly(&less, &solids, 51.0, "the difference");
 
-    is_not_a_solid(&model, keys[1], keys[0], Rule::Union);
+    let (either, solids) = fused(&model, keys[1], keys[0], Rule::Union);
+    assert_eq!(solids.len(), 1, "the union is one solid");
+    holds_exactly(&either, &solids, 9.0 + 51.0, "the union");
 }
 
 /// A frame three by three, leaning forward one, two high at the origin, and an

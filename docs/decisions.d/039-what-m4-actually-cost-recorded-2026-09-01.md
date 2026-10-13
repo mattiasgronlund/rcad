@@ -370,7 +370,12 @@ moved them.
 > and the comb, two cubes along part of an edge, the frame less the block over
 > its corner, and two quarter bends end to end still refuse
 > `ResultIsNotManifold { count: 4 }`, and §80.9's decision that two solids
-> touching along an edge of both are not built is untouched.
+> touching along an edge of both are not built is untouched. (Two of the four
+> still refuse, each two solids touching along an edge of both: the frame and
+> the comb, and the two cubes, both in `degenerate_fuses.rs`. The two quarter
+> bends answer since Q756, §378.6: their four darts came from two circles
+> given one name. The frame less the block answers since Q1913, in the note
+> below.)
 
 > **2026-10-06 note (Q803): a prism lying on one of its own edges parts four
 > darts too.** `part_each_line_two_faces_rest_against_each_other_along` now
@@ -417,9 +422,24 @@ moved them.
 >    faces, `77.807457349804`, and it validates. Both as Q1116's lane
 >    measured them.
 > 5. **§80.9 is untouched.** It is about a line that is an edge of both
->    inputs, four darts from four input faces, and that stays refused: where
->    neither pair is pieces of one input face, `the_two_pairs_along` still
->    asks for two flat faces on one plane facing one way.
+>    inputs, four darts from four input faces, with a different solid on each
+>    side, and that stays refused. As first written, this point kept every
+>    line of four input faces refused, since where neither pair is pieces of
+>    one input face `the_two_pairs_along` still asks for two flat faces on one
+>    plane facing one way. That was wider than §80.9, which is about two
+>    touching solids: an L plate less a pocket cut into its corner square is
+>    one solid touching itself along such a line, its two arms joined by the
+>    plate's floor. **Since queue row Q1913 the same day**,
+>    `pair_each_line_one_solid_touches_itself_along` in `fuse/assemble.rs`
+>    parts such a line by input, the two faces round each input's edge a
+>    pair, where a face of one pair and a face of the other walk the line the
+>    same way and are joined without it. Faces round a line alternate in
+>    which way they walk it, and so do the full and empty wedges between
+>    them, so those two faces bound the two different full wedges, and joined
+>    they are one solid. Joined means across an edge with two faces along it,
+>    or across a line already parted this way. Where they are not joined, as
+>    with two cubes along part of an edge, the line stays one edge, refused
+>    under §80.9.
 >
 > Measured with the guards gone, in `a_prism_lying_on_one_edge.rs`: the block
 > less the prism inside it is one solid of two shells, the block's six faces
@@ -458,11 +478,48 @@ moved them.
 > `a_lens_whose_hole_is_half_a_disk.rs`, the bar at `(−3, 0)` less the half
 > bar of radius 1 at `(0, −3)` answers `98.5π`, and less the half bar of
 > radius 4 at the origin `76π`; the file had called the second a limit. Two
-> kinds stay refused `ResultIsNotManifold { count: 4 }` under point 5 above,
-> each one solid touching itself along a line that is an edge of both
-> inputs, four input faces round it: the frame less the comb, `8`, and the
-> two bars united less either half bar, `200π − 4L − 1.5π` and `176π − 4L`
-> for the lens's area `L`.
+> kinds stayed refused `ResultIsNotManifold { count: 4 }` under point 5 above,
+> each along a line that is an edge of both inputs, four input faces round
+> it: the frame less the comb, `8`, and the two bars united less either half
+> bar, `200π − 4L − 1.5π` and `176π − 4L` for the lens's area `L`. So did the
+> L plate less the pocket in its corner square, which Q1910 ran as a shape a
+> designer draws (`a_prism_lying_on_one_edge.rs`).
+>
+> Queue row Q1913 moved them, by the amended point 5. The L plate less the
+> pocket answers one solid of `2.5`, and the two bars united less the half bar
+> of radius 4 answers `176π − 4L`. So does the frame 3 by 5 less the block 4
+> by 4 over its corner, which the Q760 note above lists as refused: one solid
+> of `11`, one shell of 12 faces, which validates, upright and turned. The
+> frame's ring is cut open at that corner, and its two ends touch along the
+> hole's corner `x = 2, y = 4`
+> (`a_frame_with_a_block_over_one_corner_fuses_turned_as_it_does_upright`,
+> which compares turned with upright only). A pin no row had named moved too: the
+> leaning comb united with the leaning ell standing on it, in
+> `a_sliver_along_an_edge_of_a_face_it_lies_on.rs`, answers one solid of `60`
+> both ways round. The ell stands on both teeth and touches the comb along
+> the bottom of the gap between them, an edge of both. The two bars united less the half bar at
+> the lens corner is parted, and then panics in `rings_round` as the union of
+> the same two already did: the bars' cap touches itself at the lens corner
+> `(0, −4, 4)` in both (queue row Q1290). The frame less the comb is still
+> refused, rightly. It is not one solid of `8` but three lumps: the frame's
+> ring with the near wall's piece left of the middle tooth, `6.5`; the square
+> between the middle and right teeth, `1`; and the triangle `(3, 0)`,
+> `(4, 0)`, `(3, 1)`, `0.5`. The square touches the ring along `x = 2,
+> y = 1`, so a different solid lies on each side of that line, and §80.9
+> leaves it unbuilt.
+>
+> Q1913's lane found the rule older than its own disagreeing with it. Where
+> one input face runs straight through the line and the other input has an
+> edge along it, the `(true, false)` arm of `the_two_pairs_along` parts the
+> line without asking whether one solid lies on both sides. A block 4 by 2,
+> 1 high, leaning back one along `x` for each step along `y`, less a block 1
+> by 3, 1 high, at `(2, −2, 0)`, answers one solid of one shell of 12 faces,
+> `7`, which validates: the block's lump of `6.5` and the triangle `(3, 0)`,
+> `(4, 0)`, `(3, 1)` of `0.5`, touching along `x = 3, y = 1`, where the
+> block's wall `x + y = 4` runs straight through. That is two touching solids
+> written as one, where the rule above refuses the same relation at a line of
+> four input faces. It was built only as a probe, not kept, and left to a
+> queue row.
 
 > **2026-10-04 note (Q473): a plane lying along a cone's ruling runs along the
 > ruling.** The gap above, closed: `AlongATouch` carries the ruling,
