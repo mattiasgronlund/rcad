@@ -263,3 +263,70 @@ another way than through `Model::fuse`:
   taken out again before the commit (446.4).
 - **Q1791**'s crash file is not in the tree. It was run on a shape built from
   the row's words, which may not be the shape the crash file built (446.4).
+
+### 446.7 The answers checked, the rows by kind, and what Mattias chose
+
+*Written on 2026-10-13 by the session that took over
+`dispatch-2026-10-03-a8`'s handoff and talked the sweep through with Mattias.*
+
+**The answers 446.4 counted.** Q1930's verifier checked the sums and about 20
+of the cited lines, and re-ran no fuse. Its probe's "answers" is an `Ok` and a
+count of solids: it ran no `validate` and measured no volume, except on Q1734.
+So the two rows that answer where their text says refused were run again at
+`8d91e2eb`, by a scratch test that ran each answer through `Model::validate`
+and measured each solid at a deflection of `0.001`, then deleted:
+`mise exec -- just t -p rcad-topo -E 'test(/zz_probe_446/)' --no-capture`.
+
+- **Q1749**, the six placements, six fuses, both policies: 72 runs. Every
+  answer is valid, and every volume is within its measured error of the exact
+  one: the union `113.0879 ± 0.038` against 36π, the intersection
+  `6.2816 ± 0.0062` against 2π (`12.5633` against 4π for the tall thin bar),
+  thick less thin `106.8063 ± 0.044` against 34π (`100.5247` against 32π), thin
+  less thick nothing. Thick less thin, which the row asked might be a limit,
+  is among them.
+- **Q1791**, six fuses, both policies: 12 runs, every one valid. The
+  intersection is `602.1680`, the union `1397.8320` and each difference
+  `397.8320`. Clipping one square by the other in Python, apart from the
+  kernel, and multiplying by the height gives `602.16799`, `1397.83201` and
+  `397.83201`.
+
+Both rows simply no longer fail on the shapes they name. Nothing is filed for
+them: `lane.md` has a lane run its row's shape on its base first and stop with
+`does_not_reproduce`, and §433.8 then closes the row at that base.
+
+**The rows by kind, not by run.** A run count leans on how many placements a
+row tried, and Q1834 alone is 30 of the 51 runs tolerance answers. 18 of the 21
+rows refuse. Sorted from each row's own text, not traced:
+
+| Kind | Rows | Tolerant |
+|---|---|---|
+| Two faces touch exactly, but a point on the touch was computed or turned, so the numbers miss it by a rounding | Q1834, Q1854, Q1839, Q1765, Q1842 | answers 3, part of 2 |
+| The same, and tolerance swaps the refusal for another | Q1737, Q1867 | swaps |
+| Rounding has already made several things of one: four planes meet a rounding apart by an apex and leave specks (Q1936), a torus band is a rounding wide (Q1734) | Q1936, Q1734 | no change |
+| The code has no road for the case: no point offered inside a piece of two sides (Q1748), a point asked on the touching line (Q1903), three surfaces with fewer than two flat (Q1909), Q104's puck | Q1748, Q1903, Q1909, Q104 | no change |
+| Two thin bars crossing, given up on by the mesher; Q1929 guesses they share a cause | Q1896, Q1897, Q1929, Q1793 | no change |
+| Not traced | Q1777 | no change |
+
+The rows of the first kind show the pattern in their own words. Q1834 answers
+cut through the axis and refuses at every cut off it. Q1765 answers at a
+quarter turn and refuses at pi/6 and 1 radian. Q1842 answers shifted and
+refuses turned. Where the numbers come out exact it answers; where they are
+computed it refuses. That is the part of the tail Mattias's question was
+about. The third kind is the same loss found later: the rounding has already
+cut the specks, and there is no yes-or-no question left for a tolerance to
+answer.
+
+By rows, the four functions that raise 120 runs (446.5) cover 9 of the 18. And
+the function that gives up is where the code stops, not why: `choose` gives up
+for Q1748, a case with no road, and for Q1936, rounding specks. So a few places
+holds; a few causes is not measured.
+
+**What Mattias chose.** He agreed that Q1749 and Q1791 need no row. He asked
+for three things:
+
+- one trace row over the two-thin-bars family, to test whether a few places
+  are a few causes: Q1953, which writes 446.8;
+- to try out carrying coincidences from how the shape was built, the reading
+  the first and third kinds point at: §448 and Q1954;
+- a sweep of a random sample of 30 class-C rows, done by a lane: §449 and
+  Q1955.
