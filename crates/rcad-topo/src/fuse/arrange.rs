@@ -1841,8 +1841,8 @@ impl<'f> Arrangement<'f> {
     /// `None` unless there are exactly three and every one is a plane. Round a
     /// corner with four or more, that is `None`, since the others pass through
     /// the box only give or take a rounding: [`Arrangement::passes_through`]
-    /// reads the three bake solved from, and
-    /// [`Arrangement::as_the_planes_say`] does not (§294.19).
+    /// and [`Arrangement::as_the_planes_say`] read the three bake solved from
+    /// (§294.19).
     fn the_three_planes_a_point_is_the_meet_of(surfaces: &[Surface]) -> Option<[Plane; 3]> {
         match surfaces {
             [
@@ -3632,11 +3632,11 @@ impl<'f> Arrangement<'f> {
     /// at one base corner, 4 high, has a meet of three of its apex's own
     /// planes whose box misses the apex's room, so it stays a node beside the
     /// apex. Along a side of the pyramid the two boxes overlap, and the planes
-    /// cannot say ([`Arrangement::as_the_planes_say`]): the apex has four planes
-    /// round it and `bake` does not say which three it solved it from. So the
-    /// certified union with a cube refused on the order. The meet's narrowed
-    /// box lies `7e-13` past the apex's along that side, and the union answers
-    /// with the two solids and their volumes (Q866).
+    /// could not say then ([`Arrangement::as_the_planes_say`]): the apex has
+    /// four planes round it, and the planes were asked only about a corner with
+    /// three. So the certified union with a cube refused on the order. The
+    /// meet's narrowed box lies `7e-13` past the apex's along that side, and
+    /// the union answers with the two solids and their volumes (Q866).
     ///
     /// **Round a closed crossing the tighter boxes are swept and not named.**
     /// [`round_a_closed_crossing_and_what_it_measures`] recognises the start by
@@ -3766,29 +3766,27 @@ impl<'f> Arrangement<'f> {
     /// `Q`, which is the crossing's forward direction ([`dominant_axis`]), so
     /// [`which_meet_comes_first_along_a_line`](rcad_predicates::which_meet_comes_first_along_a_line)
     /// answers in the crossing's own terms.
+    ///
+    /// **A corner with four or more planes round it is placed by the three
+    /// `bake` solved it from** ([`BakedCorner::solved_from`]), against a node
+    /// that is the meet of the two planes of the line and one more, `R`. When
+    /// those three hold both planes of the line, the corner is on it exactly
+    /// and is the meet with the third. When they do not, the corner is a
+    /// rounding off the line, and it comes first exactly when it lies on the
+    /// side of `R` the line runs on into
+    /// ([`Arrangement::where_a_corner_off_a_line_comes_along_it`]). That is the
+    /// side [`Arrangement::passes_through`] reads, so a face that puts the
+    /// corner on one side of `R` and a face that puts it in order along `R`'s
+    /// cut cannot disagree. A block face run through a square pyramid's apex
+    /// meets each side of the pyramid a rounding from the apex, and every
+    /// placed certified cut refused on that order while the planes were asked
+    /// only about a corner with exactly three round it (§294.19).
     fn as_the_planes_say(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let partner = self.crossings[crossing].partner;
         let (Some(flat), Some(partner)) = (self.surface.as_plane(), partner.as_plane()) else {
             return None;
         };
-        let the_third_plane = |node: usize| {
-            let node = &self.nodes[node];
-            let surfaces: &[Surface] = match (node.vertex, &node.made_of) {
-                (Some(vertex), _) => {
-                    &self
-                        .face
-                        .wires
-                        .iter()
-                        .flatten()
-                        .find(|edge| edge.start.vertex == vertex)
-                        .expect("every corner node is where an edge of this face starts")
-                        .start
-                        .around
-                }
-                (None, Some((made_of, _))) => made_of,
-                (None, None) => return None,
-            };
-            let three = Self::the_three_planes_a_point_is_the_meet_of(surfaces)?;
+        let the_third_plane = |three: [Plane; 3]| {
             let mut others = three
                 .into_iter()
                 .filter(|plane| plane != flat && plane != partner);
@@ -3797,15 +3795,88 @@ impl<'f> Arrangement<'f> {
                 (None, _) | (Some(_), Some(_)) => None,
             }
         };
-        let (mine, theirs) = (the_third_plane(first)?, the_third_plane(second)?);
-        Some(
-            rcad_predicates::which_meet_comes_first_along_a_line(
-                [flat.coefficients(), partner.coefficients()],
+        let line = [flat.coefficients(), partner.coefficients()];
+        let (mine, theirs) = (
+            self.the_three_planes_a_node_is_the_meet_of(first)?,
+            self.the_three_planes_a_node_is_the_meet_of(second)?,
+        );
+        let is_a_corner = |node: usize| self.nodes[node].vertex.is_some();
+        let decided = match (the_third_plane(mine), the_third_plane(theirs)) {
+            (Some(mine), Some(theirs)) => rcad_predicates::which_meet_comes_first_along_a_line(
+                line,
                 mine.coefficients(),
                 theirs.coefficients(),
-            )
-            .expect("each node was solved as the one point where its three planes meet"),
-        )
+            ),
+            (None, Some(theirs)) if is_a_corner(first) => {
+                Self::where_a_corner_off_a_line_comes_along_it(line, mine, theirs)
+            }
+            (Some(mine), None) if is_a_corner(second) => {
+                Self::where_a_corner_off_a_line_comes_along_it(line, theirs, mine)
+                    .map(the_other_way)
+            }
+            (None | Some(_), None | Some(_)) => return None,
+        };
+        Some(decided.expect("each node was solved as the one point where its three planes meet"))
+    }
+
+    /// The three planes a node's box was worked out round: for a corner of
+    /// the face the three `bake` solved it from, and for a meet of three the
+    /// three it is the meet of. `None` unless all three are planes.
+    fn the_three_planes_a_node_is_the_meet_of(&self, node: usize) -> Option<[Plane; 3]> {
+        let node = &self.nodes[node];
+        match (node.vertex, &node.made_of) {
+            (Some(_), _) => self
+                .the_baked_corner_of(node)
+                .solved_from
+                .and_then(|three| Self::the_three_planes_a_point_is_the_meet_of(&three)),
+            (None, Some((made_of, _))) => Self::the_three_planes_a_point_is_the_meet_of(made_of),
+            (None, None) => None,
+        }
+    }
+
+    /// Whether a corner `bake` solved as the meet of the `three` planes comes
+    /// before or after the point where `cut` crosses the `line` two planes
+    /// meet in, walked along `n₀ × n₁`: [`Decision::Pos`] when the corner
+    /// does, [`Decision::Zero`] when the corner is on `cut`.
+    ///
+    /// The corner need not be on the line, so it is put where `cut` says it
+    /// is: `cut`'s value along the line is `(t − t_cut) · det(n₀, n₁, n_cut)`,
+    /// and the corner comes first when its own value has the sign that puts
+    /// it at a `t` below `t_cut`. That is the rule
+    /// [`which_meet_comes_first_along_a_line`](rcad_predicates::which_meet_comes_first_along_a_line)
+    /// follows with a point on the line, and it gives the same answer when
+    /// the three hold the line's two planes. Both signs are exact.
+    fn where_a_corner_off_a_line_comes_along_it(
+        line: [[f64; 4]; 2],
+        three: [Plane; 3],
+        cut: Plane,
+    ) -> core::result::Result<Decision, rcad_predicates::Error> {
+        let normal = |[nx, ny, nz, _]: [f64; 4]| [nx, ny, nz];
+        let into_the_cut = orient3d(
+            normal(line[0]),
+            normal(line[1]),
+            normal(cut.coefficients()),
+            [0.0; 3],
+        );
+        let side = rcad_predicates::side_of_a_plane_where_three_planes_meet(
+            three.map(|flat| flat.coefficients()),
+            cut.coefficients(),
+        )?;
+        Ok(match (side, into_the_cut) {
+            (undecided @ Decision::Undecidable { .. }, _)
+            | (_, undecided @ Decision::Undecidable { .. }) => undecided,
+            (_, Decision::Zero) => {
+                panic!("a plane a meet on the line was solved with runs along the line")
+            }
+            (Decision::Zero, _) => Decision::Zero,
+            (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => Decision::Neg,
+            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => Decision::Pos,
+            (other, decided) => {
+                panic!(
+                    "a sign came back with a decision nothing here knows: {other:?}, {decided:?}"
+                )
+            }
+        })
     }
 
     /// Which of two nodes on a straight crossing comes first along it, where
