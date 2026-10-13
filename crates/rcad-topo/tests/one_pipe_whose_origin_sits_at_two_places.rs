@@ -25,10 +25,11 @@
 //! (§325.4). Now all four unions — one spelling and two, each either way round
 //! — answer one bar of three faces with the volume worked out by hand.
 //!
-//! **A pin in the upper bar is where it still costs the answer.** With a thin
-//! bar in the upper bar, the union with the lower bar is refused where one
-//! spelling unites, because the fuse asks where the two spellings and the
-//! pin's wall meet (§231.5).
+//! **A pin in the upper bar costs nothing either.** With a thin bar in the
+//! upper bar, the union with the lower bar was refused where one spelling
+//! unites, because the fuse asked where the two spellings and the pin's wall
+//! meet (§231.5). Now both spellings unite, pin or no pin, with the wall one
+//! face (Q1877).
 //!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
@@ -345,7 +346,10 @@ fn the_stacked_bars_unite_into_one_bar_however_the_wall_is_written() {
 /// through, at `(−2, 0, 15.5)` the wall's longitude is
 /// `z × (−1, 0, 0) = (0, −1, 0)` and the pin's `(−1, 0, 0) × z = (0, 1, 0)`,
 /// so that crossing turns round, and at `(2, 0, 15.5)` both are `(0, 1, 0)`
-/// and it does not.
+/// and it does not. A probe print in that branch confirmed it, in both
+/// orders: the two stored ways read `(true, false)` at `(−2, 0, 15.5)` and
+/// `(false, false)` at `(2, 0, 15.5)`, and for the slanted pin `(true, false)`
+/// at `(−2, 0, 6.125)`.
 #[test]
 fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_unite_as_one_spelling_does() {
     for pinned in [a_pin_right_through(), a_slanted_pin_from_the_axis()] {

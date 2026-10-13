@@ -1936,7 +1936,11 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::place_where_two_rulings_cross`]), and two half ellipses
     /// of two pipes of one width whose axes meet meet at the two places their
     /// walls touch ([`Arrangement::place_where_two_halves_meet`]); every other
-    /// two crossings of one pair get no node (§347.9).
+    /// two crossings of one pair get no node (§347.9). Two crossings whose
+    /// partners are one surface written twice, which [`intersect`] calls
+    /// [`SurfaceMeet::SameSurface`], are two crossings of one pair too, and are
+    /// placed as one once [`meet_of_three_surfaces`] has refused them
+    /// ([`Arrangement::the_two_partners_are_one_surface`], Q1877).
     ///
     /// Three surfaces can meet at two points, and both are nodes.
     /// [`MeetOfThree::MoreThanAPoint`] is an answer and not a refusal (§34.9):
