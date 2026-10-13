@@ -1620,7 +1620,11 @@ impl<'f> Arrangement<'f> {
                     // cone at a node, and the turn between them is undecided
                     // (§224.2's joined cone, taken back in).
                     let crossing = &self.crossings[index];
-                    let on_it = if corner.is_on_by_construction(&crossing.partner) {
+                    let on_it = if corner.is_on_by_construction(&crossing.partner)
+                        || self.a_corner_on_a_cap_circle_is_where_two_pipes_touch(
+                            &corner,
+                            &crossing.partner,
+                        ) {
                         nothing_rules_the_point_out(crossing.picked_by(), at)
                     } else {
                         self.passes_through(index, at, &corner.around, policy, log)?
@@ -1659,6 +1663,68 @@ impl<'f> Arrangement<'f> {
             })
             .collect();
         Ok(())
+    }
+
+    /// Whether `corner` is on a cap's circle, the cap square to its pipe's axis
+    /// through where that axis starts, as `bake` carries it
+    /// ([`BakedFace::caps_through_the_start_of_their_axis`]), and is one of the
+    /// two places `c ± r·n̂` where that pipe touches `partner`, a pipe of the
+    /// same radius whose axis runs exactly through the start `c`.
+    fn a_corner_on_a_cap_circle_is_where_two_pipes_touch(
+        &self,
+        corner: &BakedCorner,
+        partner: &Surface,
+    ) -> bool {
+        let Surface::Cylinder(other) = *partner else {
+            return false;
+        };
+        let [one, two] = &corner.around[..] else {
+            return false;
+        };
+        let on_the_cap = |surface: &Surface, known: &ACapThroughTheStartOfItsAxis| {
+            surface
+                .as_plane()
+                .is_some_and(|flat| *flat == known.cap || *flat == known.cap.reversed())
+        };
+        let on_the_pipe = |surface: &Surface, known: &ACapThroughTheStartOfItsAxis| {
+            one_surface(surface, &Surface::Cylinder(known.pipe))
+        };
+        let Some(known) = self
+            .face
+            .caps_through_the_start_of_their_axis
+            .iter()
+            .find(|known| {
+                (on_the_cap(one, known) && on_the_pipe(two, known))
+                    || (on_the_pipe(one, known) && on_the_cap(two, known))
+            })
+        else {
+            return false;
+        };
+        let start = known.pipe.axis().origin();
+        if known.pipe.radius() != other.radius()
+            || lies_exactly_on_the_axis(start, other.axis()) != Some(true)
+        {
+            return false;
+        }
+        let [mine, its] = [known.pipe, other]
+            .map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
+        let places = where_two_pipes_touch(
+            start.coordinates().map(Interval::exactly),
+            cross_of_intervals(mine, its),
+            other.radius(),
+        );
+        let corner_box = corner.point.enclosure();
+        places
+            .iter()
+            .filter(|place| {
+                let place = place.enclosure();
+                (0..3).all(|axis| {
+                    corner_box[axis].lo() <= place[axis].lo()
+                        && place[axis].hi() <= corner_box[axis].hi()
+                })
+            })
+            .count()
+            == 1
     }
 
     /// Whether a corner of the face, at `point` with the surfaces `around` it,
@@ -2150,6 +2216,19 @@ impl<'f> Arrangement<'f> {
     /// rule beside a triple it may also name is two corners called one
     /// ([`name_of_surface_bits`]).
     ///
+    /// **On the cap itself it is the same two places**, where the circle the
+    /// cap is bounded by, its crossing with its own pipe, touches its crossing
+    /// with the other pipe of that radius. The circle is round `c` with
+    /// radius `r` in the cap, and a point `c + r·û` of it, `û` square to its
+    /// own axis, is `r·‖û × ê‖` from the other axis along `ê`: `r` where `û`
+    /// is square to `ê` as well, so `û = ±n̂`, and less everywhere else. The
+    /// cap's corner on the circle is one of the two
+    /// ([`Arrangement::a_corner_on_a_cap_circle_is_where_two_pipes_touch`]),
+    /// and the other is named here as the walls name it. Asked of
+    /// `meet_of_three_surfaces`, the cap of the same two bars was refused
+    /// for one plane and two pipes, once its corner was taken onto the other
+    /// pipe (Q1815).
+    ///
     /// # Errors
     ///
     /// [`Error::Undecidable`](crate::Error::Undecidable) when which side of
@@ -2161,28 +2240,36 @@ impl<'f> Arrangement<'f> {
         second: usize,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
-        let Surface::Cylinder(face) = self.surface else {
-            return Ok(false);
+        let is_half = |crossing: usize| self.crossings[crossing].half_an_ellipse.is_some();
+        let (flat, pipes) = match (
+            self.surface,
+            self.crossings[first].partner,
+            self.crossings[second].partner,
+        ) {
+            (Surface::Cylinder(face), Surface::Plane(cap), Surface::Cylinder(other))
+                if is_half(second) =>
+            {
+                (cap, [face, other])
+            }
+            (Surface::Cylinder(face), Surface::Cylinder(other), Surface::Plane(cap))
+                if is_half(first) =>
+            {
+                (cap, [face, other])
+            }
+            (Surface::Plane(cap), Surface::Cylinder(one), Surface::Cylinder(other)) => {
+                (cap, [one, other])
+            }
+            _ => return Ok(false),
         };
-        let (cap_at, half_at) = if self.crossings[first].partner.as_plane().is_some() {
-            (first, second)
-        } else {
-            (second, first)
-        };
-        let (Surface::Plane(flat), Surface::Cylinder(other)) = (
-            self.crossings[cap_at].partner,
-            self.crossings[half_at].partner,
-        ) else {
-            return Ok(false);
-        };
-        if self.crossings[half_at].half_an_ellipse.is_none() {
+        let [one, other] = pipes.map(Surface::Cylinder);
+        if pipes[0].radius() != pipes[1].radius() || one_surface(&one, &other) {
             return Ok(false);
         }
         let on_this_cap = |known: &&ACapThroughTheStartOfItsAxis| {
             (known.cap == flat || known.cap == flat.reversed())
-                && [face, other].iter().any(|pipe| {
-                    one_surface(&Surface::Cylinder(known.pipe), &Surface::Cylinder(*pipe))
-                })
+                && [one, other]
+                    .iter()
+                    .any(|pipe| one_surface(&Surface::Cylinder(known.pipe), pipe))
         };
         let Some(known) = self
             .face
@@ -2193,29 +2280,29 @@ impl<'f> Arrangement<'f> {
             return Ok(false);
         };
         let start = known.pipe.axis().origin();
-        let across = if one_surface(&Surface::Cylinder(known.pipe), &self.surface) {
-            other
+        let across = if one_surface(&Surface::Cylinder(known.pipe), &one) {
+            pipes[1]
         } else {
-            face
+            pipes[0]
         };
         if lies_exactly_on_the_axis(start, across.axis()) != Some(true) {
             return Ok(false);
         }
 
-        let [one, two] =
-            [face, other].map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
+        let [mine, its] =
+            pipes.map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
         let places = where_two_pipes_touch(
             start.coordinates().map(Interval::exactly),
-            cross_of_intervals(one, two),
-            face.radius(),
+            cross_of_intervals(mine, its),
+            pipes[0].radius(),
         );
-        let mut pipes = [face, other];
-        pipes.sort_by_key(|pipe| name_of_surface_bits(&Surface::Cylinder(*pipe)));
-        let [lesser, greater] = pipes;
-        let named = where_two_halves_meet(&self.surface, &Surface::Cylinder(other));
+        let mut sorted = pipes;
+        sorted.sort_by_key(|pipe| name_of_surface_bits(&Surface::Cylinder(*pipe)));
+        let [lesser, greater] = sorted;
+        let named = where_two_halves_meet(&one, &other);
         for place in places {
-            if !nothing_rules_the_point_out(self.crossings[cap_at].picked_by(), place)
-                || !nothing_rules_the_point_out(self.crossings[half_at].picked_by(), place)
+            if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
+                || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
             {
                 continue;
             }
