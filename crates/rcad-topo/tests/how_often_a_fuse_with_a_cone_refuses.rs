@@ -992,7 +992,7 @@ fn the_six_fuses_held_to_their_inputs(
     (sampled, sigma): (f64, f64),
     what: &str,
     policy: &Policy,
-) -> Vec<(Rule, Result<(f64, f64), String>)> {
+) -> SixAnswers {
     let fused = |rule, arguments, tools| {
         let answer = fused_and_measured(model, rule, arguments, tools, policy)
             .map_err(|why| format!("{why}"));
@@ -1055,6 +1055,10 @@ fn the_six_fuses_held_to_their_inputs(
     }
     all
 }
+
+/// Each fuse's rule, with the volume of what it handed back and that volume's
+/// declared error, or what it said when it refused.
+type SixAnswers = Vec<(Rule, Result<(f64, f64), String>)>;
 
 /// One fuse on a copy of `model`, validated, with the volume of every solid
 /// it hands back added up and the sum of their errors.
