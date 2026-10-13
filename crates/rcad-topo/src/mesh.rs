@@ -2444,17 +2444,21 @@ impl BuildingAMesh {
     /// from its corner on one loop to the island's corner nearest that loop,
     /// round the island to its corner nearest the other loop, and straight on
     /// from there. The patch either side takes the island's half on its side
-    /// into its one loop ([`ACutAcrossARing::round_an_island`]). An island no
-    /// cut meets goes whole into the one patch it lies in, as a hole of it, as
-    /// on a cap ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). With no islands
-    /// every cut is straight, and the patches are the ones a ring was always
-    /// cut into, bit for bit.
+    /// into its one loop ([`ACutAcrossARing::round_an_island`]). **An island
+    /// two cuts meet lies across the patch between them** and splits it in
+    /// two, one beside each loop, each taking the island's stretch between the
+    /// two cuts on its side, so a ring holding an island that reaches past a
+    /// quarter turn is cut into more than four patches. An island no cut meets
+    /// goes whole into the one patch it lies in, as a hole of it, as on a cap
+    /// ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). With no islands every cut
+    /// is straight, and the patches are the ones a ring was always cut into,
+    /// bit for bit.
     ///
     /// `None` when the face is not a ring: two loops is not enough, they both
     /// have to go right round, or there is nothing across to cut to. `None` as
-    /// well when a cut meets two islands, two cuts meet one, a leg round an
-    /// island meets a loop, another island or another cut, or an island lies
-    /// in no patch.
+    /// well when a cut meets two islands, a leg round an island meets a loop,
+    /// another island or another cut, the patches do not take each side of an
+    /// island once, or an island lies in no patch.
     #[expect(
         clippy::too_many_arguments,
         reason = "the face, its surface and chart, its two kinds of loop, the turn and the room are each read"
@@ -2571,6 +2575,16 @@ impl BuildingAMesh {
         ) {
             return Ok(None);
         }
+        let across_an_island: Vec<bool> = (0..4)
+            .map(|step| an_island_lies_across_the_patch_after(&through, step, whole_turn))
+            .collect();
+        if !each_island_a_cut_meets_goes_into_the_patches_once(
+            &through,
+            &across_an_island,
+            islands.len(),
+        ) {
+            return Ok(None);
+        }
 
         let mut cuts = Vec::with_capacity(4);
         for (&[leaving, arriving], round) in ends.iter().zip(&through) {
@@ -2580,6 +2594,7 @@ impl BuildingAMesh {
                 cuts.push(ACutAcrossARing {
                     back: across.the_other_way(),
                     across,
+                    legs: None,
                 });
                 continue;
             };
@@ -2604,9 +2619,8 @@ impl BuildingAMesh {
                 .extend([round.island.points[reached], round.island.points[left]]);
             cuts.push(ACutAcrossARing::round_an_island(
                 round,
-                arriving[1] > leaving[1],
-                &to_the_island,
-                &from_the_island,
+                to_the_island,
+                from_the_island,
             ));
         }
 
@@ -2618,17 +2632,47 @@ impl BuildingAMesh {
         let mut patches = Vec::with_capacity(4);
         for step in 0..4 {
             let next = (step + 1) % 4;
-            let mut one = unwrapped(
-                &up.between(along_the_top[step], along_the_top[next]),
-                whole_turn,
-            );
+            let along_the_up = up.between(along_the_top[step], along_the_top[next]);
+            let along_the_down = down
+                .between(along_the_bottom[step], along_the_bottom[next])
+                .the_other_way();
+            // **An island across the patch splits it in two**, one beside the
+            // loop running up and one beside the loop running down, each
+            // taking the stretch of the island between the two cuts' corners
+            // on its side.
+            if across_an_island[step] {
+                let (Some(behind), Some(ahead)) = (&through[step], &through[next]) else {
+                    unreachable!("an island lies across a patch only between two cuts round it");
+                };
+                let (Some([to_behind, from_behind]), Some([to_ahead, from_ahead])) =
+                    (&cuts[step].legs, &cuts[next].legs)
+                else {
+                    unreachable!("a cut round an island is made in two legs");
+                };
+                let [near_the_up, near_the_down] =
+                    behind.the_stretches_to(ahead).map(|[from, to]| {
+                        let stretch = behind.island.between(from, to);
+                        if behind.runs_up_the_chart {
+                            stretch
+                        } else {
+                            stretch.the_other_way()
+                        }
+                    });
+                let mut one = unwrapped(&along_the_up, whole_turn);
+                one.take_in_unwrapped(to_ahead, whole_turn);
+                one.take_in_unwrapped(&near_the_up, whole_turn);
+                one.take_in_unwrapped(&to_behind.the_other_way(), whole_turn);
+                let mut other = unwrapped(&near_the_down, whole_turn);
+                other.take_in_unwrapped(from_ahead, whole_turn);
+                other.take_in_unwrapped(&along_the_down, whole_turn);
+                other.take_in_unwrapped(&from_behind.the_other_way(), whole_turn);
+                patches.push(vec![one]);
+                patches.push(vec![other]);
+                continue;
+            }
+            let mut one = unwrapped(&along_the_up, whole_turn);
             one.take_in_unwrapped(&cuts[next].across, whole_turn);
-            one.take_in_unwrapped(
-                &down
-                    .between(along_the_bottom[step], along_the_bottom[next])
-                    .the_other_way(),
-                whole_turn,
-            );
+            one.take_in_unwrapped(&along_the_down, whole_turn);
             one.take_in_unwrapped(&cuts[step].back, whole_turn);
             patches.push(vec![one]);
         }
@@ -3856,6 +3900,12 @@ impl ACutUpToThePole {
 struct ACutAcrossARing {
     across: WalkedLoop,
     back: WalkedLoop,
+    /// A cut round an island as its two legs, from the loop running up to the
+    /// island and from the island to the loop running down, each the points
+    /// strictly between its two ends; `None` for a straight cut. The two
+    /// patches an island splits the patch between two cuts into take these
+    /// rather than `across` and `back`, which go round the whole of a half.
+    legs: Option<[WalkedLoop; 2]>,
 }
 
 impl ACutAcrossARing {
@@ -3870,14 +3920,13 @@ impl ACutAcrossARing {
     /// down.
     fn round_an_island(
         round: &ARingsCutRoundAnIsland,
-        runs_up_the_chart: bool,
-        to_the_island: &WalkedLoop,
-        from_the_island: &WalkedLoop,
+        to_the_island: WalkedLoop,
+        from_the_island: WalkedLoop,
     ) -> Self {
         let [reached, left] = round.corners;
         let on_its_left = round.island.between(reached, left);
         let on_its_right = round.island.between(left, reached).the_other_way();
-        let (behind, ahead) = if runs_up_the_chart {
+        let (behind, ahead) = if round.runs_up_the_chart {
             (on_its_left, on_its_right)
         } else {
             (on_its_right, on_its_left)
@@ -3885,24 +3934,57 @@ impl ACutAcrossARing {
         let round_one_half = |half: &WalkedLoop| {
             let mut cut = to_the_island.clone();
             cut.take_in(half);
-            cut.take_in(from_the_island);
+            cut.take_in(&from_the_island);
             cut
         };
         Self {
             across: round_one_half(&behind),
             back: round_one_half(&ahead).the_other_way(),
+            legs: Some([to_the_island, from_the_island]),
         }
     }
 }
 
 /// Where one of a ring's cuts goes round an island: which of the ring's
 /// islands it is, the island moved by whole turns of longitude so that its
-/// middle is within half a turn of the corner the cut leaves from, and the
-/// island's corner the cut reaches it at and the one it leaves it from.
+/// middle is within half a turn of the corner the cut leaves from, the
+/// island's corner the cut reaches it at and the one it leaves it from, and
+/// whether the cut runs up the chart.
 struct ARingsCutRoundAnIsland {
     which: usize,
     island: WalkedLoop,
     corners: [usize; 2],
+    runs_up_the_chart: bool,
+}
+
+impl ARingsCutRoundAnIsland {
+    /// The corners the island's two halves run between, the way the island is
+    /// walked: the half behind the cut, at lower longitude, and the half ahead.
+    fn its_halves(&self) -> [[usize; 2]; 2] {
+        let [reached, left] = self.corners;
+        if self.runs_up_the_chart {
+            [[reached, left], [left, reached]]
+        } else {
+            [[left, reached], [reached, left]]
+        }
+    }
+
+    /// The corners the island's two stretches between this cut and the cut
+    /// `ahead` round the same island run between, the way the island is
+    /// walked: the stretch beside the loop running up and the one beside the
+    /// loop running down. Walked from `ahead` to this cut and from this cut to
+    /// `ahead` respectively, the first is taken the way the island is walked
+    /// where the cuts run up the chart and the other way where they run down,
+    /// and so is the second.
+    fn the_stretches_to(&self, ahead: &Self) -> [[usize; 2]; 2] {
+        let [reached_behind, left_behind] = self.corners;
+        let [reached_ahead, left_ahead] = ahead.corners;
+        if self.runs_up_the_chart {
+            [[reached_ahead, reached_behind], [left_behind, left_ahead]]
+        } else {
+            [[reached_behind, reached_ahead], [left_ahead, left_behind]]
+        }
+    }
 }
 
 /// What [`BuildingAMesh::a_cut_through_an_island`] needs to find a cut that
@@ -4621,44 +4703,111 @@ fn the_sides_of_a_rim(cap: &WalkedLoop, whole: f64) -> impl Iterator<Item = [[f6
 
 /// Which island each of a ring's cuts goes round, from the corner it leaves
 /// at each end of `ends`: `None` for a cut whose straight line meets none.
-/// It reaches the island at the island's corner furthest towards the loop it
-/// leaves, and leaves it from the corner furthest towards the loop it arrives
-/// on. `None` overall when a cut meets two islands, two cuts meet one, or a
-/// cut that meets one runs level across the chart, where neither loop is the
-/// nearer to any corner.
+///
+/// A cut that is the only one to meet its island reaches it at the island's
+/// corner furthest towards the loop it leaves, and leaves it from the corner
+/// furthest towards the loop it arrives on. **Where several cuts meet one
+/// island those are the same two corners for each of them**, so each reaches
+/// and leaves it near where its own straight line crosses it instead
+/// ([`the_corners_a_cut_crosses_an_island_near`]). A thin bar reaching out of
+/// a fat one's side leaves an island in the thin bar's wall that reaches
+/// `4.1` of the `2π` round it, which two or three of the four cuts meet
+/// (Q1858).
+///
+/// `None` overall when a cut meets two islands, a cut that meets one runs
+/// level across the chart, where neither loop is the nearer to any corner, or
+/// a cut that meets an island another cut meets as well crosses no side of it
+/// in the turn it is taken in.
 fn where_a_rings_cuts_go_round_islands(
     ends: &[[[f64; 2]; 2]],
     islands: &[WalkedLoop],
     whole: f64,
 ) -> Option<Vec<Option<ARingsCutRoundAnIsland>>> {
-    let mut met = vec![false; islands.len()];
-    let mut through = Vec::with_capacity(ends.len());
+    let mut meeting = Vec::with_capacity(ends.len());
     for &[leaving, arriving] in ends {
         let meets: Vec<usize> = (0..islands.len())
             .filter(|&at| a_leg_meets_an_island(&islands[at], [leaving, arriving], None, whole))
             .collect();
-        let which = match meets[..] {
-            [] => {
-                through.push(None);
-                continue;
-            }
-            [which] if !met[which] && leaving[1] != arriving[1] => which,
+        meeting.push(match meets[..] {
+            [] => None,
+            [which] if leaving[1] != arriving[1] => Some(which),
             _ => return None,
-        };
-        met[which] = true;
-        let island = in_the_turn_nearest(&islands[which], leaving[0], whole);
-        let towards_leaving = (leaving[1] - arriving[1]).signum();
-        let corners = [
-            the_corner_furthest(&island, towards_leaving),
-            the_corner_furthest(&island, -towards_leaving),
-        ];
-        through.push(Some(ARingsCutRoundAnIsland {
-            which,
-            island,
-            corners,
-        }));
+        });
     }
-    Some(through)
+    ends.iter()
+        .zip(&meeting)
+        .map(|(&[leaving, arriving], &which)| {
+            let Some(which) = which else {
+                return Some(None);
+            };
+            let island = in_the_turn_nearest(&islands[which], leaving[0], whole);
+            let alone = meeting
+                .iter()
+                .filter(|&&other| other == Some(which))
+                .count()
+                == 1;
+            let corners = if alone {
+                let towards_leaving = (leaving[1] - arriving[1]).signum();
+                [
+                    the_corner_furthest(&island, towards_leaving),
+                    the_corner_furthest(&island, -towards_leaving),
+                ]
+            } else {
+                the_corners_a_cut_crosses_an_island_near(&island, [leaving, arriving])?
+            };
+            Some(Some(ARingsCutRoundAnIsland {
+                which,
+                island,
+                corners,
+                runs_up_the_chart: arriving[1] > leaving[1],
+            }))
+        })
+        .collect()
+}
+
+/// The island's corners a cut from `leaving` to `arriving` reaches it at and
+/// leaves it from, where other cuts meet the same island: of the side its
+/// straight line crosses first from `leaving`, the end nearer the crossing,
+/// and of the side it crosses first from `arriving`, the same. `None` when the
+/// line crosses no side.
+fn the_corners_a_cut_crosses_an_island_near(
+    island: &WalkedLoop,
+    cut: [[f64; 2]; 2],
+) -> Option<[usize; 2]> {
+    let count = island.corners.len();
+    let crossings: Vec<(f64, usize)> = (0..count)
+        .filter_map(|at| {
+            let next = (at + 1) % count;
+            let [along_the_cut, along_the_side] =
+                where_two_sides_cross(cut, [island.corners[at], island.corners[next]])?;
+            Some((along_the_cut, if along_the_side <= 0.5 { at } else { next }))
+        })
+        .collect();
+    let first = crossings
+        .iter()
+        .min_by(|one, other| one.0.total_cmp(&other.0))?;
+    let last = crossings
+        .iter()
+        .max_by(|one, other| one.0.total_cmp(&other.0))?;
+    Some([first.1, last.1])
+}
+
+/// How far along each of two straight sides in the chart they cross, as a
+/// share of its length from its first end, or `None` where they are parallel
+/// or do not cross.
+fn where_two_sides_cross([a, b]: [[f64; 2]; 2], [c, d]: [[f64; 2]; 2]) -> Option<[f64; 2]> {
+    let cross = |p: [f64; 2], q: [f64; 2]| p[0] * q[1] - p[1] * q[0];
+    let one = [b[0] - a[0], b[1] - a[1]];
+    let other = [d[0] - c[0], d[1] - c[1]];
+    let between = [c[0] - a[0], c[1] - a[1]];
+    let turn = cross(one, other);
+    if turn == 0.0 {
+        return None;
+    }
+    let along_one = cross(between, other) / turn;
+    let along_other = cross(between, one) / turn;
+    ((0.0..=1.0).contains(&along_one) && (0.0..=1.0).contains(&along_other))
+        .then_some([along_one, along_other])
 }
 
 /// Whether each leg of a ring's cuts round islands stays inside the face: it
@@ -4709,6 +4858,78 @@ fn the_legs_round_islands_stay_inside_a_ring(
                         })
             })
     })
+}
+
+/// Whether the patch between cut `step` of a ring and the cut after it lies
+/// across an island both go round, rather than reaching round an end of it:
+/// the two cuts meet one island, and in one turn of longitude once the cut
+/// after the last is taken a whole turn on.
+fn an_island_lies_across_the_patch_after(
+    through: &[Option<ARingsCutRoundAnIsland>],
+    step: usize,
+    whole: f64,
+) -> bool {
+    let next = (step + 1) % through.len();
+    let (Some(behind), Some(ahead)) = (&through[step], &through[next]) else {
+        return false;
+    };
+    let wrapped = if next == 0 { whole } else { 0.0 };
+    behind.which == ahead.which
+        && (longitudes_of(&behind.island).0 - longitudes_of(&ahead.island).0 - wrapped).abs()
+            < whole / 2.0
+}
+
+/// Whether the patches of a ring take each side of every island a cut meets
+/// once exactly: a cut's half on the side of a patch no island lies across,
+/// and the stretches between two cuts' corners where one does.
+///
+/// It holds for an island one cut meets at two corners. Two cuts that meet one
+/// island at one corner, cuts round one island that disagree on which way up
+/// the chart they run, or a cut between two round one island that does not
+/// meet it, leave a side in no patch or in two, which would put a patch over
+/// another.
+fn each_island_a_cut_meets_goes_into_the_patches_once(
+    through: &[Option<ARingsCutRoundAnIsland>],
+    across_an_island: &[bool],
+    islands: usize,
+) -> bool {
+    let count = through.len();
+    let mut taken: Vec<Vec<u32>> = vec![Vec::new(); islands];
+    let mut take = |round: &ARingsCutRoundAnIsland, [from, to]: [usize; 2]| {
+        let corners = round.island.corners.len();
+        let sides = &mut taken[round.which];
+        sides.resize(corners, 0);
+        let mut at = from;
+        while at != to {
+            sides[at] += 1;
+            at = (at + 1) % corners;
+        }
+    };
+    for step in 0..count {
+        let next = (step + 1) % count;
+        let (behind, ahead) = (&through[step], &through[next]);
+        if across_an_island[step] {
+            let (Some(behind), Some(ahead)) = (behind, ahead) else {
+                unreachable!("an island lies across a patch only between two cuts round it");
+            };
+            if behind.runs_up_the_chart != ahead.runs_up_the_chart {
+                return false;
+            }
+            for stretch in behind.the_stretches_to(ahead) {
+                take(behind, stretch);
+            }
+            continue;
+        }
+        if let Some(ahead) = ahead {
+            take(ahead, ahead.its_halves()[0]);
+        }
+        if let Some(behind) = behind {
+            take(behind, behind.its_halves()[1]);
+        }
+    }
+    taken
+        .iter()
+        .all(|sides| sides.iter().all(|&times| times == 1))
 }
 
 /// Whether a straight leg from a rim corner meets a side of the rim other
