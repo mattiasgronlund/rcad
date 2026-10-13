@@ -1411,10 +1411,13 @@ impl BuildingAMesh {
         //
         // §31.10 item 5 and §35.7 both say this claim is the one lane 5
         // falsifies, and the sentence that stops being true is *"the fuse
-        // refuses a curved solid outright"*. The other face with a hole this
-        // cuts is a ball's skin whose outer loop reaches both poles and whose
-        // hole reaches neither, which a half ball cut again leaves: it is cut
-        // from the hole up to each pole instead. A ball's skin with only holes
+        // refuses a curved solid outright"*. A pipe's patch whose outline
+        // does not go right round, with one hole in it, which a slanted pin
+        // from a bar's axis leaves where the bar ends beside where the pin
+        // would come out, is cut from the hole up to its outline and down to
+        // it. A ball's skin whose outer loop reaches both poles and whose hole
+        // reaches neither, which a half ball cut again leaves, is cut from the
+        // hole up to each pole instead. A ball's skin with only holes
         // was opened into strips above, a cap on a ball with islands in it
         // was cut up to its pole, and a ring on a pipe with islands in it was
         // cut across round them. Any other face with one loop right round and
@@ -1438,6 +1441,18 @@ impl BuildingAMesh {
                 room,
             )? {
                 return Ok(patches);
+            }
+            if let Some((one, other)) =
+                self.cut_a_hole_out_to_its_outline(face, stored, &walked, room)?
+            {
+                return self.cut_each_narrow_enough(
+                    face,
+                    stored,
+                    Chart::Upright,
+                    vec![one, other],
+                    widest,
+                    room,
+                );
             }
             let Some((one, other)) =
                 self.cut_a_hole_up_to_both_poles(face, stored, &walked, room)?
@@ -5598,18 +5613,22 @@ fn how_far_round(around: &WalkedLoop) -> f64 {
 /// **positive when the face's material is inside the loop** and negative when it
 /// is outside.
 ///
-/// A **pinching** surface's two coordinates are right-handed about its outward
-/// normal — `∂u × ∂v` is `R² cos v` times it on a ball — and a wire keeps its
-/// face's material on its left, so a loop with the material inside it runs
-/// anticlockwise in `(u, v)` and the shoelace sum comes out positive. The number
-/// itself is not used, only its sign, and it is an area in radians squared
-/// rather than a size in space.
+/// The two coordinates of every surface but a torus are right-handed about its
+/// outward normal — `∂u × ∂v` is `R² cos v` times it on a ball — and a wire
+/// keeps its face's material on its left, so a loop with the material inside it
+/// runs anticlockwise in `(u, v)` and the shoelace sum comes out positive. The
+/// number itself is not used, only its sign, and it is an area in radians
+/// squared rather than a size in space.
 ///
-/// **Right-handed is not true of every surface, and the caller is what makes
-/// that safe.** A torus crosses its two coordinates *into* the material, so the
-/// sign of this sum would read backwards there. It never gets the chance: the
-/// only call site whose sign matters is guarded by [`Surface::where_it_pinches`],
-/// and a torus pinches nowhere. `every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
+/// **Right-handed is not true of a torus, and the caller is what makes that
+/// safe.** A torus crosses its two coordinates *into* the material, so the sign
+/// of this sum would read backwards there. It never gets the chance: a call
+/// site whose sign matters either runs only on a surface that pinches
+/// ([`Surface::where_it_pinches`]), and a torus pinches nowhere, or runs on a
+/// pipe and asks [`how_far_the_second_coordinate_wraps`] that it is not a
+/// torus, as [`a_ring_on_a_pipe_with_islands_in_it`] and
+/// [`BuildingAMesh::cut_a_hole_out_to_its_outline`] do.
+/// `every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
 /// in `rcad-geom` is the measurement, over all five surfaces.
 fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
     let corners = &around.corners;
@@ -5940,6 +5959,74 @@ fn the_pole_side_a_line_from_a_hole_reaches(
     }
     let (_, at, crossing) = nearest?;
     (around.points[at] == around.points[(at + 1) % count]).then_some((at, crossing))
+}
+
+/// The corner of `outline` a leg from a hole's corner at `[longitude,
+/// latitude]` lands on, going up the latitude for a `way` of `1.0` and down
+/// it for `-1.0`: the nearer end of the first side the line along that
+/// longitude meets beyond `latitude`.
+///
+/// `None` when a side of `outline` lies along the line, where nothing says
+/// which of its points is first; when the line meets no side; when the
+/// corner it lands on is not strictly beyond `latitude`; or when the leg
+/// does not stay inside the outline ([`a_leg_stays_inside`]).
+fn where_a_leg_from_a_hole_lands(
+    outline: &WalkedLoop,
+    [longitude, latitude]: [f64; 2],
+    way: f64,
+) -> Option<usize> {
+    let corners = &outline.corners;
+    let count = corners.len();
+    let mut nearest: Option<(f64, usize)> = None;
+    for at in 0..count {
+        let (here, next) = (corners[at], corners[(at + 1) % count]);
+        if !passes(longitude, here[0], next[0]) {
+            continue;
+        }
+        if here[0] == next[0] {
+            return None;
+        }
+        let crossing = here[1] + (longitude - here[0]) / (next[0] - here[0]) * (next[1] - here[1]);
+        let away = (crossing - latitude) * way;
+        if away > 0.0 && nearest.is_none_or(|(least, _)| away < least) {
+            nearest = Some((away, at));
+        }
+    }
+    let (_, at) = nearest?;
+    let onwards = (at + 1) % count;
+    let landing = if the_nearer_of(longitude, corners[at][0], corners[onwards][0]) {
+        at
+    } else {
+        onwards
+    };
+    let beyond = (corners[landing][1] - latitude) * way > 0.0;
+    (beyond && a_leg_stays_inside(outline, [[longitude, latitude], corners[landing]], landing))
+        .then_some(landing)
+}
+
+/// Whether the straight leg from a point to corner `landing` of `outline`
+/// lies inside it in the chart: it meets no side but at `landing`, and a
+/// point half way along it is inside.
+///
+/// **Touching counts as meeting**, as it does for a chord
+/// ([`a_chord_stays_inside`]): a leg through a corner of the outline is two
+/// sides for the triangulator, and a leg along a side draws that side twice.
+/// A leg that meets no side is wholly inside or wholly outside, which the
+/// point half way along tells apart.
+fn a_leg_stays_inside(outline: &WalkedLoop, leg: [[f64; 2]; 2], landing: usize) -> bool {
+    let count = outline.corners.len();
+    let meets_a_side = (0..count).any(|at| {
+        let next = (at + 1) % count;
+        let side = [outline.corners[at], outline.corners[next]];
+        if at == landing || next == landing {
+            let far = if at == landing { side[1] } else { side[0] };
+            a_point_lies_along(leg, far) || a_point_lies_along(side, leg[0])
+        } else {
+            two_sides_meet(leg, side)
+        }
+    });
+    let half_way = [0, 1].map(|which| (leg[0][which] + leg[1][which]) / 2.0);
+    !meets_a_side && a_loop_holds(outline, half_way)
 }
 
 /// Whether a side of `around` meets the line along `longitude` between two
