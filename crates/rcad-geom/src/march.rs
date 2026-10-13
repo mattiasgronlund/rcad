@@ -1048,6 +1048,52 @@ mod tests {
         );
     }
 
+    /// **A trial that settles onto the loop behind where it set out from is
+    /// shortened, and not kept.** A pipe of radius 1 along `x` through
+    /// `y = 1, z = 1` reaches out of the side of one of radius 4 up `z` through
+    /// `x = 0, y = −2.5`, and the two cross in one loop round the line
+    /// `x = 0, z = 1`. Seen down that line, the loop goes once round it, and
+    /// the angle about it only ever grows the one way along the loop.
+    ///
+    /// This is the frame the mesh walks a whole thin bar out of a fat bar's
+    /// side in, and the seed and the room are the ones its coarse walk asks:
+    /// `(√9.75, 0, 1)` and half the budget. The walk leaves the seed along
+    /// `+z`, and it used to keep a first trial that settled onto the loop at
+    /// `z = 0.13`, behind the seed. Every step after it went forward, so that
+    /// first point belonged between the walk's last two, and the thin bar's
+    /// outline on its own wall crossed itself. The mesh refused it as a wire
+    /// that will not lie flat on its face (Q1889).
+    #[test]
+    fn a_trial_that_settles_behind_its_start_is_shortened_and_not_kept() {
+        let thin = a_pipe([1.0, 0.0, 0.0], [-10.0, 1.0, 1.0], 1.0);
+        let fat = a_pipe([0.0, 0.0, 1.0], [0.0, -2.5, -4.0], 4.0);
+        let start = Point::new(3.122498999199199, 0.0, 1.0);
+
+        let walked = march([&thin, &fat], start, 1.685337313933421e307, 1 << 20)
+            .expect("a thin pipe out of a fat one's side crosses it in one loop");
+
+        let round_the_line = |at: Point| f64::atan2(at.z() - 1.0, at.x());
+        let turns: Vec<f64> = core::iter::once(start)
+            .chain(walked.points.iter().copied())
+            .chain(core::iter::once(start))
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|pair| {
+                let turn = round_the_line(pair[1]) - round_the_line(pair[0]);
+                (turn + core::f64::consts::PI).rem_euclid(core::f64::consts::TAU)
+                    - core::f64::consts::PI
+            })
+            .collect();
+        let whole: f64 = turns.iter().sum();
+        assert!(
+            (whole.abs() - core::f64::consts::TAU).abs() < 1e-9
+                && turns.iter().all(|&turn| turn * whole > 0.0),
+            "each step goes the same way round, and the steps make one whole turn: \
+             turns {turns:?} from {start:?} through {:?}",
+            walked.points
+        );
+    }
+
     /// Two surfaces tangent along their crossing have no direction to follow,
     /// and saying so is the branch §24.1 built this to be able to watch.
     #[test]
