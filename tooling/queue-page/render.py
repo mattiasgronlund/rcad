@@ -11,21 +11,31 @@ and writes a self-contained page: rows added against rows closed per day, two
 SVG charts of the queue's shape over every commit of `docs/queue.md` on main's
 first-parent line, a table of both by day, a table of the rows running now with
 the tier each was taken from and the agent it runs under, a table of the open
-rows Mattias pinned and what holds each back, a table of the open rows a fill
-would not take now and why, then the current
+rows Mattias pinned and what holds each back, a table of why a fill would not
+take an open row now and which rows each reason holds back, then the current
 ready, running and lately-closed rows, and what the overnight fuzz job did
 night by night — that last section is `fuzz_section.py`'s, read from the fuzz log root the caller
 names.
 `docs/decisions.md` §230, §263.
 
+Every row of main's copy also gets a page of its own, `<out>/rows/<id>.html`:
+its tier, its class, the rows it came from as `just lineage` reads them, the
+files it expects to change, and the row itself. The front page names a row by
+its id alone, and every Q id on either kind of page links to that row's page
+(§444).
+
 The state this keeps across runs is `<out>/.history-cache.json`, one entry
-per commit sha already tallied, and `<out>/.fuzz-cache.json`, one entry per
-fuzz log already read (`fuzz_section.py` says why). Recomputing every commit on every write
+per commit sha already tallied, `<out>/.fuzz-cache.json`, one entry per
+fuzz log already read (`fuzz_section.py` says why), and
+`<out>/.lineage-cache.json`, what each commit did to the rows, which is what
+`lineage.Graph` reads. Recomputing every commit on every write
 would make the render the queue pays for grow with the queue's own history;
 a sha's tally changes only when the list of tiers does, and `load_cache` drops
 an entry taken under another list. Measured through `just queue-page` against
 the real history (600 first-parent commits touching docs/queue.md,
-2026-10-04): 19s cold, 1.7s warm.
+2026-10-04): 19s cold, 1.7s warm. The lineage cache is the dearer one cold:
+`just lineage` read 3472 copies of a 1.7 MB file on every run, 6m28s at
+3ca67d02, and an empty cache costs the render one such walk, once (§444).
 
 A failure here — no `main` here, no commit ever touched the file — is said on
 stderr and returned as a nonzero exit, never raised past `main`: the caller
@@ -45,12 +55,22 @@ from datetime import datetime, timezone
 sys.dont_write_bytecode = True
 QUEUE_TOOLING = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "queue"))
 sys.path.insert(0, QUEUE_TOOLING)
-from rows import Queue, TIERS_IN_ORDER  # noqa: E402
+sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lineage")))
+from rows import SMALL, Queue, TIERS_IN_ORDER  # noqa: E402
 import fuzz_section  # noqa: E402
+import lineage  # noqa: E402
 
 QUEUE_PATH = "docs/queue.md"
 CLOSED_ROWS_SHOWN = 12
-SKIP_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), held (by|elsewhere by) (\S+)$")
+# The two lines `just queue blocked` prints: a row's path meets one hold, or it
+# is one of `queue_shared_files` and two holds already have it (§424.4). The
+# blocked mode takes no row, so neither names a row taken above.
+MEETS_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), held (by|elsewhere by) (\S+)$")
+SHARED_LINE = re.compile(
+    r"^skip (\S+) \(tier (\S+)\): its (\S+) is shared, and "
+    r"(\S+) \(held (by|elsewhere by) (\S+)\) and (\S+) \(held (by|elsewhere by) (\S+)\) already hold it$")
+ANY_ROW_ID = re.compile(r"^[TDQ][0-9]+$")
+ROW_REF = re.compile(r"(?<![0-9A-Za-z])Q[0-9]+(?![0-9A-Za-z])")
 
 
 def main(argv):
@@ -71,11 +91,17 @@ def main(argv):
     points = [tallied(git, sha, when, cache) for sha, when in history]
     save_cache(cache_path, cache)
     tip_text = git.show(history[-1][0], QUEUE_PATH)
+    tip = Queue(tip_text)
+    summaries_path = os.path.join(out_dir, ".lineage-cache.json")
+    summaries = load_summaries(summaries_path)
+    graph = lineage.Graph(os.getcwd(), "refs/heads/main", summaries)
+    write_atomically(summaries_path, json.dumps({"shape": lineage.SUMMARY_SHAPE, "commits": summaries}, sort_keys=True))
     fuzz_cache_path = os.path.join(out_dir, ".fuzz-cache.json")
     fuzz, fuzz_cache = fuzz_section.section(fuzz_root, read_json(fuzz_cache_path))
     write_atomically(fuzz_cache_path, json.dumps(fuzz_cache, sort_keys=True))
     rendered_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    page = render_page(points, current_state(tip_text), fuzz, rendered_at)
+    page = render_page(points, current_state(tip, tip_text), fuzz, rendered_at, Links(tip, "rows/"))
+    write_row_pages(os.path.join(out_dir, "rows"), tip, graph)
     write_atomically(os.path.join(out_dir, "index.html"), page)
     return 0
 
@@ -121,6 +147,12 @@ def load_cache(path):
     return {sha: counts for sha, counts in cache.items() if set(counts["by_tier"]) == set(TIERS_IN_ORDER)}
 
 
+def load_summaries(path):
+    """What each commit did to the rows, as earlier renders kept it, or nothing when it was kept under another shape."""
+    cache = read_json(path)
+    return cache["commits"] if cache.get("shape") == lineage.SUMMARY_SHAPE else {}
+
+
 def read_json(path):
     """A cache file's contents, or an empty cache when there is none or it does not parse."""
     try:
@@ -163,8 +195,7 @@ def tally(text):
     return {"by_tier": by_tier, "parked": parked, "closed": closed}
 
 
-def current_state(tip_text):
-    tip = Queue(tip_text)
+def current_state(tip, tip_text):
     verbs = load_queue_verbs()
     here = verbs.Here(QUEUE_PATH)
     return {
@@ -211,17 +242,15 @@ def running_rows(verbs, here, tip):
         before = set(claimed)
         found = verbs.has_a_tree(hold["branch"], branches, trees, claimed, left)
         tree = tree_for(hold, trees, found, claimed - before, left)
-        row = tip.find(row_id)
         rows.append({
             "id": row_id,
             "branch": hold["branch"],
             "where": tree.path if tree else f"no tree yet, taken from {hold['tree']}",
             "agent": agent_of(tree) if tree else None,
-            "tier": tier_taken_from(hold, row),
+            "tier": tier_taken_from(hold, tip.find(row_id)),
             "taken_by": os.path.basename(hold["tree"]),
             "write_set": hold["write_set"],
             "taken": hold["taken"],
-            "what": row.text if row else f"{row_id}  -  -  -  {hold['write_set']}  (not merged into main yet)",
         })
     return rows
 
@@ -340,11 +369,16 @@ def blocked_lines(tree):
     assert result.returncode == 0, f"`just queue blocked` failed on main's own copy in {tree.path}: {result.stderr.strip()}"
     lines = []
     for line in result.stdout.splitlines():
-        match = SKIP_LINE.match(line)
-        assert match, f"`just queue blocked` printed a line this cannot read: {line!r}"
-        row_id, tier, mine, other, theirs, how, holder = match.groups()
-        lines.append({"id": row_id, "tier": tier, "mine": mine, "other": other, "theirs": theirs,
-                      "how": how, "holder": holder})
+        meets = MEETS_LINE.match(line)
+        shared = SHARED_LINE.match(line)
+        assert meets or shared, f"`just queue blocked` printed a line this cannot read: {line!r}"
+        if meets:
+            row_id, _, mine, other, theirs, how, holder = meets.groups()
+            lines.append({"id": row_id, "mine": mine, "shared": False, "holders": [(other, theirs, how, holder)]})
+        else:
+            row_id, _, mine, first, first_how, first_holder, second, second_how, second_holder = shared.groups()
+            lines.append({"id": row_id, "mine": mine, "shared": True,
+                          "holders": [(first, None, first_how, first_holder), (second, None, second_how, second_holder)]})
     return lines
 
 
@@ -413,7 +447,7 @@ SLOT_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", 
 SLOT_DARK = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"]
 
 
-def render_page(points, state, fuzz, rendered_at):
+def render_page(points, state, fuzz, rendered_at, links):
     by_tier_chart = stacked_area(
         points=points,
         series=[(f"Tier {t}", lambda counts, t=t: counts["by_tier"][t]) for t in TIERS_IN_ORDER]
@@ -439,13 +473,14 @@ def render_page(points, state, fuzz, rendered_at):
         progress_chart=progress_chart,
         added_closed_chart=added_closed_chart,
         statistics_table=statistics_table(days),
-        running_table=running_table(state["running"], rendered_at),
-        pinned_table=pinned_table(state["pinned"], state["running"], state["not_taken"]),
-        not_taken_table=not_taken_table(state["not_taken"]),
-        ready_section=ready_section(state["ready"]),
-        running_section=running_section(state["running"]),
-        closed_section=closed_section(state["closed"]),
+        running_table=running_table(state["running"], rendered_at, links),
+        pinned_table=pinned_table(state["pinned"], state["running"], state["not_taken"], links),
+        not_taken_table=not_taken_table(state["not_taken"], links),
+        ready_section=ready_section(state["ready"], links),
+        running_section=running_section(state["running"], links),
+        closed_section=closed_section(state["closed"], links),
         fuzz_section=fuzz,
+        base_style=BASE_STYLE,
         series_colors=series_color_css(),
         coverage_light=SLOT_LIGHT[0],
         coverage_dark=SLOT_DARK[0],
@@ -577,7 +612,7 @@ def statistics_table(days):
 </table>"""
 
 
-def running_table(rows, rendered_at):
+def running_table(rows, rendered_at, links):
     """One line per held row: the tier it was taken from, the agent whose tree it runs in, and who took it.
 
     A slot has no number to show: `queue_slots` is a count (§397.7) and `just
@@ -593,7 +628,7 @@ def running_table(rows, rendered_at):
         tier = html.escape(row["tier"]) if row["tier"] is not None else "not recorded"
         agent = f'<code>{html.escape(row["agent"])}</code>' if row["agent"] is not None else "no tree yet"
         lines.append(
-            f'<tr><th><code>{html.escape(row["id"])}</code></th><td>{tier}</td><td>{agent}</td>'
+            f'<tr><th>{links.ref(row["id"])}</th><td>{tier}</td><td>{agent}</td>'
             f'<td><code>{html.escape(row["taken_by"])}</code></td></tr>'
         )
     body = "\n".join(lines)
@@ -606,21 +641,25 @@ def running_table(rows, rendered_at):
 </table>"""
 
 
-def pinned_table(rows, running, groups):
+def pinned_table(rows, running, groups, links):
     """One line per open pinned row, in the order a fill takes them, and what holds it back.
 
-    What holds a row back is what the table of rows the fill will not take
-    says of it, word for word, so the two tables cannot disagree. A row that
-    runs is held back by nothing, whether the claims file holds it or main's
-    copy says `lane:` with no take behind it, as `just queue` counts both.
+    What holds a row back is every reason the table of why the fill will not
+    take a row files it under, word for word, so the two tables cannot
+    disagree. A row that runs is held back by nothing, whether the claims
+    file holds it or main's copy says `lane:` with no take behind it, as
+    `just queue` counts both.
     """
     if not rows:
         return "<p>nothing pinned</p>"
     running_on = {row["id"]: row["branch"] for row in running}
-    held_back = {row_id: why for _, lines in reasons_not_taken(groups) if lines is not None
-                 for row_id, _, why in lines}
+    held_back = {}
+    for _, reasons in reasons_not_taken(groups, links):
+        for reason, row_ids in (reasons or {}).items():
+            for row_id in row_ids:
+                held_back.setdefault(row_id, []).append(reason)
     lines = [
-        f'<tr><th><code>{html.escape(row.id)}</code></th><td class="n">{row.pin}</td>'
+        f'<tr><th>{links.ref(row.id)}</th><td class="n">{row.pin}</td>'
         f'<td>{blocked_by(row, running_on, held_back, groups["meeting"] is None)}</td></tr>'
         for row in rows
     ]
@@ -640,81 +679,94 @@ def blocked_by(row, running_on, held_back, meeting_not_worked_out):
     if row.state.startswith("lane:"):
         return f"nothing: it is running, on <code>{html.escape(row.state[len('lane:'):])}</code>"
     if row.id in held_back:
-        return held_back[row.id]
+        return "; ".join(held_back[row.id])
     if meeting_not_worked_out:
         return "ready, but whether it meets a running lane's write set is not worked out"
     return "nothing: it is ready"
 
 
-def not_taken_table(groups):
-    """One group per reason a fill passes an open row over, each headed by how many rows it holds.
+def not_taken_table(groups, links):
+    """One group per kind of reason a fill passes an open row over, each reason beside the rows it holds back.
 
-    The third group names the entry, the row and the lane as `just queue next`
-    does, since it is that recipe's own line taken apart.
+    A kind is headed by how many rows it holds back, each counted once
+    however many of its reasons name it. The third kind's reasons are `just
+    queue next`'s own lines, less the row's id, tier and, where one hold is
+    met, its own path.
     """
     bodies = []
-    for title, lines in reasons_not_taken(groups):
-        if lines is None:
+    for title, reasons in reasons_not_taken(groups, links):
+        if reasons is None:
             bodies.append(
-                f'<tbody>\n<tr><th colspan="3">{title} (not worked out)</th></tr>\n'
-                f"<tr><td colspan=\"3\">no tree that holds main has main's own {QUEUE_PATH}, "
+                f'<tbody>\n<tr><th colspan="2">{title} (not worked out)</th></tr>\n'
+                f"<tr><td colspan=\"2\">no tree that holds main has main's own {QUEUE_PATH}, "
                 f"and <code>just queue blocked</code> is run only there</td></tr>\n</tbody>")
         else:
-            bodies.append(not_taken_group(title, lines))
+            bodies.append(not_taken_group(title, reasons, links))
     body = "\n".join(bodies)
-    return f"""<p class="qp-sub">open rows a fill would pass over even with every slot free, by why</p>
+    return f"""<p class="qp-sub">why a fill would pass open rows over even with every slot free, and which rows each reason holds back</p>
 <table class="qp-stats">
-<thead><tr><th>Row</th><th>Tier</th><th>Why</th></tr></thead>
+<thead><tr><th>Why</th><th>Rows</th></tr></thead>
 {body}
 </table>"""
 
 
-def reasons_not_taken(groups):
-    """Each reason a fill passes an open row over, as its title and its rows' id, tier and why.
+def reasons_not_taken(groups, links):
+    """Each kind of reason a fill passes an open row over, as its title and its reasons, each with the rows it holds back.
 
-    The rows are None for the third reason when `meeting_a_running_lane` could
-    not work it out.
+    A reason's rows come in the order a fill walks them, and a kind's reasons
+    in the order of the first row each holds back, so the reason in front of
+    the row a fill would reach first leads. A row waiting on two rows not yet
+    done is under both. The reasons are None for the third kind when
+    `meeting_a_running_lane` could not work it out.
     """
-    waiting = [
-        (row.id, row.tier, "waits on " + ", ".join(
-            f"<code>{html.escape(other)}</code> ({html.escape(state)})" for other, state in unfinished))
-        for row, unfinished in groups["waiting"]
-    ]
-    parked = [(row.id, row.tier, f"parked for {html.escape(row.state[len('parked:'):])}") for row in groups["parked"]]
-    meeting = None if groups["meeting"] is None else [
-        (line["id"], line["tier"],
-         f'its <code>{html.escape(line["mine"])}</code> meets <code>{html.escape(line["other"])}</code>\'s '
-         f'<code>{html.escape(line["theirs"])}</code>, held {line["how"]} <code>{html.escape(line["holder"])}</code>')
-        for line in groups["meeting"]
-    ]
+    waiting = {}
+    for row, unfinished in groups["waiting"]:
+        for other, state in unfinished:
+            waiting.setdefault(f"waits on {links.ref(other)} ({links.text(state)})", []).append(row.id)
+    parked = {}
+    for row in groups["parked"]:
+        parked.setdefault(f"parked for {links.text(row.state[len('parked:'):])}", []).append(row.id)
+    meeting = None
+    if groups["meeting"] is not None:
+        meeting = {}
+        for line in groups["meeting"]:
+            meeting.setdefault(meeting_reason(line, links), []).append(line["id"])
     return [("Waits on rows not yet done", waiting), ("Parked", parked), ("Meets a running lane's write set", meeting)]
 
 
-def not_taken_group(title, lines):
-    head = f'<tr><th colspan="3">{title} ({len(lines)})</th></tr>'
-    rows = [f"<tr><th><code>{html.escape(row_id)}</code></th><td>{html.escape(tier)}</td><td>{why}</td></tr>"
-            for row_id, tier, why in lines]
-    return "<tbody>\n" + "\n".join([head, *rows]) + "\n</tbody>"
+def meeting_reason(line, links):
+    if line["shared"]:
+        holders = " and ".join(f"{links.ref(other)} (held {how} <code>{html.escape(holder)}</code>)"
+                               for other, _, how, holder in line["holders"])
+        return f"<code>{html.escape(line['mine'])}</code> is shared, and {holders} already hold it"
+    ((other, theirs, how, holder),) = line["holders"]
+    return f"meets {links.ref(other)}'s <code>{html.escape(theirs)}</code>, held {how} <code>{html.escape(holder)}</code>"
 
 
-def ready_section(by_tier):
+def not_taken_group(title, reasons, links):
+    held = {row_id for row_ids in reasons.values() for row_id in row_ids}
+    head = f'<tr><th colspan="2">{title} ({len(held)})</th></tr>'
+    lines = [f"<tr><td>{reason}</td><td>{' '.join(links.ref(row_id) for row_id in row_ids)}</td></tr>"
+             for reason, row_ids in reasons.items()]
+    return "<tbody>\n" + "\n".join([head, *lines]) + "\n</tbody>"
+
+
+def ready_section(by_tier, links):
     items = []
     for tier in TIERS_IN_ORDER:
         rows = by_tier[tier]
         if not rows:
             continue
-        items.append(f"<h3>Tier {html.escape(tier)}</h3><ul>")
-        items.extend(f"<li>{row_html(row)}</li>" for row in rows)
-        items.append("</ul>")
+        items.append(f"<h3>Tier {html.escape(tier)}</h3><p>{' '.join(links.ref(row.id) for row in rows)}</p>")
     return "".join(items) if items else "<p>none ready</p>"
 
 
-def running_section(rows):
+def running_section(rows, links):
     if not rows:
         return "<p>nothing running</p>"
     items = (
-        f"<li><code>{html.escape(row['id'])}</code> on <code>{html.escape(row['branch'])}</code> "
-        f"at <code>{html.escape(row['where'])}</code> — {row_html_text(row['what'])}{narrowed_html(row)}</li>"
+        f"<li>{links.ref(row['id'])} on <code>{html.escape(row['branch'])}</code> "
+        f"at <code>{html.escape(row['where'])}</code>{narrowed_html(row)}</li>"
         for row in rows
     )
     return "<ul>" + "".join(items) + "</ul>"
@@ -727,18 +779,236 @@ def narrowed_html(row):
     return f" — narrowed to <code>{html.escape(row['write_set'])}</code>"
 
 
-def closed_section(rows):
+def closed_section(rows, links):
     if not rows:
         return "<p>none closed yet</p>"
-    return "<ul>" + "".join(f"<li>{row_html(row)}</li>" for row in reversed(rows)) + "</ul>"
+    return "<p>" + " ".join(links.ref(row.id) for row in reversed(rows)) + "</p>"
 
 
-def row_html(row):
-    return row_html_text(row.text)
+class Links:
+    """How a page names a row: linked to the row's own page when main's copy holds the row, and so it has one."""
+
+    def __init__(self, tip, to_rows):
+        self.ids = set(tip.ids())
+        self.to_rows = to_rows
+
+    def ref(self, row_id):
+        """A row named by its id, of any letter, as code."""
+        return f"<code>{self.link(row_id)}</code>"
+
+    def text(self, text):
+        """`text` escaped, with every Q id in it linked.
+
+        Only Q ids: a T or D id in prose is as often something else, as in
+        "arm D2", and those rows are named where the grammar puts an id.
+        """
+        return ROW_REF.sub(lambda match: self.link(match.group(0)), html.escape(text))
+
+    def link(self, row_id):
+        if row_id not in self.ids:
+            return html.escape(row_id)
+        return f'<a href="{self.to_rows}{row_id}.html">{row_id}</a>'
 
 
-def row_html_text(text):
-    return f"<code>{html.escape(text.split()[0])}</code> {html.escape(' '.join(text.split()[5:]))}"
+def write_row_pages(directory, tip, graph):
+    """One page for every row of main's copy (§444), and none left for a row it no longer holds."""
+    links = Links(tip, "")
+    os.makedirs(directory, exist_ok=True)
+    for row in tip.rows:
+        assert ANY_ROW_ID.match(row.id), f"{row.id!r} cannot name a page, and check-queue refuses an id of that shape"
+        write_atomically(os.path.join(directory, f"{row.id}.html"), row_page(row, graph, links))
+    for name in os.listdir(directory):
+        if name.endswith(".html") and name[: -len(".html")] not in links.ids:
+            os.remove(os.path.join(directory, name))
+
+
+def row_page(row, graph, links):
+    return ROW_PAGE.format(
+        base_style=BASE_STYLE,
+        id=html.escape(row.id),
+        tier=html.escape(row.tier),
+        row_class=class_html(row.tag),
+        provenance=provenance_html(row.id, graph, links),
+        write_set=write_set_html(row.write_set),
+        text=links.text(row.text),
+    )
+
+
+# §352.3's two halves of a class, cut to a line each.
+HOW_BAD = {
+    "wrong": "a wrong answer",
+    "crash": "a panic, an abort, an overflow or a hang",
+    "refuses": "a named refusal of an input that has an answer",
+}
+HOW_LIKELY = {
+    "A": "seen: a real input met it",
+    "B": "typical: a shape designers make on purpose",
+    "C": "possible: only a probe builds it",
+    "D": "never: outside the scale envelope of §3.5",
+}
+
+
+def class_html(tag):
+    if tag is None:
+        return "none"
+    if tag == SMALL:
+        return "none: it is tagged <code>small</code>, and goes out in a bundle (§352.4)"
+    bad, likely = tag.split("/")
+    return f"<b>{likely}</b>, {HOW_LIKELY[likely]}. Its tag is <code>{tag}</code>: {HOW_BAD[bad]} (§352.3)"
+
+
+def provenance_html(row_id, graph, links):
+    """The row, the row it came from, and so on up to what nothing led to, as `just lineage main <id>` reads each (§432, §433).
+
+    A step whose source is read from the row's text (§433.6) says what it
+    would be without that. A chain that comes back to a row it already passed
+    stops there and says so.
+    """
+    steps = []
+    passed = [row_id]
+    node = row_id
+    while True:
+        info = graph.with_text.parent_of.get(node)
+        steps.append(step_html(node, info, graph, links))
+        parent = info.parent if info is not None else None
+        if parent is None or parent.startswith(("fuzz:", "step:")):
+            break
+        if parent in passed:
+            steps.append(f"{links.ref(parent)} again, so the chain goes round, and stops here")
+            break
+        passed.append(parent)
+        node = parent
+    return "".join(f"<li>{step}</li>" for step in steps)
+
+
+def step_html(node, info, graph, links):
+    if info is None:
+        if node.startswith("Q"):
+            return f"{links.ref(node)}: no commit on main's history added it"
+        return f"{links.ref(node)}: carried over from the retired <code>docs/test-plan.md</code>, and lineage follows only Q rows"
+    commit = graph.added_at[node]
+    day = commit.date.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    came = came_from(info, links)
+    if node in graph.read_from_text:
+        came += f"; without reading its text, {came_from(graph.parent_of[node], links)}"
+    return f"{links.ref(node)}, added in <code>{commit.sha[:8]}</code> on {day}, <q>{links.text(commit.subject)}</q>: {came}"
+
+
+FOUND_BY = {
+    lineage.WORD_LABEL: "as its own word says",
+    lineage.COMMIT_LABEL: "read from the commit that added it",
+    lineage.MESSAGE_LABEL: "read from that commit's message",
+    lineage.TEXT_LABEL: "which its text names (§433.6)",
+}
+
+
+def came_from(info, links):
+    if info.label == lineage.UNKNOWN_LABEL:
+        return ("not known: the commit that added it closed more than one row, and neither their text "
+                "nor its message says which one led to it")
+    if info.relation == lineage.FIRST:
+        if info.label == lineage.WORD_LABEL:
+            return "nothing led to it, as its word <code>from/-</code> says"
+        return "nothing led to it: the commit that added it closed no row"
+    verb = "a re-file of" if info.relation == lineage.RE_FILE else "came from"
+    return f"{verb} {source_html(info.parent, links)}, {FOUND_BY[info.label]}"
+
+
+def source_html(parent, links):
+    if parent.startswith("fuzz:"):
+        return f"the fuzz target <code>{html.escape(parent[len('fuzz:'):])}</code>"
+    if parent.startswith("step:"):
+        return f"the STEP file <code>{html.escape(parent[len('step:'):])}</code>"
+    return links.ref(parent)
+
+
+def write_set_html(write_set):
+    """The files a lane on the row expects to change: its write set (§230.2)."""
+    if write_set == "-":
+        return "no tracked file, only a new section of its own"
+    return "<ul>" + "".join(f"<li><code>{html.escape(path)}</code></li>" for path in write_set.split(",")) + "</ul>"
+
+
+ROW_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{id} · rcad queue</title>
+<style>
+{base_style}
+dl.qp-row {{ display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; max-width: 1100px; margin: 0; }}
+dl.qp-row dt {{ color: var(--qp-ink-2); font-weight: 600; }}
+dl.qp-row dd {{ margin: 0; }}
+dl.qp-row ol {{ margin: 0; padding-left: 20px; }}
+pre.qp-row-text {{
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: var(--qp-surface);
+  border: 1px solid var(--qp-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  max-width: 1100px;
+}}
+</style>
+</head>
+<body>
+<p class="qp-sub"><a href="../index.html">rcad queue</a></p>
+<h1>{id}</h1>
+<dl class="qp-row">
+<dt>Tier</dt><dd>{tier}</dd>
+<dt>Class</dt><dd>{row_class}</dd>
+<dt>Came from</dt><dd><ol>{provenance}</ol></dd>
+<dt>Expects to change</dt><dd>{write_set}</dd>
+</dl>
+<h2>The row</h2>
+<pre class="qp-row-text">{text}</pre>
+</body>
+</html>
+"""
+
+# The palette, the type and the plain elements both kinds of page share.
+BASE_STYLE = """:root {
+  color-scheme: light;
+  --qp-surface: #fcfcfb;
+  --qp-page: #f9f9f7;
+  --qp-ink: #0b0b0b;
+  --qp-ink-2: #52514e;
+  --qp-muted: #898781;
+  --qp-grid: #e1e0d9;
+  --qp-border: rgba(11,11,11,0.10);
+  --qp-link: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --qp-surface: #1a1a19;
+    --qp-page: #0d0d0d;
+    --qp-ink: #ffffff;
+    --qp-ink-2: #c3c2b7;
+    --qp-muted: #898781;
+    --qp-grid: #2c2c2a;
+    --qp-border: rgba(255,255,255,0.10);
+    --qp-link: #3987e5;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 16px;
+  background: var(--qp-page);
+  color: var(--qp-ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+h1 { font-size: 18px; margin: 0 0 4px; }
+h2 { font-size: 15px; margin: 28px 0 8px; }
+h2:first-child { margin-top: 0; }
+h3 { font-size: 13px; margin: 12px 0 4px; color: var(--qp-ink-2); }
+p.qp-sub { color: var(--qp-muted); margin: 0 0 20px; }
+ul { margin: 0 0 8px; padding-left: 20px; }
+li { margin: 2px 0; }
+code { font-size: 12px; }
+a { color: var(--qp-link); }"""
 
 
 PAGE = """<!DOCTYPE html>
@@ -748,44 +1018,7 @@ PAGE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rcad queue</title>
 <style>
-:root {{
-  color-scheme: light;
-  --qp-surface: #fcfcfb;
-  --qp-page: #f9f9f7;
-  --qp-ink: #0b0b0b;
-  --qp-ink-2: #52514e;
-  --qp-muted: #898781;
-  --qp-grid: #e1e0d9;
-  --qp-border: rgba(11,11,11,0.10);
-}}
-@media (prefers-color-scheme: dark) {{
-  :root {{
-    color-scheme: dark;
-    --qp-surface: #1a1a19;
-    --qp-page: #0d0d0d;
-    --qp-ink: #ffffff;
-    --qp-ink-2: #c3c2b7;
-    --qp-muted: #898781;
-    --qp-grid: #2c2c2a;
-    --qp-border: rgba(255,255,255,0.10);
-  }}
-}}
-* {{ box-sizing: border-box; }}
-body {{
-  margin: 0;
-  padding: 16px;
-  background: var(--qp-page);
-  color: var(--qp-ink);
-  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
-}}
-h1 {{ font-size: 18px; margin: 0 0 4px; }}
-h2 {{ font-size: 15px; margin: 28px 0 8px; }}
-h2:first-child {{ margin-top: 0; }}
-h3 {{ font-size: 13px; margin: 12px 0 4px; color: var(--qp-ink-2); }}
-p.qp-sub {{ color: var(--qp-muted); margin: 0 0 20px; }}
-ul {{ margin: 0 0 8px; padding-left: 20px; }}
-li {{ margin: 2px 0; }}
-code {{ font-size: 12px; }}
+{base_style}
 .qp-chart {{
   background: var(--qp-surface);
   border: 1px solid var(--qp-border);

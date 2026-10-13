@@ -32,9 +32,16 @@ Deliberately not `import queue`: `tooling/queue/queue.py` as a module named
 threading can depend on. Only `Row` and `Queue` come from `rows.py`, which
 collides with nothing. `CAME_FROM` and `CAME_FROM_AN_INPUT` are duplicated
 from `queue.py` rather than imported for the same reason.
+
+Parsing the file at each commit is what costs a walk its minutes, so each
+commit is read once, into a summary of the rows it added and the rows it
+closed (`summarize`), and the rules above read only those. The queue page
+keeps the summaries between renders and parses only the commits that are new
+since (§444).
 """
 
 import bisect
+import functools
 import os
 import re
 import subprocess
@@ -64,6 +71,11 @@ CRASH_FILE_ALONE = re.compile(r"(?<![A-Za-z0-9_/])crash-[0-9a-f]{6,}")
 HASH = re.compile(r"(?<![A-Za-z0-9])[0-9a-f]{8,40}(?![A-Za-z0-9])")
 STEP_FILE_NAME = re.compile(r"(?<![A-Za-z0-9_.\-])[A-Za-z0-9_.\-]+\.(?:stp|step)(?![A-Za-z0-9_\-])")
 MANIFEST_LINE = re.compile(r"^[0-9a-f]{64} [ *](.+)$")
+
+# The shape of what `summarize` returns, so a summary kept under another shape
+# is never read as this one. Bump it whenever `summarize`, or `rows_at` that it
+# reads through, changes what a commit's summary holds.
+SUMMARY_SHAPE = 1
 
 
 class Commit:
@@ -120,12 +132,10 @@ def load_commits(top, ref):
 def load_blobs(top, shas, path):
     """`path`'s bytes at every sha in `shas`, `None` where it does not exist there.
 
-    One `git cat-file --batch` rather than one `git show` per sha: at this
-    base 2245 commits touch `docs/queue.md` on `main`, which with each
-    commit's parents is close to 4500 lookups, and `--batch` answers them all
-    in one process. Output is read by the byte count each header gives, not
-    split on newlines, since a row's text can itself hold no control bytes but
-    the general shape of a blob is arbitrary.
+    One `git cat-file --batch` rather than one `git show` per sha, for the
+    corpus manifest at every commit that touched it. Output is read by the
+    byte count each header gives, not split on newlines, since the general
+    shape of a blob is arbitrary.
     """
     ids = sorted(set(shas))
     if not ids:
@@ -160,6 +170,76 @@ def rows_at(blob):
         return {}
     text = blob.decode("utf-8", "surrogateescape")
     return {row.id: row for row in Queue(text).rows if ROW_ID.match(row.id)}
+
+
+def summarize_missing(top, commits, summaries):
+    """Add to `summaries` the summary of every commit in `commits` it lacks.
+
+    Each copy of `docs/queue.md` is fetched by its blob id and parsed once
+    however many commits hold it: on `main` at 3ca67d02, 3472 commits and
+    parents hold 2296 distinct copies, and parsing one takes about 0.09 s.
+    A few are kept parsed, since a commit's parents are mostly the commits just
+    before it in this walk, and only a few, since one copy parsed holds
+    every row of the file.
+    """
+    missing = [commit for commit in commits if commit.sha not in summaries]
+    if not missing:
+        return
+    blob_of = blob_ids(top, {sha for commit in missing for sha in (commit.sha, *commit.parents)}, QUEUE_PATH)
+    reader = subprocess.Popen(["git", "-C", top, "cat-file", "--batch"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+    @functools.lru_cache(maxsize=8)
+    def rows_in(blob):
+        return rows_at(read_blob(reader, blob)) if blob is not None else {}
+
+    try:
+        for commit in missing:
+            summaries[commit.sha] = summarize(rows_in(blob_of[commit.sha]), [rows_in(blob_of[p]) for p in commit.parents])
+    finally:
+        reader.stdin.close()
+        reader.wait()
+
+
+def blob_ids(top, shas, path):
+    """`path`'s blob id at every sha in `shas`, `None` where it does not exist there."""
+    ids = sorted(shas)
+    out = git(top, "cat-file", "--batch-check", input_bytes="".join(f"{sha}:{path}\n" for sha in ids).encode())
+    lines = out.decode().splitlines()
+    assert len(lines) == len(ids), f"cat-file --batch-check answered {len(lines)} lines for {len(ids)} names"
+    result = {}
+    for sha, line in zip(ids, lines):
+        fields = line.split()
+        result[sha] = None if fields[-1] == "missing" else fields[0]
+    return result
+
+
+def read_blob(reader, blob):
+    """One blob's bytes, asked of a `git cat-file --batch` kept open."""
+    reader.stdin.write(f"{blob}\n".encode())
+    reader.stdin.flush()
+    header = reader.stdout.readline().split()
+    assert len(header) == 3 and header[1] == b"blob", f"cat-file answered {header!r} for the blob {blob}"
+    data = reader.stdout.read(int(header[2]) + 1)
+    return data[:-1]
+
+
+def summarize(rows, parents):
+    """What one commit did to the rows, read off its own copy and its parents' copies.
+
+    `added` is every row no parent holds, with its text. `closed` is every row
+    it closed, done or dropped, that some parent holds and none holds closed,
+    with how it closed and its text there. The rules read nothing else of a
+    commit's copy, so a summary stands in for the copy itself.
+    """
+    added = {row_id: row.text for row_id, row in rows.items() if all(row_id not in parent for parent in parents)}
+    closed = {}
+    for row_id, row in rows.items():
+        if not row.is_closed():
+            continue
+        before = [parent[row_id] for parent in parents if row_id in parent]
+        if before and not any(earlier.is_closed() for earlier in before):
+            closed[row_id] = ["done" if row.state.startswith("done:") else "dropped", row.text]
+    return {"added": added, "closed": closed}
 
 
 class ParentInfo:
@@ -242,18 +322,20 @@ def is_a_re_file(new_text, candidate_text):
 
 class Graph:
     """Every row's resolved parent, without and with the sources §433.6 reads out of
-    row text, and the tree each first row or §433 source grows either way."""
+    row text, and the tree each first row or §433 source grows either way.
 
-    def __init__(self, top, ref):
+    `summaries` holds each commit's `summarize`, by commit sha, and is filled
+    in here for every commit it lacks: a caller that keeps it between runs
+    parses only the commits that are new since.
+    """
+
+    def __init__(self, top, ref, summaries):
         self.top = top
         self.commits = load_commits(top, ref)
         self.tip_sha = git(top, "rev-parse", ref).decode().strip()
-        shas = {self.tip_sha}
-        for commit in self.commits:
-            shas.add(commit.sha)
-            shas.update(commit.parents)
-        self.blobs = load_blobs(top, shas, QUEUE_PATH)
-        self._rows_cache = {}
+        summarize_missing(top, self.commits, summaries)
+        self.summaries = summaries
+        self._tip_rows = None
         self.added_at = {}  # row id -> Commit
         self.closed_at = defaultdict(list)  # commit sha -> [row id]
         self.closed_kind = {}  # row id -> "done" | "dropped"
@@ -267,45 +349,37 @@ class Graph:
         self.without_text = Tree(self.parent_of)
         self.with_text = Tree({**self.parent_of, **self.read_from_text})
 
-    def rows_of(self, sha):
-        if sha not in self._rows_cache:
-            self._rows_cache[sha] = rows_at(self.blobs.get(sha))
-        return self._rows_cache[sha]
-
     def tip_rows(self):
-        return self.rows_of(self.tip_sha)
+        if self._tip_rows is None:
+            self._tip_rows = rows_at(load_blobs(self.top, [self.tip_sha], QUEUE_PATH)[self.tip_sha])
+        return self._tip_rows
 
     def is_open_at_tip(self, row_id):
         row = self.tip_rows().get(row_id)
         return row is not None and not row.is_closed()
 
+    def added_text(self, row_id):
+        """A row's text in the commit that added it."""
+        return self.summaries[self.added_at[row_id].sha]["added"][row_id]
+
+    def _closed_text(self, commit, row_id):
+        return self.summaries[commit.sha]["closed"][row_id][1]
+
     def _find_added(self):
         candidates = defaultdict(list)
         for commit in self.commits:
-            rows = self.rows_of(commit.sha)
-            for row_id in rows:
-                if all(row_id not in self.rows_of(parent) for parent in commit.parents):
-                    candidates[row_id].append(commit)
+            for row_id in self.summaries[commit.sha]["added"]:
+                candidates[row_id].append(commit)
         for row_id, commits in candidates.items():
             self.added_at[row_id] = min(commits, key=lambda c: c.date)
 
     def _find_closed(self):
         for commit in self.commits:
-            rows = self.rows_of(commit.sha)
-            for row_id, row in rows.items():
-                if not row.is_closed():
-                    continue
-                if self.added_at.get(row_id) is commit:
-                    continue
-                parents_with_it = [p for p in commit.parents if row_id in self.rows_of(p)]
-                if not parents_with_it:
-                    continue
-                if any(self.rows_of(p)[row_id].is_closed() for p in parents_with_it):
-                    continue
+            for row_id, (kind, _) in self.summaries[commit.sha]["closed"].items():
                 if row_id in self.closed_commit:
                     continue
                 self.closed_at[commit.sha].append(row_id)
-                self.closed_kind[row_id] = "done" if row.state.startswith("done:") else "dropped"
+                self.closed_kind[row_id] = kind
                 self.closed_commit[row_id] = commit
 
     def _candidates_closed_at(self, commit):
@@ -324,7 +398,7 @@ class Graph:
 
     def _resolve_parents(self):
         for row_id, commit in self.added_at.items():
-            row_text = self.rows_of(commit.sha)[row_id].text
+            row_text = self.added_text(row_id)
             word = extract_word(row_text)
             from_word = resolve_from_word(word) if word else None
             if from_word is not None:
@@ -344,7 +418,7 @@ class Graph:
         matches = [
             cid
             for cid in candidates
-            if token_present(cid, row_text) or token_present(row_id, self.rows_of(commit.sha)[cid].text)
+            if token_present(cid, row_text) or token_present(row_id, self._closed_text(commit, cid))
         ]
         if len(matches) == 1:
             return self._parent_info(row_id, row_text, matches[0], dropped, COMMIT_LABEL, commit)
@@ -361,7 +435,7 @@ class Graph:
         return ParentInfo(None, UNKNOWN_LABEL, "unknown")
 
     def _parent_info(self, row_id, row_text, candidate, dropped, label, commit):
-        candidate_text = self.rows_of(commit.sha)[candidate].text
+        candidate_text = self._closed_text(commit, candidate)
         relation = RE_FILE if candidate in dropped and is_a_re_file(row_text, candidate_text) else LED_TO
         return ParentInfo(candidate, label, relation)
 
@@ -383,7 +457,7 @@ class Graph:
             commit = self.added_at[row_id]
             if commit.sha in filed_once_a_word_could_say_it:
                 continue
-            row_text = self.rows_of(commit.sha)[row_id].text
+            row_text = self.added_text(row_id)
             if not text_may_name_the_source(extract_word(row_text)):
                 continue
             source = inputs.source_named_by(description(row_text))
@@ -691,7 +765,7 @@ def main(argv):
         return 2
     top, ref = argv[0], argv[1]
     row_ids = [a for a in argv[2:] if a]
-    graph = Graph(top, ref)
+    graph = Graph(top, ref, {})
     if row_ids:
         return max(print_row_lookup(graph, row_id) for row_id in row_ids)
     print_first_row_table(graph, graph.without_text, WITHOUT_TEXT)
