@@ -7049,6 +7049,20 @@ mod tests {
         a_clean_sweep(&model);
     }
 
+    /// Row Q1849, and the `64` ulps [`it_lies_flat`] allows. The cap of
+    /// [`a_cap_whose_rim_is_three_arcs_validates_turned_off_the_axes`], turned
+    /// through 39 fortieths of a turn about each of four axes.
+    ///
+    /// At 63 of the 156 turns its coarsest mesh is the rim's six points, which
+    /// stray at most `2.1` ulps of the largest coordinate from one plane; at
+    /// the other 93 it has a point off the rim and strays at least `4e14`. The
+    /// `64` sits between. Each flat mesh encloses no more than how far it
+    /// strays times its area, 34 of them below zero and 29 above, and the cap
+    /// validates at every turn.
+    ///
+    /// **The same cap turned inside out is refused at every turn.** Its flat
+    /// mesh encloses a rounding above zero at 28 turns, and that was read as
+    /// its volume, so it passed: a solid whose faces all point into it.
     #[test]
     fn a_cap_whose_rim_is_three_arcs_lies_flat_at_every_turn_and_validates() {
         let axes = [
@@ -7057,8 +7071,10 @@ mod tests {
             Vector::new(1.0, 1.0, 1.0),
             Vector::new(-2.0, 5.0, 1.0),
         ];
-        let mut most_ulps = 0.0f64;
-        let mut rounded = [0; 3];
+        let mut most_ulps_flat = 0.0f64;
+        let mut fewest_ulps_bent = f64::INFINITY;
+        let mut rounded_flat = [0; 3];
+        let mut rounded_inside_out = [0; 3];
         for direction in axes {
             for fortieths in 1..40 {
                 let what = format!("turned {fortieths}/40 about {direction:?}");
@@ -7067,36 +7083,11 @@ mod tests {
                     f64::from(fortieths) * core::f64::consts::TAU / 40.0,
                 )
                 .expect("a finite turn");
-                let mut model = an_empty_model();
-                let cap = a_cap_whose_rim_is_three_arcs(&mut model);
-                model
-                    .place_solid(cap, &turn)
-                    .expect("this model made the key");
-                let view = model.solid(cap).expect("this model made the key");
-                let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(
-                    view,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                )
-                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-                let strays = how_far_it_strays_from_one_plane(&coarsest);
-                most_ulps =
-                    most_ulps.max(strays / (f64::EPSILON * largest_coordinate_of(&coarsest)));
-                assert!(it_lies_flat(&coarsest), "{what}: strays {strays:e}");
-                let enclosed = signed_volume_over(&coarsest);
-                rounded[usize::from(enclosed > 0.0) + usize::from(enclosed >= 0.0)] += 1;
-                assert!(
-                    enclosed.abs() <= strays * area_of_every_triangle(&coarsest),
-                    "{what}: encloses {enclosed:e}, strays {strays:e}"
-                );
-                model
-                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-                let mut model = an_empty_model();
-                let cap = a_cap_whose_rim_is_three_arcs_facing(&mut model, true);
-                model
-                    .place_solid(cap, &turn)
-                    .expect("this model made the key");
+
+                let (mut model, cap) = a_cap_whose_rim_is_three_arcs_placed(&turn);
+                turn_it_inside_out(&mut model);
+                let enclosed = signed_volume_over(&its_coarsest_mesh(&model, cap, &what));
+                rounded_inside_out[which_side_of_zero(enclosed)] += 1;
                 let inside_out = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
                 assert!(
                     matches!(
@@ -7105,9 +7096,97 @@ mod tests {
                     ),
                     "{what}: inside out {inside_out:?}"
                 );
+
+                let (model, cap) = a_cap_whose_rim_is_three_arcs_placed(&turn);
+                let coarsest = its_coarsest_mesh(&model, cap, &what);
+                let strays = how_far_it_strays_from_one_plane(&coarsest);
+                let ulps = strays / (f64::EPSILON * largest_coordinate_of(&coarsest));
+                if it_lies_flat(&coarsest) {
+                    most_ulps_flat = most_ulps_flat.max(ulps);
+                    let enclosed = signed_volume_over(&coarsest);
+                    rounded_flat[which_side_of_zero(enclosed)] += 1;
+                    assert!(
+                        enclosed.abs() <= strays * area_of_every_triangle(&coarsest),
+                        "{what}: encloses {enclosed:e}, strays {strays:e}"
+                    );
+                } else {
+                    fewest_ulps_bent = fewest_ulps_bent.min(ulps);
+                }
+                model
+                    .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
             }
         }
-        eprintln!("Q1849 PROBE most ulps {most_ulps} rounded below, at, above zero {rounded:?}");
+        assert!(
+            most_ulps_flat < 4.0 && fewest_ulps_bent > 1e12,
+            "flat meshes stray up to {most_ulps_flat} ulps, bent ones from {fewest_ulps_bent}"
+        );
+        assert!(
+            rounded_flat[0] > 0 && rounded_flat[2] > 0,
+            "flat meshes below, at and above zero: {rounded_flat:?}"
+        );
+        assert!(
+            rounded_inside_out[2] > 0,
+            "no turn left the cap turned inside out a rounding above zero: {rounded_inside_out:?}"
+        );
+    }
+
+    fn which_side_of_zero(enclosed: f64) -> usize {
+        usize::from(enclosed > 0.0) + usize::from(enclosed >= 0.0)
+    }
+
+    fn a_cap_whose_rim_is_three_arcs_placed(turn: &Isometry) -> (Model, crate::SolidKey) {
+        let mut model = an_empty_model();
+        let cap = a_cap_whose_rim_is_three_arcs(&mut model);
+        model
+            .place_solid(cap, turn)
+            .expect("this model made the key");
+        (model, cap)
+    }
+
+    fn its_coarsest_mesh(model: &Model, cap: crate::SolidKey, what: &str) -> Mesh {
+        the_coarsest_mesh_whose_sides_do_not_cross(
+            model.solid(cap).expect("this model made the key"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{what}: {why:?}"))
+    }
+
+    /// The cap of [`a_cap_whose_rim_is_three_arcs`] with every face pointing
+    /// into it: the lid's plane faces the other way wherever it is named, the
+    /// lid and the ball trade rims, and the ball is used reversed. Described
+    /// that way to [`SolidBuilder::build`] it is refused before it can be
+    /// placed, so it is written in place.
+    fn turn_it_inside_out(model: &mut Model) {
+        let data = model.data_mut();
+        assert_eq!(data.faces.len(), 2, "a cap is a lid and a skin");
+        let mut rims = Vec::new();
+        for face in data.faces.values_mut() {
+            if let Surface::Plane(lid) = face.surface {
+                face.surface = Surface::Plane(lid.reversed());
+            }
+            rims.push(face.wires.clone());
+        }
+        for (face, rim) in data.faces.values_mut().zip(rims.into_iter().rev()) {
+            face.wires = rim;
+        }
+        for edge in data.edges.values_mut() {
+            if let EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(lid),
+                ..
+            } = &mut edge.run
+            {
+                *lid = lid.reversed();
+            }
+        }
+        for shell in data.shells.values_mut() {
+            for used in &mut shell.faces {
+                if data.faces[used.face].surface.as_plane().is_none() {
+                    used.orient = used.orient.reversed();
+                }
+            }
+        }
     }
 
     fn area_of_every_triangle(mesh: &Mesh) -> f64 {
@@ -7127,19 +7206,9 @@ mod tests {
     /// and each arc is picked by the planes through the rim's centre and its
     /// two ends.
     fn a_cap_whose_rim_is_three_arcs(model: &mut Model) -> crate::SolidKey {
-        a_cap_whose_rim_is_three_arcs_facing(model, false)
-    }
-
-    /// [`a_cap_whose_rim_is_three_arcs`], or with `inside_out` the same cap with
-    /// every face pointing into it: the lid's plane facing `+x`, its rim walked
-    /// the other way, and the ball used reversed.
-    fn a_cap_whose_rim_is_three_arcs_facing(
-        model: &mut Model,
-        inside_out: bool,
-    ) -> crate::SolidKey {
         let (radius, behind) = (13.0, 12.0);
         let cuts = [(3.0, 4.0), (3.0, -4.0), (-5.0, 0.0)];
-        a_cap_with_its_rim_in_arcs(model, radius, behind, &cuts, inside_out)
+        a_cap_with_its_rim_in_arcs(model, radius, behind, &cuts)
             .expect("a cap of a ball is a solid")
     }
 
@@ -7152,10 +7221,8 @@ mod tests {
         radius: f64,
         behind: f64,
         cuts: &[(f64, f64)],
-        inside_out: bool,
     ) -> crate::Result<crate::SolidKey> {
-        let outward = if inside_out { 1.0 } else { -1.0 };
-        let lid = Plane::from_point_and_normal(Point::origin(), Vector::new(outward, 0.0, 0.0))?;
+        let lid = Plane::from_point_and_normal(Point::origin(), Vector::new(-1.0, 0.0, 0.0))?;
         let mut builder = SolidBuilder::new();
         let corners: Vec<_> = cuts
             .iter()
@@ -7194,11 +7261,6 @@ mod tests {
                 DraftStep::Along(builder.add_coedge(edge, Orientation::Reversed).expect("e"))
             })
             .collect();
-        let (lid_steps, skin_steps, skin_is_used) = if inside_out {
-            (skin_steps, lid_steps, Orientation::Reversed)
-        } else {
-            (lid_steps, skin_steps, Orientation::Forward)
-        };
         let lid_wire = builder.add_wire(&lid_steps)?;
         let skin_wire = builder.add_wire(&skin_steps)?;
         let skin = builder.add_face(
@@ -7206,7 +7268,10 @@ mod tests {
             &[skin_wire],
         )?;
         let lid_face = builder.add_face(Surface::Plane(lid), &[lid_wire])?;
-        builder.add_shell(&[(skin, skin_is_used), (lid_face, Orientation::Forward)])?;
+        builder.add_shell(&[
+            (skin, Orientation::Forward),
+            (lid_face, Orientation::Forward),
+        ])?;
         builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
     }
 }
