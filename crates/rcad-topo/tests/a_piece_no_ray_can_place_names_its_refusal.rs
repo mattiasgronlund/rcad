@@ -222,7 +222,7 @@ const PLACED_RINGS: [(f64, f64); 3] = [(4.0, 1.0), (1.0, 0.5), (2.0, 1.0)];
 /// `CornersCoincide`.
 #[test]
 fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
-    for (which, (ring, tube)) in PLACED_RINGS.into_iter().enumerate() {
+    for (ring, tube) in PLACED_RINGS {
         let one_bend = PI * PI * ring * tube * tube / 2.0;
         for turn in [FRAC_PI_2, -FRAC_PI_2] {
             for rule in EVERY_RULE {
@@ -235,19 +235,8 @@ fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
                     let first = a_quarter_bend(&mut model, ring, tube);
                     let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, turn);
                     let measured =
-                        fused_and_measured(&mut model, first, placed, rule, the_first_first);
-                    let not_meshed = which == 0
-                        && turn > 0.0
-                        && (rule == Rule::Intersection
-                            || (rule == Rule::Union && !the_first_first));
-                    if not_meshed {
-                        assert!(
-                            matches!(measured, Err(Error::CannotMeshAFace { .. })),
-                            "{what}: {measured:?}"
-                        );
-                        continue;
-                    }
-                    let measured = measured.unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                        fused_and_measured(&mut model, first, placed, rule, the_first_first)
+                            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
                     let [(volume, error)] = measured[..] else {
                         panic!("{what}: one solid, not {measured:?}");
                     };
@@ -284,6 +273,7 @@ fn a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule() {
 #[test]
 fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
     for (ring, tube) in PLACED_RINGS {
+        let one_bend = PI * PI * ring * tube * tube / 2.0;
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
                 let what = format!(
@@ -292,17 +282,20 @@ fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
                 let mut model = a_model();
                 let first = a_quarter_bend(&mut model, ring, tube);
                 let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, PI);
-                let measured = fused_and_measured(&mut model, first, placed, rule, the_first_first);
-                match rule {
-                    Rule::Intersection => assert!(
-                        matches!(&measured, Ok(solids) if solids.is_empty()),
-                        "{what}: {measured:?}"
-                    ),
-                    Rule::Union | Rule::Difference => assert!(
-                        matches!(measured, Err(Error::CannotMeshAFace { .. })),
-                        "{what}: {measured:?}"
-                    ),
+                let measured = fused_and_measured(&mut model, first, placed, rule, the_first_first)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                let bends = match rule {
+                    Rule::Union => 2,
+                    Rule::Difference => 1,
+                    Rule::Intersection => 0,
                     other => panic!("not a rule this tries: {other:?}"),
+                };
+                assert_eq!(measured.len(), bends, "{what}: {measured:?}");
+                for (volume, error) in measured {
+                    assert!(
+                        (volume - one_bend).abs() <= error,
+                        "{what}: {volume} ± {error}, a bend {one_bend}"
+                    );
                 }
             }
         }
