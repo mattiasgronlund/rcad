@@ -143,3 +143,32 @@ rows as well.
 448.6, the count by (a) to (d), and the row it filed or why it filed none; and
 a **Result.** paragraph under the In short above. The table should be committed
 as it grows, so that a relay picks up from the file.
+
+### 448.5 The nine rows at the base
+
+*Being written. Q1954's first lane ran step 1 for all nine and stopped at its
+budget; steps 2 to 4 are still to do for each row that refuses.*
+
+**Step 1, run at `283ddff8`.** Q1930's probes from `/tmp/q1930-probes/` were
+copied into `crates/rcad-topo/tests/` unchanged, but for a report that prints
+every input of each record still `Undecidable`, run with `mise exec -- just t
+-p rcad-topo -E 'test(/q1930_probe_q(1834|1854|1765|1737|1734|1842|1936|1839|1867)$/)'
+--no-capture`, and deleted. 9 tests passed and printed 202 lines. The probes,
+the report and the print (`q1954-base.txt`) are kept at `/tmp/q1954-probes/`;
+`python3 q1954-short.py q1954-base.txt` gives the counts below. "Site" is the
+predicate of the record still `Undecidable`, or the `Error` variant.
+
+| Row | Runs | Certified at the base | Site and record |
+|---|---|---|---|
+| Q1834 | 5 cuts, 3 bars, both ways: 30 | refuses 30 | orient3d, `1.9e-16` to `8.9e-16`, at `(c, -s/2, z0 + h/4)` where `s` is `sqrt(1 - c²)`: `(0.5, -0.4330127018922194 to -0.43301270189221924, 2.5)` at `c = 0.5`, `z0 = 2`, `h = 2` |
+| Q1854 | six fuses: 6 | refuses 6 | orient3d, `8.5e-16`, of the turned block's bottom normal `(0, -0.479425538604203, -0.8775825618903728)`, the side's `(-1, 0, 0)` and the box `(-1, ±0, ±8.9e-16)` |
+| Q1839 | four placements, D and I: 8 | answers 3, refuses 5 | `Invalid(DynamicRangeTooWide)`, ratio `1.3e15` to `4.5e16` |
+| Q1765 | pi/6 and 1 radian, wall 4 and 2 high, U and D both ways: 16 | refuses 16 | side of plane, `1.45e-13` at pi/6 on the box `[-1.0000000000000533, -0.9999999999999472] × [1.7320508075688241, 1.7320508075689303] × [0.9999999999999469, 1.000000000000053]`, `1.75e-13` at 1 radian on `[-1.6829419696158563, -1.6829419696157297] × [1.080604611736216, 1.0806046117363426] × [0.9999999999999367, 1.0000000000000633]` |
+| Q1842 | four placements, D and I: 8 | answers 4 (unplaced and shifted), refuses 4 | turned: orient3d, `5.8e-13`, at `[1.4999999999999982, 1.5000000000000016] × [-2.920637567314879, -2.920637567314877] × [6.907957455021635, 6.907957455021639]`; turned then shifted: side of plane, `3.6e-15`, on `[9.999999999999993, 10.000000000000005] × [-5.0, -4.999999999999997] × [2.4999999999999982, 2.4999999999999996]` |
+| Q1737 / Q1958 | 5 mm model, both notches, U, I and D: 6 | **answers 6** | — |
+| Q1867 | nine two-knife wedges: 9 | refuses 9 | `Invalid(DynamicRangeTooWide)` |
+| Q1936 | shifted, turned, turned then shifted, D and I: 6 | refuses 6 | a point inside a piece of a face, enclosure infinite; shifted, three corners whose boxes each hold the apex `(7, -5, 12.5)`, the first `[6.999999999999998, 7.000000000000003] × [-5.000000000000001, -4.999999999999998] × [12.499999999999996, 12.500000000000005]` |
+| Q1734 | quarter and half turn, six fuses, each validated and measured: 12 | **answers 12** | — |
+
+So Q1737's shape, which Q1958 closed, and Q1734's answer at the base, and the
+seven others refuse as 446.4 found them.
