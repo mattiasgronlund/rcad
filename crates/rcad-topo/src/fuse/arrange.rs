@@ -12550,7 +12550,8 @@ mod tests {
 #[cfg(test)]
 mod curved {
     use rcad_geom::{
-        Axis, Cone, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
+        Axis, Cone, EdgeRun, Isometry, Orientation, Picker, Plane, Point, Scale, Surface,
+        SurfaceMeet, Torus, Vector,
     };
     use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 
@@ -12632,6 +12633,9 @@ mod curved {
         solids
     }
 
+    /// Two bars of radius `1/4` along `ways`, each cut off `1` either side of
+    /// `middle` along its own axis, so their axes meet at `middle` exactly,
+    /// both cut against each other.
     fn two_bars_crossing_at(middle: Point, ways: [Vector; 2]) -> Vec<BakedSolid> {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let policy = Policy::certified();
@@ -12660,58 +12664,113 @@ mod curved {
         solids
     }
 
+    /// Bars on `(3, 4, 0)` and `(4, 0, 3)` cut each other's wall into the same
+    /// four pieces whether their axes meet at the origin or at `(11, −3.25,
+    /// 0.5)`.
+    ///
+    /// Where the walls cross is four half ellipses, and each is picked out by
+    /// two flat surfaces through where the axes meet. At the origin those are
+    /// half-spaces. At `(11, −3.25, 0.5)` no half-space written in `f64` passes
+    /// exactly through that point, so `intersect` picks them by flat surfaces
+    /// that hold the point itself (§443). The arrangement used to read only
+    /// half-spaces there, and could not order the corners along a crossing
+    /// picked the other way.
+    ///
+    /// **Four pieces, the same four**: each wall keeps two pieces with a cap's
+    /// circle and four sides of half ellipses, and two pieces of four sides,
+    /// and every side starts at the same corner in both places: a cap's own
+    /// corner, or the same one of the six corners where three surfaces meet.
     #[test]
-    fn probe_q1892_split() {
-        for middle in [Point::new(0.0, 0.0, 0.0), Point::new(11.0, -3.25, 0.5)] {
-            let solids = two_bars_crossing_at(
-                middle,
-                [Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 0.0, 3.0)],
-            );
-            for solid in &solids {
-                let split = split_a_face(
-                    the_wall(solid),
+    fn two_bars_on_3_4_0_and_4_0_3_crossing_where_no_half_space_holds_the_middle_cut_each_wall_in_four()
+     {
+        let ways = [Vector::new(3.0, 4.0, 0.0), Vector::new(4.0, 0.0, 3.0)];
+        let shapes = [Point::origin(), Point::new(11.0, -3.25, 0.5)].map(|middle| {
+            let solids = two_bars_crossing_at(middle, ways);
+            let walls = [the_wall(&solids[0]), the_wall(&solids[1])];
+            for [one, other] in [walls, [walls[1], walls[0]]] {
+                let crossing = rcad_geom::intersect(
+                    &one.surface,
+                    &other.surface,
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
                 );
-                match split {
-                    Ok(split) => {
-                        println!("{middle:?}: {} pieces", split.pieces.len());
-                        for piece in &split.pieces {
-                            println!(
-                                "  piece wires {:?} whole {}",
-                                piece.wires.iter().map(Vec::len).collect::<Vec<_>>(),
-                                piece.is_the_whole_surface
-                            );
-                            for wire in &piece.wires {
-                                for meet in wire {
-                                    let ends = meet.ends.clone().map(|end| match end {
-                                        MeetPoint::Existing { point, .. } => {
-                                            format!("old {:?}", point.enclosure().map(|i| i.lo()))
-                                        }
-                                        MeetPoint::OfThreeSurfaces {
-                                            surfaces,
-                                            which,
-                                            point,
-                                        } => format!(
-                                            "three {:?}#{which} {:?}",
-                                            surfaces.map(|s| kind(&s)),
-                                            point.enclosure().map(|i| (i.lo(), i.width()))
-                                        ),
-                                        other => format!("{other:?}"),
-                                    });
-                                    println!(
-                                        "    {:?} side {:?} ends {ends:?}",
-                                        meet.carried_by.map(|s| kind(&s)),
-                                        meet.material_side
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Err(why) => println!("{middle:?}: refused {why:?}"),
+                let Ok(SurfaceMeet::Curves(runs)) = &crossing else {
+                    panic!("{middle:?}: {crossing:?}");
+                };
+                assert_eq!(runs.len(), 4, "{middle:?}: four half ellipses");
+                for run in runs {
+                    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                        panic!("{middle:?}: {run:?}");
+                    };
+                    let held = if middle == Point::origin() {
+                        matches!(picked_by[..], [Picker::InFrontOf(_), Picker::InFrontOf(_)])
+                    } else {
+                        matches!(
+                            picked_by[..],
+                            [
+                                Picker::InFrontOfAFlatThrough(_),
+                                Picker::InFrontOfAFlatThrough(_)
+                            ]
+                        )
+                    };
+                    assert!(held, "{middle:?}: {picked_by:?}");
                 }
             }
-        }
+            solids
+                .iter()
+                .map(the_pieces_of_the_wall)
+                .collect::<Vec<_>>()
+        });
+
+        let wire_lengths: Vec<Vec<usize>> = shapes[0][0]
+            .iter()
+            .map(|piece| piece.iter().map(Vec::len).collect())
+            .collect();
+        assert_eq!(
+            wire_lengths,
+            [vec![1, 4], vec![1, 4], vec![4], vec![4]],
+            "{:?}",
+            shapes[0]
+        );
+        assert_eq!(shapes[0], shapes[1]);
+    }
+
+    /// Each piece a bar's wall is cut into, as its wires, each wire as the
+    /// corner every side starts at and the two surfaces that carry it.
+    fn the_pieces_of_the_wall(bar: &BakedSolid) -> Vec<Vec<Vec<String>>> {
+        let split = split_a_face(
+            the_wall(bar),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the wall is split");
+        split
+            .pieces
+            .iter()
+            .map(|piece| {
+                piece
+                    .wires
+                    .iter()
+                    .map(|wire| {
+                        wire.iter()
+                            .map(|side| {
+                                let start = match &side.ends[0] {
+                                    MeetPoint::Existing { .. } => "old".to_owned(),
+                                    MeetPoint::OfThreeSurfaces { which, .. } => format!("#{which}"),
+                                    end @ (MeetPoint::WhereAClosedCurveStarts { .. }
+                                    | MeetPoint::HalfWayRoundAClosedCurve { .. }
+                                    | MeetPoint::APoleOfAClosedSurface { .. }) => {
+                                        panic!("no closed curve or pole on these walls: {end:?}")
+                                    }
+                                };
+                                let [one, other] = side.carried_by.map(|surface| kind(&surface));
+                                format!("{start} {one}/{other}")
+                            })
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     fn the_wall(bar: &BakedSolid) -> &BakedFace {
