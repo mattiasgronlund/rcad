@@ -2278,6 +2278,110 @@ mod tests {
         }
     }
 
+    /// Ten points of the one loop a pipe reaching out of the side of a pipe of
+    /// radius 4 up `z` crosses it in come back in the order they run round it,
+    /// from each of the ten, every pair of the other nine both ways and with
+    /// the two pipes swapped. The loop runs back and forth round both axes, so
+    /// no normal orders it the way a conic is ordered. The reaching pipe runs
+    /// along `x` with radius 1, which is the bar Q1857 cut in half; along
+    /// `x + z`, so the two axes are not square to each other; and along `x`
+    /// with radius 4, so neither pipe is the thinner. Each step is checked
+    /// against `∇S × ∇T` before the order is asked, so what this pins is the
+    /// geometry.
+    #[test]
+    fn ten_points_on_the_one_loop_where_two_pipes_cross_come_back_in_the_order_they_run_round_it() {
+        let off = 3.5;
+        let fat = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
+        for (radius, lean) in [(1.0, 0.0), (1.0, 1.0), (4.0, 0.0)] {
+            let way = Vector::new(1.0, 0.0, lean);
+            let reaching = Surface::Cylinder(
+                Cylinder::new(
+                    Axis::new(Point::new(0.0, off, 5.0), way).expect("an axis"),
+                    radius,
+                )
+                .expect("a radius"),
+            );
+            let round = round_the_one_loop_two_pipes_cross_in(radius, off, lean);
+            let count = round.len();
+            for start in 0..count {
+                let [here, next] = [round[start], round[(start + 1) % count]];
+                let from_the_axis = Vector::new(here[0], here[1] - off, here[2] - 5.0);
+                let along = way * (from_the_axis.dot(way) / way.dot(way));
+                let runs = (from_the_axis - along).cross(Vector::new(here[0], here[1], 0.0));
+                let step = Vector::new(next[0] - here[0], next[1] - here[1], next[2] - here[2]);
+                assert!(
+                    runs.dot(step) > 0.0,
+                    "radius {radius}, lean {lean}: the crossing runs {runs:?} at {here:?} and \
+                     the step to {next:?} is {step:?}"
+                );
+            }
+            for start in 0..count {
+                let at = |ahead: usize| PredicatePoint::from(round[(start + ahead) % count]);
+                for one in 1..count {
+                    for other in one + 1..count {
+                        let what = format!(
+                            "radius {radius}, lean {lean}, from point {start}, {one} then {other} \
+                             ahead"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&reaching, &fat],
+                                at(0),
+                                at(one),
+                                at(other)
+                            ),
+                            Ok(Decision::Pos),
+                            "{what}"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&reaching, &fat],
+                                at(0),
+                                at(other),
+                                at(one)
+                            ),
+                            Ok(Decision::Neg),
+                            "{what}, asked the other way"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&fat, &reaching],
+                                at(0),
+                                at(one),
+                                at(other)
+                            ),
+                            Ok(Decision::Neg),
+                            "{what}, the pair swapped"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ten points of the one loop a pipe of `radius` along `x + lean z`
+    /// through `(0, off, 5)` crosses a pipe of radius 4 up `z` in, in the order
+    /// the crossing runs with the leaning pipe taken first: on the side of
+    /// `x = 0` that is `x > 0`, going round the leaning pipe's axis from
+    /// below `z = 5`'s side to above it, then back on the side `x < 0`.
+    fn round_the_one_loop_two_pipes_cross_in(radius: f64, off: f64, lean: f64) -> Vec<[f64; 3]> {
+        use core::f64::consts::PI;
+        let widest = ((4.0 - off) / radius).acos();
+        let on_the_side = |side: f64, step: i32| {
+            let angle = PI + (PI - widest) * f64::from(step) / 3.0;
+            let y = off + radius * angle.cos();
+            let x = side * (16.0 - y * y).sqrt();
+            [
+                x,
+                y,
+                5.0 + lean * x + (1.0 + lean * lean).sqrt() * radius * angle.sin(),
+            ]
+        };
+        let ahead = (-2..=2).rev().map(|step| on_the_side(1.0, step));
+        let back = (-2..=2).map(|step| on_the_side(-1.0, step));
+        ahead.chain(back).collect()
+    }
+
     /// Two pipes of one radius, two running the same way, and a thin pipe the
     /// fat one does not swallow whole, which crosses it in one loop that runs
     /// back and forth round both axes, are refused rather than ordered.
