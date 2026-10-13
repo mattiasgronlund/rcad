@@ -392,8 +392,8 @@ fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_are_refused_where_one_sp
     }
 }
 
-/// **A slanted pin starting on a bar's axis is refused already where the bar
-/// ends beside where the pin would come out the other side.**
+/// **A slanted pin starting on a bar's axis is refused only where the bar ends
+/// across where the pin would come out the other side.**
 ///
 /// A thin pipe through a fat one crosses it in two loops. A pin that starts
 /// on the fat bar's axis makes only one of them, round `(−2, 0, 5.5)` here.
@@ -407,14 +407,24 @@ fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_are_refused_where_one_sp
 /// are refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in both orders,
 /// though no face of the pin comes near the loop. The end's plane and the two
 /// walls are the three surfaces that meet there, but which three the fuse asks
-/// is not traced. Just below the span, from `z = 1.5` to `1.8125`, they are
-/// refused `CurvedFaceWithAHoleGoesTooFarRound` in both orders instead, also
-/// untraced. Further out, at `−2`, `1`, `1.25`, `3.1875` and `3.25`, they
-/// unite into one solid that validates. Q528's route put the bar's end at
-/// `z = 2`, which is why [`a_slanted_pin_from_the_axis`] moves the joint down
-/// to `1`.
+/// is not traced. Everywhere else tried, from `−2` to `1.8125` and at `3.1875`
+/// and `3.25`, they unite into one solid that validates. Q528's route put the
+/// bar's end at `z = 2`, which is why [`a_slanted_pin_from_the_axis`] moves
+/// the joint down to `1`.
+///
+/// From `z = 1.5` to `1.8125` they were refused
+/// `CurvedFaceWithAHoleGoesTooFarRound` in both orders. There the plane of the
+/// pin's bottom cap cuts the bar's wall in an ellipse that crosses the bar's
+/// end, so the wall below it is a patch that does not go right round, more
+/// than a quarter turn wide, with the loop round `(2, 0, 2.5)` as a hole in
+/// it, and the mesher had no cut for a hole in such a patch.
+///
+/// The pin's lowest point is `z = 3.6`, above every end tried, so the part of
+/// the pin outside the bar is the same in every answer, and each volume less
+/// the bar's own, `4π` per unit of height, is the same as at `z = 1`.
 #[test]
-fn a_slanted_pin_from_a_bars_axis_is_refused_where_the_bar_ends_beside_where_it_would_come_out() {
+fn a_slanted_pin_from_a_bars_axis_is_refused_only_where_the_bar_ends_across_where_it_would_come_out()
+ {
     let policy = Policy::certified();
     let pinned = a_slanted_pin_from_the_axis();
     let [from, to] = pinned.along_the_pin;
@@ -441,9 +451,17 @@ fn a_slanted_pin_from_a_bars_axis_is_refused_where_the_bar_ends_beside_where_it_
                 .unwrap_or_else(|broken| {
                     panic!("the bar from {bottom}, came back broken: {broken:?}")
                 });
-            Ok::<usize, Error>(fused.solids().len())
+            let [solid] = fused.solids() else {
+                panic!(
+                    "the bar from {bottom} and the pin are one solid: {:?}",
+                    fused.solids()
+                );
+            };
+            Ok::<(f64, f64), Error>(volume_of(&model, *solid))
         })
     };
+    let the_bar_alone_from =
+        |bottom: f64| std::f64::consts::PI * RADIUS * RADIUS * (pinned.top - bottom);
 
     for bottom in [1.875, 1.9375, 2.0, 2.5, 3.0, 3.0625, 3.125] {
         for said in the_pin_and_a_bar_from(bottom) {
@@ -458,20 +476,18 @@ fn a_slanted_pin_from_a_bars_axis_is_refused_where_the_bar_ends_beside_where_it_
             );
         }
     }
-    for bottom in [1.5, 1.75, 1.8125] {
+    let [(at_one, at_one_bound), _] = the_pin_and_a_bar_from(1.0)
+        .map(|said| said.unwrap_or_else(|refused| panic!("the bar from 1: {refused:?}")));
+    let the_pin_outside_the_bar = at_one - the_bar_alone_from(1.0);
+    for bottom in [-2.0, 1.0, 1.25, 1.5, 1.75, 1.8125, 3.1875, 3.25] {
         for said in the_pin_and_a_bar_from(bottom) {
+            let (volume, bound) =
+                said.unwrap_or_else(|refused| panic!("the bar from {bottom}: {refused:?}"));
+            let outside = volume - the_bar_alone_from(bottom);
             assert!(
-                matches!(said, Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })),
-                "the bar from {bottom}, just below the loop: {said:?}"
-            );
-        }
-    }
-    for bottom in [-2.0, 1.0, 1.25, 3.1875, 3.25] {
-        for said in the_pin_and_a_bar_from(bottom) {
-            assert_eq!(
-                said.unwrap_or_else(|refused| panic!("the bar from {bottom}: {refused:?}")),
-                1,
-                "the bar from {bottom}"
+                (outside - the_pin_outside_the_bar).abs() <= bound + at_one_bound,
+                "the bar from {bottom}: {volume} ± {bound} leaves {outside} of the pin outside \
+                 the bar, and from 1 it leaves {the_pin_outside_the_bar} ± {at_one_bound}"
             );
         }
     }
@@ -530,7 +546,7 @@ fn a_pin_right_through() -> APinnedBar {
 ///
 /// The route Q528 named, with the joint moved down from `z = 2`, where the
 /// pin is refused before the lower bar comes into it
-/// ([`a_slanted_pin_from_a_bars_axis_is_refused_where_the_bar_ends_beside_where_it_would_come_out`]).
+/// ([`a_slanted_pin_from_a_bars_axis_is_refused_only_where_the_bar_ends_across_where_it_would_come_out`]).
 fn a_slanted_pin_from_the_axis() -> APinnedBar {
     APinnedBar {
         joint: 1.0,
