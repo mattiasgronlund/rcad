@@ -143,3 +143,159 @@ rows as well.
 448.6, the count by (a) to (d), and the row it filed or why it filed none; and
 a **Result.** paragraph under the In short above. The table should be committed
 as it grows, so that a relay picks up from the file.
+
+### 448.5 The nine rows at the base
+
+*Being written. Q1954's first lane ran step 1 for all nine. Its third wrote
+steps 2 to 4 below for Q1834, Q1765, Q1854, Q1842, Q1839 and Q1867, and its
+fourth checked Q1842's aim. Q1936, Q1958's fix and Q1734 are measured, in
+the fourth lane's handoff, and still to write here, and so are 448.6 and the
+Result.*
+
+**Step 1, run at `283ddff8`.** Q1930's probes from `/tmp/q1930-probes/` were
+copied into `crates/rcad-topo/tests/` unchanged, but for a report that prints
+every input of each record still `Undecidable`, run with `mise exec -- just t
+-p rcad-topo -E 'test(/q1930_probe_q(1834|1854|1765|1737|1734|1842|1936|1839|1867)$/)'
+--no-capture`, and deleted. 9 tests passed and printed 202 lines. The probes,
+the report and the print (`q1954-base.txt`) are kept at `/tmp/q1954-probes/`;
+`python3 q1954-short.py q1954-base.txt` gives the counts below. "Site" is the
+predicate of the record still `Undecidable`, or the `Error` variant.
+
+| Row | Runs | Certified at the base | Site and record |
+|---|---|---|---|
+| Q1834 | 5 cuts, 3 bars, both ways: 30 | refuses 30 | orient3d, `1.9e-16` to `8.9e-16`, at `(c, -s/2, z0 + h/4)` where `s` is `sqrt(1 - c²)`: `(0.5, -0.4330127018922194 to -0.43301270189221924, 2.5)` at `c = 0.5`, `z0 = 2`, `h = 2` |
+| Q1854 | six fuses: 6 | refuses 6 | orient3d, `8.5e-16`, of the turned block's bottom normal `(0, -0.479425538604203, -0.8775825618903728)`, the side's `(-1, 0, 0)` and the box `(-1, ±0, ±8.9e-16)` |
+| Q1839 | four placements, D and I: 8 | answers 3, refuses 5 | `Invalid(DynamicRangeTooWide)`, ratio `1.3e15` to `4.5e16` |
+| Q1765 | pi/6 and 1 radian, wall 4 and 2 high, U and D both ways: 16 | refuses 16 | side of plane, `1.45e-13` at pi/6 on the box `[-1.0000000000000533, -0.9999999999999472] × [1.7320508075688241, 1.7320508075689303] × [0.9999999999999469, 1.000000000000053]`, `1.75e-13` at 1 radian on `[-1.6829419696158563, -1.6829419696157297] × [1.080604611736216, 1.0806046117363426] × [0.9999999999999367, 1.0000000000000633]` |
+| Q1842 | four placements, D and I: 8 | answers 4 (unplaced and shifted), refuses 4 | turned: orient3d, `5.8e-13`, at `[1.4999999999999982, 1.5000000000000016] × [-2.920637567314879, -2.920637567314877] × [6.907957455021635, 6.907957455021639]`; turned then shifted: side of plane, `3.6e-15`, on `[9.999999999999993, 10.000000000000005] × [-5.0, -4.999999999999997] × [2.4999999999999982, 2.4999999999999996]` |
+| Q1737 / Q1958 | 5 mm model, both notches, U, I and D: 6 | **answers 6** | — |
+| Q1867 | nine two-knife wedges: 9 | refuses 9 | `Invalid(DynamicRangeTooWide)` |
+| Q1936 | shifted, turned, turned then shifted, D and I: 6 | refuses 6 | a point inside a piece of a face, enclosure infinite; shifted, three corners whose boxes each hold the apex `(7, -5, 12.5)`, the first `[6.999999999999998, 7.000000000000003] × [-5.000000000000001, -4.999999999999998] × [12.499999999999996, 12.500000000000005]` |
+| Q1734 | quarter and half turn, six fuses, each validated and measured: 12 | **answers 12** | — |
+
+So Q1737's shape, which Q1958 closed, and Q1734's answer at the base, and the
+seven others refuse as 446.4 found them.
+
+**Steps 2 to 4.** Where each refusal is asked comes from the stacks Q1930
+kept (`/tmp/q1930-probes/gdb-all-*.txt`, read with `lasthit.py`). The rest
+comes from probes added to the copied files and run at `283ddff8`
+(`q1954_probe_q1834`, `_q1765`, `_q1854` in `zz_q1930_simple.rs`;
+`_q1842`, `_q1936`, `_q1839` in `zz_q1930_corner.rs`; `_q1867` in
+`zz_q1930_lune.rs`). They are kept in `/tmp/q1954-probes/`.
+
+- **Q1834.** *The question*: does the other half's cut face hold the point
+  chosen inside a piece of the cut? `select::coincident_face` asks
+  `holds::walk_one_outline`, and that asks orient3d of each corner against the
+  plane through the point, the aim and a target off the face. *Its exact
+  answer*: both halves' cut faces have the corners `(0.5, ±s, 2)` and
+  `(0.5, ±s, 4)`, with `s = 0.8660254037844386`, and the first corner,
+  `A = (0.5, -s, 2)`, is the aim (`holds.rs` 260-265). The point
+  `(0.5, -s/2, 2.5)` is `A + (C - A)/4`, with `C = (0.5, s, 4)` the opposite
+  corner. That is where `candidate_points`' first family puts it:
+  `midway(corner, midway(before, after))`, a quarter of the way along the
+  piece's diagonal. So the point lies on the line from the aim through `C`,
+  and orient3d at `C` is exactly zero when the point is built from the stored
+  corners. Built from the crossings, it is the box in the record. In exact
+  real numbers it misses that line only by which way `sqrt(0.75)` rounded
+  (`s*s - 0.75 = -8.7e-17` by `fma`). Either sign gives the same winding,
+  since `C` is behind the point. *Which of (a) to (d)*: none. The fuse made
+  the coincidence itself, by choosing a test point on a diagonal and an aim
+  at one end of it. Cut through the axis, `s = 1` is exact, the zero is
+  exact, and the union answers. The cure is a test point or an aim off the
+  diagonal, not a carried fact.
+- **Q1765.** *The question*: is the bar's seam corner on the cube's wall?
+  `Arrangement::passes_through` asks it (`fuse/arrange.rs` 1795-1841, from
+  `place_the_corners`) as `side_of_surface(wall, corner box)`. *Its exact
+  answer*: before the turn, the corner is `(0, 2, 1)` and the wall is
+  `x = 0`, so `Zero`. *Which of (a) to (d)*: **(c)**. The cube's faces carry
+  the location `(R, 0)` and the bar's `(R, (-1.8660254037844388,
+  1.2320508075688772, 1))`, with the same bits of `R`
+  (`[0, 0, 0.2588190451025208, 0.9659258262890683]`). So the bar's placement
+  is the cube's turn with a shift after it, and the shift was rounded into
+  the bar's translation by `Isometry::compose`. Then
+  `where_a_corner_lands_after_moving` gives the bar's corner as a box
+  `1.06e-13` wide, because pi/6 is not one of the 24 turns of a cube it can
+  check exactly. The fact was in hand until `compose`. After that nothing
+  keeps the shared turn apart. (The corner as the view rounds it,
+  `(-1.0000000000000002, 1.7320508075688772, 1)`, happens to be exactly on
+  the wall as the view rounds it. That is a rounding that went the right
+  way, not something the model knows.)
+- **Q1854.** *The question*: which way do the slab's side and the pipe turn
+  at a node on the slab's bottom? It is asked in
+  `Arrangement::turns_anticlockwise` (`arrange.rs` 5181-5241) as orient3d of
+  three gradients. *Its exact answer*: the side `x = -17` is stored exactly
+  (`[-1, 0, 0, -17]`), because a turn about `x` keeps it, and the pipe's axis
+  is `x = -16`, `y = 0`, with radius `1`. So the side rests along the pipe,
+  the pipe's gradient on the touching line is exactly `(-1, 0, 0)`, two rows
+  are parallel, and the determinant is `Zero`. `rcad_geom::intersect` already
+  says so: the side meets the pipe in a `Straight` run, and every other face
+  of the slab meets it in `RightRoundWhereItsFacesCross`. *Which of (a) to
+  (d)*: the touch was made by the user's numbers (d). It stays exact in the
+  two stored surfaces, so it is the crossing's own surfaces, **(b)**, that
+  know it. Lines 5222-5227 read `Zero` for a plane resting along a cone and
+  for two pipes that touch, but not for a plane resting along a pipe. The
+  fact was in hand and was not read.
+- **Q1842 turned.** *The question*: as for Q1834, in
+  `holds::walk_one_outline`, about the point `(1.5, 0, 7.5)` turned 0.4 about
+  `x`, which the probe puts at `(1.5, -2.920637567314879,
+  6.907957455021638)`, inside the record's box. Unturned, that point is
+  `C + (A - C)/4` on the half bar's flat face `y = 0`, with `C = (3, 0, 10)`
+  and `A = (-3, 0, 0)` its opposite corners. It is on no diagonal of the
+  block's face. *Which*: none, the same as Q1834: the fuse's own test
+  point. The half bar's flat face, stored as `[0, 0.9210609940028851,
+  0.38941834230865047, 0]`, has the wire `(-3, 0, 0)`, `(-3, -3.894…,
+  9.2106…)`, `(3, -3.894…, 9.2106…)`, `(3, 0, 0)`, so its aim is `A`, and
+  the point lies on the line from `A` through `C`. From the block's first
+  corner, `(-5, 0, -1)` turned, it lies on no line through another corner,
+  so the orient3d that refuses is the one at `C`. Unplaced and shifted,
+  every number is exact and it answers. Both solids are turned by the one
+  turn, so (c) would answer it too: in the frame before the turn it is the
+  unplaced shape.
+- **Q1842 turned then shifted.** *The question*: is the half bar's corner
+  `(3, 0, 0)`, placed at `(10, -5, 2.5)`, on the block's face `y = 0`? It is
+  asked in `Arrangement::passes_through`, as for Q1765. *Its exact answer*:
+  before the placement, the corner is on `y = 0` in both solids, so `Zero`.
+  As stored, the half bar's flat face is `[0, 0.9210609940028851,
+  0.38941834230865047, 3.6317591142427994]` and the block's face is
+  `[0, -0.9210609940028851, -0.38941834230865047, -3.631759114242799]`, one
+  ulp apart in offset. So `is_on_by_construction` does not take them as one
+  plane, and the box straddles both. *Which*: **(c)**. Both are at the one
+  placement `(R, (7, -5, 2.5))`, and the block also carries its own shift
+  `(-5, 0, -1)`, which lies along `y = 0`. `Isometry::compose` rounds
+  `R·(-5, 0, -1) + t` into the block's translation,
+  `(2, -4.610581657691349, 1.578939005997115)`, and the plane's offset
+  rounds from that. Turned alone, both offsets come out `0` and the corner
+  is `Zero` on both.
+- **Q1839.** *The small feature*: under
+  `Policy::certified().with_dynamic_range_check(Severity::Warn)`, every fuse
+  that refuses at the base answers with an edge between the apex and a point
+  a rounding from it. Unplaced, intersection: `2.46e-16`, from
+  `(0, 2.458e-16, 10)` to `(0, 0, 10)`, and `11 / 2.458e-16` is the record's
+  `4.47e16`. Shifted: `8.9e-16` to `2.2e-15`, a speck at `(7, -5, 12.5)`.
+  Turned: `3.8e-15`. Turned then shifted: `1.1e-14`. The three that answer
+  have no edge shorter than `3`. *Its exact answer*: the block's face runs
+  exactly through the apex, so the tetrahedron's three side planes and that
+  face meet in the one point, and no edge is there. *Which*: likely **(a)**.
+  The apex is a corner of all three side faces (`BakedCorner::around`), and
+  the block's face is exactly through the stored apex unplaced and shifted.
+  It is lost where the crossings of the block's face with each side plane
+  are worked out from side planes whose normals rounded, so they miss each
+  other near the apex. This is not yet checked function by function.
+  Turned, (c) is needed as well.
+- **Q1867.** *The small feature*: the second knife's face through the axis
+  is stored with offset `4.440892098500626e-16` at 90 degrees and radius 1
+  (`4.5e-13` at 45 degrees and radius 1000, `-2.2e-16` at 10 degrees and
+  radius 1), not `0`. So it misses the poles by that much, and
+  `6 / 4.440892098500626e-16` is exactly the record's ratio
+  `1.351079888211149e16`, with `6` the knife's reach. *Its exact answer*: the
+  plane holds the axis, so the lune's tip is the pole and there is no small
+  feature. *Which*: **(d)**. The ball is at the origin and the knife's face
+  holds the `z` axis because of the numbers the user gave. Only the knife
+  moves: `place_solid` composes its turn about `z` with its own shift
+  `(0, -6r, -6r)`, and the offset rounds there. A turn about `z` keeps
+  every point of the axis exactly, so the question could still be asked in
+  the knife's frame before its turn. That is close to (c), but the movement
+  belongs to one solid only. With the range check at `Warn`, certified then
+  refuses by name (`ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`, and
+  `CannotNameWhichPieceOfACrossingThisIs` at 45 degrees and radius 1000), so
+  no answer was there to measure.
