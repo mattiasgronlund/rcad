@@ -16,18 +16,24 @@
 //! `Isometry::quarter_turns`, every fuse answers what it holds by hand under
 //! both policies and logs nothing.
 //!
-//! **Half a turn about `y` by `Isometry::rotation(y, π)`: refused, and a side
-//! a rounding off parallel to the axis is not why.** Every side runs *exactly*
-//! along the turned bar: how it leans against the pipe comes out zero. But
-//! `sin π` rounds to `1.2e-16`, so the turn is not one of a cube's, and the
-//! fuse reads the bar's seam corner through `where_a_corner_lands_after_moving`
-//! as a box `± CORNER_AFTER_MOVING_ROUNDOFF · 3`. The bottom cap circle starts
-//! at that corner. Every certified fuse is refused *order along a crossing*
-//! between that box and where a side's line crosses the bottom circle — Q885's
-//! case, met there on a shape only a probe builds, and here on one a designer
-//! draws. Every tolerant fuse is refused `CannotTellTheCellsOfAFaceApart`. The
-//! seam notch tilted off the axis, so that no side runs along it, is refused at
-//! the same box when certified, and as two curves touching when tolerant.
+//! **Half a turn about `y` by `Isometry::rotation(y, π)`: answered, though the
+//! bottom cap circle starts inside a box.** Every side runs *exactly* along the
+//! turned bar: how it leans against the pipe comes out zero. But `sin π`
+//! rounds to `1.2e-16`, so the turn is not one of a cube's, and the fuse reads
+//! the bar's seam corner through `where_a_corner_lands_after_moving` as a box
+//! `± CORNER_AFTER_MOVING_ROUNDOFF · 3`. The bottom cap circle starts inside
+//! that box. Every certified fuse was refused *order along a crossing* between
+//! that box and where a side's line crosses the bottom circle — Q885's case,
+//! met there on a shape only a probe builds, and here on one a designer draws.
+//! Every tolerant fuse was refused `CannotTellTheCellsOfAFaceApart`. The seam
+//! notch tilted off the axis, so that no side runs along it, was refused at the
+//! same box when certified, and as two curves touching when tolerant, so what
+//! refused was the corner and not a side along the axis. `fuse/arrange.rs` now
+//! counts the bottom circle from the seam corner's box, since no other node
+//! can lie between that box and where the circle starts
+//! (`Arrangement::count_each_loop_from_the_node_round_its_start`, Q1737).
+//! Every fuse now answers what it holds by hand under both policies and logs
+//! nothing, and the tilted notch answers with the volume it has unturned.
 //!
 //! **One radian about `(1, 1, 1)`: answered, though a side lies a rounding off
 //! parallel to the axis.** The turn rounds each side's normal and the bar's
@@ -45,10 +51,10 @@
 //! answers what it holds by hand under both policies and logs nothing, and so
 //! does the seam notch tilted off the axis, with the volume it has unturned.
 //!
-//! **The half turn by rotation is a gap, not a limit** (§16.10). A turn moves
-//! no material, so each answer exists and is the unturned one. The exact half
-//! turn reaches it for the same shape, and so does the one-radian turn, whose
-//! rounding is in the turn itself.
+//! **The half turn by rotation was a gap, not a limit** (§16.10), and it is
+//! closed. A turn moves no material, so each answer exists and is the unturned
+//! one. The exact half turn reached it for the same shape, and so did the
+//! one-radian turn, whose rounding is in the turn itself.
 //!
 //! *Where a plane and a pipe cross*, the predicate Q765 named, refuses none of
 //! these fuses.
@@ -60,17 +66,13 @@ use rcad_geom::{
     Surface, SurfaceMeet, Unit, Vector, how_a_plane_leans_against_a_pipe, intersect,
     where_a_closed_crossing_starts, where_a_corner_lands_after_moving,
 };
-use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, Record};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 5.0;
 const SIDE: f64 = 2.0;
 const RULES: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
-const ALONG_A_CROSSING: &str = "order along a crossing";
-/// How near a point moved back out of a refusal's box must come to where it is
-/// named to be. The boxes are about `1e-15` wide.
-const CLOSE: f64 = 1e-12;
 
 /// A notch's corner nearest the origin, before any turn: the seam notch is
 /// `[2, 4] × [−1, 1] × [1, 3]`.
@@ -131,53 +133,21 @@ fn the_seam_corner_is_a_box_after_rotation_by_pi_and_a_point_after_two_quarter_t
 
 /// Q885's case on a designer's shape: the bottom cap circle starts inside the
 /// seam corner's box, and a side's line crosses the circle a little way round.
-/// Every certified fuse of either notch is refused on ordering the two.
+/// The circle is counted from that box, so every fuse of either notch, under
+/// either policy, answers what it holds by hand and logs nothing, as the exact
+/// half turn does.
 #[test]
-fn turned_half_a_turn_by_rotation_every_certified_fuse_is_refused_at_the_seam_corners_box() {
-    let turn = half_a_turn_by_rotation();
-    for notch in BOTH_NOTCHES {
-        for rule in RULES {
-            let what = format!("notch at {notch:?}, {rule:?}");
-            let (_, fused, _) = notched_and_fused(&turn, notch, &Isometry::identity(), rule, false);
-            let on_the_circle =
-                refused_between_the_seam_corner_and_the_bottom_circle(fused, &turn, &what);
-            assert!(
-                on_a_side_of(notch, on_the_circle),
-                "{what}: {on_the_circle:?} is on no side of the notch"
-            );
-        }
-    }
-}
-
-#[test]
-fn turned_half_a_turn_by_rotation_every_tolerant_fuse_cannot_tell_the_cells_of_a_face_apart() {
-    let turn = half_a_turn_by_rotation();
-    for notch in BOTH_NOTCHES {
-        for rule in RULES {
-            let (_, fused, _) = notched_and_fused(&turn, notch, &Isometry::identity(), rule, true);
-            let Err(Error::CannotTellTheCellsOfAFaceApart { .. }) = fused else {
-                panic!("notch at {notch:?}, {rule:?}: {fused:?}");
-            };
-        }
-    }
+fn turned_half_a_turn_by_rotation_every_fuse_answers_what_it_holds_by_hand() {
+    answers_every_fuse_by_hand("half a turn by rotation", &half_a_turn_by_rotation());
 }
 
 /// The seam notch tilted off the bar's axis, so that no side of it runs along
-/// the bar, is refused at the same box under the same turn: what refuses here
-/// is the seam corner, and not a side along the axis.
+/// the bar, answers every fuse under the same turn and both policies with the
+/// volume it has unturned. It was refused at the seam corner's box when
+/// certified, so what refused was the corner and not a side along the axis.
 #[test]
-fn turned_half_a_turn_by_rotation_a_notch_tilted_off_the_axis_is_refused_at_the_same_box() {
-    let turn = half_a_turn_by_rotation();
-    for rule in RULES {
-        let what = format!("tilted, {rule:?}");
-        let (_, fused, _) = notched_and_fused(&turn, THE_SEAM_NOTCH, &a_tilt(), rule, false);
-        refused_between_the_seam_corner_and_the_bottom_circle(fused, &turn, &what);
-
-        let (_, fused, _) = notched_and_fused(&turn, THE_SEAM_NOTCH, &a_tilt(), rule, true);
-        let Err(Error::TwoCurvesTouchWithoutCrossing { .. }) = fused else {
-            panic!("{what}, tolerant: {fused:?}");
-        };
-    }
+fn turned_half_a_turn_by_rotation_a_notch_tilted_off_the_axis_answers_every_fuse() {
+    answers_every_tilted_fuse_as_unturned(&half_a_turn_by_rotation());
 }
 
 /// Turned one radian about `(1, 1, 1)`, every side of either notch leans
@@ -237,7 +207,14 @@ fn turned_one_radian_about_a_diagonal_every_fuse_answers_what_it_holds_by_hand()
 /// the same fuse has unturned.
 #[test]
 fn turned_one_radian_about_a_diagonal_a_notch_tilted_off_the_axis_answers_every_fuse() {
-    let turn = one_radian_about_a_diagonal();
+    answers_every_tilted_fuse_as_unturned(&one_radian_about_a_diagonal());
+}
+
+/// Fuses the seam notch tilted off the bar's axis with the bar, unturned and
+/// both placed by `turn`, by every rule under both policies, and checks that
+/// each comes back one solid with nothing logged, and the turned one with the
+/// unturned one's volume.
+fn answers_every_tilted_fuse_as_unturned(turn: &Isometry) {
     for tolerant in [false, true] {
         for rule in RULES {
             let what = format!("tolerant {tolerant}, {rule:?}");
@@ -253,7 +230,7 @@ fn turned_one_radian_about_a_diagonal_a_notch_tilted_off_the_axis_answers_every_
                 the_volume_of_the_one_solid(&model, fused, &format!("{what}, unturned"));
 
             let (model, fused, log) =
-                notched_and_fused(&turn, THE_SEAM_NOTCH, &a_tilt(), rule, tolerant);
+                notched_and_fused(turn, THE_SEAM_NOTCH, &a_tilt(), rule, tolerant);
             assert!(log.is_empty(), "{what}, turned: logged {log:?}");
             let (turned, turned_error) =
                 the_volume_of_the_one_solid(&model, fused, &format!("{what}, turned"));
@@ -444,66 +421,4 @@ fn the_seam_corner_as_the_fuse_reads_it(turn: &Isometry) -> (PredicatePoint, f64
         where_a_corner_lands_after_moving(Point::new(RADIUS, 0.0, 0.0), [&bottom, &wall], turn)
             .expect("a finite corner and a finite move");
     (corner, wobble.magnitude())
-}
-
-/// Checks that `fused` was refused once, on ordering the seam corner's box
-/// against another point, and that the other point lies on the bottom cap
-/// circle. Hands back that point, moved back by the turn.
-fn refused_between_the_seam_corner_and_the_bottom_circle(
-    fused: Result<Vec<SolidKey>, Error>,
-    turn: &Isometry,
-    what: &str,
-) -> [f64; 3] {
-    let (seam_corner, _) = the_seam_corner_as_the_fuse_reads_it(turn);
-    let record = the_one_refusal(fused, what);
-    assert_eq!(record.predicate(), ALONG_A_CROSSING, "{what}");
-    let [one, other] = record.inputs() else {
-        panic!("{what}: {record:?}");
-    };
-    let on_the_circle = match (*one == seam_corner, *other == seam_corner) {
-        (true, false) => other,
-        (false, true) => one,
-        neither_or_both => panic!("{what}: {neither_or_both:?}, {seam_corner:?} in {record:?}"),
-    };
-    let [x, y, z] = where_it_was_before_the_turn(*on_the_circle, turn);
-    assert!(
-        on_the_wall([x, y, z]) && z.abs() < CLOSE,
-        "{what}: ({x}, {y}, {z}) is off the bottom circle"
-    );
-    [x, y, z]
-}
-
-fn the_one_refusal(fused: Result<Vec<SolidKey>, Error>, what: &str) -> Record {
-    let Err(Error::Undecidable { records }) = fused else {
-        panic!("{what}: {fused:?}");
-    };
-    let [record] = records.records() else {
-        panic!("{what}: {records:?}");
-    };
-    record.clone()
-}
-
-/// The middle of a point's box, moved back into the bar's own frame.
-fn where_it_was_before_the_turn(point: PredicatePoint, turn: &Isometry) -> [f64; 3] {
-    let [x, y, z] = point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0);
-    turn.inverse()
-        .apply_to_point(Point::new(x, y, z))
-        .coordinates()
-}
-
-fn on_the_wall([x, y, _]: [f64; 3]) -> bool {
-    ((x * x + y * y).sqrt() - RADIUS).abs() < CLOSE
-}
-
-/// Whether a point, in the bar's own frame, lies on the plane of one of the
-/// untilted notch's four sides.
-fn on_a_side_of([corner_x, corner_y, _]: [f64; 3], [x, y, _]: [f64; 3]) -> bool {
-    [
-        (x, corner_x),
-        (x, corner_x + SIDE),
-        (y, corner_y),
-        (y, corner_y + SIDE),
-    ]
-    .into_iter()
-    .any(|(at, side)| (at - side).abs() < CLOSE)
 }
