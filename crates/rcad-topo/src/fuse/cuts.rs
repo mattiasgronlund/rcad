@@ -1933,6 +1933,90 @@ mod tests {
         );
     }
 
+    /// A bar standing against a block's wall touches it along a line and
+    /// crosses it nowhere, so one solid made of both does not run through
+    /// itself. It is what a union of the two answers (§39.4, the Q1901 note),
+    /// and refusing it refused every fuse after that union (queue row Q1902).
+    #[test]
+    fn a_solid_whose_bar_rests_on_its_blocks_wall_is_not_refused() {
+        let answer = a_block_and_a_bar_as_one(5.0);
+
+        assert!(answer.is_ok(), "expected no refusal, got {answer:?}");
+    }
+
+    #[test]
+    fn a_solid_whose_bar_reaches_into_its_blocks_wall_is_refused() {
+        let answer = a_block_and_a_bar_as_one(4.75);
+
+        assert!(
+            matches!(answer, Err(Error::ArgumentIntersectsItself)),
+            "expected a refusal, got {answer:?}"
+        );
+    }
+
+    #[test]
+    fn a_solid_of_two_bars_side_by_side_is_not_refused() {
+        let answer = two_bars_as_one(2.0);
+
+        assert!(answer.is_ok(), "expected no refusal, got {answer:?}");
+    }
+
+    #[test]
+    fn a_solid_of_two_bars_that_overlap_is_refused() {
+        let answer = two_bars_as_one(1.5);
+
+        assert!(
+            matches!(answer, Err(Error::ArgumentIntersectsItself)),
+            "expected a refusal, got {answer:?}"
+        );
+    }
+
+    /// A block of side four and a bar of radius one standing at `x`, `y = 2`
+    /// from height one to three, wired into one solid by hand and gathered.
+    /// At `x = 5` the bar's wall rests on the block's wall `x = 4`.
+    fn a_block_and_a_bar_as_one(x: f64) -> Result<(), Error> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let block = model.add_cube(4.0, &policy, &mut log).expect("a block");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                2.0,
+                &Isometry::translation(Vector::new(x, 2.0, 1.0)).expect("a finite shift"),
+            )
+            .expect("a bar of radius one");
+        let both = both_solids_as_one(&mut model, block, bar);
+
+        let mut solids =
+            bake(&model, &[both], &policy, &mut ProvenanceLog::new()).expect("it bakes");
+        gather(&mut solids, &policy, &mut log)
+    }
+
+    /// Two bars of radius one and two high, the second standing `apart` from
+    /// the first along y, wired into one solid by hand and gathered. Two apart
+    /// they rest on each other along a line, away from either bar's seam.
+    fn two_bars_as_one(apart: f64) -> Result<(), Error> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let one = model
+            .add_round_bar(1.0, 2.0, &Isometry::identity())
+            .expect("a bar of radius one");
+        let other = model
+            .add_round_bar(
+                1.0,
+                2.0,
+                &Isometry::translation(Vector::new(0.0, apart, 0.0)).expect("a finite shift"),
+            )
+            .expect("another bar of radius one");
+        let both = both_solids_as_one(&mut model, one, other);
+
+        let mut solids =
+            bake(&model, &[both], &policy, &mut ProvenanceLog::new()).expect("it bakes");
+        gather(&mut solids, &policy, &mut log)
+    }
+
     /// Two solids handed over on the *same* side still cut each other. `A` is
     /// the union of the arguments, and a union of two overlapping cubes that
     /// were never cut against each other keeps the halves buried inside the
