@@ -67,8 +67,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
     Cone, DynamicRange, EdgeRun, HalfSpace, Isometry, MeetOfThree, Orientation, Picker, Plane,
-    PlaneAgreement, Point, Surface, SurfaceMeet, Vector, meet_of_three_surfaces,
-    which_way_a_closed_crossing_turns,
+    PlaneAgreement, Point, PointsAlongACrossing, Surface, SurfaceMeet, Vector,
+    meet_of_three_surfaces, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
@@ -4690,6 +4690,11 @@ impl Edge {
     /// A dot of exactly zero is `None`: either the named direction lay along
     /// its chord, which the old code refused too, or the crossing's direction
     /// at the chosen end does.
+    ///
+    /// **An arc of a plane's very long ellipse round a pipe is faced by the
+    /// pipe instead**, and [`AlongALongPipe`] says when and how: there both
+    /// arcs leave the chord within a rounding of its own direction, and the
+    /// squared-off dot above is rounding noise.
     fn the_way_across_the_chord_into_the_arc(
         &self,
         corners: &[Corner],
@@ -4712,6 +4717,14 @@ impl Edge {
             } else {
                 [other, one]
             };
+        let in_order = [first, second].map(|end| corners[end].point);
+        if let Some(pipe) = AlongALongPipe::of(self.carried_by, in_order) {
+            return pipe.the_way_into_the_arc(
+                in_order,
+                [named_from, self.other_end_than(named_from)].map(|end| corners[end].point),
+                towards,
+            );
+        }
         let mut from = first;
         let mut crossing = crossing_at(first);
         if crossing == Vector::zero() {
@@ -4778,6 +4791,144 @@ impl Edge {
         let mut either = self.carried_by;
         either.sort_by_key(name_of_surface_bits);
         either[0]
+    }
+}
+
+/// A plane and a pipe that cross in an ellipse reaching more than half of
+/// [`PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST`] times further up the
+/// axis than an arc's two ends and the radius, with both ends on one side of
+/// the plane through the axis that the normal leans across.
+///
+/// # Why the chord is not squared off against the crossing there
+///
+/// A plane a rounding off parallel to the axis of a pipe of radius `2` cuts it
+/// in an ellipse `1.8e16` long, and an arc of it between two walls of a square
+/// bar is `1.23` long. Both arcs between the two ends leave each of them along
+/// the chord's own line, one each way, so squared off against the chord
+/// [`Edge::the_way_across_the_chord_into_the_arc`]'s crossing direction is
+/// rounding noise, and the picker it made held both arcs (Q1882).
+///
+/// # How it is faced instead
+///
+/// Write `ŵ` for the axis direction scaled to length one, `n` for the
+/// plane's normal, `o` for the axis origin and `sideways = ŵ × n`, which lies
+/// in the plane square to the axis. On each side of the plane through the axis
+/// and `n`, the ellipse is one curve that climbs from one tip to the other;
+/// so of the two arcs between two ends on one side, the **near** arc is the
+/// one between their two heights on that side, and the other runs out round
+/// both tips. Each half, drawn against height, bends away from the axis, so
+/// the near arc lies on the side of its chord that `sideways` points to on its
+/// ends' side, and the far arc on the other. The direction across the chord
+/// in the plane is `n × (second − first)`, worked out from the ends in
+/// [`Edge::the_way_across_the_chord_into_the_arc`]'s order (§312), and turned
+/// to face the near arc.
+///
+/// **Which arc `towards` names is read off two signs.** Into the near arc,
+/// `towards` climbs towards the other end's height, whether it is the
+/// crossing's direction at the named end or the step to a corner of a joined
+/// run ([`Assembly::arc_of_a_joined_run`]), since every point of the near arc
+/// is between the two heights; and the named end with `towards` added is on
+/// the ends' side. A `towards` that climbs away names the far arc. One that
+/// climbs towards the other end but crosses to the other side is refused: a
+/// step to a corner of the far arc on the other side does that, and so can
+/// the crossing's direction at an end so near a tip that the direction leans
+/// across the axis further than the end is off that plane, and the two cannot
+/// be told apart.
+///
+/// **A step to a corner of the far arc beyond the other end, on the ends'
+/// side, reads as the near arc**, and nothing here can tell it from the
+/// crossing's direction, whose climb can be longer than the arc (`1.32` up
+/// against `1.23` on the bar). That needs a joined run of the far arc, which
+/// runs out to both tips, so a plane face and a pipe face that both reach more
+/// than this many times the ends' heights up the axis; nothing built has one.
+struct AlongALongPipe {
+    origin: Point,
+    /// `ŵ`, the axis direction scaled to length one.
+    up: Vector,
+    normal: Vector,
+    /// `ŵ × n`.
+    sideways: Vector,
+    /// `1` when the ends are on the side `sideways` points to, `-1` when they
+    /// are on the other.
+    ends_side: f64,
+}
+
+impl AlongALongPipe {
+    /// The pipe the arc between `ends` runs up, when `carried_by` is a plane
+    /// and a pipe whose ellipse reaches as far as [`AlongALongPipe`] says, and
+    /// both ends are on one side.
+    ///
+    /// **The reach is `(|s₀| + r·m) / |n·ŵ|`**, with `s₀` the plane's signed
+    /// distance to the axis origin, `r` the radius and `m` the length of the
+    /// part of `n` square to the axis, worked out as `rcad_geom::walk` works
+    /// it out. Past half the walk's multiple and not past the whole of it, an
+    /// arc faced here is walked round the ellipse with the picker this makes,
+    /// which is a true one; past the whole, every arc the walk takes up the
+    /// pipe was faced here.
+    fn of(carried_by: [Surface; 2], ends: [Point; 2]) -> Option<Self> {
+        let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = carried_by
+        else {
+            return None;
+        };
+        let origin = pipe.axis().origin();
+        let up = pipe.axis().direction() * pipe.axis().direction().length().recip();
+        let normal = flat.normal();
+        let lean = normal.dot(up);
+        let square_on = (normal - up * lean).length();
+        let radius = pipe.radius();
+        let heights = ends.map(|end| up.dot(end - origin));
+        let far = (flat.signed_distance_to(origin).abs() + radius * square_on) / lean.abs();
+        let dwarfs_its_ends = far
+            > PointsAlongACrossing::WALKED_ROUND_THE_CONE_PAST / 2.0
+                * heights[0].abs().max(heights[1].abs()).max(radius);
+        if !dwarfs_its_ends {
+            return None;
+        }
+        let sideways = up.cross(normal);
+        let ends_side = match ends.map(|end| sideways.dot(end - origin)) {
+            [one, other] if one > 0.0 && other > 0.0 => 1.0,
+            [one, other] if one < 0.0 && other < 0.0 => -1.0,
+            _ => return None,
+        };
+        Some(Self {
+            origin,
+            up,
+            normal,
+            sideways,
+            ends_side,
+        })
+    }
+
+    /// The direction across the chord between `in_order`'s two ends into the
+    /// arc `towards` leaves `named_from` along, `named_from` the end it is
+    /// named from and the other end second; `None` where a sign it needs is
+    /// nought or the two signs disagree, as [`AlongALongPipe`] says.
+    fn the_way_into_the_arc(
+        &self,
+        [first, second]: [Point; 2],
+        [named_from, other]: [Point; 2],
+        towards: Vector,
+    ) -> Option<Vector> {
+        let across = self.normal.cross(second - first);
+        let bulges = self.ends_side * across.dot(self.sideways);
+        let into_the_near_arc = match bulges.partial_cmp(&0.0)? {
+            Ordering::Greater => across,
+            Ordering::Less => -across,
+            Ordering::Equal => return None,
+        };
+        let climbs = towards.dot(self.up);
+        let to_the_other = (other - named_from).dot(self.up);
+        if !(climbs.abs() > 0.0 && to_the_other.abs() > 0.0) {
+            return None;
+        }
+        let on_the_ends_side =
+            self.ends_side * self.sideways.dot(named_from + towards - self.origin) > 0.0;
+        match ((climbs > 0.0) == (to_the_other > 0.0), on_the_ends_side) {
+            (true, true) => Some(into_the_near_arc),
+            (false, _) => Some(-into_the_near_arc),
+            (true, false) => None,
+        }
     }
 }
 
