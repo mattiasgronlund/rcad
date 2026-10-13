@@ -2870,32 +2870,7 @@ mod tests {
 
         let patch = zip_up_a_band(&ring, &outline, &hole, deflection(1.0)).expect("a band");
         assert_eq!(patch.triangles().len(), 8);
-        let mut used: HashMap<(u32, u32), u32> = HashMap::new();
-        for &[one, two, three] in patch.triangles() {
-            for side in [(one, two), (two, three), (three, one)] {
-                *used.entry(side).or_default() += 1;
-            }
-        }
-        let the_loops_way: Vec<(u32, u32)> = (0..4)
-            .flat_map(|at| [(at, (at + 1) % 4), (4 + at, 4 + (at + 1) % 4)])
-            .collect();
-        for side in &the_loops_way {
-            assert_eq!(used.get(side), Some(&1), "the side {side:?}");
-        }
-        for (&(from, to), &times) in &used {
-            if the_loops_way.contains(&(from, to)) {
-                continue;
-            }
-            assert!(
-                (from < 4) != (to < 4),
-                "the side from {from} to {to} joins two corners of one loop"
-            );
-            assert_eq!(
-                (times, used.get(&(to, from))),
-                (1, Some(&1)),
-                "the rung from {from} to {to}"
-            );
-        }
+        each_rim_side_once_its_rims_way_and_each_rung_once_each_way(&patch, 4, "the band");
 
         let the_outlines_way = at_one_angle([0.0, FRAC_PI_2, PI, 1.5 * PI]);
         assert_eq!(
@@ -2911,5 +2886,105 @@ mod tests {
             ),
             "{refused:?}"
         );
+    }
+
+    /// [`zip_up_a_band`] says no triangle it draws reaches further round the
+    /// tube than the widest side either rim has, and that is what makes each
+    /// side's own walk enough to keep the triangles near the surface. So here
+    /// is the search that could find one that does (`docs/decisions.md`
+    /// §15.6): rims of three to seven corners each, the hole's first corner set
+    /// off from the outline's by nothing, a little, most of a side, half a turn
+    /// and back, at angles round the ring a rounding apart.
+    #[test]
+    fn no_zipped_triangle_reaches_further_round_than_the_widest_side_of_a_rim() {
+        use core::f64::consts::{PI, TAU};
+        let ring = Surface::from(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube inside its ring"));
+        let coarse = Deflection::of(10.0).expect("a positive length");
+        for out in 3..=7 {
+            for back in 3..=7 {
+                for set_off in [0.0, 0.1, 1.0, PI, -2.5] {
+                    let what = format!("{out} corners out, {back} back, set off {set_off}");
+                    let round_the_tube = |count: usize, from: f64, way: f64| -> Vec<[f64; 2]> {
+                        (0..count)
+                            .map(|at| [from + way * TAU * at as f64 / count as f64, 0.3])
+                            .collect()
+                    };
+                    let outline = round_the_tube(out, 0.4, 1.0);
+                    let mut hole = round_the_tube(back, 0.4 + set_off, -1.0);
+                    for corner in &mut hole {
+                        corner[1] = 0.3_f64.next_up();
+                    }
+                    let patch = zip_up_a_band(
+                        &ring,
+                        &Loop::through(outline.clone()).expect("an outline"),
+                        &Loop::through(hole.clone()).expect("a hole"),
+                        coarse,
+                    )
+                    .unwrap_or_else(|why| panic!("{what}: {why}"));
+                    each_rim_side_once_its_rims_way_and_each_rung_once_each_way(&patch, out, &what);
+
+                    let widest = TAU / out.min(back) as f64;
+                    let round: Vec<f64> = outline
+                        .iter()
+                        .chain(&hole)
+                        .map(|corner| corner[0])
+                        .collect();
+                    for triangle in patch.triangles() {
+                        let first = round[triangle[0] as usize];
+                        let reach = triangle
+                            .map(|corner| within_half_a_turn(round[corner as usize] - first));
+                        let width = reach.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+                            - reach.iter().copied().fold(f64::INFINITY, f64::min);
+                        // Every corner is under 10 round the tube and was
+                        // rounded a few times on the way to `width`.
+                        assert!(
+                            width <= widest + 8.0 * 10.0 * f64::EPSILON,
+                            "{what}: triangle {triangle:?} reaches {width} round the tube, \
+                             and the widest side is {widest}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// That `patch`, from [`zip_up_a_band`] with an outline of `out` corners,
+    /// uses each side of either rim once the way its rim runs, and each other
+    /// side once each way, from a corner of one rim to a corner of the other.
+    fn each_rim_side_once_its_rims_way_and_each_rung_once_each_way(
+        patch: &Patch,
+        out: usize,
+        what: &str,
+    ) {
+        let (out, all) = (out as u32, patch.corners().len() as u32);
+        let mut used: HashMap<(u32, u32), u32> = HashMap::new();
+        for &[one, two, three] in patch.triangles() {
+            for side in [(one, two), (two, three), (three, one)] {
+                *used.entry(side).or_default() += 1;
+            }
+        }
+        let the_next_round_its_rim = |corner: u32| match corner + 1 {
+            next if next == out => 0,
+            next if next == all => out,
+            next => next,
+        };
+        for corner in 0..all {
+            let side = (corner, the_next_round_its_rim(corner));
+            assert_eq!(used.get(&side), Some(&1), "{what}: the side {side:?}");
+        }
+        for (&(from, to), &times) in &used {
+            if to == the_next_round_its_rim(from) {
+                continue;
+            }
+            assert!(
+                (from < out) != (to < out),
+                "{what}: the side from {from} to {to} joins two corners of one rim"
+            );
+            assert_eq!(
+                (times, used.get(&(to, from))),
+                (1, Some(&1)),
+                "{what}: the rung from {from} to {to}"
+            );
+        }
     }
 }
