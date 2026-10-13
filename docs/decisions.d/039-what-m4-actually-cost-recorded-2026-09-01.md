@@ -370,7 +370,12 @@ moved them.
 > and the comb, two cubes along part of an edge, the frame less the block over
 > its corner, and two quarter bends end to end still refuse
 > `ResultIsNotManifold { count: 4 }`, and §80.9's decision that two solids
-> touching along an edge of both are not built is untouched.
+> touching along an edge of both are not built is untouched. (Two of the four
+> still refuse, each two solids touching along an edge of both: the frame and
+> the comb, and the two cubes, both in `degenerate_fuses.rs`. The two quarter
+> bends answer since Q756, §378.6: their four darts came from two circles
+> given one name. The frame less the block answers since Q1913, in the note
+> below.)
 
 > **2026-10-06 note (Q803): a prism lying on one of its own edges parts four
 > darts too.** `part_each_line_two_faces_rest_against_each_other_along` now
@@ -482,7 +487,13 @@ moved them.
 >
 > Queue row Q1913 moved them, by the amended point 5. The L plate less the
 > pocket answers one solid of `2.5`, and the two bars united less the half bar
-> of radius 4 answers `176π − 4L`. A pin no row had named moved too: the
+> of radius 4 answers `176π − 4L`. So does the frame 3 by 5 less the block 4
+> by 4 over its corner, which the Q760 note above lists as refused: one solid
+> of `11`, one shell of 12 faces, which validates, upright and turned. The
+> frame's ring is cut open at that corner, and its two ends touch along the
+> hole's corner `x = 2, y = 4`
+> (`a_frame_with_a_block_over_one_corner_fuses_turned_as_it_does_upright`,
+> which compares turned with upright only). A pin no row had named moved too: the
 > leaning comb united with the leaning ell standing on it, in
 > `a_sliver_along_an_edge_of_a_face_it_lies_on.rs`, answers one solid of `60`
 > both ways round. The ell stands on both teeth and touches the comb along
