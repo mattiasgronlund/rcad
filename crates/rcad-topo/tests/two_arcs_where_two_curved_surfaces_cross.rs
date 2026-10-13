@@ -49,11 +49,11 @@
 //! crosses a loop twice, sent no side of two pipes to that function between
 //! two corners when run with a print in it before Q1643. The one loop a thin
 //! bar reaching out of a fat one's side leaves, cut by a wall through the loop,
-//! does not reach it: it is refused before its arcs are named, since Q1685 by
-//! `rcad-geom` when asked to put the two corners in order round it, and by
-//! `fuse/arrange.rs` before that (Q1683). `rcad-geom` puts the ball's one loop
-//! in order since Q1767, and two pipes' one loop not yet. Whole and turned
-//! about its own axis, the thin bar answers every rule both ways round since
+//! was refused before its arcs were named: by `fuse/arrange.rs` until Q1685
+//! (Q1683), and then by `rcad-geom` when asked to put the two corners in order
+//! round it. `rcad-geom` puts them in order since Q1880, by their angle round
+//! the line that meets both axes square to both, and every rule both ways
+//! round answers. Whole and turned about its own axis, the thin bar answers every rule both ways round since
 //! Q1858, which lets more than one of the cuts the mesh the fuse checks its
 //! answer with makes across the thin bar's skin meet the window the fat bar
 //! leaves in it. Unturned it answers every rule but the union and the thin bar
@@ -611,15 +611,28 @@ fn a_wall_through_the_axes_of_a_thin_bar_through_a_fat_one_answers_every_rule() 
 /// of it: a print where it picks the loop a run between two corners is on did
 /// not print (Q1683).
 ///
-/// That gate lets the one loop through now, to be put in order only by the
-/// name of where the walk starts on it, and **every rule both ways round is
-/// refused one step further on**, by name, out of `rcad-geom`:
-/// `TheseTwoSurfacesDoNotCrossInAConic`, as `rcad-geom` declines to say which
-/// of the two corners comes first round the loop. It says which for the
-/// ball's one loop above since Q1767.
+/// That gate let the one loop through, to be put in order only by the name of
+/// where the walk starts on it, and until Q1880 every rule both ways round was
+/// refused one step further on, `TheseTwoSurfacesDoNotCrossInAConic`, as
+/// `rcad-geom` declined to say which of the two corners comes first round the
+/// loop. It says which now, by their angle round the line that meets both
+/// axes square to both, as it does for the ball's one loop above round the
+/// line through the ball's centre.
+///
+/// **Every rule both ways round answers**, one solid each: the union `170π − I`
+/// in nine faces, both intersections `I` in three, the half less the fat bar
+/// `10π − I` in five and the fat bar less the half `160π − I` in seven.
+///
+/// The fat bar's skin is three of the union's nine and of the seven, counted
+/// face by face: the piece below `z = 5` outside the loop, the piece above it
+/// outside the loop, and the piece under the thin bar's wall inside the loop's
+/// lower arc. The circle where the wall's plane crosses that skin cuts it
+/// apart all the way round, as the wall `y = 0` cuts the fat bar's skin in the
+/// test of two loops above. The window over the wall inside the loop is the
+/// fat bar's one face of the intersection's three and of the half less the fat
+/// bar's five.
 #[test]
-fn a_half_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_loop_they_cross_in()
-{
+fn a_half_thin_bar_reaching_out_of_a_fat_ones_side_answers_every_rule() {
     let gives = what_each_rule_gives(|model| {
         let thin = thin_bar_out_of_a_fat_ones_side(model);
         let fat = model
@@ -630,15 +643,22 @@ fn a_half_thin_bar_reaching_out_of_a_fat_ones_side_is_refused_ordering_the_one_l
             fat,
         ]
     });
-    assert!(
-        gives.iter().all(|answer| matches!(
-            answer,
-            Err(Error::Geometry(
-                rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic
-            ))
-        )),
-        "{gives:?}"
-    );
+    let shared = what_a_half_thin_bar_out_of_a_fat_ones_side_shares_with_it();
+    let wanted = [
+        (170.0 * PI - shared, 9),
+        (170.0 * PI - shared, 9),
+        (shared, 3),
+        (shared, 3),
+        (10.0 * PI - shared, 5),
+        (160.0 * PI - shared, 7),
+    ];
+    let answers = gives.iter().zip(wanted).all(|(answer, (volume, faces))| {
+        matches!(
+            answer.as_deref(),
+            Ok([solid]) if solid.faces == faces && (solid.volume - volume).abs() <= solid.error
+        )
+    });
+    assert!(answers, "{gives:?}");
 }
 
 /// The whole of the thin bar of the test above, `20π`, against the same bar of

@@ -16,7 +16,8 @@
 //! one normal away from the first (§15.5).
 //!
 //! The one loop a ball off a pipe's axis crosses it in, where the ball reaches
-//! into the pipe's side, is not read that way. It is ordered by how far round
+//! into the pipe's side, and the one loop two pipes cross in, where neither
+//! swallows the other, are not read that way. Each is ordered by how far round
 //! a line each point is, and that comes down to determinants too, with no
 //! angle worked out (`HowTwoPointsSitRoundALine`).
 //!
@@ -44,6 +45,7 @@
 //! | two cones of one slope on one axis | the first apex minus the second |
 //! | a thin pipe and a fat one swallowing it, the loop where the thin one comes out | the thin pipe's stored axis direction negated |
 //! | the same, the loop where it goes in | the thin pipe's stored axis direction |
+//! | two pipes neither of which swallows the other, the one loop | the step from the first axis to the second, going round the line along that step |
 //!
 //! The pipe row takes a line of work to see and is worth having written down.
 //! Its crossing lies in the cutting plane, its tangent is `n × ρ` for the
@@ -103,7 +105,7 @@
 //! one slope cross in one circle halfway between their apexes and need no
 //! picker.
 //!
-//! # Two pipes, where one swallows the other, are not a conic and still order
+//! # Two pipes are not a conic and still order
 //!
 //! A fat pipe crosses a thin one whose whole cross-section it swallows in two
 //! quartic loops, neither flat. Each runs once round the thin pipe's axis, so
@@ -113,8 +115,14 @@
 //! fat one winds about the thin axis negated, and which loop a run is on is
 //! read off the point it starts from, against the plane through the fat axis
 //! that `intersect`'s picker puts between them (Q1483).
-//! `the_way_a_loop_round_a_thin_pipe_winds` has the product. Two pipes that
-//! cross in one loop run back and forth round both axes, and are refused.
+//! `the_way_a_loop_round_a_thin_pipe_winds` has the product. Two pipes neither
+//! of which swallows the other, two of one radius included, cross in one loop
+//! that runs back and forth round both axes. Every half-plane edged by the
+//! line that meets both axes square to both crosses that loop once, so it is
+//! ordered by how far round that line each point is, as the ball's one loop
+//! is (Q1880). `the_way_the_one_loop_two_pipes_cross_in_winds` has the
+//! argument. Whether one swallows the other and whether the two reach each
+//! other are each asked exactly.
 
 use core::cmp::Ordering;
 
@@ -148,9 +156,10 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// of them are the same place on it — a line meets a conic twice, so three
 /// *different* points on one are never in a line.
 ///
-/// On the one loop a ball off a pipe's axis crosses it in, which is ordered
-/// round a line, a point at `from`'s own angle round the line comes first, and
-/// [`Decision::Zero`] means `one` and `other` are the same place on the loop.
+/// On the one loop a ball off a pipe's axis crosses it in, and the one loop two
+/// pipes cross in, each ordered round a line, a point at `from`'s own angle
+/// round the line comes first, and [`Decision::Zero`] means `one` and `other`
+/// are the same place on the loop.
 ///
 /// All three points may be boxes, and usually are: a corner where three surfaces
 /// meet is one. Where a box is wide enough to straddle another point's the
@@ -163,9 +172,11 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// not one closed curve lying in a plane, nor one of the two loops a fat pipe
 /// crosses a thin one it swallows whole in, nor one of the two loops a ball
 /// crosses a pipe it swallows whole in, nor the one loop a ball off a pipe's
-/// axis crosses it in where it reaches into its side: two planes, a plane
-/// along a pipe's axis, two pipes of one radius, two running the same way, two
-/// whose crossing is one loop, a ball off a pipe's axis that misses it,
+/// axis crosses it in where it reaches into its side, nor the one loop two
+/// pipes cross in where neither swallows the other: two planes, a plane
+/// along a pipe's axis, two pipes of one radius whose axes meet, two running
+/// the same way, two that miss each other, touch at one point, or touch from
+/// inside in a figure of eight, a ball off a pipe's axis that misses it,
 /// touches it at one point, or touches it from inside in a figure of eight, a
 /// plane cutting a torus in a quartic, every pair with a torus
 /// on it but a plane, a cone against a pipe, a second cone or a ball off its
@@ -220,9 +231,9 @@ pub fn which_comes_first_round_a_crossing(
 enum WhichWayItWinds {
     /// The crossing runs anticlockwise about this.
     About(Vector),
-    /// The crossing is the one loop a ball off a pipe's axis crosses it in,
-    /// which runs back and forth round the pipe's axis, about no normal, and
-    /// once round this line.
+    /// The crossing is the one loop a ball off a pipe's axis crosses it in, or
+    /// the one loop two pipes cross in, which runs back and forth round a
+    /// pipe's axis, about no normal, and once round this line.
     RoundALine(RoundALine),
     /// Which of two circles the run is on could not be decided from the point
     /// the ordering starts at — the honest answer is that nothing is known, and
@@ -245,22 +256,50 @@ impl WhichWayItWinds {
     }
 }
 
-/// The line through a ball's centre `c` that meets a pipe's axis square to it,
-/// and which way round it the one loop the two cross in runs.
+/// A line one loop runs once round, and which way round it the loop runs.
 ///
 /// Every half-plane with this line for its edge crosses the loop once, so
 /// going round the loop goes once round the line, and three points of the loop
 /// are ordered by how far round the line each one is.
 #[derive(Clone, Copy, Debug)]
 struct RoundALine {
-    centre: [f64; 3],
-    /// A point of the pipe's axis.
-    on_the_axis: [f64; 3],
-    /// The pipe's axis direction `w`.
-    along: [f64; 3],
-    /// `false` for the pair taken ball first, which runs anticlockwise about
-    /// the step from the centre back to the axis.
+    line: WhichLine,
+    /// `false` for the pair in the order whose loop runs the way the line's
+    /// own two readings turn, as [`WhichLine`] says for each line.
     backwards: bool,
+}
+
+/// The line a [`RoundALine`] is, read off the two surfaces it comes from.
+///
+/// **Exhaustive on purpose.** These are the two one loops that are ordered
+/// round a line, and a third would need its own argument that every
+/// half-plane edged by its line crosses it once.
+#[derive(Clone, Copy, Debug)]
+enum WhichLine {
+    /// The line through a ball's centre `c` that meets a pipe's axis square to
+    /// it. Its readings turn anticlockwise about the step from the centre back
+    /// to the axis, the way the loop runs with the ball taken first.
+    ThroughABallsCentre {
+        centre: [f64; 3],
+        /// A point of the pipe's axis.
+        on_the_axis: [f64; 3],
+        /// The pipe's axis direction `w`.
+        along: [f64; 3],
+    },
+    /// The line that meets two pipes' axes square to both. Its readings turn
+    /// anticlockwise about `N = w₁ × w₂`, the way the loop runs with the first
+    /// pipe taken first where the step along the line from the first axis to
+    /// the second runs along `N`.
+    BetweenTwoAxes {
+        /// A point of the first pipe's axis, `o₁`.
+        one_at: [f64; 3],
+        /// The first pipe's axis direction `w₁`.
+        one_way: [f64; 3],
+        /// A point of the second pipe's axis, `o₂`.
+        other_at: [f64; 3],
+        /// The second pipe's axis direction `w₂`.
+        other_way: [f64; 3],
+    },
 }
 
 /// The normal the crossing of these two surfaces runs anticlockwise about, or
@@ -279,7 +318,7 @@ struct RoundALine {
 /// in one closed curve lying in a plane, in one of the two loops round a
 /// pipe's axis that a fat pipe or a ball swallowing it crosses it in, or in
 /// the one loop round a line that a ball off a pipe's axis reaching into its
-/// side crosses it in, and
+/// side, or two pipes neither of which swallows the other, cross in, and
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube and a ball inscribed in a pipe or a cone.
 ///
@@ -359,14 +398,17 @@ fn the_way_this_crossing_winds(
         // Two pipes cross in a degree-four space curve that is neither flat nor
         // convex. Where one swallows the other's whole cross-section, each of
         // its two loops runs once round the thin pipe's axis, and that is what
-        // orders it; every other pair of pipes is refused inside.
+        // orders it. Where neither does, the one loop runs once round the line
+        // that meets both axes square to both. Pipes that touch, miss, or run
+        // the same way are refused inside.
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
             return match one.radius().total_cmp(&other.radius()) {
-                Ordering::Less => the_way_a_loop_round_a_thin_pipe_winds(one, other, from),
+                Ordering::Less | Ordering::Equal => {
+                    the_way_a_loop_round_a_thin_pipe_winds(one, other, from)
+                }
                 Ordering::Greater => {
                     Ok(the_way_a_loop_round_a_thin_pipe_winds(other, one, from)?.the_other_way())
                 }
-                Ordering::Equal => Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
             };
         }
         // The two flat families a plane cuts a torus in are circles, and only
@@ -705,9 +747,11 @@ fn the_way_the_one_loop_a_ball_off_a_pipes_axis_crosses_it_in_winds(
 ) -> Result<WhichWayItWinds> {
     match whether_a_balls_equator_misses_a_pipes_circle(ball, pipe, across) {
         Some(Decision::Neg) => Ok(WhichWayItWinds::RoundALine(RoundALine {
-            centre: ball.centre().coordinates(),
-            on_the_axis: pipe.axis().origin().coordinates(),
-            along: pipe.axis().direction().components(),
+            line: WhichLine::ThroughABallsCentre {
+                centre: ball.centre().coordinates(),
+                on_the_axis: pipe.axis().origin().coordinates(),
+                along: pipe.axis().direction().components(),
+            },
             backwards: false,
         })),
         Some(Decision::Zero | Decision::Pos) => Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
@@ -935,7 +979,10 @@ fn the_way_a_circle_round_a_cones_axis_winds(
 }
 
 /// Which way the loop `from` is on runs, of the two a fat pipe crosses a thin
-/// one in, for the pair taken thin pipe first.
+/// one in, for the pair taken thin pipe first. A fat pipe that does not
+/// swallow the thin one, and two pipes of one radius, cross in one loop
+/// instead where they cross at all, and
+/// [`the_way_the_one_loop_two_pipes_cross_in_winds`] orders that.
 ///
 /// # Each loop runs once round the thin pipe's axis
 ///
@@ -969,10 +1016,12 @@ fn the_way_a_circle_round_a_cones_axis_winds(
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the fat pipe is proved
-/// not to swallow the thin one, `R − r ≤ δ`, asked exactly as `(R − r)² K ≤
-/// T²` with `K = ‖w × w_f‖²` and `T = (o_f − o_t) · (w × w_f)`: two pipes
-/// running the same way cross in lines, and two whose crossing is one loop
-/// run back and forth round both axes.
+/// to touch the thin one from inside, `R − r = δ`, asked exactly as
+/// `(R − r)² K = T²` with `K = ‖w × w_f‖²` and `T = (o_f − o_t) · (w × w_f)`:
+/// two pipes running the same way cross in lines, two of one radius whose
+/// axes meet cross in two ellipses, and two that touch from inside cross in a
+/// figure of eight. From [`the_way_the_one_loop_two_pipes_cross_in_winds`] for
+/// two pipes that miss each other or touch at one point.
 fn the_way_a_loop_round_a_thin_pipe_winds(
     thin: &Cylinder,
     fat: &Cylinder,
@@ -987,10 +1036,15 @@ fn the_way_a_loop_round_a_thin_pipe_winds(
     {
         return Ok(WhichWayItWinds::CannotTell);
     }
-    match whether_a_fat_pipe_swallows_a_thin_one(thin, fat) {
+    let Some(apart) = HowFarApartTwoAxesAre::of(thin, fat) else {
+        return Ok(WhichWayItWinds::CannotTell);
+    };
+    let wider = Exact::of(fat.radius()).minus(&Exact::of(thin.radius()));
+    match apart.closer_than(&wider) {
         Some(Decision::Pos) => {}
-        Some(Decision::Zero | Decision::Neg) => {
-            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        Some(Decision::Zero) => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        Some(Decision::Neg) => {
+            return the_way_the_one_loop_two_pipes_cross_in_winds(thin, fat, &apart);
         }
         Some(Decision::Undecidable { .. }) | None => return Ok(WhichWayItWinds::CannotTell),
         Some(other) => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
@@ -1007,32 +1061,118 @@ fn the_way_a_loop_round_a_thin_pipe_winds(
     }
 }
 
-/// The sign of `(R − r)² K − T²` for the fat pipe's radius `R` above the thin
-/// one's `r`, which is `K (R − r − δ)(R − r + δ)` and so the sign of
-/// `R − r − δ`: above nothing where the fat pipe swallows the thin one's whole
-/// cross-section. `None` where a product leaves what [`Exact`] can hold.
-fn whether_a_fat_pipe_swallows_a_thin_one(thin: &Cylinder, fat: &Cylinder) -> Option<Decision> {
-    let wider = Exact::of(fat.radius()).minus(&Exact::of(thin.radius()));
-    if wider.sign() != Decision::Pos {
-        return Some(Decision::Neg);
+/// How far apart two pipes' axes are, exactly: `δ = |T| / √K`, for
+/// `K = ‖w₁ × w₂‖²` and `T = (o₂ − o₁) · (w₁ × w₂)`.
+struct HowFarApartTwoAxesAre {
+    squared_across: Exact,
+    reach: Exact,
+}
+
+impl HowFarApartTwoAxesAre {
+    /// `None` where a product leaves what [`Exact`] can hold.
+    fn of(one: &Cylinder, other: &Cylinder) -> Option<Self> {
+        let across = Exact::cross_of(
+            &Exact::of_each(one.axis().direction().components()),
+            other.axis().direction().components(),
+        )?;
+        let gap = Exact::gap_between(
+            one.axis().origin().coordinates(),
+            other.axis().origin().coordinates(),
+        );
+        Some(Self {
+            squared_across: Exact::squared_length_of(&across)?,
+            reach: Exact::dot_of_two_exact(&gap, &across)?,
+        })
     }
-    let across = Exact::cross_of(
-        &Exact::of_each(thin.axis().direction().components()),
-        fat.axis().direction().components(),
-    )?;
-    let squared_across = Exact::squared_length_of(&across)?;
-    let gap = Exact::gap_between(
-        thin.axis().origin().coordinates(),
-        fat.axis().origin().coordinates(),
-    );
-    let reach = Exact::dot_of_two_exact(&gap, &across)?;
-    Some(
-        wider
-            .times(&wider)?
-            .times(&squared_across)?
-            .minus(&reach.times(&reach)?)
-            .sign(),
-    )
+
+    /// The sign of `X² K − T²` for `X` nothing or more, which is
+    /// `K (X − δ)(X + δ)` and so the sign of `X − δ`: above nothing where the
+    /// two axes are closer together than `X`, and nothing where they run the
+    /// same way. `None` where a product leaves what [`Exact`] can hold.
+    fn closer_than(&self, width: &Exact) -> Option<Decision> {
+        Some(
+            width
+                .times(width)?
+                .times(&self.squared_across)?
+                .minus(&self.reach.times(&self.reach)?)
+                .sign(),
+        )
+    }
+}
+
+/// The line the one loop runs round, of two pipes neither of which swallows
+/// the other's whole cross-section, for the pair taken `one` first. `apart`
+/// is already known to put the axes farther apart than the difference of the
+/// radii.
+///
+/// # Every half-plane edged by the line crosses the loop once
+///
+/// Put the line that meets both axes square to both along `z`, with `one`'s
+/// axis along `x` at `z = 0` and `other`'s along `(cos b, sin b, 0)` at
+/// `z = δ`, for radii `r` and `R` and `|R − r| < δ < R + r`. A half-plane
+/// edged by `z` at angle `φ` round it, with `t > 0` out from the line, cuts
+/// `one` where `t² sin² φ + z² = r²` and `other` where
+/// `t² sin² (φ − b) + (z − δ)² = R²`. Taking `t²` out of the second with the
+/// first leaves `f(z) = (1 − k) z² − 2δz + δ² + k r² − R²`, for
+/// `k = sin² (φ − b) / sin² φ`, and a point of the loop is a root of `f` with
+/// `|z| < r`. `f(−r) = (δ + r)² − R²` is above nothing and
+/// `f(r) = (δ − r)² − R²` below it, and `f` is at most a quadratic, so it has
+/// one root between and crosses there rather than touching. At `φ = 0` and
+/// `φ = π`, where `k` is not there, `one` is the two lines `z = ±r` of the
+/// half-plane, and only `z = r` reaches `other`, since
+/// `t² sin² b = R² − (δ ∓ r)²` is above nothing for `−` alone. So the loop is
+/// a smooth graph over the angle round the line, the line misses it, and the
+/// loop runs in the order of that angle. Nothing there asks which pipe is the
+/// fatter.
+///
+/// # Which way round
+///
+/// At `φ = 0` the point is `(t, 0, r)`, and `∇S × ∇T`, the step out from
+/// `one`'s axis crossed with the step out from `other`'s, is
+/// `r t sin b (cos b, sin b, 0)`. Its part along `(0, 1, 0)`, the way round
+/// the line anticlockwise about `+z`, is `r t sin² b`, above nothing. So the
+/// loop runs anticlockwise about the step along the line from `one`'s axis to
+/// `other`'s, which is `N = w₁ × w₂` where `T` is above nothing and `−N` where
+/// it is below.
+///
+/// # Errors
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the two are proved to
+/// miss each other or to touch at one point, `R + r ≤ δ`.
+fn the_way_the_one_loop_two_pipes_cross_in_winds(
+    one: &Cylinder,
+    other: &Cylinder,
+    apart: &HowFarApartTwoAxesAre,
+) -> Result<WhichWayItWinds> {
+    let both_radii = Exact::of(other.radius()).plus(&Exact::of(one.radius()));
+    match apart.closer_than(&both_radii) {
+        Some(Decision::Pos) => {}
+        Some(Decision::Zero | Decision::Neg) => {
+            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        }
+        Some(Decision::Undecidable { .. }) | None => return Ok(WhichWayItWinds::CannotTell),
+        Some(other) => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    }
+    let backwards = match apart.reach.sign() {
+        Decision::Pos => false,
+        Decision::Neg => true,
+        Decision::Undecidable { .. } => return Ok(WhichWayItWinds::CannotTell),
+        // `T` nothing makes `(R − r)² K − T²` nothing or more, and the caller
+        // has it below nothing.
+        Decision::Zero => unreachable!("two axes farther apart than nothing meet"),
+        other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    };
+    let [one_at, other_at] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
+    let [one_way, other_way] = [one, other].map(|pipe| pipe.axis().direction().components());
+    Ok(WhichWayItWinds::RoundALine(RoundALine {
+        line: WhichLine::BetweenTwoAxes {
+            one_at,
+            one_way,
+            other_at,
+            other_way,
+        },
+        backwards,
+    }))
 }
 
 /// The sign of `((at − o_f) × w_f) · (w × w_f)`, which is `‖w_f‖²` times
@@ -1151,7 +1291,7 @@ impl Predicate for HowThreeOnACurveWind {
 
 /// Which of `one` and `other` comes first round `line` from `from`: the answer
 /// [`which_comes_first_round_a_crossing`] gives on the one loop a ball off a
-/// pipe's axis crosses it in.
+/// pipe's axis crosses it in, and on the one loop two pipes cross in.
 ///
 /// How far round the line a point is is never worked out as an angle. Each of
 /// the two is put in the half turn ahead of `from` or the half turn after it,
@@ -1277,16 +1417,27 @@ impl RoundALine {
 /// How two points sit round a [`RoundALine`], evaluated the two ways the
 /// cascade can use.
 ///
-/// A point `p` is read as `s = (p − c) · w` and `t = (p − c) · X`, for
-/// `X = (c − o) × w`: two coordinates square to the line, which turn
-/// anticlockwise about the step from the centre back to the axis. How two
-/// points turn is `t₁ s₂ − s₁ t₂`, which is `W ((p₁ − c) × (p₂ − c)) · (−d)`,
-/// a volume like the sweep [`HowThreeOnACurveWind`] works out. Whether they
-/// face one way is `s₁ s₂ + t₁ t₂`, whose two terms are of different units,
-/// since `X` is a length long and `w` is not; so it is a sign and not a size,
-/// and it is asked only where the two turn by nothing. There the two steps
-/// out from the line lie along one line, and stretching one coordinate does
-/// not change the sign.
+/// A point `p` is read as two coordinates `x` and `y` square to the line, each
+/// nothing on it. How two points turn is `x₁ y₂ − y₁ x₂`, a volume like the
+/// sweep [`HowThreeOnACurveWind`] works out, and whether they face one way is
+/// `x₁ x₂ + y₁ y₂`.
+///
+/// Round the line through a ball's centre `c`, `x = (p − c) · X` and
+/// `y = (p − c) · w`, for `X = (c − o) × w`, and they turn anticlockwise
+/// about the step from the centre back to the axis: `x₁ y₂ − y₁ x₂` is
+/// `W ((p₁ − c) × (p₂ − c)) · (−d)`.
+///
+/// Round the line between two pipes' axes, `x = (p − o₁) · (N × w₁)` and
+/// `y = (p − o₂) · (N × w₂)`, for `N = w₁ × w₂`. Each is nothing on the line,
+/// which meets both axes square to both, and `(N × w₁) × (N × w₂)` is `‖N‖² N`,
+/// so `x₁ y₂ − y₁ x₂` is `‖N‖² ((p₁ − q) × (p₂ − q)) · N` for `q` any point of
+/// the line: they turn anticlockwise about `N`.
+///
+/// In neither case are `x` and `y` read along two directions square to each
+/// other and of one length, so `x₁ x₂ + y₁ y₂` is a sign and not a size, and it is asked only where the two
+/// turn by nothing. There the two steps out from the line lie along one line,
+/// so one point's two readings are the other's times one number, and the sign
+/// is that number's.
 struct HowTwoPointsSitRoundALine {
     line: RoundALine,
     first: PredicatePoint,
@@ -1315,55 +1466,50 @@ impl Predicate for HowTwoPointsSitRoundALine {
     }
 
     /// How the two turn is swept two ways, and the overlap is the answer, as
-    /// in [`HowThreeOnACurveWind`]: `t₁ s₂ − s₁ t₂` is `t₁ (s₂ − s₁) −
-    /// s₁ (t₂ − t₁)` for every two points, and the second reads the short step
+    /// in [`HowThreeOnACurveWind`]: `x₁ y₂ − y₁ x₂` is `x₁ (y₂ − y₁) −
+    /// y₁ (x₂ − x₁)` for every two points, and the second reads the short step
     /// between two points close together rather than two long ones from the
-    /// centre.
+    /// line.
     fn on_intervals(&self) -> Interval {
-        let along = exactly(self.line.along);
-        let out = cross_enclosing(
-            gap_enclosing(self.line.on_the_axis, self.line.centre),
-            along,
-        );
         let gap = |here: [Interval; 3], there: [Interval; 3]| -> [Interval; 3] {
             core::array::from_fn(|axis| there[axis] - here[axis])
         };
-        let read = |step: [Interval; 3]| [dot_enclosing(step, along), dot_enclosing(step, out)];
-        let centre = exactly(self.line.centre);
+        let readings = self.line.line.readings_on_intervals();
+        let read = |point: [Interval; 3]| {
+            readings.map(|(from, way)| dot_enclosing(gap(exactly(from), point), way))
+        };
         let [first, second] = [self.first, self.second].map(PredicatePoint::enclosure);
-        let [s_first, t_first] = read(gap(centre, first));
-        let [s_second, t_second] = read(gap(centre, second));
+        let [x_first, y_first] = read(first);
+        let [x_second, y_second] = read(second);
         match self.asks {
             WhatIsAsked::HowTheyTurn => {
-                let [s_step, t_step] = read(gap(first, second));
+                let [x_step, y_step] =
+                    readings.map(|(_, way)| dot_enclosing(gap(first, second), way));
                 where_two_enclosures_of_one_number_overlap(
-                    t_first * s_second - s_first * t_second,
-                    t_first * s_step - s_first * t_step,
+                    x_first * y_second - y_first * x_second,
+                    x_first * y_step - y_first * x_step,
                 )
             }
-            WhatIsAsked::WhetherTheyFaceOneWay => s_first * s_second + t_first * t_second,
+            WhatIsAsked::WhetherTheyFaceOneWay => x_first * x_second + y_first * y_second,
         }
     }
 
     fn exactly(&self) -> Option<Decision> {
-        let out = Exact::cross_of(
-            &Exact::gap_between(self.line.on_the_axis, self.line.centre),
-            self.line.along,
-        )?;
-        let along = Exact::of_each(self.line.along);
+        let readings = self.line.line.readings_exactly()?;
         let read = |point: PredicatePoint| -> Option<[Exact; 2]> {
-            let step = Exact::gap_between(self.line.centre, point.exact_coordinates()?);
+            let point = point.exact_coordinates()?;
+            let [x, y] = &readings;
             Some([
-                Exact::dot_of_two_exact(&step, &along)?,
-                Exact::dot_of_two_exact(&step, &out)?,
+                Exact::dot_of_two_exact(&Exact::gap_between(x.0, point), &x.1)?,
+                Exact::dot_of_two_exact(&Exact::gap_between(y.0, point), &y.1)?,
             ])
         };
-        let [s_first, t_first] = read(self.first)?;
-        let [s_second, t_second] = read(self.second)?;
+        let [x_first, y_first] = read(self.first)?;
+        let [x_second, y_second] = read(self.second)?;
         let value = match self.asks {
-            WhatIsAsked::HowTheyTurn => t_first.times(&s_second)?.minus(&s_first.times(&t_second)?),
+            WhatIsAsked::HowTheyTurn => x_first.times(&y_second)?.minus(&y_first.times(&x_second)?),
             WhatIsAsked::WhetherTheyFaceOneWay => {
-                s_first.times(&s_second)?.plus(&t_first.times(&t_second)?)
+                x_first.times(&x_second)?.plus(&y_first.times(&y_second)?)
             }
         };
         match value.sign() {
@@ -1374,6 +1520,63 @@ impl Predicate for HowTwoPointsSitRoundALine {
             Decision::Undecidable { .. } => None,
             other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
         }
+    }
+}
+
+impl WhichLine {
+    /// The two readings `x` and `y` of a point `p` that
+    /// [`HowTwoPointsSitRoundALine`] takes, each `(p − from) · way` for its
+    /// own `from` and `way`, with each `way` enclosed.
+    fn readings_on_intervals(self) -> [([f64; 3], [Interval; 3]); 2] {
+        match self {
+            Self::ThroughABallsCentre {
+                centre,
+                on_the_axis,
+                along,
+            } => {
+                let out = cross_enclosing(gap_enclosing(on_the_axis, centre), exactly(along));
+                [(centre, out), (centre, exactly(along))]
+            }
+            Self::BetweenTwoAxes {
+                one_at,
+                one_way,
+                other_at,
+                other_way,
+            } => {
+                let square = cross_enclosing(exactly(one_way), exactly(other_way));
+                [
+                    (one_at, cross_enclosing(square, exactly(one_way))),
+                    (other_at, cross_enclosing(square, exactly(other_way))),
+                ]
+            }
+        }
+    }
+
+    /// The same two readings, each `way` exactly. `None` where a product
+    /// leaves what [`Exact`] can hold.
+    fn readings_exactly(self) -> Option<[([f64; 3], [Exact; 3]); 2]> {
+        Some(match self {
+            Self::ThroughABallsCentre {
+                centre,
+                on_the_axis,
+                along,
+            } => {
+                let out = Exact::cross_of(&Exact::gap_between(on_the_axis, centre), along)?;
+                [(centre, out), (centre, Exact::of_each(along))]
+            }
+            Self::BetweenTwoAxes {
+                one_at,
+                one_way,
+                other_at,
+                other_way,
+            } => {
+                let square = Exact::cross_of(&Exact::of_each(one_way), other_way)?;
+                [
+                    (one_at, Exact::cross_of(&square, one_way)?),
+                    (other_at, Exact::cross_of(&square, other_way)?),
+                ]
+            }
+        })
     }
 }
 
@@ -2278,11 +2481,116 @@ mod tests {
         }
     }
 
-    /// Two pipes of one radius, two running the same way, and a thin pipe the
-    /// fat one does not swallow whole, which crosses it in one loop that runs
-    /// back and forth round both axes, are refused rather than ordered.
+    /// Ten points of the one loop a pipe reaching out of the side of a pipe of
+    /// radius 4 up `z` crosses it in come back in the order they run round it,
+    /// from each of the ten, every pair of the other nine both ways and with
+    /// the two pipes swapped. The loop runs back and forth round both axes, so
+    /// no normal orders it the way a conic is ordered. The reaching pipe runs
+    /// along `x` with radius 1, which is the bar Q1857 cut in half; along
+    /// `x + z`, so the two axes are not square to each other; and along `x`
+    /// with radius 4, so neither pipe is the thinner. Each step is checked
+    /// against `∇S × ∇T` before the order is asked, so what this pins is the
+    /// geometry.
     #[test]
-    fn two_pipes_that_do_not_cross_in_two_loops_round_the_thinner_are_refused() {
+    fn ten_points_on_the_one_loop_where_two_pipes_cross_come_back_in_the_order_they_run_round_it() {
+        let off = 3.5;
+        let fat = Surface::Cylinder(Cylinder::new(Axis::z(), 4.0).expect("a radius"));
+        for (radius, lean) in [(1.0, 0.0), (1.0, 1.0), (4.0, 0.0)] {
+            let way = Vector::new(1.0, 0.0, lean);
+            let reaching = Surface::Cylinder(
+                Cylinder::new(
+                    Axis::new(Point::new(0.0, off, 5.0), way).expect("an axis"),
+                    radius,
+                )
+                .expect("a radius"),
+            );
+            let round = round_the_one_loop_two_pipes_cross_in(radius, off, lean);
+            let count = round.len();
+            for start in 0..count {
+                let [here, next] = [round[start], round[(start + 1) % count]];
+                let from_the_axis = Vector::new(here[0], here[1] - off, here[2] - 5.0);
+                let along = way * (from_the_axis.dot(way) / way.dot(way));
+                let runs = (from_the_axis - along).cross(Vector::new(here[0], here[1], 0.0));
+                let step = Vector::new(next[0] - here[0], next[1] - here[1], next[2] - here[2]);
+                assert!(
+                    runs.dot(step) > 0.0,
+                    "radius {radius}, lean {lean}: the crossing runs {runs:?} at {here:?} and \
+                     the step to {next:?} is {step:?}"
+                );
+            }
+            for start in 0..count {
+                let at = |ahead: usize| PredicatePoint::from(round[(start + ahead) % count]);
+                for one in 1..count {
+                    for other in one + 1..count {
+                        let what = format!(
+                            "radius {radius}, lean {lean}, from point {start}, {one} then {other} \
+                             ahead"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&reaching, &fat],
+                                at(0),
+                                at(one),
+                                at(other)
+                            ),
+                            Ok(Decision::Pos),
+                            "{what}"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&reaching, &fat],
+                                at(0),
+                                at(other),
+                                at(one)
+                            ),
+                            Ok(Decision::Neg),
+                            "{what}, asked the other way"
+                        );
+                        assert_eq!(
+                            which_comes_first_round_a_crossing(
+                                [&fat, &reaching],
+                                at(0),
+                                at(one),
+                                at(other)
+                            ),
+                            Ok(Decision::Neg),
+                            "{what}, the pair swapped"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ten points of the one loop a pipe of `radius` along `x + lean z`
+    /// through `(0, off, 5)` crosses a pipe of radius 4 up `z` in, in the order
+    /// the crossing runs with the leaning pipe taken first: on the side of
+    /// `x = 0` that is `x > 0`, going round the leaning pipe's axis from
+    /// below `z = 5`'s side to above it, then back on the side `x < 0`.
+    fn round_the_one_loop_two_pipes_cross_in(radius: f64, off: f64, lean: f64) -> Vec<[f64; 3]> {
+        use core::f64::consts::PI;
+        let widest = ((4.0 - off) / radius).acos();
+        let on_the_side = |side: f64, step: i32| {
+            let angle = PI + (PI - widest) * f64::from(step) / 3.0;
+            let y = off + radius * angle.cos();
+            let x = side * (16.0 - y * y).sqrt();
+            [
+                x,
+                y,
+                5.0 + lean * x + (1.0 + lean * lean).sqrt() * radius * angle.sin(),
+            ]
+        };
+        let ahead = (-2..=2).rev().map(|step| on_the_side(1.0, step));
+        let back = (-2..=2).map(|step| on_the_side(-1.0, step));
+        ahead.chain(back).collect()
+    }
+
+    /// Two pipes of one radius whose axes meet, which cross in two ellipses,
+    /// two running the same way, and a thin pipe that misses the fat one or
+    /// touches its side at one point, which cross in no loop, are refused
+    /// rather than ordered.
+    #[test]
+    fn two_pipes_that_cross_in_neither_one_loop_nor_two_are_refused() {
         let pipe = |at: Point, along: Vector, radius: f64| {
             Surface::Cylinder(
                 Cylinder::new(Axis::new(at, along).expect("an axis"), radius).expect("a radius"),
@@ -2302,9 +2610,14 @@ mod tests {
                 [3.875, 0.984_375_f64.sqrt(), 5.0],
             ),
             (
-                "not swallowed whole",
-                pipe(Point::new(0.0, 3.5, 5.0), along_x, 1.0),
-                [3.75_f64.sqrt(), 3.5, 6.0],
+                "that miss",
+                pipe(Point::new(0.0, 6.0, 5.0), along_x, 1.0),
+                [0.0, 4.0, 5.0],
+            ),
+            (
+                "that touch at one point",
+                pipe(Point::new(0.0, 5.0, 5.0), along_x, 1.0),
+                [0.0, 4.0, 5.0],
             ),
         ];
         for (what, other, on_both) in pairs {

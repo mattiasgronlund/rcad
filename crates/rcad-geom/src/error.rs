@@ -672,18 +672,17 @@ pub enum Error {
     /// cuts two of them, and a ball against a pipe or a pipe against a pipe
     /// crosses in a degree-four space curve that is neither flat nor convex.
     ///
-    /// Three kinds of those quartic loops are ordered all the same, and never
+    /// Four kinds of those quartic loops are ordered all the same, and never
     /// get this: the two loops a ball off a pipe's axis crosses it in where it
     /// swallows the pipe's whole cross-section (Q1554), and the two a fat pipe
     /// crosses a thin one it swallows in (Q1483), each read down the pipe's
-    /// axis; and since Q1767 the one loop a ball off a pipe's axis crosses it in
-    /// where it reaches into its side, read round a line.
+    /// axis; and the one loop a ball off a pipe's axis crosses it in where it
+    /// reaches into its side (Q1767), and the one loop two pipes cross in where
+    /// neither swallows the other (Q1880), as a thin pipe reaching out of a fat
+    /// one's side leaves, each read round a line.
     ///
     /// A **limit** for the straight cases — the question is a different one and
-    /// the arrangement's dominant-axis rule already answers it. A **gap** for
-    /// two pipes whose crossing is one loop, as a thin pipe reaching out of a
-    /// fat one's side leaves, where the curve is there and ordering points
-    /// along it is not built yet (Q1857, §16.10, §31.2 row 8). A ball off a
+    /// the arrangement's dominant-axis rule already answers it. A ball off a
     /// pipe's axis that touches the pipe from inside, and a thin pipe that
     /// touches a fat one from inside, cross in a figure of eight and are
     /// refused too; which of the two that is has not been argued.
