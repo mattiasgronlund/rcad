@@ -145,20 +145,27 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 
 /// The second bar starts where the axes meet, at 50°, 60°, 70°, 100° or 120°.
 ///
-/// **Every fuse is refused `Undecidable` `order along a crossing`**, ordering
-/// the two points `c ± r·ẑ` where the pipes touch round a closed crossing that
-/// starts inside the box round `c − r·ẑ`. At 120° the refusals stand since
-/// Q1645 named the crossing there; before it, `intersect` refused all six
-/// `CannotNameWhichPieceOfACrossingThisIs`.
+/// **Every fuse is refused `Undecidable` `orient3d` on the second bar's near
+/// cap**, asking which way the cap turns at a point where the pipes touch,
+/// from its crossing with the first pipe to its own circle round the second.
+/// The two pipes are tangent there, so their gradients are parallel, and the
+/// determinant of the cap's normal and the two is nought, which their boxes
+/// cannot prove. The two curves touch there too. Not traced further.
 ///
-/// **Where each is refused.** Each bar's faces are split in the order the
-/// bars are handed in. At 120° with the first bar first, the first bar's
-/// wall is refused on the order round the cap's crossing (Q1821,
-/// `a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves`
-/// in `fuse/arrange.rs`). Everywhere else the first bar's faces are all
-/// split, its wall in six, and the second bar's near cap is refused on the
+/// **Until Q1900 every fuse was refused `order along a crossing`**, ordering
+/// the two points `c ± r·ẑ` where the pipes touch round a closed crossing that
+/// starts inside the box round `c − r·ẑ`. Each bar's faces are split in the
+/// order the bars are handed in. At 120° with the first bar first, the first
+/// bar's wall was refused on the order round the cap's crossing
+/// (`a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves`
+/// in `fuse/arrange.rs`). Everywhere else the first bar's faces were all
+/// split, its wall in six, and the second bar's near cap was refused on the
 /// order round its crossing with the first pipe, which starts at `(11,
-/// −3.25, 0.25)`, inside the `3.1e−13` box of the cap's corner there.
+/// −3.25, 0.25)`, inside the `3.1e−13` box of the cap's corner there. A node
+/// whose box holds the start now comes before one whose box is clear of it
+/// (`round_a_closed_crossing_and_what_it_measures`). At 120° the order was
+/// reached since Q1645 named the crossing there; before it, `intersect`
+/// refused all six `CannotNameWhichPieceOfACrossingThisIs`.
 ///
 /// That corner is the bottom of `add_round_bar`'s seam, at `(r, 0, 0)`
 /// before the move, and the turn onto `x` puts it at `c − r·ẑ`. **Until
@@ -202,6 +209,10 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 #[test]
 fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
     for degrees in [50.0, 60.0, 70.0, 100.0, 120.0] {
+        let mut model =
+            Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let [_, second] = two_bars(&mut model, degrees, [11.0, -3.25, 0.5]);
+        let facing = PredicatePoint::from(the_near_cap(&model, second).normal().components());
         for (rule, first_first) in six_fuses() {
             let said = fuse(degrees, [11.0, -3.25, 0.5], rule, first_first);
             let what = format!("{degrees}° {rule:?} (first first: {first_first})");
@@ -209,8 +220,11 @@ fn a_bar_starting_where_it_crosses_another_at_a_slant_is_refused() {
                 panic!("{what}: {said:?}");
             };
             assert_eq!(
-                records.records().last().map(|record| record.predicate()),
-                Some("order along a crossing"),
+                records
+                    .records()
+                    .last()
+                    .map(|record| (record.predicate(), record.inputs()[0])),
+                Some(("orient3d", facing)),
                 "{what}: {said:?}"
             );
         }
@@ -230,17 +244,7 @@ fn the_near_cap_as_the_model_hands_it_out_misses_both_points_the_pipes_touch_at(
         let mut model =
             Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
         let [_, second] = two_bars(&mut model, degrees, [11.0, -3.25, 0.5]);
-        let near_cap = model
-            .solid(second)
-            .expect("the second bar")
-            .faces()
-            .filter_map(|face| face.surface().as_plane().copied())
-            .find(|cap| {
-                cap.signed_distance_to(rcad_geom::Point::new(11.0, -3.25, 0.5))
-                    .abs()
-                    < 1e-12
-            })
-            .expect("a bar starting at the meeting point has a cap within a rounding of it");
+        let near_cap = the_near_cap(&model, second);
         for z in [0.25, 0.75] {
             let side = near_cap.side_of_point(PredicatePoint::from([11.0, -3.25, z]));
             assert!(
@@ -249,6 +253,22 @@ fn the_near_cap_as_the_model_hands_it_out_misses_both_points_the_pipes_touch_at(
             );
         }
     }
+}
+
+/// The cap of the bar `second` that starts at `(11, −3.25, 0.5)`, as the
+/// model hands it out.
+fn the_near_cap(model: &Model, second: SolidKey) -> rcad_geom::Plane {
+    model
+        .solid(second)
+        .expect("the second bar")
+        .faces()
+        .filter_map(|face| face.surface().as_plane().copied())
+        .find(|cap| {
+            cap.signed_distance_to(rcad_geom::Point::new(11.0, -3.25, 0.5))
+                .abs()
+                < 1e-12
+        })
+        .expect("a bar starting at the meeting point has a cap within a rounding of it")
 }
 
 fn six_fuses() -> [(Rule, bool); 6] {

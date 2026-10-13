@@ -8152,6 +8152,30 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// ahead and the other behind are the two ordered: two places either side of a
 /// point are two places.
 ///
+/// **A node whose box holds the start comes before one whose box is clear of
+/// both**, where nothing above can say. The sweep cannot: the step from the
+/// start to that node may be nothing, so it straddles nought however far round
+/// the other node is. The node may be a hair ahead of the start, and then it
+/// comes first. It may be a hair behind, and then it comes last, and reading it
+/// first instead turns the whole order round to start from it, which is the
+/// same order round the loop, as long as no node lies between it and the start.
+/// The stretch of the crossing from the start to it runs between two points of
+/// its box, bent off the straight line between them by about `κd²/8`, for `κ`
+/// how sharply the crossing turns and `d` the box's width: `2e-32` at the shape
+/// below, where the nearest side another box clear of this one can have is an
+/// ulp of `0.25`, `5.5e-17`, away. A box within that bend of a side, which
+/// takes a side within about `1e-15` of nought at that size, has not been
+/// shown to be clear of the stretch. Two nodes whose boxes share a point are
+/// left as they were.
+///
+/// Two bars of radius `1/4`, the second starting where their axes meet and
+/// turned 120° about `z`, are the shape (Q1900). The second bar's near cap
+/// crosses the first bar's wall in an ellipse walked from `(11, −3.25, 0.25)`,
+/// exactly where the two pipes touch, and the node there is `c − r·n̂`, a box
+/// `2e-16` wide round it, as the second pipe's direction is stored `2.2e-16`
+/// off `z = 0`. The node where they touch across the ellipse is clear of it,
+/// and the two were refused on the order until this arm.
+///
 /// **Every arm but the sweep answers as wide as a box**, which is a length:
 /// [`one_point_if_both_are_exact`], [`the_one_the_start_is`] and the
 /// [`the_one_ahead_of_the_start`] behind it each hand back the wider of the two
@@ -8196,6 +8220,13 @@ fn round_a_closed_crossing_and_what_it_measures(
         && let Some(read) = round_a_closed_crossing_by_its_angle(pair, from, one, other)
     {
         return Ok((read, Measures::Volume));
+    }
+    if matches!(decided, Decision::Undecidable { .. }) && !boxes_overlap(one, other) {
+        match (boxes_overlap(one, from), boxes_overlap(other, from)) {
+            (true, false) => return Ok((Decision::Pos, Measures::Length)),
+            (false, true) => return Ok((Decision::Neg, Measures::Length)),
+            (true, true) | (false, false) => {}
+        }
     }
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
