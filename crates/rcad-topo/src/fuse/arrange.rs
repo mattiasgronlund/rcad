@@ -3625,7 +3625,8 @@ impl<'f> Arrangement<'f> {
     /// and the other point the pipes touch at. The loop starts inside the
     /// corner's `3.1e−13` box, which reads as far behind the start as ahead of
     /// it, and all 30 certified fuses at 50° to 120° refused on that order
-    /// (Q1898, `a_bar_starting_where_it_crosses_another_at_a_slant_is_refused`).
+    /// (Q1898, `a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`
+    /// pins them answered).
     ///
     /// Two boxes clear of the start leave the order open where the start lies
     /// on the line through them, and those are left to the policy as before.
@@ -8780,7 +8781,7 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 ///
 /// **A box reaching behind the start is left as it was**, since its node may
 /// be a hair behind and come last: the `3.1e-13` box of the second bar's near
-/// cap corner in `a_bar_starting_where_it_crosses_another_at_a_slant_is_refused`
+/// cap corner in `a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`
 /// is one. So is a box every point of which reads exactly nought. Its node is
 /// square to the run from the start, so it is the start or the place the start
 /// was rounded off, and [`the_start_is_a_rounding_off`] has already declined
@@ -13818,7 +13819,7 @@ mod curved {
     /// both cut it and both carry the cap, and the wall is told it once,
     /// beside its own near cap. Until Q1820 it was copied over here by hand,
     /// and the whole fuse was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
-    /// on this wall (`a_bar_starting_where_it_crosses_another_at_a_slant_is_refused`
+    /// on this wall (`a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`
     /// in `tests/two_equal_bars_leaning_at_each_other.rs`).
     #[test]
     fn a_wall_told_a_cap_holds_where_the_axes_meet_is_split_where_the_cap_meets_the_halves() {
