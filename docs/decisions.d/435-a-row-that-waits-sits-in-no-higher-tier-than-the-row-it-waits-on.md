@@ -77,6 +77,11 @@ and leaves them.
 
 ### 435.4 Which of the two rows moves
 
+*§445 amends this on 2026-10-13, at Mattias's word: a row with a class or a pin
+that waits on a row the fill takes later lends that row its place in the fill,
+and neither row moves in the file. A row with no class still goes down. No
+verb refuses the case below as Mattias's to set any more.*
+
 When the rule is broken, one of the two rows is in the wrong place: the waiting
 row, which should go down to its blocker's tier, or the blocker, which should
 come up to the waiting row's tier.
