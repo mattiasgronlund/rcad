@@ -16,18 +16,24 @@
 //! `Isometry::quarter_turns`, every fuse answers what it holds by hand under
 //! both policies and logs nothing.
 //!
-//! **Half a turn about `y` by `Isometry::rotation(y, π)`: refused, and a side
-//! a rounding off parallel to the axis is not why.** Every side runs *exactly*
-//! along the turned bar: how it leans against the pipe comes out zero. But
-//! `sin π` rounds to `1.2e-16`, so the turn is not one of a cube's, and the
-//! fuse reads the bar's seam corner through `where_a_corner_lands_after_moving`
-//! as a box `± CORNER_AFTER_MOVING_ROUNDOFF · 3`. The bottom cap circle starts
-//! at that corner. Every certified fuse is refused *order along a crossing*
-//! between that box and where a side's line crosses the bottom circle — Q885's
-//! case, met there on a shape only a probe builds, and here on one a designer
-//! draws. Every tolerant fuse is refused `CannotTellTheCellsOfAFaceApart`. The
-//! seam notch tilted off the axis, so that no side runs along it, is refused at
-//! the same box when certified, and as two curves touching when tolerant.
+//! **Half a turn about `y` by `Isometry::rotation(y, π)`: answered, though the
+//! bottom cap circle starts inside a box.** Every side runs *exactly* along the
+//! turned bar: how it leans against the pipe comes out zero. But `sin π`
+//! rounds to `1.2e-16`, so the turn is not one of a cube's, and the fuse reads
+//! the bar's seam corner through `where_a_corner_lands_after_moving` as a box
+//! `± CORNER_AFTER_MOVING_ROUNDOFF · 3`. The bottom cap circle starts inside
+//! that box. Every certified fuse was refused *order along a crossing* between
+//! that box and where a side's line crosses the bottom circle — Q885's case,
+//! met there on a shape only a probe builds, and here on one a designer draws.
+//! Every tolerant fuse was refused `CannotTellTheCellsOfAFaceApart`. The seam
+//! notch tilted off the axis, so that no side runs along it, was refused at the
+//! same box when certified, and as two curves touching when tolerant, so what
+//! refused was the corner and not a side along the axis. `fuse/arrange.rs` now
+//! counts the bottom circle from the seam corner's box, since no other node
+//! can lie between that box and where the circle starts
+//! (`Arrangement::count_each_loop_from_the_node_round_its_start`, Q1737).
+//! Every fuse now answers what it holds by hand under both policies and logs
+//! nothing, and the tilted notch answers with the volume it has unturned.
 //!
 //! **One radian about `(1, 1, 1)`: answered, though a side lies a rounding off
 //! parallel to the axis.** The turn rounds each side's normal and the bar's
@@ -45,10 +51,10 @@
 //! answers what it holds by hand under both policies and logs nothing, and so
 //! does the seam notch tilted off the axis, with the volume it has unturned.
 //!
-//! **The half turn by rotation is a gap, not a limit** (§16.10). A turn moves
-//! no material, so each answer exists and is the unturned one. The exact half
-//! turn reaches it for the same shape, and so does the one-radian turn, whose
-//! rounding is in the turn itself.
+//! **The half turn by rotation was a gap, not a limit** (§16.10), and it is
+//! closed. A turn moves no material, so each answer exists and is the unturned
+//! one. The exact half turn reached it for the same shape, and so did the
+//! one-radian turn, whose rounding is in the turn itself.
 //!
 //! *Where a plane and a pipe cross*, the predicate Q765 named, refuses none of
 //! these fuses.
@@ -127,8 +133,9 @@ fn the_seam_corner_is_a_box_after_rotation_by_pi_and_a_point_after_two_quarter_t
 
 /// Q885's case on a designer's shape: the bottom cap circle starts inside the
 /// seam corner's box, and a side's line crosses the circle a little way round.
-/// Every fuse of either notch, under either policy, answers what it holds by
-/// hand and logs nothing, as the exact half turn does.
+/// The circle is counted from that box, so every fuse of either notch, under
+/// either policy, answers what it holds by hand and logs nothing, as the exact
+/// half turn does.
 #[test]
 fn turned_half_a_turn_by_rotation_every_fuse_answers_what_it_holds_by_hand() {
     answers_every_fuse_by_hand("half a turn by rotation", &half_a_turn_by_rotation());

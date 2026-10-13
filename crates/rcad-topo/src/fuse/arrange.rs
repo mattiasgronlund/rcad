@@ -3316,8 +3316,9 @@ impl<'f> Arrangement<'f> {
     /// `1.2e-16`, so the bar's seam corner on its bottom cap is a box `±8.5e-14`
     /// round `(−3, 0, 0)`, and the cap's circle is walked from `(−3, 0,
     /// −3.7e-16)`, inside that box. The nodes where the notch's sides cross the
-    /// circle are `0.17` and more round from it, and every fuse was refused on
-    /// the order of the corner against the first of them.
+    /// circle are an arc of `3 asin(1/3) ≈ 1.02` or more from it either way
+    /// round, and every fuse was refused on the order of the corner against
+    /// one of them.
     fn count_each_loop_from_the_node_round_its_start(&mut self, on_each: &[Vec<usize>]) {
         for (crossing, on_it) in on_each.iter().enumerate() {
             let named = self.the_node_round_the_start(crossing, on_it);
