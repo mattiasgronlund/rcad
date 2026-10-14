@@ -70,6 +70,19 @@
 //! run, `a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused`,
 //! stopped at its first fuse; run again with all 24 of its fuses let through,
 //! it printed none.
+//!
+//! Q1950 tried bends written out at a ring angle that is not a multiple of
+//! `π/2`, the one case `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule`
+//! and `a_bend_placed_half_a_turn_round_from_another_places_every_piece` leave
+//! untried, since each starts its first bend's wall at angle 0. Tried over
+//! `0.1` to `1.4` radians, a copy a quarter turn backward or half a turn
+//! round, ring 4 and tube 1: most angles are refused before a ray, each at a
+//! different step — `Undecidable` at `a point inside a piece of a face` or at
+//! `side of torus`, `ACurvedFaceGoesRightRoundWithNoSeam`, or
+//! `ResultIsNotManifold` — never at `CannotFireARayAtAFacesSurface`, so this
+//! family is not reached either. `0.9` radians answers cleanly for every rule,
+//! both turns and all three rings in `PLACED_RINGS`, and is the one pinned in
+//! `a_bend_written_out_at_another_angle_and_a_copy_turned_round_answer_every_rule`.
 
 use core::f64::consts::{FRAC_PI_2, PI};
 use std::collections::BTreeMap;
@@ -84,7 +97,10 @@ use smallvec::smallvec;
 
 mod rings;
 
-use rings::{a_bend_turned_and_written_out, a_quarter_bend, the_top_half_of_a_ring};
+use rings::{
+    a_bend_turned_and_written_out, a_bend_written_out_at_an_angle, a_quarter_bend,
+    the_top_half_of_a_ring,
+};
 
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
@@ -299,6 +315,79 @@ fn a_bend_placed_half_a_turn_round_from_another_places_every_piece() {
                         (volume - one_bend).abs() <= error,
                         "{what}: {volume} ± {error}, a bend {one_bend}"
                     );
+                }
+            }
+        }
+    }
+}
+
+/// The two tests above place the first bend's wall from angle 0, so the band
+/// of wall a rounding wide between a cap rim and the other bend's meridian
+/// sits at a ring angle of 0 or `π/2`, each a multiple of `π/2`. Placing a
+/// copy by `Isometry::rotation` cannot try another angle either: a placed
+/// face is meshed in the frame it is stored in, unturned, so it never reaches
+/// the branch `atan2` cuts the ring angle on.
+///
+/// Here both bends are written out instead, one at `0.9` radians — not a
+/// multiple of `π/2` — and the other a quarter turn backward or half a turn
+/// round from it, so the band this time sits at a ring angle of `0.9` or
+/// `0.9 − π/2`. Every rule both ways round answers and validates, for all
+/// three rings, each solid's volume against `π² R r² / 2` a bend. Turned a
+/// quarter backward the two bends meet only at their shared cap plane and
+/// share no material there, so the intersection answers no solid at all —
+/// unlike `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule`,
+/// whose exact axis angles leave a floating-point sliver of overlap instead.
+///
+/// Not every angle answers this way: run with the arm made to print over a
+/// spread of angles (row Q1950), `0.3`, `0.7` and most others are refused
+/// `Undecidable`, some at `a point inside a piece of a face` and some at
+/// `side of torus`, and a few are refused `ACurvedFaceGoesRightRoundWithNoSeam`
+/// or `ResultIsNotManifold` instead — each a different band than the one
+/// `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule` and
+/// `a_bend_placed_half_a_turn_round_from_another_places_every_piece` already
+/// place, at a ring angle that is not a multiple of `π/2`. `0.9` is the one
+/// tried here that answers for every ring, both turns and every rule.
+#[test]
+fn a_bend_written_out_at_another_angle_and_a_copy_turned_round_answer_every_rule() {
+    let angle = 0.9;
+    for (ring, tube) in PLACED_RINGS {
+        let one_bend = PI * PI * ring * tube * tube / 2.0;
+        for turn in [-FRAC_PI_2, PI] {
+            let half_a_turn = turn == PI;
+            for rule in EVERY_RULE {
+                for the_first_first in [true, false] {
+                    let what = format!(
+                        "ring {ring}, tube {tube}, {angle} then {turn} round, {rule:?}, \
+                         the first first {the_first_first}"
+                    );
+                    let mut model = a_model();
+                    let first = a_bend_written_out_at_an_angle(&mut model, ring, tube, 1, angle)
+                        .expect("a bend written out at another angle");
+                    let other =
+                        a_bend_written_out_at_an_angle(&mut model, ring, tube, 1, angle + turn)
+                            .expect("a bend written out at another angle, turned round");
+                    let measured =
+                        fused_and_measured(&mut model, first, other, rule, the_first_first)
+                            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                    let bends = match (rule, half_a_turn) {
+                        (Rule::Union, true) => 2,
+                        (Rule::Union, false) => 1,
+                        (Rule::Difference, _) => 1,
+                        (Rule::Intersection, _) => 0,
+                        (other, _) => panic!("not a rule this tries: {other:?}"),
+                    };
+                    assert_eq!(measured.len(), bends, "{what}: {measured:?}");
+                    let expected = if rule == Rule::Union && !half_a_turn {
+                        2.0 * one_bend
+                    } else {
+                        one_bend
+                    };
+                    for (volume, error) in measured {
+                        assert!(
+                            (volume - expected).abs() <= error,
+                            "{what}: {volume} ± {error}, expected {expected}"
+                        );
+                    }
                 }
             }
         }

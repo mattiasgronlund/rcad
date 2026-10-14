@@ -105,6 +105,38 @@ pub fn a_bend_turned_and_written_out(
     a_bend(model, ring, tube, &sits)
 }
 
+/// A bend `quarters` quarter turns long round the ring, written out where it
+/// sits the way [`a_bend_turned_and_written_out`] is, but turned by `angle`
+/// radians rather than by whole quarter turns.
+///
+/// Every number of the bend is put through the general rotation
+/// `(x, y) → (x cos θ − y sin θ, x sin θ + y cos θ)`, not the exact quarter
+/// turn `a_bend_turned_and_written_out` composes — so, unlike that function,
+/// `angle` need not be a multiple of `π/2`. That is what puts a band of wall
+/// at a ring angle that is not a multiple of `π/2` where the mesh actually
+/// reads it: placing a bend by `Isometry::rotation` does not, since a placed
+/// face is meshed in the frame it is stored in (row Q1950).
+///
+/// # Errors
+///
+/// Whatever [`SolidBuilder::build`] refuses the description with.
+pub fn a_bend_written_out_at_an_angle(
+    model: &mut Model,
+    ring: f64,
+    tube: f64,
+    quarters: u32,
+    angle: f64,
+) -> Result<SolidKey> {
+    let inner = ring - tube;
+    let sits = match quarters {
+        1 => WhereABendSits::quarter(inner),
+        2 => WhereABendSits::half(inner),
+        other => panic!("a bend of {other} quarter turns is not one this writes"),
+    }
+    .turned_by(angle);
+    a_bend(model, ring, tube, &sits)
+}
+
 /// The top half of a whole ring about `+z`, `z ≥ 0`: a torus face right round
 /// the ring and a flat ring of the plane `z = 0` closing it underneath.
 ///
@@ -235,6 +267,23 @@ impl WhereABendSits {
 
     fn turned_a_quarter_turn(&self) -> Self {
         let turn = |[x, y]: [f64; 2]| [written_out(-y), written_out(x)];
+        Self {
+            start_corner: turn(self.start_corner),
+            end_corner: turn(self.end_corner),
+            start_cap_facing: turn(self.start_cap_facing),
+            end_cap_facing: turn(self.end_cap_facing),
+            seam_side: turn(self.seam_side),
+        }
+    }
+
+    fn turned_by(&self, angle: f64) -> Self {
+        let (sin, cos) = angle.sin_cos();
+        let turn = |[x, y]: [f64; 2]| {
+            [
+                written_out(x * cos - y * sin),
+                written_out(x * sin + y * cos),
+            ]
+        };
         Self {
             start_corner: turn(self.start_corner),
             end_corner: turn(self.end_corner),
