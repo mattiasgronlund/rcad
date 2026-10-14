@@ -40,7 +40,9 @@
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{
+    Axis, Deflection, Isometry, Plane, Scale, Surface, SurfaceMeet, Vector, intersect,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{EdgeKey, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -215,6 +217,169 @@ fn a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it() {
          answer keeps the bar, and nothing where it does not:\n{}",
         wrong.join("\n")
     );
+}
+
+/// The pairs of the two tests above, the wall four high and two high, with
+/// both solids turned about `z` through the origin by `π/6` and by one radian:
+/// the cube placed by the turn, and the bar by the turn after its shift to
+/// `(−1, 2, 1)`, as a caller turning a sketch's parts into place builds them
+/// (queue row Q1765). Every rule both ways round, under `certified`.
+///
+/// **For the numbers the kernel is handed, the bar is clear of the wall.** The
+/// turn is the `f64` nearest it, and composing it with the shift rounds the
+/// bar's place, so the plane the model holds for the wall and the pipe it holds
+/// for the bar's skin miss by `5.3e−17` at `π/6` and `2.1e−16` at one radian,
+/// worked out in exact rationals from the numbers below. `intersect` decides
+/// that exactly: they meet in nothing. So the answer is the one a bar clear of
+/// a block has, which is a sound one: the union is the two as they stand, the
+/// intersection no solid, and each difference the first solid whole. A
+/// quarter turn (`Isometry::quarter_turns`) is exact and keeps the touch.
+///
+/// Every one of the 24 used to be refused `Undecidable`, at the side of the
+/// wall's plane of the bar's seam corner. The corner, moved by a turn that is
+/// not one of a cube's, is a box `1e−13` wide round where it lands, and the
+/// plane runs through the box. The corner is on the pipe, and the plane leaves
+/// no room in the pipe, so the side is the side the pipe's axis is on.
+///
+/// **Nothing cuts the bar's seam**, so where the answer keeps the bar (union,
+/// and the bar less the cube) the seam's one image is the answer's one edge up
+/// the seam's line, the wall four high or two; and nothing where it does not.
+#[test]
+fn a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule() {
+    let mut wrong: Vec<String> = Vec::new();
+    for angle in [PI / 6.0, 1.0] {
+        for wall in [4.0, 2.0] {
+            for swapped in [false, true] {
+                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                    let what =
+                        format!("turned {angle}, wall {wall} high, {rule:?}, bar first {swapped}");
+                    if let Err(why) = turned_against_a_wall(angle, wall, swapped, rule) {
+                        wrong.push(format!("{what}: {why}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// One fuse of [`a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule`]:
+/// `Err` saying what is wrong with it.
+fn turned_against_a_wall(angle: f64, wall: f64, swapped: bool, rule: Rule) -> Result<(), String> {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let turn = Isometry::rotation(&Axis::z(), angle).expect("a finite angle");
+    let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+    let cube = model
+        .add_extrusion(&rectangle, wall, &turn)
+        .expect("building a box needs no decision");
+    let shift = Isometry::translation(Vector::new(-1.0, 2.0, 1.0)).expect("a whole-number shift");
+    let bar = model
+        .add_round_bar(1.0, 2.0, &turn.compose(&shift))
+        .expect("a bar");
+    if !the_wall_misses_the_pipe(&model, cube, bar) {
+        return Err("the wall's plane meets the bar's pipe".to_owned());
+    }
+    let seam = the_one_straight_edge_of(&model, bar);
+    let seam_runs_up = {
+        let start = model
+            .edge(seam)
+            .expect("this model made the key")
+            .start()
+            .point();
+        [start.x(), start.y()]
+    };
+    let [(first, first_volume), (second, second_volume)] = if swapped {
+        [(bar, 2.0 * PI), (cube, 16.0 * wall)]
+    } else {
+        [(cube, 16.0 * wall), (bar, 2.0 * PI)]
+    };
+    let mut log = ProvenanceLog::new();
+    let answer = model
+        .fuse(&[first], &[second], rule, &Policy::certified(), &mut log)
+        .map_err(|why| format!("refused {why}"))?;
+    if !log.records().is_empty() {
+        return Err(format!("not every decision is proved: {:?}", log.records()));
+    }
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .map_err(|why| format!("the model does not validate: {why}"))?;
+    let mut found: Vec<f64> = answer
+        .solids()
+        .iter()
+        .map(|&solid| volume_of(&model, solid))
+        .collect();
+    found.sort_by(f64::total_cmp);
+    let mut expected = match rule {
+        Rule::Union => vec![first_volume, second_volume],
+        Rule::Intersection => vec![],
+        Rule::Difference => vec![first_volume],
+        _ => unreachable!("only the three rules are asked"),
+    };
+    expected.sort_by(f64::total_cmp);
+    let near = found.len() == expected.len()
+        && found.iter().zip(&expected).all(|(found, expected)| {
+            found <= expected && (expected - found) / expected < HOW_FAR_A_MESH_MAY_BE
+        });
+    if !near {
+        return Err(format!(
+            "measured {found:?}, and the answer is {expected:?}"
+        ));
+    }
+    let images = answer
+        .images_of_edge(seam)
+        .expect("this model made the key");
+    let up_the_seam: Vec<EdgeKey> = answer
+        .solids()
+        .iter()
+        .flat_map(|&solid| edges_of(&model, solid))
+        .filter(|&edge| runs_up_the_line(&model, edge, seam_runs_up))
+        .collect();
+    let keeps_the_bar = rule == Rule::Union || (rule == Rule::Difference && swapped);
+    if up_the_seam.len() != usize::from(keeps_the_bar) || images != up_the_seam {
+        return Err(format!(
+            "the answer's edges up the seam's line are {up_the_seam:?} and the seam's images \
+             {images:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `intersect` proves that the cube's upright wall nearest the bar, as
+/// the model holds it placed, and the bar's skin meet in nothing.
+fn the_wall_misses_the_pipe(model: &Model, cube: SolidKey, bar: SolidKey) -> bool {
+    let skin = model
+        .solid(bar)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.surface())
+        .find(|surface| matches!(surface, Surface::Cylinder(_)))
+        .expect("a bar has a round skin");
+    let Surface::Cylinder(pipe) = skin else {
+        unreachable!("found as a pipe")
+    };
+    let wall = model
+        .solid(cube)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.plane())
+        .filter(|plane| plane.normal().z() == 0.0)
+        .min_by(|one, other| {
+            let off =
+                |plane: &Plane| (plane.signed_distance_to(pipe.axis().origin()).abs() - 1.0).abs();
+            off(one).total_cmp(&off(other))
+        })
+        .expect("a box has faces");
+    matches!(
+        intersect(
+            &Surface::Plane(wall),
+            &skin,
+            &Policy::certified(),
+            &mut ProvenanceLog::new()
+        ),
+        Ok(SurfaceMeet::Nothing)
+    )
 }
 
 /// The heights of an upright edge's two ends, lower first.
