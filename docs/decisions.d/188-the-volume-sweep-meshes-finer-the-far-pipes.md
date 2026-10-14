@@ -121,6 +121,12 @@ argues it under "What stops a fold". The ring that needed it is
 faces drew the same side from circle to circle at the corner floor and only
 folded apart once the ball's band took a point inside.
 
+**2026-10-14, Q1973:** that floor is also never below half the box's width
+over `2¹³` (`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO` in `validate.rs`), a cost bound
+set from what `rcad-topo`'s tests and the slow tier clear. The doc comment of
+`the_coarsest_mesh_whose_sides_do_not_cross`, under "What stops a fold",
+argues it.
+
 **The LED files, after the fix** (the kicad rate is 114/323 either side, and no
 pin moved):
 
