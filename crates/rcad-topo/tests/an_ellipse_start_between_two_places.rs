@@ -38,15 +38,14 @@
 //! everywhere, but at an end of the short axis it is, and here it is bit for bit.
 
 use rcad_geom::{
-    Axis, Deflection, Error as GeometryError, Isometry, MeetOfThree, Point, Scale, Surface,
-    SurfaceMeet, Vector, intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
-    which_comes_first_round_a_crossing,
+    Axis, Deflection, Isometry, MeetOfThree, Point, Scale, Surface, SurfaceMeet, Vector, intersect,
+    meet_of_three_surfaces, where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
 };
-use rcad_predicates::{Decision, Interval, Level, Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
-/// The name `order_along` records a refusal under.
-const ALONG_A_CROSSING: &str = "order along a crossing";
+/// The bar's radius, `1 + 2⁻⁵¹`.
+const RADIUS: f64 = 1.0 + 2.0 * f64::EPSILON;
 
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
@@ -159,177 +158,202 @@ fn the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_
 }
 
 /// The pin: under either policy, every rule with either solid first gets past
-/// the order of the two places with nothing recorded about the order along a
-/// crossing, and is refused while its answer is written, with
-/// `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom`. The records are
-/// all `side of a half-space`, at `Interval`: three for the union and for the
-/// bar less the block, one for the intersection and for the block less the bar.
+/// the order of the two places with nothing recorded at all, and answers one
+/// solid that validates and holds its closed form, all but the bar less the
+/// block, which is refused on a fold of its mesh.
+///
+/// **The closed forms.** The block's side `x = −17` is `2⁻⁵¹` inside the bar's
+/// wall, its other three sides are clear of the bar, and its bottom is under
+/// the bar's bottom everywhere over the bar's disc. So the two share the part
+/// of the bar under the block's top. Over the disc the top stands at
+/// `h ∓ y tan ½`, with `h = 4 / cos ½ − 2` where the axis meets it, between
+/// `2.01` and `3.10` and so inside the bar's `10`. The `y` term sums to nothing
+/// over a disc centred on `y = 0`, so what they share is `π r² (4 / cos ½ − 2)`,
+/// `8.0361` with `r = 1 + 2⁻⁵¹`. The block holds `4 · 12 · 4 = 192` and the bar
+/// `10 π r²`, so the union is `192 + 10 π r²` less what they share, `215.380`,
+/// and the block less the bar is `192` less it, `183.964`. The fin of the bar
+/// outside `x = −17` holds about `1.7e-22`, which none of them can hold.
+///
+/// **The bar less the block**, `10 π r²` less what they share, `23.380`, and
+/// the fin, is refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`
+/// at the last rung of the fold ladder (Q1869): the fin's wall and the block's
+/// side both draw one side of the mesh. A probe took 0.48 s for it under either
+/// policy. That refusal is Q1972's.
 ///
 /// **Why this says the arm gave an order.** Every fuse here goes through
 /// `the_one_ahead_of_the_start`, and goes there from `the_one_the_start_is`'s
-/// `(false, false)` arm: a run of this test under `gdb` with no change to the
-/// source, a breakpoint on each and one on `Model::fuse`, counted six hits of
-/// the function and six of the arm in each of the twelve fuses, and none of the
-/// overlap arm or of the line that answers `Undecidable`. That is a run and not
-/// a test. The rest is this file: the
-/// sweep is a proved zero, neither place is a rounding off the start, the
-/// boxes are apart and neither holds the start, which is the only way to that
-/// arm. Had the arm left the pair `Undecidable`, a certified fuse would have
-/// refused with an `order along a crossing` record.
+/// `(false, false)` arm: a run of each of the twelve fuses under `gdb` with no
+/// change to the source counted six hits of each function and six of the arm,
+/// none of the `(true, true)` arm that answers `Undecidable`, and none of the
+/// other place `the_one_ahead_of_the_start` is called from. That is a run and
+/// not a test. The rest is this file: the sweep is a proved zero, neither place
+/// is a rounding off the start, the boxes are apart and neither holds the
+/// start, which is the only way to that arm. Had the arm left the pair
+/// `Undecidable`, a certified fuse would have refused with an `order along a
+/// crossing` record.
 ///
-/// Why each fuse is then refused has not been traced.
+/// Before Q1860's walk fix (`10517374`) every one of the twelve was refused
+/// `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom` while its answer
+/// was written: where the block's side cuts the top's ellipse, the walk kept
+/// both arcs, the long one on the top and a sliver `2⁻⁵¹` outside the block
+/// (Q1860's trace).
 #[test]
-fn every_fuse_gets_past_the_order_of_the_two_places_and_is_refused_naming_a_piece_of_a_crossing() {
+fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the_block() {
+    let shared = std::f64::consts::PI * RADIUS * RADIUS * (4.0 / 0.5_f64.cos() - 2.0);
+    let bar = std::f64::consts::PI * RADIUS * RADIUS * 10.0;
+    let block = 4.0 * 12.0 * 4.0;
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
         for rule in EVERY_RULE {
             for bar_first in [true, false] {
                 let case = format!("{policy:?} {rule:?}, bar first {bar_first}");
                 let mut log = ProvenanceLog::new();
-                match fuse_the_bar_and_the_block(rule, bar_first, &policy, &mut log) {
-                    Err(Error::Geometry(GeometryError::CannotNameWhichPieceOfACrossingThisIs)) => {}
-                    Ok(fused) => panic!(
-                        "{case}: the fuse answered with {} solids; check each against its \
-                         volume and pin it",
-                        fused.solids().len()
-                    ),
-                    Err(other) => panic!("{case}: {other:?}"),
-                }
-                let records = log.records();
-                assert!(
-                    records
-                        .iter()
-                        .all(|record| record.predicate() != ALONG_A_CROSSING),
-                    "{case}: {records:#?}"
+                let (mut model, the_bar, the_block) = the_bar_and_the_block();
+                let fused = fuse_the_bar_and_a_block(
+                    &mut model,
+                    [the_bar, the_block],
+                    rule,
+                    bar_first,
+                    &policy,
+                    &mut log,
                 );
-                let how_many = match (rule, bar_first) {
-                    (Rule::Union, _) | (Rule::Difference, true) => 3,
-                    (Rule::Intersection, _) | (Rule::Difference, false) => 1,
+                assert!(log.records().is_empty(), "{case}: {:#?}", log.records());
+                let closed_form = match (rule, bar_first) {
+                    (Rule::Union, _) => block + bar - shared,
+                    (Rule::Intersection, _) => shared,
+                    (Rule::Difference, false) => block - shared,
+                    (Rule::Difference, true) => {
+                        assert!(
+                            matches!(
+                                fused,
+                                Err(Error::TwoPatchesOfTheMeshDrewTheSameSide {
+                                    drawn: 4,
+                                    used: 4
+                                })
+                            ),
+                            "{case}: {fused:?}"
+                        );
+                        continue;
+                    }
                     _ => unreachable!("{case}: EVERY_RULE names three rules"),
                 };
-                assert_eq!(
-                    records
-                        .iter()
-                        .map(|record| (record.predicate(), record.level()))
-                        .collect::<Vec<_>>(),
-                    vec![("side of a half-space", Level::Interval); how_many],
-                    "{case}: {records:#?}"
-                );
+                assert_one_solid_holding(&model, fused, closed_form, shared, &policy, &case);
             }
         }
     }
 }
 
-/// The fin the bar leaves outside `x = −17`, reached on `main` without the walk
-/// fix: the same bar, and a block on the same square standing straight up from
-/// `z = −1` to `z = 11`, so that it holds the whole bar but the fin. The fin is
-/// `2⁻⁵¹` thick, so every point of it rounds to `x = −17`, and its bottom and top
-/// faces are each three corners on one line: `(−17, ±2⁻²⁵)` and the bar's rim
-/// corner `(−17, ∓6.1e-17)`. The triangulator hands such a face back with no
-/// triangles, and until the mesher drew them itself the chord and both halves
-/// of the arc round each were used by one triangle only, so every fuse here was
-/// refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)` by
-/// `every_side_of_the_skin_is_used_both_ways` on the coarsest mesh (Q1928).
+/// The same bar and a block on the same square standing straight up from
+/// `z = −1` to `z = 11`, so that it holds the whole bar but the fin `2⁻⁵¹`
+/// thick the bar leaves outside `x = −17`. Under either policy, every rule with
+/// either solid first answers one solid that validates and holds its closed
+/// form, with nothing recorded, all but the bar less the block, the fin alone.
 ///
-/// Drawn, the tolerant union answers either way round with the block, `576`:
-/// the fin adds about `1.7e-22`, which `576` cannot hold.
+/// **The closed forms.** The block holds `4 · 12 · 12 = 576` and the bar
+/// `10 π r²`, all of it inside the block but the fin, which holds about
+/// `1.7e-22`. So the union is `576`, the intersection `10 π r²`, and the block
+/// less the bar `576 − 10 π r²`, and none of them can hold the fin.
+///
+/// **The fin alone** is refused `VolumeIsNotPositive` at exactly `0` under
+/// either policy, since every point of it rounds onto `x = −17`. That refusal
+/// is Q1938's.
+///
+/// **The fin's ends.** Its bottom and top faces are each three corners on one
+/// line, `(−17, ±2⁻²⁵)` and the bar's rim corner `(−17, ∓6.1e-17)`. The
+/// triangulator hands such a face back with no triangles, and until the mesher
+/// drew them itself (Q1928) the chord and both halves of the arc round each were
+/// used by one triangle only, so the unions and the fin alone were refused
+/// `Invalid(FacesDoNotAgreeWhichWayTheyFace)` by
+/// `every_side_of_the_skin_is_used_both_ways` on the coarsest mesh.
+///
+/// Before Q1860's walk fix (`10517374`) the intersection and the block less the
+/// bar were refused `CannotNameWhichPieceOfACrossingThisIs` before any mesh,
+/// and the certified union `Undecidable` on two `side of a half-space` records
+/// pushed by `which_side_of` in `rcad-geom`'s `walk.rs`, under
+/// `Conic::the_stretch_this_run_covers`, while its volume was checked on its
+/// mesh.
 #[test]
-fn the_fin_a_bar_leaves_beside_an_upright_block_is_drawn_and_the_tolerant_union_is_the_block() {
-    let policy = Policy::tolerant(25.0);
-    for bar_first in [true, false] {
-        let (mut model, bar, block) = the_bar_and_an_upright_block();
-        let fused = fuse_the_bar_and_an_upright_block(
-            &mut model,
-            [bar, block],
-            Rule::Union,
-            bar_first,
-            &policy,
-        )
-        .unwrap_or_else(|why| panic!("bar first {bar_first}: {why:?}"));
-        let [union] = fused.solids()[..] else {
-            panic!("bar first {bar_first}: {:?}", fused.solids())
-        };
-        let measured = model
-            .solid(union)
-            .expect("the fuse made it")
-            .measure(
-                Deflection::of(0.01).expect("a positive deflection"),
-                &policy,
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|why| panic!("bar first {bar_first}: {why:?}"));
-        assert!(
-            (measured.volume() - 576.0).abs() <= measured.volume_error(),
-            "bar first {bar_first}: {measured:?}"
-        );
-        model
-            .validate(&policy, &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| panic!("bar first {bar_first}: {why:?}"));
+fn every_fuse_with_the_upright_block_answers_its_closed_form_but_the_fin_alone() {
+    let bar = std::f64::consts::PI * RADIUS * RADIUS * 10.0;
+    let block = 4.0 * 12.0 * 12.0;
+    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+        for rule in EVERY_RULE {
+            for bar_first in [true, false] {
+                let case = format!("{policy:?} {rule:?}, bar first {bar_first}");
+                let mut log = ProvenanceLog::new();
+                let (mut model, the_bar, the_block) = the_bar_and_an_upright_block();
+                let fused = fuse_the_bar_and_a_block(
+                    &mut model,
+                    [the_bar, the_block],
+                    rule,
+                    bar_first,
+                    &policy,
+                    &mut log,
+                );
+                assert!(log.records().is_empty(), "{case}: {:#?}", log.records());
+                let closed_form = match (rule, bar_first) {
+                    (Rule::Union, _) => block,
+                    (Rule::Intersection, _) => bar,
+                    (Rule::Difference, false) => block - bar,
+                    (Rule::Difference, true) => {
+                        assert!(
+                            matches!(
+                                fused,
+                                Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume }))
+                                    if volume == 0.0
+                            ),
+                            "{case}: {fused:?}"
+                        );
+                        continue;
+                    }
+                    _ => unreachable!("{case}: EVERY_RULE names three rules"),
+                };
+                assert_one_solid_holding(&model, fused, closed_form, bar, &policy, &case);
+            }
+        }
     }
 }
 
-/// What the same fuses meet once the fin's ends are drawn: the certified union
-/// is refused `Undecidable` on two `side of a half-space` records at
-/// `Interval`, boxes round the rim corner at each end of the fin, written in
-/// the bar's own frame as `(−1, 0, 0)` and `(−1, 0, 10)`; and the bar less the
-/// block, which is the fin alone, is refused `VolumeIsNotPositive` at exactly
-/// `0` under either policy, since every point of it rounds onto `x = −17`.
-/// Before, all six were refused `FacesDoNotAgreeWhichWayTheyFace`.
-///
-/// The union's two records are pushed by `which_side_of` in `rcad-geom`'s
-/// `walk.rs`, under `Conic::the_stretch_this_run_covers`, while the union's
-/// volume is checked on its mesh (a `gdb` run of this test, not a test). On top
-/// of Q1860's walk fix (`10517374`, which Q1870 lands) the certified union
-/// answers `576` either way round and validates, so Q1870 moves that half of
-/// this pin to an answer. The bar less the block is refused there the same way.
-///
-/// The intersection, and the block less the bar, are refused
-/// `CannotNameWhichPieceOfACrossingThisIs` before any mesh, and are not this.
-#[test]
-fn past_the_fin_the_certified_union_and_the_fin_alone_are_still_refused() {
-    for bar_first in [true, false] {
-        let (mut model, bar, block) = the_bar_and_an_upright_block();
-        let fused = fuse_the_bar_and_an_upright_block(
-            &mut model,
-            [bar, block],
-            Rule::Union,
-            bar_first,
-            &Policy::certified(),
-        );
-        let Err(Error::Undecidable { records }) = fused else {
-            panic!("bar first {bar_first}: {fused:?}")
-        };
-        assert_eq!(
-            records
-                .records()
-                .iter()
-                .map(|record| (record.predicate(), record.level()))
-                .collect::<Vec<_>>(),
-            vec![("side of a half-space", Level::Interval); 2],
-            "bar first {bar_first}: {records:#?}"
-        );
-    }
-    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
-        let (mut model, bar, block) = the_bar_and_an_upright_block();
-        let fused = fuse_the_bar_and_an_upright_block(
-            &mut model,
-            [bar, block],
-            Rule::Difference,
-            true,
-            &policy,
-        );
-        assert!(
-            matches!(
-                fused,
-                Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume })) if volume == 0.0
-            ),
-            "{policy:?}: {fused:?}"
-        );
-    }
+/// Checks that `fused` is one solid holding `closed_form` within the error bar
+/// `measure` publishes, and that the model validates. The bar must be under
+/// half of `shared`, the piece the bar and the block share, so that an answer
+/// that left that piece out or counted it twice is off by more than its bar.
+fn assert_one_solid_holding(
+    model: &Model,
+    fused: rcad_topo::Result<Fused>,
+    closed_form: f64,
+    shared: f64,
+    policy: &Policy,
+    case: &str,
+) {
+    let fused = fused.unwrap_or_else(|why| panic!("{case}: {why:?}"));
+    let [solid] = fused.solids()[..] else {
+        panic!("{case}: {:?}", fused.solids())
+    };
+    let measured = model
+        .solid(solid)
+        .expect("the fuse made it")
+        .measure(
+            Deflection::of(0.01).expect("a positive deflection"),
+            policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{case}: {why:?}"));
+    assert!(
+        (measured.volume() - closed_form).abs() <= measured.volume_error(),
+        "{case}: {closed_form} wanted, {measured:?}"
+    );
+    assert!(
+        measured.volume_error() < shared / 2.0,
+        "{case}: {shared} shared, {measured:?}"
+    );
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{case}: {why:?}"));
 }
 
 /// A bar `2⁻⁴⁰` wider than `1`, less the tilted block, reaches the ladder in
-/// `validate.rs` on `main` without the walk fix: the ellipse's start is
-/// `−17 − 2⁻⁴⁰`, off the block's side, so the walk is not refused. The fin it
+/// `validate.rs` with or without Q1860's walk fix: the ellipse's start is
+/// `−17 − 2⁻⁴⁰`, off the block's side, so the walk was not refused. The fin it
 /// leaves outside `x = −17` is `2⁻⁴⁰` thick and `2.7e-6` across, and its
 /// coarsest mesh folds `drawn 4, used 4` on the side from
 /// `(−17, −1.3486991523489155e-6, 0)` to `(−17, 1.3486991523489157e-6, 2.558)`:
@@ -372,18 +396,18 @@ fn a_fold_across_a_thin_fin_is_refused_in_seconds_at_the_ladders_last_rung() {
     }
 }
 
-fn fuse_the_bar_and_an_upright_block(
+fn fuse_the_bar_and_a_block(
     model: &mut Model,
     [bar, block]: [SolidKey; 2],
     rule: Rule,
     bar_first: bool,
     policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> rcad_topo::Result<Fused> {
-    let mut log = ProvenanceLog::new();
     if bar_first {
-        model.fuse(&[bar], &[block], rule, policy, &mut log)
+        model.fuse(&[bar], &[block], rule, policy, log)
     } else {
-        model.fuse(&[block], &[bar], rule, policy, &mut log)
+        model.fuse(&[block], &[bar], rule, policy, log)
     }
 }
 
@@ -391,7 +415,7 @@ fn the_bar_and_an_upright_block() -> (Model, SolidKey, SolidKey) {
     let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
     let bar = model
         .add_round_bar(
-            1.0 + f64::powi(2.0, -51),
+            RADIUS,
             10.0,
             &Isometry::translation(Vector::new(-16.0, 0.0, 0.0)).expect("a finite shift"),
         )
@@ -412,20 +436,6 @@ fn the_bar_and_an_upright_block() -> (Model, SolidKey, SolidKey) {
         )
         .expect("a positive height");
     (model, bar, block)
-}
-
-fn fuse_the_bar_and_the_block(
-    rule: Rule,
-    bar_first: bool,
-    policy: &Policy,
-    log: &mut ProvenanceLog,
-) -> rcad_topo::Result<Fused> {
-    let (mut model, bar, block) = the_bar_and_the_block();
-    if bar_first {
-        model.fuse(&[bar], &[block], rule, policy, log)
-    } else {
-        model.fuse(&[block], &[bar], rule, policy, log)
-    }
 }
 
 /// The block's top, the plane whose normal points mostly up, its side
@@ -539,7 +549,7 @@ fn dot(one: [Interval; 3], other: [Interval; 3]) -> Interval {
 }
 
 fn the_bar_and_the_block() -> (Model, SolidKey, SolidKey) {
-    the_block_and_a_bar_of_radius(1.0 + f64::powi(2.0, -51))
+    the_block_and_a_bar_of_radius(RADIUS)
 }
 
 fn the_block_and_a_bar_of_radius(radius: f64) -> (Model, SolidKey, SolidKey) {
