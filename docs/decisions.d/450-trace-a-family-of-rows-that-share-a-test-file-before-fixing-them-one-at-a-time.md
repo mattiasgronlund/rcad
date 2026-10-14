@@ -15,7 +15,9 @@ share a cause. It files one fix row for each cause, and names the members that
 fix should close. Every fix lane also runs the shapes of the open rows that
 share its test file, and the merge closes the ones it now answers. Today that
 was done by hand. `just queue families` will list the families once Q2003
-lands. Until then the line in 450.2 lists them.
+lands. Until then the line in 450.2 lists them. Where many separate fixes
+have already landed in one place, 450.6 looks back at whether they were one
+fix.
 
 ### 450.1 What happened on 10-14
 
@@ -233,3 +235,99 @@ family's rows share a cause before anything else moves.
 
 Until Q2003 lands, `dispatch-lanes` step 4 points at 450.2's line, and the
 dispatcher runs it at each fill.
+
+### 450.6 Look back where many fixes landed
+
+*Mattias, 2026-10-14, about 21:00 UTC: "Would that mean that when we have
+fixed enough rows one by one, we should go back and see if there should have
+bin one "higher level fix" covering a larger group of rows, and therby also
+increase the probability that we implicitly fixed even more non yet reported
+rows?" Session `dispatch-2026-10-03-a8` answered him in chat under
+`CLAUDE.md`'s "Decide it yourself". The session after it checked the numbers
+at `ce2cee31` and wrote the answer down.*
+
+**Yes.** Two things decide how. Where to look back is chosen by where the
+fixes landed. And whether a fix at the cause also answers shapes nobody has
+filed yet is counted by a sweep, not taken on trust.
+
+**Closed rows are grouped by where their fixes landed.** 450.2 groups open rows
+by the test file that pins their shape, because an open row's cause is not
+known yet. A closed row's fix is known, so the mark is a place in the code that
+many separate fixes changed. The count below covers the 253 lane merges since
+2026-09-24 on `origin/main`'s first-parent line whose row has a class. For each
+merge it takes the Rust functions named in the hunk headers of `git diff -U0
+<merge>^1 <merge> -- crates/*/src`, with `*.rs diff=rust` set through `-c
+core.attributesFile`, and counts distinct rows per function:
+
+| Rows | Function |
+|---|---|
+| 14 | `holds.rs` `is_one_circle_cut_in_two` |
+| 12 | `fuse/assemble.rs` `from_the_pieces` |
+| 12 | `holds.rs` `where_a_closed_crossing_is_centred` |
+| 11 | `fuse/assemble.rs` `of` |
+| 10 | `fuse/select.rs` `keeps` |
+| 8 each | `mesh.rs` `cut_in_two`, `fuse/arrange.rs` `how_a_crossing_runs`, `fuse/select.rs` `place_the_piece` and `choose`, `holds.rs` `what_a_face_cut_by_part_of_a_crossing_holds`, `fuse/assemble.rs` `sides_of`, `write.rs` `curve` |
+
+The count is rough. A hunk header names the nearest function above the hunk.
+So a hunk that adds a function, or changes the doc comment of the next one,
+counts to the one before it. And `of` is the name of several functions. The top
+row is that case: 13 of its 14 merges changed only doc-comment lines there, all
+but Q1033's. Those lines are the doc comment of
+`what_a_face_cut_by_part_of_a_crossing_holds`, just below, which lists the
+families of faces it reads. In the two merges read in full, Q876's and Q1863's,
+each added the case its row fixed.
+
+**What a fix at the cause looks like.** The record has two kinds.
+
+- **A fact named where it is made.**
+  `Arrangement::place_where_two_halves_meet` names the two places the walls of
+  two pipes of one width touch, `[a, b, b]` with `which` 0 or 1. Q1908
+  (`13b5c30a`) made `arrange` read that name in `is_where_two_pipes_touch`:
+  "the node's name is the proof". Q1965 (`b36fc5e0`) found three places in
+  `assemble` that still asked whether two pipes touch by an exact nought at a
+  corner's rounded point, and made them read the name too
+  (`mark_where_two_pipes_touch`). A look back of this kind asks which stages
+  still work out a fact from numbers when the stage that made it could have
+  named it.
+- **A reading of a whole kind of face.**
+  `what_a_face_cut_by_part_of_a_crossing_holds` reads a face as the part of
+  its surface in front of all its cuts, and takes that only for a list of
+  families of cuts, each argued on its own. Twice a fix took a whole kind of
+  face off that list. Q1002 made a flat face wind its own boundary, each arc
+  read as its chord, wherever the families say nothing
+  (`what_a_flat_face_of_chords_and_arcs_holds`). Q1227 did the same for a cone
+  face seen down its axis (`what_a_cone_face_seen_down_its_axis_holds`). Faces
+  on a pipe, a ball or a ring still go family by family.
+
+**The first look back is `AFaceTrimmedByACurveThisCannotFollow`.** 13 of the
+14 rows counted to the top row were refused that way, or as
+`CannotFollowAFacesTrimming`, which is what `classify_point` answers when
+`holds.rs` cannot follow a face's trimming: Q876, Q971, Q1002, Q1009, Q1033,
+Q1162, Q1165, Q1177, Q1227, Q1246, Q1252, Q1367 and Q1863. The 14th, Q975, was
+refused in `which_side_of_its_neighbour_a_side_keeps`. Q971 and Q1033 are one
+shape, a frustum's floor disc, refused at two stages, as in 450.1.
+
+At `ce2cee31`, `AFaceTrimmedByACurveThisCannotFollow` is named by 50 done rows,
+13 dropped ones and 10 open ones: Q1969 in tier 1, Q961, Q1282 and Q1832 in
+tier 2, and Q640, Q1111, Q1350, Q1395, Q1410 and Q1610 in tier 5. Two more open
+rows name `CannotFollowAFacesTrimming`, Q491 and Q1020, both in tier 5. Not all
+twelve are a shape that refuses. Q1832 and Q1282 ask for a shape that reaches
+the refusal. Q961 is a probe expected to refuse. Q491 overflows at `1e308`.
+
+Either answer is useful. If the fixes are cases of one rule `holds.rs` lacks,
+that rule is a fix at the cause. If they are one case per kind of curve, that
+is a limit of the approach, and the open rows stay one at a time. The look back
+is **Q2025**, tier 2, write set `-`. It is not pinned.
+
+**Shapes nobody filed are counted, not assumed (§16.10).** A fix at the cause
+should answer shapes near its rows' shapes that no row names. Whether it does
+takes a run. Sweep shapes near theirs, by angle, place, size and turn, under
+`Policy::certified()`, and count before the fix and after. 446.8's sweep is the
+model: Q1929's shape answered all six fuses at 15 of 41 angles at the base, and
+at 38 with the probe that stood in for its fix. The pins the one-by-one fixes
+left are what make a fix at the cause safe to make, and every one of them must
+still pass.
+
+**No trigger and no recipe yet (§13).** One look back is filed. If it finds a
+fix at the cause, a trigger earns a recipe, for example "a function that N
+separate fixes changed in a fortnight". If it does not, nothing is built.
