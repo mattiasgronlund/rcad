@@ -10366,20 +10366,16 @@ fn where_two_pipes_touch(
 /// The unit vector `up` points along, where two of its components are
 /// exactly nought and the third has a proved sign; `None` otherwise.
 fn along_one_coordinate_axis(up: [Interval; 3]) -> Option<[f64; 3]> {
-    let signs = up.map(Interval::sign);
     let mut unit = [0.0; 3];
-    let mut found = false;
-    for (axis, sign) in signs.into_iter().enumerate() {
-        match sign {
-            Decision::Zero => {}
-            Decision::Pos | Decision::Neg if !found => {
-                unit[axis] = if sign == Decision::Pos { 1.0 } else { -1.0 };
-                found = true;
-            }
-            _ => return None,
-        }
+    for (axis, side) in up.into_iter().enumerate() {
+        unit[axis] = match side.sign() {
+            Decision::Zero => 0.0,
+            Decision::Pos => 1.0,
+            Decision::Neg => -1.0,
+            Decision::Undecidable { .. } | _ => return None,
+        };
     }
-    found.then_some(unit)
+    (unit.iter().filter(|side| **side != 0.0).count() == 1).then_some(unit)
 }
 
 /// Which of the two places two pipes touch at `place` is, as the face on

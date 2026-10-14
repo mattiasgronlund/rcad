@@ -6,8 +6,8 @@
 //! long and starts at `through = (11, −3.25, 0.5)`, so its near cap passes
 //! through where the axes meet. Each test runs all six fuses — three rules,
 //! each bar first in turn. Every one answers: through either point at 50°,
-//! 60°, 70°, 100° and 120°, and through `(11, 0, 0)` at 80° and at the angles
-//! from 105° to 135° tested here.
+//! 60°, 70°, 100° and 120°, through `(11, −3.25, 0.5)` at 85° and 95° too, and
+//! through `(11, 0, 0)` at 80° and at the angles from 105° to 135° tested here.
 //!
 //! **What they should come to**, with `r = 1/4` and `a` the angle: the first
 //! bar is `A = π/4`. What two pipes of one width share where their axes cross at
