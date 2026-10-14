@@ -2804,11 +2804,13 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// than the fourteenth rung would split is refused, and nothing here says no
 /// solid has one. It was set from two suites and no more. A throwaway probe of
 /// this ladder over `just t -p rcad-topo`, 2087 tests, and `just test-slow`,
-/// 73, at `1d3cd744`, saw it clear a fold 469 and 28 times, never past the
-/// ninth rung — room `7.8e-3` under a top room of `2`, 657 points, in
-/// `every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates`.
-/// Thirteen halvings is five rungs past that, so the cap refuses no fold those
-/// two suites saw cleared. Of a solid outside them it says nothing.
+/// 73, saw it clear a fold 469 and 28 times, never past the ninth rung — room
+/// `7.8e-3` under a top room of `2`, in
+/// `every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates`
+/// — at `1d3cd744`, and the same again on `bb8f67d6` with the cap merged in,
+/// where the cap ended a ladder on the fin and nowhere else. Thirteen halvings
+/// is five rungs past the ninth, so the cap refuses no fold those two suites
+/// saw cleared. Of a solid outside them it says nothing.
 ///
 /// **A stop on a fold no finer mesh can split was tried first, and not taken**
 /// (Q1869). It refused a fold at once when every triangle using the side had
