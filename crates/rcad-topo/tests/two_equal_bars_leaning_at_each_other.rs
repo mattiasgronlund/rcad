@@ -6,8 +6,10 @@
 //! long and starts at `through = (11, −3.25, 0.5)`, so its near cap passes
 //! through where the axes meet. Each test runs all six fuses — three rules,
 //! each bar first in turn. Every one answers: through either point at 50°,
-//! 60°, 70°, 100° and 120°, through `(11, −3.25, 0.5)` at 85° and 95° too, and
-//! through `(11, 0, 0)` at 80° and at the angles from 105° to 135° tested here.
+//! 60°, 70°, 100° and 120°, through `(11, −3.25, 0.5)` at 85° and 95° too and
+//! at an exact quarter turn, and through `(11, 0, 0)` at 80° and at the angles
+//! from 105° to 135° tested here. Through `(11, −3.25, 0.5)` at 90° worked out
+//! in radians, every one is still refused.
 //!
 //! **What they should come to**, with `r = 1/4` and `a` the angle: the first
 //! bar is `A = π/4`. What two pipes of one width share where their axes cross at
@@ -206,33 +208,97 @@ fn a_bar_starting_where_it_crosses_another_at_85_or_95_degrees_answers_every_fus
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// As above at 90°, with the second bar turned onto `y` by an exact quarter
+/// turn about `z`, so `I = 1/24`. Its near cap is then the flat `y = −3.25`,
+/// which holds the first bar's axis and cuts the first pipe in two lines along
+/// it, `z = 0.25` and `z = 0.75`, the first of them the first bar's seam.
+#[test]
+fn a_bar_starting_where_it_crosses_another_a_quarter_turn_round_answers_every_fuse() {
+    let quarter = Isometry::quarter_turns(&Axis::z(), 1).expect("a quarter turn about z");
+    let wrong = what_goes_wrong_with_a_bar_starting_where_the_axes_meet_turned(90.0, &quarter);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Turned by 90° worked out in radians rather than by a quarter turn, the same
+/// two bars are still refused, every fuse `order along a crossing`. The turn
+/// leaves the second bar's stored direction at `(6.1e-17, 1, 0)`, so its near
+/// cap leans a rounding off `y = −3.25` and crosses the first bar's seam, `z =
+/// 0.25`, near the meeting point, running within a rounding of it from one of
+/// the first bar's caps to the other. On the cap at `x = 13` two nodes are to
+/// be put in order round the cap's circle: the seam's end `(13, −3.25, 0.25)`,
+/// exact, and where the near cap crosses that circle, a box a few roundings
+/// wide that holds the seam's end. Nothing the arrangement asks tells the two
+/// apart.
+#[test]
+fn a_bar_starting_where_it_crosses_another_turned_90_degrees_in_radians_is_still_refused() {
+    for (rule, first_first) in six_fuses() {
+        let mut model =
+            Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let said = fuse_in(
+            &mut model,
+            &turned_by(90.0),
+            [11.0, -3.25, 0.5],
+            rule,
+            first_first,
+        );
+        let Err(Error::Undecidable { records }) = &said else {
+            panic!("{rule:?} (first first: {first_first}): {said:?}");
+        };
+        let asked: Vec<&str> = records
+            .records()
+            .iter()
+            .map(|record| record.predicate())
+            .collect();
+        assert_eq!(
+            asked,
+            ["order along a crossing"],
+            "{rule:?} (first first: {first_first})"
+        );
+    }
+}
+
 /// One line for each of the six fuses of the bar starting where the axes meet
 /// at each of `angles` that does not answer as
 /// `a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`
 /// says.
 fn what_goes_wrong_with_a_bar_starting_where_the_axes_meet(angles: &[f64]) -> Vec<String> {
+    angles
+        .iter()
+        .flat_map(|&degrees| {
+            what_goes_wrong_with_a_bar_starting_where_the_axes_meet_turned(
+                degrees,
+                &turned_by(degrees),
+            )
+        })
+        .collect()
+}
+
+/// As [`what_goes_wrong_with_a_bar_starting_where_the_axes_meet`] at one
+/// angle, `degrees`, with the second bar turned about `z` by `turn`.
+fn what_goes_wrong_with_a_bar_starting_where_the_axes_meet_turned(
+    degrees: f64,
+    turn: &Isometry,
+) -> Vec<String> {
     let (first, second) = (PI / 4.0, PI / 8.0);
+    let shared = 1.0 / (24.0 * degrees.to_radians().sin());
     let mut wrong = Vec::new();
-    for &degrees in angles {
-        let shared = 1.0 / (24.0 * degrees.to_radians().sin());
-        for (rule, first_first) in six_fuses() {
-            let (volume, faces): (f64, &[usize]) = match (rule, first_first) {
-                (Rule::Union, _) => (first + second - shared, &[9]),
-                (Rule::Intersection, _) => (shared, &[4]),
-                (Rule::Difference, true) => (first - shared, &[10]),
-                (Rule::Difference, false) => (second - shared, &[3]),
-                (_, _) => unreachable!("six_fuses names three rules and no other"),
-            };
-            let mut model =
-                Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let said = fuse_in(&mut model, degrees, [11.0, -3.25, 0.5], rule, first_first)
-                .map_err(|why| format!("refused: {why:?}"))
-                .and_then(|solids| how_far_off(&model, &solids, volume, faces));
-            if let Err(why) = said {
-                wrong.push(format!(
-                    "{degrees}° {rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}: {why}"
-                ));
-            }
+    for (rule, first_first) in six_fuses() {
+        let (volume, faces): (f64, &[usize]) = match (rule, first_first) {
+            (Rule::Union, _) => (first + second - shared, &[9]),
+            (Rule::Intersection, _) => (shared, &[4]),
+            (Rule::Difference, true) => (first - shared, &[10]),
+            (Rule::Difference, false) => (second - shared, &[3]),
+            (_, _) => unreachable!("six_fuses names three rules and no other"),
+        };
+        let mut model =
+            Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let said = fuse_in(&mut model, turn, [11.0, -3.25, 0.5], rule, first_first)
+            .map_err(|why| format!("refused: {why:?}"))
+            .and_then(|solids| how_far_off(&model, &solids, volume, faces));
+        if let Err(why) = said {
+            wrong.push(format!(
+                "{degrees}° {rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}: {why}"
+            ));
         }
     }
     wrong
@@ -358,7 +424,7 @@ fn the_near_cap_as_the_model_hands_it_out_misses_both_points_the_pipes_touch_at(
     for degrees in [50.0, 60.0, 70.0, 100.0] {
         let mut model =
             Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let [_, second] = two_bars(&mut model, degrees, [11.0, -3.25, 0.5]);
+        let [_, second] = two_bars(&mut model, &turned_by(degrees), [11.0, -3.25, 0.5]);
         let near_cap = the_near_cap(&model, second);
         for z in [0.25, 0.75] {
             let side = near_cap.side_of_point(PredicatePoint::from([11.0, -3.25, z]));
@@ -461,9 +527,15 @@ fn what_goes_wrong_with_a_long_bar_through_another(angles: &[f64]) -> Vec<String
             };
             let mut model =
                 Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let said = fuse_in(&mut model, degrees, [11.0, 0.0, 0.0], rule, first_first)
-                .map_err(|why| format!("refused: {why:?}"))
-                .and_then(|solids| how_far_off(&model, &solids, volume, faces));
+            let said = fuse_in(
+                &mut model,
+                &turned_by(degrees),
+                [11.0, 0.0, 0.0],
+                rule,
+                first_first,
+            )
+            .map_err(|why| format!("refused: {why:?}"))
+            .and_then(|solids| how_far_off(&model, &solids, volume, faces));
             if let Err(why) = said {
                 wrong.push(format!(
                     "{degrees}° {rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}: {why}"
@@ -485,14 +557,19 @@ fn six_fuses() -> [(Rule, bool); 6] {
     ]
 }
 
+/// The second bar's turn about `z` by `degrees`, worked out in radians.
+fn turned_by(degrees: f64) -> Isometry {
+    Isometry::rotation(&Axis::z(), f64::to_radians(degrees)).expect("a turn about z")
+}
+
 fn fuse_in(
     model: &mut Model,
-    degrees: f64,
+    about_z: &Isometry,
     through: [f64; 3],
     rule: Rule,
     first_first: bool,
 ) -> Result<Vec<SolidKey>, Error> {
-    let [first, second] = two_bars(model, degrees, through);
+    let [first, second] = two_bars(model, about_z, through);
     let (arguments, tools) = if first_first {
         ([first], [second])
     } else {
@@ -548,7 +625,7 @@ fn how_far_off(
     Ok(())
 }
 
-fn two_bars(model: &mut Model, degrees: f64, through: [f64; 3]) -> [SolidKey; 2] {
+fn two_bars(model: &mut Model, about_z: &Isometry, through: [f64; 3]) -> [SolidKey; 2] {
     let onto_x = Isometry::quarter_turns(&Axis::y(), 1).expect("a turn about y");
     let first_at = Isometry::translation(rcad_geom::Vector::new(
         through[0] - 2.0,
@@ -558,9 +635,7 @@ fn two_bars(model: &mut Model, degrees: f64, through: [f64; 3]) -> [SolidKey; 2]
     .expect("a finite move")
     .compose(&onto_x);
     let first = model.add_round_bar(0.25, 4.0, &first_at).expect("a bar");
-    let turned = Isometry::rotation(&Axis::z(), f64::to_radians(degrees))
-        .expect("a turn about z")
-        .compose(&onto_x);
+    let turned = about_z.compose(&onto_x);
     let along = turned.apply_to_vector(rcad_geom::Vector::new(0.0, 0.0, 1.0));
     let (start, length) = if through[1] == 0.0 {
         (
