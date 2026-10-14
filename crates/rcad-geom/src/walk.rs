@@ -2400,10 +2400,11 @@ fn the_two_ellipses_equal_pipes_on_crossing_axes_cut(
 /// Where two axes that are known to meet do meet.
 ///
 /// The foot of the common perpendicular on the first axis, which is the
-/// crossing point itself once the two are known to reach each other.
-/// [`intersect`](crate::intersect) asks of the same point that it is exactly on
-/// both axes before it names the four halves.
-pub(crate) fn where_two_axes_meet(first: &Cylinder, second: &Cylinder) -> Point {
+/// crossing point itself once the two are known to reach each other, worked in
+/// `f64` and so to within a rounding: it centres an ellipse and picks nothing.
+/// [`intersect`](crate::intersect) works the point out exactly before it names
+/// the four halves, since this can miss a point `f64` holds (Q1967).
+fn where_two_axes_meet(first: &Cylinder, second: &Cylinder) -> Point {
     let [mine, theirs] = [first, second].map(|pipe| pipe.axis().direction());
     let sideways = mine.cross(theirs);
     let between = second.axis().origin() - first.axis().origin();
