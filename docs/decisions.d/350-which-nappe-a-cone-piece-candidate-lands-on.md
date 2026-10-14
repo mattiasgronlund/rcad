@@ -181,7 +181,7 @@ count in the table was the same on all three runs.
   |---|---|---|---|---|
   | leaning block | 192 | 98 | 178 | 12 `CannotTellTheCellsOfAFaceApart`, 2 `CannotMeshAFace` |
   | corner-up cube | 96 | 72 | 88 | 8 `order along a crossing` |
-  | slab | 80 | 40 | 50 | 16 `ACurvedFaceGoesRightRoundWithNoSeam`, 14 `side of a half-space` |
+  | slab | 80 | 40 | 64 | 16 `ACurvedFaceGoesRightRoundWithNoSeam` |
 
   The two columns are not known to hold the same cases, since the turns and
   heights may not be §350.4's, and the base is ten days of fixes on from
@@ -191,7 +191,12 @@ count in the table was the same on all three runs.
   `ACurvedFaceGoesRightRoundWithNoSeam`. **2026-10-11, Q1742 (Q1733, §35.6):**
   the slab is now 50 right of 80, refusing 16 `ACurvedFaceGoesRightRoundWithNoSeam`
   and 14 `side of a half-space`, and no more `a point inside a piece of a
-  face`.
+  face`. **2026-10-14, Q1871 (Q1837):** the two slab pins in
+  `a_plane_cut_along_a_cones_other_nappe.rs` now hold 64 right and 16
+  `ACurvedFaceGoesRightRoundWithNoSeam`; Q1743's 14 `side of a half-space`
+  answer right since Q1837's fix to `walk.rs`. Turned `1.5` the slab, as the
+  model stores it, leaves a lens of the cone past its end at `−y`, `3.6e−16`
+  inside the rim.
 - **Round the unit cone**, the leaning block is 169 right of 192, the cube 88 of
   96 and the slab 80 of 80 (Q1733, §35.6; was 68 of 80, naming 12 `a point
   inside a piece of a face` in the slab from `−8`). The leaning block refuses 8
