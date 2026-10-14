@@ -224,11 +224,14 @@ impl Surface {
     /// circle winds about the step between their centres, and two cones' of
     /// one slope about the step between their apexes, each a length, and the
     /// sweep there is a volume. Round a line, how two points turn is an area
-    /// or a volume as [`WhichLine`] says for each line.
+    /// or a volume as [`WhichLine`] says for each line. Grown twice as big, a
+    /// shape of each kind hands back an enclosure that reads twice as wide
+    /// through the measure named here:
+    /// `the_sweep_round_a_planes_conic_is_an_area_and_round_two_balls_circle_a_volume`.
     ///
-    /// Where nothing was swept, the answer is [`NOTHING_IS_KNOWN`] and filed
-    /// as a [`Measures::Length`], the measure that reads an enclosure widest,
-    /// though no budget covers an infinite one in any units.
+    /// Where the way round cannot be told, nothing is swept, and the answer is
+    /// [`NOTHING_IS_KNOWN`], filed as a [`Measures::Length`]. Its enclosure is
+    /// infinite, which no budget covers in any units.
     ///
     /// # Errors
     ///
@@ -1596,8 +1599,11 @@ impl WhichLine {
     /// What `x₁ y₂ − y₁ x₂` measures, for the two readings
     /// [`HowTwoPointsSitRoundALine`] takes. Round a ball's line `x` reads
     /// along `(c − o) × w`, a length, so `x` is an area and the turn a volume.
-    /// Round two pipes' line `N × w₁` and `N × w₂` are of no length, so `x`
-    /// and `y` are lengths and the turn an area.
+    /// Round two pipes' line `N × w₁` and `N × w₂` are built of the two axes'
+    /// directions alone and carry no length, so `x` and `y` are lengths and
+    /// the turn an area.
+    /// `the_sweep_round_a_planes_conic_is_an_area_and_round_two_balls_circle_a_volume`
+    /// grows a shape of each kind and reads both.
     fn what_a_turn_measures(self) -> Measures {
         match self {
             Self::ThroughABallsCentre { .. } => Measures::Volume,
@@ -1777,6 +1783,137 @@ mod tests {
             which_comes_first_round_a_crossing([&there, &here], at(0), at(1), at(3)),
             Ok(Decision::Neg)
         );
+    }
+
+    /// What the order round a crossing measures, shown by how wide an order it
+    /// cannot tell comes back as the shape grows. Each shape is asked about
+    /// one small box twice, a way round from the start, so the sweep straddles
+    /// nought. Made twice as big, box and all, an area's enclosure grows four
+    /// times and a volume's eight, so read through the measure handed back,
+    /// the bigger shape's wobble is twice the smaller's, as a length's is.
+    /// Filed as a volume, as every pair was until Q1273, a plane's conic would
+    /// read the bigger shape's wobble no wider than the smaller's.
+    #[test]
+    fn the_sweep_round_a_planes_conic_is_an_area_and_round_two_balls_circle_a_volume() {
+        type AShape = fn(f64) -> ([Surface; 2], [[f64; 3]; 2]);
+        let shapes: [(&str, AShape, Measures); 6] = [
+            (
+                "a plane through a ball's middle",
+                |k| {
+                    (
+                        [the_equators_plane(), a_ball(5.0 * k)],
+                        [[5.0 * k, 0.0, 0.0], [0.0, 5.0 * k, 0.0]],
+                    )
+                },
+                Measures::Area,
+            ),
+            (
+                "a ball on a pipe's axis",
+                |k| {
+                    let pipe =
+                        Surface::Cylinder(Cylinder::new(Axis::z(), 4.0 * k).expect("a radius"));
+                    (
+                        [a_ball(5.0 * k), pipe],
+                        [[4.0 * k, 0.0, 3.0 * k], [0.0, 4.0 * k, 3.0 * k]],
+                    )
+                },
+                Measures::Area,
+            ),
+            (
+                "a pipe reaching out of the side of another",
+                |k| {
+                    let fat =
+                        Surface::Cylinder(Cylinder::new(Axis::z(), 4.0 * k).expect("a radius"));
+                    let reaching = Surface::Cylinder(
+                        Cylinder::new(
+                            Axis::new(
+                                Point::new(0.0, 3.5 * k, 5.0 * k),
+                                Vector::new(1.0, 0.0, 0.0),
+                            )
+                            .expect("an axis"),
+                            k,
+                        )
+                        .expect("a radius"),
+                    );
+                    let round = round_the_one_loop_two_pipes_cross_in(1.0, 3.5, 0.0);
+                    (
+                        [reaching, fat],
+                        [round[0], round[2]].map(|at| at.map(|x| k * x)),
+                    )
+                },
+                Measures::Area,
+            ),
+            (
+                "two balls",
+                |k| {
+                    let there = Surface::Sphere(
+                        Sphere::new(Point::new(6.0 * k, 0.0, 0.0), 5.0 * k).expect("a radius"),
+                    );
+                    (
+                        [a_ball(5.0 * k), there],
+                        [[3.0 * k, 4.0 * k, 0.0], [3.0 * k, 0.0, 4.0 * k]],
+                    )
+                },
+                Measures::Volume,
+            ),
+            (
+                "two cones of one slope up one axis",
+                |k| {
+                    let [low, high] =
+                        [0.0, 4.0 * k].map(|apex| Surface::Cone(a_cone_up_z(apex, 1.0)));
+                    (
+                        [low, high],
+                        [[2.0 * k, 0.0, 2.0 * k], [0.0, 2.0 * k, 2.0 * k]],
+                    )
+                },
+                Measures::Volume,
+            ),
+            (
+                "a ball off a pipe's axis, crossing it in one loop",
+                |k| {
+                    let ball = Surface::Sphere(
+                        Sphere::new(Point::new(1.5 * k, 0.0, 0.0), 2.0 * k).expect("a radius"),
+                    );
+                    let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), k).expect("a radius"));
+                    let round = round_the_one_loop(2.0, 1.5);
+                    (
+                        [ball, pipe],
+                        [round[0], round[2]].map(|at| at.map(|x| k * x)),
+                    )
+                },
+                Measures::Volume,
+            ),
+        ];
+        for (what, shape, measures) in shapes {
+            let wobble_at = |k: f64| {
+                let ([first, second], [start, place]) = shape(k);
+                let pair = [&first, &second];
+                let from = PredicatePoint::from(start);
+                let a_box = PredicatePoint::Constructed(
+                    place.map(|x| Interval::new(x - k / 1024.0, x + k / 1024.0).expect("a box")),
+                );
+                let (decided, said) =
+                    Surface::which_comes_first_round_a_crossing_and_what_it_measures(
+                        pair, from, a_box, a_box,
+                    )
+                    .expect("a conic");
+                assert_eq!(
+                    Ok(decided),
+                    which_comes_first_round_a_crossing(pair, from, a_box, a_box),
+                    "{what} at {k}"
+                );
+                let Decision::Undecidable { enclosure } = decided else {
+                    panic!("{what} at {k}: {decided:?}");
+                };
+                assert_eq!(said, measures, "{what} at {k}");
+                assert!(
+                    enclosure.is_finite() && enclosure > 0.0,
+                    "{what} at {k}: {enclosure}"
+                );
+                said.wobble_of(enclosure, k)
+            };
+            assert_eq!(wobble_at(2.0), 2.0 * wobble_at(1.0), "{what}");
+        }
     }
 
     /// A ring of four and one about `+z`, centred on the origin. Its outer
