@@ -22,8 +22,8 @@
 //! Where it answers `None` for two rings of one joined face, `rings_round`
 //! panicked with that same message, and since Q1253 refuses the fuse
 //! `CannotPlaceTheRingsOfAJoinedFlatFace`. The rest of this file builds the families it
-//! answers `None` for and pins what the fuse does with each. Each one that is
-//! refused is refused before `rings_round`, and each test names the stage: that was
+//! answers `None` for and pins what the fuse does with each. Where one is
+//! refused, its test names the stage it is refused at: that was
 //! read with a breakpoint on `select::choose`, on `rings_round` and on
 //! `holds_the_other_rings` (Q597), which the two tests above do reach. Two
 //! holed bars turned a quarter are answered and reach `holds_the_other_rings`
@@ -49,8 +49,11 @@
 //! puts a corner on its arc wherever one of its own walls would cross it, so
 //! the ring `rings_round` is handed winds (Q641). A closed side that is one of
 //! several, its ring coming back through the side's one corner, is reached on
-//! a bored block's joined top, where the outline winds and places it; the probe
-//! with no ring that winds is refused before `rings_round` (Q802). A hole
+//! a bored block's joined top, where the outline winds and places it. The probe
+//! with no ring that winds was refused before `rings_round` (Q802) until Q1748;
+//! now it reaches it, and the bored bar less the tools is refused
+//! `CannotPlaceTheRingsOfAJoinedFlatFace` there, its other five fuses
+//! answered. A hole
 //! along the cut cone's hyperbola closed by a ball, which no plane can close
 //! without putting corners on the outline, reaches `rings_round` in the union
 //! with an outline and a hole along two hyperbolas, and is answered under every
@@ -2677,33 +2680,34 @@ fn a_bar_touching_a_blocks_bore_at_its_seam_leaves_one_hole_through_that_corner_
     }
 }
 
-/// **Two such rings on one face, and none that winds: refused before the
-/// rings are placed.** A bar of radius 7 and height 4 bored by a bar of radius
-/// 1 at `(−3, 0)`, and three tools: a bar of radius 3 at `(4, 0)` touching the
-/// big bar's wall from inside along the line through `(7, 0)`, the seam corner
-/// of both; a bar of radius 1 at `(−1, 0)` touching the bore from outside along
+/// **Two such rings on one face, and none that winds: the rings cannot be
+/// placed.** A bar of radius 7 and height 4 bored by a bar of radius 1 at
+/// `(−3, 0)`, and three tools: a bar of radius 3 at `(4, 0)` touching the big
+/// bar's wall from inside along the line through `(7, 0)`, the seam corner of
+/// both; a bar of radius 1 at `(−1, 0)` touching the bore from outside along
 /// the line through `(−2, 0)`, the bore's seam corner, both from `z = −1` to
 /// `5`; and a puck of radius 1 at `(0, 4)` from `z = 4` to `6`, standing on the
 /// top so the fuse cuts it along the puck's circle and joins it back. The top
-/// of the bored bar less the tools would be one joined face with two rings:
-/// the big bar's circle and the radius-3 bar's, both closed at `(7, 0)`, and
-/// the bore's circle and the radius-1 bar's through `(−2, 0)`. Neither winds
-/// round any area and `holds_the_other_rings` answers `None` for both, so
-/// `rings_round` would refuse the fuse `CannotPlaceTheRingsOfAJoinedFlatFace`,
-/// as it does the cap along four pipes with its own small shape through it.
+/// of the bored bar less the tools is one joined face with two rings: the big
+/// bar's circle and the radius-3 bar's, both closed at `(7, 0)`, and the
+/// bore's circle and the radius-1 bar's through `(−2, 0)`. Neither winds round
+/// any area and `holds_the_other_rings` answers `None` for both, so
+/// `rings_round` refuses the fuse `CannotPlaceTheRingsOfAJoinedFlatFace`, as
+/// it does the cap along four pipes with its own small shape through it. That
+/// refusal is what is left of queue row Q1183; the other five fuses answer.
 ///
-/// **Every rule, both ways round, is refused before that**: `Undecidable`, on
-/// `a point inside a piece of a face` in `select.rs`, whose record names the
-/// corners of the top's piece outside the puck, `(7, 0, 4)` twice, `(−2, 0, 4)`,
-/// `(−3, 1, 4)`, `(−2, 0, 4)` and `(0, 5, 4)` (Q802). The bar unbored, less the
-/// radius-3 bar and a puck at `(−3, 0)`, whose one such ring would be the
-/// outline, is refused the same way, its record naming the floor's piece with
-/// `(7, 0, 0)` twice; the same bar less the radius-3 bar alone answers every
-/// rule. Probed with a foot of straight walls, `[−1, 1] × [3, 5]`, instead of
-/// the puck, the foot's planes put corners on the circles and the rings wind;
-/// the union and the bored bar less the tools were then refused `Undecidable`
-/// on `area swept by a wire round a normal`, for a ring on the floor with
-/// `(−2, 0, 0)` twice among its four corners (not pinned).
+/// **Until Q1748 every rule, both ways round, was refused before that**:
+/// `Undecidable`, on `a point inside a piece of a face` in `select.rs`, whose
+/// record named the corners of the top's piece outside the puck, `(7, 0, 4)`
+/// twice, `(−2, 0, 4)`, `(−3, 1, 4)`, `(−2, 0, 4)` and `(0, 5, 4)` (Q802).
+/// Since Q1748 the point search places that piece. The bar unbored, with the
+/// puck at `(−3, 0)`, was refused the same way and answers now; the next test
+/// pins it. Probed with a foot of straight walls, `[−1, 1] × [3, 5]`, instead
+/// of the puck, the foot's planes put corners on the circles and the rings
+/// wind; the union and the bored bar less the tools are then refused
+/// `Undecidable` on `area swept by a wire round a normal`, for a ring on the
+/// floor with `(−2, 0, 0)` twice among its four corners, before Q1748 and
+/// since (probed again for Q1974, not pinned).
 ///
 /// The answers exist. The bored bar holds `192π`; of the radius-3 bar's `54π`,
 /// `36π` is inside it, and of the radius-1 bar's `6π`, `4π`; the puck, `2π`,
@@ -2711,24 +2715,88 @@ fn a_bar_touching_a_blocks_bore_at_its_seam_leaves_one_hole_through_that_corner_
 /// and `4π`, the bored bar less the tools `152π`, and the tools less the bar
 /// the two bars' ends, `9π` and `π` each, and the puck.
 #[test]
-fn a_bored_bar_touched_inside_its_wall_and_beside_its_bore_is_refused_before_its_rings_are_placed()
+fn a_bored_bar_touched_inside_its_wall_and_beside_its_bore_answers_all_but_the_bar_less_the_tools()
 {
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let (bored, tools) = a_bored_bar_touched_at_both_seams_and_a_puck(&mut model);
         let what = format!("{rule:?}, swapped {swapped}");
-        let refused = fused_groups_in_order(&mut model, &[bored], &tools, rule, swapped);
-        let Err(Error::Undecidable { records }) = refused else {
-            panic!("{what}: {refused:?}");
-        };
-        assert!(
-            !records.records().is_empty()
-                && records
-                    .records()
-                    .iter()
-                    .all(|record| record.predicate() == "a point inside a piece of a face"),
-            "{what}: {records:?}"
-        );
+        let answer = fused_groups_in_order(&mut model, &[bored], &tools, rule, swapped);
+        match (rule, swapped) {
+            (Rule::Union, _) => {
+                assert_holds(&model, the_only(answer, &what), 214.0 * PI, &what);
+            }
+            (Rule::Intersection, _) => {
+                let [beside_the_bore, inside_the_wall] =
+                    the_two_smaller_first(&model, answer, &what);
+                assert_holds(&model, beside_the_bore, 4.0 * PI, &what);
+                assert_holds(&model, inside_the_wall, 36.0 * PI, &what);
+            }
+            (Rule::Difference, false) => {
+                let Err(Error::CannotPlaceTheRingsOfAJoinedFlatFace { .. }) = answer else {
+                    panic!("{what}: {answer:?}");
+                };
+            }
+            (Rule::Difference, true) => {
+                let solids = the_smaller_first(&model, answer, &what);
+                let [small_end, other_small_end, puck, big_end, other_big_end] = solids[..] else {
+                    panic!("{what}: {solids:?}");
+                };
+                assert_holds(&model, small_end, PI, &what);
+                assert_holds(&model, other_small_end, PI, &what);
+                assert_holds(&model, puck, 2.0 * PI, &what);
+                assert_holds(&model, big_end, 9.0 * PI, &what);
+                assert_holds(&model, other_big_end, 9.0 * PI, &what);
+            }
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        }
+    }
+}
+
+/// **The bar unbored, with the puck at `(−3, 0)`: every rule answers since
+/// Q1748.** The bar of radius 7 and height 4, and two tools: the bar of radius
+/// 3 at `(4, 0)` from `z = −1` to `5`, touching its wall from inside along the
+/// line through `(7, 0)`, the seam corner of both, and a puck of radius 1 at
+/// `(−3, 0)` from `z = 4` to `6`, standing on the top so the fuse cuts it along
+/// the puck's circle and joins it back. Less the tools, the top's one such
+/// ring, the big bar's circle and the radius-3 bar's both closed at `(7, 0)`,
+/// is its outline. Until Q1748 every rule, both ways round, was refused
+/// `Undecidable` on `a point inside a piece of a face`, its record naming the
+/// floor's piece with `(7, 0, 0)` twice. The same bar less the radius-3 bar
+/// alone answered every rule then and does now (probed for Q1974, not pinned).
+///
+/// The bar holds `196π`; of the radius-3 bar's `54π`, `36π` is inside it; the
+/// puck, `2π`, shares nothing. So the union is `216π`, the intersection `36π`,
+/// the bar less the tools `160π`, and the tools less the bar the radius-3
+/// bar's two ends, `9π` each, and the puck.
+#[test]
+fn a_bar_touched_inside_its_wall_at_its_seam_with_a_puck_on_its_top_answers_every_rule() {
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let (bar, tools) = a_bar_touched_at_its_seam_and_a_puck(&mut model);
+        let what = format!("{rule:?}, swapped {swapped}");
+        let answer = fused_groups_in_order(&mut model, &[bar], &tools, rule, swapped);
+        match (rule, swapped) {
+            (Rule::Union, _) => {
+                assert_holds(&model, the_only(answer, &what), 216.0 * PI, &what);
+            }
+            (Rule::Intersection, _) => {
+                assert_holds(&model, the_only(answer, &what), 36.0 * PI, &what);
+            }
+            (Rule::Difference, false) => {
+                assert_holds(&model, the_only(answer, &what), 160.0 * PI, &what);
+            }
+            (Rule::Difference, true) => {
+                let solids = the_smaller_first(&model, answer, &what);
+                let [puck, one_end, other_end] = solids[..] else {
+                    panic!("{what}: {solids:?}");
+                };
+                assert_holds(&model, puck, 2.0 * PI, &what);
+                assert_holds(&model, one_end, 9.0 * PI, &what);
+                assert_holds(&model, other_end, 9.0 * PI, &what);
+            }
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        }
     }
 }
 
@@ -2780,6 +2848,21 @@ fn a_bored_bar_touched_at_both_seams_and_a_puck(model: &mut Model) -> (SolidKey,
         .add_round_bar(1.0, 2.0, &at(0.0, 4.0, 4.0))
         .expect("a puck of radius one");
     (bored, [inside_the_wall, beside_the_bore, puck])
+}
+
+/// The bar of radius 7, and the tools: the bar of radius 3 at `(4, 0)` from
+/// `z = −1` to `5`, and the puck at `(−3, 0)`.
+fn a_bar_touched_at_its_seam_and_a_puck(model: &mut Model) -> (SolidKey, [SolidKey; 2]) {
+    let bar = model
+        .add_round_bar(7.0, 4.0, &Isometry::identity())
+        .expect("a bar of radius seven");
+    let inside_the_wall = model
+        .add_round_bar(3.0, 6.0, &at(4.0, 0.0, -1.0))
+        .expect("a bar of radius three");
+    let puck = model
+        .add_round_bar(1.0, 2.0, &at(-3.0, 0.0, 4.0))
+        .expect("a puck of radius one");
+    (bar, [inside_the_wall, puck])
 }
 
 /// Whether a wire of a flat face of `solid` runs a closed side round from
