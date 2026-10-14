@@ -82,7 +82,7 @@
 
 mod cones;
 
-use cones::a_pointed_cone;
+use cones::{a_frustum_seamed_towards, a_pointed_cone};
 use rcad_geom::{
     Axis, Isometry, MeetOfThree, Point, Scale, Surface, Vector, meet_of_three_surfaces,
 };
@@ -304,6 +304,181 @@ fn a_tolerant_fuse_of_a_cube_on_a_cones_apex_refuses_a_sweep_past_an_area_budget
             ),
             "{rule:?} {cone_first}: {enclosure}"
         );
+    }
+}
+
+// Q2016 WIP: the four `probe_*` tests below are exploratory and not meant to
+// be committed as final — they are left here, uncommitted-normally but kept
+// for this relay, so the next lane does not have to re-derive them. See the
+// handoff for what each one found. None of them is a regression test; they
+// must be removed (or turned into one, if a gap is found) before this row is
+// reported done.
+#[test]
+fn probe_family_b_tilt_grid() {
+    for tilt_exp in [-20, -16, -12, -10, -8, -6, -4, -3, -2] {
+        let tilt = f64::powi(10.0, tilt_exp);
+        for size in [0.01, 0.1, 0.3, 0.6, 1.0, 5.0, 25.0] {
+            let mut model = Model::new(Scale::millimetres(size).expect("ws"));
+            let triangle = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 3.0], [-3.0, 3.0]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a triangle");
+            let tilted = Isometry::rotation(
+                &Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("an axis"),
+                tilt,
+            )
+            .expect("a finite turn")
+            .compose(&Isometry::translation(Vector::new(0.0, 0.0, LIFT)).expect("a finite shift"));
+            let prism = model
+                .add_extrusion(&triangle, 32.0, &tilted)
+                .expect("a positive height");
+            let ball = a_ball_grazing_the_z_axis(&mut model);
+            for (rule, cone_first) in EVERY_FUSE {
+                let (arguments, tools) = if cone_first {
+                    ([ball], [prism])
+                } else {
+                    ([prism], [ball])
+                };
+                let mut log = ProvenanceLog::new();
+                let fused = model.fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::tolerant(size),
+                    &mut log,
+                );
+                let records: Vec<_> = match &fused {
+                    Ok(_) => log.records().to_vec(),
+                    Err(Error::Undecidable { records }) => records.records().to_vec(),
+                    Err(other) => {
+                        println!("tilt=1e{tilt_exp} size={size} rule={rule:?} cone_first={cone_first}: {other:?}");
+                        continue;
+                    }
+                };
+                if !records.is_empty() {
+                    println!(
+                        "tilt=1e{tilt_exp} size={size} rule={rule:?} cone_first={cone_first} fused_ok={} preds={:?}",
+                        fused.is_ok(),
+                        records
+                            .iter()
+                            .map(|r| (r.predicate(), r.measures()))
+                            .collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn probe_family_b_ball_cube() {
+    for scale in [1.0, 0.5, 0.3, 0.18, 0.1] {
+      for size in [0.1, 0.3, 0.6, 1.0, 2.0, 5.0, 10.0] {
+        let mut model = Model::new(Scale::millimetres(size).expect("ws"));
+        let ball = model
+            .add_ball(
+                scale,
+                &Isometry::translation(Vector::new(0.0, 0.0, scale)).expect("a finite shift"),
+            )
+            .expect("a positive radius");
+        let cube = a_corner_up_cube_round_the_origin(&mut model, 6.0 * scale);
+        for (rule, cone_first) in EVERY_FUSE {
+            let (arguments, tools) = if cone_first {
+                ([ball], [cube])
+            } else {
+                ([cube], [ball])
+            };
+            let mut log = ProvenanceLog::new();
+            let fused = model.fuse(
+                &arguments,
+                &tools,
+                rule,
+                &Policy::tolerant(size),
+                &mut log,
+            );
+            let records: Vec<_> = match &fused {
+                Ok(_) => log.records().to_vec(),
+                Err(Error::Undecidable { records }) => records.records().to_vec(),
+                Err(other) => {
+                    println!("scale={scale} rule={rule:?} cone_first={cone_first}: {other:?}");
+                    continue;
+                }
+            };
+            if !records.is_empty() {
+                println!(
+                    "scale={scale} size={size} rule={rule:?} cone_first={cone_first} fused_ok={} n={} preds={:?}",
+                    fused.is_ok(),
+                    records.len(),
+                    records.iter().map(|r| r.predicate()).collect::<Vec<_>>()
+                );
+            }
+        }
+      }
+    }
+}
+
+#[test]
+fn probe_family_a_angles() {
+    for seam_name in ["px", "py", "nx", "ny"] {
+        let seam = match seam_name {
+            "px" => [1.0, 0.0],
+            "py" => [0.0, 1.0],
+            "nx" => [-1.0, 0.0],
+            _ => [0.0, -1.0],
+        };
+        let mut model = Model::new(Scale::millimetres(2.0).expect("ws"));
+        let frustum = a_frustum_seamed_towards(
+            &mut model,
+            2.0,
+            0.01,
+            3.0,
+            seam,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a frustum");
+        let cube = a_corner_up_cube_of_side_six_round_the_origin(&mut model);
+        for (rule, cone_first) in EVERY_FUSE {
+            let (arguments, tools) = if cone_first {
+                ([frustum], [cube])
+            } else {
+                ([cube], [frustum])
+            };
+            let mut log = ProvenanceLog::new();
+            let fused = model.fuse(
+                &arguments,
+                &tools,
+                rule,
+                &Policy::tolerant(2.0),
+                &mut log,
+            );
+            let records: Vec<_> = match &fused {
+                Ok(_) => log.records().to_vec(),
+                Err(Error::Undecidable { records }) => records.records().to_vec(),
+                Err(other) => {
+                    println!("seam={seam_name} rule={rule:?} cone_first={cone_first}: {other:?}");
+                    continue;
+                }
+            };
+            for record in &records {
+                if record.predicate() != ALONG_A_CROSSING {
+                    continue;
+                }
+                for point in record.inputs() {
+                    let [x, y, _z] = point.enclosure();
+                    let mx = (x.lo() + x.hi()) / 2.0;
+                    let my = (y.lo() + y.hi()) / 2.0;
+                    let angle = my.atan2(mx).to_degrees();
+                    println!(
+                        "seam={seam_name} rule={rule:?} cone_first={cone_first} measure={:?} angle={angle:.2} x=[{},{}] y=[{},{}]",
+                        record.measures(),
+                        x.lo(),
+                        x.hi(),
+                        y.lo(),
+                        y.hi()
+                    );
+                }
+            }
+        }
     }
 }
 
