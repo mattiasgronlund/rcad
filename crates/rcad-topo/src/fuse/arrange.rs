@@ -2472,7 +2472,8 @@ impl<'f> Arrangement<'f> {
     /// half-space written in `f64` passes exactly through `c`, holds `c`
     /// itself, and that is taken as it is (`docs/decisions.md` §443.5) —
     /// unless `c` is no point `f64` holds, where it holds the other pipe's
-    /// start and the crossing is worked out in intervals
+    /// start or a point on neither axis and the crossing is worked out in
+    /// intervals
     /// ([`where_an_axis_crosses_a_flat_picker`]).
     ///
     /// **Without it the four halves were one edge.** Every half runs between
@@ -10019,7 +10020,8 @@ fn one_of_two_loops_round_a_thin_pipe(
 /// Each surface is a half-space, or, where no half-space written in `f64`
 /// passes exactly through that point, a surface that holds the point itself,
 /// as for bars on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)`, or
-/// the other pipe's start where `f64` holds no such point. Only
+/// the other pipe's start or a point on neither axis where `f64` holds no such
+/// point. Only
 /// a picker's facing is read here, and both kinds hold it exactly as
 /// `intersect` asked it (`docs/decisions.md` §443.5).
 ///
@@ -10336,8 +10338,9 @@ fn a_box_round_where_a_flat_surface_cuts_a_pipe(
 /// asking it exactly of both axes, so the crossing is that point, exactly
 /// (`docs/decisions.md` §443.5). Where the axes meet at no point `f64` holds,
 /// `intersect` builds it through the other pipe's start instead, holding the
-/// whole of that pipe's axis, and the crossing is worked out as for a
-/// half-space, from its facing and that point.
+/// whole of that pipe's axis, or through a point on neither axis that is level
+/// with where they meet along its facing, and the crossing is worked out as
+/// for a half-space, from its facing and that point.
 ///
 /// # Panics
 ///
