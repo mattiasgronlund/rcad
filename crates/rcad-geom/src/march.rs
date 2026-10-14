@@ -124,14 +124,15 @@ const WIDTHS_A_SETTLED_SEED_MAY_SIT_OFF: f64 = 1e6;
 /// far, and [`one_step`] does not keep one the rounds ran out on
 /// ([`what_a_trial_of_this_length_measures`], Q2014).
 ///
-/// **Not "settle until it stops moving".** Once done, the moves go round among
-/// a few roundings, `9.2e-16`, `2.2e-16`, `8.9e-16`, so a rule that goes on
-/// while each move is smaller than the last stops on points that are already
-/// settled and moves them within those roundings. Going on until the point is
-/// within a million of its enclosure's widths of both surfaces, the yardstick
+/// **Not "settle until it stops moving".** Once done, the moves are roundings
+/// and never nothing: that same point moved `3.3e-16` in each of rounds
+/// fourteen to twenty. So it never stops, and a rule that goes on while each
+/// move is smaller than the last stops on points that are already settled and
+/// moves them within those roundings. Going on until the point is within a
+/// million of its enclosure's widths of both surfaces, the yardstick
 /// [`the_settling_did_not_land_on_both`] puts to a seed, is no better: over the
-/// `rcad-geom` and `rcad-topo` tests, 6 662 settlings are not there after eight
-/// rounds and 4 057 never get there in 200.
+/// `rcad-geom` and `rcad-topo` tests, 6 818 settlings are not there after eight
+/// rounds and 4 195 never get there in 200.
 const ROUNDS_OF_SETTLING: usize = 8;
 
 /// One run of a crossing, followed into points.
