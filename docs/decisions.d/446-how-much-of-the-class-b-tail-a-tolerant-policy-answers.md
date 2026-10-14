@@ -335,7 +335,12 @@ for three things:
 
 *Written on 2026-10-14 by Q1953, a first lane and three relays, each carrying
 on from the last one's commit. Every count is from a scratch test run on
-`10a716f3`'s source, which the branch did not change.*
+`10a716f3`'s source, which the branch did not change. Run again on 2026-10-14
+at `71b14cce`, which is main at `bb8f67d6` with this section merged, with
+`/tmp/q1953-probes/r3/zz_q1953_probe.rs` copied in and `ZZ_TOL` unset (`mise
+exec -- just t -p rcad-topo -E 'test(/q1953_probe_/)' --no-capture`), the probe
+printed the same 407 lines starting `Q1953`, once sorted, as `r3/all-base.txt`
+did at `10a716f3`, so every outcome below holds there too.*
 
 **What it found.** The four rows refuse 85 runs at the base, in six different
 errors, and they come to two causes, both gaps. One test is behind 76 of them:
@@ -600,6 +605,6 @@ two untraced causes close no open row. They are shapes the sweep found.
   demonstrate a limit by §16.10.
 
 For §448: the first row carries a fact of kind (b) from where it was made to a
-question that asked the numbers instead. If 448.4 finds (b) behind three of its
-nine rows, its writing row is the same kind of work, and the two may share a
-road.
+question that asked the numbers instead. 448.6 found (b) behind one of its nine
+rows, Q1854, where the fact was in hand and not read, and filed no row for it.
+Q1854's own row is the same kind of work, and the two may share a road.
