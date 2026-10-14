@@ -600,6 +600,15 @@ record. The records are all `side of a half-space`, at `Interval`: three for
 the union and for the bar less the block, one for the intersection and for the
 block less the bar. Why each fuse is then refused was not traced.
 
+**2026-10-14, Q1978:** since Q1870 landed Q1860's fix to `walk.rs`, the pin is
+`every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the_block`
+in `an_ellipse_start_between_two_places.rs`: every fuse of the shape answers
+its closed form — union `192 + 10 π r² − π r² (4 / cos ½ − 2)`, intersection
+`π r² (4 / cos ½ − 2)`, block less bar `192` less it — with an empty log under
+`Policy::certified()` and `Policy::tolerant(25.0)`, and the bar less the block
+is refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` (Q1972).
+A `gdb` run still counts six hits of the `(false, false)` arm per fuse.
+
 A probe of the lane's, never committed, ran the same fuses at other radii:
 
 - At `1.5` and `0.75`, every fuse under both policies answers one solid with

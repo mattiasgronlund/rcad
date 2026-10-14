@@ -170,9 +170,9 @@ fn a_plane_exactly_through_a_bars_rim_start_answers_all_six_fuses_right_under_bo
 /// both, the rim start by its vertex and the meet by its three surfaces, a few
 /// ulps apart, and all six fuses refused `ResultIsNotManifold { count: 1 }`.
 /// It is the fifteenth draw of the corner-up cubes that
-/// `a_frustum_and_a_bar_of_the_same_size_refuse_the_same_corner_up_cubes_alike`
-/// stands against a bar, and those six were the only refusals there that were
-/// not an undecided order.
+/// `a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_cones`
+/// stands against a bar, which answers every one of its 96 fuses there, so
+/// these six are the frustum's alone.
 ///
 /// Nothing here is worked out by hand. The volumes are held to one another:
 /// union and intersection make up the two solids, and each difference is its
