@@ -69,6 +69,10 @@ use rcad_geom::{
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
+mod cones;
+
+use cones::a_frustum;
+
 const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 5.0;
 const SIDE: f64 = 2.0;
@@ -208,6 +212,315 @@ fn turned_one_radian_about_a_diagonal_every_fuse_answers_what_it_holds_by_hand()
 #[test]
 fn turned_one_radian_about_a_diagonal_a_notch_tilted_off_the_axis_answers_every_fuse() {
     answers_every_tilted_fuse_as_unturned(&one_radian_about_a_diagonal());
+}
+
+const BALL_RADIUS: f64 = 3.0;
+
+/// A box straddling the north pole: `x, y ∈ [−1, 1]`, `z ∈ [2, 4]`, so its
+/// centre line `x = y = 0` runs through the pole at `(0, 0, 3)` and its
+/// farthest corner is `√2` from that line — inside the ball down to where the
+/// ball's own radius at that height, `√(9 − z²)`, falls to `√2` at
+/// `z = √7 ≈ 2.6458`. Below that the whole square footprint is inside the
+/// ball, so the overlap's cross-section is simply `√(9 − x² − y²) − 2`, never
+/// clipped by the ball's own curve, for every `(x, y)` the box reaches.
+const POLAR_NOTCH: [f64; 3] = [-1.0, -1.0, 2.0];
+
+/// `BALL_RADIUS³ · 4π / 3`.
+fn the_balls_own_volume() -> f64 {
+    4.0 / 3.0 * PI * BALL_RADIUS.powi(3)
+}
+
+/// The part of the ball inside [`POLAR_NOTCH`]'s box, by a composite Simpson's
+/// rule over `x, y ∈ [−1, 1]` of `√(9 − x² − y²) − 2` — a method the kernel's
+/// own `measure`, which integrates a triangulated mesh, never touches. 100
+/// panels in each direction converges `f64`-tight: doubling to 200 moves the
+/// answer by under `1e-12`, far below the volume error the fuse itself
+/// reports.
+fn the_polar_notchs_overlap_with_the_ball() -> f64 {
+    simpsons_rule_over_a_square(-1.0, 1.0, -1.0, 1.0, 100, |x, y| {
+        (BALL_RADIUS * BALL_RADIUS - x * x - y * y).sqrt() - 2.0
+    })
+}
+
+/// Composite Simpson's rule for `∫∫ f(x, y) dx dy` over `[x0, x1] × [y0, y1]`,
+/// `panels` panels (even) along each axis.
+fn simpsons_rule_over_a_square(
+    x0: f64,
+    x1: f64,
+    y0: f64,
+    y1: f64,
+    panels: usize,
+    f: impl Fn(f64, f64) -> f64,
+) -> f64 {
+    assert_eq!(panels % 2, 0, "Simpson's rule needs an even panel count");
+    let weight = |i: usize| {
+        if i == 0 || i == panels {
+            1.0
+        } else if i % 2 == 1 {
+            4.0
+        } else {
+            2.0
+        }
+    };
+    let step_x = (x1 - x0) / panels as f64;
+    let step_y = (y1 - y0) / panels as f64;
+    let mut total = 0.0;
+    for i in 0..=panels {
+        let x = x0 + step_x * i as f64;
+        let mut row = 0.0;
+        for j in 0..=panels {
+            let y = y0 + step_y * j as f64;
+            row += weight(j) * f(x, y);
+        }
+        total += weight(i) * row;
+    }
+    total * step_x * step_y / 9.0
+}
+
+/// A ball of radius 3 and a block of side 2 straddling its north pole
+/// ([`POLAR_NOTCH`]), both turned half a turn about `y` by `rotation`, fused
+/// by every rule both ways round (the ball as argument and as tool), under
+/// both policies. Q1737's fix to `Arrangement::the_node_round_the_start`
+/// matches a plane and a pipe only — this is a plane and a *sphere*, the one
+/// other surface whose loop is counted from a start point the half turn
+/// rounds (the moved pole, not a moved corner, but the same
+/// `CORNER_AFTER_MOVING_ROUNDOFF`-sized box).
+#[test]
+fn a_turned_ball_notched_near_its_pole_by_a_turned_block_answers_every_fuse_both_ways_round() {
+    let turn = half_a_turn_by_rotation();
+    let overlap = the_polar_notchs_overlap_with_the_ball();
+    let ball_volume = the_balls_own_volume();
+    for tolerant in [false, true] {
+        let policy = if tolerant {
+            Policy::tolerant(5.0)
+        } else {
+            Policy::certified()
+        };
+        for rule in RULES {
+            for ball_is_argument in [true, false] {
+                let what =
+                    format!("tolerant {tolerant}, {rule:?}, ball is argument {ball_is_argument}");
+                let (mut model, ball, notch) = a_turned_ball_and_polar_notch(&turn);
+                let (first, second) = if ball_is_argument {
+                    (ball, notch)
+                } else {
+                    (notch, ball)
+                };
+                let mut log = ProvenanceLog::new();
+                let fused = model
+                    .fuse(&[first], &[second], rule, &policy, &mut log)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"))
+                    .solids()
+                    .to_vec();
+                assert!(log.is_empty(), "{what}: logged {log:?}");
+                let by_hand = what_the_ball_and_notch_hold_by_hand(
+                    rule,
+                    ball_is_argument,
+                    ball_volume,
+                    overlap,
+                );
+                match by_hand {
+                    Some(expected) => {
+                        let (volume, error) = the_volume_of_the_one_solid(&model, Ok(fused), &what);
+                        assert!(
+                            (volume - expected).abs() <= error,
+                            "{what}: measured {volume} ± {error}, by hand {expected}"
+                        );
+                    }
+                    None => assert!(fused.is_empty(), "{what}: expected no solid, got {fused:?}"),
+                }
+            }
+        }
+    }
+}
+
+/// What fusing the ball with the polar notch holds, by rule and by which one
+/// is the argument. `None` means the rule removes the whole block or the
+/// whole ball, leaving no solid at all.
+fn what_the_ball_and_notch_hold_by_hand(
+    rule: Rule,
+    ball_is_argument: bool,
+    ball_volume: f64,
+    overlap: f64,
+) -> Option<f64> {
+    let block_volume = SIDE * SIDE * SIDE;
+    match rule {
+        Rule::Union => Some(ball_volume + block_volume - overlap),
+        Rule::Intersection => Some(overlap),
+        Rule::Difference if ball_is_argument => Some(ball_volume - overlap),
+        Rule::Difference => Some(block_volume - overlap),
+        other => panic!("no volume worked out by hand for {other:?}"),
+    }
+}
+
+/// The ball and the block of [`POLAR_NOTCH`], both turned by `turn`.
+fn a_turned_ball_and_polar_notch(turn: &Isometry) -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 5.0).expect("5 mm is a working size"));
+    let ball = model
+        .add_ball(BALL_RADIUS, turn)
+        .expect("a ball turned half a turn");
+    let [x, y, z] = POLAR_NOTCH;
+    let square = ProfileBuilder::new(vec![[0.0, 0.0], [SIDE, 0.0], [SIDE, SIDE], [0.0, SIDE]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square is a profile");
+    let notch = model
+        .add_extrusion(
+            &square,
+            SIDE,
+            &Isometry::translation(Vector::new(x, y, z)).expect("a finite shift"),
+        )
+        .expect("a block");
+    model
+        .place_solid(notch, turn)
+        .expect("a turn moves a block");
+    (model, ball, notch)
+}
+
+const FRUSTUM_NEAR: f64 = 1.0;
+const FRUSTUM_FAR: f64 = 10.0;
+/// `slope = 1`, a power of two, so `slope · height` rounds to nothing at
+/// either cap (cones/mod.rs's own discipline).
+const FRUSTUM_SLOPE: f64 = 1.0;
+/// `[2, 4] × [−1, 1] × [5, 7]`: every corner's distance off the axis is at
+/// most `√(4² + 1²) = √17 ≈ 4.123`, and the frustum's radius at the lowest
+/// corner height, `z = 5`, is `5` (`slope = 1`) — so the whole block sits
+/// inside the frustum, corner to corner.
+const FRUSTUM_NOTCH: [f64; 3] = [2.0, -1.0, 5.0];
+
+/// `(π / 3) · height · (r_near² + r_near · r_far + r_far²)`.
+fn the_frustums_own_volume() -> f64 {
+    let height = FRUSTUM_FAR - FRUSTUM_NEAR;
+    let r_near = FRUSTUM_SLOPE * FRUSTUM_NEAR;
+    let r_far = FRUSTUM_SLOPE * FRUSTUM_FAR;
+    PI / 3.0 * height * (r_near * r_near + r_near * r_far + r_far * r_far)
+}
+
+/// A frustum from radius 1 to radius 10 and a block of side 2 that sits
+/// wholly inside it ([`FRUSTUM_NOTCH`]), unturned or turned an exact half turn
+/// about `y` (two quarter turns, which round nothing), fused by every rule
+/// both ways round, under both policies: every combination answers what it
+/// holds by hand, with nothing logged.
+#[test]
+fn a_block_wholly_inside_a_frustum_unturned_or_turned_an_exact_half_turn_answers_every_fuse_both_ways_round()
+ {
+    answers_every_frustum_fuse_both_ways_round("unturned", &Isometry::identity(), None);
+    answers_every_frustum_fuse_both_ways_round("an exact half turn", &half_a_turn_exactly(), None);
+}
+
+/// Turned half a turn about `y` by `rotation`, every combination still
+/// answers **except** `Difference` with the frustum as the argument — cutting
+/// the block out of the frustum. That one is refused
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] on the frustum's lateral
+/// face, under both policies, though the block never touches that face: its
+/// farthest corner is `0.88` inside it, at the tightest end. `sin π` rounds to
+/// `1.2e-16`, same as Q1737's bar, and
+/// [`the_node_round_the_start`](rcad_topo) — the step Q1737 added so a loop is
+/// counted from its own corner's box rather than losing the corner among the
+/// nodes near it — matches `[Surface::Plane, Surface::Cylinder]` only. A
+/// frustum's wall is `Surface::Cone`, so its own bottom corner, moved into the
+/// same kind of box by the same rounding, gets no such match, and whatever
+/// reads the frustum's cone face's loop from an un-arranged start refuses it.
+/// This is a
+/// different error, on a different shape, than Q1956's twelve plane-and-cone
+/// ellipse refusals (`CannotTellTheCellsOfAFaceApart` on a cube's plane
+/// crossing a cone sideways) — not a repeat of that row.
+#[test]
+fn turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refused() {
+    answers_every_frustum_fuse_both_ways_round(
+        "half a turn by rotation",
+        &half_a_turn_by_rotation(),
+        Some(Rule::Difference),
+    );
+}
+
+/// Fuses the frustum of [`FRUSTUM_NOTCH`] with the block wholly inside it,
+/// both placed by `turn`, by every rule both ways round, under both policies,
+/// and checks each answers what it holds by hand with nothing logged —
+/// except `refused_rule` with the frustum as the argument, which it checks is
+/// refused [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead.
+fn answers_every_frustum_fuse_both_ways_round(
+    which: &str,
+    turn: &Isometry,
+    refused_rule: Option<Rule>,
+) {
+    let frustum_volume = the_frustums_own_volume();
+    let block_volume = SIDE * SIDE * SIDE;
+    for tolerant in [false, true] {
+        let policy = if tolerant {
+            Policy::tolerant(5.0)
+        } else {
+            Policy::certified()
+        };
+        for rule in RULES {
+            for frustum_is_argument in [true, false] {
+                let what = format!(
+                    "{which}, tolerant {tolerant}, {rule:?}, frustum is argument {frustum_is_argument}"
+                );
+                let (mut model, frustum, notch) = a_turned_frustum_and_inside_notch(turn);
+                let (first, second) = if frustum_is_argument {
+                    (frustum, notch)
+                } else {
+                    (notch, frustum)
+                };
+                let mut log = ProvenanceLog::new();
+                let result = model.fuse(&[first], &[second], rule, &policy, &mut log);
+                if Some(rule) == refused_rule && frustum_is_argument {
+                    let why = result.expect_err(&format!("{what}: expected a refusal"));
+                    assert!(
+                        matches!(why, Error::AFaceTrimmedByACurveThisCannotFollow { .. }),
+                        "{what}: {why:?}"
+                    );
+                    continue;
+                }
+                let fused = result
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"))
+                    .solids()
+                    .to_vec();
+                assert!(log.is_empty(), "{what}: logged {log:?}");
+                let by_hand = match rule {
+                    Rule::Union => Some(frustum_volume),
+                    Rule::Intersection => Some(block_volume),
+                    Rule::Difference if frustum_is_argument => Some(frustum_volume - block_volume),
+                    Rule::Difference => None,
+                    other => panic!("no volume worked out by hand for {other:?}"),
+                };
+                match by_hand {
+                    Some(expected) => {
+                        let (volume, error) = the_volume_of_the_one_solid(&model, Ok(fused), &what);
+                        assert!(
+                            (volume - expected).abs() <= error,
+                            "{what}: measured {volume} ± {error}, by hand {expected}"
+                        );
+                    }
+                    None => assert!(fused.is_empty(), "{what}: expected no solid, got {fused:?}"),
+                }
+            }
+        }
+    }
+}
+
+/// The frustum and the block of [`FRUSTUM_NOTCH`], both turned by `turn`.
+fn a_turned_frustum_and_inside_notch(turn: &Isometry) -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::new(Unit::Millimetre, 5.0).expect("5 mm is a working size"));
+    let frustum = a_frustum(&mut model, FRUSTUM_SLOPE, FRUSTUM_NEAR, FRUSTUM_FAR);
+    model
+        .place_solid(frustum, turn)
+        .expect("a turn moves a frustum");
+    let [x, y, z] = FRUSTUM_NOTCH;
+    let square = ProfileBuilder::new(vec![[0.0, 0.0], [SIDE, 0.0], [SIDE, SIDE], [0.0, SIDE]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square is a profile");
+    let notch = model
+        .add_extrusion(
+            &square,
+            SIDE,
+            &Isometry::translation(Vector::new(x, y, z)).expect("a finite shift"),
+        )
+        .expect("a block");
+    model
+        .place_solid(notch, turn)
+        .expect("a turn moves a block");
+    (model, frustum, notch)
 }
 
 /// Fuses the seam notch tilted off the bar's axis with the bar, unturned and
