@@ -1800,18 +1800,23 @@ fn where_two_leaning_pipes_cross(
 /// is three things: `c` is where the two axes meet, asked exactly of each axis;
 /// each surface passes exactly through `c`; and each facing lies exactly in the
 /// flat of the two stored directions. Then `c ± r·n̂` is on both, because `n̂` is
-/// square to that flat.
+/// square to that flat. Where `f64` holds no point that is `c`, the axes are
+/// asked exactly whether they lie in one flat, and each surface holds the whole
+/// of the other axis, and so `c`, instead ([`a_surface_through_the_other_axis`]).
 ///
 /// **The pair is sorted first**, as the walk sorts it, so `c` is worked out the
 /// same way whichever way round the caller wrote the two.
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when `c`, worked out
-/// exactly, is not a point `f64` holds ([`where_two_axes_meet_exactly`]), and
-/// whatever [`a_surface_through_where_the_walls_touch`] refuses. A **gap**
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when no two surfaces are
+/// found: where `c` is a point `f64` holds ([`where_two_axes_meet_exactly`]),
+/// whatever [`a_surface_through_where_the_walls_touch`] refuses, and where it
+/// is not, whatever [`a_surface_through_the_other_axis`] refuses. A **gap**
 /// (§16.10): the four halves are there and four corners apart, and what runs
-/// out is a point in `f64` that is exactly where the axes meet.
+/// out is a facing written in `f64` that lies exactly in the flat of the two
+/// directions. Bars along `x` through `(9, 0, 0)` turned 105° about `z`, the
+/// turned one's direction a hair off `z = 0`, are still refused this.
 ///
 /// # Where no flat surface written in `f64` will do
 ///
@@ -1830,7 +1835,9 @@ fn where_two_leaning_pipes_cross(
 /// (`no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`).
 /// Such a surface is a [`HalfSpaceThroughAPoint`] instead, which holds `c`
 /// itself and the pipe's own direction and so passes exactly through `c` for
-/// every facing (`docs/decisions.md` §443).
+/// every facing (`docs/decisions.md` §443). Where `c` itself is not a point
+/// `f64` holds, every surface is one of those, through the other pipe's
+/// stored start.
 fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     one: &Cylinder,
     other: &Cylinder,
@@ -1843,21 +1850,28 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     } else {
         (one, other)
     };
-    let Some(middle) = where_two_axes_meet_exactly(first, second) else {
-        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-    };
-    if !(middle.is_finite()
-        && [first, second]
-            .iter()
-            .all(|pipe| it_lies_exactly_on_the_axis(middle, pipe)))
-    {
-        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-    }
     let [first_way, second_way] = [first, second].map(|pipe| pipe.axis().direction());
-    let (Some(towards_first), Some(towards_second)) = (
-        a_surface_through_where_the_walls_touch(middle, first_way, second_way)?,
-        a_surface_through_where_the_walls_touch(middle, second_way, first_way)?,
-    ) else {
+    let pickers = match where_two_axes_meet_exactly(first, second) {
+        Some(middle) => {
+            if !(middle.is_finite()
+                && [first, second]
+                    .iter()
+                    .all(|pipe| it_lies_exactly_on_the_axis(middle, pipe)))
+            {
+                return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+            }
+            (
+                a_surface_through_where_the_walls_touch(middle, first_way, second_way)?,
+                a_surface_through_where_the_walls_touch(middle, second_way, first_way)?,
+            )
+        }
+        None if the_two_axes_lie_exactly_in_one_flat(first, second) => (
+            a_surface_through_the_other_axis(first, second)?,
+            a_surface_through_the_other_axis(second, first)?,
+        ),
+        None => return Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    };
+    let (Some(towards_first), Some(towards_second)) = pickers else {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     };
     let surfaces = [towards_first, towards_second];
@@ -1946,6 +1960,69 @@ fn the_f64_a_quotient_is(top: &Exact, bottom: &Exact) -> Option<f64> {
         }
     }
     None
+}
+
+/// Whether the axes of `one` and `other` lie in one flat, asked exactly:
+/// `(o₂ − o₁)·(ê × û)` is nought. Two axes that are not parallel meet exactly
+/// when it is.
+fn the_two_axes_lie_exactly_in_one_flat(one: &Cylinder, other: &Cylinder) -> bool {
+    let [(here, mine), (there, theirs)] = [one, other].map(|pipe| {
+        (
+            pipe.axis().origin().coordinates(),
+            pipe.axis().direction().components(),
+        )
+    });
+    Exact::cross_of(&Exact::of_each(mine), theirs)
+        .and_then(|sideways| Exact::dot_of_two_exact(&Exact::gap_between(here, there), &sideways))
+        .is_some_and(|reach| reach.sign() == Decision::Zero)
+}
+
+/// A flat surface that holds the whole of `other`'s axis and leans towards
+/// `own` rather than `other`, for two axes that meet where `f64` holds no
+/// point — or `None` when no facing tried gives one.
+///
+/// It passes through `other`'s stored start and faces `other`'s stored
+/// direction crossed with `x`, `y` or `z`, either way round. Crossing with one
+/// of those only moves numbers about and turns some round, so each facing is
+/// exactly square to `other`'s direction, and the surface holds the whole of
+/// `other`'s axis exactly: `c`, where the axes meet, with it. A facing that
+/// also lies exactly in the flat of the two directions is square to `n̂`, so
+/// the surface holds `c ± r·n̂` too, which is all the halves need of it
+/// ([`four_half_ellipses_where_two_pipes_of_one_width_meet`]).
+///
+/// Bars along `x` through `(9, 0, 0)` and turned 80° about `z`, with both
+/// stored exactly in `z = 0`, meet at `(11 + 2⁻⁵⁰, 0, 0)`. The surface leaning
+/// towards the bar along `x` passes through the turned bar's start and faces
+/// that bar's direction crossed with `z`, and the one leaning towards the
+/// turned bar passes through `(9, 0, 0)` and faces `(0, 1, 0)`
+/// (`two_thin_bars_whose_axes_meet_where_f64_holds_no_point_are_named_in_four_halves`).
+///
+/// # Errors
+///
+/// Whatever [`HalfSpaceThroughAPoint::new`] refuses.
+fn a_surface_through_the_other_axis(own: &Cylinder, other: &Cylinder) -> Result<Option<Picker>> {
+    let [own_way, other_way] = [own, other].map(|pipe| pipe.axis().direction());
+    let [x, y, z] = other_way.components();
+    for facing in [[0.0, z, -y], [-z, 0.0, x], [y, -x, 0.0]]
+        .into_iter()
+        .flat_map(|facing| [facing, facing.map(|number| -number)])
+        .map(Vector::from)
+    {
+        assert!(
+            Exact::dot_of(facing.components(), other_way.components())
+                .is_none_or(|reach| reach.sign() == Decision::Zero),
+            "{other_way:?} crossed with x, y or z is {facing:?}, which is square to it"
+        );
+        if it_lies_exactly_in_the_flat_of(facing, own_way, other_way)
+            && it_leans_towards(facing, own_way, other_way)
+        {
+            return Ok(Some(Picker::from(HalfSpaceThroughAPoint::new(
+                other.axis().origin(),
+                facing,
+            )?)));
+        }
+    }
+    Ok(None)
 }
 
 /// The flat surface [`a_flat_surface_through_where_the_walls_touch`] finds, or
