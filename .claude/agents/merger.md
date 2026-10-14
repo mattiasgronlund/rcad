@@ -94,7 +94,13 @@ below, and settle what the stop line names.
    and Q145 were closed the same way. A bundle of small rows (§352.4) gets one
    `done` step per row, every one with the same lane tip. A row of it the lane
    left undone stays open under its hold: name it in `needs_judgement`, and the
-   dispatcher takes it again.
+   dispatcher takes it again. A row your brief says the verifier confirmed the
+   branch also answers (§450.3 rule 4) gets a `done` step too, with the same
+   lane tip, in the same call, while `docs/queue.md` shows it `todo` or
+   `after:`. One a lane holds, parked or closed goes in `needs_judgement`
+   instead, since `done` would close it all the same. The commit message names
+   the closed ones, `<ids> answered by <row>`, and `rows_closed` says `<id>
+   done:<sha> answered by <row>`.
 4. The batch's `add` steps are the lane's `rows`, which its report carries
    as lists of words, each step as it stands (§383.4). The lane wrote them
    while it still had the context, by the rules for tier, class, `small`, write
