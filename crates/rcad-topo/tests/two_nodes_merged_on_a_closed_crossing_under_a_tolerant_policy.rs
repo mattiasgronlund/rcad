@@ -98,10 +98,48 @@
 //! search here (a face classification refusal, not a crossing order one), and
 //! was not traced further.
 //!
-//! **"Plane through a ball" was not searched.** It is the one remaining
-//! family a plane's conic sweep shows up in (`along_a_crossing.rs`'s
-//! `WhichWayItWinds::About` arm) that is not yet built below working size
-//! `1`; that is Q2016's own follow-up.
+//! # Plane through a ball
+//!
+//! The same gap shows up a third time for "plane through a ball", the one
+//! remaining family a plane's conic sweep runs through
+//! (`along_a_crossing.rs`'s `WhichWayItWinds::About` arm, reached for a plane
+//! and a sphere at `along_a_crossing.rs:401-402` unconditionally — a sphere
+//! has no apex or seam to force the walk's start near, so the construction
+//! that reaches it mirrors the cone's apex case directly: a cube stood on its
+//! corner with a ball centred at the cube's own centre, its radius the
+//! cube's half-diagonal, so the cube's one near vertex sits exactly on the
+//! ball's surface. Several of the cube's faces then cut the ball in circles
+//! close to that one vertex, the same way three of the cube's faces cut the
+//! cone's apex in ellipses.
+//!
+//! A `5`-scale x `7`-size x `4`-rule grid (narrower than the cone's own,
+//! since a ball has no seam direction to vary) finds the gap at, among
+//! others, a shape scale of `0.18` and a working size of `0.6` — the cone's
+//! own pin values, shared by chance of the two narrower grids overlapping,
+//! not because the shapes are the same.
+//! `a_tolerant_fuse_of_a_cube_on_a_ball_through_its_corner_below_working_size_one_merges_the_same_shape_as_at_full_scale`
+//! pins that merge the same way the other two families' tests do. **No wrong
+//! answer came of this one either.**
+//!
+//! A first attempt at this family — tilting `a_ball_grazing_the_z_axis`'s
+//! wall, and later a three-solid construction meant to separate the walk's
+//! start from the forced collinearity a shared edge gives a block's own
+//! corner — never reached the crossing-order predicate at all, refusing
+//! earlier on an unrelated question at every tried tolerance. Reading
+//! `cascade.rs`'s `decide` (the function every predicate in this file's
+//! search goes through) explains why: *"the one case that comes back
+//! `Decision::Undecidable` is an interval that straddles zero when level 3
+//! cannot run. For exact `f64` inputs that never happens, short of an
+//! intermediate product overflowing or falling into the subnormals."* Making
+//! a line through a ball's circle *exactly* collinear or *exactly* tangent
+//! does not reach `Undecidable` by itself — stored, exact coordinates always
+//! get a certified sign at the exact level, however close together. What
+//! reaches it is the ordinary thing every other family's gap search relies
+//! on: a point that already is not exact, because the walk's three points in
+//! a real fuse are new vertices, built by arithmetic on a genuine crossing,
+//! not hand-picked exact coordinates — the same way the cone's and the
+//! frustum's gaps were found, by a grid search over ordinary shapes rather
+//! than by engineering an exact degeneracy.
 
 mod cones;
 
@@ -330,208 +368,117 @@ fn a_tolerant_fuse_of_a_cube_on_a_cones_apex_refuses_a_sweep_past_an_area_budget
     }
 }
 
-// Q2016 WIP: the `probe_*` tests below are exploratory and not meant to be
-// committed as final — they are left here, uncommitted-normally but kept
-// across relays, so the next lane does not have to re-derive them. See the
-// handoff for what each one found. Neither is a regression test; both must
-// be removed (or turned into one, if a gap is found) before this row is
-// reported done.
-// Q2016 WIP (relay 2): a ball cut by a big wall far from the circle (so its
-// own corners never touch it), with two small blocks whose grazing edges lie
-// IN the wall's plane and cross the ball close to tangent — a structurally
-// different setup from `a_ball_grazing_the_z_axis`'s, where the two places
-// and the walk's start are forced onto one line because they all sit on the
-// SAME edge (the two walls' shared edge). Here the wall providing the circle
-// (`big_wall`) touches the ball only through its flat face, never through its
-// own edges, so the circle stays one closed loop; `near_block`'s edge injects
-// the two close places, and `far_block`'s edge injects a third place on the
-// opposite side of the circle to walk from.
+/// The gap found below a working size of `1` for "plane through a ball": a
+/// cube stood on its corner, with that corner's own vertex sitting exactly on
+/// a ball centred where the cube is — the ball's radius is the cube's own
+/// half-diagonal, `3 * scale * sqrt(3)` for a side of `6 * scale` — the same
+/// construction as the cone's apex case above, with the cone's single apex
+/// point swapped for the one cube vertex a sphere has no apex to match.
+/// Several of the cube's faces cut the ball in circles, each ordered by the
+/// sweep `((one − from) × (other − from)) · n`, with `n` the face's normal:
+/// `WhichWayItWinds::About` is reached here exactly as it is for a plane and
+/// a pipe or a cone, `along_a_crossing.rs:401-402` computing the same normal
+/// unconditionally for a plane and a sphere. Searching the cone's own
+/// 5-scale x 7-size x 4-rule grid (the frustum's two scale/size lists narrowed
+/// to keep the search small, since a ball has no seam direction to vary)
+/// finds the same area-acceptable, volume-not-acceptable gap, at a shape
+/// scale of `0.18` and a working size of `0.6` among others — the cone's own
+/// pin values, which the half-diagonal construction shares by chance of the
+/// grids overlapping, not by the shapes being the same.
+///
+/// **The merged answer is not wrong**, by the same similarity-transform
+/// argument as the cone's apex case: scaled up by `1 / 0.18` and run at a
+/// 10 mm working size, comfortably past the `2.73` mm where an area budget
+/// covers the widest sweep, the merge gives a solid with the same face, wire
+/// and shell counts.
 #[test]
-fn probe_family_b_three_solids() {
-    let radius = 5.0f64;
-    let wall_z = 2.0f64;
-    let circle_radius = (radius * radius - wall_z * wall_z).sqrt();
-    let one_ulp_below = f64::from_bits(circle_radius.to_bits() - 1);
-    println!(
-        "circle_radius={circle_radius:.17e} one_ulp_below={one_ulp_below:.17e} diff={:e}",
-        circle_radius - one_ulp_below
-    );
-    for eps_exp in [-3, -6, -9, -12, -14, -15, -16, -17, -18] {
-        let eps = if eps_exp == -18 {
-            circle_radius - one_ulp_below
-        } else {
-            f64::powi(10.0, eps_exp)
-        };
-        let mut model = Model::new(Scale::millimetres(1.0).expect("ws"));
-        let ball = model
-            .add_ball(
-                radius,
-                &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a finite shift"),
-            )
-            .expect("a positive radius");
-        let big_wall = {
-            let profile = ProfileBuilder::new(vec![
-                [-50.0, -50.0],
-                [50.0, -50.0],
-                [50.0, 50.0],
-                [-50.0, 50.0],
-            ])
-            .build(&Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a square");
-            model
-                .add_extrusion(
-                    &profile,
-                    48.0,
-                    &Isometry::translation(Vector::new(0.0, 0.0, wall_z)).expect("a finite shift"),
-                )
-                .expect("a positive height")
-        };
-        let near_block = {
-            let profile =
-                ProfileBuilder::new(vec![[0.0, -10.0], [1.0, -10.0], [1.0, 10.0], [0.0, 10.0]])
-                    .build(&Policy::certified(), &mut ProvenanceLog::new())
-                    .expect("a rectangle");
-            model
-                .add_extrusion(
-                    &profile,
-                    1.0,
-                    &Isometry::translation(Vector::new(circle_radius - eps, 0.0, wall_z))
-                        .expect("a finite shift"),
-                )
-                .expect("a positive height")
-        };
-        let far_block = {
-            let profile =
-                ProfileBuilder::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 10.0], [0.0, 10.0]])
-                    .build(&Policy::certified(), &mut ProvenanceLog::new())
-                    .expect("a rectangle");
-            model
-                .add_extrusion(
-                    &profile,
-                    1.0,
-                    &Isometry::translation(Vector::new(circle_radius - 0.01, 0.0, wall_z))
-                        .expect("a finite shift"),
-                )
-                .expect("a positive height")
-        };
-        for (rule, cone_first) in EVERY_FUSE {
-            let (arguments, tools) = if cone_first {
-                ([ball], [big_wall])
-            } else {
-                ([big_wall], [ball])
-            };
-            let mut log = ProvenanceLog::new();
-            let first = model.fuse(&arguments, &tools, rule, &Policy::tolerant(1.0), &mut log);
-            let Ok(first) = first else {
-                println!(
-                    "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} wall step: {first:?}"
-                );
-                continue;
-            };
-            let after_wall = first.solids()[0];
-            let mut log2 = ProvenanceLog::new();
-            let second = model.fuse(
-                &[after_wall],
-                &[near_block],
-                rule,
-                &Policy::tolerant(1.0),
-                &mut log2,
-            );
-            let records: Vec<_> = match &second {
-                Ok(_) => log2.records().to_vec(),
-                Err(Error::Undecidable { records }) => records.records().to_vec(),
-                Err(other) => {
-                    println!(
-                        "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} near step: {other:?}"
-                    );
-                    continue;
-                }
-            };
-            if !records.is_empty() {
-                println!(
-                    "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} near_ok={} preds={:?}",
-                    second.is_ok(),
-                    records
-                        .iter()
-                        .map(|r| (r.predicate(), r.measures()))
-                        .collect::<Vec<_>>()
-                );
-            }
-            let Ok(second) = second else {
-                continue;
-            };
-            let after_near = second.solids()[0];
-            let mut log3 = ProvenanceLog::new();
-            let third = model.fuse(
-                &[after_near],
-                &[far_block],
-                rule,
-                &Policy::tolerant(1.0),
-                &mut log3,
-            );
-            let records3: Vec<_> = match &third {
-                Ok(_) => log3.records().to_vec(),
-                Err(Error::Undecidable { records }) => records.records().to_vec(),
-                Err(other) => {
-                    println!(
-                        "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} far step: {other:?}"
-                    );
-                    continue;
-                }
-            };
-            if !records3.is_empty() {
-                println!(
-                    "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} far_ok={} preds={:?}",
-                    third.is_ok(),
-                    records3
-                        .iter()
-                        .map(|r| (r.predicate(), r.measures()))
-                        .collect::<Vec<_>>()
-                );
-            }
-        }
-    }
-}
+fn a_tolerant_fuse_of_a_cube_on_a_ball_through_its_corner_below_working_size_one_merges_the_same_shape_as_at_full_scale()
+ {
+    let gap_scale = 0.18;
+    let gap_size = 0.6;
+    let gap_policy = Policy::tolerant(gap_size);
+    let mut gap_model = Model::new(Scale::millimetres(gap_size).expect("a working size"));
+    let gap_ball = gap_model
+        .add_ball(
+            3.0 * gap_scale * 3.0f64.sqrt(),
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a finite shift"),
+        )
+        .expect("a positive radius");
+    let gap_cube = a_corner_up_cube_round_the_origin(&mut gap_model, 6.0 * gap_scale);
+    let mut gap_log = ProvenanceLog::new();
+    let gap_fused = gap_model
+        .fuse(
+            &[gap_ball],
+            &[gap_cube],
+            Rule::Union,
+            &gap_policy,
+            &mut gap_log,
+        )
+        .expect("the gap case answers Ok");
 
-#[test]
-fn probe_family_b_ball_cube() {
-    for scale in [1.0, 0.5, 0.3, 0.18, 0.1] {
-        for size in [0.1, 0.3, 0.6, 1.0, 2.0, 5.0, 10.0] {
-            let mut model = Model::new(Scale::millimetres(size).expect("ws"));
-            let ball = model
-                .add_ball(
-                    scale,
-                    &Isometry::translation(Vector::new(0.0, 0.0, scale)).expect("a finite shift"),
-                )
-                .expect("a positive radius");
-            let cube = a_corner_up_cube_round_the_origin(&mut model, 6.0 * scale);
-            for (rule, cone_first) in EVERY_FUSE {
-                let (arguments, tools) = if cone_first {
-                    ([ball], [cube])
-                } else {
-                    ([cube], [ball])
-                };
-                let mut log = ProvenanceLog::new();
-                let fused = model.fuse(&arguments, &tools, rule, &Policy::tolerant(size), &mut log);
-                let records: Vec<_> = match &fused {
-                    Ok(_) => log.records().to_vec(),
-                    Err(Error::Undecidable { records }) => records.records().to_vec(),
-                    Err(other) => {
-                        println!("scale={scale} rule={rule:?} cone_first={cone_first}: {other:?}");
-                        continue;
-                    }
-                };
-                if !records.is_empty() {
-                    println!(
-                        "scale={scale} size={size} rule={rule:?} cone_first={cone_first} fused_ok={} n={} preds={:?}",
-                        fused.is_ok(),
-                        records.len(),
-                        records.iter().map(|r| r.predicate()).collect::<Vec<_>>()
-                    );
-                }
-            }
-        }
-    }
+    gap_log
+        .records()
+        .iter()
+        .find(|record| {
+            record.predicate() == ALONG_A_CROSSING
+                && record.measures() == Measures::Area
+                && gap_policy
+                    .wobble_is_acceptable(Measures::Area.wobble_of(record.enclosure(), gap_size))
+                && !gap_policy
+                    .wobble_is_acceptable(Measures::Volume.wobble_of(record.enclosure(), gap_size))
+        })
+        .expect("the area reading merges a sweep the volume reading would have refused");
+
+    let gap_solid = gap_model
+        .solid(gap_fused.solids()[0])
+        .expect("the fuse's one solid");
+    let gap_shape = (
+        gap_solid.faces().count(),
+        gap_solid.faces().flat_map(|face| face.wires()).count(),
+        gap_solid.shells().count(),
+    );
+
+    let reference_size = 10.0;
+    let mut reference_model =
+        Model::new(Scale::millimetres(reference_size).expect("a working size"));
+    let reference_ball = reference_model
+        .add_ball(
+            3.0 * 3.0f64.sqrt(),
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a finite shift"),
+        )
+        .expect("a positive radius");
+    let reference_cube = a_corner_up_cube_round_the_origin(&mut reference_model, 6.0);
+    let reference_fused = reference_model
+        .fuse(
+            &[reference_ball],
+            &[reference_cube],
+            Rule::Union,
+            &Policy::tolerant(reference_size),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a working size of 10, well past 2.73, merges comfortably under the area budget");
+    let reference_solid = reference_model
+        .solid(reference_fused.solids()[0])
+        .expect("the fuse's one solid");
+    let reference_shape = (
+        reference_solid.faces().count(),
+        reference_solid
+            .faces()
+            .flat_map(|face| face.wires())
+            .count(),
+        reference_solid.shells().count(),
+    );
+
+    assert_eq!(gap_fused.solids().len(), 1, "one solid, the union of both");
+    assert_eq!(
+        reference_fused.solids().len(),
+        1,
+        "one solid, the union of both"
+    );
+    assert_eq!(
+        gap_shape, reference_shape,
+        "the gap case's topology should match the full-scale reference's"
+    );
 }
 
 /// The gap found below a working size of `1` for "frustum cut near its
