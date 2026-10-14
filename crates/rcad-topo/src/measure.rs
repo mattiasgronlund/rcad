@@ -1089,6 +1089,15 @@ fn crossed(along: &[[f64; 2]; 3], down: &[[f64; 2]; 3]) -> [Vec<f64>; 3] {
 /// rounding it down. Shifting `sixth` itself back is exact unless the volume
 /// lands among the subnormals, and then it is off by less than their spacing,
 /// which is charged.
+///
+/// **The difference is packed before its size is read**, for the reason
+/// [`how_far_the_middle_is_from`] packs its own: fresh out of the subtraction
+/// its entries can nearly cancel, and adding up their sizes then charges more
+/// than the distance. The block less the cone in
+/// `a_flat_solid_publishes_the_rounding_of_its_measure.rs` came out as
+/// `7.95e-16` and `−1.78e-15` in the units the shifts picked, a distance of
+/// `9.8e-16` charged as `2.57e-15`, and published `2.2e-13` for a mesh
+/// `8.4e-14` off.
 fn how_far_the_volume_rounded(
     six_volumes: &[f64],
     sixth: f64,
@@ -1096,7 +1105,7 @@ fn how_far_the_volume_rounded(
     whole_shift: i32,
 ) -> f64 {
     let (six_sixths, lost) = two_product(sixth, 6.0);
-    let off = added(six_volumes, &[-lost, -six_sixths]);
+    let off = packed(&added(six_volumes, &[-lost, -six_sixths]));
     let error = shift_up(divided_up(at_most(&off), 6.0), whole_shift);
     if shift(volume, -whole_shift) == sixth {
         return error;
@@ -1265,10 +1274,10 @@ fn six_volumes_exactly(fan: &[[[f64; 2]; 9]]) -> f64 {
 /// are is part of it, as it is of the volume (`docs/decisions.md` §338.5).
 ///
 /// **Packed after every triangle, because this runs on every solid measured,
-/// over its fan or its mesh,** and not only on one whose sign is in doubt: an expansion that is
-/// only ever added to grows by every entry of every determinant, and adding to
-/// it costs its length each time. [`compress`] keeps it as short as the value
-/// needs.
+/// over its fan or its mesh,** and not only on one whose sign is in doubt: an
+/// expansion that is only ever added to grows by every entry of every
+/// determinant, and adding to it costs its length each time. [`compress`]
+/// keeps it as short as the value needs.
 fn volume_and_moment_as_expansions(fan: &[[[f64; 2]; 9]]) -> (Vec<f64>, [Vec<f64>; 3]) {
     let mut six_volumes: Vec<f64> = Vec::new();
     let mut moment: [Vec<f64>; 3] = Default::default();
