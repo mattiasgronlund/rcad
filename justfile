@@ -12731,7 +12731,8 @@ _queue-rows file:
 # Otherwise a small row
 # waits for the walk to reach its tier, and takes the next ready small rows with
 # it. It is never taken alone, and the rows of one bundle may overlap each other,
-# since one lane does them all. The plain output ends with §352.6's measure.
+# since one lane does them all. The plain output ends with §352.6's measure,
+# then the count of §450.3's families.
 #
 # **Rows Mattias pinned go first** (§430). A description starting `pinned/<n>`
 # is a row he put at the head of the queue, and the fill takes the ready ones
@@ -12765,9 +12766,18 @@ _queue-rows file:
 # What it cannot read — an open fence, a short row, a state it does not know —
 # it refuses rather than guesses at, and points at `check-queue` for the why.
 #
+# **`families` lists the places to trace before fixing one row** (§450.3 rule
+# 1): three or more open rows, not parked, whose write sets name one
+# `tests/*.rs` file. A row whose text, after its pin, class and from word, starts
+# `Trace the family on <file>` is a trace, open or closed, and the ids after the
+# file are the rows it covered. A file a trace has been on is a family again
+# only once three open rows no trace named share it. The plain output counts
+# them on its last line, and the queue page lists them. The logic is
+# `tooling/queue/families.py`.
+#
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
 # `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag`, `pick`, `pin` and
-# `unpin`, with `show` and `running` to read, and `narrow`, which changes a hold
+# `unpin`, with `show`, `running` and `families` to read, and `narrow`, which changes a hold
 # and no row. `tier` moves an open row to another tier and, like
 # `add`, writes that tier's heading when the file has none (§307). `tag` sets,
 # replaces or removes a row's class or `small` (§352.2), and a class moves the
@@ -12811,7 +12821,7 @@ _queue-rows file:
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
-# already landed. `show` and `running` only read, so neither runs it.
+# already landed. `show`, `running` and `families` only read, so none runs it.
 [doc("What to dispatch from docs/queue.md, and the verbs that change it one row at a time: `just queue take` prints their usage.")]
 queue mode="" *args:
     #!/usr/bin/env bash
@@ -12824,7 +12834,7 @@ queue mode="" *args:
             status=$?
             {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" queue-page || true
             exit "$status" ;;
-        show|running)
+        show|running|families)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         help)
@@ -12835,6 +12845,7 @@ queue mode="" *args:
                 'just queue next [N]                          what N free slots take; N defaults to the free slots on this machine' \
                 'just queue show <id>                         one row, its hold, and its state in other worktrees' \
                 'just queue running                           what holds a slot on this machine, one line each' \
+                'just queue families [--count]                three or more open rows on one tests/*.rs file that no trace named (§450.3); --count prints how many' \
                 'just queue narrow <id> <write set>           narrow a held row to entries inside the set it was taken with; a lane runs it (§424.7)' \
                 'just queue meets <id> <write set>            the skip line for the first hold read from input that the write set meets; narrow asks it' \
                 'just queue take <id> <branch>                dispatch a ready row to <branch>: state lane:<branch>, held until done, drop or park' \
@@ -12890,8 +12901,13 @@ queue mode="" *args:
             narrowed=$(QUEUE_FILE='{{ queue_file }}' python3 "$tool" narrowed) || exit 1
         fi
     fi
+    families=""
+    if [ -z "$mode" ]; then
+        families=$(QUEUE_FILE='{{ queue_file }}' python3 '{{ justfile_directory() }}/tooling/queue/queue.py' families --count) || exit 1
+    fi
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; [ -z "$narrowed" ] || printf '%s\n' "$narrowed"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" -v cand_id="${2:-}" -v cand_ws="${3:-}" \
+        -v families="$families" \
         -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' \
         -v shared_files='{{ queue_shared_files }}' '
         BEGIN {
@@ -13041,6 +13057,7 @@ queue mode="" *args:
             for (x = 1; x <= w; x++) if (small[walk[x]]) smallready++
             printf "tier 1, open and not parked: %d in A or B (%d wrong, %d crash, %d refuses), %d with no class; tier 5: %d in C, %d in D, %d with no class; %d small row%s ready, and a bundle is %d\n", \
                 ab, abof["wrong"], abof["crash"], abof["refuses"], unclassed, inc, ind, unclassed5, smallready, (smallready == 1 ? "" : "s"), bundle
+            printf "families with no trace: %d (§450.3); just queue families lists them\n", families
         }
         function refuse(line, msg) {
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
@@ -13288,6 +13305,12 @@ queue-page:
 # the page must work every summary out again. The second render must also
 # remove a page planted for a row main's copy does not hold, and leave a page
 # whose row did not change unwritten.
+#
+# The Families section (§450.3) says there is none at the fourth commit, whose
+# rows name no `tests/*.rs` file. The fifth commit adds three open rows on one
+# test file, one by an item and one in tier 5, a parked fourth that is no
+# member, and three on another file that a closed trace names, so only the
+# first file is a family.
 #
 # The fuzzing section reads a fixture log root with one night of each kind the
 # table tells apart: a finished night with its first artifacts (09-10), a build
@@ -13609,9 +13632,9 @@ check-queue-page-selftest:
     has '<h3>Tier 5</h3><p><code><a href="rows/Q6.html">Q6</a></code></p>' "the ready list leaves out tier 5's Q6"
     has '<h3>Tier 3</h3><p><code><a href="rows/Q12.html">Q12</a></code> <code><a href="rows/Q13.html">Q13</a></code> <code><a href="rows/Q26.html">Q26</a></code></p>' \
         "tier 3's ready rows are Q12, Q13 and Q26, each linked, and not Q24 or Q25, which run"
-    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Pinned|Rows the fill will not take now|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
-    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Ready</h2> ' ] \
-        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Pinned, Rows the fill will not take now, then Ready: $order"
+    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Pinned|Rows the fill will not take now|Families|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
+    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Families</h2> <h2>Ready</h2> ' ] \
+        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Pinned, Rows the fill will not take now, Families, then Ready: $order"
     # Each line: the row, the tier its take was taken from, the agent whose tree it runs in, the dispatcher's tree.
     # A row main's copy holds is linked to its page; Q8, Q9 and Q17 are in no copy of main, so they have none.
     has '<tr><th><code><a href="rows/Q2.html">Q2</a></code></th><td>2</td><td><code>wf_page-1</code></td><td><code>dispatch-a</code></td></tr>' \
@@ -13663,8 +13686,10 @@ check-queue-page-selftest:
     has '<tr><td><code>crates/rcad-topo/src/fuse/arrange.rs</code> is shared, and <code><a href="rows/Q24.html">Q24</a></code> (held by <code>lane:lane-q24</code>) and <code><a href="rows/Q25.html">Q25</a></code> (held by <code>lane:lane-q25</code>) already hold it</td><td><code><a href="rows/Q26.html">Q26</a></code></td></tr>' \
         "Q26's arrange.rs is on queue_shared_files and two lanes hold it already (§424.4)"
     # Every id the table names, in reading order: each reason by the first row it holds back, in the order a fill walks them.
-    [ "$(between 'Rows the fill will not take now' 'Ready' | grep -oE '>[TDQ][0-9]+<' | tr -d '<>' | tr '\n' ' ')" = 'Q13 Q19 Q12 Q19 Q10 Q14 Q99 Q14 D1 Q15 Q4 Q16 Q10 Q20 Q11 Q2 Q12 Q24 Q25 Q26 ' ] \
+    [ "$(between 'Rows the fill will not take now' 'Families' | grep -oE '>[TDQ][0-9]+<' | tr -d '<>' | tr '\n' ' ')" = 'Q13 Q19 Q12 Q19 Q10 Q14 Q99 Q14 D1 Q15 Q4 Q16 Q10 Q20 Q11 Q2 Q12 Q24 Q25 Q26 ' ] \
         || fail "the table should hold Q19, Q14 and Q15 waiting, Q4 and Q16 parked, then Q20 and Q11, Q12 and Q26 meeting a lane, each reason in the order a fill reaches the first row it holds back, and not Q13 or Q21 as rows held back, which meet nothing"
+    [ "$(between 'Families' 'Ready' | grep -c '<p>no family</p>')" -eq 1 ] \
+        || fail "no row names a tests/*.rs file at commit D, so the Families section should say there is no family"
     grep -qE '<p class="qp-sub">as of [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z, when this page was last rendered</p>' "$out/index.html" \
         || fail "the running table does not say when the page was rendered"
     # Each row: added and closed that day, open by tier 1 2 2.2 2.5 3 4 5, parked, all open, closed so far.
@@ -13766,7 +13791,7 @@ check-queue-page-selftest:
     render || fail "queue-page failed to render with the copy in the tree holding main not main's commit"
     has "<tr><th colspan=\"2\">Meets a running lane's write set (not worked out)</th></tr>" \
         "with the copy in the tree holding main not main's commit, the page should say the third group is not worked out"
-    not_taken=$(between 'Rows the fill will not take now' 'Ready')
+    not_taken=$(between 'Rows the fill will not take now' 'Families')
     ! grep -qF 'rows/Q11.html' <<<"$not_taken" || fail "Q11 was held back on a copy that is not main's commit"
     has '<tr><th colspan="2">Waits on rows not yet done (3)</th></tr>' "the waiting rows come from main's commit, and should still show"
     has "<tr><th><code><a href=\"rows/Q20.html\">Q20</a></code></th><td class=\"n\">2</td><td>ready, but whether it meets a running lane's write set is not worked out</td></tr>" \
@@ -13776,12 +13801,27 @@ check-queue-page-selftest:
 
     sed -i -E 's/  pinned\/[0-9]+ /  /' "$hub/docs/queue.md"
     sed -i '/^Q21  /a Q23  1  todo  opus  docs/n.md  from/Q21 a row filed from Q21 §432' "$hub/docs/queue.md"
+    # §450.3 rule 1 (Q2003): three open rows on a_family.rs, one by an item and
+    # one in tier 5, and a parked fourth that is no member; three on
+    # a_traced_family.rs that a closed trace named, so no family.
+    sed -i '/^Q23  /a Q40  1  todo  opus  crates/rcad-topo/tests/a_family.rs  from/- a row on a test file §450\
+    Q41  1  todo  opus  crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/a_family.rs#a_test  from/- a second row on it, by an item §450\
+    Q43  1  parked:§450  opus  crates/rcad-topo/tests/a_family.rs  from/- a parked row on it, no member §450\
+    Q44  1  todo  opus  crates/rcad-topo/tests/a_traced_family.rs  from/- a row a trace named §450\
+    Q45  1  todo  opus  crates/rcad-topo/tests/a_traced_family.rs  from/- a second row a trace named §450\
+    Q46  1  todo  opus  crates/rcad-topo/tests/a_traced_family.rs  from/- a third row a trace named §450' "$hub/docs/queue.md"
+    sed -i '/^Q6  /a Q42  5  todo  opus  crates/rcad-topo/tests/a_family.rs  refuses/C from/- a third row on it, in tier 5 §450' "$hub/docs/queue.md"
+    sed -i '/^D1  /a Q47  1  done:abcdef6  opus  -  from/- Trace the family on crates/rcad-topo/tests/a_traced_family.rs: Q44, Q45 and Q46 §450' "$hub/docs/queue.md"
     g add docs/queue.md
     GIT_COMMITTER_DATE='2026-09-05T10:00:00+00:00' g commit -q -m "commit E: every pin taken off, and Q23 filed from Q21"
     sha_e=$(g rev-parse HEAD)
     render || fail "queue-page failed to render with no row pinned"
     [ "$(between 'Pinned' 'Rows the fill will not take now' | grep -c '<p>nothing pinned</p>')" -eq 1 ] \
         || fail "with no row pinned, the pinned table should say nothing is"
+    families=$(between 'Families' 'Ready')
+    grep -qF '<tr><td class="n">3</td><td><code>crates/rcad-topo/tests/a_family.rs</code></td><td><code><a href="rows/Q40.html">Q40</a></code> (1) <code><a href="rows/Q41.html">Q41</a></code> (1) <code><a href="rows/Q42.html">Q42</a></code> (5)</td></tr>' <<<"$families" \
+        || fail "the Families section should hold a_family.rs with its three open rows, each linked with its tier, and not the parked Q43: $families"
+    ! grep -qF 'a_traced_family.rs' <<<"$families" || fail "the Families section holds a_traced_family.rs, whose three rows a closed trace named"
     on_page Q23 "<li><code><a href=\"Q23.html\">Q23</a></code>, added in <code>${sha_e:0:8}</code> on 2026-09-05, <q>commit E: every pin taken off, and <a href=\"Q23.html\">Q23</a> filed from <a href=\"Q21.html\">Q21</a></q>: came from <code><a href=\"Q21.html\">Q21</a></code>, as its own word says</li>" \
         "Q23 came from Q21, as its word says, and its commit's subject links the Q ids it names"
     [ "$(chain Q23)" = 'Q23 Q21 Q4 Q3 Q1 ' ] \
@@ -13792,7 +13832,7 @@ check-queue-page-selftest:
     render || fail "queue-page failed to render with the lineage cache kept under another shape"
     [ "$(chain Q23)" = 'Q23 Q21 Q2 ' ] \
         || fail "a lineage cache kept under another shape should be worked out again from git, which gives Q21's own word, Q2, not the planted Q4: $(chain Q23)"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, Pace leads the page, the ready list holds every tier, every Q id that is a row links to that row's page, which gives its tier, class, write set, text and where it came from, the lineage cache serves a kept commit and works out a new one, and the fuzzing section matches its fixture nights"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the ready list holds every tier, every Q id that is a row links to that row's page, which gives its tier, class, write set, text and where it came from, the lineage cache serves a kept commit and works out a new one, and the fuzzing section matches its fixture nights"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
@@ -14365,6 +14405,63 @@ check-queue-selftest:
     drive classes
     grep -qxF 'tier 1, open and not parked: 3 in A or B (2 wrong, 0 crash, 1 refuses), 1 with no class; tier 5: 2 in C, 2 in D, 1 with no class; 0 small rows ready, and a bundle is 5' <<<"$got" \
         || fail "the measure line does not count the classes fixture's tier 1 and tier 5 rows, the tier 5 row with no class among them"
+
+    # §450.3 rule 1 (Q2003): the rows on two_equal_bars_leaning_at_each_other.rs,
+    # copied as 16eab121's docs/queue.md held them, are the family Q1953 traced.
+    # A closed row and a parked one on the file are no members, and Q1991 names
+    # one file twice, by two items, and counts once. A trace, open or closed,
+    # takes out the rows it names; the file is a family again with three rows no
+    # trace names, and a row a trace on another file named counts on a file no
+    # trace has been on.
+    fence families <<'MD'
+    Q1793 1    after:Q1660    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B was/Q1656 Two bars of radius 1/4 through (11,0,0), the second 32 long turned 120 degrees about z, stored direction (-0.5,0.866,-2.2e-16) (a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wire in two_equal_bars_leaning_at_each_other.rs), are refused under all six fuses, where since Q1660 the same pair turned 50, 60, 70 or 100 degrees answers every one. As Q1660 left it, both unions are refused CannotNameWhichPieceOfACrossingThisIs, the intersections ACurvedFaceGoesRightRoundWithNoSeam and CannotMeshAFace CornersCoincide, and the differences CornersCoincide and AWireWillNotLieFlatOnItsFace. Measured by Q1660: grad S x grad T at the two points where the pipes touch is (1.6e-17, 0, 0) and not nought, as the points sit at y = +-6.4e-17, so the_corners_of_each_run_between_two_tangent_points in fuse/assemble.rs, which asks for exactly nought at both ends, does not keep the middle of each half ellipse, and the half folded from touch point to touch point cannot be named. Two roads named and not run: read which arc each edge either side of the middle is, since a Corner does not carry its arrange name, or choose the end where the surfaces cross at the wider angle. Close the gap, or demonstrate a limit by section 16.10 §31
+    Q1896 1    after:Q1892    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/src/mesh.rs,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B from/Q1892 Two bars of radius 1/4 cut off 1 either side of where their axes meet, on (3,4,0) and (4,0,3), each built by add_bar_cut_off_by with its axis origin at that point (two_bars_crossing_at in fuse/arrange.rs mod curved), are refused in all six fuses when the axes meet at (0.5,0,0), (1,0,0), (2,0,0), (0,0,1), (0,1,0), (1,1,1) or (0.25,0.5,0.75), where intersect picks the halves by half-spaces: AWireWillNotLieFlatOnItsFace, ACurvedFaceGoesRightRoundWithNoSeam, CannotMeshAFace or TwoPatchesOfTheMeshDrewTheSameSide. At the origin five of six answer (union pi/4 - 1/(12 sin a), sin a = 0.8773) and the second bar less the first is refused TwoPatchesOfTheMeshDrewTheSameSide. Through (11,-3.25,0.5), picked by surfaces holding the middle since Q1892, the same refusals come, and split_a_face cuts each wall there into the four pieces it cuts at the origin. Untraced; Q1793 and Q1724 meet the same refusals and may share the cause, not run. Make them answer and pin the volumes §31
+    Q1897 1    after:Q1892    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/src/mesh.rs,crates/rcad-geom/src/walk.rs,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B from/Q1892 Two bars of radius 1/4 cut off 1 either side of where their axes meet, on (3,4,0) and (4,-3,0), square to each other in z = 0, each built by add_bar_cut_off_by with its axis origin at that point (as two_bars_crossing_at in fuse/arrange.rs mod curved builds them), are refused in all six fuses wherever the axes meet. At the origin and (1,0,0), where intersect picks the halves by half-spaces, and at (11,0,0), where it picks them by surfaces holding the middle since Q1892, the refusals are AWireWillNotLieFlatOnItsFace, ACurvedFaceGoesRightRoundWithNoSeam or CannotMeshAFace, the same six in the same order at (1,0,0) and (11,0,0). At (11,-3.25,0.5), picked by surfaces holding the middle, all six are refused CannotNameWhichPieceOfACrossingThisIs, as before the arrangement change of Q1892, though intersect names every pair of the two bars surfaces there in both orders with no error. Untraced; the first refusals may share the cause of the row for the bars on (3,4,0) and (4,0,3), not run. Make them answer §31
+    Q1929 1    todo    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B from/Q1908 Two bars of radius 1/4, the second 2 long starting where the axes meet at (11,-3.25,0.5) turned 120 degrees about z, its stored direction a hair off z = 0: since Q1908 all six fuses get past the second bar near cap and are refused, the union and both differences AWireWillNotLieFlatOnItsFace and the intersection ACurvedFaceGoesRightRoundWithNoSeam (a_bar_starting_where_it_crosses_another_at_120_degrees_is_refused_building_a_wire in two_equal_bars_leaning_at_each_other.rs pins it), where at 50, 60, 70 and 100 degrees every fuse answers with 1/(24 sin a) shared. Untraced; Q1793, Q1724, Q1896 and Q1897 meet the same refusals and may share the cause, not run. Make them answer and pin the volumes §31
+    Q1646 1    done:cdb4d6fe52cc131100b86be1f4ddd91483d3b5e3    opus    crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B Two bars of radius 1/4 whose axes meet at a slant are named in four halves by intersect since Q1625, with pickers facing (0,1,0) and (1,0,0) rather than the pipes' stored directions, and every fuse of them is refused in the arrangement. The bars: one from (9,0,0), length 4, turned onto x by Isometry::quarter_turns(y,1); the other turned the same way and then by Isometry::rotation(z, a), a = 50, 60, 70 or 100 degrees, from (11,0,0) - 16d, length 32, d its direction. All six fuses of each refuse Geometry(WhereThreeSurfacesMeetNeedsTwoOfThemFlat); with the second bar starting at (11,-3.25,0.5), length 2, and the first from (9,-3.25,0.5), they refuse that or Undecidable; at 72cc2f6c all were refused CannotNameWhichPieceOfACrossingThisIs at intersect. a_half_of_an_ellipse in fuse/arrange.rs knows a half only by picker normals bit-equal to plus or minus the stored directions, so these halves get no node where they meet: place_the_meets falls to place_where_two_rulings_cross. Recognise a half by which pipe each picker leans towards, asked exactly, take the two axis directions from the pipes in place_the_middle_of_each_half, and fix the docs of both that say the pickers face along the stored directions. That may not be all: the bar turned 120 degrees through (11,0,0), whose pickers are its stored directions, is refused WhereThreeSurfacesMeetNeedsTwoOfThemFlat before and after Q1625, untraced; trace it (Q1292 is a lead, not run). Pin the six fuses of each in the new test file §31
+    Q1656 1    dropped:§31    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B Two bars of radius 1/4 through (11,0,0), the second 32 long turned 120 degrees about z, stored direction (-0.5,0.866,-2.2e-16) (a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wire in two_equal_bars_leaning_at_each_other.rs), get past the arrangement since Q1646. All six fuses are refused CannotMeshAFace CornersCoincide, AWireWillNotLieFlatOnItsFace or ACurvedFaceGoesRightRoundWithNoSeam. Untraced. A lead, not run: the way out of a point where the two pipes touch is read in assemble.rs the_way_across_the_chord_into_the_arc off grad S x grad T, which is nought there but for rounding, the step Q1622 names. Trace it after Q1622 lands §31
+    Q1990  5  parked:§450  opus  crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs  refuses/C from/- parked on the family's file, so no member §450
+    Q1991  2  todo  opus  crates/rcad-topo/tests/fuses_that_must_agree.rs#a_pair,crates/rcad-topo/tests/fuses_that_must_agree.rs#another_pair  from/- one file named twice, one row §450
+    Q1992  2  todo  opus  crates/rcad-topo/tests/fuses_that_must_agree.rs  from/- a second row on the file §450
+    MD
+    family='4 crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs Q1793(1) Q1896(1) Q1897(1) Q1929(1)'
+    drive families families
+    grep -qxF "$family" <<<"$got" \
+        || fail "queue families did not find 16eab121's family on two_equal_bars_leaning_at_each_other.rs, its four open rows and no closed or parked one"
+    grep -qF 'fuses_that_must_agree.rs' <<<"$got" \
+        && fail "queue families counted a row naming one file by two items as two rows"
+    grep -qxF '1 family with no trace (§450.3)' <<<"$got" || fail "queue families did not end with how many families it found"
+    drive families families --count
+    [ "$got" = 1 ] || fail "queue families --count did not print the number of families alone"
+    drive families
+    grep -qxF 'families with no trace: 1 (§450.3); just queue families lists them' <<<"$got" \
+        || fail "the plain queue does not count the families"
+
+    more() { sed '$d' "$dir/$1.md" > "$dir/$2.md"; cat >> "$dir/$2.md"; echo '```' >> "$dir/$2.md"; }
+    more families families-traced <<'MD'
+    Q1953  1  done:abcdef0  opus  -  from/- Trace the family on crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs: Q1896, Q1897, Q1929 and Q1793, under Policy::certified() §450
+    MD
+    drive families-traced families
+    [ "$got" = '0 families with no trace (§450.3)' ] || fail "a closed trace naming the family's four rows did not take the family out"
+    drive families-traced
+    grep -qxF 'families with no trace: 0 (§450.3); just queue families lists them' <<<"$got" \
+        || fail "the plain queue still counts a family a trace has covered"
+
+    more families-traced families-again <<'MD'
+    Q2001  1  todo  opus  crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs  from/- a new row on the traced file §450
+    Q2002  1  todo  opus  crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs#a_test  from/- another §450
+    Q2003  1  todo  opus  crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs  from/- a third §450
+    Q2004  1  todo  opus  crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs,crates/rcad-topo/tests/a_third_file.rs  from/- a row a trace on another file named §450
+    Q2005  1  todo  opus  crates/rcad-topo/tests/a_third_file.rs  from/- the third file's second row §450
+    Q2006  1  todo  opus  crates/rcad-topo/tests/a_third_file.rs  from/- the third file's third row §450
+    Q2007  1  todo  opus  -  pinned/1 from/- Trace the family on crates/rcad-topo/tests/another_file.rs: Q2004 §450
+    MD
+    drive families-again families
+    [ "$got" = "$(printf '%s\n' \
+        '3 crates/rcad-topo/tests/a_third_file.rs Q2004(1) Q2005(1) Q2006(1)' \
+        '3 crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs Q2001(1) Q2002(1) Q2003(1)' \
+        '2 families with no trace (§450.3)')" ] \
+        || fail "a traced file was not a family again with the three rows no trace names, or a file no trace has been on lost a row a trace on another file named"
 
     bundled() {
         got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
