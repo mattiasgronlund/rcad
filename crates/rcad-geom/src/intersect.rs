@@ -5226,17 +5226,19 @@ fn the_heights_a_ring_crosses_a_pipe_at(
     if ask(&one_direction, Measures::Length, &at, policy, log)? != Decision::Zero {
         return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface);
     }
-    match ask(&centre_on_the_axis, Measures::Area, &at, policy, log)? {
-        Decision::Zero => {}
-        Decision::Pos => {
-            return if a_pipe_along_a_rings_axis_misses_its_tube(ring, pipe, &at, policy, log)? {
-                Ok(SmallVec::new())
-            } else {
-                Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
-            };
-        }
-        other => unreachable!("a sum of squares is never below zero: {other:?}"),
+    let off_the_axis = ask(&centre_on_the_axis, Measures::Area, &at, policy, log)?;
+    if off_the_axis == Decision::Pos {
+        return if a_pipe_along_a_rings_axis_misses_its_tube(ring, pipe, &at, policy, log)? {
+            Ok(SmallVec::new())
+        } else {
+            Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
+        };
     }
+    assert_eq!(
+        off_the_axis,
+        Decision::Zero,
+        "a sum of squares is never below zero"
+    );
     let shape = ask(&room, Measures::Area, &at, policy, log)?;
     if shape == Decision::Neg {
         return Ok(SmallVec::new());
