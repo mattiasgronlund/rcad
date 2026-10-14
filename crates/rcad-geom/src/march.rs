@@ -618,7 +618,8 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 /// radius 2 up `z`, walked from the bottom of their loop with `1.7e307` of
 /// room: the trial `6.3e4` was kept `3.69` from the seed and known only to
 /// `0.21`, every other point of the walk being known to `1.4e-15` or better
-/// (Q2014). Now the next ask is half that chord, `1.84`.
+/// (Q2014). Now the next ask is half that chord, `1.84`, which lands `1.25`
+/// from the seed and is kept, and the walk is known to `1.9e-15`.
 ///
 /// # A trial that came back short behind `here` is not kept
 ///
@@ -1333,6 +1334,10 @@ mod tests {
     /// the whole walk was published as known to `0.21`, where every other point
     /// of it was known to `1.4e-15` or better. Eight more rounds move that point
     /// `0.20`.
+    ///
+    /// Now that trial is not kept, and the next ask is half its chord, `1.84`.
+    /// That one lands `1.25` from the seed and is kept, the shortest step of
+    /// the walk, which is known to `1.9e-15`.
     #[test]
     fn a_trial_whose_far_end_has_not_finished_settling_is_shortened_and_not_kept() {
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, -1.0], 2.0);
