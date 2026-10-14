@@ -37,6 +37,12 @@
 // base; it never goes to the lander, since there is no branch for `just land`
 // to merge. Anything but a `confirm` comes back not merged.
 //
+// Since §450.3 rule 4 a fix lane runs the shapes of the open rows that share a
+// `tests/*.rs` file with its row, and names in `also_answers` the ones its
+// branch now answers. Its verifier runs each again, and `just land --answers`,
+// or the Opus merger, closes the confirmed ones done at the lane's tip in the
+// same `queue apply`.
+//
 // Invoke it as the `lanes` workflow, which is `meta.name` below and not this
 // file's name: Claude Code loads `.claude/workflows/*.js`, parses `meta`, and
 // registers what `meta.name` says. Pass args:
@@ -570,7 +576,7 @@ function gatePassed(check) {
 }
 
 // Null when every step is one `just land` takes: `add <tier> <model> <write
-// set> <what>`, `after @N <ids>` or `tag @N <tag>`, each word a line of the
+// set> <what>`, `after @N <ids>`, `after <id> @N` or `tag @N <tag>`, each word a line of the
 // steps file the lander writes, so no word may be empty, hold a newline, or be
 // the `+` that separates steps there.
 function stepsProblem(rows) {
@@ -579,7 +585,7 @@ function stepsProblem(rows) {
     if (!Array.isArray(step) || !step.every(oneLine)) {
       return `the step ${JSON.stringify(step)} is not a list of words`
     }
-    if (STEP_WORDS[step[0]] !== step.length) return `the step ${JSON.stringify(step)} is not add <tier> <model> <write set> <what>, after @N <ids>, or tag @N <tag>`
+    if (STEP_WORDS[step[0]] !== step.length) return `the step ${JSON.stringify(step)} is not add <tier> <model> <write set> <what>, after @N <ids> or after <id> @N, or tag @N <tag>`
   }
   return null
 }
@@ -867,6 +873,21 @@ function reportSchema(lane, relay) {
     core.files_changed = { type: 'array', items: { type: 'string' } }
     core.tests_that_fail_without_the_change = { type: 'array', items: { type: 'string' }, description: 'empty for a lane that changed only .md files and comments (§375)' }
     core.rows = rowsSchema()
+    core.also_answers = {
+      type: 'array',
+      description: 'lane.md and §450.3 rule 4: each open row prep listed that shares a tests/*.rs file with your row and whose every shape now answers on your branch, one entry for each shape with its run; empty when none',
+      items: {
+        type: 'object',
+        required: ['row', 'input', 'command', 'printed'],
+        properties: {
+          row: { type: 'string', description: 'the open row\'s id' },
+          input: { type: 'string', description: 'the crash file, corpus file or shape, as the row names it' },
+          command: { type: 'string', description: 'the exact command you ran on your branch, in the foreground' },
+          probe: { type: 'string', description: 'for a shape, the path and the whole text of the probe test you wrote, ran and removed; empty otherwise' },
+          printed: { type: 'string', description: 'the lines of its print that show the row answered, verbatim' },
+        },
+      },
+    }
     required.push('landed_sha', 'files_changed', 'tests_that_fail_without_the_change', 'rows')
     if (lane.sameBehaviour === true) {
       core.tests_that_reach_the_change = { type: 'array', items: { type: 'string' }, description: 'the tests that run the lines you changed and pass before and after; your row keeps the behaviour, so no test fails without it and tests_that_fail_without_the_change stays empty (§399)' }
@@ -897,7 +918,7 @@ function rowsSchema() {
   return {
     type: 'array',
     items: { type: 'array', items: { type: 'string' } },
-    description: 'the just queue apply steps that add the rows your work leaves, each a list of words: ["add", "<tier>", "<model>", "<write set>", "<what, ending in §N>"], ["tag", "@1", "<class>|small"], ["after", "@1", "<id>[,<id>]"]; @1, @2 are this list\'s own adds, since ids come from a shared counter; empty when you leave nothing to add (§383.4, lane.md)',
+    description: 'the just queue apply steps that add the rows your work leaves, each a list of words: ["add", "<tier>", "<model>", "<write set>", "<what, ending in §N>"], ["tag", "@1", "<class>|small"], ["after", "@1", "<id>[,<id>]"], or ["after", "<id>", "@1"] to set an open row to wait on one you add; @1, @2 are this list\'s own adds, since ids come from a shared counter; empty when you leave nothing to add (§383.4, lane.md)',
   }
 }
 
@@ -996,9 +1017,17 @@ Lines that run -- just verify-lane runs this once, before it checks the branch o
   ${linesThatRunCommand(lane)}
 When N is 0, nothing that runs changed (§375): skip the revert below, say so in notes, and report tests_fail_without_fix: false with no reproduced_mutation if your steps are the tests ones, or no tests_pass_without_change and no mutation_caught if they are the same behaviour ones.
 ${kind === 'same_behaviour' ? sameBehaviourProof() : revertProof()}
-Your own worktree is a different tree the harness made for this check. Run git rev-parse --show-toplevel in it and report exactly that output as worktree_path in your verdict.
+${alsoAnswersNote(r)}Your own worktree is a different tree the harness made for this check. Run git rev-parse --show-toplevel in it and report exactly that output as worktree_path in your verdict.
 
 The lane claims (JSON): ${JSON.stringify(r)}`
+}
+
+// §450.3 rule 4: the rows a lane says its branch also answers close only on
+// its verifier's word, so the verifier runs each one again.
+function alsoAnswersNote(r) {
+  const named = Array.isArray(r.also_answers) ? [...new Set(r.also_answers.map((entry) => entry && entry.row))] : []
+  if (!named.length) return ''
+  return `The lane says its branch also answers ${named.join(', ')}. Run each entry of its also_answers again on the branch tip by verifier.md's Also answers section, and report also_answers_confirmed and also_answers_refused.\n`
 }
 
 function revertProof() {
@@ -1099,10 +1128,17 @@ If the switch refuses because ${branch} already exists, stop and report it as no
 ${landed}
 Push attempts: at most ${MERGE_ATTEMPTS}. A catch-up over docs alone costs no attempt; at most ${DOCS_CATCH_UPS} of those, reported as docs_catch_ups.
 The lane's rows are its add steps for your queue apply, as merger.md step 3 says.
-
+${answeredNote(lane, prior)}
 The lane's report (JSON): ${JSON.stringify(r)}
 
 The verifier's verdict (JSON): ${JSON.stringify(prior.check)}`
+}
+
+function answeredNote(lane, prior) {
+  const answers = answeredBy(lane, prior)
+  return answers.length
+    ? `Its verifier confirmed the branch also answers ${answers.join(', ')}: each gets a done step with the lane's tip in the same queue apply, by merger.md step 3.\n`
+    : ''
 }
 
 function relayedFrom(prior) {
@@ -1163,7 +1199,18 @@ Its last line is then one line of JSON. Report every field of it exactly as it s
 
 function landCommand(lane, prior) {
   const r = prior.report
-  return `mise exec -- just land ${r.rows.length ? '--steps target/land-steps.txt ' : ''}${lane.queueId} ${branchOf(lane)} ${r.landed_sha} ${mergeBranchOf(lane)} ${treesOf(prior).join(' ')}`
+  const answers = answeredBy(lane, prior)
+  return `mise exec -- just land ${r.rows.length ? '--steps target/land-steps.txt ' : ''}${answers.length ? `--answers ${answers.join(',')} ` : ''}${lane.queueId} ${branchOf(lane)} ${r.landed_sha} ${mergeBranchOf(lane)} ${treesOf(prior).join(' ')}`
+}
+
+// §450.3 rule 4: a row closes as answered only when the lane named it and its
+// verifier ran it again and saw it answer. The lane's own rows close anyway,
+// and just land refuses a row named in both lists.
+function answeredBy(lane, prior) {
+  const named = new Set((Array.isArray(prior.report.also_answers) ? prior.report.also_answers : []).map((entry) => entry && entry.row))
+  const confirmed = prior.check && Array.isArray(prior.check.also_answers_confirmed) ? prior.check.also_answers_confirmed : []
+  const own = lane.queueId.split(',')
+  return [...new Set(confirmed)].filter((id) => named.has(id) && /^[TDQ][0-9]+$/.test(id) && !own.includes(id))
 }
 
 function PRUNE(trees) {
@@ -1186,6 +1233,12 @@ function verdictSchema(kind) {
     lines_that_run: { type: 'string', description: 'everything that command printed, verbatim, down to its last line, lines that run: N -- never your own reading of the diff' },
     verdict: { type: 'string', enum: ['merge', 'fix_first', 'reject'] },
     notes: { type: 'string', description: 'at most five lines, for the merger: what it must act on and what no other field says -- never an account of the steps you ran, which the other fields already hold' },
+    also_answers_confirmed: { type: 'array', items: { type: 'string' }, description: 'the ids from the lane\'s also_answers you ran again on the branch tip and saw answer, each open on origin/main, held by no lane, and sharing a tests/*.rs file with the lane\'s write set (verifier.md, Also answers); leave it out when the lane named none' },
+    also_answers_refused: {
+      type: 'array',
+      description: 'each id from the lane\'s also_answers you did not confirm, and why (verifier.md, Also answers)',
+      items: { type: 'object', required: ['row', 'why'], properties: { row: { type: 'string' }, why: { type: 'string' } } },
+    },
   }
   const required = ['worktree_path', 'branch_ok', 'files_outside_write_set', 'gate_summary', 'number_mismatches', 'unbacked_claims', 'fixes', 'lines_that_run_command', 'lines_that_run', 'verdict']
   if (kind === 'tests') {
