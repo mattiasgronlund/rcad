@@ -75,14 +75,75 @@
 //! scaling the shape and the working size together cannot change which of two
 //! points comes first round the ellipse.
 //!
-//! **Only this shape was searched.** "Bar or frustum cut along the seam" and
-//! "plane through a ball" — the other two families a plane's conic sweep
-//! shows up in (`along_a_crossing.rs`'s `WhichWayItWinds::About` arm) — are
-//! not yet built below working size `1`; that is Q2002's own follow-up.
+//! The same gap shows up for "frustum cut near its seam": swap the cone's
+//! sharp apex for `a_frustum_seamed_towards`'s flat near cap, cut at a
+//! three-hundredth of the far end (`far / 300`), and the same 13-scale x
+//! 17-size x 4-rule grid merges two corners the volume reading would have
+//! refused at, among others, a shape scale of `0.26` and a working size of
+//! `0.75`. The seam's own direction never matters to where the two faces of
+//! the cube cross the cone (`probe_family_a_angles`, run during this search,
+//! found the same crossing azimuth whichever of the four whole directions the
+//! seam was cut towards), so this result stands for "bar cut along its seam"
+//! too — a bar is `a_frustum_seamed_towards` with its near and far close
+//! together; a true cylinder-faced bar, which needs a slope of zero and so
+//! cannot be built this way, was not tried separately.
+//! `a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_one_merges_the_same_shape_as_at_full_scale`
+//! pins the `0.26`/`0.75` merge the same way. **No wrong answer came of it
+//! either.**
+//!
+//! A near cap cut this close (`far / 300`) sometimes refuses earlier, with
+//! `CannotTellTheCellsOfAFaceApart`, before the crossing is even reached —
+//! seen at shape scales `0.1` to `0.4` crossed with working sizes `0.1` to
+//! `0.9` in the same grid. That is a different question from the one under
+//! search here (a face classification refusal, not a crossing order one), and
+//! was not traced further.
+//!
+//! # Plane through a ball
+//!
+//! The same gap shows up a third time for "plane through a ball", the one
+//! remaining family a plane's conic sweep runs through
+//! (`along_a_crossing.rs`'s `WhichWayItWinds::About` arm, reached for a plane
+//! and a sphere at `along_a_crossing.rs:401-402` unconditionally — a sphere
+//! has no apex or seam to force the walk's start near, so the construction
+//! that reaches it mirrors the cone's apex case directly: a cube stood on its
+//! corner with a ball centred at the cube's own centre, its radius the
+//! cube's half-diagonal, so the cube's one near vertex sits exactly on the
+//! ball's surface. Several of the cube's faces then cut the ball in circles
+//! close to that one vertex, the same way three of the cube's faces cut the
+//! cone's apex in ellipses.
+//!
+//! A `5`-scale x `7`-size x `4`-rule grid (narrower than the cone's own,
+//! since a ball has no seam direction to vary) finds the gap at, among
+//! others, a shape scale of `0.18` and a working size of `0.6` — the cone's
+//! own pin values, shared by chance of the two narrower grids overlapping,
+//! not because the shapes are the same.
+//! `a_tolerant_fuse_of_a_cube_on_a_ball_through_its_corner_below_working_size_one_merges_the_same_shape_as_at_full_scale`
+//! pins that merge the same way the other two families' tests do. **No wrong
+//! answer came of this one either.**
+//!
+//! A first attempt at this family — tilting `a_ball_grazing_the_z_axis`'s
+//! wall, and later a three-solid construction meant to separate the walk's
+//! start from the forced collinearity a shared edge gives a block's own
+//! corner — never reached the crossing-order predicate at all, refusing
+//! earlier on an unrelated question at every tried tolerance. Reading
+//! `cascade.rs`'s `decide` (the function every predicate in this file's
+//! search goes through) explains why: *"the one case that comes back
+//! `Decision::Undecidable` is an interval that straddles zero when level 3
+//! cannot run. For exact `f64` inputs that never happens, short of an
+//! intermediate product overflowing or falling into the subnormals."* Making
+//! a line through a ball's circle *exactly* collinear or *exactly* tangent
+//! does not reach `Undecidable` by itself — stored, exact coordinates always
+//! get a certified sign at the exact level, however close together. What
+//! reaches it is the ordinary thing every other family's gap search relies
+//! on: a point that already is not exact, because the walk's three points in
+//! a real fuse are new vertices, built by arithmetic on a genuine crossing,
+//! not hand-picked exact coordinates — the same way the cone's and the
+//! frustum's gaps were found, by a grid search over ordinary shapes rather
+//! than by engineering an exact degeneracy.
 
 mod cones;
 
-use cones::a_pointed_cone;
+use cones::{a_frustum_seamed_towards, a_pointed_cone};
 use rcad_geom::{
     Axis, Isometry, MeetOfThree, Point, Scale, Surface, Vector, meet_of_three_surfaces,
 };
@@ -305,6 +366,231 @@ fn a_tolerant_fuse_of_a_cube_on_a_cones_apex_refuses_a_sweep_past_an_area_budget
             "{rule:?} {cone_first}: {enclosure}"
         );
     }
+}
+
+/// The gap found below a working size of `1` for "plane through a ball": a
+/// cube stood on its corner, with that corner's own vertex sitting exactly on
+/// a ball centred where the cube is — the ball's radius is the cube's own
+/// half-diagonal, `3 * scale * sqrt(3)` for a side of `6 * scale` — the same
+/// construction as the cone's apex case above, with the cone's single apex
+/// point swapped for the one cube vertex a sphere has no apex to match.
+/// Several of the cube's faces cut the ball in circles, each ordered by the
+/// sweep `((one − from) × (other − from)) · n`, with `n` the face's normal:
+/// `WhichWayItWinds::About` is reached here exactly as it is for a plane and
+/// a pipe or a cone, `along_a_crossing.rs:401-402` computing the same normal
+/// unconditionally for a plane and a sphere. Searching the cone's own
+/// 5-scale x 7-size x 4-rule grid (the frustum's two scale/size lists narrowed
+/// to keep the search small, since a ball has no seam direction to vary)
+/// finds the same area-acceptable, volume-not-acceptable gap, at a shape
+/// scale of `0.18` and a working size of `0.6` among others — the cone's own
+/// pin values, which the half-diagonal construction shares by chance of the
+/// grids overlapping, not by the shapes being the same.
+///
+/// **The merged answer is not wrong**, by the same similarity-transform
+/// argument as the cone's apex case: scaled up by `1 / 0.18` and run at a
+/// 10 mm working size, comfortably past the `2.73` mm where an area budget
+/// covers the widest sweep, the merge gives a solid with the same face, wire
+/// and shell counts.
+#[test]
+fn a_tolerant_fuse_of_a_cube_on_a_ball_through_its_corner_below_working_size_one_merges_the_same_shape_as_at_full_scale()
+ {
+    let gap_scale = 0.18;
+    let gap_size = 0.6;
+    let gap_policy = Policy::tolerant(gap_size);
+    let mut gap_model = Model::new(Scale::millimetres(gap_size).expect("a working size"));
+    let gap_ball = gap_model
+        .add_ball(
+            3.0 * gap_scale * 3.0f64.sqrt(),
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a finite shift"),
+        )
+        .expect("a positive radius");
+    let gap_cube = a_corner_up_cube_round_the_origin(&mut gap_model, 6.0 * gap_scale);
+    let mut gap_log = ProvenanceLog::new();
+    let gap_fused = gap_model
+        .fuse(
+            &[gap_ball],
+            &[gap_cube],
+            Rule::Union,
+            &gap_policy,
+            &mut gap_log,
+        )
+        .expect("the gap case answers Ok");
+
+    gap_log
+        .records()
+        .iter()
+        .find(|record| {
+            record.predicate() == ALONG_A_CROSSING
+                && record.measures() == Measures::Area
+                && gap_policy
+                    .wobble_is_acceptable(Measures::Area.wobble_of(record.enclosure(), gap_size))
+                && !gap_policy
+                    .wobble_is_acceptable(Measures::Volume.wobble_of(record.enclosure(), gap_size))
+        })
+        .expect("the area reading merges a sweep the volume reading would have refused");
+
+    let gap_solid = gap_model
+        .solid(gap_fused.solids()[0])
+        .expect("the fuse's one solid");
+    let gap_shape = (
+        gap_solid.faces().count(),
+        gap_solid.faces().flat_map(|face| face.wires()).count(),
+        gap_solid.shells().count(),
+    );
+
+    let reference_size = 10.0;
+    let mut reference_model =
+        Model::new(Scale::millimetres(reference_size).expect("a working size"));
+    let reference_ball = reference_model
+        .add_ball(
+            3.0 * 3.0f64.sqrt(),
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a finite shift"),
+        )
+        .expect("a positive radius");
+    let reference_cube = a_corner_up_cube_round_the_origin(&mut reference_model, 6.0);
+    let reference_fused = reference_model
+        .fuse(
+            &[reference_ball],
+            &[reference_cube],
+            Rule::Union,
+            &Policy::tolerant(reference_size),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a working size of 10, well past 2.73, merges comfortably under the area budget");
+    let reference_solid = reference_model
+        .solid(reference_fused.solids()[0])
+        .expect("the fuse's one solid");
+    let reference_shape = (
+        reference_solid.faces().count(),
+        reference_solid
+            .faces()
+            .flat_map(|face| face.wires())
+            .count(),
+        reference_solid.shells().count(),
+    );
+
+    assert_eq!(gap_fused.solids().len(), 1, "one solid, the union of both");
+    assert_eq!(
+        reference_fused.solids().len(),
+        1,
+        "one solid, the union of both"
+    );
+    assert_eq!(
+        gap_shape, reference_shape,
+        "the gap case's topology should match the full-scale reference's"
+    );
+}
+
+/// The gap found below a working size of `1` for "frustum cut near its
+/// seam": the cone's apex case's shape, with `a_frustum_seamed_towards`'s
+/// flat near cap (cut at `far / 300`) in place of the cone's sharp point,
+/// shrunk to a shape scale of `0.26` and fused at a `0.75` mm working size,
+/// merges the two corners round the ellipse under the area reading where the
+/// volume reading would have refused.
+///
+/// **The merged answer is not wrong**, by the same similarity-transform
+/// argument as the cone's apex case: scaled up by `1 / 0.26` and run at a
+/// 10 mm working size, comfortably past the `2.73` mm where an area budget
+/// covers the widest sweep, the merge gives a solid with the same face, wire
+/// and shell counts.
+#[test]
+fn a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_one_merges_the_same_shape_as_at_full_scale()
+ {
+    let gap_scale = 0.26;
+    let gap_size = 0.75;
+    let gap_policy = Policy::tolerant(gap_size);
+    let mut gap_model = Model::new(Scale::millimetres(gap_size).expect("a working size"));
+    let gap_far = 3.0 * gap_scale;
+    let gap_frustum = a_frustum_seamed_towards(
+        &mut gap_model,
+        2.0,
+        gap_far / 300.0,
+        gap_far,
+        [-1.0, 0.0],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a frustum");
+    let gap_cube = a_corner_up_cube_round_the_origin(&mut gap_model, 6.0 * gap_scale);
+    let mut gap_log = ProvenanceLog::new();
+    let gap_fused = gap_model
+        .fuse(
+            &[gap_frustum],
+            &[gap_cube],
+            Rule::Union,
+            &gap_policy,
+            &mut gap_log,
+        )
+        .expect("the gap case answers Ok");
+
+    gap_log
+        .records()
+        .iter()
+        .find(|record| {
+            record.predicate() == ALONG_A_CROSSING
+                && record.measures() == Measures::Area
+                && gap_policy
+                    .wobble_is_acceptable(Measures::Area.wobble_of(record.enclosure(), gap_size))
+                && !gap_policy
+                    .wobble_is_acceptable(Measures::Volume.wobble_of(record.enclosure(), gap_size))
+        })
+        .expect("the area reading merges a sweep the volume reading would have refused");
+
+    let gap_solid = gap_model
+        .solid(gap_fused.solids()[0])
+        .expect("the fuse's one solid");
+    let gap_shape = (
+        gap_solid.faces().count(),
+        gap_solid.faces().flat_map(|face| face.wires()).count(),
+        gap_solid.shells().count(),
+    );
+
+    let reference_size = 10.0;
+    let mut reference_model =
+        Model::new(Scale::millimetres(reference_size).expect("a working size"));
+    let reference_far = 3.0;
+    let reference_frustum = a_frustum_seamed_towards(
+        &mut reference_model,
+        2.0,
+        reference_far / 300.0,
+        reference_far,
+        [-1.0, 0.0],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a frustum");
+    let reference_cube = a_corner_up_cube_round_the_origin(&mut reference_model, 6.0);
+    let reference_fused = reference_model
+        .fuse(
+            &[reference_frustum],
+            &[reference_cube],
+            Rule::Union,
+            &Policy::tolerant(reference_size),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a working size of 10, well past 2.73, merges comfortably under the area budget");
+    let reference_solid = reference_model
+        .solid(reference_fused.solids()[0])
+        .expect("the fuse's one solid");
+    let reference_shape = (
+        reference_solid.faces().count(),
+        reference_solid
+            .faces()
+            .flat_map(|face| face.wires())
+            .count(),
+        reference_solid.shells().count(),
+    );
+
+    assert_eq!(gap_fused.solids().len(), 1, "one solid, the union of both");
+    assert_eq!(
+        reference_fused.solids().len(),
+        1,
+        "one solid, the union of both"
+    );
+    assert_eq!(
+        gap_shape, reference_shape,
+        "the gap case's topology should match the full-scale reference's"
+    );
 }
 
 /// A cube of side six with its diagonal brought upright and its middle at the
