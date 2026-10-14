@@ -290,7 +290,11 @@ fn a_tolerant_fuse_of_a_cube_on_a_cones_apex_refuses_a_sweep_past_an_area_budget
 /// A cube of side six with its diagonal brought upright and its middle at the
 /// origin, built as `a_plane_cut_along_a_cones_other_nappe.rs` builds it.
 fn a_corner_up_cube_of_side_six_round_the_origin(model: &mut Model) -> SolidKey {
-    let side = 6.0;
+    a_corner_up_cube_round_the_origin(model, 6.0)
+}
+
+/// [`a_corner_up_cube_of_side_six_round_the_origin`], scaled to `side`.
+fn a_corner_up_cube_round_the_origin(model: &mut Model, side: f64) -> SolidKey {
     let diagonal = Axis::new(Point::origin(), Vector::new(1.0, -1.0, 0.0)).expect("a direction");
     let stood = Isometry::rotation(&diagonal, (1.0f64 / 3.0).sqrt().acos()).expect("a finite turn");
     let placed = Isometry::translation(Vector::new(0.0, 0.0, -side * 3.0f64.sqrt() / 2.0))
@@ -302,4 +306,58 @@ fn a_corner_up_cube_of_side_six_round_the_origin(model: &mut Model) -> SolidKey 
     model
         .add_extrusion(&square, side, &placed)
         .expect("a square extrudes")
+}
+
+#[test]
+fn probe_search_cube_cone_below_one() {
+    let scales: [f64; 13] = [
+        0.5, 0.45, 0.4, 0.35, 0.3, 0.28, 0.26, 0.24, 0.22, 0.2, 0.18, 0.15, 0.1,
+    ];
+    let sizes: [f64; 17] = [
+        0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9,
+    ];
+    for scale in scales {
+        for size in sizes {
+            let policy = Policy::tolerant(size);
+            for (rule, cone_first) in EVERY_FUSE {
+                let mut model = Model::new(Scale::millimetres(size).expect("ws"));
+                let cone = a_pointed_cone(&mut model, 2.0, 3.0 * scale);
+                let cube = a_corner_up_cube_round_the_origin(&mut model, 6.0 * scale);
+                let (arguments, tools) = if cone_first {
+                    ([cone], [cube])
+                } else {
+                    ([cube], [cone])
+                };
+                let mut log = ProvenanceLog::new();
+                let fused = model.fuse(&arguments, &tools, rule, &policy, &mut log);
+                let records: Vec<_> = match &fused {
+                    Ok(_) => log.records().to_vec(),
+                    Err(Error::Undecidable { records }) => records.records().to_vec(),
+                    Err(other) => {
+                        println!(
+                            "scale={scale} size={size} rule={rule:?} cone_first={cone_first}: other error {other:?}"
+                        );
+                        continue;
+                    }
+                };
+                for record in &records {
+                    if record.predicate() != ALONG_A_CROSSING {
+                        continue;
+                    }
+                    if record.measures() != Measures::Area {
+                        continue;
+                    }
+                    let e = record.enclosure();
+                    let area_ok = policy.wobble_is_acceptable(Measures::Area.wobble_of(e, size));
+                    let vol_ok = policy.wobble_is_acceptable(Measures::Volume.wobble_of(e, size));
+                    if area_ok && !vol_ok {
+                        println!(
+                            "GAP scale={scale} size={size} rule={rule:?} cone_first={cone_first} fused_ok={} e={e:e} area_ok={area_ok} vol_ok={vol_ok}",
+                            fused.is_ok()
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
