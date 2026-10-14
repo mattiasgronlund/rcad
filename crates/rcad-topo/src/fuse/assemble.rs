@@ -102,6 +102,7 @@ use crate::{
 use super::arrange::{
     a_plane_cuts_a_cone_in_rulings, a_plane_lies_along_a_pipes_axis, agreement_of_two_planes,
     name_of_surface_bits, name_of_the_surface_either_way_round, two_pipes_run_along_one_line,
+    where_two_halves_meet,
 };
 use super::bake::{grown_by, what_writing_the_corner_down_cost};
 use super::select::Chosen;
@@ -448,7 +449,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
                 to,
                 piece.ancestors[0],
                 false,
-                &corners,
+                &mut corners,
                 policy,
                 log,
             )?;
@@ -3402,7 +3403,7 @@ impl Assembly {
     /// **Such a run cannot be named as one edge.** An arc is told from its
     /// sibling by the way `∇S × ∇T` runs at one of its ends
     /// ([`Edge::the_way_across_the_chord_into_the_arc`]), and at a point where
-    /// the two surfaces are tangent that is exactly nought. Two pipes of one
+    /// the two surfaces are tangent that is nought. Two pipes of one
     /// width whose axes meet cross in four half ellipses that all run between
     /// the two points their walls touch at, and the arrangement cuts each half
     /// at its middle so that it has a corner of its own
@@ -3413,8 +3414,10 @@ impl Assembly {
     /// cap planes (`two_equal_bars_leaning_at_each_other.rs`, Q1660). Kept,
     /// the answer is the one the fuse gives where nothing is joined.
     ///
-    /// The test is the same exact one the naming makes, so a run is kept in
-    /// pieces exactly where it could not be named whole. A run that closes up
+    /// The test is the one the naming makes, [`the_way_the_crossing_runs`],
+    /// which knows a touch point by how the arrangement named its corner and
+    /// not by the rounded point (`docs/decisions.md` §448.3), so a run is kept
+    /// in pieces exactly where it could not be named whole. A run that closes up
     /// has one corner at both ends and goes right round, which needs no
     /// naming, and a straight one is named by its two ends alone.
     fn the_corners_of_each_run_between_two_tangent_points(
@@ -3447,10 +3450,10 @@ impl Assembly {
                     return false;
                 };
                 let edge = &self.edges[*run];
-                let [mine, partner] = edge.carried_by;
                 let tangent_at = |corner: usize| {
-                    let at = self.corners[corner].point;
-                    gradient_of(&mine, at).cross(gradient_of(&partner, at)) == Vector::zero()
+                    let corner = &self.corners[corner];
+                    the_way_the_crossing_runs(&edge.carried_by, corner, corner.point)
+                        == Vector::zero()
                 };
                 one != other && !edge.lies_on_two_planes() && tangent_at(one) && tangent_at(other)
             })
@@ -4563,6 +4566,12 @@ struct Corner {
     /// here, so that `wobble` is a move the fuse chose and not only rounding
     /// (`docs/decisions.md` §417.7).
     moved_by_the_policy: bool,
+    /// Each pair of pipes of one width whose walls touch here, as the
+    /// arrangement named the corner ([`mark_where_two_pipes_touch`]),
+    /// written as [`a_pair_of_pipes`] writes it. The two are tangent here, and
+    /// that is carried from how the corner was built rather than read off its
+    /// rounded point (`docs/decisions.md` §448.3).
+    where_pipes_touch: Vec<[[u64; 9]; 2]>,
 }
 
 /// One edge of the result.
@@ -4791,11 +4800,15 @@ impl Edge {
     /// the same picker that way (§312.6).
     ///
     /// **Unless the two surfaces are tangent there**, where `∇S × ∇T` is
-    /// exactly nought and says nothing: then it is read at the other end. Two
-    /// bars of one radius whose axes meet cross in two ellipses that touch at
-    /// two such points, and every arc of them runs from one (Q1660). Whether
-    /// the cross is nought does not follow the order of the fuse's arguments,
-    /// since swapping them only turns its sign.
+    /// nought and says nothing: then it is read at the other end. Two bars of
+    /// one radius whose axes meet cross in two ellipses that touch at two such
+    /// points, and every arc of them runs from one (Q1660). That a corner is
+    /// one of them is read off how the arrangement named it and not off its
+    /// rounded point, where the cross is a rounding wherever `f64` does not
+    /// hold the point ([`the_way_the_crossing_runs`], `docs/decisions.md`
+    /// §448.3). Whether the cross is nought does not follow the order of the
+    /// fuse's arguments, since swapping them only turns its sign, and the pair
+    /// of pipes a corner is marked with is named alike either way round.
     ///
     /// A dot of exactly zero is `None`: either the named direction lay along
     /// its chord, which the old code refused too, or the crossing's direction
@@ -4815,10 +4828,8 @@ impl Edge {
             let chord = corners[self.other_end_than(corner)].point - corners[corner].point;
             direction * chord.dot(chord) - chord * chord.dot(direction)
         };
-        let [mine, partner] = self.carried_by;
         let crossing_at = |corner: usize| {
-            let at = corners[corner].point;
-            gradient_of(&mine, at).cross(gradient_of(&partner, at))
+            the_way_the_crossing_runs(&self.carried_by, &corners[corner], corners[corner].point)
         };
         let [one, other] = self.ends;
         let [first, second] =
@@ -5532,6 +5543,7 @@ fn corner_of(
                 wobble: 0.0,
                 from: Some(vertex.key()),
                 moved_by_the_policy: false,
+                where_pipes_touch: Vec::new(),
             });
             made.len() - 1
         })
@@ -7160,6 +7172,7 @@ impl Corners {
                     wobble,
                     from: was,
                     moved_by_the_policy,
+                    where_pipes_touch: Vec::new(),
                 });
                 self.at.insert(exactly_at(at), self.made.len() - 1);
                 self.made.len() - 1
@@ -7720,7 +7733,7 @@ impl Edges {
         to: usize,
         face: FaceKey,
         turned_round: bool,
-        corners: &Corners,
+        corners: &mut Corners,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Side> {
@@ -7754,10 +7767,11 @@ impl Edges {
                 already
             }
             None => {
+                mark_where_two_pipes_touch(corners, &carried_by, [from, to]);
                 let arc = if from == to {
                     WhichArc::TheOnlyOne
                 } else {
-                    which_arc_this_is(meet, [from, to])?
+                    which_arc_this_is(meet, [from, to], &corners.made)?
                 };
                 self.made.push(Edge {
                     ends: [from.min(to), from.max(to)],
@@ -7942,9 +7956,11 @@ struct Lid {
 /// [`FaceMeet::material_side`] already holds. **No point on the arc is built.**
 ///
 /// **Where the two surfaces are tangent at the first corner** `∇S × ∇T` is
-/// exactly nought there, so the arc is named from the corner it stops at
-/// instead, leaving it backwards along the same signed direction (Q1660: the
-/// two points two bars of one radius whose axes meet touch at).
+/// nought there, so the arc is named from the corner it stops at instead,
+/// leaving it backwards along the same signed direction (Q1660: the two points
+/// two bars of one radius whose axes meet touch at). That they touch there is
+/// read off the corner and not off its rounded point
+/// ([`the_way_the_crossing_runs`]).
 ///
 /// # Errors
 ///
@@ -7963,23 +7979,25 @@ struct Lid {
 /// If the material side is anything but [`Decision::Neg`] or [`Decision::Pos`].
 /// [`FaceMeet::material_side`] is written from which way round the arrangement
 /// walked the arc and costs no arithmetic, so anything else is a bug here.
-fn which_arc_this_is(meet: &FaceMeet, [starts_at, stops_at]: [usize; 2]) -> Result<WhichArc> {
+fn which_arc_this_is(
+    meet: &FaceMeet,
+    [starts_at, stops_at]: [usize; 2],
+    corners: &[Corner],
+) -> Result<WhichArc> {
     match the_crossing_of_these_runs_straight(&meet.carried_by) {
         Some(true) => return Ok(WhichArc::TheOnlyOne),
         Some(false) => {}
         None => return Err(Error::ACrossingThisCannotBeOrderedAlong),
     }
-    let [mine, partner] = meet.carried_by;
-    let along_the_crossing_at = |end: &MeetPoint| {
-        let at = middle_of(end.point());
-        gradient_of(&mine, at).cross(gradient_of(&partner, at))
+    let along_the_crossing_at = |end: &MeetPoint, corner: usize| {
+        the_way_the_crossing_runs(&meet.carried_by, &corners[corner], middle_of(end.point()))
     };
     let forwards = match meet.material_side {
         Decision::Neg => 1.0,
         Decision::Pos => -1.0,
         other => panic!("a side of a face was walked with no material side: {other:?}"),
     };
-    let leaving_the_start = along_the_crossing_at(&meet.ends[0]);
+    let leaving_the_start = along_the_crossing_at(&meet.ends[0], starts_at);
     if leaving_the_start != Vector::zero() {
         return Ok(WhichArc::LeavingACorner {
             corner: starts_at,
@@ -7988,8 +8006,75 @@ fn which_arc_this_is(meet: &FaceMeet, [starts_at, stops_at]: [usize; 2]) -> Resu
     }
     Ok(WhichArc::LeavingACorner {
         corner: stops_at,
-        towards: along_the_crossing_at(&meet.ends[1]) * -forwards,
+        towards: along_the_crossing_at(&meet.ends[1], stops_at) * -forwards,
     })
+}
+
+/// Mark each of `ends` that the arrangement named as one of the two places
+/// the walls of the two pipes `carried_by` touch, so that
+/// [`the_way_the_crossing_runs`] knows them for points the two are tangent at.
+///
+/// **The arrangement names them and does not find them**: two pipes of one
+/// width whose axes meet cross in four half ellipses, `intersect` cuts the
+/// ellipses at the two places the walls touch
+/// (`four_half_ellipses_where_two_pipes_of_one_width_meet`), and
+/// `Arrangement::place_where_two_halves_meet` names those two `[a, b, b]`,
+/// with `which` 0 or 1 ([`where_two_halves_meet`]). `carried_by` is the pair
+/// the face's arrangement named them with, and both ends were made by
+/// [`Corners::of`] just before, so each name that is an end is in
+/// [`Corners::named`] under the name its point goes by.
+///
+/// The touch is carried from how the corner was built and not read off its
+/// rounded point, where `∇S × ∇T` is a rounding wherever `f64` does not hold
+/// the point (`docs/decisions.md` §448.3).
+fn mark_where_two_pipes_touch(corners: &mut Corners, carried_by: &[Surface; 2], ends: [usize; 2]) {
+    let Some(pair) = a_pair_of_pipes(carried_by) else {
+        return;
+    };
+    let named = names_of_the_three_surfaces(&where_two_halves_meet(&carried_by[0], &carried_by[1]));
+    for which in 0..2 {
+        let name = corners.goes_by(CornerName::Meet(named, which));
+        let Some(&corner) = corners.named.get(&name) else {
+            continue;
+        };
+        if !ends.contains(&corner) {
+            continue;
+        }
+        let touching = &mut corners.made[corner].where_pipes_touch;
+        if !touching.contains(&pair) {
+            touching.push(pair);
+        }
+    }
+}
+
+/// `∇S × ∇T` of the two surfaces `carried_by` at `at`, a rounding of `corner`:
+/// the way their crossing runs there. **Exactly nought where `corner` is one of
+/// the places their two walls touch** ([`mark_where_two_pipes_touch`]), since
+/// the two pipes are tangent there and the gradients are parallel.
+///
+/// Read off the rounded point alone, it is nought there only where `f64` holds
+/// the place: two bars of one radius, one turned 120° about `z` onto a
+/// direction a hair off `z = 0`, touch at `y = ±6.4e−17`, and the cross there is
+/// `(1.6e−17, 0, 0)` (Q1660). An arc from such a corner was then named by that
+/// rounding and picked the wrong way round its ellipse (Q1793, Q1953).
+fn the_way_the_crossing_runs(carried_by: &[Surface; 2], corner: &Corner, at: Point) -> Vector {
+    if a_pair_of_pipes(carried_by).is_some_and(|pair| corner.where_pipes_touch.contains(&pair)) {
+        return Vector::zero();
+    }
+    let [one, other] = carried_by;
+    gradient_of(one, at).cross(gradient_of(other, at))
+}
+
+/// The two pipes `carried_by`, each named either way round and the two
+/// sorted, so that the pair is named alike whichever of the two comes first
+/// and whichever way each stores its axis; `None` unless both are pipes.
+fn a_pair_of_pipes(carried_by: &[Surface; 2]) -> Option<[[u64; 9]; 2]> {
+    let [Surface::Cylinder(_), Surface::Cylinder(_)] = carried_by else {
+        return None;
+    };
+    let mut pair = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
+    pair.sort_unstable();
+    Some(pair)
 }
 
 /// Whether these two surfaces cross in straight lines, so that two corners on
@@ -10627,6 +10712,7 @@ mod tests {
                 wobble: 0.0,
                 from: None,
                 moved_by_the_policy: false,
+                where_pipes_touch: Vec::new(),
             }],
             edges: vec![Edge {
                 ends: [0, 0],
@@ -10715,6 +10801,7 @@ mod tests {
                     wobble: 0.0,
                     from: None,
                     moved_by_the_policy: false,
+                    where_pipes_touch: Vec::new(),
                 }],
                 edges: vec![Edge {
                     ends: [0, 0],
@@ -10775,6 +10862,7 @@ mod tests {
             wobble: 0.0,
             from: None,
             moved_by_the_policy: false,
+            where_pipes_touch: Vec::new(),
         };
         let edge = |ends: [usize; 2]| Edge {
             ends,
@@ -10843,6 +10931,7 @@ mod tests {
             wobble: 0.0,
             from: None,
             moved_by_the_policy: false,
+            where_pipes_touch: Vec::new(),
         };
         let assembly = Assembly {
             corners: vec![
