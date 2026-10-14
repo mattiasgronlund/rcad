@@ -2722,8 +2722,8 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// points and the two faces stop drawing the same side (`docs/decisions.md`
 /// §285.4). The zero ladder in [`how_much_space_a_curved_solid_encloses`]
 /// already retried a fold one step on (§208.3); this is the same retry at the
-/// first mesh. It is asked further down than a crossing is, for the reason
-/// under "What stops a fold".
+/// first mesh. It is asked down to a floor of its own, for the reasons under
+/// "What stops a fold".
 ///
 /// # Why this is not a fixed finer deflection
 ///
@@ -2788,13 +2788,52 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// What it costs is a mesh whose sides across the flattest face are about
 /// `closest / √2`, which is the size of the finest feature the corners show.
 ///
-/// **It still ends.** The halving from half the box's width reaches the floor
-/// in about `log₂(3ρ·width/closest²)` rungs, and a solid that folds at every
-/// deflection walks those rungs and is refused with the finest fold. The three
-/// refusals that end a crossing's ladder before its floor end this one too.
-/// Where `closest²` rounds to zero, or `ρ` is out of range, the floor is zero,
-/// and `Deflection::of` refusing a length that is not above zero ends it, as it
-/// ends the zero ladder.
+/// **And never more than [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] halvings below
+/// the top**, whatever `closest` says, since `closest` can be far smaller than
+/// any side a mesh would split. The bar `2⁻⁴⁰` wider than `1`, less the tilted
+/// block, in `an_ellipse_start_between_two_places.rs` leaves a fin outside
+/// `x = −17` that is `2⁻⁴⁰` thick and `2.7e-6` across. The block's strip of
+/// side between the fin's two corners has only straight edges, and the bar's
+/// wall draws the same side over it, from `(−17, −1.35e-6, 0)` to
+/// `(−17, 1.35e-6, 2.558)`. The floor above put the last rung some 53 halvings
+/// below the top. The fold was the same at every rung from 5 down to `1.2e-3`
+/// and 24672 points, each rung cost 2.5 to 5 times the last, and both policies
+/// were still meshing after 465 s (Q1869). With the cap the last rung is
+/// `6.1e-4`, and both are refused within 1.8 s.
+///
+/// The cap is **a cost bound and not a proof**: a fold that only a mesh
+/// fourteen rungs down would split is refused. It was set past what clears
+/// today. A throwaway probe of this ladder over `just t -p rcad-topo`, 2087
+/// tests, and `just test-slow`, 73, saw it clear a fold 469 and 28 times, never
+/// past the ninth rung — room `7.8e-3` under a top room of `2`, 657 points, in
+/// `every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates`.
+/// Thirteen halvings is five rungs past that.
+///
+/// **A stop on a fold no finer mesh can split was tried first, and not taken**
+/// (Q1869). It refused a fold at once when every triangle using the side had
+/// corners no finer mesh moves, and was charged no more than the least room
+/// any face of the solid is cut in: a triangle charged under its room is not
+/// split, and a flat face with straight edges is cut the same at every
+/// deflection. On the fin that does not hold. The wall's triangle from
+/// `(−17, 1.35e-6, 2.558)` to `(−17, −1.35e-6, 0)` to `(−17, −1.35e-6, 2.558)`
+/// is charged `2.5e-12`, under that least room of `3.6e-12`, but the bar's long
+/// top ellipse runs between its two upper corners: three points along it at
+/// the coarsest, and a walk of it at the least room is refused for too many
+/// points. The triangle's circle in the wall's chart has a radius near `1.46`,
+/// so a point a finer mesh adds along that ellipse can flip the triangle away
+/// by Delaunay with no charge changing. So can the chart's own scaling
+/// (`rcad-mesh`'s `how_this_domain_is_scaled`), and so can a cut placed
+/// elsewhere in the face. The stop could not show the fold stays, and in both
+/// runs above it never fired.
+///
+/// **It ends in at most fourteen rungs.** A solid that folds at every
+/// deflection walks the halving from half the box's width down to the higher
+/// of the two floors, `log₂(3ρ·width/closest²)` rungs or fourteen, whichever is
+/// fewer, and is refused with the finest fold. The floor of the rung after a
+/// crossing is the corner floor, so a solid that crosses at some deflections
+/// and folds at others can go further. The three refusals that end a crossing's
+/// ladder before its floor end this one too, and so does `Deflection::of`
+/// refusing a room that is not above zero, as on a box with no width.
 ///
 /// Whichever ends it, **the finest mesh's crossing or fold is what is handed
 /// back**. A face that meshed at a finer deflection was not what stopped the
@@ -2811,9 +2850,10 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 ///
 /// # Errors
 ///
-/// The finest mesh's crossing or fold when no finer mesh clears it, and a finer
-/// mesh's refusal when it is about something else — which is the solid's next
-/// blocker and the one worth naming.
+/// The finest mesh's crossing or fold when no mesh down to its floor clears it
+/// — and each floor is a cost bound, so a mesh past it might have — and a
+/// finer mesh's refusal when it is about something else, which is the solid's
+/// next blocker and the one worth naming.
 fn the_coarsest_mesh_whose_sides_do_not_cross(
     view: SolidView<'_>,
     policy: &Policy,
@@ -2829,13 +2869,18 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     let Some(closest) = how_close_two_corners_come(view) else {
         return Err(finest_refusal);
     };
+    let top = {
+        let (low, high) = (low.coordinates(), high.coordinates());
+        (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0
+    };
     let finest_for_a_crossing = closest / 2.0;
     let finest_for_a_fold = match how_flat_a_curved_face_gets(view, [low, high]) {
         Some(flattest) if flattest > 0.0 => {
             finest_for_a_crossing.min(closest * closest / (6.0 * flattest))
         }
         _ => finest_for_a_crossing,
-    };
+    }
+    .max(top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO));
     let finest = |refusal: &Error| {
         if its_sides_cross(refusal) {
             finest_for_a_crossing
@@ -2843,8 +2888,7 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
             finest_for_a_fold
         }
     };
-    let (low, high) = (low.coordinates(), high.coordinates());
-    let mut room = (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0;
+    let mut room = top;
     while room >= finest(&finest_refusal) {
         let Ok(less) = Deflection::of(room) else {
             break;
@@ -2866,6 +2910,13 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     }
     Err(finest_refusal)
 }
+
+/// How many times [`the_coarsest_mesh_whose_sides_do_not_cross`] halves its
+/// room below half the box's width before it stops asking a fold again: a fold
+/// is asked at that top room and at most thirteen rungs under it, and refused
+/// with the finest fold when every one folds. A cost bound and not a proof;
+/// that function's doc says what it was set from, under "What stops a fold".
+const HALVINGS_A_FOLD_IS_ASKED_DOWN_TO: i32 = 13;
 
 /// Whether a finer mesh may clear what refused this one, because it is about
 /// where the mesh's own chords and cuts fell and not about the solid: its sides
