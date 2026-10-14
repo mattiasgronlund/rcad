@@ -1228,6 +1228,45 @@ mod tests {
         );
     }
 
+    /// **A trial whose far end the settling had not finished with is shortened,
+    /// and not kept.** A ball of radius 3 at `(0, 3, 5)` reaches across a pipe
+    /// of radius 2 up `z`, and the two cross in one loop. This is the frame the
+    /// coarsest mesh try of their union walks them in, and the seed and the room
+    /// are the ones it asks: the bottom of the loop, `(0, 2, 5 − √8)`, and
+    /// `1.7e307` (Q2014). The walk leaves the seed along `−x`. The first trial
+    /// cannot be settled, the four from `4.1e153` to `1.6e19` settle back onto
+    /// the seed exactly, and `4.0e9` lands `4.4` away with a bound of `11`, so
+    /// it settles back too. The trial `6.3e4` came back from a long way off:
+    /// Newton's moves, round by round, were `6.5e4 1.5e4 11 9.5 11 9.3 2.9 1.3`,
+    /// and the eight rounds ran out there. It was kept as the walk's first
+    /// point, `3.69` from the seed and known only to `0.21` of the crossing, so
+    /// the whole walk was published as known to `0.21`, where every other point
+    /// of it was known to `1.4e-15` or better. Eight more rounds move that point
+    /// `0.20`.
+    #[test]
+    fn a_trial_whose_far_end_has_not_finished_settling_is_shortened_and_not_kept() {
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, -1.0], 2.0);
+        let ball = a_ball([0.0, 3.0, 5.0], 3.0);
+        let start = Point::new(0.0, 1.9999999999999998, 2.1715728752538097);
+
+        let walked = march([&pipe, &ball], start, 1.685337313933421e307, 1 << 20)
+            .expect("a ball off a pipe's axis crosses it in one loop");
+
+        let gaps: Vec<f64> = core::iter::once(start)
+            .chain(walked.points.iter().copied())
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).length())
+            .collect();
+        println!("each point known to {:e}, gaps {gaps:?}", walked.deviation);
+        let shortest = gaps.iter().copied().fold(f64::INFINITY, f64::min);
+        assert!(
+            walked.deviation * 1e9 < shortest,
+            "each point known to {:e}, against a shortest step of {shortest:e}",
+            walked.deviation
+        );
+    }
+
     /// **The bound with the two surfaces' bend counted holds, and is the flat
     /// bound to within a factor of two, where a ball and a pipe nearly touch.**
     /// A ball of radius 1 and a pipe on its centre `2⁻⁴⁰` thinner cross in two
