@@ -15,7 +15,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Surface, Vector};
 use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Model, OnAFace, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{FaceView, Model, OnAFace, ProfileBuilder, Rule, SolidKey, SolidView};
 
 /// Where the plane cuts the bar: off the axis on either side, and through it.
 const CUTS: [f64; 6] = [0.5, 0.25, 0.125, -0.5, 0.75, 0.0];
@@ -73,51 +73,82 @@ fn a_half_bars_cut_face_holds_a_box_on_either_diagonal() {
             let mut model = a_model();
             let [_, half] = the_two_halves(&mut model, cut, bottom, height);
             let view = model.solid(half).expect("this model made the key");
-            let face = view
-                .faces()
-                .find(|face| match face.surface() {
-                    Surface::Plane(flat) => {
-                        flat.normal().components() == [1.0, 0.0, 0.0] && flat.offset() == cut
-                    }
-                    _ => false,
-                })
-                .expect("the half has the cut as a face");
-            let corners: Vec<[f64; 3]> = face
-                .wires()
-                .flat_map(|wire| wire.coedges())
-                .map(|side| side.start().point().coordinates())
-                .collect();
-            let [first, second, third, fourth] = corners[..] else {
-                panic!("the cut face is a rectangle: {corners:?}");
-            };
+            let (face, [first, second, third, fourth]) = the_cut_face(view, cut);
             for [from, to] in [
                 [first, third],
                 [third, first],
                 [second, fourth],
                 [fourth, second],
             ] {
-                let point = a_quarter_of_the_way(from, to);
-                let mut log = ProvenanceLog::new();
-                let said = view
-                    .face_holds_the_point(face.key(), point, &Policy::certified(), &mut log)
-                    .unwrap_or_else(|refused| {
-                        panic!("cut at x = {cut}, {point:?} towards {to:?}: {refused:?}")
-                    });
-                assert_eq!(said, OnAFace::Held, "cut at x = {cut}, {point:?}");
-                assert!(log.is_empty(), "a certified answer logs nothing: {log:?}");
+                let point = a_box_part_of_the_way(from, to, 4.0);
+                the_face_holds(view, face, point, &format!("cut at x = {cut}, {point:?}"));
             }
         }
     }
 }
 
-/// The point a quarter of the way from `from` to `to`, as a box one rounding
+/// The middle of the same rectangle, as a box a rounding wide, is on both its
+/// diagonals, so a half-line aimed at any of its four corners runs on through
+/// the opposite one. The fuse offers the middle of two opposite corners as a
+/// point inside a piece, and the face holds it.
+#[test]
+fn a_half_bars_cut_face_holds_a_box_at_its_middle() {
+    for cut in CUTS {
+        for (bottom, height) in BARS {
+            let mut model = a_model();
+            let [_, half] = the_two_halves(&mut model, cut, bottom, height);
+            let view = model.solid(half).expect("this model made the key");
+            let (face, [first, _, third, _]) = the_cut_face(view, cut);
+            let point = a_box_part_of_the_way(first, third, 2.0);
+            the_face_holds(view, face, point, &format!("cut at x = {cut}, {point:?}"));
+        }
+    }
+}
+
+/// The half's face on the plane `x = cut`, and its four corners in the order
+/// its wire runs.
+fn the_cut_face(view: SolidView<'_>, cut: f64) -> (FaceView<'_>, [[f64; 3]; 4]) {
+    let face = view
+        .faces()
+        .find(|face| match face.surface() {
+            Surface::Plane(flat) => {
+                flat.normal().components() == [1.0, 0.0, 0.0] && flat.offset() == cut
+            }
+            _ => false,
+        })
+        .expect("the half has the cut as a face");
+    let corners: Vec<[f64; 3]> = face
+        .wires()
+        .flat_map(|wire| wire.coedges())
+        .map(|side| side.start().point().coordinates())
+        .collect();
+    let Ok(rectangle) = corners.clone().try_into() else {
+        panic!("the cut face is a rectangle: {corners:?}");
+    };
+    (face, rectangle)
+}
+
+/// `face` holds `point`, certified, and logs nothing on the way.
+fn the_face_holds(view: SolidView<'_>, face: FaceView<'_>, point: PredicatePoint, asked: &str) {
+    let mut log = ProvenanceLog::new();
+    let said = view
+        .face_holds_the_point(face.key(), point, &Policy::certified(), &mut log)
+        .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+    assert_eq!(said, OnAFace::Held, "{asked}");
+    assert!(
+        log.is_empty(),
+        "{asked}: a certified answer logs nothing: {log:?}"
+    );
+}
+
+/// The point `1 / parts` of the way from `from` to `to`, as a box one rounding
 /// wide either side along every axis the two differ on.
-fn a_quarter_of_the_way(from: [f64; 3], to: [f64; 3]) -> PredicatePoint {
+fn a_box_part_of_the_way(from: [f64; 3], to: [f64; 3], parts: f64) -> PredicatePoint {
     PredicatePoint::Constructed(core::array::from_fn(|axis| {
         if from[axis] == to[axis] {
             return Interval::exactly(from[axis]);
         }
-        let near = (3.0 * from[axis] + to[axis]) / 4.0;
+        let near = ((parts - 1.0) * from[axis] + to[axis]) / parts;
         Interval::new(near.next_down(), near.next_up()).expect("a box round a finite number")
     }))
 }
