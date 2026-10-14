@@ -6306,9 +6306,10 @@ pub(crate) fn fold_each_corner_one_plane_cuts_a_rounding_from_it(
         let [tip] = tips.as_slice() else {
             continue;
         };
-        let another_corner_is_as_near = tip.meets.iter().any(|(surfaces, points)| {
-            another_corner_is_as_near(surfaces, points, Some(corner), &corners, &sharing, policy)
-        });
+        let another_corner_is_as_near = tip
+            .meets
+            .iter()
+            .any(|(_, points)| another_corner_is_as_near(points, Some(corner), &corners, policy));
         if another_corner_is_as_near {
             continue;
         }
@@ -6383,23 +6384,28 @@ fn which_corners_share_each_pair_of_planes(
     sharing
 }
 
-/// Whether an input corner other than `but`, on two of the meet `surfaces`'
-/// planes, is within [`Policy::max_wobble`] of every one of the meet's
-/// `points`: folding the meet would then join two input corners.
+/// Whether an input corner other than `but` is within [`Policy::max_wobble`]
+/// of every one of a meet's `points`: folding the meet would then join two
+/// input corners.
+///
+/// **Any input corner, not only one on two of the meet's planes.** Asked only
+/// of those, it let two cubes stood corner to corner, one turned a little
+/// short of a half turn, each fold its corner with the three meets where the
+/// other's plane cuts its edges, while the other's corner, on one or none of
+/// those planes, was a rounding away. The two corners were then named apart at
+/// one point, and joining the faces round them panicked (queue row Q2019).
 fn another_corner_is_as_near(
-    surfaces: &[Surface; 3],
     points: &[PredicatePoint],
     but: Option<usize>,
     corners: &[InputCorner],
-    sharing: &BTreeMap<[[u64; 9]; 2], Vec<usize>>,
     policy: &Policy,
 ) -> bool {
-    pairs_of_names(names_of_the_three_surfaces(surfaces))
+    corners
         .iter()
-        .flat_map(|pair| sharing.get(pair).into_iter().flatten())
-        .filter(|&&other| Some(other) != but)
-        .any(|&other| {
-            furthest_from(corners[other].put, points).is_some_and(|far| far <= policy.max_wobble())
+        .enumerate()
+        .filter(|&(other, _)| Some(other) != but)
+        .any(|(_, other)| {
+            furthest_from(other.put, points).is_some_and(|far| far <= policy.max_wobble())
         })
 }
 
@@ -6615,7 +6621,6 @@ pub(crate) fn fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it(
         return Vec::new();
     };
     let corners = input_corners(model, scratch);
-    let sharing = which_corners_share_each_pair_of_planes(&corners);
     let meets = every_meet_of_three_planes(scratch);
     let taken: BTreeSet<[[u64; 9]; 3]> = taken_as_input_corners
         .iter()
@@ -6705,9 +6710,7 @@ pub(crate) fn fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it(
         };
         let left_alone = tip.meets.iter().any(|(surfaces, points)| {
             taken.contains(&names_of_the_three_surfaces(surfaces))
-                || another_corner_is_as_near(
-                    surfaces, points, end.corner, &corners, &sharing, policy,
-                )
+                || another_corner_is_as_near(points, end.corner, &corners, policy)
         });
         if !left_alone {
             found.push((end, tip));
