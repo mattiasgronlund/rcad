@@ -41,7 +41,9 @@
 //! bar inside a bar's line again on `eec03934`: Q1537's last placing rule had
 //! moved it from 30 of 60 answered, 24 refused at *a point inside a piece of a
 //! face* and 6 at *one shell inside another*, to what it prints now. With that
-//! rule switched off by hand the cell printed the old line again.
+//! rule switched off by hand the cell printed the old line again. Since queue
+//! row Q1748 it does not: the point search places that piece itself, and with
+//! the rule switched off the cell prints the line below.
 //!
 //! | cell | touching | clear by one | what the touch alone refuses |
 //! |---|---|---|---|
@@ -333,11 +335,13 @@ fn a_bar_inside_a_bar_touching_its_wall() {
 /// corner, and the point search found no point inside it. A gap (§16.10): the
 /// answer exists, and the control row reaches it. Q1537's last rule in
 /// `fuse/select.rs`, `by_the_piece_across_a_side_clear_of_every_face`, closed
-/// it: the seam corner lies on the thin bar's pipe but below its bottom cap or
-/// above its top one, so it is clear of every face of the thin bar, and the
-/// piece across a side is placed outside the thin bar. Those two pieces are
-/// the only ones the rule is asked about here. With it switched off, these 20
-/// are refused again and no other fuse here is.
+/// it first: the seam corner lies on the thin bar's pipe but below its bottom
+/// cap or above its top one, so it is clear of every face of the thin bar, and
+/// the piece across a side is placed outside the thin bar. Before Q1748, with
+/// that rule switched off, these 20 were refused again and no other fuse here
+/// was. Since Q1748 the point search places that piece itself, as it places
+/// the same piece of a flush cap in the test below, so the rule is no longer
+/// asked about it: with the rule switched off, all 60 answer.
 ///
 /// The thick bar less the thin one is left out: it is the thick bar with a
 /// hollow touching its wall along that line, and whether one solid may have
@@ -415,6 +419,117 @@ fn a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms() 
     assert!(
         wrong.is_empty(),
         "{} of 60 fuses refused; since Q1537 every one answers:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// A thin bar standing inside a thick one and touching its wall, with a cap
+/// flush with one of the thick bar's caps, against the closed forms.
+///
+/// The thick bar has radius `R` and height four and stands on the origin; the
+/// thin bar has radius `r`, its axis `R − r` from the thick bar's along `+x`,
+/// `−x` or `+y`, and stands on the floor at height two, at `z = 2` at height
+/// two, or on the floor at height four. For `r` of one or two and `R − r` of
+/// two or three, that is 36 shapes. The thin bar of height `h` is all inside
+/// the thick one, so `A ∪ B = 4πR²`, `A ∩ B = πr²h`, the thick bar less the
+/// thin one is `4πR² − πr²h`, and the thin bar less the thick one is no solid
+/// at all.
+///
+/// **Every one of the 72 fuses of the twelve shapes along `+x` used to be
+/// refused**, `Undecidable` at *a point inside a piece of a face* (queue row
+/// Q1748); along `−x` and `+y` every fuse answered already. Along `+x` the
+/// touch is on the thick bar's seam. The thin bar's pipe cuts the flush cap in
+/// a circle that touches the cap's rim at the seam corner from inside, so the
+/// piece of the cap between the rim and that circle is one wire of two sides,
+/// each a whole circle from the seam corner back to it. Unlike
+/// [`a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms`],
+/// the seam corner is on the thin bar's flush cap, so no rule places that piece
+/// by what is across one of its sides. The point search places it now:
+/// `between_the_round_wires` in `fuse/select.rs` offers a point inside it, and
+/// `in_the_bulge_of` holds that point.
+///
+/// The thick bar less the thin one is in here, unlike in the test above: the
+/// thin bar's flush cap opens its bore through the thick bar's cap, so what is
+/// left is not a closed hollow, and queue row Q1635's question does not arise.
+#[test]
+fn a_thin_bar_flush_with_a_thick_bars_cap_touching_its_wall_from_inside_against_the_closed_forms() {
+    let policy = Policy::certified();
+    let pi = std::f64::consts::PI;
+    let mut wrong = Vec::new();
+    for thin in 1..=2 {
+        for thicker in 2..=3 {
+            let thick = thin + thicker;
+            let (r, big) = (f64::from(thin), f64::from(thick));
+            let off = f64::from(thicker);
+            let placements = [(off, 0.0), (-off, 0.0), (0.0, off)]
+                .into_iter()
+                .flat_map(|xy| {
+                    [(2.0, 0.0), (2.0, 2.0), (4.0, 0.0)].map(|height_and_z| (xy, height_and_z))
+                });
+            for ((x, y), (height, z)) in placements {
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let outer = model
+                    .add_round_bar(big, 4.0, &Isometry::identity())
+                    .expect("a whole-number bar");
+                let inner = model
+                    .add_round_bar(
+                        r,
+                        height,
+                        &Isometry::translation(Vector::new(x, y, z)).expect("a whole-number shift"),
+                    )
+                    .expect("a whole-number bar");
+                let whole = 4.0 * pi * big * big;
+                let thin_bar = pi * r * r * height;
+                for (one, other, rule, holds) in [
+                    (outer, inner, Rule::Union, Some(whole)),
+                    (inner, outer, Rule::Union, Some(whole)),
+                    (outer, inner, Rule::Intersection, Some(thin_bar)),
+                    (inner, outer, Rule::Intersection, Some(thin_bar)),
+                    (outer, inner, Rule::Difference, Some(whole - thin_bar)),
+                    (inner, outer, Rule::Difference, None),
+                ] {
+                    let case = format!(
+                        "{rule:?} of R = {big}, r = {r} of height {height} at ({x}, {y}, {z}), \
+                         thick bar first: {}",
+                        one == outer
+                    );
+                    let mut fused = model.clone();
+                    let answer = match fused.fuse(
+                        &[one],
+                        &[other],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        Ok(answer) => answer,
+                        Err(why) => {
+                            wrong.push(format!("{case} refused {}", named(&why)));
+                            continue;
+                        }
+                    };
+                    fused
+                        .validate(&policy, &mut ProvenanceLog::new())
+                        .unwrap_or_else(|why| panic!("{case} does not validate: {why}"));
+                    let Some(holds) = holds else {
+                        assert!(answer.solids().is_empty(), "{case} is no solid at all");
+                        continue;
+                    };
+                    assert_eq!(answer.solids().len(), 1, "{case} is one solid");
+                    let (volume, error) = volume_and_error(&fused, answer.solids());
+                    assert!(
+                        (volume - holds).abs() <= error,
+                        "{case} measures {volume} against {holds}, out by more than the {error} \
+                         its mesh declares"
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} of 216 fuses refused; since Q1748 every one answers:\n{}",
         wrong.len(),
         wrong.join("\n")
     );
