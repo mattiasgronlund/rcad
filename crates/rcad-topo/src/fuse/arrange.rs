@@ -200,11 +200,30 @@ pub(crate) struct Piece {
     pub(crate) orientation: Orientation,
     /// The boundary, every wire keeping the piece's material on its left.
     ///
-    /// On a **flat** piece the first wire is the outer one and the rest are
-    /// holes, which is the winding [`Model::validate`] asks for there. On a
-    /// closed surface neither is outer and the order is the order the walks were
-    /// found in — §31.3 settles that "outline and holes" is a thing a face
-    /// stores rather than a fact about the geometry.
+    /// On a **closed surface** neither wire is outer, and the order is simply
+    /// the order the walks were found in — §31.3 settles that "outline and
+    /// holes" is a thing a face stores rather than a fact about the geometry.
+    ///
+    /// On a **flat** piece [`piece_from`] puts the outer wire first only when
+    /// one of the piece's own walks keeps a stretch of the face's own outer
+    /// boundary. A piece the cuts carved entirely out of the inside has nothing
+    /// here to tell outer from hole by, and keeps the order its walks were
+    /// found in, outer first or not. The plate's band between the bar's circle
+    /// and the half ring's inner circle is such a piece: its first wire here is
+    /// the bar's circle, a hole, and every fuse that builds it still validates
+    /// (`a_half_ring_standing_on_a_round_plate.rs`, row Q1580).
+    ///
+    /// Nothing later puts that order right for every piece. `Assembly`'s
+    /// `join_up_what_is_one_face` sorts a flat face's wires by which way each
+    /// one winds (`rings_round`) only where it joins the face to a coplanar
+    /// neighbour; a face joined to nothing reaches [`Model::validate`] in the
+    /// order written here. Validate reads a flat face's first wire as its
+    /// outline, but judges the winding only of a wire of three corners or
+    /// more, so a hole of one or two corners, such as a whole circle, passes
+    /// in either place (row Q1236). Reversing the order this leaves broke no
+    /// `rcad-topo` test (row Q1589), so whether a hole of three corners or more
+    /// can come first on a face joined to nothing is not shown either way
+    /// (row Q1976).
     ///
     /// [`Model::validate`]: crate::Model::validate
     pub(crate) wires: Vec<Vec<FaceMeet>>,
@@ -7809,11 +7828,12 @@ impl<'f> Arrangement<'f> {
     /// If the piece has no wires.
     fn piece_from(&self, cell: usize, lump: &[usize], outer: Option<usize>) -> Result<Piece> {
         let mut cycles = self.cells[cell].clone();
-        // A flat piece has an outer wire and holes, and `Model::validate` reads
-        // the first as the outer one. The outer wire is the walk that keeps the
-        // face's own outer boundary, which is the lump the face's first wire is
-        // in. On a closed surface neither is outer (§31.3) and this leaves the
-        // order the walks were found in.
+        // This puts the outer wire first only when one of the piece's own
+        // walks keeps the face's outer boundary: then that walk's lump is
+        // `outer` and it sorts to the front. A piece the cuts carved out of the
+        // inside has no such walk, every key here comes out equal, and the
+        // sort leaves the order the walks were found in, outer first or not.
+        // `Piece::wires`'s doc says what does and does not put that right.
         cycles.sort_by_key(|&cycle| usize::from(Some(lump[cycle]) != outer));
 
         let wires: Vec<Vec<FaceMeet>> = cycles
