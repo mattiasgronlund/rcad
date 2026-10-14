@@ -306,7 +306,7 @@ fn two_balls_at_y_16_refuse_under_a_certified_policy_round_a_circle_in_z_1() {
                 is_the_order_of(refused, places),
                 "{rule:?}, ball first {ball_first}: {refused:#?}"
             );
-            assert_eq!(refused.measures(), Measures::Volume, "{rule:?}");
+            assert_eq!(refused.measures(), Measures::Area, "{rule:?}");
             assert_eq!(refused.enclosure(), ROUND_A_BALLS_CIRCLE_IN_Z_1, "{rule:?}");
         }
     }

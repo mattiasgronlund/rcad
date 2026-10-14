@@ -182,3 +182,18 @@ merges a length budget refuses, and every one of the 21 still refused on the
 next thing it met: no answer moved, and none was wrong. The sweep arm
 (`which_comes_first_round_a_crossing`) stays `Measures::Volume`; what it
 should be filed as is its own row (Q706's follow-up).
+
+**2026-10-14, Q1273: the sweep filed by what it measures.** The sweep arm now
+files its refusal as `rcad-geom` says
+(`Surface::which_comes_first_round_a_crossing_and_what_it_measures`): an area
+round a plane's conic, a circle round a pipe's or a cone's axis, and two
+pipes' one loop; a volume round two balls' circle, two cones of one slope, and
+a ball's one loop off a pipe's axis; a length where the way round cannot be
+told. Probes of 7488 and 13984 tolerant fuses found no wrong answer. The
+corner-up cube of side 6 on the steep cone, answered right at working sizes
+`2` to `2.6` under the volume reading, now refuses at `2`
+(`a_tolerant_fuse_of_a_cube_on_a_cones_apex_refuses_a_sweep_past_an_area_budget`),
+and `the_sweep_round_a_planes_conic_is_an_area_and_round_two_balls_circle_a_volume`
+pins the measure by growing six shapes to twice their size. Below a working
+size of `1` the area reading is the more lenient one, by `1/s`; no fuse has
+been searched for one it misleads (Q2002).
