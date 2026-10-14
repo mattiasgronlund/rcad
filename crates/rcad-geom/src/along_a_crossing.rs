@@ -127,7 +127,7 @@
 use core::cmp::Ordering;
 
 use rcad_predicates::{
-    Decision, Filtered, Interval, NOTHING_IS_KNOWN, Point as PredicatePoint, Predicate,
+    Decision, Filtered, Interval, Measures, NOTHING_IS_KNOWN, Point as PredicatePoint, Predicate,
     SideOfSurface, are_real_numbers, decide, is_a_real_point,
 };
 
@@ -197,40 +197,89 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// `a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently`
 /// is the demonstration. A **gap**: the answer exists and is worked out
 /// correctly one file away. `docs/decisions.md` §39.
+///
+/// [`Surface::which_comes_first_round_a_crossing_and_what_it_measures`] gives
+/// the same answer and says what an undecided one's enclosure measures.
 pub fn which_comes_first_round_a_crossing(
     pair: [&Surface; 2],
     from: PredicatePoint,
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Result<Decision> {
-    let winds = the_way_this_crossing_winds(pair, from)?;
-    if !(is_a_real_point(from) && is_a_real_point(one) && is_a_real_point(other)) {
-        return Ok(NOTHING_IS_KNOWN);
-    }
-    match winds {
-        WhichWayItWinds::About(normal) if are_real_numbers(normal.components()) => {
-            Ok(decide(&HowThreeOnACurveWind {
-                from,
-                one,
-                other,
-                anticlockwise_about: normal.components(),
-            })
-            .0)
+    Surface::which_comes_first_round_a_crossing_and_what_it_measures(pair, from, one, other)
+        .map(|(decided, _)| decided)
+}
+
+impl Surface {
+    /// [`which_comes_first_round_a_crossing`]'s answer, and what its
+    /// enclosure measures, which is what a tolerant policy divides it by the
+    /// working size for.
+    ///
+    /// **The sweep is an area round a plane's conic and a volume round two
+    /// balls' circle.** It is `((one − from) × (other − from)) · n`, two steps
+    /// crossed, an area, read along the `n` the crossing winds about. Where
+    /// one of the two surfaces is a plane, `n` is its normal, of length one,
+    /// and so is a pipe's or a cone's axis direction, that the circles and
+    /// loops round an axis wind about: the sweep stays an area. Two balls'
+    /// circle winds about the step between their centres, and two cones' of
+    /// one slope about the step between their apexes, each a length, and the
+    /// sweep there is a volume. Round a line, how two points turn is an area
+    /// or a volume as [`WhichLine`] says for each line.
+    ///
+    /// Where nothing was swept, the answer is [`NOTHING_IS_KNOWN`] and filed
+    /// as a [`Measures::Length`], the measure that reads an enclosure widest,
+    /// though no budget covers an infinite one in any units.
+    ///
+    /// # Errors
+    ///
+    /// As [`which_comes_first_round_a_crossing`].
+    pub fn which_comes_first_round_a_crossing_and_what_it_measures(
+        pair: [&Surface; 2],
+        from: PredicatePoint,
+        one: PredicatePoint,
+        other: PredicatePoint,
+    ) -> Result<(Decision, Measures)> {
+        let winds = the_way_this_crossing_winds(pair, from)?;
+        let measures = winds.what_the_order_measures();
+        if !(is_a_real_point(from) && is_a_real_point(one) && is_a_real_point(other)) {
+            return Ok((NOTHING_IS_KNOWN, measures));
         }
-        WhichWayItWinds::About(_) | WhichWayItWinds::CannotTell => Ok(NOTHING_IS_KNOWN),
-        WhichWayItWinds::RoundALine(line) => {
-            Ok(which_comes_first_round_a_line(line, from, one, other))
-        }
+        let decided = match winds {
+            WhichWayItWinds::About(normal) | WhichWayItWinds::AboutAStep(normal)
+                if are_real_numbers(normal.components()) =>
+            {
+                decide(&HowThreeOnACurveWind {
+                    from,
+                    one,
+                    other,
+                    anticlockwise_about: normal.components(),
+                })
+                .0
+            }
+            WhichWayItWinds::About(_)
+            | WhichWayItWinds::AboutAStep(_)
+            | WhichWayItWinds::CannotTell => NOTHING_IS_KNOWN,
+            WhichWayItWinds::RoundALine(line) => {
+                which_comes_first_round_a_line(line, from, one, other)
+            }
+        };
+        Ok((decided, measures))
     }
 }
 
 /// What a crossing runs round, when that can be worked out.
 ///
 /// **Exhaustive on purpose.** There is a normal, a line, or neither, and a
-/// caller that has neither has nothing left to order by.
+/// caller that has neither has nothing left to order by. The normal is of
+/// length one or a step between two points, since what the sweep about it
+/// measures turns on which.
 enum WhichWayItWinds {
-    /// The crossing runs anticlockwise about this.
+    /// The crossing runs anticlockwise about this direction, of length one:
+    /// a plane's normal, or a pipe's or a cone's axis direction.
     About(Vector),
+    /// The crossing runs anticlockwise about this step between two points:
+    /// two balls' centres, or two cones' apexes.
+    AboutAStep(Vector),
     /// The crossing is the one loop a ball off a pipe's axis crosses it in, or
     /// the one loop two pipes cross in, which runs back and forth round a
     /// pipe's axis, about no normal, and once round this line.
@@ -247,11 +296,24 @@ impl WhichWayItWinds {
     fn the_other_way(self) -> Self {
         match self {
             Self::About(normal) => Self::About(-normal),
+            Self::AboutAStep(step) => Self::AboutAStep(-step),
             Self::RoundALine(line) => Self::RoundALine(RoundALine {
                 backwards: !line.backwards,
                 ..line
             }),
             Self::CannotTell => Self::CannotTell,
+        }
+    }
+
+    /// What the order of two points round the crossing measures:
+    /// [`Surface::which_comes_first_round_a_crossing_and_what_it_measures`]
+    /// says why.
+    fn what_the_order_measures(&self) -> Measures {
+        match self {
+            Self::About(_) => Measures::Area,
+            Self::AboutAStep(_) => Measures::Volume,
+            Self::RoundALine(line) => line.line.what_a_turn_measures(),
+            Self::CannotTell => Measures::Length,
         }
     }
 }
@@ -356,7 +418,13 @@ fn the_way_this_crossing_winds(
         // Two balls cross in a circle in their radical plane, whose normal is
         // the line between the centres. Two balls with the same centre cross in
         // nothing at all, and there is no such line.
-        [Surface::Sphere(one), Surface::Sphere(other)] => other.centre() - one.centre(),
+        [Surface::Sphere(one), Surface::Sphere(other)] => {
+            let between = other.centre() - one.centre();
+            if between == Vector::zero() {
+                return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+            }
+            return Ok(WhichWayItWinds::AboutAStep(between));
+        }
         // Two planes cross in a straight line, which has nothing to wind about.
         [Surface::Plane(_), Surface::Plane(_)] => {
             return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
@@ -848,7 +916,7 @@ fn the_way_two_cones_on_one_axis_wind(
         // `σ₂s − σ₁s` with the circle at `h₁ = d/2` and `h₂ = −d/2`, so `σ₁` is
         // the sign of `d` and `σ₂` the other one: the circle winds about `−d ŵ`,
         // which is the way from the second apex to the first.
-        Ordering::Equal => Ok(WhichWayItWinds::About(one.apex() - other.apex())),
+        Ordering::Equal => Ok(WhichWayItWinds::AboutAStep(one.apex() - other.apex())),
         Ordering::Greater => the_way_a_circle_round_a_cones_axis_winds(one, one.apex(), from),
         Ordering::Less => Ok(
             the_way_a_circle_round_a_cones_axis_winds(other, other.apex(), from)?.the_other_way(),
@@ -1418,8 +1486,9 @@ impl RoundALine {
 /// cascade can use.
 ///
 /// A point `p` is read as two coordinates `x` and `y` square to the line, each
-/// nothing on it. How two points turn is `x₁ y₂ − y₁ x₂`, a volume like the
-/// sweep [`HowThreeOnACurveWind`] works out, and whether they face one way is
+/// nothing on it. How two points turn is `x₁ y₂ − y₁ x₂`, a volume round a
+/// ball's line and an area round two pipes', as
+/// [`WhichLine::what_a_turn_measures`] says, and whether they face one way is
 /// `x₁ x₂ + y₁ y₂`.
 ///
 /// Round the line through a ball's centre `c`, `x = (p − c) · X` and
@@ -1524,6 +1593,18 @@ impl Predicate for HowTwoPointsSitRoundALine {
 }
 
 impl WhichLine {
+    /// What `x₁ y₂ − y₁ x₂` measures, for the two readings
+    /// [`HowTwoPointsSitRoundALine`] takes. Round a ball's line `x` reads
+    /// along `(c − o) × w`, a length, so `x` is an area and the turn a volume.
+    /// Round two pipes' line `N × w₁` and `N × w₂` are of no length, so `x`
+    /// and `y` are lengths and the turn an area.
+    fn what_a_turn_measures(self) -> Measures {
+        match self {
+            Self::ThroughABallsCentre { .. } => Measures::Volume,
+            Self::BetweenTwoAxes { .. } => Measures::Area,
+        }
+    }
+
     /// The two readings `x` and `y` of a point `p` that
     /// [`HowTwoPointsSitRoundALine`] takes, each `(p − from) · way` for its
     /// own `from` and `way`, with each `way` enclosed.
