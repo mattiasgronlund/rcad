@@ -7422,4 +7422,214 @@ mod tests {
         ])?;
         builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
     }
+
+    /// **Two loops that touch at a corner of the solid touch there at every
+    /// room**, so the ladder stops at the first rung that touches where the
+    /// coarsest mesh did, and hands that rung's refusal back (Q1866).
+    ///
+    /// `builder.rs`'s tube has a hole as wide as its wall, and walks each cap's
+    /// two circles the same way round from the seam's foot `(2, 0, 0)`, a
+    /// corner no chord moves. At height 1 the ladder walked rooms 2, 1 and 0.5,
+    /// each touching there, and handed back the last. At height `2⁻³⁵` the two
+    /// closest corners are the seam's ends, `2⁻³⁵` apart, and it walked on
+    /// towards a floor some thirty-seven halvings down: every rung touched at
+    /// `(2, 0, 0)`, the corner the triangulator named there went from number
+    /// 6 to number 10507 by room `4.8e-7`, and that rung alone took 36 seconds.
+    #[test]
+    fn a_tube_whose_hole_is_as_wide_as_its_wall_is_refused_at_the_first_room_it_asks() {
+        for height in [1.0, f64::powi(2.0, -35)] {
+            let mut model = an_empty_model();
+            let tube = a_tube_whose_hole_is_as_wide_as_its_wall(&mut model, height);
+            walk_its_hole_the_way_its_rim_goes(&mut model);
+            let view = model.solid(tube).expect("this model made the key");
+            let handed_back = the_coarsest_mesh_whose_sides_do_not_cross(
+                view,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect_err("a hole as wide as its wall touches its rim");
+            let half_the_widest_side = Deflection::of(2.0).expect("a positive room");
+            let at_the_top = view
+                .mesh(
+                    half_the_widest_side,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect_err("a hole as wide as its wall touches its rim");
+            let (
+                Error::CannotMeshAFace { face, why },
+                Error::CannotMeshAFace {
+                    face: face_at_the_top,
+                    why: why_at_the_top,
+                },
+            ) = (&handed_back, &at_the_top)
+            else {
+                panic!("height {height}: {handed_back:?} and {at_the_top:?}");
+            };
+            assert_eq!(
+                (face, why),
+                (face_at_the_top, why_at_the_top),
+                "height {height}"
+            );
+        }
+    }
+
+    /// A tube `height` tall whose hole is as wide as its wall, both pipes of
+    /// radius 2, wound as a sound tube is: the hole's wall used reversed, and
+    /// each cap's hole walked against its rim. [`SolidBuilder::build`] sweeps
+    /// it and refuses it, so it is built with a hole of radius 1 and the hole
+    /// is widened in place: its two corners moved out to 2, and its wall's
+    /// pipe with them.
+    fn a_tube_whose_hole_is_as_wide_as_its_wall(model: &mut Model, height: f64) -> crate::SolidKey {
+        let (outer_radius, inner_radius) = (2.0, 1.0);
+        let mut builder = SolidBuilder::new();
+        let mut corner = |radius, z| {
+            builder
+                .add_vertex(Point::new(radius, 0.0, z))
+                .expect("a finite point")
+        };
+        let outer_bottom = corner(outer_radius, 0.0);
+        let outer_top = corner(outer_radius, height);
+        let inner_bottom = corner(inner_radius, 0.0);
+        let inner_top = corner(inner_radius, height);
+
+        let mut circle = |corner| {
+            builder
+                .add_edge(corner, corner, EdgeRun::RightRoundWhereItsFacesCross)
+                .expect("one whole circle of the two faces crossing there")
+        };
+        let outer_bottom_circle = circle(outer_bottom);
+        let outer_top_circle = circle(outer_top);
+        let inner_bottom_circle = circle(inner_bottom);
+        let inner_top_circle = circle(inner_top);
+        let outer_seam = builder
+            .add_edge(outer_bottom, outer_top, EdgeRun::Straight)
+            .expect("a ruling of a pipe is straight");
+        let inner_seam = builder
+            .add_edge(inner_bottom, inner_top, EdgeRun::Straight)
+            .expect("a ruling of a pipe is straight");
+
+        let mut step = |edge, turn| {
+            DraftStep::Along(
+                builder
+                    .add_coedge(edge, turn)
+                    .expect("an edge of this build"),
+            )
+        };
+        let round_the_outer_wall = [
+            step(outer_bottom_circle, Orientation::Forward),
+            step(outer_seam, Orientation::Forward),
+            step(outer_top_circle, Orientation::Reversed),
+            step(outer_seam, Orientation::Reversed),
+        ];
+        let round_the_inner_wall = [
+            step(inner_bottom_circle, Orientation::Reversed),
+            step(inner_seam, Orientation::Forward),
+            step(inner_top_circle, Orientation::Forward),
+            step(inner_seam, Orientation::Reversed),
+        ];
+        let round_the_outer_bottom = [step(outer_bottom_circle, Orientation::Reversed)];
+        let round_the_inner_bottom = [step(inner_bottom_circle, Orientation::Forward)];
+        let round_the_outer_top = [step(outer_top_circle, Orientation::Forward)];
+        let round_the_inner_top = [step(inner_top_circle, Orientation::Reversed)];
+
+        let mut face = |surface, wires: &[&[DraftStep]]| {
+            let wires: Vec<_> = wires
+                .iter()
+                .map(|steps| builder.add_wire(steps).expect("a closed wire"))
+                .collect();
+            builder.add_face(surface, &wires).expect("a face")
+        };
+        let pipe = |radius| {
+            Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a positive radius"))
+        };
+        let cap = |z, up| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, up))
+                    .expect("the z axis is a unit normal"),
+            )
+        };
+        let outer_wall = face(pipe(outer_radius), &[&round_the_outer_wall]);
+        let inner_wall = face(pipe(inner_radius), &[&round_the_inner_wall]);
+        let bottom = face(
+            cap(0.0, -1.0),
+            &[&round_the_outer_bottom, &round_the_inner_bottom],
+        );
+        let top = face(
+            cap(height, 1.0),
+            &[&round_the_outer_top, &round_the_inner_top],
+        );
+        builder
+            .add_shell(&[
+                (outer_wall, Orientation::Forward),
+                (inner_wall, Orientation::Reversed),
+                (bottom, Orientation::Forward),
+                (top, Orientation::Forward),
+            ])
+            .expect("four faces close");
+        let tube = builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a tube with a hole of radius 1 in a pipe of radius 2");
+
+        let data = model.data_mut();
+        let mut moved = 0;
+        for corner in data.vertices.values_mut() {
+            let [x, y, z] = corner.point.coordinates();
+            if x == inner_radius {
+                corner.point = Point::new(outer_radius, y, z);
+                moved += 1;
+            }
+        }
+        let mut widened = 0;
+        for wall in data.faces.values_mut() {
+            if matches!(&wall.surface, Surface::Cylinder(hole) if hole.radius() == inner_radius) {
+                wall.surface = pipe(outer_radius);
+                widened += 1;
+            }
+        }
+        assert_eq!(
+            (moved, widened),
+            (2, 1),
+            "the hole's two corners and its wall"
+        );
+        tube
+    }
+
+    /// Walks the hole of [`a_tube_whose_hole_is_as_wide_as_its_wall`] the way
+    /// `builder.rs`'s tube does: each circle of the hole the same way round as
+    /// the rim beside it, and the hole's wall used forward like the outer one.
+    /// Both loops of a cap then set off from the seam's foot the same way.
+    fn walk_its_hole_the_way_its_rim_goes(model: &mut Model) {
+        let data = model.data_mut();
+        let mut hole_walls = 0;
+        let mut circles_round_the_hole = Vec::new();
+        for shell in data.shells.values_mut() {
+            for used in &mut shell.faces {
+                if used.orient == Orientation::Reversed {
+                    used.orient = Orientation::Forward;
+                    hole_walls += 1;
+                    for wire in &data.faces[used.face].wires {
+                        for coedge in data.wires[*wire].coedges() {
+                            let edge = data.coedges[coedge].edge;
+                            if data.edges[edge].start == data.edges[edge].end {
+                                circles_round_the_hole.push(edge);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut flipped = 0;
+        for coedge in data.coedges.values_mut() {
+            if circles_round_the_hole.contains(&coedge.edge) {
+                coedge.orientation = coedge.orientation.reversed();
+                flipped += 1;
+            }
+        }
+        assert_eq!(
+            (hole_walls, circles_round_the_hole.len(), flipped),
+            (1, 2, 4),
+            "the hole's wall, its two circles, and each circle's wall and cap"
+        );
+    }
 }
