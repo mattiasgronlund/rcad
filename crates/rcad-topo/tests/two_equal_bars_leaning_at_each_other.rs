@@ -301,14 +301,14 @@ fn a_bar_starting_where_it_crosses_another_at_120_degrees_is_refused_building_a_
 /// **Only where the axes meet at `(0, 0, 0)`.** The fuse asks whether the
 /// pipes are tangent at a touch point by an exact nought at its rounded point,
 /// and elsewhere it can read a rounding there, say no, and pick an arc from the
-/// touch point the wrong way (Q1965).
-/// At `(0, 1, 0)` a face then came to the mesh with an arc from a touch point
-/// walked three quarters of the way round its ellipse, and was refused
-/// `ASideCutsOffOneCornerOfACurvedPatch`; at `(1, 1, 1)` the answer was
-/// refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)`; at the six other points
-/// Q1896 names the fuse is refused before it meshes. With every touch point
-/// read as tangent, by Q1953's scratch tolerance in `fuse/assemble.rs`, all
-/// nine answered this volume and `[3, 3]` faces, both ways round.
+/// touch point the wrong way (Q1965). At `(0, 1, 0)` a face then came to the
+/// mesh with an arc from a touch point walked three quarters of the way round
+/// its ellipse, and was refused `ASideCutsOffOneCornerOfACurvedPatch`; at
+/// `(1, 1, 1)` the answer was refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)`;
+/// at `(2, 0, 0)` a face was refused `BoundaryCrossesItself`, and at the five
+/// other points Q1896 names `AWireWillNotLieFlatOnItsFace`. With every touch
+/// point read as tangent, by Q1953's scratch tolerance in `fuse/assemble.rs`,
+/// all nine answered this volume and `[3, 3]` faces, both ways round.
 #[test]
 fn a_bar_along_4_0_3_less_one_along_3_4_0_meshes_where_the_two_pieces_touch() {
     let shared = 25.0 / (12.0 * 481.0_f64.sqrt());
