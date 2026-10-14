@@ -1807,11 +1807,11 @@ fn where_two_leaning_pipes_cross(
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when `c`, worked out in
-/// `f64`, is not exactly on both axes, and whatever
-/// [`a_surface_through_where_the_walls_touch`] refuses. A **gap** (§16.10): the
-/// four halves are there and four corners apart, and what runs out is a point
-/// in `f64` that is exactly where the axes meet.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when `c`, worked out
+/// exactly, is not a point `f64` holds ([`where_two_axes_meet_exactly`]), and
+/// whatever [`a_surface_through_where_the_walls_touch`] refuses. A **gap**
+/// (§16.10): the four halves are there and four corners apart, and what runs
+/// out is a point in `f64` that is exactly where the axes meet.
 ///
 /// # Where no flat surface written in `f64` will do
 ///
@@ -1843,7 +1843,9 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     } else {
         (one, other)
     };
-    let middle = crate::walk::where_two_axes_meet(first, second);
+    let Some(middle) = where_two_axes_meet_exactly(first, second) else {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    };
     if !(middle.is_finite()
         && [first, second]
             .iter()
@@ -1883,6 +1885,67 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
             })
             .collect(),
     ))
+}
+
+/// Where the axes of `first` and `second` meet, worked out exactly from the
+/// stored numbers — or `None` when a coordinate of that point is not a number
+/// `f64` holds, or an exact sum on the way cannot be formed.
+///
+/// With `o₁`, `ê` the first axis, `o₂`, `û` the second and `w = ê × û`, the
+/// point is `o₁ + ê·N/D` with `N = ((o₂ − o₁) × û)·w` and `D = w·w`, so each
+/// coordinate is `(o₁·D + ê·N)/D`, read one component at a time. The same
+/// formula worked in `f64` ([`crate::walk::where_two_axes_meet`]) rounds on the
+/// way and can miss a point `f64` holds: bars along `x` through `(9, 0, 0)` and
+/// turned 125° about `z` through `(11, 0, 0)` meet at `(11, 0, 0)` exactly, and
+/// the `f64` formula lands beside it
+/// (`two_thin_bars_whose_axes_meet_where_f64_holds_the_point_are_named_in_four_halves`).
+/// Two lines that are not parallel meet in one point, so wherever the `f64`
+/// formula lands on both axes this finds the same point.
+fn where_two_axes_meet_exactly(first: &Cylinder, second: &Cylinder) -> Option<Point> {
+    let [(here, mine), (there, theirs)] = [first, second].map(|pipe| {
+        (
+            pipe.axis().origin().coordinates(),
+            pipe.axis().direction().components(),
+        )
+    });
+    let sideways = Exact::cross_of(&Exact::of_each(mine), theirs)?;
+    let across = Exact::cross_of(&Exact::gap_between(here, there), theirs)?;
+    let along = Exact::dot_of_two_exact(&across, &sideways)?;
+    let bottom = Exact::squared_length_of(&sideways)?;
+    let [x, y, z] = [0, 1, 2].map(|axis| {
+        let top = Exact::of(here[axis])
+            .times(&bottom)?
+            .plus(&Exact::of(mine[axis]).times(&along)?);
+        the_f64_a_quotient_is(&top, &bottom)
+    });
+    Some(Point::new(x?, y?, z?))
+}
+
+/// `top / bottom`, when `f64` holds it, or `None` when it lies between two
+/// `f64`. `bottom` is above nought.
+///
+/// The quotient of the two rounded is within a few units in the last place of
+/// the true one, so this steps from there one `f64` at a time towards it, asking
+/// exactly which side of it each one is on, until one is on it or the side
+/// changes. A zero comes back as `+0.0`, as the `f64` formula gives it.
+fn the_f64_a_quotient_is(top: &Exact, bottom: &Exact) -> Option<f64> {
+    const MOST_STEPS: usize = 8;
+    if top.sign() == Decision::Zero {
+        return Some(0.0);
+    }
+    let side_of = |guess: f64| Some(top.minus(&Exact::of(guess).times(bottom)?).sign());
+    let mut guess = top.nearest_f64() / bottom.nearest_f64();
+    let first_side = side_of(guess)?;
+    for _ in 0..MOST_STEPS {
+        match side_of(guess)? {
+            Decision::Zero => return Some(guess),
+            side if side != first_side => return None,
+            Decision::Pos => guess = guess.next_up(),
+            Decision::Neg => guess = guess.next_down(),
+            Decision::Undecidable { .. } | _ => return None,
+        }
+    }
+    None
 }
 
 /// The flat surface [`a_flat_surface_through_where_the_walls_touch`] finds, or
