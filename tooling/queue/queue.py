@@ -44,6 +44,7 @@ from datetime import datetime, timezone
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from rows import CLASS, SMALL, TIERS_IN_ORDER, Queue, highest_q, tier_of_class  # noqa: E402
+from families import families, family_line  # noqa: E402
 
 ID = re.compile(r"^[TDQ][0-9]+$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -58,6 +59,8 @@ just queue blocked                         each ready row whose write set meets 
 just queue next [N]                        what N free slots take; N defaults to the free slots on this machine
 just queue running                         what holds a slot on this machine, one line each
 just queue show <id>                       one row, its hold, and its state in other worktrees
+just queue families [--count]              the families of §450.3: three or more open rows, not parked, naming one
+                                            tests/*.rs file, less the rows a trace named; --count prints how many
 just queue narrow <id> <write set>         a lane's hold, narrowed to entries inside the set its row was taken with;
                                             written to the claims file alone, so a lane runs it from its own tree.
                                             Widening back is refused while the entry meets another hold (§424.7)
@@ -100,7 +103,10 @@ def main(argv):
         print(USAGE, file=sys.stderr)
         return 2
     verb, args = argv[0], argv[1:]
-    here = Here(os.environ.get("QUEUE_FILE", "docs/queue.md"))
+    queue_file = os.environ.get("QUEUE_FILE", "docs/queue.md")
+    if verb == "families":
+        return print_families(queue_file, args)
+    here = Here(queue_file)
     readers = {"show": show, "running": running, "elsewhere": elsewhere, "narrowed": narrowed}
     if verb in readers:
         readers[verb](here, args)
@@ -119,6 +125,29 @@ def main(argv):
     except Refused as refusal:
         print(f"queue {verb}: {refusal}", file=sys.stderr)
         return 1
+    return 0
+
+
+def print_families(queue_file, args):
+    """`families`: one line per family, then how many, or the number alone with `--count` (§450.3).
+
+    It reads the file it is given and nothing else, so it needs no git
+    repository and no claims file.
+    """
+    if args not in ([], ["--count"]):
+        print("queue families: usage: families [--count]", file=sys.stderr)
+        return 2
+    if not os.path.isfile(queue_file):
+        print(f"queue families: {queue_file}: no such file", file=sys.stderr)
+        return 1
+    with open(queue_file, encoding="utf-8") as f:
+        found = families(Queue(f.read()))
+    if args == ["--count"]:
+        print(len(found))
+        return 0
+    for file, members in found:
+        print(family_line(file, members))
+    print(f"{len(found)} {'family' if len(found) == 1 else 'families'} with no trace (§450.3)")
     return 0
 
 
