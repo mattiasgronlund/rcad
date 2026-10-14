@@ -20,9 +20,12 @@
 //! the side it is on of the half-space `intersect` picks it by, and every one
 //! of these answers.
 //!
-//! **A thin bar that ends at the fat one's axis is refused before any of
-//! that**, in its first fuse, under every rule both ways round
-//! (`a_thin_bar_ending_at_a_fat_ones_axis_is_refused_telling_a_faces_cells_apart`).
+//! **A thin bar that ends at the fat one's axis was refused before any of
+//! that**, in its first fuse, under every rule both ways round, because the
+//! plane of its cap parts the fat wall in two halves that the loop's outside
+//! could not be told between (row Q1777). Another **gap**: a surface that cuts
+//! a face is drawn wherever it crosses the inside of the face, so it has one
+//! side over each region of the inside, and the halves are on its two sides.
 //!
 //! The closed forms. Inside the bar of radius 3 the ball holds the whole disk
 //! of radius 3 out to `4` from its centre, and a disk of radius `√(25 − x²)`
@@ -34,7 +37,7 @@ use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Model, Rule, SolidKey};
 
 const BALL: f64 = 500.0 * PI / 3.0;
 /// What the ball shares with the bar of radius 3 on one side of its centre.
@@ -133,33 +136,33 @@ fn a_thin_bar_right_through_a_fat_one_and_each_answer_beside_a_far_cube_hold_the
 }
 
 /// The bar of radius 1 along `x` at `z = 5` from `x = −10` to the fat bar's
-/// axis at `x = 0` crosses the fat bar's wall in one of the two loops, its cap
-/// inside the fat bar. Every rule both ways round is refused
-/// `CannotTellTheCellsOfAFaceApart` in the first fuse, with or without the two
-/// loops named apart. A ball with a bar ending at its centre answers.
+/// axis at `x = 0`, `10π`, crosses the fat bar's wall in one of the two loops,
+/// its cap inside the fat bar.
+///
+/// The thin bar keeps the half of `I` on its side of `x = 0`, so the two share
+/// `I/2`: the union `170π − I/2`, the intersection `I/2`, the fat bar less the
+/// thin one `160π − I/2`, and the thin bar less the fat one `10π − I/2`, one
+/// solid.
+///
+/// Every rule both ways round was refused `CannotTellTheCellsOfAFaceApart` in
+/// the first fuse (Q1777). The plane of the thin bar's cap cuts the fat wall in
+/// two straight lines that part it into the half at `x > 0` and the half at
+/// `x < 0`, and the walk round the outside of the loop at `x = 4` agreed with
+/// both halves about every closed curve.
 #[test]
-fn a_thin_bar_ending_at_a_fat_ones_axis_is_refused_telling_a_faces_cells_apart() {
-    for (rule, swapped) in every_rule_both_ways() {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let fat = fat_bar(&mut model);
-        let thin = bar_along_x(&mut model, 1.0, -10.0, 10.0, 5.0);
-        let (arguments, tools) = if swapped {
-            ([thin], [fat])
-        } else {
-            ([fat], [thin])
-        };
-        let answer = model.fuse(
-            &arguments,
-            &tools,
-            rule,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
-        assert!(
-            matches!(answer, Err(Error::CannotTellTheCellsOfAFaceApart { .. })),
-            "{rule:?} (thin bar first: {swapped}): {answer:?}"
-        );
-    }
+fn a_thin_bar_ending_at_a_fat_ones_axis_and_each_answer_beside_a_far_cube_hold_their_closed_forms()
+{
+    let half = what_a_thin_bar_through_a_fat_one_shares() / 2.0;
+    every_rule_and_a_far_cube_hold_their_closed_forms(
+        "a thin bar ending at a fat one's axis",
+        |model| [fat_bar(model), bar_along_x(model, 1.0, -10.0, 10.0, 5.0)],
+        [
+            &[170.0 * PI - half],
+            &[half],
+            &[160.0 * PI - half],
+            &[10.0 * PI - half],
+        ],
+    );
 }
 
 /// Fuses the pair `build` makes under every rule both ways round, then each
