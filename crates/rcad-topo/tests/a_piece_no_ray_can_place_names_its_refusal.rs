@@ -1606,3 +1606,108 @@ fn probe_q1951_thin_band_on_a_pipe() {
     );
     println!("PROBE pipe: {mesh:?}");
 }
+
+/// PROBE (Q1951): a ball of radius 4, cut by a thin slab box a rounding tall
+/// straddling its equator. Unlike `probe_q1951_thin_band_on_a_pipe` above, the
+/// cut here comes from a real fuse (`Rule::Intersection`), so the two latitude
+/// circles bounding the kept band are new rims the fuse's own plane-crosses-
+/// sphere arithmetic placed a rounding apart, not two declared vertices on a
+/// bare primitive. Not committed.
+#[test]
+fn probe_q1951_thin_band_on_a_ball_cut_by_a_fuse() {
+    let mut model = a_model();
+    let ball = model.add_ball(4.0, &Isometry::identity()).expect("a ball");
+    let rectangle = ProfileBuilder::new(vec![[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    let slab = model
+        .add_extrusion(
+            &rectangle,
+            4.0 * f64::EPSILON,
+            &at_height(-2.0 * f64::EPSILON),
+        )
+        .expect("a thin slab");
+    let fused = model.fuse(
+        &[ball],
+        &[slab],
+        Rule::Intersection,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    match fused {
+        Ok(answer) => {
+            let solids: Vec<SolidKey> = answer.solids().to_vec();
+            println!("PROBE ball x slab: Ok, {} solid(s)", solids.len());
+            for solid in solids {
+                let mesh = model.solid(solid).expect("this model made the key").mesh(
+                    rcad_geom::Deflection::of(1e-6).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                println!("PROBE ball x slab mesh: {mesh:?}");
+            }
+        }
+        Err(why) => println!("PROBE ball x slab: refused {:?}", the_refusal(&Err(why))),
+    }
+}
+
+/// PROBE (Q1951): two coaxial bars, radius 4 and a rounding wider, the
+/// narrower one a rounding taller — the step at their shared top leaves the
+/// narrower bar's own wall between the step and its own cap rim, a rounding
+/// apart, on a `Surface::Cylinder` rather than a `Surface::Torus`.
+///
+/// Printing `a_band_the_chart_reads_as_one_line`'s own locals for this face
+/// (instrumented by hand, not committed) showed every condition but the
+/// `Surface::Torus(_)` match already true: `goes_right_round` on both rims,
+/// neither `goes_right_round_the_second_way`, `climbed` opposite in sign
+/// (`-6.283185307179586` and `6.283185307179586`), and `highest - lowest` at
+/// `9.9e-14`, inside `HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF`'s `8.9e-5`. So the
+/// doc comment's "for want of a solid that reaches them" is wrong: this solid
+/// reaches it. But widening the match to `Surface::Cylinder(_)` too, so the
+/// face is handed to `zip_up_a_band` instead of cut and triangulated, changed
+/// nothing: both ways round gave the identical
+/// `CannotMeshAFace { why: BoundaryCrossesItself { at: 10261 }, .. }`, same
+/// face, same index. So whatever `BoundaryCrossesItself` is tracking here
+/// sits upstream of the `HowToCut` choice, not inside `cut_a_band_right_round_the_ring`
+/// or `zip_up_a_band` themselves, and widening the predicate alone would not
+/// have zipped this band up clean the way it does a torus's. Not committed,
+/// and not run yet with an ordinary radius/height step rather than this
+/// `1e-13` one, so neither a class nor a fix is claimed.
+#[test]
+fn probe_q1951_thin_band_on_two_coaxial_bars() {
+    let mut model = a_model();
+    let narrower = model
+        .add_round_bar(4.0, 10.0, &Isometry::identity())
+        .expect("a bar");
+    let wider = model
+        .add_round_bar(4.0 + 1e-13, 10.0 - 1e-13, &Isometry::identity())
+        .expect("a bar");
+    let fused = model.fuse(
+        &[narrower],
+        &[wider],
+        Rule::Union,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    match fused {
+        Ok(answer) => {
+            let solids: Vec<SolidKey> = answer.solids().to_vec();
+            println!("PROBE two bars: Ok, {} solid(s)", solids.len());
+            for solid in solids {
+                let mesh = model.solid(solid).expect("this model made the key").mesh(
+                    rcad_geom::Deflection::of(1e-6).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                println!(
+                    "PROBE two bars mesh: {}",
+                    match &mesh {
+                        Ok(mesh) => format!("Ok({} points)", mesh.points().len()),
+                        Err(why) => format!("{why:?}"),
+                    }
+                );
+            }
+        }
+        Err(why) => println!("PROBE two bars: refused {:?}", the_refusal(&Err(why))),
+    }
+}
