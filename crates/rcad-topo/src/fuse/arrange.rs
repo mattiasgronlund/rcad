@@ -8997,11 +8997,18 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// merged two nodes whose boxes were up to `s²` times wider than its budget
 /// for a length: 625 times at 25 mm (§318.5).
 ///
-/// **The sweep stays a volume.** It is two steps from the start crossed, an
-/// area, read against the normal the crossing winds about. That normal is a
-/// plane's, of length one, for a plane's conic, which makes the sweep an area,
-/// and the line between the centres for two balls, which makes it a volume.
-/// Which of the two it is is `rcad-geom`'s to say.
+/// **The sweep is filed as `rcad-geom` says**
+/// ([`Surface::which_comes_first_round_a_crossing_and_what_it_measures`]). It
+/// is two steps from the start crossed, an area, read against the normal the
+/// crossing winds about. Round a plane's conic, or a circle round a pipe's or
+/// a cone's axis, that normal is a direction of length one and the sweep is an
+/// area; round two balls' circle, or two cones' of one slope, it is the step
+/// between their centres or apexes and the sweep is a volume. Filed as a
+/// volume everywhere until Q1273, a plane conic's sweep was divided by the
+/// working size once too often, so a tolerant policy merged two nodes whose
+/// sweep was up to `s` times its budget for an area: the corner-up cube on a
+/// steep cone's apex at 2 mm was one (§318.5). The angle and the stretch
+/// below answer only a proved sign, which no policy reads the measure of.
 fn round_a_closed_crossing_and_what_it_measures(
     pair: [&Surface; 2],
     [from, node]: [PredicatePoint; 2],
@@ -9019,7 +9026,8 @@ fn round_a_closed_crossing_and_what_it_measures(
     }
     // The sweep is asked first so that a pair it has no way round is refused
     // by it, before the reading below takes a gradient of either surface.
-    let decided = which_comes_first_round_a_crossing(pair, from, one, other)?;
+    let (decided, sweeps) =
+        Surface::which_comes_first_round_a_crossing_and_what_it_measures(pair, from, one, other)?;
     let rounded_off = [
         the_start_is_a_rounding_off(pair, from, one)?,
         the_start_is_a_rounding_off(pair, from, other)?,
@@ -9056,7 +9064,7 @@ fn round_a_closed_crossing_and_what_it_measures(
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
     if decided != Decision::Zero {
-        return Ok((decided, Measures::Volume));
+        return Ok((decided, sweeps));
     }
     if boxes_overlap(one, other) {
         let ahead = the_one_ahead_of_the_start(pair, from, one, other);
