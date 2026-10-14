@@ -3403,7 +3403,7 @@ impl Assembly {
     /// **Such a run cannot be named as one edge.** An arc is told from its
     /// sibling by the way `∇S × ∇T` runs at one of its ends
     /// ([`Edge::the_way_across_the_chord_into_the_arc`]), and at a point where
-    /// the two surfaces are tangent that is exactly nought. Two pipes of one
+    /// the two surfaces are tangent that is nought. Two pipes of one
     /// width whose axes meet cross in four half ellipses that all run between
     /// the two points their walls touch at, and the arrangement cuts each half
     /// at its middle so that it has a corner of its own
@@ -3414,8 +3414,10 @@ impl Assembly {
     /// cap planes (`two_equal_bars_leaning_at_each_other.rs`, Q1660). Kept,
     /// the answer is the one the fuse gives where nothing is joined.
     ///
-    /// The test is the same exact one the naming makes, so a run is kept in
-    /// pieces exactly where it could not be named whole. A run that closes up
+    /// The test is the one the naming makes, [`the_way_the_crossing_runs`],
+    /// which knows a touch point by how the arrangement named its corner and
+    /// not by the rounded point (`docs/decisions.md` §448.3), so a run is kept
+    /// in pieces exactly where it could not be named whole. A run that closes up
     /// has one corner at both ends and goes right round, which needs no
     /// naming, and a straight one is named by its two ends alone.
     fn the_corners_of_each_run_between_two_tangent_points(
@@ -4798,11 +4800,15 @@ impl Edge {
     /// the same picker that way (§312.6).
     ///
     /// **Unless the two surfaces are tangent there**, where `∇S × ∇T` is
-    /// exactly nought and says nothing: then it is read at the other end. Two
-    /// bars of one radius whose axes meet cross in two ellipses that touch at
-    /// two such points, and every arc of them runs from one (Q1660). Whether
-    /// the cross is nought does not follow the order of the fuse's arguments,
-    /// since swapping them only turns its sign.
+    /// nought and says nothing: then it is read at the other end. Two bars of
+    /// one radius whose axes meet cross in two ellipses that touch at two such
+    /// points, and every arc of them runs from one (Q1660). That a corner is
+    /// one of them is read off how the arrangement named it and not off its
+    /// rounded point, where the cross is a rounding wherever `f64` does not
+    /// hold the point ([`the_way_the_crossing_runs`], `docs/decisions.md`
+    /// §448.3). Whether the cross is nought does not follow the order of the
+    /// fuse's arguments, since swapping them only turns its sign, and the pair
+    /// of pipes a corner is marked with is named alike either way round.
     ///
     /// A dot of exactly zero is `None`: either the named direction lay along
     /// its chord, which the old code refused too, or the crossing's direction
