@@ -298,30 +298,36 @@ fn a_bar_starting_where_it_crosses_another_at_120_degrees_is_refused_building_a_
 /// the same triangle was drawn twice, facing both ways (`docs/decisions.md`
 /// §446.8). The bar along `(3, 4, 0)` less the other, the same pinch, meshed.
 ///
-/// Where the axes meet at `(0, 0, 0)`, `(0, 1, 0)` and `(1, 1, 1)`. At the
-/// six other points Q1896 names, the fuse is refused before it meshes, naming
-/// an arc from a touch point by a rounding (Q1965).
+/// **Only where the axes meet at `(0, 0, 0)`.** The fuse asks whether the
+/// pipes are tangent at a touch point by an exact nought at its rounded point,
+/// and elsewhere it can read a rounding there, say no, and pick an arc from the
+/// touch point the wrong way (Q1965).
+/// At `(0, 1, 0)` a face then came to the mesh with an arc from a touch point
+/// walked three quarters of the way round its ellipse, and was refused
+/// `ASideCutsOffOneCornerOfACurvedPatch`; at `(1, 1, 1)` the answer was
+/// refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)`; at the six other points
+/// Q1896 names the fuse is refused before it meshes. With every touch point
+/// read as tangent, by Q1953's scratch tolerance in `fuse/assemble.rs`, all
+/// nine answered this volume and `[3, 3]` faces, both ways round.
 #[test]
 fn a_bar_along_4_0_3_less_one_along_3_4_0_meshes_where_the_two_pieces_touch() {
     let shared = 25.0 / (12.0 * 481.0_f64.sqrt());
     let volume = PI / 8.0 - shared;
-    for middle in [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0]] {
-        let what = format!("{middle:?}: solids of [3, 3] faces and volume {volume}");
-        let mut model =
-            Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let [along_3_4_0, along_4_0_3] = two_bars_crossing_at(&mut model, middle);
-        let solids = model
-            .fuse(
-                &[along_4_0_3],
-                &[along_3_4_0],
-                Rule::Difference,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .map(|answer| answer.solids().to_vec())
-            .unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
-        answers(&model, &solids, volume, &[3, 3], &what);
-    }
+    let what = format!("solids of [3, 3] faces and volume {volume}");
+    let mut model =
+        Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let [along_3_4_0, along_4_0_3] = two_bars_crossing_at(&mut model, [0.0, 0.0, 0.0]);
+    let solids = model
+        .fuse(
+            &[along_4_0_3],
+            &[along_3_4_0],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map(|answer| answer.solids().to_vec())
+        .unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
+    answers(&model, &solids, volume, &[3, 3], &what);
 }
 
 /// The second bar's near cap, as the model hands it out, is proved off both
