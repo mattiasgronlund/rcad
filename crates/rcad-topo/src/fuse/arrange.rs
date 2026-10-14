@@ -6646,11 +6646,8 @@ impl<'f> Arrangement<'f> {
                 if on_the_cut {
                     return None;
                 }
-                match side_of_surface(cut, node.point) {
-                    side @ (Decision::Pos | Decision::Neg) => Some(side),
-                    Decision::Zero | Decision::Undecidable { .. } => None,
-                    other => panic!("a decision nothing here knows: {other:?}"),
-                }
+                let side = side_of_surface(cut, node.point);
+                matches!(side, Decision::Pos | Decision::Neg).then_some(side)
             })
         })
     }
