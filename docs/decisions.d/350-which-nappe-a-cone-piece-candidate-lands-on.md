@@ -196,7 +196,12 @@ count in the table was the same on all three runs.
   `ACurvedFaceGoesRightRoundWithNoSeam`; Q1743's 14 `side of a half-space`
   answer right since Q1837's fix to `walk.rs`. Turned `1.5` the slab, as the
   model stores it, leaves a lens of the cone past its end at `−y`, `3.6e−16`
-  inside the rim.
+  inside the rim. **2026-10-15, Q1989 (Q1985):** the leaning block's 12
+  `CannotTellTheCellsOfAFaceApart` of the table above are now 8
+  `Invalid(DynamicRangeTooWide)`, leaned `4` through its apex, turned `0` and
+  `1`, a limit pinned by ratio in
+  `a_steep_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range`,
+  and 4 `a point inside a piece of a face`, turned `3` (Q464).
 - **Round the unit cone**, the leaning block is 169 right of 192, the cube 88 of
   96 and the slab 80 of 80 (Q1733, §35.6; was 68 of 80, naming 12 `a point
   inside a piece of a face` in the slab from `−8`). The leaning block refuses 8
