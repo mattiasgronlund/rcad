@@ -1918,13 +1918,18 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// the rim puts the start off the cap
 /// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`).
 ///
-/// It places a second kind of piece too, with no rounding in it: a thick
-/// bar's cap where a thin bar stands inside and touches the thick bar's wall
-/// along its seam. The thin bar's pipe cuts the cap's plane in a circle that
-/// touches the rim at the seam corner, so the piece between them has two
-/// sides, each from that corner back to it, and the point search finds no
-/// point inside it. The corner is on the thin bar's pipe but past its caps, so
-/// clear of every face of the thin bar (Q1563, `tests/fuses_that_touch.rs`).
+/// It placed a second kind of piece too, with no rounding in it, until the
+/// point search learned to: a thick bar's cap where a thin bar stands inside
+/// and touches the thick bar's wall along its seam. The thin bar's pipe cuts
+/// the cap's plane in a circle that touches the rim at the seam corner, so the
+/// piece between them has two sides, each from that corner back to it, and the
+/// point search found no point inside it. The corner is on the thin bar's pipe
+/// but past its caps, so clear of every face of the thin bar (Q1563,
+/// `tests/fuses_that_touch.rs`). Since Q1748 [`between_the_round_wires`]
+/// offers a point inside that piece and [`in_the_bulge_of`] holds it, so this
+/// rule is no longer asked about it. Switched off, it costs no fuse in
+/// `tests/fuses_that_touch.rs`, but tests elsewhere in this crate still fail
+/// without it, the bends' among them.
 fn by_the_piece_across_a_side_clear_of_every_face(
     model: &Model,
     scratch: &Scratch,
@@ -2563,6 +2568,20 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// corners wind round nothing, and until its arc was counted no point was held
 /// and every fuse of two bends' top halves meeting flush was refused
 /// [`INSIDE_A_PIECE`] (row Q1373).
+///
+/// **A side that closes on itself has no chord, and its bulge is the whole
+/// region it goes round**, which holds every point its partner's sign does.
+/// Such a side is in a wire of more than one side where two whole circles
+/// touch at a corner they share: a thin bar's cap flush with a thick bar's,
+/// the two pipes touching on the thick bar's seam, leaves the thick cap a
+/// crescent whose one wire is the rim and the thin circle, each from the seam
+/// corner back to it. The corners are that one corner twice and wind round
+/// nothing, so the rim counts one and the thin circle, whose material is
+/// outside it, nothing. Asked of the chord, the turn about a chord with no
+/// length was zero, no point of the crescent was held, and every fuse was
+/// refused [`INSIDE_A_PIECE`] (row Q1748). A side along a ring with its
+/// material outside goes to [`across_the_inner_disk`] first, which reads such
+/// a side as undecided, and that only loses a candidate.
 fn in_the_bulge_of(
     flat: &Plane,
     side: &FaceMeet,
@@ -2592,6 +2611,9 @@ fn in_the_bulge_of(
     };
     if !one_round_region || side.material_side != Decision::Neg {
         return Some(0);
+    }
+    if closes_on_itself(side) {
+        return Some(1);
     }
     let turn = which_side_of_the_chord(flat, side, in_plane, point)?;
     Some(if turn == Decision::Neg { 1 } else { 0 })
@@ -2768,7 +2790,7 @@ fn the_pipe_of_the_rings_own_radius(ring: &Torus) -> Cylinder {
 /// it bounds would hold no point at all.
 fn round_wire_of(wire: &[FaceMeet]) -> Option<Surface> {
     match wire {
-        [only] if only.ends[0].point() == only.ends[1].point() => Some(only.carried_by[1]),
+        [only] if closes_on_itself(only) => Some(only.carried_by[1]),
         [one, other]
             if matches!(one.carried_by[1], Surface::Sphere(_))
                 && one.carried_by[1] == other.carried_by[1] =>
@@ -4083,8 +4105,23 @@ impl Chord {
 /// as the circle round its middle through its corner, which is exactly what a
 /// ball or a pipe square to the plane cuts and only near what a leaning pipe or
 /// a cone does; nothing about a candidate is trusted, so a wire read wrongly
-/// only costs candidates. Nothing for a piece with fewer than two round wires,
-/// whose one middle is already offered.
+/// only costs candidates.
+///
+/// **Two whole circles can be one wire**, where they touch at a corner they
+/// share. A thin bar's cap flush with a thick bar's, the two pipes touching on
+/// the thick bar's seam, leaves the thick cap a crescent whose one wire is the
+/// rim and the thin circle, each from the seam corner back to it. That wire is
+/// not round ([`round_wire_of`]), every blend of its corners is the seam
+/// corner, and every side's chord has no length, so until each such side was
+/// read here as a round wire of its own no point was offered inside it and
+/// every fuse was refused [`INSIDE_A_PIECE`] (row Q1748). The line from the
+/// rim's middle through the seam corner crosses the rim at the corner and
+/// across from it, and the thin circle at the corner and one diameter in from
+/// it, so the middle of the stretch from across the rim to that second
+/// crossing is inside the crescent: `(−1, 0, 0)` for radii three and one. Such
+/// sides come after the round wires, so a piece with none is offered what it
+/// was. Nothing for a piece with fewer than two round wires and such sides
+/// together, whose one middle is already offered.
 fn between_the_round_wires(flat: &Plane, piece: &Piece) -> Vec<PredicatePoint> {
     let mut through_its_corner = Vec::new();
     for wire in &piece.wires {
@@ -4093,6 +4130,18 @@ fn between_the_round_wires(flat: &Plane, piece: &Piece) -> Vec<PredicatePoint> {
         };
         let corner = middle_of(wire[0].ends[0].point());
         for middle in the_middles_of_a_round_wire(flat, &partner) {
+            through_its_corner.push((middle_of(middle), corner));
+        }
+    }
+    let whole_circles_in_a_wire_of_more = piece
+        .wires
+        .iter()
+        .filter(|wire| round_wire_of(wire).is_none())
+        .flatten()
+        .filter(|side| closes_on_itself(side));
+    for side in whole_circles_in_a_wire_of_more {
+        let corner = middle_of(side.ends[0].point());
+        for middle in the_middles_of_a_round_wire(flat, &side.carried_by[1]) {
             through_its_corner.push((middle_of(middle), corner));
         }
     }
@@ -4126,6 +4175,11 @@ fn between_the_round_wires(flat: &Plane, piece: &Piece) -> Vec<PredicatePoint> {
         );
     }
     candidates
+}
+
+/// Whether `side` runs right round a closed curve, from one corner back to it.
+fn closes_on_itself(side: &FaceMeet) -> bool {
+    side.ends[0].point() == side.ends[1].point()
 }
 
 /// The middle of a piece's corners, which is somewhere near it and nowhere in
