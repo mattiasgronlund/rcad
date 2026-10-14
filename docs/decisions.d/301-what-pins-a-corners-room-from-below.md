@@ -27,6 +27,7 @@ each fail it (301.5). No kernel code changed.*
   301.7   What this leaves
   301.8   Which draws the 0.49 fold belongs to, and whether shrinking the room changes their answer
   301.9   The room `bake`'s picker grants, and why it does not grow with how badly three planes cross
+  301.10  The room x0.5, x0.1 and x1.25 re-run across rcad-topo after §356 and §395
 
 ### 301.1 The room shrunk to half, a tenth and nothing
 
@@ -193,6 +194,13 @@ mutations are the proof. A revert would take the unit test out with the file.
 exactly `what_writing_the_corner_down_cost`, which is what the doc comment and
 §253.4 claim. If a shape that fills the room is found, a test on it should
 stand beside this one.
+
+**This table is stale past §356 and §395.** The unit test named here moved
+from the two cube walls to a wall and the cut `x = y` (§356.5), the room it
+builds is no longer always `what_writing_the_corner_down_cost` (§356's
+branch), and the wedge test's own slope range grew (§301.9). §301.10 re-runs
+all three mutations against today's code, across the whole of `rcad-topo`, and
+names every test that still pins the room, from below and from above.
 
 ### 301.6 The probe
 
@@ -387,3 +395,63 @@ conditioning cover, so `refuses/D`, and none is filed. From 2⁻²⁶, about
 2⁻³², about `2.3e-10`, most pyramids build an answer that does not validate:
 a corner `1e-7` off its face's plane. The kernel catches that and writes
 nothing.
+
+### 301.10 The room x0.5, x0.1 and x1.25 re-run across rcad-topo after §356 and §395
+
+*Queue row Q495, from §356.5's forecast. Lane
+`lane-q495-what-pins-a-corners-room`, off `b982307a`.* Since §356,
+`a_corner_is_this_place`'s one-line room build is a branch
+(`crates/rcad-topo/src/fuse/arrange.rs:2784-2793`): where `bake` placed the
+corner on three planes, the room is
+`BakedCorner::room_its_planes_were_asked_with` (§395.8); otherwise it is still
+`what_writing_the_corner_down_cost`. Both branches feed the one `room` binding
+that `grown_by` reads, so the scratch edit was multiplying that binding —
+`grown_by(node.point, room * k)` — rather than either branch alone, which
+would have missed the other. Each run was
+`mise exec -- just t -p rcad-topo --no-fail-fast`, reverted with `git checkout
+-- crates/rcad-topo/src/fuse/arrange.rs` before the next. No kernel code
+changed; nothing in `arrange.rs` is committed.
+
+| k | Tests run | Passed | Failed | Skipped |
+|---|---|---|---|---|
+| 1 (unmodified) | 2112 | 2112 | 0 | 3 |
+| 0.5 | 2112 | 2108 | 4 | 3 |
+| 0.1 | 2112 | 2107 | 5 | 3 |
+| 1.25 | 2112 | 2109 | 3 | 3 |
+
+**Five tests pin the room from below** (fail at 0.5, 0.1, or both): four
+hand-written unit tests against a specific number, and one certified fuse of
+a shape, at 0.1 only:
+
+- `a_place_as_far_off_a_corner_as_its_room_is_folded_into_it_and_one_a_step_further_is_not`
+  (§301.5), at both 0.5 and 0.1.
+- `a_meet_of_three_planes_bake_solved_the_corner_among_is_folded_only_while_its_box_lies_within_bakes_room`,
+  at both 0.5 and 0.1.
+- `a_meet_is_folded_when_its_tighter_box_lies_inside_the_corners_room_however_far_cramers_reaches`,
+  at both 0.5 and 0.1.
+- `a_place_inside_a_corners_room_is_folded_into_it_though_its_box_misses_the_corners`,
+  at both 0.5 and 0.1 — it pins only from below, not above, since growing the
+  room cannot break a containment check on a place already proven inside it
+  (absent from the 1.25 row below).
+- `a_pyramid_with_a_sliver_face_at_its_apex_is_united`, in
+  `crates/rcad-topo/tests/a_corner_with_four_planes_round_it.rs`, at 0.1 only.
+  It is outside this file's own table (301.3, 310.2): a shape-level test added
+  since §395 that none of 301's or 310's searches tried.
+
+**Three tests pin the room from above** (fail at 1.25), all hand-written and
+all also in the "from below" list:
+`a_place_as_far_off_a_corner_as_its_room_is_folded_into_it_and_one_a_step_further_is_not`,
+`a_meet_of_three_planes_bake_solved_the_corner_among_is_folded_only_while_its_box_lies_within_bakes_room`,
+and
+`a_meet_is_folded_when_its_tighter_box_lies_inside_the_corners_room_however_far_cramers_reaches`.
+
+**One certified-shape test pins the room, and only at 0.1.** The sliver test
+above fuses under `Policy::certified()` and panics when the fuse is refused,
+which at ×0.1 it is ("two regions of one face could not be told apart"). Every
+other test that reads a fuse's answer passes at all three scales: neither
+pyramid fold test (310.2) nor the wedge test (301.5, 301.9) is among the
+failures at 0.5, 0.1 or 1.25. This confirms §356.5's forecast for the
+sixteenth-fold pyramid test by name, and extends it: across the whole crate,
+not just the two tests 310.4 named, the room at ×0.5 and ×1.25 is pinned only
+by the hand-written unit tests that ask about it directly, and at ×0.1 by
+those and the sliver test.
