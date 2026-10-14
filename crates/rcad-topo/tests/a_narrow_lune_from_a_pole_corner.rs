@@ -21,6 +21,7 @@
 use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
+use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -197,8 +198,8 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
 /// were named, before the range was asked. The fuse now asks the range first,
 /// of the answer's corners and edges as they are once its pieces are joined,
 /// and a chord a rounding long beside a coordinate of 1 is the limit §87.3
-/// names. A tolerant policy only warns of the range, and there the seven are
-/// still refused that name
+/// names. A tolerant policy only warns of the range, and there the arc is named
+/// since Q1867 and the seven are refused further on
 /// ([`two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`]).
 #[test]
 fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
@@ -237,41 +238,50 @@ fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
 
 /// The same nine cases under a tolerant policy, where a range too wide is only
 /// a warning, so each goes on past the range check and is refused by name
-/// further on.
+/// further on. Each is past the range §87.3 names: the arc of `x = 0` from a
+/// pole to a corner a rounding off it is a chord `4.4e−16` long beside a
+/// coordinate of 1.
 ///
-/// **The seven Q1664 moved are refused
-/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`**, as all seven were under
-/// every policy before Q1664: the arc of `x = 0` from a pole to a corner a
-/// rounding off it has its chord along the tangent at the pole. **Q1614's two
-/// are refused `CannotNameWhichPieceOfACrossingThisIs`**, where they were
-/// refused before Q1614.
+/// **The seven Q1664 moved were refused
+/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` until Q1867**, as all
+/// seven were under every policy before Q1664: that arc has its chord along
+/// the tangent at the pole. **Q1614's two are refused
+/// `CannotNameWhichPieceOfACrossingThisIs`**, where they were refused before
+/// Q1614.
 ///
-/// **Naming that arc by the tangent at the pole answered none of them** (Q1665,
-/// commit `e5dcff60`, taken back), the shorter arc when the way the edge leaves
-/// the pole and its chord point the same way. The four 90 degree differences
-/// were then refused
-/// `CannotMeshAFace` for corners that coincide, the 45 degree one at radius
-/// 0.001 and the 10 degree one at radius 1000 were refused
-/// `FacesDoNotAgreeWhichWayTheyFace`, and Q1614's two were refused as here.
-/// The 10 degree intersection at radius 1 did not finish: `validate.rs`'s
-/// `the_coarsest_mesh_whose_sides_do_not_cross` halved its deflection rung
-/// after rung down towards half the closest corner pair, `1.28e−15`, and every
-/// rung was refused `LoopsTouch` at the same corner, `(0, −6.4e−16, −1)`, where
-/// the two knives' line meets the ball a rounding past the south pole.
+/// **Q1867 names that arc** (`Edge::the_way_into_an_arc_along_its_own_chord`
+/// in `fuse/assemble.rs`) and none of the seven answers for it. Each answer's
+/// corners, edges and faces are right — the 90 degree difference at radius 1
+/// was dumped, the arcs from each pole to the corner beside it picked as the
+/// short ones — and each is refused further on:
+///
+/// - **the four 90 degree differences for corners that coincide**, by the
+///   mesher, which sees the pole and the corner `4.4e−16` from it as one point
+///   on the face's own map;
+/// - **the 45 degree one at radius 0.001 and the 10 degree one at radius 1000
+///   for faces that do not agree which way they face**;
+/// - **the 10 degree intersection at radius 1 for loops that touch** at
+///   `(0, −6.4e−16, −1)`, where the two knives' line meets the ball a rounding
+///   past the south pole. Before Q1866 `validate.rs`'s
+///   `the_coarsest_mesh_whose_sides_do_not_cross` walked its ladder down
+///   endlessly there, a rung refused at the same corner each time; it now stops
+///   at the second.
 #[test]
 fn two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy() {
-    const UNNAMED_ARC: &str = "ACurvedEdgeThatIsPartOfACrossingCannotBeNamed";
+    const COINCIDE: &str = "CornersCoincide";
+    const FACE_APART: &str = "FacesDoNotAgreeWhichWayTheyFace";
+    const TOUCH: &str = "LoopsTouch";
     const UNNAMED_PIECE: &str = "CannotNameWhichPieceOfACrossingThisIs";
     for (degrees, radius, rule, refused) in [
-        (90.0, 1.0, Rule::Difference, UNNAMED_ARC),
-        (90.0, 0.001, Rule::Difference, UNNAMED_ARC),
-        (90.0, 1000.0, Rule::Difference, UNNAMED_ARC),
-        (90.0, 3.0, Rule::Difference, UNNAMED_ARC),
-        (45.0, 0.001, Rule::Difference, UNNAMED_ARC),
+        (90.0, 1.0, Rule::Difference, COINCIDE),
+        (90.0, 0.001, Rule::Difference, COINCIDE),
+        (90.0, 1000.0, Rule::Difference, COINCIDE),
+        (90.0, 3.0, Rule::Difference, COINCIDE),
+        (45.0, 0.001, Rule::Difference, FACE_APART),
         (45.0, 1000.0, Rule::Difference, UNNAMED_PIECE),
-        (10.0, 1.0, Rule::Intersection, UNNAMED_ARC),
+        (10.0, 1.0, Rule::Intersection, TOUCH),
         (10.0, 0.001, Rule::Difference, UNNAMED_PIECE),
-        (10.0, 1000.0, Rule::Difference, UNNAMED_ARC),
+        (10.0, 1000.0, Rule::Difference, FACE_APART),
     ] {
         let mut model = a_model(radius);
         let ball = model
@@ -286,10 +296,73 @@ fn two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy() {
             panic!("{degrees} degrees, radius {radius}, {rule:?}: answered {outcome:?}");
         };
         assert_eq!(
-            which_refusal(&why),
+            what_stops_the_mesher_or_which_refusal(&why),
             refused,
             "{degrees} degrees, radius {radius}, {rule:?}: {why:?}"
         );
+    }
+}
+
+/// A half ball `x ≥ 0` cut by a block whose face `y = 1e−10·r` misses the
+/// polar axis by a hair answers at every size and under every rule, and
+/// measures its closed form.
+///
+/// The difference keeps the arc of `x = 0` from each pole to the corner where
+/// the block's face crosses it, `1e−10·r` round. The `z` of that corner is
+/// `r` to every bit an `f64` has, so the chord lies exactly along the tangent
+/// at the pole, and the crossing at the pole runs exactly along the chord: the
+/// two directions the fuse tells the arcs apart by both square off to nothing.
+/// That difference was refused `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`
+/// at all four sizes until Q1867, under a certified policy and with the range
+/// well inside §87.3's. The arc sets off from the pole towards the corner, so
+/// it is the short one, on the side of the chord away from the ball's centre.
+///
+/// With the slab `0 ≤ y ≤ t` of the half ball, `t = 1e−10·r`, of volume
+/// `(π/2)(r²t − t³/3)`, the difference is the quarter ball and the slab, the
+/// intersection is the quarter ball less the slab, and the union is the block
+/// and the half ball less that intersection.
+#[test]
+fn a_half_ball_cut_by_a_block_a_hair_off_its_polar_axis_is_answered() {
+    for radius in RADII {
+        let t = 1e-10 * radius;
+        let slab = PI / 2.0 * (radius * radius * t - t * t * t / 3.0);
+        let quarter = a_balls_volume(radius) / 4.0;
+        for (rule, closed_form) in [
+            (Rule::Difference, quarter + slab),
+            (Rule::Intersection, quarter - slab),
+            (
+                Rule::Union,
+                12.0 * 6.0 * 12.0 * radius.powi(3) + quarter + slab,
+            ),
+        ] {
+            let mut model = a_model(radius);
+            let ball = model
+                .add_ball(radius, &Isometry::identity())
+                .expect("a ball");
+            let first = a_knife_through_the_axis(&mut model, radius, 0.0);
+            let half = fused(&mut model, &[ball], &[first], Rule::Intersection);
+            let knife = block(
+                &mut model,
+                [12.0 * radius, 6.0 * radius, 12.0 * radius],
+                Vector::new(-6.0 * radius, t, -6.0 * radius),
+            );
+            let answer = model
+                .fuse(
+                    &half,
+                    &[knife],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("radius {radius}, {rule:?}: refused {why:?}"))
+                .solids()
+                .to_vec();
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("radius {radius}, {rule:?}: {why:?}"));
+            assert_eq!(answer.len(), 1, "radius {radius}, {rule:?}");
+            measures(volume_of(&model, &answer, radius), closed_form);
+        }
     }
 }
 
@@ -928,5 +1001,28 @@ fn which_refusal(why: &Error) -> &str {
     if let Error::Invalid(rcad_topo::Invalid::DynamicRangeTooWide { .. }) = why {
         return "DynamicRangeTooWide";
     }
+    if let Error::Invalid(rcad_topo::Invalid::FacesDoNotAgreeWhichWayTheyFace) = why {
+        return "FacesDoNotAgreeWhichWayTheyFace";
+    }
     panic!("expected a refusal by name, got {why:?}")
+}
+
+/// What stopped the mesher, for a face it could not mesh, and otherwise
+/// [`which_refusal`].
+fn what_stops_the_mesher_or_which_refusal(why: &Error) -> &str {
+    if let Error::CannotMeshAFace {
+        why: CannotTriangulate::CornersCoincide { .. },
+        ..
+    } = why
+    {
+        return "CornersCoincide";
+    }
+    if let Error::CannotMeshAFace {
+        why: CannotTriangulate::LoopsTouch { .. },
+        ..
+    } = why
+    {
+        return "LoopsTouch";
+    }
+    which_refusal(why)
 }

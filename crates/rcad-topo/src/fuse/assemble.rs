@@ -4810,9 +4810,10 @@ impl Edge {
     /// fuse's arguments, since swapping them only turns its sign, and the pair
     /// of pipes a corner is marked with is named alike either way round.
     ///
-    /// A dot of exactly zero is `None`: either the named direction lay along
-    /// its chord, which the old code refused too, or the crossing's direction
-    /// at the chosen end does.
+    /// **A dot of exactly zero** means the named direction lay along its chord,
+    /// or the crossing's direction at the chosen end does, and
+    /// [`Edge::the_way_into_an_arc_along_its_own_chord`] reads the side another
+    /// way.
     ///
     /// **An arc of a plane's very long ellipse round a pipe is faced by the
     /// pipe instead**, and [`AlongALongPipe`] says when and how: there both
@@ -4853,14 +4854,90 @@ impl Edge {
             crossing = crossing_at(second);
         }
         let across = squared_off_from(from, crossing);
-        let agreement = across.dot(squared_off_from(named_from, towards));
+        let named = squared_off_from(named_from, towards);
+        let agreement = across.dot(named);
         if agreement > 0.0 {
             Some(across)
         } else if agreement < 0.0 {
             Some(-across)
         } else {
-            None
+            self.the_way_into_an_arc_along_its_own_chord(
+                corners,
+                [first, second],
+                named,
+                named_from,
+                towards,
+            )
         }
+    }
+
+    /// The way into a plane's arc when one of the two directions
+    /// [`Edge::the_way_across_the_chord_into_the_arc`] squares off against the
+    /// chord lies along it, so their dot is exactly nought — or `None` when the
+    /// arc is on no plane, or this cannot say either.
+    ///
+    /// **It is the arc where a ball's crossing with a plane runs from a pole to
+    /// a corner a hair off it.** The crossing at the pole runs along the chord,
+    /// so `across` is nought, and so is the named direction when it is the
+    /// tangent there. Cut a half ball `x ≥ 0` by a block whose face is
+    /// `y = 1e−10`: the corner where `x = 0` and that face cross the ball is
+    /// stored `(0, 1e−10, −1)`, since the `z` that far round rounds to `−1`, and
+    /// the difference was refused by name at every size.
+    ///
+    /// **The answer is `±n × c`**, `n` the plane's normal and `c` the chord taken
+    /// from the end whose point comes first, so that it does not follow the
+    /// order of the fuse's arguments (§312). Only its sign is left to say:
+    ///
+    /// - **The named direction, squared off, when it has any length.** It points
+    ///   to the arc's side of the chord, whether `towards` is a tangent or the
+    ///   step to a corner a joined run dissolved
+    ///   ([`Assembly::arc_of_a_joined_run`]).
+    /// - **Otherwise which way along the chord the named direction runs**, for a
+    ///   curve that closes. It lies along the chord, so the arc either sets off
+    ///   towards the far end, and is the shorter one, on the side of the chord
+    ///   away from the curve's centre; or sets off away from it right round the
+    ///   curve, and is the longer one, on the centre's side. Away from the
+    ///   centre is the way the round surface's gradient leans, since inside the
+    ///   curve is inside the round surface. A step to a dissolved corner reads
+    ///   the same: a corner on a closed curve can lie along the chord from an
+    ///   end only off that end, towards the far end on the shorter arc and past
+    ///   the near one on the longer.
+    fn the_way_into_an_arc_along_its_own_chord(
+        &self,
+        corners: &[Corner],
+        [first, second]: [usize; 2],
+        named: Vector,
+        named_from: usize,
+        towards: Vector,
+    ) -> Option<Vector> {
+        let side = |reading: f64| reading.partial_cmp(&0.0).filter(|side| side.is_ne());
+        let flat = self.carried_by.iter().find_map(Surface::as_plane)?;
+        let at = corners[first].point;
+        let square = flat.normal().cross(corners[second].point - at);
+        let into_the_arc = if named == Vector::zero() {
+            let round = self
+                .carried_by
+                .iter()
+                .find(|surface| surface.as_plane().is_none())?;
+            where_a_closed_crossing_is_centred(round, flat)?;
+            let outwards = side(square.dot(gradient_of(round, at)))?;
+            let heading =
+                side(towards.dot(
+                    corners[self.other_end_than(named_from)].point - corners[named_from].point,
+                ))?;
+            if outwards == heading {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
+        } else {
+            side(named.dot(square))?
+        };
+        Some(if into_the_arc.is_gt() {
+            square
+        } else {
+            -square
+        })
     }
 
     /// The end of this edge that is not `corner`.
@@ -8254,10 +8331,11 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
 /// The loop stops once the total is past twice the size of the arithmetic. That
 /// is past any reading `facing · p` can have by Cauchy–Schwarz, so by then both
 /// ends read in front and the loop has already returned — which is why the one
-/// way out of here is `facing` having no length to point along. That is a chord
-/// lying along the crossing's own direction, which for a conic means an arc so
-/// short its chord rounds onto its own tangent
-/// (`an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name`).
+/// way out of here is `facing` having no length to point along. Every `facing`
+/// [`Edge::the_way_across_the_chord_into_the_arc`] hands over has one: an arc
+/// so short its chord rounds onto its own tangent is faced square to the chord
+/// in its own plane instead
+/// (`an_arc_from_a_pole_to_a_corner_a_hair_off_it_is_named_by_the_way_it_sets_off`).
 ///
 /// # Room for the corners the next fuse will solve
 ///
@@ -9531,7 +9609,7 @@ mod tests {
         Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
         WireStep, Written, assemble, name_of_the_closed_crossing_through,
         names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_half_space_both_ends_are_on, the_nappe_an_arc_that_does_not_close_is_on, turns_round,
+        the_nappe_an_arc_that_does_not_close_is_on, turns_round,
         vertices_that_only_start_a_closed_edge, winding_round,
     };
 
@@ -10383,30 +10461,90 @@ mod tests {
         }
     }
 
-    /// The whole of what
-    /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] is left refusing,
-    /// and a **gap** rather than a limit: the half-space exists and `f64` cannot
-    /// reach it.
+    /// The arc of the circle `x = 0` round the unit ball from its south pole to
+    /// a corner `1e−10` round is named by which way it sets off: towards the far
+    /// end it is the short arc, on the side of the chord away from the centre,
+    /// and away from it the long arc, on the centre's side — from either end.
     ///
-    /// Two corners a hair apart on the unit circle. The chord to a point that
-    /// far round is `(cos δ − 1, sin δ)`, and for `δ` under an `f64` rounding
-    /// `cos δ` is exactly one — so the chord lies exactly along the tangent, the
-    /// normal `v(c·c) − c(c·v)` cancels to exactly nothing, and there is no
-    /// direction left to separate the two arcs along.
+    /// The `z` of a point `1e−10` round is `−1` to every bit, so the chord lies
+    /// exactly along the tangent at the pole, and the crossing at the pole runs
+    /// exactly along the chord: both directions the arcs are told apart by
+    /// square off to nothing. Until Q1867 that was the whole of what
+    /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] refused for a
+    /// plane's crossing with a ball.
     #[test]
-    fn an_arc_whose_chord_rounds_onto_its_own_tangent_is_refused_by_name() {
-        let from = Point::new(1.0, 0.0, 0.0);
-        let to = Point::new(1.0, 1e-16, 0.0);
-        let leaving = Vector::new(0.0, 1.0, 0.0);
-        let chord = to - from;
+    fn an_arc_from_a_pole_to_a_corner_a_hair_off_it_is_named_by_the_way_it_sets_off() {
+        let up = Vector::new(0.0, 0.0, 1.0);
+        let along = Vector::new(0.0, 1.0, 0.0);
+        for (from, towards, short) in [
+            (0, along, true),
+            (0, -along, false),
+            (1, -along, true),
+            (1, along, false),
+        ] {
+            let (corners, edge) = the_arc_of_x_0_from_the_south_pole_a_hair_round(from, towards);
+            let facing = edge
+                .the_way_across_the_chord_into_the_arc(&corners, from, towards)
+                .unwrap_or_else(|| panic!("leaving corner {from} along {towards:?} names an arc"));
+            assert_eq!(
+                facing.dot(up) < 0.0,
+                short,
+                "leaving corner {from} along {towards:?} is the short arc: {short}"
+            );
+            assert!(
+                edge.how_it_runs(&corners, None).is_ok(),
+                "leaving corner {from} along {towards:?} has a half-space"
+            );
+        }
+    }
 
-        let facing = leaving * chord.dot(chord) - chord * chord.dot(leaving);
-        assert_eq!(
-            facing,
-            Vector::zero(),
-            "an arc this short has a chord along its own tangent"
+    /// A run of pieces joined into one names its arc by the step from an end
+    /// to a corner the joining dissolved ([`Assembly::arc_of_a_joined_run`]),
+    /// and that step is no tangent. From the south pole to `(0, 1, 0)`, far
+    /// round the long arc to the corner `1e−10` round, it leans the way the
+    /// chord runs, which read as a tangent says the short arc. Its side of the
+    /// chord says the long one.
+    #[test]
+    fn a_joined_arc_named_by_a_corner_far_round_the_long_way_is_the_long_arc() {
+        let to_the_far_side = Point::new(0.0, 1.0, 0.0) - Point::new(0.0, 0.0, -1.0);
+        let (corners, edge) = the_arc_of_x_0_from_the_south_pole_a_hair_round(0, to_the_far_side);
+        let facing = edge
+            .the_way_across_the_chord_into_the_arc(&corners, 0, to_the_far_side)
+            .expect("a step to a point of the arc off its chord names it");
+        assert!(
+            facing.dot(Vector::new(0.0, 0.0, 1.0)) > 0.0,
+            "the long arc is on the centre's side of the chord, and was faced {facing:?}"
         );
-        assert!(the_half_space_both_ends_are_on(facing, [from, to], None).is_none());
+    }
+
+    /// The edge where the plane `x = 0` crosses the unit ball from the south
+    /// pole, corner 0, to `(0, 1e−10, −1)`, corner 1, named as the arc leaving
+    /// `corner` along `towards`.
+    fn the_arc_of_x_0_from_the_south_pole_a_hair_round(
+        corner: usize,
+        towards: Vector,
+    ) -> (Vec<Corner>, Edge) {
+        let at = |point: Point| Corner {
+            point,
+            wobble: 0.0,
+            from: None,
+            moved_by_the_policy: false,
+            where_pipes_touch: Vec::new(),
+        };
+        let wall = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
+            .expect("a unit normal");
+        let ball = Sphere::new(Point::origin(), 1.0).expect("a ball of radius one");
+        let corners = vec![
+            at(Point::new(0.0, 0.0, -1.0)),
+            at(Point::new(0.0, 1e-10, -1.0)),
+        ];
+        let edge = Edge {
+            ends: [0, 1],
+            carried_by: [Surface::Plane(wall), Surface::Sphere(ball)],
+            arc: WhichArc::LeavingACorner { corner, towards },
+            from: Vec::new(),
+        };
+        (corners, edge)
     }
 
     /// Two solids flush against each other name the plane they share opposite
