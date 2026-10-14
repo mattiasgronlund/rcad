@@ -7,6 +7,9 @@ steps, its verifier said `merge`, and this does the rest: fetch, branch from
 `origin/main`, unlock, check the sha, merge, close the row and add the lane's
 rows in one `queue apply`, `check-queue`, commit, gate, and the push loop with
 §367's free catch-ups over docs, then `ff-main`, unlock and `mark-finished`.
+The same `queue apply` closes each row of `--answers`, the rows the verifier
+confirmed the branch also answers (§450.3 rule 4), done at the lane's tip,
+while `docs/queue.md` still shows it open and held by no lane.
 
 **Anything that wants judgement is a stop, named.** The sha differs from the
 lane's report, a merge conflicts, §0 names the row, `queue apply` or
@@ -43,6 +46,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "queue"))
+from rows import Queue  # noqa: E402
+
 MERGE_ATTEMPTS = 3
 DOCS_CATCH_UPS = 5
 JUST = os.environ.get("LAND_JUST", "just")
@@ -51,8 +57,8 @@ STATE = os.path.join("target", "land")
 ROW = re.compile(r"^[TDQ][0-9]+$")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
 STEP_ARGS = {"add": 4, "after": 2, "tag": 2}
-USAGE = ("usage: just land [--steps <file>] <row>[,<row>...] <lane branch> <lane sha> "
-         "<merge branch> [<tree to unlock and mark finished>...], then just land wait for as long as "
+USAGE = ("usage: just land [--steps <file>] [--answers <row>[,<row>...]] <row>[,<row>...] <lane branch> "
+         "<lane sha> <merge branch> [<tree to unlock and mark finished>...], then just land wait for as long as "
          "its last line says it is still running")
 
 
@@ -144,22 +150,26 @@ def ended(report, stop):
 
 def parsed(argv):
     argv = list(argv)
-    steps = None
-    if argv[:1] == ["--steps"]:
-        if len(argv) < 2:
-            raise Stop("usage", USAGE)
-        steps = argv[1]
+    flags = {"--steps": None, "--answers": None}
+    while argv[:1] and argv[0] in flags:
+        if len(argv) < 2 or flags[argv[0]] is not None:
+            raise Stop("usage", f"{argv[0]} wants one value and comes at most once. {USAGE}")
+        flags[argv[0]] = argv[1]
         argv = argv[2:]
     if len(argv) < 4:
         raise Stop("usage", USAGE)
     rows, branch, sha, merge_branch, *trees = argv
     rows = rows.split(",")
-    for row in rows:
+    answers = flags["--answers"].split(",") if flags["--answers"] is not None else []
+    for row in rows + answers:
         if not ROW.match(row):
             raise Stop("usage", f"'{row}' is not a row id: T, D or Q and then a number. {USAGE}")
+    both = [row for row in answers if row in rows]
+    if both or len(set(answers)) != len(answers):
+        raise Stop("usage", f"--answers names a row twice, or one the lane ran ({', '.join(both)}). {USAGE}")
     if not SHA.match(sha):
         raise Stop("usage", f"'{sha}' is not a sha: 7 to 40 lowercase hex digits. {USAGE}")
-    return {"steps": steps, "rows": rows, "branch": branch, "sha": sha,
+    return {"steps": flags["--steps"], "answers": answers, "rows": rows, "branch": branch, "sha": sha,
             "merge_branch": merge_branch, "trees": trees}
 
 
@@ -194,7 +204,7 @@ def read_steps(path):
         verb = step[0]
         if verb not in STEP_ARGS:
             raise Stop("steps", f"step {number} of {path} is '{text}': a lane's steps are add, after "
-                                f"and tag, and just land writes the done steps itself")
+                                f"and tag, and just land writes the done steps itself, the answered rows' too")
         if len(step) - 1 != STEP_ARGS[verb]:
             raise Stop("steps", f"step {number} of {path} is '{text}': {verb} takes "
                                 f"{STEP_ARGS[verb]} words after it, one to a line, and it has {len(step) - 1}")
@@ -448,16 +458,39 @@ def land_one(entry):
     landing = {"rows_closed": [], "rows_added": [], "unlocked": [], "needs_judgement": []}
     tip = lane_tip(entry["branch"], entry["sha"])
     merge("conflict", "git", "merge", "--no-ff", "--no-commit", entry["branch"])
-    refuse_if_section_0_names(entry["rows"])
-    apply_queue(entry["rows"], tip, entry["steps"], landing)
+    answered = still_open(entry.get("answers", []), landing)
+    refuse_if_section_0_names(entry["rows"] + answered)
+    apply_queue(entry["rows"], answered, tip, entry["steps"], landing)
     command("check-queue", JUST, "check-queue")
     command("commit", "git", "add", "docs/queue.md")
-    message = f"Merge {entry['branch']}: {', '.join(entry['rows'])} done, by just land"
+    also = f", and {', '.join(answered)} answered by it" if answered else ""
+    message = f"Merge {entry['branch']}: {', '.join(entry['rows'])} done{also}, by just land"
     command("commit", "git", "commit", "-q", "-m", message)
     left = output("git", "status", "--short")
     if left:
         raise Stop("commit", f"git status --short prints something after the merge commit: {left}")
     return landing
+
+
+def still_open(answers, landing):
+    """The rows of `--answers` that `docs/queue.md` shows open and held by no lane, the others named for a reader.
+
+    `queue apply`'s `done` closes any row that is not closed already, one a lane
+    holds included, so this is what keeps a row another lane is at work on, or
+    one parked or closed since the verifier looked, from being closed as
+    answered. An entry an older `land.py` wrote has no `answers`, hence `get`.
+    """
+    queue = Queue(read("docs/queue.md"))
+    kept = []
+    for row_id in answers:
+        row = queue.find(row_id)
+        if row is not None and (row.state == "todo" or row.state.startswith("after:")):
+            kept.append(row_id)
+        else:
+            state = row.state if row is not None else "not a row"
+            landing["needs_judgement"].append(
+                f"{row_id} is {state} in docs/queue.md, so it was not closed as answered by this lane")
+    return kept
 
 
 def lane_tip(branch, reported):
@@ -493,17 +526,18 @@ def refuse_if_section_0_names(rows):
                                 f"(§172.5), and that wants a reader")
 
 
-def apply_queue(rows, tip, steps, landing):
+def apply_queue(rows, answered, tip, steps, landing):
     short = output("git", "rev-parse", "--short=8", tip)
     steps = [said_where_from(step, rows[0]) for step in steps]
-    batch = [["done", row, short] for row in rows] + steps
+    batch = [["done", row, short] for row in rows + answered] + steps
     words = []
     for step in batch:
         words += (["+"] if words else []) + step
     rc, said, out = run_split(JUST, "queue", "apply", *words)
     if rc != 0:
         raise Stop("queue-apply", f"just queue apply refused the batch: {last_line(said)}")
-    landing["rows_closed"] = [f"{row} done:{short}" for row in rows]
+    landing["rows_closed"] = ([f"{row} done:{short}" for row in rows]
+                              + [f"{row} done:{short} answered by {rows[0]}" for row in answered])
     ids = [line for line in out.splitlines() if ROW.match(line.strip())]
     adds = [step for step in steps if step[0] == "add"]
     if len(ids) != len(adds):
