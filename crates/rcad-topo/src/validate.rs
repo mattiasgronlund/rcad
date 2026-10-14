@@ -2753,6 +2753,30 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// [`Error::MoreMeshPointsThanASolidWillHold`] and a patch with more triangles
 /// than the triangulator will hold each end it too.
 ///
+/// **So does a touch where the rung before touched** (Q1866). Two loops of one
+/// face refused as touching at one place at two rooms in a row, the coarsest
+/// mesh counting as the rung before the top, are taken to touch there at every
+/// room, and the finer refusal is handed back. A corner of the solid is where
+/// it is at every room, and so is a chord point every halving keeps, so a touch
+/// at one of them comes back. The place is compared, never the corner and side
+/// numbers, which count the points along the edges and grow every rung.
+/// `builder.rs`'s tube with a hole as wide as its wall walks each cap's two
+/// circles the same way round from the seam's foot, and touches there at every
+/// room. Built `2⁻³⁵` tall, its corner floor is some thirty-seven halvings
+/// down, and the walk had not ended after a minute and a half: the rung at
+/// room `4.8e-7` alone took 36 seconds. Now it is refused at the top rung.
+///
+/// That is again **a cost bound and not a proof**: a touch a third, finer mesh
+/// would clear is refused. A throwaway probe of this ladder over
+/// `just t -p rcad-topo`, the rest of the workspace and `just test-slow`, at
+/// `bd9d330f`, saw 56 ladders with a rung refused for loops touching. The 51 a
+/// finer mesh cleared were each cleared by the very next rung, never after two
+/// touches in a row; in the 5 refused, every two touches in a row were at one
+/// place on one face. Of a solid outside those suites it says nothing. Nor does
+/// it catch a touch that moves: the same tube wound as a sound tube is, each
+/// hole walked against its rim, touches at a chord point that creeps towards
+/// the seam's foot as the room halves, and still walks towards its floor.
+///
 /// # What stops a fold
 ///
 /// **The corner floor is argued for chords that cross, and a fold is not
@@ -2855,10 +2879,11 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 ///
 /// # Errors
 ///
-/// The finest mesh's crossing or fold when no mesh down to its floor clears it
-/// — and each floor is a cost bound, so a mesh past it might have — and a
-/// finer mesh's refusal when it is about something else, which is the solid's
-/// next blocker and the one worth naming.
+/// The finest mesh's crossing or fold when no mesh down to its floor clears it,
+/// or when two meshes in a row have one face's loops touch at one place — and
+/// each floor, and that stop, is a cost bound, so a finer mesh might have
+/// cleared it — and a finer mesh's refusal when it is about something else,
+/// which is the solid's next blocker and the one worth naming.
 fn the_coarsest_mesh_whose_sides_do_not_cross(
     view: SolidView<'_>,
     policy: &Policy,
@@ -2900,6 +2925,10 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
         };
         match view.mesh(less, policy, log) {
             Ok(mesh) => return Ok(mesh),
+            Err(why) if they_touch_where_they_touched_before(&finest_refusal, &why) => {
+                finest_refusal = why;
+                break;
+            }
             Err(why) if a_finer_mesh_may_clear(&why) => finest_refusal = why,
             Err(
                 Error::DeflectionBelowWhatAMeshCanReach { .. }
@@ -2928,6 +2957,27 @@ const HALVINGS_A_FOLD_IS_ASKED_DOWN_TO: i32 = 13;
 /// crossing, or two of its patches drawing one side through their insides.
 fn a_finer_mesh_may_clear(why: &Error) -> bool {
     its_sides_cross(why) || matches!(why, Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
+}
+
+/// Whether two meshes, one finer than the other, were both refused for two
+/// loops of one face touching at one place.
+///
+/// The place, and never the corner or side numbers, which count the points
+/// each mesh put along the edges and grow with every rung.
+fn they_touch_where_they_touched_before(before: &Error, now: &Error) -> bool {
+    matches!(
+        (before, now),
+        (
+            Error::CannotMeshAFace {
+                face,
+                why: rcad_mesh::CannotTriangulate::LoopsTouch { at, .. },
+            },
+            Error::CannotMeshAFace {
+                face: face_now,
+                why: rcad_mesh::CannotTriangulate::LoopsTouch { at: at_now, .. },
+            },
+        ) if face == face_now && at == at_now
+    )
 }
 
 /// The distance between the two closest corners of the solid that are not in
