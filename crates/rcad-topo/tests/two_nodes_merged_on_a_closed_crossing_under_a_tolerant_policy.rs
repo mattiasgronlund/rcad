@@ -330,59 +330,164 @@ fn a_tolerant_fuse_of_a_cube_on_a_cones_apex_refuses_a_sweep_past_an_area_budget
     }
 }
 
-// Q2016 WIP: the four `probe_*` tests below are exploratory and not meant to
-// be committed as final — they are left here, uncommitted-normally but kept
-// for this relay, so the next lane does not have to re-derive them. See the
-// handoff for what each one found. None of them is a regression test; they
-// must be removed (or turned into one, if a gap is found) before this row is
+// Q2016 WIP: the `probe_*` tests below are exploratory and not meant to be
+// committed as final — they are left here, uncommitted-normally but kept
+// across relays, so the next lane does not have to re-derive them. See the
+// handoff for what each one found. Neither is a regression test; both must
+// be removed (or turned into one, if a gap is found) before this row is
 // reported done.
+// Q2016 WIP (relay 2): a ball cut by a big wall far from the circle (so its
+// own corners never touch it), with two small blocks whose grazing edges lie
+// IN the wall's plane and cross the ball close to tangent — a structurally
+// different setup from `a_ball_grazing_the_z_axis`'s, where the two places
+// and the walk's start are forced onto one line because they all sit on the
+// SAME edge (the two walls' shared edge). Here the wall providing the circle
+// (`big_wall`) touches the ball only through its flat face, never through its
+// own edges, so the circle stays one closed loop; `near_block`'s edge injects
+// the two close places, and `far_block`'s edge injects a third place on the
+// opposite side of the circle to walk from.
 #[test]
-fn probe_family_b_tilt_grid() {
-    for tilt_exp in [-20, -16, -12, -10, -8, -6, -4, -3, -2] {
-        let tilt = f64::powi(10.0, tilt_exp);
-        for size in [0.01, 0.1, 0.3, 0.6, 1.0, 5.0, 25.0] {
-            let mut model = Model::new(Scale::millimetres(size).expect("ws"));
-            let triangle = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 3.0], [-3.0, 3.0]])
-                .build(&Policy::certified(), &mut ProvenanceLog::new())
-                .expect("a triangle");
-            let tilted = Isometry::rotation(
-                &Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("an axis"),
-                tilt,
+fn probe_family_b_three_solids() {
+    let radius = 5.0f64;
+    let wall_z = 2.0f64;
+    let circle_radius = (radius * radius - wall_z * wall_z).sqrt();
+    let one_ulp_below = f64::from_bits(circle_radius.to_bits() - 1);
+    println!(
+        "circle_radius={circle_radius:.17e} one_ulp_below={one_ulp_below:.17e} diff={:e}",
+        circle_radius - one_ulp_below
+    );
+    for eps_exp in [-3, -6, -9, -12, -14, -15, -16, -17, -18] {
+        let eps = if eps_exp == -18 {
+            circle_radius - one_ulp_below
+        } else {
+            f64::powi(10.0, eps_exp)
+        };
+        let mut model = Model::new(Scale::millimetres(1.0).expect("ws"));
+        let ball = model
+            .add_ball(
+                radius,
+                &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a finite shift"),
             )
-            .expect("a finite turn")
-            .compose(&Isometry::translation(Vector::new(0.0, 0.0, LIFT)).expect("a finite shift"));
-            let prism = model
-                .add_extrusion(&triangle, 32.0, &tilted)
-                .expect("a positive height");
-            let ball = a_ball_grazing_the_z_axis(&mut model);
-            for (rule, cone_first) in EVERY_FUSE {
-                let (arguments, tools) = if cone_first {
-                    ([ball], [prism])
-                } else {
-                    ([prism], [ball])
-                };
-                let mut log = ProvenanceLog::new();
-                let fused = model.fuse(&arguments, &tools, rule, &Policy::tolerant(size), &mut log);
-                let records: Vec<_> = match &fused {
-                    Ok(_) => log.records().to_vec(),
-                    Err(Error::Undecidable { records }) => records.records().to_vec(),
-                    Err(other) => {
-                        println!(
-                            "tilt=1e{tilt_exp} size={size} rule={rule:?} cone_first={cone_first}: {other:?}"
-                        );
-                        continue;
-                    }
-                };
-                if !records.is_empty() {
+            .expect("a positive radius");
+        let big_wall = {
+            let profile = ProfileBuilder::new(vec![
+                [-50.0, -50.0],
+                [50.0, -50.0],
+                [50.0, 50.0],
+                [-50.0, 50.0],
+            ])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a square");
+            model
+                .add_extrusion(
+                    &profile,
+                    48.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, wall_z)).expect("a finite shift"),
+                )
+                .expect("a positive height")
+        };
+        let near_block = {
+            let profile =
+                ProfileBuilder::new(vec![[0.0, -10.0], [1.0, -10.0], [1.0, 10.0], [0.0, 10.0]])
+                    .build(&Policy::certified(), &mut ProvenanceLog::new())
+                    .expect("a rectangle");
+            model
+                .add_extrusion(
+                    &profile,
+                    1.0,
+                    &Isometry::translation(Vector::new(circle_radius - eps, 0.0, wall_z))
+                        .expect("a finite shift"),
+                )
+                .expect("a positive height")
+        };
+        let far_block = {
+            let profile =
+                ProfileBuilder::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 10.0], [0.0, 10.0]])
+                    .build(&Policy::certified(), &mut ProvenanceLog::new())
+                    .expect("a rectangle");
+            model
+                .add_extrusion(
+                    &profile,
+                    1.0,
+                    &Isometry::translation(Vector::new(circle_radius - 0.01, 0.0, wall_z))
+                        .expect("a finite shift"),
+                )
+                .expect("a positive height")
+        };
+        for (rule, cone_first) in EVERY_FUSE {
+            let (arguments, tools) = if cone_first {
+                ([ball], [big_wall])
+            } else {
+                ([big_wall], [ball])
+            };
+            let mut log = ProvenanceLog::new();
+            let first = model.fuse(&arguments, &tools, rule, &Policy::tolerant(1.0), &mut log);
+            let Ok(first) = first else {
+                println!(
+                    "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} wall step: {first:?}"
+                );
+                continue;
+            };
+            let after_wall = first.solids()[0];
+            let mut log2 = ProvenanceLog::new();
+            let second = model.fuse(
+                &[after_wall],
+                &[near_block],
+                rule,
+                &Policy::tolerant(1.0),
+                &mut log2,
+            );
+            let records: Vec<_> = match &second {
+                Ok(_) => log2.records().to_vec(),
+                Err(Error::Undecidable { records }) => records.records().to_vec(),
+                Err(other) => {
                     println!(
-                        "tilt=1e{tilt_exp} size={size} rule={rule:?} cone_first={cone_first} fused_ok={} preds={:?}",
-                        fused.is_ok(),
-                        records
-                            .iter()
-                            .map(|r| (r.predicate(), r.measures()))
-                            .collect::<Vec<_>>()
+                        "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} near step: {other:?}"
                     );
+                    continue;
                 }
+            };
+            if !records.is_empty() {
+                println!(
+                    "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} near_ok={} preds={:?}",
+                    second.is_ok(),
+                    records
+                        .iter()
+                        .map(|r| (r.predicate(), r.measures()))
+                        .collect::<Vec<_>>()
+                );
+            }
+            let Ok(second) = second else {
+                continue;
+            };
+            let after_near = second.solids()[0];
+            let mut log3 = ProvenanceLog::new();
+            let third = model.fuse(
+                &[after_near],
+                &[far_block],
+                rule,
+                &Policy::tolerant(1.0),
+                &mut log3,
+            );
+            let records3: Vec<_> = match &third {
+                Ok(_) => log3.records().to_vec(),
+                Err(Error::Undecidable { records }) => records.records().to_vec(),
+                Err(other) => {
+                    println!(
+                        "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} far step: {other:?}"
+                    );
+                    continue;
+                }
+            };
+            if !records3.is_empty() {
+                println!(
+                    "eps=1e{eps_exp} rule={rule:?} cone_first={cone_first} far_ok={} preds={:?}",
+                    third.is_ok(),
+                    records3
+                        .iter()
+                        .map(|r| (r.predicate(), r.measures()))
+                        .collect::<Vec<_>>()
+                );
             }
         }
     }
