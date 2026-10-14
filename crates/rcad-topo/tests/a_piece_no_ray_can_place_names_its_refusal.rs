@@ -1588,3 +1588,21 @@ fn expect(fused: Result<usize, Error>, said: Option<&str>, what: &str) {
         (_, _) => panic!("{what}: expected {said:?}, got {fused:?}"),
     }
 }
+
+/// PROBE (Q1951): a round bar of radius 4 standing a rounding tall — its one
+/// curved wall face is a band between its two cap rims, a rounding apart,
+/// exactly the shape `a_band_the_chart_reads_as_one_line` zips on a torus but
+/// restricts to `Surface::Torus(_)`. Not committed.
+#[test]
+fn probe_q1951_thin_band_on_a_pipe() {
+    let mut model = a_model();
+    let bar = model
+        .add_round_bar(4.0, 4.0 * f64::EPSILON, &Isometry::identity())
+        .expect("a thin bar");
+    let mesh = model.solid(bar).expect("this model made the key").mesh(
+        rcad_geom::Deflection::of(1e-6).expect("a length"),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    println!("PROBE pipe: {mesh:?}");
+}
