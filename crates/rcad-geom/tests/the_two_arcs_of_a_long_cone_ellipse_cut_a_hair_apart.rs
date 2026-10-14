@@ -14,11 +14,12 @@
 //!
 //! The wall stands square to the lid and cuts the ellipse on the rulings
 //! `1.25e-7` either side of the near end. Each arc is asked at its middle: the
-//! sliver's round the cone, inside a box `256 ε` times the size of the apex and
-//! the ends, about `1.3e-13` wide; the long arc's round the ellipse, at its far
-//! end, inside a box `256 ε` times the ellipse's size, about `7.6e-6` wide. The
-//! sliver's middle is `8.7e-15` from the wall, so no box round it tells which
-//! side it is on. The far end is `6.7e7` from the wall and told outright.
+//! sliver's round the cone, inside a box reaching `256 ε` times the size of the
+//! apex and the ends, `1.3e-13`, either way of it; the long arc's round the
+//! ellipse, at its far end, inside a box reaching `256 ε` times the ellipse's
+//! size, `4.3e-6`, either way. The sliver's middle is `8.7e-15` from the wall,
+//! so no box round it tells which side it is on. The far end is `1.5e8` from
+//! the wall and told outright.
 //!
 //! **One arc told is enough**, as in `the_two_arcs_of_a_cap_rim_cut_a_hair_apart.rs`.
 //! Until Q1846 the walk round the cone read the sliver's untold sign as holding
@@ -95,7 +96,7 @@ fn the_wall_is_closer_to_the_slivers_middle_than_its_box_is_wide() {
         "the sliver's middle is {middle:e} off the wall"
     );
     let far = off_the_wall(the_far_end());
-    assert!(far > 6e7, "the far end is {far:e} off the wall");
+    assert!(far > 1e8, "the far end is {far:e} off the wall");
 }
 
 /// The wall facing the long arc picks it: its middle, the far end, is held,
@@ -114,8 +115,23 @@ fn the_long_arc_is_picked_when_it_is_held_and_the_sliver_cannot_be_told() {
         .map(|point| point.y())
         .fold(f64::NEG_INFINITY, f64::max);
     assert!(
-        furthest > far_end.y() / 2.0 && furthest <= far_end.y() + deviation,
-        "the long arc runs out to {far_end:?}, and these points reach {furthest:e}"
+        furthest <= far_end.y() + deviation,
+        "nothing on the ellipse is past {far_end:?}, and these points reach {furthest:e}"
+    );
+    let longest_step = along
+        .points()
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).length())
+        .fold(0.0, f64::max);
+    let nearest_the_far_end = along
+        .points()
+        .iter()
+        .map(|point| (*point - far_end).length())
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        nearest_the_far_end <= longest_step,
+        "the long arc passes {far_end:?}, and the nearest of these points is \
+         {nearest_the_far_end:e} from it, more than the longest step of {longest_step:e}"
     );
     for point in along.points() {
         let off_the_lid = the_lid().signed_distance_to(*point).abs();
