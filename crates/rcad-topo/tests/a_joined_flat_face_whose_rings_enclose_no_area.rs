@@ -71,9 +71,9 @@
 //! bore is set off along `(0.6, 0.8)`, so the sliver between the two arcs has
 //! a leaning chord whose two ends round apart. Only the union joins the caps,
 //! so only the union reads a bulge. The three tests at the end of this file
-//! pin it: every rule answers at `δ = 10⁻⁸`; at `10⁻¹²` the union and the bar
-//! less the plate answer and the rest are refused; at `10⁻¹⁴` every rule is
-//! refused, the union only after `rings_round` has placed every ring right. A
+//! pin it: every rule answers at `δ = 10⁻⁸`, `10⁻¹²` and `10⁻¹⁴`. Until Q1837
+//! some were refused at `10⁻¹²` and all at `10⁻¹⁴`, out of the walk, the union
+//! at `10⁻¹⁴` only after `rings_round` had placed every ring right. A
 //! sweep of the union both ways round over `δ = k·10⁻¹⁸`, `k = 1` to `300`,
 //! with a print in `how_each_arc_bulges` that is not kept, read 2269 arcs the
 //! right way, 91 the wrong way and none `Zero`. With the holed bar first, 37
@@ -3595,11 +3595,47 @@ fn a_bar_cut_to_pipes(
 /// other fuse in this test still answers right with the reading flipped.
 #[test]
 fn a_bar_filling_a_plates_bore_all_but_a_sliver_is_answered_under_every_rule() {
-    let sliver = 4.0 * what_the_bore_holds_past_the_bar(1e-8);
+    every_rule_both_ways_holds_what_the_circles_say(1e-8);
+}
+
+/// **The same with the sliver `10⁻¹²` thick.** The chord is about `6·10⁻⁶`
+/// long and the bar's arc reads the right way by `2.4·10⁻¹²`, still thousands
+/// of ulps. The sliver is past §3.5's envelope here, `15/10⁻¹²` against `10¹¹`.
+///
+/// Until Q1837 only the union both ways round and the bar less the plate
+/// answered. The intersection both ways round and the plate less the bar were
+/// refused `CannotNameWhichPieceOfACrossingThisIs` (Q633): the walk read the
+/// sliver's middle, too near the picker to tell, as held, and so held both arcs.
+/// One arc held and the other not told now keeps the held one.
+#[test]
+fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_trillionth_thick_is_answered_under_every_rule() {
+    every_rule_both_ways_holds_what_the_circles_say(1e-12);
+}
+
+/// **And with the sliver `10⁻¹⁴` thick.** The chord is `6.2·10⁻⁷` long and the
+/// bar's arc reads the right way by `4·0.6δ = 2.4·10⁻¹⁴`, about 54 ulps.
+///
+/// Until Q1837 every rule was refused here: the union both ways round
+/// `Undecidable`, on the side of a half-space at points built near the
+/// sliver's corners, `(1.8, 2.4)` on the floor and the top, in boxes under
+/// `10⁻¹²` wide; and the rest `CannotNameWhichPieceOfACrossingThisIs` (Q633).
+/// Those were the walk's signs about the sliver's arc, which it no longer
+/// needs where the other arc is told.
+#[test]
+fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_hundred_trillionth_thick_is_answered_under_every_rule()
+ {
+    every_rule_both_ways_holds_what_the_circles_say(1e-14);
+}
+
+/// Every rule both ways round, on [`a_bored_plate_and_a_bar_filling_its_bore`]
+/// with the bore `delta` past the bar's wall, holds what the circles say, in a
+/// model that validates.
+fn every_rule_both_ways_holds_what_the_circles_say(delta: f64) {
+    let sliver = 4.0 * what_the_bore_holds_past_the_bar(delta);
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, 1e-8);
-        let what = format!("{rule:?}, swapped {swapped}");
+        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, delta);
+        let what = format!("{rule:?}, swapped {swapped}, the bore {delta} past the bar");
         let answer = fused_in_order(&mut model, pair, rule, swapped);
         match (rule, swapped) {
             (Rule::Difference, true) => {
@@ -3616,82 +3652,6 @@ fn a_bar_filling_a_plates_bore_all_but_a_sliver_is_answered_under_every_rule() {
                 };
                 assert_holds(&model, the_only(answer, &what), volume, &what);
             }
-        }
-    }
-}
-
-/// **The same with the sliver `10⁻¹²` thick: the union is answered both ways
-/// round, and so is the bar less the plate**, each holding what the circles
-/// say. The chord is about `6·10⁻⁶` long and the bar's arc reads the right way
-/// by `2.4·10⁻¹²`, still thousands of ulps. The intersection both ways round
-/// and the plate less the bar are refused `CannotNameWhichPieceOfACrossingThisIs`
-/// (Q633). The sliver is past §3.5's envelope here, `15/10⁻¹²` against `10¹¹`.
-#[test]
-fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_trillionth_thick_is_united_both_ways() {
-    let sliver = 4.0 * what_the_bore_holds_past_the_bar(1e-12);
-    for (rule, swapped) in every_rule_both_ways() {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, 1e-12);
-        let what = format!("{rule:?}, swapped {swapped}");
-        let answer = fused_in_order(&mut model, pair, rule, swapped);
-        match (rule, swapped) {
-            (Rule::Union, _) => assert_holds(
-                &model,
-                the_only(answer, &what),
-                576.0 * PI - PI / 4.0 - sliver,
-                &what,
-            ),
-            (Rule::Difference, true) => {
-                let [between_the_holes, in_the_bore] = the_two_smaller_first(&model, answer, &what);
-                assert_holds(&model, between_the_holes, 0.75 * PI, &what);
-                assert_holds(&model, in_the_bore, 36.0 * PI - sliver, &what);
-            }
-            (Rule::Intersection | Rule::Difference, _) => assert!(
-                matches!(
-                    answer,
-                    Err(Error::Geometry(
-                        rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
-                    ))
-                ),
-                "{what}: {answer:?}"
-            ),
-            (other, _) => panic!("not a rule this probes: {other:?}"),
-        }
-    }
-}
-
-/// **With the sliver `10⁻¹⁴` thick every rule is refused**: the union both
-/// ways round `Undecidable`, and the rest
-/// `CannotNameWhichPieceOfACrossingThisIs` (Q633).
-///
-/// The union, both ways round, reaches `rings_round` and places every ring
-/// right: the chord is `6.2·10⁻⁷` long
-/// and the bar's arc reads the right way by `4·0.6δ = 2.4·10⁻¹⁴`, about 54
-/// ulps. Only after that is it refused `Undecidable`, on the side of a
-/// half-space at points built near the sliver's corners, `(1.8, 2.4)` on the
-/// floor and the top, in boxes under `10⁻¹²` wide.
-#[test]
-fn a_bar_filling_a_plates_bore_all_but_a_sliver_a_hundred_trillionth_thick_is_refused() {
-    for (rule, swapped) in every_rule_both_ways() {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let pair = a_bored_plate_and_a_bar_filling_its_bore(&mut model, 1e-14);
-        let refused = fused_in_order(&mut model, pair, rule, swapped);
-        let what = format!("{rule:?}, swapped {swapped}");
-        match rule {
-            Rule::Union => assert!(
-                matches!(refused, Err(Error::Undecidable { .. })),
-                "{what}: {refused:?}"
-            ),
-            Rule::Intersection | Rule::Difference => assert!(
-                matches!(
-                    refused,
-                    Err(Error::Geometry(
-                        rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
-                    ))
-                ),
-                "{what}: {refused:?}"
-            ),
-            other => panic!("not a rule this probes: {other:?}"),
         }
     }
 }
