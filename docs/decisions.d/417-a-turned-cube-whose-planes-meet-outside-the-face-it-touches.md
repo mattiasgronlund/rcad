@@ -407,10 +407,19 @@ chose to move it, it was not only rounded.
 - A corner not proved off the plane, exactly. When its three planes meet on
   the plane, the three meets are the corner, and joining them is the
   arrangement's; when the side cannot be told, nothing is folded.
-- A tip with a meet that another input corner, sharing two planes with it, is
-  within the wobble of: the fold would join the two corners, and two input
-  corners a rounding apart along one edge is an edge shorter than the wobble,
-  which this rule does not judge.
+- A tip with a meet that another input corner is within the wobble of:
+  `another_corner_is_as_near` in `fuse/assemble.rs` asks this of every input
+  corner but the one folded, on whichever planes it sits on, not only one
+  sharing two planes with the tip (queue row Q2019) — the end fold of 417.9
+  reads the same function. Two cubes stood corner to corner, one turned a
+  little short of a half turn about an axis leaning off `z`, meet at one
+  point whose six planes all pass within a rounding of it; the other cube's
+  own corner there, on one or none of those planes, is as near, so judging
+  only a corner that shares two planes with the tip would have folded past it
+  (`a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`). The
+  fold would join the two corners, and two input corners a rounding apart
+  along one edge is an edge shorter than the wobble, which this rule does not
+  judge.
 - A meet with a curved surface among its three: its three surfaces may meet
   more than once, and only three planes meet in exactly one point.
 

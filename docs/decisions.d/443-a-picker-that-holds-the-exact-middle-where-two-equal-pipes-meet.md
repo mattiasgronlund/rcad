@@ -95,7 +95,12 @@ again through `intersect`, so it gets the new picker from the namer itself.
 - **The arrangement** (`fuse/arrange.rs`). `a_half_of_an_ellipse`, and the
   places that find where two halves meet and the middle of each, read a flat
   picker's facing and where an axis crosses it. For the new arm the facing is
-  `facing` and the axes cross it at `through`, exactly.
+  `facing`, and the axes cross it at `through`, exactly, only where `through`
+  is on `pipe`'s axis. Where the axes meet at no point `f64` holds,
+  `intersect` builds the picker through the other pipe's start instead, or
+  through a point on neither axis that is level with where they meet along
+  its facing, and `where_an_axis_crosses_a_flat_picker` in `fuse/arrange.rs`
+  works the crossing out as an enclosure of intervals, not a point.
 - **`validate.rs`** asks every picker of a crossing which side each end of
   the edge is on, through `Picker::side_of_point`, and refuses an end behind
   one as `EdgeOutsideWhatPickedIt`; the new arm answers that as a half-space

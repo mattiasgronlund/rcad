@@ -131,6 +131,32 @@ fn united_one_at_a_time(ball_at: f64) -> (Model, Result<Vec<SolidKey>, Error>) {
     (model, second)
 }
 
+/// Fuse the block against the ball and the bar together under any `rule`, as
+/// [`united_all_at_once`] does for [`Rule::Union`], with the block as the
+/// arguments when `block_first` and as the tool otherwise.
+fn fused_all_at_once(
+    ball_at: f64,
+    rule: Rule,
+    block_first: bool,
+) -> (Model, Result<Vec<SolidKey>, Error>) {
+    let (mut model, [block, ball, bar]) = a_block_a_ball_and_a_bar(ball_at);
+    let (arguments, tools) = if block_first {
+        (vec![block], vec![ball, bar])
+    } else {
+        (vec![ball, bar], vec![block])
+    };
+    let answer = model
+        .fuse(
+            &arguments,
+            &tools,
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map(|fused| fused.solids().to_vec());
+    (model, answer)
+}
+
 /// The trio fuses, and the answer is the right solid.
 ///
 /// The ball stands three units from the bar's axis, radii one and one, so the
@@ -403,6 +429,73 @@ fn a_ball_driven_into_the_bar_fuses_into_one_block() {
             "the floor at {at:?}, {what}"
         );
     }
+}
+
+/// Pins the other two rules on the same shape as the test above, both ways
+/// round (queue row Q2022).
+///
+/// By the same inclusion-exclusion as that test's closed form, `block ∪ (ball
+/// ∪ bar) = block + (ball ∪ bar) − block ∩ (ball ∪ bar)`: the intersection is
+/// the ball's upper hemisphere and the bar, both already inside the block,
+/// less half of what the ball and the bar share — the ball sits astride the
+/// floor, so only the half of their shared lens with `z ≥ 0` is in the block
+/// too. The block less the two is the block less that. The two less the
+/// block is **two** solids: the bar's top stub alone, and the bottom stub run
+/// together with the ball's lower hemisphere, less the other half of their
+/// shared lens.
+#[test]
+fn a_ball_driven_into_the_bar_answers_intersection_and_difference_both_ways_round() {
+    let half_ball = 2.0 / 3.0 * PI * RADIUS * RADIUS * RADIUS;
+    let bar_in_block = SIDE * PI * RADIUS * RADIUS;
+    let stubs = 4.0 * PI * RADIUS * RADIUS;
+    let half_share = what_the_ball_and_the_bar_share(1.5) / 2.0;
+    let intersection = half_ball + bar_in_block - half_share;
+    let block_less_the_two = SIDE * SIDE * SIDE - intersection;
+    let the_two_less_the_block = half_ball + stubs - half_share;
+
+    for (rule, block_first, closed_form, how_many) in [
+        (Rule::Intersection, true, intersection, 1),
+        (Rule::Intersection, false, intersection, 1),
+        (Rule::Difference, true, block_less_the_two, 1),
+        (Rule::Difference, false, the_two_less_the_block, 2),
+    ] {
+        let (model, answer) = fused_all_at_once(3.5, rule, block_first);
+        let solids =
+            answer.unwrap_or_else(|why| panic!("{rule:?} (block first: {block_first}): {why:?}"));
+        assert_eq!(
+            solids.len(),
+            how_many,
+            "{rule:?} (block first: {block_first})"
+        );
+        it_measures_within_its_own_error(&model, &solids, closed_form);
+    }
+}
+
+/// The model's answer validates, and its solids' volumes sum to within
+/// their own measures' error, at [`A_DEFLECTION`], of `closed_form`.
+fn it_measures_within_its_own_error(model: &Model, solids: &[SolidKey], closed_form: f64) {
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the answer is a valid solid");
+    let (measured, error) = solids.iter().fold((0.0, 0.0), |(volume, error), &key| {
+        let measurement = model
+            .solid(key)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(A_DEFLECTION).expect("a fiftieth of a millimetre is a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid this file built can be measured");
+        (
+            volume + measurement.volume(),
+            error + measurement.volume_error(),
+        )
+    });
+    assert!(
+        (measured - closed_form).abs() <= error,
+        "{measured} is further from {closed_form} than the measures' own error, {error}"
+    );
 }
 
 /// Where the ball is driven into the bar, a point is answered wherever it is.
