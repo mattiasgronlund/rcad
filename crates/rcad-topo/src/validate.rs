@@ -2789,25 +2789,26 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// `closest / √2`, which is the size of the finest feature the corners show.
 ///
 /// **And never more than [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] halvings below
-/// the top**, whatever `closest` says, since `closest` can be far smaller than
-/// any side a mesh would split. The bar `2⁻⁴⁰` wider than `1`, less the tilted
-/// block, in `an_ellipse_start_between_two_places.rs` leaves a fin outside
-/// `x = −17` that is `2⁻⁴⁰` thick and `2.7e-6` across. The block's strip of
-/// side between the fin's two corners has only straight edges, and the bar's
-/// wall draws the same side over it, from `(−17, −1.35e-6, 0)` to
+/// the top**, whatever `closest` says. The bar `2⁻⁴⁰` wider than `1`, less
+/// the tilted block, in `an_ellipse_start_between_two_places.rs` leaves a fin
+/// outside `x = −17` that is `2⁻⁴⁰` thick and `2.7e-6` across. The block's
+/// strip of side between the fin's two corners has only straight edges, and the
+/// bar's wall draws the same side over it, from `(−17, −1.35e-6, 0)` to
 /// `(−17, 1.35e-6, 2.558)`. The floor above put the last rung some 53 halvings
 /// below the top. The fold was the same at every rung from 5 down to `1.2e-3`
 /// and 24672 points, each rung cost 2.5 to 5 times the last, and both policies
 /// were still meshing after 465 s (Q1869). With the cap the last rung is
 /// `6.1e-4`, and both are refused within 1.8 s.
 ///
-/// The cap is **a cost bound and not a proof**: a fold that only a mesh
-/// fourteen rungs down would split is refused. It was set past what clears
-/// today. A throwaway probe of this ladder over `just t -p rcad-topo`, 2087
-/// tests, and `just test-slow`, 73, saw it clear a fold 469 and 28 times, never
-/// past the ninth rung — room `7.8e-3` under a top room of `2`, 657 points, in
+/// The cap is **a cost bound and not a proof**: a fold that only a mesh finer
+/// than the fourteenth rung would split is refused, and nothing here says no
+/// solid has one. It was set from two suites and no more. A throwaway probe of
+/// this ladder over `just t -p rcad-topo`, 2087 tests, and `just test-slow`,
+/// 73, at `1d3cd744`, saw it clear a fold 469 and 28 times, never past the
+/// ninth rung — room `7.8e-3` under a top room of `2`, 657 points, in
 /// `every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates`.
-/// Thirteen halvings is five rungs past that.
+/// Thirteen halvings is five rungs past that, so the cap refuses no fold those
+/// two suites saw cleared. Of a solid outside them it says nothing.
 ///
 /// **A stop on a fold no finer mesh can split was tried first, and not taken**
 /// (Q1869). It refused a fold at once when every triangle using the side had
@@ -2820,20 +2821,22 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// top ellipse runs between its two upper corners: three points along it at
 /// the coarsest, and a walk of it at the least room is refused for too many
 /// points. The triangle's circle in the wall's chart has a radius near `1.46`,
-/// so a point a finer mesh adds along that ellipse can flip the triangle away
-/// by Delaunay with no charge changing. So can the chart's own scaling
-/// (`rcad-mesh`'s `how_this_domain_is_scaled`), and so can a cut placed
-/// elsewhere in the face. The stop could not show the fold stays, and in both
-/// runs above it never fired.
+/// so a point a finer mesh adds along that ellipse may land inside it and flip
+/// the triangle away by Delaunay with no charge changing, and the stop had no
+/// way to rule that out. Nor did it cover the chart's own scaling
+/// (`rcad-mesh`'s `how_this_domain_is_scaled`), or a cut placed elsewhere in
+/// the face. It could not show the fold stays, and in both runs above it never
+/// fired.
 ///
-/// **It ends in at most fourteen rungs.** A solid that folds at every
-/// deflection walks the halving from half the box's width down to the higher
-/// of the two floors, `log₂(3ρ·width/closest²)` rungs or fourteen, whichever is
-/// fewer, and is refused with the finest fold. The floor of the rung after a
-/// crossing is the corner floor, so a solid that crosses at some deflections
-/// and folds at others can go further. The three refusals that end a crossing's
-/// ladder before its floor end this one too, and so does `Deflection::of`
-/// refusing a room that is not above zero, as on a box with no width.
+/// **A fold alone ends it in at most fourteen rungs.** A solid that folds at
+/// every deflection walks the halving from half the box's width down to the
+/// higher of the two floors, about `log₂(3ρ·width/closest²)` rungs or
+/// fourteen, whichever is fewer, and is refused with the finest fold. The floor
+/// of the rung after a crossing is the corner floor, so a solid that crosses at
+/// some deflections and folds at others can go further. The three refusals that
+/// end a crossing's ladder before its floor end this one too, and so does
+/// `Deflection::of` refusing a room that is not above zero, as on a box with no
+/// width.
 ///
 /// Whichever ends it, **the finest mesh's crossing or fold is what is handed
 /// back**. A face that meshed at a finer deflection was not what stopped the

@@ -336,15 +336,14 @@ fn past_the_fin_the_certified_union_and_the_fin_alone_are_still_refused() {
 /// the bar's wall and the block's flat strip of side between those two corners
 /// both draw it (Q1869).
 ///
-/// The strip's edges are all straight, so its mesh is the same at every
-/// deflection. Before Q1869 the ladder still asked mesh after mesh, down to a
-/// floor some 53 halvings under its top: on `main` at `a14d3018` both policies
-/// were still walking it after 465 s, the fold the same at every rung from 5
-/// down to `1.2e-3` and 24672 points. Q1869 ends a fold's ladder thirteen
-/// halvings under its top, at `6.1e-4` here, and refuses the fold that mesh
-/// draws. That is a cost bound and not a claim that no finer mesh would clear
-/// the fold; `validate.rs` says why under "What stops a fold". This bounds the
-/// wait well under the old one, rather than timing it.
+/// The strip's edges are all straight. Before Q1869 the ladder asked mesh after
+/// mesh, down to a floor some 53 halvings under its top: on `main` at
+/// `a14d3018` both policies were still walking it after 465 s, the fold the
+/// same at every rung from 5 down to `1.2e-3` and 24672 points. Q1869 ends a
+/// fold's ladder thirteen halvings under its top, at `6.1e-4` here, and refuses
+/// the fold that mesh draws. That is a cost bound and not a claim that no finer
+/// mesh would clear the fold; `validate.rs` says why under "What stops a fold".
+/// This bounds the wait well under the old one, rather than timing it.
 #[test]
 fn a_fold_across_a_thin_fin_is_refused_in_seconds_at_the_ladders_last_rung() {
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
