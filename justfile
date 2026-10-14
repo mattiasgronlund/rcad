@@ -14366,6 +14366,63 @@ check-queue-selftest:
     grep -qxF 'tier 1, open and not parked: 3 in A or B (2 wrong, 0 crash, 1 refuses), 1 with no class; tier 5: 2 in C, 2 in D, 1 with no class; 0 small rows ready, and a bundle is 5' <<<"$got" \
         || fail "the measure line does not count the classes fixture's tier 1 and tier 5 rows, the tier 5 row with no class among them"
 
+    # §450.3 rule 1 (Q2003): the rows on two_equal_bars_leaning_at_each_other.rs,
+    # copied as 16eab121's docs/queue.md held them, are the family Q1953 traced.
+    # A closed row and a parked one on the file are no members, and Q1991 names
+    # one file twice, by two items, and counts once. A trace, open or closed,
+    # takes out the rows it names; the file is a family again with three rows no
+    # trace names, and a row a trace on another file named counts on a file no
+    # trace has been on.
+    fence families <<'MD'
+    Q1793 1    after:Q1660    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B was/Q1656 Two bars of radius 1/4 through (11,0,0), the second 32 long turned 120 degrees about z, stored direction (-0.5,0.866,-2.2e-16) (a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wire in two_equal_bars_leaning_at_each_other.rs), are refused under all six fuses, where since Q1660 the same pair turned 50, 60, 70 or 100 degrees answers every one. As Q1660 left it, both unions are refused CannotNameWhichPieceOfACrossingThisIs, the intersections ACurvedFaceGoesRightRoundWithNoSeam and CannotMeshAFace CornersCoincide, and the differences CornersCoincide and AWireWillNotLieFlatOnItsFace. Measured by Q1660: grad S x grad T at the two points where the pipes touch is (1.6e-17, 0, 0) and not nought, as the points sit at y = +-6.4e-17, so the_corners_of_each_run_between_two_tangent_points in fuse/assemble.rs, which asks for exactly nought at both ends, does not keep the middle of each half ellipse, and the half folded from touch point to touch point cannot be named. Two roads named and not run: read which arc each edge either side of the middle is, since a Corner does not carry its arrange name, or choose the end where the surfaces cross at the wider angle. Close the gap, or demonstrate a limit by section 16.10 §31
+    Q1896 1    after:Q1892    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/src/mesh.rs,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B from/Q1892 Two bars of radius 1/4 cut off 1 either side of where their axes meet, on (3,4,0) and (4,0,3), each built by add_bar_cut_off_by with its axis origin at that point (two_bars_crossing_at in fuse/arrange.rs mod curved), are refused in all six fuses when the axes meet at (0.5,0,0), (1,0,0), (2,0,0), (0,0,1), (0,1,0), (1,1,1) or (0.25,0.5,0.75), where intersect picks the halves by half-spaces: AWireWillNotLieFlatOnItsFace, ACurvedFaceGoesRightRoundWithNoSeam, CannotMeshAFace or TwoPatchesOfTheMeshDrewTheSameSide. At the origin five of six answer (union pi/4 - 1/(12 sin a), sin a = 0.8773) and the second bar less the first is refused TwoPatchesOfTheMeshDrewTheSameSide. Through (11,-3.25,0.5), picked by surfaces holding the middle since Q1892, the same refusals come, and split_a_face cuts each wall there into the four pieces it cuts at the origin. Untraced; Q1793 and Q1724 meet the same refusals and may share the cause, not run. Make them answer and pin the volumes §31
+    Q1897 1    after:Q1892    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/src/mesh.rs,crates/rcad-geom/src/walk.rs,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B from/Q1892 Two bars of radius 1/4 cut off 1 either side of where their axes meet, on (3,4,0) and (4,-3,0), square to each other in z = 0, each built by add_bar_cut_off_by with its axis origin at that point (as two_bars_crossing_at in fuse/arrange.rs mod curved builds them), are refused in all six fuses wherever the axes meet. At the origin and (1,0,0), where intersect picks the halves by half-spaces, and at (11,0,0), where it picks them by surfaces holding the middle since Q1892, the refusals are AWireWillNotLieFlatOnItsFace, ACurvedFaceGoesRightRoundWithNoSeam or CannotMeshAFace, the same six in the same order at (1,0,0) and (11,0,0). At (11,-3.25,0.5), picked by surfaces holding the middle, all six are refused CannotNameWhichPieceOfACrossingThisIs, as before the arrangement change of Q1892, though intersect names every pair of the two bars surfaces there in both orders with no error. Untraced; the first refusals may share the cause of the row for the bars on (3,4,0) and (4,0,3), not run. Make them answer §31
+    Q1929 1    todo    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B from/Q1908 Two bars of radius 1/4, the second 2 long starting where the axes meet at (11,-3.25,0.5) turned 120 degrees about z, its stored direction a hair off z = 0: since Q1908 all six fuses get past the second bar near cap and are refused, the union and both differences AWireWillNotLieFlatOnItsFace and the intersection ACurvedFaceGoesRightRoundWithNoSeam (a_bar_starting_where_it_crosses_another_at_120_degrees_is_refused_building_a_wire in two_equal_bars_leaning_at_each_other.rs pins it), where at 50, 60, 70 and 100 degrees every fuse answers with 1/(24 sin a) shared. Untraced; Q1793, Q1724, Q1896 and Q1897 meet the same refusals and may share the cause, not run. Make them answer and pin the volumes §31
+    Q1646 1    done:cdb4d6fe52cc131100b86be1f4ddd91483d3b5e3    opus    crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B Two bars of radius 1/4 whose axes meet at a slant are named in four halves by intersect since Q1625, with pickers facing (0,1,0) and (1,0,0) rather than the pipes' stored directions, and every fuse of them is refused in the arrangement. The bars: one from (9,0,0), length 4, turned onto x by Isometry::quarter_turns(y,1); the other turned the same way and then by Isometry::rotation(z, a), a = 50, 60, 70 or 100 degrees, from (11,0,0) - 16d, length 32, d its direction. All six fuses of each refuse Geometry(WhereThreeSurfacesMeetNeedsTwoOfThemFlat); with the second bar starting at (11,-3.25,0.5), length 2, and the first from (9,-3.25,0.5), they refuse that or Undecidable; at 72cc2f6c all were refused CannotNameWhichPieceOfACrossingThisIs at intersect. a_half_of_an_ellipse in fuse/arrange.rs knows a half only by picker normals bit-equal to plus or minus the stored directions, so these halves get no node where they meet: place_the_meets falls to place_where_two_rulings_cross. Recognise a half by which pipe each picker leans towards, asked exactly, take the two axis directions from the pipes in place_the_middle_of_each_half, and fix the docs of both that say the pickers face along the stored directions. That may not be all: the bar turned 120 degrees through (11,0,0), whose pickers are its stored directions, is refused WhereThreeSurfacesMeetNeedsTwoOfThemFlat before and after Q1625, untraced; trace it (Q1292 is a lead, not run). Pin the six fuses of each in the new test file §31
+    Q1656 1    dropped:§31    opus    crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs   refuses/B Two bars of radius 1/4 through (11,0,0), the second 32 long turned 120 degrees about z, stored direction (-0.5,0.866,-2.2e-16) (a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wire in two_equal_bars_leaning_at_each_other.rs), get past the arrangement since Q1646. All six fuses are refused CannotMeshAFace CornersCoincide, AWireWillNotLieFlatOnItsFace or ACurvedFaceGoesRightRoundWithNoSeam. Untraced. A lead, not run: the way out of a point where the two pipes touch is read in assemble.rs the_way_across_the_chord_into_the_arc off grad S x grad T, which is nought there but for rounding, the step Q1622 names. Trace it after Q1622 lands §31
+    Q1990  5  parked:§450  opus  crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs  refuses/C from/- parked on the family's file, so no member §450
+    Q1991  2  todo  opus  crates/rcad-topo/tests/fuses_that_must_agree.rs#a_pair,crates/rcad-topo/tests/fuses_that_must_agree.rs#another_pair  from/- one file named twice, one row §450
+    Q1992  2  todo  opus  crates/rcad-topo/tests/fuses_that_must_agree.rs  from/- a second row on the file §450
+    MD
+    family='4 crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs Q1793(1) Q1896(1) Q1897(1) Q1929(1)'
+    drive families families
+    grep -qxF "$family" <<<"$got" \
+        || fail "queue families did not find 16eab121's family on two_equal_bars_leaning_at_each_other.rs, its four open rows and no closed or parked one"
+    grep -qF 'fuses_that_must_agree.rs' <<<"$got" \
+        && fail "queue families counted a row naming one file by two items as two rows"
+    grep -qxF '1 family with no trace (§450.3)' <<<"$got" || fail "queue families did not end with how many families it found"
+    drive families families --count
+    [ "$got" = 1 ] || fail "queue families --count did not print the number of families alone"
+    drive families
+    grep -qxF 'families with no trace: 1 (§450.3); just queue families lists them' <<<"$got" \
+        || fail "the plain queue does not count the families"
+
+    more() { sed '$d' "$dir/$1.md" > "$dir/$2.md"; cat >> "$dir/$2.md"; echo '```' >> "$dir/$2.md"; }
+    more families families-traced <<'MD'
+    Q1953  1  done:abcdef0  opus  -  from/- Trace the family on crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs: Q1896, Q1897, Q1929 and Q1793, under Policy::certified() §450
+    MD
+    drive families-traced families
+    [ "$got" = '0 families with no trace (§450.3)' ] || fail "a closed trace naming the family's four rows did not take the family out"
+    drive families-traced
+    grep -qxF 'families with no trace: 0 (§450.3); just queue families lists them' <<<"$got" \
+        || fail "the plain queue still counts a family a trace has covered"
+
+    more families-traced families-again <<'MD'
+    Q2001  1  todo  opus  crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs  from/- a new row on the traced file §450
+    Q2002  1  todo  opus  crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs#a_test  from/- another §450
+    Q2003  1  todo  opus  crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs  from/- a third §450
+    Q2004  1  todo  opus  crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs,crates/rcad-topo/tests/a_third_file.rs  from/- a row a trace on another file named §450
+    Q2005  1  todo  opus  crates/rcad-topo/tests/a_third_file.rs  from/- the third file's second row §450
+    Q2006  1  todo  opus  crates/rcad-topo/tests/a_third_file.rs  from/- the third file's third row §450
+    Q2007  1  todo  opus  -  pinned/1 from/- Trace the family on crates/rcad-topo/tests/another_file.rs: Q2004 §450
+    MD
+    drive families-again families
+    [ "$got" = "$(printf '%s\n' \
+        '3 crates/rcad-topo/tests/a_third_file.rs Q2004(1) Q2005(1) Q2006(1)' \
+        '3 crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs Q2001(1) Q2002(1) Q2003(1)' \
+        '2 families with no trace (§450.3)')" ] \
+        || fail "a traced file was not a family again with the three rows no trace names, or a file no trace has been on lost a row a trace on another file named"
+
     bundled() {
         got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
             || fail "queue ${*:3} failed on the $1 fixture with bundles of $2"
