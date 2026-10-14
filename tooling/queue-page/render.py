@@ -12,7 +12,9 @@ SVG charts of the queue's shape over every commit of `docs/queue.md` on main's
 first-parent line, a table of both by day, a table of the rows running now with
 the tier each was taken from and the agent it runs under, a table of the open
 rows Mattias pinned and what holds each back, a table of why a fill would not
-take an open row now and which rows each reason holds back, then the current
+take an open row now and which rows each reason holds back, a table of the
+families of §450.3 that no trace has covered (`tooling/queue/families.py`
+finds them, as `just queue families` does), then the current
 ready, running and lately-closed rows, and what the overnight fuzz job did
 night by night — that last section is `fuzz_section.py`'s, read from the fuzz log root the caller
 names.
@@ -58,6 +60,7 @@ QUEUE_TOOLING = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__
 sys.path.insert(0, QUEUE_TOOLING)
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lineage")))
 from rows import SMALL, Queue, TIERS_IN_ORDER  # noqa: E402
+import families as family_rows  # noqa: E402
 import fuzz_section  # noqa: E402
 import lineage  # noqa: E402
 
@@ -204,6 +207,7 @@ def current_state(tip, tip_text):
         "running": running_rows(verbs, here, tip),
         "pinned": pinned_rows(tip),
         "not_taken": rows_not_taken(tip, tip_text, here.trees()),
+        "families": family_rows.families(tip),
         "closed": closed_rows(tip),
     }
 
@@ -477,6 +481,7 @@ def render_page(points, state, fuzz, rendered_at, links):
         running_table=running_table(state["running"], rendered_at, links),
         pinned_table=pinned_table(state["pinned"], state["running"], state["not_taken"], links),
         not_taken_table=not_taken_table(state["not_taken"], links),
+        families_table=families_table(state["families"], links),
         ready_section=ready_section(state["ready"], links),
         running_section=running_section(state["running"], links),
         closed_section=closed_section(state["closed"], links),
@@ -750,6 +755,24 @@ def not_taken_group(title, reasons, links):
     lines = [f"<tr><td>{reason}</td><td>{' '.join(links.ref(row_id) for row_id in row_ids)}</td></tr>"
              for reason, row_ids in reasons.items()]
     return "<tbody>\n" + "\n".join([head, *lines]) + "\n</tbody>"
+
+
+def families_table(found, links):
+    """One line per family of §450.3 rule 1, largest first: how many rows, their test file, and each row with its tier."""
+    if not found:
+        return "<p>no family</p>"
+    lines = [
+        f'<tr><td class="n">{len(members)}</td><td><code>{html.escape(file)}</code></td>'
+        f"<td>{' '.join(f'{links.ref(row.id)} ({html.escape(row.tier)})' for row in members)}</td></tr>"
+        for file, members in found
+    ]
+    body = "\n".join(lines)
+    return f"""<table class="qp-stats">
+<thead><tr><th class="n">Rows</th><th>Test file</th><th>Members, each with its tier</th></tr></thead>
+<tbody>
+{body}
+</tbody>
+</table>"""
 
 
 def ready_section(by_tier, links):
@@ -1109,6 +1132,10 @@ table.qp-stats .n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 
 <h2>Rows the fill will not take now</h2>
 {not_taken_table}
+
+<h2>Families</h2>
+<p class="qp-sub">three or more open rows, not parked, on one test file that no trace has named: trace the family before fixing one of them (§450.3)</p>
+{families_table}
 
 <div class="qp-grid2">
 <div>
