@@ -108,9 +108,10 @@ is not a reason to run `fuzz-triage-row`.
 
 **If a row the fill took is in a family, trace the family first** (§450.3). A
 family is three or more open rows, not parked, that name one `tests/*.rs` file
-in their write sets. List them with the line in 450.2 (`just decision 450.2`).
-If no row starting "Trace the family on" that file names the family's members,
-do not send the row alone. In the same `queue apply` as your takes, `add` the
+in their write sets. `just queue families` lists them, less the rows a trace
+has named, a trace being a row, open or closed, starting "Trace the family on
+<file>"; the plain `just queue` ends with how many. Do not send a row in a
+family it lists alone. In the same `queue apply` as your takes, `add` the
 trace with write set `-`, in the tier of the member the fill reached first. Put
 every other member that is not pinned and not in a lane `after` it, keeping
 what each already waits on (`after Q1 Q8,@1`). Then `take @1` in that slot.
