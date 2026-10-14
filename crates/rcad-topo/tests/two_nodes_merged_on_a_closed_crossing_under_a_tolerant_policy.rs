@@ -1,7 +1,9 @@
-//! Two places a ball is cut at, merged round a closed crossing by a tolerant
-//! policy that read the width of their boxes as a volume.
+//! Two nodes merged round a closed crossing by a tolerant policy that read
+//! what it was handed as a volume: first two places a ball is cut at, whose
+//! boxes' width is a length, then two corners round a cone's ellipse, whose
+//! sweep from the start is an area.
 //!
-//! # The shape
+//! # The ball's shape
 //!
 //! `a_tilted_wall_grazing_a_ball_sums_to_zero.rs`'s, lifted by `1008` so the
 //! ball's centre is at `z = 1024`. A prism on the triangle `(0, 0)`, `(4, 3)`,
@@ -35,8 +37,35 @@
 //! the 21 refused on the edge next. The two places are meets of two planes and
 //! a ball, so they are on the planes' straight crossing too, where their order
 //! was always filed as a length.
+//!
+//! # The cone's shape
+//!
+//! `a_plane_cut_along_a_cones_other_nappe.rs`'s steep cone, slope two about
+//! `z` from its apex at the origin up to a cap at `z = 3`, and a cube of side
+//! six stood on its corner with its middle on the apex. Three of the cube's
+//! faces cut the cone in ellipses, and two corners on one of them are ordered
+//! round it by the sweep `((one − from) × (other − from)) · n`, with `n` the
+//! face's normal, of length one. So the sweep is an area. Its enclosure is
+//! about `1e-13`, and a certified fuse refuses on it.
+//!
+//! # What this pins
+//!
+//! A tolerant policy at a 2 mm working size has a budget of `64 ε · 2 =
+//! 2.8e-14` for a length. The sweep was filed as a volume, read as its
+//! enclosure over `2²`, which that budget covers for every enclosure up to
+//! the widest, `1.06e-13`, so the corners were merged and every fuse
+//! answered. Q1273's probe held those answers to the checks of the nappe
+//! file, with the model at 100 mm and the policy at 2 to 2.6 mm, and each was
+//! right. Read over `2`, the enclosure the order refuses on is past the
+//! budget, and every fuse refuses. An area budget covers the widest from a
+//! working size of `2.73` up.
 
-use rcad_geom::{Isometry, MeetOfThree, Scale, Surface, Vector, meet_of_three_surfaces};
+mod cones;
+
+use cones::a_pointed_cone;
+use rcad_geom::{
+    Axis, Isometry, MeetOfThree, Point, Scale, Surface, Vector, meet_of_three_surfaces,
+};
 use rcad_predicates::{Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -189,4 +218,88 @@ fn the_only_surface_of(model: &Model, solid: SolidKey) -> Surface {
     let surface = faces.next().expect("a face").surface();
     assert!(faces.next().is_none(), "a ball is one face");
     surface
+}
+
+/// The working size of the model the cube and the cone are fused in, and of
+/// the policy.
+const THE_CUBES_WORKING_SIZE: f64 = 2.0;
+
+/// Each rule, and for the difference which solid goes first: whether the cone
+/// is the argument.
+const EVERY_FUSE: [(Rule, bool); 4] = [
+    (Rule::Union, true),
+    (Rule::Intersection, true),
+    (Rule::Difference, true),
+    (Rule::Difference, false),
+];
+
+/// The regression: every tolerant fuse of the cube and the cone refuses on the
+/// order of two corners round an ellipse, filed as an area, with a sweep past
+/// the policy's budget read as an area and inside it read as a volume.
+///
+/// Filed as a volume, the policy merged them, and every fuse answered.
+#[test]
+fn a_tolerant_fuse_of_a_cube_on_a_cones_apex_refuses_a_sweep_past_an_area_budget() {
+    let policy = Policy::tolerant(THE_CUBES_WORKING_SIZE);
+    for (rule, cone_first) in EVERY_FUSE {
+        let mut model =
+            Model::new(Scale::millimetres(THE_CUBES_WORKING_SIZE).expect("a working size"));
+        let cone = a_pointed_cone(&mut model, 2.0, 3.0);
+        let cube = a_corner_up_cube_of_side_six_round_the_origin(&mut model);
+        let (arguments, tools) = if cone_first {
+            ([cone], [cube])
+        } else {
+            ([cube], [cone])
+        };
+        let mut log = ProvenanceLog::new();
+        let fused = model.fuse(&arguments, &tools, rule, &policy, &mut log);
+        let Err(Error::Undecidable { records }) = fused else {
+            let merged: Vec<_> = log
+                .records()
+                .iter()
+                .filter(|record| record.predicate() == ALONG_A_CROSSING)
+                .map(|record| (record.measures(), record.enclosure()))
+                .collect();
+            panic!(
+                "{rule:?}, cone first {cone_first}: {:?}, after merging {merged:?}",
+                fused.map(|_: Fused| "an answer")
+            );
+        };
+        let refused = records.records().last().expect("a refusal names why");
+        let enclosure = refused.enclosure();
+        assert_eq!(
+            refused.predicate(),
+            ALONG_A_CROSSING,
+            "{rule:?} {cone_first}"
+        );
+        assert_eq!(refused.measures(), Measures::Area, "{rule:?} {cone_first}");
+        assert!(
+            !policy
+                .wobble_is_acceptable(Measures::Area.wobble_of(enclosure, THE_CUBES_WORKING_SIZE)),
+            "{rule:?} {cone_first}: {enclosure}"
+        );
+        assert!(
+            policy.wobble_is_acceptable(
+                Measures::Volume.wobble_of(enclosure, THE_CUBES_WORKING_SIZE)
+            ),
+            "{rule:?} {cone_first}: {enclosure}"
+        );
+    }
+}
+
+/// A cube of side six with its diagonal brought upright and its middle at the
+/// origin, built as `a_plane_cut_along_a_cones_other_nappe.rs` builds it.
+fn a_corner_up_cube_of_side_six_round_the_origin(model: &mut Model) -> SolidKey {
+    let side = 6.0;
+    let diagonal = Axis::new(Point::origin(), Vector::new(1.0, -1.0, 0.0)).expect("a direction");
+    let stood = Isometry::rotation(&diagonal, (1.0f64 / 3.0).sqrt().acos()).expect("a finite turn");
+    let placed = Isometry::translation(Vector::new(0.0, 0.0, -side * 3.0f64.sqrt() / 2.0))
+        .expect("a finite move")
+        .compose(&stood);
+    let square = ProfileBuilder::new(vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+    model
+        .add_extrusion(&square, side, &placed)
+        .expect("a square extrudes")
 }
