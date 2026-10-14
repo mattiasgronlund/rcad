@@ -1844,6 +1844,7 @@ impl<'f> Arrangement<'f> {
                             .chain(corner.around.iter().copied())
                             .collect();
                         Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
+                            .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
                             .unwrap_or(undecided)
                     }
                 }
@@ -7792,6 +7793,60 @@ impl<'f> Arrangement<'f> {
                     ) => None,
                 }
             })
+        })
+    }
+
+    /// Which side of `partner` a point lies that is on a pipe among the
+    /// surfaces it is `on`, where `partner` runs along that pipe and clear of
+    /// it: the side of the pipe's axis, read off the axis's own `f64` point.
+    /// `None` where no such pipe is among them, and the caller keeps the box's
+    /// answer.
+    ///
+    /// A bar standing against a block wall along its seam, both turned about
+    /// `z` by `π/6` or by one radian, has its seam corner a rounding off the
+    /// wall's plane, well inside the corner's own box, since a turn that is
+    /// not one of a cube's leaves that box `1e−13` wide. Every fuse of the
+    /// pair was refused for it. The wall's placed plane and the bar's placed
+    /// pipe miss each other, though: the axis is `5.3e−17` past the radius at
+    /// `π/6` and `2.1e−16` at one radian, so the bar is clear of the wall and
+    /// the answer is the two solids as they stand (Q1765).
+    ///
+    /// **Every point of the pipe is on one side of the plane.**
+    /// [`intersect`] says [`SurfaceMeet::Nothing`] for a plane and a pipe only
+    /// where `n·w` is exactly nought and `n·n·r² − (n·o − d)²` is below nought,
+    /// for the plane's normal `n` and offset `d` and the pipe's axis through
+    /// `o` along `w`. A point of the pipe is then `o + s·w + r·u` for a `u` of
+    /// length one square to `w`, so `n·p − d` is `(n·o − d) + r·(n·u)`, and
+    /// `|r·(n·u)|` is at most `r·|n|`, which is less than `|n·o − d|`. So the
+    /// sign at the point is the sign at `o`, which is an `f64` point the plane
+    /// decides exactly, and never nought there.
+    ///
+    /// Asked under [`Policy::certified`] whatever the caller's policy, since
+    /// only a proved miss says anything, and its records are not kept: an
+    /// answer it cannot prove decides nothing here.
+    fn side_of_a_plane_clear_of_a_pipe(on: &[Surface], partner: &Plane) -> Option<Decision> {
+        on.iter().find_map(|pipe| {
+            let Surface::Cylinder(pipe) = pipe else {
+                return None;
+            };
+            if !matches!(
+                intersect(
+                    &Surface::Plane(*partner),
+                    &Surface::Cylinder(*pipe),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                ),
+                Ok(SurfaceMeet::Nothing)
+            ) {
+                return None;
+            }
+            match partner.side_of_point(PredicatePoint::from(pipe.axis().origin().coordinates())) {
+                side @ (Decision::Pos | Decision::Neg) => Some(side),
+                Decision::Zero => {
+                    unreachable!("a plane proved clear of a pipe holds a point of its axis")
+                }
+                Decision::Undecidable { .. } | _ => None,
+            }
         })
     }
 
