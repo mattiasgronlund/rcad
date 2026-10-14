@@ -10333,17 +10333,53 @@ pub(crate) fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface;
 
 /// The two places two pipes of one radius touch at, whose axes meet at
 /// `middle`: `middle ± radius·up/‖up‖`, for `up` square to both axes.
+///
+/// **Where `up` runs along a coordinate axis, `up/‖up‖` is that axis**, one
+/// way or the other, and is taken so rather than divided out
+/// ([`along_one_coordinate_axis`]). Two bars of radius `1/4` along `x` and
+/// turned 85° about `z`, the second starting where the axes meet at `(11,
+/// −3.25, 0.5)`, have `up = (0, 0, sin 85°)`. Divided out, the place `(11,
+/// −3.25, 0.25)` came back a box `2e-16` tall in `z`, round the very point the
+/// near cap's loop on the first bar's wall is walked from; every point of the
+/// box reads nought along the way the loop runs there, so nothing could say
+/// whether it comes first round the loop or last, and every fuse was refused
+/// (Q1968).
 fn where_two_pipes_touch(
     middle: [Interval; 3],
     up: [Interval; 3],
     radius: f64,
 ) -> [PredicatePoint; 2] {
-    let reach = quotient_of(Interval::exactly(radius), root_enclosing(dot_of(up, up)));
+    let step = along_one_coordinate_axis(up).map_or_else(
+        || {
+            let reach = quotient_of(Interval::exactly(radius), root_enclosing(dot_of(up, up)));
+            up.map(|side| reach * side)
+        },
+        |unit| unit.map(|side| Interval::exactly(radius * side)),
+    );
     [Interval::exactly(1.0), Interval::exactly(-1.0)].map(|side| {
         as_exact_as_it_is(PredicatePoint::Constructed(
-            [0, 1, 2].map(|axis| middle[axis] + side * reach * up[axis]),
+            [0, 1, 2].map(|axis| middle[axis] + side * step[axis]),
         ))
     })
+}
+
+/// The unit vector `up` points along, where two of its components are
+/// exactly nought and the third has a proved sign; `None` otherwise.
+fn along_one_coordinate_axis(up: [Interval; 3]) -> Option<[f64; 3]> {
+    let signs = up.map(Interval::sign);
+    let mut unit = [0.0; 3];
+    let mut found = false;
+    for (axis, sign) in signs.into_iter().enumerate() {
+        match sign {
+            Decision::Zero => {}
+            Decision::Pos | Decision::Neg if !found => {
+                unit[axis] = if sign == Decision::Pos { 1.0 } else { -1.0 };
+                found = true;
+            }
+            _ => return None,
+        }
+    }
+    found.then_some(unit)
 }
 
 /// Which of the two places two pipes touch at `place` is, as the face on
