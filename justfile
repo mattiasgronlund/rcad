@@ -17145,6 +17145,13 @@ land *args:
 # Which waiting run gets the lock first is not fixed, so those arms hold either
 # order to the same outcome.
 #
+# Three arms pin §450.3 rule 4's `--answers`. A lane named as answering one
+# open row, one that waits, one a lane holds, one parked, one closed and one
+# that is no row closes the two open ones done at its tip in its own `queue
+# apply` and names the other four in `needs_judgement`; a row named twice is a
+# usage stop; and a spool entry with no `answers`, as a `land.py` from before
+# it wrote them, still lands beside one that has them.
+#
 # **A stub stands where `just` would run a recipe**, on `LAND_JUST`, the way the
 # fuzz selftests put a stub `cargo` on `PATH`. The real `gate` would gate this
 # repository, `ff-main` and `mark-finished` act on real trees, and `queue apply`
@@ -17626,7 +17633,49 @@ check-land-selftest:
     on_origin "$lane_sha" || fail "the lane a killed follower started landing is not on origin/main"
     ! locked lander || fail "the lander tree is still locked after a killed follower"
     spool_empty
-    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, outlives a killed follower, and wait-for waits on a live entry and on a held lock"
+
+    fixture answers
+    another_merge docs/queue.md "$(printf '%s\n' '## Tier 1' '' '```' \
+        'Q3   1    todo           sonnet  tests/a.rs  a row the lane answers §450' \
+        'Q4   1    lane:lane-z    sonnet  tests/a.rs  a row another lane holds §450' \
+        'Q5   1    parked:§450    sonnet  tests/a.rs  a parked row §450' \
+        'Q6   1    after:Q3       sonnet  tests/a.rs  a row that waits §450' \
+        'Q7   1    done:abcdef12  sonnet  tests/a.rs  a closed row §450' \
+        '```')"
+    run --answers Q3,Q4,Q5,Q6,Q7,Q8 Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lane that answers other rows did not merge"
+    git -C "$at/origin.git" show main:docs/queue.md \
+        | grep -qxF "apply done Q1 ${lane_sha:0:8} + done Q3 ${lane_sha:0:8} + done Q6 ${lane_sha:0:8}" \
+        || fail "the merge commit does not close the row and the open rows it answers in one queue apply (§450.3 rule 4)"
+    [ "$(field rows_closed)" = "[\"Q1 done:${lane_sha:0:8}\", \"Q3 done:${lane_sha:0:8} answered by Q1\", \"Q6 done:${lane_sha:0:8} answered by Q1\"]" ] \
+        || fail "rows_closed is $(field rows_closed)"
+    for row in Q4 Q5 Q7 Q8; do
+        grep -qF "\"$row is " <<<"$(field needs_judgement)" \
+            || fail "needs_judgement does not say why $row, held, parked, closed or no row, was not closed as answered"
+    done
+    [ "$(git -C "$at/origin.git" log -1 --format=%s main)" = 'Merge lane-x: Q1 done, and Q3, Q6 answered by it, by just land' ] \
+        || fail "the merge commit's subject is '$(git -C "$at/origin.git" log -1 --format=%s main)'"
+
+    fixture answers-twice
+    run --answers Q1 Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped usage
+
+    fixture old-entry
+    second_lane
+    hold_lock
+    start_in lander Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
+    for entry in "$at/hub/.git/rcad-land/spool"/*.json; do
+        python3 -c 'import json, sys; e = json.load(open(sys.argv[1])); e.pop("answers"); open(sys.argv[1], "w").write(json.dumps(e))' "$entry" \
+            || fail "a spool entry carries no answers, so this arm cannot take it out to make one an older land.py wrote"
+    done
+    release_lock
+    wait_for lander
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the first lane did not land beside a spool entry with no answers"
+    wait_for lander2
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the second lane did not land beside a spool entry with no answers"
+    spool_empty
+    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, outlives a killed follower, wait-for waits on a live entry and on a held lock, closes the open rows a lane answers in its queue apply and names the others, and lands a spool entry an older land.py wrote"
 
 # A verifier's fixed steps for one lane, run for it (§383.4 item 4, §385): unlock
 # the lane's tree, `git log` from the base to the branch, the files outside the
