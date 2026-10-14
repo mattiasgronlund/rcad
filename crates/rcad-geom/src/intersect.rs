@@ -7701,6 +7701,98 @@ mod tests {
         }
     }
 
+    /// The same two bars turned 105°, 110°, 111°, 113°, 114° or 119°, where the
+    /// second's stored direction is a hair under `z = 0`, by `2⁻⁵²`, and its
+    /// start a hair over it, by `2⁻⁴⁸` (Q1967). Worked in exact fractions, the
+    /// two stored axes still lie in one flat and meet at `(11 ± 2⁻⁵⁰, 0, 0)`,
+    /// which `f64` does not hold, and neither direction crossed with `x`, `y`
+    /// or `z` lies in that flat. Every one of these was refused
+    /// `CannotNameWhichPieceOfACrossingThisIs`.
+    #[test]
+    fn two_thin_bars_a_hair_off_one_coordinate_flat_whose_axes_meet_off_f64_are_named_in_four_halves()
+     {
+        let first = a_pipe_as_written([1.0, 0.0, 0.0], [9.0, 0.0, 0.0]);
+        for (degrees, through, along) in [
+            (
+                105,
+                [
+                    15.141104721640332,
+                    -15.454813220625095,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.2588190451025208,
+                    0.9659258262890684,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                110,
+                [16.4723222932107, -15.035081932574537, 3.552713678800501e-15],
+                [
+                    -0.3420201433256687,
+                    0.9396926207859085,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                111,
+                [
+                    16.733887192724808,
+                    -14.937286823955231,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.35836794954530043,
+                    0.933580426497202,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                113,
+                [
+                    17.25169805582838,
+                    -14.728077655239048,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.3907311284892739,
+                    0.9205048534524405,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                114,
+                [
+                    17.507786289212802,
+                    -14.616727322281617,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.4067366430758002,
+                    0.9135454576426011,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                119,
+                [
+                    18.756953923941392,
+                    -13.993915314230335,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.48480962024633706,
+                    0.874619707139396,
+                    -2.220446049250313e-16,
+                ],
+            ),
+        ] {
+            let second = a_pipe_as_written(along, through);
+            named_in_four_halves_both_ways_round(&first, &second, degrees);
+        }
+    }
+
     /// A pipe of radius 1/4 whose axis stores `along` and `through` bit for
     /// bit, as a moved bar's does.
     fn a_pipe_as_written(along: [f64; 3], through: [f64; 3]) -> Surface {
