@@ -10322,7 +10322,7 @@ fn exactly_added(left: &[f64], right: &[f64]) -> Vec<f64> {
 /// The three surfaces the two nodes where four half ellipses meet are named
 /// by: the lesser of the two pipes by [`name_of_surface_bits`], then the
 /// greater twice, so that the face on either pipe names them alike.
-fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface; 3] {
+pub(crate) fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface; 3] {
     let (lesser, greater) = if name_of_surface_bits(one) <= name_of_surface_bits(other) {
         (one, other)
     } else {
