@@ -63,8 +63,10 @@ impl Measurement {
     /// For a wholly flat solid there is no such shell, and this is how far the
     /// rounded sum landed from the exact volume of the solid's own triangles,
     /// worked out rather than bounded in advance: `0.0` exactly when the sum
-    /// is exact. `a_flat_solid_publishes_the_rounding_of_its_measure.rs` holds
-    /// it against that volume worked out exactly. Never negative.
+    /// is exact. A curved solid owes the same rounding of its sum over the
+    /// mesh, worked out the same way, on top of the shell.
+    /// `a_flat_solid_publishes_the_rounding_of_its_measure.rs` holds both
+    /// against the volume of the triangles worked out exactly. Never negative.
     #[must_use]
     pub fn volume_error(self) -> f64 {
         self.volume_error
@@ -119,10 +121,14 @@ impl Measurement {
     /// that comparison is worth and who makes it.
     ///
     /// The material the mesh gets wrong — missing on a bar, added round a hole
-    /// — is no more than [`Measurement::volume_error`] of space, and none of it
-    /// is further from the centroid than the solid reaches, so moving all of it
-    /// to the far side shifts the balance point by at most
-    /// `volume_error / volume` of that reach.
+    /// — is no more than the shell [`Measurement::volume_error`] charges, and
+    /// none of it is further from the centroid than the solid reaches, so
+    /// moving all of it to the far side shifts the balance point by at most
+    /// `shell / volume` of that reach. On top of that, how far the rounded
+    /// centroid landed from where the mesh's own triangles balance exactly,
+    /// worked out as it is for a flat solid below;
+    /// `a_flat_solid_publishes_the_rounding_of_its_measure.rs` holds a curved
+    /// solid's against that point.
     ///
     /// For a wholly flat solid there is no such material, and this is how far
     /// the rounded centroid landed from where the solid's own triangles balance
@@ -309,7 +315,9 @@ impl SolidView<'_> {
     /// A solid with a curved face has no such fan — its caps fan into no
     /// triangles at all and its wall into two with no area — so it is measured
     /// over [`SolidView::mesh`], and the three error terms say how much of the
-    /// answer the triangles could be hiding.
+    /// answer the triangles could be hiding. The volume's and the centroid's
+    /// add how far their own sums over the mesh rounded, worked out as the flat
+    /// path works it out.
     ///
     /// # Which knob decides what
     ///
@@ -435,12 +443,29 @@ impl SolidView<'_> {
     /// [`SolidView::volume_and_moment`] is where that is derived, and every word
     /// of it applies here — the triangles are a different set, not a different
     /// kind of thing.
+    ///
+    /// **The volume's error is the space the mesh hides and the rounding of its
+    /// sum, both, and so is the centroid's wobble.** The rounding is worked out
+    /// as the flat path works it out, from the mesh's own triangles summed
+    /// exactly. A solid whose curved faces are a hair of skin hides less space
+    /// than one rounding of the sum, and published that space alone: the block
+    /// less the cone in `a_flat_solid_publishes_the_rounding_of_its_measure.rs`
+    /// measured `1152.0000000000007` with an error of `5.7e-19`, and its mesh
+    /// encloses `8.4e-14` less; its centroid came out `1.2e-15` from where the
+    /// mesh balances, with a wobble of `5.1e-21`.
     fn measured_over(self, mesh: &Mesh) -> Result<Measurement> {
         let hub = hub_of(mesh);
         let shifts = axis_shifts_over(mesh, hub);
-        let (six_volumes, moment) = volume_and_moment_over(mesh, hub, shifts);
+        let SumsOverAMesh {
+            six_volumes,
+            moment,
+            fan,
+            ..
+        } = volume_and_moment_over(mesh, hub, shifts);
 
-        let volume = shift(six_volumes / 6.0, shifts.iter().sum());
+        let whole_shift = shifts.iter().sum();
+        let sixth = six_volumes / 6.0;
+        let volume = shift(sixth, whole_shift);
         if !volume.is_finite() {
             return Err(Error::VolumeTooLargeToMeasure);
         }
@@ -454,14 +479,27 @@ impl SolidView<'_> {
 
         let balance = [0, 1, 2].map(|axis| shift(moment[axis] / (4.0 * six_volumes), shifts[axis]));
         let centroid = hub + Vector::from(balance);
+        let (exact_six_volumes, exact_moment) = volume_and_moment_as_expansions(&fan);
+        let four_times_the_six_volumes = packed(&multiplied(&exact_six_volumes, &[4.0]));
         Ok(Measurement {
             volume,
-            volume_error: skin.volume_error,
+            volume_error: upward(
+                skin.volume_error
+                    + how_far_the_volume_rounded(&exact_six_volumes, sixth, volume, whole_shift),
+            ),
             surface_area: skin.area,
             area_error: skin.area_error,
             centroid,
-            centroid_wobble: (skin.volume_error / volume)
-                * how_far_the_solid_reaches_from(mesh, centroid),
+            centroid_wobble: upward(
+                (skin.volume_error / volume) * how_far_the_solid_reaches_from(mesh, centroid)
+                    + how_far_the_middle_is_from(
+                        centroid,
+                        hub,
+                        shifts,
+                        &exact_moment,
+                        &four_times_the_six_volumes,
+                    ),
+            ),
         })
     }
 
@@ -1067,6 +1105,15 @@ fn crossed(along: &[[f64; 2]; 3], down: &[[f64; 2]; 3]) -> [Vec<f64>; 3] {
 /// rounding it down. Shifting `sixth` itself back is exact unless the volume
 /// lands among the subnormals, and then it is off by less than their spacing,
 /// which is charged.
+///
+/// **The difference is packed before its size is read**, for the reason
+/// [`how_far_the_middle_is_from`] packs its own: fresh out of the subtraction
+/// its entries can nearly cancel, and adding up their sizes then charges more
+/// than the distance. The block less the cone in
+/// `a_flat_solid_publishes_the_rounding_of_its_measure.rs` came out as
+/// `7.95e-16` and `−1.78e-15` in the units the shifts picked, a distance of
+/// `9.8e-16` charged as `2.57e-15`, and published `2.2e-13` for a mesh
+/// `8.4e-14` off.
 fn how_far_the_volume_rounded(
     six_volumes: &[f64],
     sixth: f64,
@@ -1074,7 +1121,7 @@ fn how_far_the_volume_rounded(
     whole_shift: i32,
 ) -> f64 {
     let (six_sixths, lost) = two_product(sixth, 6.0);
-    let off = added(six_volumes, &[-lost, -six_sixths]);
+    let off = packed(&added(six_volumes, &[-lost, -six_sixths]));
     let error = shift_up(divided_up(at_most(&off), 6.0), whole_shift);
     if shift(volume, -whole_shift) == sixth {
         return error;
@@ -1242,11 +1289,11 @@ fn six_volumes_exactly(fan: &[[[f64; 2]; 9]]) -> f64 {
 /// surface, so that point is the same whatever the hub; which triangles they
 /// are is part of it, as it is of the volume (`docs/decisions.md` §338.5).
 ///
-/// **Packed after every triangle, because this runs on every flat solid
-/// measured** and not only on one whose sign is in doubt: an expansion that is
-/// only ever added to grows by every entry of every determinant, and adding to
-/// it costs its length each time. [`compress`] keeps it as short as the value
-/// needs.
+/// **Packed after every triangle, because this runs on every solid measured,
+/// over its fan or its mesh,** and not only on one whose sign is in doubt: an
+/// expansion that is only ever added to grows by every entry of every
+/// determinant, and adding to it costs its length each time. [`compress`]
+/// keeps it as short as the value needs.
 fn volume_and_moment_as_expansions(fan: &[[[f64; 2]; 9]]) -> (Vec<f64>, [Vec<f64>; 3]) {
     let mut six_volumes: Vec<f64> = Vec::new();
     let mut moment: [Vec<f64>; 3] = Default::default();
@@ -1434,7 +1481,9 @@ fn axis_shifts_over(mesh: &Mesh, hub: Point) -> [i32; 3] {
     widest.map(shift_for)
 }
 
-/// Six times the signed volume of a mesh, and its first moment about `hub`.
+/// Six times the signed volume of a mesh, its first moment about `hub`, how far
+/// the first can be from the six volumes the mesh's triangles enclose exactly,
+/// and every triangle's offsets exactly.
 ///
 /// The mesh's triangles in the order it stores them, which is fixed (§25.7), so
 /// two runs give the same sum bit for bit.
@@ -1446,65 +1495,17 @@ fn axis_shifts_over(mesh: &Mesh, hub: Point) -> [i32; 3] {
 /// exact *about* is the mesh, which stands in for the solid to within
 /// [`Measurement::volume_error`]; the sign it decides is the sign the mesh's
 /// own triangles have, which is what these two callers branch on.
-fn volume_and_moment_over(mesh: &Mesh, hub: Point, shifts: [i32; 3]) -> (f64, [f64; 3]) {
-    let (six_volumes, moment, _) = volume_moment_and_how_far_off_over(mesh, hub, shifts);
-    (six_volumes, moment)
-}
-
-/// The signed volume of a mesh, for
-/// [`Model::validate`](crate::Model::validate) to complain about — the curved
-/// twin of [`SolidView::signed_volume`].
-pub(crate) fn signed_volume_over(mesh: &Mesh) -> f64 {
-    let hub = hub_of(mesh);
-    let shifts = axis_shifts_over(mesh, hub);
-    let (six_volumes, _) = volume_and_moment_over(mesh, hub, shifts);
-    shift(six_volumes / 6.0, shifts.iter().sum())
-}
-
-/// [`signed_volume_over`], and how far it can be from the volume the mesh's
-/// own triangles enclose exactly, rounded up.
-///
-/// **The sign is always the mesh's own; the size need not be close.** The
-/// rounded sum stands whenever it is further from zero than its slack, so a
-/// sum just past its slack can be off by nearly all of itself. A caller that
-/// compares the size with something else needs this second number, and
-/// `validate`'s check of a mesh that lies flat on one plane is one.
-///
-/// It is the six volumes' own error, a sixth of it, the rounding of that
-/// sixth, and of the shift back to the model's units, all rounded up, the way
-/// [`how_far_the_volume_rounded`] charges a fan's. The six volumes' error is
-/// one of two bounds this file already rests the sign on: the slack
-/// [`SolidView::volume_and_moment`] derives, for a rounded sum, and half a
-/// spacing, for the exact one [`six_volumes_exactly`] rounds once.
-pub(crate) fn signed_volume_over_and_how_far_it_rounded(mesh: &Mesh) -> (f64, f64) {
-    let hub = hub_of(mesh);
-    let shifts = axis_shifts_over(mesh, hub);
-    let (six_volumes, _, six_volumes_off) = volume_moment_and_how_far_off_over(mesh, hub, shifts);
-    let whole_shift = shifts.iter().sum();
-    let sixth = six_volumes / 6.0;
-    let volume = shift(sixth, whole_shift);
-    let sixth_off =
-        upward(divided_up(six_volumes_off, 6.0) + sixth.abs() * f64::EPSILON + f64::from_bits(1));
-    let error = shift_up(sixth_off, whole_shift);
-    if shift(volume, -whole_shift) == sixth {
-        return (volume, error);
-    }
-    (volume, upward(error + f64::from_bits(1)))
-}
-
-/// [`volume_and_moment_over`]'s two sums, and how far the first can be from
-/// the six volumes the mesh's triangles enclose exactly.
 ///
 /// The rounded sum is off by at most its slack, which is why it is only kept
 /// when it is further from zero than that. The exact sum is the nearest `f64`
 /// to the true one, off by half a spacing of itself, which `|sum| · ε` plus
 /// the smallest subnormal covers. An overflow comes back with a slack that is
 /// not finite, so it is off by any amount, which is what it is.
-fn volume_moment_and_how_far_off_over(
-    mesh: &Mesh,
-    hub: Point,
-    shifts: [i32; 3],
-) -> (f64, [f64; 3], f64) {
+///
+/// The offsets are what [`SolidView::measured_over`] works out how far its
+/// rounded volume landed from, as [`SolidView::volume_and_moment`]'s are for a
+/// flat solid.
+fn volume_and_moment_over(mesh: &Mesh, hub: Point, shifts: [i32; 3]) -> SumsOverAMesh {
     let mut fan: Vec<[[f64; 2]; 9]> = Vec::new();
     let mut six_volumes = 0.0;
     let mut how_big_the_terms_are = 0.0;
@@ -1525,14 +1526,72 @@ fn volume_moment_and_how_far_off_over(
 
     let slack = (fan.len() as f64 + 8.0) * f64::EPSILON * how_big_the_terms_are;
     if six_volumes.abs() > slack || !how_big_the_terms_are.is_finite() {
-        return (six_volumes, moment, upward(slack));
+        return SumsOverAMesh {
+            six_volumes,
+            moment,
+            six_volumes_off: upward(slack),
+            fan,
+        };
     }
     let exactly = six_volumes_exactly(&fan);
-    (
-        exactly,
+    SumsOverAMesh {
+        six_volumes: exactly,
         moment,
-        exactly.abs() * f64::EPSILON + f64::from_bits(1),
-    )
+        six_volumes_off: exactly.abs() * f64::EPSILON + f64::from_bits(1),
+        fan,
+    }
+}
+
+/// What [`volume_and_moment_over`] sums, in the units the shifts picked.
+struct SumsOverAMesh {
+    six_volumes: f64,
+    moment: [f64; 3],
+    /// How far `six_volumes` can be from the exact sum, rounded up: a bound
+    /// ahead of time, where [`how_far_the_volume_rounded`] works it out.
+    six_volumes_off: f64,
+    fan: ExactFan,
+}
+
+/// The signed volume of a mesh, for
+/// [`Model::validate`](crate::Model::validate) to complain about — the curved
+/// twin of [`SolidView::signed_volume`].
+pub(crate) fn signed_volume_over(mesh: &Mesh) -> f64 {
+    let hub = hub_of(mesh);
+    let shifts = axis_shifts_over(mesh, hub);
+    let sums = volume_and_moment_over(mesh, hub, shifts);
+    shift(sums.six_volumes / 6.0, shifts.iter().sum())
+}
+
+/// [`signed_volume_over`], and how far it can be from the volume the mesh's
+/// own triangles enclose exactly, rounded up.
+///
+/// **The sign is always the mesh's own; the size need not be close.** The
+/// rounded sum stands whenever it is further from zero than its slack, so a
+/// sum just past its slack can be off by nearly all of itself. A caller that
+/// compares the size with something else needs this second number, and
+/// `validate`'s check of a mesh that lies flat on one plane is one.
+///
+/// It is the six volumes' own error, a sixth of it, the rounding of that
+/// sixth, and of the shift back to the model's units, all rounded up, the way
+/// [`how_far_the_volume_rounded`] charges a fan's. The six volumes' error is
+/// one of two bounds this file already rests the sign on: the slack
+/// [`SolidView::volume_and_moment`] derives, for a rounded sum, and half a
+/// spacing, for the exact one [`six_volumes_exactly`] rounds once.
+pub(crate) fn signed_volume_over_and_how_far_it_rounded(mesh: &Mesh) -> (f64, f64) {
+    let hub = hub_of(mesh);
+    let shifts = axis_shifts_over(mesh, hub);
+    let sums = volume_and_moment_over(mesh, hub, shifts);
+    let whole_shift = shifts.iter().sum();
+    let sixth = sums.six_volumes / 6.0;
+    let volume = shift(sixth, whole_shift);
+    let sixth_off = upward(
+        divided_up(sums.six_volumes_off, 6.0) + sixth.abs() * f64::EPSILON + f64::from_bits(1),
+    );
+    let error = shift_up(sixth_off, whole_shift);
+    if shift(volume, -whole_shift) == sixth {
+        return (volume, error);
+    }
+    (volume, upward(error + f64::from_bits(1)))
 }
 
 /// Each face of the mesh and how much area its triangles have, in the order the
