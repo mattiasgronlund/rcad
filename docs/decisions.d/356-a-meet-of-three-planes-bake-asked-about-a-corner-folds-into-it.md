@@ -244,7 +244,9 @@ sixteenth's test still passes and no longer pins the room from below: with the
 rule, a room ×0.5 answers all its 36 (356.3's ×0.5 column is 103 of 108 at
 1/16, and the five refused are at heights 1/4 and 4). So §310.4's "only two
 tests fail at ×0.5" should now be one, the hand-written test; that is a
-forecast, not re-run across rcad-topo.
+forecast, not re-run across rcad-topo. §301.10 (Q495) re-ran it: the
+sixteenth's test does pass at ×0.5, but four tests fail, not one — the
+hand-written test and three more unit tests beside it in `arrange.rs`.
 
 ### 356.6 What this leaves, and what Q275 should measure first
 

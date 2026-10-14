@@ -53,16 +53,23 @@ The apex's own box stayed under 0.18 rooms wide at every fold. (Citation to
 is a citation, not a measurement, and it is not re-measured here.)
 
 **So a four-plane corner does fill the room**, which none of §301's shapes
-did (§301.4). The workspace's two committed tests pin the two ends of what
-the table shows: at a fold of 1/16 the union still answers although 31 of the
-36 turned cases would refuse with the room halved
+did (§301.4). At this section's base, `a35aa8ba`, the workspace's two
+committed tests pinned the two ends of what the table shows: at a fold of
+1/16 the union still answered although 31 of the 36 turned cases would
+refuse with the room halved
 (`a_pyramid_whose_two_faces_fold_by_a_sixteenth_is_united_though_its_apex_meets_stick_out_past_half_the_room`),
-and at a fold of 1/64 every one of the 36 is refused as it stands
+and at a fold of 1/64 every one of the 36 was refused as it stood
 (`a_pyramid_whose_two_faces_fold_by_a_sixty_fourth_is_refused_because_its_apex_meets_stick_out_past_the_room`).
-Both tests pass at this section's base, `a35aa8ba`: `mise exec -- just t -p
-rcad-topo --test a_corner_with_four_planes_round_it` (log kept at
-`target/q276/test-a_corner_with_four_planes_round_it.log`), 2 tests run, 2
-passed — a re-measurement, not a citation.
+`mise exec -- just t -p rcad-topo --test a_corner_with_four_planes_round_it`
+(log kept at `target/q276/test-a_corner_with_four_planes_round_it.log`), 2
+tests run, 2 passed — a re-measurement, not a citation. **Both tests have
+since moved.** §356 turned the sixty-fourth's test round: it unites rather
+than refuses, under its new name
+`a_pyramid_whose_two_faces_fold_by_a_sixty_fourth_is_united_though_its_apex_meets_stick_out_past_the_room`
+(310.3). The sixteenth's test kept its name and still passes, but §356.5
+forecast that it no longer pins the room at a half, and §301.10 (Q495)
+confirms that by running the room ×0.5 across the whole of `rcad-topo`: the
+sixteenth's test is not among the four that fail.
 
 ### 310.3 The gap at a fold of 1/64 and below
 
@@ -81,18 +88,25 @@ paragraph was re-measured here; both are cited to `034111e9`.
 
 ### 310.4 The room x0.5 across rcad-topo
 
-With the fold room scaled by a half, only two of rcad-topo's tests fail:
-the sixteenth-fold pyramid pin
-(`a_pyramid_whose_two_faces_fold_by_a_sixteenth_is_united_though_its_apex_meets_stick_out_past_half_the_room`,
-310.2's table already names its 31-of-36 refusal count) and the hand-written
-room-boundary pin
-(`a_place_as_far_off_a_corner_as_its_room_is_folded_into_it_and_one_a_step_further_is_not`,
-§301.5). 1054 of 1056 pass, over one run of the property suites. **This
-figure is cited to Q240's commits `034111e9` and `4b6e3e2e`, and is not
-re-measured here**: reaching it needs the same scratch edit to
-`a_corner_is_this_place` that §301.6's probe used (an `Q225_SCALE`
-environment variable read inside `arrange.rs`), and this row's write set does
-not include `crates/`, so no such edit was made.
+*This section was written from a citation to Q240's commits `034111e9` and
+`4b6e3e2e` ("only two of rcad-topo's tests fail"), never re-measured, because
+the row that wrote it had no `crates/` in its write set (§301.4's wording,
+above, is this section's own history and is kept for that reason). §356
+changed the room build the scratch edit touches into a branch, and §356.5
+forecast that the count had dropped to one. Q495 is the first row whose write
+set includes `crates/rcad-topo/src/fuse/arrange.rs`, and ran the edit.*
+
+With the fold room scaled by a half across the whole of `rcad-topo` — not
+just the property suites — **four tests fail, not two or one**:
+`a_place_as_far_off_a_corner_as_its_room_is_folded_into_it_and_one_a_step_further_is_not`
+(§301.5) and three more hand-written unit tests beside it in `arrange.rs`'s
+`tests` module. **Neither pyramid fold test is among them.** The
+sixteenth-fold pin
+(`a_pyramid_whose_two_faces_fold_by_a_sixteenth_is_united_though_its_apex_meets_stick_out_past_half_the_room`)
+passes at ×0.5, confirming §356.5's forecast, and so does the sixty-fourth's
+(310.2) and the wedge's (§301.5, §301.9). The full count, the five tests that
+fail at ×0.1 instead, the three that fail at ×1.25, and the command, are
+§301.10's.
 
 ### 310.5 What this leaves
 

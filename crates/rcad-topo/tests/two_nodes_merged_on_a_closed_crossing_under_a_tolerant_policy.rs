@@ -59,6 +59,26 @@
 //! right. Read over `2`, the enclosure the order refuses on is past the
 //! budget, and every fuse refuses. An area budget covers the widest from a
 //! working size of `2.73` up.
+//!
+//! # Below a working size of one
+//!
+//! Below `1`, the area reading is the more lenient one, by `1/s`: at a shape
+//! scale of `0.18` and a working size of `0.6`, the cube on the cone's apex
+//! merges two corners the volume reading would have refused — a real gap,
+//! searched across 13 shape scales (`0.1` to `0.5`), 17 working sizes (`0.1`
+//! to `0.9`) and the four rule/order combinations above (884 fuses, no
+//! panics). **No wrong answer came of it.**
+//! `a_tolerant_fuse_of_a_cube_on_a_cone_below_working_size_one_merges_the_same_shape_as_at_full_scale`
+//! pins one such merge and compares its solid's face, wire and shell counts
+//! against the same pair fused at full scale and a 10 mm working size — past
+//! `2.73`, so trusted — and they agree: fusing is a similarity transform, so
+//! scaling the shape and the working size together cannot change which of two
+//! points comes first round the ellipse.
+//!
+//! **Only this shape was searched.** "Bar or frustum cut along the seam" and
+//! "plane through a ball" — the other two families a plane's conic sweep
+//! shows up in (`along_a_crossing.rs`'s `WhichWayItWinds::About` arm) — are
+//! not yet built below working size `1`; that is Q2002's own follow-up.
 
 mod cones;
 
@@ -290,7 +310,11 @@ fn a_tolerant_fuse_of_a_cube_on_a_cones_apex_refuses_a_sweep_past_an_area_budget
 /// A cube of side six with its diagonal brought upright and its middle at the
 /// origin, built as `a_plane_cut_along_a_cones_other_nappe.rs` builds it.
 fn a_corner_up_cube_of_side_six_round_the_origin(model: &mut Model) -> SolidKey {
-    let side = 6.0;
+    a_corner_up_cube_round_the_origin(model, 6.0)
+}
+
+/// [`a_corner_up_cube_of_side_six_round_the_origin`], scaled to `side`.
+fn a_corner_up_cube_round_the_origin(model: &mut Model, side: f64) -> SolidKey {
     let diagonal = Axis::new(Point::origin(), Vector::new(1.0, -1.0, 0.0)).expect("a direction");
     let stood = Isometry::rotation(&diagonal, (1.0f64 / 3.0).sqrt().acos()).expect("a finite turn");
     let placed = Isometry::translation(Vector::new(0.0, 0.0, -side * 3.0f64.sqrt() / 2.0))
@@ -302,4 +326,98 @@ fn a_corner_up_cube_of_side_six_round_the_origin(model: &mut Model) -> SolidKey 
     model
         .add_extrusion(&square, side, &placed)
         .expect("a square extrudes")
+}
+
+/// The gap Q1273 left open below a working size of `1`: the cube-on-a-cone
+/// shape, shrunk to a shape scale of `0.18` and fused at a `0.6` mm working
+/// size, merges the two corners round the ellipse under the area reading
+/// where the volume reading would have refused — the area budget covers more
+/// than the volume one below a working size of `1`, by `1/s`.
+///
+/// **The merged answer is not wrong.** A tolerant fuse of the same pair,
+/// scaled up by `1/0.18` and run at a 10 mm working size — comfortably past
+/// the `2.73` mm where §318.5 says an area budget covers the widest sweep, so
+/// its merge is trusted — gives a solid with the same face, wire and shell
+/// counts. Fusing is a similarity transform: scaling the shape and the
+/// working size together cannot change which of two points comes first round
+/// the ellipse, so the two runs answer the same combinatorial question and
+/// agree.
+#[test]
+fn a_tolerant_fuse_of_a_cube_on_a_cone_below_working_size_one_merges_the_same_shape_as_at_full_scale()
+ {
+    let gap_scale = 0.18;
+    let gap_size = 0.6;
+    let gap_policy = Policy::tolerant(gap_size);
+    let mut gap_model = Model::new(Scale::millimetres(gap_size).expect("a working size"));
+    let gap_cone = a_pointed_cone(&mut gap_model, 2.0, 3.0 * gap_scale);
+    let gap_cube = a_corner_up_cube_round_the_origin(&mut gap_model, 6.0 * gap_scale);
+    let mut gap_log = ProvenanceLog::new();
+    let gap_fused = gap_model
+        .fuse(
+            &[gap_cone],
+            &[gap_cube],
+            Rule::Union,
+            &gap_policy,
+            &mut gap_log,
+        )
+        .expect("the gap case answers Ok");
+
+    gap_log
+        .records()
+        .iter()
+        .find(|record| {
+            record.predicate() == ALONG_A_CROSSING
+                && record.measures() == Measures::Area
+                && gap_policy
+                    .wobble_is_acceptable(Measures::Area.wobble_of(record.enclosure(), gap_size))
+                && !gap_policy
+                    .wobble_is_acceptable(Measures::Volume.wobble_of(record.enclosure(), gap_size))
+        })
+        .expect("the area reading merges a sweep the volume reading would have refused");
+
+    let gap_solid = gap_model
+        .solid(gap_fused.solids()[0])
+        .expect("the fuse's one solid");
+    let gap_shape = (
+        gap_solid.faces().count(),
+        gap_solid.faces().flat_map(|face| face.wires()).count(),
+        gap_solid.shells().count(),
+    );
+
+    let reference_size = 10.0;
+    let mut reference_model =
+        Model::new(Scale::millimetres(reference_size).expect("a working size"));
+    let reference_cone = a_pointed_cone(&mut reference_model, 2.0, 3.0);
+    let reference_cube = a_corner_up_cube_round_the_origin(&mut reference_model, 6.0);
+    let reference_fused = reference_model
+        .fuse(
+            &[reference_cone],
+            &[reference_cube],
+            Rule::Union,
+            &Policy::tolerant(reference_size),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a working size of 10, well past 2.73, merges comfortably under the area budget");
+    let reference_solid = reference_model
+        .solid(reference_fused.solids()[0])
+        .expect("the fuse's one solid");
+    let reference_shape = (
+        reference_solid.faces().count(),
+        reference_solid
+            .faces()
+            .flat_map(|face| face.wires())
+            .count(),
+        reference_solid.shells().count(),
+    );
+
+    assert_eq!(gap_fused.solids().len(), 1, "one solid, the union of both");
+    assert_eq!(
+        reference_fused.solids().len(),
+        1,
+        "one solid, the union of both"
+    );
+    assert_eq!(
+        gap_shape, reference_shape,
+        "the gap case's topology should match the full-scale reference's"
+    );
 }
