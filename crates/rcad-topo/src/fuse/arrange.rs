@@ -714,7 +714,9 @@ struct Arrangement<'f> {
     /// arcs was thrown away. Only such a crossing can say which side of itself a
     /// walk elsewhere on the surface is on — a straight one runs on past its
     /// outermost node, and two walks either side of that stretch are one cell
-    /// with two different signs.
+    /// with two different signs. Inside the face a surface handed in as a cut
+    /// still tells cells apart, drawn in full or not
+    /// ([`Arrangement::the_one_on_its_side_of_every_cut`]).
     drawn_in_full: Vec<bool>,
     /// Which crossing each cut surface handed in turned into, in the order they
     /// were handed in. `None` when the surface misses the face's own and cuts
@@ -1162,7 +1164,7 @@ impl<'f> Arrangement<'f> {
         arrangement.cut_the_crossings_into_arcs(policy, log)?;
         arrangement.walk_the_cycles(policy, log)?;
         arrangement.count_the_windings_inside_each_lump();
-        arrangement.group_the_cycles_into_cells(policy, log)?;
+        arrangement.group_the_cycles_into_cells(cuts, policy, log)?;
         arrangement.count_the_windings()?;
         Ok(arrangement)
     }
@@ -5787,6 +5789,7 @@ impl<'f> Arrangement<'f> {
     /// surface but a torus.
     fn group_the_cycles_into_cells(
         &mut self,
+        cuts: &[Surface],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
@@ -5806,7 +5809,7 @@ impl<'f> Arrangement<'f> {
 
         self.say_whether_the_face_holds_each_lump_of_closed_cuts(&lump);
 
-        let facing = self.the_walk_of_each_other_lump_each_walk_faces(&lump, &sides)?;
+        let facing = self.the_walk_of_each_other_lump_each_walk_faces(&lump, &sides, cuts)?;
         let torus = matches!(self.surface, Surface::Torus(_));
         for (one, its) in facing.iter().enumerate() {
             for &other in its {
@@ -5970,7 +5973,9 @@ impl<'f> Arrangement<'f> {
     ///
     /// Where a walk's signs agree with one walk of a lump, that is the one.
     /// Where they agree with several, [`Arrangement::which_of_them_holds`] is
-    /// asked. What it cannot settle is refused, except for a walk the face's
+    /// asked, and then [`Arrangement::the_one_on_its_side_of_every_cut`],
+    /// with the surfaces handed in as `cuts`. What neither settles is
+    /// refused, except for a walk the face's
     /// boundary is known to wind round no times: no piece is made of its cell,
     /// so leaving it unjoined loses nothing, and joining it to the wrong walk
     /// would not either — but a guess is not what this function hands out.
@@ -5990,6 +5995,7 @@ impl<'f> Arrangement<'f> {
         &self,
         lump: &[usize],
         sides: &[Vec<Option<Decision>>],
+        cuts: &[Surface],
     ) -> Result<Vec<Vec<usize>>> {
         let count = self.cycles.len();
         let mut walks_of: std::collections::BTreeMap<usize, Vec<usize>> =
@@ -6031,7 +6037,9 @@ impl<'f> Arrangement<'f> {
                     .collect();
                 let chosen = match candidates[..] {
                     [only] => Some(only),
-                    _ => self.which_of_them_holds(walk, &candidates),
+                    _ => self
+                        .which_of_them_holds(walk, &candidates)
+                        .or_else(|| self.the_one_on_its_side_of_every_cut(walk, &candidates, cuts)),
                 };
                 match chosen {
                     Some(chosen) => facing[walk].push(chosen),
@@ -6515,6 +6523,133 @@ impl<'f> Arrangement<'f> {
             _ => !turns_left(first, last)?,
         };
         Some(if passes { once } else { 0 })
+    }
+
+    /// Which of several walks of one lump `walk` can share a cell with, by the
+    /// side each is on of every surface handed in as a cut; `None` when more
+    /// than one is left, or none.
+    ///
+    /// A candidate is ruled out when one of the two is known to be inside the
+    /// face and the two are on opposite sides of a cut. A thin bar from
+    /// `x = −10` to the axis of a fat one standing up `z` is why: its cap
+    /// plane `x = 0` cuts the fat wall in two lines that part it into the half
+    /// at `x > 0` and the half at `x < 0`, its pipe cuts the wall in a loop
+    /// round `x = 4`, and the walk round the outside of that loop agrees with
+    /// both halves about every closed curve. Neither line closes, so neither
+    /// is drawn in full and [`Arrangement::which_side_of_everything`] asks
+    /// neither.
+    ///
+    /// **Inside the face, a cut has one side over the whole of a cell.** A cut
+    /// surface is handed to [`Arrangement::crossing_for`] with no point to pick
+    /// a curve by, so every curve it cuts the face's surface in is a crossing,
+    /// its own or one it is folded into, and either way one flagged as a cut,
+    /// whose every step [`Arrangement::cut_the_crossings_into_arcs`] draws. A
+    /// curve that does not close runs on past its last node, but to come
+    /// inside the face it crosses the rim, and that is a node
+    /// ([`Arrangement::drop_the_lumps_of_straight_cuts_alone`] rests on the
+    /// same). Each crossing left out is either clear of the face's box or has
+    /// every node of it clear of the box
+    /// ([`Arrangement::work_out_how_each_crossing_runs`]), and so not inside
+    /// the face, **or is one of the cuts that reach only the face's boundary**
+    /// ([`Arrangement::leave_out_the_cuts_that_reach_only_the_boundary`]),
+    /// which can run on through the face undrawn. Those are not asked here. So
+    /// every point inside the face where an asked cut is nothing is on a
+    /// drawn arc, or is where it touches the face's surface without crossing
+    /// it, and there its sign does not turn. A cell is connected and misses
+    /// every drawn arc, the rim among them, so a cell is wholly inside the
+    /// face or wholly outside it. Inside, each asked cut has one sign over the
+    /// whole cell, and that sign or nothing at every node round it.
+    ///
+    /// **Only a surface handed in as a cut.** A partner the rim alone runs
+    /// along is drawn only along the curve its edge lies on: a pipe cut to
+    /// three quarters of a turn has one of its two lines on `y = 0` in its rim
+    /// and the other half a turn round, through the middle of the face. A cut
+    /// folded into that crossing flags it as a cut, so the flag on a crossing
+    /// cannot stand in for this.
+    ///
+    /// This is a gap (§16.10): the cells are there, and the walk is in one.
+    /// Two other ways were looked at. Counting how often a walk goes round the
+    /// node of a loop on the pipe unrolled needs the angle round the axis to
+    /// only grow or only shrink along every arc, and a pipe's crossing with
+    /// another pipe does not ([`Arrangement::the_one_that_goes_round_the_axis_as_well`]).
+    /// Firing a ray from a point of the walk is how a piece of a lump with a
+    /// curve that runs on is placed, and a loop has none.
+    fn the_one_on_its_side_of_every_cut(
+        &self,
+        walk: usize,
+        candidates: &[usize],
+        cuts: &[Surface],
+    ) -> Option<usize> {
+        let inside = |cycle: usize| self.winding_of_cycle[cycle] == Some(1);
+        let asked: Vec<&Surface> = cuts
+            .iter()
+            .filter(|cut| !self.face.cuts_that_reach_only_its_boundary.contains(cut))
+            .collect();
+        let mine: Vec<Option<Decision>> = asked
+            .iter()
+            .map(|cut| self.side_of_a_cut(walk, cut))
+            .collect();
+        let on_another_side = |candidate: usize| {
+            asked.iter().zip(&mine).any(|(cut, mine)| {
+                matches!(
+                    (*mine, self.side_of_a_cut(candidate, cut)),
+                    (Some(mine), Some(theirs)) if mine != theirs
+                )
+            })
+        };
+        let mut left = candidates.iter().copied().filter(|&candidate| {
+            !((inside(walk) || inside(candidate)) && on_another_side(candidate))
+        });
+        let only = left.next()?;
+        left.next().is_none().then_some(only)
+    }
+
+    /// Which side of `cut` the region `cycle` walks round is on: `Pos` or
+    /// `Neg`, or `None` where nothing here can say.
+    ///
+    /// Read off a half-edge where the walk runs along a curve `cut` itself
+    /// cuts the face's surface in, the same way
+    /// [`Arrangement::which_side_of_everything`] reads it: left of a forward
+    /// half-edge is the partner's negative side. A curve read some other way
+    /// is passed over: a line the cut rests along, half an ellipse, and a
+    /// ruling through an apex or an arc of one run against its gradients.
+    /// Otherwise it is read off the walk's own nodes, passing over one on a
+    /// curve the cut draws, which is on the cut. Every node of the half at
+    /// `x < 0` in the case [`Arrangement::the_one_on_its_side_of_every_cut`]
+    /// names is on `x = 0`, so it is the arcs that place it.
+    ///
+    /// Nothing is refused or logged: a side left unread only leaves a
+    /// candidate in.
+    fn side_of_a_cut(&self, cycle: usize, cut: &Surface) -> Option<Decision> {
+        let along_the_cut = self.cycles[cycle].iter().find_map(|&half_edge| {
+            let arc = &self.arcs[half_edge / 2];
+            let crossing = &self.crossings[arc.crossing];
+            let read_by_its_arcs = crossing.partner == *cut
+                && crossing.touching.is_none()
+                && crossing.half_an_ellipse.is_none()
+                && crossing.through_an_apex.is_none()
+                && !arc.against_its_gradients;
+            read_by_its_arcs.then_some(if half_edge.is_multiple_of(2) {
+                Decision::Neg
+            } else {
+                Decision::Pos
+            })
+        });
+        along_the_cut.or_else(|| {
+            self.cycles[cycle].iter().find_map(|&half_edge| {
+                let node = &self.nodes[self.from(half_edge)];
+                let on_the_cut = node.crossings.iter().any(|&through| {
+                    self.crossings[through]
+                        .every_surface_that_draws_it()
+                        .any(|drawn_by| drawn_by == cut)
+                });
+                if on_the_cut {
+                    return None;
+                }
+                let side = side_of_surface(cut, node.point);
+                matches!(side, Decision::Pos | Decision::Neg).then_some(side)
+            })
+        })
     }
 
     /// Refuse a cell that holds two walks of one lump, on any surface but a
