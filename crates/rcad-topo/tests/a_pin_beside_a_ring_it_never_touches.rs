@@ -27,13 +27,15 @@
 //! without asking whether the two meet at all. A pipe along the ring's axis
 //! but off it meets the tube nowhere when every distance from the axis it
 //! reaches is past the tube's, short of it, or round the whole of it, and
-//! that is now answered.
+//! that is now answered. A plane holding the ring's axis, the ring and that
+//! pipe were refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` for the same
+//! reason, and now meet nowhere.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, Error, Isometry, Orientation, Plane, Point, Scale,
-    Surface, SurfaceMeet, Torus, Vector, intersect,
+    Axis, Cylinder, Deflection, EdgeRun, Error, Isometry, MeetOfThree, Orientation, Plane, Point,
+    Scale, Surface, SurfaceMeet, Torus, Vector, intersect, meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
@@ -192,6 +194,29 @@ fn a_pipe_along_a_rings_axis_that_reaches_its_tube_is_not_said_to_miss_it() {
                 "a pipe {what}"
             );
         }
+    }
+}
+
+/// A plane holding the ring's axis, the ring and the pin's pipe beside it share
+/// no point, since the ring and the pipe share none, in every order.
+#[test]
+fn a_plane_through_a_rings_axis_the_ring_and_a_pipe_beside_it_meet_nowhere() {
+    let ring = a_ring([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    let pipe = a_pipe([5.2, 0.0, 0.25], [0.0, 0.0, 1.0], 0.15);
+    let flat = Surface::Plane(
+        Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+            .expect("the y axis is a unit normal"),
+    );
+    for surfaces in [
+        [&flat, &ring, &pipe],
+        [&ring, &pipe, &flat],
+        [&pipe, &flat, &ring],
+    ] {
+        assert_eq!(
+            meet_of_three_surfaces(surfaces, &Policy::certified(), &mut ProvenanceLog::new()),
+            Ok(MeetOfThree::Nowhere),
+            "{surfaces:?}"
+        );
     }
 }
 
