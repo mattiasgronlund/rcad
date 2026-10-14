@@ -22,8 +22,11 @@
 //! as that corner, while the other cube's own corner, on one or none of the
 //! meets' planes, was as near. The two corners were then named apart at one
 //! point, and joining the faces round them panicked. The fold is now left
-//! alone where any other input corner is within the policy's wobble of every
-//! meet (`docs/decisions.md` §417.7).
+//! alone where any other input corner, on whichever planes, is within the
+//! policy's wobble of one of the three meets (`docs/decisions.md` §417.7).
+//!
+//! Under `Policy::certified()` the fuzz crash file's turn answers each of
+//! these too, and the other three turns refuse `DynamicRangeTooWide`.
 
 use rcad_geom::{Deflection, Isometry, Scale};
 use rcad_predicates::{Policy, ProvenanceLog};
