@@ -172,6 +172,25 @@ will be traced in tier 1 when Q1948 comes up. Whether to trace the tier 5-only
 families sooner is a change to §230.1's tier order. That is Mattias's to make,
 and this section does not make it.
 
+**The fill hardly reaches tier 5.** From 10-10 to 10-14 it took 2 tier 5 rows
+into a lane, and 87 were added. Each count is read from main's first-parent
+history of `docs/queue.md`: a row counts as taken in the tier it had when its
+state first became `lane:`. So for the ten families with members in tier 5
+only, "when the fill reaches them" means not soon. Tier 1 rows that name their
+test files were fixed one at a time instead: 43 on
+`a_joined_flat_face_whose_rings_enclose_no_area.rs`, and 20 on
+`a_solid_written_out_and_read_back_is_the_same_solid.rs`. The ten families
+have 40 open rows in tier 5. 28 of them were filed straight into tier 5 as
+class C, and 12 were moved there from another tier. Some of the rows that name
+a test file only added it. So these counts say where the work went. They do
+not say that the tier 1 fixes and the tier 5 rows share a cause. Only a trace
+says that.
+
+**One road that changes no tier order.** A trace row has no class, so Mattias
+can pin one (§430.4). `pin` moves it to tier 1, and the fill sends it next. A
+pinned trace for one tier 5 family costs one slot, and it shows whether that
+family's rows share a cause before anything else moves.
+
 ### 450.5 The rows filed
 
 - **Q2003**, tier 2.2, `just queue families`. It lists the families as 450.3's
