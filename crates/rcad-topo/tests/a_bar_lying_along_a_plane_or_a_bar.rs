@@ -37,6 +37,16 @@
 //! straight side whose two ends are each a corner of the seam or a place known
 //! exactly on it, read where the bar is placed.
 //! `a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it` pins it.
+//!
+//! **A bar on a wall, both turned about `z` by a float angle, answers as a bar
+//! clear of the wall** (queue row Q1765). Turned by `π/6` or one radian, the
+//! wall's placed plane and the bar's placed pipe miss by `1e−16` or so, which
+//! `intersect` proves, so that answer is the sound one. Every fuse was refused
+//! `Undecidable` all the same, on which side of the wall the bar's seam corner
+//! is: a corner moved by a turn that is not one of a cube's is a box `1e−13`
+//! wide. A gap, not a limit: `fuse/arrange.rs` now reads that side off the
+//! pipe's axis wherever the plane is proved clear of a pipe the corner is on.
+//! `a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule` pins it.
 
 use core::f64::consts::PI;
 
