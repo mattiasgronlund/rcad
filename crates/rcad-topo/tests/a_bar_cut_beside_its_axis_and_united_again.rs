@@ -110,11 +110,11 @@ fn a_half_bars_cut_face_holds_a_box_at_its_middle() {
 fn the_cut_face(view: SolidView<'_>, cut: f64) -> (FaceView<'_>, [[f64; 3]; 4]) {
     let face = view
         .faces()
-        .find(|face| match face.surface() {
-            Surface::Plane(flat) => {
-                flat.normal().components() == [1.0, 0.0, 0.0] && flat.offset() == cut
-            }
-            _ => false,
+        .find(|face| {
+            let Surface::Plane(flat) = face.surface() else {
+                return false;
+            };
+            flat.normal().components() == [1.0, 0.0, 0.0] && flat.offset() == cut
         })
         .expect("the half has the cut as a face");
     let corners: Vec<[f64; 3]> = face
