@@ -23,7 +23,11 @@ solid's own faces, was lost in the build itself for Q1839, which stores a
 face proved off its own corner. A fifth place the theory did not name, the
 fuse's own choice of a test point, an aim or where a walk starts, explains
 Q1834 and is how Q1958 was fixed. Q1867 and Q1734 touch only where the user
-put them, (d), which the theory does not reach.
+put them, (d), which the theory does not reach. Then 448.7 found that the
+shared movement (c) needs was known to the code calling the kernel and not to
+the kernel, which keeps one composed placement per shell. A caller that fuses
+first and places after gets every answer exactly today, so §17.3 stands, and
+Q1962 and Q1963 are dropped.
 
 ### 448.1 The theory
 
@@ -407,3 +411,78 @@ gets no row either: Q1834's own row keeps its cure, an aim or a test point
 off the piece's diagonal (`holds.rs` 260-265, or `select::candidate_points`),
 and Q1958 is fixed. 446.8, the trace of the two-thin-bars family, has not
 landed, so the row names none of that family.
+
+### 448.7 Who knew the movement the two solids share — 2026-10-14
+
+*Session `dispatch-2026-10-03-a8`, reading 448.5 and 448.6 against the code at
+`469ec5c5`, before Q1962 and Q1963 were taken. The decision below is the
+session's, by `CLAUDE.md`'s "Decide it yourself". A consumer that needs the
+kernel to carry (c) turns it round.*
+
+**What the kernel holds.** A solid keeps one placement per shell,
+`ShellUse::loc` in `crates/rcad-topo/src/model.rs`, and `Model::place_solid`
+composes each movement onto it (`used.loc = movement.compose(&used.loc)`). No
+movement is kept apart from the placement it lands on. Some of the tests go
+further and compose the shared movement themselves before the kernel sees
+it: `a_block` in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`
+builds the block at `placement.compose(&own)`, while the pyramid and the half
+bar are built where they stand and then moved by `place_solid`. Q1954's probe
+for Q1765 builds the bar at `turn.compose(&shift(-1, 2, 1))`.
+
+So in every row 448.6 counts under (c), what knew that one movement placed
+both solids was the code calling the kernel. The kernel was handed the
+composed numbers. For the kernel as it stands, that is (d), "known to nothing
+the kernel built" (448.1). 448.5's "the fact was in hand until `compose`" is
+true of the caller.
+
+**What a caller can do today.** Fuse the two solids where they were built, and
+move the answer after.
+`a_cut_made_where_the_solids_were_built_and_then_placed_answers_at_every_placement`,
+in the same test file, does that for the pyramid and for the half bar, each
+with `THE_HALF_PAST_THE_SEAM`, by difference and intersection, at the four
+placements of §294.8, under `certified`. All 16 answer, validate, hold what
+the two hold, and leave nothing in the log, and each half pyramid is 5 faces
+and 16 sides. Placed first, the same pyramid refuses `DynamicRangeTooWide` at
+all six placed fuses
+(`a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut`).
+`mise exec -- just t -p rcad-topo -E
+'binary(a_broken_three_surface_corner_read_back_from_bytes)'`: 14 tests run,
+14 passed.
+
+**What carrying (c) inside the kernel would take.** The model would keep each
+movement apart on the shell: `ShellUse`, and everything that composes, writes
+or reads a shell's placement. The fuse would work in the frame of the
+movements both solids share and give the answer that movement, where §17.3
+settled that it "bakes placement into world coordinates at entry". And it
+would help only a caller that moves both solids by `place_solid` and fuses
+after, not one that composes its own placements, as these tests do. None of
+that is in Q1962's write set, which is `fuse/`, one test file and §294's file.
+
+**Settled: §17.3 stands, and the kernel does not carry (c) until a consumer
+needs it.** For the numbers the kernel is handed, the pyramid's refusal is a
+limit (§294.21). The answer of those numbers holds an edge a rounding long,
+which `f64` cannot hold beside coordinates near 10. The answer the designer
+meant is the answer of other numbers, which the kernel is not given. Giving
+it takes a new input, the movement handed in apart, so it is a feature, and
+§13's rule 3 defers a feature to the milestone where its consumer appears.
+This is not "no caller hits it": any caller can move two solids by one
+movement and fuse them after. The point is that no answer the kernel gives to
+the numbers it is handed is wrong, and a caller who knows the movement is
+shared already has an exact road, which the test above pins.
+
+**What it does to the rows.**
+
+- **Q1962** is dropped. Fused first, its pyramid answers. Placed first, it
+  refuses with the limit §294.21 named, and its pin stays as it is.
+- **Q1963** is dropped. Q1765 and Q1842 stop waiting on it and go back to
+  what their own rows ask: for the numbers the kernel is handed, is the
+  refusal a gap or a limit? Q1842 turned is refused at the fuse's own test
+  point on a diagonal (448.5), whose cure is in Q1834's row, so Q1842 waits
+  on Q1834. Q1765 is ready.
+- **Q1839** keeps its row. Its own finding in 448.5 is (a), a face the build
+  stored proved off its own corner. The 3 of its 5 that 448.5 gave to (c) are
+  (d) for the kernel, as above.
+- **Q1969** keeps its row. It names (c) as its pattern, but the cure it asks
+  for is `Arrangement::the_node_round_the_start` taking a cone as well as a
+  pipe. That is the fuse's own choice, as Q1958's cure was.

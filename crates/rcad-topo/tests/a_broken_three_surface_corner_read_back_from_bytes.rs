@@ -38,7 +38,8 @@
 //! into specks a rounding across by the apex, and the half pyramid built round
 //! them keeps an edge a rounding long, which `certified` refuses and
 //! `tolerant(100)` mostly takes: a defect of its own, pinned here as it stands
-//! (§294.21).
+//! (§294.21). Cut where it was built and placed after, it answers half of
+//! itself at every placement (§448.7).
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -465,6 +466,61 @@ fn a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut() {
     }
 }
 
+/// **Cut where they were built and placed after, the sound pyramid and the
+/// half bar answer at every placement.** Each is fused with
+/// `THE_HALF_PAST_THE_SEAM` before the movement the two share, and the answer
+/// is moved after, so no rounding of the movement reaches the fuse. Under
+/// `certified` every answer validates, holds what the two hold, and leaves
+/// nothing in the log, and each half pyramid is 5 faces and 16 sides, as where
+/// it stands. Placed first, the pyramid refuses (above) and the half bar
+/// refuses when turned (below). The kernel keeps one placement per shell and
+/// is not told which movement two solids share, so fusing first is the
+/// caller's to choose (§448.7).
+#[test]
+fn a_cut_made_where_the_solids_were_built_and_then_placed_answers_at_every_placement() {
+    let certified = Policy::certified();
+    for placement in every_placement() {
+        for rule in [Rule::Difference, Rule::Intersection] {
+            let case = format!("the pyramid, {placement:?}, {rule:?}");
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let pyramid = a_pyramid(&mut model);
+            let block = a_block(&mut model, THE_HALF_PAST_THE_SEAM, &Isometry::identity());
+            let answer = fused_then_placed(&mut model, (pyramid, block), rule, placement, &case);
+            the_answer_holds_what_the_two_hold(
+                &model,
+                &answer,
+                (THE_HALF_PAST_THE_SEAM, rule),
+                &certified,
+                what_the_pyramid_and_a_block_hold,
+                &case,
+            );
+            assert_eq!(
+                the_faces_and_sides_of(&model, &answer),
+                FacesAndSides {
+                    faces: 5,
+                    sides: 16
+                },
+                "{case}"
+            );
+
+            let case = format!("the half bar, {placement:?}, {rule:?}");
+            let (mut model, half_bar) =
+                the_half_bar_read_back(Isometry::identity(), WHERE_THE_HALF_BAR_PUTS_IT);
+            let block = a_block(&mut model, THE_HALF_PAST_THE_SEAM, &Isometry::identity());
+            let answer = fused_then_placed(&mut model, (half_bar, block), rule, placement, &case);
+            the_answer_holds_what_the_two_hold(
+                &model,
+                &answer,
+                (THE_HALF_PAST_THE_SEAM, rule),
+                &certified,
+                what_the_half_bar_and_a_block_hold,
+                &case,
+            );
+        }
+    }
+}
+
 /// **Every partner, every rule, every placement and both policies give the
 /// box's refusal** for every move of the apex, the cut through the apex among
 /// them. Each three of the four side planes cross at the apex alone, so no
@@ -791,6 +847,32 @@ fn the_cut_through_the_apex(
             Err(refused)
         }
     }
+}
+
+/// `solid` and `partner` fused under `rule` where they were built, which has
+/// to answer under `certified` with nothing in the log, and every solid of the
+/// answer then moved by `placement`.
+fn fused_then_placed(
+    model: &mut Model,
+    (solid, partner): (SolidKey, SolidKey),
+    rule: Rule,
+    placement: Isometry,
+    case: &str,
+) -> Fused {
+    let mut log = ProvenanceLog::new();
+    let answer = model
+        .fuse(&[solid], &[partner], rule, &Policy::certified(), &mut log)
+        .unwrap_or_else(|error| panic!("{case}: refused where they were built: {error:?}"));
+    assert!(
+        log.records().is_empty(),
+        "{case}: a certified answer logs nothing"
+    );
+    for &piece in answer.solids() {
+        model
+            .place_solid(piece, &placement)
+            .expect("this model made the key");
+    }
+    answer
 }
 
 /// How many faces an answer has, and how many sides their outlines and holes
