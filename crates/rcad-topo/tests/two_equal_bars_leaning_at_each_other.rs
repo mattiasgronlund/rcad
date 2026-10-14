@@ -19,6 +19,10 @@
 //! two sides of the cap: the cap cuts the solid in two equal halves, and `I =
 //! 1/(24 sin a)`. In both, the union is `A + B − I`, the first less the second
 //! `A − I` and the second less the first `B − I`.
+//!
+//! One more pair is built another way, as Q1896 builds it: two bars 2 long,
+//! each `π/8`, with the axes meeting in the middle of both, so each runs past
+//! the shared solid both ways and `I = 1/(12 sin a)` again.
 
 use std::f64::consts::PI;
 
@@ -279,6 +283,47 @@ fn a_bar_starting_where_it_crosses_another_at_120_degrees_is_refused_building_a_
     }
 }
 
+/// Two bars 2 long, each cut off 1 either side of where the axes meet, one
+/// along `(3, 4, 0)` and the other along `(4, 0, 3)`, so `cos a = 12/25`: the
+/// one along `(4, 0, 3)` less the other answers two solids of 3 faces, `π/8 −
+/// 1/(12 sin a)` between them, wherever the axes meet (Q1896). The pipe of the
+/// one taken away cuts the other bar in two, and the two pieces touch at the
+/// two points the pipes are tangent at, each thinning to nothing there.
+///
+/// **Until Q1966 the mesh drew one sliver twice there**, and the fuse was
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` in
+/// `nest_the_shells`, which meshes each shell to measure it. At the touch point
+/// a piece of each pipe meets the other along the same two arcs, and each cut
+/// the corner off by the same side between the two mesh points next to it, so
+/// the same triangle was drawn twice, facing both ways (`docs/decisions.md`
+/// §446.8). The bar along `(3, 4, 0)` less the other, the same pinch, meshed.
+///
+/// Where the axes meet at `(0, 0, 0)`, `(0, 1, 0)` and `(1, 1, 1)`. At the
+/// six other points Q1896 names, the fuse is refused before it meshes, naming
+/// an arc from a touch point by a rounding (Q1965).
+#[test]
+fn a_bar_along_4_0_3_less_one_along_3_4_0_meshes_where_the_two_pieces_touch() {
+    let shared = 25.0 / (12.0 * 481.0_f64.sqrt());
+    let volume = PI / 8.0 - shared;
+    for middle in [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 1.0]] {
+        let what = format!("{middle:?}: solids of [3, 3] faces and volume {volume}");
+        let mut model =
+            Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let [along_3_4_0, along_4_0_3] = two_bars_crossing_at(&mut model, middle);
+        let solids = model
+            .fuse(
+                &[along_4_0_3],
+                &[along_3_4_0],
+                Rule::Difference,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .map(|answer| answer.solids().to_vec())
+            .unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
+        answers(&model, &solids, volume, &[3, 3], &what);
+    }
+}
+
 /// The second bar's near cap, as the model hands it out, is proved off both
 /// points where the pipes touch, `(11, −3.25, 0.25)` and `(11, −3.25, 0.75)`,
 /// at 50°, 60°, 70° and 100°, where both are exact in `f64`. Before the move
@@ -424,4 +469,43 @@ fn two_bars(model: &mut Model, degrees: f64, through: [f64; 3]) -> [SolidKey; 2]
         .add_round_bar(0.25, length, &second_at)
         .expect("a bar");
     [first, second]
+}
+
+/// A bar along `(3, 4, 0)` and one along `(4, 0, 3)`, each of radius 1/4 and
+/// cut off 1 either side of `middle`, where their axes meet: each is the bar
+/// along `z` cut off at `z = ±1`, turned onto its way about `ẑ × way` and moved
+/// to `middle`.
+fn two_bars_crossing_at(model: &mut Model, middle: [f64; 3]) -> [SolidKey; 2] {
+    let caps = [-1.0, 1.0].map(|z| {
+        rcad_geom::Plane::from_point_and_normal(
+            rcad_geom::Point::new(0.0, 0.0, z),
+            rcad_geom::Vector::new(0.0, 0.0, z),
+        )
+        .expect("a cap")
+    });
+    let up = rcad_geom::Vector::new(0.0, 0.0, 1.0);
+    [
+        rcad_geom::Vector::new(3.0, 4.0, 0.0),
+        rcad_geom::Vector::new(4.0, 0.0, 3.0),
+    ]
+    .map(|way| {
+        let way = way.normalized().expect("a way");
+        let turn = Isometry::rotation(
+            &Axis::new(rcad_geom::Point::origin(), up.cross(way)).expect("an axis"),
+            up.dot(way).acos(),
+        )
+        .expect("a turn");
+        let at = Isometry::translation(rcad_geom::Vector::new(middle[0], middle[1], middle[2]))
+            .expect("a finite move")
+            .compose(&turn);
+        model
+            .add_bar_cut_off_by(
+                0.25,
+                caps,
+                &at,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar")
+    })
 }
