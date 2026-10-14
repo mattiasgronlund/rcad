@@ -2918,22 +2918,8 @@ impl Conic {
     /// between them, and the half-spaces on it are what say which — asked at the
     /// middle of each arc, of the box that point is really known to be inside,
     /// so a witness that came out of trigonometry cannot certify a confident
-    /// sign about noise (§27.7).
-    ///
-    /// **One arc told is enough.** The half-spaces are there to pick one of the
-    /// two arcs, so an arc one of them surely rules out leaves the other, and an
-    /// arc every one of them surely holds is the run when the other cannot be
-    /// told. A sliver is where that matters: its middle can sit nearer a
-    /// half-space's flat surface than its box is wide. The cap rim in
-    /// `the_two_arcs_of_a_cap_rim_cut_a_hair_apart.rs` is cut by a block's
-    /// floor that is `1.5e-15` from the middle of a sliver `2.5e-7` long, under
-    /// one ulp of the rim's size of eight, so no box round a point placed by
-    /// trigonometry tells which side it is on, and the long arc's middle eight
-    /// away is told outright. Nothing is recorded for a sign the answer did not
-    /// need. Only when neither arc is told from the other — both held, both
-    /// ruled out, or both untold — are the signs asked again through
-    /// [`which_side_of`], which records each one nobody could tell, and the run
-    /// is refused.
+    /// sign about noise (§27.7). One arc told is enough, as
+    /// [`which_of_the_two_arcs`] says.
     fn the_stretch_this_run_covers(
         &self,
         run: &NamedRun,
@@ -2970,25 +2956,70 @@ impl Conic {
         let [Some(onwards_middle), Some(backwards_middle)] = middles else {
             return Err(Error::CannotWorkOutHowBigACrossingIs);
         };
-        let onwards_arc = what_the_half_spaces_say(picked_by, onwards_middle);
-        let backwards_arc = what_the_half_spaces_say(picked_by, backwards_middle);
-        match (onwards_arc, backwards_arc) {
-            (HalfSpacesSay::Hold, HalfSpacesSay::CannotTell | HalfSpacesSay::RuleOut)
-            | (HalfSpacesSay::CannotTell, HalfSpacesSay::RuleOut) => Ok((from, onwards)),
-            (HalfSpacesSay::CannotTell | HalfSpacesSay::RuleOut, HalfSpacesSay::Hold)
-            | (HalfSpacesSay::RuleOut, HalfSpacesSay::CannotTell) => Ok((from, backwards)),
-            (HalfSpacesSay::Hold, HalfSpacesSay::Hold)
-            | (HalfSpacesSay::CannotTell, HalfSpacesSay::CannotTell)
-            | (HalfSpacesSay::RuleOut, HalfSpacesSay::RuleOut) => {
-                for middle in [onwards_middle, backwards_middle] {
-                    for picker in picked_by {
-                        which_side_of(picker, middle, policy, log);
-                    }
-                }
-                Err(Error::CannotNameWhichPieceOfACrossingThisIs)
-            }
+        match which_of_the_two_arcs(picked_by, [onwards_middle, backwards_middle], policy, log)? {
+            TheArcPicked::First => Ok((from, onwards)),
+            TheArcPicked::Second => Ok((from, backwards)),
         }
     }
+}
+
+/// Which of the two arcs between a run's two ends `picked_by` picks, asked of
+/// the box round each arc's middle, `middles`, in the order given.
+///
+/// **One arc told is enough.** The half-spaces are there to pick one of the
+/// two arcs, so an arc one of them surely rules out leaves the other, and an
+/// arc every one of them surely holds is the run when the other cannot be
+/// told. A sliver is where that matters: its middle can sit nearer a
+/// half-space's flat surface than its box is wide. The cap rim in
+/// `the_two_arcs_of_a_cap_rim_cut_a_hair_apart.rs` is cut by a block's floor
+/// that is `1.5e-15` from the middle of a sliver `2.5e-7` long, under one ulp
+/// of the rim's size of eight, so no box round a point placed by trigonometry
+/// tells which side it is on, and the long arc's middle eight away is told
+/// outright. The ellipse round a cone in
+/// `the_two_arcs_of_a_long_cone_ellipse_cut_a_hair_apart.rs` is cut by a wall
+/// `8.7e-15` from its sliver's middle, whose box reaches `1.3e-13` either way,
+/// and its long arc's middle is `1.5e8` away.
+///
+/// Nothing is recorded for a sign the answer did not need. Only when neither
+/// arc is told from the other — both held, both ruled out, or both untold —
+/// are the signs asked again through [`which_side_of`], which records each
+/// one nobody could tell.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when neither arc is told
+/// from the other.
+fn which_of_the_two_arcs(
+    picked_by: &[Picker],
+    middles: [PredicatePoint; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<TheArcPicked> {
+    let [first, second] = middles.map(|middle| what_the_half_spaces_say(picked_by, middle));
+    match (first, second) {
+        (HalfSpacesSay::Hold, HalfSpacesSay::CannotTell | HalfSpacesSay::RuleOut)
+        | (HalfSpacesSay::CannotTell, HalfSpacesSay::RuleOut) => Ok(TheArcPicked::First),
+        (HalfSpacesSay::CannotTell | HalfSpacesSay::RuleOut, HalfSpacesSay::Hold)
+        | (HalfSpacesSay::RuleOut, HalfSpacesSay::CannotTell) => Ok(TheArcPicked::Second),
+        (HalfSpacesSay::Hold, HalfSpacesSay::Hold)
+        | (HalfSpacesSay::CannotTell, HalfSpacesSay::CannotTell)
+        | (HalfSpacesSay::RuleOut, HalfSpacesSay::RuleOut) => {
+            for middle in middles {
+                for picker in picked_by {
+                    which_side_of(picker, middle, policy, log);
+                }
+            }
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+        }
+    }
+}
+
+/// Which of the two middles [`which_of_the_two_arcs`] was handed is on the arc
+/// it picked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TheArcPicked {
+    First,
+    Second,
 }
 
 /// What the half-spaces on a run say about one arc of it, asked of the box
@@ -3197,8 +3228,8 @@ impl AnArcRoundACone {
     ///
     /// # Errors
     ///
-    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when they pick both or
-    /// neither, and whatever [`room_left_over`] and the step counts refuse.
+    /// What [`AnArcRoundACone::which_arc`] refuses, and whatever
+    /// [`room_left_over`] and the step counts refuse.
     fn walk(
         &self,
         conic: &Conic,
@@ -3226,6 +3257,17 @@ impl AnArcRoundACone {
     /// placed by [`Conic::at`] and boxed by the ellipse's own deviation. Round
     /// the cone, its middle is where the ruling runs nearly along the plane,
     /// and there `n·g` is a rounding and `−s₀ / (n·g)` can be anything.
+    ///
+    /// One arc told is enough, as [`which_of_the_two_arcs`] says. A wall cut
+    /// a hair either side of the ellipse's near end leaves a sliver whose
+    /// middle no box round the cone tells, while the far end is told outright
+    /// (`the_two_arcs_of_a_long_cone_ellipse_cut_a_hair_apart.rs`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when neither arc is
+    /// told from the other, and [`Error::CannotWorkOutHowBigACrossingIs`] when
+    /// a middle is not a point, so there is no box round it to ask about.
     fn which_arc(
         &self,
         conic: &Conic,
@@ -3240,13 +3282,7 @@ impl AnArcRoundACone {
         } else {
             onwards
         };
-        let near_held = every_half_space_holds(
-            &self.picked_by,
-            self.at((from + near) / 2.0),
-            self.deviation(),
-            policy,
-            log,
-        )?;
+        let near_middle = somewhere_within(self.at((from + near) / 2.0), self.deviation());
 
         let [start, finish] = self.ends.map(|end| conic.angle_of(end));
         let round_the_ellipse = start + wrapped(finish - start);
@@ -3258,18 +3294,17 @@ impl AnArcRoundACone {
         } else {
             round_the_ellipse - core::f64::consts::TAU
         };
-        let far_held = every_half_space_holds(
-            &self.picked_by,
+        let far_middle = somewhere_within(
             conic.at((start + past_the_far_end) / 2.0),
             deviation_round_the_ellipse,
-            policy,
-            log,
-        )?;
+        );
 
-        match (near_held, far_held) {
-            (true, false) => Ok(WhichArc::Near(from, near)),
-            (false, true) => Ok(WhichArc::Far(start, past_the_far_end)),
-            (true, true) | (false, false) => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+        let (Some(near_middle), Some(far_middle)) = (near_middle, far_middle) else {
+            return Err(Error::CannotWorkOutHowBigACrossingIs);
+        };
+        match which_of_the_two_arcs(&self.picked_by, [near_middle, far_middle], policy, log)? {
+            TheArcPicked::First => Ok(WhichArc::Near(from, near)),
+            TheArcPicked::Second => Ok(WhichArc::Far(start, past_the_far_end)),
         }
     }
 
@@ -3705,8 +3740,8 @@ impl AnArcAlongAPipe {
 /// nothing else to go on picks both and is refused rather than handed a coin
 /// toss. It is recorded because it happened, and because the refusal that
 /// follows says nothing about which half-space gave up.
-/// [`Conic::the_stretch_this_run_covers`] has something else to go on — the
-/// other arc, told outright — and asks here only when it has not.
+/// [`which_of_the_two_arcs`] has something else to go on — the other arc,
+/// told outright — and asks here only when it has not.
 ///
 /// **A tolerant caller is not refused before its budget is looked at.** The box
 /// handed in is `deviation` wide on every side, so "undecided" here means the
