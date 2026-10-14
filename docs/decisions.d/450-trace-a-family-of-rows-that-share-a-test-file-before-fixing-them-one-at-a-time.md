@@ -55,6 +55,18 @@ Q1965". The chain:
 - Q1966 and Q1967 closed as well. Q1968, a cause the trace found at other
   angles, is in a lane.
 
+**Before the trace, the family was fixed one row at a time, and each fix moved
+the refusal one step on.** Q1656 says its shape got "past the arrangement
+since Q1646", then refused in the mesher; it was filed again as Q1793
+(`was/Q1656`). Q1908 fixed an `Undecidable` in `turns_anticlockwise`, at a
+point where the two pipes touch, and its shape went on to refuse as Q1929
+(`from/Q1908`). Q1892 fixed how the crossing's pieces are named, and Q1896
+came from it (`from/Q1892`). Each lane fixed the place where its own shape
+stopped. The trace asked instead for the first step that goes wrong across all
+four, and found one test behind six different errors. So a trace changes more
+than the cost. It changes where the fix goes, and with that, which shapes the
+fix answers.
+
 §448 is the other side. It traced nine rows picked by kind of refusal, from
 four test files. For most of them the cause it found needs a feature, which
 448.7 deferred. So its rows Q1962 and Q1963 were dropped, and they closed
@@ -113,6 +125,22 @@ rows, and `a_turned_plane_exactly_proportional_to_another.rs`,
   test behind five different errors raised in different places, so grouping by
   446.5's table of raising functions would have split the two-thin-bars family.
   A shared shape is the better mark.
+- **A file named after a refusal collects unrelated shapes.**
+  `a_joined_flat_face_whose_rings_enclose_no_area.rs` is named after a case in
+  `rings_round`, and 43 tier 1 rows naming it were fixed one at a time from
+  09-29 to 10-14. Read at `091b5bbc`, its ten open rows are:
+  - three on `rings_round` itself: Q1604, Q1684 and Q1990;
+  - two refused `AFaceTrimmedByACurveThisCannotFollow`, on different shapes:
+    Q640 and Q1111;
+  - three different shapes, refused three different ways: Q618, Q1184 and
+    Q1185;
+  - two that are not refusals: Q972 and Q1225.
+
+  A trace there will most likely split the family. A file named after a shape
+  is the better bet. All five open rows of
+  `an_edge_between_two_planes_its_curve_leaves.rs` are one shape, a bar whose
+  lid is split by a curve. Four of them fail in four different ways, as the
+  two-thin-bars rows did before 446.8.
 
 ### 450.3 The rule
 
