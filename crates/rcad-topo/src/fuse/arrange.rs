@@ -1162,7 +1162,7 @@ impl<'f> Arrangement<'f> {
         arrangement.cut_the_crossings_into_arcs(policy, log)?;
         arrangement.walk_the_cycles(policy, log)?;
         arrangement.count_the_windings_inside_each_lump();
-        arrangement.group_the_cycles_into_cells(policy, log)?;
+        arrangement.group_the_cycles_into_cells(cuts, policy, log)?;
         arrangement.count_the_windings()?;
         Ok(arrangement)
     }
@@ -5787,6 +5787,7 @@ impl<'f> Arrangement<'f> {
     /// surface but a torus.
     fn group_the_cycles_into_cells(
         &mut self,
+        cuts: &[Surface],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
@@ -5806,7 +5807,7 @@ impl<'f> Arrangement<'f> {
 
         self.say_whether_the_face_holds_each_lump_of_closed_cuts(&lump);
 
-        let facing = self.the_walk_of_each_other_lump_each_walk_faces(&lump, &sides)?;
+        let facing = self.the_walk_of_each_other_lump_each_walk_faces(&lump, &sides, cuts)?;
         let torus = matches!(self.surface, Surface::Torus(_));
         for (one, its) in facing.iter().enumerate() {
             for &other in its {
@@ -5990,6 +5991,7 @@ impl<'f> Arrangement<'f> {
         &self,
         lump: &[usize],
         sides: &[Vec<Option<Decision>>],
+        cuts: &[Surface],
     ) -> Result<Vec<Vec<usize>>> {
         let count = self.cycles.len();
         let mut walks_of: std::collections::BTreeMap<usize, Vec<usize>> =
