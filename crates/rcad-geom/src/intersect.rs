@@ -138,10 +138,12 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// up to four for a cone, see [`where_a_ring_and_a_round_surface_cross`]. A
 /// pipe of the tube's radius lying along the ring's core circle, the pipe of a
 /// bar butted onto a bend's cap, is the circle the two touch in and the two
-/// halves of a loop, see [`where_a_ring_and_a_pipe_along_its_core_cross`]. Any
-/// other pipe off the axis, and anything else off it or another torus, is not
-/// named at all: the crossing runs to degree eight and none of the machinery
-/// for that exists. Two
+/// halves of a loop, see [`where_a_ring_and_a_pipe_along_its_core_cross`]. A
+/// pipe along the axis but off it, past the tube, in the ring's hole or round
+/// the whole ring, meets it nowhere, see
+/// [`the_heights_a_ring_crosses_a_pipe_at`]. Any other pipe off the axis, and
+/// anything else off it or another torus, is not named at all: the crossing
+/// runs to degree eight and none of the machinery for that exists. Two
 /// tori with one centre, one pair of radii and their axes along one line are the
 /// same surface and come back as one, **whichever way each axis points** — see
 /// [`one_ring_either_way_round`].
@@ -184,8 +186,9 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic`] for every plane
 /// against a torus but the two families that cut circles, and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a torus against
-/// anything curved but a ball, a pipe or a cone on its axis and a pipe of its
-/// tube's radius along its core circle.
+/// anything curved but a ball, a pipe or a cone on its axis, a pipe of its
+/// tube's radius along its core circle, and a pipe along its axis clear of
+/// its tube.
 ///
 /// **A partly undecidable answer refuses whole.** A caller handed one of two
 /// curves has no way to know a second existed, and a fuse classifying against
