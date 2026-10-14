@@ -4919,7 +4919,7 @@ impl Edge {
                 .carried_by
                 .iter()
                 .find(|surface| surface.as_plane().is_none())?;
-            where_a_closed_crossing_is_centred(round, &flat)?;
+            where_a_closed_crossing_is_centred(round, flat)?;
             let outwards = side(square.dot(gradient_of(round, at)))?;
             let heading =
                 side(towards.dot(
@@ -9609,7 +9609,7 @@ mod tests {
         Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
         WireStep, Written, assemble, name_of_the_closed_crossing_through,
         names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_half_space_both_ends_are_on, the_nappe_an_arc_that_does_not_close_is_on, turns_round,
+        the_nappe_an_arc_that_does_not_close_is_on, turns_round,
         vertices_that_only_start_a_closed_edge, winding_round,
     };
 
