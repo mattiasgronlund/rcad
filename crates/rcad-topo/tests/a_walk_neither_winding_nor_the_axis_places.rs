@@ -1287,6 +1287,7 @@ fn the_ball_inside_a_hole(radius: f64, off: f64) -> f64 {
 /// Named `a_small_ball_on_a_bars_wall_is_refused_before_any_cell` until Q1766.
 #[test]
 fn a_small_ball_on_a_bars_seam_is_refused_telling_the_pipes_cells_apart() {
+    let mut refusals = Vec::new();
     for (rule, first) in every_rule_both_ways() {
         let mut model = a_model();
         let bar = model
@@ -1308,21 +1309,30 @@ fn a_small_ball_on_a_bars_seam_is_refused_telling_the_pipes_cells_apart() {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         );
-        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = refused else {
-            panic!(
+        let (name, face) = match refused {
+            Err(Error::CannotTellTheCellsOfAFaceApart { face }) => {
+                ("CannotTellTheCellsOfAFaceApart", face)
+            }
+            Err(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face }) => {
+                ("AClosedEdgeOfTheAnswerWouldStartAtAPole", face)
+            }
+            other => panic!(
                 "the bar, the slab and the ball, {rule:?}, the bar first {first}: {:?}",
-                refused.map(|fused| fused.solids().to_vec())
-            );
+                other.map(|fused| fused.solids().to_vec())
+            ),
         };
         let surface = model
             .face(face)
             .expect("the refusal names a face of the model")
             .surface();
-        assert!(
-            matches!(surface, Surface::Cylinder(_)),
-            "the bar, the slab and the ball, {rule:?}, the bar first {first}: refused on {surface:?}"
-        );
+        let kind = format!("{surface:?}");
+        let kind = kind.split('(').next().unwrap_or_default();
+        refusals.push(format!(
+            "{rule:?}, the bar first {first}: {name} on a {kind}"
+        ));
     }
+    println!("{refusals:#?}");
+    assert_eq!(refusals, Vec::<String>::new());
 }
 
 /// Each rule, with `true` for the first solid built named first.

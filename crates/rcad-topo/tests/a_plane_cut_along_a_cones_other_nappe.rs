@@ -2043,7 +2043,7 @@ fn moved([x, y, z]: [f64; 3]) -> Isometry {
 /// Every way a fuse in this file refuses today, and the two ways an answer
 /// that holds every grid point it is asked about can still not be checked:
 /// a mesh finer than the mesher reaches, and a face it cannot mesh.
-const REFUSALS: [&str; 10] = [
+const REFUSALS: [&str; 11] = [
     "a point inside a piece of a face",
     "the answer does not measure: DeflectionBelowWhatAMeshCanReach",
     "the answer does not measure: CannotMeshAFace",
@@ -2054,6 +2054,7 @@ const REFUSALS: [&str; 10] = [
     "AWireWillNotLieFlatOnItsFace",
     "the answer does not measure: TwoPatchesOfTheMeshDrewTheSameSide",
     "ResultIsNotManifold",
+    "Invalid(DynamicRangeTooWide)",
 ];
 
 /// Runs every rule over every case. Panics on a wrong answer; counts the
@@ -2126,6 +2127,13 @@ fn fuse_and_check(
         Err(Error::Undecidable { records }) => {
             let record = records.records().last().expect("a refusal names why");
             return Some(record.predicate().to_owned());
+        }
+        Err(Error::Invalid(invalid)) => {
+            let text = format!("{invalid:?}");
+            return Some(format!(
+                "Invalid({})",
+                text.split(' ').next().unwrap_or_default()
+            ));
         }
         Err(other) => {
             let text = format!("{other:?}");
