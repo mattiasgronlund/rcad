@@ -6031,7 +6031,9 @@ impl<'f> Arrangement<'f> {
                     .collect();
                 let chosen = match candidates[..] {
                     [only] => Some(only),
-                    _ => self.which_of_them_holds(walk, &candidates),
+                    _ => self
+                        .which_of_them_holds(walk, &candidates)
+                        .or_else(|| self.the_one_on_its_side_of_every_cut(walk, &candidates, cuts)),
                 };
                 match chosen {
                     Some(chosen) => facing[walk].push(chosen),
