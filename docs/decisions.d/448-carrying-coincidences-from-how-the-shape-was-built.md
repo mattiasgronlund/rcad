@@ -505,3 +505,20 @@ the band rather than refusing it. A pattern makes a consumer for (c) only where
 the patterned part is then moved together with another part by one movement
 and the two are fused after, and there the caller can fuse first, as above. So
 nothing turns the decision round yet.
+
+**Where (c) would be needed.** Two pads sketched side by side on one datum
+plane turned 30 degrees, `0..20 × 0..10` and `20..30 × 0..10`, touch exactly
+along `x = 20` in the sketch's frame. A caller that builds each pad there,
+turns it, and fuses it gives the kernel two solids under one turn that touch,
+which is the shape Q1765 and Q1842 refuse. This example itself has not been
+run. Fusing the two pads in the sketch's frame and turning the answer after
+is the road above. A caller that models one feature at a time cannot take it:
+when the second pad arrives, the first has already been fused into a body in
+world coordinates. That caller is (c)'s consumer. For it the movement would
+have to stay on the first pad's faces through the fuse that put them in the
+body, and not only on the shell as above. That is a reading, not measured.
+
+*Mattias, 2026-10-14: "Ok, so that is absolutley something we must solve, but
+not just now."* So it is a tier 4 row, parked on this section, which §230.1
+keeps parked until `docs/consumers.md` names a caller that builds features on
+a tilted plane one at a time.
