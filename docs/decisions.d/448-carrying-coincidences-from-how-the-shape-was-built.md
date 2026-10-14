@@ -486,3 +486,22 @@ shared already has an exact road, which the test above pins.
 - **Q1969** keeps its row. It names (c) as its pattern, but the cure it asks
   for is `Arrangement::the_node_round_the_start` taking a cone as well as a
   pipe. That is the fuse's own choice, as Q1958's cure was.
+
+**Mattias, 2026-10-14**, asked whether a consumer moves several parts by one
+movement and fuses them after: "Probably not yet, but would cloning and moving
+one part using an matrix or polar pattern. e.g. FreeCAD:s PolarPattern
+functionality match the description?"
+
+**A pattern is not (c).** A pattern moves one part by several movements, one
+for each copy, and leaves the part the copies are cut into where it was. (c)
+is several parts moved by one movement. A copy and that part share no
+movement. Two copies share one only in that each neighbouring pair is the
+first pair turned, and the first pair is one part left where it was beside a
+turned copy of it, which is (d): the touch is made by the step the user chose
+and the shape of the part. 448.5 already has a polar pattern of two, Q1734,
+whose second quarter bend is the first turned by `rotation(z, FRAC_PI_2)`. It
+is filed under (d), and it answers at the base because `zip_up_a_band` meshes
+the band rather than refusing it. A pattern makes a consumer for (c) only where
+the patterned part is then moved together with another part by one movement
+and the two are fused after, and there the caller can fuse first, as above. So
+nothing turns the decision round yet.
