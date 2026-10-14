@@ -70,6 +70,19 @@
 //! run, `a_half_bend_and_two_quarter_bars_spelling_a_plane_through_its_axis_an_ulp_apart_are_refused`,
 //! stopped at its first fuse; run again with all 24 of its fuses let through,
 //! it printed none.
+//!
+//! Q1950 tried bends written out at a ring angle that is not a multiple of
+//! `π/2`, the one case `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule`
+//! and `a_bend_placed_half_a_turn_round_from_another_places_every_piece` leave
+//! untried, since each starts its first bend's wall at angle 0. Tried over
+//! `0.1` to `1.4` radians, a copy a quarter turn backward or half a turn
+//! round, ring 4 and tube 1: most angles are refused before a ray, each at a
+//! different step — `Undecidable` at `a point inside a piece of a face` or at
+//! `side of torus`, `ACurvedFaceGoesRightRoundWithNoSeam`, or
+//! `ResultIsNotManifold` — never at `CannotFireARayAtAFacesSurface`, so this
+//! family is not reached either. `0.9` radians answers cleanly for every rule,
+//! both turns and all three rings in `PLACED_RINGS`, and is the one pinned in
+//! `a_bend_written_out_at_another_angle_and_a_copy_turned_round_answer_every_rule`.
 
 use core::f64::consts::{FRAC_PI_2, PI};
 use std::collections::BTreeMap;
