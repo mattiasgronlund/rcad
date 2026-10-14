@@ -177,28 +177,65 @@ fn a_long_bar_through_another_at_a_slant_answers_every_fuse() {
 /// reads it off the name the arrangement gives them.
 #[test]
 fn a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse() {
+    let wrong =
+        what_goes_wrong_with_a_bar_starting_where_the_axes_meet(&[50.0, 60.0, 70.0, 100.0, 120.0]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// As above at 85° and 95°, where the near cap's plane crosses the first
+/// bar's wall in an ellipse that runs past both of the first bar's caps: it
+/// reaches `r·tan a`, `2.86`, either way along `x` from the meeting point, and
+/// the caps are `2` off at `x = 9` and `x = 13`. So the loop has six nodes on
+/// the wall, where it crosses the two cap circles four times and the two
+/// points the pipes touch at, and they have to be put in order round it.
+///
+/// **Until Q1968 every fuse was refused `order along a crossing`** on the first
+/// bar's wall, between the node at `c − r·ẑ` and the node where the loop
+/// crosses the circle at `x = 9`. The loop is walked from `c − r·ẑ`, `(11,
+/// −3.25, 0.25)` exactly, and the node there was worked out as `c −
+/// r·n̂/‖n̂‖`, for `n̂ = (0, 0, sin a)` square to both axes, so it was a box
+/// `2e-16` tall in `z` and of no width in `x` and `y`. Every point of that box
+/// reads exactly nought along the way the loop runs at its start, so the node
+/// was not counted first round the loop, and nothing else could say whether
+/// it comes first or last. Where `n̂` lies along a coordinate axis it is now
+/// taken as that axis, and the node is the start itself, by name
+/// (`where_two_pipes_touch` in `fuse/arrange.rs`).
+#[test]
+fn a_bar_starting_where_it_crosses_another_at_85_or_95_degrees_answers_every_fuse() {
+    let wrong = what_goes_wrong_with_a_bar_starting_where_the_axes_meet(&[85.0, 95.0]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// One line for each of the six fuses of the bar starting where the axes meet
+/// at each of `angles` that does not answer as
+/// `a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`
+/// says.
+fn what_goes_wrong_with_a_bar_starting_where_the_axes_meet(angles: &[f64]) -> Vec<String> {
     let (first, second) = (PI / 4.0, PI / 8.0);
-    for degrees in [50.0_f64, 60.0, 70.0, 100.0, 120.0] {
+    let mut wrong = Vec::new();
+    for &degrees in angles {
         let shared = 1.0 / (24.0 * degrees.to_radians().sin());
-        let six: [(Rule, bool, f64, &[usize]); 6] = [
-            (Rule::Union, true, first + second - shared, &[9]),
-            (Rule::Union, false, first + second - shared, &[9]),
-            (Rule::Intersection, true, shared, &[4]),
-            (Rule::Intersection, false, shared, &[4]),
-            (Rule::Difference, true, first - shared, &[10]),
-            (Rule::Difference, false, second - shared, &[3]),
-        ];
-        for (rule, first_first, volume, faces) in six {
-            let what = format!(
-                "{degrees}° {rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}"
-            );
+        for (rule, first_first) in six_fuses() {
+            let (volume, faces): (f64, &[usize]) = match (rule, first_first) {
+                (Rule::Union, _) => (first + second - shared, &[9]),
+                (Rule::Intersection, _) => (shared, &[4]),
+                (Rule::Difference, true) => (first - shared, &[10]),
+                (Rule::Difference, false) => (second - shared, &[3]),
+                (_, _) => unreachable!("six_fuses names three rules and no other"),
+            };
             let mut model =
                 Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
-            let solids = fuse_in(&mut model, degrees, [11.0, -3.25, 0.5], rule, first_first)
-                .unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
-            answers(&model, &solids, volume, faces, &what);
+            let said = fuse_in(&mut model, degrees, [11.0, -3.25, 0.5], rule, first_first)
+                .map_err(|why| format!("refused: {why:?}"))
+                .and_then(|solids| how_far_off(&model, &solids, volume, faces));
+            if let Err(why) = said {
+                wrong.push(format!(
+                    "{degrees}° {rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}: {why}"
+                ));
+            }
         }
     }
+    wrong
 }
 
 /// Two bars 2 long, each cut off 1 either side of where the axes meet, one
@@ -472,17 +509,9 @@ fn fuse_in(
         .map(|answer| answer.solids().to_vec())
 }
 
-/// Assert that `solids` are one solid for each of `faces`, each with that
-/// many faces, that the model validates, and that together they measure
-/// `volume` to within the mesh's own error. `what` is the right answer, which
-/// is what every message carries.
-fn answers(model: &Model, solids: &[SolidKey], volume: f64, faces: &[usize], what: &str) {
-    if let Err(why) = how_far_off(model, solids, volume, faces) {
-        panic!("{what}: {why}");
-    }
-}
-
-/// What [`answers`] asserts, with what is wrong when it does not hold.
+/// Whether `solids` are one solid for each of `faces`, each with that many
+/// faces, the model validates, and together they measure `volume` to within
+/// the mesh's own error, with what is wrong when they do not.
 fn how_far_off(
     model: &Model,
     solids: &[SolidKey],
