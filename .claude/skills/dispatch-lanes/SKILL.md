@@ -106,6 +106,16 @@ says why it filed nothing — then re-run `queue next`. It fills as usual, with
 no refusal, when the latest night has no verdicts file; that line says so and
 is not a reason to run `fuzz-triage-row`.
 
+**If a row the fill took is in a family, trace the family first** (§450.3). A
+family is three or more open rows, not parked, that name one `tests/*.rs` file
+in their write sets. List them with the line in 450.2 (`just decision 450.2`).
+If no row starting "Trace the family on" that file names the family's members,
+do not send the row alone. In the same `queue apply` as your takes, `add` the
+trace with write set `-`, in the tier of the member the fill reached first. Put
+every other member that is not pinned and not in a lane `after` it, keeping
+what each already waits on (`after Q1 Q8,@1`). Then `take @1` in that slot.
+450.3 has the trace's text.
+
 A line `take Q1,Q2,Q3 (a bundle of 3 small rows, one lane)` is **one
 lane** doing all of those rows (§352.4), with each row's text indented under
 it.
