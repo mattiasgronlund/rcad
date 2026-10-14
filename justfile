@@ -12731,7 +12731,8 @@ _queue-rows file:
 # Otherwise a small row
 # waits for the walk to reach its tier, and takes the next ready small rows with
 # it. It is never taken alone, and the rows of one bundle may overlap each other,
-# since one lane does them all. The plain output ends with §352.6's measure.
+# since one lane does them all. The plain output ends with §352.6's measure,
+# then the count of §450.3's families.
 #
 # **Rows Mattias pinned go first** (§430). A description starting `pinned/<n>`
 # is a row he put at the head of the queue, and the fill takes the ready ones
@@ -12765,9 +12766,18 @@ _queue-rows file:
 # What it cannot read — an open fence, a short row, a state it does not know —
 # it refuses rather than guesses at, and points at `check-queue` for the why.
 #
+# **`families` lists the places to trace before fixing one row** (§450.3 rule
+# 1): three or more open rows, not parked, whose write sets name one
+# `tests/*.rs` file. A row whose text, after its pin, class and from word, starts
+# `Trace the family on <file>` is a trace, open or closed, and the ids after the
+# file are the rows it covered. A file a trace has been on is a family again
+# only once three open rows no trace named share it. The plain output counts
+# them on its last line, and the queue page lists them. The logic is
+# `tooling/queue/families.py`.
+#
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
 # `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag`, `pick`, `pin` and
-# `unpin`, with `show` and `running` to read, and `narrow`, which changes a hold
+# `unpin`, with `show`, `running` and `families` to read, and `narrow`, which changes a hold
 # and no row. `tier` moves an open row to another tier and, like
 # `add`, writes that tier's heading when the file has none (§307). `tag` sets,
 # replaces or removes a row's class or `small` (§352.2), and a class moves the
@@ -12811,7 +12821,7 @@ _queue-rows file:
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
-# already landed. `show` and `running` only read, so neither runs it.
+# already landed. `show`, `running` and `families` only read, so none runs it.
 [doc("What to dispatch from docs/queue.md, and the verbs that change it one row at a time: `just queue take` prints their usage.")]
 queue mode="" *args:
     #!/usr/bin/env bash
@@ -12824,7 +12834,7 @@ queue mode="" *args:
             status=$?
             {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" queue-page || true
             exit "$status" ;;
-        show|running)
+        show|running|families)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
                 exec python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@" ;;
         help)
@@ -12835,6 +12845,7 @@ queue mode="" *args:
                 'just queue next [N]                          what N free slots take; N defaults to the free slots on this machine' \
                 'just queue show <id>                         one row, its hold, and its state in other worktrees' \
                 'just queue running                           what holds a slot on this machine, one line each' \
+                'just queue families [--count]                three or more open rows on one tests/*.rs file that no trace named (§450.3); --count prints how many' \
                 'just queue narrow <id> <write set>           narrow a held row to entries inside the set it was taken with; a lane runs it (§424.7)' \
                 'just queue meets <id> <write set>            the skip line for the first hold read from input that the write set meets; narrow asks it' \
                 'just queue take <id> <branch>                dispatch a ready row to <branch>: state lane:<branch>, held until done, drop or park' \
@@ -12890,8 +12901,13 @@ queue mode="" *args:
             narrowed=$(QUEUE_FILE='{{ queue_file }}' python3 "$tool" narrowed) || exit 1
         fi
     fi
+    families=""
+    if [ -z "$mode" ]; then
+        families=$(QUEUE_FILE='{{ queue_file }}' python3 '{{ justfile_directory() }}/tooling/queue/queue.py' families --count) || exit 1
+    fi
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; [ -z "$narrowed" ] || printf '%s\n' "$narrowed"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" -v cand_id="${2:-}" -v cand_ws="${3:-}" \
+        -v families="$families" \
         -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' \
         -v shared_files='{{ queue_shared_files }}' '
         BEGIN {
@@ -13041,6 +13057,7 @@ queue mode="" *args:
             for (x = 1; x <= w; x++) if (small[walk[x]]) smallready++
             printf "tier 1, open and not parked: %d in A or B (%d wrong, %d crash, %d refuses), %d with no class; tier 5: %d in C, %d in D, %d with no class; %d small row%s ready, and a bundle is %d\n", \
                 ab, abof["wrong"], abof["crash"], abof["refuses"], unclassed, inc, ind, unclassed5, smallready, (smallready == 1 ? "" : "s"), bundle
+            printf "families with no trace: %d (§450.3); just queue families lists them\n", families
         }
         function refuse(line, msg) {
             printf "queue: %s:%s: cannot read %s; just check-queue says what is wrong\n", file, line, msg > "/dev/stderr"
