@@ -6,10 +6,10 @@
 //! long and starts at `through = (11, −3.25, 0.5)`, so its near cap passes
 //! through where the axes meet. Each test runs all six fuses — three rules,
 //! each bar first in turn. Every one answers: through either point at 50°,
-//! 60°, 70°, 100° and 120°, through `(11, −3.25, 0.5)` at 85° and 95° too and
-//! at an exact quarter turn, and through `(11, 0, 0)` at 80° and at the angles
-//! from 105° to 135° tested here. Through `(11, −3.25, 0.5)` at 90° worked out
-//! in radians, every one is still refused.
+//! 60°, 70°, 100° and 120°, through `(11, −3.25, 0.5)` at each odd angle from
+//! 83° to 97° too and at an exact quarter turn, and through `(11, 0, 0)` at 80°
+//! and at the angles from 105° to 135° tested here. Through `(11, −3.25, 0.5)`
+//! at 90° worked out in radians, every one is still refused.
 //!
 //! **What they should come to**, with `r = 1/4` and `a` the angle: the first
 //! bar is `A = π/4`. What two pipes of one width share where their axes cross at
@@ -205,6 +205,18 @@ fn a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse() {
 #[test]
 fn a_bar_starting_where_it_crosses_another_at_85_or_95_degrees_answers_every_fuse() {
     let wrong = what_goes_wrong_with_a_bar_starting_where_the_axes_meet(&[85.0, 95.0]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// As above at 83°, 87°, 89°, 91°, 93° and 97°. The near cap's ellipse runs
+/// past both of the first bar's caps from about 82.9° to 97.1°, where `r·tan a`
+/// passes `2`, so each of these has the six nodes on the first bar's wall that
+/// 85° and 95° have.
+#[test]
+fn a_bar_starting_where_it_crosses_another_near_square_answers_every_fuse() {
+    let wrong = what_goes_wrong_with_a_bar_starting_where_the_axes_meet(&[
+        83.0, 87.0, 89.0, 91.0, 93.0, 97.0,
+    ]);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
