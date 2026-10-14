@@ -121,10 +121,14 @@ impl Measurement {
     /// that comparison is worth and who makes it.
     ///
     /// The material the mesh gets wrong — missing on a bar, added round a hole
-    /// — is no more than [`Measurement::volume_error`] of space, and none of it
-    /// is further from the centroid than the solid reaches, so moving all of it
-    /// to the far side shifts the balance point by at most
-    /// `volume_error / volume` of that reach.
+    /// — is no more than the shell [`Measurement::volume_error`] charges, and
+    /// none of it is further from the centroid than the solid reaches, so
+    /// moving all of it to the far side shifts the balance point by at most
+    /// `shell / volume` of that reach. On top of that, how far the rounded
+    /// centroid landed from where the mesh's own triangles balance exactly,
+    /// worked out as it is for a flat solid below;
+    /// `a_flat_solid_publishes_the_rounding_of_its_measure.rs` holds a curved
+    /// solid's against that point.
     ///
     /// For a wholly flat solid there is no such material, and this is how far
     /// the rounded centroid landed from where the solid's own triangles balance
@@ -311,7 +315,9 @@ impl SolidView<'_> {
     /// A solid with a curved face has no such fan — its caps fan into no
     /// triangles at all and its wall into two with no area — so it is measured
     /// over [`SolidView::mesh`], and the three error terms say how much of the
-    /// answer the triangles could be hiding.
+    /// answer the triangles could be hiding. The volume's and the centroid's
+    /// add how far their own sums over the mesh rounded, worked out as the flat
+    /// path works it out.
     ///
     /// # Which knob decides what
     ///
@@ -439,13 +445,14 @@ impl SolidView<'_> {
     /// kind of thing.
     ///
     /// **The volume's error is the space the mesh hides and the rounding of its
-    /// sum, both.** The second is worked out as the flat path works it out, from
-    /// the mesh's own triangles summed exactly. A solid whose curved faces are
-    /// a hair of skin hides less space than one rounding of the sum, and
-    /// published that space alone: the block less the cone in
-    /// `a_flat_solid_publishes_the_rounding_of_its_measure.rs` measured
-    /// `1152.0000000000007` with an error of `5.7e-19`, and its mesh encloses
-    /// `8.4e-14` less.
+    /// sum, both, and so is the centroid's wobble.** The rounding is worked out
+    /// as the flat path works it out, from the mesh's own triangles summed
+    /// exactly. A solid whose curved faces are a hair of skin hides less space
+    /// than one rounding of the sum, and published that space alone: the block
+    /// less the cone in `a_flat_solid_publishes_the_rounding_of_its_measure.rs`
+    /// measured `1152.0000000000007` with an error of `5.7e-19`, and its mesh
+    /// encloses `8.4e-14` less; its centroid came out `1.2e-15` from where the
+    /// mesh balances, with a wobble of `5.1e-21`.
     fn measured_over(self, mesh: &Mesh) -> Result<Measurement> {
         let hub = hub_of(mesh);
         let shifts = axis_shifts_over(mesh, hub);
@@ -472,7 +479,8 @@ impl SolidView<'_> {
 
         let balance = [0, 1, 2].map(|axis| shift(moment[axis] / (4.0 * six_volumes), shifts[axis]));
         let centroid = hub + Vector::from(balance);
-        let (exact_six_volumes, _) = volume_and_moment_as_expansions(&fan);
+        let (exact_six_volumes, exact_moment) = volume_and_moment_as_expansions(&fan);
+        let four_times_the_six_volumes = packed(&multiplied(&exact_six_volumes, &[4.0]));
         Ok(Measurement {
             volume,
             volume_error: upward(
@@ -482,8 +490,16 @@ impl SolidView<'_> {
             surface_area: skin.area,
             area_error: skin.area_error,
             centroid,
-            centroid_wobble: (skin.volume_error / volume)
-                * how_far_the_solid_reaches_from(mesh, centroid),
+            centroid_wobble: upward(
+                (skin.volume_error / volume) * how_far_the_solid_reaches_from(mesh, centroid)
+                    + how_far_the_middle_is_from(
+                        centroid,
+                        hub,
+                        shifts,
+                        &exact_moment,
+                        &four_times_the_six_volumes,
+                    ),
+            ),
         })
     }
 
