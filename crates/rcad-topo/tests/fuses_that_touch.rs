@@ -420,6 +420,104 @@ fn a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms() 
     );
 }
 
+/// A thin bar standing inside a thick one and touching its wall on the thick
+/// bar's seam, with a cap flush with one of the thick bar's caps, against the
+/// closed forms.
+///
+/// The thick bar has radius `R` and height four and stands on the origin; the
+/// thin bar has radius `r`, its axis `R − r` along `+x`, and stands on the
+/// floor at height two, at `z = 2` at height two, or on the floor at height
+/// four. For `r` of one or two and `R − r` of two or three, that is twelve
+/// shapes. The thin bar of height `h` is all inside the thick one, so
+/// `A ∪ B = 4πR²`, `A ∩ B = πr²h`, and the thin bar less the thick one is no
+/// solid at all.
+///
+/// **Every fuse of these used to be refused**, `Undecidable` at *a point
+/// inside a piece of a face* (queue row Q1748). The thin bar's pipe cuts the
+/// flush cap in a circle that touches the cap's rim at the seam corner from
+/// inside, so the piece of the cap between the rim and that circle is one wire
+/// of two sides, each a whole circle from the seam corner back to it. Unlike
+/// [`a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms`],
+/// the seam corner is on the thin bar's flush cap, so no rule places that piece
+/// by what is across one of its sides.
+#[test]
+fn a_thin_bar_flush_with_a_thick_bars_cap_touching_its_wall_on_the_seam_against_the_closed_forms() {
+    let policy = Policy::certified();
+    let pi = std::f64::consts::PI;
+    let mut wrong = Vec::new();
+    for thin in 1..=2 {
+        for thicker in 2..=3 {
+            let thick = thin + thicker;
+            let (r, big) = (f64::from(thin), f64::from(thick));
+            let off = f64::from(thicker);
+            for (height, z) in [(2.0, 0.0), (2.0, 2.0), (4.0, 0.0)] {
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let outer = model
+                    .add_round_bar(big, 4.0, &Isometry::identity())
+                    .expect("a whole-number bar");
+                let inner = model
+                    .add_round_bar(
+                        r,
+                        height,
+                        &Isometry::translation(Vector::new(off, 0.0, z))
+                            .expect("a whole-number shift"),
+                    )
+                    .expect("a whole-number bar");
+                let whole = 4.0 * pi * big * big;
+                let thin_bar = pi * r * r * height;
+                for (one, other, rule, holds) in [
+                    (outer, inner, Rule::Union, Some(whole)),
+                    (inner, outer, Rule::Union, Some(whole)),
+                    (outer, inner, Rule::Intersection, Some(thin_bar)),
+                    (inner, outer, Rule::Intersection, Some(thin_bar)),
+                    (inner, outer, Rule::Difference, None),
+                ] {
+                    let case = format!(
+                        "{rule:?} of R = {big}, r = {r} of height {height} at z = {z}, thick bar \
+                         first: {}",
+                        one == outer
+                    );
+                    let mut fused = model.clone();
+                    let answer = match fused.fuse(
+                        &[one],
+                        &[other],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        Ok(answer) => answer,
+                        Err(why) => {
+                            wrong.push(format!("{case} refused {}", named(&why)));
+                            continue;
+                        }
+                    };
+                    fused
+                        .validate(&policy, &mut ProvenanceLog::new())
+                        .unwrap_or_else(|why| panic!("{case} does not validate: {why}"));
+                    let Some(holds) = holds else {
+                        assert!(answer.solids().is_empty(), "{case} is no solid at all");
+                        continue;
+                    };
+                    assert_eq!(answer.solids().len(), 1, "{case} is one solid");
+                    let (volume, error) = volume_and_error(&fused, answer.solids());
+                    assert!(
+                        (volume - holds).abs() <= error,
+                        "{case} measures {volume} against {holds}, out by more than the {error} \
+                         its mesh declares"
+                    );
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} of 60 fuses refused; since Q1748 every one answers:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 #[test]
 fn two_balls_touching_at_a_point() {
     every_rule_over(
