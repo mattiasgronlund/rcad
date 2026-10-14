@@ -237,10 +237,15 @@ fn a_point_off_the_plane(face: FaceView<'_>, plane: &Plane) -> Option<Point> {
 /// diagonal from the corner the half-line aimed at
 /// (`tests/a_bar_cut_beside_its_axis_and_united_again.rs`, row Q1834). How
 /// often a wire winds round a point does not depend on which way the
-/// half-line runs, so the next corner is aimed at instead, and the face is
-/// refused only when every corner leaves some corner unread. What a try that
-/// gave up wrote in the log is kept only when every try gave up, and then it is
-/// the first try's.
+/// half-line runs, so the next corner is aimed at instead. The middle of a
+/// rectangle is on both its diagonals and every corner fails it, so after the
+/// corners the middle of each side is aimed at. A middle is a rounding off the
+/// plane, and that changes no sign: every `orient3d` here has `target` as one
+/// of its points, so each of the other three counts only through where the line
+/// from `target` through it meets the plane, and for the aim that is a point of
+/// the plane in the same direction from `point`. The face is refused only when
+/// every aim leaves some corner unread. What a try that gave up wrote in the log
+/// is kept only when every try gave up, and then it is the first try's.
 ///
 /// [`FaceView::for_each_triangle`] cannot answer this. Its triangles overlap
 /// wherever the face is not convex and its spokes are sides of nothing, so one
@@ -270,11 +275,21 @@ fn what_a_flat_face_holds(
                 || is_one_circle_cut_in_two(solid, face, wire)?,
         );
     }
-    let mut aims: Vec<Option<Point>> = face
+    let outlines: Vec<Vec<Point>> = face
         .wires()
         .zip(&round)
         .filter(|(_, is_round)| !**is_round)
-        .flat_map(|(wire, _)| wire.points())
+        .map(|(wire, _)| wire.points().collect())
+        .collect();
+    let mut aims: Vec<Option<Point>> = outlines
+        .iter()
+        .flatten()
+        .copied()
+        .chain(
+            outlines
+                .iter()
+                .flat_map(|corners| the_middles_of_its_sides(corners)),
+        )
         .map(Some)
         .collect();
     if aims.is_empty() {
@@ -333,6 +348,24 @@ fn what_a_flat_face_holds(
         first_refusal.expect("a walk was refused from every aim, and there was at least one");
     trial.drain_into(log);
     Err(gave_up_turning_a_corner(point, enclosure))
+}
+
+/// The middle of each side of a wire whose corners are `corners`, in the order
+/// they run. Each is a rounding off the plane at most, which a half-line's aim
+/// may be (see [`what_a_flat_face_holds`]). Halving each end before adding them
+/// is what keeps a corner near `f64::MAX` from overflowing.
+fn the_middles_of_its_sides(corners: &[Point]) -> impl Iterator<Item = Point> + '_ {
+    corners
+        .iter()
+        .zip(corners.iter().cycle().skip(1))
+        .map(|(one, other)| {
+            let [one, other] = [one.coordinates(), other.coordinates()];
+            Point::new(
+                0.5 * one[0] + 0.5 * other[0],
+                0.5 * one[1] + 0.5 * other[1],
+                0.5 * one[2] + 0.5 * other[2],
+            )
+        })
 }
 
 /// What a half-line from a point towards one aim found, round one wire of a
