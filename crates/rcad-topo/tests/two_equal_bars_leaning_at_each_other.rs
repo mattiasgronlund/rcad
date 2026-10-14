@@ -5,10 +5,9 @@
 //! centred on `through = (11, 0, 0)`, so it runs right through the first, or 2
 //! long and starts at `through = (11, −3.25, 0.5)`, so its near cap passes
 //! through where the axes meet. Each test runs all six fuses — three rules,
-//! each bar first in turn. At 50°, 60°, 70° and 100° every one answers, through
-//! either point. At 120° every one is refused, through either point, and at 80°
-//! and 105° to 135° every one through `(11, 0, 0)`, each by the variant pinned
-//! here.
+//! each bar first in turn. At 50°, 60°, 70°, 100° and 120° every one answers,
+//! through either point. At 80° and 105° to 135° but 120° every one through
+//! `(11, 0, 0)` is refused, each by the variant pinned here.
 //!
 //! **What they should come to**, with `r = 1/4` and `a` the angle: the first
 //! bar is `A = π/4`. What two pipes of one width share where their axes cross at
@@ -22,9 +21,9 @@
 //! 1/(24 sin a)`. In both, the union is `A + B − I`, the first less the second
 //! `A − I` and the second less the first `B − I`.
 //!
-//! One more pair is built another way, as Q1896 builds it: two bars 2 long,
-//! each `π/8`, with the axes meeting in the middle of both, so each runs past
-//! the shared solid both ways and `I = 1/(12 sin a)` again.
+//! Two more pairs are built another way, as Q1896 and Q1897 build them: two
+//! bars 2 long, each `π/8`, with the axes meeting in the middle of both, so each
+//! runs past the shared solid both ways and `I = 1/(12 sin a)` again.
 
 use std::f64::consts::PI;
 
@@ -32,8 +31,8 @@ use rcad_geom::{Axis, Deflection, Isometry};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
-/// The second bar runs right through the first at 50°, 60°, 70° or 100°, and
-/// every fuse answers what the module doc says, with `I = 1/(12 sin a)`: the
+/// The second bar runs right through the first at 50°, 60°, 70°, 100° or 120°,
+/// and every fuse answers what the module doc says, with `I = 1/(12 sin a)`: the
 /// union in 8 faces, the shared part in 4, and each bar less the other as two
 /// solids of 3 faces, which touch at the two points the pipes are tangent at.
 ///
@@ -64,10 +63,23 @@ use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 /// counted below are those of the bars and nothing more. The joining keeps the
 /// middle of each half ellipse as a corner, since a half folded into one edge
 /// from touch point to touch point cannot be named.
+///
+/// **Until Q1965 every fuse at 120° was refused** (Q1793): the unions
+/// `CannotNameWhichPieceOfACrossingThisIs`, the rest `CannotMeshAFace { why:
+/// CornersCoincide }`, `AWireWillNotLieFlatOnItsFace` or
+/// `ACurvedFaceGoesRightRoundWithNoSeam`. There the second bar's stored
+/// direction is `(−0.5, 0.866…, −2.2e−16)`, a hair off the flat `z = 0`, so the
+/// two points the pipes touch at sit at `y = ±6.4e−17`, and `∇S × ∇T` there is
+/// `(1.6e−17, 0, 0)` (measured in Q1660), not nought. `fuse/assemble.rs` asked
+/// whether the pipes are tangent at a corner by that cross being exactly nought,
+/// so it read a rounding at each touch point, named the arcs from it by that
+/// rounding, and folded each half ellipse into one edge from touch point to
+/// touch point. A corner the arrangement names as one of the two places the
+/// pipes touch now carries that it is (`docs/decisions.md` §448.3).
 #[test]
 fn a_long_bar_through_another_at_a_slant_answers_every_fuse() {
     let (first, second) = (PI / 4.0, 2.0 * PI);
-    for degrees in [50.0_f64, 60.0, 70.0, 100.0] {
+    for degrees in [50.0_f64, 60.0, 70.0, 100.0, 120.0] {
         let shared = 1.0 / (12.0 * degrees.to_radians().sin());
         for (rule, first_first) in six_fuses() {
             let (volume, faces): (f64, &[usize]) = match (rule, first_first) {
@@ -89,71 +101,8 @@ fn a_long_bar_through_another_at_a_slant_answers_every_fuse() {
     }
 }
 
-/// The second bar runs right through the first at 120°. Its pickers are its
-/// stored directions, so what `a_half_of_an_ellipse` learned in Q1646 does
-/// not touch it. Its stored direction is `(−0.5, 0.866…, −2.2e−16)`, a hair off
-/// the flat `z = 0`.
-///
-/// **Every fuse gets past the arrangement and is refused making the faces into
-/// triangles, building their wires or naming a joined edge**: `CannotMeshAFace
-/// { why: CornersCoincide }`, `AWireWillNotLieFlatOnItsFace`,
-/// `ACurvedFaceGoesRightRoundWithNoSeam` or `CannotNameWhichPieceOfACrossingThisIs`,
-/// as pinned below. Before Q1646 all six were refused
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, at the far caps. Not traced
-/// further. A lead, not run: the pipe's direction is off `z = 0`, so the two
-/// points the halves meet at are off the `±z` half-planes and the count of how
-/// often each walk goes round the axis settles, where at 50° it cannot.
-///
-/// **The unions moved in Q1660.** They were refused `CornersCoincide` with the
-/// first bar first and `AWireWillNotLieFlatOnItsFace` with the second. Q1660
-/// joins back the cuts the other bar's cap planes make in the long pipe, and
-/// that joining walks straight through the middle of each half ellipse unless
-/// both of the half's ends are points where the pipes are tangent, read as
-/// `∇S × ∇T` exactly nought. Here the two points sit at `y = ±6.4e−17`, and the
-/// cross there is `(1.6e−17, 0, 0)` at both, measured with a probe in
-/// `the_corners_of_each_run_between_two_tangent_points`, so each half is
-/// folded into one edge from touch point to touch point, which cannot be
-/// named. Either way it is refused.
-///
-/// At 80° and at 105° to 135° every fuse is refused the same few ways
-/// (`a_long_bar_through_another_at_80_or_105_to_135_degrees_is_refused_past_the_split`).
-///
-/// **A gap, by §16.10**: the answer is `1/(12 sin 120°)` shared, inside the
-/// range a model holds.
-#[test]
-fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wire() {
-    for (rule, first_first) in six_fuses() {
-        let said = fuse(120.0, [11.0, 0.0, 0.0], rule, first_first);
-        let pinned = match (rule, first_first) {
-            (Rule::Union, _) => matches!(
-                said,
-                Err(Error::Geometry(
-                    rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
-                ))
-            ),
-            (Rule::Intersection, false) | (Rule::Difference, true) => {
-                matches!(
-                    said,
-                    Err(Error::CannotMeshAFace {
-                        why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
-                        ..
-                    })
-                )
-            }
-            (Rule::Difference, false) => {
-                matches!(said, Err(Error::AWireWillNotLieFlatOnItsFace { .. }))
-            }
-            (Rule::Intersection, true) => {
-                matches!(said, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
-            }
-            (_, _) => unreachable!("six_fuses names three rules and no other"),
-        };
-        assert!(pinned, "{rule:?} (first first: {first_first}): {said:?}");
-    }
-}
-
-/// The second bar starts where the axes meet, at 50°, 60°, 70° or 100°, and
-/// every fuse answers what the module doc says, with `I = 1/(24 sin a)`: the
+/// The second bar starts where the axes meet, at 50°, 60°, 70°, 100° or 120°,
+/// and every fuse answers what the module doc says, with `I = 1/(24 sin a)`: the
 /// union in 9 faces, the shared part in 4, the first bar less the second in 10
 /// and the second less the first in 3.
 ///
@@ -237,10 +186,18 @@ fn a_long_bar_through_another_at_120_degrees_is_refused_meshing_or_building_a_wi
 /// at `c − r·ẑ` is that node too: it is on the cap's circle by construction,
 /// and that circle meets the first pipe only at `c ± r·ẑ` because the cap
 /// holds `c`.
+///
+/// **Until Q1965 every fuse at 120° got past the near cap and was refused**
+/// (Q1929): the union and both differences `AWireWillNotLieFlatOnItsFace`, the
+/// shared part `ACurvedFaceGoesRightRoundWithNoSeam`. `fuse/assemble.rs` asked
+/// whether the pipes are tangent at the two touch points by an exact nought of
+/// `∇S × ∇T` at their rounded points, as
+/// `a_long_bar_through_another_at_a_slant_answers_every_fuse` says, and now
+/// reads it off the name the arrangement gives them.
 #[test]
 fn a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse() {
     let (first, second) = (PI / 4.0, PI / 8.0);
-    for degrees in [50.0_f64, 60.0, 70.0, 100.0] {
+    for degrees in [50.0_f64, 60.0, 70.0, 100.0, 120.0] {
         let shared = 1.0 / (24.0 * degrees.to_radians().sin());
         let six: [(Rule, bool, f64, &[usize]); 6] = [
             (Rule::Union, true, first + second - shared, &[9]),
@@ -263,37 +220,13 @@ fn a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse() {
     }
 }
 
-/// The second bar starts where the axes meet at 120°, its stored direction a
-/// hair off `z = 0`. **Every fuse gets past the near cap and is refused
-/// building a wire or a face**: the union and both differences
-/// `AWireWillNotLieFlatOnItsFace`, the shared part
-/// `ACurvedFaceGoesRightRoundWithNoSeam`, two of the refusals the long bar
-/// through the first at 120° meets. Until Q1908 all six were refused
-/// `orient3d` on the near cap, as at the other angles
-/// (`a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`).
-/// Not traced further.
-///
-/// **A gap, by §16.10**: the answer is `1/(24 sin 120°)` shared, inside the
-/// range a model holds.
-#[test]
-fn a_bar_starting_where_it_crosses_another_at_120_degrees_is_refused_building_a_wire() {
-    for (rule, first_first) in six_fuses() {
-        let said = fuse(120.0, [11.0, -3.25, 0.5], rule, first_first);
-        let pinned = if matches!(rule, Rule::Intersection) {
-            matches!(said, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
-        } else {
-            matches!(said, Err(Error::AWireWillNotLieFlatOnItsFace { .. }))
-        };
-        assert!(pinned, "{rule:?} (first first: {first_first}): {said:?}");
-    }
-}
-
 /// Two bars 2 long, each cut off 1 either side of where the axes meet, one
-/// along `(3, 4, 0)` and the other along `(4, 0, 3)`, so `cos a = 12/25`: the
-/// one along `(4, 0, 3)` less the other answers two solids of 3 faces, `π/8 −
-/// 1/(12 sin a)` between them, wherever the axes meet (Q1896). The pipe of the
-/// one taken away cuts the other bar in two, and the two pieces touch at the
-/// two points the pipes are tangent at, each thinning to nothing there.
+/// along `(3, 4, 0)` and the other along `(4, 0, 3)`, so `cos a = 12/25`,
+/// answer every fuse at each of the nine places Q1896 has the axes meet, with
+/// `I = 1/(12 sin a)` as the module doc says: the union in 8 faces, the shared
+/// part in 4, and each bar less the other as two solids of 3 faces. The pipe of
+/// the one taken away cuts the other bar in two, and the two pieces touch at
+/// the two points the pipes are tangent at, each thinning to nothing there.
 ///
 /// **Until Q1966 the mesh drew one sliver twice there**, and the fuse was
 /// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` in
@@ -303,36 +236,96 @@ fn a_bar_starting_where_it_crosses_another_at_120_degrees_is_refused_building_a_
 /// the same triangle was drawn twice, facing both ways (`docs/decisions.md`
 /// §446.8). The bar along `(3, 4, 0)` less the other, the same pinch, meshed.
 ///
-/// **Only where the axes meet at `(0, 0, 0)`.** The fuse asks whether the
-/// pipes are tangent at a touch point by an exact nought at its rounded point,
-/// and elsewhere it can read a rounding there, say no, and pick an arc from the
-/// touch point the wrong way (Q1965). At `(0, 1, 0)` a face then came to the
-/// mesh with an arc from a touch point walked three quarters of the way round
-/// its ellipse, and was refused `ASideCutsOffOneCornerOfACurvedPatch`; at
-/// `(1, 1, 1)` the answer was refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)`;
-/// at `(2, 0, 0)` a face was refused `BoundaryCrossesItself`, and at the five
-/// other points Q1896 names `AWireWillNotLieFlatOnItsFace`. With every touch
-/// point read as tangent, by Q1953's scratch tolerance in `fuse/assemble.rs`,
-/// all nine answered this volume and `[3, 3]` faces, both ways round.
+/// **Until Q1965 that held only where the axes meet at `(0, 0, 0)`.** The fuse
+/// asked whether the pipes are tangent at a touch point by an exact nought at
+/// its rounded point, and elsewhere it could read a rounding there, say no, and
+/// pick an arc from the touch point the wrong way. At `(0, 1, 0)` a face then
+/// came to the mesh with an arc from a touch point walked three quarters of the
+/// way round its ellipse, and was refused `ASideCutsOffOneCornerOfACurvedPatch`
+/// (Q1953's trace).
 #[test]
-fn a_bar_along_4_0_3_less_one_along_3_4_0_meshes_where_the_two_pieces_touch() {
-    let shared = 25.0 / (12.0 * 481.0_f64.sqrt());
-    let volume = PI / 8.0 - shared;
-    let what = format!("solids of [3, 3] faces and volume {volume}");
-    let mut model =
-        Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let [along_3_4_0, along_4_0_3] = two_bars_crossing_at(&mut model, [0.0, 0.0, 0.0]);
-    let solids = model
-        .fuse(
-            &[along_4_0_3],
-            &[along_3_4_0],
-            Rule::Difference,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .map(|answer| answer.solids().to_vec())
-        .unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
-    answers(&model, &solids, volume, &[3, 3], &what);
+fn two_bars_on_3_4_0_and_4_0_3_answer_every_fuse_wherever_the_axes_meet() {
+    let wrong = what_goes_wrong_with_two_bars_crossing(
+        [[3.0, 4.0, 0.0], [4.0, 0.0, 3.0]],
+        &[
+            [0.0, 0.0, 0.0],
+            [0.5, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0],
+            [0.25, 0.5, 0.75],
+            [11.0, -3.25, 0.5],
+        ],
+    );
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Two bars 2 long as above, one along `(3, 4, 0)` and the other along `(4, −3,
+/// 0)`, square to each other in `z = 0`, answer every fuse at each of the four
+/// places Q1897 has the axes meet, with `I = 1/12`.
+#[test]
+fn two_bars_on_3_4_0_and_4_minus_3_0_answer_every_fuse_wherever_the_axes_meet() {
+    let wrong = what_goes_wrong_with_two_bars_crossing(
+        [[3.0, 4.0, 0.0], [4.0, -3.0, 0.0]],
+        &[
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [11.0, 0.0, 0.0],
+            [11.0, -3.25, 0.5],
+        ],
+    );
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// One line for each of the six fuses of the two bars [`two_bars_crossing_at`]
+/// builds along `ways` about each of `middles` that does not answer as
+/// `two_bars_on_3_4_0_and_4_0_3_answer_every_fuse_wherever_the_axes_meet` says.
+fn what_goes_wrong_with_two_bars_crossing(
+    ways: [[f64; 3]; 2],
+    middles: &[[f64; 3]],
+) -> Vec<String> {
+    let [one, other] = ways.map(|way| rcad_geom::Vector::new(way[0], way[1], way[2]));
+    let sin = one.cross(other).length() / (one.length() * other.length());
+    let (bar, shared) = (PI / 8.0, 1.0 / (12.0 * sin));
+    let mut wrong = Vec::new();
+    for &middle in middles {
+        for (rule, first_first) in six_fuses() {
+            let (volume, faces): (f64, &[usize]) = match rule {
+                Rule::Union => (2.0 * bar - shared, &[8]),
+                Rule::Intersection => (shared, &[4]),
+                Rule::Difference => (bar - shared, &[3, 3]),
+                _ => unreachable!("six_fuses names three rules and no other"),
+            };
+            let what = format!(
+                "{middle:?} {rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}"
+            );
+            let mut model =
+                Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let [first, second] = two_bars_crossing_at(&mut model, ways, middle);
+            let (arguments, tools) = if first_first {
+                ([first], [second])
+            } else {
+                ([second], [first])
+            };
+            let said = model
+                .fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .map(|answer| answer.solids().to_vec())
+                .map_err(|why| format!("refused: {why:?}"))
+                .and_then(|solids| how_far_off(&model, &solids, volume, faces));
+            if let Err(why) = said {
+                wrong.push(format!("{what}: {why}"));
+            }
+        }
+    }
+    wrong
 }
 
 /// The second bar's near cap, as the model hands it out, is proved off both
@@ -588,10 +581,22 @@ fn fuse_in(
 /// `volume` to within the mesh's own error. `what` is the right answer, which
 /// is what every message carries.
 fn answers(model: &Model, solids: &[SolidKey], volume: f64, faces: &[usize], what: &str) {
+    if let Err(why) = how_far_off(model, solids, volume, faces) {
+        panic!("{what}: {why}");
+    }
+}
+
+/// What [`answers`] asserts, with what is wrong when it does not hold.
+fn how_far_off(
+    model: &Model,
+    solids: &[SolidKey],
+    volume: f64,
+    faces: &[usize],
+) -> Result<(), String> {
     let policy = Policy::certified();
     model
         .validate(&policy, &mut ProvenanceLog::new())
-        .unwrap_or_else(|why| panic!("{what}: the answer does not validate: {why:?}"));
+        .map_err(|why| format!("the answer does not validate: {why:?}"))?;
     let mut counted = Vec::with_capacity(solids.len());
     let (mut measured, mut error) = (0.0, 0.0);
     for &solid in solids {
@@ -603,15 +608,19 @@ fn answers(model: &Model, solids: &[SolidKey], volume: f64, faces: &[usize], wha
                 &policy,
                 &mut ProvenanceLog::new(),
             )
-            .expect("the answer measures");
+            .map_err(|why| format!("the answer does not measure: {why:?}"))?;
         measured += measure.volume();
         error += measure.volume_error();
     }
-    assert_eq!(counted, faces, "{what}: faces of each solid");
-    assert!(
-        (measured - volume).abs() <= error,
-        "{what}: measured {measured} and the mesh may miss by {error}"
-    );
+    if counted != faces {
+        return Err(format!("solids of {counted:?} faces"));
+    }
+    if (measured - volume).abs() > error {
+        return Err(format!(
+            "measured {measured} and the mesh may miss by {error}"
+        ));
+    }
+    Ok(())
 }
 
 fn two_bars(model: &mut Model, degrees: f64, through: [f64; 3]) -> [SolidKey; 2] {
@@ -649,11 +658,10 @@ fn two_bars(model: &mut Model, degrees: f64, through: [f64; 3]) -> [SolidKey; 2]
     [first, second]
 }
 
-/// A bar along `(3, 4, 0)` and one along `(4, 0, 3)`, each of radius 1/4 and
-/// cut off 1 either side of `middle`, where their axes meet: each is the bar
-/// along `z` cut off at `z = ±1`, turned onto its way about `ẑ × way` and moved
-/// to `middle`.
-fn two_bars_crossing_at(model: &mut Model, middle: [f64; 3]) -> [SolidKey; 2] {
+/// A bar along each of `ways`, each of radius 1/4 and cut off 1 either side of
+/// `middle`, where their axes meet: each is the bar along `z` cut off at
+/// `z = ±1`, turned onto its way about `ẑ × way` and moved to `middle`.
+fn two_bars_crossing_at(model: &mut Model, ways: [[f64; 3]; 2], middle: [f64; 3]) -> [SolidKey; 2] {
     let caps = [-1.0, 1.0].map(|z| {
         rcad_geom::Plane::from_point_and_normal(
             rcad_geom::Point::new(0.0, 0.0, z),
@@ -662,12 +670,10 @@ fn two_bars_crossing_at(model: &mut Model, middle: [f64; 3]) -> [SolidKey; 2] {
         .expect("a cap")
     });
     let up = rcad_geom::Vector::new(0.0, 0.0, 1.0);
-    [
-        rcad_geom::Vector::new(3.0, 4.0, 0.0),
-        rcad_geom::Vector::new(4.0, 0.0, 3.0),
-    ]
-    .map(|way| {
-        let way = way.normalized().expect("a way");
+    ways.map(|way| {
+        let way = rcad_geom::Vector::new(way[0], way[1], way[2])
+            .normalized()
+            .expect("a way");
         let turn = Isometry::rotation(
             &Axis::new(rcad_geom::Point::origin(), up.cross(way)).expect("an axis"),
             up.dot(way).acos(),
