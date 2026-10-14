@@ -3279,6 +3279,15 @@ check-skills-selftest:
 # throws at the start when `args.lanes` has more than one entry unless
 # `args.shareOneRun` is `true`. The arm checks that the exact throw line is
 # there, and that its message names one Workflow call per row.
+#
+# **Arm thirty-three checks that the rows a fix lane also answers close on its
+# verifier's word, in the merge's own `queue apply`** (§450.3 rule 4). Before
+# it, `17532d10` closed Q1965's family by hand. `lanes.js` must give the
+# verifier `also_answers_confirmed`, ask it to run the lane's `also_answers`
+# again, pass what it confirms to `just land --answers` and tell the Opus
+# merger; `prep.md` must list the open rows on the row's test file, `lane.md`
+# tell a fix lane to run them, `verifier.md` hold the Also answers steps, and
+# `merger.md` give each confirmed row a `done` step.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, refuses to share a run across rows unless asked, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -3414,6 +3423,14 @@ check-lanes-workflow:
     readonly_rows_required="    required.push('rows')"
     share_guard='if (LANES.length > 1 && args.shareOneRun !== true) throw new Error('
     share_message='one Workflow call per row'
+    answers_flag='`--answers ${answers.join('
+    answers_confirmed="    also_answers_confirmed: { type: 'array'"
+    answers_lane='**A fix lane runs its family at the end** (§450.3 rule 4).'
+    answers_prep='name the same file in their write sets'
+    answers_verifier='## Also answers'
+    answers_merger='gets a `done` step too, with the same'
+    answers_asked='${alsoAnswersNote(r)}'
+    answers_told='${answeredNote(lane, prior)}'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -3820,6 +3837,13 @@ check-lanes-workflow:
             echo "$1 does not throw at the start when args.lanes has more than one entry unless args.shareOneRun is true ('$share_guard'), or its message does not name one Workflow call per row ('$share_message'); five times a dispatcher put a fill of several rows into one run before this, and prose alone did not stop it (§230.4)"
             [ "$failed" != 0 ] || failed=32
         fi
+        if ! grep -qF -- "$answers_flag" "$1" || ! grep -qF -- "$answers_confirmed" "$1" \
+            || ! grep -qF -- "$answers_asked" "$1" || ! grep -qF -- "$answers_told" "$1" \
+            || ! grep -qF -- "$answers_lane" "$2/lane.md" || ! grep -qF -- "$answers_prep" "$2/prep.md" \
+            || ! grep -qxF -- "$answers_verifier" "$2/verifier.md" || ! grep -qF -- "$answers_merger" "$2/merger.md"; then
+            echo "$1 does not pass the rows a verifier confirmed to just land ('$answers_flag'), give the verifier '$answers_confirmed', ask it to run them ('$answers_asked') or tell the merger ('$answers_told'), or $2 does not say it in lane.md ('$answers_lane'), prep.md ('$answers_prep'), verifier.md ('$answers_verifier') or merger.md ('$answers_merger'); a row a fix lane answers would stay open until someone closed it by hand, as 17532d10 did (§450.3 rule 4)"
+            [ "$failed" != 0 ] || failed=33
+        fi
         return "$failed"
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
@@ -4082,7 +4106,23 @@ check-lanes-workflow:
     grep -vF -- "$share_guard" "$file" > "$dir/share-guard-missing/lanes.js"
     fresh share-message-missing
     swap "$file" "$share_message" 'that on purpose' > "$dir/share-message-missing/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32)
+    fresh answers-not-landed
+    swap "$file" "$answers_flag" '`' > "$dir/answers-not-landed/lanes.js"
+    fresh answers-unconfirmed
+    grep -vF -- "$answers_confirmed" "$file" > "$dir/answers-unconfirmed/lanes.js"
+    fresh answers-not-asked
+    swap "$file" "$answers_asked" '' > "$dir/answers-not-asked/lanes.js"
+    fresh answers-not-told
+    swap "$file" "$answers_told" '' > "$dir/answers-not-told/lanes.js"
+    fresh answers-lane-unsaid
+    grep -vF -- "$answers_lane" "$agents/lane.md" > "$dir/answers-lane-unsaid/agents/lane.md"
+    fresh answers-prep-unsaid
+    grep -vF -- "$answers_prep" "$agents/prep.md" > "$dir/answers-prep-unsaid/agents/prep.md"
+    fresh answers-verifier-unsaid
+    grep -vxF -- "$answers_verifier" "$agents/verifier.md" > "$dir/answers-verifier-unsaid/agents/verifier.md"
+    fresh answers-merger-unsaid
+    grep -vF -- "$answers_merger" "$agents/merger.md" > "$dir/answers-merger-unsaid/agents/merger.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -4099,7 +4139,7 @@ check-lanes-workflow:
             exit 1
         fi
     done
-    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, relays a lane past its budget to a fresh one, briefs a short-form lane through prep and starts no lane on anything but ok, closes a row whose fault no longer shows only on its verifier's confirm, and prunes only what merged; ${#cuts[@]} cuts, each caught"
+    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, relays a lane past its budget to a fresh one, briefs a short-form lane through prep and starts no lane on anything but ok, closes a row whose fault no longer shows only on its verifier's confirm, closes the rows a fix lane also answers only on its verifier's word, and prunes only what merged; ${#cuts[@]} cuts, each caught"
 
 # Print the changed lines between two commits that could change what runs:
 # everything but `.md` files, comment lines, and test code -- files under
