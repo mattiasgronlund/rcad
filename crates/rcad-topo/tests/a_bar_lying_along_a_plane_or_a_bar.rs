@@ -241,20 +241,35 @@ fn a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it() {
 /// plane runs through the box. The corner is on the pipe, and the plane leaves
 /// no room in the pipe, so the side is the side the pipe's axis is on.
 ///
-/// **Nothing cuts the bar's seam**, so where the answer keeps the bar (union,
-/// and the bar less the cube) the seam's one image is the answer's one edge up
-/// the seam's line, the wall four high or two; and nothing where it does not.
+/// **The seam's history is the one a bar standing clear of the wall has**: the
+/// same bar half a unit off the unturned wall, at `(−1.5, 2, 1)`, fused the
+/// same way. Nothing lies along the seam, so the fuse joins the skin across it
+/// and the seam has no image under any rule; only a wall touching the bar along
+/// it keeps it, as in the two tests above. Read edge by edge, the answer then
+/// has the same number of straight edges and of round ones as that one.
 #[test]
 fn a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule() {
     let mut wrong: Vec<String> = Vec::new();
     for angle in [PI / 6.0, 1.0] {
+        let turn = Isometry::rotation(&Axis::z(), angle).expect("a finite angle");
         for wall in [4.0, 2.0] {
             for swapped in [false, true] {
                 for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
                     let what =
                         format!("turned {angle}, wall {wall} high, {rule:?}, bar first {swapped}");
-                    if let Err(why) = turned_against_a_wall(angle, wall, swapped, rule) {
-                        wrong.push(format!("{what}: {why}"));
+                    let clear = a_bar_against_a_wall(
+                        &Isometry::identity(),
+                        [-1.5, 2.0, 1.0],
+                        wall,
+                        swapped,
+                        rule,
+                    );
+                    let turned = a_bar_against_a_wall(&turn, [-1.0, 2.0, 1.0], wall, swapped, rule);
+                    match (clear, turned) {
+                        (Ok(clear), Ok(turned)) if clear == turned => (),
+                        (clear, turned) => wrong.push(format!(
+                            "{what}: {turned:?}, and standing clear unturned {clear:?}"
+                        )),
                     }
                 }
             }
@@ -263,18 +278,27 @@ fn a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// One fuse of [`a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule`]:
-/// `Err` saying what is wrong with it.
-fn turned_against_a_wall(angle: f64, wall: f64, swapped: bool, rule: Rule) -> Result<(), String> {
+/// What one fuse of
+/// [`a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule`] keeps of
+/// the bar's seam: how many images the seam has, and how many straight edges
+/// and round ones the answer has. The cube is placed by `turn` and the bar by
+/// `turn` after its shift to `bar_at`. `Err` says what is wrong with the fuse.
+fn a_bar_against_a_wall(
+    turn: &Isometry,
+    bar_at: [f64; 3],
+    wall: f64,
+    swapped: bool,
+    rule: Rule,
+) -> Result<[usize; 3], String> {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let turn = Isometry::rotation(&Axis::z(), angle).expect("a finite angle");
     let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
         .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a square");
     let cube = model
-        .add_extrusion(&rectangle, wall, &turn)
+        .add_extrusion(&rectangle, wall, turn)
         .expect("building a box needs no decision");
-    let shift = Isometry::translation(Vector::new(-1.0, 2.0, 1.0)).expect("a whole-number shift");
+    let [x, y, z] = bar_at;
+    let shift = Isometry::translation(Vector::new(x, y, z)).expect("a short shift");
     let bar = model
         .add_round_bar(1.0, 2.0, &turn.compose(&shift))
         .expect("a bar");
@@ -282,14 +306,6 @@ fn turned_against_a_wall(angle: f64, wall: f64, swapped: bool, rule: Rule) -> Re
         return Err("the wall's plane meets the bar's pipe".to_owned());
     }
     let seam = the_one_straight_edge_of(&model, bar);
-    let seam_runs_up = {
-        let start = model
-            .edge(seam)
-            .expect("this model made the key")
-            .start()
-            .point();
-        [start.x(), start.y()]
-    };
     let [(first, first_volume), (second, second_volume)] = if swapped {
         [(bar, 2.0 * PI), (cube, 16.0 * wall)]
     } else {
@@ -329,21 +345,20 @@ fn turned_against_a_wall(angle: f64, wall: f64, swapped: bool, rule: Rule) -> Re
     }
     let images = answer
         .images_of_edge(seam)
-        .expect("this model made the key");
-    let up_the_seam: Vec<EdgeKey> = answer
+        .expect("this model made the key")
+        .len();
+    let (round, straight): (Vec<EdgeKey>, Vec<EdgeKey>) = answer
         .solids()
         .iter()
         .flat_map(|&solid| edges_of(&model, solid))
-        .filter(|&edge| runs_up_the_line(&model, edge, seam_runs_up))
-        .collect();
-    let keeps_the_bar = rule == Rule::Union || (rule == Rule::Difference && swapped);
-    if up_the_seam.len() != usize::from(keeps_the_bar) || images != up_the_seam {
-        return Err(format!(
-            "the answer's edges up the seam's line are {up_the_seam:?} and the seam's images \
-             {images:?}"
-        ));
-    }
-    Ok(())
+        .partition(|&edge| {
+            model
+                .edge(edge)
+                .expect("this model made the key")
+                .is_closed()
+                .expect("the edges here are straight or round a circle")
+        });
+    Ok([images, straight.len(), round.len()])
 }
 
 /// Whether `intersect` proves that the cube's upright wall nearest the bar, as
