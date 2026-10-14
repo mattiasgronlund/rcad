@@ -2811,10 +2811,14 @@ fn the_point_a_box_names(boxed: [Interval; 3]) -> PredicatePoint {
 ///
 /// **One axis, and the plane holding it, are decided exactly**: the plane by
 /// [`it_holds_the_axis`], and the other surface by the questions
-/// [`intersect`] asks before it names a circle. A ball, a pipe or a cone that
-/// is not on the ring's axis is not this road and is handed on, as is a second
-/// ring, but for a pipe of the tube's radius along the ring's core circle,
-/// which [`what_a_plane_through_a_rings_axis_leaves_of_a_pipe_along_its_core`]
+/// [`intersect`] asks before it names a circle. A ball or a cone that is not
+/// on the ring's axis is not this road and is handed on, as is a second ring.
+/// A pipe off the axis is answered here too:
+/// [`the_heights_a_ring_crosses_a_round_surface_at`] names no heights for one
+/// along the ring's axis, off it and clear of the tube, and this function
+/// then answers [`MeetOfThree::Nowhere`] — but for a pipe of the tube's
+/// radius along the ring's core circle, which
+/// [`what_a_plane_through_a_rings_axis_leaves_of_a_pipe_along_its_core`]
 /// answers.
 fn what_a_plane_through_a_rings_axis_leaves(
     flat: &Plane,
