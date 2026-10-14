@@ -1800,18 +1800,26 @@ fn where_two_leaning_pipes_cross(
 /// is three things: `c` is where the two axes meet, asked exactly of each axis;
 /// each surface passes exactly through `c`; and each facing lies exactly in the
 /// flat of the two stored directions. Then `c ± r·n̂` is on both, because `n̂` is
-/// square to that flat.
+/// square to that flat. Where `f64` holds no point that is `c`, the axes are
+/// asked exactly whether they lie in one flat, and each surface holds the whole
+/// of the other axis, and so `c`, instead ([`a_surface_through_the_other_axis`]),
+/// or where none of those lies in the flat, passes through a point `f64` holds
+/// whose dot with the facing is exactly `c`'s
+/// ([`a_surface_through_a_point_beside_the_middle`]).
 ///
 /// **The pair is sorted first**, as the walk sorts it, so `c` is worked out the
 /// same way whichever way round the caller wrote the two.
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when `c`, worked out in
-/// `f64`, is not exactly on both axes, and whatever
-/// [`a_surface_through_where_the_walls_touch`] refuses. A **gap** (§16.10): the
-/// four halves are there and four corners apart, and what runs out is a point
-/// in `f64` that is exactly where the axes meet.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when no two surfaces are
+/// found: where `c` is a point `f64` holds ([`where_two_axes_meet_exactly`]),
+/// whatever [`a_surface_through_where_the_walls_touch`] refuses, and where it
+/// is not, whatever [`a_surface_through_the_other_axis`] and
+/// [`a_surface_through_a_point_beside_the_middle`] refuse. A **gap** (§16.10):
+/// the four halves are there and four corners apart, and what runs out is a
+/// facing written in `f64` that lies exactly in the flat of the two directions,
+/// or a point `f64` holds level with `c` along it.
 ///
 /// # Where no flat surface written in `f64` will do
 ///
@@ -1830,7 +1838,9 @@ fn where_two_leaning_pipes_cross(
 /// (`no_flat_surface_written_in_f64_picks_the_halves_of_bores_on_3_4_0_and_4_0_3`).
 /// Such a surface is a [`HalfSpaceThroughAPoint`] instead, which holds `c`
 /// itself and the pipe's own direction and so passes exactly through `c` for
-/// every facing (`docs/decisions.md` §443).
+/// every facing (`docs/decisions.md` §443). Where `c` itself is not a point
+/// `f64` holds, every surface is one of those, through the other pipe's
+/// stored start or through a point on neither axis.
 fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     one: &Cylinder,
     other: &Cylinder,
@@ -1843,19 +1853,40 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
     } else {
         (one, other)
     };
-    let middle = crate::walk::where_two_axes_meet(first, second);
-    if !(middle.is_finite()
-        && [first, second]
-            .iter()
-            .all(|pipe| it_lies_exactly_on_the_axis(middle, pipe)))
-    {
-        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-    }
     let [first_way, second_way] = [first, second].map(|pipe| pipe.axis().direction());
-    let (Some(towards_first), Some(towards_second)) = (
-        a_surface_through_where_the_walls_touch(middle, first_way, second_way)?,
-        a_surface_through_where_the_walls_touch(middle, second_way, first_way)?,
-    ) else {
+    let pickers = match where_two_axes_meet_exactly(first, second) {
+        Some(middle) => {
+            if !(middle.is_finite()
+                && [first, second]
+                    .iter()
+                    .all(|pipe| it_lies_exactly_on_the_axis(middle, pipe)))
+            {
+                return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+            }
+            (
+                a_surface_through_where_the_walls_touch(middle, first_way, second_way)?,
+                a_surface_through_where_the_walls_touch(middle, second_way, first_way)?,
+            )
+        }
+        None if the_two_axes_lie_exactly_in_one_flat(first, second) => {
+            let Some(middle) = where_two_axes_meet_in_fractions(first, second) else {
+                return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+            };
+            let towards = |own: &Cylinder, other: &Cylinder| match a_surface_through_the_other_axis(
+                own, other,
+            )? {
+                Some(picker) => Ok(Some(picker)),
+                None => a_surface_through_a_point_beside_the_middle(
+                    &middle,
+                    own.axis().direction(),
+                    other.axis().direction(),
+                ),
+            };
+            (towards(first, second)?, towards(second, first)?)
+        }
+        None => return Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    };
+    let (Some(towards_first), Some(towards_second)) = pickers else {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     };
     let surfaces = [towards_first, towards_second];
@@ -1883,6 +1914,246 @@ fn four_half_ellipses_where_two_pipes_of_one_width_meet(
             })
             .collect(),
     ))
+}
+
+/// Where the axes of `first` and `second` meet, worked out exactly from the
+/// stored numbers — or `None` when a coordinate of that point is not a number
+/// `f64` holds, or an exact sum on the way cannot be formed.
+///
+/// With `o₁`, `ê` the first axis, `o₂`, `û` the second and `w = ê × û`, the
+/// point is `o₁ + ê·N/D` with `N = ((o₂ − o₁) × û)·w` and `D = w·w`, so each
+/// coordinate is `(o₁·D + ê·N)/D`, read one component at a time. The same
+/// formula worked in `f64` ([`crate::walk::where_two_axes_meet`]) rounds on the
+/// way and can miss a point `f64` holds: bars along `x` through `(9, 0, 0)` and
+/// turned 125° about `z` through `(11, 0, 0)` meet at `(11, 0, 0)` exactly, and
+/// the `f64` formula lands beside it
+/// (`two_thin_bars_whose_axes_meet_where_f64_holds_the_point_are_named_in_four_halves`).
+/// Two lines that are not parallel meet in one point, so wherever the `f64`
+/// formula lands on both axes this finds the same point.
+fn where_two_axes_meet_exactly(first: &Cylinder, second: &Cylinder) -> Option<Point> {
+    let middle = where_two_axes_meet_in_fractions(first, second)?;
+    let [x, y, z] = middle
+        .tops
+        .each_ref()
+        .map(|top| the_f64_a_quotient_is(top, &middle.bottom));
+    Some(Point::new(x?, y?, z?))
+}
+
+/// A point worked out exactly: `tops[i] / bottom` along each axis, with
+/// `bottom` above nought.
+struct AFractionalPoint {
+    tops: [Exact; 3],
+    bottom: Exact,
+}
+
+/// The point [`where_two_axes_meet_exactly`] rounds, as the exact fractions
+/// `(o₁·D + ê·N)/D`, or `None` when an exact product on the way cannot be
+/// formed.
+fn where_two_axes_meet_in_fractions(
+    first: &Cylinder,
+    second: &Cylinder,
+) -> Option<AFractionalPoint> {
+    let [(here, mine), (there, theirs)] = [first, second].map(|pipe| {
+        (
+            pipe.axis().origin().coordinates(),
+            pipe.axis().direction().components(),
+        )
+    });
+    let sideways = Exact::cross_of(&Exact::of_each(mine), theirs)?;
+    let across = Exact::cross_of(&Exact::gap_between(here, there), theirs)?;
+    let along = Exact::dot_of_two_exact(&across, &sideways)?;
+    let bottom = Exact::squared_length_of(&sideways)?;
+    let [x, y, z] = [0, 1, 2].map(|axis| {
+        Some(
+            Exact::of(here[axis])
+                .times(&bottom)?
+                .plus(&Exact::of(mine[axis]).times(&along)?),
+        )
+    });
+    Some(AFractionalPoint {
+        tops: [x?, y?, z?],
+        bottom,
+    })
+}
+
+/// `top / bottom`, when `f64` holds it, or `None` when it lies between two
+/// `f64`. `bottom` is above nought.
+///
+/// The quotient of the two rounded is within a few units in the last place of
+/// the true one, so this steps from there one `f64` at a time towards it, asking
+/// exactly which side of it each one is on, until one is on it or the side
+/// changes. A zero comes back as `+0.0`, as the `f64` formula gives it.
+fn the_f64_a_quotient_is(top: &Exact, bottom: &Exact) -> Option<f64> {
+    const MOST_STEPS: usize = 8;
+    if top.sign() == Decision::Zero {
+        return Some(0.0);
+    }
+    let side_of = |guess: f64| Some(top.minus(&Exact::of(guess).times(bottom)?).sign());
+    let mut guess = top.nearest_f64() / bottom.nearest_f64();
+    let first_side = side_of(guess)?;
+    for _ in 0..MOST_STEPS {
+        match side_of(guess)? {
+            Decision::Zero => return Some(guess),
+            side if side != first_side => return None,
+            Decision::Pos => guess = guess.next_up(),
+            Decision::Neg => guess = guess.next_down(),
+            Decision::Undecidable { .. } | _ => return None,
+        }
+    }
+    None
+}
+
+/// Whether the axes of `one` and `other` lie in one flat, asked exactly:
+/// `(o₂ − o₁)·(ê × û)` is nought. Two axes that are not parallel meet exactly
+/// when it is.
+fn the_two_axes_lie_exactly_in_one_flat(one: &Cylinder, other: &Cylinder) -> bool {
+    let [(here, mine), (there, theirs)] = [one, other].map(|pipe| {
+        (
+            pipe.axis().origin().coordinates(),
+            pipe.axis().direction().components(),
+        )
+    });
+    Exact::cross_of(&Exact::of_each(mine), theirs)
+        .and_then(|sideways| Exact::dot_of_two_exact(&Exact::gap_between(here, there), &sideways))
+        .is_some_and(|reach| reach.sign() == Decision::Zero)
+}
+
+/// A flat surface that holds the whole of `other`'s axis and leans towards
+/// `own` rather than `other`, for two axes that meet where `f64` holds no
+/// point — or `None` when no facing tried gives one.
+///
+/// It passes through `other`'s stored start and faces `other`'s stored
+/// direction crossed with `x`, `y` or `z`, either way round. Crossing with one
+/// of those only moves numbers about and turns some round, so each facing is
+/// exactly square to `other`'s direction, and the surface holds the whole of
+/// `other`'s axis exactly: `c`, where the axes meet, with it. A facing that
+/// also lies exactly in the flat of the two directions is square to `n̂`, so
+/// the surface holds `c ± r·n̂` too, which is all the halves need of it
+/// ([`four_half_ellipses_where_two_pipes_of_one_width_meet`]).
+///
+/// Bars along `x` through `(9, 0, 0)` and turned 80° about `z`, with both
+/// stored exactly in `z = 0`, meet at `(11 + 2⁻⁵⁰, 0, 0)`. The surface leaning
+/// towards the bar along `x` passes through the turned bar's start and faces
+/// that bar's direction crossed with `z`, and the one leaning towards the
+/// turned bar passes through `(9, 0, 0)` and faces `(0, 1, 0)`
+/// (`two_thin_bars_whose_axes_meet_where_f64_holds_no_point_are_named_in_four_halves`).
+///
+/// # Errors
+///
+/// Whatever [`HalfSpaceThroughAPoint::new`] refuses.
+fn a_surface_through_the_other_axis(own: &Cylinder, other: &Cylinder) -> Result<Option<Picker>> {
+    let [own_way, other_way] = [own, other].map(|pipe| pipe.axis().direction());
+    let [x, y, z] = other_way.components();
+    for facing in [[0.0, z, -y], [-z, 0.0, x], [y, -x, 0.0]]
+        .into_iter()
+        .flat_map(|facing| [facing, facing.map(|number| -number)])
+        .map(Vector::from)
+    {
+        assert!(
+            Exact::dot_of(facing.components(), other_way.components())
+                .is_none_or(|reach| reach.sign() == Decision::Zero),
+            "{other_way:?} crossed with x, y or z is {facing:?}, which is square to it"
+        );
+        if it_lies_exactly_in_the_flat_of(facing, own_way, other_way)
+            && it_leans_towards(facing, own_way, other_way)
+        {
+            return Ok(Some(Picker::from(HalfSpaceThroughAPoint::new(
+                other.axis().origin(),
+                facing,
+            )?)));
+        }
+    }
+    Ok(None)
+}
+
+/// A flat surface through a point `f64` holds and on neither axis, which
+/// passes exactly through `middle`, where the axes meet, and leans towards
+/// `own` rather than `other` — or `None` when no facing tried gives one.
+///
+/// It is for axes that meet where `f64` holds no point and where no surface
+/// [`a_surface_through_the_other_axis`] tries lies in their flat. The facing
+/// is `own`, then the sums [`sums_mostly_of_own`] gives, each taken only where
+/// it lies exactly in the flat of `own` and `other` and leans towards `own`,
+/// so the surface holds `c ± r·n̂` once it holds `c`. The point is the one
+/// [`a_point_level_with`] finds.
+///
+/// Bars along `x` through `(9, 0, 0)` and turned 105° about `z`, the turned
+/// one's direction `û` stored `2⁻⁵²` under `z = 0`, meet at `(11 − 2⁻⁵⁰, 0,
+/// 0)`, which rounds to `(11 − 2⁻⁴⁹, 0, 0)`. The surface leaning towards the
+/// turned bar faces `û`, and the one leaning towards the bar along `x` faces
+/// `2·x̂ + û`, since `x̂` reaches only `x`, where no slide `f64` holds makes
+/// up `2⁻⁵⁰` at 11. Both facings reach `z` by `−2⁻⁵²`, so
+/// sliding `z` by `−4` times the facing's `x` makes up the `2⁻⁵⁰` the rounding
+/// left along `x`: the two pass through `(11 − 2⁻⁴⁹, 0, −4·u_x)` and
+/// `(11 − 2⁻⁴⁹, 0, −4·(2 + u_x))`
+/// (`two_thin_bars_a_hair_off_one_coordinate_flat_whose_axes_meet_off_f64_are_named_in_four_halves`).
+///
+/// # Errors
+///
+/// Whatever [`HalfSpaceThroughAPoint::new`] refuses.
+fn a_surface_through_a_point_beside_the_middle(
+    middle: &AFractionalPoint,
+    own: Vector,
+    other: Vector,
+) -> Result<Option<Picker>> {
+    for facing in core::iter::once(own).chain(sums_mostly_of_own(own, other)) {
+        if !(it_lies_exactly_in_the_flat_of(facing, own, other)
+            && it_leans_towards(facing, own, other))
+        {
+            continue;
+        }
+        if let Some(through) = a_point_level_with(middle, facing) {
+            return Ok(Some(Picker::from(HalfSpaceThroughAPoint::new(
+                through, facing,
+            )?)));
+        }
+    }
+    Ok(None)
+}
+
+/// A point `f64` holds whose dot with `facing` is exactly `middle`'s, so the
+/// flat surface through it facing `facing` passes exactly through `middle` —
+/// or `None` when none is found.
+///
+/// `middle` rounded one coordinate at a time falls short by `s =
+/// facing·(middle − rounded)`. Sliding coordinate `j` by `s/facing_j` makes
+/// that up, and a slide is kept only where `f64` holds it and the coordinate
+/// it lands on, asked exactly, so the further `facing` is from reaching along
+/// `j` the larger and the likelier to be held the slide is.
+fn a_point_level_with(middle: &AFractionalPoint, facing: Vector) -> Option<Point> {
+    let facing = facing.components();
+    let short_by = |point: [f64; 3]| {
+        (0..3).try_fold(Exact::of(0.0), |sum, axis| {
+            let gap = middle.tops[axis].minus(&Exact::of(point[axis]).times(&middle.bottom)?);
+            Some(sum.plus(&Exact::of(facing[axis]).times(&gap)?))
+        })
+    };
+    let rounded = middle
+        .tops
+        .each_ref()
+        .map(|top| top.nearest_f64() / middle.bottom.nearest_f64());
+    if !rounded.iter().all(|coordinate| coordinate.is_finite()) {
+        return None;
+    }
+    let short = short_by(rounded)?;
+    (0..3).filter(|&axis| facing[axis] != 0.0).find_map(|axis| {
+        let (top, bottom) = if facing[axis] > 0.0 {
+            (
+                short.clone(),
+                middle.bottom.times(&Exact::of(facing[axis]))?,
+            )
+        } else {
+            (
+                Exact::of(0.0).minus(&short),
+                middle.bottom.times(&Exact::of(-facing[axis]))?,
+            )
+        };
+        let mut through = rounded;
+        through[axis] += the_f64_a_quotient_is(&top, &bottom)?;
+        let level = through.iter().all(|coordinate| coordinate.is_finite())
+            && short_by(through)?.sign() == Decision::Zero;
+        level.then(|| Point::from(through))
+    })
 }
 
 /// The flat surface [`a_flat_surface_through_where_the_walls_touch`] finds, or
@@ -2002,11 +2273,7 @@ fn a_flat_surface_through_where_the_walls_touch(
                     * (f64::from(steps) * one_unit_in_the_last_place_of_what_it_moves(own, way))
             })
         });
-    let mostly_own = (2..=4).flat_map(|more| {
-        (1..more)
-            .flat_map(|less| [less, -less])
-            .map(move |less| own * f64::from(more) + other * f64::from(less))
-    });
+    let mostly_own = sums_mostly_of_own(own, other);
     let in_lowest_terms = own_in_lowest_terms(own);
     let slid_as_far_as_solved = in_lowest_terms
         .into_iter()
@@ -2034,6 +2301,17 @@ fn a_flat_surface_through_where_the_walls_touch(
         }
     }
     Ok(None)
+}
+
+/// Two to four of `own` and fewer of `other`, either way: each lies in the
+/// flat of the two when nothing rounds, and leans towards `own` as anything
+/// holding more of it does.
+fn sums_mostly_of_own(own: Vector, other: Vector) -> impl Iterator<Item = Vector> {
+    (2..=4).flat_map(move |more| {
+        (1..more)
+            .flat_map(|less| [less, -less])
+            .map(move |less| own * f64::from(more) + other * f64::from(less))
+    })
 }
 
 /// How many steps a facing is slid either way along a whole-number way before
@@ -7447,6 +7725,245 @@ mod tests {
                     matches!(above_low, Decision::Pos | Decision::Zero)
                         && matches!(below_high, Decision::Pos | Decision::Zero),
                     "the window {window:?} for {picker:?} does not hold the true middle"
+                );
+            }
+        }
+    }
+
+    /// Two bars of radius 1/4, the first along `x` through `(9, 0, 0)` and the
+    /// second turned 122°, 125°, 128°, 129° or 135° about `z` and started 16
+    /// back along itself from `(11, 0, 0)`, with the numbers the model stores
+    /// for them (Q1967). Worked in exact fractions, the two stored axes meet at
+    /// `(x, 0, 0)`, 16 along the second, with `x` either `11` or `11 − 2⁻⁴⁹`,
+    /// both of which `f64` holds. The foot of the common perpendicular worked
+    /// in `f64` misses that point by a rounding and so is not on both axes, and
+    /// every one of these was refused `CannotNameWhichPieceOfACrossingThisIs`.
+    #[test]
+    fn two_thin_bars_whose_axes_meet_where_f64_holds_the_point_are_named_in_four_halves() {
+        let first = a_pipe_as_written([1.0, 0.0, 0.0], [9.0, 0.0, 0.0]);
+        for (degrees, through, along) in [
+            (
+                122,
+                [
+                    19.478708227731275,
+                    -13.568769538502819,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.5299192642332048,
+                    0.8480480961564262,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                125,
+                [
+                    20.177222981616737,
+                    -13.106432708623867,
+                    -1.7763568394002505e-15,
+                ],
+                [
+                    -0.5735764363510462,
+                    0.8191520442889917,
+                    1.1102230246251565e-16,
+                ],
+            ),
+            (
+                128,
+                [
+                    20.850583605210534,
+                    -12.608172057707556,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.6156614753256584,
+                    0.7880107536067222,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                129,
+                [21.0691262567974, -12.43433538331154, 3.552713678800501e-15],
+                [
+                    -0.6293203910498375,
+                    0.7771459614569712,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                135,
+                [
+                    22.31370849898476,
+                    -11.313708498984763,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.7071067811865475,
+                    0.7071067811865477,
+                    -2.220446049250313e-16,
+                ],
+            ),
+        ] {
+            let second = a_pipe_as_written(along, through);
+            named_in_four_halves_both_ways_round(&first, &second, degrees);
+        }
+    }
+
+    /// The same two bars turned 80°, 112° or 116°, where the second's stored
+    /// direction and start are exactly in `z = 0` (Q1967). Worked in exact
+    /// fractions, the two stored axes meet at `(11 ± 2⁻⁵⁰, 0, 0)`, which `f64`
+    /// does not hold, so no surface through that point can be written down.
+    /// Every one of these was refused `CannotNameWhichPieceOfACrossingThisIs`.
+    #[test]
+    fn two_thin_bars_whose_axes_meet_where_f64_holds_no_point_are_named_in_four_halves() {
+        let first = a_pipe_as_written([1.0, 0.0, 0.0], [9.0, 0.0, 0.0]);
+        for (degrees, through, along) in [
+            (
+                80,
+                [8.221629157329115, -15.756924048195328, 0.0],
+                [0.17364817766693036, 0.984807753012208, 0.0],
+            ),
+            (
+                112,
+                [16.993705494654595, -14.834941673068599, 0.0],
+                [-0.3746065934159121, 0.9271838545667874, 0.0],
+            ),
+            (
+                116,
+                [18.01393834862524, -14.38070474078667, 0.0],
+                [-0.43837114678907746, 0.8987940462991669, 0.0],
+            ),
+        ] {
+            let second = a_pipe_as_written(along, through);
+            named_in_four_halves_both_ways_round(&first, &second, degrees);
+        }
+    }
+
+    /// The same two bars turned 105°, 110°, 111°, 113°, 114° or 119°, where the
+    /// second's stored direction is a hair under `z = 0`, by `2⁻⁵²`, and its
+    /// start a hair over it, by `2⁻⁴⁸` (Q1967). Worked in exact fractions, the
+    /// two stored axes still lie in one flat and meet at `(11 ± 2⁻⁵⁰, 0, 0)`,
+    /// which `f64` does not hold, and neither direction crossed with `x`, `y`
+    /// or `z` lies in that flat. Every one of these was refused
+    /// `CannotNameWhichPieceOfACrossingThisIs`.
+    #[test]
+    fn two_thin_bars_a_hair_off_one_coordinate_flat_whose_axes_meet_off_f64_are_named_in_four_halves()
+     {
+        let first = a_pipe_as_written([1.0, 0.0, 0.0], [9.0, 0.0, 0.0]);
+        for (degrees, through, along) in [
+            (
+                105,
+                [
+                    15.141104721640332,
+                    -15.454813220625095,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.2588190451025208,
+                    0.9659258262890684,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                110,
+                [16.4723222932107, -15.035081932574537, 3.552713678800501e-15],
+                [
+                    -0.3420201433256687,
+                    0.9396926207859085,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                111,
+                [
+                    16.733887192724808,
+                    -14.937286823955231,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.35836794954530043,
+                    0.933580426497202,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                113,
+                [
+                    17.25169805582838,
+                    -14.728077655239048,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.3907311284892739,
+                    0.9205048534524405,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                114,
+                [
+                    17.507786289212802,
+                    -14.616727322281617,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.4067366430758002,
+                    0.9135454576426011,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                119,
+                [
+                    18.756953923941392,
+                    -13.993915314230335,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.48480962024633706,
+                    0.874619707139396,
+                    -2.220446049250313e-16,
+                ],
+            ),
+        ] {
+            let second = a_pipe_as_written(along, through);
+            named_in_four_halves_both_ways_round(&first, &second, degrees);
+        }
+    }
+
+    /// A pipe of radius 1/4 whose axis stores `along` and `through` bit for
+    /// bit, as a moved bar's does.
+    fn a_pipe_as_written(along: [f64; 3], through: [f64; 3]) -> Surface {
+        let axis =
+            Axis::as_written(Point::from(through), Vector::from(along)).expect("a direction");
+        assert_eq!(axis.direction().components(), along, "stored as written");
+        Surface::Cylinder(Cylinder::new(axis, 0.25).expect("a radius"))
+    }
+
+    /// `intersect` names the crossing of `one` and `other` in four halves,
+    /// each picked by two flat surfaces, whichever is written first.
+    fn named_in_four_halves_both_ways_round(one: &Surface, other: &Surface, degrees: u32) {
+        for (first, second) in [(one, other), (other, one)] {
+            let named = intersect(
+                first,
+                second,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let Ok(SurfaceMeet::Curves(halves)) = &named else {
+                panic!("{degrees}°: two ellipses crossing: {named:?}");
+            };
+            assert_eq!(halves.len(), 4, "{degrees}°: {halves:?}");
+            for half in halves {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                    panic!("{degrees}°: a piece of where the two cross: {half:?}");
+                };
+                assert!(
+                    picked_by.len() == 2
+                        && picked_by
+                            .iter()
+                            .all(|picker| picker.facing_of_a_flat().is_some()),
+                    "{degrees}°: two flat pickers: {picked_by:?}"
                 );
             }
         }

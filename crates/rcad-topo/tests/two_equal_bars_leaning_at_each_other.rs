@@ -5,8 +5,10 @@
 //! centred on `through = (11, 0, 0)`, so it runs right through the first, or 2
 //! long and starts at `through = (11, −3.25, 0.5)`, so its near cap passes
 //! through where the axes meet. Each test runs all six fuses — three rules,
-//! each bar first in turn. At 50° to 100° every one answers, through either
-//! point; at 120° they are still refused, each by the variant pinned here.
+//! each bar first in turn. At 50°, 60°, 70° and 100° every one answers, through
+//! either point. At 120° every one is refused, through either point, and at 80°
+//! and 105° to 135° every one through `(11, 0, 0)`, each by the variant pinned
+//! here.
 //!
 //! **What they should come to**, with `r = 1/4` and `a` the angle: the first
 //! bar is `A = π/4`. What two pipes of one width share where their axes cross at
@@ -28,7 +30,7 @@ use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry};
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
 /// The second bar runs right through the first at 50°, 60°, 70° or 100°, and
 /// every fuse answers what the module doc says, with `I = 1/(12 sin a)`: the
@@ -112,6 +114,9 @@ fn a_long_bar_through_another_at_a_slant_answers_every_fuse() {
 /// `the_corners_of_each_run_between_two_tangent_points`, so each half is
 /// folded into one edge from touch point to touch point, which cannot be
 /// named. Either way it is refused.
+///
+/// At 80° and at 105° to 135° every fuse is refused the same few ways
+/// (`a_long_bar_through_another_at_80_or_105_to_135_degrees_is_refused_past_the_split`).
 ///
 /// **A gap, by §16.10**: the answer is `1/(12 sin 120°)` shared, inside the
 /// range a model holds.
@@ -368,6 +373,173 @@ fn the_near_cap(model: &Model, second: SolidKey) -> rcad_geom::Plane {
                 < 1e-12
         })
         .expect("a bar starting at the meeting point has a cap within a rounding of it")
+}
+
+/// The second bar runs right through the first at 80° or at 105° to 135° but
+/// 120° (Q1967), and **every fuse gets past splitting the faces and none
+/// answers**. The unions, both ways round, are refused
+/// `CannotNameWhichPieceOfACrossingThisIs` after the pieces are chosen, as at
+/// 120°; the rest `CannotMeshAFace`, `AWireWillNotLieFlatOnItsFace`,
+/// `ACurvedFaceGoesRightRoundWithNoSeam` or
+/// `Invalid(FacesDoNotAgreeWhichWayTheyFace)`, each as pinned below. Not
+/// traced further: Q1793 names the same refusals at 120°, and Q1965 the touch
+/// points they meet at.
+///
+/// **Until Q1967 all 84 were refused `CannotNameWhichPieceOfACrossingThisIs` by
+/// `intersect`**, splitting the faces, before any piece was chosen. Each of the
+/// four halves of the ellipses two pipes of one width cross in is picked by two
+/// flat surfaces through where the axes meet, and that point was worked out in
+/// `f64` and then asked exactly of both axes. It failed three ways, each fixed
+/// in `four_half_ellipses_where_two_pipes_of_one_width_meet` in
+/// `crates/rcad-geom/src/intersect.rs`:
+///
+/// - At 122° to 135° the axes meet at `(11, 0, 0)`, which `f64` holds, and the
+///   `f64` formula landed beside it. The point is now worked out exactly
+///   (`where_two_axes_meet_exactly`).
+/// - At 80°, 112° and 116° the stored direction lies exactly in `z = 0` and
+///   `f64` holds no point where the axes meet. Each surface now holds the whole
+///   of the other axis (`a_surface_through_the_other_axis`).
+/// - At 105°, 110°, 111°, 113°, 114° and 119° the stored direction is a hair
+///   off `z = 0` and `f64` holds no point where the axes meet either. Each
+///   surface now passes through a point `f64` holds that is level with the
+///   meeting point along the surface's facing
+///   (`a_surface_through_a_point_beside_the_middle`).
+///
+/// **A gap, by §16.10**: the answer is `1/(12 sin a)` shared, inside the range
+/// a model holds.
+#[test]
+fn a_long_bar_through_another_at_80_or_105_to_135_degrees_is_refused_past_the_split() {
+    type Pin = fn(&Result<usize, Error>) -> bool;
+    let unnamed: Pin = refused_naming_a_piece;
+    let pinned: [(&[f64], [Pin; 6]); 5] = [
+        (
+            &[80.0, 112.0, 114.0],
+            [
+                unnamed,
+                unnamed,
+                refused_with_no_seam,
+                refused_corners_coincide,
+                refused_corners_coincide,
+                refused_a_wire_not_flat,
+            ],
+        ),
+        (
+            &[105.0, 110.0],
+            [
+                unnamed,
+                unnamed,
+                refused_with_no_seam,
+                refused_corners_coincide,
+                refused_a_boundary_crossing_itself,
+                refused_a_wire_not_flat,
+            ],
+        ),
+        (
+            &[111.0, 119.0],
+            [
+                unnamed,
+                unnamed,
+                refused_a_boundary_crossing_itself,
+                refused_with_no_seam,
+                refused_a_wire_not_flat,
+                refused_a_boundary_crossing_itself,
+            ],
+        ),
+        (
+            &[113.0, 116.0],
+            [
+                unnamed,
+                unnamed,
+                refused_with_no_seam,
+                refused_a_side_cutting_off_a_corner,
+                refused_faces_that_disagree,
+                refused_a_wire_not_flat,
+            ],
+        ),
+        (
+            &[122.0, 125.0, 128.0, 129.0, 135.0],
+            [
+                unnamed,
+                unnamed,
+                refused_with_no_seam,
+                refused_a_boundary_crossing_itself,
+                refused_a_boundary_crossing_itself,
+                refused_a_wire_not_flat,
+            ],
+        ),
+    ];
+    let mut not_as_pinned = Vec::new();
+    for (angles, pins) in pinned {
+        for &degrees in angles {
+            for ((rule, first_first), pin) in six_fuses().into_iter().zip(pins) {
+                let said = fuse(degrees, [11.0, 0.0, 0.0], rule, first_first);
+                if !pin(&said) {
+                    not_as_pinned.push(format!(
+                        "{degrees}° {rule:?} (first first: {first_first}): {said:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        not_as_pinned.is_empty(),
+        "not as pinned:\n{}",
+        not_as_pinned.join("\n")
+    );
+}
+
+fn refused_naming_a_piece(said: &Result<usize, Error>) -> bool {
+    matches!(
+        said,
+        Err(Error::Geometry(
+            rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+        ))
+    )
+}
+
+fn refused_with_no_seam(said: &Result<usize, Error>) -> bool {
+    matches!(said, Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }))
+}
+
+fn refused_a_wire_not_flat(said: &Result<usize, Error>) -> bool {
+    matches!(said, Err(Error::AWireWillNotLieFlatOnItsFace { .. }))
+}
+
+fn refused_corners_coincide(said: &Result<usize, Error>) -> bool {
+    matches!(
+        said,
+        Err(Error::CannotMeshAFace {
+            why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
+            ..
+        })
+    )
+}
+
+fn refused_a_boundary_crossing_itself(said: &Result<usize, Error>) -> bool {
+    matches!(
+        said,
+        Err(Error::CannotMeshAFace {
+            why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
+            ..
+        })
+    )
+}
+
+fn refused_a_side_cutting_off_a_corner(said: &Result<usize, Error>) -> bool {
+    matches!(
+        said,
+        Err(Error::CannotMeshAFace {
+            why: rcad_mesh::CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch { .. },
+            ..
+        })
+    )
+}
+
+fn refused_faces_that_disagree(said: &Result<usize, Error>) -> bool {
+    matches!(
+        said,
+        Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
+    )
 }
 
 fn six_fuses() -> [(Rule, bool); 6] {

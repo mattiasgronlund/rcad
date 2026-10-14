@@ -2212,7 +2212,8 @@ impl<'f> Arrangement<'f> {
     /// proves that before it names the halves) and is not along the axis, since
     /// it leans towards it. A picker that is a half-space gives `c` as where the
     /// axis crosses it, in intervals; one that holds its point holds `c` itself
-    /// (`docs/decisions.md` §443.5). `n̂` is along the two pickers' facings
+    /// where that point is on the axis (`docs/decisions.md` §443.5), and gives
+    /// it as a half-space does where it is not ([`where_an_axis_crosses_a_flat_picker`]). `n̂` is along the two pickers' facings
     /// crossed, since both lie exactly in the flat of the two axes. The
     /// enclosure is then of the true places.
     ///
@@ -2471,7 +2472,11 @@ impl<'f> Arrangement<'f> {
     /// more than nought against it, so the axis crosses the surface once. A
     /// picker that holds its point, which `intersect` builds where no
     /// half-space written in `f64` passes exactly through `c`, holds `c`
-    /// itself, and that is taken as it is (`docs/decisions.md` §443.5).
+    /// itself, and that is taken as it is (`docs/decisions.md` §443.5) —
+    /// unless `c` is no point `f64` holds, where it holds the other pipe's
+    /// start or a point on neither axis and the crossing is worked out in
+    /// intervals
+    /// ([`where_an_axis_crosses_a_flat_picker`]).
     ///
     /// **Without it the four halves were one edge.** Every half runs between
     /// the same two nodes ([`Arrangement::place_where_two_halves_meet`]) and
@@ -10149,7 +10154,9 @@ fn one_of_two_loops_round_a_thin_pipe(
 ///
 /// Each surface is a half-space, or, where no half-space written in `f64`
 /// passes exactly through that point, a surface that holds the point itself,
-/// as for bars on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)`. Only
+/// as for bars on `(3, 4, 0)` and `(4, 0, 3)` through `(11, −3.25, 0.5)`, or
+/// the other pipe's start or a point on neither axis where `f64` holds no such
+/// point. Only
 /// a picker's facing is read here, and both kinds hold it exactly as
 /// `intersect` asked it (`docs/decisions.md` §443.5).
 ///
@@ -10461,35 +10468,56 @@ fn a_box_round_where_a_flat_surface_cuts_a_pipe(
 /// An enclosure of where `pipe`'s axis crosses the flat surface of `picker`,
 /// one of the two that pick out a half ellipse ([`a_half_of_an_ellipse`]).
 ///
-/// A picker holding its point holds where the axes meet: `intersect` builds it
-/// through that point only after asking it exactly of both axes, so the
-/// crossing is that point, exactly (`docs/decisions.md` §443.5).
+/// A picker holding its point, where that point is on `pipe`'s axis, holds
+/// where the axes meet: `intersect` builds it through that point only after
+/// asking it exactly of both axes, so the crossing is that point, exactly
+/// (`docs/decisions.md` §443.5). Where the axes meet at no point `f64` holds,
+/// `intersect` builds it through the other pipe's start instead, holding the
+/// whole of that pipe's axis, or through a point on neither axis that is level
+/// with where they meet along its facing, and the crossing is worked out as
+/// for a half-space, from its facing and that point.
 ///
 /// # Panics
 ///
 /// If `picker` is curved, which [`a_half_of_an_ellipse`] rules out.
 fn where_an_axis_crosses_a_flat_picker(pipe: &Cylinder, picker: &Picker) -> [Interval; 3] {
     match picker {
-        Picker::InFrontOf(facing) => where_an_axis_crosses_a_flat_surface(pipe, facing),
-        Picker::InFrontOfAFlatThrough(facing) => {
+        Picker::InFrontOf(facing) => where_an_axis_crosses_a_flat_surface(
+            pipe,
+            facing.normal(),
+            Interval::exactly(facing.offset()),
+        ),
+        Picker::InFrontOfAFlatThrough(facing)
+            if lies_exactly_on_the_axis(facing.through(), pipe.axis()) == Some(true) =>
+        {
             facing.through().coordinates().map(Interval::exactly)
         }
+        Picker::InFrontOfAFlatThrough(facing) => where_an_axis_crosses_a_flat_surface(
+            pipe,
+            facing.facing(),
+            dot_of(
+                facing.facing().components().map(Interval::exactly),
+                facing.through().coordinates().map(Interval::exactly),
+            ),
+        ),
         Picker::OutsideABall(_) | Picker::OutsideAPipe(_) | Picker::InsideAPipe(_) | _ => {
             unreachable!("a half ellipse is picked out by two flat surfaces, not {picker:?}")
         }
     }
 }
 
-/// An enclosure of where `pipe`'s axis crosses the flat surface of `facing`,
-/// which faces along that axis: `o + λ·d` with `λ = (offset − g·o)/(g·d)`.
-fn where_an_axis_crosses_a_flat_surface(pipe: &Cylinder, facing: &HalfSpace) -> [Interval; 3] {
+/// An enclosure of where `pipe`'s axis crosses the flat surface `g·x = offset`,
+/// for `g` the `facing`, which faces along that axis: `o + λ·d` with
+/// `λ = (offset − g·o)/(g·d)`.
+fn where_an_axis_crosses_a_flat_surface(
+    pipe: &Cylinder,
+    facing: Vector,
+    offset: Interval,
+) -> [Interval; 3] {
     let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
     let direction = pipe.axis().direction().components().map(Interval::exactly);
-    let normal = facing.normal().components().map(Interval::exactly);
-    let slide = quotient_of(
-        Interval::exactly(facing.offset()) - dot_of(normal, origin),
-        dot_of(normal, direction),
-    );
+    let normal = facing.components().map(Interval::exactly);
+    let slide = quotient_of(offset - dot_of(normal, origin), dot_of(normal, direction));
     [0, 1, 2].map(|axis| origin[axis] + direction[axis] * slide)
 }
 
