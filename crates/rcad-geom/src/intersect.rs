@@ -7451,4 +7451,121 @@ mod tests {
             }
         }
     }
+
+    /// Two bars of radius 1/4, the first along `x` through `(9, 0, 0)` and the
+    /// second turned 122°, 125°, 128°, 129° or 135° about `z` and started 16
+    /// back along itself from `(11, 0, 0)`, with the numbers the model stores
+    /// for them (Q1967). Worked in exact fractions, the two stored axes meet at
+    /// `(x, 0, 0)`, 16 along the second, with `x` either `11` or `11 − 2⁻⁴⁹`,
+    /// both of which `f64` holds. The foot of the common perpendicular worked
+    /// in `f64` misses that point by a rounding and so is not on both axes, and
+    /// every one of these was refused `CannotNameWhichPieceOfACrossingThisIs`.
+    #[test]
+    fn two_thin_bars_whose_axes_meet_where_f64_holds_the_point_are_named_in_four_halves() {
+        let first = a_pipe_as_written([1.0, 0.0, 0.0], [9.0, 0.0, 0.0]);
+        for (degrees, through, along) in [
+            (
+                122,
+                [
+                    19.478708227731275,
+                    -13.568769538502819,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.5299192642332048,
+                    0.8480480961564262,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                125,
+                [
+                    20.177222981616737,
+                    -13.106432708623867,
+                    -1.7763568394002505e-15,
+                ],
+                [
+                    -0.5735764363510462,
+                    0.8191520442889917,
+                    1.1102230246251565e-16,
+                ],
+            ),
+            (
+                128,
+                [
+                    20.850583605210534,
+                    -12.608172057707556,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.6156614753256584,
+                    0.7880107536067222,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                129,
+                [21.0691262567974, -12.43433538331154, 3.552713678800501e-15],
+                [
+                    -0.6293203910498375,
+                    0.7771459614569712,
+                    -2.220446049250313e-16,
+                ],
+            ),
+            (
+                135,
+                [
+                    22.31370849898476,
+                    -11.313708498984763,
+                    3.552713678800501e-15,
+                ],
+                [
+                    -0.7071067811865475,
+                    0.7071067811865477,
+                    -2.220446049250313e-16,
+                ],
+            ),
+        ] {
+            let second = a_pipe_as_written(along, through);
+            named_in_four_halves_both_ways_round(&first, &second, degrees);
+        }
+    }
+
+    /// A pipe of radius 1/4 whose axis stores `along` and `through` bit for
+    /// bit, as a moved bar's does.
+    fn a_pipe_as_written(along: [f64; 3], through: [f64; 3]) -> Surface {
+        let axis =
+            Axis::as_written(Point::from(through), Vector::from(along)).expect("a direction");
+        assert_eq!(axis.direction().components(), along, "stored as written");
+        Surface::Cylinder(Cylinder::new(axis, 0.25).expect("a radius"))
+    }
+
+    /// `intersect` names the crossing of `one` and `other` in four halves,
+    /// each picked by two flat surfaces, whichever is written first.
+    fn named_in_four_halves_both_ways_round(one: &Surface, other: &Surface, degrees: u32) {
+        for (first, second) in [(one, other), (other, one)] {
+            let named = intersect(
+                first,
+                second,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let Ok(SurfaceMeet::Curves(halves)) = &named else {
+                panic!("{degrees}°: two ellipses crossing: {named:?}");
+            };
+            assert_eq!(halves.len(), 4, "{degrees}°: {halves:?}");
+            for half in halves {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = half.run() else {
+                    panic!("{degrees}°: a piece of where the two cross: {half:?}");
+                };
+                assert!(
+                    picked_by.len() == 2
+                        && picked_by
+                            .iter()
+                            .all(|picker| picker.facing_of_a_flat().is_some()),
+                    "{degrees}°: two flat pickers: {picked_by:?}"
+                );
+            }
+        }
+    }
 }
