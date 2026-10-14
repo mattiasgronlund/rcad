@@ -173,7 +173,51 @@ pub(crate) fn assemble(
     if let Some(inputs_reach) = inputs_reach {
         assembly.check_dynamic_range(inputs_reach, policy, range_warning)?;
     }
-    assembly.runs = assembly.how_each_edge_runs()?;
+    let runs = assembly.how_each_edge_runs();
+    if std::env::var("PROBE_DUMP").is_ok() {
+        for (index, corner) in assembly.corners.iter().enumerate() {
+            eprintln!("DUMP corner {index} {:?}", corner.point.coordinates());
+        }
+        for (index, edge) in assembly.edges.iter().enumerate() {
+            let arc = match edge.arc {
+                WhichArc::TheOnlyOne => "only".to_string(),
+                WhichArc::LeavingACorner { corner, towards } => {
+                    format!("leaving {corner} towards {towards:?}")
+                }
+            };
+            let kinds = edge.carried_by.map(|surface| match surface {
+                Surface::Plane(plane) => format!("plane{:?}", plane.coefficients()),
+                other => format!("{other:?}").chars().take(12).collect(),
+            });
+            let run = match &runs {
+                Ok(runs) => format!("{:?}", runs[index])
+                    .chars()
+                    .take(300)
+                    .collect::<String>(),
+                Err(_) => String::new(),
+            };
+            eprintln!(
+                "DUMP edge {index} ends {:?} {kinds:?} {arc} RUN {run}",
+                edge.ends
+            );
+        }
+        for (index, face) in assembly.faces.iter().enumerate() {
+            let surface: String = match face.surface {
+                Surface::Plane(plane) => format!("plane{:?}", plane.coefficients()),
+                other => format!("{other:?}").chars().take(12).collect(),
+            };
+            let wires: Vec<Vec<(usize, bool)>> = face
+                .wires
+                .iter()
+                .map(|wire| wire.iter().map(|side| (side.edge, side.forward)).collect())
+                .collect();
+            eprintln!(
+                "DUMP face {index} {surface} {:?} wires {wires:?}",
+                face.used
+            );
+        }
+    }
+    assembly.runs = runs?;
     Ok(assembly)
 }
 
@@ -4853,11 +4897,49 @@ impl Edge {
             crossing = crossing_at(second);
         }
         let across = squared_off_from(from, crossing);
-        let agreement = across.dot(squared_off_from(named_from, towards));
+        let named = squared_off_from(named_from, towards);
+        let agreement = across.dot(named);
         if agreement > 0.0 {
             Some(across)
         } else if agreement < 0.0 {
             Some(-across)
+        } else {
+            self.the_way_into_an_arc_whose_chord_lies_along_its_tangent(
+                corners, from, named_from, towards,
+            )
+        }
+    }
+
+    fn the_way_into_an_arc_whose_chord_lies_along_its_tangent(
+        &self,
+        corners: &[Corner],
+        from: usize,
+        named_from: usize,
+        towards: Vector,
+    ) -> Option<Vector> {
+        let flat = self.carried_by.iter().find_map(Surface::as_plane)?;
+        let round = self
+            .carried_by
+            .iter()
+            .find(|surface| surface.as_plane().is_none())?;
+        where_a_closed_crossing_is_centred(round, &flat)?;
+        let at = corners[from].point;
+        let chord = corners[self.other_end_than(from)].point - at;
+        let square = flat.normal().cross(chord);
+        let reading = square.dot(gradient_of(round, at));
+        let outwards = if reading > 0.0 {
+            square
+        } else if reading < 0.0 {
+            -square
+        } else {
+            return None;
+        };
+        let heading =
+            towards.dot(corners[self.other_end_than(named_from)].point - corners[named_from].point);
+        if heading > 0.0 {
+            Some(outwards)
+        } else if heading < 0.0 {
+            Some(-outwards)
         } else {
             None
         }

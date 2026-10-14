@@ -293,6 +293,71 @@ fn two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy() {
     }
 }
 
+#[test]
+fn probe_q1867_nine_under_tolerant() {
+    let only: Option<usize> = std::env::var("PROBE_CASE").ok().map(|s| s.parse().unwrap());
+    for (index, (degrees, radius, rule)) in [
+        (90.0, 1.0, Rule::Difference),
+        (90.0, 0.001, Rule::Difference),
+        (90.0, 1000.0, Rule::Difference),
+        (90.0, 3.0, Rule::Difference),
+        (45.0, 0.001, Rule::Difference),
+        (45.0, 1000.0, Rule::Difference),
+        (10.0, 1.0, Rule::Intersection),
+        (10.0, 0.001, Rule::Difference),
+        (10.0, 1000.0, Rule::Difference),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if only.is_some_and(|only| only != index) {
+            continue;
+        }
+        let mut model = a_model(radius);
+        let ball = model
+            .add_ball(radius, &Isometry::identity())
+            .expect("a ball");
+        let first = a_knife_through_the_axis(&mut model, radius, 0.0);
+        let half = fused(&mut model, &[ball], &[first], Rule::Intersection);
+        let second = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
+        let mut log = ProvenanceLog::new();
+        let policy = Policy::tolerant(model.scale().nominal_size());
+        eprintln!("PROBE start {index} {degrees} {radius} {rule:?}");
+        let outcome = model.fuse(&half, &[second], rule, &policy, &mut log);
+        match outcome {
+            Ok(fused) => {
+                let answer = fused.solids().to_vec();
+                let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                let volume: Vec<_> = answer
+                    .iter()
+                    .map(|&solid| {
+                        model
+                            .solid(solid)
+                            .unwrap()
+                            .measure(
+                                Deflection::of(DEFLECTION_PER_RADIUS * radius).unwrap(),
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            )
+                            .map(|m| m.volume())
+                    })
+                    .collect();
+                let closed = what_two_knives_leave()
+                    .iter()
+                    .find(|(r, _)| *r == rule)
+                    .map(|(_, f)| f(degrees, radius))
+                    .unwrap();
+                eprintln!(
+                    "PROBE {index} {degrees} {radius} {rule:?}: answered {} solids, valid {valid:?}, volumes {volume:?}, closed {closed}, log {}",
+                    answer.len(),
+                    log.records().len()
+                );
+            }
+            Err(why) => eprintln!("PROBE {index} {degrees} {radius} {rule:?}: refused {why:?}"),
+        }
+    }
+}
+
 /// Why the 90 degree wedge was refused before it answered: the knife turned a
 /// quarter turn holds the axis by its corners and misses it by its stored
 /// plane, so a point in between was inside by the corners and is outside by
