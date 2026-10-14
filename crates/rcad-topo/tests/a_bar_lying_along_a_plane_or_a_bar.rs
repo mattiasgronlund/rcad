@@ -658,3 +658,102 @@ fn a_bar(model: &mut Model, radius: f64, height: f64, [x, y, z]: [f64; 3]) -> So
         )
         .expect("a bar")
 }
+
+/// The cylinder twin of Q953's wedge less the frustum (queue row Q1014): a
+/// block of side four, and a bar of radius one the same four high, lying
+/// inside it against the wall `x = 0`, touching it along `(0, 2, z)`. The
+/// wall's own corners sit at `z = 0` and `z = 4`, the same range the ruling
+/// runs, so the touch spans the wall's whole height.
+///
+/// The bar sits wholly inside the block, so the union is the block alone and
+/// the bar less the block is nothing. The intersection is the bar alone. The
+/// block less the bar is the one case that touches itself: in every cross
+/// section the hole's circle is tangent to the wall, so the wall's own
+/// thickness there runs to nothing, and the answer stays one piece whose wall
+/// folds back on itself along the ruling rather than parting into two.
+///
+/// Every one of the twelve fuses here — three rules, either argument first,
+/// certified or tolerant — answers; none is refused. `mesh.rs`'s fix for a
+/// straight edge lying across a flat face of its own solid (§364) is what the
+/// block-less-bar answer needs in order to measure at all: the ruling is such
+/// an edge, lying across the block's wall.
+#[test]
+fn a_block_less_a_bar_against_its_wall_touches_itself_along_the_ruling() {
+    const BLOCK_SIDE: f64 = 4.0;
+    const BAR_RADIUS: f64 = 1.0;
+    let block_volume = BLOCK_SIDE * BLOCK_SIDE * BLOCK_SIDE;
+    let bar_volume = PI * BAR_RADIUS * BAR_RADIUS * BLOCK_SIDE;
+
+    let mut wrong: Vec<String> = Vec::new();
+    for it_first in [false, true] {
+        for policy_name in ["certified", "tolerant"] {
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let block = a_block(&mut model, [BLOCK_SIDE, BLOCK_SIDE, BLOCK_SIDE]);
+                let bar = a_bar(&mut model, BAR_RADIUS, BLOCK_SIDE, [1.0, 2.0, 0.0]);
+                let [first, second] = if it_first { [bar, block] } else { [block, bar] };
+                let policy = if policy_name == "certified" {
+                    Policy::certified()
+                } else {
+                    Policy::tolerant(100.0)
+                };
+                let what = format!("{rule:?}, bar first {it_first}, {policy_name}");
+                let answer = match model.fuse(
+                    &[first],
+                    &[second],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                ) {
+                    Ok(answer) => answer,
+                    Err(why) => {
+                        wrong.push(format!("{what}: refused {why}"));
+                        continue;
+                    }
+                };
+                if let Err(why) = model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
+                    wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                    continue;
+                }
+                let solids = answer.solids();
+                let wanted_solids = usize::from(!(rule == Rule::Difference && it_first));
+                if solids.len() != wanted_solids {
+                    wrong.push(format!(
+                        "{what}: {} solids, wanted {wanted_solids}: {solids:?}",
+                        solids.len()
+                    ));
+                    continue;
+                }
+                if wanted_solids == 0 {
+                    continue;
+                }
+                let found = volume_of(&model, solids[0]);
+                let near = match rule {
+                    Rule::Union => (found - block_volume).abs() < 1e-9,
+                    Rule::Intersection => {
+                        found <= bar_volume
+                            && (bar_volume - found) / bar_volume < HOW_FAR_A_MESH_MAY_BE
+                    }
+                    Rule::Difference => {
+                        let expected = block_volume - bar_volume;
+                        found >= expected && (found - expected) / expected < HOW_FAR_A_MESH_MAY_BE
+                    }
+                    _ => unreachable!("only the three rules are asked"),
+                };
+                if !near {
+                    let expected = match rule {
+                        Rule::Union => block_volume,
+                        Rule::Intersection => bar_volume,
+                        Rule::Difference => block_volume - bar_volume,
+                        _ => unreachable!("only the three rules are asked"),
+                    };
+                    wrong.push(format!(
+                        "{what}: measured {found}, and the answer is {expected}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
