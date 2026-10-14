@@ -855,13 +855,20 @@ fn a_block_leaned_three_eighths_turned_three_across_a_steep_pointed_cone_answers
 /// Leaned `1`, the block meets the cone at every crossing. Crossing `0`
 /// turned `0`, the union and the cone-less-block refuse `CannotMeshAFace`;
 /// every other lean-`1` fuse is right. Leaned `4`, crossing `0` puts the
-/// leaning face through the apex and nowhere else on the cone, a touch, and
-/// refuses `CannotTellTheCellsOfAFaceApart` on every rule and every turn. The
-/// turn rounds that touch either way ([`a_leaning_case`]): turned `3` the face
-/// misses the apex ([`APART`]), and turned `0` or `1` the block holds a tip of
-/// the cone about `1e−16` tall ([`OVERLAPPING`]). Crossing `−0.5` misses the
-/// cone ([`APART`]), the other two crossings meet it ([`OVERLAPPING`]), and
-/// every one of those twenty-four answers right.
+/// leaning face through the apex and nowhere else on the cone, a touch. The
+/// turn rounds that touch either way ([`a_leaning_case`]):
+///
+/// - **Turned `0` or `1`**, the block holds a tip of the cone about `1e−16`
+///   tall ([`OVERLAPPING`]), and every rule is refused
+///   `Invalid(DynamicRangeTooWide)`. That is a limit, as round the unit cone
+///   ([`a_steep_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range`]).
+/// - **Turned `3`**, the face misses the apex ([`APART`]), and every rule is
+///   refused `a point inside a piece of a face`, Q464's family.
+///
+/// Until Q1777's `the_one_on_its_side_of_every_cut` in `fuse/arrange.rs` all
+/// twelve were refused `CannotTellTheCellsOfAFaceApart` instead (Q1985).
+/// Crossing `−0.5` misses the cone ([`APART`]), the other two crossings meet it
+/// ([`OVERLAPPING`]), and every one of those twenty-four answers right.
 #[test]
 fn a_block_leaned_one_unturned_across_a_steep_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
@@ -901,7 +908,7 @@ fn a_block_leaned_four_unturned_across_a_steep_pointed_cone_answers_right_or_ref
         tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 4.0, &[0.0])),
         Tally {
             right: 12,
-            refused: [("CannotTellTheCellsOfAFaceApart", 4)].into()
+            refused: [("Invalid(DynamicRangeTooWide)", 4)].into()
         }
     );
 }
@@ -912,7 +919,7 @@ fn a_block_leaned_four_turned_one_across_a_steep_pointed_cone_answers_right_or_r
         tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 4.0, &[1.0])),
         Tally {
             right: 12,
-            refused: [("CannotTellTheCellsOfAFaceApart", 4)].into()
+            refused: [("Invalid(DynamicRangeTooWide)", 4)].into()
         }
     );
 }
@@ -923,7 +930,7 @@ fn a_block_leaned_four_turned_three_across_a_steep_pointed_cone_answers_right_or
         tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 4.0, &[3.0])),
         Tally {
             right: 12,
-            refused: [("CannotTellTheCellsOfAFaceApart", 4)].into()
+            refused: [("a point inside a piece of a face", 4)].into()
         }
     );
 }
@@ -1480,19 +1487,8 @@ fn slabs(cone: ConeShape, lows: &[f64]) -> Vec<Case> {
 /// each refusal, since a refusal leaves it as it was.
 #[test]
 fn a_unit_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range() {
-    let mut got = Vec::new();
-    for turn in [0.0, 1.0] {
-        let case = a_leaning_case(THE_UNIT_CONE, 4.0, 0.0, turn);
-        for (rule, cone_first) in RULES {
-            got.push((
-                turn,
-                which_fuse(rule, cone_first),
-                the_ratio_it_is_refused_at(&case, rule, cone_first),
-            ));
-        }
-    }
     assert_eq!(
-        got,
+        the_ratios_a_lean_four_block_through_the_apex_is_refused_at(THE_UNIT_CONE),
         [
             (0.0, "the union", Ok(5.364581909073752e16)),
             (0.0, "the intersection", Ok(5.364581909073751e16)),
@@ -1504,6 +1500,47 @@ fn a_unit_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_
             (1.0, "the block less the cone", Ok(2.6822909545368416e16)),
         ]
     );
+}
+
+/// The same eight fuses round [`THE_STEEP_CONE`], which its tallies count as
+/// `Invalid(DynamicRangeTooWide)` since Q1777 (Q1985), are refused for the
+/// same reason and are the same limit: the turn rounds the leaning face a
+/// little beyond the apex, and the tip of the cone the block then holds is too
+/// small to resolve beside the block's corners.
+#[test]
+fn a_steep_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range() {
+    assert_eq!(
+        the_ratios_a_lean_four_block_through_the_apex_is_refused_at(THE_STEEP_CONE),
+        [
+            (0.0, "the union", Ok(2.1458327636294896e16)),
+            (0.0, "the intersection", Ok(2.1458327636294896e16)),
+            (0.0, "the cone less the block", Ok(2.1458327636294896e16)),
+            (0.0, "the block less the cone", Ok(2.1458327636294896e16)),
+            (1.0, "the union", Ok(1.072916381814745e16)),
+            (1.0, "the intersection", Ok(1.072916381814745e16)),
+            (1.0, "the cone less the block", Ok(1.072916381814745e16)),
+            (1.0, "the block less the cone", Ok(1.072916381814745e16)),
+        ]
+    );
+}
+
+/// [`the_ratio_it_is_refused_at`] for every rule of the block leaned `4` at
+/// crossing `0`, turned `0` and `1`, round `cone`.
+fn the_ratios_a_lean_four_block_through_the_apex_is_refused_at(
+    cone: ConeShape,
+) -> Vec<(f64, &'static str, Result<f64, String>)> {
+    let mut got = Vec::new();
+    for turn in [0.0, 1.0] {
+        let case = a_leaning_case(cone, 4.0, 0.0, turn);
+        for (rule, cone_first) in RULES {
+            got.push((
+                turn,
+                which_fuse(rule, cone_first),
+                the_ratio_it_is_refused_at(&case, rule, cone_first),
+            ));
+        }
+    }
+    got
 }
 
 fn which_fuse(rule: Rule, cone_first: bool) -> &'static str {
@@ -2050,10 +2087,10 @@ const REFUSALS: [&str; 10] = [
     "Geometry(CannotNameWhichPieceOfACrossingThisIs)",
     "order along a crossing",
     "ACurvedFaceGoesRightRoundWithNoSeam",
-    "CannotTellTheCellsOfAFaceApart",
     "AWireWillNotLieFlatOnItsFace",
     "the answer does not measure: TwoPatchesOfTheMeshDrewTheSameSide",
     "ResultIsNotManifold",
+    "Invalid(DynamicRangeTooWide)",
 ];
 
 /// Runs every rule over every case. Panics on a wrong answer; counts the
@@ -2126,6 +2163,13 @@ fn fuse_and_check(
         Err(Error::Undecidable { records }) => {
             let record = records.records().last().expect("a refusal names why");
             return Some(record.predicate().to_owned());
+        }
+        Err(Error::Invalid(invalid)) => {
+            let text = format!("{invalid:?}");
+            return Some(format!(
+                "Invalid({})",
+                text.split(' ').next().unwrap_or_default()
+            ));
         }
         Err(other) => {
             let text = format!("{other:?}");

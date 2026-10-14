@@ -1265,63 +1265,85 @@ fn the_ball_inside_a_hole(radius: f64, off: f64) -> f64 {
     sum * step_out * step_round
 }
 
-/// A bar of radius 2, height 10, against a slab `|x| < 1` along it and a ball
-/// of radius `0.5` on its seam at `(2, 0, 5)`, which was to be a walk going
-/// round nothing on a pipe. Every rule both ways round is refused telling the
-/// cells of the bar's pipe apart.
+/// A ball of radius `0.5` centred on the wall of a bar of radius 2, height 10,
+/// is refused `AClosedEdgeOfTheAnswerWouldStartAtAPole` under every rule both
+/// ways round: on the bar's pipe with the bar first, and on the ball with the
+/// ball first. So it is with the slab `|x| < 1` along the bar, which was to
+/// make a walk going round nothing on a pipe, and without it; and so it is
+/// with the ball on the bar's seam at `(2, 0, 5)` and a quarter turn round at
+/// `(0, 2, 5)`.
 ///
-/// The ball's centre is on the bar's wall, so it reaches into the bar's side
-/// and crosses it in one quartic loop that runs back and forth round the axis,
-/// which no determinant orders (§34.10). Q1554 ordered only the two loops of a
-/// ball that swallows a pipe's whole cross-section, which a ball of `0.5`
-/// against a bar of 2 cannot: the rod holed off its axis,
+/// **The ball's poles lie on the wall.** A sphere stores only its centre and
+/// radius, and is parametrised about world `z` (`validate.rs`'s
+/// `the_way_it_is_parametrised_about`), so turning the ball moves neither pole.
+/// On the seam they are `(2, 0, 4.5)` and `(2, 0, 5.5)`, both on the wall. The
+/// ball crosses the wall in one loop, `16 sin²(θ/2) + (z − 5)² = 0.25` with `θ`
+/// round the bar from the ball's centre, whose top and bottom are those poles.
+/// A probe in Q1985 moved the ball's centre `0.1` in or out from the wall, and
+/// the bar and the ball alone then answered every rule both ways round with
+/// one solid, volumes not checked. The answer exists, so this is a gap.
+///
+/// The loop runs back and forth round the bar's axis, which no determinant
+/// orders (§34.10). Q1554 ordered only the two loops of a ball that swallows a
+/// pipe's whole cross-section, which a ball of `0.5` against a bar of 2 cannot:
+/// the rod holed off its axis,
 /// [`a_ball_against_a_square_rod_holed_off_its_axis_is_answered_under_every_rule`],
 /// was pinned here beside it until then. Until Q1661 every rule was refused
 /// `ACrossingThisCannotBeOrderedAlong` before any cell, by `fuse/arrange.rs`'s
-/// `how_a_crossing_runs`. That lets the one loop through now, and since Q1767
+/// `how_a_crossing_runs`, which now lets the one loop through, and since Q1767
 /// `rcad-geom` orders it by angle round the line through the ball's centre
-/// square to the bar's axis, so the fuse gets as far as the cells, where it is
-/// refused `CannotTellTheCellsOfAFaceApart` on the pipe. Why is not traced;
-/// Q1768 takes it.
+/// square to the bar's axis. The fuse then got as far as the cells and was
+/// refused `CannotTellTheCellsOfAFaceApart` on the pipe, until Q1777's
+/// `the_one_on_its_side_of_every_cut` told those cells apart.
 ///
-/// Named `a_small_ball_on_a_bars_wall_is_refused_before_any_cell` until Q1766.
+/// Named `a_small_ball_on_a_bars_wall_is_refused_before_any_cell` until Q1766,
+/// and `a_small_ball_on_a_bars_seam_is_refused_telling_the_pipes_cells_apart`
+/// until Q1985.
 #[test]
-fn a_small_ball_on_a_bars_seam_is_refused_telling_the_pipes_cells_apart() {
-    for (rule, first) in every_rule_both_ways() {
-        let mut model = a_model();
-        let bar = model
-            .add_round_bar(2.0, 10.0, &Isometry::identity())
-            .expect("a bar");
-        let slab = block(&mut model, [-1.0, -5.0, -1.0], [1.0, 5.0, 11.0]);
-        let small = model
-            .add_ball(0.5, &shift(2.0, 0.0, 5.0))
-            .expect("a small ball");
-        let (arguments, tools) = if first {
-            (vec![bar], vec![slab, small])
-        } else {
-            (vec![slab, small], vec![bar])
-        };
-        let refused = model.fuse(
-            &arguments,
-            &tools,
-            rule,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
-        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = refused else {
-            panic!(
-                "the bar, the slab and the ball, {rule:?}, the bar first {first}: {:?}",
-                refused.map(|fused| fused.solids().to_vec())
+fn a_small_ball_centred_on_a_bars_wall_is_refused_where_its_poles_lie_on_the_wall() {
+    for (what, [x, y, z], with_the_slab) in [
+        ("on its seam, with the slab", [2.0, 0.0, 5.0], true),
+        ("on its seam", [2.0, 0.0, 5.0], false),
+        ("a quarter turn from its seam", [0.0, 2.0, 5.0], false),
+    ] {
+        for (rule, first) in every_rule_both_ways() {
+            let mut model = a_model();
+            let bar = model
+                .add_round_bar(2.0, 10.0, &Isometry::identity())
+                .expect("a bar");
+            let mut others = Vec::new();
+            if with_the_slab {
+                others.push(block(&mut model, [-1.0, -5.0, -1.0], [1.0, 5.0, 11.0]));
+            }
+            others.push(model.add_ball(0.5, &shift(x, y, z)).expect("a small ball"));
+            let (arguments, tools) = if first {
+                (vec![bar], others)
+            } else {
+                (others, vec![bar])
+            };
+            let refused = model.fuse(
+                &arguments,
+                &tools,
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
             );
-        };
-        let surface = model
-            .face(face)
-            .expect("the refusal names a face of the model")
-            .surface();
-        assert!(
-            matches!(surface, Surface::Cylinder(_)),
-            "the bar, the slab and the ball, {rule:?}, the bar first {first}: refused on {surface:?}"
-        );
+            let what = format!("a ball {what}, {rule:?}, the bar first {first}");
+            let face = match refused {
+                Err(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face }) => face,
+                other => panic!("{what}: {:?}", other.map(|fused| fused.solids().to_vec())),
+            };
+            let surface = model
+                .face(face)
+                .expect("the refusal names a face of the model")
+                .surface();
+            let on_the_first = if first {
+                matches!(surface, Surface::Cylinder(_))
+            } else {
+                matches!(surface, Surface::Sphere(_))
+            };
+            assert!(on_the_first, "{what}: refused on {surface:?}");
+        }
     }
 }
 
