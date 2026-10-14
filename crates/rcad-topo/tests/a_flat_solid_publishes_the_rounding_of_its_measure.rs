@@ -18,8 +18,8 @@
 //! cube on whole numbers still gets.
 //!
 //! **A solid with a curved face owes the same rounding**, over the mesh it is
-//! measured on, and the last test holds one against that mesh worked out
-//! exactly the same way.
+//! measured on, and the last two tests hold one's volume and centroid against
+//! that mesh worked out exactly the same way.
 
 use std::cell::Cell;
 
@@ -28,7 +28,7 @@ use rcad_predicates::expansion::{
     compress, expansion_sum, product_is_exact, scale_expansion, two_diff, two_sum,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{FaceView, Mesh, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{FaceView, Measurement, Mesh, Model, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
 
@@ -804,15 +804,7 @@ fn a_solid_turned_by_half_and_quarter_turns_owns_up_to_what_the_turns_rounded() 
 /// used nearly whole: the check floors that too.
 #[test]
 fn a_curved_solid_owns_up_to_the_rounding_of_the_sum_over_its_mesh() {
-    let (model, solid) = a_block_turned_onto_the_ruling_less_the_cone();
-    let solid = model.solid(solid).expect("the fuse made the key");
-    let deflection = Deflection::of(0.01).expect("a positive length");
-    let measured = solid
-        .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect("the block less the cone measures");
-    let mesh = solid
-        .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new())
-        .expect("the block less the cone meshes");
+    let (measured, mesh) = the_block_less_the_cone_measured_and_meshed();
     let exact = six_times_the_volume_of(&mesh);
     let less = roughly(&plus(
         &times(&[measured.volume()], &[6.0]),
@@ -836,6 +828,36 @@ fn a_curved_solid_owns_up_to_the_rounding_of_the_sum_over_its_mesh() {
     assert!(
         used > 0.99,
         "the block less the cone's mesh used {used} of its published error"
+    );
+}
+
+/// The same block less the cone, held to where its mesh balances.
+///
+/// The centroid is two rounded sums over the mesh divided, as a flat solid's
+/// is, and its wobble owes their rounding too, on top of the share of the
+/// solid's reach the hidden space can move it. That share is `5.1e-21` here,
+/// and the centroid came out about `1.2e-15` from where the mesh's triangles
+/// balance exactly. The floor holds the wobble to the rounding worked out, not
+/// bounded in advance.
+#[test]
+fn a_curved_solid_owns_up_to_the_rounding_of_where_its_mesh_balances() {
+    let (measured, mesh) = the_block_less_the_cone_measured_and_meshed();
+    let (moment, weight) = where_the_mesh_balances(&mesh);
+    let used = the_share_of_its_wobble(
+        "the block less the cone",
+        measured.centroid(),
+        measured.centroid_wobble(),
+        (&moment, &weight),
+        0,
+    );
+    println!(
+        "the block less the cone: middle {:?} within {:e}, {used:.6} of it used",
+        measured.centroid(),
+        measured.centroid_wobble(),
+    );
+    assert!(
+        used > 0.99,
+        "the block less the cone's mesh used {used} of its published wobble"
     );
 }
 
@@ -1097,6 +1119,21 @@ fn two_turned_cubes_each_less_the_other() -> NamedSolids {
     (model, answers)
 }
 
+/// [`a_block_turned_onto_the_ruling_less_the_cone`] measured, and the mesh the
+/// measure was taken over.
+fn the_block_less_the_cone_measured_and_meshed() -> (Measurement, Mesh) {
+    let (model, solid) = a_block_turned_onto_the_ruling_less_the_cone();
+    let solid = model.solid(solid).expect("the fuse made the key");
+    let deflection = Deflection::of(0.01).expect("a positive length");
+    let measured = solid
+        .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the block less the cone measures");
+    let mesh = solid
+        .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the block less the cone meshes");
+    (measured, mesh)
+}
+
 /// The block `[−6, 6] × [−12, 4] × [0, 6]` turned about `x` until its floor
 /// lies on `2y − z = 0`, as near as the turn's rounding lets it, less the
 /// pointed cone of slope one half and height eight whose ruling that plane
@@ -1140,6 +1177,20 @@ fn six_times_the_volume_of(mesh: &Mesh) -> Vec<f64> {
             .map(|corner| scaled(points[corner as usize], 0));
         plus(&total, &six_times_the_volume_under(corners))
     })
+}
+
+/// Where the space a mesh's triangles enclose balances, exactly, hung from the
+/// world origin as [`where_the_solid_balances`] hangs a solid's own triangles.
+fn where_the_mesh_balances(mesh: &Mesh) -> ([Vec<f64>; 3], Vec<f64>) {
+    let points = mesh.points();
+    let mut balance = Default::default();
+    for triangle in mesh.triangles() {
+        let corners = triangle
+            .corners()
+            .map(|corner| scaled(points[corner as usize], 0));
+        weigh_in(corners, &mut balance);
+    }
+    balance
 }
 
 fn a_model() -> Model {
@@ -1239,23 +1290,28 @@ fn twice_the_vector_area_of([a, b, c]: [[f64; 3]; 3]) -> [Vec<f64>; 3] {
 /// times the sum of `a · (b × c)`. Every corner is scaled by `2^up`, and the
 /// middle with it.
 fn where_the_solid_balances(model: &Model, solid: SolidKey, up: i32) -> ([Vec<f64>; 3], Vec<f64>) {
-    let mut moment: [Vec<f64>; 3] = Default::default();
-    let mut weight = Vec::new();
+    let mut balance = Default::default();
     for face in model.solid(solid).expect("a key the model made").faces() {
         face.for_each_triangle(|corners| {
-            let corners = corners.map(|corner| scaled(corner, up));
-            let six_volume = six_times_the_volume_under(corners);
-            weight = plus(&weight, &times(&six_volume, &[4.0]));
-            for (axis, total) in moment.iter_mut().enumerate() {
-                let summed = plus(
-                    &plus(&[corners[0][axis]], &[corners[1][axis]]),
-                    &[corners[2][axis]],
-                );
-                *total = plus(total, &times(&six_volume, &summed));
-            }
+            weigh_in(corners.map(|corner| scaled(corner, up)), &mut balance);
         });
     }
-    (moment, weight)
+    balance
+}
+
+/// One triangle's tetrahedron with the world origin added to a moment and a
+/// weight: its six volumes times the sum of its corners, and four times its
+/// six volumes.
+fn weigh_in(corners: [[f64; 3]; 3], (moment, weight): &mut ([Vec<f64>; 3], Vec<f64>)) {
+    let six_volume = six_times_the_volume_under(corners);
+    *weight = plus(weight, &times(&six_volume, &[4.0]));
+    for (axis, total) in moment.iter_mut().enumerate() {
+        let summed = plus(
+            &plus(&[corners[0][axis]], &[corners[1][axis]]),
+            &[corners[2][axis]],
+        );
+        *total = plus(total, &times(&six_volume, &summed));
+    }
 }
 
 /// Where one face's fan balances exactly under `docs/decisions.md` §338.5's
