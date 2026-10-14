@@ -37,7 +37,7 @@ use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on};
 use crate::validate::{
     nothing_curved_says_where_it_bends, side_of_surface, the_way_it_is_parametrised_about,
 };
-use crate::view::{EdgeView, FaceView, VertexView, WireStepView, WireView};
+use crate::view::{CoedgeView, EdgeView, FaceView, VertexView, WireStepView, WireView};
 use crate::{EdgeKey, Error, FaceKey, Invalid, Result, SolidView, VertexKey};
 
 /// A solid cut into triangles.
@@ -1092,7 +1092,15 @@ impl BuildingAMesh {
         // between a cap rim and a meridian circle a rounding round from it
         // (Q1734).
         if a_band_the_chart_reads_as_one_line(&surface, &walked) {
-            return self.hand_over(face, &surface, walked, room, HowToCut::ZipUpABand, log);
+            return self.hand_over(
+                face,
+                solid,
+                &surface,
+                walked,
+                room,
+                HowToCut::ZipUpABand,
+                log,
+            );
         }
         let patches = if round_the_second_way > 0 {
             self.cut_a_band_right_round_the_ring(face, &surface, &walked, room)?
@@ -1101,7 +1109,7 @@ impl BuildingAMesh {
             self.cut_what_reaches_right_round_the_ring(face, &surface, patches, room)?
         };
         for patch in patches {
-            self.hand_over(face, &surface, patch, room, how, log)?;
+            self.hand_over(face, solid, &surface, patch, room, how, log)?;
         }
         Ok(())
     }
@@ -3491,9 +3499,14 @@ impl BuildingAMesh {
 
     /// Hand one patch to the mesher `how` names and take what comes back into
     /// the solid's own table.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the face, the solid it reads the faces across in, the surface, the patch, the room, the mesher and the log are each read"
+    )]
     fn hand_over(
         &mut self,
         face: FaceView<'_>,
+        solid: SolidView<'_>,
         surface: &Surface,
         patch: Vec<WalkedLoop>,
         room: f64,
@@ -3505,7 +3518,7 @@ impl BuildingAMesh {
         let mut along_a_loop = HashSet::new();
         let mut between_two_edges = Vec::new();
         let mut model_corners: HashSet<u32> = self.at_vertex.values().copied().collect();
-        for corner in self.corners_with_one_face_across_the_edges_either_side(face) {
+        for corner in self.corners_with_one_face_across_the_edges_either_side(face, solid) {
             model_corners.remove(&corner);
         }
         for one in patch {
@@ -3513,11 +3526,12 @@ impl BuildingAMesh {
                 along_a_loop.insert(a_side(from, one.points[(at + 1) % one.points.len()]));
                 // A loop that is one closed edge passes its own corner and stays
                 // on that edge, and so does a piece of a face bounded by that one
-                // edge alone. Anywhere else a corner of the model, or a point
-                // where this face was cut into pieces, is taken to be where the
-                // boundary passes from one neighbour to another; where that is
-                // not so — two edges between the same two faces — `finish` is
-                // what stands between a shared side and an `Ok`.
+                // edge alone, or by two edges with one curved face across both.
+                // Anywhere else a corner of the model, or a point where this face
+                // was cut into pieces, is taken to be where the boundary passes
+                // from one neighbour to another; where that is not so — two edges
+                // with one flat face across both — `finish` is what stands
+                // between a shared side and an `Ok`.
                 between_two_edges.push(
                     !one.closes_on_one_curve
                         && (model_corners.contains(&from) || self.on_a_cut.contains(&from)),
@@ -3653,8 +3667,9 @@ impl BuildingAMesh {
     }
 
     /// The entries in the point table of each corner of the model where a wire
-    /// of `face` passes from one edge to the next and another face lies along
-    /// both of them.
+    /// of `face` passes from one edge to the next and one face of `solid` lies
+    /// along both of them, when that face is curved or the wire is `face`'s
+    /// only one and closes on one edge.
     ///
     /// **There the face across sees the same three points in a row**, the
     /// corner and the points next to it along the two edges, so the corner is
@@ -3679,25 +3694,65 @@ impl BuildingAMesh {
     ///   `(3, 4, 0)` was refused the same way (Q1966,
     ///   `two_equal_bars_leaning_at_each_other.rs`, `docs/decisions.md` §446.8).
     ///
+    /// **A flat face across is left out but for the one closed edge**, the
+    /// first shape, which is the one place a flat face across was shown to fold.
+    /// A ball's cap under a flat lid, its rim three arcs, is held to the flat
+    /// coarsest mesh `a_cap_whose_rim_is_three_arcs_lies_flat_at_every_turn_and_validates`
+    /// pins in `validate.rs`: with the lid asked as well, the cap kept the three
+    /// corners where its arcs meet, and its coarsest mesh lay flat at none of
+    /// the test's 156 turns. No fold with a flat face across a rim of several
+    /// edges has been shown, so none is paid for. A flat face is never held to
+    /// what this marks ([`TrimmedDomain::with_corners_between_two_edges`]),
+    /// so a flat `face` with a curved face across is marked for nothing.
+    ///
     /// A corner a cut leaves from stays marked whatever this says, since there
     /// the boundary does pass from the edge to the cut.
-    fn corners_with_one_face_across_the_edges_either_side(&self, face: FaceView<'_>) -> Vec<u32> {
-        let across = |edge: EdgeView<'_>| -> SmallVec<[FaceKey; 2]> {
+    fn corners_with_one_face_across_the_edges_either_side(
+        &self,
+        face: FaceView<'_>,
+        solid: SolidView<'_>,
+    ) -> Vec<u32> {
+        let corner_where = |coedge: CoedgeView<'_>| {
+            *self
+                .at_vertex
+                .get(&coedge.start().key())
+                .expect("walking the wire put the corner every coedge starts at in the table")
+        };
+        let mut wires = face.wires();
+        if let (Some(wire), None) = (wires.next(), wires.next())
+            && wire.closes_on_one_edge()
+        {
+            let coedge = wire
+                .coedges()
+                .next()
+                .expect("a wire that closes on one edge has that edge's coedge");
+            return vec![corner_where(coedge)];
+        }
+        let curved_across = |edge: EdgeView<'_>| -> SmallVec<[FaceKey; 2]> {
             edge.neighbouring_faces()
                 .filter(|&other| other != face.key())
+                .filter(|&other| {
+                    solid
+                        .model()
+                        .face(other)
+                        .expect("a face along an edge of a solid is a face of its model")
+                        .surface()
+                        .as_plane()
+                        .is_none()
+                })
                 .collect()
         };
         let mut corners = Vec::new();
         for wire in face.wires() {
             let edges: SmallVec<[EdgeView<'_>; 4]> =
                 wire.coedges().map(|coedge| coedge.edge()).collect();
-            let starts = wire.coedges().map(|coedge| coedge.start().key());
-            for (at, start) in starts.enumerate() {
-                let before = across(edges[(at + edges.len() - 1) % edges.len()]);
-                if across(edges[at]).iter().any(|other| before.contains(other)) {
-                    corners.push(*self.at_vertex.get(&start).expect(
-                        "walking the wire put the corner every coedge starts at in the table",
-                    ));
+            for (at, coedge) in wire.coedges().enumerate() {
+                let before = curved_across(edges[(at + edges.len() - 1) % edges.len()]);
+                if curved_across(edges[at])
+                    .iter()
+                    .any(|other| before.contains(other))
+                {
+                    corners.push(corner_where(coedge));
                 }
             }
         }
