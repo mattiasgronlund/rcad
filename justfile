@@ -13306,6 +13306,12 @@ queue-page:
 # remove a page planted for a row main's copy does not hold, and leave a page
 # whose row did not change unwritten.
 #
+# The Families section (§450.3) says there is none at the fourth commit, whose
+# rows name no `tests/*.rs` file. The fifth commit adds three open rows on one
+# test file, one by an item and one in tier 5, a parked fourth that is no
+# member, and three on another file that a closed trace names, so only the
+# first file is a family.
+#
 # The fuzzing section reads a fixture log root with one night of each kind the
 # table tells apart: a finished night with its first artifacts (09-10), a build
 # that failed (09-11), no directory at all (09-12), a triaged night with new
@@ -13626,9 +13632,9 @@ check-queue-page-selftest:
     has '<h3>Tier 5</h3><p><code><a href="rows/Q6.html">Q6</a></code></p>' "the ready list leaves out tier 5's Q6"
     has '<h3>Tier 3</h3><p><code><a href="rows/Q12.html">Q12</a></code> <code><a href="rows/Q13.html">Q13</a></code> <code><a href="rows/Q26.html">Q26</a></code></p>' \
         "tier 3's ready rows are Q12, Q13 and Q26, each linked, and not Q24 or Q25, which run"
-    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Pinned|Rows the fill will not take now|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
-    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Ready</h2> ' ] \
-        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Pinned, Rows the fill will not take now, then Ready: $order"
+    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Pinned|Rows the fill will not take now|Families|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
+    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Families</h2> <h2>Ready</h2> ' ] \
+        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Pinned, Rows the fill will not take now, Families, then Ready: $order"
     # Each line: the row, the tier its take was taken from, the agent whose tree it runs in, the dispatcher's tree.
     # A row main's copy holds is linked to its page; Q8, Q9 and Q17 are in no copy of main, so they have none.
     has '<tr><th><code><a href="rows/Q2.html">Q2</a></code></th><td>2</td><td><code>wf_page-1</code></td><td><code>dispatch-a</code></td></tr>' \
@@ -13680,8 +13686,10 @@ check-queue-page-selftest:
     has '<tr><td><code>crates/rcad-topo/src/fuse/arrange.rs</code> is shared, and <code><a href="rows/Q24.html">Q24</a></code> (held by <code>lane:lane-q24</code>) and <code><a href="rows/Q25.html">Q25</a></code> (held by <code>lane:lane-q25</code>) already hold it</td><td><code><a href="rows/Q26.html">Q26</a></code></td></tr>' \
         "Q26's arrange.rs is on queue_shared_files and two lanes hold it already (§424.4)"
     # Every id the table names, in reading order: each reason by the first row it holds back, in the order a fill walks them.
-    [ "$(between 'Rows the fill will not take now' 'Ready' | grep -oE '>[TDQ][0-9]+<' | tr -d '<>' | tr '\n' ' ')" = 'Q13 Q19 Q12 Q19 Q10 Q14 Q99 Q14 D1 Q15 Q4 Q16 Q10 Q20 Q11 Q2 Q12 Q24 Q25 Q26 ' ] \
+    [ "$(between 'Rows the fill will not take now' 'Families' | grep -oE '>[TDQ][0-9]+<' | tr -d '<>' | tr '\n' ' ')" = 'Q13 Q19 Q12 Q19 Q10 Q14 Q99 Q14 D1 Q15 Q4 Q16 Q10 Q20 Q11 Q2 Q12 Q24 Q25 Q26 ' ] \
         || fail "the table should hold Q19, Q14 and Q15 waiting, Q4 and Q16 parked, then Q20 and Q11, Q12 and Q26 meeting a lane, each reason in the order a fill reaches the first row it holds back, and not Q13 or Q21 as rows held back, which meet nothing"
+    [ "$(between 'Families' 'Ready' | grep -c '<p>no family</p>')" -eq 1 ] \
+        || fail "no row names a tests/*.rs file at commit D, so the Families section should say there is no family"
     grep -qE '<p class="qp-sub">as of [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z, when this page was last rendered</p>' "$out/index.html" \
         || fail "the running table does not say when the page was rendered"
     # Each row: added and closed that day, open by tier 1 2 2.2 2.5 3 4 5, parked, all open, closed so far.
@@ -13783,7 +13791,7 @@ check-queue-page-selftest:
     render || fail "queue-page failed to render with the copy in the tree holding main not main's commit"
     has "<tr><th colspan=\"2\">Meets a running lane's write set (not worked out)</th></tr>" \
         "with the copy in the tree holding main not main's commit, the page should say the third group is not worked out"
-    not_taken=$(between 'Rows the fill will not take now' 'Ready')
+    not_taken=$(between 'Rows the fill will not take now' 'Families')
     ! grep -qF 'rows/Q11.html' <<<"$not_taken" || fail "Q11 was held back on a copy that is not main's commit"
     has '<tr><th colspan="2">Waits on rows not yet done (3)</th></tr>' "the waiting rows come from main's commit, and should still show"
     has "<tr><th><code><a href=\"rows/Q20.html\">Q20</a></code></th><td class=\"n\">2</td><td>ready, but whether it meets a running lane's write set is not worked out</td></tr>" \
@@ -13793,12 +13801,27 @@ check-queue-page-selftest:
 
     sed -i -E 's/  pinned\/[0-9]+ /  /' "$hub/docs/queue.md"
     sed -i '/^Q21  /a Q23  1  todo  opus  docs/n.md  from/Q21 a row filed from Q21 §432' "$hub/docs/queue.md"
+    # §450.3 rule 1 (Q2003): three open rows on a_family.rs, one by an item and
+    # one in tier 5, and a parked fourth that is no member; three on
+    # a_traced_family.rs that a closed trace named, so no family.
+    sed -i '/^Q23  /a Q40  1  todo  opus  crates/rcad-topo/tests/a_family.rs  from/- a row on a test file §450\
+    Q41  1  todo  opus  crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/a_family.rs#a_test  from/- a second row on it, by an item §450\
+    Q43  1  parked:§450  opus  crates/rcad-topo/tests/a_family.rs  from/- a parked row on it, no member §450\
+    Q44  1  todo  opus  crates/rcad-topo/tests/a_traced_family.rs  from/- a row a trace named §450\
+    Q45  1  todo  opus  crates/rcad-topo/tests/a_traced_family.rs  from/- a second row a trace named §450\
+    Q46  1  todo  opus  crates/rcad-topo/tests/a_traced_family.rs  from/- a third row a trace named §450' "$hub/docs/queue.md"
+    sed -i '/^Q6  /a Q42  5  todo  opus  crates/rcad-topo/tests/a_family.rs  refuses/C from/- a third row on it, in tier 5 §450' "$hub/docs/queue.md"
+    sed -i '/^D1  /a Q47  1  done:abcdef6  opus  -  from/- Trace the family on crates/rcad-topo/tests/a_traced_family.rs: Q44, Q45 and Q46 §450' "$hub/docs/queue.md"
     g add docs/queue.md
     GIT_COMMITTER_DATE='2026-09-05T10:00:00+00:00' g commit -q -m "commit E: every pin taken off, and Q23 filed from Q21"
     sha_e=$(g rev-parse HEAD)
     render || fail "queue-page failed to render with no row pinned"
     [ "$(between 'Pinned' 'Rows the fill will not take now' | grep -c '<p>nothing pinned</p>')" -eq 1 ] \
         || fail "with no row pinned, the pinned table should say nothing is"
+    families=$(between 'Families' 'Ready')
+    grep -qF '<tr><td class="n">3</td><td><code>crates/rcad-topo/tests/a_family.rs</code></td><td><code><a href="rows/Q40.html">Q40</a></code> (1) <code><a href="rows/Q41.html">Q41</a></code> (1) <code><a href="rows/Q42.html">Q42</a></code> (5)</td></tr>' <<<"$families" \
+        || fail "the Families section should hold a_family.rs with its three open rows, each linked with its tier, and not the parked Q43: $families"
+    ! grep -qF 'a_traced_family.rs' <<<"$families" || fail "the Families section holds a_traced_family.rs, whose three rows a closed trace named"
     on_page Q23 "<li><code><a href=\"Q23.html\">Q23</a></code>, added in <code>${sha_e:0:8}</code> on 2026-09-05, <q>commit E: every pin taken off, and <a href=\"Q23.html\">Q23</a> filed from <a href=\"Q21.html\">Q21</a></q>: came from <code><a href=\"Q21.html\">Q21</a></code>, as its own word says</li>" \
         "Q23 came from Q21, as its word says, and its commit's subject links the Q ids it names"
     [ "$(chain Q23)" = 'Q23 Q21 Q4 Q3 Q1 ' ] \
@@ -13809,7 +13832,7 @@ check-queue-page-selftest:
     render || fail "queue-page failed to render with the lineage cache kept under another shape"
     [ "$(chain Q23)" = 'Q23 Q21 Q2 ' ] \
         || fail "a lineage cache kept under another shape should be worked out again from git, which gives Q21's own word, Q2, not the planted Q4: $(chain Q23)"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, Pace leads the page, the ready list holds every tier, every Q id that is a row links to that row's page, which gives its tier, class, write set, text and where it came from, the lineage cache serves a kept commit and works out a new one, and the fuzzing section matches its fixture nights"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the ready list holds every tier, every Q id that is a row links to that row's page, which gives its tier, class, write set, text and where it came from, the lineage cache serves a kept commit and works out a new one, and the fuzzing section matches its fixture nights"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
