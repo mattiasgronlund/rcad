@@ -105,6 +105,9 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
    family of fixes it considered and say why that family is the only one? Read
    any claim that a result is exact the same way.
 
+A lane that names rows in `also_answers` gets the section Also answers below
+as well, whichever of the next three sections its steps are.
+
 ## Tests
 
 6. Say whether step 3's gate already proves the lane's named tests or recipe
@@ -241,6 +244,31 @@ and the verdict is `confirm` or `refuse`.
    Otherwise `refuse`, and name in `still_shown_by` the command whose print
    still shows it. A lane's run that says the fault is gone and yours that
    says it shows is a `refuse`, whatever the lane printed.
+
+## Also answers
+
+A fix lane runs the shapes of the open rows that share a `tests/*.rs` file
+with its row, and names in `also_answers` each row its branch now answers,
+with the runs (§450.3 rule 4). Each row you confirm closes done at the lane's
+tip in the merge's own `queue apply`, and nobody runs its shapes again, so
+your runs are its whole proof.
+
+1. `git fetch origin`. Each row named must stand in `origin/main:docs/queue.md`
+   as `todo` or `after:`, so neither closed, parked nor held by a lane, and
+   its write set must name a `tests/*.rs` file the lane's write set names.
+2. With your tree at the branch tip, run each entry's command as it stands,
+   one plain Bash call each, in the foreground with `timeout` 600000. For an
+   entry with a probe, write the probe test at its path with the Write tool,
+   exactly as the entry gives it, run the command, then delete the file, so
+   `git status --porcelain` prints nothing when you are done.
+3. Read each row with `mise exec -- just queue show <id>`. Every crash file,
+   corpus file or shape it names needs an entry, and your run of each must
+   show it answer as the row asks.
+
+Put a row that passes all three in `also_answers_confirmed`, and every other
+in `also_answers_refused` with why. A refused row stays open as it was; it is
+no reason for a `fix_first`, since the lane's own row is what your verdict is
+on.
 
 ## The rows
 

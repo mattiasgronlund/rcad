@@ -144,6 +144,15 @@ the lane would otherwise spend twenty minutes finding again:
   `replayed_main`, `kept`. Count such a file as passing, give the sha from its
   own line, and its night's copy at `<root>/<night>/artifacts/<target>/<file>`
   for the lane to replay;
+- for a row whose write set names a `tests/*.rs` file, the open rows that
+  name the same file in their write sets, each with its id and its line
+  (§450.3 rule 4). That is the row's family: once its fix is committed, the
+  lane runs each one's shapes on its branch and names those that now answer.
+  Find them with `git grep -n -F '<file>' <base> -- docs/queue.md`, and leave
+  out the row itself, a closed or parked row, and one a lane holds, which has
+  `lane:` in its third field. `just queue families` lists only families of
+  three or more that no trace has named, so it is not this list. Say so when
+  there are none;
 - nothing about the context hook for a writing row. A lane that sees "Lane
   budget passed" is past 150k of its own context; it commits, hands its branch
   over, and `lanes.js` starts a fresh lane on it, up to three times a row

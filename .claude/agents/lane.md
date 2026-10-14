@@ -55,6 +55,18 @@ why it is gone: your verifier runs the same commands on the base, and on its
 confirm the row closes done at the base. If any of them shows the fault, do
 the row as usual.
 
+**A fix lane runs its family at the end** (§450.3 rule 4). Prep's facts list
+the open rows that share a `tests/*.rs` file with your row. Once your fix is
+committed, run each one's shapes on your branch the same ways as above: a
+crash file through `rcad-fuzz-explain`, a corpus file through its test, and a
+shape through a probe you do not commit. Name in `also_answers` each row whose
+every shape now answers as that row asks, one entry for each shape, with the
+input, the command, the probe's path and whole text, and the lines of its
+print that show it. Your verifier runs each again, and the merge closes the
+ones it confirms done at your tip, answered by your row, in the same `queue
+apply`. A row that still fails is not named; say in `remaining` what it
+printed.
+
 **You own the files your brief names and no others.** A change you find you need
 outside them goes in `out_of_write_set_needs`, and you do not make it. A brief
 that names no files makes you read-only: write no tracked file and make no
@@ -190,6 +202,10 @@ what is not a row.
 - `["after", "@1", "<id>[,<id>]"]` for a row that waits on another. A row
   with no class goes down to the latest tier among the rows it waits on, so
   `add 1` and then `after` a tier 5 row lands it in tier 5 (§435.6).
+- `["after", "<id>", "@1"]` sets a row that is already open to wait on a row
+  you add, as a family trace does with each member and the fix row that
+  should close it (§450.3 rule 3). `after` refuses a closed, pinned or
+  lane-held row.
 
 `@1`, `@2` are the first and second `add` of your own list. Ids come from a
 shared counter, so a step never names a new id itself. Before you add a row,
