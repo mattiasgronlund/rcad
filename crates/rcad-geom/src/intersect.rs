@@ -7594,6 +7594,36 @@ mod tests {
         }
     }
 
+    /// The same two bars turned 80°, 112° or 116°, where the second's stored
+    /// direction and start are exactly in `z = 0` (Q1967). Worked in exact
+    /// fractions, the two stored axes meet at `(11 ± 2⁻⁵⁰, 0, 0)`, which `f64`
+    /// does not hold, so no surface through that point can be written down.
+    /// Every one of these was refused `CannotNameWhichPieceOfACrossingThisIs`.
+    #[test]
+    fn two_thin_bars_whose_axes_meet_where_f64_holds_no_point_are_named_in_four_halves() {
+        let first = a_pipe_as_written([1.0, 0.0, 0.0], [9.0, 0.0, 0.0]);
+        for (degrees, through, along) in [
+            (
+                80,
+                [8.221629157329115, -15.756924048195328, 0.0],
+                [0.17364817766693036, 0.984807753012208, 0.0],
+            ),
+            (
+                112,
+                [16.993705494654595, -14.834941673068599, 0.0],
+                [-0.3746065934159121, 0.9271838545667874, 0.0],
+            ),
+            (
+                116,
+                [18.01393834862524, -14.38070474078667, 0.0],
+                [-0.43837114678907746, 0.8987940462991669, 0.0],
+            ),
+        ] {
+            let second = a_pipe_as_written(along, through);
+            named_in_four_halves_both_ways_round(&first, &second, degrees);
+        }
+    }
+
     /// A pipe of radius 1/4 whose axis stores `along` and `through` bit for
     /// bit, as a moved bar's does.
     fn a_pipe_as_written(along: [f64; 3], through: [f64; 3]) -> Surface {
