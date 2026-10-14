@@ -4941,7 +4941,9 @@ fn two_circles_round_the_axis(ring: &Torus) -> Result<SurfaceMeet> {
 /// where the two share it, each named by the plane it lies in
 /// ([`circles_round_a_rings_axis`]), a circle and a loop for a pipe of the
 /// tube's radius along the ring's core circle
-/// ([`where_a_ring_and_a_pipe_along_its_core_cross`]), and refused otherwise.
+/// ([`where_a_ring_and_a_pipe_along_its_core_cross`]), nothing for a pipe along
+/// the ring's axis off it and clear of the tube
+/// ([`the_heights_a_ring_crosses_a_pipe_at`]), and refused otherwise.
 ///
 /// # Errors
 ///
@@ -5121,7 +5123,8 @@ fn where_a_ring_and_a_pipe_along_its_core_cross(
 /// # Errors
 ///
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] where the partner
-/// does not share the ring's axis, or is a plane or a torus.
+/// does not share the ring's axis, but for a pipe along it proved clear of
+/// the tube, or is a plane or a torus.
 /// [`Error::Undecidable`] where a sign could not be settled, which takes a
 /// product leaving `f64`'s range.
 pub(crate) fn the_heights_a_ring_crosses_a_round_surface_at(
@@ -5141,7 +5144,8 @@ pub(crate) fn the_heights_a_ring_crosses_a_round_surface_at(
 }
 
 /// A ring and a pipe: the heights of the circles round the axis where the two
-/// share it, refused where they do not.
+/// share it, none where the pipe runs along the axis off it and clear of the
+/// tube, and refused otherwise.
 ///
 /// # On one axis it is one sign
 ///
@@ -5162,11 +5166,35 @@ pub(crate) fn the_heights_a_ring_crosses_a_round_surface_at(
 /// Sharing an axis is the two questions [`where_a_cone_and_a_pipe_cross`] asks,
 /// with the ring's centre standing in for the apex.
 ///
+/// # Along the axis but off it, clear of the tube is one of three signs
+///
+/// Cut both square to the axis. At every height the pipe is a circle of radius
+/// `a` whose centre is `δ` from the axis, and a circle round the axis at that
+/// height meets it exactly where its radius is from `|δ − a|` to `δ + a`. The
+/// tube is circles round the axis too, of every radius from `R − r` to `R + r`
+/// over the heights `−r` to `r`. So the two miss exactly where those two
+/// ranges do:
+///
+/// | where the pipe is | it misses where | `k` |
+/// |---|---|---|
+/// | past the tube | `δ − a > R + r` | `R + r + a` |
+/// | in the ring's hole | `δ + a < R − r` | `R − r − a` |
+/// | round the whole ring | `a − δ > R + r` | `a − R − r` |
+///
+/// Each is `δ` against `k`, so each is a sign of `A − U·k²`, with `U = d·d`
+/// for the pipe's direction `d` and `A = ‖(c − o) × d‖² = U·δ²` the question
+/// that asked whether the pipe is on the axis: above zero past the tube, and
+/// below zero in the hole or round the ring once `k` is above zero. The pin
+/// of a fuse standing beside an O-ring is the first (row Q1975). A pipe
+/// resting on the tube at one point is a zero, and stays refused with every
+/// other pipe off the axis.
+///
 /// # Errors
 ///
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] where the two do
-/// not share an axis. [`Error::Undecidable`] where a sign could not be
-/// settled, which takes a product leaving `f64`'s range.
+/// not share an axis, but for a pipe along it proved clear of the tube.
+/// [`Error::Undecidable`] where a sign could not be settled, which takes a
+/// product leaving `f64`'s range.
 fn the_heights_a_ring_crosses_a_pipe_at(
     ring: &Torus,
     pipe: &Cylinder,
@@ -5192,13 +5220,22 @@ fn the_heights_a_ring_crosses_a_pipe_at(
         exactly: || how_much_of_a_tube_a_pipe_on_its_axis_leaves_exactly(ring, pipe),
     };
     // Two directions crossed is dimensionless, and filed as a length for the
-    // reason `where_a_plane_and_a_pipe_cross` gives. Off the axis is refused,
-    // so no answer here rests on a sign it was not given.
-    let shares_the_axis = ask(&one_direction, Measures::Length, &at, policy, log)?
-        == Decision::Zero
-        && ask(&centre_on_the_axis, Measures::Area, &at, policy, log)? == Decision::Zero;
-    if !shares_the_axis {
+    // reason `where_a_plane_and_a_pipe_cross` gives. A pipe off the axis is
+    // answered only where three signs prove it clear of the tube, so no answer
+    // here rests on a sign it was not given.
+    if ask(&one_direction, Measures::Length, &at, policy, log)? != Decision::Zero {
         return Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface);
+    }
+    match ask(&centre_on_the_axis, Measures::Area, &at, policy, log)? {
+        Decision::Zero => {}
+        Decision::Pos => {
+            return if a_pipe_along_a_rings_axis_misses_its_tube(ring, pipe, &at, policy, log)? {
+                Ok(SmallVec::new())
+            } else {
+                Err(Error::ACrossingBetweenATorusAndAnotherCurvedSurface)
+            };
+        }
+        other => unreachable!("a sum of squares is never below zero: {other:?}"),
     }
     let shape = ask(&room, Measures::Area, &at, policy, log)?;
     if shape == Decision::Neg {
@@ -5214,6 +5251,86 @@ fn the_heights_a_ring_crosses_a_pipe_at(
     );
     let up = root_enclosing(room * squared_length_enclosing(exactly(along)));
     Ok(smallvec![-up, up])
+}
+
+/// Whether a pipe running along a ring's axis, off it, is proved clear of the
+/// tube: past it, in its hole, or round the whole of it. The proof is on
+/// [`the_heights_a_ring_crosses_a_pipe_at`]; a pipe resting on the tube at one
+/// point is a zero there, and answers `false`.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] where a sign could not be settled, which takes a
+/// product leaving `f64`'s range.
+fn a_pipe_along_a_rings_axis_misses_its_tube(
+    ring: &Torus,
+    pipe: &Cylinder,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    let (core, tube, skin) = (ring.ring_radius(), ring.tube_radius(), pipe.radius());
+    let past_the_tube = the_axes_apart_against_a_gap(ring, pipe, [core, tube, skin]);
+    if ask(&past_the_tube, Measures::Area, at, policy, log)? == Decision::Pos {
+        return Ok(true);
+    }
+    for inside in [[core, -tube, -skin], [skin, -core, -tube]] {
+        let gap = Question {
+            named: WHERE_A_TORUS_AND_A_PIPE_CROSS,
+            enclosing: || the_sum_enclosing(inside),
+            exactly: || Some(the_sum_exactly(inside)),
+        };
+        if ask(&gap, Measures::Length, at, policy, log)? == Decision::Pos
+            && ask(
+                &the_axes_apart_against_a_gap(ring, pipe, inside),
+                Measures::Area,
+                at,
+                policy,
+                log,
+            )? == Decision::Neg
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// `A − U·k²`, with `A = ‖(c − o) × d‖²` for the ring's centre `c` and the
+/// pipe's origin `o` and direction `d`, `U = d·d`, and `k` the sum of `gap`:
+/// the sign of `δ² − k²` for `δ` how far the pipe's axis is from the centre.
+fn the_axes_apart_against_a_gap(
+    ring: &Torus,
+    pipe: &Cylinder,
+    gap: [f64; 3],
+) -> Question<impl Fn() -> Interval, impl Fn() -> Option<Exact>> {
+    let centre = ring.centre().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    Question {
+        named: WHERE_A_TORUS_AND_A_PIPE_CROSS,
+        enclosing: move || {
+            let k = the_sum_enclosing(gap);
+            how_far_off_an_axis_enclosing(centre, origin, along)
+                - k * k * squared_length_enclosing(exactly(along))
+        },
+        exactly: move || {
+            let k = the_sum_exactly(gap);
+            Some(
+                how_far_off_an_axis_exactly(centre, origin, along)?
+                    .minus(&k.times(&k)?.times(&Exact::dot_of(along, along)?)?),
+            )
+        },
+    }
+}
+
+fn the_sum_enclosing([one, two, three]: [f64; 3]) -> Interval {
+    Interval::exactly(one) + Interval::exactly(two) + Interval::exactly(three)
+}
+
+fn the_sum_exactly(terms: [f64; 3]) -> Exact {
+    terms
+        .iter()
+        .fold(Exact::of(0.0), |sum, &term| sum.plus(&Exact::of(term)))
 }
 
 /// `D = r² − (a − R)²` as an enclosure.

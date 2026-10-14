@@ -436,7 +436,9 @@ pub enum Error {
 
     /// A torus against a ball, a pipe, a cone, or another torus, except a
     /// ball, a pipe or a cone on its own axis, which `intersect` now names
-    /// whether it reaches the tube, rests on it, or misses it (row Q1376).
+    /// whether it reaches the tube, rests on it, or misses it (row Q1376),
+    /// and a pipe along its axis but off it that is clear of the tube, which
+    /// it names as meeting it nowhere (row Q1975).
     ///
     /// A **gap** and the same one two leaning pipes have (§29), one degree
     /// worse: the crossing is a space curve of degree up to eight, naming which
@@ -454,8 +456,13 @@ pub enum Error {
     /// only a run right round a whole circle named by the two faces alone,
     /// which `rcad-topo`'s `Model::validate` does not yet ask for — that
     /// function's own doc says why. A second torus about the same axis is
-    /// still not named at all. (b) The general case wants §29's whole second
-    /// stage over again with a torus in it.
+    /// still not named at all. (b) A pipe **along the axis but off it** misses
+    /// the tube exactly where every distance from the axis it reaches is past
+    /// the tube's, short of it, or round the whole of it, three signs of one
+    /// polynomial, and `intersect` answers it as nothing (row Q1975, a pin
+    /// standing beside an O-ring). One that reaches the tube, or rests on it
+    /// at one point, is still refused. (c) The general case wants §29's whole
+    /// second stage over again with a torus in it.
     #[error("a torus crossing another curved surface is a space curve of degree up to eight")]
     ACrossingBetweenATorusAndAnotherCurvedSurface,
 
