@@ -16,6 +16,10 @@
 //! The check is that the truth lies inside `value ± error`. A published error
 //! of `0.0` then asks the value to be the truth on the nose, which is what a
 //! cube on whole numbers still gets.
+//!
+//! **A solid with a curved face owes the same rounding**, over the mesh it is
+//! measured on, and the last test holds one against that mesh worked out
+//! exactly the same way.
 
 use std::cell::Cell;
 
@@ -24,7 +28,11 @@ use rcad_predicates::expansion::{
     compress, expansion_sum, product_is_exact, scale_expansion, two_diff, two_sum,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{FaceView, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{FaceView, Mesh, Model, ProfileBuilder, Rule, SolidKey};
+
+mod cones;
+
+use cones::a_pointed_cone;
 
 /// The two cubes `docs/queue.md` Q81 fused: side two, `b` moved out by
 /// `(2, 0.5, 0.25)` so the two touch face to face, and both turned `0.7` about
@@ -772,6 +780,65 @@ fn a_solid_turned_by_half_and_quarter_turns_owns_up_to_what_the_turns_rounded() 
     );
 }
 
+/// `docs/queue.md` Q1845: **a solid with a curved face owns up to the rounding
+/// of the sum over its mesh** as well as to the space its curved faces hide.
+///
+/// The solid is the block of `a_cone_cap_whose_rim_runs_through_its_apex.rs`
+/// turned onto a ruling of the pointed cone of slope one half and height eight,
+/// less the cone. It keeps a hair of cone skin along the ruling and nothing
+/// else curved, so the space hidden under its mesh of twenty triangles is
+/// `5.7e-19`, and the sum over them rounds by far more than that. It measured
+/// `1152.0000000000007` with an error of `5.7e-19`, while its mesh, summed
+/// exactly, encloses `8.4e-14` less: `7.9e-15` of that is the sum rounding,
+/// and the rest a sixth of the sum rounding.
+///
+/// **The oracle is the mesh the measure is taken over**, summed exactly here
+/// from the world origin in the same arithmetic as the flat solids above.
+/// [`FaceView::for_each_triangle`] cannot stand in for it, since a curved face
+/// fans into its own corners and never into the mesh. The solid's true volume
+/// is within the hidden space of the mesh's, so an error that does not reach
+/// the mesh's own volume has left out the rounding.
+///
+/// The hidden space is five orders under the rounding, so the error is nearly
+/// all rounding, and a rounding worked out rather than bounded in advance is
+/// used nearly whole: the check floors that too.
+#[test]
+fn a_curved_solid_owns_up_to_the_rounding_of_the_sum_over_its_mesh() {
+    let (model, solid) = a_block_turned_onto_the_ruling_less_the_cone();
+    let solid = model.solid(solid).expect("the fuse made the key");
+    let deflection = Deflection::of(0.01).expect("a positive length");
+    let measured = solid
+        .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the block less the cone measures");
+    let mesh = solid
+        .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the block less the cone meshes");
+    let exact = six_times_the_volume_of(&mesh);
+    let less = roughly(&plus(
+        &times(&[measured.volume()], &[6.0]),
+        &negated(&exact),
+    )) / 6.0;
+    let used = share(less.abs(), measured.volume_error());
+    println!(
+        "the block less the cone: {} ± {:e} over {} triangles, and its mesh encloses {less:e} \
+         less exactly; {used:.6} of the error used",
+        measured.volume(),
+        measured.volume_error(),
+        mesh.triangles().len(),
+    );
+    assert!(
+        the_volume_is_inside(measured.volume(), measured.volume_error(), &exact),
+        "the block less the cone measures {} ± {:e}, and the mesh it was measured over encloses \
+         {less:e} less exactly",
+        measured.volume(),
+        measured.volume_error(),
+    );
+    assert!(
+        used > 0.99,
+        "the block less the cone's mesh used {used} of its published error"
+    );
+}
+
 /// The largest share of its published error the truth used, over the solids
 /// measured, for each of the five errors.
 #[derive(Debug, Default)]
@@ -1028,6 +1095,51 @@ fn two_turned_cubes_each_less_the_other() -> NamedSolids {
         answers.push((what, *only));
     }
     (model, answers)
+}
+
+/// The block `[−6, 6] × [−12, 4] × [0, 6]` turned about `x` until its floor
+/// lies on `2y − z = 0`, as near as the turn's rounding lets it, less the
+/// pointed cone of slope one half and height eight whose ruling that plane
+/// touches.
+fn a_block_turned_onto_the_ruling_less_the_cone() -> (Model, SolidKey) {
+    let mut model = a_model();
+    let cone = a_pointed_cone(&mut model, 0.5, 8.0);
+    let rectangle = ProfileBuilder::new(vec![[-6.0, -12.0], [6.0, -12.0], [6.0, 4.0], [-6.0, 4.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle is a profile");
+    let turn = Isometry::rotation(&Axis::x(), f64::atan2(-2.0, -1.0)).expect("a finite turn");
+    let block = model
+        .add_extrusion(&rectangle, 6.0, &turn)
+        .expect("a rectangle extrudes");
+    let fused = model
+        .fuse(
+            &[block],
+            &[cone],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("the block less the cone fuses: {why}"));
+    let [only] = fused.solids() else {
+        panic!(
+            "the block less the cone is one solid, and came back {}",
+            fused.solids().len()
+        );
+    };
+    let only = *only;
+    (model, only)
+}
+
+/// Six times the volume a mesh's triangles enclose, exactly: the sum over
+/// every triangle of `a · (b × c)`, hung from the world origin.
+fn six_times_the_volume_of(mesh: &Mesh) -> Vec<f64> {
+    let points = mesh.points();
+    mesh.triangles().iter().fold(Vec::new(), |total, triangle| {
+        let corners = triangle
+            .corners()
+            .map(|corner| scaled(points[corner as usize], 0));
+        plus(&total, &six_times_the_volume_under(corners))
+    })
 }
 
 fn a_model() -> Model {
