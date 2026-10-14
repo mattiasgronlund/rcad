@@ -330,3 +330,281 @@ for three things:
   the first and third kinds point at: §448 and Q1954;
 - a sweep of a random sample of 30 class-C rows, done by a lane: §449 and
   Q1955.
+
+### 446.8 The two-thin-bars family, traced
+
+*Written on 2026-10-14 by Q1953, a first lane and three relays, each carrying
+on from the last one's commit. Every count is from a scratch test run on
+`10a716f3`'s source, which the branch did not change. Run again on 2026-10-14
+at `71b14cce`, which is main at `bb8f67d6` with this section merged, with
+`/tmp/q1953-probes/r3/zz_q1953_probe.rs` copied in and `ZZ_TOL` unset (`mise
+exec -- just t -p rcad-topo -E 'test(/q1953_probe_/)' --no-capture`), the probe
+printed the same 407 lines starting `Q1953`, once sorted, as `r3/all-base.txt`
+did at `10a716f3`, so every outcome below holds there too.*
+
+**What it found.** The four rows refuse 85 runs at the base, in six different
+errors, and they come to two causes, both gaps. One test is behind 76 of them:
+`assemble` asks whether two pipes are tangent at a corner by an exact `f64`
+nought of `∇S × ∇T` at the corner's rounded point. Where two pipes of one width
+touch, that point is one `f64` holds only when both axes lie in a coordinate
+plane, so elsewhere the test reads a rounding and says no. The hair off z = 0
+that Q1793 and Q1929 name matters only that way: it takes their axes out of
+z = 0. The other 9 are Q1896's second bar less the first at each of its nine
+meeting points: the mesher folds where the two walls touch. So the few places
+446.5 found are fewer causes than places: one test is behind five different
+errors. The sweep found two more causes on the same shapes at other angles,
+not traced. "Each cause, gap or limit" near the end says what each is, and
+what lost it, for 448.4.
+
+Run at `10a716f3` by a scratch test, `crates/rcad-topo/tests/zz_q1953_probe.rs`,
+deleted before the commit and kept at `/tmp/q1953-probes/`, with
+`mise exec -- just t -p rcad-topo -E 'test(/q1953_probe_/)' --no-capture`. All
+under `Policy::certified()`, at 100 mm, six fuses each. "Stored direction" is
+the pipe's axis direction as the model hands it out.
+
+**The four rows still refuse at the base, as 446.4 has them.** Q1896 answers 5
+of its 54 runs (at the origin, the second bar less the first refused
+`TwoPatchesOfTheMeshDrewTheSameSide`), Q1897 none of 24, Q1793 and Q1929 none
+of 6 at 120 degrees.
+
+**The stored directions are a hair off z = 0 in three of the four rows.** Q1793
+and Q1929's second bar is `(-0.5, 0.866…, -2.2e-16)` at 120 degrees, as their
+rows say. Q1897's two bars, built as `add_bar_cut_off_by` with a turn about
+`ẑ × way`, are `(0.6, 0.8, 1.1e-16)` and `(0.8, -0.6, 1.1e-16)`. Q1896's first
+bar is `(0.6, 0.8, 1.1e-16)`, its second `(0.8, 0, 0.6)` exactly.
+
+**The hair is the cause in Q1897, Q1793 and Q1929.** Three ways round:
+
+- **An angle sweep.** The probe turned the second bar to 41 angles: every 5
+  degrees from 30 to 150, and every degree from 111 to 129. The stored
+  direction is off z = 0 at 24 of them, and at all 24 both shapes refuse all
+  six fuses. It lies in z = 0 at 17. There the bar starting where the axes meet
+  (Q1929's shape) answers all six at 15, and the long bar through (Q1793's)
+  answers all six at 14. The exceptions refuse some other way, in all six
+  fuses: Q1929's shape at 85 and 95 degrees `Undecidable`, and Q1793's at 80,
+  112 and 116 degrees `CannotNameWhichPieceOfACrossingThisIs`.
+- **One ulp of angle.** The first three angles above 120 degrees in radians
+  whose stored direction lies in z = 0 are 1, 4 and 7 ulps on. Q1929's shape
+  answers all six at each of them. Q1793's answers all six at 1 and 7, and
+  refuses all six `CannotNameWhichPieceOfACrossingThisIs` at 4. Moved the other
+  way, the first three angles above 50, 60 and 100 degrees whose direction is
+  off z = 0 refuse all six, both shapes, at all nine.
+- **Q1897 laid flat.** With each bar turned about z from x by the angle of its
+  way, instead of about `ẑ × way`, the stored directions are
+  `(0.6000000000000001, 0.8, 0)` and `(0.8, -0.6000000000000001, 0)`. Then all
+  24 of Q1897's fuses answer, at all four meeting points, including
+  (11, -3.25, 0.5), where with the hair all six refuse
+  `CannotNameWhichPieceOfACrossingThisIs`.
+
+**The hair is not Q1896's cause.** Its first bar laid flat the same way, all 54
+of its fuses refuse, at all nine meeting points, the origin's five included.
+Q1896's two axes span a flat that is no coordinate plane, before any rounding.
+
+**A lead, not run.** Two pipes of one width whose axes meet touch at `c ± r·n̂`,
+`n̂` square to both axes. In the flat cases `n̂` is `ẑ`, and both points are
+exact in `f64`. A unit vector with every coordinate a binary fraction lies along
+a coordinate axis (`a² + b² + c² = 4^k` in whole numbers has only the trivial
+solutions, by halving), so with the hair, and in Q1896 always, the two points
+are not numbers `f64` holds. Q1793's row has the fuse asking `∇S × ∇T` for
+exactly nought at those points. Whether the touch points are the one cause of
+all four rows is what the trace has to show next.
+
+**The first step that goes wrong, where the hair is the cause: `assemble`
+names an arc from a touch point by a direction that is rounding.** Run at
+`448acd99` by a scratch module at the end of `crates/rcad-topo/src/fuse/assemble.rs`,
+removed before the commit and kept as `/tmp/q1953-probes/assemble-trace.patch`
+(`git apply` it, then `mise exec -- just t -p rcad-topo -E
+'test(/q1953_trace_/)' --no-capture`; its print is kept beside it as
+`zz_trace_at_448acd99.txt`). It runs `Scratch::split_both_groups`, `choose`,
+`assemble` and `Assembly::nest_the_shells` one at a time for the union,
+intersection and difference, each shape with the hair and without: Q1929's at
+120 degrees against 120 degrees + 1 ulp, and Q1897's at the origin and at
+(11, −3.25, 0.5), against the same bars laid flat.
+
+- **Everything before the arcs is the same.** The split gives the same pieces,
+  the same corner names along every wire, and no record. `choose` keeps the
+  same pieces. `assemble` makes the same corners and the same edges between
+  them.
+- **The arcs differ.** On every edge between a touch point and another corner,
+  the flat build names the arc from the other corner, since `∇S × ∇T` reads
+  exactly nought at the touch point. With the hair it reads
+  `(1.2e-17, 6.9e-18, 0)` there in Q1929, not nought, so `which_arc_this_is`
+  (`assemble.rs:7966`) names the arc from the touch point with that rounding as
+  its direction. `Edge::the_way_across_the_chord_into_the_arc`
+  (`assemble.rs:4808`) reads the crossing at whichever end compares first, the
+  same way, so an arc named from its good end still gets a rounding for its
+  side where the touch point compares first.
+- **So the picker is wrong.** In Q1929's union, the arcs from the top touch
+  point to (10.57, −3, 0.5) and from the bottom one to (10.86, −3.5, 0.5) are
+  picked by half-spaces facing exactly the other way from the flat build's:
+  `(0.00586, −0.00338, −0.0135)` against `(−0.00586, 0.00338, 0.0135)`. That
+  is the other arc of the ellipse. Four more are picked by half-spaces whose
+  normals are about `1e-18` long, which is rounding.
+- **Then the mesher gives up**, in `nest_the_shells`, which meshes each shell
+  to measure it: `AWireWillNotLieFlatOnItsFace`, `ACurvedFaceGoesRightRoundWithNoSeam`
+  or `CannotNameWhichPieceOfACrossingThisIs`. Every flat build nests.
+
+Q1793's intersection and difference differ the same way. Its union differs
+earlier: with the hair `assemble` makes 2 new corners, not 6, and three
+pipe-to-pipe edges all between the same two corners, where the flat build has
+seven. Pieces and `choose` are the same. That fits Q1793's row, which
+has `the_corners_of_each_run_between_two_tangent_points` (`assemble.rs:3420`)
+asking for `∇S × ∇T` exactly nought at both ends. This was not traced
+further.
+
+**A reading, not yet argued in full.** The cause is one test, "the two
+surfaces are tangent here", made as an `f64` nought of `∇S × ∇T` at a corner's
+rounded point. It holds only where the touch point is an `f64` triple. The
+two stored pipes still have one radius and axes that meet exactly, so they
+still touch, and `intersect` still splits them by
+`four_half_ellipses_where_two_pipes_of_one_width_meet`. The answer exists, so
+this reads as a gap. The fact the code needs is that the corner is a touch
+point, which is a fact of the crossing's own two surfaces, 448.1's (b), and the
+turn does not take it away. What the turn takes away is only how exact the
+point is.
+
+**The reading demonstrated: told a touch point another way, every hair case
+answers.** Q1953's third lane, at `9c9edfcf`. `assemble.rs` tests tangency by an
+exact nought of `∇S × ∇T` in three places: `which_arc_this_is` (`:7983`),
+`Edge::the_way_across_the_chord_into_the_arc` (`:4840`) and
+`the_corners_of_each_run_between_two_tangent_points` (`:3453`). A scratch change
+put all three behind one test that, with `ZZ_TOL` set, takes
+`|∇S × ∇T|² ≤ (64ε)²|∇S|²|∇T|²` as tangent, and with it unset is the exact test
+as it stands. It is kept as `/tmp/q1953-probes/r2/relay2-scratch.patch`, with
+the probe at `r2/zz_q1953_probe.rs` and the runner `r2/zz_run.sh`
+(`./zz_run.sh <out> 1 '<filter>'` sets `ZZ_TOL`). This is a probe of the cause,
+not the fix: the fix carries the fact, below.
+
+- `q1953_trace_` with `ZZ_TOL`: every hair case nests (Q1929, Q1793, Q1897 at
+  the origin and at (11, −3.25, 0.5), all three rules); unset, the same binary
+  refuses them as above.
+- `q1953_probe_checked`, six fuses through `Model::fuse`, each answer through
+  `Model::validate` and measured at a deflection of `0.001`: Q1929 and Q1793 at
+  120 degrees and Q1897 at its four meeting points answer all six with the
+  hair, every answer valid, and every volume equal to the flat build's within
+  its measured error. The intersections against `16r³/(3 sin a)`: Q1897
+  `0.08325 ± 0.00033` against `0.08333`, Q1793 `0.09608 ± 0.00116` against
+  `0.09623`, and Q1929, the half, `0.04805 ± 0.00058` against `0.04811`.
+- Relay 0's sweep with `ZZ_TOL`: Q1929's shape answers all six at 38 of 41
+  angles, and Q1793's at 27. Q1897 laid flat answers 24 of 24 as before.
+- **Q1896 shares it.** With `ZZ_TOL` it answers 45 of its 54 fuses, against 5 at
+  the base, the same 5 of 6 at every one of its nine meeting points. Its touch
+  points are never `f64` triples, so the exact test never fires there. The
+  fourth lane ran the 45 through `Model::validate` and measured them as above,
+  with `q1953_probe_q1896_checked`, added to the probe and kept as
+  `/tmp/q1953-probes/r3/zz_q1953_probe.rs` (`ZZ_TOL=1 mise exec -- just t -p
+  rcad-topo -E 'test(/q1953_probe_q1896_checked/)' --no-capture`, print kept as
+  `r3/q1896-checked-tol.txt`). Every answer is valid, and the same at all nine
+  points within `0.00001`. With `sin a = 0.8773`, the union is
+  `0.68987 ± 0.00516` against `π/4 − 1/(12 sin a) = 0.69041`, the intersection
+  `0.09487 ± 0.00114` against `1/(12 sin a) = 0.09499`, and the first bar less
+  the second, two solids, `0.29751 ± 0.00315` against `π/8 − 1/(12 sin a) =
+  0.29771`.
+- **The 85 refusals at the base, by error** (the same probe, `ZZ_TOL` unset):
+  `AWireWillNotLieFlatOnItsFace` 37, `CannotMeshAFace` 20,
+  `ACurvedFaceGoesRightRoundWithNoSeam` 16, `CannotNameWhichPieceOfACrossingThisIs`
+  8, `TwoPatchesOfTheMeshDrewTheSameSide` 3, and 1 `Invalid(FacesDoNotAgreeWhichWayTheyFace)`,
+  Q1896's first bar less the second at (11, −3.25, 0.5): the fuse's own check
+  caught a solid the wrong arcs had built. With `ZZ_TOL` all of them answer but
+  the 9 below, which are the three `TwoPatches` and six that refused otherwise
+  first.
+
+**What is left are three other causes, each its own first step.**
+
+- **Q1896, the second bar less the first** (the bar along `(4, 0, 3)` less the
+  one along `(3, 4, 0)`), at all nine points with `ZZ_TOL`, and both
+  differences of Q1896 laid flat: refused `TwoPatchesOfTheMeshDrewTheSameSide
+  { drawn: 4, used: 4 }` in `nest_the_shells`. Split, `choose` and `assemble`
+  give the mirror of the first-less-second assembly, with pickers of ordinary
+  length. A scratch print in `mesh.rs`'s `finish` (in the same patch) names the
+  side: two faces, the first bar's outer piece of pipe and the second bar's
+  inner piece turned over, each cut the touch-point corner off by the same chord
+  between the two mesh points next to it on its two arcs, so the same sliver
+  triangle is drawn twice, facing opposite ways. At the touch point the two
+  faces are tangent and the solid pinches to nothing; the retry at finer
+  deflections in `how_much_space_a_curved_solid_encloses` meets the same fold
+  at every rung. The answer exists, and the other difference of the same pair
+  meshes, so it is a gap.
+- **Q1793's shape at 80, 105, 110–114, 116, 119, 122, 125, 128, 129 and 135
+  degrees, and at 120 degrees + 4 ulp**, with `ZZ_TOL`, in all six fuses:
+  refused `CannotNameWhichPieceOfACrossingThisIs` in `Scratch::split_both_groups`,
+  before `assemble`, with the stored direction in z = 0 or off it alike. Not
+  traced past the split; 446.5 names `which_of_these_circles_this_run_is`
+  (`walk.rs`) for Q1793's 2 runs of that error.
+- **Q1929's shape at 85, 90 and 95 degrees**, with `ZZ_TOL`, in all six fuses:
+  refused `Undecidable`, "order along a crossing", in the split, at the touch
+  point (11, −3.25, 0.25). The second bar starts at the meeting point, so its
+  cap plane passes through both touch points; three surfaces meet there. Not
+  traced further.
+
+**Each cause, gap or limit, and what lost it.** 448.4 asks of each refusal
+which of 448.1's (a) to (d) knew the coincidence and where it was lost, and
+names these rows as well if their cause is a coincidence a turn lost. None of
+the four causes is.
+
+- **The touch point read from its numbers: a gap, and the turn kept the
+  coincidence.** Two pipes of one radius whose axes meet touch at `c ± r·n̂` in
+  exact arithmetic, whatever the turn. Turned or not, the stored pipes have one
+  radius, and `four_half_ellipses_where_two_pipes_of_one_width_meet` asks `c`
+  exactly of each stored axis before it names the four halves that meet at the
+  two touch points: the split gives the same pieces with the hair as without
+  it. So the tangency is a fact of the crossing's own two surfaces, 448.1's
+  (b), and it is still in hand when `assemble` asks. What a rounding loses is
+  the touch point's place, which is not an `f64` triple. The corner holds a
+  rounding of it, and the three tests in `assemble` ask that rounding instead
+  of the fact. The fix carries the fact, that this corner is a touch point,
+  from where `intersect` cut the ellipses there. It is not a tolerance (448.3):
+  the scratch test above was a probe of the cause, not the fix.
+
+  The row asked which of (a) to (c) knew the bar lay in z = 0. None of them.
+  That is (d), the user's turn about z, and `f64` rounds it off by a hair at 24
+  of the 41 angles. The fix needs nothing of it: lying in z = 0 only put the
+  touch points on `f64` triples, so the exact test happened to work. Q1896's
+  axes never lie in a coordinate plane, and it needs the same fact and answers
+  by it.
+- **Q1896's fold at the touch point: a gap, and no coincidence is lost.** In
+  exact arithmetic the two walls are tangent at the touch point, and each piece
+  of the answer thins to nothing there. That is the shape, not a turn or a
+  rounding, so a carried fact has nothing to answer: the mesher has to cut the
+  corner off once and not twice. The answer exists: the first bar less the
+  second, the same pinch the other way round, meshes and validates with the
+  right volume. It is the pattern of §187.4's first defect, where a cap and a
+  wall cut off the same ear near the tip of an ellipse.
+- **Q1793's shape at 14 angles, `CannotNameWhichPieceOfACrossingThisIs` in the
+  split: untraced, so neither a gap nor a limit yet.** The split comes before
+  `assemble`, so the base refuses the same way: all six fuses at each of the 14
+  angles, in relay 0's sweep with `ZZ_TOL` unset. At 80, 112 and 116 degrees
+  the direction lies exactly in z = 0, so the hair is not its cause. Nothing
+  here says whether a coincidence is lost.
+- **Q1929's shape at 85, 90 and 95 degrees, `Undecidable` "order along a
+  crossing" in the split: untraced.** The base refuses the same way, all six
+  fuses at each of the three. One coincidence is there at every angle:
+  the second bar's cap plane passes through `c` square to its axis, and `n̂` is
+  square to that axis, so both touch points lie on the cap plane and three
+  surfaces meet at each. The build made that coincidence, since the bar starts
+  where the axes meet. But it is there too at the 38 angles that answer, so it
+  is not shown to be the cause.
+
+**Which rows each closes.** The touch-point cause: all of Q1897's 24 refused
+runs, Q1929's 6, Q1793's 6, and 40 of Q1896's 49. The fold: Q1896's other 9.
+At the base the fold shows at 3 of its 9 points (the origin, (0, 1, 0) and
+(1, 1, 1)); at the other six the touch-point cause stops the run first. The
+two untraced causes close no open row. They are shapes the sweep found.
+
+**The rows filed**, one writing row per cause, by Q1953's report:
+
+- the touch point: carry it from `intersect` to `assemble`'s three tests, make
+  the four rows answer and pin their volumes, and turn Q1793's and Q1929's
+  pinned refusals round. It closes Q1897, Q1929 and Q1793, and all of Q1896
+  but the second bar less the first.
+- the fold: make Q1896's second bar less the first mesh, in `mesh.rs`, and pin
+  its volume. It closes the rest of Q1896. At the origin it can be worked at
+  the base, so it does not wait on the first.
+- Q1793's shape at its 14 angles, and in a row of its own Q1929's at 85 to 95
+  degrees: name the first step that goes wrong in the split, then fix it, or
+  demonstrate a limit by §16.10.
+
+For §448: the first row carries a fact of kind (b) from where it was made to a
+question that asked the numbers instead. 448.6 found (b) behind one of its nine
+rows, Q1854, where the fact was in hand and not read, and filed no row for it.
+Q1854's own row is the same kind of work, and the two may share a road.
