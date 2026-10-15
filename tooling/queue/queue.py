@@ -82,6 +82,8 @@ just queue drop <id> <§N>                  state dropped:§N, moved under ## Cl
 just queue park <id> <§N>                  state parked:§N, left in its tier
 just queue after <id> <id>[,<id>...]       state after:<ids>; each id must exist in some copy, branch or claim; a row
                                             with no class moves down to the latest tier among the rows it names (§435)
+just queue after <id> -                    a row that waits goes back to todo: the way out for a row whose wait was
+                                            dropped, since only done: ends a wait (§451)
 just queue rank <id> before <id>           move <id> to sit just before the other id, within their shared tier
 just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict
 just queue pin <id> [<id>...]              Mattias's alone (§430): pinned/<n> in front of each open row's description,
@@ -672,7 +674,7 @@ def park_step(queue, claims, here, args, batch):
 
 def after_step(queue, claims, here, args, batch):
     if len(args) < 2:
-        raise Refused("usage: after <id> <id>[,<id>...]")
+        raise Refused("usage: after <id> <id>[,<id>...] | after <id> -")
     row_id = args[0]
     waits = [w for arg in args[1:] for w in arg.split(",") if w]
     refuse_conflicted(here, queue)
@@ -680,6 +682,8 @@ def after_step(queue, claims, here, args, batch):
     if row.is_closed() or row.state.startswith("lane:"):
         raise Refused(f"{row_id} is {row.state}, and only a row nobody holds can wait")
     refuse_if_pinned(row, "after")
+    if "-" in waits:
+        return free_step(queue, row, waits)
     for other in waits:
         if not ID.match(other):
             raise Refused(f"'{other}' is not an id")
@@ -703,6 +707,22 @@ def after_step(queue, claims, here, args, batch):
         taken = move_row(queue, waiting, to)
         message += f", tier {row.tier} -> {to}, beside {beside}, which it waits on{taken}"
     return queue, message, None
+
+
+def free_step(queue, row, waits):
+    """`after <id> -`: a row that waits goes back to `todo`.
+
+    Only `done:` ends a wait, so a row whose wait was dropped has no other way
+    back. `drop` does not free its waiters itself: a waiter may need the row
+    that replaces the dropped one, and only whoever drops it knows which.
+    check-queue refuses the drop and names this step for each waiter (§451).
+    """
+    if waits != ["-"]:
+        raise Refused(f"'-' frees {row.id} of every row it waits on, so it stands alone: after {row.id} -")
+    if not row.state.startswith("after:"):
+        raise Refused(f"{row.id} is {row.state}, and '-' frees only a row whose state is after:")
+    queue.replace(row, row.with_state("todo"))
+    return queue, f"{row.id}: {row.state} -> todo", None
 
 
 def exists_elsewhere(here, claims, row_id):
