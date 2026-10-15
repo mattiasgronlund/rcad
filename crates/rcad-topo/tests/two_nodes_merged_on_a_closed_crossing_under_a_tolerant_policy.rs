@@ -91,12 +91,50 @@
 //! pins the `0.26`/`0.75` merge the same way. **No wrong answer came of it
 //! either.**
 //!
+//! # The far rim the cube's edges run through
+//!
 //! A near cap cut this close (`far / 300`) sometimes refuses earlier, with
-//! `CannotTellTheCellsOfAFaceApart`, before the crossing is even reached —
-//! seen at shape scales `0.1` to `0.4` crossed with working sizes `0.1` to
-//! `0.9` in the same grid. That is a different question from the one under
-//! search here (a face classification refusal, not a crossing order one), and
-//! was not traced further.
+//! `CannotTellTheCellsOfAFaceApart`, before the crossing is even reached.
+//! Q2028 traced it, and it is not the near cap. In a grid of 21 shape scales
+//! (`0.1` to `0.5`), 17 working sizes (`0.1` to `0.9`) and the four fuses,
+//! all 304 of these refusals came from `spread_the_winding` in
+//! `fuse/arrange.rs`, on the frustum's far cap.
+//!
+//! Each of the six edges round the cube's middle, where an upper face meets a
+//! lower one, carried on past its upper corner, runs exactly through the far
+//! rim: at a scale of one it reaches `z = 3` at `6` from the axis, and a cone
+//! of slope two is `6` from the axis there. So four surfaces meet at one
+//! point, the cap, the cone and two faces of the cube, and on the cap that
+//! point is three meets: the rim with each face's line, and the two lines
+//! with each other. Stored in `f64` they come back as three boxes a few
+//! `1e-16` apart, and `merge_points_that_are_one_point` decides them a pair at
+//! a time. At a shape scale of `0.1` and a working size of `0.25` it joins the
+//! rim's meet with one line to the meet of the two lines, and proves the
+//! rim's meet with the other line apart from both. That other line then meets
+//! the rim twice, a hair apart, and `spread_the_winding` cannot tell the
+//! cap's cells apart. The answer exists, so this is a gap (§16.10).
+//!
+//! **No answer was wrong.** The 48 fuses of that grid that answered pass
+//! `Model::validate`, have the solid, face, wire and shell counts of the same
+//! fuse at a scale of one and a working size of `10`, and its volume to
+//! within `1.9e-5`. Lifting the far cap by a thousandth of its height takes it
+//! off the edges' lines, and all 1428 fuses answer. Turning the seam to `+x`
+//! still leaves 347 refusals, so the seam plays no part. The two power-of-two
+//! images of a scale of `0.1` and a size of `0.25`, which round the same way,
+//! refuse the same, so small numbers play no part either.
+//! `a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart`
+//! and `the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges`
+//! pin both.
+//!
+//! A designer draws the same kind of meeting on purpose: a round bar notched
+//! by a block whose inside corner stands on the bar's wall, at `(0.6 r, 0.8
+//! r)`. At a radius of `12.8` or `25.6` and working sizes of `10`, `25` and
+//! `100`, every fuse is refused from the same place in `spread_the_winding`,
+//! on the bar's wall, with two meets whose boxes overlap kept apart.
+//! `a_tolerant_fuse_of_a_round_bar_and_a_block_cornered_on_its_wall_cannot_tell_the_walls_cells_apart`
+//! pins the `12.8`/`25` case. At other radii the same bar is refused
+//! `ResultIsNotManifold` or `TheFuseWroteABrokenAnswer`, or runs for minutes;
+//! those are rows of their own.
 //!
 //! # Plane through a ball
 //!
@@ -305,8 +343,8 @@ fn the_only_surface_of(model: &Model, solid: SolidKey) -> Surface {
 /// the policy.
 const THE_CUBES_WORKING_SIZE: f64 = 2.0;
 
-/// Each rule, and for the difference which solid goes first: whether the cone
-/// is the argument.
+/// Each rule, and for the difference which solid goes first: whether the
+/// curved one, the cone, the frustum or the bar, is the argument.
 const EVERY_FUSE: [(Rule, bool); 4] = [
     (Rule::Union, true),
     (Rule::Intersection, true),
@@ -591,6 +629,184 @@ fn a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_o
         gap_shape, reference_shape,
         "the gap case's topology should match the full-scale reference's"
     );
+}
+
+/// Q2028's trace. Each of the six edges round a corner-up cube's middle,
+/// carried on past its upper corner, runs exactly through the far rim of a
+/// slope-two frustum whose far cap is at half the cube's side. So four
+/// surfaces meet at one point there, and every tolerant fuse refuses on the
+/// far cap, `z = 3 s`: at a shape scale of `0.1` and a working size of `0.25`,
+/// and at its two power-of-two images, which round the same way.
+#[test]
+fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart()
+ {
+    for (scale, size) in [(0.1, 0.25), (0.8, 2.0), (6.4, 16.0)] {
+        for (rule, frustum_first) in EVERY_FUSE {
+            let (model, fused) = a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
+                scale,
+                size,
+                1.0,
+                rule,
+                frustum_first,
+            );
+            let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = fused else {
+                panic!(
+                    "{scale} {size} {rule:?} {frustum_first}: {:?}",
+                    fused.map(|_: Fused| "an answer")
+                );
+            };
+            let surface = model.face(face).expect("the refused face").surface();
+            let Surface::Plane(cap) = surface else {
+                panic!("{scale} {size} {rule:?} {frustum_first}: {surface:?}");
+            };
+            assert_eq!(
+                (cap.normal().components(), cap.offset()),
+                ([0.0, 0.0, 1.0], 3.0 * scale),
+                "{scale} {size} {rule:?} {frustum_first}"
+            );
+        }
+    }
+}
+
+/// The far cap lifted by a thousandth of its height is off the cube's edges'
+/// lines, so no four surfaces meet at one point there, and every fuse of the
+/// shape above at a scale of `0.1` and a working size of `0.25` answers with
+/// a model `Model::validate` passes.
+#[test]
+fn the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges() {
+    let size = 0.25;
+    for (rule, frustum_first) in EVERY_FUSE {
+        let (model, fused) = a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
+            0.1,
+            size,
+            1.001,
+            rule,
+            frustum_first,
+        );
+        let fused = fused.unwrap_or_else(|error| panic!("{rule:?} {frustum_first}: {error:?}"));
+        assert!(!fused.solids().is_empty(), "{rule:?} {frustum_first}");
+        model
+            .validate(&Policy::tolerant(size), &mut ProvenanceLog::new())
+            .unwrap_or_else(|error| panic!("{rule:?} {frustum_first}: {error:?}"));
+    }
+}
+
+/// A designer draws the same kind of meeting on purpose: a round bar notched
+/// by a block whose inside corner edge stands on the bar's wall. At a radius
+/// of `12.8` and a working size of `25`, every tolerant fuse refuses on the
+/// bar's wall.
+#[test]
+fn a_tolerant_fuse_of_a_round_bar_and_a_block_cornered_on_its_wall_cannot_tell_the_walls_cells_apart()
+ {
+    for (rule, bar_first) in EVERY_FUSE {
+        let (model, fused) =
+            a_round_bar_fused_with_a_block_cornered_on_its_wall(12.8, 25.0, rule, bar_first);
+        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = fused else {
+            panic!(
+                "{rule:?} {bar_first}: {:?}",
+                fused.map(|_: Fused| "an answer")
+            );
+        };
+        let surface = model.face(face).expect("the refused face").surface();
+        assert!(
+            matches!(surface, Surface::Cylinder(_)),
+            "{rule:?} {bar_first}: {surface:?}"
+        );
+    }
+}
+
+/// The cube of side `6 scale` stood on its corner with its middle at the
+/// origin, and a frustum of slope two about `z` with its near cap at
+/// `far / 300` and its far cap at `far = 3 scale far_factor`, its seam cut
+/// towards `-x`, fused by `rule` under a tolerant policy at `size`, the
+/// frustum first when `frustum_first`. At a `far_factor` of `1` the far cap's
+/// rim holds the point every edge round the cube's middle, carried on past
+/// its upper corner, runs through.
+fn a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
+    scale: f64,
+    size: f64,
+    far_factor: f64,
+    rule: Rule,
+    frustum_first: bool,
+) -> (Model, rcad_topo::Result<Fused>) {
+    let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
+    let far = 3.0 * scale * far_factor;
+    let frustum = a_frustum_seamed_towards(
+        &mut model,
+        2.0,
+        far / 300.0,
+        far,
+        [-1.0, 0.0],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a frustum");
+    let cube = a_corner_up_cube_round_the_origin(&mut model, 6.0 * scale);
+    let (arguments, tools) = if frustum_first {
+        ([frustum], [cube])
+    } else {
+        ([cube], [frustum])
+    };
+    let fused = model.fuse(
+        &arguments,
+        &tools,
+        rule,
+        &Policy::tolerant(size),
+        &mut ProvenanceLog::new(),
+    );
+    (model, fused)
+}
+
+/// A round bar of radius `radius` and height `2 radius` up from the origin,
+/// and a block over `x` from `0.6 radius` to `2 radius`, `y` from
+/// `-2 radius` to `0.8 radius` and `z` from `-radius` to `3 radius`, fused by
+/// `rule` under a tolerant policy at `size`, the bar first when `bar_first`.
+/// The block's inside corner edge, at `(0.6 radius, 0.8 radius)`, stands on
+/// the bar's wall, as a designer cutting a notch to the wall draws it, so at
+/// each of the bar's caps four surfaces meet at one point: the cap, the wall
+/// and the two faces of the block on that edge.
+fn a_round_bar_fused_with_a_block_cornered_on_its_wall(
+    radius: f64,
+    size: f64,
+    rule: Rule,
+    bar_first: bool,
+) -> (Model, rcad_topo::Result<Fused>) {
+    let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
+    let bar = model
+        .add_round_bar(
+            radius,
+            2.0 * radius,
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a shift"),
+        )
+        .expect("a bar");
+    let notch = ProfileBuilder::new(vec![
+        [0.6 * radius, -2.0 * radius],
+        [2.0 * radius, -2.0 * radius],
+        [2.0 * radius, 0.8 * radius],
+        [0.6 * radius, 0.8 * radius],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a rectangle");
+    let block = model
+        .add_extrusion(
+            &notch,
+            4.0 * radius,
+            &Isometry::translation(Vector::new(0.0, 0.0, -radius)).expect("a shift"),
+        )
+        .expect("a block");
+    let (arguments, tools) = if bar_first {
+        ([bar], [block])
+    } else {
+        ([block], [bar])
+    };
+    let fused = model.fuse(
+        &arguments,
+        &tools,
+        rule,
+        &Policy::tolerant(size),
+        &mut ProvenanceLog::new(),
+    );
+    (model, fused)
 }
 
 /// A cube of side six with its diagonal brought upright and its middle at the
