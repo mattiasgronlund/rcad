@@ -154,12 +154,15 @@ impl Measurement {
     /// `0.0` exactly when the centroid came out on the nose, as on a cube with
     /// whole-number corners (`docs/decisions.md` §338.5). Never negative.
     ///
-    /// **Infinite when the volume is not clear of its own error**, because
-    /// `shell / volume` then bounds nothing: a solid that may enclose no space
-    /// at all has no balance point to be near. Where the volume is not even
-    /// above zero, the moment cannot be divided by it, and
-    /// [`Measurement::centroid`] is where the mesh's skin balances instead —
-    /// a point near the solid, and no more.
+    /// **Infinite when the volume is not above zero**, because the moment
+    /// cannot be divided by it, and [`Measurement::centroid`] is then where the
+    /// mesh's skin balances instead — a point near the solid, and no more.
+    /// Above zero but not clear of the hidden space, `shell / volume` is at
+    /// least one, so the wobble is at least the solid's whole reach from the
+    /// centroid, and a balance point inside the solid is never further out
+    /// than that: the coarsest round bar in
+    /// `the_published_error_bounds_shrink_as_the_mesh_gets_finer`, meshed to a
+    /// deflection of `1`, hides more space than its mesh holds.
     #[must_use]
     pub fn centroid_wobble(self) -> f64 {
         self.centroid_wobble
@@ -494,7 +497,8 @@ impl SolidView<'_> {
     /// however the mesh is out, and is refused. A sum above that and not
     /// above zero is answered as it is, with the skin's middle for a centroid
     /// and an infinite wobble, since a moment divided by nothing balances
-    /// nowhere.
+    /// nowhere. A sum above zero is divided as it always was, however small,
+    /// for the reason [`Measurement::centroid_wobble`] gives.
     fn measured_over(self, mesh: &Mesh) -> Result<Measurement> {
         let hub = hub_of(mesh);
         let shifts = axis_shifts_over(mesh, hub);
@@ -537,10 +541,13 @@ impl SolidView<'_> {
         let balance = [0, 1, 2].map(|axis| shift(moment[axis] / (4.0 * six_volumes), shifts[axis]));
         let centroid = hub + Vector::from(balance);
         let four_times_the_six_volumes = packed(&multiplied(&exact_six_volumes, &[4.0]));
-        let centroid_wobble = if volume <= volume_error {
-            f64::INFINITY
-        } else {
-            upward(
+        Ok(Measurement {
+            volume,
+            volume_error,
+            surface_area: skin.area,
+            area_error: skin.area_error,
+            centroid,
+            centroid_wobble: upward(
                 (skin.volume_error / volume) * how_far_the_solid_reaches_from(mesh, centroid)
                     + how_far_the_middle_is_from(
                         centroid,
@@ -549,15 +556,7 @@ impl SolidView<'_> {
                         &exact_moment,
                         &four_times_the_six_volumes,
                     ),
-            )
-        };
-        Ok(Measurement {
-            volume,
-            volume_error,
-            surface_area: skin.area,
-            area_error: skin.area_error,
-            centroid,
-            centroid_wobble,
+            ),
         })
     }
 

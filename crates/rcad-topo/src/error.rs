@@ -1555,6 +1555,14 @@ pub enum Invalid {
     /// measured `113.088` with the lid listed first and `113.488` with the half
     /// disc first, each `± 0.038`, where the bar is `36π` (Q604).
     ///
+    /// Since a flat face is charged for its points off its plane (Q2088), the
+    /// two come with `± 0.196` and `± 2.71` instead, and overlap. They must:
+    /// whichever face is drawn second has its triangles off the plane it
+    /// names, by `0.066` of space for the half disc and `0.333` for the lid,
+    /// and the two meshes differ by those two slabs, `0.400` together. The
+    /// volume still depends on which face is listed first; the measure now
+    /// owns up to it.
+    ///
     /// Two faces on one plane are not this, however that plane is spelt; nor
     /// are two faces that cross in one of a pipe's own straight lines, where
     /// the arc the run names is that line.
