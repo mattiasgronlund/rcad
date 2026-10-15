@@ -3838,7 +3838,11 @@ fn the_way_out_of(surface: &Surface, at: Point) -> [Interval; 3] {
 ///
 /// `None` when every corner of the face is on it, as
 /// [`which_side_of_it_this_face_lies_on`] gives for a face across.
-fn which_side_of_a_surface_a_run_names_this_face_lies_on(
+///
+/// **`mesh.rs` asks this same question of the same corners**, for a closed
+/// edge at a ball's pole; the two call sites share this one body so they stay
+/// one reading (`docs/decisions.md` §399).
+pub(crate) fn which_side_of_a_surface_a_run_names_this_face_lies_on(
     solid: SolidView<'_>,
     face: FaceView<'_>,
     named: Surface,
