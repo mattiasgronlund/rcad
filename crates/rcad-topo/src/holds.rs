@@ -1852,8 +1852,8 @@ fn is_one_circle_cut_in_two(
 /// the face's boundary, and borders the face's own side along that neighbour on
 /// the side the face does not keep. So the face sits inside the part in front
 /// of all of them; and that part is connected — a plane cut by half-planes and
-/// round discs, a sphere cut by any two planes or by planes each with its
-/// centre on or behind it, or a ring cut by planes through its axis and at most
+/// round discs, a sphere cut by planes as [`leaves_a_ball_in_one_piece`] sets
+/// out, or a ring cut by planes through its axis and at most
 /// one square to it — with the face's boundary on its boundary, so the face is
 /// all of it. On a sphere the "in front of any" reading asks the same
 /// of the part behind all of them, which is the cuts turned round.
@@ -1878,7 +1878,9 @@ fn is_one_circle_cut_in_two(
 /// it lies inside and crosses in a closed curve, a flat face that is a polygon
 /// with one bite out of its edge where it lies outside a pipe
 /// ([`is_a_polygon_less_one_bite_of_a_pipe`]), a sphere face whose sides are
-/// arcs cut by two planes or by planes each with the centre on one side of it
+/// arcs and whole circles cut by two planes, by planes with one point inside
+/// the ball on or behind each, or by such planes and one more whose circle
+/// meets the part in front of them in one arc at most
 /// ([`leaves_a_ball_in_one_piece`]), a cone face or a pipe face cut by
 /// planes as [`is_a_family_this_follows`] sets out, and a ring face cut by
 /// planes through its axis and at most one square to it
@@ -1892,6 +1894,17 @@ fn is_one_circle_cut_in_two(
 /// ellipse and a pipe's circle earn that the same way a ball's circle does,
 /// through [`where_a_closed_crossing_is_centred`]. Anything else is refused by
 /// name, as before.
+///
+/// **A ball face's side right round the circle a plane cuts it in is a cut
+/// with no corners** (row Q2038). It has no two ends for step 1 to read the
+/// way it runs between, but the circle is all of where its plane crosses the
+/// sphere, so the face lies wholly on one side of that plane, and
+/// [`what_the_part_in_front_of_its_cuts_holds`] reads the side off the face's
+/// other corners. The skin of a ball kept to a block's corner and behind a
+/// steep plane whose circle lies inside what the block keeps has one. Before,
+/// such a side refused every reading in [`the_way_a_side_runs`], so no face the
+/// steps answered is answered differently now. A cone face's side right round
+/// a closed curve goes down its axis instead, below.
 ///
 /// **One face is one of two pieces in front of every cut, and is told from the
 /// other**: a wall of a bar with two flats, where the part of the pipe between
@@ -2012,10 +2025,17 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     let with_a_round_wire = face
         .wires()
         .any(|wire| is_a_round_wire_of_a_flat_face(face, wire));
-    if !with_a_round_wire && whole_curves.is_empty() {
+    let on_a_ball = matches!(surface, Surface::Sphere(_));
+    if !with_a_round_wire && (whole_curves.is_empty() || on_a_ball) {
         let mut refused = None;
         for sides in &readings {
-            match what_the_part_in_front_of_its_cuts_holds(face, &surface, sides, point) {
+            match what_the_part_in_front_of_its_cuts_holds(
+                face,
+                &surface,
+                sides,
+                &whole_curves,
+                point,
+            ) {
                 Ok(Some(held)) => return Ok(held),
                 Ok(None) => {}
                 Err(why) => {
@@ -2036,7 +2056,7 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             };
             assert!(
                 whole_curves.is_empty(),
-                "only a cone face's sides are read as whole curves"
+                "only a cone or a ball face's sides are read as whole curves"
             );
             what_a_flat_face_of_chords_and_arcs_holds(solid, face, &flat, sides, point, policy, log)
         }
@@ -2577,10 +2597,26 @@ fn in_front_of_a_plane_every_side_is_behind(
 
 /// Steps 1 to 3 of [`what_a_face_cut_by_part_of_a_crossing_holds`], or `None`
 /// where the face is outside the family they follow.
+///
+/// **A ball face's whole circles are cuts with no corners** (row Q2038). The
+/// skin of a ball kept to `x, y ≥ 1.5` and behind a steep plane whose circle
+/// lies wholly between the two has that circle as a wire of its own, and is
+/// still the part of the sphere in front of all three. Such a circle has no two
+/// ends for step 1 to read the way it runs between, so the side its plane keeps
+/// is read off the face's corners instead
+/// ([`the_side_every_corner_off_a_plane_is_on`]): the circle is all of where the
+/// plane crosses the sphere, and the face is one piece with none of that circle
+/// inside it, so it lies wholly on one side, the side of every corner off the
+/// plane. The circle's own corner is not one of those asked: it is on the plane,
+/// but stored a rounding off it. Step 2 then asks the circle against every other cut
+/// ([`where_a_whole_circle_lies`]) as it asks every side. A face whose corners
+/// all lie in front of the circle's plane has none of its sides behind it, so
+/// such a face is only ever taken as the part in front of every cut.
 fn what_the_part_in_front_of_its_cuts_holds(
     face: FaceView<'_>,
     surface: &Surface,
     sides: &[Side],
+    whole_circles: &[WholeCurve],
     point: PredicatePoint,
 ) -> Result<Option<OnAFace>> {
     let mut cuts: Vec<Cut> = Vec::new();
@@ -2597,6 +2633,30 @@ fn what_the_part_in_front_of_its_cuts_holds(
                 corners_on_it: corners.to_vec(),
             }),
         }
+    }
+    for circle in whole_circles {
+        let across = Surface::Plane(circle.across);
+        let corners = sides
+            .iter()
+            .flat_map(|side| [side.start.at, side.end.at])
+            .chain(
+                whole_circles
+                    .iter()
+                    .filter(|other| !core::ptr::eq(*other, circle))
+                    .map(|other| other.corner),
+            );
+        let Some(kept) = the_side_every_corner_off_a_plane_is_on(corners, &circle.across) else {
+            return Ok(None);
+        };
+        if cuts.iter().any(|known| known.surface == across) {
+            return Ok(None);
+        }
+        cuts.push(Cut {
+            surface: across,
+            placed: Surface::Plane(circle.across_placed),
+            kept,
+            corners_on_it: Vec::new(),
+        });
     }
     let nappe = if let Surface::Cone(cone) = surface {
         the_nappe_its_sides_are_on(cone, sides)
@@ -2651,8 +2711,16 @@ fn what_the_part_in_front_of_its_cuts_holds(
     let mut in_front_of_all = true;
     let mut behind_all = true;
     for cut in &cuts {
-        for side in sides.iter().filter(|side| side.across != cut.surface) {
-            match where_a_side_lies(surface, side, cut) {
+        let where_the_sides_lie = sides
+            .iter()
+            .filter(|side| side.across != cut.surface)
+            .map(|side| where_a_side_lies(surface, side, cut));
+        let where_the_circles_lie = whole_circles
+            .iter()
+            .filter(|circle| Surface::Plane(circle.across) != cut.surface)
+            .map(|circle| where_a_whole_circle_lies(surface, circle, cut));
+        for lies in where_the_sides_lie.chain(where_the_circles_lie) {
+            match lies {
                 Lies::On => {}
                 Lies::Beside(found) if found == cut.kept => behind_all = false,
                 Lies::Beside(_) => in_front_of_all = false,
@@ -2673,6 +2741,7 @@ fn what_the_part_in_front_of_its_cuts_holds(
         };
         Ok(Some(the_apex_is_a_corner(held)))
     } else if behind_all
+        && whole_circles.is_empty()
         && (the_rest_of_a_ball_is_one_piece() || is_two_discs_taken_together(surface, &cuts))
     {
         held_in_front_of_any(&cuts, point).map(Some)
@@ -3476,12 +3545,9 @@ fn the_side_away_from_the_apex_a_face_keeps(
     if cone.is_cut_in_a_closed_curve_by(&curve.across) != Some(true) {
         return None;
     }
-    let side_of = |at: Point| {
-        curve
-            .across
-            .side_of_point(PredicatePoint::from(at.coordinates()))
-    };
-    let apex = side_of(cone.apex());
+    let apex = curve
+        .across
+        .side_of_point(PredicatePoint::from(cone.apex().coordinates()));
     if !matches!(apex, Decision::Pos | Decision::Neg) {
         return None;
     }
@@ -3489,9 +3555,19 @@ fn the_side_away_from_the_apex_a_face_keeps(
         .iter()
         .flat_map(|side| [side.start.at, side.end.at])
         .chain(whole_curves.iter().map(|other| other.corner));
+    the_side_every_corner_off_a_plane_is_on(corners, &curve.across).filter(|&kept| kept != apex)
+}
+
+/// The side of `flat` every one of `corners` off it is on, each read exactly
+/// where it is stored; `None` where none is off it, where two are on different
+/// sides, and where a sign could not be settled.
+fn the_side_every_corner_off_a_plane_is_on(
+    corners: impl IntoIterator<Item = Point>,
+    flat: &Plane,
+) -> Option<Decision> {
     let mut kept = None;
     for corner in corners {
-        match side_of(corner) {
+        match flat.side_of_point(PredicatePoint::from(corner.coordinates())) {
             Decision::Zero => {}
             found @ (Decision::Pos | Decision::Neg) if kept.is_none_or(|known| known == found) => {
                 kept = Some(found);
@@ -3499,7 +3575,7 @@ fn the_side_away_from_the_apex_a_face_keeps(
             Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _ => return None,
         }
     }
-    kept.filter(|&kept| kept != apex)
+    kept
 }
 
 /// The name a turn read down a cone's axis goes by in provenance records.
@@ -3711,8 +3787,10 @@ enum Lies {
 /// a whole closed curve has no two ends to read a chord between, and
 /// [`what_a_flat_face_of_chords_and_arcs_holds`] counts it as a whole instead.
 /// So, for the same reason, is a cone face's side right round the curve a
-/// plane cuts it in ([`a_whole_curve_round_a_cone`]), which
-/// [`what_a_cone_face_seen_down_its_axis_holds`] reads as a whole.
+/// plane cuts it in ([`a_whole_curve_round_a_cone_or_a_ball`]), which
+/// [`what_a_cone_face_seen_down_its_axis_holds`] reads as a whole, and a ball
+/// face's side right round the circle a plane cuts it in, which
+/// [`what_the_part_in_front_of_its_cuts_holds`] reads as a cut with no corners.
 fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Readings> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let mut readings: Vec<Vec<Side>> = vec![Vec::new()];
@@ -3735,7 +3813,7 @@ fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Re
             placed: corner.point(),
         });
         if start.key == end.key
-            && let Some(curve) = a_whole_curve_round_a_cone(face, edge, across, start.at)
+            && let Some(curve) = a_whole_curve_round_a_cone_or_a_ball(face, edge, across, start.at)
         {
             whole_curves.push(curve);
             continue;
@@ -3804,13 +3882,15 @@ fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Re
 struct Readings {
     /// Every way to read the sides that run between two corners.
     sides: Vec<Vec<Side>>,
-    /// The sides that run right round a closed curve, on a cone face only.
+    /// The sides that run right round a closed curve, on a cone or a ball face
+    /// only.
     whole_curves: Vec<WholeCurve>,
 }
 
-/// A side of a cone face that runs right round the closed curve a plane cuts
-/// the cone in, from its one corner back to it: that plane where the face is
-/// stored and once moved into place, and the corner where it is stored.
+/// A side of a cone or a ball face that runs right round the closed curve a
+/// plane cuts the cone or the ball in, from its one corner back to it: that
+/// plane where the face is stored and once moved into place, and the corner
+/// where it is stored.
 struct WholeCurve {
     across: Plane,
     across_placed: Plane,
@@ -3818,15 +3898,15 @@ struct WholeCurve {
 }
 
 /// The side `edge` of `face`, which leaves `corner` and comes back to it, read
-/// as a [`WholeCurve`]; `None` unless `face` is on a cone, the face `across` is
-/// flat, and `edge` runs along where the two cross.
-fn a_whole_curve_round_a_cone(
+/// as a [`WholeCurve`]; `None` unless `face` is on a cone or a ball, the face
+/// `across` is flat, and `edge` runs along where the two cross.
+fn a_whole_curve_round_a_cone_or_a_ball(
     face: FaceView<'_>,
     edge: EdgeView<'_>,
     across: FaceView<'_>,
     corner: Point,
 ) -> Option<WholeCurve> {
-    let (Surface::Cone(_), Surface::Plane(flat), Surface::Plane(placed)) = (
+    let (Surface::Cone(_) | Surface::Sphere(_), Surface::Plane(flat), Surface::Plane(placed)) = (
         face.stored_surface(),
         across.stored_surface(),
         across.surface(),
@@ -3866,7 +3946,7 @@ fn is_a_round_wire_of_a_flat_face(face: FaceView<'_>, wire: WireView<'_>) -> boo
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for an arc no half-space
 /// tells from its sibling and that is not an arc of a cone's face along a curve
 /// that does not close ([`the_way_into_an_arc_that_does_not_close`]), a whole
-/// closed crossing among parts of others that is not a cone face's
+/// closed crossing among parts of others that is not a cone or a ball face's
 /// [`WholeCurve`], which never reaches here, or a kind of run this has not been
 /// taught, and whatever [`the_face_across`] gives for the edge.
 fn the_way_a_side_runs(
@@ -4947,8 +5027,11 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// On a ring it is planes through the axis, no two side by side, and at most
 /// one plane square to it, as [`leaves_a_ring_in_one_piece`] sets out.
 ///
-/// On a sphere, it is any two planes, or planes with one point inside the ball
-/// on or behind each of them ([`leaves_a_ball_in_one_piece`]). **Two planes leave one piece
+/// On a sphere, it is any two planes, planes with one point inside the ball
+/// on or behind each of them, or planes that are one of those two kinds once
+/// one plane is left out, where the circle that plane cuts the sphere in meets
+/// the part in front of the rest in one arc at most
+/// ([`leaves_a_ball_in_one_piece`]). **Two planes leave one piece
 /// whatever they keep** (row
 /// Q1162). They cut the sphere in two circles, which meet in at most two
 /// points. Where they cross at two, the part in front of both has its edge on
@@ -5003,38 +5086,67 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// not inside, and that is refused though the part is the whole of what the
 /// two keep.
 ///
+/// **Past those, one plane may be left out, if its circle meets what the rest
+/// keep in one arc at most** (row Q2038). Say the part `R` of the sphere in
+/// front of every other cut is one piece, by either argument above, and the
+/// circle `C` the one left out cuts the sphere in meets `R` in one arc, the
+/// whole circle, or nothing. `C` cuts the sphere into two caps, and the part
+/// wanted is the part of `R` in the cap that plane keeps. Where `C` meets `R`,
+/// every piece of `R` less `C` borders `C`, since a piece that did not would
+/// be open and closed in `R`, and so all of it, as `R` is one piece. Near each
+/// point of the arc, `R` is a small disc that `C` cuts
+/// into two halves, one in each cap, and the halves in one cap all join along
+/// the arc, which is one piece. So `R` less `C` is two pieces at most, one in
+/// each cap, and the part in front of every cut is one of them, or all of `R`
+/// when `C` misses `R`. [`its_circle_meets_what_the_others_keep_in_one_arc`]
+/// counts the arc's ends. Each is a **corner**, where `C` crosses another
+/// plane at a point strictly in front of every cut but those two, and each
+/// corner ends one arc only, since `C` runs from that plane's front to its
+/// back there; so two corners at most is one arc at most. A corner on a third
+/// plane, and a line of two planes that only touches the ball, where `C`
+/// meets the other's circle without crossing it, are refused. A ball of
+/// radius 3 kept to `x ≥ 1`, `y ≥ 2` and `x + y + z ≤ 5.1` is followed this
+/// way, by the circle of `x = 1`, though its three planes meet outside it; so
+/// is one kept to `x ≥ 3`, `x ≥ z` and `y ≤ 4`, whose circle on `y = 4` only
+/// touches what the other two keep, by the circle of `x = z`; and so is one
+/// kept to `x, y ≥ 1.5` and `x + y ≤ 4.2`, whose circle on `x + y = 4.2` lies
+/// wholly inside what the other two keep and takes a disc out of it
+/// (`a_circle_touching_twice_what_two_planes_keep_is_refused_and_once_or_biting_followed`
+/// below, and `tests/a_ball_kept_by_a_block_and_a_leaning_plane.rs`).
+///
 /// **The "in front of any" reading needs the part *behind* every cut in one
 /// piece instead**: the ball kept to `x, y, z ≤ 1.3` below is the part behind
 /// cuts keeping `x, y, z ≥ 1.3`, and it is two pieces. So
 /// [`what_the_part_in_front_of_its_cuts_holds`] reads a sphere face that way
 /// only when the cuts turned round are one piece here too, which two planes
-/// always are, and three or more are when some point inside the ball is on or
-/// *in front of* each. That stays right as this widens, since what it asks is
-/// what the argument above shows of any planes, turned round or not
-/// (`the_part_behind_three_planes_meeting_inside_a_ball_is_one_piece` below).
-/// A face with three or more cuts, no such point, and every side behind every
-/// other cut is refused: the part behind all of them can be two pieces.
+/// always are, three or more are when some point inside the ball is on or
+/// *in front of* each, and any are when one left out leaves such planes and a
+/// circle with two corners at most. That stays right as this widens, since
+/// what it asks is what the arguments above show of any planes, turned round
+/// or not (`the_part_behind_three_planes_meeting_inside_a_ball_is_one_piece`
+/// below). A face with three or more cuts that the cuts turned round are not
+/// shown one piece for, and every side behind every other cut, is refused: the
+/// part behind all of them can be two pieces.
 ///
-/// **With no such point found, three planes or more are refused, and that is a
-/// limit for some and a gap for others.** There is nothing to push from, and
-/// the part in front of all of them can be two pieces with nothing between
-/// them, which this family has no answer for: three caps lost can go right
-/// round a patch, the planes meeting outside the ball
+/// **With none of those, three planes or more are refused, and that is a
+/// limit for some and a gap for others.** The part in front of all of them can
+/// be two pieces with nothing between them, which this family has no answer
+/// for: three caps lost can go right round a patch, the planes meeting outside
+/// the ball, and each circle left out has four corners
 /// (`three_planes_that_miss_a_balls_centre_leave_its_skin_in_two_pieces`
-/// below), one is enough when it cuts across the middle of what two others
+/// below); one is enough when it cuts across the middle of what two others
 /// keep, the three normals in one plane so they meet nowhere
 /// (`one_plane_with_a_balls_centre_in_front_beside_two_with_it_behind_leaves_two_pieces`),
+/// or touches the rim of what two others keep at two points
+/// (`a_circle_touching_twice_what_two_planes_keep_is_refused_and_once_or_biting_followed`);
 /// and one can cut a corner's tip off, as above. But the part can be one piece
-/// with no point found, and that is a gap: a cap lost from inside what the
-/// others keep leaves a ring, a circle that only touches the rim of what the
-/// others keep takes nothing from it
-/// (`a_circle_touching_what_two_planes_keep_is_refused` below), and a cap can
-/// bite one side of it. Nor are the meeting points of three every place `o`
-/// can be: the point of the region behind every cut nearest the centre, which
-/// is inside the ball whenever any point of it is, can also be the foot of the
-/// centre on one plane or on the line two meet in. Telling the rest apart wants
-/// where the circles cross that rim, which nothing here reads, and no face has
-/// asked for any of it (§13).
+/// with none of those, and that is a gap: `z ≤ 7` above meets the corner of
+/// what the other two keep on the sphere, which puts a corner of its circle on
+/// a third plane. Nor are the meeting points of three every place `o` can be:
+/// the point of the region behind every cut nearest the centre, which is
+/// inside the ball whenever any point of it is, can also be the foot of the
+/// centre on one plane or on the line two meet in, and two circles may need to
+/// be left out at once. No face has asked for those yet (§13).
 ///
 /// # On a cone it is planes the apex is in front of, any number of them, and one it is on or two that meet inside the cone
 ///
@@ -5398,40 +5510,57 @@ fn leaves_a_ring_in_one_piece(ring: &rcad_geom::Torus, cuts: &[Cut]) -> bool {
 }
 
 /// Whether the part of `ball`'s sphere in front of every one of `cuts` is one
-/// piece: every cut a plane, and two of them at most, or some point strictly
-/// inside the ball on or behind each of them, as [`is_a_family_this_follows`]
-/// argues. The points asked are the centre and every point where three of the
-/// planes meet. A sign that could not be settled is a refusal, never a guess.
+/// piece, as [`is_a_family_this_follows`] argues: every cut a plane, and either
+/// the cuts are one piece by [`two_cuts_or_a_point_inside_behind_each`], or
+/// leaving one of them out they are, and the circle the one left out cuts the
+/// sphere in meets the part in front of the rest in one arc at most
+/// ([`its_circle_meets_what_the_others_keep_in_one_arc`]). A sign that could
+/// not be settled is a refusal, never a guess.
 fn leaves_a_ball_in_one_piece(ball: &rcad_geom::Sphere, cuts: &[Cut]) -> bool {
     let Some(planes) = cuts
         .iter()
-        .map(|cut| cut.surface.as_plane())
-        .collect::<Option<Vec<&Plane>>>()
+        .map(|cut| cut.surface.as_plane().map(|flat| (flat, cut.kept)))
+        .collect::<Option<Vec<(&Plane, Decision)>>>()
     else {
         return false;
     };
-    if cuts.len() <= 2 {
+    two_cuts_or_a_point_inside_behind_each(ball, &planes)
+        || (0..planes.len()).any(|left_out| {
+            let mut others = planes.clone();
+            let (flat, _) = others.remove(left_out);
+            its_circle_meets_what_the_others_keep_in_one_arc(ball, flat, &others)
+                && two_cuts_or_a_point_inside_behind_each(ball, &others)
+        })
+}
+
+/// Whether `planes`, each with the side it keeps, are two at most, or have some
+/// point strictly inside `ball` on or behind each of them: the centre, or a
+/// point where three of them meet. Either leaves the part of the sphere in
+/// front of all of them one piece, as [`is_a_family_this_follows`] argues.
+fn two_cuts_or_a_point_inside_behind_each(
+    ball: &rcad_geom::Sphere,
+    planes: &[(&Plane, Decision)],
+) -> bool {
+    if planes.len() <= 2 {
         return true;
     }
     let centre = PredicatePoint::from(ball.centre().coordinates());
-    let the_centre_is_behind_every_cut = cuts
+    let the_centre_is_behind_every_cut = planes
         .iter()
-        .zip(&planes)
-        .all(|(cut, flat)| is_on_or_behind(flat.side_of_point(centre), cut.kept));
-    the_centre_is_behind_every_cut || three_planes_meet_inside_behind_the_rest(ball, cuts, &planes)
+        .all(|(flat, kept)| is_on_or_behind(flat.side_of_point(centre), *kept));
+    the_centre_is_behind_every_cut || three_planes_meet_inside_behind_the_rest(ball, planes)
 }
 
-/// Whether some three of `cuts`, on `planes`, meet at a point strictly inside
-/// `ball` that is on or behind every other cut: the second kind of point
-/// [`is_a_family_this_follows`] pushes the sphere out from. The meeting point
-/// is on its own three planes by being built from them, so only the ball and
-/// the other planes are asked, the other planes exactly
+/// Whether some three of `planes` meet at a point strictly inside `ball` that
+/// is on or behind every other one, each read against the side it keeps: the
+/// second kind of point [`is_a_family_this_follows`] pushes the sphere out
+/// from. The meeting point is on its own three planes by being built from them,
+/// so only the ball and the other planes are asked, the other planes exactly
 /// ([`side_of_a_plane_where_three_planes_meet`]). Three normals in one plane
 /// meet nowhere and are passed over.
 fn three_planes_meet_inside_behind_the_rest(
     ball: &rcad_geom::Sphere,
-    cuts: &[Cut],
-    planes: &[&Plane],
+    planes: &[(&Plane, Decision)],
 ) -> bool {
     let skin = Surface::Sphere(*ball);
     let count = planes.len();
@@ -5439,24 +5568,162 @@ fn three_planes_meet_inside_behind_the_rest(
         (first + 1..count).any(|second| {
             (second + 1..count).any(|third| {
                 let three = [first, second, third];
-                let Ok(meet) = Plane::meet_of_three(planes[first], planes[second], planes[third])
+                let Ok(meet) =
+                    Plane::meet_of_three(planes[first].0, planes[second].0, planes[third].0)
                 else {
                     return false;
                 };
-                let rows = three.map(|which| planes[which].coefficients());
+                let rows = three.map(|which| planes[which].0.coefficients());
                 side_of_surface(&skin, meet) == Decision::Neg
-                    && cuts
+                    && planes
                         .iter()
-                        .zip(planes)
                         .enumerate()
                         .filter(|(which, _)| !three.contains(which))
-                        .all(|(_, (cut, flat))| {
+                        .all(|(_, (flat, kept))| {
                             side_of_a_plane_where_three_planes_meet(rows, flat.coefficients())
-                                .is_ok_and(|sits| is_on_or_behind(sits, cut.kept))
+                                .is_ok_and(|sits| is_on_or_behind(sits, *kept))
                         })
             })
         })
     })
+}
+
+/// Whether the circle `flat` cuts `ball`'s sphere in meets the part of the
+/// sphere strictly in front of every one of `others` in one arc, the whole
+/// circle or nothing: whether it has two **corners** at most, a corner being
+/// a point where the circle crosses another cut's plane that is strictly in
+/// front of every cut but those two. A corner on a third plane, a sign that
+/// could not be settled, and a line of two planes that only touches the ball
+/// are each a refusal.
+///
+/// Each arc of the circle in front of every other cut ends at two corners, its
+/// own: at an end some other cut's plane crosses the circle, and it crosses it
+/// at a point where the circle runs from that cut's front to its back, so only
+/// one arc can end there. A plane side by side with `flat`
+/// ([`the_normals_lie_along_one_line`]) has one side all round the circle and
+/// ends no arc, so it is passed over. Where the circle crosses `other` is
+/// where the line the two planes meet in crosses the sphere, and
+/// [`TwoCrossings`] reads which side of a third plane each crossing is on.
+fn its_circle_meets_what_the_others_keep_in_one_arc(
+    ball: &rcad_geom::Sphere,
+    flat: &Plane,
+    others: &[(&Plane, Decision)],
+) -> bool {
+    let mut corners = 0;
+    for (which, (other, _)) in others.iter().enumerate() {
+        if the_normals_lie_along_one_line(flat, other) {
+            continue;
+        }
+        let crossings = TwoCrossings::of(ball, flat, other);
+        if crossings.misses == Decision::Pos {
+            continue;
+        }
+        if crossings.misses != Decision::Neg {
+            return false;
+        }
+        for way in [Decision::Pos, Decision::Neg] {
+            let in_front: Vec<Option<bool>> = others
+                .iter()
+                .enumerate()
+                .filter(|(third, _)| *third != which)
+                .map(|(_, (third, kept))| crossings.side_of(third, way).map(|sits| sits == *kept))
+                .collect();
+            if in_front.contains(&Some(false)) {
+                continue;
+            }
+            if in_front.contains(&None) {
+                return false;
+            }
+            corners += 1;
+        }
+    }
+    corners <= 2
+}
+
+/// The two points where the line two planes meet in crosses a sphere, held as
+/// numbers whose signs are read without taking a square root.
+///
+/// With `n·x = d` and `m·x = e` the two planes, `c` the centre and `r` the
+/// radius, put `a = d − n·c`, `b = e − m·c`, `u = n × m` and `G = |u|²`, not
+/// zero since the normals do not lie along one line. The line's point nearest
+/// the centre is `F = c + (λn + μm)/G`, `λ = |m|²a − (n·m)b` and
+/// `μ = |n|²b − (n·m)a` solving `n·(F − c) = a` and `m·(F − c) = b`, and
+/// `|F − c|² = N/G` with `N = a²|m|² − 2ab(n·m) + b²|n|²`. So the line misses
+/// the ball when `N − r²G` is positive and crosses it twice when it is
+/// negative, at `F ± (√M/G)u` with `M = r²G − N`.
+struct TwoCrossings {
+    centre: [Interval; 3],
+    /// `λn + μm`, the way from the centre to the foot `F`, times `G`.
+    to_the_foot: [Interval; 3],
+    across: [Interval; 3],
+    squared: Interval,
+    /// `M`, which is `G` times the square of how far each crossing is from the
+    /// foot.
+    reach: Interval,
+    /// The sign of `N − r²G`: `Pos` when the line misses the ball.
+    misses: Decision,
+}
+
+impl TwoCrossings {
+    fn of(ball: &rcad_geom::Sphere, one: &Plane, other: &Plane) -> Self {
+        let centre = exactly(ball.centre().coordinates());
+        let [n, m] = [one, other].map(|flat| exactly(flat.normal().components()));
+        let [a, b] = [(one, n), (other, m)]
+            .map(|(flat, normal)| Interval::exactly(flat.offset()) - dot(normal, centre));
+        let [nn, mm, nm] = [dot(n, n), dot(m, m), dot(n, m)];
+        let across = cross(n, m);
+        let squared = dot(across, across);
+        let radius = Interval::exactly(ball.radius());
+        let how_far = a * a * mm - Interval::exactly(2.0) * a * b * nm + b * b * nn;
+        let reach = radius * radius * squared - how_far;
+        let [lambda, mu] = [mm * a - nm * b, nn * b - nm * a];
+        Self {
+            centre,
+            to_the_foot: core::array::from_fn(|axis| lambda * n[axis] + mu * m[axis]),
+            across,
+            squared,
+            reach,
+            misses: (-reach).sign(),
+        }
+    }
+
+    /// The side of `flat` the crossing `F + (√M/G)u` is strictly on when `way`
+    /// is `Pos`, and `F − (√M/G)u` when it is `Neg`; `None` when it is on the
+    /// plane or the sign could not be settled.
+    ///
+    /// `G` times the plane's value there is `A ± √M·B`, with
+    /// `A = G(p·c − f) + p·(λn + μm)` and `B = p·u` for `p·x = f` the plane.
+    /// Where `A` and `±B` have one sign that is the sum's; where they have
+    /// opposite signs the larger wins, which is the sign of `A² − M·B²`.
+    fn side_of(&self, flat: &Plane, way: Decision) -> Option<Decision> {
+        let normal = exactly(flat.normal().components());
+        let off = dot(normal, self.centre) - Interval::exactly(flat.offset());
+        let along = self.squared * off + dot(normal, self.to_the_foot);
+        let across = dot(normal, self.across);
+        let across = if way == Decision::Pos {
+            across
+        } else {
+            -across
+        };
+        let strictly =
+            |sits: Decision| matches!(sits, Decision::Pos | Decision::Neg).then_some(sits);
+        if across.sign() == Decision::Zero {
+            return strictly(along.sign());
+        }
+        if along.sign() == Decision::Zero {
+            return strictly(across.sign());
+        }
+        let [along_sits, across_sits] = [strictly(along.sign())?, strictly(across.sign())?];
+        if along_sits == across_sits {
+            return Some(along_sits);
+        }
+        let larger = strictly((along * along - self.reach * across * across).sign())?;
+        Some(if larger == Decision::Pos {
+            along_sits
+        } else {
+            across_sits
+        })
+    }
 }
 
 /// Whether a point whose side of a cut's plane is `sits` is on that plane or
@@ -6936,6 +7203,43 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                 [..] => Lies::Across,
             }
         }
+    }
+}
+
+/// Where the whole circle `circle`'s plane cuts a ball face's sphere in lies
+/// against `cut`, another plane cutting the face: beside it when the two never
+/// meet on the sphere, and [`Lies::Across`] otherwise and for any other
+/// surface.
+///
+/// **They never meet when the planes are side by side
+/// ([`the_normals_lie_along_one_line`]) or the line they meet in misses the
+/// ball** ([`TwoCrossings`]), and then the circle is wholly on the side its
+/// centre is. The circle bounds the disc its plane cuts the ball in, and the
+/// line of the two planes, where it meets that plane, would cross the disc's
+/// edge to reach the disc's inside, so a line that misses the ball misses the
+/// disc, and the disc is on one side, its centre with it. That centre is the
+/// ball's centre `c` moved `a/|n|²` along the plane's normal `n`, with
+/// `a = d − n·c` for the plane `n·x = d`, so against `m·x = e` it is on the side
+/// of `|n|²(m·c − e) + a(n·m)`, read exactly. The circle's own corner is not
+/// asked: it is stored a rounding off both the sphere and the plane, and the
+/// centre is not.
+fn where_a_whole_circle_lies(surface: &Surface, circle: &WholeCurve, cut: &Cut) -> Lies {
+    let (Surface::Sphere(ball), Some(other)) = (surface, cut.surface.as_plane()) else {
+        return Lies::Across;
+    };
+    let own = &circle.across;
+    if !the_normals_lie_along_one_line(own, other)
+        && TwoCrossings::of(ball, own, other).misses != Decision::Pos
+    {
+        return Lies::Across;
+    }
+    let centre = exactly(ball.centre().coordinates());
+    let [n, m] = [own, other].map(|flat| exactly(flat.normal().components()));
+    let a = Interval::exactly(own.offset()) - dot(n, centre);
+    let sits = dot(n, n) * (dot(m, centre) - Interval::exactly(other.offset())) + a * dot(n, m);
+    match sits.sign() {
+        found @ (Decision::Pos | Decision::Neg) => Lies::Beside(found),
+        Decision::Zero | Decision::Undecidable { .. } | _ => Lies::Across,
     }
 }
 
@@ -9476,7 +9780,13 @@ mod tests {
     /// `x + y ≤ 1.5`, and the centre is in front of it, and so is the corner
     /// `(0.5, 0.5, 0.5)`. Where it meets `z = 0.5` and one of `x = 0.5` and
     /// `y = 0.5`, at `(0.5, 1, 0.5)` and `(1, 0.5, 0.5)`, is in front of the
-    /// other, and it meets those two nowhere: refused.
+    /// other, and it meets those two nowhere, so no point the four planes give
+    /// is behind all four. **It is followed all the same**, by the fourth's
+    /// circle: the other three keep the centre behind them, and the circle
+    /// crosses them at `(0.5, 1, ±√2.75)`, `(1, 0.5, ±√2.75)` and on
+    /// `z = 0.5` where `x` or `y` is below `0.5`, of which only the two above
+    /// `z = 0` are in front of the rest. Two corners, one arc, and the grid
+    /// finds one piece.
     #[test]
     fn caps_no_bigger_than_half_a_ball_are_followed_however_many() {
         let ball = Surface::Sphere(
@@ -9515,8 +9825,14 @@ mod tests {
         let mut turned = corner;
         turned.push(a_flat_cut(diagonal, clipped, Decision::Neg));
         assert!(
-            !is_a_family_this_follows(&ball, &turned, None),
-            "x, y, z >= 0.5 and x + y <= 1.5 are refused"
+            is_a_family_this_follows(&ball, &turned, None),
+            "x, y, z >= 0.5 and x + y <= 1.5 are followed by the fourth's circle"
+        );
+        assert_eq!(
+            pieces_of_a_sphere(2.0, |at| {
+                at.iter().all(|coordinate| *coordinate > 0.5) && at[0] + at[1] < 1.5
+            }),
+            1
         );
     }
 
@@ -9700,27 +10016,35 @@ mod tests {
         );
     }
 
-    /// A circle that only touches the rim of what two planes keep, and one that
-    /// bites one side of it, are refused: no point where the three planes meet
-    /// is inside the ball.
+    /// A circle that touches the rim of what two planes keep at two points is
+    /// refused, and one that touches it once or bites one side of it is
+    /// followed, though in none of the three is a point where the planes meet
+    /// inside the ball.
     ///
     /// **Touching both sides leaves two pieces.** A ball of radius 5 at the
     /// origin kept to `x, y ≥ 3` is a lens, and `x + y = 7` touches its rim at
     /// `(3, 4, 0)` and `(4, 3, 0)` and crosses it nowhere else. On the equator
     /// with `x, y > 3`, `x + y > 7`, so nothing there is strictly in front of
     /// `x + y ≤ 7` too, and the lens's two halves are apart; the three normals
-    /// lie in one plane, so the planes meet nowhere.
+    /// lie in one plane, so the planes meet nowhere. Each of the three circles
+    /// meets one of the other planes along a line that only touches the ball,
+    /// at `(3, 4, 0)` or `(4, 3, 0)`, so none has its corners counted.
     ///
-    /// **Touching one side, or biting it, leaves one, and that is a gap.** Kept
-    /// to `x ≥ 3` and `x ≥ z`, the ball's skin is a cap with its top cut off,
-    /// and `y = 4` touches it at `(3, 4, 0)` alone: `y ≤ 4` takes nothing, but
-    /// the three meet at `(3, 4, 3)`, outside. A ball of radius 3 kept to
-    /// `x ≥ 1`, `y ≥ 2` is a lens whose top corner `(1, 2, 2)` has
+    /// **Touching one side, or biting it, leaves one, and the corners say
+    /// so.** Kept to `x ≥ 3` and `x ≥ z`, the ball's skin is a cap with its
+    /// top cut off, and `y = 4` touches it at `(3, 4, 0)` alone: `y ≤ 4` takes
+    /// nothing, and the three meet at `(3, 4, 3)`, outside. The circle of
+    /// `x = z` crosses `x = 3` at `(3, ±√7, 3)`, both in front of `y ≤ 4`, and
+    /// `y = 4` where `x` is `±√4.5`, below `3`: two corners. A ball of radius 3
+    /// kept to `x ≥ 1`, `y ≥ 2` is a lens whose top corner `(1, 2, 2)` has
     /// `x + y + z = 5`, which is as high as `x + y + z` gets on the side
     /// `x = 1`, so `x + y + z ≤ 5.1` bites only the side `y = 2`; the three meet
-    /// at `(1, 2, 2.1)`, outside.
+    /// at `(1, 2, 2.1)`, outside. The circle of `x = 1` crosses `y = 2` at
+    /// `(1, 2, ±2)`, both in front of `x + y + z ≤ 5.1`, and misses the leaning
+    /// plane: two corners. This is the ball's skin of
+    /// `tests/a_ball_kept_by_a_block_and_a_leaning_plane.rs`.
     #[test]
-    fn a_circle_touching_or_biting_what_two_planes_keep_is_refused() {
+    fn a_circle_touching_twice_what_two_planes_keep_is_refused_and_once_or_biting_followed() {
         let five = Surface::Sphere(
             rcad_geom::Sphere::new(Point::origin(), 5.0).expect("a ball of radius five"),
         );
@@ -9762,8 +10086,8 @@ mod tests {
             a_flat_cut(y, Point::new(0.0, 4.0, 0.0), Decision::Neg),
         ];
         assert!(
-            !is_a_family_this_follows(&five, &touching_one, None),
-            "x >= 3, x >= z and y <= 4 are refused"
+            is_a_family_this_follows(&five, &touching_one, None),
+            "x >= 3, x >= z and y <= 4 are followed"
         );
         assert_eq!(
             pieces_of_a_sphere(5.0, |at| at[0] > 3.0 && at[0] > at[2] && at[1] < 4.0),
@@ -9783,8 +10107,8 @@ mod tests {
             ),
         ];
         assert!(
-            !is_a_family_this_follows(&three, &biting, None),
-            "x >= 1, y >= 2 and x + y + z <= 5.1 are refused"
+            is_a_family_this_follows(&three, &biting, None),
+            "x >= 1, y >= 2 and x + y + z <= 5.1 are followed"
         );
         assert_eq!(
             pieces_of_a_sphere(3.0, |at| {
