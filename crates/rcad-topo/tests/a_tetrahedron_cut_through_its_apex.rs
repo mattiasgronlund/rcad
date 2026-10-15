@@ -64,27 +64,21 @@ fn the_front_face_through_three_points_is_stored_a_rounding_off_the_apex() {
 /// is refused too.
 ///
 /// Built through the apex exactly and left where it was built, the four
-/// planes meet at one point.
+/// planes meet at one point. Placed, they do not: the placement rounds each
+/// plane again, and where the three side planes meet lands on the same side of
+/// the cut as with the front face through three points.
 #[test]
 fn where_the_three_side_planes_meet_is_off_the_cut_at_every_placement() {
-    for (placement, side) in [
-        (Placement::WhereItWasBuilt, Decision::Neg),
-        (Placement::Shifted, Decision::Neg),
-        (Placement::Turned, Decision::Pos),
-        (Placement::TurnedThenShifted, Decision::Pos),
-    ] {
-        assert_eq!(
-            the_side_of_the_cut_the_apex_is_on(Front::ThroughThreePoints, placement),
-            side,
-            "{placement:?}"
-        );
-    }
+    let at_every_placement = |front| {
+        Placement::EVERY.map(|placement| the_side_of_the_cut_the_apex_is_on(front, placement))
+    };
     assert_eq!(
-        the_side_of_the_cut_the_apex_is_on(
-            Front::ThroughTheApexExactly,
-            Placement::WhereItWasBuilt
-        ),
-        Decision::Zero
+        at_every_placement(Front::ThroughThreePoints),
+        [Decision::Neg, Decision::Neg, Decision::Pos, Decision::Pos]
+    );
+    assert_eq!(
+        at_every_placement(Front::ThroughTheApexExactly),
+        [Decision::Zero, Decision::Neg, Decision::Pos, Decision::Pos]
     );
 }
 
