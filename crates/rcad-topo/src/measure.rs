@@ -34,6 +34,14 @@ pub struct Measurement {
 
 impl Measurement {
     /// How much space the solid encloses.
+    ///
+    /// **Can be negative, but never by more than [`Measurement::volume_error`].**
+    /// A curved solid as thin as a sliver can sum over its mesh to a little
+    /// under zero while the true volume is a little over; the two quarter bends
+    /// in `a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver`
+    /// leave a wedge of `5.4e-17` that sums to `-8.7e-17` at a deflection of
+    /// `0.01`, with an error of `2.0e-15`. A sum further below zero than that is
+    /// refused, as [`SolidView::measure`] says.
     #[must_use]
     pub fn volume(self) -> f64 {
         self.volume
@@ -59,6 +67,13 @@ impl Measurement {
     /// What is on the wrong side of the triangles either way is the shell
     /// between them and the surface — same shell, same thickness, opposite sign
     /// — and [`how_much_space_hides_under_a_flat_stand_in`] bounds it.
+    ///
+    /// A flat face of a curved solid has no shell, but its mesh points lie on
+    /// its plane only as nearly as their coordinates can be written down, and
+    /// a turned plane's rarely can. So it is charged the slab its triangles can
+    /// stray through: [`how_far_the_points_stray_off`] its plane times its
+    /// area, and the furthest any flat face strays times the slivers along its
+    /// rim, as [`SolidView::skin_of`] says.
     ///
     /// For a wholly flat solid there is no such shell, and this is how far the
     /// rounded sum landed from the exact volume of the solid's own triangles,
@@ -137,6 +152,13 @@ impl Measurement {
     /// rather than bounded in advance, as the volume and area errors are:
     /// `0.0` exactly when the centroid came out on the nose, as on a cube with
     /// whole-number corners (`docs/decisions.md` §338.5). Never negative.
+    ///
+    /// **Infinite when the volume is not clear of its own error**, because
+    /// `shell / volume` then bounds nothing: a solid that may enclose no space
+    /// at all has no balance point to be near. Where the volume is not even
+    /// above zero, the moment cannot be divided by it, and
+    /// [`Measurement::centroid`] is where the mesh's skin balances instead —
+    /// a point near the solid, and no more.
     #[must_use]
     pub fn centroid_wobble(self) -> f64 {
         self.centroid_wobble
@@ -360,9 +382,16 @@ impl SolidView<'_> {
     /// or [`Error::Undecidable`].
     ///
     /// [`Invalid::VolumeIsNotPositive`] when the solid encloses a negative
-    /// amount of space, or none — the same refusal
+    /// amount of space, or none. A wholly flat solid is refused for a sum of
+    /// zero or less — the same refusal
     /// [`Model::validate`](crate::Model::validate) gives for the same bytes,
-    /// with the same number in it.
+    /// with the same number in it. A curved solid is refused only for a sum of
+    /// at most minus its [`Measurement::volume_error`], because a sliver's mesh
+    /// can sum a little under zero round a true volume a little over it; a sum
+    /// within its error of zero is answered, as [`Measurement::volume`] says.
+    /// `validate` does not yet charge a curved solid's flat faces what
+    /// [`SolidView::skin_of`] charges them, so it can still refuse a sliver
+    /// this answers (Q2089).
     ///
     /// **This used to be an assert, and §20.1 settled it that way.** The
     /// argument then was that the only route to an inside-out solid was a bug
@@ -447,7 +476,9 @@ impl SolidView<'_> {
     /// kind of thing.
     ///
     /// **The volume's error is the space the mesh hides and the rounding of its
-    /// sum, both, and so is the centroid's wobble.** The rounding is worked out
+    /// sum, both, and so is the centroid's wobble.** The space hidden is the
+    /// shell under the curved faces and the slab the flat faces' points stray
+    /// through, both from [`SolidView::skin_of`]. The rounding is worked out
     /// as the flat path works it out, from the mesh's own triangles summed
     /// exactly. A solid whose curved faces are a hair of skin hides less space
     /// than one rounding of the sum, and published that space alone: the block
@@ -455,6 +486,13 @@ impl SolidView<'_> {
     /// measured `1152.0000000000007` with an error of `5.7e-19`, and its mesh
     /// encloses `8.4e-14` less; its centroid came out `1.2e-15` from where the
     /// mesh balances, with a wobble of `5.1e-21`.
+    ///
+    /// **The sign is judged against that error, so the error comes first.** A
+    /// sum at most minus the error is a solid that encloses no space, or less,
+    /// however the mesh is out, and is refused. A sum above that and not
+    /// above zero is answered as it is, with the skin's middle for a centroid
+    /// and an infinite wobble, since a moment divided by nothing balances
+    /// nowhere.
     fn measured_over(self, mesh: &Mesh) -> Result<Measurement> {
         let hub = hub_of(mesh);
         let shifts = axis_shifts_over(mesh, hub);
@@ -531,8 +569,8 @@ impl SolidView<'_> {
     /// a turned plane's rarely can: the caps of the sliver in
     /// `a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver`
     /// are meshed up to `4.3e-16` off their planes, and the space between those
-    /// triangles and their planes moved the sum by up to `4.9e-16` against a
-    /// wedge of `5.4e-17`. So each flat face is charged
+    /// triangles and their planes moved the sum by anywhere from `-4.9e-16` to
+    /// `3.2e-16` (Q2087) against a wedge of `5.4e-17`. So each flat face is charged
     /// [`how_far_the_points_stray_off`] its plane times its area, the slab its
     /// triangles can stray through. The slivers between a flat face's
     /// inscribed outline and its curve are inside the neighbouring curved
