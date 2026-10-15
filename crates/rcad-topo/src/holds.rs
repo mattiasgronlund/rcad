@@ -2072,7 +2072,21 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             in_front_of_a_plane_every_side_is_behind(face, &surface, &readings, point)?
                 .ok_or(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
         }
-        Surface::Sphere(_) | Surface::Torus(_) | _ => {
+        Surface::Sphere(_) => {
+            let [sides] = readings.as_slice() else {
+                panic!(
+                    "a ball face's sides are read one way, since only a ruling of a pipe is read more ways than one"
+                );
+            };
+            what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
+                face,
+                &surface,
+                sides,
+                &whole_curves,
+                point,
+            )
+        }
+        Surface::Torus(_) | _ => {
             Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
         }
     }
@@ -2619,33 +2633,13 @@ fn what_the_part_in_front_of_its_cuts_holds(
     whole_circles: &[WholeCurve],
     point: PredicatePoint,
 ) -> Result<Option<OnAFace>> {
-    let mut cuts: Vec<Cut> = Vec::new();
-    for side in sides {
-        let kept = which_side_of_its_neighbour_a_side_keeps(face, surface, side)?;
-        let corners = [side.start.key, side.end.key];
-        match cuts.iter_mut().find(|known| known.surface == side.across) {
-            Some(known) if known.kept == kept => known.corners_on_it.extend(corners),
-            Some(_) => return Ok(None),
-            None => cuts.push(Cut {
-                surface: side.across,
-                placed: side.across_placed,
-                kept,
-                corners_on_it: corners.to_vec(),
-            }),
-        }
-    }
+    let Some(mut cuts) = the_cuts_its_sides_make(face, surface, sides)? else {
+        return Ok(None);
+    };
     for circle in whole_circles {
         let across = Surface::Plane(circle.across);
-        let corners = sides
-            .iter()
-            .flat_map(|side| [side.start.at, side.end.at])
-            .chain(
-                whole_circles
-                    .iter()
-                    .filter(|other| !core::ptr::eq(*other, circle))
-                    .map(|other| other.corner),
-            );
-        let Some(kept) = the_side_every_corner_off_a_plane_is_on(corners, &circle.across) else {
+        let Some(kept) = the_side_a_face_keeps_of_a_whole_circle(sides, whole_circles, circle)
+        else {
             return Ok(None);
         };
         if cuts.iter().any(|known| known.surface == across) {
@@ -3672,6 +3666,421 @@ fn lies_between_seen_down_the_axis(
         }
     }
     Ok(true)
+}
+
+/// Whether a ball face holds `point`, taken as being on the ball, read off the
+/// face's own sides **seen from a point of the sphere off the face**: the
+/// winding of [`what_a_cone_face_seen_down_its_axis_holds`], with every turn
+/// read from that point instead of down an axis (row Q2052).
+///
+/// # Why the sphere seen from one of its points is a flat picture
+///
+/// The whole sphere but `P` lies in front of the plane touching it at `P`, so
+/// every other point of it is seen along a ray of its own from `P`: one to one,
+/// without a fold, and turning every part of the sphere the same way round. A
+/// plane through `P` is seen as a line. A circle of the sphere whose plane `Q`
+/// misses `P` is seen as a circle, and the cap on the far side of `Q` from `P`
+/// as its inside. A face off `P` is then seen as a flat region whose boundary
+/// is its sides seen the same way, and `point` is on the face exactly when the
+/// count round its sides is non-zero where it is seen, as on a flat face. A
+/// seam is walked once each way, so leaving it out, as
+/// [`every_reading_of_the_sides_of`] does, changes no count.
+///
+/// # How each side is seen
+///
+/// Every side is an arc of the circle a plane `Q` cuts the sphere in, from `A`
+/// to `B`. The line through `A` and `B` as seen is the plane through `P`, `A`
+/// and `B`, which meets that circle at `A` and `B` and nowhere else, so the arc
+/// is seen as all of its circle on one side of its chord. Which side is the
+/// sign of `into · (chord × (P − A))`, with `into` [`the_way_into_an_arc`]. Of
+/// `P − A`, only its part along `Q`'s normal `n` counts, since `into` and the
+/// chord lie in `Q`, so that sign is `−β` times `into · (n × chord)`, with `β`
+/// the side of `Q` that `P` is on: [`is_the_arc_left_of_its_chord`]'s answer,
+/// turned round where `P` is in front of `Q`. The piece between the arc and its
+/// chord is the inside of the circle on the arc's side, so `point` is in it
+/// when it is seen on that side of the chord and is on the far side of `Q` from
+/// `P`. A side across anything but a plane, or straight, is refused.
+///
+/// # Why `P` is off the face
+///
+/// `P` is taken behind a cut `k` that one of the face's sides lies on, where
+/// every other side and every whole circle lies on `k` or in front of it
+/// ([`where_a_side_lies`] and [`where_a_whole_circle_lies`]). The open cap
+/// behind `k` then holds no point of the face's boundary. It is one piece, so
+/// it lies wholly on the face or wholly off it, and just behind the side on `k`
+/// is off the face, which keeps the side in front there. So the whole cap is
+/// off the face, `P` with it, and so is any `point` strictly behind `k`. Each
+/// cut is tried in turn, and a face with no such cut is refused.
+///
+/// `P` is held exactly as `scaled / weight`, the point of the sphere at
+/// `c + r·N/w` for `N = (2s, 2t, s² + t² − 1)` along three axes and
+/// `w = s² + t² + 1`, which is `N`'s length for any `s` and `t`. They are taken
+/// in floating point to put `P` near the point farthest behind `k`, and every
+/// sign read of `P` after that is certified in interval arithmetic, with `w`
+/// multiplied through: intervals here neither divide nor take roots.
+///
+/// # A side right round a circle
+///
+/// A [`WholeCurve`] is all of the circle a plane `W` cuts the sphere in, so it
+/// has no chord, and it is read whole, as
+/// [`what_the_part_in_front_of_its_cuts_holds`] reads it: the face is on one
+/// side of `W`, the side of every corner off it
+/// ([`the_side_a_face_keeps_of_a_whole_circle`]). A point strictly on the other
+/// side is not held, and one on `W` is on the circle. `P` is taken on the
+/// face's side of `W` too, so every point still asked is seen outside the
+/// circle, where it counts nothing, and leaving it out leaves the rest of the
+/// wires closed.
+///
+/// # Why the steps before this could not answer such a face
+///
+/// A ball kept to a block's corner and under a slab whose circle crosses each
+/// of the block's sides twice is left in two pieces, a tip and the rest
+/// (`tests/a_ball_kept_by_a_block_and_a_leaning_plane.rs`). The part of the
+/// sphere in front of all three planes is both of them, so no reading of the
+/// cuts tells one from the other, and [`is_a_family_this_follows`] is right to
+/// say no. This reads the boundary and not the cuts, so it never asks whether
+/// a region is one piece. Before, every such face was refused, so no face the
+/// steps answered is answered differently now.
+///
+/// # Errors
+///
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face with no sides, a
+/// side that is straight or across anything but a plane, two sides along one
+/// plane keeping different sides of it, a whole circle whose side no corner
+/// settles, no cut to see the face from behind, and `point` on two chords at
+/// once; [`Error::Undecidable`] when a sign could not be settled, and whatever
+/// [`which_side_of_its_neighbour_a_side_keeps`] refuses.
+fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
+    face: FaceView<'_>,
+    surface: &Surface,
+    sides: &[Side],
+    whole_circles: &[WholeCurve],
+    point: PredicatePoint,
+) -> Result<OnAFace> {
+    let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
+    let Surface::Sphere(placed) = face.surface() else {
+        unreachable!("a face stored on a ball sits on one once moved")
+    };
+    let mut arcs = Vec::with_capacity(sides.len());
+    for side in sides {
+        let (SideRun::Arc { into_the_arc }, Some(own), Surface::Plane(own_placed)) =
+            (&side.run, side.across.as_plane(), side.across_placed)
+        else {
+            return Err(cannot());
+        };
+        let left = is_the_arc_left_of_its_chord(own, side, *into_the_arc).ok_or_else(cannot)?;
+        arcs.push((left, own_placed));
+    }
+    if arcs.is_empty() {
+        return Err(cannot());
+    }
+    let cuts = the_cuts_its_sides_make(face, surface, sides)?.ok_or_else(cannot)?;
+    let mut kept_by_each_circle = Vec::with_capacity(whole_circles.len());
+    for circle in whole_circles {
+        let kept = the_side_a_face_keeps_of_a_whole_circle(sides, whole_circles, circle)
+            .ok_or_else(cannot)?;
+        match circle.across_placed.side_of_point(point) {
+            Decision::Zero => return Ok(OnAFace::OnItsBoundary),
+            found @ (Decision::Pos | Decision::Neg) if found == kept => (),
+            Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(
+                    &Surface::Plane(circle.across_placed),
+                    point,
+                    enclosure,
+                ));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+        kept_by_each_circle.push(kept);
+    }
+    let (behind, pole, poles_sides) = cuts
+        .iter()
+        .find_map(|cut| {
+            let (pole, poles_sides) = a_point_of_the_ball_behind(
+                &placed,
+                surface,
+                sides,
+                whole_circles,
+                &kept_by_each_circle,
+                cut,
+            )?;
+            Some((cut, pole, poles_sides))
+        })
+        .ok_or_else(cannot)?;
+    match side_of_surface(&behind.placed, point) {
+        found @ (Decision::Pos | Decision::Neg) if found != behind.kept => {
+            return Ok(OnAFace::NotHeld);
+        }
+        Decision::Pos | Decision::Neg | Decision::Zero => (),
+        Decision::Undecidable { enclosure } => {
+            return Err(gave_up_on_a_side(&behind.placed, point, enclosure));
+        }
+        other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+    }
+    let at = point.enclosure();
+    let gave_up_seeing = |enclosure| {
+        gave_up(
+            SEEN_FROM_A_POINT_OF_THE_BALL,
+            point,
+            Level::Interval,
+            enclosure,
+            Measures::Volume,
+        )
+    };
+
+    let mut winding = 0i64;
+    let mut on_a_chord: Option<(usize, Decision)> = None;
+    let mut along = Vec::with_capacity(sides.len());
+    for (index, (side, &(left, own_placed))) in sides.iter().zip(&arcs).enumerate() {
+        let [from, to] = [side.start.placed, side.end.placed];
+        let beside = pole.sees(from, to, at);
+        if let Decision::Undecidable { enclosure } = beside {
+            return Err(gave_up_seeing(enclosure));
+        }
+        along.push(beside);
+        let poles_side = poles_sides[index];
+        let on_the_left = left == (poles_side == Decision::Neg);
+        let [arcs_side, away] = if on_the_left {
+            [Decision::Pos, Decision::Neg]
+        } else {
+            [Decision::Neg, Decision::Pos]
+        };
+        let read = own_placed.side_of_point(point);
+        let inside = if poles_side == Decision::Pos {
+            read
+        } else if read == Decision::Pos {
+            Decision::Neg
+        } else if read == Decision::Neg {
+            Decision::Pos
+        } else {
+            read
+        };
+        match inside {
+            Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
+                return Ok(OnAFace::OnItsBoundary);
+            }
+            Decision::Neg if beside == arcs_side => winding += if on_the_left { -1 } else { 1 },
+            Decision::Neg if beside == Decision::Zero => {
+                if on_a_chord.is_some() {
+                    return Err(cannot());
+                }
+                on_a_chord = Some((index, away));
+            }
+            Decision::Zero | Decision::Neg | Decision::Pos => (),
+            Decision::Undecidable { enclosure } => {
+                return Err(gave_up_on_a_side(&side.across_placed, point, enclosure));
+            }
+            other => panic!("a side came back with a decision nothing here knows: {other:?}"),
+        }
+    }
+
+    let mut corners = sides.iter().map(|side| side.start.placed);
+    let aim = match on_a_chord {
+        None => corners.next(),
+        Some((chord, _)) => {
+            let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
+            corners.find(|corner| {
+                matches!(
+                    pole.sees(from, to, exactly(corner.coordinates())),
+                    Decision::Pos | Decision::Neg
+                )
+            })
+        }
+    }
+    .ok_or_else(cannot)?;
+
+    for (index, side) in sides.iter().enumerate() {
+        let along = match on_a_chord {
+            Some((chord, away)) if chord == index => away,
+            _ => along[index],
+        };
+        let [from, to] = [side.start.placed, side.end.placed].map(|corner| {
+            if corner == aim {
+                Decision::Zero
+            } else {
+                pole.sees(corner, aim, at)
+            }
+        });
+        winding += crossing(from, to, along)
+            .ok_or_else(|| gave_up_seeing(whichever_of_them_was_not_read(from, to)))?;
+    }
+    Ok(held_where_it_winds(winding))
+}
+
+/// The name a turn read from a point of a ball goes by in provenance records.
+const SEEN_FROM_A_POINT_OF_THE_BALL: &str = "seen_from_a_point_of_a_ball";
+
+/// A point of `ball` behind `cut` to see a face from, as
+/// [`what_a_ball_face_seen_from_a_point_of_its_sphere_holds`] needs it, with
+/// the side of each side's plane it is on; `None` where `cut` is not a plane,
+/// where a side or a whole circle could not be shown to lie on `cut` or in
+/// front of it, and where the point found is not certified strictly behind
+/// `cut`, strictly off every side's plane, and on the face's side of every
+/// whole circle's plane, each read where the face sits.
+fn a_point_of_the_ball_behind(
+    ball: &rcad_geom::Sphere,
+    surface: &Surface,
+    sides: &[Side],
+    whole_circles: &[WholeCurve],
+    kept_by_each_circle: &[Decision],
+    cut: &Cut,
+) -> Option<(APointOfTheBall, Vec<Decision>)> {
+    let flat = cut.placed.as_plane()?;
+    let on_it_or_in_front = |lies| match lies {
+        Lies::On => true,
+        Lies::Beside(found) => found == cut.kept,
+        Lies::Across => false,
+    };
+    let the_sides_lie_in_front = sides
+        .iter()
+        .filter(|side| side.across != cut.surface)
+        .all(|side| on_it_or_in_front(where_a_side_lies(surface, side, cut)));
+    let the_circles_lie_in_front = whole_circles
+        .iter()
+        .filter(|circle| Surface::Plane(circle.across) != cut.surface)
+        .all(|circle| on_it_or_in_front(where_a_whole_circle_lies(surface, circle, cut)));
+    if !(the_sides_lie_in_front && the_circles_lie_in_front) {
+        return None;
+    }
+    let behind = match cut.kept {
+        Decision::Pos => Decision::Neg,
+        Decision::Neg => Decision::Pos,
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    };
+    let pole = APointOfTheBall::near_the_farthest_behind(ball, flat, behind);
+    if pole.side_of(flat) != behind {
+        return None;
+    }
+    let mut poles_sides = Vec::with_capacity(sides.len());
+    for side in sides {
+        let found = pole.side_of(side.across_placed.as_plane()?);
+        if !matches!(found, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        poles_sides.push(found);
+    }
+    let with_every_circle = whole_circles
+        .iter()
+        .zip(kept_by_each_circle)
+        .all(|(circle, &kept)| pole.side_of(&circle.across_placed) == kept);
+    with_every_circle.then_some((pole, poles_sides))
+}
+
+/// A point of a ball, held exactly as `scaled / weight` with `weight ≥ 1`,
+/// since intervals here neither divide nor take roots.
+struct APointOfTheBall {
+    scaled: [Interval; 3],
+    weight: Interval,
+}
+
+impl APointOfTheBall {
+    /// The point of `ball` at `c + r·N/w`, `N = (2s, 2t, s² + t² − 1)` and
+    /// `w = s² + t² + 1`, which is `N`'s length, with `s` and `t` taken in
+    /// floating point to put it near the point of `ball` farthest along
+    /// `flat`'s normal the way `towards` says. The coordinate the third part of
+    /// `N` goes to is the one that way is lowest along, which keeps `s` and `t`
+    /// no bigger than about 2.4.
+    fn near_the_farthest_behind(ball: &rcad_geom::Sphere, flat: &Plane, towards: Decision) -> Self {
+        let normal = flat.normal().components();
+        let length = normal.iter().map(|part| part * part).sum::<f64>().sqrt();
+        let way = if towards == Decision::Pos {
+            length
+        } else {
+            -length
+        };
+        let out = normal.map(|part| part / way);
+        let lowest = (0..3)
+            .min_by(|&one, &other| out[one].total_cmp(&out[other]))
+            .expect("three axes");
+        let others = [(lowest + 1) % 3, (lowest + 2) % 3];
+        let [first, second] = others.map(|axis| Interval::exactly(out[axis] / (1.0 - out[lowest])));
+        let squared = first * first + second * second;
+        let one = Interval::exactly(1.0);
+        let mut towards_it = [squared - one; 3];
+        towards_it[others[0]] = Interval::exactly(2.0) * first;
+        towards_it[others[1]] = Interval::exactly(2.0) * second;
+        let weight = squared + one;
+        let centre = exactly(ball.centre().coordinates());
+        let radius = Interval::exactly(ball.radius());
+        Self {
+            scaled: core::array::from_fn(|axis| weight * centre[axis] + radius * towards_it[axis]),
+            weight,
+        }
+    }
+
+    /// Which side of `flat` the point is on: the sign of
+    /// `n · scaled − d · weight`, which is `weight` times `n · x − d`.
+    fn side_of(&self, flat: &Plane) -> Decision {
+        (dot(exactly(flat.normal().components()), self.scaled)
+            - Interval::exactly(flat.offset()) * self.weight)
+            .sign()
+    }
+
+    /// Which side of the line from `from` to `to` the point `at` is seen on
+    /// from here: the sign of `(at − from) · ((to − from) × (P − from))`, with
+    /// `weight` multiplied through, which is the determinant of the three steps
+    /// out from `P` to `from`, `to` and `at`.
+    fn sees(&self, from: Point, to: Point, at: [Interval; 3]) -> Decision {
+        let [from, to] = [from, to].map(|corner| exactly(corner.coordinates()));
+        let step = core::array::from_fn(|axis| to[axis] - from[axis]);
+        let off = core::array::from_fn(|axis| at[axis] - from[axis]);
+        let back = core::array::from_fn(|axis| self.scaled[axis] - self.weight * from[axis]);
+        dot(off, cross(step, back)).sign()
+    }
+}
+
+/// The cuts a face's sides make, one for each surface across a side, with the
+/// side of it the face keeps along those sides and the corners on it; `None`
+/// where two sides along one surface keep different sides of it.
+///
+/// # Errors
+///
+/// Whatever [`which_side_of_its_neighbour_a_side_keeps`] refuses.
+fn the_cuts_its_sides_make(
+    face: FaceView<'_>,
+    surface: &Surface,
+    sides: &[Side],
+) -> Result<Option<Vec<Cut>>> {
+    let mut cuts: Vec<Cut> = Vec::new();
+    for side in sides {
+        let kept = which_side_of_its_neighbour_a_side_keeps(face, surface, side)?;
+        let corners = [side.start.key, side.end.key];
+        match cuts.iter_mut().find(|known| known.surface == side.across) {
+            Some(known) if known.kept == kept => known.corners_on_it.extend(corners),
+            Some(_) => return Ok(None),
+            None => cuts.push(Cut {
+                surface: side.across,
+                placed: side.across_placed,
+                kept,
+                corners_on_it: corners.to_vec(),
+            }),
+        }
+    }
+    Ok(Some(cuts))
+}
+
+/// The side of `circle`'s plane a ball face keeps, read off every corner of the
+/// face off that plane where it is stored: the corners of its sides and of its
+/// other whole circles. The circle's own corner is not asked, since it is on
+/// the plane but stored a rounding off it. `None` where no corner is off the
+/// plane, where two are on different sides, and where a sign could not be
+/// settled.
+fn the_side_a_face_keeps_of_a_whole_circle(
+    sides: &[Side],
+    whole_circles: &[WholeCurve],
+    circle: &WholeCurve,
+) -> Option<Decision> {
+    let corners = sides
+        .iter()
+        .flat_map(|side| [side.start.at, side.end.at])
+        .chain(
+            whole_circles
+                .iter()
+                .filter(|other| !core::ptr::eq(*other, circle))
+                .map(|other| other.corner),
+        );
+    the_side_every_corner_off_a_plane_is_on(corners, &circle.across)
 }
 
 /// Whether a flat face whose every side lies behind the other cut is the
