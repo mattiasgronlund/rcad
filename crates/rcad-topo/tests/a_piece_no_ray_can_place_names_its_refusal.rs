@@ -528,16 +528,21 @@ fn every_side_of_a_bend_placed_round_from_another_is_used_once_each_way() {
 /// the difference one, each within the measure's own error of `π² R r² / 2` a
 /// bend.
 ///
-/// The intersection is the sliver. `Model::validate` passes it, but
-/// `SolidView::measure` at a deflection of `0.01` refuses it
-/// `VolumeIsNotPositive`, its mesh summing to `−8.7e-17`: the measure reads
-/// that sum's sign alone. It is pinned as it stands, for the `measure.rs` row
-/// Q1949 filed to move.
+/// The intersection is the sliver, a wedge of the ring as wide as the angle
+/// between the two caps, `4.3e-18`, so it holds `4π` times that angle,
+/// `5.4e-17`. `Model::validate` passes it. Its mesh's caps lie up to `4.3e-16`
+/// off their planes, and the space between those triangles and their planes
+/// moves the mesh's sum anywhere from `−4.9e-16` to `3.2e-16` over deflections
+/// from `0.01` to `5e-5` (Q2087). The measure charged a flat face nothing for
+/// that space, so at `0.01` it refused the sliver `VolumeIsNotPositive` on a
+/// sum of `−8.7e-17` (Q2077), and at `0.001` and `1e-4` its answer's range
+/// missed the wedge (Q2078). A flat face now owes how far its points stray off
+/// its plane, and a sum within its own error of zero is answered rather than
+/// refused, so the sliver is held against the wedge at all three.
 #[test]
 fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver() {
     let one_bend = PI * PI * 4.0 / 2.0;
     let policy = Policy::certified();
-    let deflection = rcad_geom::Deflection::of(0.01).expect("a deflection");
     for rule in EVERY_RULE {
         for the_first_first in [true, false] {
             let what = format!("{rule:?}, the first first {the_first_first}");
@@ -558,32 +563,58 @@ fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_
             let [solid] = answer.solids()[..] else {
                 panic!("{what}: one solid, not {:?}", answer.solids());
             };
-            let measured = model
-                .solid(solid)
-                .and_then(|solid| solid.measure(deflection, &policy, &mut ProvenanceLog::new()))
-                .map(|measured| (measured.volume(), measured.volume_error()));
-            let expected = match rule {
-                Rule::Union => 2.0 * one_bend,
-                Rule::Difference => one_bend,
-                Rule::Intersection => {
-                    assert!(
-                        matches!(
-                            measured,
-                            Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
-                        ),
-                        "{what}: {measured:?}"
-                    );
-                    continue;
-                }
+            let (expected, deflections) = match rule {
+                Rule::Union => (2.0 * one_bend, &[0.01][..]),
+                Rule::Difference => (one_bend, &[0.01][..]),
+                Rule::Intersection => (
+                    4.0 * PI * the_angle_between_the_caps_of(&model, solid),
+                    &[0.01, 0.001, 1e-4][..],
+                ),
                 other => panic!("not a rule this tries: {other:?}"),
             };
-            let (volume, error) = measured.unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            assert!(
-                (volume - expected).abs() <= error,
-                "{what}: {volume} ± {error}, expected {expected}"
-            );
+            for &size in deflections {
+                let deflection = rcad_geom::Deflection::of(size).expect("a deflection");
+                let (volume, error) = model
+                    .solid(solid)
+                    .and_then(|solid| solid.measure(deflection, &policy, &mut ProvenanceLog::new()))
+                    .map(|measured| (measured.volume(), measured.volume_error()))
+                    .unwrap_or_else(|why| panic!("{what}, deflection {size}: {why:?}"));
+                assert!(
+                    (volume - expected).abs() <= error,
+                    "{what}, deflection {size}: {volume} ± {error}, expected {expected}"
+                );
+            }
         }
     }
+}
+
+/// The angle between the two caps of the sliver, which sits at the angle `−2`
+/// round the ring's axis.
+///
+/// Each cap faces out of the sliver, so their outward normals all but cancel,
+/// and what is left of their sum points in along the radius by that angle.
+/// Each cap's plane runs through the axis, so the wedge between them holds the
+/// tube's area times the angle times the ring, by Pappus.
+fn the_angle_between_the_caps_of(model: &Model, solid: SolidKey) -> f64 {
+    let caps: Vec<_> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .filter_map(|face| match face.surface() {
+            Surface::Plane(plane) => Some((plane.offset(), face.outward_normal())),
+            _ => None,
+        })
+        .collect();
+    let [(one_offset, one), (two_offset, two)] = caps[..] else {
+        panic!("two caps, not {caps:?}");
+    };
+    assert_eq!(
+        (one_offset, two_offset),
+        (0.0, 0.0),
+        "each cap's plane runs through the axis"
+    );
+    let left_over = one + two;
+    -(left_over.x() * (-2.0f64).cos() + left_over.y() * (-2.0f64).sin())
 }
 
 /// A quarter of a round bar of radius 6, `z` from −2 to 2, holds a quarter
