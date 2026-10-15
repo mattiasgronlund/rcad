@@ -2443,12 +2443,14 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// the coarsest mesh as before, and 260 184 meshes more than the old rule
 /// asked for.
 ///
-/// **The walk is kept to the mesher's own refusals, with no cap on the
+/// **The walk was kept to the mesher's own refusals, with no cap on the
 /// rungs** (row Q1890). A walk cut short would fall back to a sum that a finer
-/// mesh, one the mesher would still make, could contradict. Halving one rung
-/// at a time is also what keeps those refusals cheap. Two tests pay most of
-/// the cost. Each was timed against the base before this ladder, one run
-/// after the other, since the machine's load moves:
+/// mesh, one the mesher would still make, could contradict. Q2060 capped it
+/// all the same, for what the rungs cost, and *What stops it* below shows a
+/// sum the cap turns round. Halving one rung at a time is also what keeps the
+/// mesher's refusals cheap. Before the cap, two tests paid most of the cost.
+/// Each was timed against the base before this ladder, one run after the
+/// other, since the machine's load moves:
 ///
 /// - `every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for`
 ///   takes `0.007` s on the base and `2.7` to `4.5` s here. Its bars, of
@@ -2492,6 +2494,19 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// as the closest to the solid's volume this saw, and the coarse sum, the zero
 /// or the rounding it was, when every mesh lay flat, so a solid flat at every
 /// mesh is judged as it was before this ladder ran for it (row Q1891).
+///
+/// **Nothing says that sum has the solid's sign, and it can have the wrong
+/// one** (row Q2047). A ball poking `2^-28` into a pipe of radius 5 makes a
+/// lens `9.9e-9` thick. Turned `6/40` about `x`, every mesh this walk asks
+/// of it strays `2.65e-8`, more than the lens is thick, and encloses about
+/// `2.76e-16` of the wrong sign, where the space it can leave out is
+/// `7.8e-15`. No rung answers, the finer ones fold, and that sum comes back:
+/// the sound lens is refused [`Invalid::VolumeIsNotPositive`] and the lens
+/// built inside out passes
+/// (`a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out`).
+/// Refusing whenever no rung answers stops passing the inside-out lens, but
+/// fifteen other tests pass on such a sum today and fail then, so it waits on
+/// a way to tell the sign that those solids can still meet.
 ///
 /// # A fold is retried; every other refusal but one still stops it
 ///
@@ -2558,14 +2573,18 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// (`a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung`
 /// in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`).
 ///
-/// **The cap changes nothing a rung past it would have decided.** Every rung
-/// this measurement saw past the thirteenth still answered
-/// `meshed-still-unsure` or folded; none of them is where the sum was going to
-/// clear [`the_sum_answers`], so stopping there hands back the same
-/// `finest_that_is_not_flat` a longer walk would have, read off a coarser mesh
-/// of the same solid rather than the finest one reached. That is a cost bound
-/// and not a proof, exactly as it is for the first ladder: a sum that would
-/// have cleared past the cap is not ruled out, only not waited for.
+/// **The cap can change the sum that comes back, though not yet an answer.**
+/// Every rung Q2060's measurement saw past the thirteenth still answered
+/// `meshed-still-unsure` or folded, so no rung past the cap was where the sum
+/// was going to clear [`the_sum_answers`]. But what comes back when no rung
+/// answers is the finest sum that does not lie flat, and a rung past the cap
+/// can turn it round. The inside-out lens above, turned `8/40`, is meshed
+/// `2.65e-8` off at the last rung under the cap and encloses `2.76e-16`, the
+/// wrong sign; one rung on it is meshed `9.9e-9` off, the lens's own
+/// thickness, and encloses `−2.81e-16`, the right sign, still not answering
+/// (`a_rung_past_the_cap_can_turn_round_the_sum_no_rung_answered`). A sum
+/// that would have cleared past the cap is not ruled out either, only not
+/// waited for, exactly as for the first ladder.
 ///
 /// # Errors
 ///
@@ -5160,10 +5179,10 @@ mod tests {
         Decision, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO, Mesh, RUNGS_THE_SECOND_LADDER_HAS_ASKED, Scope,
         a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
         as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space,
-        how_far_it_strays_from_one_plane, how_much_space_a_curved_solid_encloses,
+        how_far_across, how_far_it_strays_from_one_plane, how_much_space_a_curved_solid_encloses,
         how_much_space_hides_under, how_wide_an_arc_of_one_branch_is, it_lies_flat,
-        largest_coordinate_of, the_coarsest_mesh_whose_sides_do_not_cross, winding_of,
-        winding_round,
+        largest_coordinate_of, signed_volume_over_and_how_far_it_rounded,
+        the_coarsest_mesh_whose_sides_do_not_cross, the_sum_answers, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -7884,7 +7903,7 @@ mod tests {
             .expect("a finite turn");
 
             let mut model = an_empty_model();
-            let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, &turn, false)
+            let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, 0.0625, &turn, false)
                 .unwrap_or_else(|why| panic!("{what}: {why:?}"));
             if signed_volume_over(&its_coarsest_mesh(&model, lens, &what)) < 0.0 {
                 coarsest_below_zero += 1;
@@ -7894,7 +7913,7 @@ mod tests {
                 .unwrap_or_else(|why| panic!("{what}: {why:?}"));
 
             let inside_out =
-                a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), &turn, true);
+                a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), 0.0625, &turn, true);
             assert!(
                 matches!(
                     inside_out,
@@ -7909,17 +7928,142 @@ mod tests {
         );
     }
 
+    /// Row Q2047. **This test asserts a wrong verdict**, so a fix to it turns
+    /// this test round. The lens of
+    /// [`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`], with
+    /// the ball poking only `2^-28` in, is `8/3` of that poke thick, `9.9e-9`,
+    /// and turned `6/40` about `x`, `Model::validate` passes it built inside
+    /// out and the sound build is refused [`Invalid::VolumeIsNotPositive`].
+    ///
+    /// Every mesh [`how_much_space_a_curved_solid_encloses`] asks of it says
+    /// it may be off the lens by `2.65e-8`, `64/9` of the poke. That is more
+    /// than the lens is thick, so nothing keeps the meshes of its two faces
+    /// in their order, and what the mesh encloses has the wrong sign: about
+    /// `2.76e-16`, where the space it can leave out is `7.8e-15`. No rung
+    /// answers, the finer ones fold, and the walk hands back that sum,
+    /// unchecked, as its last line does whenever no rung answers.
+    #[test]
+    fn a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out() {
+        let poke = f64::powi(2.0, -28);
+        let thick = 8.0 * poke / 3.0;
+        let turn = Isometry::rotation(&Axis::x(), 6.0 * core::f64::consts::TAU / 40.0)
+            .expect("a finite turn");
+        let sound =
+            a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), poke, &turn, false);
+        assert!(
+            matches!(
+                sound,
+                Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
+            ),
+            "sound {sound:?}"
+        );
+
+        let policy = Policy::certified();
+        let mut model = an_empty_model();
+        let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, poke, &turn, true)
+            .expect("the inside-out lens is passed");
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .expect("the inside-out lens is passed");
+        let view = model.solid(lens).expect("this model made the key");
+        let enclosed =
+            how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new())
+                .expect("the walk hands back a sum");
+        assert!(enclosed > 0.0, "inside out, it encloses {enclosed}");
+
+        let coarsest =
+            the_coarsest_mesh_whose_sides_do_not_cross(view, &policy, &mut ProvenanceLog::new())
+                .expect("the coarsest mesh");
+        let top = how_far_across(&coarsest) / 2.0;
+        let mut meshed = 0;
+        for halvings in 0..=HALVINGS_A_FOLD_IS_ASKED_DOWN_TO {
+            let room = top / f64::powi(2.0, halvings);
+            let less = Deflection::of(room).expect("a room above zero");
+            match view.mesh(less, &policy, &mut ProvenanceLog::new()) {
+                Ok(mesh) => {
+                    meshed += 1;
+                    let strays = mesh.deviation().magnitude();
+                    let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+                    assert!(
+                        strays > thick && sum > 0.0 && !the_sum_answers(view, &mesh, sum, rounding),
+                        "room {room}: strays {strays}, encloses {sum}"
+                    );
+                }
+                Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
+                Err(why) => panic!("room {room}: {why:?}"),
+            }
+        }
+        assert!(meshed > 0, "every rung folded");
+    }
+
+    /// Row Q2047. One rung past [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] can turn
+    /// round the sum [`how_much_space_a_curved_solid_encloses`] hands back
+    /// when no rung answers. The inside-out lens of
+    /// [`a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out`],
+    /// turned `8/40`, is meshed at the last rung under the cap `2.65e-8` off
+    /// and encloses `2.76e-16`, the wrong sign. At the next rung it is meshed
+    /// `9.9e-9` off, the lens's own thickness, and encloses `−2.81e-16`, the
+    /// right sign. Neither answers, so the cap decides which of the two
+    /// comes back.
+    #[test]
+    fn a_rung_past_the_cap_can_turn_round_the_sum_no_rung_answered() {
+        let poke = f64::powi(2.0, -28);
+        let turn = Isometry::rotation(&Axis::x(), 8.0 * core::f64::consts::TAU / 40.0)
+            .expect("a finite turn");
+        let policy = Policy::certified();
+        let mut model = an_empty_model();
+        let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, poke, &turn, true)
+            .expect("the inside-out lens is passed");
+        let view = model.solid(lens).expect("this model made the key");
+        let enclosed =
+            how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new())
+                .expect("the walk hands back a sum");
+        assert!(enclosed > 0.0, "inside out, it encloses {enclosed}");
+
+        let coarsest =
+            the_coarsest_mesh_whose_sides_do_not_cross(view, &policy, &mut ProvenanceLog::new())
+                .expect("the coarsest mesh");
+        let top = how_far_across(&coarsest) / 2.0;
+        let sum_at = |halvings: i32| {
+            let room = top / f64::powi(2.0, halvings);
+            let mesh = view
+                .mesh(
+                    Deflection::of(room).expect("a room above zero"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("room {room}: {why:?}"));
+            let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+            assert!(
+                !the_sum_answers(view, &mesh, sum, rounding),
+                "room {room}: {sum} answers"
+            );
+            sum
+        };
+        let last_under_the_cap = sum_at(HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
+        let past_the_cap = sum_at(HALVINGS_A_FOLD_IS_ASKED_DOWN_TO + 1);
+        assert!(
+            last_under_the_cap == enclosed && past_the_cap < 0.0,
+            "it hands back {enclosed}; the last rung under the cap encloses \
+             {last_under_the_cap} and the next {past_the_cap}"
+        );
+    }
+
     /// The lens of [`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`]
-    /// built turned by `turn`, and with both faces pointing into it when
-    /// `inside_out`. Its corners are where the rim crosses `x = 0` and `z = 0`,
+    /// built turned by `turn`, with its two low corners `poke` inside the pipe,
+    /// so that it is about `8/3` of `poke` thick at its middle, and with both
+    /// faces pointing into it when `inside_out`. Its corners are where the rim
+    /// crosses `x = 0` and `z = 0`,
     /// and each edge between two of them is picked by the half-space facing
     /// their quadrant, which holds both corners strictly inside it at any turn.
     fn a_lens_where_a_ball_pokes_into_a_pipe(
         model: &mut Model,
+        poke: f64,
         turn: &Isometry,
         inside_out: bool,
     ) -> crate::Result<crate::SolidKey> {
-        let (pipe_radius, ball_at, rim_low) = (5.0f64, 8.0f64, 4.9375f64);
+        let (pipe_radius, ball_at) = (5.0f64, 8.0f64);
+        let rim_low = pipe_radius - poke;
         let across = (pipe_radius * pipe_radius - rim_low * rim_low).sqrt();
         let along = (2.0 * ball_at * (pipe_radius - rim_low)).sqrt();
         let ball_radius = (across * across + (ball_at - rim_low) * (ball_at - rim_low)).sqrt();
