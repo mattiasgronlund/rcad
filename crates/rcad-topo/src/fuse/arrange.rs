@@ -3915,19 +3915,33 @@ impl<'f> Arrangement<'f> {
     /// The same, without asking a policy: [`Decision::Undecidable`] comes back
     /// as `None` for a caller that has another route to try.
     ///
-    /// The boxes are asked first and the planes
-    /// ([`Arrangement::as_the_planes_say`]) where the boxes cannot say, as in
+    /// The boxes are asked first, then the planes
+    /// ([`Arrangement::as_the_planes_say`]) and then a quadric
+    /// ([`Arrangement::as_the_quadric_says`]) where the boxes cannot say, as in
     /// [`Arrangement::order_along`], because the route given up can be the
-    /// only one there is: a plate with a notch on the line of each edge of its
+    /// only one there is. A plate with a notch on the line of each edge of its
     /// hole has one ray that can place the hole, and the boxes could not order
-    /// two nodes on it a rounding apart (Q992). A quadric
-    /// ([`Arrangement::as_the_quadric_says`]) is not asked here.
+    /// two nodes on it a rounding apart: two cuts, which the planes order
+    /// (Q992), and a cut and a bar's edge, which the bar orders (Q1484).
+    ///
+    /// A pipe's axis ([`Arrangement::as_the_pipes_axis_says`]) is not asked:
+    /// it orders round a closed crossing, and no ray here has been shown to
+    /// need it.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
-        let (decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
+        let (mut decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) = self.as_the_planes_say(crossing, first, second)
+        {
+            decided = proved;
+        }
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) = self.as_the_quadric_says(crossing, first, second)
+        {
+            decided = proved;
+        }
         match decided {
             Decision::Pos | Decision::Neg | Decision::Zero => Some(decided),
-            Decision::Undecidable { .. } => self.as_the_planes_say(crossing, first, second),
-            _ => None,
+            Decision::Undecidable { .. } | _ => None,
         }
     }
 
@@ -13291,6 +13305,15 @@ mod tests {
                 .expect("a radius"),
             )
         };
+        let cone = |x: f64, y: f64, z: f64, slope: f64| {
+            Surface::Cone(
+                Cone::new(
+                    Axis::new(Point::new(x, y, z), Vector::new(0.0, 1.0, 0.0)).expect("an axis"),
+                    slope,
+                )
+                .expect("a slope"),
+            )
+        };
         for (name, planes, extra) in [
             ("Q992", q992.clone(), None),
             (
@@ -13313,6 +13336,22 @@ mod tests {
                 "M bar line 6.5 exactly beside x=6.5+... ordinary",
                 vec![[1.0, 0.0, 0.0, -6.25]],
                 Some(bar(7.0, 1.0, 0.5)),
+            ),
+            ("N cone U alone", vec![], Some(cone(6.25, 0.75, 1.25, 0.25))),
+            (
+                "O cone U cut down its middle",
+                vec![[1.0, 0.0, 0.0, -6.25]],
+                Some(cone(6.25, 0.75, 1.25, 0.25)),
+            ),
+            (
+                "P cone U cut right of its middle",
+                vec![[1.0, 0.0, 0.0, -6.5]],
+                Some(cone(6.25, 0.75, 1.25, 0.25)),
+            ),
+            (
+                "Q cone U cut left of its middle",
+                vec![[1.0, 0.0, 0.0, -6.0]],
+                Some(cone(6.25, 0.75, 1.25, 0.25)),
             ),
         ] {
             let mut cut = cut_by(&top, &planes);
@@ -13351,6 +13390,40 @@ mod tests {
                     "PROBE {name} lumps running on {:?}",
                     arrangement.lumps_with_a_curve_that_runs_on(&lump)
                 );
+                for (index, node) in arrangement.nodes.iter().enumerate() {
+                    let [x, y, _] = node.point.enclosure();
+                    if y.lo() <= 3.0 && 3.0 <= y.hi() {
+                        let kinds: Vec<String> = node
+                            .crossings
+                            .iter()
+                            .map(|&on| {
+                                let partner = arrangement.crossings[on].partner;
+                                format!(
+                                    "{on}:{}:{:?}",
+                                    crate::validate::name_of_surface(&partner),
+                                    partner.as_plane().map(|plane| plane.coefficients())
+                                )
+                            })
+                            .collect();
+                        eprintln!(
+                            "PROBE {name} node {index} x [{}, {}] on {kinds:?}",
+                            x.lo(),
+                            x.hi()
+                        );
+                    }
+                }
+                for (index, arc) in arrangement.arcs.iter().enumerate() {
+                    let ends = arc.ends.map(|end| {
+                        let [x, y, _] = arrangement.nodes[end].point.enclosure();
+                        [x.lo(), y.lo()].map(|at| (at * 1000.0).round() / 1000.0)
+                    });
+                    eprintln!(
+                        "PROBE {name} arc {index} crossing {} ends {:?} at {ends:?} lump {}",
+                        arc.crossing,
+                        arc.ends,
+                        lump[arrangement.cycle_of[2 * index]]
+                    );
+                }
             }
             let mut log = ProvenanceLog::new();
             let result = split_a_face(&cut, &Policy::certified(), &mut log);
@@ -13362,9 +13435,12 @@ mod tests {
                         log.is_empty()
                     );
                     for piece in &split.pieces {
-                        let corners: Vec<[f64; 3]> = piece.wires[0]
+                        let corners: Vec<[f64; 2]> = piece.wires[0]
                             .iter()
-                            .filter_map(|side| side.ends[0].point().exact_coordinates())
+                            .map(|side| {
+                                let [x, y, _] = side.ends[0].point().enclosure();
+                                [x, y].map(|at| (at.lo() * 1000.0).round() / 1000.0)
+                            })
                             .collect();
                         eprintln!(
                             "PROBE {name} piece with {} wires, {} sides, exact corners {corners:?}",
