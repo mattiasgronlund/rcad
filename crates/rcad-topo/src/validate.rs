@@ -2443,12 +2443,14 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// the coarsest mesh as before, and 260 184 meshes more than the old rule
 /// asked for.
 ///
-/// **The walk is kept to the mesher's own refusals, with no cap on the
+/// **The walk was kept to the mesher's own refusals, with no cap on the
 /// rungs** (row Q1890). A walk cut short would fall back to a sum that a finer
-/// mesh, one the mesher would still make, could contradict. Halving one rung
-/// at a time is also what keeps those refusals cheap. Two tests pay most of
-/// the cost. Each was timed against the base before this ladder, one run
-/// after the other, since the machine's load moves:
+/// mesh, one the mesher would still make, could contradict. Q2060 capped it
+/// all the same, for what the rungs cost, and *What stops it* below shows a
+/// sum the cap turns round. Halving one rung at a time is also what keeps the
+/// mesher's refusals cheap. Before the cap, two tests paid most of the cost.
+/// Each was timed against the base before this ladder, one run after the
+/// other, since the machine's load moves:
 ///
 /// - `every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for`
 ///   takes `0.007` s on the base and `2.7` to `4.5` s here. Its bars, of
@@ -2492,6 +2494,19 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// as the closest to the solid's volume this saw, and the coarse sum, the zero
 /// or the rounding it was, when every mesh lay flat, so a solid flat at every
 /// mesh is judged as it was before this ladder ran for it (row Q1891).
+///
+/// **Nothing says that sum has the solid's sign, and it can have the wrong
+/// one** (row Q2047). A ball poking `2^-28` into a pipe of radius 5 makes a
+/// lens `9.9e-9` thick. Turned `6/40` about `x`, every mesh this walk asks
+/// of it strays `2.65e-8`, more than the lens is thick, and encloses about
+/// `2.76e-16` of the wrong sign, where the space it can leave out is
+/// `7.8e-15`. No rung answers, the finer ones fold, and that sum comes back:
+/// the sound lens is refused [`Invalid::VolumeIsNotPositive`] and the lens
+/// built inside out passes
+/// (`a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out`).
+/// Refusing whenever no rung answers stops passing the inside-out lens, but
+/// fifteen other tests pass on such a sum today and fail then, so it waits on
+/// a way to tell the sign that those solids can still meet.
 ///
 /// # A fold is retried; every other refusal but one still stops it
 ///
@@ -2558,14 +2573,18 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// (`a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung`
 /// in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`).
 ///
-/// **The cap changes nothing a rung past it would have decided.** Every rung
-/// this measurement saw past the thirteenth still answered
-/// `meshed-still-unsure` or folded; none of them is where the sum was going to
-/// clear [`the_sum_answers`], so stopping there hands back the same
-/// `finest_that_is_not_flat` a longer walk would have, read off a coarser mesh
-/// of the same solid rather than the finest one reached. That is a cost bound
-/// and not a proof, exactly as it is for the first ladder: a sum that would
-/// have cleared past the cap is not ruled out, only not waited for.
+/// **The cap can change the sum that comes back, though not yet an answer.**
+/// Every rung Q2060's measurement saw past the thirteenth still answered
+/// `meshed-still-unsure` or folded, so no rung past the cap was where the sum
+/// was going to clear [`the_sum_answers`]. But what comes back when no rung
+/// answers is the finest sum that does not lie flat, and a rung past the cap
+/// can turn it round. The inside-out lens above, turned `8/40`, is meshed
+/// `2.65e-8` off at the last rung under the cap and encloses `2.76e-16`, the
+/// wrong sign; one rung on it is meshed `9.9e-9` off, the lens's own
+/// thickness, and encloses `−2.81e-16`, the right sign, still not answering
+/// (`a_rung_past_the_cap_can_turn_round_the_sum_no_rung_answered`). A sum
+/// that would have cleared past the cap is not ruled out either, only not
+/// waited for, exactly as for the first ladder.
 ///
 /// # Errors
 ///
