@@ -2638,8 +2638,10 @@ fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64, rounding: f6
 /// (`the_space_a_mesh_can_leave_out_is_no_more_than_measure_charges`).
 ///
 /// `None` when a triangle with area stands in for a face this cannot charge,
-/// and `f64::INFINITY` when the mesh strays a whole radius of a curved face or
-/// more, which a finer mesh can still bring under it.
+/// wherever in the mesh it comes, and otherwise `f64::INFINITY` when the mesh
+/// strays a whole radius of a curved face or more, which a finer mesh can
+/// still bring under it
+/// (`a_solid_with_a_cone_face_is_not_charged_even_where_its_bar_strays_a_whole_radius`).
 ///
 /// **A cone cannot be charged.** Its radius runs down to nothing at the
 /// apex, and how near a face comes to it takes a walk over the mesh that
@@ -2669,10 +2671,11 @@ fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
             return None;
         }
         let inner = radius - deviation;
-        if inner <= 0.0 {
-            return Some(f64::INFINITY);
-        }
-        hidden += area * (radius * radius * radius - inner * inner * inner) / (3.0 * inner * inner);
+        hidden += if inner > 0.0 {
+            area * (radius * radius * radius - inner * inner * inner) / (3.0 * inner * inner)
+        } else {
+            f64::INFINITY
+        };
     }
     Some(hidden)
 }
