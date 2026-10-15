@@ -132,6 +132,15 @@
 //! edge learns its neighbour's, and the arrangement leaves the crossing out
 //! only where no node of it splits a crossing that is kept.
 //!
+//! **Each face is told, too, the sides of planes every face carrying a cut
+//! lies in** (Q1909, [`BakedFace::sides_the_faces_of_each_cut_lie_in`]). A
+//! face's box can reach across such a plane where a crossing on it does not:
+//! a pin slanting up out of a bar's axis has the pipe of its wall cross the
+//! bar's end in an ellipse on the far side of the axis, wholly behind the
+//! pin's own cap. No face of the pin reaches that ellipse, and where the
+//! arrangement cannot place where it meets the bar's rim, that is what lets it
+//! leave the ellipse out.
+//!
 //! # Each face is told the caps through the start of their axis that cut it
 //!
 //! `bake` reads off a round bar's numbers before its move that its near cap
@@ -168,12 +177,13 @@ use rcad_geom::{
     meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
+use smallvec::SmallVec;
 
 use crate::{EdgeKey, Error, Result};
 
 use super::Sameness;
 use super::arrange::stretches_of_a_line_inside;
-use super::bake::{ACapThroughTheStartOfItsAxis, BakedFace, BakedSolid};
+use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedFace, BakedSolid};
 
 /// Work out every cut line, and hang each on the face it cuts.
 ///
@@ -182,7 +192,8 @@ use super::bake::{ACapThroughTheStartOfItsAxis, BakedFace, BakedSolid};
 /// planes are in there, why a crossing that splits nothing and lies where
 /// its face never reaches is then left off, why each face is told which
 /// cuts meet it only on its boundary, and each edge what the face across it
-/// was told, and why each face is told the caps through the start of their
+/// was told, why each face is told the sides of planes the faces of each cut
+/// lie in, and why each face is told the caps through the start of their
 /// axis that the faces cutting it carry.
 ///
 /// # Errors
@@ -240,6 +251,7 @@ pub(crate) fn gather(
             let kept = the_cuts_left_on(face, &cuts);
             face.cuts.extend(kept);
             face.cuts_that_reach_only_its_boundary = the_cuts_that_reach_only_its_boundary(&cuts);
+            face.sides_the_faces_of_each_cut_lie_in = the_sides_the_faces_of_each_cut_lie_in(&cuts);
             for cap in told {
                 if !face.caps_through_the_start_of_their_axis.contains(&cap) {
                     face.caps_through_the_start_of_their_axis.push(cap);
@@ -254,9 +266,13 @@ pub(crate) fn gather(
 }
 
 /// A cut found for a face, before it is hung on it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct ACutFound {
     cut: Surface,
+    /// The sides of planes the face that carries `cut` lies in
+    /// ([`BakedFace::lies_in`]) when `cut` is that face's own surface, and
+    /// none when it is a surface across that face's boundary.
+    its_face_lies_in: SmallVec<[ASideOfAPlane; 2]>,
     /// Whether the face that carries `cut` provably shares no point with the
     /// whole surface of the face it cuts, so that no point of their crossing is
     /// on that face.
@@ -275,6 +291,11 @@ fn found_on(face: &BakedFace, against: &BakedFace, cuts: Vec<Surface>) -> Vec<AC
     cuts.into_iter()
         .map(|cut| ACutFound {
             cut,
+            its_face_lies_in: if cut == against.surface {
+                against.lies_in.clone()
+            } else {
+                SmallVec::new()
+            },
             its_face_misses_this_surface,
             reaches_only_its_boundary: reaches_only_its_boundary && cut == against.surface,
         })
@@ -314,6 +335,50 @@ fn the_cuts_that_reach_only_its_boundary(found: &[ACutFound]) -> Vec<Surface> {
         }
     }
     left_out
+}
+
+/// For each cut, the sides of planes that every face carrying it lies in, by
+/// the first finding's sides that every other finding of that cut holds as
+/// well; a cut left with none is not listed.
+fn the_sides_the_faces_of_each_cut_lie_in(
+    found: &[ACutFound],
+) -> Vec<(Surface, SmallVec<[ASideOfAPlane; 2]>)> {
+    let mut sides: Vec<(Surface, SmallVec<[ASideOfAPlane; 2]>)> = Vec::new();
+    for one in found {
+        if sides.iter().any(|(cut, _)| *cut == one.cut) {
+            continue;
+        }
+        let every_face_lies_in: SmallVec<[ASideOfAPlane; 2]> = one
+            .its_face_lies_in
+            .iter()
+            .filter(|side| {
+                found
+                    .iter()
+                    .filter(|other| other.cut == one.cut)
+                    .all(|other| {
+                        other
+                            .its_face_lies_in
+                            .iter()
+                            .any(|theirs| one_closed_side_of_one_plane(side, theirs))
+                    })
+            })
+            .copied()
+            .collect();
+        if !every_face_lies_in.is_empty() {
+            sides.push((one.cut, every_face_lies_in));
+        }
+    }
+    sides
+}
+
+/// Whether the two are the same closed side of the same plane, however each
+/// plane is written.
+fn one_closed_side_of_one_plane(one: &ASideOfAPlane, other: &ASideOfAPlane) -> bool {
+    match one.plane.agreement_with(&other.plane) {
+        PlaneAgreement::SameWay => one.behind == other.behind,
+        PlaneAgreement::OppositeWay => one.behind != other.behind,
+        PlaneAgreement::Different | PlaneAgreement::CannotTell | _ => false,
+    }
 }
 
 /// Fill in [`BakedEdge::its_neighbour_leaves_out`](super::bake::BakedEdge::its_neighbour_leaves_out)
