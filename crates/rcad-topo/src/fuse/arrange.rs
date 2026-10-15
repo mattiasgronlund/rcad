@@ -13127,6 +13127,110 @@ mod tests {
         }
     }
 
+    /// Q992's plate again, cut by `x = 6.5` and by a bar lying on its top
+    /// along `y`, whose near edge on the top is `x = 6.5 + 2⁻⁵³`. The one ray
+    /// that can place the hole, from `(5, 3)` along `y = 3`, meets the cut and
+    /// the bar's edge a rounding apart, and the bar says which it meets first
+    /// (Q1484).
+    ///
+    /// The bar's edge is not an `f64`, so its node on `y = 3` has the box
+    /// `[6.5, 6.500000000000001]` along `x`, which shares one end with the
+    /// cut's node at `6.5`. The planes cannot say which comes first, since the
+    /// bar is no plane, and the line's point at `6.5` is outside the bar,
+    /// which puts the bar's edge past the cut
+    /// ([`Arrangement::as_the_quadric_says`]). Building the drawing already
+    /// asks that, ordering the nodes on `y = 3`; the ray asked only the boxes
+    /// and the planes, gave up, and the hole was refused.
+    #[test]
+    fn a_hole_whose_only_ray_out_meets_a_cut_and_a_bar_a_rounding_apart_is_placed_by_the_bar() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let plate = ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 1.0],
+            [5.0, 1.0],
+            [5.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 5.0],
+            [7.0, 5.0],
+            [7.0, 6.0],
+            [8.0, 6.0],
+            [8.0, 8.0],
+            [5.0, 8.0],
+            [5.0, 7.0],
+            [3.0, 7.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
+            [0.0, 5.0],
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ])
+        .with_hole(vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0], [3.0, 5.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a square hole");
+        let solid = model
+            .add_extrusion(&plate, 1.0, &Isometry::identity())
+            .expect("an extrusion");
+        let top = bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the plate bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(facing_up)
+        .expect("the plate has a top");
+        let mut cut = cut_by(&top, &[[1.0, 0.0, 0.0, -6.5]]);
+        let along_y = Axis::new(Point::new(7.0, 0.0, 1.0), Vector::new(0.0, 1.0, 0.0))
+            .expect("an axis along y");
+        cut.cuts.push(Surface::Cylinder(
+            rcad_geom::Cylinder::new(along_y, 0.5 - f64::powi(2.0, -53)).expect("a radius"),
+        ));
+
+        let mut log = ProvenanceLog::new();
+        let pieces = split_a_face(&cut, &Policy::certified(), &mut log)
+            .expect("the ray from (5, 3) along y = 3 says which piece the hole is in")
+            .pieces;
+
+        assert!(
+            log.is_empty(),
+            "a ray given up leaves no record, and the bar decides exactly"
+        );
+        assert_eq!(
+            pieces.len(),
+            5,
+            "left of the cut, the sliver up to the bar, under the bar, and the \
+             two either side of the right notch past it"
+        );
+        let holed = pieces
+            .iter()
+            .find(|piece| piece.wires.len() == 2)
+            .expect("the piece the hole is in keeps the hole");
+        assert_eq!(holed.wires[1].len(), 4, "the hole is still a square");
+        let corners: Vec<[f64; 3]> = holed.wires[0]
+            .iter()
+            .filter_map(|side| side.ends[0].point().exact_coordinates())
+            .collect();
+        assert!(
+            [[1.0, 3.0, 1.0], [6.5, 0.0, 1.0], [6.5, 8.0, 1.0]]
+                .iter()
+                .all(|corner| corners.contains(corner)),
+            "the hole is in the piece left of x = 6.5: {corners:?}"
+        );
+        assert_eq!(
+            pieces.iter().filter(|piece| piece.wires.len() == 1).count(),
+            4,
+            "the other four pieces have no hole"
+        );
+        for piece in &pieces {
+            every_wire_closes(piece);
+        }
+    }
+
     #[test]
     fn probe_q1484() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -13172,20 +13276,48 @@ mod tests {
         .expect("the plate has a top");
         let tiny = |n: i32| f64::powi(2.0, n);
         let q992: Vec<[f64; 4]> = vec![[-1.0, 3.0, 0.0, -2.5], [1.0, 0.0, 0.0, -6.5]];
-        for (name, planes, ball) in [
+        let ball = |centre: [f64; 2], radius: f64| {
+            Surface::Sphere(
+                rcad_geom::Sphere::new(Point::new(centre[0], centre[1], 1.0), radius)
+                    .expect("a radius"),
+            )
+        };
+        let bar = |x: f64, z: f64, radius: f64| {
+            Surface::Cylinder(
+                rcad_geom::Cylinder::new(
+                    Axis::new(Point::new(x, 0.0, z), Vector::new(0.0, 1.0, 0.0)).expect("an axis"),
+                    radius,
+                )
+                .expect("a radius"),
+            )
+        };
+        for (name, planes, extra) in [
             ("Q992", q992.clone(), None),
             (
                 "E top 3-2^-53 misses",
                 vec![[1.0, 0.0, 0.0, -6.5]],
-                Some(([6.5, 2.0], 1.0 - tiny(-53))),
+                Some(ball([6.5, 2.0], 1.0 - tiny(-53))),
+            ),
+            ("J bar alone", vec![], Some(bar(7.0, 1.0, 0.5 - tiny(-53)))),
+            (
+                "K bar line 6.5+2^-53 beside x=6.5",
+                vec![[1.0, 0.0, 0.0, -6.5]],
+                Some(bar(7.0, 1.0, 0.5 - tiny(-53))),
+            ),
+            (
+                "L bar line 6.5-2^-53 beside x=6.5",
+                vec![[1.0, 0.0, 0.0, -6.5]],
+                Some(bar(6.0, 1.0, 0.5 - tiny(-53))),
+            ),
+            (
+                "M bar line 6.5 exactly beside x=6.5+... ordinary",
+                vec![[1.0, 0.0, 0.0, -6.25]],
+                Some(bar(7.0, 1.0, 0.5)),
             ),
         ] {
             let mut cut = cut_by(&top, &planes);
-            if let Some((centre, radius)) = ball {
-                cut.cuts.push(Surface::Sphere(
-                    rcad_geom::Sphere::new(Point::new(centre[0], centre[1], 1.0), radius)
-                        .expect("a radius"),
-                ));
+            if let Some(surface) = extra {
+                cut.cuts.push(surface);
             }
             let cuts = canonical_cut_surfaces(&cut);
             if let Ok(arrangement) =
