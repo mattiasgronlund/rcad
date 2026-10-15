@@ -245,21 +245,35 @@ fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
 /// **The seven Q1664 moved were refused
 /// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` until Q1867**, as all
 /// seven were under every policy before Q1664: that arc has its chord along
-/// the tangent at the pole. **Q1614's two are refused
-/// `CannotNameWhichPieceOfACrossingThisIs`**, where they were refused before
-/// Q1614.
+/// the tangent at the pole. **Q1614's two were refused
+/// `CannotNameWhichPieceOfACrossingThisIs` until Q2081**, as they were before
+/// Q1614. Their arc from a pole to the corner a rounding off it has its
+/// chord along the tangent too, and the crossing at the pole, squared off
+/// against that chord, came out not nought but a rounding along it:
+/// `(0, ±4.7e−38, 0)` at radius 1000 and `(0, ±3.3e−55, 0)` at radius 0.001.
+/// The fuse took that rounding as the way into the arc, and a side of the
+/// chord read along the chord names no one piece of the circle. Since Q2081
+/// `Edge::the_way_across_the_chord_into_the_arc` faces an arc of a closed
+/// curve whose two ends square off the same way by which way it sets off
+/// along its chord, here away from the ball's centre.
 ///
 /// **Q1867 names that arc** (`Edge::the_way_into_an_arc_along_its_own_chord`
-/// in `fuse/assemble.rs`) and none of the seven answers for it. Each answer's
-/// corners, edges and faces are right — the 90 degree difference at radius 1
-/// was dumped, the arcs from each pole to the corner beside it picked as the
-/// short ones — and each is refused further on:
+/// in `fuse/assemble.rs`) and none of the seven answers for it, nor does
+/// either of Q1614's two for Q2081. Each answer's corners, edges and faces are
+/// right — the 90 degree difference at radius 1 and the 10 degree one at
+/// radius 0.001 were dumped, the arcs from each pole to the corner beside it
+/// picked as the short ones — and each is refused further on:
 ///
-/// - **the four 90 degree differences for corners that coincide**, by the
-///   mesher, which sees the pole and the corner `4.4e−16` from it as one point
-///   on the face's own map;
-/// - **the 45 degree one at radius 0.001 and the 10 degree one at radius 1000
-///   for faces that do not agree which way they face**;
+/// - **the four 90 degree differences and the 45 degree one at radius 1000
+///   for corners that coincide**, by the mesher, which sees the pole and the
+///   corner a rounding from it as one point on the face's own map;
+/// - **the 45 degree one at radius 0.001 and the 10 degree ones at radii 0.001
+///   and 1000 for faces that do not agree which way they face**. The faces are
+///   right and the name is not. The walk puts a point on the arc of `x = 0`
+///   from the north pole to the corner beside it, and the flat face of
+///   `x = 0` goes through that point, but the coarsest mesh of the sphere's
+///   face draws the pole straight to the corner and skips it, so the sides
+///   there are not each used once both ways;
 /// - **the 10 degree intersection at radius 1 for loops that touch** at
 ///   `(0, −6.4e−16, −1)`, where the two knives' line meets the ball a rounding
 ///   past the south pole. Before Q1866 `validate.rs`'s
@@ -271,16 +285,15 @@ fn two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy() {
     const COINCIDE: &str = "CornersCoincide";
     const FACE_APART: &str = "FacesDoNotAgreeWhichWayTheyFace";
     const TOUCH: &str = "LoopsTouch";
-    const UNNAMED_PIECE: &str = "CannotNameWhichPieceOfACrossingThisIs";
     for (degrees, radius, rule, refused) in [
         (90.0, 1.0, Rule::Difference, COINCIDE),
         (90.0, 0.001, Rule::Difference, COINCIDE),
         (90.0, 1000.0, Rule::Difference, COINCIDE),
         (90.0, 3.0, Rule::Difference, COINCIDE),
         (45.0, 0.001, Rule::Difference, FACE_APART),
-        (45.0, 1000.0, Rule::Difference, UNNAMED_PIECE),
+        (45.0, 1000.0, Rule::Difference, COINCIDE),
         (10.0, 1.0, Rule::Intersection, TOUCH),
-        (10.0, 0.001, Rule::Difference, UNNAMED_PIECE),
+        (10.0, 0.001, Rule::Difference, FACE_APART),
         (10.0, 1000.0, Rule::Difference, FACE_APART),
     ] {
         let mut model = a_model(radius);

@@ -4904,6 +4904,40 @@ impl Edge {
     /// fuse's arguments, since swapping them only turns its sign, and the pair
     /// of pipes a corner is marked with is named alike either way round.
     ///
+    /// **Unless the crossing's directions at the two ends, squared off, point
+    /// the same way, on a curve that closes on a plane.** Such a curve bends one
+    /// way all round, so each arc between two of its corners lies wholly on one
+    /// side of their chord, and the crossing runs into that side at one end and
+    /// out of it at the other: squared off, the two point opposite ways, for
+    /// either arc. Where they point the same way, the rounding of the stored
+    /// ends chose the side and not the curve, and the arc is faced instead by
+    /// which way along the chord the named direction sets off
+    /// ([`Edge::the_way_into_a_closed_arc_by_how_it_sets_off`]). Whether this
+    /// reading is used is read off the stored ends alone, so it does not follow
+    /// the order of the fuse's arguments.
+    ///
+    /// Q2081 met it on the caps of a round bar of radius `24.32` notched by a
+    /// block whose corner edge stands on the bar's wall. Each cap has an arc
+    /// from `(14.591999999999995, 19.456000000000003)` to `(14.591999999999999,
+    /// 19.456000000000003)`, two roundings long, its stored chord along `x`
+    /// where the circle runs 37 degrees off it. Squared off against that chord,
+    /// a direction along the circle there says nothing of the arc's side, only
+    /// of which way it runs. On the bottom cap the crossing at both ends and
+    /// the named direction pointed to the centre's side, `(0, −1.84e−28, 0)`,
+    /// so the arc was faced towards the centre: its picker was `y ≤ 19.456`,
+    /// which holds the other 286 degrees of the circle. The volume search's mesh
+    /// then walked the arc the long way round, crossed itself on every rung of
+    /// its ladder, and the fuse did not come back; the top cap's crossing runs
+    /// the other way and its arc happened to be faced right. Read by how they set
+    /// off, both are faced `(0, 3.55e−15, 0)`, away from the centre. The arcs of
+    /// the 45 degree lune at radius 1000 and the 10 degree one at radius 0.001
+    /// from each pole to the corner a rounding off it
+    /// (`a_narrow_lune_from_a_pole_corner.rs`) had their crossing squared off to
+    /// a rounding along the chord, `(0, ±4.7e−38, 0)` and `(0, ±3.3e−55, 0)`,
+    /// at both ends, and are now faced `(0, 0, ∓6.4e−13)` and
+    /// `(0, 0, ∓1.25e−18)`, away from the ball's centre, the short arcs, as the
+    /// 90 degree lune's already were.
+    ///
     /// **A dot of exactly zero** means the named direction lay along its chord,
     /// or the crossing's direction at the chosen end does, and
     /// [`Edge::the_way_into_an_arc_along_its_own_chord`] reads the side another
@@ -4948,6 +4982,17 @@ impl Edge {
             crossing = crossing_at(second);
         }
         let across = squared_off_from(from, crossing);
+        if from == first
+            && self.a_closed_curve_on_a_plane()
+            && across.dot(squared_off_from(second, crossing_at(second))) > 0.0
+        {
+            return self.the_way_into_a_closed_arc_by_how_it_sets_off(
+                corners,
+                [first, second],
+                named_from,
+                towards,
+            );
+        }
         let named = squared_off_from(named_from, towards);
         let agreement = across.dot(named);
         if agreement > 0.0 {
@@ -4995,7 +5040,10 @@ impl Edge {
     ///   curve is inside the round surface. A step to a dissolved corner reads
     ///   the same: a corner on a closed curve can lie along the chord from an
     ///   end only off that end, towards the far end on the shorter arc and past
-    ///   the near one on the longer.
+    ///   the near one on the longer. This reading is
+    ///   [`Edge::the_way_into_a_closed_arc_by_how_it_sets_off`], which
+    ///   [`Edge::the_way_across_the_chord_into_the_arc`] also takes when the
+    ///   rounding of an arc's ends chose its side.
     fn the_way_into_an_arc_along_its_own_chord(
         &self,
         corners: &[Corner],
@@ -5004,34 +5052,65 @@ impl Edge {
         named_from: usize,
         towards: Vector,
     ) -> Option<Vector> {
-        let side = |reading: f64| reading.partial_cmp(&0.0).filter(|side| side.is_ne());
+        if named == Vector::zero() {
+            return self.the_way_into_a_closed_arc_by_how_it_sets_off(
+                corners,
+                [first, second],
+                named_from,
+                towards,
+            );
+        }
         let flat = self.carried_by.iter().find_map(Surface::as_plane)?;
-        let at = corners[first].point;
-        let square = flat.normal().cross(corners[second].point - at);
-        let into_the_arc = if named == Vector::zero() {
-            let round = self
-                .carried_by
-                .iter()
-                .find(|surface| surface.as_plane().is_none())?;
-            where_a_closed_crossing_is_centred(round, flat)?;
-            let outwards = side(square.dot(gradient_of(round, at)))?;
-            let heading =
-                side(towards.dot(
-                    corners[self.other_end_than(named_from)].point - corners[named_from].point,
-                ))?;
-            if outwards == heading {
-                Ordering::Greater
-            } else {
-                Ordering::Less
-            }
-        } else {
-            side(named.dot(square))?
-        };
-        Some(if into_the_arc.is_gt() {
+        let square = flat
+            .normal()
+            .cross(corners[second].point - corners[first].point);
+        Some(if a_side_of_nought(named.dot(square))?.is_gt() {
             square
         } else {
             -square
         })
+    }
+
+    /// Whether this edge runs along a curve that closes on a plane — a circle
+    /// or an ellipse, where a plane cuts a ball, a pipe or a cone right round.
+    /// Such a curve bends one way all round, so each of its two arcs between
+    /// two corners lies wholly on one side of their chord.
+    fn a_closed_curve_on_a_plane(&self) -> bool {
+        let Some(flat) = self.carried_by.iter().find_map(Surface::as_plane) else {
+            return false;
+        };
+        self.carried_by
+            .iter()
+            .find(|surface| surface.as_plane().is_none())
+            .is_some_and(|round| where_a_closed_crossing_is_centred(round, flat).is_some())
+    }
+
+    /// The way into an arc of a curve that closes on a plane, `±n × c`, read
+    /// from which way along the chord the arc sets off — or `None` when the arc
+    /// is on no such curve, or this cannot say. The second bullet of
+    /// [`Edge::the_way_into_an_arc_along_its_own_chord`] says why the reading
+    /// holds, and [`Edge::the_way_across_the_chord_into_the_arc`] when else it
+    /// is taken.
+    fn the_way_into_a_closed_arc_by_how_it_sets_off(
+        &self,
+        corners: &[Corner],
+        [first, second]: [usize; 2],
+        named_from: usize,
+        towards: Vector,
+    ) -> Option<Vector> {
+        let flat = self.carried_by.iter().find_map(Surface::as_plane)?;
+        let at = corners[first].point;
+        let square = flat.normal().cross(corners[second].point - at);
+        let round = self
+            .carried_by
+            .iter()
+            .find(|surface| surface.as_plane().is_none())?;
+        where_a_closed_crossing_is_centred(round, flat)?;
+        let outwards = a_side_of_nought(square.dot(gradient_of(round, at)))?;
+        let heading = a_side_of_nought(
+            towards.dot(corners[self.other_end_than(named_from)].point - corners[named_from].point),
+        )?;
+        Some(if outwards == heading { square } else { -square })
     }
 
     /// The end of this edge that is not `corner`.
@@ -5084,6 +5163,12 @@ impl Edge {
         either.sort_by_key(name_of_surface_bits);
         either[0]
     }
+}
+
+/// Which side of nought `reading` is, or `None` when it is nought or not a
+/// number.
+fn a_side_of_nought(reading: f64) -> Option<Ordering> {
+    reading.partial_cmp(&0.0).filter(|side| side.is_ne())
 }
 
 /// A plane and a pipe that cross in an ellipse reaching more than half of
