@@ -7938,4 +7938,105 @@ mod tests {
             );
         }
     }
+
+    /// Row Q1890. A solid with a face of a cone is not charged at all, by any
+    /// mesh, so it answers by a mesh that does not lie flat, as it did before
+    /// its sum was weighed. That holds even where another of its faces is
+    /// meshed a whole radius out: the coarsest mesh of a bar of radius one
+    /// under a cone flaring out to nine strays `8.05`.
+    ///
+    /// Charged a triangle at a time, the bar's wall came first and was charged
+    /// without end before any triangle of the cone was met, so this solid asked
+    /// for a finer mesh where the same solid with its faces in the other order
+    /// answered.
+    #[test]
+    fn a_solid_with_a_cone_face_is_not_charged_even_where_its_bar_strays_a_whole_radius() {
+        let mut model = an_empty_model();
+        let flared = a_bar_under_a_flared_cone(&mut model).expect("a sound solid");
+        let mesh = its_coarsest_mesh(&model, flared, "a bar under a flared cone");
+        let deviation = mesh.deviation().magnitude();
+        assert!(
+            deviation >= 1.0,
+            "strays {deviation}, less than the bar's radius"
+        );
+        let view = model.solid(flared).expect("this model made the key");
+        assert_eq!(
+            how_much_space_hides_under(view, &mesh),
+            None,
+            "strays {deviation}"
+        );
+    }
+
+    /// A bar of radius one about `z` from `z = 0` to `z = 1`, and on it a band
+    /// of the cone with its apex at `z = −1` and a slope of one in two, from
+    /// radius one at `z = 1` out to nine at `z = 17`, closed by two flat caps.
+    /// The bar's wall is the first face.
+    fn a_bar_under_a_flared_cone(model: &mut Model) -> crate::Result<crate::SolidKey> {
+        let up = Vector::new(0.0, 0.0, 1.0);
+        let flat = |height: f64, facing: f64| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, height), up * facing)
+                    .expect("z has a length"),
+            )
+        };
+        let wall = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0)?);
+        let flare = Surface::Cone(Cone::new(
+            Axis::new(Point::new(0.0, 0.0, -1.0), up).expect("z has a length"),
+            0.5,
+        )?);
+
+        let mut builder = SolidBuilder::new();
+        let [bottom, middle, top] = [(1.0, 0.0), (1.0, 1.0), (9.0, 17.0)]
+            .map(|(radius, z)| builder.add_vertex(Point::new(radius, 0.0, z)));
+        let (bottom, middle, top) = (bottom?, middle?, top?);
+        let round_the_bottom =
+            builder.add_edge(bottom, bottom, EdgeRun::RightRoundWhereItsFacesCross)?;
+        let round_the_middle = builder.add_edge(
+            middle,
+            middle,
+            EdgeRun::RightRoundWhereItCrosses {
+                and: flat(1.0, 1.0),
+            },
+        )?;
+        let round_the_top = builder.add_edge(top, top, EdgeRun::RightRoundWhereItsFacesCross)?;
+        let up_the_wall = builder.add_edge(bottom, middle, EdgeRun::Straight)?;
+        let up_the_flare = builder.add_edge(middle, top, EdgeRun::Straight)?;
+
+        let faces = [
+            (
+                wall,
+                vec![
+                    (round_the_bottom, Orientation::Forward),
+                    (up_the_wall, Orientation::Forward),
+                    (round_the_middle, Orientation::Reversed),
+                    (up_the_wall, Orientation::Reversed),
+                ],
+            ),
+            (
+                flare,
+                vec![
+                    (round_the_middle, Orientation::Forward),
+                    (up_the_flare, Orientation::Forward),
+                    (round_the_top, Orientation::Reversed),
+                    (up_the_flare, Orientation::Reversed),
+                ],
+            ),
+            (
+                flat(0.0, -1.0),
+                vec![(round_the_bottom, Orientation::Reversed)],
+            ),
+            (flat(17.0, 1.0), vec![(round_the_top, Orientation::Forward)]),
+        ];
+        let mut drafted = Vec::new();
+        for (surface, walked) in faces {
+            let mut steps = Vec::new();
+            for (edge, way) in walked {
+                steps.push(DraftStep::Along(builder.add_coedge(edge, way)?));
+            }
+            let wire = builder.add_wire(&steps)?;
+            drafted.push((builder.add_face(surface, &[wire])?, Orientation::Forward));
+        }
+        builder.add_shell(&drafted)?;
+        builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+    }
 }
