@@ -2366,8 +2366,8 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// A polyhedron's own fan *is* its volume; a curved solid has no such fan — a
 /// round bar's caps fan into no triangles at all and its wall into two with no
 /// area (§35.4) — so it is summed over a mesh instead. The caller reads only
-/// the **sign** of what comes back; the size of a flat mesh's sum is weighed
-/// here, below, and nowhere else.
+/// the **sign** of what comes back; the size of a mesh's sum is weighed here,
+/// below, and nowhere else.
 ///
 /// # A coarse mesh that lies flat has not answered
 ///
@@ -2410,36 +2410,61 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// So a flat mesh is asked again with less room. Halving from the mesh's own
 /// width rather than down from [`as_coarse_as_a_mesh_gets`] is what keeps it to
 /// a handful of meshes: the bulge a flat patch is hiding is at most that width,
-/// and every halving that does not find it rules out half of what is left. The
-/// three-arc cap turned `1/40` answers `25.7` at room `2.47`, where its mesh
-/// no longer lies flat. **The finer meshes are read and thrown away**; nothing
-/// a caller measures is worked out here.
+/// and every halving that does not find it rules out half of what is left.
+/// **The finer meshes are read and thrown away**; nothing a caller measures is
+/// worked out here.
 ///
-/// # A flat sum answers once it is larger than what a mesh can leave out
+/// # A sum answers once it is larger than what a mesh can leave out
+///
+/// The solid's volume is within [`how_much_space_hides_under`] of what the
+/// mesh encloses exactly, and that is within the second number
+/// [`signed_volume_over_and_how_far_it_rounded`] hands back of the sum. A sum
+/// larger than the two together has the solid's own sign, and answers; a sum
+/// that is not has said nothing, **whether or not the mesh lies flat**, and
+/// the next rung is asked for.
+///
+/// **A mesh that does not lie flat used to answer at once, on its sign.** But
+/// each face is cut into triangles on its own, and where two curved faces meet
+/// in a rim whose corners do not lie in one plane, each can cross the rim by a
+/// different diagonal. Between the two, the mesh is a thin solid of either
+/// sign. The lens a ball makes poking `1/16` into a pipe, built turned `8/40`
+/// of a turn about `x`, has a coarsest mesh of twelve points that does not lie
+/// flat and encloses `−0.041`, with `2.2` of space it can leave out. That sum
+/// was read as the lens's volume: the lens was refused
+/// [`Invalid::VolumeIsNotPositive`], and the same lens turned inside out passed
+/// (`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`, row
+/// Q1890). Weighed, it is asked again, and at room `0.0297` the lens's mesh
+/// encloses `0.188`, which answers.
+///
+/// What that costs is the rungs down to a room where a mesh's charge is under
+/// the solid's volume, for every curved solid. A probe over
+/// `just t -p rcad-topo` counted 112 593 sums asked for, 39 071 answered by
+/// the coarsest mesh as before, and 260 184 meshes more than the old rule
+/// asked for. **That cost is not settled** (row Q1890's handoff): one test
+/// went from `0.022` s to `9.1` s.
 ///
 /// A sound solid a rounding thick, such as the sliver a fuse leaves where two
 /// curved faces almost meet, lies flat in every mesh of it, so asking again
-/// walked it down to the floor, minutes for one test. But a flat sum is not
-/// always a rounding. The solid's volume is within
-/// [`how_much_space_hides_under`] of what the mesh encloses exactly, and that
-/// is within the second number
-/// [`signed_volume_over_and_how_far_it_rounded`] hands back of the sum. A sum
-/// larger than the two together has the solid's own sign, and answers. That is
-/// what ends the slivers of
+/// walked it down to the floor, minutes for one test, before its sum was
+/// weighed. That is what ends the slivers of
 /// `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule` and
 /// `a_quarter_of_a_bar_placed_round_from_a_bend_in_it_answers_or_keeps_an_edge_a_rounding_long`,
-/// at rooms `0.5` and `0.25`: a probe saw one sum `2.51e-15` against `1.67e-15`
-/// hidden. The same probe, run over the whole `rcad-topo` suite, saw every flat
-/// mesh summed exactly, off by `3e-28` at most, and charging that changed no
-/// answer; it is charged because nothing else bounds a sum kept rounded.
+/// at rooms `0.5` and `0.25` when the ladder halved from the width alone: a
+/// probe saw one sum `2.51e-15` against `1.67e-15` hidden. The same probe, run
+/// over the whole `rcad-topo` suite, saw every flat mesh summed exactly, off by
+/// `3e-28` at most, and charging that changed no answer; it is charged because
+/// nothing else bounds a sum kept rounded.
 ///
-/// A face of a cone is charged without end (see [`how_much_space_hides_under`]),
-/// so a flat mesh of a solid with one never answers by its size, and a cone
-/// sliver walks to the floor as it did before.
+/// **A face of a cone cannot be charged yet** (see
+/// [`how_much_space_hides_under`]), so a solid with one keeps the old rule: a
+/// mesh that does not lie flat answers on its sign, and a flat one is asked
+/// again, so a cone sliver walks to the floor as it did before. Row Q1883 gives
+/// cones measure.rs's charge.
 ///
-/// **When no rung answers, the coarse sum comes back**, the zero or the
-/// rounding it was, so a solid flat at every mesh is judged as it was before
-/// this ladder ran for it.
+/// **When no rung answers, the finest sum that does not lie flat comes back**,
+/// as the closest to the solid's volume this saw, and the coarse sum, the zero
+/// or the rounding it was, when every mesh lay flat, so a solid flat at every
+/// mesh is judged as it was before this ladder ran for it (row Q1891).
 ///
 /// # A fold is retried; every other refusal but one still stops it
 ///
@@ -2519,6 +2544,8 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     if the_sum_answers(view, &coarsest, enclosed, rounding) {
         return Ok(enclosed);
     }
+    let mut finest_that_is_not_flat =
+        (enclosed != 0.0 && !it_lies_flat(&coarsest)).then_some(enclosed);
     let mut room = how_far_across(&coarsest) / 2.0;
     while let Ok(less) = Deflection::of(room) {
         let mut this_rung = ProvenanceLog::new();
@@ -2528,6 +2555,9 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 if the_sum_answers(view, &finer, finer_encloses, rounding) {
                     this_rung.drain_into(log);
                     return Ok(finer_encloses);
+                }
+                if finer_encloses != 0.0 && !it_lies_flat(&finer) {
+                    finest_that_is_not_flat = Some(finer_encloses);
                 }
             }
             Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
@@ -2542,13 +2572,15 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         }
         room /= 2.0;
     }
-    Ok(enclosed)
+    Ok(finest_that_is_not_flat.unwrap_or(enclosed))
 }
 
 /// Whether what a mesh of this solid encloses says which way the solid's faces
-/// point: it is not zero, and either the mesh does not lie flat or the sum,
-/// less `rounding`, how far it can be from what the mesh's triangles enclose
-/// exactly, is still larger than all the space the mesh can leave out.
+/// point: it is not zero, and the sum, less `rounding`, how far it can be from
+/// what the mesh's triangles enclose exactly, is still larger than all the
+/// space the mesh can leave out. A solid with a face that space cannot be
+/// charged for answers, as it did before that space was weighed, whenever the
+/// mesh does not lie flat.
 ///
 /// **The rounding is charged because the size is read, not only the sign.**
 /// [`signed_volume_over_and_how_far_it_rounded`] keeps a rounded sum whenever
@@ -2556,9 +2588,13 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 /// can be off by nearly all of itself, and a mesh whose exact volume is under
 /// the hidden space would then pass.
 fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64, rounding: f64) -> bool {
-    enclosed != 0.0
-        && (!it_lies_flat(mesh)
-            || enclosed.abs() > (how_much_space_hides_under(view, mesh) + rounding).next_up())
+    if enclosed == 0.0 {
+        return false;
+    }
+    match how_much_space_hides_under(view, mesh) {
+        Some(hidden) => enclosed.abs() > (hidden + rounding).next_up(),
+        None => !it_lies_flat(mesh),
+    }
 }
 
 /// The most space there can be between a mesh of this solid and the solid,
@@ -2570,13 +2606,17 @@ fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64, rounding: f6
 /// `Measurement::volume_error`'s charge loosened: `Mesh::deviation`'s doc
 /// shows `(r³ − (r − d)³) / (3(r − d)²) ≤ d · (r / (r − d))²`.
 ///
-/// **A cone is charged without end.** Its radius runs down to nothing at the
+/// `None` when a triangle with area stands in for a face this cannot charge,
+/// and `f64::INFINITY` when the mesh strays a whole radius of a curved face or
+/// more, which a finer mesh can still bring under it.
+///
+/// **A cone cannot be charged.** Its radius runs down to nothing at the
 /// apex, and how near a face comes to it takes a walk over the mesh that
 /// `measure::bend_of_each_face` already makes; a second copy of that walk is
 /// not worth what it buys here. So a solid with a cone face is answered by a
 /// mesh that does not lie flat, as before. Row Q1883 puts measure.rs's own
 /// charge here in place of this copy, and that one reaches the tip.
-fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> f64 {
+fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
     let deviation = mesh.deviation().magnitude();
     let radius_of: HashMap<FaceKey, Option<f64>> = view
         .faces()
@@ -2594,16 +2634,21 @@ fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> f64 {
         if area == 0.0 {
             continue;
         }
+        if radius == 0.0 {
+            return None;
+        }
         let inner = radius - deviation;
         if inner <= 0.0 {
-            return f64::INFINITY;
+            return Some(f64::INFINITY);
         }
         hidden += area * deviation * (radius / inner) * (radius / inner);
     }
-    hidden
+    Some(hidden)
 }
 
-/// `None` for a plane, which does not bend.
+/// `None` for a plane, which does not bend, and `Some(0.0)` for a surface
+/// whose bend this has not been taught, which
+/// [`how_much_space_hides_under`] cannot charge at all.
 fn the_smallest_radius_it_bends_at(surface: &Surface) -> Option<f64> {
     match surface {
         Surface::Plane(_) => None,
@@ -2631,10 +2676,11 @@ fn the_smallest_radius_it_bends_at(surface: &Surface) -> Option<f64> {
 /// (`a_cap_whose_rim_is_three_arcs_lies_flat_at_every_turn_and_validates`), the
 /// three-arc cap's coarsest mesh is its rim's six points at 63, and they stray
 /// at most `2.1` ulps from one plane; at the other 93 it has a point off the
-/// rim, and strays at least `4e14`. The `64` sits far from both. Read flat,
-/// a mesh is only asked again, or answers by its size, so a bend under `64`
-/// ulps taken for flat costs rungs, and at worst comes back as its coarse sum,
-/// which is what it answered before.
+/// rim, and strays at least `4e14`. The `64` sits far from both. A mesh
+/// answers by its size, flat or not, unless the solid has a face
+/// [`how_much_space_hides_under`] cannot charge; read flat, such a mesh is
+/// only asked again. So a bend under `64` ulps taken for flat costs rungs, and
+/// at worst comes back as its coarse sum, which is what it answered before.
 fn it_lies_flat(mesh: &Mesh) -> bool {
     const ROUNDINGS_OFF_THE_PLANE: f64 = 64.0;
     how_far_it_strays_from_one_plane(mesh)
@@ -7681,5 +7727,134 @@ mod tests {
             (1, 2, 4),
             "the hole's wall, its two circles, and each circle's wall and cap"
         );
+    }
+
+    /// Row Q1890. The lens a ball makes poking `1/16` into a pipe of radius 5
+    /// about `z`: the ball's face below and the pipe's above, meeting in a rim
+    /// of four corners that do not lie in one plane, the two on `z = 0` lower
+    /// by `1/16` than the two on `x = 0`.
+    ///
+    /// **A mesh that does not lie flat can enclose the wrong sign.** At the
+    /// coarsest, each face is cut into triangles across the rim on its own, so
+    /// where the two faces join other corners the mesh is a thin solid of
+    /// either sign. Built turned `8/40` of a turn about `x`, the sound lens's
+    /// coarsest mesh is twelve points and encloses `−0.041`, where the mesh
+    /// that answers, at room `0.0297`, encloses `0.188`. It did not lie flat,
+    /// so that sum was read as the lens's volume: the lens was refused
+    /// [`Invalid::VolumeIsNotPositive`] and the same lens turned inside out
+    /// passed. The space that mesh can leave out is `2.2`, so its sum says
+    /// nothing about the sign.
+    ///
+    /// **It is built where it sits, not placed.** A placed curved face is
+    /// meshed where it is stored, so placing the lens moves its mesh with it
+    /// and never changes which corners the triangles join.
+    #[test]
+    fn a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn() {
+        let mut coarsest_below_zero = 0;
+        for fortieths in 0..40 {
+            let what = format!("turned {fortieths}/40 about x");
+            let turn = Isometry::rotation(
+                &Axis::x(),
+                f64::from(fortieths) * core::f64::consts::TAU / 40.0,
+            )
+            .expect("a finite turn");
+
+            let mut model = an_empty_model();
+            let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, &turn, false)
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            if signed_volume_over(&its_coarsest_mesh(&model, lens, &what)) < 0.0 {
+                coarsest_below_zero += 1;
+            }
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+
+            let inside_out =
+                a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), &turn, true);
+            assert!(
+                matches!(
+                    inside_out,
+                    Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
+                ),
+                "{what}: inside out {inside_out:?}"
+            );
+        }
+        assert!(
+            coarsest_below_zero > 0,
+            "no turn gave the sound lens a coarsest mesh that encloses below zero"
+        );
+    }
+
+    /// The lens of [`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`]
+    /// built turned by `turn`, and with both faces pointing into it when
+    /// `inside_out`. Its corners are where the rim crosses `x = 0` and `z = 0`,
+    /// and each edge between two of them is picked by the half-space facing
+    /// their quadrant, which holds both corners strictly inside it at any turn.
+    fn a_lens_where_a_ball_pokes_into_a_pipe(
+        model: &mut Model,
+        turn: &Isometry,
+        inside_out: bool,
+    ) -> crate::Result<crate::SolidKey> {
+        let (pipe_radius, ball_at, rim_low) = (5.0f64, 8.0f64, 4.9375f64);
+        let across = (pipe_radius * pipe_radius - rim_low * rim_low).sqrt();
+        let along = (2.0 * ball_at * (pipe_radius - rim_low)).sqrt();
+        let ball_radius = (across * across + (ball_at - rim_low) * (ball_at - rim_low)).sqrt();
+        let pipe = Cylinder::new(Axis::z(), pipe_radius)?.transformed(turn);
+        let ball = Sphere::new(Point::new(0.0, ball_at, 0.0), ball_radius)?.transformed(turn);
+        let mut builder = SolidBuilder::new();
+        let corners = [
+            (across, rim_low, 0.0),
+            (0.0, pipe_radius, along),
+            (-across, rim_low, 0.0),
+            (0.0, pipe_radius, -along),
+        ]
+        .map(|(x, y, z)| {
+            builder
+                .add_vertex(turn.apply_to_point(Point::new(x, y, z)))
+                .expect("a finite corner")
+        });
+        let quadrants = [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)];
+        let mut edges = Vec::new();
+        for (at, (x, z)) in quadrants.into_iter().enumerate() {
+            let mut picked_by: SmallVec<[Picker; 1]> = SmallVec::new();
+            picked_by.push(Picker::from(HalfSpace::through_a_point_facing(
+                turn.apply_to_point(Point::origin()),
+                turn.apply_to_vector(Vector::new(x, 0.0, z)),
+            )?));
+            let run = EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Cylinder(pipe),
+                picked_by,
+            };
+            edges.push(builder.add_edge(corners[at], corners[(at + 1) % 4], run)?);
+        }
+        let way = if inside_out {
+            Orientation::Reversed
+        } else {
+            Orientation::Forward
+        };
+        let mut the_rim_walked = |way: Orientation| -> Vec<_> {
+            let mut ordered = edges.clone();
+            if way == Orientation::Reversed {
+                ordered.reverse();
+            }
+            ordered
+                .into_iter()
+                .map(|edge| {
+                    DraftStep::Along(
+                        builder
+                            .add_coedge(edge, way)
+                            .expect("an edge this builder made"),
+                    )
+                })
+                .collect()
+        };
+        let ball_steps = the_rim_walked(way);
+        let pipe_steps = the_rim_walked(way.reversed());
+        let ball_wire = builder.add_wire(&ball_steps)?;
+        let pipe_wire = builder.add_wire(&pipe_steps)?;
+        let ball_face = builder.add_face(Surface::Sphere(ball), &[ball_wire])?;
+        let pipe_face = builder.add_face(Surface::Cylinder(pipe), &[pipe_wire])?;
+        builder.add_shell(&[(ball_face, way), (pipe_face, way)])?;
+        builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
     }
 }
