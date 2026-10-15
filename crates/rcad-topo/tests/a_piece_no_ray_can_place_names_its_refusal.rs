@@ -423,11 +423,24 @@ fn a_bend_written_out_at_another_angle_and_a_copy_turned_round_answer_every_rule
 /// start. That start's box straddles the first bend's start cap plane, and
 /// until Q2059 the loop gave up there, before it asked the end cap's plane,
 /// which puts the start strictly off the wall.
+///
+/// Placed round by `−2` and a quarter turn back, the copy's end cap and the
+/// first bend's start cap lie on planes through the axis a rounding apart, and
+/// each cap's disk lies inside the other bend by about `1.7e-17` at the ring.
+/// Every rule both ways round is refused `ResultIsNotManifold` (Q1949, not yet
+/// fixed): the first bend's start cap is placed outside the copy by a point
+/// `8e-16` off its own plane, beyond the copy's end cap plane.
 #[test]
 fn a_bend_placed_round_by_a_float_and_a_copy_turned_on_answers_every_rule() {
     let one_bend = PI * PI * 4.0 / 2.0;
     let mut not_the_bends = Vec::new();
-    for (start, turn) in [(1.0, PI), (0.3, FRAC_PI_2), (0.3, PI), (-2.0, PI)] {
+    for (start, turn) in [
+        (1.0, PI),
+        (0.3, FRAC_PI_2),
+        (0.3, PI),
+        (-2.0, PI),
+        (-2.0, -FRAC_PI_2),
+    ] {
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
                 let what =
