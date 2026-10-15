@@ -33,7 +33,7 @@ use smallvec::SmallVec;
 
 use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
-use crate::holds::{Trimming, the_face_across, the_side_this_face_lies_on};
+use crate::holds::the_face_across;
 use crate::validate::{
     nothing_curved_says_where_it_bends, side_of_surface, the_way_it_is_parametrised_about,
 };
@@ -7469,8 +7469,9 @@ fn the_way_this_face_walks_a_closed_edge(
     if forward == Vector::zero() {
         return Ok(None);
     }
-    let Some(material) =
-        which_side_of_a_surface_a_run_names_this_face_lies_on(solid, face, partner)?
+    let Some(material) = crate::validate::which_side_of_a_surface_a_run_names_this_face_lies_on(
+        solid, face, partner,
+    )?
     else {
         return Ok(None);
     };
@@ -7544,42 +7545,6 @@ fn the_way_a_flat_disk_across_a_ball_walks_its_rim(
                 Orientation::Reversed => -walked,
             })
         }))
-}
-
-/// Which side of `named`, a surface a run of this face's names, the face lies
-/// on, as its corners off `named` say.
-///
-/// **`Model::validate` asks this same question of the same corners**, in its
-/// own private copy, and the two must stay one reading: the corners on `named`
-/// are the ends of every edge of this face whose run is between something and
-/// `named`, which no rounding can take off it ([`Trimming`]), and every other
-/// corner is read. `None` when every corner of the face is on it.
-fn which_side_of_a_surface_a_run_names_this_face_lies_on(
-    solid: SolidView<'_>,
-    face: FaceView<'_>,
-    named: Surface,
-) -> Result<Option<Decision>> {
-    let mut corners_on_it = Vec::new();
-    for coedge in face.wires().flat_map(WireView::coedges) {
-        let edge = coedge.edge();
-        let beyond = the_face_across(solid, face, edge)?.unwrap_or(face);
-        if which_two_surfaces_a_run_is_between(
-            edge.stored_run(),
-            [&face.stored_surface(), &beyond.stored_surface()],
-        )
-        .contains(&named)
-        {
-            corners_on_it.push(edge.start().key());
-            corners_on_it.push(edge.end().key());
-        }
-    }
-    the_side_this_face_lies_on(
-        face,
-        &Trimming {
-            surface: named.transformed(&face.location()),
-            corners_on_it,
-        },
-    )
 }
 
 /// Make every pole of a ball that a crossing runs through one of the points
