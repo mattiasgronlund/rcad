@@ -68,9 +68,10 @@ impl Measurement {
     /// between them and the surface — same shell, same thickness, opposite sign
     /// — and [`how_much_space_hides_under_a_flat_stand_in`] bounds it.
     ///
-    /// A flat face of a curved solid has no shell, but its mesh points lie on
-    /// its plane only as nearly as their coordinates can be written down, and
-    /// a turned plane's rarely can. So it is charged the slab its triangles can
+    /// A flat face of a curved solid has no shell, but the points the mesher
+    /// places along its curved edges lie on its plane only as nearly as their
+    /// coordinates can be written down, and a turned plane's rarely can. So it
+    /// is charged the slab its triangles can
     /// stray through: [`how_far_the_points_stray_off`] its plane times its
     /// area, and the furthest any flat face strays times the slivers along its
     /// rim, as [`SolidView::skin_of`] says.
@@ -273,9 +274,10 @@ impl FaceMeasurement {
     ///   the triangles' share of it, twice over — once as area that pairs with
     ///   nothing and once in the net difference above the split.
     /// - **A flat face of a curved solid**: each point moves straight on to the
-    ///   face's plane, so `moved` is [`how_far_the_points_stray_off`] it — `0`
-    ///   where every point lies on the plane exactly, and a rounding or so on
-    ///   a turned plane, whose points rarely can; and what is
+    ///   face's plane, except the face's own corners, which stay where the
+    ///   solid holds them, so `moved` is [`how_far_the_points_stray_off`] it —
+    ///   `0` where every other point lies on the plane exactly, and a rounding
+    ///   or so on a turned plane, whose points rarely can; and what is
     ///   unpaired is the slivers between the inscribed outline and the curve,
     ///   at most `E` of them and within `d` of a side of the mesh.
     ///
@@ -564,15 +566,26 @@ impl SolidView<'_> {
     /// One walk over the faces rather than three, because the error terms are
     /// all a share of the very area being summed.
     ///
-    /// **A flat face owes space too, once it is turned.** Its mesh points lie on
-    /// its plane only as nearly as their coordinates can be written down, and
-    /// a turned plane's rarely can: the caps of the sliver in
+    /// **A flat face owes space too, once it is turned.** The points the mesher
+    /// places along its curved edges lie on its plane only as nearly as their
+    /// coordinates can be written down, and a turned plane's rarely can: the
+    /// caps of the sliver in
     /// `a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver`
     /// are meshed up to `4.3e-16` off their planes, and the space between those
     /// triangles and their planes moved the sum by anywhere from `-4.9e-16` to
-    /// `3.2e-16` (Q2087) against a wedge of `5.4e-17`. So each flat face is charged
-    /// [`how_far_the_points_stray_off`] its plane times its area, the slab its
-    /// triangles can stray through. The slivers between a flat face's
+    /// `3.2e-16` (Q2087) against a wedge of `5.4e-17`. So each flat face is
+    /// charged [`how_far_the_points_stray_off`] its plane times its area, the
+    /// slab its triangles can stray through.
+    ///
+    /// **The face's own corners are not charged**, because a corner is where
+    /// the solid really reaches and the mesh holds it exactly, as a wholly flat
+    /// solid's measure takes its corners (§338). Charged too, the block less
+    /// the cone in `a_flat_solid_publishes_the_rounding_of_its_measure.rs`,
+    /// whose turned block's corners sit up to `1.2e-15` off its planes and
+    /// whose flat faces carry no other point, owed `3.5e-13` for space its
+    /// mesh does not leave out, four times the rounding it really owes.
+    ///
+    /// The slivers between a flat face's
     /// inscribed outline and its curve are inside the neighbouring curved
     /// face's shell, as [`how_much_space_hides_under_a_flat_stand_in`] says,
     /// but that shell now ends at points up to the same distance off the
@@ -581,9 +594,12 @@ impl SolidView<'_> {
     /// the furthest any flat face strays.
     fn skin_of(self, mesh: &Mesh) -> Skin {
         let bends = bend_of_each_face(self, mesh);
-        let planes: HashMap<FaceKey, Plane> = self
+        let flat_faces: HashMap<FaceKey, (Plane, Vec<u32>)> = self
             .faces()
-            .filter_map(|face| face.surface().as_plane().map(|plane| (face.key(), *plane)))
+            .filter_map(|face| {
+                let plane = *face.surface().as_plane()?;
+                Some((face.key(), (plane, the_corners_it_holds(face, mesh))))
+            })
             .collect();
         let deviation = mesh.deviation().magnitude();
         let mut skin = Skin {
@@ -602,10 +618,10 @@ impl SolidView<'_> {
                 continue;
             }
             let Some(radius) = bend.radius else {
-                let plane = planes
+                let (plane, held) = flat_faces
                     .get(&face)
                     .expect("a face that does not bend lies on a plane");
-                let off = how_far_the_points_stray_off(mesh, triangles, plane);
+                let off = how_far_the_points_stray_off(mesh, triangles, plane, held);
                 skin.volume_error += off * area;
                 furthest_off_a_plane = furthest_off_a_plane.max(off);
                 continue;
@@ -938,12 +954,16 @@ impl SolidView<'_> {
             }
             (None, None) => {
                 let error = deviation * rim_of_the_flat_faces(mesh, |other| other == face);
-                let plane = self
+                let view = self
                     .faces()
                     .find(|used| used.key() == face)
-                    .expect("the face was measured as one of this solid's")
-                    .plane();
-                let off = how_far_the_points_stray_off(mesh, triangles, &plane);
+                    .expect("the face was measured as one of this solid's");
+                let off = how_far_the_points_stray_off(
+                    mesh,
+                    triangles,
+                    &view.plane(),
+                    &the_corners_it_holds(view, mesh),
+                );
                 (error, off, error)
             }
         };
@@ -1868,8 +1888,15 @@ fn how_much_space_hides_under_a_flat_stand_in(area: f64, radius: f64, deviation:
     area * (radius * radius * radius - inner * inner * inner) / (3.0 * inner * inner)
 }
 
-/// How far the furthest corner of `triangles` lies off `plane`, rounded up: a
-/// length, in the model's own unit.
+/// How far the furthest point of `triangles` lies off `plane`, leaving out the
+/// points `held`, rounded up: a length, in the model's own unit.
+///
+/// `held` is the face's own corners, from [`the_corners_it_holds`]. A corner is
+/// where the solid really reaches, wherever the plane is — the truth a flat
+/// solid is measured against too (`docs/decisions.md` §338) — and the mesh
+/// holds it exactly, so nothing lies between a triangle and the truth there.
+/// The points the mesher placed along a face's curved edges stand for points
+/// on curves that lie in the plane, and those are what can stray.
 ///
 /// **Worked out exactly and not read off [`Plane::signed_distance_to`]**,
 /// whose [`Plane::SIGNED_DISTANCE_ROUNDOFF`] at coordinates of `4` is about
@@ -1880,14 +1907,24 @@ fn how_much_space_hides_under_a_flat_stand_in(area: f64, radius: f64, deviation:
 /// one only to within [`Plane::NORMAL_LENGTH_ROUNDOFF`] of its square, so
 /// dividing by the length is at most multiplying by `1 + 64ε`.
 ///
-/// `0.0` exactly when every corner sits on the plane exactly.
-fn how_far_the_points_stray_off(mesh: &Mesh, triangles: &[MeshTriangle], plane: &Plane) -> f64 {
+/// `0.0` exactly when every point but the corners sits on the plane exactly,
+/// and when there are no such points at all.
+fn how_far_the_points_stray_off(
+    mesh: &Mesh,
+    triangles: &[MeshTriangle],
+    plane: &Plane,
+    held: &[u32],
+) -> f64 {
     let normal = plane.normal().components();
     let mut furthest = 0.0f64;
     for triangle in triangles {
-        for corner in corners_of(mesh, triangle) {
+        for corner in triangle.corners() {
+            if held.contains(&corner) {
+                continue;
+            }
+            let point = mesh.points()[corner as usize];
             let mut height = vec![-plane.offset()];
-            for (along, at) in normal.into_iter().zip(corner.coordinates()) {
+            for (along, at) in normal.into_iter().zip(point.coordinates()) {
                 let (product, lost) = two_product(along, at);
                 height = added(&height, &[lost, product]);
             }
@@ -1895,6 +1932,19 @@ fn how_far_the_points_stray_off(mesh: &Mesh, triangles: &[MeshTriangle], plane: 
         }
     }
     upward(furthest * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF))
+}
+
+/// Which entries of the mesh are `face`'s own corners: the point the model
+/// holds for each vertex on its wires, exactly, as [`Mesh::point_at_vertex`]
+/// says.
+fn the_corners_it_holds(face: FaceView<'_>, mesh: &Mesh) -> Vec<u32> {
+    face.wires()
+        .flat_map(|wire| wire.coedges())
+        .map(|coedge| {
+            mesh.point_at_vertex(coedge.start().key())
+                .expect("every corner of the solid has its point in the mesh")
+        })
+        .collect()
 }
 
 /// The total length of the mesh sides where a face `counted` picks meets another
