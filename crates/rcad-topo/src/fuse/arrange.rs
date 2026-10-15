@@ -13127,6 +13127,125 @@ mod tests {
         }
     }
 
+    #[test]
+    fn probe_q1484() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let plate = ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 1.0],
+            [5.0, 1.0],
+            [5.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 5.0],
+            [7.0, 5.0],
+            [7.0, 6.0],
+            [8.0, 6.0],
+            [8.0, 8.0],
+            [5.0, 8.0],
+            [5.0, 7.0],
+            [3.0, 7.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
+            [0.0, 5.0],
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ])
+        .with_hole(vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0], [3.0, 5.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a square hole");
+        let solid = model
+            .add_extrusion(&plate, 1.0, &Isometry::identity())
+            .expect("an extrusion");
+        let top = bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the plate bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(facing_up)
+        .expect("the plate has a top");
+        let tiny = |n: i32| f64::powi(2.0, n);
+        let q992: Vec<[f64; 4]> = vec![[-1.0, 3.0, 0.0, -2.5], [1.0, 0.0, 0.0, -6.5]];
+        for (name, planes, ball) in [
+            ("Q992", q992.clone(), None),
+            (
+                "E top 3-2^-53 misses",
+                vec![[1.0, 0.0, 0.0, -6.5]],
+                Some(([6.5, 2.0], 1.0 - tiny(-53))),
+            ),
+        ] {
+            let mut cut = cut_by(&top, &planes);
+            if let Some((centre, radius)) = ball {
+                cut.cuts.push(Surface::Sphere(
+                    rcad_geom::Sphere::new(Point::new(centre[0], centre[1], 1.0), radius)
+                        .expect("a radius"),
+                ));
+            }
+            let cuts = canonical_cut_surfaces(&cut);
+            if let Ok(arrangement) =
+                Arrangement::of(&cut, &cuts, &Policy::certified(), &mut ProvenanceLog::new())
+            {
+                let lump = arrangement.lump_of_each_cycle();
+                let mut sides = Vec::new();
+                for cycle in 0..arrangement.cycles.len() {
+                    sides.push(
+                        arrangement
+                            .which_side_of_everything(
+                                cycle,
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            )
+                            .expect("sides"),
+                    );
+                }
+                let facing =
+                    arrangement.the_walk_of_each_other_lump_each_walk_faces(&lump, &sides, &cuts);
+                for cycle in 0..arrangement.cycles.len() {
+                    eprintln!(
+                        "PROBE {name} walk {cycle} lump {} winding {:?} sides {:?} facing {:?}",
+                        lump[cycle],
+                        arrangement.winding_of_cycle[cycle],
+                        sides[cycle],
+                        facing.as_ref().map(|facing| facing[cycle].clone())
+                    );
+                }
+                eprintln!(
+                    "PROBE {name} lumps running on {:?}",
+                    arrangement.lumps_with_a_curve_that_runs_on(&lump)
+                );
+            }
+            let mut log = ProvenanceLog::new();
+            let result = split_a_face(&cut, &Policy::certified(), &mut log);
+            match &result {
+                Ok(split) => {
+                    eprintln!(
+                        "PROBE {name} ok: {} pieces, log empty {}",
+                        split.pieces.len(),
+                        log.is_empty()
+                    );
+                    for piece in &split.pieces {
+                        let corners: Vec<[f64; 3]> = piece.wires[0]
+                            .iter()
+                            .filter_map(|side| side.ends[0].point().exact_coordinates())
+                            .collect();
+                        eprintln!(
+                            "PROBE {name} piece with {} wires, {} sides, exact corners {corners:?}",
+                            piece.wires.len(),
+                            piece.wires[0].len()
+                        );
+                    }
+                }
+                Err(error) => eprintln!("PROBE {name} err: {error:?}"),
+            }
+        }
+    }
+
     /// Planes that keep the whole box round a face on one side are left out
     /// before any meet is placed, so no node is on them, not even where they
     /// cross the one plane that does cut the face, and the face comes apart as
