@@ -4885,6 +4885,38 @@ impl Edge {
     /// fuse's arguments, since swapping them only turns its sign, and the pair
     /// of pipes a corner is marked with is named alike either way round.
     ///
+    /// **Unless the crossing's directions at the two ends, squared off, point
+    /// the same way, on a curve that closes on a plane.** Such a curve bends one
+    /// way all round, so each arc between two of its corners lies wholly on one
+    /// side of their chord, and the crossing runs into that side at one end and
+    /// out of it at the other: squared off, the two point opposite ways, for
+    /// either arc. Where they point the same way, the rounding of the stored
+    /// ends chose the side and not the curve, and the arc is faced instead by
+    /// which way along the chord the named direction sets off
+    /// ([`Edge::the_way_into_a_closed_arc_by_how_it_sets_off`]). Whether this
+    /// reading is used is read off the stored ends alone, so it does not follow
+    /// the order of the fuse's arguments.
+    ///
+    /// Q2081 met it on the caps of a round bar of radius `24.32` notched by a
+    /// block whose corner edge stands on the bar's wall. Each cap has an arc
+    /// from `(14.591999999999995, 19.456000000000003)` to `(14.591999999999999,
+    /// 19.456000000000003)`, two roundings long, its stored chord along `x`
+    /// where the circle runs 37 degrees off it. Squared off against that chord,
+    /// a direction along the circle there says nothing of the arc's side, only
+    /// of which way it runs. On the bottom cap the crossing at both ends and
+    /// the named direction pointed to the centre's side, `(0, −1.84e−28, 0)`,
+    /// so the arc was faced towards the centre: its picker was `y ≤ 19.456`,
+    /// which holds the other 286 degrees of the circle. The volume search's mesh
+    /// then walked the arc the long way round, crossed itself on every rung of
+    /// its ladder, and the fuse did not come back; the top cap's crossing runs
+    /// the other way and its arc happened to be faced right. Read by how they set
+    /// off, both are faced `(0, 3.55e−15, 0)`, away from the centre. The arcs of
+    /// the 45 degree lune at radius 1000 from each pole to the corner a rounding
+    /// off it (`a_narrow_lune_from_a_pole_corner.rs`) had their crossing squared
+    /// off to a rounding along the chord, `(0, ±4.7e−38, 0)`, at both ends, and
+    /// are now faced `(0, 0, ∓6.4e−13)`, away from the ball's centre, the short
+    /// arcs, as the 90 degree lune's already were.
+    ///
     /// **A dot of exactly zero** means the named direction lay along its chord,
     /// or the crossing's direction at the chosen end does, and
     /// [`Edge::the_way_into_an_arc_along_its_own_chord`] reads the side another
@@ -4987,7 +5019,10 @@ impl Edge {
     ///   curve is inside the round surface. A step to a dissolved corner reads
     ///   the same: a corner on a closed curve can lie along the chord from an
     ///   end only off that end, towards the far end on the shorter arc and past
-    ///   the near one on the longer.
+    ///   the near one on the longer. This reading is
+    ///   [`Edge::the_way_into_a_closed_arc_by_how_it_sets_off`], which
+    ///   [`Edge::the_way_across_the_chord_into_the_arc`] also takes when the
+    ///   rounding of an arc's ends chose its side.
     fn the_way_into_an_arc_along_its_own_chord(
         &self,
         corners: &[Corner],
@@ -5031,8 +5066,10 @@ impl Edge {
 
     /// The way into an arc of a curve that closes on a plane, `±n × c`, read
     /// from which way along the chord the arc sets off — or `None` when the arc
-    /// is on no such curve, or this cannot say. See
-    /// [`Edge::the_way_into_an_arc_along_its_own_chord`] for the reading.
+    /// is on no such curve, or this cannot say. The second bullet of
+    /// [`Edge::the_way_into_an_arc_along_its_own_chord`] says why the reading
+    /// holds, and [`Edge::the_way_across_the_chord_into_the_arc`] when else it
+    /// is taken.
     fn the_way_into_a_closed_arc_by_how_it_sets_off(
         &self,
         corners: &[Corner],
