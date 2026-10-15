@@ -593,6 +593,102 @@ fn a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_o
     );
 }
 
+#[test]
+fn probe_q2028_one() {
+    let scale = 0.1;
+    let size = 0.25;
+    let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
+    let far = 3.0 * scale;
+    let frustum = a_frustum_seamed_towards(
+        &mut model,
+        2.0,
+        far / 300.0,
+        far,
+        [-1.0, 0.0],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a frustum");
+    let cube = a_corner_up_cube_round_the_origin(&mut model, 6.0 * scale);
+    for face in model.solid(frustum).unwrap().faces() {
+        println!("frustum face {:?}", face.surface());
+    }
+    let mut log = ProvenanceLog::new();
+    let fused = model.fuse(
+        &[frustum],
+        &[cube],
+        Rule::Union,
+        &Policy::tolerant(size),
+        &mut log,
+    );
+    println!("{:?}", fused.map(|_| "ok"));
+    for record in log.records() {
+        println!(
+            "log: {} {:?} {:?} {} {:?}",
+            record.predicate(),
+            record.level(),
+            record.measures(),
+            record.enclosure(),
+            record.inputs()
+        );
+    }
+}
+
+#[test]
+fn probe_q2028_seam_cut_refusals() {
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for scale_step in 0..=20 {
+        let scale = 0.1 + 0.02 * f64::from(scale_step);
+        for size_step in 0..=16 {
+            let size = 0.1 + 0.05 * f64::from(size_step);
+            for (rule, frustum_first) in EVERY_FUSE {
+                let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
+                let far = 3.0 * scale;
+                let frustum = a_frustum_seamed_towards(
+                    &mut model,
+                    2.0,
+                    far / 300.0,
+                    far,
+                    [-1.0, 0.0],
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a frustum");
+                let cube = a_corner_up_cube_round_the_origin(&mut model, 6.0 * scale);
+                let (arguments, tools) = if frustum_first {
+                    ([frustum], [cube])
+                } else {
+                    ([cube], [frustum])
+                };
+                let fused = model.fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::tolerant(size),
+                    &mut ProvenanceLog::new(),
+                );
+                let what = match &fused {
+                    Ok(_) => "ok".to_string(),
+                    Err(Error::Undecidable { records }) => format!(
+                        "undecidable {}",
+                        records.records().last().map_or("-", |r| r.predicate())
+                    ),
+                    Err(error) => format!("{error:?}")
+                        .split([' ', '{', '('])
+                        .next()
+                        .unwrap_or("")
+                        .to_string(),
+                };
+                if what.starts_with("CannotTell") {
+                    println!("{scale:.2} {size:.2} {rule:?} {frustum_first}: {fused:?}");
+                }
+                *counts.entry(what).or_default() += 1;
+            }
+        }
+    }
+    println!("{counts:#?}");
+}
+
 /// A cube of side six with its diagonal brought upright and its middle at the
 /// origin, built as `a_plane_cut_along_a_cones_other_nappe.rs` builds it.
 fn a_corner_up_cube_of_side_six_round_the_origin(model: &mut Model) -> SolidKey {
