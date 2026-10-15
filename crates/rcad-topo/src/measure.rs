@@ -42,6 +42,15 @@ impl Measurement {
     /// leave a wedge of `5.4e-17` that sums to `-8.7e-17` at a deflection of
     /// `0.01`, with an error of `2.0e-15`. A sum further below zero than that is
     /// refused, as [`SolidView::measure`] says.
+    ///
+    /// A mesh so coarse that it owes more than the solid holds does the same to
+    /// a solid of any thickness. A ball of radius one meshed to a deflection of
+    /// `2` is an octahedron and owes `20.0`; with a cube of side `1.15` taken out
+    /// of its middle it holds `2.67` and sums `-0.19`. The same ball turned
+    /// inside out sums `-4/3` there and is answered too, since its own `-4π/3`
+    /// lies within that error and a refusal on the sign alone would refuse the
+    /// sound one with it. `an_inside_out_solid_meshed_coarse_answers_negative.rs`
+    /// is both.
     #[must_use]
     pub fn volume(self) -> f64 {
         self.volume
@@ -394,6 +403,11 @@ impl SolidView<'_> {
     /// at most minus its [`Measurement::volume_error`], because a sliver's mesh
     /// can sum a little under zero round a true volume a little over it; a sum
     /// within its error of zero is answered, as [`Measurement::volume`] says.
+    /// So a curved solid turned inside out is answered wherever its sum is
+    /// within its error of zero, as a ball of radius one is at deflections of
+    /// `0.5`, `1` and `2`: at `2` a sound ball with a cube taken out of it sums
+    /// below zero too, and `validate` is what refuses the inside-out one
+    /// (`an_inside_out_solid_meshed_coarse_answers_negative.rs`).
     /// `validate` does not yet charge a curved solid's flat faces what
     /// [`SolidView::skin_of`] charges them, so it can still refuse a sliver
     /// this answers (Q2089).
