@@ -2429,7 +2429,7 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// different diagonal. Between the two, the mesh is a thin solid of either
 /// sign. The lens a ball makes poking `1/16` into a pipe, built turned `8/40`
 /// of a turn about `x`, has a coarsest mesh of twelve points that does not lie
-/// flat and encloses `−0.041`, with `2.2` of space it can leave out. That sum
+/// flat and encloses `−0.041`, with `1.98` of space it can leave out. That sum
 /// was read as the lens's volume: the lens was refused
 /// [`Invalid::VolumeIsNotPositive`], and the same lens turned inside out passed
 /// (`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`, row
@@ -7747,7 +7747,7 @@ mod tests {
     /// that answers, at room `0.0297`, encloses `0.188`. It did not lie flat,
     /// so that sum was read as the lens's volume: the lens was refused
     /// [`Invalid::VolumeIsNotPositive`] and the same lens turned inside out
-    /// passed. The space that mesh can leave out is `2.2`, so its sum says
+    /// passed. The space that mesh can leave out is `1.98`, so its sum says
     /// nothing about the sign.
     ///
     /// **It is built where it sits, not placed.** A placed curved face is
