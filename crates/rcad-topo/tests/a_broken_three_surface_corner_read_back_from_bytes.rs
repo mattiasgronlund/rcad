@@ -52,8 +52,8 @@
 //! top of the half bar's own, and **every fuse refuses**, most of them as
 //! `validate` does, with `EdgeHasNoLength`. The sound half bar answers every
 //! partner but the block that cut it, fused again flush along its flat face,
-//! which it refuses when turned: a defect of its own, pinned here as it
-//! stands.
+//! which it answers turned and refuses turned then shifted: a defect of its
+//! own, pinned here as it stands.
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
@@ -64,7 +64,7 @@ use rcad_geom::{
     Axis, DYNAMIC_RANGE_CHECK, Deflection, EdgeRun, Isometry, Orientation, Plane, Point,
     SIDE_OF_PLANE, Scale, Surface, Vector, WHERE_THREE_SURFACES_MEET,
 };
-use rcad_predicates::{ORIENT3D, Policy, ProvenanceLog};
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
     DraftEdge, DraftStep, Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidBuilder,
     SolidKey,
@@ -590,16 +590,15 @@ fn the_sound_half_bar_answers_every_partner_but_a_cut_along_its_flat_face_with_w
 }
 
 /// **The sound half bar cut again by the block that made it refuses when
-/// turned**, which is a defect and not the moved corner's refusal (§294.18).
-/// `THE_HALF_PAST_THE_SEAM`'s face `y = 0` lies on the half bar's flat face,
-/// and the answers exist: the whole half bar for the difference and nothing
-/// for the intersection. They come back with no placement and shifted under
-/// both policies, and turned under `tolerant(100)`. Turned, `certified` cannot
-/// say the sign of an `orient3d`; turned and shifted, it cannot say which side
-/// of a plane something is on, and `tolerant(100)` finds two curves on a face
-/// that touch without crossing.
+/// turned and shifted**, which is a defect and not the moved corner's
+/// refusal (§294.18). `THE_HALF_PAST_THE_SEAM`'s face `y = 0` lies on the
+/// half bar's flat face, and the answers exist: the whole half bar for the
+/// difference and nothing for the intersection. They come back with no
+/// placement, shifted and turned, under both policies. Turned then shifted,
+/// `certified` cannot say which side of a plane something is on, and
+/// `tolerant(100)` finds two curves on a face that touch without crossing.
 #[test]
-fn a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned() {
+fn a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned_and_shifted() {
     let [identity, shift, turn, turn_then_shift] = every_placement();
     let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
     let (solids, volume) =
@@ -617,6 +616,7 @@ fn a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned() {
             (identity, &tolerant),
             (shift, &certified),
             (shift, &tolerant),
+            (turn, &certified),
             (turn, &tolerant),
         ];
         for (placement, policy) in answered {
@@ -629,7 +629,6 @@ fn a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned() {
             );
         }
         let refused = [
-            (turn, &certified, Refused::Undecidable(vec![ORIENT3D])),
             (
                 turn_then_shift,
                 &certified,
