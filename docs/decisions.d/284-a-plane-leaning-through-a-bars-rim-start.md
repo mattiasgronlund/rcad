@@ -390,3 +390,249 @@ policy.
   Since this change, where that node was an input corner, the corner goes
   where the input corner goes and not where the meet arrived. Whether any of
   them moved by a bit was not compared, beyond every test passing.
+
+### 284.10 How far an input corner moves a dropped name — 2026-10-15
+
+*Queue row Q942, continuing 284.9. Two lanes ran on
+`lane-q942-replay-the-30-draws-with-names-carried`: the first read the code
+and reverted every probe it tried without measuring anything; this one
+measured 284.9's second bullet and found why its first cannot be answered by
+re-running 284.8's probe on this base.*
+
+**284.9's second bullet: yes, by a few ulps, never more.** `Corners::of`
+(`crates/rcad-topo/src/fuse/assemble.rs:7277`) hands a name the place
+`join_the_names_of_each_point` (`:7203`) already settled on, whenever the two
+were found to be one point; that handoff is the `Some(&(input_corner,
+vertex))` arm at `:7290`. A temporary probe there (removed before this
+commit, kept nowhere), run whenever `end` carried a name other than the
+input corner's own vertex, printed the distance from `middle_of(input_corner)`
+to `middle_of(end.point())`. Run as `PROBE_Q942_MOVED=1 mise exec -- just t -p
+rcad-topo --no-fail-fast --no-capture` (a cold run, cancelled after 997 of
+2188 tests — the suite's slow property tests, not this row's two, were what
+was left ahead of it): 21 210 redirects fired, 19 178 of them (90%) by
+exactly zero and the rest between `1.1e-16` and `5.0276450535801215e-14`
+(the largest about 226 times a `f64`'s own epsilon), nine orders of magnitude
+under the smallest tolerance named anywhere in this file (284.8's own
+`1e-6` probe). Inside `a_fused_draw_hands_its_provenance_back_through_the_door`
+alone — the row's own first test, lines 16135–25970 of that run's log — 9 824
+of those redirects fired, 8 788 of them zero and the rest in the same tiny
+range, topping out at the same `5.0276450535801215e-14`. That is 284.8's own
+"a few ulps apart", read off the current code: an input corner does pull a
+dropped name's corner a hair, never by anything a mesh or a `validate`
+tolerance would call a move.
+
+**284.9's first bullet is still open, and re-running 284.8's probe on this
+base cannot close it.** `join_the_names_of_each_point` runs before any
+corner is made, and every lookup after it goes through `goes_by`
+(`:7284`) first, so two names it has joined can never again resolve to two
+different corners — read off `Corners::of`'s control flow, not from trying it
+and finding nothing. Asking 284.8's own question — "did the dropped name and
+the name of the node that stood for it become two different corners" —
+against this base therefore answers no for every fuse, whatever the 30
+original draws individually do now: the question itself has no case left to
+find, not because those 30 are confirmed fixed. Answering 284.9's first
+bullet needs the identity of the original 30 (which corpus file, which half,
+which test), and that can only come from 284.8's probe as it ran on
+`f4775743`, the commit it was measured on.
+
+Found this lane, so the next one does not have to re-find it:
+`f4775743` is reachable (`git worktree add <path> f4775743 --detach`
+succeeds) and still has the shapes 284.8's probe hooked. The drop happens in
+`Arrangement::fold_the_nodes`
+(`crates/rcad-topo/src/fuse/arrange.rs:1839`); its `Some(into)` arm (`:1857`)
+is where one side of a fold's identity is always dropped — `mine`'s when
+`takes_over` is false, the survivor's own `made_of` when it is true, so a
+*blanket* "a name was dropped" probe fires on every fold and overcounts
+284.8's 20/10/6, exactly as this row's first lane found. The dropped name
+surfaces as a second corner, a few ulps from the one the node should have
+shared, in `Corners::of` on that commit
+(`crates/rcad-topo/src/fuse/assemble.rs:3694`), where it is named afresh
+because nothing before Q656 told the two spellings to agree. §284.8 does not
+say how its probe told seeds and halves apart; that still needs adding, in
+whatever test harness hook is used (`crates/rcad-topo/tests/fuzzing/fuse.rs`).
+Tag it, rebuild the probe at `f4775743` (not attempted this lane — only the
+worktree and the two hook points were confirmed, not a build or a run),
+replay the flagged seeds on the current base, and where one now answers,
+check it the way
+`a_cube_on_its_corner_leaning_through_a_bars_top_rim_start_answers_all_six_fuses`
+(`crates/rcad-topo/tests/a_plane_leaning_through_a_bars_rim_start.rs:181`)
+does.
+
+### 284.11 A distance proxy for the dropped-name corner, and its limits — 2026-10-15
+
+*Queue row Q942, continuing 284.9 and 284.10. Third lane on
+`lane-q942-replay-the-30-draws-with-names-carried`, relayed from the one that
+wrote 284.10. This closes no part of 284.9's first bullet; it narrows what the
+next lane needs to build.*
+
+**A cheaper probe than rebuilding `fold_the_nodes`'s own tracking, tried at
+`f4775743` in a sibling `git worktree add ... f4775743 --detach`.** Rather than
+following a dropped `made_of` through repeated folds, a temporary print in
+`Assembly::new` (`crates/rcad-topo/src/fuse/assemble.rs`, right before the
+`corners.made` that becomes `Self.corners`, so after every piece is walked and
+no more corners are made) scanned every pair of the assembly's own corners and
+printed any pair closer than `1e-10` and further than `0.0` — tight enough to
+sit under every genuine "two features of a fuzz draw happen to be close"
+distance and over `f64`'s own noise floor, and three orders of magnitude
+tighter than the `1e-6` 284.8 names for its own targeted print. Two more
+temporary prints, in `crates/rcad-topo/tests/fuzzing/fuse.rs`'s
+`two_models_split_and_fused_noting_everything` (tagging `first`/`second`
+immediately round each half's call) and in each of the two tests' own
+`every_seed` (tagging the corpus filename before it is read), let the dupes be
+read back against which draw and which half made them, since the test loop is
+single-threaded and the three prints interleave in call order. None of the
+three edits were committed; this subsection gives the exact lines so they can
+be rebuilt in a few minutes, the way 284.10 did for its own probe.
+
+**This proxy's count for
+`a_fused_draw_hands_its_provenance_back_through_the_door` matches 284.8's
+exactly: 20.** Over `PROBE_Q942_DUPES=1 mise exec -- cargo nextest run -p
+rcad-topo --test a_fused_draw_hands_its_provenance_back_through_the_door
+--no-capture` on `f4775743`, 368 pairs printed, but every one was either a
+duplicate of another (the "both ways round" check runs the same pair of
+groups twice) or sat at a distance from `1.1e-16` up to `8.8e-7` — most of
+them far under 284.10's own `5.03e-14` ceiling, a few, at the top of that
+range, probably genuine near-coincidences in a fuzz draw rather than the
+bug — and resolved to exactly **20 distinct (seed, half) pairs**, the same
+count 284.8's table gives this test. That match is the evidence the proxy is
+finding the right thing on this one test, not a coincidence of the threshold.
+
+**It does not reproduce 284.8's 10 for
+`every_seed_in_the_checked_in_corpus_is_fused_without_panicking`.** Both tests
+read the same corpus directory
+(`fuzz/corpus/two_solids_fused_by_a_stranger`) and both end up inside the same
+shared `two_models_split_and_fused`, so the same bytes meet the same fuse
+code either way. Run the same way, this test's probe found the *same* 20
+(seed, half) pairs as the first test, not a different 10. Whatever told
+284.8's own probe the two tests' counts apart is not reproduced here, and
+this lane did not find it — most likely 284.8 counted at the fold/drop level
+(`fold_the_nodes`), where an event belongs to whichever call stack reached
+it, and something about that attribution is test-specific in a way a
+pure end-state distance scan on the finished `Corners` cannot see. The next
+lane wanting the true 20/10/6 split needs the fold-level probe 284.10 already
+sketched (`Arrangement::fold_the_nodes`,
+`crates/rcad-topo/src/fuse/arrange.rs:1839`), not this one.
+
+**Replaying the 20 at the current base mostly hits a different thing the row
+did not ask about.** A temporary test
+(`crates/rcad-topo/tests/q942_scratch_probe.rs`, removed before this commit,
+not kept anywhere) decoded each of the 20 (seed, half) pairs exactly as
+`how_one_model_is_fused_noting_which_way_the_second_call_went` does — same
+header, same `rest.len() / 2` split, same `usize::from(header) %
+(solids.len() + 1)` argument/tool split — on the **current** base (`6b5a987f`
+already in it). Of the 20, **17 split one-sided**: every one of that draw's
+solids landed on one side and none on the other, so there is no second group
+for an inclusion-exclusion check to pair against. One further draw splits
+`0`-`2`, also one-sided. Only **2 of the 20** split two-sided
+(`26f1462c484dbaa264d92e26cf2402faa77b47da` half `first`, split 1 of 2; and
+`af0513a2a8b8be4e4688ea514569a426c452145b` half `first`, also split 1 of 2 —
+the same split on what look like two different corpus files, each 4763 bytes,
+which the filenames alone do not explain and which this lane did not chase
+down). Both of those two refuse **every** one of union, intersection and both
+differences, each with the same `Undecidable` on `"where two planes cross"`
+at a point with a subnormal coordinate
+(`3.4766779039175e-310` and `1.54307e-319` respectively against `0.0`) — a
+different refusal from `ResultIsNotManifold { count: 1 }`, and from
+representation wobble near the limit of `f64`, not from a dropped name. So of
+the 20 this proxy found, **none give this lane an inclusion-exclusion check
+to run**: the 17 one-sided ones are not the shape the row's check applies to,
+and the 2 two-sided ones refuse for an unrelated reason before any volume is
+measured. This does not mean the fix did nothing for these 20 — a one-sided
+fuse (one group against no tools) still walks the arrangement and could still
+have hit the drop-and-diverge pattern 284.8 found at `f4775743`, and whether
+it does **has not been checked**, since the inclusion-exclusion the row names
+only makes sense for a two-sided pair.
+
+**What this leaves, for the next lane:** 284.9's first bullet is still open.
+The three probe edits above are the cheapest path back to a trustworthy
+"which of the 30 draws" split by test, but a trustworthy "did the dropped
+name become a corner" check still wants the fold-level tracking
+(`fold_the_nodes`, `Corners::of` on `f4775743`) 284.10 already pointed at,
+not this subsection's end-state distance scan — that scan is good evidence
+for *where* to look, not a replacement for the real criterion. Separately,
+for a one-sided draw (17 of the 20 found here), the question to ask on
+replay is not inclusion-exclusion but whether the single answer's volume
+equals the sum of its own input solids' volumes (union and difference
+against no tools should both preserve it; intersection against no tools
+should answer zero) — a different, simpler check than
+`a_cube_on_its_corner_leaning_through_a_bars_top_rim_start_answers_all_six_fuses`'s,
+not yet written.
+
+### 284.12 The volume check for the 18 one-sided draws, and two that still refuse the row's own error — 2026-10-15
+
+*Queue row Q942, continuing 284.11. Fourth lane on
+`lane-q942-replay-the-30-draws-with-names-carried`, relayed from the one that
+wrote 284.11. Still does not close 284.9's first bullet — that still needs
+the fold-level probe — but it writes the check 284.11 left unwritten and
+finds something worth a row of its own.*
+
+**The check needed one more thing than 284.11 said: the input group can hold
+two solids that overlap each other, and then "sum of the two" is the wrong
+number to check against.** A temporary test
+(`crates/rcad-topo/tests/q942_scratch_probe.rs`, removed before this commit,
+not kept anywhere) decoded each of the 20 (seed, half) pairs 284.11 found and
+replayed them exactly as `how_one_model_is_fused_noting_which_way_the_second_call_went`
+does — same header, same split — on the current base. For each of the 18
+that split one-sided, before calling `fuse`, it measured every solid on the
+populated side on its own, and — since that side can hold more than one
+solid — measured every pair of them against each other under
+`Rule::Intersection`, to read off how much they already share. The check is
+then: a one-sided union or difference should answer the sum of the
+populated side's own volumes *less* whatever those solids already shared,
+and a one-sided intersection against nothing should answer zero.
+
+**All 9 of the 18 that answer measure right.** Five pairs shared nothing
+(`aaf0849e74b4802f108ba0cc6fac702acd7b01ab` second, `072477c484938b7c58f180ff3d6686795ce6ce30`
+first, `bd34edca7f1ee5c2420fbaefbec56ba50a773534` second,
+`24ad8af581e63e0ac7b5388c0f1b68d132522f49` second — each within
+`2.5e-12` of the plain sum, well inside its own `volume_error` — and the
+fifth of the nine shared zero too). The other four did share volume —
+`3b8a41247cae1b5111cf87ea57c5426c2c5a84c1` second (`604.17` of `2000`),
+`909f5d0cda8613a7a3985e80ec446875c74209b2` first and
+`875b42887cd649416e958f86357ba0feb254d9bf` first (`500` of `2000` each),
+`99dca94553b786a6756aba1bcae4724165fa84fc` second (`250` of `2000`), and
+`8c487f415612e0d22e4f790f198c3cb02e688f00` second (two solids that share
+essentially all of one of them, at a scale around `1.3e67`, read off a draw
+with coordinates that large rather than a bug in the sharing measurement) —
+and every one of those four's answer came back exactly the sum less what was
+shared, to the same tiny tolerance. No volume discrepancy anywhere in the 9.
+
+**The other 9 of the 18 refuse, and two of them refuse the row's own named
+error.** `436972d8c4ea703a0684b7ea02d819f01e1be097` second and
+`9b1756eff92be261bc400ca92fd4246f771b62e6` first both refuse
+`ResultIsNotManifold { count: 1 }` — the exact error the row names for the
+dropped-name bug, on a one-sided union and a one-sided difference
+respectively, each between two solids that share no volume (so this is not
+the "two solids overlap" case above finding a genuine, different fold).
+Four more refuse `CannotTellTheCellsOfAFaceApart`
+(`9e32e91344a77d3dd8d125b2557b4283c5e45443` second,
+`f393db47a8aa9f0e76042d74e10e5ce300db4d4d` second,
+`0c7ea848b080d723562e5fe72a52ee587108b8f3` second,
+`b4d67ca14ae42ee1bb387cd5e5041f6f3fa0d1a8` second), and the last three refuse
+the same `Undecidable` on `"where two planes cross"` into a chain of
+`"orient3d"` records that the two two-sided draws of 284.11 also hit
+(`c0ee3446c70515b1855eec926e859b417be90bf7` first,
+`49ee8fe4740bb199da2c5114ab1b9198a5380c4d` first,
+`0fc08ded94f825916464b6207988649323dad98c` first).
+
+**So of this proxy's 20, none give the row's own inclusion-exclusion check
+anything to run — the only two that split two-sided both refuse, as 284.11
+found — and of the 18 one-sided ones, 9 answer with no volume problem and 9
+refuse. Two of those 9 refuse with exactly the error the row is about.** That
+is new evidence against the row's own premise that "since 6b5a987f carries
+the names" every one of these would now answer: on this proxy's list, two
+still do not, on the same error. Whether these two are the *same* fold this
+row is chasing, or a different one that happens to print the same way,
+is not settled here — both pairs share no volume (so 284.11's "two solids
+overlap" explanation does not apply to them), which is consistent with a
+drop-and-diverge fold rather than ruled out, but confirming it needs the same
+fold-level tracking as the true 20/10/6 split does, not this end-state check.
+
+**What this leaves:** 284.9's first bullet is still open — the fold-level
+probe (`Arrangement::fold_the_nodes`, `crates/rcad-topo/src/fuse/arrange.rs:1839`)
+284.10 and 284.11 both point at is still the only way to get the true 30 and
+know which of them this row is actually about. Separately, and regardless of
+that: the two `ResultIsNotManifold { count: 1 }` refusals above are a
+concrete, reproducible fact about the current base — run the fold-level
+probe once it exists and check whether these two are in its list before
+assuming they are the same bug, rather than filing them on a guess.
