@@ -947,3 +947,133 @@ fn a_block_less_a_bar_against_its_wall_touches_itself_along_the_ruling() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// A block of side four, and a bar of radius one and two high standing inside
+/// it from `z = 1` to `z = 3`, touching a wall along a ruling (queue row Q1903,
+/// from Q1116). Two placings: at `(3, 2, 1)` the bar touches the wall `x = 4`
+/// along its own seam, and at `(1, 2, 1)` it touches `x = 0` across from it.
+///
+/// Unlike [`a_block_less_a_bar_against_its_wall_touches_itself_along_the_ruling`],
+/// the bar stops short of the block's floor and roof, so the block less the bar
+/// is **one solid of two shells**: the block's six faces, and the bar's three
+/// as a hollow, the two touching along a line (`docs/decisions.md` §39.4, the
+/// 2026-10-13 note). It was refused `Undecidable` at *one shell inside another*,
+/// over the two ends of the touching line: the touch parts the line (Q760),
+/// so every corner of the hollow is on the block's wall and none says which
+/// side of it the hollow is. The far side of each of the hollow's cap circles
+/// does.
+///
+/// The bar is wholly inside the block, so the union is the block alone, the
+/// intersection is the bar alone, and the bar less the block is nothing. Every
+/// one of the 24 fuses here — two placings, three rules, either argument first,
+/// certified or tolerant — answers.
+#[test]
+fn a_block_less_a_shorter_bar_touching_its_wall_keeps_the_bar_as_a_hollow() {
+    const BLOCK_SIDE: f64 = 4.0;
+    const BAR_RADIUS: f64 = 1.0;
+    const BAR_HEIGHT: f64 = 2.0;
+    let block_volume = BLOCK_SIDE * BLOCK_SIDE * BLOCK_SIDE;
+    let bar_volume = PI * BAR_RADIUS * BAR_RADIUS * BAR_HEIGHT;
+
+    let mut wrong: Vec<String> = Vec::new();
+    for at in [[3.0, 2.0, 1.0], [1.0, 2.0, 1.0]] {
+        for it_first in [false, true] {
+            for policy_name in ["certified", "tolerant"] {
+                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                    let mut model =
+                        Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                    let block = a_block(&mut model, [BLOCK_SIDE, BLOCK_SIDE, BLOCK_SIDE]);
+                    let bar = a_bar(&mut model, BAR_RADIUS, BAR_HEIGHT, at);
+                    let [first, second] = if it_first { [bar, block] } else { [block, bar] };
+                    let policy = if policy_name == "certified" {
+                        Policy::certified()
+                    } else {
+                        Policy::tolerant(100.0)
+                    };
+                    let what =
+                        format!("bar at {at:?}, {rule:?}, bar first {it_first}, {policy_name}");
+                    let answer = match model.fuse(
+                        &[first],
+                        &[second],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        Ok(answer) => answer,
+                        Err(why) => {
+                            wrong.push(format!("{what}: refused {why:?}"));
+                            continue;
+                        }
+                    };
+                    if let Err(why) =
+                        model.validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    {
+                        wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                        continue;
+                    }
+                    let solids = answer.solids();
+                    let wanted_solids = usize::from(!(rule == Rule::Difference && it_first));
+                    if solids.len() != wanted_solids {
+                        wrong.push(format!(
+                            "{what}: {} solids, wanted {wanted_solids}: {solids:?}",
+                            solids.len()
+                        ));
+                        continue;
+                    }
+                    if wanted_solids == 0 {
+                        continue;
+                    }
+                    let faces_of_each_shell = faces_of_each_shell(&model, solids[0]);
+                    let wanted_shells: &[usize] = match rule {
+                        Rule::Union => &[6],
+                        Rule::Intersection => &[3],
+                        Rule::Difference => &[3, 6],
+                        _ => unreachable!("only the three rules are asked"),
+                    };
+                    if faces_of_each_shell != wanted_shells {
+                        wrong.push(format!(
+                            "{what}: shells of {faces_of_each_shell:?} faces, wanted \
+                             {wanted_shells:?}"
+                        ));
+                    }
+                    let found = volume_of(&model, solids[0]);
+                    let (expected, near) = match rule {
+                        Rule::Union => (block_volume, (found - block_volume).abs() < 1e-9),
+                        Rule::Intersection => (
+                            bar_volume,
+                            found <= bar_volume
+                                && (bar_volume - found) / bar_volume < HOW_FAR_A_MESH_MAY_BE,
+                        ),
+                        Rule::Difference => {
+                            let expected = block_volume - bar_volume;
+                            (
+                                expected,
+                                found >= expected
+                                    && (found - expected) / expected < HOW_FAR_A_MESH_MAY_BE,
+                            )
+                        }
+                        _ => unreachable!("only the three rules are asked"),
+                    };
+                    if !near {
+                        wrong.push(format!(
+                            "{what}: measured {found}, and the answer is {expected}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// How many faces each shell of a solid has, fewest first.
+fn faces_of_each_shell(model: &Model, solid: SolidKey) -> Vec<usize> {
+    let mut faces: Vec<usize> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .shells()
+        .map(|shell| shell.faces().count())
+        .collect();
+    faces.sort_unstable();
+    faces
+}
