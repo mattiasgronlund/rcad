@@ -7682,4 +7682,174 @@ mod tests {
             "the hole's wall, its two circles, and each circle's wall and cap"
         );
     }
+
+    #[test]
+    fn probe_q1890_lens() {
+        let poles = [
+            ("z", Isometry::identity()),
+            ("y", Isometry::quarter_turns(&Axis::x(), 1).expect("t")),
+            ("x", Isometry::quarter_turns(&Axis::y(), 1).expect("t")),
+            (
+                "1/40 about (3,-1,2)",
+                Isometry::rotation(
+                    &Axis::new(Point::origin(), Vector::new(3.0, -1.0, 2.0)).expect("a"),
+                    core::f64::consts::TAU / 40.0,
+                )
+                .expect("t"),
+            ),
+            (
+                "1/16 about x",
+                Isometry::rotation(&Axis::x(), core::f64::consts::TAU / 16.0).expect("t"),
+            ),
+        ];
+        for (ball_radius, reach) in [(3.0, 0.25)] {
+            for (pole_name, pole_turn) in &poles[1..2] {
+                let mut model = an_empty_model();
+                let seam_up_y = pole_turn.compose(
+                    &Isometry::translation(Vector::new(0.0, 0.0, -1.0))
+                        .expect("m")
+                        .compose(&Isometry::quarter_turns(&Axis::z(), 1).expect("t")),
+                );
+                let bar = model.add_round_bar(2.0, 12.0, &seam_up_y).expect("bar");
+                let ball = model
+                    .add_ball(
+                        ball_radius,
+                        &pole_turn.compose(
+                            &Isometry::translation(Vector::new(
+                                0.0,
+                                2.0 + ball_radius - reach,
+                                5.0,
+                            ))
+                            .expect("m"),
+                        ),
+                    )
+                    .expect("ball");
+                println!("PROBE both turned {pole_name}");
+                probe_one(model, bar, ball, ball_radius, reach);
+            }
+        }
+    }
+
+    fn probe_one(
+        mut model: Model,
+        bar: crate::SolidKey,
+        ball: crate::SolidKey,
+        ball_radius: f64,
+        reach: f64,
+    ) {
+        {
+            let fused = model.fuse(
+                &[bar],
+                &[ball],
+                crate::Rule::Intersection,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let lens = match fused {
+                Ok(answer) => answer.solids().to_vec(),
+                Err(why) => {
+                    println!("PROBE r={ball_radius} reach={reach}: fuse refused {why:?}");
+                    return;
+                }
+            };
+            println!(
+                "PROBE r={ball_radius} reach={reach}: {} solids in model, answer {}",
+                model.solids().count(),
+                lens.len()
+            );
+            for key in &lens {
+                probe_report(&model, *key, "sound");
+            }
+            for key in &lens {
+                probe_turn_inside_out(&mut model, *key);
+                probe_report(&model, *key, "inside out");
+            }
+        }
+    }
+
+    fn probe_report(model: &Model, key: crate::SolidKey, what: &str) {
+        let view = model.solid(key).expect("k");
+        let faces = view.faces().count();
+        let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(
+            view,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        match coarsest {
+            Ok(mesh) => {
+                let mut faces_of = vec![std::collections::HashSet::new(); mesh.points().len()];
+                for triangle in mesh.triangles() {
+                    for corner in triangle.corners() {
+                        faces_of[corner as usize].insert(triangle.face());
+                    }
+                }
+                let rim = faces_of.iter().filter(|set| set.len() > 1).count();
+                for (at, point) in mesh.points().iter().enumerate() {
+                    println!("PROBE     point {at} {point:?} faces {:?}", faces_of[at]);
+                }
+                for triangle in mesh.triangles() {
+                    println!(
+                        "PROBE     triangle {:?} face {:?}",
+                        triangle.corners(),
+                        triangle.face()
+                    );
+                }
+                let (enclosed, rounding) = super::signed_volume_over_and_how_far_it_rounded(&mesh);
+                println!(
+                    "PROBE   {what}: faces {faces} points {} rim {rim} triangles {} flat {} strays {:e} encloses {enclosed:e} rounding {rounding:e} answers {}",
+                    mesh.points().len(),
+                    mesh.triangles().len(),
+                    it_lies_flat(&mesh),
+                    how_far_it_strays_from_one_plane(&mesh),
+                    super::the_sum_answers(view, &mesh, enclosed, rounding),
+                );
+            }
+            Err(why) => println!("PROBE   {what}: coarsest refused {why:?}"),
+        }
+        let said = super::how_much_space_a_curved_solid_encloses(
+            view,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let validated = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+        println!("PROBE   {what}: encloses {said:?} validate {validated:?}");
+    }
+
+    fn probe_turn_inside_out(model: &mut Model, key: crate::SolidKey) {
+        let slot = key.slot_in(model.id());
+        let data = model.data_mut();
+        let shells: Vec<_> = data.solids[slot]
+            .shells
+            .iter()
+            .map(|used| used.shell)
+            .collect();
+        let mut faces = Vec::new();
+        for shell in &shells {
+            for used in &mut data.shells[*shell].faces {
+                faces.push(used.face);
+                if data.faces[used.face].surface.as_plane().is_none() {
+                    used.orient = used.orient.reversed();
+                }
+            }
+        }
+        let mut wires = Vec::new();
+        for face in faces {
+            let face = &mut data.faces[face];
+            assert!(
+                face.surface.as_plane().is_none(),
+                "only curved faces in a lens"
+            );
+            wires.extend(face.wires.iter().copied());
+        }
+        for wire in wires {
+            let steps = &mut data.wires[wire].steps;
+            steps.reverse();
+            for step in steps.iter() {
+                if let WireStep::Along(coedge) = step {
+                    let coedge = &mut data.coedges[*coedge];
+                    coedge.orientation = coedge.orientation.reversed();
+                }
+            }
+        }
+    }
 }
