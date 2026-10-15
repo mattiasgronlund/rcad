@@ -2538,21 +2538,34 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 ///
 /// # What stops it
 ///
-/// **The first half needs no argument about geometry.** Halving a finite length
-/// reaches zero, and `Deflection::of` refuses a length that is not greater than
-/// zero, so the loop ends whatever any mesh does — a fold retried for ever is
-/// still a fold retried on a deflection walking down to nothing.
+/// **Halving a finite length reaches zero**, and `Deflection::of` refuses a
+/// length that is not greater than zero, so nothing here loops for ever: a
+/// fold or an unanswered sum retried without end is still retried on a
+/// deflection walking down to nothing.
 ///
-/// **Retrying a fold does not loosen the second half either.** Both refusals
-/// that end it on a real solid are raised *before* a triangle is drawn —
-/// `DeflectionBelowWhatAMeshCanReach` when the mesher is asked for a deflection
-/// finer than the walk under this solid's own numbers will take, and
-/// `MoreMeshPointsThanASolidWillHold` while the points are being laid down —
-/// and a fold is only found by `finish`, once the whole mesh is built. So a
-/// solid that folds at every deflection walks the same ladder it would have
-/// walked lying flat at every deflection, and stops on the same rung; what the
-/// retry costs is the meshes between the first fold and that rung, and the
-/// coarse sum stands.
+/// **That bound is cheap to state and expensive to wait for.** The first rung
+/// starts at half the coarsest mesh's own box, and a solid whose coarse sum
+/// never clears [`the_sum_answers`] — not only one that folds — keeps this halving
+/// all the way down with it, meshing finer at every rung. Q2060 measured it on
+/// a real test rather than a crafted one: a bar cut off at a lean of `1e9`
+/// (`what_a_tolerant_policy_costs_a_mesh.rs`) walks 22 rungs this way, never
+/// folding and never answering, until `MoreTrianglesThanAPatchWillHold` stops
+/// it on a mesh of 1.5 million triangles — 1.46 s of `Model::validate` spent on
+/// a bar that was sound at the coarsest mesh already. So this ladder is capped
+/// the same way [`the_coarsest_mesh_whose_sides_do_not_cross`] is, at
+/// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] below its own top: the cap ends the
+/// bar's ladder at rung 13 and the same call takes 11 ms
+/// (`a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung`
+/// in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`).
+///
+/// **The cap changes nothing a rung past it would have decided.** Every rung
+/// this measurement saw past the thirteenth still answered
+/// `meshed-still-unsure` or folded; none of them is where the sum was going to
+/// clear [`the_sum_answers`], so stopping there hands back the same
+/// `finest_that_is_not_flat` a longer walk would have, read off a coarser mesh
+/// of the same solid rather than the finest one reached. That is a cost bound
+/// and not a proof, exactly as it is for the first ladder: a sum that would
+/// have cleared past the cap is not ruled out, only not waited for.
 ///
 /// # Errors
 ///
@@ -2573,8 +2586,15 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     }
     let mut finest_that_is_not_flat =
         (enclosed != 0.0 && !it_lies_flat(&coarsest)).then_some(enclosed);
-    let mut room = how_far_across(&coarsest) / 2.0;
-    while let Ok(less) = Deflection::of(room) {
+    let top = how_far_across(&coarsest) / 2.0;
+    let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
+    let mut room = top;
+    while room >= floor {
+        let Ok(less) = Deflection::of(room) else {
+            break;
+        };
+        #[cfg(test)]
+        RUNGS_THE_SECOND_LADDER_HAS_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut this_rung = ProvenanceLog::new();
         match view.mesh(less, policy, &mut this_rung) {
             Ok(finer) => {
@@ -2601,6 +2621,15 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     }
     Ok(finest_that_is_not_flat.unwrap_or(enclosed))
 }
+
+/// How many times [`how_much_space_a_curved_solid_encloses`]'s own ladder has
+/// asked a finer mesh, counted only in tests. A clock says a capped call is
+/// fast; this says why, in a count the clock on the machine running it cannot
+/// change: `a_bar_leaning_hard_asks_no_more_than_the_ladders_cap_lets_it`
+/// reads it instead of racing a timeout against a thread.
+#[cfg(test)]
+static RUNGS_THE_SECOND_LADDER_HAS_ASKED: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 /// Whether what a mesh of this solid encloses says which way the solid's faces
 /// point: it is not zero, and the sum, less `rounding`, how far it can be from
@@ -3030,6 +3059,11 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
 /// is asked at that top room and at most thirteen rungs under it, and refused
 /// with the finest fold when every one folds. A cost bound and not a proof;
 /// that function's doc says what it was set from, under "What stops a fold".
+///
+/// [`how_much_space_a_curved_solid_encloses`]'s own ladder, which retries a sum
+/// that does not answer and not only a fold, is capped the same number of
+/// halvings below its own top (Q2060, §199.4) — see that function's "What
+/// stops it".
 const HALVINGS_A_FOLD_IS_ASKED_DOWN_TO: i32 = 13;
 
 /// Whether a finer mesh may clear what refused this one, because it is about
@@ -5119,9 +5153,10 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        Decision, Mesh, Scope, a_circle_round_the_axis,
-        a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets, gradient_of,
-        hand_on_a_refusal_that_found_the_space, how_far_it_strays_from_one_plane,
+        Decision, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO, Mesh, RUNGS_THE_SECOND_LADDER_HAS_ASKED, Scope,
+        a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
+        as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space,
+        how_far_it_strays_from_one_plane, how_much_space_a_curved_solid_encloses,
         how_much_space_hides_under, how_wide_an_arc_of_one_branch_is, it_lies_flat,
         largest_coordinate_of, the_coarsest_mesh_whose_sides_do_not_cross, winding_of,
         winding_round,
@@ -7761,6 +7796,56 @@ mod tests {
             (hole_walls, circles_round_the_hole.len(), flipped),
             (1, 2, 4),
             "the hole's wall, its two circles, and each circle's wall and cap"
+        );
+    }
+
+    /// A bar cut off at a lean of `1e9` never folds and never clears
+    /// [`super::the_sum_answers`], so [`how_much_space_a_curved_solid_encloses`]'s
+    /// own ladder walks every rung it is allowed and no more (Q2060, §199.4).
+    ///
+    /// [`RUNGS_THE_SECOND_LADDER_HAS_ASKED`] counts the calls this ladder makes
+    /// to a finer mesh, which does not depend on the clock the way the pin this
+    /// replaces did: that pin raced a 1 s `recv_timeout` against a thread, and
+    /// with the cap reverted the race still passed, since both the capped and
+    /// the uncapped run land well inside a second. Here there is no timeout to
+    /// race: without the cap this bar's ladder keeps halving past
+    /// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] rungs until
+    /// `MoreTrianglesThanAPatchWillHold` stops it at the twenty-second, so the
+    /// count below is `HALVINGS_A_FOLD_IS_ASKED_DOWN_TO + 1` with the cap and
+    /// higher without it, whatever the machine running the test is doing.
+    #[test]
+    fn a_bar_leaning_hard_asks_no_more_than_the_ladders_cap_lets_it() {
+        let radius = 1.0;
+        let lean = 1e9;
+        let policy = Policy::tolerant(50.0 * lean);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let flat = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the z axis is a unit normal");
+        let leaning =
+            Plane::from_point_and_normal(Point::new(radius, 0.0, 0.5), Vector::new(lean, 0.0, 1.0))
+                .expect("a direction with length");
+        let bar = model
+            .add_bar_cut_off_by(
+                radius,
+                [flat, leaning],
+                &Isometry::identity(),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar cut off at an angle");
+        let view = model.solid(bar).expect("this model made the key");
+        RUNGS_THE_SECOND_LADDER_HAS_ASKED.store(0, std::sync::atomic::Ordering::Relaxed);
+        let enclosed =
+            how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new());
+        assert!(
+            enclosed.is_ok(),
+            "a bar cut off at an angle encloses some space: {enclosed:?}"
+        );
+        assert_eq!(
+            RUNGS_THE_SECOND_LADDER_HAS_ASKED.load(std::sync::atomic::Ordering::Relaxed),
+            usize::try_from(HALVINGS_A_FOLD_IS_ASKED_DOWN_TO + 1).expect("a small positive count"),
+            "the ladder asks a finer mesh at the top room and at most \
+             HALVINGS_A_FOLD_IS_ASKED_DOWN_TO rungs under it, never more"
         );
     }
 

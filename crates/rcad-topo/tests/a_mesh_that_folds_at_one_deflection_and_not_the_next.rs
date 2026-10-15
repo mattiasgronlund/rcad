@@ -29,19 +29,55 @@
 //! mesher's own cuts happened to fall and not something about the shape, so
 //! handing it on as the answer throws away a rung that would have answered.
 //!
-//! **No solid reaches the loop to spend those rungs, though.** §206.3's own
-//! shape is fixed at the source — `cut_in_two` charges at least two steps for a
-//! cut across a piece that is still one whole closed curve, so the sliver's
-//! coarse mesh now carries a point off the plane of its rim and encloses
-//! something. Every one of the 168 answers, and none refuses the
-//! `VolumeIsNotPositive` a zero handed on comes back as. Running the whole test
-//! suite with the loop instrumented to write a line per call that reached it
-//! agrees from the other side: four solids reached it, all four from
-//! `a_solid_whose_numbers_are_too_big_to_mesh.rs`, and all four stopped on
-//! their first rung with `DeflectionBelowWhatAMeshCanReach` and no fold. So the
-//! retry costs the gate nothing today.
+//! **No solid reaches the loop to spend those rungs on a fold, though.**
+//! §206.3's own shape is fixed at the source — `cut_in_two` charges at least
+//! two steps for a cut across a piece that is still one whole closed curve, so
+//! the sliver's coarse mesh now carries a point off the plane of its rim and
+//! encloses something. Every one of the 168 answers, and none refuses the
+//! `VolumeIsNotPositive` a zero handed on comes back as.
 //!
-//! The §16.10 verdict is therefore neither *limit* nor *gap* but **a guard**:
+//! **Q1890 widened the loop past the zero sum, and that count is a different
+//! count now.** The loop no longer waits for the coarse sum to be exactly
+//! zero; it runs whenever `the_sum_answers` says the sum does not
+//! clear the hidden space, which a mesh that is *not* flat can also fail. Q2060
+//! retook the instrumented count on this base: the whole `rcad-topo` suite,
+//! 2164 tests, calls the loop 71 854 times, 444 of them folding (all from the
+//! families swept in this file) and the rest meshing or stopping outright. Of
+//! those calls, 38 run past the thirteenth rung — all of them from real
+//! fixtures, none crafted for this row — and one family costs real time over
+//! it: a bar cut off at a lean of `1e9`
+//! (`what_a_tolerant_policy_costs_a_mesh.rs`) walks 22 rungs, never folding and
+//! never answering, until `MoreTrianglesThanAPatchWillHold` stops it on a mesh
+//! of 1.5 million triangles — 1.46 s of `Model::validate` for a bar that was
+//! already sound at the coarsest mesh. So the loop *is* reached to spend real
+//! rungs, just not on a fold, and it is now capped the same
+//! `HALVINGS_A_FOLD_IS_ASKED_DOWN_TO` halvings below its own top
+//! that the first ladder is, which ends that bar's ladder at rung 13 and the
+//! same call at 11 ms. None of the rungs the cap gives up — 14 through 22 —
+//! is where the sum was going to clear: every one of them still came back
+//! `meshed-still-unsure`, so the cap stops a wait and not an answer; turning
+//! one of those rungs' sums into the volume would have been a gap and not a
+//! limit (§16.10), and this is why it is neither.
+//!
+//! **That bar is pinned by counting rungs, not timing them.** A first pin
+//! raced a thread against a 1 s `recv_timeout`, and with the cap reverted to
+//! an uncommitted edit the race still passed, three runs out of three, in
+//! 0.67 s — both the capped and the uncapped call land well inside a second,
+//! so the margin the first ladder's pin relies on (its own 30 s timeout
+//! against a 465 s wait, in `an_ellipse_start_between_two_places.rs`) was
+//! never there for this one. The pin that replaced it is
+//! `validate::tests::a_bar_leaning_hard_asks_no_more_than_the_ladders_cap_lets_it`,
+//! beside the function it drives in `crates/rcad-topo/src/validate.rs`, the
+//! way `a_tube_whose_hole_is_as_wide_as_its_wall_is_refused_at_the_first_room_it_asks`
+//! already calls `the_coarsest_mesh_whose_sides_do_not_cross` directly rather
+//! than through a full `Model::validate`. It reads a count the clock cannot
+//! move, `RUNGS_THE_SECOND_LADDER_HAS_ASKED`, and fails without the cap on
+//! this same bar every time: 22, not 14.
+//! The fold count above is unaffected: every fold this file counts happens
+//! within the first ten rungs the ladder walks, well inside the cap.
+//!
+//! The §16.10 verdict for the **fold** is therefore still neither *limit* nor
+//! *gap* but **a guard**:
 //! the answer exists, the arithmetic reaches it, and no solid asks. It is kept
 //! because what closed §206.3 is a cost bound and not a proof — `cut_in_two`'s
 //! own doc comment says nothing shows a bare cut across a piece bounded by
