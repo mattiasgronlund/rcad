@@ -1,0 +1,359 @@
+//! A ball pressed a little way into the side of a round bar, and the piece
+//! the two share (row Q2044).
+//!
+//! # The shape
+//!
+//! The bar of `a_bar_seamed_up_y_and_a_ball_in_its_side` in
+//! `two_curves_of_one_pair_that_meet.rs`: radius 2, up `z` from −1 to 11,
+//! turned a quarter round `z` so that its seam runs up `(0, 2, z)`. A ball of
+//! radius `r` centred at `(0, 2 + r − reach, 5)` reaches `reach` into its
+//! side. What they share is a thin lens of two faces, a patch of the pipe and
+//! a cap of the ball, bounded by one closed edge with **one corner**, where the
+//! seam crosses the loop's top. The ball can sit on any side of the bar: put on
+//! the other three, off the seam, the lens still has one corner.
+//!
+//! # Why it is refused
+//!
+//! `Model::fuse` asks how much space each curved piece of its answer encloses
+//! before it writes it (`how_much_space_it_encloses` in `fuse/assemble.rs`,
+//! which is `how_much_space_a_curved_solid_encloses` in `validate.rs`). The
+//! first thing that does is `the_coarsest_mesh_whose_sides_do_not_cross`. At
+//! the coarsest mesh both faces of the lens draw the same side across the
+//! loop, and the fuse is refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn:
+//! 4, used: 4 }`.
+//!
+//! A fold is meant to be asked again at half the room, rung by rung, down to a
+//! floor read off the distance between the two closest corners of the solid
+//! (`how_close_two_corners_come`). The lens has one corner, so there is no
+//! distance, that function says `None`, and the arm that reads it hands the
+//! coarsest fold straight back without asking for one finer mesh.
+//!
+//! # A gap, not a limit
+//!
+//! A finer mesh of the same lens does not fold. Measured on `d6433677` with a
+//! probe in `the_coarsest_mesh_whose_sides_do_not_cross`, not kept: for the
+//! ball of 3 at reach `0.25`, rooms `4`, `2`, `1` and `0.5` fold and every room
+//! from `0.25` down to `0.002` meshes; at reach `0.5` the rooms from `0.5` down
+//! mesh; for the ball of 6 at reach `0.25`, the rooms from `0.25` down. With
+//! the ladder run for a solid with fewer than two corners too, its floor the
+//! box's half width over `2¹³`, all six refused fuses answered, validated, and
+//! measured within the mesh's error of [`ball_in_the_side_of_the_bar`]. So the
+//! answer is there, and only the missing distance kept the fuse from it.
+//!
+//! # Not the case row Q1232 searches for
+//!
+//! Q1232 looks for a fold that outlasts every rung down to `closest²/(6ρ)`,
+//! where two corners stand far apart and two curves both faces share pass close
+//! between them. Here no rung is asked at all, because there is no second
+//! corner. A floor read off the gap between the curves, which is what Q1232
+//! would put in place of the corners, still needs this arm to start the
+//! ladder when the corners give no distance.
+//!
+//! # What answers
+//!
+//! The union and both differences of the same shallow press answer, and so
+//! does the intersection at reach `1`, whose coarsest mesh does not fold.
+//! Thin pieces of the same kind that designers make answer too: a lens of two
+//! balls a quarter or a half thick, and a ball's cap as high past a block's
+//! face, each two faces round one loop, and neither folds at its coarsest
+//! mesh. So no shape designers make on purpose is known to be refused this
+//! way, and the refusal is class C.
+//!
+//! The fuses run certified, in a model of 100 mm.
+
+use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
+use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+
+use std::f64::consts::PI;
+
+/// The three shallow presses that are refused: a ball of 3 at reach `0.25`
+/// and `0.5`, and a ball of 6 at reach `0.25`.
+const REFUSED: [(f64, f64); 3] = [(3.0, 0.25), (3.0, 0.5), (6.0, 0.25)];
+
+/// The intersection of the bar and a ball of 3 pressed `0.25` or `0.5` into
+/// it, or of 6 pressed `0.25`, is refused for the fold at its coarsest mesh,
+/// either solid first. The fix row turns this into the answer: two faces and
+/// [`ball_in_the_side_of_the_bar`].
+#[test]
+fn what_a_ball_pressed_a_quarter_or_a_half_into_a_bar_shares_with_it_is_refused_for_a_coarse_fold()
+{
+    for (radius, reach) in REFUSED {
+        for bar_first in [true, false] {
+            let mut model = a_model();
+            let said = fuse(&mut model, radius, reach, Rule::Intersection, bar_first);
+            assert!(
+                matches!(
+                    said,
+                    Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 })
+                ),
+                "ball of {radius} at reach {reach}, bar first: {bar_first}: {said:?}"
+            );
+        }
+    }
+}
+
+/// Pressed `1` in, the ball of 3 and the ball of 6 share with the bar a lens
+/// whose coarsest mesh does not fold, and the intersection answers with it.
+#[test]
+fn what_a_ball_pressed_one_into_a_bar_shares_with_it_answers() {
+    for radius in [3.0, 6.0] {
+        for bar_first in [true, false] {
+            let mut model = a_model();
+            let said = fuse(&mut model, radius, 1.0, Rule::Intersection, bar_first);
+            answers(
+                &mut model,
+                said,
+                ball_in_the_side_of_the_bar(radius, 1.0, 1000),
+                &[2],
+                &format!("ball of {radius} at reach 1, bar first: {bar_first}"),
+            );
+        }
+    }
+}
+
+/// The union and both differences of each refused press answer. The bar less
+/// the ball keeps its pipe, its two caps and the dent; the ball less the bar
+/// is its skin and the pipe's patch.
+#[test]
+fn the_other_four_fuses_of_a_shallow_press_answer() {
+    for (radius, reach) in REFUSED {
+        let bar = 48.0 * PI;
+        let ball = 4.0 * PI / 3.0 * radius.powi(3);
+        let shared = ball_in_the_side_of_the_bar(radius, reach, 1000);
+        for (rule, bar_first, volume, faces) in [
+            (Rule::Union, true, bar + ball - shared, 4),
+            (Rule::Union, false, bar + ball - shared, 4),
+            (Rule::Difference, true, bar - shared, 4),
+            (Rule::Difference, false, ball - shared, 2),
+        ] {
+            let mut model = a_model();
+            let said = fuse(&mut model, radius, reach, rule, bar_first);
+            answers(
+                &mut model,
+                said,
+                volume,
+                &[faces],
+                &format!(
+                    "{rule:?} of the ball of {radius} at reach {reach}, bar first: {bar_first}"
+                ),
+            );
+        }
+    }
+}
+
+/// Two balls of 3 whose centres are `6 − thick` apart, along each axis, share
+/// a lens `thick` thick, `π(4r + d)(2r − d)²/12` for `d` the distance between
+/// the centres. It answers, either ball first.
+#[test]
+fn a_lens_of_two_balls_a_quarter_or_a_half_thick_answers() {
+    for thick in [0.25, 0.5] {
+        let apart = 6.0 - thick;
+        let lens = PI * (12.0 + apart) * thick * thick / 12.0;
+        for axis in 0..3 {
+            for first_first in [true, false] {
+                let mut model = a_model();
+                let mut at = [0.0; 3];
+                at[axis] = apart;
+                let one = model.add_ball(3.0, &Isometry::identity()).expect("a ball");
+                let other = model.add_ball(3.0, &moved_to(at)).expect("a ball");
+                let said = intersect(&mut model, [one, other], first_first);
+                answers(
+                    &mut model,
+                    said,
+                    lens,
+                    &[2],
+                    &format!(
+                        "two balls {thick} thick along axis {axis}, first first: {first_first}"
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// A ball of 3 at the origin and a block whose face is `high` inside the ball,
+/// across each axis but `−z`, share the ball's cap, `πh²(3r − h)/3`. It
+/// answers, either solid first.
+#[test]
+fn a_balls_cap_a_quarter_or_a_half_high_past_a_blocks_face_answers() {
+    for high in [0.25, 0.5] {
+        let cap = PI * high * high * (9.0 - high) / 3.0;
+        for (axis, beyond) in [(0, true), (0, false), (1, true), (1, false), (2, true)] {
+            for ball_first in [true, false] {
+                let mut model = a_model();
+                let (mut from, mut to) = ([-5.0; 3], [5.0; 3]);
+                if beyond {
+                    from[axis] = 3.0 - high;
+                } else {
+                    to[axis] = high - 3.0;
+                }
+                let ball = model.add_ball(3.0, &Isometry::identity()).expect("a ball");
+                let block = a_block(&mut model, from, to);
+                let said = intersect(&mut model, [ball, block], ball_first);
+                answers(
+                    &mut model,
+                    said,
+                    cap,
+                    &[2],
+                    &format!(
+                        "cap {high} high past the face across axis {axis}, on the far side: \
+                         {beyond}, ball first: {ball_first}"
+                    ),
+                );
+            }
+        }
+    }
+}
+
+/// [`ball_in_the_side_of_the_bar`] at the 1000 steps the fuses are held to is
+/// within a millionth of the rule at 100 000, for every press this file makes.
+#[test]
+fn the_ball_in_the_side_of_the_bar_is_within_a_millionth_of_a_rule_a_hundred_times_finer() {
+    for (radius, reach) in [(3.0, 0.25), (3.0, 0.5), (3.0, 1.0), (6.0, 0.25), (6.0, 1.0)] {
+        let (coarse, fine) = (
+            ball_in_the_side_of_the_bar(radius, reach, 1000),
+            ball_in_the_side_of_the_bar(radius, reach, 100_000),
+        );
+        assert!(
+            (coarse - fine).abs() < 1e-6,
+            "ball of {radius} at reach {reach}: {coarse} at 1000 steps, {fine} at 100 000"
+        );
+    }
+}
+
+fn a_model() -> Model {
+    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
+}
+
+/// The fuse `rule` of the bar and a ball of `radius` pressed `reach` into it,
+/// the bar first or not.
+fn fuse(
+    model: &mut Model,
+    radius: f64,
+    reach: f64,
+    rule: Rule,
+    bar_first: bool,
+) -> rcad_topo::Result<Vec<SolidKey>> {
+    let seam_up_y = moved_to([0.0, 0.0, -1.0])
+        .compose(&Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z"));
+    let bar = model.add_round_bar(2.0, 12.0, &seam_up_y).expect("a bar");
+    let ball = model
+        .add_ball(radius, &moved_to([0.0, 2.0 + radius - reach, 5.0]))
+        .expect("a ball");
+    let (arguments, tools) = if bar_first {
+        ([bar], [ball])
+    } else {
+        ([ball], [bar])
+    };
+    model
+        .fuse(
+            &arguments,
+            &tools,
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map(|answer| answer.solids().to_vec())
+}
+
+fn intersect(
+    model: &mut Model,
+    [first, second]: [SolidKey; 2],
+    first_first: bool,
+) -> rcad_topo::Result<Vec<SolidKey>> {
+    let (arguments, tools) = if first_first {
+        ([first], [second])
+    } else {
+        ([second], [first])
+    };
+    model
+        .fuse(
+            &arguments,
+            &tools,
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map(|answer| answer.solids().to_vec())
+}
+
+fn moved_to(at: [f64; 3]) -> Isometry {
+    Isometry::translation(Vector::new(at[0], at[1], at[2])).expect("a finite move")
+}
+
+fn a_block(model: &mut Model, from: [f64; 3], to: [f64; 3]) -> SolidKey {
+    let rectangle = ProfileBuilder::new(vec![
+        [0.0, 0.0],
+        [to[0] - from[0], 0.0],
+        [to[0] - from[0], to[1] - from[1]],
+        [0.0, to[1] - from[1]],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a rectangle is a profile");
+    model
+        .add_extrusion(&rectangle, to[2] - from[2], &moved_to(from))
+        .expect("a rectangle extrudes")
+}
+
+/// Assert that `said` is one solid for each of `faces`, each with that many
+/// faces, that the model validates, and that together they measure `volume`
+/// to within the mesh's own error. `what` names the fuse in every message.
+fn answers(
+    model: &mut Model,
+    said: rcad_topo::Result<Vec<SolidKey>>,
+    volume: f64,
+    faces: &[usize],
+    what: &str,
+) {
+    let policy = Policy::certified();
+    let solids = said.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{what}: the answer does not validate: {why:?}"));
+    let mut counted = Vec::with_capacity(solids.len());
+    let (mut measured, mut error) = (0.0, 0.0);
+    for solid in solids {
+        let view = model.solid(solid).expect("a solid the fuse made");
+        counted.push(view.faces().count());
+        let measure = view
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the answer measures");
+        measured += measure.volume();
+        error += measure.volume_error();
+    }
+    assert_eq!(counted, faces, "{what}: faces of each solid");
+    assert!(
+        (measured - volume).abs() <= error,
+        "{what}: measured {measured} against {volume}, and the mesh may miss by {error}"
+    );
+}
+
+/// What a ball of `radius` centred at `(0, 2 + radius − reach, 5)` shares with
+/// the bar of radius 2 up `z`, by a midpoint rule of `steps` steps across `x`.
+///
+/// At each `x` the ball's section is a disc of radius `a = √(radius² − x²)`
+/// about `y = c`, `c = 2 + radius − reach`, and the bar keeps the part of it
+/// at `y ≤ √(4 − x²)`: the segment `a²(π/2 + asin(s/a)) + s√(a² − s²)`, for
+/// `s = √(4 − x²) − c` how far that line is past the disc's centre. The rule
+/// runs between the two `x` where the segment closes, `√(4 − x²) + a = c`,
+/// at which `a = (c + (radius² − 4)/c)/2`.
+fn ball_in_the_side_of_the_bar(radius: f64, reach: f64, steps: u32) -> f64 {
+    let centre = 2.0 + radius - reach;
+    let at_the_edge = (centre + (radius * radius - 4.0) / centre) / 2.0;
+    let edge = (radius * radius - at_the_edge * at_the_edge).sqrt();
+    let step = 2.0 * edge / f64::from(steps);
+    let mut sum = 0.0;
+    for i in 0..steps {
+        let x = -edge + step * (f64::from(i) + 0.5);
+        let squared = radius * radius - x * x;
+        let past = (4.0 - x * x).sqrt() - centre;
+        sum += squared * (PI / 2.0 + (past / squared.sqrt()).asin())
+            + past * (squared - past * past).sqrt();
+    }
+    sum * step
+}
