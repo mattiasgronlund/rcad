@@ -869,6 +869,19 @@ impl BuildingAMesh {
             walking_along_this_edge_refused(edge.key(), why.with_its_surfaces_moved(&there))
         })?;
         let mut points = along_it.points().to_vec();
+        if std::env::var("Q2040").is_ok() {
+            eprintln!(
+                "WALK {:?} ends {:?} points {} deviation {:?} along {:?}",
+                run.run(),
+                ends,
+                points.len(),
+                along_it.deviation().magnitude(),
+                along
+                    .iter()
+                    .map(|s| format!("{s:?}").chars().take(60).collect::<String>())
+                    .collect::<Vec<_>>()
+            );
+        }
         // **A straight edge lying across a flat face of the same solid gets a
         // point in its middle**, or that face draws its side a second time. The
         // wedge less the frustum it rests on keeps its slanted face whole and
@@ -4882,6 +4895,18 @@ fn corners_the_quarter_cuts_leave_from(
             !its_meridian_meets_an_island(cap.corners[corner], towards, islands, whole)
         })
         .collect();
+    if std::env::var("Q2040").is_ok() {
+        eprintln!(
+            "CAP {} corners climbed {} towards {towards} quarters {quarters:?}",
+            cap.corners.len(),
+            cap.climbed
+        );
+        for (at, corner) in cap.corners.iter().enumerate() {
+            if at < 12 || at + 4 > cap.corners.len() || at % 100 == 0 {
+                eprintln!("  {at} {corner:?} clear {}", clear.contains(&at));
+            }
+        }
+    }
     let among = if clear_of_the_islands.len() >= 4 {
         clear_of_the_islands
     } else if clear.len() >= 4 {
@@ -5038,11 +5063,16 @@ fn the_sides_of_a_rim(cap: &WalkedLoop, whole: f64) -> impl Iterator<Item = [[f6
     let count = cap.corners.len();
     (0..count).flat_map(move |at| {
         let here = cap.corners[at];
-        let mut there = cap.corners[(at + 1) % count];
-        if at + 1 == count {
-            there[0] += cap.climbed;
-        }
-        [-whole, 0.0, whole].map(|by| [[here[0] + by, here[1]], [there[0] + by, there[1]]])
+        let there = cap.corners[(at + 1) % count];
+        let on = if at + 1 == count { cap.climbed } else { 0.0 };
+        let one_addition = std::env::var("Q2040_ONE").is_ok();
+        [-whole, 0.0, whole].map(|by| {
+            if one_addition {
+                [[here[0] + by, here[1]], [there[0] + (on + by), there[1]]]
+            } else {
+                [[here[0] + by, here[1]], [there[0] + on + by, there[1]]]
+            }
+        })
     })
 }
 
@@ -5347,7 +5377,10 @@ fn two_sides_meet([a, b]: [[f64; 2]; 2], [c, d]: [[f64; 2]; 2]) -> bool {
 /// latitude `from` to `to`, leaving `from` itself out.
 fn a_side_meets_a_cut([one, other]: [[f64; 2]; 2], longitude: f64, [from, to]: [f64; 2]) -> bool {
     let on_the_cut = |latitude: f64| latitude != from && passes_or_ends_at(latitude, from, to);
-    if one[0] == longitude && other[0] == longitude {
+    let near: f64 = std::env::var("Q2040_NEAR")
+        .ok()
+        .map_or(0.0, |s| s.parse().unwrap());
+    if (one[0] - longitude).abs() <= near && (other[0] - longitude).abs() <= near {
         let (low, high) = (one[1].min(other[1]), one[1].max(other[1]));
         return on_the_cut(low)
             || on_the_cut(high)

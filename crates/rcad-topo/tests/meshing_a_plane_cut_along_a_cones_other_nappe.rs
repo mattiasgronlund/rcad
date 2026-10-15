@@ -207,6 +207,49 @@ fn the_eighteen_held_to_the_familys_four_checks() {
     );
 }
 
+#[test]
+fn probe_q2040_one_measure() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let (cone_key, block_key) = build(
+        &mut model,
+        THE_POINTED_CONE,
+        a_leaning_block(0.25, 0.0, core::f64::consts::FRAC_PI_4),
+    );
+    let answer = model
+        .fuse(
+            &[cone_key],
+            &[block_key],
+            Rule::Intersection,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("fuses");
+    let piece = answer.solids()[0];
+    let said = model
+        .solid(piece)
+        .expect("made")
+        .measure(
+            Deflection::of(0.05).expect("positive"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .map(|m| m.volume());
+    println!("PROBE {said:?}");
+}
+
+#[test]
+fn probe_q2040_designer_shape() {
+    for turn in [core::f64::consts::FRAC_PI_4, 2.0] {
+        let said = what_it_gives(
+            THE_POINTED_CONE,
+            a_leaning_block(0.25, 0.0, turn),
+            INTERSECTION,
+        );
+        println!("PROBE turn {turn}: {said}");
+    }
+}
+
 const INTERSECTION: (Rule, bool) = (Rule::Intersection, true);
 const BLOCK_LESS_CONE: (Rule, bool) = (Rule::Difference, false);
 
