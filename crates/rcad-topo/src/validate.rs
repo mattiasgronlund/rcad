@@ -2538,21 +2538,34 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 ///
 /// # What stops it
 ///
-/// **The first half needs no argument about geometry.** Halving a finite length
-/// reaches zero, and `Deflection::of` refuses a length that is not greater than
-/// zero, so the loop ends whatever any mesh does — a fold retried for ever is
-/// still a fold retried on a deflection walking down to nothing.
+/// **Halving a finite length reaches zero**, and `Deflection::of` refuses a
+/// length that is not greater than zero, so nothing here loops for ever: a
+/// fold or an unanswered sum retried without end is still retried on a
+/// deflection walking down to nothing.
 ///
-/// **Retrying a fold does not loosen the second half either.** Both refusals
-/// that end it on a real solid are raised *before* a triangle is drawn —
-/// `DeflectionBelowWhatAMeshCanReach` when the mesher is asked for a deflection
-/// finer than the walk under this solid's own numbers will take, and
-/// `MoreMeshPointsThanASolidWillHold` while the points are being laid down —
-/// and a fold is only found by `finish`, once the whole mesh is built. So a
-/// solid that folds at every deflection walks the same ladder it would have
-/// walked lying flat at every deflection, and stops on the same rung; what the
-/// retry costs is the meshes between the first fold and that rung, and the
-/// coarse sum stands.
+/// **That bound is cheap to state and expensive to wait for.** The first rung
+/// starts at half the coarsest mesh's own box, and a solid whose coarse sum
+/// never clears [`the_sum_answers`] — not only one that folds — keeps this halving
+/// all the way down with it, meshing finer at every rung. Q2060 measured it on
+/// a real test rather than a crafted one: a bar cut off at a lean of `1e9`
+/// (`what_a_tolerant_policy_costs_a_mesh.rs`) walks 22 rungs this way, never
+/// folding and never answering, until `MoreTrianglesThanAPatchWillHold` stops
+/// it on a mesh of 1.5 million triangles — 1.46 s of `Model::validate` spent on
+/// a bar that was sound at the coarsest mesh already. So this ladder is capped
+/// the same way [`the_coarsest_mesh_whose_sides_do_not_cross`] is, at
+/// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] below its own top: the cap ends the
+/// bar's ladder at rung 13 and the same call takes 11 ms
+/// (`a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung`
+/// in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`).
+///
+/// **The cap changes nothing a rung past it would have decided.** Every rung
+/// this measurement saw past the thirteenth still answered
+/// `meshed-still-unsure` or folded; none of them is where the sum was going to
+/// clear [`the_sum_answers`], so stopping there hands back the same
+/// `finest_that_is_not_flat` a longer walk would have, read off a coarser mesh
+/// of the same solid rather than the finest one reached. That is a cost bound
+/// and not a proof, exactly as it is for the first ladder: a sum that would
+/// have cleared past the cap is not ruled out, only not waited for.
 ///
 /// # Errors
 ///
@@ -2573,8 +2586,13 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     }
     let mut finest_that_is_not_flat =
         (enclosed != 0.0 && !it_lies_flat(&coarsest)).then_some(enclosed);
-    let mut room = how_far_across(&coarsest) / 2.0;
-    while let Ok(less) = Deflection::of(room) {
+    let top = how_far_across(&coarsest) / 2.0;
+    let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
+    let mut room = top;
+    while room >= floor {
+        let Ok(less) = Deflection::of(room) else {
+            break;
+        };
         let mut this_rung = ProvenanceLog::new();
         match view.mesh(less, policy, &mut this_rung) {
             Ok(finer) => {
@@ -3030,6 +3048,11 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
 /// is asked at that top room and at most thirteen rungs under it, and refused
 /// with the finest fold when every one folds. A cost bound and not a proof;
 /// that function's doc says what it was set from, under "What stops a fold".
+///
+/// [`how_much_space_a_curved_solid_encloses`]'s own ladder, which retries a sum
+/// that does not answer and not only a fold, is capped the same number of
+/// halvings below its own top (Q2060, §199.4) — see that function's "What
+/// stops it".
 const HALVINGS_A_FOLD_IS_ASKED_DOWN_TO: i32 = 13;
 
 /// Whether a finer mesh may clear what refused this one, because it is about

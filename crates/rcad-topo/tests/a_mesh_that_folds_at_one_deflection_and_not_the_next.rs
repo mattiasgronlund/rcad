@@ -29,19 +29,37 @@
 //! mesher's own cuts happened to fall and not something about the shape, so
 //! handing it on as the answer throws away a rung that would have answered.
 //!
-//! **No solid reaches the loop to spend those rungs, though.** §206.3's own
-//! shape is fixed at the source — `cut_in_two` charges at least two steps for a
-//! cut across a piece that is still one whole closed curve, so the sliver's
-//! coarse mesh now carries a point off the plane of its rim and encloses
-//! something. Every one of the 168 answers, and none refuses the
-//! `VolumeIsNotPositive` a zero handed on comes back as. Running the whole test
-//! suite with the loop instrumented to write a line per call that reached it
-//! agrees from the other side: four solids reached it, all four from
-//! `a_solid_whose_numbers_are_too_big_to_mesh.rs`, and all four stopped on
-//! their first rung with `DeflectionBelowWhatAMeshCanReach` and no fold. So the
-//! retry costs the gate nothing today.
+//! **No solid reaches the loop to spend those rungs on a fold, though.**
+//! §206.3's own shape is fixed at the source — `cut_in_two` charges at least
+//! two steps for a cut across a piece that is still one whole closed curve, so
+//! the sliver's coarse mesh now carries a point off the plane of its rim and
+//! encloses something. Every one of the 168 answers, and none refuses the
+//! `VolumeIsNotPositive` a zero handed on comes back as.
 //!
-//! The §16.10 verdict is therefore neither *limit* nor *gap* but **a guard**:
+//! **Q1890 widened the loop past the zero sum, and that count is a different
+//! count now.** The loop no longer waits for the coarse sum to be exactly
+//! zero; it runs whenever `the_sum_answers` says the sum does not
+//! clear the hidden space, which a mesh that is *not* flat can also fail. Q2060
+//! retook the instrumented count on this base: the whole `rcad-topo` suite,
+//! 2164 tests, calls the loop 71 854 times, 444 of them folding (all from the
+//! families swept in this file) and the rest meshing or stopping outright. Of
+//! those calls, 38 run past the thirteenth rung — all of them from real
+//! fixtures, none crafted for this row — and one family costs real time over
+//! it: a bar cut off at a lean of `1e9`
+//! (`what_a_tolerant_policy_costs_a_mesh.rs`) walks 22 rungs, never folding and
+//! never answering, until `MoreTrianglesThanAPatchWillHold` stops it on a mesh
+//! of 1.5 million triangles — 1.46 s of `Model::validate` for a bar that was
+//! already sound at the coarsest mesh. So the loop *is* reached to spend real
+//! rungs, just not on a fold, and it is now capped the same
+//! `HALVINGS_A_FOLD_IS_ASKED_DOWN_TO` halvings below its own top
+//! that the first ladder is, which ends that bar's ladder at rung 13 and the
+//! same call at 11 ms
+//! (`a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung`).
+//! The fold count above is unaffected: every fold this file counts happens
+//! within the first ten rungs the ladder walks, well inside the cap.
+//!
+//! The §16.10 verdict for the **fold** is therefore still neither *limit* nor
+//! *gap* but **a guard**:
 //! the answer exists, the arithmetic reaches it, and no solid asks. It is kept
 //! because what closed §206.3 is a cost bound and not a proof — `cut_in_two`'s
 //! own doc comment says nothing shows a bare cut across a piece bounded by
@@ -735,4 +753,51 @@ fn one_solid<'a>(model: &'a Model, answer: &[SolidKey], what: &str) -> SolidView
 /// The cap of height `h` off a ball of `radius`: `π h² (3r − h) / 3`.
 fn a_caps_volume(radius: f64, h: f64) -> f64 {
     PI * h * h * (3.0 * radius - h) / 3.0
+}
+
+/// The second ladder, the one that retries a sum that does not answer and not
+/// only a fold, is capped the same way the first one is (§199.4).
+///
+/// A bar cut off at a lean of `1e9` keeps `how_much_space_a_curved_solid_encloses`
+/// asking a finer mesh for 22 rungs before `MoreTrianglesThanAPatchWillHold`
+/// stops it, because the coarse sum never clears
+/// `the_sum_answers` — not because any mesh folds. Measured on this
+/// base before the cap, `model.validate` took 1.46 s; the cap ends the ladder at
+/// rung 13 and the same call takes 11 ms. A second, no-cap run is not checked
+/// against: the margin below is ninety times the capped time and an eighth of
+/// the uncapped one, so a flake would have to be large to pass by accident.
+#[test]
+fn a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung() {
+    let (answer, answered) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let radius = 1.0;
+        let lean = 1e9;
+        let policy = Policy::tolerant(50.0 * lean);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let flat = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the z axis is a unit normal");
+        let leaning =
+            Plane::from_point_and_normal(Point::new(radius, 0.0, 0.5), Vector::new(lean, 0.0, 1.0))
+                .expect("a direction with length");
+        model
+            .add_bar_cut_off_by(
+                radius,
+                [flat, leaning],
+                &Isometry::identity(),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar cut off at an angle");
+        let sound = model.validate(&policy, &mut ProvenanceLog::new());
+        answer
+            .send(sound.is_ok())
+            .expect("the test waits for the answer");
+    });
+    let sound = answered
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .unwrap_or_else(|_| panic!("still validating after 1 s"));
+    assert!(
+        sound,
+        "a bar cut off at an angle is a sound bar however far it leans"
+    );
 }
