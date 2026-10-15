@@ -12,10 +12,11 @@
 //! facing `−y` through the apex along `(0, −10, 3)` scaled to length one, and
 //! `10 × 0.28734788556634544` rounds, so the stored plane is a rounding off
 //! the apex. The fuse reads the apex as where the three side planes meet, and
-//! that is `5.8e−17` above the cut. So the numbers the kernel is handed have a
-//! triangle about `1e−16` across at the top of the front face, above the cut,
-//! and the half that holds it holds a feature `f64` cannot hold beside
-//! coordinates near 10. A front face built through the apex exactly answers.
+//! that is `5.8e−17` from the cut, on the block's side. So the numbers the
+//! kernel is handed have a triangle about `1e−16` across at the top of the
+//! front face, on the block's side of the cut, and the half that holds it
+//! holds a feature `f64` cannot hold beside coordinates near 10. A front face
+//! built through the apex exactly answers.
 
 use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
@@ -91,7 +92,7 @@ fn where_the_three_side_planes_meet_is_off_the_cut_at_every_placement() {
 fn unplaced_less_the_block_answers_45_under_certified() {
     answers(
         Placement::WhereItWasBuilt,
-        Rule::Difference,
+        Half::LessTheBlock,
         &Policy::certified(),
     );
 }
@@ -100,7 +101,7 @@ fn unplaced_less_the_block_answers_45_under_certified() {
 fn unplaced_less_the_block_answers_45_under_tolerant() {
     answers(
         Placement::WhereItWasBuilt,
-        Rule::Difference,
+        Half::LessTheBlock,
         &Policy::tolerant(100.0),
     );
 }
@@ -109,7 +110,7 @@ fn unplaced_less_the_block_answers_45_under_tolerant() {
 fn unplaced_and_the_block_is_refused_under_certified() {
     is_refused(
         Placement::WhereItWasBuilt,
-        Rule::Intersection,
+        Half::AndTheBlock,
         4.474687036223253e16,
     );
 }
@@ -118,67 +119,71 @@ fn unplaced_and_the_block_is_refused_under_certified() {
 fn unplaced_and_the_block_answers_15_under_tolerant() {
     answers(
         Placement::WhereItWasBuilt,
-        Rule::Intersection,
+        Half::AndTheBlock,
         &Policy::tolerant(100.0),
     );
 }
 
 #[test]
 fn shifted_less_the_block_is_refused_under_certified() {
-    is_refused(Placement::Shifted, Rule::Difference, 1.5199648742375424e16);
+    is_refused(
+        Placement::Shifted,
+        Half::LessTheBlock,
+        1.5199648742375424e16,
+    );
 }
 
 #[test]
 fn shifted_less_the_block_answers_45_under_tolerant() {
     answers(
         Placement::Shifted,
-        Rule::Difference,
+        Half::LessTheBlock,
         &Policy::tolerant(100.0),
     );
 }
 
 #[test]
 fn shifted_and_the_block_is_refused_under_certified() {
-    is_refused(
-        Placement::Shifted,
-        Rule::Intersection,
-        1.5199648742375424e16,
-    );
+    is_refused(Placement::Shifted, Half::AndTheBlock, 1.5199648742375424e16);
 }
 
 #[test]
 fn shifted_and_the_block_answers_15_under_tolerant() {
     answers(
         Placement::Shifted,
-        Rule::Intersection,
+        Half::AndTheBlock,
         &Policy::tolerant(100.0),
     );
 }
 
 #[test]
 fn turned_less_the_block_is_refused_under_certified() {
-    is_refused(Placement::Turned, Rule::Difference, 3_183_396_951_313_399.0);
+    is_refused(
+        Placement::Turned,
+        Half::LessTheBlock,
+        3_183_396_951_313_399.0,
+    );
 }
 
 #[test]
 fn turned_less_the_block_answers_45_under_tolerant() {
     answers(
         Placement::Turned,
-        Rule::Difference,
+        Half::LessTheBlock,
         &Policy::tolerant(100.0),
     );
 }
 
 #[test]
 fn turned_and_the_block_answers_15_under_certified() {
-    answers(Placement::Turned, Rule::Intersection, &Policy::certified());
+    answers(Placement::Turned, Half::AndTheBlock, &Policy::certified());
 }
 
 #[test]
 fn turned_and_the_block_answers_15_under_tolerant() {
     answers(
         Placement::Turned,
-        Rule::Intersection,
+        Half::AndTheBlock,
         &Policy::tolerant(100.0),
     );
 }
@@ -187,7 +192,7 @@ fn turned_and_the_block_answers_15_under_tolerant() {
 fn turned_then_shifted_less_the_block_is_refused_under_certified() {
     is_refused(
         Placement::TurnedThenShifted,
-        Rule::Difference,
+        Half::LessTheBlock,
         1_281_735_828_939_219.8,
     );
 }
@@ -196,7 +201,7 @@ fn turned_then_shifted_less_the_block_is_refused_under_certified() {
 fn turned_then_shifted_less_the_block_answers_45_under_tolerant() {
     answers(
         Placement::TurnedThenShifted,
-        Rule::Difference,
+        Half::LessTheBlock,
         &Policy::tolerant(100.0),
     );
 }
@@ -205,7 +210,7 @@ fn turned_then_shifted_less_the_block_answers_45_under_tolerant() {
 fn turned_then_shifted_and_the_block_answers_15_under_certified() {
     answers(
         Placement::TurnedThenShifted,
-        Rule::Intersection,
+        Half::AndTheBlock,
         &Policy::certified(),
     );
 }
@@ -214,7 +219,7 @@ fn turned_then_shifted_and_the_block_answers_15_under_certified() {
 fn turned_then_shifted_and_the_block_answers_15_under_tolerant() {
     answers(
         Placement::TurnedThenShifted,
-        Rule::Intersection,
+        Half::AndTheBlock,
         &Policy::tolerant(100.0),
     );
 }
@@ -226,14 +231,14 @@ fn turned_then_shifted_and_the_block_answers_15_under_tolerant() {
 fn a_front_face_through_the_apex_fused_where_built_and_then_placed_answers_at_every_placement() {
     let certified = Policy::certified();
     for placement in Placement::EVERY {
-        for rule in [Rule::Difference, Rule::Intersection] {
-            let case = format!("{placement:?}, {rule:?}");
+        for half in Half::BOTH {
+            let case = format!("{placement:?}, {half:?}");
             let mut model = a_model();
             let tetrahedron = a_tetrahedron(&mut model, Front::ThroughTheApexExactly);
             let block = a_block(&mut model, &Isometry::identity());
             let mut log = ProvenanceLog::new();
             let answer = model
-                .fuse(&[tetrahedron], &[block], rule, &certified, &mut log)
+                .fuse(&[tetrahedron], &[block], half.rule(), &certified, &mut log)
                 .unwrap_or_else(|error| panic!("{case}: {error:?}"));
             for &solid in answer.solids() {
                 model
@@ -241,7 +246,7 @@ fn a_front_face_through_the_apex_fused_where_built_and_then_placed_answers_at_ev
                     .expect("the fuse made the key");
             }
             assert!(log.records().is_empty(), "{case}");
-            the_answer_holds_its_half(&model, answer.solids(), rule, &certified, &case);
+            the_answer_holds_its_half(&model, answer.solids(), half, &certified, &case);
         }
     }
 }
@@ -259,11 +264,8 @@ fn a_front_face_through_the_apex_placed_first_is_refused_where_the_placement_rou
         (Placement::Turned, [true, false]),
         (Placement::TurnedThenShifted, [true, false]),
     ] {
-        for (rule, refused) in [Rule::Difference, Rule::Intersection]
-            .into_iter()
-            .zip(refused)
-        {
-            let case = format!("{placement:?}, {rule:?}");
+        for (half, refused) in Half::BOTH.into_iter().zip(refused) {
+            let case = format!("{placement:?}, {half:?}");
             let mut model = a_model();
             let tetrahedron = a_tetrahedron(&mut model, Front::ThroughTheApexExactly);
             model
@@ -271,13 +273,13 @@ fn a_front_face_through_the_apex_placed_first_is_refused_where_the_placement_rou
                 .expect("this model made the key");
             let block = a_block(&mut model, &placement.movement());
             let mut log = ProvenanceLog::new();
-            match model.fuse(&[tetrahedron], &[block], rule, &certified, &mut log) {
+            match model.fuse(&[tetrahedron], &[block], half.rule(), &certified, &mut log) {
                 Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) if refused => {
                     assert!(ratio > 1e15, "{case}: {ratio}");
                 }
                 Ok(answer) if !refused => {
                     assert!(log.records().is_empty(), "{case}");
-                    the_answer_holds_its_half(&model, answer.solids(), rule, &certified, &case);
+                    the_answer_holds_its_half(&model, answer.solids(), half, &certified, &case);
                 }
                 other => panic!("{case}: {other:?}"),
             }
@@ -288,10 +290,10 @@ fn a_front_face_through_the_apex_placed_first_is_refused_where_the_placement_rou
 /// The fuse of the tetrahedron and the block, placed, answers one solid that
 /// holds its half and validates. Under `tolerant` its log holds one record,
 /// where the corners of the speck at the apex are taken as the apex.
-fn answers(placement: Placement, rule: Rule, policy: &Policy) {
-    let case = format!("{placement:?}, {rule:?}, {policy:?}");
+fn answers(placement: Placement, half: Half, policy: &Policy) {
+    let case = format!("{placement:?}, {half:?}, {policy:?}");
     let mut log = ProvenanceLog::new();
-    let (model, answer) = the_fuse(placement, rule, policy, &mut log);
+    let (model, answer) = the_fuse(placement, half, policy, &mut log);
     let answer = answer.unwrap_or_else(|error| panic!("{case}: {error:?}"));
     let records: Vec<&str> = log
         .records()
@@ -304,15 +306,15 @@ fn answers(placement: Placement, rule: Rule, policy: &Policy) {
         &["three meets of one plane taken as an input corner"]
     };
     assert_eq!(records, expected, "{case}");
-    the_answer_holds_its_half(&model, &answer, rule, policy, &case);
+    the_answer_holds_its_half(&model, &answer, half, policy, &case);
 }
 
 /// The fuse is refused on the range of its answer, at `ratio` to `1e−9`.
-fn is_refused(placement: Placement, rule: Rule, ratio: f64) {
-    let case = format!("{placement:?}, {rule:?}");
+fn is_refused(placement: Placement, half: Half, ratio: f64) {
+    let case = format!("{placement:?}, {half:?}");
     let (_, answer) = the_fuse(
         placement,
-        rule,
+        half,
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     );
@@ -329,7 +331,7 @@ fn is_refused(placement: Placement, rule: Rule, ratio: f64) {
 
 fn the_fuse(
     placement: Placement,
-    rule: Rule,
+    half: Half,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> (Model, Result<Vec<SolidKey>, Error>) {
@@ -340,27 +342,22 @@ fn the_fuse(
         .expect("this model made the key");
     let block = a_block(&mut model, &placement.movement());
     let answer = model
-        .fuse(&[tetrahedron], &[block], rule, policy, log)
+        .fuse(&[tetrahedron], &[block], half.rule(), policy, log)
         .map(|answer| answer.solids().to_vec());
     (model, answer)
 }
 
-/// One solid, holding 45 for the difference and 15 for the intersection to
-/// `1e−12`, in a model that validates.
+/// One solid, holding the volume of its half to `1e−12` relative, in a model
+/// that validates.
 fn the_answer_holds_its_half(
     model: &Model,
     solids: &[SolidKey],
-    rule: Rule,
+    half: Half,
     policy: &Policy,
     case: &str,
 ) {
     let [solid] = solids else {
         panic!("{case}: {} solids", solids.len());
-    };
-    let half = match rule {
-        Rule::Difference => 45.0,
-        Rule::Intersection => 15.0,
-        other => panic!("{case}: no half for {other:?}"),
     };
     let volume = model
         .solid(*solid)
@@ -373,8 +370,9 @@ fn the_answer_holds_its_half(
         .expect("a measure")
         .volume();
     assert!(
-        (volume - half).abs() <= 1e-12 * half,
-        "{case}: {volume} for {half}"
+        (volume - half.volume()).abs() <= 1e-12 * half.volume(),
+        "{case}: {volume} for {}",
+        half.volume()
     );
     model
         .validate(policy, &mut ProvenanceLog::new())
@@ -451,6 +449,33 @@ impl Placement {
             Self::Shifted => shift,
             Self::Turned => turn,
             Self::TurnedThenShifted => shift.compose(&turn),
+        }
+    }
+}
+
+/// Which half of the tetrahedron a fuse with the block keeps.
+#[derive(Clone, Copy, Debug)]
+enum Half {
+    /// The tetrahedron less the block: 45, off the block's side of the cut.
+    LessTheBlock,
+    /// The tetrahedron and the block: 15, on the block's side.
+    AndTheBlock,
+}
+
+impl Half {
+    const BOTH: [Self; 2] = [Self::LessTheBlock, Self::AndTheBlock];
+
+    fn rule(self) -> Rule {
+        match self {
+            Self::LessTheBlock => Rule::Difference,
+            Self::AndTheBlock => Rule::Intersection,
+        }
+    }
+
+    fn volume(self) -> f64 {
+        match self {
+            Self::LessTheBlock => 45.0,
+            Self::AndTheBlock => 15.0,
         }
     }
 }
