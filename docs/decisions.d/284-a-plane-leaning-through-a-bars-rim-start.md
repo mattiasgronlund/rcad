@@ -390,3 +390,70 @@ policy.
   Since this change, where that node was an input corner, the corner goes
   where the input corner goes and not where the meet arrived. Whether any of
   them moved by a bit was not compared, beyond every test passing.
+
+### 284.10 How far an input corner moves a dropped name — 2026-10-15
+
+*Queue row Q942, continuing 284.9. Two lanes ran on
+`lane-q942-replay-the-30-draws-with-names-carried`: the first read the code
+and reverted every probe it tried without measuring anything; this one
+measured 284.9's second bullet and found why its first cannot be answered by
+re-running 284.8's probe on this base.*
+
+**284.9's second bullet: yes, by a few ulps, never more.** `Corners::of`
+(`crates/rcad-topo/src/fuse/assemble.rs:7277`) hands a name the place
+`join_the_names_of_each_point` (`:7203`) already settled on, whenever the two
+were found to be one point; that handoff is the `Some(&(input_corner,
+vertex))` arm at `:7290`. A temporary probe there (removed before this
+commit, kept nowhere), run whenever `end` carried a name other than the
+input corner's own vertex, printed the distance from `middle_of(input_corner)`
+to `middle_of(end.point())`. Run as `PROBE_Q942_MOVED=1 mise exec -- just t -p
+rcad-topo --no-fail-fast --no-capture` (a cold run, cancelled after 997 of
+2188 tests — the suite's slow property tests, not this row's two, were what
+was left ahead of it): 21 210 redirects fired, 19 178 of them (90%) by
+exactly zero and the rest between `1.1e-16` and `5.0276450535801215e-14`
+(the largest about 226 times a `f64`'s own epsilon), nine orders of magnitude
+under the smallest tolerance named anywhere in this file (284.8's own
+`1e-6` probe). Inside `a_fused_draw_hands_its_provenance_back_through_the_door`
+alone — the row's own first test, lines 16135–25970 of that run's log — 9 824
+of those redirects fired, 8 788 of them zero and the rest in the same tiny
+range, topping out at the same `5.0276450535801215e-14`. That is 284.8's own
+"a few ulps apart", read off the current code: an input corner does pull a
+dropped name's corner a hair, never by anything a mesh or a `validate`
+tolerance would call a move.
+
+**284.9's first bullet is still open, and re-running 284.8's probe on this
+base cannot close it.** `join_the_names_of_each_point` runs before any
+corner is made, and every lookup after it goes through `goes_by`
+(`:7284`) first, so two names it has joined can never again resolve to two
+different corners — read off `Corners::of`'s control flow, not from trying it
+and finding nothing. Asking 284.8's own question — "did the dropped name and
+the name of the node that stood for it become two different corners" —
+against this base therefore answers no for every fuse, whatever the 30
+original draws individually do now: the question itself has no case left to
+find, not because those 30 are confirmed fixed. Answering 284.9's first
+bullet needs the identity of the original 30 (which corpus file, which half,
+which test), and that can only come from 284.8's probe as it ran on
+`f4775743`, the commit it was measured on.
+
+Found this lane, so the next one does not have to re-find it:
+`f4775743` is reachable (`git worktree add <path> f4775743 --detach`
+succeeds) and still has the shapes 284.8's probe hooked. The drop happens in
+`Arrangement::fold_the_nodes`
+(`crates/rcad-topo/src/fuse/arrange.rs:1839`); its `Some(into)` arm (`:1857`)
+is where one side of a fold's identity is always dropped — `mine`'s when
+`takes_over` is false, the survivor's own `made_of` when it is true, so a
+*blanket* "a name was dropped" probe fires on every fold and overcounts
+284.8's 20/10/6, exactly as this row's first lane found. The dropped name
+surfaces as a second corner, a few ulps from the one the node should have
+shared, in `Corners::of` on that commit
+(`crates/rcad-topo/src/fuse/assemble.rs:3694`), where it is named afresh
+because nothing before Q656 told the two spellings to agree. §284.8 does not
+say how its probe told seeds and halves apart; that still needs adding, in
+whatever test harness hook is used (`crates/rcad-topo/tests/fuzzing/fuse.rs`).
+Tag it, rebuild the probe at `f4775743` (not attempted this lane — only the
+worktree and the two hook points were confirmed, not a build or a run),
+replay the flagged seeds on the current base, and where one now answers,
+check it the way
+`a_cube_on_its_corner_leaning_through_a_bars_top_rim_start_answers_all_six_fuses`
+(`crates/rcad-topo/tests/a_plane_leaning_through_a_bars_rim_start.rs:181`)
+does.
