@@ -676,14 +676,48 @@ fn probe_q2028_reference_faces() {
 fn probe_q2028_designer() {
     q2028_designer(
         &[[0.6, 0.8]],
-        &[1.0, 2.0, 4.0, 8.0, 16.0, 0.5, 10.0, 12.8, 25.6],
+        &[1.0, 2.0, 4.0, 8.0, 16.0, 0.5, 10.0, 12.8, 25.6, 5.0],
         &[1.0, 10.0, 25.0, 100.0],
     );
 }
 
 #[test]
-fn probe_q2028_designer_hang() {
+fn probe_q2028_broken() {
     q2028_designer(&[[0.6, 0.8]], &[0.26, 0.28, 0.30], &[0.1, 0.15]);
+    q2028_designer(&[[0.6, 0.8]], &[1.12], &[0.4, 0.6]);
+    q2028_designer(&[[0.6, 0.8]], &[4.48], &[1.6, 2.4]);
+    q2028_designer(&[[0.6, 0.8]], &[17.92], &[6.4, 9.6]);
+}
+
+#[test]
+fn probe_q2028_hunt() {
+    let scales: Vec<f64> = (8..=20).map(|k| 0.1 + 0.02 * f64::from(k)).collect();
+    let sizes: Vec<f64> = (0..=16).map(|j| 0.1 + 0.05 * f64::from(j)).collect();
+    q2028_designer(&[[0.6, 0.8]], &scales, &sizes);
+}
+
+#[test]
+fn probe_q2028_hang_image() {
+    q2028_designer(&[[0.6, 0.8]], &[0.38 * 64.0], &[0.1 * 64.0]);
+}
+
+#[test]
+fn probe_q2028_power_of_two() {
+    for (scale, size) in [(0.1, 0.25), (0.8, 2.0), (6.4, 16.0)] {
+        for (rule, frustum_first) in EVERY_FUSE {
+            let (model, fused) = q2028_fuse(scale, size, 1.0, [-1.0, 0.0], rule, frustum_first);
+            let surface = match &fused {
+                Err(Error::CannotTellTheCellsOfAFaceApart { face }) => {
+                    format!("{:?}", model.face(*face).map(|view| view.surface()))
+                }
+                _ => String::new(),
+            };
+            println!(
+                "pow2 {scale} {size} {rule:?} {frustum_first}: {:?} {surface}",
+                fused.map(|_| "ok")
+            );
+        }
+    }
 }
 
 fn q2028_designer(corners: &[[f64; 2]], scales: &[f64], sizes: &[f64]) {
@@ -741,9 +775,16 @@ fn q2028_designer(corners: &[[f64; 2]], scales: &[f64], sizes: &[f64]) {
                             .unwrap_or("")
                             .to_string(),
                     };
-                    if what.starts_with("CannotTell") {
-                        println!("{corner:?} {scale:.2} {size:.2} {rule:?} {bar_first}: {fused:?}");
-                    }
+                    let shown = match &fused {
+                        Ok(answer) => format!(
+                            "valid {:?}",
+                            model
+                                .validate(&Policy::tolerant(size), &mut ProvenanceLog::new())
+                                .map(|()| answer.solids().len())
+                        ),
+                        Err(error) => format!("{error:?}").chars().take(160).collect(),
+                    };
+                    println!("{corner:?} {scale} {size} {rule:?} {bar_first}: {shown}");
                     *counts.entry(format!("{corner:?} {what}")).or_default() += 1;
                 }
             }
