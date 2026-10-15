@@ -2600,11 +2600,15 @@ fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64, rounding: f6
 /// The most space there can be between a mesh of this solid and the solid,
 /// on either side.
 ///
-/// Each curved face is charged `area · d · (r / (r − d))²`, with `area` its
-/// triangles' area, `d` the mesh's [`Mesh::deviation`] and `r` the smallest
-/// radius the face bends at, and a flat face nothing. That is
-/// `Measurement::volume_error`'s charge loosened: `Mesh::deviation`'s doc
-/// shows `(r³ − (r − d)³) / (3(r − d)²) ≤ d · (r / (r − d))²`.
+/// Each curved face is charged `area · (r³ − (r − d)³) / (3(r − d)²)`, with
+/// `area` its triangles' area, `d` the mesh's [`Mesh::deviation`] and `r` the
+/// smallest radius the face bends at, and a flat face nothing. That is the
+/// shell `measure::how_much_space_hides_under_a_flat_stand_in` charges, so
+/// `Measurement::volume_error`'s own argument and not a looser one. The looser
+/// `area · d · (r / (r − d))²` that `Mesh::deviation`'s doc publishes charged a
+/// ball meshed a quarter of its radius out a third more, and every sum that
+/// lands between the two asks for a finer mesh it does not need
+/// (`the_space_a_mesh_can_leave_out_is_no_more_than_measure_charges`).
 ///
 /// `None` when a triangle with area stands in for a face this cannot charge,
 /// and `f64::INFINITY` when the mesh strays a whole radius of a curved face or
@@ -2641,7 +2645,7 @@ fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
         if inner <= 0.0 {
             return Some(f64::INFINITY);
         }
-        hidden += area * deviation * (radius / inner) * (radius / inner);
+        hidden += area * (radius * radius * radius - inner * inner * inner) / (3.0 * inner * inner);
     }
     Some(hidden)
 }
