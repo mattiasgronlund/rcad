@@ -91,12 +91,50 @@
 //! pins the `0.26`/`0.75` merge the same way. **No wrong answer came of it
 //! either.**
 //!
+//! # The far rim the cube's edges run through
+//!
 //! A near cap cut this close (`far / 300`) sometimes refuses earlier, with
-//! `CannotTellTheCellsOfAFaceApart`, before the crossing is even reached —
-//! seen at shape scales `0.1` to `0.4` crossed with working sizes `0.1` to
-//! `0.9` in the same grid. That is a different question from the one under
-//! search here (a face classification refusal, not a crossing order one), and
-//! was not traced further.
+//! `CannotTellTheCellsOfAFaceApart`, before the crossing is even reached.
+//! Q2028 traced it, and it is not the near cap. In a grid of 21 shape scales
+//! (`0.1` to `0.5`), 17 working sizes (`0.1` to `0.9`) and the four fuses,
+//! all 304 of these refusals came from `spread_the_winding` in
+//! `fuse/arrange.rs`, on the frustum's far cap.
+//!
+//! Each of the six edges round the cube's middle, where an upper face meets a
+//! lower one, carried on past its upper corner, runs exactly through the far
+//! rim: at a scale of one it reaches `z = 3` at `6` from the axis, and a cone
+//! of slope two is `6` from the axis there. So four surfaces meet at one
+//! point, the cap, the cone and two faces of the cube, and on the cap that
+//! point is three meets: the rim with each face's line, and the two lines
+//! with each other. Stored in `f64` they come back as three boxes a few
+//! `1e-16` apart, and `merge_points_that_are_one_point` decides them a pair at
+//! a time. At a shape scale of `0.1` and a working size of `0.25` it joins the
+//! rim's meet with one line to the meet of the two lines, and proves the
+//! rim's meet with the other line apart from both. That other line then meets
+//! the rim twice, a hair apart, and `spread_the_winding` cannot tell the
+//! cap's cells apart. The answer exists, so this is a gap (§16.10).
+//!
+//! **No answer was wrong.** The 48 fuses of that grid that answered pass
+//! `Model::validate`, have the solid, face, wire and shell counts of the same
+//! fuse at a scale of one and a working size of `10`, and its volume to
+//! within `1.9e-5`. Lifting the far cap by a thousandth of its height takes it
+//! off the edges' lines, and all 1428 fuses answer. Turning the seam to `+x`
+//! still leaves 347 refusals, so the seam plays no part. The two power-of-two
+//! images of a scale of `0.1` and a size of `0.25`, which round the same way,
+//! refuse the same, so small numbers play no part either.
+//! `a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart`
+//! and `the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges`
+//! pin both.
+//!
+//! A designer draws the same kind of meeting on purpose: a round bar notched
+//! by a block whose inside corner stands on the bar's wall, at `(0.6 r, 0.8
+//! r)`. At a radius of `12.8` or `25.6` and working sizes of `10`, `25` and
+//! `100`, every fuse is refused from the same place in `spread_the_winding`,
+//! on the bar's wall, with two meets whose boxes overlap kept apart.
+//! `a_tolerant_fuse_of_a_round_bar_and_a_block_cornered_on_its_wall_cannot_tell_the_walls_cells_apart`
+//! pins the `12.8`/`25` case. At other radii the same bar is refused
+//! `ResultIsNotManifold` or `TheFuseWroteABrokenAnswer`, or runs for minutes;
+//! those are rows of their own.
 //!
 //! # Plane through a ball
 //!
@@ -305,8 +343,8 @@ fn the_only_surface_of(model: &Model, solid: SolidKey) -> Surface {
 /// the policy.
 const THE_CUBES_WORKING_SIZE: f64 = 2.0;
 
-/// Each rule, and for the difference which solid goes first: whether the cone
-/// is the argument.
+/// Each rule, and for the difference which solid goes first: whether the
+/// curved one, the cone, the frustum or the bar, is the argument.
 const EVERY_FUSE: [(Rule, bool); 4] = [
     (Rule::Union, true),
     (Rule::Intersection, true),
