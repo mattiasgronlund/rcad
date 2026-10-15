@@ -263,6 +263,69 @@ fn a_wall_spelled_twice_is_cut_to_the_same_half_bar_as_a_wall_spelled_once() {
     }
 }
 
+/// The upper bar's wall spelled the other way — axis reversed and the origin
+/// slid off `z = 2` to `z = 123` — still joins the lower bar's wall as one
+/// pipe: the union is the half bar four tall, `8π`, either way round.
+///
+/// `a_ring_goes_right_round` finds a ring's side partner with `one_surface`
+/// (Q354, §407.1), which folds a pipe's axis reversal into one name, and the
+/// origin slide too since this axis runs along a coordinate, where the fold is
+/// exact (`the_axis_origin_slid_the_one_way` in `fuse/arrange.rs`). Found by
+/// the stored fields instead, with no fold, the two spellings would not match
+/// and the fuse would refuse — as the hand-built case did before Q354
+/// (`a_side_naming_its_pipe_by_the_other_spelling_is_still_counted_round`).
+#[test]
+fn a_wall_spelled_the_other_way_round_still_fuses_to_one_half_bar() {
+    let policy = Policy::certified();
+    for lower_first in [true, false] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let lower = a_half_bar_whose_wall_names_its_axis_at(&mut model, 0.0, 0.0);
+        let upper =
+            a_half_bar_whose_wall_names_its_axis_the_other_way_round(&mut model, HEIGHT, 123.0);
+        let [argument, tool] = if lower_first {
+            [lower, upper]
+        } else {
+            [upper, lower]
+        };
+        let fused = model
+            .fuse(
+                &[argument],
+                &[tool],
+                Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("lower first {lower_first}: {refused:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| {
+                panic!("lower first {lower_first} came back broken: {broken:?}")
+            });
+        let [half] = fused.solids() else {
+            panic!("lower first {lower_first}: {:?}", fused.solids());
+        };
+        let half = model.solid(*half).expect("this model made the key");
+        assert_eq!(
+            half.faces().count(),
+            4,
+            "lower first {lower_first}: the faces of a half bar"
+        );
+        let measured = half
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a half bar measures");
+        assert!(
+            (measured.volume() - 8.0 * PI).abs() <= measured.volume_error(),
+            "lower first {lower_first}: {} ± {} against 8π",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
 /// Two bars from `Model::add_round_bar`, the second placed on the first,
 /// united and then united with a cube far away that touches neither: two
 /// solids, `16π + 8` between them, either way round.
@@ -421,6 +484,32 @@ fn a_half_bar_whose_wall_names_its_axis_at(
     *half
 }
 
+/// A round bar from `bottom` up [`HEIGHT`] less the block over `x < 0`, whose
+/// wall names the same pipe the other way round from
+/// [`a_half_bar_whose_wall_names_its_axis_at`]: axis direction reversed,
+/// origin at `z = axis_origin`.
+fn a_half_bar_whose_wall_names_its_axis_the_other_way_round(
+    model: &mut Model,
+    bottom: f64,
+    axis_origin: f64,
+) -> SolidKey {
+    let bar = a_bar_whose_wall_names_its_axis_the_other_way_round(model, bottom, axis_origin);
+    let block = a_block_over_negative_x(model);
+    let cut = model
+        .fuse(
+            &[bar],
+            &[block],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar less the block");
+    let [half] = cut.solids() else {
+        panic!("a bar less the block is one solid: {:?}", cut.solids());
+    };
+    *half
+}
+
 /// A round bar from `bottom` up [`HEIGHT`], whose wall names its axis at the
 /// origin whichever bar it is.
 ///
@@ -497,6 +586,94 @@ fn a_bar_whose_wall_names_its_axis_at(
         Axis::new(
             Point::new(0.0, 0.0, axis_origin),
             Vector::new(0.0, 0.0, 1.0),
+        )
+        .expect("a direction with a length"),
+        RADIUS,
+    )
+    .expect("a positive radius");
+    let wall = builder
+        .add_face(Surface::Cylinder(pipe), &[wire])
+        .expect("the curved wall");
+
+    builder
+        .add_shell(&[
+            (bottom_cap, Orientation::Forward),
+            (top_cap, Orientation::Forward),
+            (wall, Orientation::Forward),
+        ])
+        .expect("a closed skin");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a bar described face by face")
+}
+
+/// A round bar from `bottom` up [`HEIGHT`], whose wall names the same pipe the
+/// other way round from [`a_bar_whose_wall_names_its_axis_at`]: axis direction
+/// reversed, origin at `z = axis_origin`.
+///
+/// A closed edge on a curved face is stored running along `ŵ × ∇C` for the
+/// wall's **stored** direction `ŵ`, so a wall written with the axis pointing
+/// down walks both its cap circles the other way round from one written
+/// pointing up — same bar, same skin, nothing but the spelling changed
+/// (`round_a_circle` in `fuse/assemble.rs`'s test helper `a_bar_between`).
+fn a_bar_whose_wall_names_its_axis_the_other_way_round(
+    model: &mut Model,
+    bottom: f64,
+    axis_origin: f64,
+) -> SolidKey {
+    let top = bottom + HEIGHT;
+    let mut builder = SolidBuilder::new();
+    let low = builder
+        .add_vertex(Point::new(RADIUS, 0.0, bottom))
+        .expect("a finite corner");
+    let high = builder
+        .add_vertex(Point::new(RADIUS, 0.0, top))
+        .expect("a finite corner");
+    let seam = builder
+        .add_edge(low, high, EdgeRun::Straight)
+        .expect("the seam up the wall");
+    let low_circle = builder
+        .add_edge(low, low, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("the bottom cap circle");
+    let high_circle = builder
+        .add_edge(high, high, EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("the top cap circle");
+
+    let cap = |builder: &mut SolidBuilder, z: f64, outward: f64, edge, turn| {
+        let plane =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, outward))
+                .expect("the z axis is a unit normal");
+        let coedge = builder.add_coedge(edge, turn).expect("one use of the rim");
+        let wire = builder
+            .add_wire(&[DraftStep::Along(coedge)])
+            .expect("a cap is bounded by one whole circle");
+        builder
+            .add_face(Surface::Plane(plane), &[wire])
+            .expect("a flat cap")
+    };
+    let bottom_cap = cap(&mut builder, bottom, -1.0, low_circle, Orientation::Forward);
+    let top_cap = cap(&mut builder, top, 1.0, high_circle, Orientation::Reversed);
+
+    let round_the_wall = [
+        (low_circle, Orientation::Reversed),
+        (seam, Orientation::Forward),
+        (high_circle, Orientation::Forward),
+        (seam, Orientation::Reversed),
+    ]
+    .map(|(edge, turn)| {
+        DraftStep::Along(
+            builder
+                .add_coedge(edge, turn)
+                .expect("a step round the wall"),
+        )
+    });
+    let wire = builder
+        .add_wire(&round_the_wall)
+        .expect("the wall's one wire");
+    let pipe = Cylinder::new(
+        Axis::new(
+            Point::new(0.0, 0.0, axis_origin),
+            Vector::new(0.0, 0.0, -1.0),
         )
         .expect("a direction with a length"),
         RADIUS,
