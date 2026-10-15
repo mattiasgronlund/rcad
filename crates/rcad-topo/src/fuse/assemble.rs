@@ -4929,6 +4929,17 @@ impl Edge {
             crossing = crossing_at(second);
         }
         let across = squared_off_from(from, crossing);
+        if from == first
+            && self.a_closed_curve_on_a_plane()
+            && across.dot(squared_off_from(second, crossing_at(second))) > 0.0
+        {
+            return self.the_way_into_a_closed_arc_by_how_it_sets_off(
+                corners,
+                [first, second],
+                named_from,
+                towards,
+            );
+        }
         let named = squared_off_from(named_from, towards);
         let agreement = across.dot(named);
         if agreement > 0.0 {
@@ -4985,34 +4996,63 @@ impl Edge {
         named_from: usize,
         towards: Vector,
     ) -> Option<Vector> {
-        let side = |reading: f64| reading.partial_cmp(&0.0).filter(|side| side.is_ne());
+        if named == Vector::zero() {
+            return self.the_way_into_a_closed_arc_by_how_it_sets_off(
+                corners,
+                [first, second],
+                named_from,
+                towards,
+            );
+        }
         let flat = self.carried_by.iter().find_map(Surface::as_plane)?;
-        let at = corners[first].point;
-        let square = flat.normal().cross(corners[second].point - at);
-        let into_the_arc = if named == Vector::zero() {
-            let round = self
-                .carried_by
-                .iter()
-                .find(|surface| surface.as_plane().is_none())?;
-            where_a_closed_crossing_is_centred(round, flat)?;
-            let outwards = side(square.dot(gradient_of(round, at)))?;
-            let heading =
-                side(towards.dot(
-                    corners[self.other_end_than(named_from)].point - corners[named_from].point,
-                ))?;
-            if outwards == heading {
-                Ordering::Greater
-            } else {
-                Ordering::Less
-            }
-        } else {
-            side(named.dot(square))?
-        };
-        Some(if into_the_arc.is_gt() {
+        let square = flat
+            .normal()
+            .cross(corners[second].point - corners[first].point);
+        Some(if a_side_of_nought(named.dot(square))?.is_gt() {
             square
         } else {
             -square
         })
+    }
+
+    /// Whether this edge runs along a curve that closes on a plane — a circle
+    /// or an ellipse, where a plane cuts a ball, a pipe or a cone right round.
+    /// Such a curve bends one way all round, so each of its two arcs between
+    /// two corners lies wholly on one side of their chord.
+    fn a_closed_curve_on_a_plane(&self) -> bool {
+        let Some(flat) = self.carried_by.iter().find_map(Surface::as_plane) else {
+            return false;
+        };
+        self.carried_by
+            .iter()
+            .find(|surface| surface.as_plane().is_none())
+            .is_some_and(|round| where_a_closed_crossing_is_centred(round, flat).is_some())
+    }
+
+    /// The way into an arc of a curve that closes on a plane, `±n × c`, read
+    /// from which way along the chord the arc sets off — or `None` when the arc
+    /// is on no such curve, or this cannot say. See
+    /// [`Edge::the_way_into_an_arc_along_its_own_chord`] for the reading.
+    fn the_way_into_a_closed_arc_by_how_it_sets_off(
+        &self,
+        corners: &[Corner],
+        [first, second]: [usize; 2],
+        named_from: usize,
+        towards: Vector,
+    ) -> Option<Vector> {
+        let flat = self.carried_by.iter().find_map(Surface::as_plane)?;
+        let at = corners[first].point;
+        let square = flat.normal().cross(corners[second].point - at);
+        let round = self
+            .carried_by
+            .iter()
+            .find(|surface| surface.as_plane().is_none())?;
+        where_a_closed_crossing_is_centred(round, flat)?;
+        let outwards = a_side_of_nought(square.dot(gradient_of(round, at)))?;
+        let heading = a_side_of_nought(
+            towards.dot(corners[self.other_end_than(named_from)].point - corners[named_from].point),
+        )?;
+        Some(if outwards == heading { square } else { -square })
     }
 
     /// The end of this edge that is not `corner`.
@@ -5065,6 +5105,12 @@ impl Edge {
         either.sort_by_key(name_of_surface_bits);
         either[0]
     }
+}
+
+/// Which side of nought `reading` is, or `None` when it is nought or not a
+/// number.
+fn a_side_of_nought(reading: f64) -> Option<Ordering> {
+    reading.partial_cmp(&0.0).filter(|side| side.is_ne())
 }
 
 /// A plane and a pipe that cross in an ellipse reaching more than half of
