@@ -195,12 +195,19 @@ row. What is new is how much of a real part they cover. The dome refuses as §12
 says, and it is the only cell with no transversal control at equal radius
 (§128.3).
 
-New gaps: a radius-2 ball resting on a block it overhangs refuses `Union` and
-ball∖block with `NotFinite("point on a plane")` or `ResultIsNotManifold{count:
-4}`, where the same ball one unit higher, a radius-1 ball, or a larger block all
-answer (`a_ball_resting_on_a_block_it_overhangs_is_refused_though_the_answer_is_both_solids`).
-A non-finite value out of whole-number input, reported as a geometry error, is
-worth its own look. The cone apex's `CannotNameWhichPieceOfACrossingThisIs` has
+New gaps, since closed: a radius-2 ball resting on a block it overhangs used
+to refuse `Union` and ball∖block with `NotFinite("point on a plane")` or
+`ResultIsNotManifold{count: 4}`, where the same ball one unit higher, a
+radius-1 ball, or a larger block all answered. The `NotFinite` case closed
+first, by §217 writing the surface that cuts a closed rim. The `Union`
+refusal — `ACurvedFaceGoesRightRoundWithNoSeam`, out of the mesher, on the
+pole the old reading took for a cap round the pole opposite it — closed with
+Q508 (§330.6): `which_pole_this_cap_reaches` in `mesh.rs` now reads a cap's
+pole off the walk round its own rim, and the test, renamed
+`a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand`,
+now asserts all seven of its cases unite into two solids measuring the
+cube's volume plus the ball's, e.g. `40.648` against `8 + 32π/3`, within the
+declared error. The cone apex's `CannotNameWhichPieceOfACrossingThisIs` has
 no demonstration yet.
 
 **The panic is fixed; both shapes answer now.** A bar standing wholly inside a
