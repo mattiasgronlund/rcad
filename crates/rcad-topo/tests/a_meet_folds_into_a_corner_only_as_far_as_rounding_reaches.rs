@@ -36,10 +36,27 @@
 //! `a_meet_is_folded_when_its_tighter_box_lies_inside_the_corners_room_however_far_cramers_reaches`
 //! in `src/fuse/arrange.rs`'s `tests` module, which asks `a_corner_is_this_place`
 //! directly.
+//!
+//! **§400.4 asks for a second draw that does reach the fold through a real
+//! fuse**, and `two_blocks_far_from_the_origin_meeting_at_a_rounded_corner`,
+//! a new entry in the checked-in corpus, is one: two solids a long way from
+//! the origin, split and united under a tolerant policy, where three of the
+//! planes `place_the_meets` asks about are a few ulps off parallel. Cramer's
+//! box reaches `974228228964.1372` wide along one axis, far past the room
+//! round the corner there, which is about `67108864` wide on every axis; the
+//! box narrowed by the checked step (§281.2, §345) is `0.00030517578125` wide
+//! along that axis and lies inside the room. So the meet folds for the
+//! reason §253 gives and not because a wide box was let past the allowance —
+//! read with a temporary log in `a_corner_is_this_place`, taken back out
+//! (§345.3's method). The fold then leaves two regions of one face the fuse
+//! cannot tell apart, so the union refuses by name rather than silently
+//! answering wrong.
 
 #![forbid(unsafe_code)]
 
 mod fuzzing;
+
+use std::path::PathBuf;
 
 use fuzzing::fuse::two_models_split_and_fused_noting_refusals;
 use rcad_geom::Deflection;
@@ -102,6 +119,42 @@ fn the_two_blocks_unite_with_their_volumes_and_pass_a_certified_sweep() {
         .validate(&Policy::certified(), &mut swept)
         .unwrap_or_else(|why| panic!("the union fails a certified sweep: {why}"));
     assert!(swept.is_empty(), "a certified sweep recorded {swept:?}");
+}
+
+/// §400.4: a draw where two solids genuinely meet, so the fuse's own
+/// arrangement reaches `place_the_meets` and folds a meet whose narrowed box
+/// lies inside the corner's room while Cramer's box alone reaches past it.
+///
+/// The module doc comment has the two boxes and the room, measured with a
+/// temporary log. What is left to check here, without that log, is that the
+/// draw still reaches one fuse and that the fuse still refuses the one way:
+/// two regions of one face the fold brought together that the policy cannot
+/// tell apart.
+#[test]
+fn a_meet_folds_by_its_narrowed_box_though_cramers_misses_the_corners_room() {
+    let bytes = std::fs::read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+        "../../fuzz/corpus/two_solids_fused_by_a_stranger/\
+             two_blocks_far_from_the_origin_meeting_at_a_rounded_corner",
+    ))
+    .expect("the draw pinned for §400.4 is checked in beside the corpus");
+    let mut refusals = Vec::new();
+    let reached = two_models_split_and_fused_noting_refusals(&bytes, &mut |why, _| {
+        refusals.push(why.to_string());
+    });
+    assert_eq!(
+        (reached.fused, reached.refused),
+        (1, 1),
+        "the draw no longer reaches the one fuse it is kept for: {reached:?}, refused with \
+         {refusals:?}"
+    );
+    assert!(
+        !refusals.is_empty()
+            && refusals
+                .iter()
+                .all(|why| why == "two regions of one face could not be told apart"),
+        "the fold should bring together two regions of one face the policy cannot tell apart, \
+         and nothing else: {refusals:?}"
+    );
 }
 
 /// The model, policy, two sides and rule that
