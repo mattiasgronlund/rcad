@@ -3915,19 +3915,33 @@ impl<'f> Arrangement<'f> {
     /// The same, without asking a policy: [`Decision::Undecidable`] comes back
     /// as `None` for a caller that has another route to try.
     ///
-    /// The boxes are asked first and the planes
-    /// ([`Arrangement::as_the_planes_say`]) where the boxes cannot say, as in
+    /// The boxes are asked first, then the planes
+    /// ([`Arrangement::as_the_planes_say`]) and then a quadric
+    /// ([`Arrangement::as_the_quadric_says`]) where the boxes cannot say, as in
     /// [`Arrangement::order_along`], because the route given up can be the
-    /// only one there is: a plate with a notch on the line of each edge of its
+    /// only one there is. A plate with a notch on the line of each edge of its
     /// hole has one ray that can place the hole, and the boxes could not order
-    /// two nodes on it a rounding apart (Q992). A quadric
-    /// ([`Arrangement::as_the_quadric_says`]) is not asked here.
+    /// two nodes on it a rounding apart: two cuts, which the planes order
+    /// (Q992), and a cut and a bar's edge, which the bar orders (Q1484).
+    ///
+    /// A pipe's axis ([`Arrangement::as_the_pipes_axis_says`]) is not asked:
+    /// it orders round a closed crossing, and no ray here has been shown to
+    /// need it.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
-        let (decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
+        let (mut decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) = self.as_the_planes_say(crossing, first, second)
+        {
+            decided = proved;
+        }
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) = self.as_the_quadric_says(crossing, first, second)
+        {
+            decided = proved;
+        }
         match decided {
             Decision::Pos | Decision::Neg | Decision::Zero => Some(decided),
-            Decision::Undecidable { .. } => self.as_the_planes_say(crossing, first, second),
-            _ => None,
+            Decision::Undecidable { .. } | _ => None,
         }
     }
 
@@ -13121,6 +13135,110 @@ mod tests {
             pieces.iter().filter(|piece| piece.wires.len() == 1).count(),
             3,
             "the other three pieces have no hole"
+        );
+        for piece in &pieces {
+            every_wire_closes(piece);
+        }
+    }
+
+    /// Q992's plate again, cut by `x = 6.5` and by a bar lying on its top
+    /// along `y`, whose near edge on the top is `x = 6.5 + 2⁻⁵³`. The one ray
+    /// that can place the hole, from `(5, 3)` along `y = 3`, meets the cut and
+    /// the bar's edge a rounding apart, and the bar says which it meets first
+    /// (Q1484).
+    ///
+    /// The bar's edge is not an `f64`, so its node on `y = 3` has the box
+    /// `[6.5, 6.500000000000001]` along `x`, which shares one end with the
+    /// cut's node at `6.5`. The planes cannot say which comes first, since the
+    /// bar is no plane, and the line's point at `6.5` is outside the bar,
+    /// which puts the bar's edge past the cut
+    /// ([`Arrangement::as_the_quadric_says`]). Building the drawing already
+    /// asks that, ordering the nodes on `y = 3`; the ray asked only the boxes
+    /// and the planes, gave up, and the hole was refused.
+    #[test]
+    fn a_hole_whose_only_ray_out_meets_a_cut_and_a_bar_a_rounding_apart_is_placed_by_the_bar() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let plate = ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 1.0],
+            [5.0, 1.0],
+            [5.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 5.0],
+            [7.0, 5.0],
+            [7.0, 6.0],
+            [8.0, 6.0],
+            [8.0, 8.0],
+            [5.0, 8.0],
+            [5.0, 7.0],
+            [3.0, 7.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
+            [0.0, 5.0],
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ])
+        .with_hole(vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0], [3.0, 5.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a square hole");
+        let solid = model
+            .add_extrusion(&plate, 1.0, &Isometry::identity())
+            .expect("an extrusion");
+        let top = bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the plate bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(facing_up)
+        .expect("the plate has a top");
+        let mut cut = cut_by(&top, &[[1.0, 0.0, 0.0, -6.5]]);
+        let along_y = Axis::new(Point::new(7.0, 0.0, 1.0), Vector::new(0.0, 1.0, 0.0))
+            .expect("an axis along y");
+        cut.cuts.push(Surface::Cylinder(
+            rcad_geom::Cylinder::new(along_y, 0.5 - f64::powi(2.0, -53)).expect("a radius"),
+        ));
+
+        let mut log = ProvenanceLog::new();
+        let pieces = split_a_face(&cut, &Policy::certified(), &mut log)
+            .expect("the ray from (5, 3) along y = 3 says which piece the hole is in")
+            .pieces;
+
+        assert!(
+            log.is_empty(),
+            "a ray given up leaves no record, and the bar decides exactly"
+        );
+        assert_eq!(
+            pieces.len(),
+            5,
+            "left of the cut, the sliver up to the bar, under the bar, and the \
+             two either side of the right notch past it"
+        );
+        let holed = pieces
+            .iter()
+            .find(|piece| piece.wires.len() == 2)
+            .expect("the piece the hole is in keeps the hole");
+        assert_eq!(holed.wires[1].len(), 4, "the hole is still a square");
+        let corners: Vec<[f64; 3]> = holed.wires[0]
+            .iter()
+            .filter_map(|side| side.ends[0].point().exact_coordinates())
+            .collect();
+        assert!(
+            [[1.0, 3.0, 1.0], [6.5, 0.0, 1.0], [6.5, 8.0, 1.0]]
+                .iter()
+                .all(|corner| corners.contains(corner)),
+            "the hole is in the piece left of x = 6.5: {corners:?}"
+        );
+        assert_eq!(
+            pieces.iter().filter(|piece| piece.wires.len() == 1).count(),
+            4,
+            "the other four pieces have no hole"
         );
         for piece in &pieces {
             every_wire_closes(piece);
