@@ -8132,64 +8132,6 @@ mod tests {
         builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
     }
 
-    fn probe_trace_the_walk(view: SolidView<'_>) -> String {
-        let policy = Policy::certified();
-        let coarsest = match the_coarsest_mesh_whose_sides_do_not_cross(
-            view,
-            &policy,
-            &mut ProvenanceLog::new(),
-        ) {
-            Ok(mesh) => mesh,
-            Err(why) => return format!("coarsest refused {why:?}"),
-        };
-        let mut out = String::new();
-        let sum = signed_volume_over(&coarsest);
-        out += &format!(
-            "coarse {sum:.3e} hid {:?} flat {} | ",
-            how_much_space_hides_under(view, &coarsest).map(|h| format!("{h:.3e}")),
-            it_lies_flat(&coarsest)
-        );
-        let top = super::how_far_across(&coarsest) / 2.0;
-        let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
-        let mut room = top;
-        let mut rung = 0;
-        while room >= floor {
-            let Ok(less) = Deflection::of(room) else {
-                out += "deflection refused";
-                return out;
-            };
-            match view.mesh(less, &policy, &mut ProvenanceLog::new()) {
-                Ok(finer) => {
-                    let sum = signed_volume_over(&finer);
-                    let hidden = how_much_space_hides_under(view, &finer);
-                    out = format!(
-                        "{} r{rung}@{room:.2e}: {sum:.3e}/{:?}{} pts {} ",
-                        out.split(" | ").next().unwrap_or(""),
-                        hidden.map(|h| format!("{h:.2e}")),
-                        if it_lies_flat(&finer) { " flat" } else { "" },
-                        finer.points().len()
-                    );
-                    out += " | ";
-                    if hidden.is_some_and(|h| sum.abs() > h) {
-                        out += "ANSWERS";
-                        return out;
-                    }
-                }
-                Err(why) => {
-                    if !matches!(why, Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) {
-                        out += &format!("r{rung}@{room:.2e}: {why:?} ");
-                        out += "STOPPED-ON-REFUSAL";
-                        return out;
-                    }
-                }
-            }
-            room /= 2.0;
-            rung += 1;
-        }
-        out += "STOPPED-AT-CAP";
-        out
-    }
-
     fn probe_lens(
         model: &mut Model,
         poke: f64,
@@ -8293,6 +8235,70 @@ mod tests {
                     sound.as_ref().map(|_| ()),
                     inside_out.map(|_| ())
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn probe_q2047_deep_walk() {
+        for k in [28, 32] {
+            for fortieths in [6, 7, 8] {
+                let poke = f64::powi(2.0, -k);
+                let turn = Isometry::rotation(
+                    &Axis::x(),
+                    f64::from(fortieths) * core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn");
+                let mut model = an_empty_model();
+                let lens = probe_lens(&mut model, poke, &turn, true).expect("inside out builds");
+                let view = model.solid(lens).expect("key");
+                let policy = Policy::certified();
+                let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(
+                    view,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("coarsest");
+                let top = super::how_far_across(&coarsest) / 2.0;
+                println!(
+                    "DEEP 2^-{k} {fortieths}/40 top {top:.3e} coarse pts {}",
+                    coarsest.points().len()
+                );
+                let mut room = top;
+                for rung in 0..40 {
+                    let Ok(less) = Deflection::of(room) else {
+                        println!("DEEP rung {rung}: deflection refused");
+                        break;
+                    };
+                    let started = std::time::Instant::now();
+                    match view.mesh(less, &policy, &mut ProvenanceLog::new()) {
+                        Ok(finer) => {
+                            let (sum, rounding) =
+                                super::signed_volume_over_and_how_far_it_rounded(&finer);
+                            let hidden = how_much_space_hides_under(view, &finer);
+                            println!(
+                                "DEEP rung {rung} room {room:.3e} dev {:.3e} sum {sum:.4e} \
+                                 rounding {rounding:.2e} hidden {hidden:?} pts {} tris {} \
+                                 answers {} {:?}",
+                                finer.deviation().magnitude(),
+                                finer.points().len(),
+                                finer.triangles().len(),
+                                super::the_sum_answers(view, &finer, sum, rounding),
+                                started.elapsed()
+                            );
+                            if super::the_sum_answers(view, &finer, sum, rounding) {
+                                break;
+                            }
+                        }
+                        Err(why) => {
+                            println!("DEEP rung {rung} room {room:.3e}: {why:?}");
+                            if !matches!(why, Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) {
+                                break;
+                            }
+                        }
+                    }
+                    room /= 2.0;
+                }
             }
         }
     }
