@@ -168,6 +168,12 @@ pub(crate) struct BakedFace {
     /// arrangement leaves it out where that splits no edge
     /// (`docs/decisions.md` §422).
     pub(crate) cuts_that_reach_only_its_boundary: Vec<Surface>,
+    /// For each cut, the sides of planes that every face carrying it lies in
+    /// ([`BakedFace::lies_in`]), filled in by the gathering step. A cut with
+    /// none is not listed. The arrangement reads it where a crossing it cannot
+    /// place a meet on lies wholly past one of them, so that no face of the cut
+    /// reaches it (Q1909).
+    pub(crate) sides_the_faces_of_each_cut_lie_in: Vec<(Surface, SmallVec<[ASideOfAPlane; 2]>)>,
     /// Each cap this face is, or has a side along, that is square to its own
     /// pipe's axis through where the axis starts, as stored, with that pipe
     /// ([`the_cap_through_the_start_of_its_axis`]). Empty for every face but a
@@ -796,6 +802,7 @@ fn bake_the_joined_faces(
             bounds: round_this_face,
             lies_in: SmallVec::new(),
             cuts_that_reach_only_its_boundary: Vec::new(),
+            sides_the_faces_of_each_cut_lie_in: Vec::new(),
             caps_through_the_start_of_their_axis: Vec::new(),
         });
     }
@@ -1510,6 +1517,7 @@ fn bake_one_face(
         bounds,
         lies_in: SmallVec::new(),
         cuts_that_reach_only_its_boundary: Vec::new(),
+        sides_the_faces_of_each_cut_lie_in: Vec::new(),
         caps_through_the_start_of_their_axis: caps,
     };
     baked.lies_in = the_sides_of_planes_it_lies_in(&baked);

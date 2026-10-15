@@ -96,7 +96,7 @@ use crate::validate::{name_of_surface, side_of_surface};
 use crate::{Error, FaceKey, Invalid, Result, VertexKey};
 
 use super::assemble::one_surface;
-use super::bake::{ACapThroughTheStartOfItsAxis, BakedCorner, BakedFace};
+use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedCorner, BakedFace};
 use super::select::InPlane;
 use super::{
     FaceMeet, MeetPoint, NamesOfOnePoint, Sameness, as_exact_as_it_is, gave_up, middle_of,
@@ -752,6 +752,12 @@ struct Arrangement<'f> {
     cells: Vec<Vec<usize>>,
     /// How many times the face's boundary winds round the region each cell is.
     winding: Vec<Option<i32>>,
+    /// Every surface that draws a crossing left out because no face of it
+    /// reaches the crossing ([`Arrangement::place_the_meets`]). Such a
+    /// crossing runs on through the face undrawn, so these surfaces no longer
+    /// keep one side over a whole cell, and
+    /// [`Arrangement::the_one_on_its_side_of_every_cut`] does not ask them.
+    cuts_reached_by_no_face: Vec<Surface>,
 }
 
 /// One curve on the face: one of the curves where the face's surface crosses
@@ -1150,6 +1156,7 @@ impl<'f> Arrangement<'f> {
             cell_of: Vec::new(),
             cells: Vec::new(),
             winding: Vec::new(),
+            cuts_reached_by_no_face: Vec::new(),
         };
         arrangement.draw_the_crossings(cuts, policy, log)?;
         arrangement.place_the_corners(policy, log)?;
@@ -1990,6 +1997,10 @@ impl<'f> Arrangement<'f> {
     /// [`Arrangement::leave_out_the_cuts_clear_of_the_face`] left out in it:
     /// its meets are off the face.
     fn place_the_meets(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+        let never_left_out = self.crossings_never_left_out();
+        let mut reached_by_no_face: Vec<usize> = Vec::new();
+        let mut folded_into_a_corner: Vec<usize> = Vec::new();
+        let mut held: Option<rcad_geom::Error> = None;
         for first in 0..self.crossings.len() {
             for second in (first + 1)..self.crossings.len() {
                 if !self.crossings[first].reaches_the_face
@@ -2021,7 +2032,26 @@ impl<'f> Arrangement<'f> {
                             self.place_where_two_crossings_of_one_pair_meet(first, second, log)?;
                             continue;
                         }
-                        return Err(gave_up_on_it.into());
+                        let unreached: SmallVec<[usize; 2]> = [first, second]
+                            .into_iter()
+                            .filter(|&crossing| {
+                                self.no_face_that_draws_it_reaches_it(
+                                    crossing,
+                                    &never_left_out,
+                                    log,
+                                )
+                            })
+                            .collect();
+                        if unreached.is_empty() {
+                            return Err(gave_up_on_it.into());
+                        }
+                        for crossing in unreached {
+                            if !reached_by_no_face.contains(&crossing) {
+                                reached_by_no_face.push(crossing);
+                            }
+                        }
+                        held.get_or_insert(gave_up_on_it);
+                        continue;
                     }
                 };
                 // The tighter box is read here by a fold into a corner on both
@@ -2070,6 +2100,7 @@ impl<'f> Arrangement<'f> {
                         &places,
                     ) {
                         self.nodes[corner].stands_for_too((sorted, which));
+                        folded_into_a_corner.extend([first, second]);
                         continue;
                     }
                     self.nodes.push(Node {
@@ -2080,6 +2111,30 @@ impl<'f> Arrangement<'f> {
                         half_way_round: false,
                         crossings: vec![first, second],
                     });
+                }
+            }
+        }
+        if let Some(gave_up_on_it) = held {
+            let met_elsewhere = reached_by_no_face.iter().any(|crossing| {
+                folded_into_a_corner.contains(crossing)
+                    || self
+                        .nodes
+                        .iter()
+                        .any(|node| node.crossings.contains(crossing))
+            });
+            if met_elsewhere {
+                return Err(gave_up_on_it.into());
+            }
+            for crossing in reached_by_no_face {
+                self.crossings[crossing].reaches_the_face = false;
+                let drawn_by: Vec<Surface> = self.crossings[crossing]
+                    .every_surface_that_draws_it()
+                    .copied()
+                    .collect();
+                for surface in drawn_by {
+                    if !self.cuts_reached_by_no_face.contains(&surface) {
+                        self.cuts_reached_by_no_face.push(surface);
+                    }
                 }
             }
         }
@@ -2655,6 +2710,89 @@ impl<'f> Arrangement<'f> {
                 intersect(one, other, policy, log),
                 Ok(SurfaceMeet::SameSurface)
             )
+    }
+
+    /// Whether every surface that draws `crossing`
+    /// ([`Crossing::every_surface_that_draws_it`]) is carried only by faces
+    /// that lie on one closed side of a plane the whole crossing is strictly
+    /// past ([`BakedFace::sides_the_faces_of_each_cut_lie_in`]), so that no
+    /// face of the other solid, or of this one, has a point on it (Q1909).
+    ///
+    /// **Such a crossing is no edge of the answer.** To go from inside a solid
+    /// to outside it, a walk on the face has to cross one of that solid's
+    /// faces, and no face carrying the crossing's surfaces is anywhere on it.
+    /// A pin slanting up from a bar's axis is the shape: its pipe runs on
+    /// behind its cap through the bar's wall and end, where no face of the
+    /// pin goes.
+    ///
+    /// Only a crossing a cut put here, and never one a boundary edge runs
+    /// along or a corner is on ([`Arrangement::crossings_never_left_out`]):
+    /// those are edges of the face whatever crosses them.
+    fn no_face_that_draws_it_reaches_it(
+        &self,
+        crossing: usize,
+        never_left_out: &[bool],
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let it = &self.crossings[crossing];
+        if !it.cuts || never_left_out[crossing] {
+            return false;
+        }
+        let sides = &self.face.sides_the_faces_of_each_cut_lie_in;
+        it.every_surface_that_draws_it().all(|surface| {
+            sides
+                .iter()
+                .filter(|(cut, _)| cut == surface)
+                .flat_map(|(_, sides)| sides)
+                .any(|&side| self.lies_wholly_past(crossing, side, log))
+        })
+    }
+
+    /// Whether every point of `crossing` is strictly past `side`'s plane.
+    ///
+    /// - **A flat surface and a pipe** cross in one curve, held whole by the
+    ///   box [`a_box_round_where_a_flat_surface_cuts_a_pipe`] gives, so a sign
+    ///   over that box is the sign at every point of the crossing.
+    /// - **Two pipes** can cross in two loops, and the crossing is one of them.
+    ///   Where the plane provably shares no point with both pipes
+    ///   ([`a_cut_of_a_pipe_is_clear_of_the_third`]), no loop crosses it, and
+    ///   each lies wholly on one side; where the crossing starts
+    ///   ([`where_a_closed_crossing_starts`]) is a point of it and says which.
+    ///   A crossing is one loop: [`Arrangement::start_every_closed_crossing_that_has_no_node`]
+    ///   gives it one node, there, on the same grounds.
+    /// - Anything else is not asked.
+    fn lies_wholly_past(
+        &self,
+        crossing: usize,
+        side: ASideOfAPlane,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let partner = self.crossings[crossing].partner;
+        let past = |point: PredicatePoint| side.plane.side_of_point(point) == side.past_it();
+        if let (Surface::Plane(flat), Surface::Cylinder(pipe))
+        | (Surface::Cylinder(pipe), Surface::Plane(flat)) = (&self.surface, &partner)
+        {
+            return a_box_round_where_a_flat_surface_cuts_a_pipe(flat, pipe)
+                .is_some_and(|boxed| past(PredicatePoint::Constructed(boxed)));
+        }
+        let (Surface::Cylinder(_), Surface::Cylinder(_)) = (&self.surface, &partner) else {
+            return false;
+        };
+        if !a_cut_of_a_pipe_is_clear_of_the_third([
+            self.surface,
+            partner,
+            Surface::Plane(side.plane),
+        ]) {
+            return false;
+        }
+        let Ok(from) = where_a_closed_crossing_starts(
+            &self.crossings[crossing].run,
+            [&self.surface, &partner],
+            log,
+        ) else {
+            return false;
+        };
+        past(where_the_crossing_starts(&self.surface, &partner, from))
     }
 
     /// The node of the corner of the face that already is `place`, one of the
@@ -6570,7 +6708,9 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::work_out_how_each_crossing_runs`]), and so not inside
     /// the face, **or is one of the cuts that reach only the face's boundary**
     /// ([`Arrangement::leave_out_the_cuts_that_reach_only_the_boundary`]),
-    /// which can run on through the face undrawn. Those are not asked here. So
+    /// **or one no face of its cut reaches**
+    /// ([`Arrangement::cuts_reached_by_no_face`], Q1909), and either of those
+    /// can run on through the face undrawn. Those are not asked here. So
     /// every point inside the face where an asked cut is nothing is on a
     /// drawn arc, or is where it touches the face's surface without crossing
     /// it, and there its sign does not turn. A cell is connected and misses
@@ -6601,7 +6741,10 @@ impl<'f> Arrangement<'f> {
         let inside = |cycle: usize| self.winding_of_cycle[cycle] == Some(1);
         let asked: Vec<&Surface> = cuts
             .iter()
-            .filter(|cut| !self.face.cuts_that_reach_only_its_boundary.contains(cut))
+            .filter(|cut| {
+                !self.face.cuts_that_reach_only_its_boundary.contains(cut)
+                    && !self.cuts_reached_by_no_face.contains(cut)
+            })
             .collect();
         let mine: Vec<Option<Decision>> = asked
             .iter()
@@ -13791,6 +13934,7 @@ mod tests {
             cell_of: Vec::new(),
             cells: Vec::new(),
             winding: Vec::new(),
+            cuts_reached_by_no_face: Vec::new(),
         };
         let mut log = ProvenanceLog::new();
         arrangement
