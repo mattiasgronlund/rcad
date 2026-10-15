@@ -12824,6 +12824,9 @@ _queue-rows file:
 # row to the tier it names (§403.4). `pin` and `unpin` are Mattias's alone
 # (§430): the queue write guard asks him before any command that runs one, and
 # of the other verbs only `take`, `done` and `pick` touch a pinned row.
+# Only `done` ends a wait, so `after <id> -` sets a waiting row back to `todo`:
+# a drop that leaves rows waiting on it is refused, with the `after` step for
+# each of them, and goes through with those steps in the same `apply` (§451).
 # Each takes the lock on the claims file in the git common directory, checks the
 # file as it would be with `check-queue`, and writes only if that passes. `just
 # queue take` with no arguments, or any verb given the wrong ones, prints the
@@ -12894,6 +12897,7 @@ queue mode="" *args:
                 'just queue drop <id> <§N>                    close a row as dropped:§N, moved under Closed' \
                 'just queue park <id> <§N>                    mark a row parked:§N, left in its tier' \
                 'just queue after <id> <id>[,<id>...]         mark a row waiting on others: state after:<ids>' \
+                'just queue after <id> -                      a row that waits goes back to todo, for a row whose wait was dropped (§451)' \
                 'just queue rank <id> before <id>             move a row to sit just before another, in their shared tier' \
                 'just queue tier <id> <tier>                  move an open row to the foot of another tier' \
                 'just queue tag <id> <class>|small|-          set, replace or remove a row class or small mark' \
@@ -13883,8 +13887,10 @@ check-queue-page-selftest:
 # no rows may leave its heading out, and `just queue add` or `tier` writes it
 # when a row first goes there (§307.3). **Rows**: a unique id, a real tier, a state from the grammar, a model,
 # a write set, and a description whose last word is the section that argues for
-# it. An `after:` names rows that can still finish. An open row sits under its
-# own tier, and a closed one under Closed.
+# it. An `after:` names rows that can still finish: one naming a dropped row is
+# refused with the `just queue after` step that frees the row or keeps its other
+# waits (§451). An open row sits under its own tier, and a closed one under
+# Closed.
 #
 # **A class is the first word of a defect's description** (§352.2): wrong,
 # crash or refuses, then `/` and a bucket A to D. A first word shaped like a
@@ -14066,11 +14072,13 @@ _queue-check file decisions:
             for (i = 1; i <= nw; i++) {
                 id = wid[i]; ok = 1
                 m = split(waits[id], a, ",")
+                rest = ""
+                for (j = 1; j <= m; j++) if (!((a[j] in kindof) && kindof[a[j]] == "dropped")) rest = rest (rest == "" ? "" : ",") a[j]
                 for (j = 1; j <= m; j++) {
                     if (a[j] == id) err(wline[id], id ": waits on itself")
                     else if (!(a[j] in kindof) && a[j] ~ /^Q/) notheld++
                     else if (!(a[j] in kindof)) err(wline[id], id ": waits on " a[j] ", which is not a row in this file, and a T or D id is never handed out again")
-                    else if (kindof[a[j]] == "dropped") err(wline[id], id ": waits on " a[j] ", which was dropped and will never be done")
+                    else if (kindof[a[j]] == "dropped") err(wline[id], id ": waits on " a[j] ", which was dropped and will never be done; " (rest == "" ? "just queue after " id " - frees it, and just queue after " id " <id> makes it wait on a row that replaces " a[j] : "just queue after " id " " rest " keeps its other waits, with any row that replaces " a[j] " added to them"))
                     if (kindof[a[j]] != "done") ok = 0
                 }
                 if (ok) ready++
@@ -14334,7 +14342,8 @@ check-queue-selftest:
     refused sha         's/done:42df376e/done:42DF/'                'state "done:42DF"'
     refused after-none  's/after:Q2/after:T99/'                     'T99, which is not a row'
     refused after-self  's/after:Q2/after:Q5/'                      'waits on itself'
-    refused after-drop  's/after:Q2/after:D1/'                      'which was dropped'
+    refused after-drop  's/after:Q2/after:D1/'                      'Q5: waits on D1, which was dropped and will never be done; just queue after Q5 - frees it, and just queue after Q5 <id> makes it wait on a row that replaces D1'
+    refused after-drop-rest 's/after:Q2/after:D1,Q2/'               'Q5: waits on D1, which was dropped and will never be done; just queue after Q5 Q2 keeps its other waits, with any row that replaces D1 added to them'
     refused model       's/^T1  1  todo  opus/T1  1  todo  haiku/'  'model "haiku"'
     refused open-dash   's/^T1  1  todo  opus/T1  1  todo  -/'      'model "-"'
     refused dash-beside 's/  -  waits/  -,docs\/  waits/'           'stands alone'
@@ -15134,7 +15143,10 @@ check-queue-merge-driver:
 # under it, in the copy that took it and in another, until `narrow` takes the
 # hold down to another file; then `next` offers the row in both copies,
 # `blocked` drops it, and the plain listing, `elsewhere` and the page say what
-# the hold was narrowed to. The
+# the hold was narrowed to. §451's: a drop refused while two rows wait on it,
+# naming the `after` step for each, and going through with those steps in one
+# `apply`, one row back to `todo` and the other still waiting on Q2; and `-`
+# refused on a row that does not wait and beside an id. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -15469,6 +15481,31 @@ check-queue-api-selftest:
     sed -n '2p' <<<"$got" | grep -qF "$new_id: todo -> after:Q2" || fail "after @1 did not print the new row waiting on Q2"
     got=$(awk -v id="$new_id" '$1 == id { print $2, $3 }' "$batch_wt/docs/queue.md")
     [ "$got" = "2 after:Q2" ] || fail "after @1 did not write tier 2, after:Q2 on the row the batch just added"
+
+    got=$(q "$batch_wt" apply add 2 opus - "from/- a row dropped with two rows waiting on it §230" \
+        + add 2 opus - "from/- waits on the dropped row alone §230" + after @2 @1 \
+        + add 2 opus - "from/- waits on the dropped row and on Q2 §230" + after @3 @1,Q2 2>&1) \
+        || fail "the rows for the drop with waiters were refused"
+    dropped=$(sed -n '1p' <<<"$got")
+    alone=$(sed -n '2p' <<<"$got")
+    beside=$(sed -n '4p' <<<"$got")
+    got=$(q "$batch_wt" drop "$dropped" §230 2>&1) && fail "drop went through with $alone and $beside waiting on $dropped"
+    grep -qF "$alone: waits on $dropped, which was dropped and will never be done; just queue after $alone - frees it" <<<"$got" \
+        || fail "the refused drop did not name the step that frees $alone"
+    grep -qF "$beside: waits on $dropped, which was dropped and will never be done; just queue after $beside Q2 keeps its other waits" <<<"$got" \
+        || fail "the refused drop did not name the step that keeps $beside waiting on Q2"
+    got=$(q "$batch_wt" apply drop "$dropped" §230 + after "$alone" - + after "$beside" Q2 2>&1) \
+        || fail "the drop with the steps its refusal named, in one apply, was refused"
+    grep -qxF "$alone: after:$dropped -> todo" <<<"$got" || fail "after - did not print $alone going back to todo"
+    got=$(awk -v a="$alone" -v b="$beside" '$1 == a || $1 == b { print $1, $3 }' "$batch_wt/docs/queue.md")
+    [ "$got" = "$(printf '%s todo\n%s after:Q2' "$alone" "$beside")" ] \
+        || fail "the drop's apply did not leave $alone todo and $beside after:Q2"
+    got=$(q "$batch_wt" after "$alone" - 2>&1) && fail "after - freed $alone, which waits on nothing"
+    grep -qF "$alone is todo, and '-' frees only a row whose state is after:" <<<"$got" \
+        || fail "after - did not say $alone waits on nothing"
+    got=$(q "$batch_wt" after "$beside" -,Q2 2>&1) && fail "after took '-' beside an id"
+    grep -qF "'-' frees $beside of every row it waits on, so it stands alone" <<<"$got" \
+        || fail "after did not say '-' stands alone"
 
     got=$(q "$batch_wt" apply add 2 opus - "from/- the first of a pair §230" + add 2 opus - "from/- the second of a pair §230" 2>&1) \
         || fail "two adds in one batch were refused"

@@ -299,7 +299,9 @@ the Not merged bullet's one `just queue apply`.
   corpus file shows (§433.2). The three ways
   on: take the row again under a new label with the fix in its brief; park it,
   with the section its reason belongs under; or `just queue drop` it. A row
-  filed again after a drop says `was/<old row>`. `git worktree unlock` each
+  filed again after a drop says `was/<old row>`. A drop that leaves rows
+  waiting on it is refused, naming an `after` step for each: `after <id> -`
+  frees one, and the steps go in the same apply (§451). `git worktree unlock` each
   tree the result named once the apply is pushed.
 
 **A triage row's fault rows each name their fuzz target** (§433.3). The
