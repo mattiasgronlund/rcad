@@ -201,7 +201,10 @@ count in the table was the same on all three runs.
   `Invalid(DynamicRangeTooWide)`, leaned `4` through its apex, turned `0` and
   `1`, a limit pinned by ratio in
   `a_steep_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range`,
-  and 4 `a point inside a piece of a face`, turned `3` (Q464).
+  and 4 `a point inside a piece of a face`, turned `3` (Q464). **2026-10-15,
+  Q2046 (Q2040, §354.7):** the table's 2 `CannotMeshAFace`, leaned `1` and
+  unturned, crossing `0`'s union and cone less the block, now answer right too,
+  as `a_plane_cut_along_a_cones_other_nappe.rs`'s pins say.
 - **Round the unit cone**, the leaning block is 169 right of 192, the cube 88 of
   96 and the slab 80 of 80 (Q1733, §35.6; was 68 of 80, naming 12 `a point
   inside a piece of a face` in the slab from `−8`). The leaning block refuses 8
@@ -216,6 +219,10 @@ count in the table was the same on all three runs.
   Which of its two steps moved them was not traced. None of the unit cone's
   refusals names the apex. Nobody traced whether its step down the axis lands
   on the apex, as 350.1 works out, and is turned away there, as 350.3 says.
+  **2026-10-15, Q2046 (Q2040, §354.7):** the leaning block's 4
+  `CannotMeshAFace`, leaned `1/4` and `3/8`, crossing `0`, turn `1`'s
+  intersection and cone less the block, now answer right too, as
+  `a_plane_cut_along_a_cones_other_nappe.rs`'s pins say.
 - **The unit cone's `a point inside a piece of a face`** are 8 in the cube
   (side `2`, middle `1`, both turns). An untraced lead. **2026-10-11, Q1742
   (Q1733, §35.6):** the 12 that used to be in the slab (from `−8`, turned
