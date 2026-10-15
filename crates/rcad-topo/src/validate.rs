@@ -5160,10 +5160,10 @@ mod tests {
         Decision, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO, Mesh, RUNGS_THE_SECOND_LADDER_HAS_ASKED, Scope,
         a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
         as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space,
-        how_far_it_strays_from_one_plane, how_much_space_a_curved_solid_encloses,
+        how_far_across, how_far_it_strays_from_one_plane, how_much_space_a_curved_solid_encloses,
         how_much_space_hides_under, how_wide_an_arc_of_one_branch_is, it_lies_flat,
-        largest_coordinate_of, the_coarsest_mesh_whose_sides_do_not_cross, winding_of,
-        winding_round,
+        largest_coordinate_of, signed_volume_over_and_how_far_it_rounded,
+        the_coarsest_mesh_whose_sides_do_not_cross, the_sum_answers, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -7884,7 +7884,7 @@ mod tests {
             .expect("a finite turn");
 
             let mut model = an_empty_model();
-            let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, &turn, false)
+            let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, 0.0625, &turn, false)
                 .unwrap_or_else(|why| panic!("{what}: {why:?}"));
             if signed_volume_over(&its_coarsest_mesh(&model, lens, &what)) < 0.0 {
                 coarsest_below_zero += 1;
@@ -7894,7 +7894,7 @@ mod tests {
                 .unwrap_or_else(|why| panic!("{what}: {why:?}"));
 
             let inside_out =
-                a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), &turn, true);
+                a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), 0.0625, &turn, true);
             assert!(
                 matches!(
                     inside_out,
@@ -7909,17 +7909,142 @@ mod tests {
         );
     }
 
+    /// Row Q2047. **This test asserts a wrong verdict**, so a fix to it turns
+    /// this test round. The lens of
+    /// [`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`], with
+    /// the ball poking only `2^-28` in, is `8/3` of that poke thick, `9.9e-9`,
+    /// and turned `6/40` about `x`, `Model::validate` passes it built inside
+    /// out and the sound build is refused [`Invalid::VolumeIsNotPositive`].
+    ///
+    /// Every mesh [`how_much_space_a_curved_solid_encloses`] asks of it says
+    /// it may be off the lens by `2.65e-8`, `64/9` of the poke. That is more
+    /// than the lens is thick, so nothing keeps the meshes of its two faces
+    /// in their order, and what the mesh encloses has the wrong sign: about
+    /// `2.76e-16`, where the space it can leave out is `7.8e-15`. No rung
+    /// answers, the finer ones fold, and the walk hands back that sum,
+    /// unchecked, as its last line does whenever no rung answers.
+    #[test]
+    fn a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out() {
+        let poke = f64::powi(2.0, -28);
+        let thick = 8.0 * poke / 3.0;
+        let turn = Isometry::rotation(&Axis::x(), 6.0 * core::f64::consts::TAU / 40.0)
+            .expect("a finite turn");
+        let sound =
+            a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), poke, &turn, false);
+        assert!(
+            matches!(
+                sound,
+                Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
+            ),
+            "sound {sound:?}"
+        );
+
+        let policy = Policy::certified();
+        let mut model = an_empty_model();
+        let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, poke, &turn, true)
+            .expect("the inside-out lens is passed");
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .expect("the inside-out lens is passed");
+        let view = model.solid(lens).expect("this model made the key");
+        let enclosed =
+            how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new())
+                .expect("the walk hands back a sum");
+        assert!(enclosed > 0.0, "inside out, it encloses {enclosed}");
+
+        let coarsest =
+            the_coarsest_mesh_whose_sides_do_not_cross(view, &policy, &mut ProvenanceLog::new())
+                .expect("the coarsest mesh");
+        let top = how_far_across(&coarsest) / 2.0;
+        let mut meshed = 0;
+        for halvings in 0..=HALVINGS_A_FOLD_IS_ASKED_DOWN_TO {
+            let room = top / f64::powi(2.0, halvings);
+            let less = Deflection::of(room).expect("a room above zero");
+            match view.mesh(less, &policy, &mut ProvenanceLog::new()) {
+                Ok(mesh) => {
+                    meshed += 1;
+                    let strays = mesh.deviation().magnitude();
+                    let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+                    assert!(
+                        strays > thick && sum > 0.0 && !the_sum_answers(view, &mesh, sum, rounding),
+                        "room {room}: strays {strays}, encloses {sum}"
+                    );
+                }
+                Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
+                Err(why) => panic!("room {room}: {why:?}"),
+            }
+        }
+        assert!(meshed > 0, "every rung folded");
+    }
+
+    /// Row Q2047. One rung past [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] can turn
+    /// round the sum [`how_much_space_a_curved_solid_encloses`] hands back
+    /// when no rung answers. The inside-out lens of
+    /// [`a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out`],
+    /// turned `8/40`, is meshed at the last rung under the cap `2.65e-8` off
+    /// and encloses `2.76e-16`, the wrong sign. At the next rung it is meshed
+    /// `9.9e-9` off, the lens's own thickness, and encloses `−2.81e-16`, the
+    /// right sign. Neither answers, so the cap decides which of the two
+    /// comes back.
+    #[test]
+    fn a_rung_past_the_cap_can_turn_round_the_sum_no_rung_answered() {
+        let poke = f64::powi(2.0, -28);
+        let turn = Isometry::rotation(&Axis::x(), 8.0 * core::f64::consts::TAU / 40.0)
+            .expect("a finite turn");
+        let policy = Policy::certified();
+        let mut model = an_empty_model();
+        let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, poke, &turn, true)
+            .expect("the inside-out lens is passed");
+        let view = model.solid(lens).expect("this model made the key");
+        let enclosed =
+            how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new())
+                .expect("the walk hands back a sum");
+        assert!(enclosed > 0.0, "inside out, it encloses {enclosed}");
+
+        let coarsest =
+            the_coarsest_mesh_whose_sides_do_not_cross(view, &policy, &mut ProvenanceLog::new())
+                .expect("the coarsest mesh");
+        let top = how_far_across(&coarsest) / 2.0;
+        let sum_at = |halvings: i32| {
+            let room = top / f64::powi(2.0, halvings);
+            let mesh = view
+                .mesh(
+                    Deflection::of(room).expect("a room above zero"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("room {room}: {why:?}"));
+            let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+            assert!(
+                !the_sum_answers(view, &mesh, sum, rounding),
+                "room {room}: {sum} answers"
+            );
+            sum
+        };
+        let last_under_the_cap = sum_at(HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
+        let past_the_cap = sum_at(HALVINGS_A_FOLD_IS_ASKED_DOWN_TO + 1);
+        assert!(
+            last_under_the_cap == enclosed && past_the_cap < 0.0,
+            "it hands back {enclosed}; the last rung under the cap encloses \
+             {last_under_the_cap} and the next {past_the_cap}"
+        );
+    }
+
     /// The lens of [`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`]
-    /// built turned by `turn`, and with both faces pointing into it when
-    /// `inside_out`. Its corners are where the rim crosses `x = 0` and `z = 0`,
+    /// built turned by `turn`, with its two low corners `poke` inside the pipe,
+    /// so that it is about `8/3` of `poke` thick at its middle, and with both
+    /// faces pointing into it when `inside_out`. Its corners are where the rim
+    /// crosses `x = 0` and `z = 0`,
     /// and each edge between two of them is picked by the half-space facing
     /// their quadrant, which holds both corners strictly inside it at any turn.
     fn a_lens_where_a_ball_pokes_into_a_pipe(
         model: &mut Model,
+        poke: f64,
         turn: &Isometry,
         inside_out: bool,
     ) -> crate::Result<crate::SolidKey> {
-        let (pipe_radius, ball_at, rim_low) = (5.0f64, 8.0f64, 4.9375f64);
+        let (pipe_radius, ball_at) = (5.0f64, 8.0f64);
+        let rim_low = pipe_radius - poke;
         let across = (pipe_radius * pipe_radius - rim_low * rim_low).sqrt();
         let along = (2.0 * ball_at * (pipe_radius - rim_low)).sqrt();
         let ball_radius = (across * across + (ball_at - rim_low) * (ball_at - rim_low)).sqrt();
@@ -8130,273 +8255,5 @@ mod tests {
         }
         builder.add_shell(&drafted)?;
         builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
-    }
-
-    fn probe_lens(
-        model: &mut Model,
-        poke: f64,
-        turn: &Isometry,
-        inside_out: bool,
-    ) -> crate::Result<crate::SolidKey> {
-        let (pipe_radius, ball_at) = (5.0f64, 8.0f64);
-        let rim_low = pipe_radius - poke;
-        let across = (pipe_radius * pipe_radius - rim_low * rim_low).sqrt();
-        let along = (2.0 * ball_at * (pipe_radius - rim_low)).sqrt();
-        let ball_radius = (across * across + (ball_at - rim_low) * (ball_at - rim_low)).sqrt();
-        let pipe = Cylinder::new(Axis::z(), pipe_radius)?.transformed(turn);
-        let ball = Sphere::new(Point::new(0.0, ball_at, 0.0), ball_radius)?.transformed(turn);
-        let mut builder = SolidBuilder::new();
-        let corners = [
-            (across, rim_low, 0.0),
-            (0.0, pipe_radius, along),
-            (-across, rim_low, 0.0),
-            (0.0, pipe_radius, -along),
-        ]
-        .map(|(x, y, z)| {
-            builder
-                .add_vertex(turn.apply_to_point(Point::new(x, y, z)))
-                .expect("a finite corner")
-        });
-        let quadrants = [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)];
-        let mut edges = Vec::new();
-        for (at, (x, z)) in quadrants.into_iter().enumerate() {
-            let mut picked_by: SmallVec<[Picker; 1]> = SmallVec::new();
-            picked_by.push(Picker::from(HalfSpace::through_a_point_facing(
-                turn.apply_to_point(Point::origin()),
-                turn.apply_to_vector(Vector::new(x, 0.0, z)),
-            )?));
-            let run = EdgeRun::PartOfWhereItCrosses {
-                and: Surface::Cylinder(pipe),
-                picked_by,
-            };
-            edges.push(builder.add_edge(corners[at], corners[(at + 1) % 4], run)?);
-        }
-        let way = if inside_out {
-            Orientation::Reversed
-        } else {
-            Orientation::Forward
-        };
-        let mut the_rim_walked = |way: Orientation| -> Vec<_> {
-            let mut ordered = edges.clone();
-            if way == Orientation::Reversed {
-                ordered.reverse();
-            }
-            ordered
-                .into_iter()
-                .map(|edge| {
-                    DraftStep::Along(
-                        builder
-                            .add_coedge(edge, way)
-                            .expect("an edge this builder made"),
-                    )
-                })
-                .collect()
-        };
-        let ball_steps = the_rim_walked(way);
-        let pipe_steps = the_rim_walked(way.reversed());
-        let ball_wire = builder.add_wire(&ball_steps)?;
-        let pipe_wire = builder.add_wire(&pipe_steps)?;
-        let ball_face = builder.add_face(Surface::Sphere(ball), &[ball_wire])?;
-        let pipe_face = builder.add_face(Surface::Cylinder(pipe), &[pipe_wire])?;
-        builder.add_shell(&[(ball_face, way), (pipe_face, way)])?;
-        builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
-    }
-
-    #[test]
-    fn probe_q2047_thin_lens() {
-        for k in [24, 26, 28, 30, 32] {
-            let poke = f64::powi(2.0, -k);
-            for fortieths in 0..40 {
-                let what = format!("poke 2^-{k}, {fortieths}/40");
-                let turn = Isometry::rotation(
-                    &Axis::x(),
-                    f64::from(fortieths) * core::f64::consts::TAU / 40.0,
-                )
-                .expect("a finite turn");
-                let mut model = an_empty_model();
-                let sound = probe_lens(&mut model, poke, &turn, false);
-                let mut other = an_empty_model();
-                let inside_out = probe_lens(&mut other, poke, &turn, true);
-                let trace = match (&sound, &inside_out) {
-                    (Ok(lens), _) => {
-                        format!(
-                            "SOUND {}",
-                            probe_trace_the_walk(model.solid(*lens).expect("key"))
-                        )
-                    }
-                    (_, Ok(lens)) => format!(
-                        "INSIDE-OUT {}",
-                        probe_trace_the_walk(other.solid(*lens).expect("key"))
-                    ),
-                    _ => "neither".to_owned(),
-                };
-                println!(
-                    "PROBE {what}: sound {:?} inside-out {:?} | {trace:?}",
-                    sound.as_ref().map(|_| ()),
-                    inside_out.map(|_| ())
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn probe_q2047_deep_walk() {
-        for k in [28, 32] {
-            for fortieths in [6, 7, 8] {
-                let poke = f64::powi(2.0, -k);
-                let turn = Isometry::rotation(
-                    &Axis::x(),
-                    f64::from(fortieths) * core::f64::consts::TAU / 40.0,
-                )
-                .expect("a finite turn");
-                let mut model = an_empty_model();
-                let lens = probe_lens(&mut model, poke, &turn, true).expect("inside out builds");
-                let view = model.solid(lens).expect("key");
-                let policy = Policy::certified();
-                let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(
-                    view,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-                .expect("coarsest");
-                let top = super::how_far_across(&coarsest) / 2.0;
-                println!(
-                    "DEEP 2^-{k} {fortieths}/40 top {top:.3e} coarse pts {}",
-                    coarsest.points().len()
-                );
-                let mut room = top;
-                for rung in 0..40 {
-                    let Ok(less) = Deflection::of(room) else {
-                        println!("DEEP rung {rung}: deflection refused");
-                        break;
-                    };
-                    let started = std::time::Instant::now();
-                    match view.mesh(less, &policy, &mut ProvenanceLog::new()) {
-                        Ok(finer) => {
-                            let (sum, rounding) =
-                                super::signed_volume_over_and_how_far_it_rounded(&finer);
-                            let hidden = how_much_space_hides_under(view, &finer);
-                            println!(
-                                "DEEP rung {rung} room {room:.3e} dev {:.3e} sum {sum:.4e} \
-                                 rounding {rounding:.2e} hidden {hidden:?} pts {} tris {} \
-                                 answers {} {:?}",
-                                finer.deviation().magnitude(),
-                                finer.points().len(),
-                                finer.triangles().len(),
-                                super::the_sum_answers(view, &finer, sum, rounding),
-                                started.elapsed()
-                            );
-                            if super::the_sum_answers(view, &finer, sum, rounding) {
-                                break;
-                            }
-                        }
-                        Err(why) => {
-                            println!("DEEP rung {rung} room {room:.3e}: {why:?}");
-                            if !matches!(why, Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) {
-                                break;
-                            }
-                        }
-                    }
-                    room /= 2.0;
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn probe_q2047_far_lens_trace() {
-        for exponent in [36, 40, 42, 43, 44, 45, 46] {
-            let offset = f64::powi(2.0, exponent);
-            for fortieths in [8, 28] {
-                let what = format!("2^{exponent}, {fortieths}/40");
-                let turn = Isometry::translation(Vector::new(offset, offset, offset))
-                    .expect("t")
-                    .compose(
-                        &Isometry::rotation(
-                            &Axis::x(),
-                            f64::from(fortieths) * core::f64::consts::TAU / 40.0,
-                        )
-                        .expect("a finite turn"),
-                    );
-                let mut model = an_empty_model();
-                let mut builder_free = SolidBuilder::new();
-                let _ = &mut builder_free;
-                let sound = probe_lens(&mut model, 0.0625, &turn, false);
-                let trace = sound
-                    .as_ref()
-                    .map(|&lens| probe_trace_the_walk(model.solid(lens).expect("key")));
-                let inside_out = probe_lens(&mut an_empty_model(), 0.0625, &turn, true);
-                println!(
-                    "PROBE {what}: sound {:?} inside-out {:?} | {trace:?}",
-                    sound.as_ref().map(|_| ()),
-                    inside_out.map(|_| ())
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn probe_q2047_lens_built_far_and_placed_near() {
-        for exponent in [0, 36, 38, 40, 41, 42, 43, 44] {
-            let offset = f64::powi(2.0, exponent);
-            for fortieths in [0, 3, 8, 13, 17, 23, 28, 33] {
-                let what = format!("2^{exponent}, {fortieths}/40");
-                let turn = Isometry::translation(Vector::new(offset, offset, offset))
-                    .expect("t")
-                    .compose(
-                        &Isometry::rotation(
-                            &Axis::x(),
-                            f64::from(fortieths) * core::f64::consts::TAU / 40.0,
-                        )
-                        .expect("a finite turn"),
-                    );
-                let mut model = an_empty_model();
-                let lens = match a_lens_where_a_ball_pokes_into_a_pipe(&mut model, &turn, false) {
-                    Ok(lens) => lens,
-                    Err(why) => {
-                        println!("PROBE {what}: build {why:?}");
-                        continue;
-                    }
-                };
-                if exponent > 0 {
-                    model
-                        .place_solid(
-                            lens,
-                            &Isometry::translation(Vector::new(-offset, -offset, -offset))
-                                .expect("t"),
-                        )
-                        .expect("key");
-                }
-                let view = model.solid(lens).expect("key");
-                let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(
-                    view,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
-                let coarse = coarsest.as_ref().map(|mesh| {
-                    (
-                        signed_volume_over(mesh),
-                        how_much_space_hides_under(view, mesh),
-                        it_lies_flat(mesh),
-                        mesh.points().len(),
-                    )
-                });
-                let top_rung = view.mesh(
-                    Deflection::of(1.0).expect("d"),
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
-                let enclosed = how_much_space_a_curved_solid_encloses(
-                    view,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                );
-                let checked = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                println!(
-                    "PROBE {what}: coarse {coarse:?} rung1 {:?} encloses {enclosed:?} validate {checked:?}",
-                    top_rung.map(|mesh| signed_volume_over(&mesh))
-                );
-            }
-        }
     }
 }
