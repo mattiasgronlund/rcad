@@ -1852,8 +1852,8 @@ fn is_one_circle_cut_in_two(
 /// the face's boundary, and borders the face's own side along that neighbour on
 /// the side the face does not keep. So the face sits inside the part in front
 /// of all of them; and that part is connected — a plane cut by half-planes and
-/// round discs, a sphere cut by any two planes or by planes each with its
-/// centre on or behind it, or a ring cut by planes through its axis and at most
+/// round discs, a sphere cut by planes as [`leaves_a_ball_in_one_piece`] sets
+/// out, or a ring cut by planes through its axis and at most
 /// one square to it — with the face's boundary on its boundary, so the face is
 /// all of it. On a sphere the "in front of any" reading asks the same
 /// of the part behind all of them, which is the cuts turned round.
@@ -1878,7 +1878,9 @@ fn is_one_circle_cut_in_two(
 /// it lies inside and crosses in a closed curve, a flat face that is a polygon
 /// with one bite out of its edge where it lies outside a pipe
 /// ([`is_a_polygon_less_one_bite_of_a_pipe`]), a sphere face whose sides are
-/// arcs cut by two planes or by planes each with the centre on one side of it
+/// arcs and whole circles cut by two planes, by planes with one point inside
+/// the ball on or behind each, or by such planes and one more whose circle
+/// meets the part in front of them in one arc at most
 /// ([`leaves_a_ball_in_one_piece`]), a cone face or a pipe face cut by
 /// planes as [`is_a_family_this_follows`] sets out, and a ring face cut by
 /// planes through its axis and at most one square to it
@@ -1892,6 +1894,17 @@ fn is_one_circle_cut_in_two(
 /// ellipse and a pipe's circle earn that the same way a ball's circle does,
 /// through [`where_a_closed_crossing_is_centred`]. Anything else is refused by
 /// name, as before.
+///
+/// **A ball face's side right round the circle a plane cuts it in is a cut
+/// with no corners** (row Q2038). It has no two ends for step 1 to read the
+/// way it runs between, but the circle is all of where its plane crosses the
+/// sphere, so the face lies wholly on one side of that plane, and
+/// [`what_the_part_in_front_of_its_cuts_holds`] reads the side off the face's
+/// other corners. The skin of a ball kept to a block's corner and behind a
+/// steep plane whose circle lies inside what the block keeps has one. Before,
+/// such a side refused every reading in [`the_way_a_side_runs`], so no face the
+/// steps answered is answered differently now. A cone face's side right round
+/// a closed curve goes down its axis instead, below.
 ///
 /// **One face is one of two pieces in front of every cut, and is told from the
 /// other**: a wall of a bar with two flats, where the part of the pipe between
@@ -2043,7 +2056,7 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             };
             assert!(
                 whole_curves.is_empty(),
-                "only a cone face's sides are read as whole curves"
+                "only a cone or a ball face's sides are read as whole curves"
             );
             what_a_flat_face_of_chords_and_arcs_holds(solid, face, &flat, sides, point, policy, log)
         }
@@ -3933,7 +3946,7 @@ fn is_a_round_wire_of_a_flat_face(face: FaceView<'_>, wire: WireView<'_>) -> boo
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for an arc no half-space
 /// tells from its sibling and that is not an arc of a cone's face along a curve
 /// that does not close ([`the_way_into_an_arc_that_does_not_close`]), a whole
-/// closed crossing among parts of others that is not a cone face's
+/// closed crossing among parts of others that is not a cone or a ball face's
 /// [`WholeCurve`], which never reaches here, or a kind of run this has not been
 /// taught, and whatever [`the_face_across`] gives for the edge.
 fn the_way_a_side_runs(
@@ -5014,8 +5027,11 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// On a ring it is planes through the axis, no two side by side, and at most
 /// one plane square to it, as [`leaves_a_ring_in_one_piece`] sets out.
 ///
-/// On a sphere, it is any two planes, or planes with one point inside the ball
-/// on or behind each of them ([`leaves_a_ball_in_one_piece`]). **Two planes leave one piece
+/// On a sphere, it is any two planes, planes with one point inside the ball
+/// on or behind each of them, or planes that are one of those two kinds once
+/// one plane is left out, where the circle that plane cuts the sphere in meets
+/// the part in front of the rest in one arc at most
+/// ([`leaves_a_ball_in_one_piece`]). **Two planes leave one piece
 /// whatever they keep** (row
 /// Q1162). They cut the sphere in two circles, which meet in at most two
 /// points. Where they cross at two, the part in front of both has its edge on
@@ -5070,38 +5086,67 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// not inside, and that is refused though the part is the whole of what the
 /// two keep.
 ///
+/// **Past those, one plane may be left out, if its circle meets what the rest
+/// keep in one arc at most** (row Q2038). Say the part `R` of the sphere in
+/// front of every other cut is one piece, by either argument above, and the
+/// circle `C` the one left out cuts the sphere in meets `R` in one arc, the
+/// whole circle, or nothing. `C` cuts the sphere into two caps, and the part
+/// wanted is the part of `R` in the cap that plane keeps. Where `C` meets `R`,
+/// every piece of `R` less `C` borders `C`, since a piece that did not would
+/// be open and closed in `R`, and so all of it, as `R` is one piece. Near each
+/// point of the arc, `R` is a small disc that `C` cuts
+/// into two halves, one in each cap, and the halves in one cap all join along
+/// the arc, which is one piece. So `R` less `C` is two pieces at most, one in
+/// each cap, and the part in front of every cut is one of them, or all of `R`
+/// when `C` misses `R`. [`its_circle_meets_what_the_others_keep_in_one_arc`]
+/// counts the arc's ends. Each is a **corner**, where `C` crosses another
+/// plane at a point strictly in front of every cut but those two, and each
+/// corner ends one arc only, since `C` runs from that plane's front to its
+/// back there; so two corners at most is one arc at most. A corner on a third
+/// plane, and a line of two planes that only touches the ball, where `C`
+/// meets the other's circle without crossing it, are refused. A ball of
+/// radius 3 kept to `x ≥ 1`, `y ≥ 2` and `x + y + z ≤ 5.1` is followed this
+/// way, by the circle of `x = 1`, though its three planes meet outside it; so
+/// is one kept to `x ≥ 3`, `x ≥ z` and `y ≤ 4`, whose circle on `y = 4` only
+/// touches what the other two keep, by the circle of `x = z`; and so is one
+/// kept to `x, y ≥ 1.5` and `x + y ≤ 4.2`, whose circle on `x + y = 4.2` lies
+/// wholly inside what the other two keep and takes a disc out of it
+/// (`a_circle_touching_twice_what_two_planes_keep_is_refused_and_once_or_biting_followed`
+/// below, and `tests/a_ball_kept_by_a_block_and_a_leaning_plane.rs`).
+///
 /// **The "in front of any" reading needs the part *behind* every cut in one
 /// piece instead**: the ball kept to `x, y, z ≤ 1.3` below is the part behind
 /// cuts keeping `x, y, z ≥ 1.3`, and it is two pieces. So
 /// [`what_the_part_in_front_of_its_cuts_holds`] reads a sphere face that way
 /// only when the cuts turned round are one piece here too, which two planes
-/// always are, and three or more are when some point inside the ball is on or
-/// *in front of* each. That stays right as this widens, since what it asks is
-/// what the argument above shows of any planes, turned round or not
-/// (`the_part_behind_three_planes_meeting_inside_a_ball_is_one_piece` below).
-/// A face with three or more cuts, no such point, and every side behind every
-/// other cut is refused: the part behind all of them can be two pieces.
+/// always are, three or more are when some point inside the ball is on or
+/// *in front of* each, and any are when one left out leaves such planes and a
+/// circle with two corners at most. That stays right as this widens, since
+/// what it asks is what the arguments above show of any planes, turned round
+/// or not (`the_part_behind_three_planes_meeting_inside_a_ball_is_one_piece`
+/// below). A face with three or more cuts that the cuts turned round are not
+/// shown one piece for, and every side behind every other cut, is refused: the
+/// part behind all of them can be two pieces.
 ///
-/// **With no such point found, three planes or more are refused, and that is a
-/// limit for some and a gap for others.** There is nothing to push from, and
-/// the part in front of all of them can be two pieces with nothing between
-/// them, which this family has no answer for: three caps lost can go right
-/// round a patch, the planes meeting outside the ball
+/// **With none of those, three planes or more are refused, and that is a
+/// limit for some and a gap for others.** The part in front of all of them can
+/// be two pieces with nothing between them, which this family has no answer
+/// for: three caps lost can go right round a patch, the planes meeting outside
+/// the ball, and each circle left out has four corners
 /// (`three_planes_that_miss_a_balls_centre_leave_its_skin_in_two_pieces`
-/// below), one is enough when it cuts across the middle of what two others
+/// below); one is enough when it cuts across the middle of what two others
 /// keep, the three normals in one plane so they meet nowhere
 /// (`one_plane_with_a_balls_centre_in_front_beside_two_with_it_behind_leaves_two_pieces`),
+/// or touches the rim of what two others keep at two points
+/// (`a_circle_touching_twice_what_two_planes_keep_is_refused_and_once_or_biting_followed`);
 /// and one can cut a corner's tip off, as above. But the part can be one piece
-/// with no point found, and that is a gap: a cap lost from inside what the
-/// others keep leaves a ring, a circle that only touches the rim of what the
-/// others keep takes nothing from it
-/// (`a_circle_touching_what_two_planes_keep_is_refused` below), and a cap can
-/// bite one side of it. Nor are the meeting points of three every place `o`
-/// can be: the point of the region behind every cut nearest the centre, which
-/// is inside the ball whenever any point of it is, can also be the foot of the
-/// centre on one plane or on the line two meet in. Telling the rest apart wants
-/// where the circles cross that rim, which nothing here reads, and no face has
-/// asked for any of it (§13).
+/// with none of those, and that is a gap: `z ≤ 7` above meets the corner of
+/// what the other two keep on the sphere, which puts a corner of its circle on
+/// a third plane. Nor are the meeting points of three every place `o` can be:
+/// the point of the region behind every cut nearest the centre, which is
+/// inside the ball whenever any point of it is, can also be the foot of the
+/// centre on one plane or on the line two meet in, and two circles may need to
+/// be left out at once. No face has asked for those yet (§13).
 ///
 /// # On a cone it is planes the apex is in front of, any number of them, and one it is on or two that meet inside the cone
 ///
