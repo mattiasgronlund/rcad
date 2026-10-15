@@ -623,6 +623,13 @@ Five items, each with a demonstration and none of them a live crash.
    next reader. Left alone deliberately: fixing it means touching the
    pole-choosing rule.
 
+   *2026-10-15, Q2051 (from Q891): since Q508 they agree.*
+   `which_pole_this_cap_reaches` in `mesh.rs` now reads a cap's pole off the
+   walk round its rim (`runs_up`), and `cut_a_cap_up_to_its_pole`'s doc says
+   the same thing. Q891's lane read `mesh.rs` lines 1916-1917 and 2396-2399
+   at `1c8854a6` and found no trap left to flag; its row named this item and
+   left this section alone.
+
 ### 41.9 The numbers
 
 **At the three lanes and this gate.** The fourth lane's column is §41.12's, and

@@ -244,4 +244,17 @@ built). **Verdict: nothing to fix.** The doc of
 refusal rather than an assert, since a wire this kernel never wrote can still
 reach it (§67.2).
 
+*2026-10-15, Q2063: the turned block's refusal above is settled by §39.4, not
+fixed here.* The 2026-10-13 note of §39.4 (Q1901, from Q1116) holds that a
+solid touching itself along a line is an answer, two shells included, the
+way the block less a prism lying inside it along its edge is
+(`a_prism_lying_on_one_edge.rs`), and that refusing such an answer is a gap.
+The block built directly on the touching plane, with no turn, already
+answers it: under `Policy::certified()` the block round the cone less the
+cone comes out `1018.0418308218332` with error `0.7511` against
+`1152 − CONE = 1017.9587134468355`, 8 faces in two shells of 6 and 2, and
+`Model::validate` passes it, pinned in
+`a_block_whose_wall_touches_the_cone_exactly_along_a_ruling_leaves_both_as_they_stand`.
+Closes Q1873; the turned block's own rounding refusal is untouched.
+
 Commands: `just decision 198.2`, `198.3`, `197.2`, `167`, `16.10`.

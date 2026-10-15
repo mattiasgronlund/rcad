@@ -200,14 +200,16 @@ fn planes_through_the_apex_cut_a_piece_out_of_the_cone_and_every_fuse_answers() 
 /// `Plane::meet_of_three` puts round the meet of its three planes, whose `y` is
 /// `5.366563145999494` at least. The fuse writes each corner down again from
 /// those planes, within the slop it tags it with, so it moves them by up to
-/// `7.9e-15`, and the block less the cone comes out `1152.0000000000007`. That
-/// answer's own error, `5.7e-19`, is only the space hidden under the hair of
-/// cone skin it keeps. How far the corners moved is given room as
-/// `two_turned_cubes_a_rounding_apart.rs` gives it: the skin's area times the
-/// furthest move, `5.7e-12` here, against the `1.4e-12` the answer is out. The
-/// error also leaves out the rounding of the answer's own sum: summed exactly,
-/// its mesh encloses `7.9e-15` less than the measure says, which that room
-/// covers seven hundred times over.
+/// `7.9e-15`, and the block less the cone comes out `1152.0000000000007`.
+/// **`SolidView::measured_over` now publishes that answer's error as
+/// `8.373360852862103e-14`, the rounding of its own sum included (§338).**
+/// Of that, `5.7e-19` is the space hidden under the hair of cone skin the
+/// answer keeps, and the rest is the sum's own rounding: summed exactly, its
+/// mesh encloses `8.373304168036343e-14` less than the measure says. How far
+/// the corners moved is given room as `two_turned_cubes_a_rounding_apart.rs`
+/// gives it: the skin's area times the furthest move, `5.7e-12` here,
+/// against the `1.4e-12` the answer is out, and that room covers the mesh's
+/// own gap about sixty-eight times over, not seven hundred.
 ///
 /// Until Q1537 every fuse was refused `Undecidable` before anything was
 /// meshed, on a lens of the block's end face where that ruling carried on past
@@ -309,6 +311,15 @@ const THE_WEDGE: f64 = 2e-21;
 /// `(−2, −6)`, `(10, −6)`, `(10, 5)`, `(−2, −1)`, of volume 1152, and the block
 /// less the cone is one solid of two shells: the block, and the cone's hollow
 /// inside it, touching its wall along the ruling.
+///
+/// **Two shells touching along that line are an answer, not a gap**, by the
+/// 2026-10-13 note of §39.4 (Q1901, from Q1116): a solid touching itself
+/// along a line is an answer, two shells included, the way the block less a
+/// prism lying inside it along its edge is
+/// (`a_prism_lying_on_one_edge.rs`). Under `Policy::certified()` the block
+/// round the cone less the cone answers `1018.0418308218332` with error
+/// `0.7511` against `1152 − CONE = 1017.9587134468355`, 8 faces in two
+/// shells of 6 and 2, and `Model::validate` passes it.
 #[test]
 fn a_block_whose_wall_touches_the_cone_exactly_along_a_ruling_leaves_both_as_they_stand() {
     let wall = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, -2.0, 0.0))

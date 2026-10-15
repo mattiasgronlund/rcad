@@ -619,12 +619,21 @@ A probe of the lane's, never committed, ran the same fuses at other radii:
   the box `(−1, ±0, ±8.9e-16)`. Under `tolerant(25.0)` every fuse answers one
   solid with five `orient3d` records.
 
+**2026-10-15, Q2042: the flush bar's refusal below is closed.** Q1854 found
+that refusal a gap, closed by `a_plane_rests_along_a_pipe` in
+`turns_anticlockwise`, `crates/rcad-topo/src/fuse/arrange.rs`, which asks
+`intersect` under `Policy::certified()` for the one straight line the side
+touches the wall along.
+`a_bar_flush_inside_a_turned_blocks_side.rs` pins all 12 fuses of the bar
+flush inside the turned block's side at their closed forms with an empty log
+under `Policy::certified()` and `Policy::tolerant(25.0)`.
+
 **What this leaves**, each filed as a queue row by Q859:
 
 - The refusal of every fuse of this shape, `refuses/C`, to be traced once
   Q1386, the grazing block's own refusal while its answer is written, is
   traced.
-- The flush bar's `orient3d` refusal under a certified policy, `refuses/B`.
+- The flush bar's `orient3d` refusal under a certified policy: closed, above.
 - The sentence in `the_one_ahead_of_the_start`'s doc comment that says the run
   and the centre are not one polynomial on an ellipse. It should say that they
   are at every walked start, and cite this part.
