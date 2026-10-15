@@ -108,6 +108,23 @@ fn q1839_probe_what_each_answer_is() {
     }
 }
 
+#[test]
+fn q1839_trace_unplaced() {
+    let policy = Policy::certified().with_dynamic_range_check(rcad_predicates::Severity::Warn);
+    for rule in [Rule::Intersection, Rule::Difference] {
+        eprintln!("Q1839T ==== {rule:?}");
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm"));
+        let tetrahedron = a_tetrahedron(&mut model);
+        let block = a_block(&mut model, &Isometry::identity());
+        let mut log = ProvenanceLog::new();
+        let answer = model.fuse(&[tetrahedron], &[block], rule, &policy, &mut log);
+        eprintln!(
+            "Q1839T ==== {rule:?} {:?}",
+            answer.map(|answer| answer.solids().len())
+        );
+    }
+}
+
 fn a_block(model: &mut Model, placement: &Isometry) -> SolidKey {
     let footprint = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]])
         .build(&Policy::certified(), &mut ProvenanceLog::new())

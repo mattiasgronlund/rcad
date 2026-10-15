@@ -1153,13 +1153,16 @@ impl<'f> Arrangement<'f> {
         };
         arrangement.draw_the_crossings(cuts, policy, log)?;
         arrangement.place_the_corners(policy, log)?;
+        arrangement.q1839_dump("corners");
         arrangement.leave_out_the_cuts_clear_of_the_face();
         arrangement.place_the_meets(policy, log)?;
         arrangement.place_the_touches();
         arrangement.leave_out_the_cuts_that_reach_only_the_boundary();
         arrangement.start_every_closed_crossing_that_has_no_node(log)?;
         arrangement.work_out_how_each_crossing_runs(log)?;
+        arrangement.q1839_dump("meets");
         arrangement.merge_points_that_are_one_point(policy, log)?;
+        arrangement.q1839_dump("merged");
         arrangement.fold_the_straight_cuts_along_one_line();
         arrangement.cut_the_crossings_into_arcs(policy, log)?;
         arrangement.walk_the_cycles(policy, log)?;
@@ -1167,6 +1170,37 @@ impl<'f> Arrangement<'f> {
         arrangement.group_the_cycles_into_cells(cuts, policy, log)?;
         arrangement.count_the_windings()?;
         Ok(arrangement)
+    }
+
+    fn q1839_dump(&self, stage: &str) {
+        if std::env::var_os("Q1839_TRACE").is_none() {
+            return;
+        }
+        let Some(flat) = self.surface.as_plane() else {
+            return;
+        };
+        eprintln!("Q1839T {stage} face {:?}", flat.coefficients());
+        for (index, crossing) in self.crossings.iter().enumerate() {
+            eprintln!(
+                "Q1839T   crossing {index} partner {:?} reaches {} cuts {}",
+                crossing
+                    .partner
+                    .as_plane()
+                    .map(|plane| plane.coefficients()),
+                crossing.reaches_the_face,
+                crossing.cuts
+            );
+        }
+        for (index, node) in self.nodes.iter().enumerate() {
+            eprintln!(
+                "Q1839T   node {index} {:?} vertex {} made_of {:?} crossings {:?}",
+                node.point.enclosure(),
+                node.vertex.is_some(),
+                node.made_of.map(|(surfaces, _)| surfaces
+                    .map(|surface| surface.as_plane().map(|plane| plane.coefficients()))),
+                node.crossings
+            );
+        }
     }
 
     /// The pieces: the cells the face's boundary winds once round.
