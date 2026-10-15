@@ -17,7 +17,8 @@ share its test file, and the merge closes the ones it now answers. Today that
 was done by hand. `just queue families` will list the families once Q2003
 lands. Until then the line in 450.2 lists them. Where many separate fixes
 have already landed in one place, 450.6 looks back at whether they were one
-fix.
+fix. 450.7 says what the first look back found: stale rows, and no measure of
+the question it was filed for.
 
 ### 450.1 What happened on 10-14
 
@@ -331,3 +332,122 @@ still pass.
 **No trigger and no recipe yet (§13).** One look back is filed. If it finds a
 fix at the cause, a trigger earns a recipe, for example "a function that N
 separate fixes changed in a fortnight". If it does not, nothing is built.
+
+### 450.7 What the first look back found
+
+*Mattias, 2026-10-15: "What can we learn from the Q2025 execution?" The session
+after the one that filed Q2025 read its run's transcripts and its close at
+`ce36a7c6`, and answered him under `CLAUDE.md`'s "Decide it yourself".*
+
+**In short.** Q2025 answered what its row asked, but not what 450.6 filed it
+for. It re-ran twelve open rows and found only two still about the refusal.
+Four rows were re-filed and one went to tier 1, which was worth its 23 minutes.
+But whether one fix at the cause would answer shapes nobody filed was never
+measured. The row put the sweep behind a count of open rows, and the count came
+up two.
+
+**What the lane answered.** The lane of run `wf_899a4886-bd4`, base `08d56823`,
+read each of the 14 merges by its diffstat, the functions it added and its
+branch's commit subjects, not by the diff itself. It put the 13 fixes in three
+kinds:
+
+- seven add a case for one kind of cut on one kind of surface: Q876, Q1009,
+  Q1162, Q1177, Q1252, Q1367 and Q1863;
+- four wind the face's own boundary: Q1002 and Q1165 on a flat face, Q1227
+  and Q1246 on a cone face seen down its axis;
+- two read a side better, Q971 and Q1033, as Q975 did.
+
+So the cases are one per kind of cut on each kind of surface, not one rule
+`holds.rs` lacks. Winding is one rule, but each kind of surface needs its own
+flat picture. For a pipe face whose sides are rulings or plane cuts not along
+the axis, count the crossings along the ruling up from the point. For a ball
+face, project it flat from a point of the sphere off the face. A ring, the lane
+said, has no such picture: "a loop round the tube bounds nothing". None of the
+three was run, and the ring's is a claim that something cannot be done, with no
+demonstration (§16.10). By the lane's own reckoning a pipe reading would have
+covered Q876, Q975 and Q1252, and a ball reading Q1162.
+
+**What it bought.** 23 minutes from the take (`6e3c4e5c`, 22:18:47Z on 10-14) to
+the close (`91352584`, 22:41:21Z): prep 2, lane 11, dispatcher 9. About four and
+a half of the dispatcher's nine were one `just queue apply`, looking for each
+`from/` and `was/` word on every branch. The lane's context peaked at 195k. It
+passed the 150k lane budget at 152k, before its first probe ran: about 35k went
+to reading `holds.rs`, and 60k to the twelve rows and their test files, since
+each row's shape is in a file of its own.
+
+It ran the twelve rows at the base, in a copy of the tree with a print at each
+of the 14 places `holds.rs` builds the refusal, so every refusal came with its
+line. Of the twelve:
+
+- two still refuse for want of a face reading: Q1350 on a ball, Q1610 on a
+  pipe;
+- two refuse somewhere else now: Q640 as `Undecidable`, Q1020 behind a mesher
+  refusal;
+- one answers: Q961;
+- five name the refusal beside a cause of their own, and their rows stand:
+  Q491, Q1111, Q1395, Q1410 and Q1969;
+- two ask for a shape, and were not run: Q1282 and Q1832.
+
+Q1350, Q640, Q1610 and Q1020 were re-filed with what the runs showed, as Q2029
+to Q2032. Q2029 went from tier 5 to tier 1 as `refuses/B`: two fuses a designer
+makes reach it, and it was class C only because no fuse face had asked. That is
+the find of the run. It is queue hygiene, and it paid. It is not what 450.6
+filed the look back for.
+
+**What it did not ask.** Mattias asked whether a fix at the cause would also fix
+shapes nobody had filed, and 450.6 says to count that with a sweep. Q2025's row,
+written by the session that wrote 450.6, put the sweep behind a gate: "If one
+rule covers three or more, file its fix row naming the rows it should close,
+with a sweep". The lane counted open rows and found two. Counted over the merged
+fixes as well, a pipe reading covers three of them and one open row, and the
+gate as written could not see that. So no sweep ran.
+
+The row also named the other outcome in advance: "if not, say so as a limit of
+the approach". The lane said it in those words, one paragraph after saying a
+pipe reading and a ball reading exist. In §16.10's terms that is a gap with two
+open rows behind it. A limit is where the answer does not exist.
+
+And the readings stayed in the lane's `remaining`. The dispatcher re-ran two of
+its probes and carried what they showed into the four rows, but not the
+readings. Q2029 went to tier 1 asking for one more case in
+`leaves_a_ball_in_one_piece`, the pattern the look back was filed to question.
+
+**The mark was right.** The hunk count named `is_one_circle_cut_in_two` by
+accident. Its hunks were in the doc comment below it, the list of families of
+faces `what_a_face_cut_by_part_of_a_crossing_holds` reads, which the fixes added
+their cases to. So doc-comment hunks should not be discounted: here they were
+the signal, as a list that grows by one entry per fix is what one case per fix
+looks like. The 14 merges added 3239 lines to `holds.rs` and took out 334. The
+file is 12321 lines at `ce36a7c6`.
+
+The rows were the wrong mark. 13 of the 14 fixes merged between 10-04 and
+10-08, Q1863 on 10-13, and the look back ran on 10-14. Picking open rows by the
+refusal their text names picked twelve, and two were still about it. Three had
+moved on, Q640, Q961 and Q1020, but no run says when, so whether a sooner look
+back would have found more is not known. Q2004 does not catch this. It re-runs the
+open rows that share a test file with a fix, and closes the ones that now
+answer. Taking the test files the 14 merges touched for their rows' write sets,
+it would have reached four of the twelve: Q640, Q961, Q1111 and Q1395. It does
+not re-file a row whose refusal moved, as Q640's did, and the other eight are in
+test files no fix touched.
+
+**Decided.**
+
+- **No second look back of this kind.** The rest of 450.6's table is not filed,
+  nor is `which_side_of_its_neighbour_a_side_keeps`, where Q975 and Q1610 both
+  stop. A look back that counts open rows answers a hygiene question. The
+  one-fix question needs the sweep.
+- **The sweep goes where the readings would be built.** Q2029 and Q2031 are
+  re-filed as Q2038 and Q2039, each with the reading Q2025 named for its
+  surface. The ball row
+  sweeps shapes near its own at the base, fixes its case, and sweeps again. If
+  most of the sweep is still refused, it says how many and files the ball
+  reading as a row of its own. The pipe row's trace says whether the pipe
+  reading or a case at the seam is the fix, by a sweep of split bars near its
+  shape at the base. That is the measurement Q2025 skipped, made by lanes that
+  are in `holds.rs` anyway.
+- **No trigger and no recipe (§13).** 450.6 earned one only by a fix at the
+  cause. None was found, and the run was not set up to find one.
+- **A look back filed from now on** runs its sweep first, with no gate in front
+  of it. Its dispatcher carries the lane's unrun readings into every row it
+  re-files.
