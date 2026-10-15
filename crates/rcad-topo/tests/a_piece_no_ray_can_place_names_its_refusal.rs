@@ -396,10 +396,10 @@ fn a_bend_written_out_at_another_angle_and_a_copy_turned_round_answer_every_rule
 
 /// A quarter bend of ring 4 and tube 1 placed round by a start, and a copy
 /// placed round by that start and a turn on, both by `place_solid` (Q1948).
-///
-/// Placed round by `1` and half a turn on, every rule both ways round answers
-/// and validates: the union the two bends apart, the intersection nothing and
-/// the difference the first bend, each against `π² R r² / 2` a bend.
+/// Placed round by `1`, `0.3` or `−2` and half a turn on, or by `0.3` and a
+/// quarter turn on, every rule both ways round answers and validates: the
+/// union the two bends apart, the intersection nothing and the difference the
+/// first bend, each against `π² R r² / 2` a bend.
 ///
 /// Placed round by `0.3` and a quarter turn on, the first bend's end cap and
 /// the copy's start cap lie on planes through the ring's axis whose normals
@@ -411,30 +411,23 @@ fn a_bend_written_out_at_another_angle_and_a_copy_turned_round_answer_every_rule
 /// `select.rs`'s `by_a_meridian_disk_beside_it` placed it by the copy's whole
 /// start cap (Q2056).
 ///
-/// Each of those fuses now stops at a later piece, at `a point inside a piece
-/// of a face`, and so does each placed round by `0.3` or `−2` and half a turn
-/// on. Run with a print where no rule placed a piece, the piece placed round
-/// by `0.3` and a quarter turn on was a band of the copy's wall a rounding
-/// wide, between its end cap rim and the first bend's start cap plane, which
-/// runs on through the axis to it; half a turn on, the band was of the same
-/// kind (Q2056). `by_the_piece_across_a_side_clear_of_every_face` would place
-/// such a band from the start of its cut, but `holds.rs`'s
-/// `held_in_front_of_all`, asked whether the first bend's wall holds that
-/// start, gives up on the start cap plane, which the start's box straddles,
-/// before it asks the end cap's plane, which puts the start strictly off the
-/// wall. Run with that loop made to go on past an undecided plane, all
-/// eighteen refused fuses here answer as placed round by `1` does, each solid
-/// against a bend; Q2059 is that change, and turns them back to answering.
+/// Each of those fuses then stopped at a later piece, at `a point inside a
+/// piece of a face`, and so did each placed round by `0.3` or `−2` and half a
+/// turn on. Run with a print where no rule placed a piece, the piece placed
+/// round by `0.3` and a quarter turn on was a band of the copy's wall a
+/// rounding wide, between its end cap rim and the first bend's start cap
+/// plane, which runs on through the axis to it; half a turn on, the band was
+/// of the same kind (Q2056). `by_the_piece_across_a_side_clear_of_every_face`
+/// places such a band from the start of its cut, which needs `holds.rs`'s
+/// `held_in_front_of_all` to say the first bend's wall does not hold that
+/// start. That start's box straddles the first bend's start cap plane, and
+/// until Q2059 the loop gave up there, before it asked the end cap's plane,
+/// which puts the start strictly off the wall.
 #[test]
-fn a_bend_placed_round_by_a_float_and_a_copy_turned_on_answers_or_is_refused_before_a_ray() {
+fn a_bend_placed_round_by_a_float_and_a_copy_turned_on_answers_every_rule() {
     let one_bend = PI * PI * 4.0 / 2.0;
-    let mut not_as_pinned = Vec::new();
-    for (start, turn, said) in [
-        (1.0, PI, None),
-        (0.3, FRAC_PI_2, Some("a point inside a piece of a face")),
-        (0.3, PI, Some("a point inside a piece of a face")),
-        (-2.0, PI, Some("a point inside a piece of a face")),
-    ] {
+    let mut not_the_bends = Vec::new();
+    for (start, turn) in [(1.0, PI), (0.3, FRAC_PI_2), (0.3, PI), (-2.0, PI)] {
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
                 let what =
@@ -448,29 +441,21 @@ fn a_bend_placed_round_by_a_float_and_a_copy_turned_on_answers_or_is_refused_bef
                     Rule::Intersection => 0,
                     other => panic!("not a rule this tries: {other:?}"),
                 };
-                let got = match fused_and_measured(&mut model, first, copy, rule, the_first_first) {
+                match fused_and_measured(&mut model, first, copy, rule, the_first_first) {
                     Ok(measured)
                         if measured.len() == bends
                             && measured
                                 .iter()
-                                .all(|&(volume, error)| (volume - one_bend).abs() <= error) =>
-                    {
-                        "the bends".to_owned()
+                                .all(|&(volume, error)| (volume - one_bend).abs() <= error) => {}
+                    Ok(measured) => {
+                        not_the_bends.push(format!("{what}: {measured:?}, a bend {one_bend}"));
                     }
-                    Ok(measured) => format!("{measured:?}, a bend {one_bend}"),
-                    Err(why) => the_refusal(&Err(why)),
-                };
-                let pinned = said.map_or_else(
-                    || "the bends".to_owned(),
-                    |said| format!("Undecidable at {said}"),
-                );
-                if got != pinned {
-                    not_as_pinned.push(format!("{what}: {got}"));
+                    Err(why) => not_the_bends.push(format!("{what}: {}", the_refusal(&Err(why)))),
                 }
             }
         }
     }
-    assert_eq!(not_as_pinned, Vec::<String>::new());
+    assert_eq!(not_the_bends, Vec::<String>::new());
 }
 
 /// The two tests above measure every answer, and a band of wall a rounding
