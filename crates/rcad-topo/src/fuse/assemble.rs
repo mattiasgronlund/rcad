@@ -4930,11 +4930,13 @@ impl Edge {
     /// its ladder, and the fuse did not come back; the top cap's crossing runs
     /// the other way and its arc happened to be faced right. Read by how they set
     /// off, both are faced `(0, 3.55e−15, 0)`, away from the centre. The arcs of
-    /// the 45 degree lune at radius 1000 from each pole to the corner a rounding
-    /// off it (`a_narrow_lune_from_a_pole_corner.rs`) had their crossing squared
-    /// off to a rounding along the chord, `(0, ±4.7e−38, 0)`, at both ends, and
-    /// are now faced `(0, 0, ∓6.4e−13)`, away from the ball's centre, the short
-    /// arcs, as the 90 degree lune's already were.
+    /// the 45 degree lune at radius 1000 and the 10 degree one at radius 0.001
+    /// from each pole to the corner a rounding off it
+    /// (`a_narrow_lune_from_a_pole_corner.rs`) had their crossing squared off to
+    /// a rounding along the chord, `(0, ±4.7e−38, 0)` and `(0, ±3.3e−55, 0)`,
+    /// at both ends, and are now faced `(0, 0, ∓6.4e−13)` and
+    /// `(0, 0, ∓1.25e−18)`, away from the ball's centre, the short arcs, as the
+    /// 90 degree lune's already were.
     ///
     /// **A dot of exactly zero** means the named direction lay along its chord,
     /// or the crossing's direction at the chosen end does, and
