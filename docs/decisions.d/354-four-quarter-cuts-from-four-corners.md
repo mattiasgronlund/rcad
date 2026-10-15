@@ -188,8 +188,81 @@ Pins moved, before → after:
   two cones less the block would check whether it still costs them anything.
   The two intersections at crossing 0, turn 1 fold under A + C for the same
   reason.
-- **Under A alone, the four at crossing 0, turn 1 are not traced**: 2 ×
+- **Under A alone, the four at crossing 0, turn 1 were not traced**: 2 ×
   `BoundaryCrossesItself` finer than 0.02, and 2 × `ASideCutsOffOneCornerOfACurvedPatch`
-  at every rung. The second is §187.4's rule refusing where it finds no point
-  to put in. The rungs of 354.4 suggest what it meets, but that was not shown.
+  at every rung. The two at lean three eighths answer since Q441 (Q846). The
+  two at lean one quarter were traced by Q2037 and answer since Q2040: a cut
+  left from a corner on the ruling the rim runs down, a few ulps of longitude
+  off the corners below it, and the sliver between was what the triangulator
+  refused (354.7).
 - **The frustum's two folds**: experiment B, Q221.
+
+### 354.7 A rim side a few ulps off a cut's meridian runs along it (Q2040)
+
+*Queue row Q2040, from Q2037's trace. Lane
+`lane-q2040-a-side-a-few-ulps-off-a-cones-ruling`, off `f24a8d05`, in three
+relays.*
+
+**What was refused.** A block whose steep face is meant through the pointed
+cone's apex is stored with that face's plane an ulp off it: at lean one quarter
+turned an eighth of a turn, the offset is `8.881784197001252e-16`. So the piece
+of the cone inside the block is a cap whose rim runs down near one ruling, round
+the apex a rounding above it, and up near another. Down the ruling the rim is a
+hyperbola, not a line, and its corners' longitudes drift by ulps from one to the
+next. Q2037 printed them at lean one quarter, crossing 0, turn 1, deflection
+0.01: `-0.04719755119659771` at `z = 8` and `-0.04719755119659906` at
+`z = 0.78`, over the first 899 corners of a rim of 1848.
+
+`corners_the_quarter_cuts_leave_from` takes a corner as clear when the cut up its
+meridian to the apex meets the rim nowhere else, and `a_side_meets_a_cut` read a
+rim side as running along a cut only when both its ends had the cut's longitude
+bit for bit. The sides below a corner on the ruling lay a few ulps to one side
+of its meridian and crossed it nowhere, so the corner was taken clear. The cut
+from it ran down the ruling a few ulps off the rim, and the patch between was a
+sliver. The triangulator refused it `ASideCutsOffOneCornerOfACurvedPatch`, since
+the cut's own points already sat where it would put a point in (Q2037: corner 7,
+and the patch from 7 to 899), or, at other turns and deflections, `LoopsTouch`.
+
+**The fix.** A side whose two ends are each within
+`the_walks_rounding_of_a_longitude` of the cut's longitude runs along the cut:
+four ulps of the larger of the longitude and a whole turn, `3.55e-15` for a
+longitude under a turn. The argument is the walk's own arithmetic.
+`WalkingAWire::arrive` takes each longitude as the one before it plus the short
+way round to `atan2`'s answer. `atan2` rounds by half an ulp of an answer under
+half a turn, and the difference, the turns taken off and the sum each round by
+half an ulp of the larger of the turn and the longitude. So one longitude
+carries about two such ulps, and the difference of two about four. Within that
+the chart cannot say which side of a cut's meridian a corner lies on, and a cut
+that close to the rim leaves a sliver whose points are the rim's own.
+
+**The argument is for the walk's rounding, and the cone's drift is the
+plane's.** It grows as the rim nears the apex, as about `2.1e-15 / z` turned an
+eighth: relay 0 printed that cap's corner 200 at `z = 9.0e-8` with longitude
+`-0.2617994112445287`, `2.3e-8` off the corners at the top. So the drift passes
+four ulps of a turn somewhere down the ruling, and the bound reads as along the
+cut only the run of the ruling above that. On every shape here that run holds
+the corners a cut was taken from. That is measured, not argued.
+
+**The bound alone only ever says "meets" more often.** A side that crosses the
+cut's longitude at a latitude on the cut has its low end on the cut, its high
+end on it, or the cut's far end strictly between them, and that is what the
+branch for a side along the cut asks.
+
+**The cap's closing side moves in one addition.** `the_sides_of_a_rim` moved
+the side that closes a cap's rim by `climbed` and then by the turn, so its copy
+a turn back could miss the first corner by an ulp. Q1879 moved it in one
+addition for `a_leg_meets_the_rim` (`296b3d05`) and not here, since three cone
+tests moved under it. Q2037 found why at Q1905's shape, lean three eighths,
+crossing 0, turn 1, deflection 0.002. Its first corner is the top of the rim's
+run down the ruling. With the copy an ulp off, the cut from that corner met the
+rim where it set off, which kept the corner from being taken clear, by accident.
+Under one addition with no bound it was taken clear, and the face was refused
+`LoopsTouch { corner: 1887, side: 2014 }`. With the bound the run below it reads
+as along the cut, and `the_sides_of_a_rim` takes the one addition.
+
+**Not taken.** Q2037's probe read a side within `1e-12` of a cut's longitude as
+along it and answered the same tests, but `1e-12` was a guess, not a bound.
+Relay 0 tried reading the ruling off the edge, and a bound per latitude in
+space, and took neither. Relay 1 described snapping each end within the bound
+onto the cut's longitude before the bit-for-bit test, which also reads a corner
+a few ulps past the cut as touching it; it was never run, so it was not taken.
