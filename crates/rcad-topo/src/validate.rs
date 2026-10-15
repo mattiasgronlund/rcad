@@ -7815,6 +7815,134 @@ mod tests {
         println!("PROBE   {what}: encloses {said:?} validate {validated:?}");
     }
 
+    #[test]
+    fn probe_q1890_hand_lens() {
+        for fortieths in [0, 6] {
+            let turn = Isometry::rotation(
+                &Axis::x(),
+                f64::from(fortieths) * core::f64::consts::TAU / 40.0,
+            )
+            .expect("t");
+            let mut model = an_empty_model();
+            let Ok(lens) = probe_hand_lens(&mut model) else {
+                println!(
+                    "PROBE build refused {:?}",
+                    probe_hand_lens(&mut an_empty_model())
+                );
+                return;
+            };
+            model.place_solid(lens, &turn).expect("k");
+            probe_short(&model, lens, &format!("{fortieths}/40 sound"));
+            probe_turn_inside_out(&mut model, lens);
+            probe_short(&model, lens, &format!("{fortieths}/40 inside out"));
+        }
+    }
+
+    fn probe_short(model: &Model, key: crate::SolidKey, what: &str) {
+        let view = model.solid(key).expect("k");
+        match view.mesh(
+            super::as_coarse_as_a_mesh_gets(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(mesh) => {
+                println!(
+                    "PROBE {what}: top points {} triangles {}",
+                    mesh.points().len(),
+                    mesh.triangles().len()
+                );
+                for (at, point) in mesh.points().iter().enumerate() {
+                    println!("PROBE     point {at} {point:?}");
+                }
+                for triangle in mesh.triangles() {
+                    println!(
+                        "PROBE     triangle {:?} face {:?}",
+                        triangle.corners(),
+                        triangle.face()
+                    );
+                }
+            }
+            Err(why) => println!("PROBE {what}: top refused {why:?}"),
+        }
+        match the_coarsest_mesh_whose_sides_do_not_cross(
+            view,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(mesh) => {
+                let (enclosed, rounding) = super::signed_volume_over_and_how_far_it_rounded(&mesh);
+                println!(
+                    "PROBE {what}: points {} triangles {} flat {} encloses {enclosed:e} answers {} hidden {:e}",
+                    mesh.points().len(),
+                    mesh.triangles().len(),
+                    it_lies_flat(&mesh),
+                    super::the_sum_answers(view, &mesh, enclosed, rounding),
+                    super::how_much_space_hides_under(view, &mesh),
+                );
+            }
+            Err(why) => println!("PROBE {what}: coarsest refused {why:?}"),
+        }
+        let validated = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+        println!("PROBE {what}: validate {validated:?}");
+    }
+
+    fn probe_hand_lens(model: &mut Model) -> crate::Result<crate::SolidKey> {
+        let (pipe_radius, ball_at, rim_low) = (5.0f64, 8.0f64, 4.9375f64);
+        let across = (pipe_radius * pipe_radius - rim_low * rim_low).sqrt();
+        let along = (2.0 * ball_at * (pipe_radius - rim_low)).sqrt();
+        let ball_radius = (across * across + (ball_at - rim_low) * (ball_at - rim_low)).sqrt();
+        let pipe = Cylinder::new(Axis::z(), pipe_radius)?;
+        let ball = Sphere::new(Point::new(0.0, ball_at, 0.0), ball_radius)?;
+        let mut builder = SolidBuilder::new();
+        let corners = [
+            (across, rim_low, 0.0),
+            (0.0, pipe_radius, along),
+            (-across, rim_low, 0.0),
+            (0.0, pipe_radius, -along),
+        ]
+        .map(|(x, y, z)| builder.add_vertex(Point::new(x, y, z)).expect("p"));
+        let quadrants = [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)];
+        let mut edges = Vec::new();
+        for (at, (x, z)) in quadrants.into_iter().enumerate() {
+            let mut picked_by: SmallVec<[Picker; 1]> = SmallVec::new();
+            picked_by.push(Picker::from(HalfSpace::through_a_point_facing(
+                Point::origin(),
+                Vector::new(x, 0.0, 0.0),
+            )?));
+            picked_by.push(Picker::from(HalfSpace::through_a_point_facing(
+                Point::origin(),
+                Vector::new(0.0, 0.0, z),
+            )?));
+            let run = EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Cylinder(pipe),
+                picked_by,
+            };
+            edges.push(builder.add_edge(corners[at], corners[(at + 1) % 4], run)?);
+        }
+        let ball_steps: Vec<_> = edges
+            .iter()
+            .map(|&edge| {
+                DraftStep::Along(builder.add_coedge(edge, Orientation::Forward).expect("e"))
+            })
+            .collect();
+        let pipe_steps: Vec<_> = edges
+            .iter()
+            .rev()
+            .map(|&edge| {
+                DraftStep::Along(builder.add_coedge(edge, Orientation::Reversed).expect("e"))
+            })
+            .collect();
+        let ball_wire = builder.add_wire(&ball_steps)?;
+        let pipe_wire = builder.add_wire(&pipe_steps)?;
+        let ball_face = builder.add_face(Surface::Sphere(ball), &[ball_wire])?;
+        let pipe_face = builder.add_face(Surface::Cylinder(pipe), &[pipe_wire])?;
+        builder.add_shell(&[
+            (ball_face, Orientation::Forward),
+            (pipe_face, Orientation::Forward),
+        ])?;
+        builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+    }
+
     fn probe_turn_inside_out(model: &mut Model, key: crate::SolidKey) {
         let slot = key.slot_in(model.id());
         let data = model.data_mut();
