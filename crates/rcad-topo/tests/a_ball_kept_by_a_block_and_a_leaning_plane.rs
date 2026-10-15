@@ -28,6 +28,18 @@
 //! is a wire of its own with no corner on any other side. Every point whose
 //! ray met that skin was refused, since a whole circle has no two ends to read
 //! the way it runs between.
+//!
+//! **The band across the lens** (row Q2052). A ball of radius 3 kept to
+//! `x ≥ 0.5` and `y ≥ 1.5` by a block, then under a slab turned 1.3 about
+//! `(−1, 1, 0)` with its top at 2.4. The slab's circle crosses the side on
+//! `x = 0.5` at `z ≈ 0.18` and `z ≈ 1.87`, and the side on `y = 1.5` at
+//! `z ≈ −0.98` and `z ≈ 2.35`, so it takes a band right across the lens and
+//! leaves the skin in two pieces, a three-sided tip at the top and the rest
+//! below. Each is a face, and the part of the sphere in front of all three
+//! planes is both of them, so no reading of the face's cuts tells it from the
+//! other piece and every point whose ray met the skin was refused. The second
+//! shape is the same with the block's corner at `(1.5, 1.5, −1)` and the
+//! slab's top at 2.8.
 
 use core::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
@@ -155,6 +167,80 @@ fn a_ball_kept_to_a_blocks_corner_with_a_flat_ground_off_inside_it_places_each_p
     ] {
         assert_eq!(placed(&model, solid, at), want, "{at:?}");
     }
+}
+
+/// Each point is placed as the hand places it: in the ball, `x > 0.5`,
+/// `y > 1.5` and below the slab's top is inside. `(0.7, 1.7, 2.2)` is under
+/// the tip, `(1.6, 1.8, 0.5)` is in the ball and the block but in the band the
+/// slab takes away, and `(0.7, 1.7, 2.6)` is over the tip, outside the ball.
+#[test]
+fn a_ball_kept_to_a_blocks_corner_with_a_band_taken_across_it_places_each_point() {
+    let (model, solid) = a_ball_kept_to_a_blocks_corner_under_a_slab([0.5, 1.5, -5.0], 2.4);
+    for (at, want) in [
+        ([0.95, 1.9, -0.9], Containment::Inside),
+        ([0.95, 1.9, 0.9], Containment::Inside),
+        ([1.9, 1.9, -0.9], Containment::Inside),
+        ([1.6, 1.6, 0.5], Containment::Inside),
+        ([2.0, 1.6, -1.5], Containment::Inside),
+        ([0.7, 1.7, 2.2], Containment::Inside),
+        ([0.0, 0.0, 0.0], Containment::Outside),
+        ([-2.0, 0.0, 0.0], Containment::Outside),
+        ([1.0, 1.0, -1.0], Containment::Outside),
+        ([1.6, 1.8, 0.5], Containment::Outside),
+        ([1.9, 1.9, 1.0], Containment::Outside),
+        ([0.7, 1.7, 2.6], Containment::Outside),
+    ] {
+        assert_eq!(placed(&model, solid, at), want, "{at:?}");
+    }
+}
+
+/// Each point is placed as the hand places it: in the ball, `x > 1.5`,
+/// `y > 1.5`, `z > −1` and below the slab's top is inside. `(1.6, 1.6, 1.9)`
+/// is under the tip, and `(1.9, 1.9, 1.0)` is in the ball and the block but in
+/// the band the slab takes away.
+#[test]
+fn a_ball_kept_to_a_blocks_floored_corner_with_a_band_taken_across_it_places_each_point() {
+    let (model, solid) = a_ball_kept_to_a_blocks_corner_under_a_slab([1.5, 1.5, -1.0], 2.8);
+    for (at, want) in [
+        ([1.9, 1.9, -0.9], Containment::Inside),
+        ([1.6, 1.6, 0.5], Containment::Inside),
+        ([1.6, 1.8, 0.5], Containment::Inside),
+        ([1.6, 1.6, 1.9], Containment::Inside),
+        ([0.0, 0.0, 0.0], Containment::Outside),
+        ([0.95, 1.9, -0.9], Containment::Outside),
+        ([1.6, 1.6, -1.5], Containment::Outside),
+        ([2.0, 1.6, -1.5], Containment::Outside),
+        ([1.9, 1.9, 1.0], Containment::Outside),
+    ] {
+        assert_eq!(placed(&model, solid, at), want, "{at:?}");
+    }
+}
+
+/// A ball of radius 3 at the origin kept to the block from `corner` to
+/// `(9, 8, 10)`, then under a slab turned 1.3 about `(−1, 1, 0)` with its top
+/// at `top`, the plane `(s, s, cos 1.3) · p = top` with `s = sin 1.3 / √2`.
+fn a_ball_kept_to_a_blocks_corner_under_a_slab(corner: [f64; 3], top: f64) -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let ball = model
+        .add_ball(3.0, &Isometry::identity())
+        .expect("a ball of radius 3");
+    let block_corner = block(&mut model, corner, [9.0, 8.0, 10.0], &Isometry::identity());
+    let lens = kept(&mut model, ball, block_corner);
+    let leaning = Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(-1.0, 1.0, 0.0)).expect("a direction"),
+        1.3,
+    )
+    .expect("a finite turn");
+    let across = 1.3f64.sin() / 2f64.sqrt();
+    assert_turns_z_onto(&leaning, [across, across, 1.3f64.cos()]);
+    let slab = block(
+        &mut model,
+        [-20.0, -20.0, top - 20.0],
+        [20.0, 20.0, top],
+        &leaning,
+    );
+    let solid = kept(&mut model, lens, slab);
+    (model, solid)
 }
 
 /// That `turn` sends `z` to within a few ulps of `want`, so the slab's top
