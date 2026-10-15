@@ -3988,7 +3988,19 @@ impl Assembly {
     /// want of the south pole, which is inside
     /// (`tests/a_shell_inside_another_names_its_refusal.rs`).
     ///
-    /// **Running out of corners is a refusal, and it says which one.** A corner
+    /// **When no corner places it, the far side of each closed edge is asked**
+    /// ([`Assembly::across_a_closed_edge_from_its_corner`]), after every corner.
+    /// A block less a shorter bar touching its wall along a ruling leaves the
+    /// bar as a hollow touching the block's wall along a line, and the touch
+    /// parts that line (Q760), so the hollow's only corners are the line's two
+    /// ends, both on the wall. Each cap circle starts and ends at one of them,
+    /// and the point across the circle from it is inside the block. That shape
+    /// was refused `Undecidable` here, for an answer that exists: one solid of
+    /// two shells touching along a line is an answer (`docs/decisions.md`
+    /// §39.4, the 2026-10-13 note; queue row Q1903,
+    /// `tests/a_bar_lying_along_a_plane_or_a_bar.rs`).
+    ///
+    /// **Running out of points is a refusal, and it says which one.** A point
     /// whose ray met a face of `outer` that [`SolidView::face_holds_the_point`]
     /// cannot follow was never asked at all, and that is
     /// [`Containment::CannotFollowAFacesTrimming`], deliberately not
@@ -4001,7 +4013,7 @@ impl Assembly {
     /// crate's tests reaches it as of this writing (`docs/decisions.md`
     /// §35.6).
     ///
-    /// **So is a corner whose ray could not be fired at a face on a ring**,
+    /// **So is a point whose ray could not be fired at a face on a ring**,
     /// [`Containment::CannotFireARayAtAFacesSurface`], which is refused
     /// [`Error::CannotFireARayAtAFacesSurface`] for the same reason: that
     /// question was never put either. It used to stay with the undecided
@@ -4013,32 +4025,33 @@ impl Assembly {
     /// a half ring `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` for a wall
     /// five clear of the ring.
     ///
-    /// **A face nobody can follow wins over a corner left undecided**, when
+    /// **A face nobody can follow wins over a point left undecided**, when
     /// both happen, and so does a face no ray could be fired at; the first of
     /// those two wins over the second. Either refusal is true, and only one can
-    /// be returned; naming the face folds an undecided corner into "never
+    /// be returned; naming the face folds an undecided point into "never
     /// asked", which costs a caller a policy that might have helped, where the
     /// other way round folds "never asked" into "undecided", which is the
     /// mistake §35.6 keeps the two apart to stop. The face named is the
     /// caller's: `apart` is thrown away when the fuse returns, so a key into it
     /// names nothing.
     ///
-    /// **The record names the corners that were asked.** When every corner came
-    /// back on the skin of `outer` or undecided, the one record says "one shell
-    /// inside another" over each of those corners once, in the order they were
-    /// asked. It used to name the first corner of the whole answer, which
-    /// nothing asked: a block less a ball touching its top and bottom with its
-    /// two poles named the block's corner at the origin. That refusal is still
-    /// a gap, since the ball is a hollow of the block and a point of it off its
-    /// poles would say so.
+    /// **The record names the points that were asked.** When every corner and
+    /// every far side came back on the skin of `outer` or undecided, the one
+    /// record says "one shell inside another" over each of those points once,
+    /// in the order they were asked. It used to name the first corner of the
+    /// whole answer, which nothing asked: a block less a ball touching its top
+    /// and bottom with its two poles named the block's corner at the origin.
+    /// That refusal is still a gap, since the ball is a hollow of the block and
+    /// a point of it off its poles would say so; its one face has no closed
+    /// edge, so no far side is asked of it either.
     ///
     /// # Errors
     ///
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] naming the input face
-    /// a face of `outer` was cut from, when a corner of `hollow` met that face
+    /// a face of `outer` was cut from, when a point of `hollow` met that face
     /// and none was placed. [`Error::CannotFireARayAtAFacesSurface`] the same
-    /// way, when a corner's ray could not be fired at a face of `outer` on a
-    /// ring and none was placed. [`Error::Undecidable`] when every corner of
+    /// way, when a point's ray could not be fired at a face of `outer` on a
+    /// ring and none was placed. [`Error::Undecidable`] when every point of
     /// `hollow` asked came back on the skin of `outer` or undecided.
     fn one_shell_is_inside_another(
         &self,
@@ -4052,31 +4065,27 @@ impl Assembly {
         let solid = apart.solid_at(written.solids[outer]);
         let mut unfollowed = None;
         let mut unfired = None;
-        let mut not_placed = Vec::new();
-        for &face in &self.shells[hollow] {
-            for side in self.faces[face].wires.iter().flatten() {
-                let corner = self.edges[side.edge].ends[usize::from(!side.forward)];
-                let at = self.corners[corner].point;
-                let mut trial = ProvenanceLog::new();
-                match solid.classify_point(at, policy, &mut trial) {
-                    Containment::Inside => {
-                        trial.drain_into(log);
-                        return Ok(true);
-                    }
-                    Containment::Outside => {
-                        trial.drain_into(log);
-                        return Ok(false);
-                    }
-                    Containment::CannotFollowAFacesTrimming { face } => {
-                        unfollowed.get_or_insert(face);
-                    }
-                    Containment::CannotFireARayAtAFacesSurface { face } => {
-                        unfired.get_or_insert(face);
-                    }
-                    Containment::OnBoundary | Containment::Undecidable { .. } => {
-                        if !not_placed.contains(&corner) {
-                            not_placed.push(corner);
-                        }
+        let mut not_placed: Vec<Point> = Vec::new();
+        for at in self.the_points_asked_of(hollow) {
+            let mut trial = ProvenanceLog::new();
+            match solid.classify_point(at, policy, &mut trial) {
+                Containment::Inside => {
+                    trial.drain_into(log);
+                    return Ok(true);
+                }
+                Containment::Outside => {
+                    trial.drain_into(log);
+                    return Ok(false);
+                }
+                Containment::CannotFollowAFacesTrimming { face } => {
+                    unfollowed.get_or_insert(face);
+                }
+                Containment::CannotFireARayAtAFacesSurface { face } => {
+                    unfired.get_or_insert(face);
+                }
+                Containment::OnBoundary | Containment::Undecidable { .. } => {
+                    if !not_placed.contains(&at) {
+                        not_placed.push(at);
                     }
                 }
             }
@@ -4093,7 +4102,7 @@ impl Assembly {
         }
         let asked: Vec<PredicatePoint> = not_placed
             .iter()
-            .map(|&corner| PredicatePoint::from(self.corners[corner].point.coordinates()))
+            .map(|at| PredicatePoint::from(at.coordinates()))
             .collect();
         Err(gave_up(
             ONE_SHELL_INSIDE_ANOTHER,
@@ -4101,6 +4110,72 @@ impl Assembly {
             Measures::Length,
             log,
         ))
+    }
+
+    /// The points of `shell` that [`Assembly::one_shell_is_inside_another`]
+    /// asks, in the order it asks them: the corner each side starts at, and
+    /// then the far side of each closed edge a side runs along.
+    ///
+    /// A closed edge has a side in each face either side of it, so its far
+    /// side is asked twice, as a corner is asked once for each side that
+    /// starts there. Only a shell no corner places gets that far.
+    fn the_points_asked_of(&self, shell: usize) -> impl Iterator<Item = Point> + '_ {
+        let sides = move || {
+            self.shells[shell]
+                .iter()
+                .flat_map(move |&face| self.faces[face].wires.iter().flatten())
+        };
+        let corners = sides()
+            .map(|side| self.corners[self.edges[side.edge].ends[usize::from(!side.forward)]].point);
+        let far_sides =
+            sides().filter_map(|side| self.across_a_closed_edge_from_its_corner(side.edge));
+        corners.chain(far_sides)
+    }
+
+    /// The point of a closed edge across its curve from the one corner it
+    /// starts and ends at, or `None` for an edge that does not close or a
+    /// curve this does not find the middle of.
+    ///
+    /// A plane crosses a pipe in a circle or an ellipse centred where the
+    /// pipe's axis meets the plane, and a ball in a circle centred at the foot
+    /// of the perpendicular from the ball's centre. Either curve is its own
+    /// reflection through that centre, so the corner reflected through it is on
+    /// the edge. It is worked out in `f64`, as a corner's point is, so it is on
+    /// the edge to within a rounding as a corner is. A far side that does not
+    /// fit in an `f64` is not asked.
+    ///
+    /// **A cone is left out**: a plane leaning across one cuts an ellipse whose
+    /// centre is not on the axis ([`where_a_closed_crossing_is_centred`]), and
+    /// nothing has needed it yet. So is a closed crossing of two curved
+    /// surfaces, which has no centre to reflect through.
+    fn across_a_closed_edge_from_its_corner(&self, edge: usize) -> Option<Point> {
+        let Edge {
+            ends: [corner, other_end],
+            carried_by,
+            ..
+        } = &self.edges[edge];
+        if corner != other_end {
+            return None;
+        }
+        let flat = carried_by.iter().find_map(Surface::as_plane)?;
+        let centre = match carried_by
+            .iter()
+            .find(|surface| surface.as_plane().is_none())?
+        {
+            Surface::Cylinder(pipe) => {
+                let axis = pipe.axis();
+                let climb = flat.normal().dot(axis.direction());
+                axis.origin() - axis.direction() * (flat.signed_distance_to(axis.origin()) / climb)
+            }
+            Surface::Sphere(ball) => flat.project(ball.centre()),
+            Surface::Cone(_) | Surface::Torus(_) | Surface::Plane(_) | _ => return None,
+        };
+        let across = centre + (centre - self.corners[*corner].point);
+        across
+            .coordinates()
+            .iter()
+            .all(|value| value.is_finite())
+            .then_some(across)
     }
 
     /// The caller's face that `face`, written into `apart`, was cut out of.

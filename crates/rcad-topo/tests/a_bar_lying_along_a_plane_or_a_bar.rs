@@ -947,3 +947,275 @@ fn a_block_less_a_bar_against_its_wall_touches_itself_along_the_ruling() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// A block of side four, and a bar of radius one and two high standing inside
+/// it from `z = 1` to `z = 3`, touching a wall along a ruling (queue row Q1903,
+/// from Q1116). Two placings: at `(3, 2, 1)` the bar touches the wall `x = 4`
+/// along its own seam, and at `(1, 2, 1)` it touches `x = 0` across from it.
+///
+/// Unlike [`a_block_less_a_bar_against_its_wall_touches_itself_along_the_ruling`],
+/// the bar stops short of the block's floor and roof, so the block less the bar
+/// is **one solid of two shells**: the block's six faces, and the bar's three
+/// as a hollow, the two touching along a line (`docs/decisions.md` §39.4, the
+/// 2026-10-13 note). It was refused `Undecidable` at *one shell inside another*,
+/// over the two ends of the touching line: the touch parts the line (Q760),
+/// so every corner of the hollow is on the block's wall and none says which
+/// side of it the hollow is. The far side of each of the hollow's cap circles
+/// does.
+///
+/// The bar is wholly inside the block, so the union is the block alone, the
+/// intersection is the bar alone, and the bar less the block is nothing. Every
+/// one of the 24 fuses here — two placings, three rules, either argument first,
+/// certified or tolerant — answers.
+#[test]
+fn a_block_less_a_shorter_bar_touching_its_wall_keeps_the_bar_as_a_hollow() {
+    const BLOCK_SIDE: f64 = 4.0;
+    const BAR_RADIUS: f64 = 1.0;
+    const BAR_HEIGHT: f64 = 2.0;
+    let block_volume = BLOCK_SIDE * BLOCK_SIDE * BLOCK_SIDE;
+    let bar_volume = PI * BAR_RADIUS * BAR_RADIUS * BAR_HEIGHT;
+
+    let mut wrong: Vec<String> = Vec::new();
+    for at in [[3.0, 2.0, 1.0], [1.0, 2.0, 1.0]] {
+        for it_first in [false, true] {
+            for policy_name in ["certified", "tolerant"] {
+                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                    let mut model =
+                        Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                    let block = a_block(&mut model, [BLOCK_SIDE, BLOCK_SIDE, BLOCK_SIDE]);
+                    let bar = a_bar(&mut model, BAR_RADIUS, BAR_HEIGHT, at);
+                    let [first, second] = if it_first { [bar, block] } else { [block, bar] };
+                    let policy = if policy_name == "certified" {
+                        Policy::certified()
+                    } else {
+                        Policy::tolerant(100.0)
+                    };
+                    let what =
+                        format!("bar at {at:?}, {rule:?}, bar first {it_first}, {policy_name}");
+                    let answer = match model.fuse(
+                        &[first],
+                        &[second],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        Ok(answer) => answer,
+                        Err(why) => {
+                            wrong.push(format!("{what}: refused {why:?}"));
+                            continue;
+                        }
+                    };
+                    if let Err(why) =
+                        model.validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    {
+                        wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                        continue;
+                    }
+                    let solids = answer.solids();
+                    let wanted_solids = usize::from(!(rule == Rule::Difference && it_first));
+                    if solids.len() != wanted_solids {
+                        wrong.push(format!(
+                            "{what}: {} solids, wanted {wanted_solids}: {solids:?}",
+                            solids.len()
+                        ));
+                        continue;
+                    }
+                    if wanted_solids == 0 {
+                        continue;
+                    }
+                    let faces_of_each_shell = faces_of_each_shell(&model, solids[0]);
+                    let wanted_shells: &[usize] = match rule {
+                        Rule::Union => &[6],
+                        Rule::Intersection => &[3],
+                        Rule::Difference => &[3, 6],
+                        _ => unreachable!("only the three rules are asked"),
+                    };
+                    if faces_of_each_shell != wanted_shells {
+                        wrong.push(format!(
+                            "{what}: shells of {faces_of_each_shell:?} faces, wanted \
+                             {wanted_shells:?}"
+                        ));
+                    }
+                    let found = volume_of(&model, solids[0]);
+                    let (expected, near) = match rule {
+                        Rule::Union => (block_volume, (found - block_volume).abs() < 1e-9),
+                        Rule::Intersection => (
+                            bar_volume,
+                            found <= bar_volume
+                                && (bar_volume - found) / bar_volume < HOW_FAR_A_MESH_MAY_BE,
+                        ),
+                        Rule::Difference => {
+                            let expected = block_volume - bar_volume;
+                            (
+                                expected,
+                                found >= expected
+                                    && (found - expected) / expected < HOW_FAR_A_MESH_MAY_BE,
+                            )
+                        }
+                        _ => unreachable!("only the three rules are asked"),
+                    };
+                    if !near {
+                        wrong.push(format!(
+                            "{what}: measured {found}, and the answer is {expected}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A block of side four less a dome inside it, the top half of a ball of
+/// radius one standing on its flat face at `z = 1`, the twin of the test above
+/// with a ball where the bar was (queue row Q1903). Two placings: centred at
+/// `(2, 1, 1)` the dome's rim touches the wall `y = 0` at one point, and at
+/// `(2, 3, 1)` it touches `y = 4`.
+///
+/// The dome is cut out of the ball by a fuse, and that fuse starts the rim
+/// circle at its point towards `−y`, the rim's one corner; the dome's round
+/// face has no other. So at `(2, 1, 1)` the only corner the block less the dome
+/// can ask is `(2, 0, 1)`, on the block's wall. The point across the rim from
+/// it, `(2, 2, 1)`, is inside the block, and it is found through the foot of
+/// the ball's centre on the rim's plane, where the bar's is found through the
+/// bar's axis. With that ball case switched off by hand, both differences of
+/// that placing, certified and tolerant, were refused `Undecidable` at *one
+/// shell inside another* over `(2, 0, 1)` alone. At `(2, 3, 1)` the corner is
+/// `(2, 2, 1)`, clear of the walls, and answers by itself.
+///
+/// The block less the dome is one solid of two shells, the block's six faces
+/// and the dome's two, measuring `64 − 2π/3` to within what its mesh declares.
+/// The union is the block, the intersection is the dome, and the dome less the
+/// block is nothing.
+#[test]
+fn a_block_less_a_dome_whose_rim_touches_its_wall_keeps_the_dome_as_a_hollow() {
+    let block_volume = 64.0;
+    let dome_volume = 2.0 * PI / 3.0;
+
+    let mut wrong: Vec<String> = Vec::new();
+    for at in [[2.0, 1.0, 1.0], [2.0, 3.0, 1.0]] {
+        for dome_first in [false, true] {
+            for policy_name in ["certified", "tolerant"] {
+                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                    let mut model =
+                        Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                    let block = a_block(&mut model, [4.0, 4.0, 4.0]);
+                    let dome = a_dome(&mut model, at);
+                    let [first, second] = if dome_first {
+                        [dome, block]
+                    } else {
+                        [block, dome]
+                    };
+                    let policy = if policy_name == "certified" {
+                        Policy::certified()
+                    } else {
+                        Policy::tolerant(100.0)
+                    };
+                    let what =
+                        format!("dome at {at:?}, {rule:?}, dome first {dome_first}, {policy_name}");
+                    let answer = match model.fuse(
+                        &[first],
+                        &[second],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        Ok(answer) => answer,
+                        Err(why) => {
+                            wrong.push(format!("{what}: refused {why:?}"));
+                            continue;
+                        }
+                    };
+                    if let Err(why) =
+                        model.validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    {
+                        wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                        continue;
+                    }
+                    let solids = answer.solids();
+                    let wanted_solids = usize::from(!(rule == Rule::Difference && dome_first));
+                    if solids.len() != wanted_solids {
+                        wrong.push(format!(
+                            "{what}: {} solids, wanted {wanted_solids}: {solids:?}",
+                            solids.len()
+                        ));
+                        continue;
+                    }
+                    if wanted_solids == 0 {
+                        continue;
+                    }
+                    let (wanted_shells, expected): (&[usize], f64) = match rule {
+                        Rule::Union => (&[6], block_volume),
+                        Rule::Intersection => (&[2], dome_volume),
+                        Rule::Difference => (&[2, 6], block_volume - dome_volume),
+                        _ => unreachable!("only the three rules are asked"),
+                    };
+                    let faces_of_each_shell = faces_of_each_shell(&model, solids[0]);
+                    if faces_of_each_shell != wanted_shells {
+                        wrong.push(format!(
+                            "{what}: shells of {faces_of_each_shell:?} faces, wanted \
+                             {wanted_shells:?}"
+                        ));
+                    }
+                    let measured = model
+                        .solid(solids[0])
+                        .expect("this model made the key")
+                        .measure(
+                            Deflection::of(A_DEFLECTION)
+                                .expect("a fiftieth of a millimetre is a length"),
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        )
+                        .expect("a solid this size measures");
+                    if (measured.volume() - expected).abs() > measured.volume_error() {
+                        wrong.push(format!(
+                            "{what}: measured {}, and the answer is {expected}, out by more \
+                             than the {} its mesh declares",
+                            measured.volume(),
+                            measured.volume_error()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The top half of a ball of radius one centred at `centre`, cut off flat
+/// at its equator by a box laid over it.
+fn a_dome(model: &mut Model, [x, y, z]: [f64; 3]) -> SolidKey {
+    let at_the_centre = Isometry::translation(Vector::new(x, y, z)).expect("a whole-number shift");
+    let ball = model.add_ball(1.0, &at_the_centre).expect("a ball");
+    let square = ProfileBuilder::new(vec![[-1.5, -1.5], [1.5, -1.5], [1.5, 1.5], [-1.5, 1.5]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+    let lid = model
+        .add_extrusion(&square, 1.5, &at_the_centre)
+        .expect("building a box needs no decision");
+    let dome = model
+        .fuse(
+            &[ball],
+            &[lid],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a ball cut at its equator by a box over its top half");
+    let [dome] = dome.solids() else {
+        panic!("the top half of a ball is one solid: {:?}", dome.solids());
+    };
+    *dome
+}
+
+/// How many faces each shell of a solid has, fewest first.
+fn faces_of_each_shell(model: &Model, solid: SolidKey) -> Vec<usize> {
+    let mut faces: Vec<usize> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .shells()
+        .map(|shell| shell.faces().count())
+        .collect();
+    faces.sort_unstable();
+    faces
+}
