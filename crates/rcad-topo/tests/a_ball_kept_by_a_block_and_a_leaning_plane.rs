@@ -17,10 +17,19 @@
 //! then to `x ≥ z` by a turned slab: `y = 4` only touches what the other two
 //! keep, at `(3, 4, 0)`, and the three planes meet at `(3, 4, 3)`, outside.
 //! Both are the shapes `holds.rs`'s
-//! `a_circle_touching_or_biting_what_two_planes_keep_is_refused` pinned as
-//! refused (row Q1350).
+//! `a_circle_touching_twice_what_two_planes_keep_is_refused_and_once_or_biting_followed`
+//! pinned as refused until this row (row Q1350).
+//!
+//! **The flat ground off.** A ball of radius 3 kept to `x, y ≥ 1.5` by a
+//! block, then to `x + y ≤ 4.2` by a turned slab. That plane's circle is
+//! centred at `(2.1, 2.1, 0)` with radius `√0.18`, so it comes no nearer
+//! either of the block's planes than `x = 1.8` and lies wholly inside the
+//! lens: the ball's skin is the lens with a round hole, and the hole's circle
+//! is a wire of its own with no corner on any other side. Every point whose
+//! ray met that skin was refused, since a whole circle has no two ends to read
+//! the way it runs between.
 
-use core::f64::consts::FRAC_PI_4;
+use core::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
 use rcad_geom::{Axis, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -99,6 +108,50 @@ fn a_ball_kept_to_x_at_least_3_and_z_beside_a_plane_touching_it_places_each_poin
         ([3.5, 2.0, 2.0], Containment::Inside),
         ([3.2, 0.0, 3.4], Containment::Outside),
         ([0.0, 0.0, 0.0], Containment::Outside),
+    ] {
+        assert_eq!(placed(&model, solid, at), want, "{at:?}");
+    }
+}
+
+/// Each point is placed as the hand places it: in the ball, `x > 1.5`,
+/// `y > 1.5` and `x + y < 4.2` is inside. `(2.12, 2.12, 0)` is in the ball and
+/// in the block, but past `x + y = 4.2`, in the part ground off.
+#[test]
+fn a_ball_kept_to_a_blocks_corner_with_a_flat_ground_off_inside_it_places_each_point() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let ball = model
+        .add_ball(3.0, &Isometry::identity())
+        .expect("a ball of radius 3");
+    let corner = block(
+        &mut model,
+        [1.5, 1.5, -5.0],
+        [9.0, 8.0, 10.0],
+        &Isometry::identity(),
+    );
+    let lens = kept(&mut model, ball, corner);
+    let upright = Isometry::rotation(
+        &Axis::new(Point::origin(), Vector::new(-1.0, 1.0, 0.0)).expect("a direction"),
+        FRAC_PI_2,
+    )
+    .expect("a finite turn");
+    assert_turns_z_onto(&upright, [0.5f64.sqrt(), 0.5f64.sqrt(), 0.0]);
+    let top = 2.1 * 2f64.sqrt();
+    let slab = block(
+        &mut model,
+        [-20.0, -20.0, top - 20.0],
+        [20.0, 20.0, top],
+        &upright,
+    );
+    let solid = kept(&mut model, lens, slab);
+    for (at, want) in [
+        ([2.0, 2.0, 0.0], Containment::Inside),
+        ([1.8, 1.8, 1.0], Containment::Inside),
+        ([1.6, 1.6, 1.9], Containment::Inside),
+        ([2.0, 1.6, -1.5], Containment::Inside),
+        ([2.12, 2.12, 0.0], Containment::Outside),
+        ([0.0, 0.0, 0.0], Containment::Outside),
+        ([1.0, 2.0, 0.0], Containment::Outside),
+        ([1.6, 1.6, 2.0], Containment::Outside),
     ] {
         assert_eq!(placed(&model, solid, at), want, "{at:?}");
     }
