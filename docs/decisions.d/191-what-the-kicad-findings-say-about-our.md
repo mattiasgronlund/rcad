@@ -324,6 +324,21 @@ and measure `8π²` and the bar apart
 (`a_whole_ring_turned_any_way_and_a_bar_far_from_it_fuse_to_the_two_apart` in
 `a_half_ring_standing_on_a_round_plate.rs`).
 
+**2026-10-15 note (Q1834): a bar cut beside its axis and united again, flush
+along the cut.** `what_a_flat_face_holds` in `holds.rs` used to aim its
+half-line at the first corner of the first wire it walked. The rectangle a cut
+beside the axis leaves has two rounded far corners, and the point the fuse
+asks about can sit a quarter of the way along the diagonal from the corner
+the half-line aimed at, on the line from that aim through the other far
+corner — a corner whose side of the line then has no sign, so the fuse gave
+up rather than answer (`a_bar_cut_beside_its_axis_and_united_again.rs`). It
+now aims at every corner in turn and then at the middle of each side, so one
+corner on the line through the test point is no longer the only try. All 36
+unions of a round bar cut beside its axis and united again now answer `πh`
+under `certified`, both ways round, where 30 of them used to refuse
+`Undecidable` on `orient3d`. §294.18's turned, certified half bar flush along
+its flat face closes the same way.
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which

@@ -1282,6 +1282,18 @@ which Q1398 is open beside; nobody has run that lead. The pin
 `a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned` holds it
 as it stands, so the row that closes it turns the pin round.
 
+**2026-10-15, Q1834 (Q2033): the turned, certified case is closed.**
+`what_a_flat_face_holds` in `holds.rs` used to aim its half-line at the first
+corner the wire walk met; that aim lay on the line through the far corner the
+turned test point sits on, §448.5's entry for "Q1842 turned". Q1834's lane
+turns the walk round: it now aims at every corner and then at the middle of
+each side, so no single aim corner can line up with the test point. `(turn,
+&certified)` answers both rules now, same as `(turn, &tolerant)` already did.
+Only turned-then-shifted still refuses, under both policies, so this closes
+with the pin renamed
+`a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned_and_shifted`,
+not turned round onto a different case.
+
 **What comes back from a millimetre move.** All 352 fuses, four moves against
 the eleven pairs at four placements under two policies, refuse
 `Error::Undecidable` with one record, "where three surfaces meet", and leave
@@ -1324,7 +1336,8 @@ passed.
 **What this leaves.**
 
 - The sound half bar cut flush along its flat face refusing when turned,
-  above. A row, tier 1, `refuses/B`.
+  above. A row, tier 1, `refuses/B`. **2026-10-15, Q1834 (Q2033):** closed for
+  the turned, certified case; the turned-then-shifted refusal left is Q2034.
 - `Model::fuse`'s doc in `crates/rcad-topo/src/fuse/mod.rs`, at the end of its
   `# Panics` section, still says a corner with four or more surfaces round it,
   or with a curved one among three, is untried (§294.7). Both are tried now,

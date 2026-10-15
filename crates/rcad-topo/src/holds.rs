@@ -225,9 +225,27 @@ fn a_point_off_the_plane(face: FaceView<'_>, plane: &Plane) -> Option<Point> {
 /// round and `-1` for the other; a hole subtracts itself because it runs the
 /// other way, and the count is non-zero exactly on the material. Which side of
 /// that half-line's line each corner falls is read as a half-open range — a
-/// corner exactly on the line counts as below it — and that is what leaves no
-/// tie to break and no second try to make. The one case a crossing count cannot
+/// corner exactly on the line counts as below it — and for a point given
+/// exactly that leaves no tie to break. The one case a crossing count cannot
 /// see is the point sitting on a side, and that is looked for as we go.
+///
+/// **A point that is a box can straddle the line through the aim and another
+/// corner**, and then that corner's side of it has no sign. The fuse asks
+/// exactly that: a bar cut in two beside its axis has a rectangle on the cut,
+/// whose two far corners are where the plane crosses the rims and are
+/// rounded, and the point it asks about is a quarter of the way along a
+/// diagonal from the corner the half-line aimed at
+/// (`tests/a_bar_cut_beside_its_axis_and_united_again.rs`, row Q1834). How
+/// often a wire winds round a point does not depend on which way the
+/// half-line runs, so the next corner is aimed at instead. The middle of a
+/// rectangle is on both its diagonals and every corner fails it, so after the
+/// corners the middle of each side is aimed at. A middle is a rounding off the
+/// plane, and that changes no sign: every `orient3d` here has `target` as one
+/// of its points, so each of the other three counts only through where the line
+/// from `target` through it meets the plane, and for the aim that is a point of
+/// the plane in the same direction from `point`. The face is refused only when
+/// every aim leaves some corner unread. What a try that gave up wrote in the log
+/// is kept only when every try gave up, and then it is the first try's.
 ///
 /// [`FaceView::for_each_triangle`] cannot answer this. Its triangles overlap
 /// wherever the face is not convex and its spokes are sides of nothing, so one
@@ -257,39 +275,110 @@ fn what_a_flat_face_holds(
                 || is_one_circle_cut_in_two(solid, face, wire)?,
         );
     }
-    let aim = face
+    let outlines: Vec<Vec<Point>> = face
         .wires()
         .zip(&round)
         .filter(|(_, is_round)| !**is_round)
-        .flat_map(|(wire, _)| wire.points())
-        .next();
+        .map(|(wire, _)| wire.points().collect())
+        .collect();
+    let mut aims: Vec<Option<Point>> = outlines
+        .iter()
+        .flatten()
+        .copied()
+        .chain(
+            outlines
+                .iter()
+                .flat_map(|corners| the_middles_of_its_sides(corners)),
+        )
+        .map(Some)
+        .collect();
+    if aims.is_empty() {
+        // The only wires left are round ones, which need no aim, so an aim is
+        // missing only for a wire with no corners at all.
+        aims.push(None);
+    }
 
-    let mut winding = 0i64;
-    for ((position, wire), is_round) in face.wires().enumerate().zip(round) {
-        if is_round {
-            match how_often_a_round_wire_winds_round(
-                solid, face, position, wire, point, policy, log,
-            )? {
-                Some(count) => winding += count,
-                None => return Ok(OnAFace::OnItsBoundary),
+    let walk_from = |aim: Option<Point>, log: &mut ProvenanceLog| -> Result<Walked> {
+        let mut winding = 0i64;
+        for ((position, wire), &is_round) in face.wires().enumerate().zip(&round) {
+            if is_round {
+                match how_often_a_round_wire_winds_round(
+                    solid, face, position, wire, point, policy, log,
+                )? {
+                    Some(count) => winding += count,
+                    None => return Ok(Walked::OnASide),
+                }
+                continue;
             }
-            continue;
+            let Some(aim) = aim else {
+                continue;
+            };
+            match walk_one_outline(solid, face, wire, point, aim, target, policy, log)? {
+                Walked::WindsRound(count) => winding += count,
+                stopped @ (Walked::OnASide | Walked::ACornerOnTheLine { .. }) => {
+                    return Ok(stopped);
+                }
+            }
         }
-        let Some(aim) = aim else {
-            // The only wires left are round ones, which the arm above took, so
-            // an aim is missing only for a wire with no corners at all.
-            continue;
-        };
-        match walk_one_outline(solid, face, wire, point, aim, target, policy, log)? {
-            Some(count) => winding += count,
-            None => return Ok(OnAFace::OnItsBoundary),
+        Ok(Walked::WindsRound(winding))
+    };
+
+    let mut first_refusal = None;
+    for aim in aims {
+        let mut trial = ProvenanceLog::new();
+        match walk_from(aim, &mut trial) {
+            Ok(Walked::ACornerOnTheLine { enclosure }) => {
+                first_refusal.get_or_insert((enclosure, trial));
+            }
+            Ok(Walked::WindsRound(winding)) => {
+                trial.drain_into(log);
+                return Ok(held_where_it_winds(winding));
+            }
+            Ok(Walked::OnASide) => {
+                trial.drain_into(log);
+                return Ok(OnAFace::OnItsBoundary);
+            }
+            Err(refused) => {
+                trial.drain_into(log);
+                return Err(refused);
+            }
         }
     }
-    Ok(if winding == 0 {
-        OnAFace::NotHeld
-    } else {
-        OnAFace::Held
-    })
+    let (enclosure, mut trial) =
+        first_refusal.expect("a walk was refused from every aim, and there was at least one");
+    trial.drain_into(log);
+    Err(gave_up_turning_a_corner(point, enclosure))
+}
+
+/// The middle of each side of a wire whose corners are `corners`, in the order
+/// they run. Each is a rounding off the plane at most, which a half-line's aim
+/// may be (see [`what_a_flat_face_holds`]). Halving each end before adding them
+/// is what keeps a corner near `f64::MAX` from overflowing.
+fn the_middles_of_its_sides(corners: &[Point]) -> impl Iterator<Item = Point> + '_ {
+    corners
+        .iter()
+        .zip(corners.iter().cycle().skip(1))
+        .map(|(one, other)| {
+            let [one, other] = [one.coordinates(), other.coordinates()];
+            Point::new(
+                0.5 * one[0] + 0.5 * other[0],
+                0.5 * one[1] + 0.5 * other[1],
+                0.5 * one[2] + 0.5 * other[2],
+            )
+        })
+}
+
+/// What a half-line from a point towards one aim found, round one wire of a
+/// flat face or round all of them.
+enum Walked {
+    /// How many times the wires wind round the point.
+    WindsRound(i64),
+    /// The point is on a side.
+    OnASide,
+    /// Which side of the half-line's line a corner falls could not be read, and
+    /// this is how wide the enclosure of that sign was. The half-line aimed
+    /// elsewhere may read every one.
+    ACornerOnTheLine { enclosure: f64 },
 }
 
 /// One round wire's contribution to a flat face's crossing count, or `None`
@@ -725,8 +814,10 @@ pub(crate) fn the_meridian_half_space_keeps(
     }
 }
 
-/// One polygonal wire's contribution to the crossing count, or `None` when
-/// `point` sits on one of its sides.
+/// One polygonal wire's contribution to the crossing count of a half-line from
+/// `point` towards `aim`, [`Walked::OnASide`] when `point` sits on one of its
+/// sides, and [`Walked::ACornerOnTheLine`] when a corner's side of that
+/// half-line's line has no sign.
 ///
 /// Every side must be straight between its two corners: stored as
 /// [`EdgeRun::Straight`], or a piece of a cone's ruling
@@ -746,10 +837,10 @@ fn walk_one_outline(
     target: Point,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Option<i64>> {
+) -> Result<Walked> {
     let corners: Vec<Point> = wire.points().collect();
     if corners.is_empty() {
-        return Ok(Some(0));
+        return Ok(Walked::WindsRound(0));
     }
     for coedge in wire.coedges() {
         let edge = coedge.edge();
@@ -777,7 +868,7 @@ fn walk_one_outline(
         let along = decide(from, corners[next], target, point, policy, log);
         match along {
             Decision::Zero => match lies_between(from, corners[next], point) {
-                Ok(true) => return Ok(None),
+                Ok(true) => return Ok(Walked::OnASide),
                 Ok(false) => (),
                 Err(overhang) => return Err(gave_up_ordering_along_a_side(point, overhang)),
             },
@@ -790,14 +881,13 @@ fn walk_one_outline(
         match crossing(sides[index], sides[next], along) {
             Some(count) => winding += count,
             None => {
-                return Err(gave_up_turning_a_corner(
-                    point,
-                    whichever_of_them_was_not_read(sides[index], sides[next]),
-                ));
+                return Ok(Walked::ACornerOnTheLine {
+                    enclosure: whichever_of_them_was_not_read(sides[index], sides[next]),
+                });
             }
         }
     }
-    Ok(Some(winding))
+    Ok(Walked::WindsRound(winding))
 }
 
 /// Whether the material of a curved face holds `point`, which is taken as being
