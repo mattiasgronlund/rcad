@@ -394,6 +394,46 @@ fn a_bend_written_out_at_another_angle_and_a_copy_turned_round_answer_every_rule
     }
 }
 
+/// A quarter bend of ring 4 and tube 1 placed round by `0.3`, and a copy
+/// placed round by `0.3 + π/2`, by `place_solid`. The first bend's end cap and
+/// the copy's start cap then lie on planes through the ring's axis whose
+/// normals differ by an ulp, so the two bends touch across a gap no `f64` lies
+/// in, and the first bend's end cap disk lies strictly in front of the copy's
+/// start cap plane (Q1948, Q2056).
+///
+/// Every rule both ways round answers and validates: the union the two bends
+/// apart, the intersection nothing and the difference the first bend, each
+/// against `π² R r² / 2` a bend.
+#[test]
+fn a_bend_placed_round_by_0_3_and_a_copy_a_quarter_turn_on_answer_every_rule() {
+    let one_bend = PI * PI * 4.0 / 2.0;
+    let mut wrong = Vec::new();
+    for rule in EVERY_RULE {
+        for the_first_first in [true, false] {
+            let what = format!("{rule:?}, the first first {the_first_first}");
+            let mut model = a_model();
+            let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, 0.3);
+            let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, 0.3 + FRAC_PI_2);
+            let bends = match rule {
+                Rule::Union => 2,
+                Rule::Difference => 1,
+                Rule::Intersection => 0,
+                other => panic!("not a rule this tries: {other:?}"),
+            };
+            match fused_and_measured(&mut model, first, copy, rule, the_first_first) {
+                Ok(measured)
+                    if measured.len() == bends
+                        && measured
+                            .iter()
+                            .all(|&(volume, error)| (volume - one_bend).abs() <= error) => {}
+                Ok(measured) => wrong.push(format!("{what}: {measured:?}, a bend {one_bend}")),
+                Err(why) => wrong.push(format!("{what}: {}", the_refusal(&Err(why)))),
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// The two tests above measure every answer, and a band of wall a rounding
 /// wide encloses no volume whichever way its triangles turn: drawn inside out,
 /// it would still measure. So every side of each answer's mesh, ring 4 and
