@@ -2519,6 +2519,8 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     if the_sum_answers(view, &coarsest, enclosed, rounding) {
         return Ok(enclosed);
     }
+    let mut finest_that_is_not_flat =
+        (enclosed != 0.0 && !it_lies_flat(&coarsest)).then_some(enclosed);
     let mut room = how_far_across(&coarsest) / 2.0;
     while let Ok(less) = Deflection::of(room) {
         let mut this_rung = ProvenanceLog::new();
@@ -2528,6 +2530,9 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 if the_sum_answers(view, &finer, finer_encloses, rounding) {
                     this_rung.drain_into(log);
                     return Ok(finer_encloses);
+                }
+                if finer_encloses != 0.0 && !it_lies_flat(&finer) {
+                    finest_that_is_not_flat = Some(finer_encloses);
                 }
             }
             Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
@@ -2542,7 +2547,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         }
         room /= 2.0;
     }
-    Ok(enclosed)
+    Ok(finest_that_is_not_flat.unwrap_or(enclosed))
 }
 
 /// Whether what a mesh of this solid encloses says which way the solid's faces
@@ -2556,9 +2561,13 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
 /// can be off by nearly all of itself, and a mesh whose exact volume is under
 /// the hidden space would then pass.
 fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64, rounding: f64) -> bool {
-    enclosed != 0.0
-        && (!it_lies_flat(mesh)
-            || enclosed.abs() > (how_much_space_hides_under(view, mesh) + rounding).next_up())
+    if enclosed == 0.0 {
+        return false;
+    }
+    match how_much_space_hides_under(view, mesh) {
+        Some(hidden) => enclosed.abs() > (hidden + rounding).next_up(),
+        None => !it_lies_flat(mesh),
+    }
 }
 
 /// The most space there can be between a mesh of this solid and the solid,
@@ -2576,7 +2585,7 @@ fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64, rounding: f6
 /// not worth what it buys here. So a solid with a cone face is answered by a
 /// mesh that does not lie flat, as before. Row Q1883 puts measure.rs's own
 /// charge here in place of this copy, and that one reaches the tip.
-fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> f64 {
+fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
     let deviation = mesh.deviation().magnitude();
     let radius_of: HashMap<FaceKey, Option<f64>> = view
         .faces()
@@ -2594,16 +2603,21 @@ fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> f64 {
         if area == 0.0 {
             continue;
         }
+        if radius == 0.0 {
+            return None;
+        }
         let inner = radius - deviation;
         if inner <= 0.0 {
-            return f64::INFINITY;
+            return Some(f64::INFINITY);
         }
         hidden += area * deviation * (radius / inner) * (radius / inner);
     }
-    hidden
+    Some(hidden)
 }
 
-/// `None` for a plane, which does not bend.
+/// `None` for a plane, which does not bend, and `Some(0.0)` for a surface
+/// whose bend this has not been taught, which
+/// [`how_much_space_hides_under`] cannot charge at all.
 fn the_smallest_radius_it_bends_at(surface: &Surface) -> Option<f64> {
     match surface {
         Surface::Plane(_) => None,
