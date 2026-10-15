@@ -557,3 +557,82 @@ against no tools should both preserve it; intersection against no tools
 should answer zero) — a different, simpler check than
 `a_cube_on_its_corner_leaning_through_a_bars_top_rim_start_answers_all_six_fuses`'s,
 not yet written.
+
+### 284.12 The volume check for the 18 one-sided draws, and two that still refuse the row's own error — 2026-10-15
+
+*Queue row Q942, continuing 284.11. Fourth lane on
+`lane-q942-replay-the-30-draws-with-names-carried`, relayed from the one that
+wrote 284.11. Still does not close 284.9's first bullet — that still needs
+the fold-level probe — but it writes the check 284.11 left unwritten and
+finds something worth a row of its own.*
+
+**The check needed one more thing than 284.11 said: the input group can hold
+two solids that overlap each other, and then "sum of the two" is the wrong
+number to check against.** A temporary test
+(`crates/rcad-topo/tests/q942_scratch_probe.rs`, removed before this commit,
+not kept anywhere) decoded each of the 20 (seed, half) pairs 284.11 found and
+replayed them exactly as `how_one_model_is_fused_noting_which_way_the_second_call_went`
+does — same header, same split — on the current base. For each of the 18
+that split one-sided, before calling `fuse`, it measured every solid on the
+populated side on its own, and — since that side can hold more than one
+solid — measured every pair of them against each other under
+`Rule::Intersection`, to read off how much they already share. The check is
+then: a one-sided union or difference should answer the sum of the
+populated side's own volumes *less* whatever those solids already shared,
+and a one-sided intersection against nothing should answer zero.
+
+**All 9 of the 18 that answer measure right.** Five pairs shared nothing
+(`aaf0849e74b4802f108ba0cc6fac702acd7b01ab` second, `072477c484938b7c58f180ff3d6686795ce6ce30`
+first, `bd34edca7f1ee5c2420fbaefbec56ba50a773534` second,
+`24ad8af581e63e0ac7b5388c0f1b68d132522f49` second — each within
+`2.5e-12` of the plain sum, well inside its own `volume_error` — and the
+fifth of the nine shared zero too). The other four did share volume —
+`3b8a41247cae1b5111cf87ea57c5426c2c5a84c1` second (`604.17` of `2000`),
+`909f5d0cda8613a7a3985e80ec446875c74209b2` first and
+`875b42887cd649416e958f86357ba0feb254d9bf` first (`500` of `2000` each),
+`99dca94553b786a6756aba1bcae4724165fa84fc` second (`250` of `2000`), and
+`8c487f415612e0d22e4f790f198c3cb02e688f00` second (two solids that share
+essentially all of one of them, at a scale around `1.3e67`, read off a draw
+with coordinates that large rather than a bug in the sharing measurement) —
+and every one of those four's answer came back exactly the sum less what was
+shared, to the same tiny tolerance. No volume discrepancy anywhere in the 9.
+
+**The other 9 of the 18 refuse, and two of them refuse the row's own named
+error.** `436972d8c4ea703a0684b7ea02d819f01e1be097` second and
+`9b1756eff92be261bc400ca92fd4246f771b62e6` first both refuse
+`ResultIsNotManifold { count: 1 }` — the exact error the row names for the
+dropped-name bug, on a one-sided union and a one-sided difference
+respectively, each between two solids that share no volume (so this is not
+the "two solids overlap" case above finding a genuine, different fold).
+Four more refuse `CannotTellTheCellsOfAFaceApart`
+(`9e32e91344a77d3dd8d125b2557b4283c5e45443` second,
+`f393db47a8aa9f0e76042d74e10e5ce300db4d4d` second,
+`0c7ea848b080d723562e5fe72a52ee587108b8f3` second,
+`b4d67ca14ae42ee1bb387cd5e5041f6f3fa0d1a8` second), and the last three refuse
+the same `Undecidable` on `"where two planes cross"` into a chain of
+`"orient3d"` records that the two two-sided draws of 284.11 also hit
+(`c0ee3446c70515b1855eec926e859b417be90bf7` first,
+`49ee8fe4740bb199da2c5114ab1b9198a5380c4d` first,
+`0fc08ded94f825916464b6207988649323dad98c` first).
+
+**So of this proxy's 20, none give the row's own inclusion-exclusion check
+anything to run — the only two that split two-sided both refuse, as 284.11
+found — and of the 18 one-sided ones, 9 answer with no volume problem and 9
+refuse. Two of those 9 refuse with exactly the error the row is about.** That
+is new evidence against the row's own premise that "since 6b5a987f carries
+the names" every one of these would now answer: on this proxy's list, two
+still do not, on the same error. Whether these two are the *same* fold this
+row is chasing, or a different one that happens to print the same way,
+is not settled here — both pairs share no volume (so 284.11's "two solids
+overlap" explanation does not apply to them), which is consistent with a
+drop-and-diverge fold rather than ruled out, but confirming it needs the same
+fold-level tracking as the true 20/10/6 split does, not this end-state check.
+
+**What this leaves:** 284.9's first bullet is still open — the fold-level
+probe (`Arrangement::fold_the_nodes`, `crates/rcad-topo/src/fuse/arrange.rs:1839`)
+284.10 and 284.11 both point at is still the only way to get the true 30 and
+know which of them this row is actually about. Separately, and regardless of
+that: the two `ResultIsNotManifold { count: 1 }` refusals above are a
+concrete, reproducible fact about the current base — run the fold-level
+probe once it exists and check whether these two are in its list before
+assuming they are the same bug, rather than filing them on a guess.
