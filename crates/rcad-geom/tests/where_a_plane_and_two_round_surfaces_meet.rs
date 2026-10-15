@@ -1179,10 +1179,12 @@ fn turning_the_whole_sweep_by_one_isometry_disagrees_with_the_closed_form_only_o
                         if let Surface::Plane(plane) = &cap {
                             let normal = plane.normal();
                             for shape in [&here, &there] {
-                                let direction = match shape {
-                                    Surface::Cylinder(this) => Some(this.axis().direction()),
-                                    Surface::Cone(this) => Some(this.axis().direction()),
-                                    _ => None,
+                                let direction = if let Surface::Cylinder(this) = shape {
+                                    Some(this.axis().direction())
+                                } else if let Surface::Cone(this) = shape {
+                                    Some(this.axis().direction())
+                                } else {
+                                    None
                                 };
                                 if let Some(direction) = direction {
                                     assert_eq!(
@@ -1339,10 +1341,12 @@ fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_fam
                 };
                 let normal = plane.normal();
                 for shape in [&here, &there] {
-                    let direction = match shape {
-                        Surface::Cylinder(this) => Some(this.axis().direction()),
-                        Surface::Cone(this) => Some(this.axis().direction()),
-                        _ => None,
+                    let direction = if let Surface::Cylinder(this) = shape {
+                        Some(this.axis().direction())
+                    } else if let Surface::Cone(this) = shape {
+                        Some(this.axis().direction())
+                    } else {
+                        None
                     };
                     if let Some(direction) = direction
                         && (normal.x().abs(), normal.y().abs(), normal.z().abs())
