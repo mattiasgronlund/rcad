@@ -7862,9 +7862,10 @@ mod tests {
     /// Row Q1890. Every unit of space [`how_much_space_hides_under`] charges
     /// past what it must is a sum that does not answer and a finer mesh asked
     /// for. A ball and a bar of radius one, meshed at a deflection of `0.3`,
-    /// stray near a third of their radius, and there `area · d · (r / (r − d))²`
-    /// per triangle charged `1.37` times the shell [`SolidView::measure`]
-    /// charges the same mesh, which is the same argument kept tight.
+    /// stray `0.27` and `0.13`, and there `area · d · (r / (r − d))²` per
+    /// triangle charged the ball `5.89` where [`SolidView::measure`] charges
+    /// the same mesh `4.42`, the same shell argument kept tight. Anything over
+    /// a tenth of the radius puts the two more than a tenth apart.
     #[test]
     fn the_space_a_mesh_can_leave_out_is_no_more_than_measure_charges() {
         let deflection = Deflection::of(0.3).expect("a positive deflection");
@@ -7890,7 +7891,7 @@ mod tests {
                 .unwrap_or_else(|why| panic!("{what}: {why:?}"));
             let deviation = mesh.deviation().magnitude();
             assert!(
-                deviation > 0.2,
+                deviation > 0.1,
                 "{what}: strays {deviation}, too little for the two charges to differ"
             );
             let charged = how_much_space_hides_under(view, &mesh)
