@@ -146,6 +146,105 @@ fn a_plates_top_with_a_round_tab_and_a_round_hole_holds_a_box_on_either_diagonal
     }
 }
 
+#[test]
+fn probe_two_arcs_on_different_lines() {
+    let mut model = a_model();
+    let piece = a_piece_with_two_arcs_on_crossing_chords(&mut model, 0.0, 2.0);
+    let view = model.solid(piece).expect("this model made the key");
+    for z in [0.0, 2.0] {
+        let face = the_flat_face_at(view, z);
+        let corners: Vec<[f64; 3]> = face
+            .wires()
+            .flat_map(|wire| wire.coedges())
+            .map(|side| side.start().point().coordinates())
+            .collect();
+        eprintln!("piece z = {z}: corners {corners:?}");
+        let point = PredicatePoint::from([0.0, 0.0, z]);
+        let mut log = ProvenanceLog::new();
+        let said = view.face_holds_the_point(face.key(), point, &Policy::certified(), &mut log);
+        eprintln!("piece z = {z}: {said:?} log empty {}", log.is_empty());
+    }
+    let mut model = a_model();
+    let cutter = a_piece_with_two_arcs_on_crossing_chords(&mut model, -1.0, 4.0);
+    let diamond = ProfileBuilder::new(vec![[20.0, 0.0], [0.0, 20.0], [-20.0, 0.0], [0.0, -20.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a diamond");
+    let plate = model
+        .add_extrusion(&diamond, 2.0, &shift(0.0, 0.0, 0.0))
+        .expect("a positive height");
+    let holed = the_one_solid(&mut model, plate, cutter, Rule::Difference);
+    let view = model.solid(holed).expect("this model made the key");
+    for z in [0.0, 2.0] {
+        let face = the_flat_face_at(view, z);
+        let corners: Vec<[f64; 3]> = face
+            .wires()
+            .flat_map(|wire| wire.coedges())
+            .map(|side| side.start().point().coordinates())
+            .collect();
+        eprintln!("plate z = {z}: corners {corners:?}");
+        let point = PredicatePoint::from([0.0, 0.0, z]);
+        let mut log = ProvenanceLog::new();
+        let said = view.face_holds_the_point(face.key(), point, &Policy::certified(), &mut log);
+        eprintln!("plate z = {z}: {said:?} log empty {}", log.is_empty());
+    }
+}
+
+fn a_piece_with_two_arcs_on_crossing_chords(
+    model: &mut Model,
+    bottom: f64,
+    height: f64,
+) -> SolidKey {
+    let lower_bar = model
+        .add_round_bar(5.0, 10.0, &shift(0.0, 4.0, -4.0))
+        .expect("a bar of radius five");
+    let under_the_line = a_prism(
+        model,
+        vec![[-15.0, -30.0], [21.0, -30.0], [21.0, -24.0], [-15.0, 24.0]],
+        -5.0,
+        12.0,
+    );
+    let bitten = the_one_solid(model, lower_bar, under_the_line, Rule::Intersection);
+    let beside = a_prism(
+        model,
+        vec![[-18.0, -30.0], [12.0, -30.0], [-18.0, 30.0]],
+        -6.0,
+        14.0,
+    );
+    let joined = the_one_solid(model, beside, bitten, Rule::Union);
+    for face in model.solid(joined).unwrap().faces() {
+        let corners: Vec<[f64; 3]> = face
+            .wires()
+            .flat_map(|wire| wire.coedges())
+            .map(|side| side.start().point().coordinates())
+            .collect();
+        eprintln!("U face {:?}: {corners:?}", face.surface());
+    }
+    let bar = model
+        .add_round_bar(5.0, height, &shift(0.0, -1.0, bottom))
+        .expect("a bar of radius five");
+    the_one_solid(model, bar, joined, Rule::Intersection)
+}
+
+fn a_prism(model: &mut Model, corners: Vec<[f64; 2]>, bottom: f64, height: f64) -> SolidKey {
+    let profile = ProfileBuilder::new(corners)
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a polygon");
+    model
+        .add_extrusion(&profile, height, &shift(0.0, 0.0, bottom))
+        .expect("a positive height")
+}
+
+fn the_flat_face_at(view: SolidView<'_>, z: f64) -> FaceView<'_> {
+    view.faces()
+        .find(|face| {
+            let Surface::Plane(flat) = face.surface() else {
+                return false;
+            };
+            flat.normal().components()[2].abs() == 1.0 && flat.origin().coordinates()[2] == z
+        })
+        .unwrap_or_else(|| panic!("a flat face at z = {z}"))
+}
+
 /// The bar of radius 1 from `z = bottom` up `height` shared with the block over
 /// `x < cut`, less a ball of radius `0.3` at `(cut + 0.1, 0, top + 0.1)`. The
 /// ball's circle on the cut has radius `√0.08` and its centre `0.1` above the
