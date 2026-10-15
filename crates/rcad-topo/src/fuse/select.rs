@@ -129,7 +129,7 @@
 //! tried after every rule above, so a piece any of them placed is placed as
 //! before.
 //!
-//! # And last, by the piece across a side that starts clear of every face
+//! # Then by the piece across a side that starts clear of every face
 //!
 //! A piece, flat or curved, takes the placement of the piece of its own face
 //! across one of its sides, when the point search places that piece inside
@@ -139,7 +139,22 @@
 //! on the plane and the ring of a cap of a bend is shown off the cap by the
 //! half-space that names the cap's circle ([`is_behind_the_meridian_disk`]).
 //! Two quarter bends placed half a turn apart need it. It is tried after
-//! every other rule, so a piece any of them placed is placed as before.
+//! every rule above, so a piece any of them placed is placed as before.
+//!
+//! # And last, by a meridian disk beside it
+//!
+//! A flat piece inside a ring, on a plane through the ring's axis, is placed
+//! against a solid made only of that ring and of planes through its axis by a
+//! face of that solid that is a whole meridian disk: when no other plane of
+//! the solid parts the piece's half of its plane from the disk's, the piece is
+//! outside when it is in front of the disk's outward plane and inside when it
+//! is behind, each side read off the planes' own numbers
+//! ([`by_a_meridian_disk_beside_it`], §35.6, Q2056). Two quarter bends placed
+//! round by `0.3` and `0.3 + π/2` need it: the first bend's end cap lies
+//! strictly in front of the copy's start cap plane, an ulp off it, so neither
+//! plane cuts the other bend's wall and the cap shares no side with anything.
+//! It is tried after every other rule, so a piece any of them placed is placed
+//! as before.
 //!
 //! # Then a piece of a flat shell both groups hold lies on the other group
 //!
@@ -226,7 +241,8 @@ pub(crate) struct Chosen {
 /// ([`by_a_side_from_an_edge_it_starts_on`]), nor a face it shares a side with
 /// ([`SidesItShares::place_on_a_face_it_shares_a_side_with`]), nor the piece
 /// across a side that starts clear of every face
-/// ([`by_the_piece_across_a_side_clear_of_every_face`]) placed it: under
+/// ([`by_the_piece_across_a_side_clear_of_every_face`]), nor a meridian disk
+/// beside it ([`by_a_meridian_disk_beside_it`]) placed it: under
 /// [`INSIDE_A_PIECE`] when no point inside it was found, and under
 /// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be
 /// placed, or only a rung of [`rungs_towards_each_crossing`],
@@ -311,7 +327,8 @@ pub(crate) fn choose(
                     by_the_piece_across_a_side_clear_of_every_face(
                         model, scratch, &solids, against, index, policy, log,
                     )
-                });
+                })
+                .or_else(|| by_a_meridian_disk_beside_it(&solids, against, piece));
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
@@ -949,7 +966,11 @@ impl<'a> SidesItShares<'a> {
     /// the other's wall a rounding round from that bend's own cap rim, and the
     /// band between holds no `f64` point. Each band's own rim is the other
     /// band's cut, one circle named once, started at two places
-    /// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`).
+    /// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`). Placed round by
+    /// `0.3` and `0.3 + π/2` instead of `0` and `π/2`, there are no such bands:
+    /// the first bend's end cap lies strictly in front of the copy's start cap
+    /// plane, an ulp off it, so neither plane cuts the other bend's wall, and
+    /// that cap is placed by [`by_a_meridian_disk_beside_it`] (Q1948, Q2056).
     fn place_on_a_face_it_shares_a_side_with(
         &mut self,
         piece: usize,
@@ -1918,6 +1939,15 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// the rim puts the start off the cap
 /// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`).
 ///
+/// Placed round by `0.3` or `−2` and half a turn on, or by `0.3` and a quarter
+/// turn on, the same kind of band is not placed. One bend's start cap plane
+/// cuts the other bend's wall, and the box round the cut's start straddles
+/// that plane. Asked whether that bend's wall holds the start,
+/// [`SolidView::what_this_face_holds`] gives up on that plane, undecided,
+/// before it asks the end cap's plane, which puts the start strictly off the
+/// wall (Q1948, Q2056). Placed round by `0` and half a turn on, that plane is
+/// `y = 0`, the start is on it, and the end cap's plane is asked next.
+///
 /// It placed a second kind of piece too, with no rounding in it, until the
 /// point search learned to: a thick bar's cap where a thin bar stands inside
 /// and touches the thick bar's wall along its seam. The thin bar's pipe cuts
@@ -2055,6 +2085,201 @@ fn is_behind_the_meridian_disk(
         the_meridian_half_space_keeps(&this_circle.transformed(&face.location()), point),
         Ok(false)
     )
+}
+
+/// Whether a flat piece inside a ring, on a plane through the ring's axis, is
+/// inside or outside a group of solids each made of that ring and of planes
+/// through its axis, read off a meridian disk of each
+/// ([`is_inside_by_a_meridian_disk`]). Inside one solid of the group is
+/// inside, outside every one is outside, and anything else is `None`, as
+/// [`by_a_corner`] folds it.
+///
+/// The piece this was built for is a quarter bend's end cap disk, against a
+/// copy of the bend placed a quarter turn on round the ring. Placed round by
+/// `0.3` and `0.3 + π/2`, the end cap's plane and the copy's start cap plane
+/// differ by an ulp, so the disk lies strictly in front of the copy's start
+/// cap, a rounding off it, and no point found inside it is placed against the
+/// copy. Its one side is its rim, along its own bend's wall, and no piece lies
+/// across that, so no rule before this one places it
+/// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`, Q2056).
+///
+/// Nothing here asks the policy: every question is settled exactly or left
+/// unsettled, so nothing goes into the log.
+fn by_a_meridian_disk_beside_it(
+    solids: &[&BakedSolid],
+    against: &[usize],
+    piece: &Piece,
+) -> Option<Placement> {
+    let flat = piece.surface.as_plane()?;
+    let mut inside_one = false;
+    let mut outside_every_one = true;
+    for &index in against {
+        match is_inside_by_a_meridian_disk(solids[index], flat, piece) {
+            Some(true) => inside_one = true,
+            Some(false) => (),
+            None => outside_every_one = false,
+        }
+    }
+    if inside_one {
+        Some(Placement::Inside)
+    } else {
+        outside_every_one.then_some(Placement::Outside)
+    }
+}
+
+/// Whether `piece`, flat on `flat`, is inside `solid`, or `None` where this
+/// cannot say. It says only where all of these hold, each asked of the numbers
+/// as stored:
+///
+/// 1. `flat` holds the axis of a ring `T` ([`how_the_axis_lies_on`]), and the
+///    piece has a side along `T` with its material inside the tube, on the
+///    negative side of the ring.
+/// 2. Every face of `solid` lies on `T` itself or on a plane holding its axis.
+/// 3. One flat face `G` of `solid` is a whole meridian disk: its one wire is
+///    one edge right round a circle, with `T` across it. Its outward plane is
+///    `σ`.
+/// 4. The plane of every other flat face of `solid` has the piece's half of
+///    `flat` and `G`'s half of `σ` strictly on one side of it.
+/// 5. The piece's half of `flat` is strictly in front of `σ`, and then the
+///    piece is outside, or strictly behind it, and then it is inside.
+///
+/// **Why that places it.** Take a point `x` inside the piece near its side
+/// along `T`, so in that side's half of `flat`. The piece's material is inside
+/// the tube, so `x` is, and off the axis. The circle `C` round the axis
+/// through `x` keeps `x`'s distance from the axis and its height, so it stays
+/// inside the tube and meets no face on `T`. Let `y` be where `C` meets `G`'s
+/// half of `σ`: inside the tube, so inside the disk `G`. Go round `C` from `y`
+/// to `x` on `x`'s side of `σ`, less than half a turn. No point of that arc
+/// past `y` is on `σ`, and a plane through the axis meets it only where the
+/// plane parts `y` from `x`, which the fourth check rules out. So the arc
+/// meets no face of `solid` past `y`, and near `y` the solid's skin is `G`
+/// alone, since `y` is off every other face's plane. `x` is then where a point
+/// just past `G` on `x`'s side of `σ` is: outside in front of `G` and inside
+/// behind it. The piece was cut by every surface of `solid`, so it is placed
+/// as `x` is (§17.4).
+///
+/// A plane that holds either half gives nought in the fourth check, and this
+/// says nothing then: a second face on `σ` is one such plane.
+fn is_inside_by_a_meridian_disk(solid: &BakedSolid, flat: &Plane, piece: &Piece) -> Option<bool> {
+    let ring = solid.faces.iter().find_map(|face| {
+        if let Surface::Torus(ring) = face.surface {
+            Some(ring)
+        } else {
+            None
+        }
+    })?;
+    let on_the_ring_or_through_its_axis = |surface: &Surface| {
+        surface
+            .as_plane()
+            .map_or(*surface == Surface::Torus(ring), |cut| {
+                how_the_axis_lies_on(cut, &ring) == Decision::Zero
+            })
+    };
+    if how_the_axis_lies_on(flat, &ring) != Decision::Zero
+        || !solid
+            .faces
+            .iter()
+            .all(|face| on_the_ring_or_through_its_axis(&face.surface))
+    {
+        return None;
+    }
+    let along_the_ring = piece.wires.iter().flatten().find(|side| {
+        side.carried_by[1] == Surface::Torus(ring) && side.material_side == Decision::Neg
+    })?;
+    let the_piece = HalfOfAPlaneThroughAnAxis::of(&ring, flat, along_the_ring.ends[0].point())?;
+    solid.faces.iter().enumerate().find_map(|(disk, face)| {
+        let outward = outward_plane_of_face(face)?;
+        let rim = the_corner_of_a_whole_meridian_disk(face, ring)?;
+        let the_disk = HalfOfAPlaneThroughAnAxis::of(&ring, &outward, rim)?;
+        let both_on_one_side_of_every_other_plane = solid
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|&(other, _)| other != disk)
+            .filter_map(|(_, other)| other.surface.as_plane())
+            .all(|cut| {
+                let in_front = the_piece.is_in_front_of(cut);
+                in_front.is_some() && in_front == the_disk.is_in_front_of(cut)
+            });
+        if !both_on_one_side_of_every_other_plane {
+            return None;
+        }
+        the_piece.is_in_front_of(&outward).map(|in_front| !in_front)
+    })
+}
+
+/// The corner of `face`'s one wire when that wire is one edge right round a
+/// circle, with `ring` across it: a whole meridian disk of `ring` when the face
+/// is flat on a plane through its axis.
+fn the_corner_of_a_whole_meridian_disk(face: &BakedFace, ring: Torus) -> Option<PredicatePoint> {
+    let [wire] = face.wires.as_slice() else {
+        return None;
+    };
+    let [rim] = wire.as_slice() else {
+        return None;
+    };
+    (rim.start.vertex == rim.end.vertex && rim.across == Surface::Torus(ring))
+        .then_some(rim.start.point)
+}
+
+/// One half of a plane through a ring's axis, the plane cut along the axis.
+///
+/// Read as `arrange.rs`'s `side_of_a_plane_holding_a_rings_axis` reads it. A
+/// point of the plane `P` is `c + a·u + b·w` for the ring's centre `c`, its
+/// axis `w` and `u` along `w × n_P`, so which half it is in is the sign of
+/// `a`, which is that of `det[p − c, w, n_P]`. On a circle the plane cuts the
+/// ring in, `a` is `±R + r·cos φ`, at least `R − r` from nought, so the box
+/// round a corner there tells it. Another plane `Q` through the axis is nought
+/// along it, so its sign over the half is that of `a·(n_Q·u)`, and `n_Q·u` has
+/// the sign of `det[n_Q, w, n_P]`. `orient3d` with one point at the origin
+/// gives each of the two signs turned round the same way, so their product is
+/// the side.
+struct HalfOfAPlaneThroughAnAxis {
+    axis: PredicatePoint,
+    normal: PredicatePoint,
+    /// Whether `det[p − c, w, n_P]`, as `orient3d` turns it, is positive.
+    positive: bool,
+}
+
+impl HalfOfAPlaneThroughAnAxis {
+    /// The half of `flat`, a plane holding `ring`'s axis, that `point` is in,
+    /// or `None` where its box does not say.
+    fn of(ring: &Torus, flat: &Plane, point: PredicatePoint) -> Option<Self> {
+        let axis = PredicatePoint::from(ring.axis().direction().components());
+        let normal = PredicatePoint::from(flat.normal().components());
+        let (centre, box_) = (ring.centre().coordinates(), point.enclosure());
+        let from_the_centre = PredicatePoint::Constructed(core::array::from_fn(|index| {
+            box_[index] - Interval::exactly(centre[index])
+        }));
+        let origin = PredicatePoint::from([0.0; 3]);
+        let positive =
+            strictly_positive(orient3d_of_points(origin, from_the_centre, axis, normal))?;
+        Some(Self {
+            axis,
+            normal,
+            positive,
+        })
+    }
+
+    /// Whether this half lies strictly on the positive side of `cut`, a plane
+    /// holding the same axis, or `None` where `cut` holds it, either way
+    /// round, or the sign is not settled.
+    fn is_in_front_of(&self, cut: &Plane) -> Option<bool> {
+        let origin = PredicatePoint::from([0.0; 3]);
+        let across = orient3d_of_points(
+            origin,
+            cut.normal().components().into(),
+            self.axis,
+            self.normal,
+        );
+        Some(strictly_positive(across)? == self.positive)
+    }
+}
+
+/// Whether `sign` is strictly positive, or `None` where it is nought or not
+/// settled.
+fn strictly_positive(sign: Decision) -> Option<bool> {
+    (sign == Decision::Pos || sign == Decision::Neg).then_some(sign == Decision::Pos)
 }
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
