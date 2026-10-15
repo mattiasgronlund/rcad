@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rcad_geom::{Cone, Deflection, Point, Surface, Vector};
+use rcad_geom::{Cone, Deflection, Plane, Point, Surface, Vector};
 use rcad_predicates::expansion::{compress, expansion_sum, scale_expansion, two_diff, two_product};
 use rcad_predicates::{Policy, ProvenanceLog};
 
@@ -34,6 +34,14 @@ pub struct Measurement {
 
 impl Measurement {
     /// How much space the solid encloses.
+    ///
+    /// **Can be negative, but never by more than [`Measurement::volume_error`].**
+    /// A curved solid as thin as a sliver can sum over its mesh to a little
+    /// under zero while the true volume is a little over; the two quarter bends
+    /// in `a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver`
+    /// leave a wedge of `5.4e-17` that sums to `-8.7e-17` at a deflection of
+    /// `0.01`, with an error of `2.0e-15`. A sum further below zero than that is
+    /// refused, as [`SolidView::measure`] says.
     #[must_use]
     pub fn volume(self) -> f64 {
         self.volume
@@ -59,6 +67,14 @@ impl Measurement {
     /// What is on the wrong side of the triangles either way is the shell
     /// between them and the surface — same shell, same thickness, opposite sign
     /// — and [`how_much_space_hides_under_a_flat_stand_in`] bounds it.
+    ///
+    /// A flat face of a curved solid has no shell, but the points the mesher
+    /// places along its curved edges lie on its plane only as nearly as their
+    /// coordinates can be written down, and a turned plane's rarely can. So it
+    /// is charged the slab its triangles can
+    /// stray through: [`how_far_the_points_stray_off`] its plane times its
+    /// area, and the furthest any flat face strays times the slivers along its
+    /// rim, as [`SolidView::skin_of`] says.
     ///
     /// For a wholly flat solid there is no such shell, and this is how far the
     /// rounded sum landed from the exact volume of the solid's own triangles,
@@ -137,6 +153,16 @@ impl Measurement {
     /// rather than bounded in advance, as the volume and area errors are:
     /// `0.0` exactly when the centroid came out on the nose, as on a cube with
     /// whole-number corners (`docs/decisions.md` §338.5). Never negative.
+    ///
+    /// **Infinite when the volume is not above zero**, because the moment
+    /// cannot be divided by it, and [`Measurement::centroid`] is then where the
+    /// mesh's skin balances instead — a point near the solid, and no more.
+    /// Above zero but not clear of the hidden space, `shell / volume` is at
+    /// least one, so the wobble is at least the solid's whole reach from the
+    /// centroid, and a balance point inside the solid is never further out
+    /// than that: the coarsest round bar in
+    /// `the_published_error_bounds_shrink_as_the_mesh_gets_finer`, meshed to a
+    /// deflection of `1`, hides more space than its mesh holds.
     #[must_use]
     pub fn centroid_wobble(self) -> f64 {
         self.centroid_wobble
@@ -250,10 +276,13 @@ impl FaceMeasurement {
     ///   as unpaired on both sides: the cone's whole tip below the split and
     ///   the triangles' share of it, twice over — once as area that pairs with
     ///   nothing and once in the net difference above the split.
-    /// - **A flat face of a curved solid**: nothing moves, because a flat face
-    ///   is meshed in its own plane, so `moved = 0`; and what is unpaired is the
-    ///   slivers between the inscribed outline and the curve, at most `E` of
-    ///   them and within `d` of a side of the mesh.
+    /// - **A flat face of a curved solid**: each point moves straight on to the
+    ///   face's plane, except the face's own corners, which stay where the
+    ///   solid holds them, so `moved` is [`how_far_the_points_stray_off`] it —
+    ///   `0` where every other point lies on the plane exactly, and a rounding
+    ///   or so on a turned plane, whose points rarely can; and what is
+    ///   unpaired is the slivers between the inscribed outline and the curve,
+    ///   at most `E` of them and within `d` of a side of the mesh.
     ///
     /// Infinite whenever `E` is — a mesh cut a whole radius out — or is not
     /// smaller than `A`, because then nothing bounds the true area away from
@@ -358,9 +387,16 @@ impl SolidView<'_> {
     /// or [`Error::Undecidable`].
     ///
     /// [`Invalid::VolumeIsNotPositive`] when the solid encloses a negative
-    /// amount of space, or none — the same refusal
+    /// amount of space, or none. A wholly flat solid is refused for a sum of
+    /// zero or less — the same refusal
     /// [`Model::validate`](crate::Model::validate) gives for the same bytes,
-    /// with the same number in it.
+    /// with the same number in it. A curved solid is refused only for a sum of
+    /// at most minus its [`Measurement::volume_error`], because a sliver's mesh
+    /// can sum a little under zero round a true volume a little over it; a sum
+    /// within its error of zero is answered, as [`Measurement::volume`] says.
+    /// `validate` does not yet charge a curved solid's flat faces what
+    /// [`SolidView::skin_of`] charges them, so it can still refuse a sliver
+    /// this answers (Q2089).
     ///
     /// **This used to be an assert, and §20.1 settled it that way.** The
     /// argument then was that the only route to an inside-out solid was a bug
@@ -445,7 +481,9 @@ impl SolidView<'_> {
     /// kind of thing.
     ///
     /// **The volume's error is the space the mesh hides and the rounding of its
-    /// sum, both, and so is the centroid's wobble.** The rounding is worked out
+    /// sum, both, and so is the centroid's wobble.** The space hidden is the
+    /// shell under the curved faces and the slab the flat faces' points stray
+    /// through, both from [`SolidView::skin_of`]. The rounding is worked out
     /// as the flat path works it out, from the mesh's own triangles summed
     /// exactly. A solid whose curved faces are a hair of skin hides less space
     /// than one rounding of the sum, and published that space alone: the block
@@ -453,6 +491,14 @@ impl SolidView<'_> {
     /// measured `1152.0000000000007` with an error of `5.7e-19`, and its mesh
     /// encloses `8.4e-14` less; its centroid came out `1.2e-15` from where the
     /// mesh balances, with a wobble of `5.1e-21`.
+    ///
+    /// **The sign is judged against that error, so the error comes first.** A
+    /// sum at most minus the error is a solid that encloses no space, or less,
+    /// however the mesh is out, and is refused. A sum above that and not
+    /// above zero is answered as it is, with the skin's middle for a centroid
+    /// and an infinite wobble, since a moment divided by nothing balances
+    /// nowhere. A sum above zero is divided as it always was, however small,
+    /// for the reason [`Measurement::centroid_wobble`] gives.
     fn measured_over(self, mesh: &Mesh) -> Result<Measurement> {
         let hub = hub_of(mesh);
         let shifts = axis_shifts_over(mesh, hub);
@@ -469,24 +515,35 @@ impl SolidView<'_> {
         if !volume.is_finite() {
             return Err(Error::VolumeTooLargeToMeasure);
         }
-        if volume <= 0.0 {
-            return Err(Invalid::VolumeIsNotPositive { volume }.into());
-        }
         let skin = self.skin_of(mesh);
         if !skin.area.is_finite() {
             return Err(Error::SurfaceAreaTooLargeToMeasure);
         }
+        let (exact_six_volumes, exact_moment) = volume_and_moment_as_expansions(&fan);
+        let volume_error = upward(
+            skin.volume_error
+                + how_far_the_volume_rounded(&exact_six_volumes, sixth, volume, whole_shift),
+        );
+        if volume <= -volume_error {
+            return Err(Invalid::VolumeIsNotPositive { volume }.into());
+        }
+        if volume <= 0.0 {
+            return Ok(Measurement {
+                volume,
+                volume_error,
+                surface_area: skin.area,
+                area_error: skin.area_error,
+                centroid: middle_of(mesh, mesh.triangles()),
+                centroid_wobble: f64::INFINITY,
+            });
+        }
 
         let balance = [0, 1, 2].map(|axis| shift(moment[axis] / (4.0 * six_volumes), shifts[axis]));
         let centroid = hub + Vector::from(balance);
-        let (exact_six_volumes, exact_moment) = volume_and_moment_as_expansions(&fan);
         let four_times_the_six_volumes = packed(&multiplied(&exact_six_volumes, &[4.0]));
         Ok(Measurement {
             volume,
-            volume_error: upward(
-                skin.volume_error
-                    + how_far_the_volume_rounded(&exact_six_volumes, sixth, volume, whole_shift),
-            ),
+            volume_error,
             surface_area: skin.area,
             area_error: skin.area_error,
             centroid,
@@ -505,17 +562,53 @@ impl SolidView<'_> {
 
     /// How much skin the mesh has, and how much of the solid's own it misses.
     ///
-    /// One walk over the faces rather than three, because the two error terms
-    /// are both a share of the very area being summed.
+    /// One walk over the faces rather than three, because the error terms are
+    /// all a share of the very area being summed.
+    ///
+    /// **A flat face owes space too, once it is turned.** The points the mesher
+    /// places along its curved edges lie on its plane only as nearly as their
+    /// coordinates can be written down, and a turned plane's rarely can: the
+    /// caps of the sliver in
+    /// `a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver`
+    /// are meshed up to `4.3e-16` off their planes, and the space between those
+    /// triangles and their planes moved the sum by anywhere from `-4.9e-16` to
+    /// `3.2e-16` (Q2087) against a wedge of `5.4e-17`. So each flat face is
+    /// charged [`how_far_the_points_stray_off`] its plane times its area, the
+    /// slab its triangles can stray through.
+    ///
+    /// **The face's own corners are not charged**, because a corner is where
+    /// the solid really reaches and the mesh holds it exactly, as a wholly flat
+    /// solid's measure takes its corners (§338). Charged too, the block less
+    /// the cone in `a_flat_solid_publishes_the_rounding_of_its_measure.rs`,
+    /// whose turned block's corners sit up to `1.2e-15` off its planes and
+    /// whose flat faces carry no other point, owed `3.5e-13` for space its
+    /// mesh does not leave out, four times the rounding it really owes.
+    ///
+    /// The slivers between a flat face's
+    /// inscribed outline and its curve are inside the neighbouring curved
+    /// face's shell, as [`how_much_space_hides_under_a_flat_stand_in`] says,
+    /// but that shell now ends at points up to the same distance off the
+    /// plane, and those slivers are at most the deviation times
+    /// [`rim_of_the_flat_faces`] in area, so that much again is charged times
+    /// the furthest any flat face strays.
     fn skin_of(self, mesh: &Mesh) -> Skin {
         let bends = bend_of_each_face(self, mesh);
+        let flat_faces: HashMap<FaceKey, (Plane, Vec<u32>)> = self
+            .faces()
+            .filter_map(|face| {
+                let plane = *face.surface().as_plane()?;
+                Some((face.key(), (plane, the_corners_it_holds(face, mesh))))
+            })
+            .collect();
         let deviation = mesh.deviation().magnitude();
         let mut skin = Skin {
             area: 0.0,
             area_error: 0.0,
             volume_error: 0.0,
         };
-        for (face, area) in areas_of_each_face(mesh) {
+        let mut furthest_off_a_plane = 0.0f64;
+        for (face, triangles) in each_face_and_its_triangles(mesh) {
+            let area = area_of(mesh, triangles);
             skin.area += area;
             let bend = bends[&face];
             if let Some(charge) = bend.tip_charge {
@@ -524,14 +617,21 @@ impl SolidView<'_> {
                 continue;
             }
             let Some(radius) = bend.radius else {
+                let (plane, held) = flat_faces
+                    .get(&face)
+                    .expect("a face that does not bend lies on a plane");
+                let off = how_far_the_points_stray_off(mesh, triangles, plane, held);
+                skin.volume_error += off * area;
+                furthest_off_a_plane = furthest_off_a_plane.max(off);
                 continue;
             };
             skin.area_error += how_much_more_surface_there_can_be(area, radius, deviation);
             skin.volume_error +=
                 how_much_space_hides_under_a_flat_stand_in(area, radius, deviation);
         }
-        skin.area_error +=
-            deviation * rim_of_the_flat_faces(mesh, |face| bends[&face].radius.is_none());
+        let rim = rim_of_the_flat_faces(mesh, |face| bends[&face].radius.is_none());
+        skin.area_error += deviation * rim;
+        skin.volume_error += furthest_off_a_plane * deviation * rim;
         skin
     }
 
@@ -853,7 +953,17 @@ impl SolidView<'_> {
             }
             (None, None) => {
                 let error = deviation * rim_of_the_flat_faces(mesh, |other| other == face);
-                (error, 0.0, error)
+                let view = self
+                    .faces()
+                    .find(|used| used.key() == face)
+                    .expect("the face was measured as one of this solid's");
+                let off = how_far_the_points_stray_off(
+                    mesh,
+                    triangles,
+                    &view.plane(),
+                    &the_corners_it_holds(view, mesh),
+                );
+                (error, off, error)
             }
         };
 
@@ -1594,13 +1704,13 @@ pub(crate) fn signed_volume_over_and_how_far_it_rounded(mesh: &Mesh) -> (f64, f6
     (volume, upward(error + f64::from_bits(1)))
 }
 
-/// Each face of the mesh and how much area its triangles have, in the order the
-/// mesh stores them.
+/// Each face of the mesh and the triangles that stand in for it, in the order
+/// the mesh stores them.
 ///
 /// A face's triangles arrive together, so this is a walk and not a lookup.
-fn areas_of_each_face(mesh: &Mesh) -> Vec<(FaceKey, f64)> {
+fn each_face_and_its_triangles(mesh: &Mesh) -> Vec<(FaceKey, &[MeshTriangle])> {
     let triangles = mesh.triangles();
-    let mut areas = Vec::new();
+    let mut faces = Vec::new();
     let mut start = 0;
     while start < triangles.len() {
         let face = triangles[start].face();
@@ -1608,10 +1718,10 @@ fn areas_of_each_face(mesh: &Mesh) -> Vec<(FaceKey, f64)> {
         while end < triangles.len() && triangles[end].face() == face {
             end += 1;
         }
-        areas.push((face, area_of(mesh, &triangles[start..end])));
+        faces.push((face, &triangles[start..end]));
         start = end;
     }
-    areas
+    faces
 }
 
 /// The area of one face's triangles, measured in a scale of its own for the
@@ -1649,8 +1759,9 @@ fn area_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> f64 {
 /// # Panics
 ///
 /// If the face's triangles are not all in one run. The mesher cuts up one face
-/// at a time, and [`areas_of_each_face`] — what the solid's area is summed from
-/// — reads a face twice over if they are not, so the two would disagree.
+/// at a time, and [`each_face_and_its_triangles`] — what the solid's area is
+/// summed from — reads a face twice over if they are not, so the two would
+/// disagree.
 fn the_triangles_of(mesh: &Mesh, face: FaceKey) -> &[MeshTriangle] {
     let triangles = mesh.triangles();
     let start = triangles
@@ -1757,12 +1868,13 @@ fn how_much_more_surface_there_can_be(area: f64, radius: f64, deviation: f64) ->
 /// and the shell between the radii `r − d` and `r` over that angle holds
 /// `(r³ − (r − d)³) / 3` per unit of it.
 ///
-/// **Nothing is charged to a flat face**, and that is a claim rather than an
-/// omission: a flat face is meshed in its own plane, so no space at all is
-/// enclosed between the two skins there. The sliver over a flat face's *rim* —
-/// between its inscribed outline and the curve that outline stands for — is
-/// inside the neighbouring curved face's shell and already counted — which the
-/// short wide bar in
+/// **None of this is charged to a flat face**: it does not bend, so no shell
+/// lies between its triangles and its surface. What a flat face owes is how
+/// far its mesh points stray off its plane, which is
+/// [`how_far_the_points_stray_off`] and [`SolidView::skin_of`] charges it. The
+/// sliver over a flat face's *rim* — between its inscribed outline and the
+/// curve that outline stands for — is inside the neighbouring curved face's
+/// shell and already counted — which the short wide bar in
 /// `the_published_error_bounds_cover_what_a_mesh_of_a_bar_or_a_ball_misses`
 /// checks against `πr²h`.
 ///
@@ -1773,6 +1885,65 @@ fn how_much_space_hides_under_a_flat_stand_in(area: f64, radius: f64, deviation:
         return f64::INFINITY;
     }
     area * (radius * radius * radius - inner * inner * inner) / (3.0 * inner * inner)
+}
+
+/// How far the furthest point of `triangles` lies off `plane`, leaving out the
+/// points `held`, rounded up: a length, in the model's own unit.
+///
+/// `held` is the face's own corners, from [`the_corners_it_holds`]. A corner is
+/// where the solid really reaches, wherever the plane is — the truth a flat
+/// solid is measured against too (`docs/decisions.md` §338) — and the mesh
+/// holds it exactly, so nothing lies between a triangle and the truth there.
+/// The points the mesher placed along a face's curved edges stand for points
+/// on curves that lie in the plane, and those are what can stray.
+///
+/// **Worked out exactly and not read off [`Plane::signed_distance_to`]**,
+/// whose [`Plane::SIGNED_DISTANCE_ROUNDOFF`] at coordinates of `4` is about
+/// `3.6e-15`, eight times the `4.3e-16` the sliver's caps really stray. Each
+/// product of the normal and a coordinate is split into its rounded part and
+/// what rounding lost, so the sum less the offset is the exact `n · p − o`.
+/// That is the distance times the normal's length, and a turned normal is
+/// one only to within [`Plane::NORMAL_LENGTH_ROUNDOFF`] of its square, so
+/// dividing by the length is at most multiplying by `1 + 64ε`.
+///
+/// `0.0` exactly when every point but the corners sits on the plane exactly,
+/// and when there are no such points at all.
+fn how_far_the_points_stray_off(
+    mesh: &Mesh,
+    triangles: &[MeshTriangle],
+    plane: &Plane,
+    held: &[u32],
+) -> f64 {
+    let normal = plane.normal().components();
+    let mut furthest = 0.0f64;
+    for triangle in triangles {
+        for corner in triangle.corners() {
+            if held.contains(&corner) {
+                continue;
+            }
+            let point = mesh.points()[corner as usize];
+            let mut height = vec![-plane.offset()];
+            for (along, at) in normal.into_iter().zip(point.coordinates()) {
+                let (product, lost) = two_product(along, at);
+                height = added(&height, &[lost, product]);
+            }
+            furthest = furthest.max(at_most(&packed(&height)));
+        }
+    }
+    upward(furthest * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF))
+}
+
+/// Which entries of the mesh are `face`'s own corners: the point the model
+/// holds for each vertex on its wires, exactly, as [`Mesh::point_at_vertex`]
+/// says.
+fn the_corners_it_holds(face: FaceView<'_>, mesh: &Mesh) -> Vec<u32> {
+    face.wires()
+        .flat_map(|wire| wire.coedges())
+        .map(|coedge| {
+            mesh.point_at_vertex(coedge.start().key())
+                .expect("every corner of the solid has its point in the mesh")
+        })
+        .collect()
 }
 
 /// The total length of the mesh sides where a face `counted` picks meets another

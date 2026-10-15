@@ -355,10 +355,13 @@ fn no_solid_the_kernel_makes_has_a_named_crossing_between_flat_faces_alone() {
 }
 
 /// Why the tilted half disc is refused rather than drawn: the volume of the
-/// model that holds it depends on which of its two lid faces is listed first,
-/// by more than the mesh says it may miss by either way. If this stops
-/// holding, the refusal's reason in `Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes`
-/// has gone stale.
+/// model that holds it depends on which of its two lid faces is listed
+/// first, by far more than rounding could ever account for. Charging each
+/// flat face for the mesh points that tilt off its own plane now admits that
+/// gap into the measure's own error bars, so the two orderings' ranges
+/// overlap instead of missing each other — the measure owns up to the gap
+/// rather than hiding it. If this stops holding, the refusal's reason in
+/// `Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes` has gone stale.
 #[test]
 fn the_tilted_half_disc_measures_by_which_face_is_listed_first() {
     let [(lid_first, lid_first_error), (half_first, half_first_error)] =
@@ -375,10 +378,17 @@ fn the_tilted_half_disc_measures_by_which_face_is_listed_first() {
             (measured.volume(), measured.volume_error())
         });
 
+    let apart = (lid_first - half_first).abs();
     assert!(
-        (lid_first - half_first).abs() > lid_first_error + half_first_error,
+        apart > 1e-6,
+        "the lid first measured {lid_first} and the half disc first {half_first}, only \
+         {apart} apart — that is rounding, not the order-dependence this test is about"
+    );
+    assert!(
+        apart <= lid_first_error + half_first_error,
         "the lid first measured {lid_first} ± {lid_first_error} and the half disc first \
-         {half_first} ± {half_first_error}"
+         {half_first} ± {half_first_error}, {apart} apart but the ranges still miss each \
+         other instead of overlapping"
     );
 }
 
