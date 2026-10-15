@@ -1996,6 +1996,36 @@ impl<'f> Arrangement<'f> {
     /// Nor is a pair with a cut
     /// [`Arrangement::leave_out_the_cuts_clear_of_the_face`] left out in it:
     /// its meets are off the face.
+    ///
+    /// # A crossing no face of its cut reaches is left out where its meet refuses
+    ///
+    /// When neither proof of nothing answers, a crossing of the pair that lies
+    /// wholly past a plane every face carrying its cut lies behind
+    /// ([`Arrangement::no_face_that_draws_it_reaches_it`]) is marked, the
+    /// refusal is held, and the meets of every other pair are still placed
+    /// (Q1909). A slanted pin starting on a bar's axis, with the bar's end
+    /// across where the pin's pipe would come out of the wall if it ran on
+    /// through the axis, is the shape: the end's plane crosses that pipe in an
+    /// ellipse behind the pin's own cap, and where it meets the bar's rim is a
+    /// plane and two pipes at a slant, which [`meet_of_three_surfaces`] has no
+    /// road to.
+    ///
+    /// Once every pair is asked, a node of any kind on a marked crossing, or a
+    /// meet folded into a corner of the face on one, means the crossing meets
+    /// something the fuse has placed, and the held refusal is handed back.
+    /// Otherwise each marked crossing is left undrawn, and its surfaces are
+    /// not asked which side a cell is on
+    /// ([`Arrangement::cuts_reached_by_no_face`]). Marked then and not where it
+    /// refuses, so that a node placed on it before, or one a later pair would
+    /// have placed, is seen rather than set aside.
+    ///
+    /// **The face across places no node where the three meet either, or
+    /// refuses.** [`meet_of_three_surfaces`] puts the three surfaces in one
+    /// order before it solves them, so it refuses the same three on every
+    /// face that asks, and there each way past the refusal places no node of
+    /// those three. Where the bar's end crosses the pin's pipe, the bar's wall
+    /// proves its own loop clear of the ellipse and leaves out the loop behind
+    /// the pin's cap.
     fn place_the_meets(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         let never_left_out = self.crossings_never_left_out();
         let mut reached_by_no_face: Vec<usize> = Vec::new();
@@ -2627,8 +2657,9 @@ impl<'f> Arrangement<'f> {
     /// Whether the two crossings can be shown to have no point in common.
     ///
     /// A node of this pair would be a point of the face's own surface lying on
-    /// both partners. There are two proofs that there is none, and each holds
-    /// anywhere — not only on this face, and for every policy.
+    /// both partners, and on what picks each crossing out of the others its
+    /// pair crosses in. There are three proofs that there is none, and each
+    /// holds anywhere — not only on this face, and for every policy.
     ///
     /// **The partners share nothing**: [`intersect`] says
     /// [`SurfaceMeet::Nothing`]. The face's surface is not asked about here: it
@@ -2646,7 +2677,17 @@ impl<'f> Arrangement<'f> {
     /// pipes at a slant (Q1646). Every bar crossing another at a slant
     /// anywhere but square was refused for it.
     ///
-    /// Neither is a distance or a threshold: a ball a millionth of a unit clear
+    /// **Or a flat surface cuts a pipe, of the three, in a curve wholly outside
+    /// what picks one of the two crossings out**
+    /// ([`Arrangement::a_cut_of_a_pipe_is_clear_of_a_picker`]). This is a bar's
+    /// wall with a slanted pin starting on its axis, and the bar's end across
+    /// where the pin's pipe would come out of the wall if it ran on through the
+    /// axis (Q1909). The pin's pipe crosses the wall in two loops, and the one
+    /// the pin makes is picked by `x ≤ 0`; the end's plane crosses the pin's
+    /// pipe in an ellipse at `x > 0`, which the bar's wall runs through, so the
+    /// second proof fails on the pair of that loop and the bar's rim.
+    ///
+    /// None is a distance or a threshold: a ball a millionth of a unit clear
     /// of a pipe is skipped, and a ball resting against one is not.
     ///
     /// An `Err` from [`intersect`] is *no proof* rather than a second failure.
@@ -2668,6 +2709,32 @@ impl<'f> Arrangement<'f> {
             intersect(&one, &other, policy, log),
             Ok(SurfaceMeet::Nothing)
         ) || a_cut_of_a_pipe_is_clear_of_the_third([self.surface, one, other])
+            || self.a_cut_of_a_pipe_is_clear_of_a_picker(first, second)
+    }
+
+    /// Whether a flat surface cuts a pipe, of the face's surface and the two
+    /// partners, in a curve wholly outside what picks `first` or `second` out
+    /// of the others its pair crosses in.
+    ///
+    /// Every point on all three surfaces is on that curve, so in the box
+    /// [`boxes_round_where_a_flat_surface_cuts_a_pipe`] gives, and a picker's
+    /// [`Decision::Neg`] over the whole box rules every such point off that
+    /// crossing, as [`nothing_rules_the_point_out`] reads it for a node.
+    fn a_cut_of_a_pipe_is_clear_of_a_picker(&self, first: usize, second: usize) -> bool {
+        let surfaces = [
+            self.surface,
+            self.crossings[first].partner,
+            self.crossings[second].partner,
+        ];
+        let pickers: SmallVec<[&Picker; 4]> = [first, second]
+            .iter()
+            .flat_map(|&crossing| self.crossings[crossing].picked_by())
+            .collect();
+        boxes_round_where_a_flat_surface_cuts_a_pipe(surfaces).any(|(_, boxed)| {
+            pickers.iter().any(|picker| {
+                picker.side_of_point(PredicatePoint::Constructed(boxed)) == Decision::Neg
+            })
+        })
     }
 
     /// Whether the two crossings' partners are one pipe written twice, so that
@@ -10658,20 +10725,29 @@ fn lies_exactly_on_the_axis(point: Point, axis: Axis) -> Option<bool> {
 /// a distance. A box the third surface runs through proves nothing, and the
 /// caller keeps the refusal it holds.
 fn a_cut_of_a_pipe_is_clear_of_the_third(surfaces: [Surface; 3]) -> bool {
-    (0..3).any(|third| {
-        let [one, other] = [(third + 1) % 3, (third + 2) % 3].map(|which| &surfaces[which]);
-        let ((Surface::Plane(flat), Surface::Cylinder(pipe))
-        | (Surface::Cylinder(pipe), Surface::Plane(flat))) = (one, other)
-        else {
-            return false;
-        };
-        let Some(boxed) = a_box_round_where_a_flat_surface_cuts_a_pipe(flat, pipe) else {
-            return false;
-        };
+    boxes_round_where_a_flat_surface_cuts_a_pipe(surfaces).any(|(third, boxed)| {
         matches!(
             side_of_surface(&surfaces[third], PredicatePoint::Constructed(boxed)),
             Decision::Pos | Decision::Neg
         )
+    })
+}
+
+/// For each two of the three surfaces that are a flat one and a pipe, the
+/// third's place among them and a box holding the whole of the curve the two
+/// cross in ([`a_box_round_where_a_flat_surface_cuts_a_pipe`]). Every point on
+/// all three is in each box.
+fn boxes_round_where_a_flat_surface_cuts_a_pipe(
+    surfaces: [Surface; 3],
+) -> impl Iterator<Item = (usize, [Interval; 3])> {
+    (0..3).filter_map(move |third| {
+        let [one, other] = [(third + 1) % 3, (third + 2) % 3].map(|which| surfaces[which]);
+        let ((Surface::Plane(flat), Surface::Cylinder(pipe))
+        | (Surface::Cylinder(pipe), Surface::Plane(flat))) = (one, other)
+        else {
+            return None;
+        };
+        a_box_round_where_a_flat_surface_cuts_a_pipe(&flat, &pipe).map(|boxed| (third, boxed))
     })
 }
 

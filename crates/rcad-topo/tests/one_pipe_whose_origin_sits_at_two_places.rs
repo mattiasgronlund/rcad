@@ -406,8 +406,13 @@ fn two_bars_on_one_pipe_written_twice_with_a_pin_in_one_unite_as_one_spelling_do
 ///
 /// With the bar's end in that span, its two ends included, the pin and the bar
 /// were refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` in both orders,
-/// though no face of the pin comes near the loop (Q1909). Now every end tried,
-/// from `−2` to `3.25`, unites into one solid that validates. Q528's route put
+/// though no face of the pin comes near the loop (Q1909). The end's plane
+/// crosses the pin's pipe in an ellipse behind the pin's own cap, and where
+/// that meets the bar's rim is a plane and two pipes at a slant. The end now
+/// leaves the ellipse out, since no face of the pin reaches it, and the wall
+/// proves the pin's own loop, at `x ≤ 0`, clear of it and leaves out the
+/// loop round `(2, 0, 2.5)`. Every end tried, from `−2` to `3.25`, unites
+/// into one solid that validates. Q528's route put
 /// the bar's end at `z = 2`, which is why [`a_slanted_pin_from_the_axis`]
 /// moves the joint down to `1`.
 ///
