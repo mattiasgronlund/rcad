@@ -1742,3 +1742,86 @@ the cut meets two of the side planes, a rounding from the apex, as the apex.
 - The four placed refusals. Not filed: carrying a movement two solids share
   is §448.7's tier 4 row, parked until `docs/consumers.md` names a caller
   that needs it.
+
+### 294.23 Q913: the turned seam is a gap, closed; turned then shifted is a limit — 2026-10-15
+
+*Queue row Q913, from Q717 and §294.9 (Q912). Lane
+`lane-q913-a-record-q717-in-294-8`. No code changed. Pinned in
+`crates/rcad-topo/tests/a_turned_and_shifted_cut_along_a_seam_misses_it_by_a_rounding.rs`,
+straight from the public `Plane`, `Cylinder` and `Isometry` API and
+`rcad_predicates::expansion`, without a model or a fuse.*
+
+**Q717's measurement.** §294.9 left one question open at its close: the
+turned-then-shifted bar cut along its seam still refuses `Undecidable` "side
+of plane" at the bottom seam corner's box, `2.8421709430404007e−13` either
+way round `(10, −5, 2.5)`, and whether that is a limit was Q913's to pin.
+Q717 (dropped, its measurement kept in its own text and in Q912's) ran the
+probe again on the base (`target/q717/q717_probe.rs`, copied in and run with
+`Q717_RULE` unset): turned alone, the moved pipe's seam plane and
+`THE_HALF_PAST_THE_SEAM`'s face `y = 0` are the same four numbers,
+`(0, −0.9210609940028851, −0.38941834230865047, 0)`; turned and shifted, the
+block's face holds `3.631759114242799` where the seam plane holds
+`3.6317591142427994` — one ulp under, `0x400d0dd7b8f4fb64` against
+`0x400d0dd7b8f4fb65` — and the block's placement composed from `(7, −5,
+2.5)`, the turn and `(−5, 0, −1)` rounds to the translation `(2,
+−4.610581657691349, 1.578939005997115)`, which is where that ulp comes from.
+
+**Turned: a gap, and it is already closed.** The two planes are one plane,
+to the bit, wherever the move is only a turn — pinned again here
+(`turned_the_seam_plane_is_the_blocks_face_bit_for_bit`), straight from
+`the_bars_seam_plane()` (the plane through the bar's axis and its seam
+corner, built the way the row's own figures name it:
+`(1, 0, 0)` crossed with `(0, 0, 1)`) and `THE_HALF_PAST_THE_SEAM`'s own
+face, each `.transformed` by the turn (and, for the block, the turn
+composed with the extrusion's own offset). §294.9's rule —
+`BakedCorner::seam_plane`, taken as through the corner without asking,
+because it is the moved copy of an incidence the model held — answers this
+half already. There was a gap here, between Q419 (refused) and Q912 (closed
+it); nothing is left open by it.
+
+**Turned then shifted: a limit.** Composing the shift in moves the two
+planes' offsets a rounding apart, pinned
+(`turned_and_shifted_the_seam_plane_misses_the_blocks_face_by_one_ulp`): the
+normals still agree bit for bit (the rotation part of the two placements is
+the same, so the one ulp is the composed translation's alone), and the
+offsets differ by exactly one ulp, `seam.offset().to_bits() −
+face.offset().to_bits() == 1`. §294.9's rule reaches a seam corner's own
+plane exactly; it does not reach a plane that misses the corner, however
+little, and this one does. So `BakedCorner::seam_plane` cannot be widened to
+cover it without taking a crossing as through a corner it is a rounding off
+— the same mistake §294.9 itself warns against for `around` (§356).
+
+**Why there is no answer to miss.** The exact miss, `n · p − d` for the
+block's face at the moved corner, computed as the sum of an expansion
+(`rcad_predicates::expansion`, never dividing) and rounded once at the end,
+is `3.885780586188048e−16`
+(`turned_and_shifted_the_miss_is_a_limit_the_scale_already_rules_out`) — the
+same figure Q717 and Q912 both measured. The placed bar's top corner reaches
+`z = 11.710609940028851` there, so holding the seam corner and the true
+crossing apart needs a spread of `11.710609940028851 /
+3.885780586188048e−16`, about `3.0137e16`. §3.5's own validity ceiling is
+`1e11`; a feature written straight into the coordinates is gone by a spread
+of about `1e16` (`what_the_dynamic_range_check_is_a_margin_against.rs`,
+§3.5). `3.0137e16` is past both: about five and a half orders of magnitude
+past the `1e11` ceiling, and about half an order of magnitude past the
+`1e16` a feature is already gone by.
+The corner's own box, `2.8421709430404007e−13` either way round, already
+reaches about 731 times past the `3.9e−16` that separates it from the true
+crossing, so no tightening of the box finds the crossing either: the gap the
+predicate would have to resolve is smaller than what the placed scene's own
+scale leaves an `f64` able to hold, not smaller than what today's arithmetic
+reaches. By `LimitOrGap`, this is a limit.
+
+**Q419's guess answers neither half.** Handing on the exact moved point when
+the move rounded nothing for it does not reach either refusal — run by
+Q717, recorded in Q912's own text (merged, `8ac8cbf2`) and not rerun here,
+since re-running it needs the rule swapped in `moved_corner.rs`, outside
+this row's write set. Turned alone, `(3, 0, 0)` is then exact, and the fuse
+refuses "side of plane" at the *top* seam corner's box instead, round `(3,
+−3.894183423086505, 9.210609940028851)` — matching the top corner moved by
+the turn alone, reproduced again here with Q717's probe copied in and run
+(`mise exec -- just t -p rcad-topo --test q717_probe --no-capture`, not
+kept): `top corner moved [3.0, -3.894183423086505, 9.210609940028851]`.
+Turned and shifted, the guess changes which refusal is hit — "order along a
+crossing" rather than "side of plane" — not whether one is.
+Neither guess reaches a point both halves of the cut agree is the corner.
