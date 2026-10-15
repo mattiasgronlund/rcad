@@ -636,37 +636,205 @@ fn probe_q2028_one() {
 
 #[test]
 fn probe_q2028_seam_cut_refusals() {
+    q2028_grid(1.0, [-1.0, 0.0], true);
+}
+
+#[test]
+fn probe_q2028_far_off_by_a_thousandth() {
+    q2028_grid(1.001, [-1.0, 0.0], false);
+}
+
+#[test]
+fn probe_q2028_reference_faces() {
+    for far_factor in [1.0, 1.001, 0.999, 1.0001, 1.00001] {
+        for (rule, frustum_first) in EVERY_FUSE {
+            let (model, fused) =
+                q2028_fuse(1.0, 10.0, far_factor, [-1.0, 0.0], rule, frustum_first);
+            let fused = fused.expect("answers");
+            let valid = model.validate(&Policy::tolerant(10.0), &mut ProvenanceLog::new());
+            println!(
+                "far factor {far_factor} {rule:?} {frustum_first}: valid {valid:?} {:?}",
+                q2028_volume(&model, &fused, 0.01)
+            );
+        }
+        let (model, fused) = q2028_fuse(1.0, 10.0, far_factor, [-1.0, 0.0], Rule::Union, true);
+        let fused = fused.expect("answers");
+        if far_factor != 1.001 {
+            continue;
+        }
+        for &solid in fused.solids() {
+            for face in model.solid(solid).expect("a solid").faces() {
+                let surface = format!("{:?}", face.surface());
+                let wires: Vec<usize> = face.wires().map(|wire| wire.coedges().count()).collect();
+                println!("  {} wires {wires:?}", &surface[..surface.len().min(90)]);
+            }
+        }
+    }
+}
+
+#[test]
+fn probe_q2028_designer() {
+    q2028_designer(
+        &[[0.6, 0.8]],
+        &[1.0, 2.0, 4.0, 8.0, 16.0, 0.5, 10.0, 12.8, 25.6],
+        &[1.0, 10.0, 25.0, 100.0],
+    );
+}
+
+#[test]
+fn probe_q2028_designer_hang() {
+    q2028_designer(&[[0.6, 0.8]], &[0.26, 0.28, 0.30], &[0.1, 0.15]);
+}
+
+fn q2028_designer(corners: &[[f64; 2]], scales: &[f64], sizes: &[f64]) {
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for &corner in corners {
+        for &scale in scales {
+            for &size in sizes {
+                for (rule, bar_first) in EVERY_FUSE {
+                    eprintln!("try {corner:?} {scale} {size} {rule:?} {bar_first}");
+                    let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
+                    let bar = model
+                        .add_round_bar(
+                            scale,
+                            2.0 * scale,
+                            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a shift"),
+                        )
+                        .expect("a bar");
+                    let [x, y] = corner;
+                    let profile = ProfileBuilder::new(vec![
+                        [x * scale, -2.0 * scale],
+                        [2.0 * scale, -2.0 * scale],
+                        [2.0 * scale, y * scale],
+                        [x * scale, y * scale],
+                    ])
+                    .build(&Policy::certified(), &mut ProvenanceLog::new())
+                    .expect("a rectangle");
+                    let block = model
+                        .add_extrusion(
+                            &profile,
+                            4.0 * scale,
+                            &Isometry::translation(Vector::new(0.0, 0.0, -scale)).expect("a shift"),
+                        )
+                        .expect("a block");
+                    let (arguments, tools) = if bar_first {
+                        ([bar], [block])
+                    } else {
+                        ([block], [bar])
+                    };
+                    let fused = model.fuse(
+                        &arguments,
+                        &tools,
+                        rule,
+                        &Policy::tolerant(size),
+                        &mut ProvenanceLog::new(),
+                    );
+                    let what = match &fused {
+                        Ok(_) => "ok".to_string(),
+                        Err(Error::Undecidable { records }) => format!(
+                            "undecidable {}",
+                            records.records().last().map_or("-", |r| r.predicate())
+                        ),
+                        Err(error) => format!("{error:?}")
+                            .split([' ', '{', '('])
+                            .next()
+                            .unwrap_or("")
+                            .to_string(),
+                    };
+                    if what.starts_with("CannotTell") {
+                        println!("{corner:?} {scale:.2} {size:.2} {rule:?} {bar_first}: {fused:?}");
+                    }
+                    *counts.entry(format!("{corner:?} {what}")).or_default() += 1;
+                }
+            }
+        }
+    }
+    println!("{counts:#?}");
+}
+
+#[test]
+fn probe_q2028_seam_east() {
+    q2028_grid(1.0, [1.0, 0.0], false);
+}
+
+fn q2028_volume(
+    model: &Model,
+    fused: &Fused,
+    deflection: f64,
+) -> (f64, (usize, usize, usize, usize)) {
+    let mut volume = 0.0;
+    let mut faces = 0;
+    let mut wires = 0;
+    let mut shells = 0;
+    for &solid in fused.solids() {
+        let view = model.solid(solid).expect("a solid");
+        faces += view.faces().count();
+        wires += view.faces().flat_map(|face| face.wires()).count();
+        shells += view.shells().count();
+        volume += view
+            .measure(
+                rcad_geom::Deflection::of(deflection).expect("a deflection"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("measures")
+            .volume();
+    }
+    (volume, (fused.solids().len(), faces, wires, shells))
+}
+
+fn q2028_fuse(
+    scale: f64,
+    size: f64,
+    far_factor: f64,
+    seam: [f64; 2],
+    rule: Rule,
+    frustum_first: bool,
+) -> (Model, rcad_topo::Result<Fused>) {
+    let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
+    let far = 3.0 * scale * far_factor;
+    let frustum = a_frustum_seamed_towards(
+        &mut model,
+        2.0,
+        far / 300.0,
+        far,
+        seam,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a frustum");
+    let cube = a_corner_up_cube_round_the_origin(&mut model, 6.0 * scale);
+    let (arguments, tools) = if frustum_first {
+        ([frustum], [cube])
+    } else {
+        ([cube], [frustum])
+    };
+    let fused = model.fuse(
+        &arguments,
+        &tools,
+        rule,
+        &Policy::tolerant(size),
+        &mut ProvenanceLog::new(),
+    );
+    (model, fused)
+}
+
+fn q2028_grid(far_factor: f64, seam: [f64; 2], check: bool) {
+    let mut references = Vec::new();
+    for (rule, frustum_first) in EVERY_FUSE {
+        let (model, fused) = q2028_fuse(1.0, 10.0, far_factor, seam, rule, frustum_first);
+        let fused = fused.expect("the reference answers");
+        references.push(q2028_volume(&model, &fused, 0.01));
+    }
+    println!("references {references:?}");
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut worst = 0.0f64;
     for scale_step in 0..=20 {
         let scale = 0.1 + 0.02 * f64::from(scale_step);
         for size_step in 0..=16 {
             let size = 0.1 + 0.05 * f64::from(size_step);
-            for (rule, frustum_first) in EVERY_FUSE {
-                let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
-                let far = 3.0 * scale;
-                let frustum = a_frustum_seamed_towards(
-                    &mut model,
-                    2.0,
-                    far / 300.0,
-                    far,
-                    [-1.0, 0.0],
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                )
-                .expect("a frustum");
-                let cube = a_corner_up_cube_round_the_origin(&mut model, 6.0 * scale);
-                let (arguments, tools) = if frustum_first {
-                    ([frustum], [cube])
-                } else {
-                    ([cube], [frustum])
-                };
-                let fused = model.fuse(
-                    &arguments,
-                    &tools,
-                    rule,
-                    &Policy::tolerant(size),
-                    &mut ProvenanceLog::new(),
-                );
+            for (which, (rule, frustum_first)) in EVERY_FUSE.into_iter().enumerate() {
+                let (model, fused) = q2028_fuse(scale, size, far_factor, seam, rule, frustum_first);
                 let what = match &fused {
                     Ok(_) => "ok".to_string(),
                     Err(Error::Undecidable { records }) => format!(
@@ -682,10 +850,21 @@ fn probe_q2028_seam_cut_refusals() {
                 if what.starts_with("CannotTell") {
                     println!("{scale:.2} {size:.2} {rule:?} {frustum_first}: {fused:?}");
                 }
+                if check && let Ok(answer) = &fused {
+                    let valid = model.validate(&Policy::tolerant(size), &mut ProvenanceLog::new());
+                    let (volume, counts) = q2028_volume(&model, answer, 0.01 * scale);
+                    let (reference, reference_counts) = references[which];
+                    let off = (volume / scale.powi(3) - reference).abs() / reference;
+                    worst = worst.max(off);
+                    println!(
+                        "answered {scale:.2} {size:.2} {rule:?} {frustum_first}: valid {valid:?} volume off {off:e} counts {counts:?} reference {reference_counts:?}"
+                    );
+                }
                 *counts.entry(what).or_default() += 1;
             }
         }
     }
+    println!("worst volume off {worst:e}");
     println!("{counts:#?}");
 }
 
