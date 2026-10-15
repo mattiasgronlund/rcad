@@ -536,9 +536,10 @@ fn every_side_of_a_bend_placed_round_from_another_is_used_once_each_way() {
 /// from `0.01` to `5e-5` (Q2087). The measure charged a flat face nothing for
 /// that space, so at `0.01` it refused the sliver `VolumeIsNotPositive` on a
 /// sum of `−8.7e-17` (Q2077), and at `0.001` and `1e-4` its answer's range
-/// missed the wedge (Q2078). A flat face now owes how far its points stray off
-/// its plane, and a sum within its own error of zero is answered rather than
-/// refused, so the sliver is held against the wedge at all three.
+/// missed the wedge (Q2078). A flat face now owes how far the points the
+/// mesher places on it stray off its plane, and a sum within its own error of
+/// zero is answered rather than refused, so the sliver is held against the
+/// wedge at all three.
 #[test]
 fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver() {
     let one_bend = PI * PI * 4.0 / 2.0;
@@ -600,9 +601,9 @@ fn the_angle_between_the_caps_of(model: &Model, solid: SolidKey) -> f64 {
         .solid(solid)
         .expect("this model made the key")
         .faces()
-        .filter_map(|face| match face.surface() {
-            Surface::Plane(plane) => Some((plane.offset(), face.outward_normal())),
-            _ => None,
+        .filter_map(|face| {
+            let plane = *face.surface().as_plane()?;
+            Some((plane.offset(), face.outward_normal()))
         })
         .collect();
     let [(one_offset, one), (two_offset, two)] = caps[..] else {
