@@ -3055,7 +3055,11 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// The count does not depend on which way the half-line runs, so as in
 /// [`what_a_flat_face_holds`] every corner is aimed at in turn, and then the
 /// middle of every side, which a box at a rectangle's middle needs since it is
-/// on both diagonals. A middle is a rounding off the plane, and that changes no
+/// on both diagonals. An exact point needs a middle too where every corner is
+/// on a chord through it and no two of those arcs share both ends: the cap of a
+/// prism whose two arcs have their chords on the two diagonals of a square,
+/// asked where they cross, is wound from the middle of a straight side (same
+/// file, row Q2075). A middle is a rounding off the plane, and that changes no
 /// sign, for the reason [`what_a_flat_face_holds`] gives. The face is refused
 /// only when every aim off the chords leaves some corner unread. What a try
 /// that gave up wrote in the log is kept only when every try gave up, and then
