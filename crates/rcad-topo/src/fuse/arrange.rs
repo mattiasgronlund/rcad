@@ -5181,6 +5181,17 @@ impl<'f> Arrangement<'f> {
     /// nothing; the touch is proved by [`a_plane_rests_along_a_cone`], so it is
     /// read as nothing and the order of the two is left to how they bend.
     ///
+    /// **So it is where the two partners are a plane resting along a pipe**,
+    /// for the same reason: all the two share is the line the plane touches
+    /// the pipe along, where the pipe's gradient is along the plane's normal
+    /// ([`a_plane_rests_along_a_pipe`]). A bar of radius `1` up `z` through
+    /// `(−16, 0, 0)` inside a block whose side is `x = −17`, turned `−0.5`
+    /// about `x`, is the shape: on the block's top the side's line and the
+    /// wall's ellipse meet there, the wall's gradient is the box
+    /// `(−1, ±0, ±8.9e-16)` against the side's `(−1, 0, 0)`, and every
+    /// certified fuse was refused here, the determinant straddling nothing by
+    /// `8.5e-16` (Q1854).
+    ///
     /// **Where the two partners are pipes of one radius and the node is one of
     /// the two places they touch, nothing is what the determinant is too.**
     /// Their axes meet at `c` and the places are `c ± r·n̂`, for `n̂` square to
@@ -5248,6 +5259,7 @@ impl<'f> Arrangement<'f> {
         }
         if matches!(turn, Decision::Undecidable { .. })
             && (a_plane_rests_along_a_cone(&first_partner, &second_partner)
+                || a_plane_rests_along_a_pipe(&first_partner, &second_partner)
                 || self.is_where_two_pipes_touch(node, &first_partner, &second_partner))
         {
             return Ok(Decision::Zero);
@@ -11225,6 +11237,27 @@ fn a_plane_rests_along_a_cone(one: &Surface, other: &Surface) -> bool {
         where_a_cones_apex_stands_against_a_plane(flat, cone) == Decision::Zero
             && how_a_plane_leans_against_a_cone(flat, cone) == Decision::Zero
     })
+}
+
+/// Whether one of the two is a plane resting along the other, a pipe, touching
+/// it along one line and crossing it nowhere: `n·w` and `n·n·r² − (n·o − d)²`
+/// both nothing, **proved**.
+///
+/// Asked of [`intersect`] under [`Policy::certified`] whatever the caller's
+/// policy, so that the two signs are the ones `intersect` splits a plane and a
+/// pipe on, written once, and neither is rounded. It answers one bare
+/// [`EdgeRun::Straight`] for the pair only where it proved both nothing, and an
+/// ellipse, two lines a half-space picks apart, nothing or an `Err` otherwise.
+/// Its records are not kept: an answer it cannot prove decides nothing here.
+fn a_plane_rests_along_a_pipe(one: &Surface, other: &Surface) -> bool {
+    matches!(
+        (one, other),
+        (Surface::Plane(_), Surface::Cylinder(_)) | (Surface::Cylinder(_), Surface::Plane(_))
+    ) && matches!(
+        intersect(one, other, &Policy::certified(), &mut ProvenanceLog::new()),
+        Ok(SurfaceMeet::Curves(runs))
+            if matches!(&runs[..], [line] if matches!(line.run(), EdgeRun::Straight))
+    )
 }
 
 /// Whether a plane holds a cone's axis: `n·w` nothing, **proved and never
