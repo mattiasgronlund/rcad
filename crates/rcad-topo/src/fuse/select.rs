@@ -3215,6 +3215,11 @@ fn settle_against_each(
         let solid: SolidView<'_> = model.solid_at(solids[index].key.slot_in(model.id()));
         let mut ray = ProvenanceLog::new();
         let placed = solid.classify_uncertain_point(point, policy, &mut ray);
+        if matches!(placed, Containment::Inside | Containment::Outside)
+            && a_face_may_run_between_it_and_the_plane(solid, piece, point, policy)
+        {
+            return Ok(Settled::Abandoned);
+        }
         // A classification nobody could make is not a decision anybody took, so
         // it says nothing in the log (§5) — and criterion 7 would otherwise read
         // it as slop this fuse had accepted, which is exactly the conflation
@@ -3255,6 +3260,65 @@ fn settle_against_each(
         }
     }
     Ok(Settled::At(lying_on.placement()))
+}
+
+/// Whether a face of `solid` may pass between `point` and the points of a flat
+/// piece's plane beside it, so that where the ray put `point` need not be
+/// where the piece is.
+///
+/// [`the_piece_holds`] holds a point a rounding off a flat piece's plane by
+/// the point's box stretched to the plane ([`stretched_to_the_plane`]), so
+/// what it shows is that the piece holds points of the plane in that box, not
+/// that it holds `point`. The ray places `point`. The two answers are the same
+/// unless the skin of `solid` runs through the stretched box, and a face can
+/// only do that where its surface does not leave the whole box on the side it
+/// leaves `point`, and where it holds some of the box.
+///
+/// **Only a certified answer clears a face.** Saying yes here drops one
+/// candidate and decides nothing about the piece, which the next candidate or
+/// rule then places. A tolerance spent on saying no would be a decision kept
+/// for a point the fuse may not have needed: under `Policy::tolerant(3.0)` a
+/// tall block through a turned flat one logged an `orient3d` for it, beside the
+/// one warning about its dynamic range
+/// (`turning_a_fuse.rs`'s
+/// `a_tall_block_through_a_flat_one_turned_answers_every_rule_under_a_tolerant_policy`).
+///
+/// Two quarter bends placed round by `−2` and by `−2 − π/2` meet at two cap
+/// planes through the ring's axis a rounding apart, and each cap's disk lies
+/// `1.7e-17` inside the other bend. A point `8e-16` off the first bend's start
+/// cap, beyond the copy's end cap plane, was held by that cap and placed
+/// outside the copy, and every rule both ways round was refused
+/// `ResultIsNotManifold` along the cap's rim (Q1949).
+fn a_face_may_run_between_it_and_the_plane(
+    solid: SolidView<'_>,
+    piece: &Piece,
+    point: PredicatePoint,
+    policy: &Policy,
+) -> bool {
+    let Some(flat) = piece.surface.as_plane() else {
+        return false;
+    };
+    if side_of_a_flat_face(flat, point) == Decision::Zero {
+        return false;
+    }
+    let reach = stretched_to_the_plane(flat, point)
+        .expect("the_piece_holds stretched this point to the plane before it held it");
+    solid.faces().any(|face| {
+        let surface = face.surface();
+        let side_of = |at| match surface.as_plane() {
+            Some(plane) => side_of_a_flat_face(plane, at),
+            None => side_of_surface(&surface, at),
+        };
+        let where_the_point_is = side_of(point);
+        if matches!(where_the_point_is, Decision::Pos | Decision::Neg)
+            && side_of(reach) == where_the_point_is
+        {
+            return false;
+        }
+        let mut asked = ProvenanceLog::new();
+        let held = solid.face_holds_the_point(face.key(), reach, policy, &mut asked);
+        !(matches!(held, Ok(OnAFace::NotHeld)) && asked.is_empty())
+    })
 }
 
 /// What one point inside a piece says about where the piece sits.
