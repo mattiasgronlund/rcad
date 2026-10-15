@@ -4063,7 +4063,10 @@ impl Assembly {
     /// origin. That ball has no closed edge, so no far side is asked of it, but
     /// its seam is half a circle from pole to pole on the plane through its
     /// centre, and the seam's middle, on the ball's equator, is inside the
-    /// block: since Q2101 the block less that ball answers.
+    /// block: since Q2101 the block less that ball answers. The same ball in a
+    /// square bar as wide as it is, `x` from 3 to 7, is still refused: the
+    /// seam's middle is where the ball touches the bar's side, so the record
+    /// names the two poles and that middle.
     ///
     /// # Errors
     ///
