@@ -1198,7 +1198,9 @@ Under `tolerant(100)` all eight answer. Under `certified` five of eight refuse
 at every placement but none, ∩ at none and at the shift. No "side of plane"
 refusal comes back. So the pyramid's refusal is not every slanted corner on a
 cut, and the tetrahedron's is a second gap, since its answer has no small
-feature either: class `refuses/B`, a row of its own.
+feature either: class `refuses/B`, a row of its own. *§294.22 found otherwise:
+the stored front face is a rounding off the apex, the answer the kernel is
+handed does have a small feature, and all five refusals are limits.*
 
 `mise exec -- just t -E
 'binary(a_broken_three_surface_corner_read_back_from_bytes)'` runs the box's
@@ -1596,3 +1598,134 @@ which replaces §294.20's
   tier 1, `refuses/B`, after Q1954: carry the fact that one movement placed
   both solids and the cut ran through the apex before it, if Q1954 finds it
   in hand, so the cut meets the apex.
+
+### 294.22 Q1839: the tetrahedron's front face is stored a rounding off its apex, and each refusal is the answer of the numbers it is handed — 2026-10-15
+
+*Queue row Q1839, from §294.17. Lane
+`lane-q1839-a-tetrahedron-cut-through-its-apex`, base `872c1b1c`, carried on
+by three more lanes (§416). No code changed: a trace put in
+`fuse/arrange.rs` was taken out. Pinned in
+`crates/rcad-topo/tests/a_tetrahedron_cut_through_its_apex.rs`. The exact
+sums below were worked in Python's `Fraction` over the stored numbers, by a
+scratch script that is not kept.*
+
+**Why §294.17 called it a gap.** It read "its answer has no small feature"
+from the shape as drawn. The block's face `y = 0` runs exactly through the
+apex `(0, 0, 10)`, so the cut and the three side planes meet at one point
+and nothing is small. That is true of the shape drawn. It is not true of the
+planes the build stored.
+
+**The front face misses the apex.** Each face of the tetrahedron gets its
+plane from `Plane::through_three_points`. The face facing `−y` runs along
+`(0, −10, 3)` scaled to length one, stored as `[0, −0.9578262852211514,
+0.28734788556634544, −2.8734788556634543]`. `10 × 0.28734788556634544` is
+not an `f64`, so at `(0, 0, 10)` the stored plane is `1.1e−16`, and
+`side_of_point` proves it `Pos`. The two other side planes are `Zero`
+there. In exact sums over the stored numbers, the three side planes meet at
+`A = (0, 5.8e−17, 10 − 1.9e−16)`, on the block's side of the cut. The front
+face's two slanted edges cross the cut at `P± = (±5.8e−17, 0, 10 − 3.9e−16)`.
+So in the tetrahedron the kernel is handed, the apex is inside the block. Its
+intersection with the block keeps a triangle `A P+ P−` of the front face,
+with sides `2.1e−16` and `1.2e−16`. Its difference keeps a four-sided cut,
+whose top edge `P+ P−` is `1.2e−16` long. Neither fits beside coordinates
+near 10 in an `f64`.
+
+**What the fuse made of it, where it was built.** With the range check at
+`Warn`, the intersection answered with the `+x` face's outline
+`(0, 2.458e−16, 10) → (0, 0, 10) → (1.5, 0, 0) → (0, 3, 0)`. `P+` and `P−`
+have one box middle, `(0, 0, 10)`, so `Corners::of` makes them one corner
+(§365.7). The triangle `A P+ P−` then has two sides on one edge, and it is
+left out. That edge runs from `A`, written at its box middle, to
+`(0, 0, 10)`, and is `2.458e−16` long. `11 / 2.458e−16` is the refusal's
+`4.47e16`. In the difference, `P+ P−` is the cut's top edge. Both of its ends
+are written as `(0, 0, 10)`, so it is left out as §365.7 leaves such a side,
+and the difference answers 45 with nothing in the log.
+
+**Placed, the placement rounds each plane again.** Where the three side
+planes meet is off the cut at every placement:
+`side_of_a_plane_where_three_planes_meet` puts it inside the block where it
+was built and shifted, and outside turned and turned then shifted. The half
+that holds `A` is refused at every placement. The other half answers when
+`P+` and `P−` are written as one triple. Shifted, they are not: both halves
+are refused at `1.5199648742375424e16`, which is `13.5 × 2⁵⁰`. That is the
+shifted block's top, `z = 13.5`, over an edge `2⁻⁵⁰` long, one `f64` step
+at `x = 7`, where 448.5's trace found a speck at the shifted apex.
+
+**The front face's rounding alone does not make the placed refusals.** A
+front face can be built through the apex exactly:
+`Plane::from_point_and_normal_as_written` through the apex along
+`(0, −10K, 3K)`, with `K = 0.09578262852211505`. That is `1/√109` rounded to
+a multiple of `2⁻⁵⁰`, so `10K`, `3K` and the offset `30K` are each an `f64`.
+The plane holds the apex and `(±3, −3, 0)` exactly, and `109K²` is `8ε` short
+of one, inside `Plane::NORMAL_LENGTH_ROUNDOFF`. Where it was built, the four
+planes meet at one point, and both halves answer under `certified` with
+nothing in the log. Placed first, its three side planes meet on the same
+side of the cut as before, at all three placements. It is refused at the
+same four fuses as the front face through three points: both halves
+shifted, and the difference turned and turned then shifted. So those four
+are the placement's rounding, which is §448.7's limit. The kernel is handed
+the composed numbers, and their answer holds an edge a rounding long.
+
+This sharpens 448.5's count. The front face's rounding, (a), is the whole of
+the unplaced intersection: built through the apex exactly, it answers. The
+placement's rounding, (c), is enough for the three placed differences: they
+are refused with the exact front face too. The shifted intersection, which
+448.5 gave to (a), is refused unless both are taken away. With the exact
+front face placed first it is still refused. With the front face through
+three points, fused where it was built and then shifted, it is the unplaced
+intersection, which is refused.
+
+**Whether it is a limit.** For the numbers the kernel is handed, all five
+are. Where it was built, the stored front plane puts the apex inside the
+block, and the tetrahedron's intersection with the block holds a triangle
+`1e−16` across. The answer `certified` would have to write does not fit an
+`f64` beside 10, so `DynamicRangeTooWide` is a limit by `LimitOrGap`.
+Placed, §448.7 settled it for the pyramid, and the exact front face shows
+the tetrahedron's placed refusals do not need the front face's rounding.
+The answer the designer meant, with nothing small in it, is the answer of
+other numbers: a front face through the apex, and the cut made before the
+placement. There is no gap to close, so the row closes on this
+demonstration and no fix is made.
+
+**The road a caller has.** Build the front face through the apex exactly,
+fuse the two where they were built, and place the answer. All eight fuses
+answer under `certified`, hold 45 and 15 to `1e−12` relative, validate, and
+leave nothing in the log. That is §448.7's road with one step more, the front
+face, and only the caller can take it: it knows the face was drawn through
+the apex, and the plane it handed in says otherwise.
+
+**Under `tolerant(100)`** all eight answer, each with one record, `three
+meets of one plane taken as an input corner`.
+`fold_each_corner_one_plane_cuts_a_rounding_from_it` takes the points where
+the cut meets two of the side planes, a rounding from the apex, as the apex.
+
+**The pins**, in
+`crates/rcad-topo/tests/a_tetrahedron_cut_through_its_apex.rs`:
+
+- `the_front_face_through_three_points_is_stored_a_rounding_off_the_apex`,
+  and the exact front face `Zero` at the apex and at `(±3, −3, 0)`.
+- `where_the_three_side_planes_meet_is_off_the_cut_at_every_placement`, for
+  both front faces.
+- The 16 fuses by name: `unplaced_`, `shifted_`, `turned_` or
+  `turned_then_shifted_`, then `less_the_block_` or `and_the_block_`, then
+  `answers_45_`, `answers_15_` or `is_refused_`, then `under_certified` or
+  `under_tolerant`. Each refusal is pinned to its ratio within `1e−9`.
+- `a_front_face_through_the_apex_fused_where_built_and_then_placed_answers_at_every_placement`,
+  the road.
+- `a_front_face_through_the_apex_placed_first_is_refused_where_the_placement_rounds`.
+
+`mise exec -- just t -p rcad-topo -E
+'binary(a_tetrahedron_cut_through_its_apex)'`: 20 tests run, 20 passed.
+
+**What this leaves.** No row.
+
+- `Plane::through_three_points` storing a plane that misses one of its own
+  three points by a rounding. Not filed. It refuses nothing: the refusals
+  above are the range check reading an answer the stored planes really
+  have. A plane that holds the three points exactly exists for this face,
+  by the search for `K`. Whether one exists for any three points was not
+  tried. Building it is a feature, and no consumer in `docs/consumers.md`
+  asks for it, so §13 defers it.
+- The four placed refusals. Not filed: carrying a movement two solids share
+  is §448.7's tier 4 row, parked until `docs/consumers.md` names a caller
+  that needs it.
