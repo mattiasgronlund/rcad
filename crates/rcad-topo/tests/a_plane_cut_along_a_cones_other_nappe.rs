@@ -200,8 +200,14 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 /// it `ASideCutsOffOneCornerOfACurvedPatch` at every rung. A cut leaves only
 /// from a corner whose meridian meets the rim nowhere else now, and the first
 /// leaves from the next corner along the rim, `0.027` round from the ruling at
-/// `0.002`. The two at lean one quarter still do not measure at `0.002`, and
-/// `the_eighteen_held_to_the_familys_four_checks` says why.
+/// `0.002`.
+///
+/// **The two at lean one quarter answer right since Q2040**, held to the same
+/// four checks. The stored face misses the apex by an ulp, so its rim down the
+/// ruling drifts by ulps of longitude from corner to corner, and a corner on
+/// that ruling was taken as clear of the rim when its cut down the ruling ran a
+/// few ulps off it. A side within the walk's rounding of a cut's longitude is
+/// read as along the cut now (§354.7).
 ///
 /// **The sixteen that could not name a piece answer right since Q1171**, each
 /// held to the same four checks. They are the faces through the apex, turned
@@ -214,14 +220,14 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 ///
 /// **The family is two tests, one per lean**, so that neither sets the slow
 /// tier's wall (`docs/decisions.md` §397.4). Their tallies add up to the counts
-/// above: the two that do not measure are at a quarter.
+/// above: all ninety-six right.
 #[test]
 fn a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_a_quarter_answers_right_or_refuses() {
     assert_eq!(
         tally(&steeper_faces_near_the_pointed_cones_apex(0.25)),
         Tally {
-            right: 46,
-            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
+            right: 48,
+            refused: [].into()
         }
     );
 }
@@ -852,9 +858,11 @@ fn a_block_leaned_three_eighths_turned_three_across_a_steep_pointed_cone_answers
 
 /// The same block leaned `1` or `4`, against the steep cone's slope of `2`.
 ///
-/// Leaned `1`, the block meets the cone at every crossing. Crossing `0`
-/// turned `0`, the union and the cone-less-block refuse `CannotMeshAFace`;
-/// every other lean-`1` fuse is right. Leaned `4`, crossing `0` puts the
+/// Leaned `1`, the block meets the cone at every crossing, and every lean-`1`
+/// fuse is right. Until Q2040's `a_side_meets_a_cut` in `mesh.rs` (§354.7),
+/// crossing `0` turned `0`, the union and the cone-less-block refused
+/// `CannotMeshAFace`; which of that fix's two steps, the bound or the one
+/// addition, moved them is not traced. Leaned `4`, crossing `0` puts the
 /// leaning face through the apex and nowhere else on the cone, a touch. The
 /// turn rounds that touch either way ([`a_leaning_case`]):
 ///
@@ -874,8 +882,8 @@ fn a_block_leaned_one_unturned_across_a_steep_pointed_cone_answers_right_or_refu
     assert_eq!(
         tally_on_every_second_point(&leaning_blocks(THE_STEEP_CONE, 1.0, &[0.0])),
         Tally {
-            right: 14,
-            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
+            right: 16,
+            refused: BTreeMap::new()
         }
     );
 }
@@ -1197,8 +1205,11 @@ fn the_steep_cone_less_a_slab_turned_one_and_a_half_keeps_a_lens_past_the_end_it
 /// ([`APART`]), and turned `1` the rounding of the turn cuts a sliver from it
 /// ([`OVERLAPPING`], [`a_leaning_case`]).
 ///
-/// Leans `0.25` and `0.375` each refuse `CannotMeshAFace` on the intersection
-/// and the block-less-cone at crossing `0`, turn `1`. Leaned `1`, the same
+/// Leans `0.25` and `0.375` answer right at every crossing and turn. Until
+/// Q2040's `a_side_meets_a_cut` in `mesh.rs` (§354.7), each refused
+/// `CannotMeshAFace` on the intersection and the block-less-cone at crossing
+/// `0`, turn `1`; which of that fix's two steps, the bound or the one
+/// addition, moved the four is not traced. Leaned `1`, the same
 /// crossing and turn refuses `AWireWillNotLieFlatOnItsFace` on the union and
 /// the cone-less-block, and the sliver the intersection answers does not
 /// measure (`TwoPatchesOfTheMeshDrewTheSameSide`). Leaned `1` and turned `1`,
@@ -1214,8 +1225,8 @@ fn a_block_leaned_a_quarter_across_a_unit_pointed_cone_answers_right_or_refuses(
     assert_eq!(
         tally_on_every_second_point(&leaning_blocks(THE_UNIT_CONE, 0.25, &[0.0, 1.0, 3.0])),
         Tally {
-            right: 46,
-            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
+            right: 48,
+            refused: BTreeMap::new()
         }
     );
 }
@@ -1225,8 +1236,8 @@ fn a_block_leaned_three_eighths_across_a_unit_pointed_cone_answers_right_or_refu
     assert_eq!(
         tally_on_every_second_point(&leaning_blocks(THE_UNIT_CONE, 0.375, &[0.0, 1.0, 3.0])),
         Tally {
-            right: 46,
-            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
+            right: 48,
+            refused: BTreeMap::new()
         }
     );
 }

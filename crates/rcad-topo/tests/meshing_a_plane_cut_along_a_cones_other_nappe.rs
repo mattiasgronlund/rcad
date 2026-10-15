@@ -12,9 +12,11 @@
 //!   keeps is under a third of a turn two quarters pick the same corner. The
 //!   patch between them was that corner and the apex twice, and the
 //!   triangulator refused it: `CornersCoincide { position: 2 }`. The cuts leave
-//!   from four different corners now (§354): fourteen answer right, and the
-//!   last two, whose steep face misses the apex by a rounding, hold every
-//!   grid point and measure at `0.02` and no finer (Q846).
+//!   from four different corners now (§354), and all sixteen answer right. The
+//!   last two, whose steep face misses the apex by a rounding, measured at
+//!   `0.02` and no finer until Q2040: their cap's rim runs down a ruling with
+//!   its corners' longitudes a few ulps apart, and a cut left from one of
+//!   those corners down the ruling, a sliver off the rim.
 //! - **Two folds on the frustum.** The block's steep face and the frustum's
 //!   face share the two arcs they cross in, each walked as two chords, and both
 //!   faces draw the side between the two arcs' middles:
@@ -22,7 +24,7 @@
 //!   retries a fold at half the room now, as §208.3's zero ladder already did,
 //!   and both answer right (§285.6's experiment B).
 
-use core::f64::consts::{FRAC_PI_2, PI};
+use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use std::collections::BTreeMap;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
@@ -104,9 +106,8 @@ fn two_quarters_are_nearest_one_corner_when_the_kept_rim_is_under_a_third_of_a_t
 }
 
 /// The intersections whose steep face is meant to run through the apex,
-/// crossing zero, do not measure at `0.002` at turn one and at no other turn,
-/// and which side of that face the apex really is on does not say whether
-/// one of them measures at all.
+/// crossing zero, all measure at `0.002`, and which side of that face the apex
+/// really is on never said whether one of them measures at all.
 ///
 /// The block's placement is rounded, so its steep face misses the apex by a
 /// rounding. The block itself puts the apex inside it at two of the six, and
@@ -115,11 +116,11 @@ fn two_quarters_are_nearest_one_corner_when_the_kept_rim_is_under_a_third_of_a_t
 /// zero, so the apex sits exactly on it, 5 to 12 units inside every other
 /// stored plane, and `OnBoundary` is the stored planes' answer (§346.7) where
 /// the corners alone used to say Inside, Inside and Outside. Since Q846's
-/// four-corner cuts (§354), only `(0.25, 1.0)` still fails to measure at
-/// every deflection; `(0.375, 3.0)` measures, and so does
-/// `(0.375, 1.0)`. So the apex's own side of the face still does not say
-/// which of these caps measure: `(0.25, 1.0)` and `(0.375, 1.0)` are both
-/// inside, and only one of them does.
+/// four-corner cuts (§354), only `(0.25, 1.0)` still failed to measure at
+/// every deflection, while `(0.375, 1.0)`, inside too, measured. Since Q2040
+/// it measures as well, so all six measure, whichever side of the face the
+/// apex is on: a cut no longer leaves from a corner on the ruling the rim runs
+/// down, a few ulps of longitude off the corners below it.
 #[test]
 fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_it_measures() {
     let policy = Policy::certified();
@@ -143,7 +144,7 @@ fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_i
         seen,
         [
             (0.25, 0.0, Containment::OnBoundary, false),
-            (0.25, 1.0, Containment::Inside, true),
+            (0.25, 1.0, Containment::Inside, false),
             (0.25, 3.0, Containment::OnBoundary, false),
             (0.375, 0.0, Containment::OnBoundary, false),
             (0.375, 1.0, Containment::Inside, false),
@@ -157,13 +158,14 @@ fn which_side_of_the_face_meant_through_the_apex_it_is_on_does_not_say_whether_i
 ///
 /// All eighteen refused before there was an answer to check until the quarter
 /// cuts left from four different corners (§354) and the coarsest mesh retried
-/// a fold. Now sixteen answer right: the twelve caps that already did, the
+/// a fold. Then sixteen answered right: the twelve caps that already did, the
 /// frustum's two folds, and the two at lean three eighths whose steep face
-/// misses the apex by a rounding, which now answer right too (Q846). The last
-/// two, at lean one quarter, still hold every grid point and measure at
-/// `0.02` and no finer. It is the harness for §285's and §354's experiments:
-/// with one applied, the same test prints how many answer right and how the
-/// rest refuse.
+/// misses the apex by a rounding (Q846). The last two, at lean one quarter,
+/// held every grid point and measured at `0.02` and no finer, refused
+/// `ASideCutsOffOneCornerOfACurvedPatch`, and all eighteen answer right since
+/// Q2040 (§354.7). It is the harness for §285's and §354's experiments: with
+/// one applied, the same test prints how many answer right and how the rest
+/// refuse.
 #[test]
 fn the_eighteen_held_to_the_familys_four_checks() {
     let mut cases = Vec::new();
@@ -195,16 +197,29 @@ fn the_eighteen_held_to_the_familys_four_checks() {
         *tally.entry(said).or_default() += 1;
     }
     println!("{tally:#?}");
-    let a_side_cuts_off_a_corner = format!(
-        "right on the grid, measured right at 0.02, refused finer: {:?}",
-        [19, 68, 9].map(|corner| format!(
-            "CannotMeshAFace ASideCutsOffOneCornerOfACurvedPatch {{ corner: {corner} }}"
-        ))
-    );
-    assert_eq!(
-        tally,
-        [("right".to_owned(), 16), (a_side_cuts_off_a_corner, 2)].into()
-    );
+    assert_eq!(tally, [("right".to_owned(), 18)].into());
+}
+
+/// The block whose steep face is meant to run through the apex, at a lean of
+/// a quarter, turned an eighth of a turn and turned `2`, measures at the
+/// finest deflection the family asks for.
+///
+/// The steep face's stored plane misses the apex by `8.9e-16` turned an eighth,
+/// so the piece of the cone inside the block is a cap whose rim runs down near
+/// one ruling to a rounding above the apex, round it, and up near another. The
+/// rim's corners down the first ruling have longitudes within an ulp of a
+/// whole turn of each other: `-0.26179938779914963` at `z = 8` and
+/// `-0.26179938779915013` at `2.92`.
+/// The first quarter cut left from the corner at `7.3`, down the ruling, and
+/// the patch between it and the rim was a sliver the triangulator refused
+/// `ASideCutsOffOneCornerOfACurvedPatch` at every deflection; turned `2`, the
+/// same cap was refused `LoopsTouch` finer than `0.01` (Q2040).
+#[test]
+fn a_steep_face_meant_through_the_apex_turned_other_ways_measures_at_the_finest_deflection() {
+    let measured = [FRAC_PI_4, 2.0].map(|turn| {
+        how_the_finest_measure_goes(THE_POINTED_CONE, a_leaning_block(0.25, 0.0, turn))
+    });
+    assert_eq!(measured, ["right", "right"].map(str::to_owned));
 }
 
 const INTERSECTION: (Rule, bool) = (Rule::Intersection, true);
@@ -417,6 +432,56 @@ fn what_it_gives(cone: ConeShape, block: BoxShape, (rule, cone_first): (Rule, bo
         }
     }
     format!("right on the grid ({decided} points), and every measure refused: {refusals:?}")
+}
+
+/// `"right"` when the intersection of the cone and the block is one solid that
+/// measures at `0.002` within its bound of the volume the shapes share, as
+/// [`what_it_gives`] holds a volume to; what refused when anything refused.
+///
+/// # Panics
+///
+/// When the intersection is not one solid, or measures a volume the shapes do
+/// not share.
+fn how_the_finest_measure_goes(cone: ConeShape, block: BoxShape) -> String {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let (cone_key, block_key) = build(&mut model, cone, block);
+    let answer = match model.fuse(
+        &[cone_key],
+        &[block_key],
+        Rule::Intersection,
+        &policy,
+        &mut ProvenanceLog::new(),
+    ) {
+        Ok(answer) => answer,
+        Err(why) => return format!("the fuse refused {}", named(&why)),
+    };
+    let [piece] = answer.solids() else {
+        panic!(
+            "{block:?}: the intersection is {} solids",
+            answer.solids().len()
+        );
+    };
+    let deflection = Deflection::of(0.002).expect("a positive length");
+    match model
+        .solid(*piece)
+        .expect("this model made the key")
+        .measure(deflection, &policy, &mut ProvenanceLog::new())
+    {
+        Ok(measured) => {
+            let want = shared_volume(cone, block);
+            let cone_volume =
+                PI * cone.slope * cone.slope * (cone.far.powi(3) - cone.near.powi(3)) / 3.0;
+            let slack = measured.volume_error() + 0.002 * cone_volume;
+            assert!(
+                (measured.volume() - want).abs() <= slack,
+                "{block:?}: volume {}, where the shapes say {want} (allowed {slack})",
+                measured.volume()
+            );
+            "right".to_owned()
+        }
+        Err(why) => named(&why),
+    }
 }
 
 /// A refusal as it prints, but for a face that would not mesh only what the

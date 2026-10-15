@@ -2302,7 +2302,7 @@ impl BuildingAMesh {
                 low.iter().enumerate().any(|(other, &[from, to])| {
                     other != one && two_sides_meet(leg, [moved_by(from), moved_by(to)])
                 }) || high.iter().any(|&[longitude, from]| {
-                    a_side_meets_a_cut(leg, longitude + by, [from, towards])
+                    a_side_meets_a_cut(leg, longitude + by, [from, towards], whole)
                 })
             })
         });
@@ -4307,6 +4307,7 @@ impl ACutThroughAnIsland<'_> {
                     [island.corners[at], island.corners[next]],
                     up_from[0],
                     [up_from[1], self.towards],
+                    self.whole,
                 )
         });
         !(others_in_the_way
@@ -4324,10 +4325,9 @@ impl ACutThroughAnIsland<'_> {
             && self
                 .other_islands()
                 .all(|other| !a_leg_meets_an_island(other, leg, None, self.whole))
-            && self
-                .others
-                .iter()
-                .all(|&[longitude, from]| !a_side_meets_a_cut(leg, longitude, [from, self.towards]))
+            && self.others.iter().all(|&[longitude, from]| {
+                !a_side_meets_a_cut(leg, longitude, [from, self.towards], self.whole)
+            })
     }
 
     /// The island's corners `corners` names, nearest the rim corner first.
@@ -5020,29 +5020,29 @@ fn a_cut_up_meets_the_rim(
     towards: f64,
     whole: f64,
 ) -> bool {
-    the_sides_of_a_rim(cap, whole).any(|side| a_side_meets_a_cut(side, longitude, [from, towards]))
+    the_sides_of_a_rim(cap, whole)
+        .any(|side| a_side_meets_a_cut(side, longitude, [from, towards], whole))
 }
 
 /// Every side of a cap's rim, a whole turn either side as well, with the side
 /// that closes it run on to its first corner a whole `climbed` on.
 ///
-/// **The closing side is moved by `climbed` and then by the turn**, so its
-/// copy a turn back can miss the first corner by an ulp, which
-/// [`a_leg_meets_the_rim`] cannot have. Moved in one addition here instead,
-/// three cone tests moved under [`a_cut_up_meets_the_rim`] (Q1879): in
-/// `meshing_a_plane_cut_along_a_cones_other_nappe`, one face measured that
-/// did not and two shapes of `the_eighteen_held_to_the_familys_four_checks`
-/// were refused `LoopsTouch`, and in `a_plane_cut_along_a_cones_other_nappe`
-/// two of a lean of three eighths were refused. Why is not traced.
+/// **The closing side is moved by `climbed` and the turn in one addition**, as
+/// [`a_leg_meets_the_rim`] moves it, so its copy a turn back ends on the first
+/// corner itself. Moved in two, it missed the first corner by an ulp, and a cut
+/// from that corner was read as meeting the rim where it set off. That kept
+/// Q1905's cone off its first corner by accident: the corner is the top of a
+/// run of the rim down the cone's ruling, which the cut up its meridian runs
+/// along a few ulps off, and taken clear under one addition it was refused
+/// `LoopsTouch` (Q2037). [`a_side_meets_a_cut`] now reads that run as along
+/// the cut (§354.7), which is what lets this take the one addition.
 fn the_sides_of_a_rim(cap: &WalkedLoop, whole: f64) -> impl Iterator<Item = [[f64; 2]; 2]> + '_ {
     let count = cap.corners.len();
     (0..count).flat_map(move |at| {
         let here = cap.corners[at];
-        let mut there = cap.corners[(at + 1) % count];
-        if at + 1 == count {
-            there[0] += cap.climbed;
-        }
-        [-whole, 0.0, whole].map(|by| [[here[0] + by, here[1]], [there[0] + by, there[1]]])
+        let there = cap.corners[(at + 1) % count];
+        let on = if at + 1 == count { cap.climbed } else { 0.0 };
+        [-whole, 0.0, whole].map(|by| [[here[0] + by, here[1]], [there[0] + (on + by), there[1]]])
     })
 }
 
@@ -5281,10 +5281,10 @@ fn each_island_a_cut_meets_goes_into_the_patches_once(
 /// than at that corner, a whole turn either side as well.
 ///
 /// **The side that closes the rim is moved by `climbed` and the turn in one
-/// addition**, and not in two as [`the_sides_of_a_rim`] moves it. A side is
-/// left out here by an end that is the leg's start bit for bit, and `climbed`
-/// is a whole number of turns exactly, so only the one addition puts the copy
-/// a turn back on the first corner itself. In two, the first corner of a
+/// addition**, as [`the_sides_of_a_rim`] moves it too. A side is left out
+/// here by an end that is the leg's start bit for bit, and `climbed` is a
+/// whole number of turns exactly, so only the one addition puts the copy a
+/// turn back on the first corner itself. In two, the first corner of a
 /// pipe's ring at `2.7861714518995693` came back `2.7861714518995697`, and the
 /// first cut across the ring was read as crossing the rim where it sets off
 /// (Q1879).
@@ -5345,9 +5345,31 @@ fn two_sides_meet([a, b]: [[f64; 2]; 2], [c, d]: [[f64; 2]; 2]) -> bool {
 
 /// Whether the side between two corners meets the cut at `longitude` from
 /// latitude `from` to `to`, leaving `from` itself out.
-fn a_side_meets_a_cut([one, other]: [[f64; 2]; 2], longitude: f64, [from, to]: [f64; 2]) -> bool {
+///
+/// **A side whose two ends are each within the walk's rounding of the cut's
+/// longitude runs along the cut**, and not only one whose ends have that
+/// longitude bit for bit ([`the_walks_rounding_of_a_longitude`]). Within that
+/// the chart cannot say which side of the cut a corner lies on, and a cut that
+/// close to the rim leaves a sliver between them whose points are the rim's
+/// own. A block face meant through a pointed cone's apex is stored an ulp off
+/// it, so the rim down the cone's ruling is a hyperbola whose longitude drifts
+/// by ulps from one corner to the next. Read bit for bit, a corner on that
+/// ruling was taken clear, the cut from it ran down the ruling a few ulps off
+/// the rim, and the sliver between was refused
+/// `ASideCutsOffOneCornerOfACurvedPatch` or `LoopsTouch` (§354.7).
+///
+/// Wherever the bit-for-bit reading said "meets", this says so too: a side that
+/// crosses the cut's longitude at a latitude on the cut has its low end on the
+/// cut, its high end on it, or `to` strictly between them.
+fn a_side_meets_a_cut(
+    [one, other]: [[f64; 2]; 2],
+    longitude: f64,
+    [from, to]: [f64; 2],
+    whole: f64,
+) -> bool {
     let on_the_cut = |latitude: f64| latitude != from && passes_or_ends_at(latitude, from, to);
-    if one[0] == longitude && other[0] == longitude {
+    let near = the_walks_rounding_of_a_longitude(longitude, whole);
+    if (one[0] - longitude).abs() <= near && (other[0] - longitude).abs() <= near {
         let (low, high) = (one[1].min(other[1]), one[1].max(other[1]));
         return on_the_cut(low)
             || on_the_cut(high)
@@ -5359,6 +5381,21 @@ fn a_side_meets_a_cut([one, other]: [[f64; 2]; 2], longitude: f64, [from, to]: [
     }
     let part = (longitude - one[0]) / (other[0] - one[0]);
     on_the_cut(one[1] + part * (other[1] - one[1]))
+}
+
+/// How far apart two longitudes the walk gives can be and still name one
+/// meridian: four ulps of the larger of the longitude and a whole turn.
+///
+/// [`WalkingAWire::arrive`] takes each longitude as the one before it plus the
+/// short way round to `atan2`'s answer. `atan2` rounds by half an ulp of
+/// its answer, which is under half a turn; the difference from the longitude
+/// before, the whole turns taken off it and the sum each round by half an ulp
+/// of the larger of the turn and the longitude. So one longitude carries about
+/// two such ulps of the walk's own arithmetic, and the difference of two about
+/// four. §354.7 has the cone shapes this was measured on.
+fn the_walks_rounding_of_a_longitude(longitude: f64, whole: f64) -> f64 {
+    let largest = longitude.abs().max(whole);
+    4.0 * (largest.next_up() - largest)
 }
 
 /// Whether `at` lies between `one` and `other`, or on either.
