@@ -204,6 +204,61 @@ fn a_bar_with_two_flats_says_which_points_are_inside_it() {
     }
 }
 
+/// A bar of radius 5 from `z = 0` to `z = 4`, less the part outside `x ≤ 4` and
+/// `y ≤ 4`. The two flats are not parallel, and meet where `x = y = 4`,
+/// `√32 ≈ 5.66` from the axis — outside the pipe. `is_a_wedge_of_a_pipe` in
+/// `holds.rs` refuses this (the two meet outside, not inside), and so does
+/// `one_of_two_runs_between_two_flats` (the two are not parallel), but
+/// `one_of_two_runs_between_two_cuts_meeting_off_the_pipe` answers it: each
+/// flat crosses the circle twice, the point they meet at is strictly outside
+/// it, and each flat's own chord keeps the other flat's side, so the wall is
+/// two runs told apart by where the tangents from `(4, 4)` touch the circle —
+/// a short run between the flats' own crossings, `(4, 3)` to `(3, 4)`, and the
+/// rest of the bar. Neither wall is refused by name.
+#[test]
+fn a_bar_with_two_flats_meeting_outside_the_pipe_holds_the_points_of_each_wall() {
+    let (model, solid) = a_bar_with_two_flats_meeting_outside_the_pipe();
+    let walls = the_faces(&model, solid, |surface| {
+        matches!(surface, Surface::Cylinder(_))
+    });
+    assert_eq!(walls.len(), 2, "one wall for each run the flats leave");
+    let on_the_pipe_exactly = [
+        [5.0, 0.0],
+        [4.0, 3.0],
+        [3.0, 4.0],
+        [0.0, 5.0],
+        [-3.0, 4.0],
+        [-4.0, 3.0],
+        [-5.0, 0.0],
+        [-4.0, -3.0],
+        [-3.0, -4.0],
+        [0.0, -5.0],
+        [3.0, -4.0],
+        [4.0, -3.0],
+    ];
+    let mut counted = [0; 3];
+    for wall in walls {
+        assert_eq!(
+            sides_of_every_neighbour(&model, solid, wall, [3.5, 3.5, 2.0]),
+            sides_of_every_neighbour(&model, solid, wall, [-5.0, 0.0, 2.0]),
+            "the short run and the long run are on the same side of every cut"
+        );
+        let near = is_the_near_run_of_two_flats_meeting_outside_the_pipe(&model, solid, wall);
+        for [x, y] in on_the_pipe_exactly {
+            for z in [-0.5, 0.0, 0.5, 2.0, 3.5, 4.0, 4.5] {
+                let expected = on_a_wall_of_two_flats_meeting_outside_the_pipe(near, [x, y, z]);
+                counted[class_of(expected)] += 1;
+                assert_eq!(
+                    holds(&model, solid, wall, [x, y, z]),
+                    Ok(expected),
+                    "the wall whose short run is {near}, at ({x}, {y}, {z})"
+                );
+            }
+        }
+    }
+    assert_eq!(counted, [18, 32, 118]);
+}
+
 /// A block `2 × 12 × 4` with a bar of radius 3 bored down into its middle as
 /// far as `z = 2`. The bar's circle runs into the top at one long side and out
 /// at the other, so the top is two faces, each keeping the outside of the pipe
@@ -621,6 +676,16 @@ fn a_bar_with_two_flats() -> (Model, SolidKey) {
     (model, solid)
 }
 
+/// A bar of radius 5 from `z = 0` to `z = 4`, less the part outside `x ≤ 4`
+/// and `y ≤ 4`.
+fn a_bar_with_two_flats_meeting_outside_the_pipe() -> (Model, SolidKey) {
+    let mut model = a_model();
+    let bar = a_bar(&mut model, 5.0, [0.0, 0.0, 0.0]);
+    let block = a_block(&mut model, [-10.0, -10.0, -1.0], [14.0, 14.0, 6.0]);
+    let solid = the_one_solid(&mut model, bar, block, Rule::Intersection);
+    (model, solid)
+}
+
 /// A block `10 × 10 × 4` less a bar of radius 3 standing on `(0, 5)`, which is
 /// the middle of the block's edge along `x = 0`, and running out through the
 /// floor and the top.
@@ -752,6 +817,60 @@ fn on_a_wall_of_the_bar_with_two_flats(round: f64, point: [f64; 3]) -> OnAFace {
     if !(0.0..=4.0).contains(&z) || x.abs() > 3.0 || round * y < 0.0 {
         OnAFace::NotHeld
     } else if z == 0.0 || z == 4.0 || x.abs() == 3.0 {
+        OnAFace::OnItsBoundary
+    } else {
+        OnAFace::Held
+    }
+}
+
+/// Whether a wall of the bar with two flats meeting outside the pipe is the
+/// short run between the flats' own crossings, `(4, 3)` to `(3, 4)`, read off
+/// its corners: both have `x ≥ 3` and `y ≥ 3` for the short run, and neither
+/// does for the long run that is the rest of the bar.
+fn is_the_near_run_of_two_flats_meeting_outside_the_pipe(
+    model: &Model,
+    solid: SolidKey,
+    wall: FaceKey,
+) -> bool {
+    let face = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .find(|used| used.key() == wall)
+        .expect("a face of this solid");
+    let corners: Vec<[f64; 3]> = face
+        .wires()
+        .flat_map(|wire| wire.points().collect::<Vec<_>>())
+        .map(|corner| corner.coordinates())
+        .collect();
+    let near = corners[0][0] >= 3.0 && corners[0][1] >= 3.0;
+    assert!(
+        corners
+            .iter()
+            .all(|corner| (corner[0] >= 3.0 && corner[1] >= 3.0) == near),
+        "a wall's corners are where the flats cross the pipe, all the same run: {corners:?}"
+    );
+    near
+}
+
+/// Where a point on the pipe of radius 5 is against the wall of the bar with
+/// flats at `x ≤ 4` and `y ≤ 4` that is the short run between the flats' own
+/// crossings when `near` is `true`, and the rest of the bar otherwise: between
+/// the caps, kept by both flats, in that run, and on its boundary on a cap or
+/// on a flat, `x = 4` or `y = 4`. No point of the pipe in one run is on the
+/// other flat's crossing: `(−4, 3)` and `(3, −4)`, on the circle but not on
+/// either flat, are interior to the long run.
+fn on_a_wall_of_two_flats_meeting_outside_the_pipe(near: bool, point: [f64; 3]) -> OnAFace {
+    let [x, y, z] = point;
+    let kept_by_both_flats = x <= 4.0 && y <= 4.0;
+    let in_this_run = if near {
+        x >= 3.0 && y >= 3.0
+    } else {
+        x < 3.0 || y < 3.0
+    };
+    if !kept_by_both_flats || !in_this_run || !(0.0..=4.0).contains(&z) {
+        OnAFace::NotHeld
+    } else if z == 0.0 || z == 4.0 || x == 4.0 || y == 4.0 {
         OnAFace::OnItsBoundary
     } else {
         OnAFace::Held
