@@ -697,8 +697,11 @@ fn a_plane_through_a_cones_apex_meets_a_ball_resting_there_at_the_apex_and_a_bar
 /// Pairs that bend the same way — two balls, two pipes, two cones of one
 /// slope — are the first road's and are swept anyway: the closed form does not
 /// care which road answers, and two roads that disagreed would show here.
-#[test]
-fn every_pair_about_one_axis_cut_square_to_it_meets_where_the_closed_form_says() {
+/// Every ball, pipe and cone the turned sweeps below ask about, built about
+/// one coordinate axis and shared with
+/// [`every_pair_about_one_axis_cut_square_to_it_meets_where_the_closed_form_says`]
+/// so a turned sweep asks the same question of the same 630 pairs.
+fn balls_pipes_and_cones_about_one_axis() -> Vec<AboutTheAxis> {
     let mut shapes = Vec::new();
     for centre in [-2.0, 0.0, 3.0] {
         for radius in [1.0, 2.0, 3.0, 5.0] {
@@ -717,6 +720,12 @@ fn every_pair_about_one_axis_cut_square_to_it_meets_where_the_closed_form_says()
             }
         }
     }
+    shapes
+}
+
+#[test]
+fn every_pair_about_one_axis_cut_square_to_it_meets_where_the_closed_form_says() {
+    let shapes = balls_pipes_and_cones_about_one_axis();
 
     let (mut shared, mut at_one_point, mut nowhere) = (0usize, 0usize, 0usize);
     for along in 0..3 {
@@ -1091,6 +1100,261 @@ fn two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused() {
         meet([&here, &there, &bar]),
         Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
     );
+}
+
+#[test]
+fn zz_q2099_probe_composed_turn() {
+    let axis = Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("a direction");
+    let angle = 0.3_f64;
+    let direct = rcad_geom::Isometry::rotation(&axis, angle).expect("finite");
+    let half = rcad_geom::Isometry::rotation(&axis, angle / 2.0).expect("finite");
+    let composed = half.compose(&half);
+    let probe_vector = Vector::new(1.0, 0.0, 0.0);
+    let a = direct.apply_to_vector(probe_vector);
+    let b = composed.apply_to_vector(probe_vector);
+    println!("direct   = ({:.20e}, {:.20e}, {:.20e})", a.x(), a.y(), a.z());
+    println!("composed = ({:.20e}, {:.20e}, {:.20e})", b.x(), b.y(), b.z());
+    println!(
+        "diff = ({:e}, {:e}, {:e})",
+        a.x() - b.x(),
+        a.y() - b.y(),
+        a.z() - b.z()
+    );
+}
+
+#[test]
+fn zz_q2099_probe_rounding_off_square() {
+    let mut shapes = Vec::new();
+    for centre in [-2.0, 0.0, 3.0] {
+        for radius in [1.0, 2.0, 3.0, 5.0] {
+            shapes.push(AboutTheAxis::Ball { centre, radius });
+        }
+    }
+    for radius in [1.0, 2.0, 3.0] {
+        for up in [true, false] {
+            shapes.push(AboutTheAxis::Pipe { radius, up });
+        }
+    }
+    for apex in [-1.0, 0.0, 2.0] {
+        for slope in [0.5, 1.0, 2.0] {
+            for up in [true, false] {
+                shapes.push(AboutTheAxis::Cone { apex, slope, up });
+            }
+        }
+    }
+
+    let axis = Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+    let angle = 1.1_f64;
+    let direct = rcad_geom::Isometry::rotation(&axis, angle).expect("finite");
+    let half = rcad_geom::Isometry::rotation(&axis, angle / 2.0).expect("finite");
+    let composed = half.compose(&half);
+
+    let along = 0usize;
+    let mut families: Vec<(&str, usize, usize, usize, usize, usize)> = Vec::new();
+    let mut not_square = 0usize;
+    for (first, one) in shapes.iter().enumerate() {
+        for other in &shapes[first + 1..] {
+            let family = match (one, other) {
+                (AboutTheAxis::Ball { .. }, AboutTheAxis::Ball { .. }) => "ball-ball",
+                (AboutTheAxis::Ball { .. }, AboutTheAxis::Pipe { .. })
+                | (AboutTheAxis::Pipe { .. }, AboutTheAxis::Ball { .. }) => "ball-pipe",
+                (AboutTheAxis::Ball { .. }, AboutTheAxis::Cone { .. })
+                | (AboutTheAxis::Cone { .. }, AboutTheAxis::Ball { .. }) => "ball-cone",
+                (AboutTheAxis::Pipe { .. }, AboutTheAxis::Pipe { .. }) => "pipe-pipe",
+                (AboutTheAxis::Pipe { .. }, AboutTheAxis::Cone { .. })
+                | (AboutTheAxis::Cone { .. }, AboutTheAxis::Pipe { .. }) => "pipe-cone",
+                (AboutTheAxis::Cone { .. }, AboutTheAxis::Cone { .. }) => "cone-cone",
+            };
+            for height in -4..=4 {
+                let height = f64::from(height);
+                let facing = if height < 0.0 { -1.0 } else { 1.0 };
+                let cap_flat = flat(on_the_axis_direction(along, facing), on_the_axis(along, height));
+                let cap = cap_flat.transformed(&composed);
+                let here = one.built(along).transformed(&direct);
+                let there = other.built(along).transformed(&direct);
+
+                if let (Surface::Plane(plane), Surface::Cylinder(cylinder)) = (&cap, &here) {
+                    let normal = plane.normal();
+                    let direction = cylinder.axis().direction();
+                    if normal.x() != direction.x() || normal.y() != direction.y() || normal.z() != direction.z() {
+                        not_square += 1;
+                    }
+                }
+
+                let mine = one.squared_radius_at(height);
+                let theirs = other.squared_radius_at(height);
+                let expected_boundary = mine >= 0.0 && theirs >= 0.0 && mine == theirs;
+                let entry = match families.iter_mut().find(|(name, ..)| *name == family) {
+                    Some(entry) => entry,
+                    None => {
+                        families.push((family, 0, 0, 0, 0, 0));
+                        families.last_mut().expect("just pushed")
+                    }
+                };
+                entry.1 += 1;
+                if expected_boundary {
+                    entry.2 += 1;
+                }
+                let expected = if !expected_boundary {
+                    "nowhere"
+                } else if mine > 0.0 {
+                    "shared"
+                } else {
+                    "one"
+                };
+                match meet([&cap, &here, &there]) {
+                    Err(error) => {
+                        entry.3 += 1;
+                        if entry.3 == 1 {
+                            println!("{family} first refusal at height {height}: {error:?}, mine {mine}, theirs {theirs}, one {one:?}, other {other:?}");
+                        }
+                    }
+                    Ok(answer) => {
+                        let actual = match &answer {
+                            MeetOfThree::Nowhere => "nowhere",
+                            MeetOfThree::MoreThanAPoint => "shared",
+                            MeetOfThree::At(points) if points.len() == 1 => "one",
+                            _ => "other",
+                        };
+                        if actual != expected {
+                            if expected_boundary {
+                                entry.4 += 1;
+                            } else {
+                                entry.5 += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!("not exactly square at least once: {not_square}");
+    for (family, counted, boundary, refused, boundary_disagreed, nonboundary_disagreed) in families {
+        println!(
+            "{family}: counted {counted}, boundary {boundary}, refused {refused}, boundary disagreed {boundary_disagreed}, non-boundary disagreed {nonboundary_disagreed}"
+        );
+    }
+}
+
+#[test]
+fn zz_q2099_probe() {
+    let mut shapes = Vec::new();
+    for centre in [-2.0, 0.0, 3.0] {
+        for radius in [1.0, 2.0, 3.0, 5.0] {
+            shapes.push(AboutTheAxis::Ball { centre, radius });
+        }
+    }
+    for radius in [1.0, 2.0, 3.0] {
+        for up in [true, false] {
+            shapes.push(AboutTheAxis::Pipe { radius, up });
+        }
+    }
+    for apex in [-1.0, 0.0, 2.0] {
+        for slope in [0.5, 1.0, 2.0] {
+            for up in [true, false] {
+                shapes.push(AboutTheAxis::Cone { apex, slope, up });
+            }
+        }
+    }
+
+    for (name, axis, angle) in [
+        ("0.3 about z", Vector::new(0.0, 0.0, 1.0), 0.3),
+        ("1.1 about (1,2,3) through (1,0,-1)", Vector::new(1.0, 2.0, 3.0), 1.1),
+        ("pi/6 about y", Vector::new(0.0, 1.0, 0.0), std::f64::consts::PI / 6.0),
+    ] {
+        let through = if name.starts_with("1.1") {
+            Point::new(1.0, 0.0, -1.0)
+        } else {
+            Point::origin()
+        };
+        let turn = rcad_geom::Isometry::rotation(&Axis::new(through, axis).expect("a direction"), angle)
+            .expect("a finite angle");
+
+        let mut counted = 0usize;
+        let mut refused = 0usize;
+        let mut transitions: Vec<((&str, &str), usize)> = Vec::new();
+        let mut square_checked = 0usize;
+        let mut square_exact = 0usize;
+        let mut square_worst = 0.0f64;
+        let mut other_printed = 0usize;
+        for along in 0..3 {
+            for (first, one) in shapes.iter().enumerate() {
+                for other in &shapes[first + 1..] {
+                    for height in -4..=4 {
+                        let height = f64::from(height);
+                        let facing = if height < 0.0 { -1.0 } else { 1.0 };
+                        let cap_flat = flat(on_the_axis_direction(along, facing), on_the_axis(along, height));
+                        let cap = cap_flat.transformed(&turn);
+                        let here = one.built(along).transformed(&turn);
+                        let there = other.built(along).transformed(&turn);
+                        for shape in [&here, &there] {
+                            let axis_direction = match shape {
+                                Surface::Cylinder(this) => Some(this.axis().direction()),
+                                Surface::Cone(this) => Some(this.axis().direction()),
+                                _ => None,
+                            };
+                            if let (Some(direction), Surface::Plane(plane)) = (axis_direction, &cap) {
+                                square_checked += 1;
+                                let normal = plane.normal();
+                                let worst = (normal.x().abs() - direction.x().abs())
+                                    .abs()
+                                    .max((normal.y().abs() - direction.y().abs()).abs())
+                                    .max((normal.z().abs() - direction.z().abs()).abs());
+                                if worst == 0.0 {
+                                    square_exact += 1;
+                                }
+                                square_worst = square_worst.max(worst);
+                            }
+                        }
+                        let mine = one.squared_radius_at(height);
+                        let theirs = other.squared_radius_at(height);
+                        counted += 1;
+                        let answer = match meet([&cap, &here, &there]) {
+                            Ok(answer) => answer,
+                            Err(_) => {
+                                refused += 1;
+                                continue;
+                            }
+                        };
+                        // "nowhere" | "shared" | "one".
+                        let expected = if mine < 0.0 || theirs < 0.0 || mine != theirs {
+                            "nowhere"
+                        } else if mine > 0.0 {
+                            "shared"
+                        } else {
+                            "one"
+                        };
+                        let actual = match &answer {
+                            MeetOfThree::Nowhere => "nowhere",
+                            MeetOfThree::MoreThanAPoint => "shared",
+                            MeetOfThree::At(points) if points.len() == 1 => "one",
+                            MeetOfThree::At(points) => {
+                                if other_printed < 5 {
+                                    other_printed += 1;
+                                    println!(
+                                        "  other At({}) at {name}, along {along}, height {height}: {one:?} vs {other:?}",
+                                        points.len()
+                                    );
+                                }
+                                "other"
+                            }
+                            _ => "other",
+                        };
+                        if actual != expected {
+                            match transitions.iter_mut().find(|((e, a), _)| *e == expected && *a == actual) {
+                                Some((_, count)) => *count += 1,
+                                None => transitions.push(((expected, actual), 1)),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!("{name}: counted {counted}, refused {refused}, transitions {transitions:?}");
+        println!(
+            "{name}: squareness checked {square_checked}, exact {square_exact}, worst abs component diff {square_worst:e}"
+        );
+    }
 }
 
 /// A ring about `z` through the origin.
