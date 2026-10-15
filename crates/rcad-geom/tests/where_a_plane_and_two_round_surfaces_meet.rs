@@ -1344,16 +1344,15 @@ fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_fam
                         Surface::Cone(this) => Some(this.axis().direction()),
                         _ => None,
                     };
-                    if let Some(direction) = direction {
-                        if (normal.x().abs(), normal.y().abs(), normal.z().abs())
+                    if let Some(direction) = direction
+                        && (normal.x().abs(), normal.y().abs(), normal.z().abs())
                             != (
                                 direction.x().abs(),
                                 direction.y().abs(),
                                 direction.z().abs(),
                             )
-                        {
-                            not_square += 1;
-                        }
+                    {
+                        not_square += 1;
                     }
                 }
 
