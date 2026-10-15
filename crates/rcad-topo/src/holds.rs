@@ -3037,30 +3037,47 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// **A point on a chord is not on the face's boundary**, and the count of the
 /// polygon is not defined there, though the count of the face is: it is the
 /// count at every point near enough, since the face's boundary is not there.
-/// So the count is read a little way from the point towards a corner off the
+/// So the count is read a little way from the point towards an aim off the
 /// line of every chord it is on, and the half-line the walk runs is aimed at
-/// that corner. Every sign that reading needs is one already in hand: the
-/// corners' sides of the half-line's line are the point's own, since the point
-/// read is on that line, and its side of each chord through the point is the
-/// corner's side of it. Inside each such arc's curve still, it is in the arc's
-/// piece where that side is the arc's. Any number of chords through the point
-/// are read so (row Q1258).
+/// it. Every sign that reading needs is one already in hand: the corners' sides
+/// of the half-line's line are the point's own, since the point read is on
+/// that line, and its side of each chord through the point is the aim's side
+/// of it. Inside each such arc's curve still, it is in the arc's piece where
+/// that side is the arc's. Any number of chords through the point are read so
+/// (row Q1258).
 ///
-/// **Where every corner is on those chords' lines**, there is no such corner.
-/// Two arcs running between the same two corners the opposite ways leave that
-/// with their two chords on one line, as the top of a ball dented by another and
-/// cut flat does (`tests/a_walk_neither_winding_nor_the_axis_places.rs`). Then
-/// every side of the polygon lies on that line, so it winds round no point off
-/// it, and the count just off the line is the two arcs' pieces alone. Read on
-/// the side away from the first arc, that is the second arc's piece where the
-/// second arc is on that side of its own chord, which runs the other way: where
-/// the two arcs are on the same side of their chords.
+/// **A point that is a box can straddle the line through the aim and another
+/// corner**, and then that corner's side of it has no sign. A half bar's cut
+/// face bitten by a ball has a rectangle's corners, rounded where the plane
+/// crosses the bar's rims, and a box on either diagonal straddles it whenever
+/// the aim is that diagonal's other end
+/// (`tests/a_flat_face_with_an_arc_holds_a_box_on_a_diagonal.rs`, row Q2035).
+/// The count does not depend on which way the half-line runs, so as in
+/// [`what_a_flat_face_holds`] every corner is aimed at in turn, and then the
+/// middle of every side, which a box at a rectangle's middle needs since it is
+/// on both diagonals. A middle is a rounding off the plane, and that changes no
+/// sign, for the reason [`what_a_flat_face_holds`] gives. The face is refused
+/// only when every aim off the chords leaves some corner unread. What a try
+/// that gave up wrote in the log is kept only when every try gave up, and then
+/// it is the first try's.
+///
+/// **Where every corner and the middle of every side is on those chords'
+/// lines**, there is no such aim. Two arcs running between the same two corners
+/// the opposite ways leave that with their two chords on one line, as the top
+/// of a ball dented by another and cut flat does
+/// (`tests/a_walk_neither_winding_nor_the_axis_places.rs`). Then every side of
+/// the polygon lies on that line, so it winds round no point off it, and the
+/// count just off the line is the two arcs' pieces alone. Read on the side away
+/// from the first arc, that is the second arc's piece where the second arc is
+/// on that side of its own chord, which runs the other way: where the two arcs
+/// are on the same side of their chords.
 ///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when every corner of the face
-/// is on the line of a chord the point is on, but for the two arcs between the
-/// same two corners above: a gap, for faces no solid here has.
+/// and the middle of every side is on the line of a chord the point is on, but
+/// for the two arcs between the same two corners above: a gap, for faces no
+/// solid here has.
 ///
 /// [`Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn`] when no point off
 /// the plane can be found ([`a_point_off_the_plane`]), and [`Error::Undecidable`]
@@ -3159,55 +3176,94 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
         }
     }
 
-    let mut aimed = None;
-    for corner in sides.iter().map(|side| side.start.placed) {
-        let at = PredicatePoint::from(corner.coordinates());
+    let the_middle_of = |side: &Side| {
+        let [one, other] = [side.start.placed, side.end.placed].map(|end| end.coordinates());
+        Point::new(
+            0.5 * one[0] + 0.5 * other[0],
+            0.5 * one[1] + 0.5 * other[1],
+            0.5 * one[2] + 0.5 * other[2],
+        )
+    };
+    let wind_aiming_at =
+        |aim: Point, towards: &[Decision], trial: &mut ProvenanceLog| -> Result<i64> {
+            let mut along = along.clone();
+            let mut winding = winding;
+            for (chord, &toward) in chords.iter().zip(towards) {
+                along[chord.index] = toward;
+                if toward == chord.arcs_side {
+                    winding += chord.piece;
+                }
+            }
+            for (index, side) in sides.iter().enumerate() {
+                let [from, to] = [side.start.placed, side.end.placed].map(|corner| {
+                    if corner == aim {
+                        Decision::Zero
+                    } else {
+                        decide(corner, aim, target, point, policy, trial)
+                    }
+                });
+                winding += crossing(from, to, along[index]).ok_or_else(|| {
+                    gave_up_turning_a_corner(point, whichever_of_them_was_not_read(from, to))
+                })?;
+            }
+            Ok(winding)
+        };
+
+    let aims = sides
+        .iter()
+        .map(|side| side.start.placed)
+        .chain(sides.iter().map(the_middle_of));
+    let mut on_every_chord = ProvenanceLog::new();
+    let mut first_refusal = None;
+    for aim in aims {
+        let mut trial = ProvenanceLog::new();
+        let at = PredicatePoint::from(aim.coordinates());
         let towards: Vec<Decision> = chords
             .iter()
             .map(|chord| {
                 let side = &sides[chord.index];
-                decide(side.start.placed, side.end.placed, target, at, policy, log)
+                decide(
+                    side.start.placed,
+                    side.end.placed,
+                    target,
+                    at,
+                    policy,
+                    &mut trial,
+                )
             })
             .collect();
-        if towards
+        if !towards
             .iter()
             .all(|found| matches!(found, Decision::Pos | Decision::Neg))
         {
-            aimed = Some((corner, towards));
-            break;
+            trial.drain_into(&mut on_every_chord);
+            continue;
+        }
+        match wind_aiming_at(aim, &towards, &mut trial) {
+            Ok(winding) => {
+                trial.drain_into(log);
+                return Ok(held_where_it_winds(winding));
+            }
+            Err(refused) => {
+                first_refusal.get_or_insert((refused, trial));
+            }
         }
     }
-    let Some((aim, towards)) = aimed else {
-        let [one, other] = chords.as_slice() else {
-            return Err(cannot());
-        };
-        let [first, second] = [&sides[one.index], &sides[other.index]];
-        if first.start.key != second.end.key || first.end.key != second.start.key {
-            return Err(cannot());
-        }
-        if one.arcs_side == other.arcs_side {
-            winding += other.piece;
-        }
-        return Ok(held_where_it_winds(winding));
-    };
-    for (chord, toward) in chords.iter().zip(towards) {
-        along[chord.index] = toward;
-        if toward == chord.arcs_side {
-            winding += chord.piece;
-        }
+    if let Some((refused, mut trial)) = first_refusal {
+        trial.drain_into(log);
+        return Err(refused);
     }
 
-    for (index, side) in sides.iter().enumerate() {
-        let [from, to] = [side.start.placed, side.end.placed].map(|corner| {
-            if corner == aim {
-                Decision::Zero
-            } else {
-                decide(corner, aim, target, point, policy, log)
-            }
-        });
-        winding += crossing(from, to, along[index]).ok_or_else(|| {
-            gave_up_turning_a_corner(point, whichever_of_them_was_not_read(from, to))
-        })?;
+    on_every_chord.drain_into(log);
+    let [one, other] = chords.as_slice() else {
+        return Err(cannot());
+    };
+    let [first, second] = [&sides[one.index], &sides[other.index]];
+    if first.start.key != second.end.key || first.end.key != second.start.key {
+        return Err(cannot());
+    }
+    if one.arcs_side == other.arcs_side {
+        winding += other.piece;
     }
     Ok(held_where_it_winds(winding))
 }
