@@ -2437,11 +2437,38 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// encloses `0.188`, which answers.
 ///
 /// What that costs is the rungs down to a room where a mesh's charge is under
-/// the solid's volume, for every curved solid. A probe over
+/// the solid's volume, for every curved solid. With the looser charge
+/// [`how_much_space_hides_under`] used to take, a probe over
 /// `just t -p rcad-topo` counted 112 593 sums asked for, 39 071 answered by
 /// the coarsest mesh as before, and 260 184 meshes more than the old rule
-/// asked for. **That cost is not settled** (row Q1890's handoff): one test
-/// went from `0.022` s to `9.1` s.
+/// asked for.
+///
+/// **The walk is kept to the mesher's own refusals, with no cap on the
+/// rungs** (row Q1890). A walk cut short would fall back to a sum that a finer
+/// mesh, one the mesher would still make, could contradict. Halving one rung
+/// at a time is also what keeps those refusals cheap. Two tests pay most of
+/// the cost. Each was timed against the base before this ladder, one run
+/// after the other, since the machine's load moves:
+///
+/// - `every_bar_in_the_table_is_built_and_checked_with_no_tolerance_asked_for`
+///   takes `0.007` s on the base and `2.7` to `4.5` s here. Its bars, of
+///   radius one, are cut by a plane leaning `4e9` to `1e11`. Every room above
+///   one leaves the mesh `0.667` out, by the quarter-turn rule, and there a
+///   mesh can leave out about seven times what it encloses, so no rung
+///   answers. Halving from the width, 21 rungs only add points along the
+///   ellipse, up to 5261. The 22nd, at a room near `1.9e3` for the lean of
+///   `4e9`, is refused `MoreTrianglesThanAPatchWillHold`, and the ladder stops
+///   there after one to two seconds. A walk that starts lower meets that refusal
+///   later and dearer: the same bar is refused after `0.62` s at that room,
+///   `7.9` s at room `100` and `66` s at room `10`.
+/// - `a_whole_ring_turned_any_way_and_a_bar_far_from_it_fuse_to_the_two_apart`
+///   takes `16` to `26` s on the base and `50` to `73` s here. It weighs 8424
+///   sums. A ring's tube is of radius one, so its rungs at rooms `5`, `2.5`
+///   and `1.25` leave a mesh a whole radius out, which nothing bounds. A ring
+///   answers at room `0.3125` or `0.156`, five or six rungs down, and the
+///   sixth rung is over a third of what the rungs cost. Of the 4914 ladders
+///   five or six rungs long, 2898 go to the sixth; under the looser charge
+///   4560 did, and the test took `61` to `82` s.
 ///
 /// A sound solid a rounding thick, such as the sliver a fuse leaves where two
 /// curved faces almost meet, lies flat in every mesh of it, so asking again
