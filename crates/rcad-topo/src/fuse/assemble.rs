@@ -1935,18 +1935,7 @@ impl Assembly {
             ring.iter().map(|&dart| self.starts_at(dart)).collect()
         };
         let (one, other) = (corners_of(one), corners_of(other));
-        let rulings: Vec<usize> = inside
-            .iter()
-            .copied()
-            .filter(|&edge| {
-                let [from, to] = self.edges[edge].ends;
-                from != to && matches!(self.edges[edge].arc, WhichArc::TheOnlyOne)
-            })
-            .collect();
-        let seam = match self.the_lowest_way_across(inside, &one, &other)? {
-            one_edge if one_edge.len() == 1 => one_edge,
-            _ => self.the_lowest_way_across(&rulings, &one, &other)?,
-        };
+        let seam = self.the_lowest_way_across(inside, &one, &other)?;
         let mut with_the_seam = dissolved.to_vec();
         for &edge in &seam {
             with_the_seam[edge] = false;
@@ -1980,7 +1969,7 @@ impl Assembly {
         let back_is_lower = there
             .iter()
             .zip(&back)
-            .map(|(&there, &back)| self.which_to_keep_first(back, there))
+            .map(|(&there, &back)| self.which_lies_lower(back, there))
             .find(|order| order.is_ne())
             .is_some_and(Ordering::is_lt);
         let corners = if back_is_lower { back } else { there };
@@ -2030,7 +2019,7 @@ impl Assembly {
                 }
             }
         }
-        let lowest = |one: &usize, other: &usize| self.which_to_keep_first(*one, *other);
+        let lowest = |one: &usize, other: &usize| self.which_lies_lower(*one, *other);
         let fewest = from.iter().filter_map(|corner| away.get(corner)).min()?;
         let mut at = from
             .iter()
@@ -3462,14 +3451,22 @@ impl Assembly {
     }
 
     fn which_to_keep_first(&self, one: usize, other: usize) -> core::cmp::Ordering {
-        let (one, other) = (&self.corners[one], &self.corners[other]);
-        let (at_one, at_other) = (one.point.coordinates(), other.point.coordinates());
-        one.from.is_none().cmp(&other.from.is_none()).then_with(|| {
-            (0..3)
-                .map(|axis| at_one[axis].total_cmp(&at_other[axis]))
-                .find(|order| order.is_ne())
-                .unwrap_or(core::cmp::Ordering::Equal)
-        })
+        let made_here = |corner: usize| self.corners[corner].from.is_none();
+        made_here(one)
+            .cmp(&made_here(other))
+            .then_with(|| self.which_lies_lower(one, other))
+    }
+
+    /// Which of two corners is lower, by `x`, then `y`, then `z`.
+    fn which_lies_lower(&self, one: usize, other: usize) -> core::cmp::Ordering {
+        let (at_one, at_other) = (
+            self.corners[one].point.coordinates(),
+            self.corners[other].point.coordinates(),
+        );
+        (0..3)
+            .map(|axis| at_one[axis].total_cmp(&at_other[axis]))
+            .find(|order| order.is_ne())
+            .unwrap_or(core::cmp::Ordering::Equal)
     }
 
     fn edges_after_joining(&self, renumbered: &Renumbered) -> Vec<Edge> {
