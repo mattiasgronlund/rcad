@@ -170,6 +170,53 @@ fn the_four_new_answers_and_the_shared_piece_add_up_to_the_two_solids() {
     }
 }
 
+/// The cone's wall outside the cube is **one** face, in the union either way
+/// round and in the cone less the cube, and the union meshes from coarse to
+/// fine.
+///
+/// The cube's planes cut the wall in arcs and no ruling, and no one edge runs
+/// from the rim to the ring round the apex: the fewest edges across are two
+/// arcs where the cube's planes cross the wall. While a seam of more than one
+/// edge had to be a chain of rulings, the wall stayed in the nine pieces the
+/// cube cut it into (queue row Q868). Those two arcs kept as the seam were
+/// once refused by the mesher, `TwoPatchesOfTheMeshDrewTheSameSide`, which is
+/// why the union is meshed here at each deflection Q868 measured it at.
+#[test]
+fn the_cones_wall_outside_the_cube_is_one_face_that_meshes() {
+    for turn in [0.0, 0.7] {
+        for (rule, cone_first) in [
+            (Rule::Union, true),
+            (Rule::Union, false),
+            (Rule::Difference, true),
+        ] {
+            let (model, answer) = fuse(turn, rule, cone_first);
+            let walls = model
+                .solid(answer[0])
+                .expect("this model made the key")
+                .faces()
+                .filter(|face| face.surface().as_plane().is_none())
+                .count();
+            assert_eq!(
+                walls, 1,
+                "{rule:?} (cone first: {cone_first}) at turn {turn}: how many walls"
+            );
+        }
+        let (model, answer) = fuse(turn, Rule::Union, true);
+        let solid = model.solid(answer[0]).expect("this model made the key");
+        for fine in [0.5, 0.05, 0.005, 0.0005] {
+            solid
+                .mesh(
+                    Deflection::of(fine).expect("a positive length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| {
+                    panic!("the union at turn {turn} does not mesh at {fine}: {why:?}")
+                });
+        }
+    }
+}
+
 /// The intersection of §200.3's pair, or whichever rule is asked for.
 fn fuse(turn: f64, rule: Rule, cone_first: bool) -> (Model, Vec<SolidKey>) {
     let policy = Policy::certified();

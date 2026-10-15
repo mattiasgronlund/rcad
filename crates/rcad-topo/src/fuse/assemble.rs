@@ -1737,11 +1737,12 @@ impl Assembly {
     /// round it and nothing across, which is not a face the writer can lay out
     /// flat (`AWireWillNotLieFlatOnItsFace`). So dissolved edges that run from
     /// one ring to the other stay, as the seam (§224.2 item 2): one edge where
-    /// one runs across, and otherwise a chain of rulings, as where a box inside
-    /// a bar cuts its wall into a grid ([`Assembly::a_seam_across_the_band`]).
-    /// Which is read off the corners, lowest first, and never off the indices
-    /// here, which depend on the order the solids were handed over — the same
-    /// rule [`Assembly::which_to_keep_first`] keeps a corner by.
+    /// one runs across, and otherwise the chain with the fewest edges, as where
+    /// a box inside a bar or a frustum cuts its wall into a grid
+    /// ([`Assembly::a_seam_across_the_band`]). Which is read off where the
+    /// corners lie, lowest first by [`Assembly::which_lies_lower`], and never
+    /// off the indices here, which depend on the order the solids were handed
+    /// over.
     ///
     /// **A group joined only across whole closed curves needs no seam either**,
     /// since each piece lay flat without one and the joining opens nothing up
@@ -1751,7 +1752,7 @@ impl Assembly {
     /// ring of half ellipses cannot.
     ///
     /// Anything else that goes right round — a group with other than two such
-    /// rings, neither an edge nor a chain of rulings across, or a seam that
+    /// rings, no chain of dissolved edges across, or a seam that
     /// still leaves a ring going round — and a group whose rings cannot be
     /// counted, stays apart. The answer is then the one the fuse gave before it
     /// joined curved faces at all.
@@ -1887,9 +1888,9 @@ impl Assembly {
     }
 
     /// The dissolved edges to keep as the seam across a band, where keeping
-    /// them leaves a face that lies flat: one edge from one ring to the other
-    /// where there is one, and otherwise the chain of rulings from ring to ring
-    /// with the fewest edges.
+    /// them leaves a face that lies flat: the chain of dissolved edges from one
+    /// ring to the other with the fewest edges, which is one edge where one
+    /// runs across.
     ///
     /// **A seam is a chain of edges where no one edge runs across.** A box
     /// standing inside a bar cuts the bar's wall at the box's floor and roof as
@@ -1901,24 +1902,41 @@ impl Assembly {
     /// stay, as every corner where pieces of one cone or pipe met does
     /// ([`Assembly::what_is_left`]).
     ///
-    /// **A chain is of rulings only**, which keep their angle round the axis,
-    /// so it cuts the wall straight down as the input's own seam did. That is
-    /// measured and not traced: a pointed cone united with a cube stood on its
-    /// corner round its apex has no edge from its rim to the ring round its
+    /// **A chain is of any dissolved edges**, not only rulings, since a cut
+    /// does not always run straight down the wall. A box standing inside a
+    /// frustum, off its axis, crosses the wall in hyperbola arcs and no ruling
+    /// (`a_box_inside_a_frustum.rs`). A cube stood on its corner round a
+    /// pointed cone's apex leaves no edge from the rim to the ring round the
     /// apex, and the fewest edges across are two arcs where the cube's planes
-    /// cross the wall. Kept as the seam, they joined the nine pieces into a face
-    /// the mesher refused, `TwoPatchesOfTheMeshDrewTheSameSide`
-    /// (`a_wire_that_rings_a_cones_apex.rs`). Chains of any edges were refused
-    /// that way in seven tests across four files, a frustum with a cube round
-    /// its apex among them, and all seven answer with the pieces apart. A seam
-    /// of one edge is kept whatever it runs along, as it was before chains.
+    /// cross the wall (`a_wire_that_rings_a_cones_apex.rs`). With chains kept
+    /// to rulings, those walls stayed in 28 and 9 pieces where the answer has
+    /// one. Chains were kept to rulings because the mesher once refused chains
+    /// of any edges, `TwoPatchesOfTheMeshDrewTheSameSide`, in seven tests
+    /// across four files, the cone's two arcs among them. Queue row Q868 found
+    /// that refusal gone at `548b0dd1`: with chains of any edges both walls
+    /// join to one face that validates and measures right, and the cone's
+    /// union meshes from deflection 0.5 down to 0.0005.
     ///
-    /// **Which is read off the corners and never off the indices here**, which
-    /// depend on the order the solids were handed over: of the chains with the
-    /// fewest edges, the one whose corners come lowest one after another by
-    /// [`Assembly::which_to_keep_first`]. For one edge that is the edge whose
-    /// lower end is lowest, then whose other end is, the rule a seam was chosen
-    /// by before chains.
+    /// **Which is read off where the corners lie and never off the indices
+    /// here**, which depend on the order the solids were handed over: of the
+    /// chains with the fewest edges, the one whose corners come lowest one
+    /// after another by [`Assembly::which_lies_lower`]. For one edge that is
+    /// the edge whose lower end is lowest, then whose other end is.
+    ///
+    /// **Not input vertices first**, as [`Assembly::which_to_keep_first`]
+    /// orders corners, because which corners are input vertices changes when
+    /// an answer is fused again. A block united with a frustum of slope one
+    /// half from `z = 2` to `z = 10` (`BesideABlock` in
+    /// `fuse_laws_over_a_cone.rs`) has two chains of two arcs across its wall,
+    /// mirror images on `x = 1` and `y = 1`. In that union the only input
+    /// vertex on a ring is `(1, 0, 2)`, the frustum's own seam corner, so input
+    /// first kept the chain on `x = 1` through `(1, −1.118, 3)`. In the union
+    /// with a copy of itself every corner on a ring is an input vertex, the
+    /// order fell to where they lie, and the chain on `y = 1` through
+    /// `(−1.118, 1, 3)` was kept, which broke
+    /// `a_block_and_cone_united_with_a_copy_of_that_union_is_that_union`.
+    /// Ordered by where they lie alone, both keep the chain on `y = 1`, through
+    /// `(0, 1, 2)`, `(−1.118, 1, 3)` and `(−4.899, 1, 10)`.
     fn a_seam_across_the_band(
         &self,
         members: &[usize],
@@ -1935,18 +1953,7 @@ impl Assembly {
             ring.iter().map(|&dart| self.starts_at(dart)).collect()
         };
         let (one, other) = (corners_of(one), corners_of(other));
-        let rulings: Vec<usize> = inside
-            .iter()
-            .copied()
-            .filter(|&edge| {
-                let [from, to] = self.edges[edge].ends;
-                from != to && matches!(self.edges[edge].arc, WhichArc::TheOnlyOne)
-            })
-            .collect();
-        let seam = match self.the_lowest_way_across(inside, &one, &other)? {
-            one_edge if one_edge.len() == 1 => one_edge,
-            _ => self.the_lowest_way_across(&rulings, &one, &other)?,
-        };
+        let seam = self.the_lowest_way_across(inside, &one, &other)?;
         let mut with_the_seam = dissolved.to_vec();
         for &edge in &seam {
             with_the_seam[edge] = false;
@@ -1960,7 +1967,8 @@ impl Assembly {
 
     /// The chain of `edges` from a corner of `one` to a corner of `other` with
     /// the fewest edges, and of those the one whose corners come lowest one
-    /// after another, walked from whichever ring that puts first; or `None`
+    /// after another by [`Assembly::which_lies_lower`], walked from whichever
+    /// ring that puts first; or `None`
     /// where no chain joins them, or where two of `edges` join the same two
     /// corners of it, which would leave the choice between them to the indices.
     fn the_lowest_way_across(
@@ -1980,7 +1988,7 @@ impl Assembly {
         let back_is_lower = there
             .iter()
             .zip(&back)
-            .map(|(&there, &back)| self.which_to_keep_first(back, there))
+            .map(|(&there, &back)| self.which_lies_lower(back, there))
             .find(|order| order.is_ne())
             .is_some_and(Ordering::is_lt);
         let corners = if back_is_lower { back } else { there };
@@ -2005,7 +2013,8 @@ impl Assembly {
 
     /// The corners of the chain through `next_to` from a corner of `from` to
     /// one of `to` with the fewest steps, and of those the one whose corners
-    /// come lowest one after another, or `None` where none joins them.
+    /// come lowest one after another by [`Assembly::which_lies_lower`], or
+    /// `None` where none joins them.
     ///
     /// Every corner is first given how many steps it is from `to`. The walk
     /// then starts at the lowest corner of `from` that is fewest steps away,
@@ -2030,7 +2039,7 @@ impl Assembly {
                 }
             }
         }
-        let lowest = |one: &usize, other: &usize| self.which_to_keep_first(*one, *other);
+        let lowest = |one: &usize, other: &usize| self.which_lies_lower(*one, *other);
         let fewest = from.iter().filter_map(|corner| away.get(corner)).min()?;
         let mut at = from
             .iter()
@@ -3461,15 +3470,25 @@ impl Assembly {
             .collect()
     }
 
+    /// Which of two corners a closed-up run keeps: an input vertex first, then
+    /// the lower by [`Assembly::which_lies_lower`].
     fn which_to_keep_first(&self, one: usize, other: usize) -> core::cmp::Ordering {
-        let (one, other) = (&self.corners[one], &self.corners[other]);
-        let (at_one, at_other) = (one.point.coordinates(), other.point.coordinates());
-        one.from.is_none().cmp(&other.from.is_none()).then_with(|| {
-            (0..3)
-                .map(|axis| at_one[axis].total_cmp(&at_other[axis]))
-                .find(|order| order.is_ne())
-                .unwrap_or(core::cmp::Ordering::Equal)
-        })
+        let made_here = |corner: usize| self.corners[corner].from.is_none();
+        made_here(one)
+            .cmp(&made_here(other))
+            .then_with(|| self.which_lies_lower(one, other))
+    }
+
+    /// Which of two corners is lower, by `x`, then `y`, then `z`.
+    fn which_lies_lower(&self, one: usize, other: usize) -> core::cmp::Ordering {
+        let (at_one, at_other) = (
+            self.corners[one].point.coordinates(),
+            self.corners[other].point.coordinates(),
+        );
+        (0..3)
+            .map(|axis| at_one[axis].total_cmp(&at_other[axis]))
+            .find(|order| order.is_ne())
+            .unwrap_or(core::cmp::Ordering::Equal)
     }
 
     fn edges_after_joining(&self, renumbered: &Renumbered) -> Vec<Edge> {

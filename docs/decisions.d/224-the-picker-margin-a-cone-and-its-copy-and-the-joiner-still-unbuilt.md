@@ -70,6 +70,27 @@ make up exists. The lane read `assemble.rs:564-880` and reached this design:
    > (`TwoPatchesOfTheMeshDrewTheSameSide`, seven tests across four files, not
    > traced). The corners in the middle of a chain stay corners, as every
    > corner where pieces of one cone or pipe met does.
+   >
+   > **2026-10-15 note (Q2092): a seam is a chain of any edges, read off by
+   > where its corners lie.** Chains are no longer kept to rulings: Q868 found
+   > the mesher's `TwoPatchesOfTheMeshDrewTheSameSide` gone at `548b0dd1`. A
+   > box standing inside a frustum off its axis crosses the wall in hyperbola
+   > arcs and no ruling, and left the wall in 28 pieces; a cube stood on its
+   > corner round a pointed cone's apex left 9. With a seam of any dissolved
+   > edges each wall is one face that validates and measures right, and the
+   > cone's union meshes from deflection 0.5 down to 0.0005
+   > (`a_box_inside_a_frustum.rs`, `a_wire_that_rings_a_cones_apex.rs`). The
+   > seam's corners now go by where they lie alone
+   > (`Assembly::which_lies_lower`), not input vertex first as the corner a
+   > closed run keeps does, since which corners are input vertices changes
+   > when an answer is fused again. At `BesideABlock` slope one half from
+   > `z = 2` to `z = 10` in `fuse_laws_over_a_cone.rs`, the union `A` has one
+   > input vertex on a ring, `(1, 0, 2)`, the frustum's own seam corner, and
+   > in `A ∪ A` every ring corner is one of `A`'s. Input first kept the chain
+   > of two arcs on `x = 1` through `(1, −1.118, 3)` in `A` and its mirror on
+   > `y = 1` through `(−1.118, 1, 3)` in `A ∪ A`, and idempotence failed. By
+   > where they lie both keep the chain on `y = 1`, through `(0, 1, 2)`,
+   > `(−1.118, 1, 3)` and `(−4.899, 1, 10)`.
 3. **Corners that stop being corners.** This is the hard part. After a join, a
    corner with only the cone and one other surface round it sits in the middle
    of an arc, and §17.1 cannot re-derive it. The two arcs either side must
