@@ -59,7 +59,7 @@ PROBE cap FaceSlot(2v1) first coedge's edge EdgeSlot(3v1) carries [(Sphere r=5, 
 
 So `find(|surface| surface != mine)` is `None`, and the cap is refused as one
 with no seam. `mesh.rs` is not this lane's, so
-`a_ball_less_a_block_over_one_corner_of_it_stops_in_the_mesher_on_a_cap_with_the_ball_both_sides_of_its_first_edge`
+`a_ball_less_or_united_with_a_block_over_one_corner_of_it_is_measured_against_the_piece`
 in `crates/rcad-topo/tests/a_ball_less_a_wedge.rs` pins that refusal, and its
 doc carries the answer it stands in for: `500π/3 − 26π/3 = 158π`. The same
 file's other test holds the three fuses that answered before (both
@@ -336,6 +336,44 @@ and with it as this section leaves it, all nine tests in the two files pass
   first coedge's. When it has one, the pin in
   `crates/rcad-topo/tests/a_ball_less_a_wedge.rs` becomes a measurement against
   `158π`.
+
+  **2026-10-15 note (Q508, `dfa75f1e`): closed, and not by that partner.** The
+  box of side two wholly inside a ball of radius three, and this bullet's own
+  shape, each have the ball across every edge of the cap that needs a pole, so
+  no partner separating the poles exists for either and the fix this bullet
+  asked for does not reach them. `which_pole_this_cap_reaches` instead reads
+  the pole off the cap's own rim: a wire keeps its face's material on the left
+  of the stored surface's own normal, a ball's and a cone's two coordinates
+  are right-handed about that normal, so a rim walked the way the longitude
+  grows has the material above it, and the walk's own count of the turn it
+  gained (`runs_up`) says which pole that is — the same count
+  `cut_a_cap_up_to_its_pole` already steps its quarters by, so the two can no
+  longer disagree (§41.8 item 5's two doc comments now say one thing). The pin
+  here becomes the measurement against `158π` this bullet asked for
+  (`a_ball_less_or_united_with_a_block_over_one_corner_of_it_is_measured_against_the_piece`),
+  the box wholly inside the ball and the crossing block both answer too
+  (`a_cap_whose_pole_no_partner_separates.rs`), and the old reading also took
+  the north pole for a cap round the south one — not only the wrong partner
+  when one existed, but the wrong pole outright. Two pins outside this fix's
+  own write set (`mesh.rs` alone) turned from a refusal to an answer with it:
+  the ball resting on a block it overhangs
+  (`a_ball_resting_on_a_block_it_overhangs_unites_into_both_solids_as_they_stand`
+  in `fuses_that_touch.rs`, measuring `40.648` against `8 + 32π/3`) and the
+  ball less, and united either way with, two blocks meeting its equator from
+  opposite sides
+  (`a_ball_less_or_united_with_two_blocks_meeting_its_equator_from_opposite_sides_keeps_all_of_it_but_the_two_pieces`
+  in `two_flat_faces_on_one_plane_facing_apart_along_an_arc.rs`, named below,
+  measuring `468.744` against `448π/3` and `3268.744` against `2800 + 448π/3`).
+  A third pin the same source change reached, in a different file again,
+  moved with its own row rather than Q508's own: Q719 (`afc7bdc5`) renamed
+  `a_ball_whose_south_pole_is_moved_fuses_to_the_sound_balls_answer`'s
+  `ROUND_THE_SOUTH_POLE` difference, in
+  `a_broken_two_surface_corner_read_back_from_bytes.rs`, from
+  `ACurvedFaceGoesRightRoundWithNoSeam` to `TheSoundAnswer` — a block round a
+  ball's south pole cut out of the ball answers the sound ball's answer to
+  the last bit, under both policies and every one of its five pole moves,
+  with nothing left in the file to build the old `Outcome` variant, which
+  went with its two match arms.
 - **The sign reads the plane's orientation as each face spells it.**
   `which_arc_of_a_circle_this_is` decides which arc a side is by
   `∇round × ∇plane`, and the plane's gradient turns round with its spelling, so
@@ -363,8 +401,8 @@ both in the new `crates/rcad-topo/tests/two_flat_faces_on_one_plane_facing_apart
   (`a_ball_shares_with_two_blocks_meeting_its_equator_from_opposite_sides_the_two_pieces_they_cut_off`,
   `two_blocks_meeting_a_balls_equator_from_opposite_sides_less_the_ball_lose_a_piece_each`),
   and the ball less the blocks, and the union, now stop one step later, in
-  the mesher, on the still-open second bullet above
-  (`a_ball_less_or_united_with_two_blocks_meeting_its_equator_from_opposite_sides_stops_in_the_mesher`,
+  the mesher, on the second bullet above, closed since by Q508
+  (`a_ball_less_or_united_with_two_blocks_meeting_its_equator_from_opposite_sides_keeps_all_of_it_but_the_two_pieces`,
   six fuses — `just t --test two_flat_faces_on_one_plane_facing_apart_along_an_arc`
   passes all five tests in the file on this section's base). §39.4 records
   both refusals under their own rows.
