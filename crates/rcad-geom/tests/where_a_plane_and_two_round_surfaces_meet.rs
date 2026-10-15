@@ -697,8 +697,11 @@ fn a_plane_through_a_cones_apex_meets_a_ball_resting_there_at_the_apex_and_a_bar
 /// Pairs that bend the same way — two balls, two pipes, two cones of one
 /// slope — are the first road's and are swept anyway: the closed form does not
 /// care which road answers, and two roads that disagreed would show here.
-#[test]
-fn every_pair_about_one_axis_cut_square_to_it_meets_where_the_closed_form_says() {
+/// Every ball, pipe and cone the turned sweeps below ask about, built about
+/// one coordinate axis and shared with
+/// [`every_pair_about_one_axis_cut_square_to_it_meets_where_the_closed_form_says`]
+/// so a turned sweep asks the same question of the same 630 pairs.
+fn balls_pipes_and_cones_about_one_axis() -> Vec<AboutTheAxis> {
     let mut shapes = Vec::new();
     for centre in [-2.0, 0.0, 3.0] {
         for radius in [1.0, 2.0, 3.0, 5.0] {
@@ -717,6 +720,12 @@ fn every_pair_about_one_axis_cut_square_to_it_meets_where_the_closed_form_says()
             }
         }
     }
+    shapes
+}
+
+#[test]
+fn every_pair_about_one_axis_cut_square_to_it_meets_where_the_closed_form_says() {
+    let shapes = balls_pipes_and_cones_about_one_axis();
 
     let (mut shared, mut at_one_point, mut nowhere) = (0usize, 0usize, 0usize);
     for along in 0..3 {
@@ -1092,6 +1101,295 @@ fn two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused() {
         Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
     );
 }
+
+/// **Turning the plane and both shapes by one shared [`Isometry`] leaves the
+/// closed form's whole balls-pipes-cones sweep refused nowhere**, and every
+/// one of the handful of rows it answers differently is a row the closed
+/// form itself already calls a boundary — `mine == theirs` on the heights
+/// the shapes were built at, before anything was turned, where the expected
+/// answer is a shared circle or exactly one point and a rounding can tip the
+/// answer either way. Never on a row the closed form calls `Nowhere`.
+///
+/// The three turns are the ones Q2099's row named: `0.3` about `z`, `1.1`
+/// about `(1,2,3)` through `(1,0,-1)`, and `pi/6` about `y`. For each, the
+/// cap's normal is also checked bit-for-bit against the axis direction of
+/// every pipe or cone it is capping — the same shared turn applied to both,
+/// so nothing here rounds the squareness away, which is why **no triple
+/// refuses** below: the roads this file answers for balls, pipes and cones
+/// about one axis all lean on that squareness.
+///
+/// [`meet`]'s own doc comment is this file's "nothing was fudged" proof: a
+/// certified `Ok` carries an empty provenance log, and that already covers
+/// every disagreement below, whichever variant it answers. A disagreement
+/// that lands `At` one or more points is **not** also checked
+/// [`corners_of`]'s way, on an exact `Decision::Zero` and a box of no
+/// width: unlike every hand-worked corner elsewhere in this file, a point an
+/// *irrational* turn puts a quadric's root at is not an `f64` either, so its
+/// own certified enclosure is a tiny box rather than an exact one — checked
+/// here only for staying tiny, the same bound the file's own
+/// `a_cap_holding_a_rings_axis_meets_a_ball_or_a_cone_on_it_at_their_circles`
+/// gives a hand-worked irrational corner.
+#[test]
+fn turning_the_whole_sweep_by_one_isometry_disagrees_with_the_closed_form_only_on_boundary_rows() {
+    let shapes = balls_pipes_and_cones_about_one_axis();
+
+    for (turn, disagreements_wanted) in [
+        (
+            rcad_geom::Isometry::rotation(
+                &Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+                0.3,
+            )
+            .expect("a finite angle"),
+            725,
+        ),
+        (
+            rcad_geom::Isometry::rotation(
+                &Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0))
+                    .expect("a direction"),
+                1.1,
+            )
+            .expect("a finite angle"),
+            1119,
+        ),
+        (
+            rcad_geom::Isometry::rotation(
+                &Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("a direction"),
+                core::f64::consts::PI / 6.0,
+            )
+            .expect("a finite angle"),
+            725,
+        ),
+    ] {
+        let (mut counted, mut disagreed) = (0usize, 0usize);
+        for along in 0..3 {
+            for (first, one) in shapes.iter().enumerate() {
+                for other in &shapes[first + 1..] {
+                    for height in -4..=4 {
+                        let height = f64::from(height);
+                        let facing = if height < 0.0 { -1.0 } else { 1.0 };
+                        let cap = flat(
+                            on_the_axis_direction(along, facing),
+                            on_the_axis(along, height),
+                        )
+                        .transformed(&turn);
+                        let here = one.built(along).transformed(&turn);
+                        let there = other.built(along).transformed(&turn);
+                        counted += 1;
+
+                        if let Surface::Plane(plane) = &cap {
+                            let normal = plane.normal();
+                            for shape in [&here, &there] {
+                                let direction = if let Surface::Cylinder(this) = shape {
+                                    Some(this.axis().direction())
+                                } else if let Surface::Cone(this) = shape {
+                                    Some(this.axis().direction())
+                                } else {
+                                    None
+                                };
+                                if let Some(direction) = direction {
+                                    assert_eq!(
+                                        (normal.x().abs(), normal.y().abs(), normal.z().abs()),
+                                        (
+                                            direction.x().abs(),
+                                            direction.y().abs(),
+                                            direction.z().abs()
+                                        ),
+                                        "the turned cap is not exactly square to {shape:?}, \
+                                         up to which way each points"
+                                    );
+                                }
+                            }
+                        }
+
+                        let mine = one.squared_radius_at(height);
+                        let theirs = other.squared_radius_at(height);
+                        let on_a_boundary = mine >= 0.0 && theirs >= 0.0 && mine == theirs;
+                        let expected = if !on_a_boundary {
+                            "nowhere"
+                        } else if mine > 0.0 {
+                            "shared"
+                        } else {
+                            "one"
+                        };
+
+                        let answer = meet([&cap, &here, &there]).unwrap_or_else(|refused| {
+                            panic!(
+                                "{one:?} and {other:?} along axis {along}, cut at {height}, \
+                                 turned: {refused:?}"
+                            )
+                        });
+                        let actual = match &answer {
+                            MeetOfThree::Nowhere => "nowhere",
+                            MeetOfThree::MoreThanAPoint => "shared",
+                            MeetOfThree::At(points) if points.len() == 1 => "one",
+                            MeetOfThree::At(_) => "other",
+                            other => panic!("an answer this test does not know: {other:?}"),
+                        };
+                        if actual == expected {
+                            continue;
+                        }
+                        assert!(
+                            on_a_boundary,
+                            "{one:?} and {other:?} along axis {along}, cut at {height}, turned: \
+                             expected {expected} off the closed form but turning answered \
+                             {answer:?}, though mine = {mine} and theirs = {theirs} do not even \
+                             agree before anything was turned"
+                        );
+                        disagreed += 1;
+                        if let MeetOfThree::At(points) = &answer {
+                            for point in points {
+                                for side in point.enclosure() {
+                                    assert!(
+                                        side.width() <= 1e-9,
+                                        "{point:?} is a box far too wide to be the single \
+                                         irrational corner a boundary row turns onto"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(counted, 17010, "the sweep stopped short");
+        assert_eq!(
+            disagreed, disagreements_wanted,
+            "how many rows this turn moves off the closed form changed"
+        );
+    }
+}
+
+/// **A cap turned by a different composition of turns from its pair rounds
+/// its stored axis off square, and a curved road that needs that squareness
+/// refuses rather than guesses.**
+///
+/// [`Isometry::compose`]'s own doc comment says why this is a real path and
+/// not a contrived one: "Any other two turns are multiplied as quaternions,
+/// which rounds", and names `rcad-topo`'s `Model::place_solid` — which
+/// composes each call's movement onto the one a part already carries — as
+/// exactly the caller that does this on every placement. Two half-turns
+/// composed are not bit-identical to the one direct turn of the same angle
+/// (`zz_q2099_probe_composed_turn` measured a one-ulp difference on a unit
+/// vector component before this test replaced it; not re-measured here).
+///
+/// The pair — a ball, a pipe or a cone about one axis, built and checked
+/// against [`AboutTheAxis::squared_radius_at`] the same way the closed-form
+/// sweep above is — is turned directly by one [`Isometry::rotation`] about
+/// the oblique axis `(1,2,3)` through `(1,0,-1)`, angle `1.1`; the cap that
+/// should cut both square to that same axis is turned by two half-turns of
+/// it composed instead. The cap's normal is checked, for every pipe or cone
+/// in the sweep, against the shape's own turned axis direction — on both a
+/// cylinder's and a cone's, since the one-off probe this replaces checked
+/// only the cylinder's — and found not bit-exactly equal at least once,
+/// which is the rounding-off-square case Q988 asked for and Q2093's
+/// same-isometry construction above never makes.
+///
+/// Refusals cluster exactly where a road needs that squareness on **both**
+/// curved sides at once: ball-ball and pipe-pipe never need it there and
+/// never refuse, where ball-pipe, ball-cone, pipe-cone and cone-cone do and
+/// do. Pinned in [`ROUNDING_OFF_SQUARE_CAP_REFUSALS`] as measured, the same
+/// way [`TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED`] pins a count no formula
+/// derives — a change here says the rounding moved, not that it is wrong.
+#[test]
+fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_family() {
+    let shapes = balls_pipes_and_cones_about_one_axis();
+
+    let axis =
+        Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+    let angle = 1.1_f64;
+    let direct = rcad_geom::Isometry::rotation(&axis, angle).expect("a finite angle");
+    let half = rcad_geom::Isometry::rotation(&axis, angle / 2.0).expect("a finite angle");
+    let composed = half.compose(&half);
+
+    let along = 0usize;
+    let families = [
+        "ball-ball",
+        "ball-pipe",
+        "ball-cone",
+        "pipe-pipe",
+        "pipe-cone",
+        "cone-cone",
+    ];
+    let mut not_square = 0usize;
+    let mut refused = [0usize; 6];
+    for (first, one) in shapes.iter().enumerate() {
+        for other in &shapes[first + 1..] {
+            let family = match (one, other) {
+                (AboutTheAxis::Ball { .. }, AboutTheAxis::Ball { .. }) => 0,
+                (AboutTheAxis::Ball { .. }, AboutTheAxis::Pipe { .. })
+                | (AboutTheAxis::Pipe { .. }, AboutTheAxis::Ball { .. }) => 1,
+                (AboutTheAxis::Ball { .. }, AboutTheAxis::Cone { .. })
+                | (AboutTheAxis::Cone { .. }, AboutTheAxis::Ball { .. }) => 2,
+                (AboutTheAxis::Pipe { .. }, AboutTheAxis::Pipe { .. }) => 3,
+                (AboutTheAxis::Pipe { .. }, AboutTheAxis::Cone { .. })
+                | (AboutTheAxis::Cone { .. }, AboutTheAxis::Pipe { .. }) => 4,
+                (AboutTheAxis::Cone { .. }, AboutTheAxis::Cone { .. }) => 5,
+            };
+            for height in -4..=4 {
+                let height = f64::from(height);
+                let facing = if height < 0.0 { -1.0 } else { 1.0 };
+                let cap = flat(
+                    on_the_axis_direction(along, facing),
+                    on_the_axis(along, height),
+                )
+                .transformed(&composed);
+                let here = one.built(along).transformed(&direct);
+                let there = other.built(along).transformed(&direct);
+
+                let Surface::Plane(plane) = &cap else {
+                    panic!("a plane turned is still a plane")
+                };
+                let normal = plane.normal();
+                for shape in [&here, &there] {
+                    let direction = if let Surface::Cylinder(this) = shape {
+                        Some(this.axis().direction())
+                    } else if let Surface::Cone(this) = shape {
+                        Some(this.axis().direction())
+                    } else {
+                        None
+                    };
+                    if let Some(direction) = direction
+                        && (normal.x().abs(), normal.y().abs(), normal.z().abs())
+                            != (
+                                direction.x().abs(),
+                                direction.y().abs(),
+                                direction.z().abs(),
+                            )
+                    {
+                        not_square += 1;
+                    }
+                }
+
+                if let Err(error) = meet([&cap, &here, &there]) {
+                    assert_eq!(
+                        error,
+                        Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat,
+                        "{one:?} and {other:?} cut at {height}, cap rounded off square"
+                    );
+                    refused[family] += 1;
+                }
+            }
+        }
+    }
+
+    assert!(
+        not_square > 0,
+        "the composed cap came out exactly square to every pair's axis after all"
+    );
+    for (name, count) in families.iter().zip(refused) {
+        println!("{name}: refused {count}");
+    }
+    assert_eq!(
+        refused, ROUNDING_OFF_SQUARE_CAP_REFUSALS,
+        "how a cap rounded off square refuses, by family, moved"
+    );
+}
+
+/// Measured, and a watch rather than a bound (see
+/// [`a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_family`]):
+/// how often a cap one rounding off square refuses, by family, in the order
+/// ball-ball, ball-pipe, ball-cone, pipe-pipe, pipe-cone, cone-cone.
+const ROUNDING_OFF_SQUARE_CAP_REFUSALS: [usize; 6] = [0, 366, 1098, 0, 972, 972];
 
 /// A ring about `z` through the origin.
 fn ring(ring_radius: f64, tube_radius: f64) -> Surface {
