@@ -3215,6 +3215,11 @@ fn settle_against_each(
         let solid: SolidView<'_> = model.solid_at(solids[index].key.slot_in(model.id()));
         let mut ray = ProvenanceLog::new();
         let placed = solid.classify_uncertain_point(point, policy, &mut ray);
+        if matches!(placed, Containment::Inside | Containment::Outside)
+            && a_face_may_run_between_it_and_the_plane(solid, piece, point, policy, &mut ray)
+        {
+            return Ok(Settled::Abandoned);
+        }
         // A classification nobody could make is not a decision anybody took, so
         // it says nothing in the log (§5) — and criterion 7 would otherwise read
         // it as slop this fuse had accepted, which is exactly the conflation
@@ -3255,6 +3260,117 @@ fn settle_against_each(
         }
     }
     Ok(Settled::At(lying_on.placement()))
+}
+
+/// Whether a face of `solid` may pass between `point` and the points of a flat
+/// piece's plane beside it, so that where the ray put `point` need not be
+/// where the piece is.
+///
+/// [`the_piece_holds`] holds a point a rounding off a flat piece's plane by
+/// the point's box stretched to the plane ([`stretched_to_the_plane`]), so
+/// what it shows is that the piece holds points of the plane in that box, not
+/// that it holds `point`. The ray places `point`. The two answers are the same
+/// unless the skin of `solid` runs between `point` and those points of the
+/// plane. A flat face cannot where its plane leaves `point` and the four
+/// corners of the plane's part of the box all strictly on one side
+/// ([`the_corners_of_the_plane_in`]), and a curved one where its surface
+/// leaves `point` and the whole box on one side. Any other face cannot where
+/// it holds no part of the box.
+///
+/// **The plane is asked at its corners, not over the box.** The box runs past
+/// the plane by as much as it took to put each end on its own side, and a
+/// face's plane parallel to the piece's and a rounding from it cuts that
+/// overshoot without coming between `point` and the piece: under
+/// `Policy::tolerant(3.0)` a tall block through a turned flat one held a box
+/// so by its own face, and the piece was placed by a later candidate through a
+/// tolerant `orient3d` its log did not expect (`turning_a_fuse.rs`'s
+/// `a_tall_block_through_a_flat_one_turned_answers_every_rule_under_a_tolerant_policy`).
+///
+/// **What a face that holds no part of the box was decided with goes into
+/// `ray`**, which says why `point` was placed where it was, so a tolerance
+/// spent on it is logged where the ray's own is, and dropped with it.
+///
+/// Two quarter bends placed round by `−2` and by `−2 − π/2` meet at two cap
+/// planes through the ring's axis a rounding apart, and each cap's disk lies
+/// `1.7e-17` inside the other bend. A point `8e-16` off the first bend's start
+/// cap, beyond the copy's end cap plane, was held by that cap and placed
+/// outside the copy, and every rule both ways round was refused
+/// `ResultIsNotManifold` along the cap's rim (Q1949).
+fn a_face_may_run_between_it_and_the_plane(
+    solid: SolidView<'_>,
+    piece: &Piece,
+    point: PredicatePoint,
+    policy: &Policy,
+    ray: &mut ProvenanceLog,
+) -> bool {
+    let Some(flat) = piece.surface.as_plane() else {
+        return false;
+    };
+    if side_of_a_flat_face(flat, point) == Decision::Zero {
+        return false;
+    }
+    let reach = stretched_to_the_plane(flat, point)
+        .expect("the_piece_holds stretched this point to the plane before it held it");
+    let corners = the_corners_of_the_plane_in(flat, reach);
+    for face in solid.faces() {
+        let surface = face.surface();
+        let clear = match surface.as_plane() {
+            Some(plane) => {
+                let where_the_point_is = side_of_a_flat_face(plane, point);
+                matches!(where_the_point_is, Decision::Pos | Decision::Neg)
+                    && corners.iter().all(|&three| {
+                        side_of_a_plane_where_three_planes_meet(three, plane.coefficients())
+                            == Ok(where_the_point_is)
+                    })
+            }
+            None => {
+                let where_the_point_is = side_of_surface(&surface, point);
+                matches!(where_the_point_is, Decision::Pos | Decision::Neg)
+                    && side_of_surface(&surface, reach) == where_the_point_is
+            }
+        };
+        if clear {
+            continue;
+        }
+        let mut asked = ProvenanceLog::new();
+        match solid.face_holds_the_point(face.key(), reach, policy, &mut asked) {
+            Ok(OnAFace::NotHeld) => asked.drain_into(ray),
+            Ok(OnAFace::Held | OnAFace::OnItsBoundary) | Err(_) => return true,
+        }
+    }
+    false
+}
+
+/// The four corners of the part of `flat` inside `reach`, each as the three
+/// planes it is the one meet of: `flat` and one end of `reach` across each of
+/// the two axes [`stretched_to_the_plane`] did not stretch along.
+///
+/// **That stretch is what makes these the corners.** It moved both ends of
+/// `reach` along the axis `flat`'s normal has most of until each end's face
+/// lies wholly on its own side of `flat`, so every line along that axis
+/// through `reach` meets `flat` inside it, and the part of `flat` in `reach`
+/// is the parallelogram these four meets span. A plane that leaves all four
+/// strictly on one side leaves the whole parallelogram there. The axis is
+/// picked here exactly as there, ties included; picked any other way, the
+/// parallelogram could run out of `reach`.
+fn the_corners_of_the_plane_in(flat: &Plane, reach: PredicatePoint) -> [[[f64; 4]; 3]; 4] {
+    let normal = flat.normal().components();
+    let along = (0..3)
+        .max_by(|&one, &other| normal[one].abs().total_cmp(&normal[other].abs()))
+        .expect("three axes");
+    let [across, and_across] = [(along + 1) % 3, (along + 2) % 3];
+    let boxed = reach.enclosure();
+    let at = |axis: usize, end: f64| {
+        let mut plane = [0.0; 4];
+        plane[axis] = 1.0;
+        plane[3] = -end;
+        plane
+    };
+    let ends = |axis: usize| [boxed[axis].lo(), boxed[axis].hi()];
+    let [one, other] = ends(across);
+    let [first, second] = ends(and_across);
+    [(one, first), (one, second), (other, first), (other, second)]
+        .map(|(this, that)| [flat.coefficients(), at(across, this), at(and_across, that)])
 }
 
 /// What one point inside a piece says about where the piece sits.

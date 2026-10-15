@@ -509,6 +509,83 @@ fn every_side_of_a_bend_placed_round_from_another_is_used_once_each_way() {
     }
 }
 
+/// A quarter bend of ring 4 and tube 1 placed round by `−2`, and a copy placed
+/// round by `−2 − π/2`, a quarter turn back. The copy's end cap and the first
+/// bend's start cap lie on planes through the ring's axis a rounding apart,
+/// and each cap's disk lies inside the other bend by about `1.7e-17` at the
+/// ring, so the two bends overlap in a sliver. Every rule both ways round was
+/// refused `ResultIsNotManifold`, with 3 faces along the first bend's start
+/// rim for the union and 1 for the intersection and the difference (Q1949). A
+/// point `8e-16` off the first bend's start cap, beyond the copy's end cap
+/// plane, was held by that cap, and the ray put it outside the copy: the union
+/// and the difference kept the cap and the intersection dropped it.
+///
+/// `select.rs` now drops what the ray says of a point of a flat piece when a
+/// face of the solid it is fired at may run between the point and the piece's
+/// plane, as the copy's end cap does here. Each cap is then placed inside the
+/// other bend by a piece it shares a side with. So every rule both ways round
+/// answers one solid that validates: the union two bends' worth of ring and
+/// the difference one, each within the measure's own error of `π² R r² / 2` a
+/// bend.
+///
+/// The intersection is the sliver. `Model::validate` passes it, but
+/// `SolidView::measure` at a deflection of `0.01` refuses it
+/// `VolumeIsNotPositive`, its mesh summing to `−8.7e-17`: the measure reads
+/// that sum's sign alone. It is pinned as it stands, for the `measure.rs` row
+/// Q1949 filed to move.
+#[test]
+fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver() {
+    let one_bend = PI * PI * 4.0 / 2.0;
+    let policy = Policy::certified();
+    let deflection = rcad_geom::Deflection::of(0.01).expect("a deflection");
+    for rule in EVERY_RULE {
+        for the_first_first in [true, false] {
+            let what = format!("{rule:?}, the first first {the_first_first}");
+            let mut model = a_model();
+            let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, -2.0);
+            let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, -2.0 - FRAC_PI_2);
+            let (arguments, tools) = if the_first_first {
+                ([first], [copy])
+            } else {
+                ([copy], [first])
+            };
+            let answer = model
+                .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let [solid] = answer.solids()[..] else {
+                panic!("{what}: one solid, not {:?}", answer.solids());
+            };
+            let measured = model
+                .solid(solid)
+                .and_then(|solid| solid.measure(deflection, &policy, &mut ProvenanceLog::new()))
+                .map(|measured| (measured.volume(), measured.volume_error()));
+            let expected = match rule {
+                Rule::Union => 2.0 * one_bend,
+                Rule::Difference => one_bend,
+                Rule::Intersection => {
+                    assert!(
+                        matches!(
+                            measured,
+                            Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
+                        ),
+                        "{what}: {measured:?}"
+                    );
+                    continue;
+                }
+                other => panic!("not a rule this tries: {other:?}"),
+            };
+            let (volume, error) = measured.unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            assert!(
+                (volume - expected).abs() <= error,
+                "{what}: {volume} ± {error}, expected {expected}"
+            );
+        }
+    }
+}
+
 /// A quarter of a round bar of radius 6, `z` from −2 to 2, holds a quarter
 /// bend of ring 4 and tube 1 whole, its two flat faces on the planes of the
 /// bend's two caps. Where it sits, every rule both ways round answers and
