@@ -116,7 +116,12 @@ pub(crate) struct BakedSolid {
     pub(crate) key: SolidKey,
     /// Its faces, in the order the model stores them.
     pub(crate) faces: Vec<BakedFace>,
-    /// A box round the whole solid, for skipping face pairs that cannot meet.
+    /// A box round the whole solid, built by taking in each face's own box
+    /// below. **Not always a proof that two solids are apart.** Where a face
+    /// has no proof box of its own — a pipe, a cone or a torus, or a flat
+    /// face with a side on one — its box is read off stored corners in plain
+    /// `f64`, and a miss between two such boxes can still leave a pair of
+    /// faces that really touch uncut (§400.3).
     pub(crate) bounds: Bounds,
 }
 
