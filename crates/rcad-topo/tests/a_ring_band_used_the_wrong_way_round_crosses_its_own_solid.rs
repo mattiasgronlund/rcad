@@ -8,9 +8,11 @@
 //! quadratic in face count." §37.1's Q1341 note found the first such route,
 //! through `Import::read` of a written model; this is the second.
 
-use rcad_geom::{Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector};
+use rcad_geom::{
+    Axis, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
 
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
@@ -23,10 +25,6 @@ fn flat_at(z: f64, facing: f64) -> Surface {
         Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, facing))
             .expect("a unit normal"),
     )
-}
-
-fn at_height(z: f64) -> Isometry {
-    Isometry::translation(Vector::new(0.0, 0.0, z)).expect("a finite shift")
 }
 
 /// A copy of `a_solid_of_revolution` in
@@ -103,7 +101,13 @@ fn a_ring_band_used_the_wrong_way_round(model: &mut Model) -> Result<SolidKey, E
             (rho_top2, z_top2),
             (rho_top, Z_TOP),
         ],
-        &[flat_at(Z_BOTTOM, -1.0), wall, flat_at(z_top2, 1.0), ring, flat_at(Z_TOP, 1.0)],
+        &[
+            flat_at(Z_BOTTOM, -1.0),
+            wall,
+            flat_at(z_top2, 1.0),
+            ring,
+            flat_at(Z_TOP, 1.0),
+        ],
         &[
             Orientation::Forward,
             Orientation::Forward,
@@ -120,22 +124,128 @@ fn a_ring_band_used_the_wrong_way_round(model: &mut Model) -> Result<SolidKey, E
     )
 }
 
+/// A box of side 1 placed far from the ring band solid, so it shares no
+/// bounding box with it at all.
+fn a_box_far_from_everything(model: &mut Model) -> SolidKey {
+    let cube = model
+        .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(1000.0, 0.0, 0.0)).expect("a finite placement"),
+        )
+        .expect("this model made the key");
+    cube
+}
+
+/// A box of side 1 straddling the ring's outer wall where it crosses
+/// `Z_TOP`, so it genuinely overlaps the solid right where the wrongly
+/// turned band sits.
+fn a_box_across_the_step(model: &mut Model) -> SolidKey {
+    let cube = model
+        .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    model
+        .place_solid(
+            cube,
+            &Isometry::translation(Vector::new(3.5, -0.5, 0.5)).expect("a finite placement"),
+        )
+        .expect("this model made the key");
+    cube
+}
+
+/// Fuse `solid` with `other` under every rule in [`EVERY_RULE`] and both
+/// argument orders, and assert each of the 6 fuses is refused the way
+/// `wanted` describes — never `Ok`, since §17.4 says a fuse answering `Ok`
+/// with a self-intersecting argument is a row of its own, not this one's to
+/// paper over.
+fn assert_every_fuse_with_it_is_refused(
+    model: &mut Model,
+    solid: SolidKey,
+    other: SolidKey,
+    label: &str,
+    wanted: impl Fn(&Error) -> bool,
+) {
+    for &rule in &EVERY_RULE {
+        for &(arguments, tools) in &[(&[solid][..], &[other][..]), (&[other][..], &[solid][..])] {
+            match model.fuse(
+                arguments,
+                tools,
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            ) {
+                Err(err) if wanted(&err) => {}
+                Ok(_) => panic!(
+                    "fuse of {label} under {rule:?} answered Ok; §17.4 says that is a row of its own"
+                ),
+                Err(err) => panic!(
+                    "fuse of {label} under {rule:?} refused with {err:?}, not the expected refusal"
+                ),
+            }
+        }
+    }
+}
+
+/// Neither box reaches `Error::ArgumentIntersectsItself`, the refusal §17.4
+/// names for a solid whose own faces run through each other. A box whose
+/// bounds overlap the solid's at all — even nowhere near the ring, like
+/// `a_box_across_the_step` and a box tried only against the solid's outer
+/// cylindrical wall during this row's own investigation — is refused the
+/// already-filed `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` gap first
+/// (Q618, Q525, §043: "refuses every bend against a flat-sided tool",
+/// regardless of whether a side of the tool comes near the ring). A box with
+/// no bounds overlap at all, like `a_box_far_from_everything`, never reaches
+/// that gap, and instead finds the one check this row's own solid is built
+/// to engage — `check_it_does_not_cross_itself` in `fuse/cuts.rs` — unable to
+/// *certify* the overlap: the band is `STEP` = 1.2e-16 wide, at the edge of
+/// what `f64` interval arithmetic can resolve at this scale, so the honest
+/// answer is `Error::Undecidable`, not a confident yes. Both are refusals,
+/// never `Ok`, so neither is a gap this row leaves open: the quartic one
+/// already has rows (Q618, Q525), and the `Undecidable` one is this
+/// construction meeting representable precision head on, a limit rather
+/// than a gap (§16.10).
 #[test]
-fn probe_builds_and_measures() {
+fn a_ring_band_used_the_wrong_way_round_crosses_its_own_solid() {
     let mut model = a_model();
     let solid = a_ring_band_used_the_wrong_way_round(&mut model).expect("it builds");
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("it validates");
+        .expect("§17.4: a solid crossing itself is not caught by validate");
     let deflection = rcad_geom::Deflection::of(0.01).expect("a deflection");
     let measured = model
         .solid(solid)
         .expect("this model made the key")
         .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("it measures");
-    println!(
-        "PROBE volume {} +- {}",
+
+    let disc_volume = std::f64::consts::PI * DISC_RADIUS * DISC_RADIUS * (Z_TOP - Z_BOTTOM);
+    let one_torus_band = 2.0 * std::f64::consts::PI * std::f64::consts::PI * RING * TUBE * TUBE;
+    assert!(
+        (measured.volume() - (disc_volume + one_torus_band)).abs() <= measured.volume_error(),
+        "measured volume {} (+- {}) should be about one torus band ({one_torus_band}) more \
+         than the disc's own ({disc_volume})",
         measured.volume(),
-        measured.volume_error()
+        measured.volume_error(),
+    );
+
+    let far = a_box_far_from_everything(&mut model);
+    assert_every_fuse_with_it_is_refused(&mut model, solid, far, "a far box", |err| {
+        matches!(err, Error::Undecidable { .. })
+    });
+
+    let across_the_step = a_box_across_the_step(&mut model);
+    assert_every_fuse_with_it_is_refused(
+        &mut model,
+        solid,
+        across_the_step,
+        "a box across the step",
+        |err| {
+            matches!(
+                err,
+                Error::Geometry(rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic)
+            )
+        },
     );
 }
