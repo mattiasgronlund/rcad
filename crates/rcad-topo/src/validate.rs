@@ -5088,8 +5088,9 @@ mod tests {
         Decision, Mesh, Scope, a_circle_round_the_axis,
         a_closed_crossing_is_walked_the_way_it_is_stored, as_coarse_as_a_mesh_gets, gradient_of,
         hand_on_a_refusal_that_found_the_space, how_far_it_strays_from_one_plane,
-        how_wide_an_arc_of_one_branch_is, it_lies_flat, largest_coordinate_of,
-        the_coarsest_mesh_whose_sides_do_not_cross, winding_of, winding_round,
+        how_much_space_hides_under, how_wide_an_arc_of_one_branch_is, it_lies_flat,
+        largest_coordinate_of, the_coarsest_mesh_whose_sides_do_not_cross, winding_of,
+        winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -7856,5 +7857,53 @@ mod tests {
         let pipe_face = builder.add_face(Surface::Cylinder(pipe), &[pipe_wire])?;
         builder.add_shell(&[(ball_face, way), (pipe_face, way)])?;
         builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+    }
+
+    /// Row Q1890. Every unit of space [`how_much_space_hides_under`] charges
+    /// past what it must is a sum that does not answer and a finer mesh asked
+    /// for. A ball and a bar of radius one, meshed at a deflection of `0.3`,
+    /// stray near a third of their radius, and there `area · d · (r / (r − d))²`
+    /// per triangle charged `1.37` times the shell [`SolidView::measure`]
+    /// charges the same mesh, which is the same argument kept tight.
+    #[test]
+    fn the_space_a_mesh_can_leave_out_is_no_more_than_measure_charges() {
+        let deflection = Deflection::of(0.3).expect("a positive deflection");
+        let mut model = an_empty_model();
+        let shapes = [
+            (
+                "a ball",
+                model
+                    .add_ball(1.0, &Isometry::identity())
+                    .expect("a ball of radius one"),
+            ),
+            (
+                "a bar",
+                model
+                    .add_round_bar(1.0, 4.0, &Isometry::identity())
+                    .expect("a bar of radius one"),
+            ),
+        ];
+        for (what, key) in shapes {
+            let view = model.solid(key).expect("this model made the key");
+            let mesh = view
+                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let deviation = mesh.deviation().magnitude();
+            assert!(
+                deviation > 0.2,
+                "{what}: strays {deviation}, too little for the two charges to differ"
+            );
+            let charged = how_much_space_hides_under(view, &mesh)
+                .unwrap_or_else(|| panic!("{what}: a ball and a bar can be charged"));
+            let measured = view
+                .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"))
+                .volume_error();
+            assert!(
+                charged <= measured,
+                "{what}: validate charges {charged} where measure charges {measured}, \
+                 straying {deviation}"
+            );
+        }
     }
 }
