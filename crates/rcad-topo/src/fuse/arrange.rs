@@ -14820,10 +14820,11 @@ mod what_the_curved_arrangement_reaches {
     use super::{
         HowItRuns, Split, a_line_one_surface_rests_on_another_along,
         a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
-        a_plane_lies_along_a_pipes_axis, along_a_bend, cross_of, dominant_axis_of_a_direction,
-        gradient_at, how_a_crossing_runs, how_a_plane_leans_against_a_cone,
-        nothing_rules_the_point_out, round_a_closed_crossing_and_what_it_measures, side_of_surface,
-        split_a_face, the_pickers_of_each_run, the_turn_where_two_planes_cross_a_quadric,
+        a_plane_lies_along_a_pipes_axis, a_plane_rests_along_a_pipe, along_a_bend, cross_of,
+        dominant_axis_of_a_direction, gradient_at, how_a_crossing_runs,
+        how_a_plane_leans_against_a_cone, nothing_rules_the_point_out,
+        round_a_closed_crossing_and_what_it_measures, side_of_surface, split_a_face,
+        the_pickers_of_each_run, the_turn_where_two_planes_cross_a_quadric,
         two_pipes_run_along_one_line, where_a_cones_apex_stands_against_a_plane,
         where_the_crossing_starts,
     };
@@ -16318,6 +16319,53 @@ mod what_the_curved_arrangement_reaches {
         assert!(
             disagreed * 10 > drawn,
             "these are meant to be a family and not a curiosity: {disagreed} of {drawn}"
+        );
+    }
+
+    /// **Only a plane proved to touch a pipe along one line rests along it.**
+    ///
+    /// [`a_plane_rests_along_a_pipe`] is what lets a turn the box cannot sign
+    /// be read as nothing (Q1854), so it has to say yes to the touch and no to
+    /// every shape beside it. A pipe of radius one up `z` and the plane `x = 1`
+    /// touch along `x = 1, y = 0`, whichever of the two comes first. The plane
+    /// `2⁻⁴⁸` inside cuts the pipe in two lines, the one `2⁻⁴⁸` outside misses
+    /// it, the one leaning to the axis cuts an ellipse, and two planes cross in
+    /// one straight line too, which is not a plane resting along a pipe.
+    #[test]
+    fn only_a_plane_proved_to_touch_a_pipe_along_a_line_rests_along_it() {
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a pipe of radius one"));
+        let a_plane = |x: f64, normal: Vector| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(x, 0.0, 0.0), normal).expect("a plane"),
+            )
+        };
+        let across = Vector::new(1.0, 0.0, 0.0);
+        let hair = 2.0_f64.powi(-48);
+        let touching = a_plane(1.0, across);
+
+        assert!(
+            a_plane_rests_along_a_pipe(&touching, &pipe),
+            "the plane one radius from the axis touches the pipe along one line"
+        );
+        assert!(
+            a_plane_rests_along_a_pipe(&pipe, &touching),
+            "and the answer does not hang on which of the two comes first"
+        );
+        assert!(
+            !a_plane_rests_along_a_pipe(&a_plane(1.0 - hair, across), &pipe),
+            "a hair inside, the plane cuts the pipe in two lines"
+        );
+        assert!(
+            !a_plane_rests_along_a_pipe(&a_plane(1.0 + hair, across), &pipe),
+            "a hair outside, the plane misses the pipe"
+        );
+        assert!(
+            !a_plane_rests_along_a_pipe(&a_plane(1.0, Vector::new(1.0, 0.0, 1.0)), &pipe),
+            "a plane leaning to the axis cuts the pipe in an ellipse"
+        );
+        assert!(
+            !a_plane_rests_along_a_pipe(&touching, &a_plane(0.0, Vector::new(0.0, 1.0, 0.0))),
+            "two planes meet in one straight line, and neither is a pipe"
         );
     }
 
