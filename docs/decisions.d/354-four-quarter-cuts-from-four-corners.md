@@ -200,8 +200,8 @@ Pins moved, before → after:
 ### 354.7 A rim side a few ulps off a cut's meridian runs along it (Q2040)
 
 *Queue row Q2040, from Q2037's trace. Lane
-`lane-q2040-a-side-a-few-ulps-off-a-cones-ruling`, off `f24a8d05`, in three
-relays.*
+`lane-q2040-a-side-a-few-ulps-off-a-cones-ruling`, off `f24a8d05`, in four
+runs, relays 0 to 3.*
 
 **What was refused.** A block whose steep face is meant through the pointed
 cone's apex is stored with that face's plane an ulp off it: at lean one quarter
@@ -259,6 +259,29 @@ rim where it set off, which kept the corner from being taken clear, by accident.
 Under one addition with no bound it was taken clear, and the face was refused
 `LoopsTouch { corner: 1887, side: 2014 }`. With the bound the run below it reads
 as along the cut, and `the_sides_of_a_rim` takes the one addition.
+
+**What it answers.** In `meshing_a_plane_cut_along_a_cones_other_nappe.rs`,
+all eighteen of `the_eighteen_held_to_the_familys_four_checks` answer right,
+where the two at lean one quarter, crossing 0, turn 1 measured at `0.02` and
+no finer; all six blocks of the which-side test measure at `0.002`, `(0.25,
+1.0)` the one that did not; and the lean-one-quarter block turned an eighth,
+refused at every deflection, and turned 2, refused finer than `0.01`, both
+measure at `0.002`. In `a_plane_cut_along_a_cones_other_nappe.rs` the lean-one-quarter
+family round the pointed cone is 48 right, where it was 46 and 2
+`CannotMeshAFace`, so all ninety-six of that family answer.
+
+**What else moved.** Three of the slow tier's leaning-block pins, in the same
+file, each lost its last refusals: the steep cone's block leaned 1 and unturned
+is 16 right, where crossing 0's union and cone less the block refused
+`CannotMeshAFace`, and the unit cone's blocks leaned a quarter and three
+eighths are 48 right each, where crossing 0, turn 1's intersection and cone
+less the block refused `CannotMeshAFace`. Which of the fix's two steps, the
+bound or the one addition, moved those six fuses is not traced. §350.5's
+tallies of the two leaning-block families count them as refused, so they are
+stale; a row is filed to bring them up to date. Run whole on `5d338451`,
+before those pins turned, `rcad-topo` ran 2149 tests, 2146 passed, and these
+three failed on their old tallies; every other test answered as it did, the
+island callers of `a_side_meets_a_cut` included.
 
 **Not taken.** Q2037's probe read a side within `1e-12` of a cut's longitude as
 along it and answered the same tests, but `1e-12` was a guess, not a bound.
