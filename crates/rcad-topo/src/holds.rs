@@ -8130,18 +8130,31 @@ fn held_in_front_of_the_cap_and_of_either(
 }
 
 /// The face is the part of its surface in front of every cut.
+///
+/// A cut that puts the point strictly behind it settles that the face does not
+/// hold the point, whatever the cuts before it could not say: a point a
+/// rounding off one cap's plane can be well behind the other cap's (Q2059).
+///
+/// # Errors
+///
+/// [`Error::Undecidable`], naming the first cut it could not say for, when no
+/// cut puts the point behind it and one could not say.
 fn held_in_front_of_all(cuts: &[Cut], point: PredicatePoint) -> Result<OnAFace> {
     let mut on_its_boundary = false;
+    let mut undecided = None;
     for cut in cuts {
         match side_of_surface(&cut.placed, point) {
             Decision::Zero => on_its_boundary = true,
             settled if settled == cut.kept => (),
             Decision::Pos | Decision::Neg => return Ok(OnAFace::NotHeld),
             Decision::Undecidable { enclosure } => {
-                return Err(gave_up_on_a_side(&cut.placed, point, enclosure));
+                undecided.get_or_insert_with(|| gave_up_on_a_side(&cut.placed, point, enclosure));
             }
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
+    }
+    if let Some(why) = undecided {
+        return Err(why);
     }
     Ok(if on_its_boundary {
         OnAFace::OnItsBoundary
