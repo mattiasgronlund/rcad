@@ -53,8 +53,26 @@
 //! rungs, just not on a fold, and it is now capped the same
 //! `HALVINGS_A_FOLD_IS_ASKED_DOWN_TO` halvings below its own top
 //! that the first ladder is, which ends that bar's ladder at rung 13 and the
-//! same call at 11 ms
-//! (`a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung`).
+//! same call at 11 ms. None of the rungs the cap gives up — 14 through 22 —
+//! is where the sum was going to clear: every one of them still came back
+//! `meshed-still-unsure`, so the cap stops a wait and not an answer; turning
+//! one of those rungs' sums into the volume would have been a gap and not a
+//! limit (§16.10), and this is why it is neither.
+//!
+//! **That bar is pinned by counting rungs, not timing them.** A first pin
+//! raced a thread against a 1 s `recv_timeout`, and with the cap reverted to
+//! an uncommitted edit the race still passed, three runs out of three, in
+//! 0.67 s — both the capped and the uncapped call land well inside a second,
+//! so the margin the first ladder's pin relies on (its own 30 s timeout
+//! against a 465 s wait, in `an_ellipse_start_between_two_places.rs`) was
+//! never there for this one. The pin that replaced it is
+//! `validate::tests::a_bar_leaning_hard_asks_no_more_than_the_ladders_cap_lets_it`,
+//! beside the function it drives in `crates/rcad-topo/src/validate.rs`, the
+//! way `a_tube_whose_hole_is_as_wide_as_its_wall_is_refused_at_the_first_room_it_asks`
+//! already calls `the_coarsest_mesh_whose_sides_do_not_cross` directly rather
+//! than through a full `Model::validate`. It reads a count the clock cannot
+//! move, `RUNGS_THE_SECOND_LADDER_HAS_ASKED`, and fails without the cap on
+//! this same bar every time: 22, not 14.
 //! The fold count above is unaffected: every fold this file counts happens
 //! within the first ten rungs the ladder walks, well inside the cap.
 //!
@@ -753,51 +771,4 @@ fn one_solid<'a>(model: &'a Model, answer: &[SolidKey], what: &str) -> SolidView
 /// The cap of height `h` off a ball of `radius`: `π h² (3r − h) / 3`.
 fn a_caps_volume(radius: f64, h: f64) -> f64 {
     PI * h * h * (3.0 * radius - h) / 3.0
-}
-
-/// The second ladder, the one that retries a sum that does not answer and not
-/// only a fold, is capped the same way the first one is (§199.4).
-///
-/// A bar cut off at a lean of `1e9` keeps `how_much_space_a_curved_solid_encloses`
-/// asking a finer mesh for 22 rungs before `MoreTrianglesThanAPatchWillHold`
-/// stops it, because the coarse sum never clears
-/// `the_sum_answers` — not because any mesh folds. Measured on this
-/// base before the cap, `model.validate` took 1.46 s; the cap ends the ladder at
-/// rung 13 and the same call takes 11 ms. A second, no-cap run is not checked
-/// against: the margin below is ninety times the capped time and an eighth of
-/// the uncapped one, so a flake would have to be large to pass by accident.
-#[test]
-fn a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung() {
-    let (answer, answered) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let radius = 1.0;
-        let lean = 1e9;
-        let policy = Policy::tolerant(50.0 * lean);
-        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let flat = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
-            .expect("the z axis is a unit normal");
-        let leaning =
-            Plane::from_point_and_normal(Point::new(radius, 0.0, 0.5), Vector::new(lean, 0.0, 1.0))
-                .expect("a direction with length");
-        model
-            .add_bar_cut_off_by(
-                radius,
-                [flat, leaning],
-                &Isometry::identity(),
-                &policy,
-                &mut ProvenanceLog::new(),
-            )
-            .expect("a bar cut off at an angle");
-        let sound = model.validate(&policy, &mut ProvenanceLog::new());
-        answer
-            .send(sound.is_ok())
-            .expect("the test waits for the answer");
-    });
-    let sound = answered
-        .recv_timeout(std::time::Duration::from_secs(1))
-        .unwrap_or_else(|_| panic!("still validating after 1 s"));
-    assert!(
-        sound,
-        "a bar cut off at an angle is a sound bar however far it leans"
-    );
 }
