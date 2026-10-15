@@ -200,8 +200,14 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 /// it `ASideCutsOffOneCornerOfACurvedPatch` at every rung. A cut leaves only
 /// from a corner whose meridian meets the rim nowhere else now, and the first
 /// leaves from the next corner along the rim, `0.027` round from the ruling at
-/// `0.002`. The two at lean one quarter still do not measure at `0.002`, and
-/// `the_eighteen_held_to_the_familys_four_checks` says why.
+/// `0.002`.
+///
+/// **The two at lean one quarter answer right since Q2040**, held to the same
+/// four checks. The stored face misses the apex by an ulp, so its rim down the
+/// ruling drifts by ulps of longitude from corner to corner, and a corner on
+/// that ruling was taken as clear of the rim when its cut down the ruling ran a
+/// few ulps off it. A side within the walk's rounding of a cut's longitude is
+/// read as along the cut now (§354.7).
 ///
 /// **The sixteen that could not name a piece answer right since Q1171**, each
 /// held to the same four checks. They are the faces through the apex, turned
@@ -214,14 +220,14 @@ fn a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses() {
 ///
 /// **The family is two tests, one per lean**, so that neither sets the slow
 /// tier's wall (`docs/decisions.md` §397.4). Their tallies add up to the counts
-/// above: the two that do not measure are at a quarter.
+/// above: all ninety-six right.
 #[test]
 fn a_pointed_cone_with_its_apex_near_a_face_at_a_lean_of_a_quarter_answers_right_or_refuses() {
     assert_eq!(
         tally(&steeper_faces_near_the_pointed_cones_apex(0.25)),
         Tally {
-            right: 46,
-            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
+            right: 48,
+            refused: [].into()
         }
     );
 }
