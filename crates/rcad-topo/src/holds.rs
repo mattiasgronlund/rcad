@@ -2012,10 +2012,17 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     let with_a_round_wire = face
         .wires()
         .any(|wire| is_a_round_wire_of_a_flat_face(face, wire));
-    if !with_a_round_wire && whole_curves.is_empty() {
+    let on_a_ball = matches!(surface, Surface::Sphere(_));
+    if !with_a_round_wire && (whole_curves.is_empty() || on_a_ball) {
         let mut refused = None;
         for sides in &readings {
-            match what_the_part_in_front_of_its_cuts_holds(face, &surface, sides, point) {
+            match what_the_part_in_front_of_its_cuts_holds(
+                face,
+                &surface,
+                sides,
+                &whole_curves,
+                point,
+            ) {
                 Ok(Some(held)) => return Ok(held),
                 Ok(None) => {}
                 Err(why) => {
@@ -2577,10 +2584,26 @@ fn in_front_of_a_plane_every_side_is_behind(
 
 /// Steps 1 to 3 of [`what_a_face_cut_by_part_of_a_crossing_holds`], or `None`
 /// where the face is outside the family they follow.
+///
+/// **A ball face's whole circles are cuts with no corners** (row Q2038). The
+/// skin of a ball kept to `x, y ≥ 1.5` and behind a steep plane whose circle
+/// lies wholly between the two has that circle as a wire of its own, and is
+/// still the part of the sphere in front of all three. Such a circle has no two
+/// ends for step 1 to read the way it runs between, so the side its plane keeps
+/// is read off the face's corners instead
+/// ([`the_side_every_corner_off_a_plane_is_on`]): the circle is all of where the
+/// plane crosses the sphere, and the face is one piece with none of that circle
+/// inside it, so it lies wholly on one side, the side of every corner off the
+/// plane. The circle's own corner is not one of those asked: it is on the plane,
+/// but stored a rounding off it. Step 2 then asks the circle against every other cut
+/// ([`where_a_whole_circle_lies`]) as it asks every side. A face whose corners
+/// all lie in front of the circle's plane has none of its sides behind it, so
+/// such a face is only ever taken as the part in front of every cut.
 fn what_the_part_in_front_of_its_cuts_holds(
     face: FaceView<'_>,
     surface: &Surface,
     sides: &[Side],
+    whole_circles: &[WholeCurve],
     point: PredicatePoint,
 ) -> Result<Option<OnAFace>> {
     let mut cuts: Vec<Cut> = Vec::new();
@@ -2597,6 +2620,30 @@ fn what_the_part_in_front_of_its_cuts_holds(
                 corners_on_it: corners.to_vec(),
             }),
         }
+    }
+    for circle in whole_circles {
+        let across = Surface::Plane(circle.across);
+        let corners = sides
+            .iter()
+            .flat_map(|side| [side.start.at, side.end.at])
+            .chain(
+                whole_circles
+                    .iter()
+                    .filter(|other| !core::ptr::eq(*other, circle))
+                    .map(|other| other.corner),
+            );
+        let Some(kept) = the_side_every_corner_off_a_plane_is_on(corners, &circle.across) else {
+            return Ok(None);
+        };
+        if cuts.iter().any(|known| known.surface == across) {
+            return Ok(None);
+        }
+        cuts.push(Cut {
+            surface: across,
+            placed: Surface::Plane(circle.across_placed),
+            kept,
+            corners_on_it: Vec::new(),
+        });
     }
     let nappe = if let Surface::Cone(cone) = surface {
         the_nappe_its_sides_are_on(cone, sides)
@@ -2651,8 +2698,16 @@ fn what_the_part_in_front_of_its_cuts_holds(
     let mut in_front_of_all = true;
     let mut behind_all = true;
     for cut in &cuts {
-        for side in sides.iter().filter(|side| side.across != cut.surface) {
-            match where_a_side_lies(surface, side, cut) {
+        let where_the_sides_lie = sides
+            .iter()
+            .filter(|side| side.across != cut.surface)
+            .map(|side| where_a_side_lies(surface, side, cut));
+        let where_the_circles_lie = whole_circles
+            .iter()
+            .filter(|circle| Surface::Plane(circle.across) != cut.surface)
+            .map(|circle| where_a_whole_circle_lies(surface, circle, cut));
+        for lies in where_the_sides_lie.chain(where_the_circles_lie) {
+            match lies {
                 Lies::On => {}
                 Lies::Beside(found) if found == cut.kept => behind_all = false,
                 Lies::Beside(_) => in_front_of_all = false,
@@ -2673,6 +2728,7 @@ fn what_the_part_in_front_of_its_cuts_holds(
         };
         Ok(Some(the_apex_is_a_corner(held)))
     } else if behind_all
+        && whole_circles.is_empty()
         && (the_rest_of_a_ball_is_one_piece() || is_two_discs_taken_together(surface, &cuts))
     {
         held_in_front_of_any(&cuts, point).map(Some)
@@ -3476,12 +3532,9 @@ fn the_side_away_from_the_apex_a_face_keeps(
     if cone.is_cut_in_a_closed_curve_by(&curve.across) != Some(true) {
         return None;
     }
-    let side_of = |at: Point| {
-        curve
-            .across
-            .side_of_point(PredicatePoint::from(at.coordinates()))
-    };
-    let apex = side_of(cone.apex());
+    let apex = curve
+        .across
+        .side_of_point(PredicatePoint::from(cone.apex().coordinates()));
     if !matches!(apex, Decision::Pos | Decision::Neg) {
         return None;
     }
@@ -3489,9 +3542,19 @@ fn the_side_away_from_the_apex_a_face_keeps(
         .iter()
         .flat_map(|side| [side.start.at, side.end.at])
         .chain(whole_curves.iter().map(|other| other.corner));
+    the_side_every_corner_off_a_plane_is_on(corners, &curve.across).filter(|&kept| kept != apex)
+}
+
+/// The side of `flat` every one of `corners` off it is on, each read exactly
+/// where it is stored; `None` where none is off it, where two are on different
+/// sides, and where a sign could not be settled.
+fn the_side_every_corner_off_a_plane_is_on(
+    corners: impl IntoIterator<Item = Point>,
+    flat: &Plane,
+) -> Option<Decision> {
     let mut kept = None;
     for corner in corners {
-        match side_of(corner) {
+        match flat.side_of_point(PredicatePoint::from(corner.coordinates())) {
             Decision::Zero => {}
             found @ (Decision::Pos | Decision::Neg) if kept.is_none_or(|known| known == found) => {
                 kept = Some(found);
@@ -3499,7 +3562,7 @@ fn the_side_away_from_the_apex_a_face_keeps(
             Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _ => return None,
         }
     }
-    kept.filter(|&kept| kept != apex)
+    kept
 }
 
 /// The name a turn read down a cone's axis goes by in provenance records.
@@ -3711,8 +3774,10 @@ enum Lies {
 /// a whole closed curve has no two ends to read a chord between, and
 /// [`what_a_flat_face_of_chords_and_arcs_holds`] counts it as a whole instead.
 /// So, for the same reason, is a cone face's side right round the curve a
-/// plane cuts it in ([`a_whole_curve_round_a_cone`]), which
-/// [`what_a_cone_face_seen_down_its_axis_holds`] reads as a whole.
+/// plane cuts it in ([`a_whole_curve_round_a_cone_or_a_ball`]), which
+/// [`what_a_cone_face_seen_down_its_axis_holds`] reads as a whole, and a ball
+/// face's side right round the circle a plane cuts it in, which
+/// [`what_the_part_in_front_of_its_cuts_holds`] reads as a cut with no corners.
 fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Readings> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let mut readings: Vec<Vec<Side>> = vec![Vec::new()];
@@ -3735,7 +3800,7 @@ fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Re
             placed: corner.point(),
         });
         if start.key == end.key
-            && let Some(curve) = a_whole_curve_round_a_cone(face, edge, across, start.at)
+            && let Some(curve) = a_whole_curve_round_a_cone_or_a_ball(face, edge, across, start.at)
         {
             whole_curves.push(curve);
             continue;
@@ -3804,13 +3869,15 @@ fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Re
 struct Readings {
     /// Every way to read the sides that run between two corners.
     sides: Vec<Vec<Side>>,
-    /// The sides that run right round a closed curve, on a cone face only.
+    /// The sides that run right round a closed curve, on a cone or a ball face
+    /// only.
     whole_curves: Vec<WholeCurve>,
 }
 
-/// A side of a cone face that runs right round the closed curve a plane cuts
-/// the cone in, from its one corner back to it: that plane where the face is
-/// stored and once moved into place, and the corner where it is stored.
+/// A side of a cone or a ball face that runs right round the closed curve a
+/// plane cuts the cone or the ball in, from its one corner back to it: that
+/// plane where the face is stored and once moved into place, and the corner
+/// where it is stored.
 struct WholeCurve {
     across: Plane,
     across_placed: Plane,
@@ -3818,15 +3885,15 @@ struct WholeCurve {
 }
 
 /// The side `edge` of `face`, which leaves `corner` and comes back to it, read
-/// as a [`WholeCurve`]; `None` unless `face` is on a cone, the face `across` is
-/// flat, and `edge` runs along where the two cross.
-fn a_whole_curve_round_a_cone(
+/// as a [`WholeCurve`]; `None` unless `face` is on a cone or a ball, the face
+/// `across` is flat, and `edge` runs along where the two cross.
+fn a_whole_curve_round_a_cone_or_a_ball(
     face: FaceView<'_>,
     edge: EdgeView<'_>,
     across: FaceView<'_>,
     corner: Point,
 ) -> Option<WholeCurve> {
-    let (Surface::Cone(_), Surface::Plane(flat), Surface::Plane(placed)) = (
+    let (Surface::Cone(_) | Surface::Sphere(_), Surface::Plane(flat), Surface::Plane(placed)) = (
         face.stored_surface(),
         across.stored_surface(),
         across.surface(),
@@ -7091,6 +7158,43 @@ fn where_a_side_lies(surface: &Surface, side: &Side, cut: &Cut) -> Lies {
                 [..] => Lies::Across,
             }
         }
+    }
+}
+
+/// Where the whole circle `circle`'s plane cuts a ball face's sphere in lies
+/// against `cut`, another plane cutting the face: beside it when the two never
+/// meet on the sphere, and [`Lies::Across`] otherwise and for any other
+/// surface.
+///
+/// **They never meet when the planes are side by side
+/// ([`the_normals_lie_along_one_line`]) or the line they meet in misses the
+/// ball** ([`TwoCrossings`]), and then the circle is wholly on the side its
+/// centre is. The circle bounds the disc its plane cuts the ball in, and the
+/// line of the two planes, where it meets that plane, would cross the disc's
+/// edge to reach the disc's inside, so a line that misses the ball misses the
+/// disc, and the disc is on one side, its centre with it. That centre is the
+/// ball's centre `c` moved `a/|n|²` along the plane's normal `n`, with
+/// `a = d − n·c` for the plane `n·x = d`, so against `m·x = e` it is on the side
+/// of `|n|²(m·c − e) + a(n·m)`, read exactly. The circle's own corner is not
+/// asked: it is stored a rounding off both the sphere and the plane, and the
+/// centre is not.
+fn where_a_whole_circle_lies(surface: &Surface, circle: &WholeCurve, cut: &Cut) -> Lies {
+    let (Surface::Sphere(ball), Some(other)) = (surface, cut.surface.as_plane()) else {
+        return Lies::Across;
+    };
+    let own = &circle.across;
+    if !the_normals_lie_along_one_line(own, other)
+        && TwoCrossings::of(ball, own, other).misses != Decision::Pos
+    {
+        return Lies::Across;
+    }
+    let centre = exactly(ball.centre().coordinates());
+    let [n, m] = [own, other].map(|flat| exactly(flat.normal().components()));
+    let a = Interval::exactly(own.offset()) - dot(n, centre);
+    let sits = dot(n, n) * (dot(m, centre) - Interval::exactly(other.offset())) + a * dot(n, m);
+    match sits.sign() {
+        found @ (Decision::Pos | Decision::Neg) => Lies::Beside(found),
+        Decision::Zero | Decision::Undecidable { .. } | _ => Lies::Across,
     }
 }
 
