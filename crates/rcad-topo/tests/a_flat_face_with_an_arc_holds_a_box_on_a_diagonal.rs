@@ -17,10 +17,22 @@
 //! the part in front of all its cuts say nothing about it. And the top of a
 //! plate with a round tab and a round hole, which winds straight away because
 //! of the hole's circle.
+//!
+//! A third face needs the middle of a side, and an exact point (row Q2075):
+//! the cap of a prism, built face by face, whose two arcs have their chords on
+//! the two diagonals of a square, asked about the point where the diagonals
+//! cross. Every corner is on one of the two chords and the arcs share no end, so
+//! no corner is an aim off both chords, and before the middles were tried the
+//! face was refused `AFaceTrimmedByACurveThisCannotFollow`.
 
-use rcad_geom::{Isometry, Scale, Surface, Vector};
+use rcad_geom::{
+    Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
+    Surface, Vector,
+};
 use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{FaceView, Model, OnAFace, ProfileBuilder, Rule, SolidKey, SolidView};
+use rcad_topo::{
+    DraftStep, FaceView, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey, SolidView,
+};
 
 /// Where the plane cuts the bar: off the axis on either side, and through it.
 /// The ball stays clear of the bar's wall for each.
@@ -146,103 +158,184 @@ fn a_plates_top_with_a_round_tab_and_a_round_hole_holds_a_box_on_either_diagonal
     }
 }
 
+/// The cap of a prism whose two arcs have their chords on the two diagonals of
+/// the square `|x|, |y| ≤ 7`, asked about the origin, where the two chords
+/// cross (row Q2075). Its four corners are the square's. The first arc runs
+/// from `(−7, −7)` to `(7, 7)` the long way round the circle of radius 10 about
+/// `(1, −1)`, outside the square below it and to its right. The top side runs
+/// back along `y = 7` to `(−7, 7)`. The second arc runs from there to `(7, −7)`
+/// round the circle of radius 26 about `(c, c)`, a shallow bow across the
+/// square. The bottom side runs back along `y = −7`. Every corner is exact,
+/// since `6, 8, 10` and `10, 24, 26` are whole.
+///
+/// Every corner is on one of the two chords and the two arcs share no end, so
+/// the only aims off both chords are the middles of the top and the bottom
+/// side, `(0, ±7)`.
+///
+/// With `c = 17` the second arc bows towards `(−1, −1)`. The face is the part of
+/// the square inside its circle, and the part of the first arc's disc outside
+/// the square below `y = x`. The origin is `17√2`, about `24.04`, from `(17,
+/// 17)`, inside that circle, so the face holds it. With `c = −17` the arc bows
+/// towards `(1, 1)`, and the face is the part of the square above `y = −x`
+/// outside its circle, with the same piece outside the square. The origin is
+/// inside that circle, so the face does not hold it. Either way the four points
+/// one away from the origin along an axis, which are off both chords, answer
+/// what the origin does.
 #[test]
-fn probe_two_arcs_on_different_lines() {
-    let mut model = a_model();
-    let piece = a_piece_with_two_arcs_on_crossing_chords(&mut model, 0.0, 2.0);
-    let view = model.solid(piece).expect("this model made the key");
-    for z in [0.0, 2.0] {
-        let face = the_flat_face_at(view, z);
-        let corners: Vec<[f64; 3]> = face
-            .wires()
-            .flat_map(|wire| wire.coedges())
-            .map(|side| side.start().point().coordinates())
-            .collect();
-        eprintln!("piece z = {z}: corners {corners:?}");
-        let point = PredicatePoint::from([0.0, 0.0, z]);
-        let mut log = ProvenanceLog::new();
-        let said = view.face_holds_the_point(face.key(), point, &Policy::certified(), &mut log);
-        eprintln!("piece z = {z}: {said:?} log empty {}", log.is_empty());
-    }
-    let mut model = a_model();
-    let cutter = a_piece_with_two_arcs_on_crossing_chords(&mut model, -1.0, 4.0);
-    let diamond = ProfileBuilder::new(vec![[20.0, 0.0], [0.0, 20.0], [-20.0, 0.0], [0.0, -20.0]])
-        .build(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a diamond");
-    let plate = model
-        .add_extrusion(&diamond, 2.0, &shift(0.0, 0.0, 0.0))
-        .expect("a positive height");
-    let holed = the_one_solid(&mut model, plate, cutter, Rule::Difference);
-    let view = model.solid(holed).expect("this model made the key");
-    for z in [0.0, 2.0] {
-        let face = the_flat_face_at(view, z);
-        let corners: Vec<[f64; 3]> = face
-            .wires()
-            .flat_map(|wire| wire.coedges())
-            .map(|side| side.start().point().coordinates())
-            .collect();
-        eprintln!("plate z = {z}: corners {corners:?}");
-        let point = PredicatePoint::from([0.0, 0.0, z]);
-        let mut log = ProvenanceLog::new();
-        let said = view.face_holds_the_point(face.key(), point, &Policy::certified(), &mut log);
-        eprintln!("plate z = {z}: {said:?} log empty {}", log.is_empty());
+fn a_cap_whose_two_arcs_have_their_chords_on_the_diagonals_holds_where_they_cross_as_one_bows() {
+    for (centre, held) in [(17.0, OnAFace::Held), (-17.0, OnAFace::NotHeld)] {
+        let mut model = a_model();
+        let prism = a_prism_with_two_arcs_on_the_diagonals(&mut model, centre);
+        let view = model.solid(prism).expect("this model made the key");
+        for z in [0.0, 2.0] {
+            let cap = the_flat_face_at(view, z);
+            let mut corners: Vec<[f64; 3]> = cap
+                .wires()
+                .flat_map(|wire| wire.coedges())
+                .map(|side| side.start().point().coordinates())
+                .collect();
+            corners.sort_by(|one, other| one.partial_cmp(other).expect("corners are numbers"));
+            assert_eq!(
+                corners,
+                [
+                    [-7.0, -7.0, z],
+                    [-7.0, 7.0, z],
+                    [7.0, -7.0, z],
+                    [7.0, 7.0, z]
+                ],
+                "the second arc about ({centre}, {centre}), the cap at z = {z}"
+            );
+            for [x, y] in [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]] {
+                let asked = format!("the second arc about ({centre}, {centre}), ({x}, {y}, {z})");
+                let point = PredicatePoint::from([x, y, z]);
+                assert_eq!(the_face_holds(view, cap, point, &asked), held, "{asked}");
+            }
+        }
     }
 }
 
-fn a_piece_with_two_arcs_on_crossing_chords(
-    model: &mut Model,
-    bottom: f64,
-    height: f64,
-) -> SolidKey {
-    let lower_bar = model
-        .add_round_bar(5.0, 10.0, &shift(0.0, 4.0, -4.0))
-        .expect("a bar of radius five");
-    let under_the_line = a_prism(
-        model,
-        vec![[-15.0, -30.0], [21.0, -30.0], [21.0, -24.0], [-15.0, 24.0]],
-        -5.0,
-        12.0,
-    );
-    let bitten = the_one_solid(model, lower_bar, under_the_line, Rule::Intersection);
-    let beside = a_prism(
-        model,
-        vec![[-18.0, -30.0], [12.0, -30.0], [-18.0, 30.0]],
-        -6.0,
-        14.0,
-    );
-    let joined = the_one_solid(model, beside, bitten, Rule::Union);
-    for face in model.solid(joined).unwrap().faces() {
-        let corners: Vec<[f64; 3]> = face
-            .wires()
-            .flat_map(|wire| wire.coedges())
-            .map(|side| side.start().point().coordinates())
-            .collect();
-        eprintln!("U face {:?}: {corners:?}", face.surface());
+/// The prism from `z = 0` to `z = 2` over the face
+/// [`a_cap_whose_two_arcs_have_their_chords_on_the_diagonals_holds_where_they_cross_as_one_bows`]
+/// describes, with the second arc about `(centre, centre)`, built face by face:
+/// a fuse of bars and blocks leaves corners a rounding off the diagonals, or
+/// splits an arc where another of its surfaces crosses it.
+fn a_prism_with_two_arcs_on_the_diagonals(model: &mut Model, centre: f64) -> SolidKey {
+    let a_plane = |[x, y, z]: [f64; 3], [along_x, along_y, along_z]: [f64; 3]| {
+        Plane::from_point_and_normal(Point::new(x, y, z), Vector::new(along_x, along_y, along_z))
+            .expect("an axis direction has length")
+    };
+    let bottom = a_plane([0.0, 0.0, 0.0], [0.0, 0.0, -1.0]);
+    let top = a_plane([0.0, 0.0, 2.0], [0.0, 0.0, 1.0]);
+    let an_arc = |cap: Plane, [x, y]: [f64; 2]| EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(cap),
+        picked_by: [Picker::from(
+            HalfSpace::through_a_point_facing(Point::origin(), Vector::new(x, y, 0.0))
+                .expect("a direction off the axis has length"),
+        )]
+        .into(),
+    };
+    let first_bows = [1.0, -1.0];
+    let second_bows = [-centre, -centre];
+    let a_pipe = |x: f64, y: f64, radius: f64| {
+        let axis = Axis::new(Point::new(x, y, 0.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis has length");
+        Surface::Cylinder(Cylinder::new(axis, radius).expect("a positive radius"))
+    };
+
+    let mut builder = SolidBuilder::new();
+    let corners = [
+        [-7.0, -7.0, 0.0],
+        [7.0, 7.0, 0.0],
+        [-7.0, 7.0, 0.0],
+        [7.0, -7.0, 0.0],
+        [-7.0, -7.0, 2.0],
+        [7.0, 7.0, 2.0],
+        [-7.0, 7.0, 2.0],
+        [7.0, -7.0, 2.0],
+    ]
+    .map(|[x, y, z]| {
+        builder
+            .add_vertex(Point::new(x, y, z))
+            .expect("a finite corner")
+    });
+    let edges = [
+        (0, 1, an_arc(bottom, first_bows)),
+        (1, 2, EdgeRun::Straight),
+        (2, 3, an_arc(bottom, second_bows)),
+        (3, 0, EdgeRun::Straight),
+        (4, 5, an_arc(top, first_bows)),
+        (5, 6, EdgeRun::Straight),
+        (6, 7, an_arc(top, second_bows)),
+        (7, 4, EdgeRun::Straight),
+        (0, 4, EdgeRun::Straight),
+        (1, 5, EdgeRun::Straight),
+        (2, 6, EdgeRun::Straight),
+        (3, 7, EdgeRun::Straight),
+    ]
+    .map(|(from, to, run)| {
+        builder
+            .add_edge(corners[from], corners[to], run)
+            .expect("an edge between two corners")
+    });
+
+    let (forward, back) = (Orientation::Forward, Orientation::Reversed);
+    let inside_the_second_pipe = if centre > 0.0 { forward } else { back };
+    let faces = [
+        (
+            Surface::Plane(bottom),
+            forward,
+            [(3, back), (2, back), (1, back), (0, back)],
+        ),
+        (
+            Surface::Plane(top),
+            forward,
+            [(4, forward), (5, forward), (6, forward), (7, forward)],
+        ),
+        (
+            a_pipe(1.0, -1.0, 10.0),
+            forward,
+            [(0, forward), (9, forward), (4, back), (8, back)],
+        ),
+        (
+            Surface::Plane(a_plane([0.0, 7.0, 0.0], [0.0, 1.0, 0.0])),
+            forward,
+            [(1, forward), (10, forward), (5, back), (9, back)],
+        ),
+        (
+            a_pipe(centre, centre, 26.0),
+            inside_the_second_pipe,
+            [(2, forward), (11, forward), (6, back), (10, back)],
+        ),
+        (
+            Surface::Plane(a_plane([0.0, -7.0, 0.0], [0.0, 1.0, 0.0])),
+            forward,
+            [(3, forward), (8, forward), (7, back), (11, back)],
+        ),
+    ];
+    let mut skin = Vec::with_capacity(faces.len());
+    for (surface, used, steps) in faces {
+        let walked = steps.map(|(which, way)| {
+            DraftStep::Along(builder.add_coedge(edges[which], way).expect("a coedge"))
+        });
+        let wire = builder.add_wire(&walked).expect("a wire that closes");
+        skin.push((builder.add_face(surface, &[wire]).expect("a face"), used));
     }
-    let bar = model
-        .add_round_bar(5.0, height, &shift(0.0, -1.0, bottom))
-        .expect("a bar of radius five");
-    the_one_solid(model, bar, joined, Rule::Intersection)
+    builder.add_shell(&skin).expect("a shell");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("the prism about ({centre}, {centre}) is not sound: {why}"))
 }
 
-fn a_prism(model: &mut Model, corners: Vec<[f64; 2]>, bottom: f64, height: f64) -> SolidKey {
-    let profile = ProfileBuilder::new(corners)
-        .build(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a polygon");
-    model
-        .add_extrusion(&profile, height, &shift(0.0, 0.0, bottom))
-        .expect("a positive height")
-}
-
-fn the_flat_face_at(view: SolidView<'_>, z: f64) -> FaceView<'_> {
+/// The face on the plane `z = height`, facing up or down.
+fn the_flat_face_at(view: SolidView<'_>, height: f64) -> FaceView<'_> {
     view.faces()
         .find(|face| {
             let Surface::Plane(flat) = face.surface() else {
                 return false;
             };
-            flat.normal().components()[2].abs() == 1.0 && flat.origin().coordinates()[2] == z
+            flat.normal().components()[2].abs() == 1.0 && flat.origin().coordinates()[2] == height
         })
-        .unwrap_or_else(|| panic!("a flat face at z = {z}"))
+        .unwrap_or_else(|| panic!("a flat face at z = {height}"))
 }
 
 /// The bar of radius 1 from `z = bottom` up `height` shared with the block over
