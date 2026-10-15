@@ -60,7 +60,11 @@
 //! flat face whose sides are straight or arcs of a closed crossing, and which
 //! nothing below follows, winds its own sides
 //! ([`what_a_flat_face_of_chords_and_arcs_holds`], row Q1002), and counts a
-//! round hole among them as a whole (row Q1165).
+//! round hole among them as a whole (row Q1165). One nappe of a cone seen down
+//! its axis is flat too, and so is a ball's sphere seen from a point of it off
+//! the face, and faces on them wind their sides the same way
+//! ([`what_a_cone_face_seen_down_its_axis_holds`], row Q1227, and
+//! [`what_a_ball_face_seen_from_a_point_of_its_sphere_holds`], row Q2052).
 //!
 //! **One family of arcs is followed now** (§167): a wedge of a ball, whose skin
 //! and whose two half-discs are each bounded by half of a circle. Those faces are
@@ -1989,6 +1993,17 @@ fn is_one_circle_cut_in_two(
 /// refused every reading, so no face the steps answered is answered
 /// differently now.
 ///
+/// # A ball face outside that family is seen from a point of its sphere
+///
+/// Seen from a point of its sphere off the face, the rest of a ball's sphere is
+/// a plane, and a face on it is a flat region whose sides are arcs bulging off
+/// their chords. [`what_a_ball_face_seen_from_a_point_of_its_sphere_holds`]
+/// winds those, as the flat face's sides are wound, wherever the steps above
+/// say nothing (row Q2052): the tip a slab's circle cuts off a ball kept to a
+/// block's corner, where the part in front of every cut is the tip and the
+/// rest below it, is one. Before, every such face was refused, so no face the
+/// steps answered is answered differently now.
+///
 /// # A face of a ball or a pipe cut by the other in one loop is asked first
 ///
 /// [`what_a_face_cut_by_a_ball_and_a_pipe_holds`] is asked before any of the
@@ -2002,10 +2017,11 @@ fn is_one_circle_cut_in_two(
 ///
 /// # Errors
 ///
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face on a ball, a
-/// pipe or a ring outside that family, and for the shapes
-/// [`what_a_flat_face_of_chords_and_arcs_holds`] and
-/// [`what_a_cone_face_seen_down_its_axis_holds`] refuse, and
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face on a pipe or a
+/// ring outside that family, and for the shapes
+/// [`what_a_flat_face_of_chords_and_arcs_holds`],
+/// [`what_a_cone_face_seen_down_its_axis_holds`] and
+/// [`what_a_ball_face_seen_from_a_point_of_its_sphere_holds`] refuse, and
 /// [`Error::Undecidable`] when a sign could not be settled.
 fn what_a_face_cut_by_part_of_a_crossing_holds(
     solid: SolidView<'_>,
@@ -5556,6 +5572,13 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 /// inside the ball whenever any point of it is, can also be the foot of the
 /// centre on one plane or on the line two meet in, and two circles may need to
 /// be left out at once. No face has asked for those yet (§13).
+///
+/// A ball face this family says no to is not refused for it any more:
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`] hands it to
+/// [`what_a_ball_face_seen_from_a_point_of_its_sphere_holds`], which reads the
+/// face's boundary and not its cuts, and so tells apart two pieces in front of
+/// every cut (row Q2052). What is refused there is a face with no cut that
+/// every other side lies on or in front of.
 ///
 /// # On a cone it is planes the apex is in front of, any number of them, and one it is on or two that meet inside the cone
 ///
