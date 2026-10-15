@@ -1066,6 +1066,131 @@ fn a_block_less_a_shorter_bar_touching_its_wall_keeps_the_bar_as_a_hollow() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The bar of the test above, radius one and two high from `z = 1` to `z = 3`,
+/// touching **two** walls of a block along two rulings (queue rows Q2069 and
+/// Q2101). Two placings: in the block `[0, 4]³` at `(1, 1, 1)` it touches the
+/// walls `x = 0` and `y = 0`, whose rulings are a quarter turn apart round the
+/// bar's axis; in a block 2 by 4 by 4 at `(1, 2, 1)` it fills the block's
+/// width and touches `x = 0` and `x = 2`, half a turn apart.
+///
+/// Q760 parts both rulings, so each of the bar's cap circles is two arcs whose
+/// four ends are all on the walls, and no edge of the hollow closes: neither
+/// its corners nor the far side of a closed edge say which side of the walls
+/// the hollow is. The block less the bar was refused `Undecidable` at *one
+/// shell inside another*, over the four corners `(1, 0, 1)`, `(0, 1, 1)`,
+/// `(0, 1, 3)`, `(1, 0, 3)` in the first block and `(0, 2, 1)`, `(2, 2, 1)`,
+/// `(0, 2, 3)`, `(2, 2, 3)` in the second. A point of each arc off its ends
+/// does say.
+///
+/// The bar is wholly inside the block, so the union is the block alone, the
+/// intersection is the bar alone, and the bar less the block is nothing. The
+/// block less the bar is one solid of two shells, the block's six faces and
+/// the bar's three, measuring `64 − 2π` and `32 − 2π`. Every one of the 24
+/// fuses here — two placings, three rules, either argument first, certified or
+/// tolerant — answers.
+#[test]
+fn a_block_less_a_shorter_bar_touching_two_walls_keeps_the_bar_as_a_hollow() {
+    const BAR_RADIUS: f64 = 1.0;
+    const BAR_HEIGHT: f64 = 2.0;
+    let bar_volume = PI * BAR_RADIUS * BAR_RADIUS * BAR_HEIGHT;
+
+    let mut wrong: Vec<String> = Vec::new();
+    for (sides, at) in [
+        ([4.0, 4.0, 4.0], [1.0, 1.0, 1.0]),
+        ([2.0, 4.0, 4.0], [1.0, 2.0, 1.0]),
+    ] {
+        let block_volume = sides[0] * sides[1] * sides[2];
+        for it_first in [false, true] {
+            for policy_name in ["certified", "tolerant"] {
+                for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                    let mut model =
+                        Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                    let block = a_block(&mut model, sides);
+                    let bar = a_bar(&mut model, BAR_RADIUS, BAR_HEIGHT, at);
+                    let [first, second] = if it_first { [bar, block] } else { [block, bar] };
+                    let policy = if policy_name == "certified" {
+                        Policy::certified()
+                    } else {
+                        Policy::tolerant(100.0)
+                    };
+                    let what = format!(
+                        "block {sides:?}, bar at {at:?}, {rule:?}, bar first {it_first}, \
+                         {policy_name}"
+                    );
+                    let answer = match model.fuse(
+                        &[first],
+                        &[second],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        Ok(answer) => answer,
+                        Err(why) => {
+                            wrong.push(format!("{what}: refused {why:?}"));
+                            continue;
+                        }
+                    };
+                    if let Err(why) =
+                        model.validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    {
+                        wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                        continue;
+                    }
+                    let solids = answer.solids();
+                    let wanted_solids = usize::from(!(rule == Rule::Difference && it_first));
+                    if solids.len() != wanted_solids {
+                        wrong.push(format!(
+                            "{what}: {} solids, wanted {wanted_solids}: {solids:?}",
+                            solids.len()
+                        ));
+                        continue;
+                    }
+                    if wanted_solids == 0 {
+                        continue;
+                    }
+                    let faces_of_each_shell = faces_of_each_shell(&model, solids[0]);
+                    let wanted_shells: &[usize] = match rule {
+                        Rule::Union => &[6],
+                        Rule::Intersection => &[3],
+                        Rule::Difference => &[3, 6],
+                        _ => unreachable!("only the three rules are asked"),
+                    };
+                    if faces_of_each_shell != wanted_shells {
+                        wrong.push(format!(
+                            "{what}: shells of {faces_of_each_shell:?} faces, wanted \
+                             {wanted_shells:?}"
+                        ));
+                    }
+                    let found = volume_of(&model, solids[0]);
+                    let (expected, near) = match rule {
+                        Rule::Union => (block_volume, (found - block_volume).abs() < 1e-9),
+                        Rule::Intersection => (
+                            bar_volume,
+                            found <= bar_volume
+                                && (bar_volume - found) / bar_volume < HOW_FAR_A_MESH_MAY_BE,
+                        ),
+                        Rule::Difference => {
+                            let expected = block_volume - bar_volume;
+                            (
+                                expected,
+                                found >= expected
+                                    && (found - expected) / expected < HOW_FAR_A_MESH_MAY_BE,
+                            )
+                        }
+                        _ => unreachable!("only the three rules are asked"),
+                    };
+                    if !near {
+                        wrong.push(format!(
+                            "{what}: measured {found}, and the answer is {expected}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A block of side four less a dome inside it, the top half of a ball of
 /// radius one standing on its flat face at `z = 1`, the twin of the test above
 /// with a ball where the bar was (queue row Q1903). Two placings: centred at
