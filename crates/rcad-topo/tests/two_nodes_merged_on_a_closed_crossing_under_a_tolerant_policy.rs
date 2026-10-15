@@ -631,242 +631,101 @@ fn a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_o
     );
 }
 
+/// Q2028's trace. Each of the six edges round a corner-up cube's middle,
+/// carried on past its upper corner, runs exactly through the far rim of a
+/// slope-two frustum whose far cap is at half the cube's side. So four
+/// surfaces meet at one point there, and every tolerant fuse refuses on the
+/// far cap, `z = 3 s`: at a shape scale of `0.1` and a working size of `0.25`,
+/// and at its two power-of-two images, which round the same way.
 #[test]
-fn probe_q2028_one() {
-    let scale = 0.1;
-    let size = 0.25;
-    let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
-    let far = 3.0 * scale;
-    let frustum = a_frustum_seamed_towards(
-        &mut model,
-        2.0,
-        far / 300.0,
-        far,
-        [-1.0, 0.0],
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    )
-    .expect("a frustum");
-    let cube = a_corner_up_cube_round_the_origin(&mut model, 6.0 * scale);
-    for face in model.solid(frustum).unwrap().faces() {
-        println!("frustum face {:?}", face.surface());
+fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart()
+ {
+    for (scale, size) in [(0.1, 0.25), (0.8, 2.0), (6.4, 16.0)] {
+        for (rule, frustum_first) in EVERY_FUSE {
+            let (model, fused) = a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
+                scale,
+                size,
+                1.0,
+                rule,
+                frustum_first,
+            );
+            let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = fused else {
+                panic!(
+                    "{scale} {size} {rule:?} {frustum_first}: {:?}",
+                    fused.map(|_: Fused| "an answer")
+                );
+            };
+            let surface = model.face(face).expect("the refused face").surface();
+            let Surface::Plane(cap) = surface else {
+                panic!("{scale} {size} {rule:?} {frustum_first}: {surface:?}");
+            };
+            assert_eq!(
+                (cap.normal().components(), cap.offset()),
+                ([0.0, 0.0, 1.0], 3.0 * scale),
+                "{scale} {size} {rule:?} {frustum_first}"
+            );
+        }
     }
-    let mut log = ProvenanceLog::new();
-    let fused = model.fuse(
-        &[frustum],
-        &[cube],
-        Rule::Union,
-        &Policy::tolerant(size),
-        &mut log,
-    );
-    println!("{:?}", fused.map(|_| "ok"));
-    for record in log.records() {
-        println!(
-            "log: {} {:?} {:?} {} {:?}",
-            record.predicate(),
-            record.level(),
-            record.measures(),
-            record.enclosure(),
-            record.inputs()
+}
+
+/// The far cap lifted by a thousandth of its height is off the cube's edges'
+/// lines, so no four surfaces meet at one point there, and every fuse of the
+/// shape above at a scale of `0.1` and a working size of `0.25` answers with
+/// a model `Model::validate` passes.
+#[test]
+fn the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges() {
+    let size = 0.25;
+    for (rule, frustum_first) in EVERY_FUSE {
+        let (model, fused) = a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
+            0.1,
+            size,
+            1.001,
+            rule,
+            frustum_first,
+        );
+        let fused = fused.unwrap_or_else(|error| panic!("{rule:?} {frustum_first}: {error:?}"));
+        assert!(!fused.solids().is_empty(), "{rule:?} {frustum_first}");
+        model
+            .validate(&Policy::tolerant(size), &mut ProvenanceLog::new())
+            .unwrap_or_else(|error| panic!("{rule:?} {frustum_first}: {error:?}"));
+    }
+}
+
+/// A designer draws the same kind of meeting on purpose: a round bar notched
+/// by a block whose inside corner edge stands on the bar's wall. At a radius
+/// of `12.8` and a working size of `25`, every tolerant fuse refuses on the
+/// bar's wall.
+#[test]
+fn a_tolerant_fuse_of_a_round_bar_and_a_block_cornered_on_its_wall_cannot_tell_the_walls_cells_apart()
+ {
+    for (rule, bar_first) in EVERY_FUSE {
+        let (model, fused) =
+            a_round_bar_fused_with_a_block_cornered_on_its_wall(12.8, 25.0, rule, bar_first);
+        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = fused else {
+            panic!(
+                "{rule:?} {bar_first}: {:?}",
+                fused.map(|_: Fused| "an answer")
+            );
+        };
+        let surface = model.face(face).expect("the refused face").surface();
+        assert!(
+            matches!(surface, Surface::Cylinder(_)),
+            "{rule:?} {bar_first}: {surface:?}"
         );
     }
 }
 
-#[test]
-fn probe_q2028_seam_cut_refusals() {
-    q2028_grid(1.0, [-1.0, 0.0], true);
-}
-
-#[test]
-fn probe_q2028_far_off_by_a_thousandth() {
-    q2028_grid(1.001, [-1.0, 0.0], false);
-}
-
-#[test]
-fn probe_q2028_reference_faces() {
-    for far_factor in [1.0, 1.001, 0.999, 1.0001, 1.00001] {
-        for (rule, frustum_first) in EVERY_FUSE {
-            let (model, fused) =
-                q2028_fuse(1.0, 10.0, far_factor, [-1.0, 0.0], rule, frustum_first);
-            let fused = fused.expect("answers");
-            let valid = model.validate(&Policy::tolerant(10.0), &mut ProvenanceLog::new());
-            println!(
-                "far factor {far_factor} {rule:?} {frustum_first}: valid {valid:?} {:?}",
-                q2028_volume(&model, &fused, 0.01)
-            );
-        }
-        let (model, fused) = q2028_fuse(1.0, 10.0, far_factor, [-1.0, 0.0], Rule::Union, true);
-        let fused = fused.expect("answers");
-        if far_factor != 1.001 {
-            continue;
-        }
-        for &solid in fused.solids() {
-            for face in model.solid(solid).expect("a solid").faces() {
-                let surface = format!("{:?}", face.surface());
-                let wires: Vec<usize> = face.wires().map(|wire| wire.coedges().count()).collect();
-                println!("  {} wires {wires:?}", &surface[..surface.len().min(90)]);
-            }
-        }
-    }
-}
-
-#[test]
-fn probe_q2028_designer() {
-    q2028_designer(
-        &[[0.6, 0.8]],
-        &[1.0, 2.0, 4.0, 8.0, 16.0, 0.5, 10.0, 12.8, 25.6, 5.0],
-        &[1.0, 10.0, 25.0, 100.0],
-    );
-}
-
-#[test]
-fn probe_q2028_broken() {
-    q2028_designer(&[[0.6, 0.8]], &[0.26, 0.28, 0.30], &[0.1, 0.15]);
-    q2028_designer(&[[0.6, 0.8]], &[1.12], &[0.4, 0.6]);
-    q2028_designer(&[[0.6, 0.8]], &[4.48], &[1.6, 2.4]);
-    q2028_designer(&[[0.6, 0.8]], &[17.92], &[6.4, 9.6]);
-}
-
-#[test]
-fn probe_q2028_hunt() {
-    let scales: Vec<f64> = (8..=20).map(|k| 0.1 + 0.02 * f64::from(k)).collect();
-    let sizes: Vec<f64> = (0..=16).map(|j| 0.1 + 0.05 * f64::from(j)).collect();
-    q2028_designer(&[[0.6, 0.8]], &scales, &sizes);
-}
-
-#[test]
-fn probe_q2028_hang_image() {
-    q2028_designer(&[[0.6, 0.8]], &[0.38 * 64.0], &[0.1 * 64.0]);
-}
-
-#[test]
-fn probe_q2028_power_of_two() {
-    for (scale, size) in [(0.1, 0.25), (0.8, 2.0), (6.4, 16.0)] {
-        for (rule, frustum_first) in EVERY_FUSE {
-            let (model, fused) = q2028_fuse(scale, size, 1.0, [-1.0, 0.0], rule, frustum_first);
-            let surface = match &fused {
-                Err(Error::CannotTellTheCellsOfAFaceApart { face }) => {
-                    format!("{:?}", model.face(*face).map(|view| view.surface()))
-                }
-                _ => String::new(),
-            };
-            println!(
-                "pow2 {scale} {size} {rule:?} {frustum_first}: {:?} {surface}",
-                fused.map(|_| "ok")
-            );
-        }
-    }
-}
-
-fn q2028_designer(corners: &[[f64; 2]], scales: &[f64], sizes: &[f64]) {
-    let mut counts = std::collections::BTreeMap::<String, usize>::new();
-    for &corner in corners {
-        for &scale in scales {
-            for &size in sizes {
-                for (rule, bar_first) in EVERY_FUSE {
-                    eprintln!("try {corner:?} {scale} {size} {rule:?} {bar_first}");
-                    let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
-                    let bar = model
-                        .add_round_bar(
-                            scale,
-                            2.0 * scale,
-                            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a shift"),
-                        )
-                        .expect("a bar");
-                    let [x, y] = corner;
-                    let profile = ProfileBuilder::new(vec![
-                        [x * scale, -2.0 * scale],
-                        [2.0 * scale, -2.0 * scale],
-                        [2.0 * scale, y * scale],
-                        [x * scale, y * scale],
-                    ])
-                    .build(&Policy::certified(), &mut ProvenanceLog::new())
-                    .expect("a rectangle");
-                    let block = model
-                        .add_extrusion(
-                            &profile,
-                            4.0 * scale,
-                            &Isometry::translation(Vector::new(0.0, 0.0, -scale)).expect("a shift"),
-                        )
-                        .expect("a block");
-                    let (arguments, tools) = if bar_first {
-                        ([bar], [block])
-                    } else {
-                        ([block], [bar])
-                    };
-                    let fused = model.fuse(
-                        &arguments,
-                        &tools,
-                        rule,
-                        &Policy::tolerant(size),
-                        &mut ProvenanceLog::new(),
-                    );
-                    let what = match &fused {
-                        Ok(_) => "ok".to_string(),
-                        Err(Error::Undecidable { records }) => format!(
-                            "undecidable {}",
-                            records.records().last().map_or("-", |r| r.predicate())
-                        ),
-                        Err(error) => format!("{error:?}")
-                            .split([' ', '{', '('])
-                            .next()
-                            .unwrap_or("")
-                            .to_string(),
-                    };
-                    let shown = match &fused {
-                        Ok(answer) => format!(
-                            "valid {:?}",
-                            model
-                                .validate(&Policy::tolerant(size), &mut ProvenanceLog::new())
-                                .map(|()| answer.solids().len())
-                        ),
-                        Err(error) => format!("{error:?}").chars().take(160).collect(),
-                    };
-                    println!("{corner:?} {scale} {size} {rule:?} {bar_first}: {shown}");
-                    *counts.entry(format!("{corner:?} {what}")).or_default() += 1;
-                }
-            }
-        }
-    }
-    println!("{counts:#?}");
-}
-
-#[test]
-fn probe_q2028_seam_east() {
-    q2028_grid(1.0, [1.0, 0.0], false);
-}
-
-fn q2028_volume(
-    model: &Model,
-    fused: &Fused,
-    deflection: f64,
-) -> (f64, (usize, usize, usize, usize)) {
-    let mut volume = 0.0;
-    let mut faces = 0;
-    let mut wires = 0;
-    let mut shells = 0;
-    for &solid in fused.solids() {
-        let view = model.solid(solid).expect("a solid");
-        faces += view.faces().count();
-        wires += view.faces().flat_map(|face| face.wires()).count();
-        shells += view.shells().count();
-        volume += view
-            .measure(
-                rcad_geom::Deflection::of(deflection).expect("a deflection"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("measures")
-            .volume();
-    }
-    (volume, (fused.solids().len(), faces, wires, shells))
-}
-
-fn q2028_fuse(
+/// The cube of side `6 scale` stood on its corner with its middle at the
+/// origin, and a frustum of slope two about `z` with its near cap at
+/// `far / 300` and its far cap at `far = 3 scale far_factor`, its seam cut
+/// towards `-x`, fused by `rule` under a tolerant policy at `size`, the
+/// frustum first when `frustum_first`. At a `far_factor` of `1` the far cap's
+/// rim holds the point every edge round the cube's middle, carried on past
+/// its upper corner, runs through.
+fn a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
     scale: f64,
     size: f64,
     far_factor: f64,
-    seam: [f64; 2],
     rule: Rule,
     frustum_first: bool,
 ) -> (Model, rcad_topo::Result<Fused>) {
@@ -877,7 +736,7 @@ fn q2028_fuse(
         2.0,
         far / 300.0,
         far,
-        seam,
+        [-1.0, 0.0],
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     )
@@ -898,53 +757,56 @@ fn q2028_fuse(
     (model, fused)
 }
 
-fn q2028_grid(far_factor: f64, seam: [f64; 2], check: bool) {
-    let mut references = Vec::new();
-    for (rule, frustum_first) in EVERY_FUSE {
-        let (model, fused) = q2028_fuse(1.0, 10.0, far_factor, seam, rule, frustum_first);
-        let fused = fused.expect("the reference answers");
-        references.push(q2028_volume(&model, &fused, 0.01));
-    }
-    println!("references {references:?}");
-    let mut counts = std::collections::BTreeMap::<String, usize>::new();
-    let mut worst = 0.0f64;
-    for scale_step in 0..=20 {
-        let scale = 0.1 + 0.02 * f64::from(scale_step);
-        for size_step in 0..=16 {
-            let size = 0.1 + 0.05 * f64::from(size_step);
-            for (which, (rule, frustum_first)) in EVERY_FUSE.into_iter().enumerate() {
-                let (model, fused) = q2028_fuse(scale, size, far_factor, seam, rule, frustum_first);
-                let what = match &fused {
-                    Ok(_) => "ok".to_string(),
-                    Err(Error::Undecidable { records }) => format!(
-                        "undecidable {}",
-                        records.records().last().map_or("-", |r| r.predicate())
-                    ),
-                    Err(error) => format!("{error:?}")
-                        .split([' ', '{', '('])
-                        .next()
-                        .unwrap_or("")
-                        .to_string(),
-                };
-                if what.starts_with("CannotTell") {
-                    println!("{scale:.2} {size:.2} {rule:?} {frustum_first}: {fused:?}");
-                }
-                if check && let Ok(answer) = &fused {
-                    let valid = model.validate(&Policy::tolerant(size), &mut ProvenanceLog::new());
-                    let (volume, counts) = q2028_volume(&model, answer, 0.01 * scale);
-                    let (reference, reference_counts) = references[which];
-                    let off = (volume / scale.powi(3) - reference).abs() / reference;
-                    worst = worst.max(off);
-                    println!(
-                        "answered {scale:.2} {size:.2} {rule:?} {frustum_first}: valid {valid:?} volume off {off:e} counts {counts:?} reference {reference_counts:?}"
-                    );
-                }
-                *counts.entry(what).or_default() += 1;
-            }
-        }
-    }
-    println!("worst volume off {worst:e}");
-    println!("{counts:#?}");
+/// A round bar of radius `radius` and height `2 radius` up from the origin,
+/// and a block over `x` from `0.6 radius` to `2 radius`, `y` from
+/// `-2 radius` to `0.8 radius` and `z` from `-radius` to `3 radius`, fused by
+/// `rule` under a tolerant policy at `size`, the bar first when `bar_first`.
+/// The block's inside corner edge, at `(0.6 radius, 0.8 radius)`, stands on
+/// the bar's wall, as a designer cutting a notch to the wall draws it, so at
+/// each of the bar's caps four surfaces meet at one point: the cap, the wall
+/// and the two faces of the block on that edge.
+fn a_round_bar_fused_with_a_block_cornered_on_its_wall(
+    radius: f64,
+    size: f64,
+    rule: Rule,
+    bar_first: bool,
+) -> (Model, rcad_topo::Result<Fused>) {
+    let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
+    let bar = model
+        .add_round_bar(
+            radius,
+            2.0 * radius,
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.0)).expect("a shift"),
+        )
+        .expect("a bar");
+    let notch = ProfileBuilder::new(vec![
+        [0.6 * radius, -2.0 * radius],
+        [2.0 * radius, -2.0 * radius],
+        [2.0 * radius, 0.8 * radius],
+        [0.6 * radius, 0.8 * radius],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a rectangle");
+    let block = model
+        .add_extrusion(
+            &notch,
+            4.0 * radius,
+            &Isometry::translation(Vector::new(0.0, 0.0, -radius)).expect("a shift"),
+        )
+        .expect("a block");
+    let (arguments, tools) = if bar_first {
+        ([bar], [block])
+    } else {
+        ([block], [bar])
+    };
+    let fused = model.fuse(
+        &arguments,
+        &tools,
+        rule,
+        &Policy::tolerant(size),
+        &mut ProvenanceLog::new(),
+    );
+    (model, fused)
 }
 
 /// A cube of side six with its diagonal brought upright and its middle at the
