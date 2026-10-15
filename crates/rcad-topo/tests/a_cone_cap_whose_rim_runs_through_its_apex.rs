@@ -200,14 +200,16 @@ fn planes_through_the_apex_cut_a_piece_out_of_the_cone_and_every_fuse_answers() 
 /// `Plane::meet_of_three` puts round the meet of its three planes, whose `y` is
 /// `5.366563145999494` at least. The fuse writes each corner down again from
 /// those planes, within the slop it tags it with, so it moves them by up to
-/// `7.9e-15`, and the block less the cone comes out `1152.0000000000007`. That
-/// answer's own error, `5.7e-19`, is only the space hidden under the hair of
-/// cone skin it keeps. How far the corners moved is given room as
-/// `two_turned_cubes_a_rounding_apart.rs` gives it: the skin's area times the
-/// furthest move, `5.7e-12` here, against the `1.4e-12` the answer is out. The
-/// error also leaves out the rounding of the answer's own sum: summed exactly,
-/// its mesh encloses `7.9e-15` less than the measure says, which that room
-/// covers seven hundred times over.
+/// `7.9e-15`, and the block less the cone comes out `1152.0000000000007`.
+/// **`SolidView::measured_over` now publishes that answer's error as
+/// `8.373360852862103e-14`, the rounding of its own sum included (§338).**
+/// Of that, `5.7e-19` is the space hidden under the hair of cone skin the
+/// answer keeps, and the rest is the sum's own rounding: summed exactly, its
+/// mesh encloses `8.373304168036343e-14` less than the measure says. How far
+/// the corners moved is given room as `two_turned_cubes_a_rounding_apart.rs`
+/// gives it: the skin's area times the furthest move, `5.7e-12` here,
+/// against the `1.4e-12` the answer is out, and that room covers the mesh's
+/// own gap about sixty-eight times over, not seven hundred.
 ///
 /// Until Q1537 every fuse was refused `Undecidable` before anything was
 /// meshed, on a lens of the block's end face where that ruling carried on past
