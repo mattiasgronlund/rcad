@@ -1,4 +1,4 @@
-//! Hollows whose corners are asked whether they are inside the shell round
+//! Hollows whose points are asked whether they are inside the shell round
 //! them: a box in a notched block, and a ball touching a block's skin with its
 //! poles.
 //!
@@ -43,10 +43,22 @@
 //!
 //! A ball of radius 2 centred at `(5, 5, 2)` touches the top with its north
 //! pole and the bottom with its south pole, so every corner of the hollow is on
-//! the block's skin and none places it. The refusal is `Undecidable`, with one
-//! record over the two poles; until row Q883 that record named the block's
-//! corner at the origin, which nothing asked about. The other five fuses of the
-//! pair answer.
+//! the block's skin and none places it. The ball's one edge, its seam, is half
+//! a circle from pole to pole and does not close, so it has no far side to ask
+//! either. That was refused `Undecidable`, with one record over the two poles
+//! (row Q1126); until row Q883 the record named the block's corner at the
+//! origin, which nothing asked about. Since row Q2101 the middle of each open
+//! arc is asked as well, and the seam's middle, `(7, 5, 2)` on the ball's
+//! equator, is inside the block: the block less the ball is one solid with the
+//! ball as a hollow, measuring `400 − 32π/3`. The other five fuses of the pair
+//! answer as they did.
+//!
+//! # A ball as wide as the square bar it is in
+//!
+//! The same ball in a bar 4 by 4 across, from `x = 3` to `x = 7`, touches the
+//! bar's two sides as well, and the seam's middle is where it touches `x = 7`.
+//! Every point asked is on the skin, so the bar less the ball is still refused,
+//! and the one record names the two poles and the seam's middle.
 
 use core::f64::consts::PI;
 
@@ -121,25 +133,116 @@ fn a_block_less_a_ball_touching_its_top_with_one_pole_keeps_the_ball_as_a_hollow
 }
 
 /// The block less a ball of radius 2 centred at `(5, 5, 2)`, which touches the
-/// block's top with its north pole and its bottom with its south pole: both
-/// corners of the hollow are on the block's skin, and the refusal names the
-/// two of them and nothing else.
+/// block's top with its north pole and its bottom with its south pole: one
+/// solid, the block's six faces and the ball's one face as a hollow, holding
+/// the block's 400 less the ball's `32π/3`, under a certified policy and a
+/// tolerant one.
 ///
-/// A gap and not a limit (§16.10): the ball is a hollow of the block, and any
-/// point of the ball off its poles would say so. Pinned as it stands.
+/// Both corners of the hollow are on the block's skin, and its one edge, the
+/// seam, does not close, so neither a corner nor the far side of a closed edge
+/// says which side of the skin the ball is. It was refused `Undecidable` at
+/// *one shell inside another*, naming the two poles (queue row Q1126). The
+/// seam's middle, `(7, 5, 2)`, is inside the block, and it is asked since queue
+/// row Q2101.
+///
+/// **The hollow keeps its seam**, one edge walked from pole to pole and back.
+/// History names no image of the input ball's seam or poles here, and it names
+/// none for a ball wholly inside the block and touching nothing either: that
+/// is a gap in history, not in this answer.
 #[test]
-fn a_block_less_a_ball_touching_its_top_and_bottom_is_refused_naming_both_poles() {
+fn a_block_less_a_ball_touching_its_top_and_bottom_keeps_the_ball_as_a_hollow() {
+    let poles = [[5.0, 5.0, 4.0], [5.0, 5.0, 0.0]];
+    for (name, policy) in [
+        ("certified", Policy::certified()),
+        ("tolerant", Policy::tolerant(100.0)),
+    ] {
+        let mut model = a_model();
+        let (block, ball) = a_block_and_a_ball_touching_its_top_and_bottom(&mut model);
+        let answer = model
+            .fuse(
+                &[block],
+                &[ball],
+                Rule::Difference,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{name}: refused {why:?}"));
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{name}: the model does not validate: {why:?}"));
+        let [solid] = answer.solids()[..] else {
+            panic!("{name}: one solid, not {:?}", answer.solids());
+        };
+        let view = model.solid(solid).expect("this model made the key");
+        let mut faces: Vec<usize> = view.shells().map(|shell| shell.face_count()).collect();
+        faces.sort_unstable();
+        assert_eq!(
+            faces,
+            [1, 6],
+            "{name}: the ball's one face and the block's six"
+        );
+        let ball_face = view
+            .faces()
+            .find(|face| face.surface().as_plane().is_none())
+            .expect("the hollow is the ball's face");
+        let seam: Vec<_> = ball_face
+            .wires()
+            .flat_map(|wire| wire.coedges())
+            .map(|coedge| {
+                (
+                    coedge.edge().key(),
+                    coedge.start().point().coordinates(),
+                    coedge.end().point().coordinates(),
+                )
+            })
+            .collect();
+        let [(down, top, bottom), (up, from, to)] = seam[..] else {
+            panic!("{name}: the ball's face is walked down its seam and back, not {seam:?}");
+        };
+        assert!(
+            down == up && top == to && bottom == from && [top, bottom] == poles,
+            "{name}: the ball's face is walked down its seam and back, not {seam:?}"
+        );
+        let measured = view
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid measures");
+        let by_hand = 400.0 - 32.0 * PI / 3.0;
+        assert!(
+            (measured.volume() - by_hand).abs() <= measured.volume_error(),
+            "{name}: measured {} ± {} against {by_hand} by hand",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
+/// The same ball in a square bar as wide as it is, 4 by 4 and 10 long from
+/// `x = 3` to `x = 7`: the ball touches the bar's top and bottom with its poles
+/// and its two sides at `(3, 5, 2)` and `(7, 5, 2)`. The second is the middle
+/// of the ball's seam, so every point asked of the hollow is on the bar's skin,
+/// and the refusal names the two poles and the seam's middle, each once, in the
+/// order they were asked: each side's first corner, then each side's middle.
+///
+/// A gap and not a limit (§16.10): the ball is a hollow of the bar, and a point
+/// of the ball's face off its seam would say so. Pinned as it stands.
+#[test]
+fn a_square_bar_less_a_ball_as_wide_as_it_is_refused_naming_both_poles_and_the_seams_middle() {
     let mut model = a_model();
-    let (block, ball) = a_block_and_a_ball_touching_its_top_and_bottom(&mut model);
+    let bar = a_block(&mut model, [3.0, 0.0, 0.0], [4.0, 10.0, 4.0]);
+    let ball = a_ball(&mut model, 2.0, at(5.0, 5.0, 2.0));
     let refusal = model
         .fuse(
-            &[block],
+            &[bar],
             &[ball],
             Rule::Difference,
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
-        .expect_err("every corner of the hollow is on the block's skin");
+        .expect_err("every point asked of the hollow is on the bar's skin");
     let Error::Undecidable { records } = refusal else {
         panic!("refused as undecided, not {refusal:?}");
     };
@@ -147,19 +250,14 @@ fn a_block_less_a_ball_touching_its_top_and_bottom_is_refused_naming_both_poles(
         panic!("one record, not {records:?}");
     };
     assert_eq!(record.predicate(), "one shell inside another");
-    let mut asked = record.inputs().to_vec();
-    asked.sort_by(|one, other| {
-        one.enclosure()[2]
-            .lo()
-            .total_cmp(&other.enclosure()[2].lo())
-    });
     assert_eq!(
-        asked,
+        record.inputs(),
         [
+            PredicatePoint::from([5.0, 5.0, 4.0]),
             PredicatePoint::from([5.0, 5.0, 0.0]),
-            PredicatePoint::from([5.0, 5.0, 4.0])
+            PredicatePoint::from([7.0, 5.0, 2.0])
         ],
-        "the two poles, each once"
+        "the two poles and the seam's middle, each once"
     );
 }
 

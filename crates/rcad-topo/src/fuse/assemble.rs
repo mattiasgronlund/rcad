@@ -4054,15 +4054,19 @@ impl Assembly {
     /// caller's: `apart` is thrown away when the fuse returns, so a key into it
     /// names nothing.
     ///
-    /// **The record names the points that were asked.** When every corner and
-    /// every far side came back on the skin of `outer` or undecided, the one
-    /// record says "one shell inside another" over each of those points once,
-    /// in the order they were asked. It used to name the first corner of the
-    /// whole answer, which nothing asked: a block less a ball touching its top
-    /// and bottom with its two poles named the block's corner at the origin.
-    /// That refusal is still a gap, since the ball is a hollow of the block and
-    /// a point of it off its poles would say so; its one face has no closed
-    /// edge, so no far side is asked of it either.
+    /// **The record names the points that were asked.** When every corner, far
+    /// side and arc's middle came back on the skin of `outer` or undecided, the
+    /// one record says "one shell inside another" over each of those points
+    /// once, in the order they were asked. It used to name the first corner of
+    /// the whole answer, which nothing asked: a block less a ball touching its
+    /// top and bottom with its two poles named the block's corner at the
+    /// origin. That ball has no closed edge, so no far side is asked of it, but
+    /// its seam is half a circle from pole to pole on the plane through its
+    /// centre, and the seam's middle, on the ball's equator, is inside the
+    /// block: since Q2101 the block less that ball answers. The same ball in a
+    /// square bar as wide as it is, `x` from 3 to 7, is still refused: the
+    /// seam's middle is where the ball touches the bar's side, so the record
+    /// names the two poles and that middle.
     ///
     /// # Errors
     ///
@@ -4132,12 +4136,21 @@ impl Assembly {
     }
 
     /// The points of `shell` that [`Assembly::one_shell_is_inside_another`]
-    /// asks, in the order it asks them: the corner each side starts at, and
-    /// then the far side of each closed edge a side runs along.
+    /// asks, in the order it asks them: the corner each side starts at, then
+    /// the far side of each closed edge a side runs along, and then the middle
+    /// of each open arc a side runs along.
     ///
     /// A closed edge has a side in each face either side of it, so its far
     /// side is asked twice, as a corner is asked once for each side that
-    /// starts there. Only a shell no corner places gets that far.
+    /// starts there; an arc's middle is asked twice the same way. Only a shell
+    /// no corner places gets that far.
+    ///
+    /// **An arc's middle is what a hollow with every corner on the outer shell
+    /// and no closed edge has left** (queue row Q2101). A bar touching two walls
+    /// of a block along two rulings has the touch part both rulings (Q760), so
+    /// each cap circle is two arcs whose four ends are all on the walls. That
+    /// was refused `Undecidable`, for one solid of two shells
+    /// (`tests/a_bar_lying_along_a_plane_or_a_bar.rs`).
     fn the_points_asked_of(&self, shell: usize) -> impl Iterator<Item = Point> + '_ {
         let sides = move || {
             self.shells[shell]
@@ -4148,53 +4161,107 @@ impl Assembly {
             .map(|side| self.corners[self.edges[side.edge].ends[usize::from(!side.forward)]].point);
         let far_sides =
             sides().filter_map(|side| self.across_a_closed_edge_from_its_corner(side.edge));
-        corners.chain(far_sides)
+        let middles = sides().filter_map(|side| self.the_middle_of_an_open_arc(side.edge));
+        corners.chain(far_sides).chain(middles)
     }
 
     /// The point of a closed edge across its curve from the one corner it
     /// starts and ends at, or `None` for an edge that does not close or a
     /// curve this does not find the middle of.
     ///
-    /// A plane crosses a pipe in a circle or an ellipse centred where the
-    /// pipe's axis meets the plane, and a ball in a circle centred at the foot
-    /// of the perpendicular from the ball's centre. Either curve is its own
-    /// reflection through that centre, so the corner reflected through it is on
-    /// the edge. It is worked out in `f64`, as a corner's point is, so it is on
-    /// the edge to within a rounding as a corner is. A far side that does not
-    /// fit in an `f64` is not asked.
-    ///
-    /// **A cone is left out**: a plane leaning across one cuts an ellipse whose
-    /// centre is not on the axis ([`where_a_closed_crossing_is_centred`]), and
-    /// nothing has needed it yet. So is a closed crossing of two curved
-    /// surfaces, which has no centre to reflect through.
+    /// The curve is centred where [`Assembly::where_an_edges_circle_is_centred`]
+    /// says, and is its own reflection through that centre, so the corner
+    /// reflected through it is on the edge. It is worked out in `f64`, as a
+    /// corner's point is, so it is on the edge to within a rounding as a corner
+    /// is. A far side that does not fit in an `f64` is not asked.
     fn across_a_closed_edge_from_its_corner(&self, edge: usize) -> Option<Point> {
-        let Edge {
-            ends: [corner, other_end],
-            carried_by,
-            ..
-        } = &self.edges[edge];
+        let [corner, other_end] = self.edges[edge].ends;
         if corner != other_end {
             return None;
         }
+        let (_, centre, _) = self.where_an_edges_circle_is_centred(edge)?;
+        let across = centre + (centre - self.corners[corner].point);
+        across.is_finite().then_some(across)
+    }
+
+    /// The middle of an open arc of a circle or an ellipse, which is off both
+    /// its ends, or `None` for an edge that closes or runs straight, or a curve
+    /// this does not find the middle of.
+    ///
+    /// Seen along the direction [`Assembly::where_an_edges_circle_is_centred`]
+    /// names, the curve is a circle and the edge's chord parts it into two arcs,
+    /// one either side. The middle of the edge's own arc, seen that way, is one
+    /// radius from the centre, square to the chord, on the side
+    /// [`Edge::the_way_across_the_chord_into_the_arc`] says the arc is. That
+    /// holds for the short arc, the long one and a half alike, with no case of
+    /// its own for each. Slid back along that direction onto the edge's plane,
+    /// it is a point of the arc itself: the slide takes straight lines to
+    /// straight lines, so it keeps the chord a chord and each side of it a
+    /// side. A ball's direction and a square pipe's are the plane's own normal,
+    /// which slides nothing, so on a circle the point is the arc's middle; on a
+    /// leaning pipe's ellipse it is the middle seen along the axis.
+    ///
+    /// It is worked out in `f64`, as a corner's point is, so it is on the edge
+    /// to within a few roundings as a corner is. A middle that does not fit in
+    /// an `f64` is not asked.
+    fn the_middle_of_an_open_arc(&self, edge: usize) -> Option<Point> {
+        let this = &self.edges[edge];
+        let WhichArc::LeavingACorner { corner, towards } = this.arc else {
+            return None;
+        };
+        let [start, stop] = this.ends;
+        if start == stop {
+            return None;
+        }
+        let (flat, centre, seen_along) = self.where_an_edges_circle_is_centred(edge)?;
+        let into_the_arc =
+            this.the_way_across_the_chord_into_the_arc(&self.corners, corner, towards)?;
+        let seen = |vector: Vector| {
+            vector - seen_along * (vector.dot(seen_along) / seen_along.dot(seen_along))
+        };
+        let [start, stop] = [start, stop].map(|end| self.corners[end].point);
+        let radius = seen(start - centre).length();
+        let chord = seen(stop - start);
+        let into_the_arc = seen(into_the_arc);
+        let square_to_the_chord = into_the_arc * chord.dot(chord) - chord * chord.dot(into_the_arc);
+        let out = square_to_the_chord * (radius / square_to_the_chord.length());
+        let back_onto_the_plane =
+            seen_along * (flat.normal().dot(out) / flat.normal().dot(seen_along));
+        let middle = centre + out - back_onto_the_plane;
+        middle.is_finite().then_some(middle)
+    }
+
+    /// Where the circle or ellipse an edge runs round is centred, with the
+    /// plane it lies in and the direction it is a circle seen along, or `None`
+    /// unless the edge runs between a plane and a pipe or a ball.
+    ///
+    /// A plane crosses a pipe in a circle or an ellipse centred where the
+    /// pipe's axis meets the plane, and seen along the axis it is the pipe's
+    /// own circle. It crosses a ball in a circle centred at the foot of the
+    /// perpendicular from the ball's centre, and seen along the plane's normal
+    /// that is a circle already.
+    ///
+    /// **A cone is left out**: a plane leaning across one cuts an ellipse whose
+    /// centre is not on the axis ([`where_a_closed_crossing_is_centred`]), and
+    /// nothing has needed it yet. So is a crossing of two curved surfaces,
+    /// which has no plane to be centred in.
+    fn where_an_edges_circle_is_centred(&self, edge: usize) -> Option<(&Plane, Point, Vector)> {
+        let carried_by = &self.edges[edge].carried_by;
         let flat = carried_by.iter().find_map(Surface::as_plane)?;
-        let centre = match carried_by
+        match carried_by
             .iter()
             .find(|surface| surface.as_plane().is_none())?
         {
             Surface::Cylinder(pipe) => {
                 let axis = pipe.axis();
                 let climb = flat.normal().dot(axis.direction());
-                axis.origin() - axis.direction() * (flat.signed_distance_to(axis.origin()) / climb)
+                let centre = axis.origin()
+                    - axis.direction() * (flat.signed_distance_to(axis.origin()) / climb);
+                Some((flat, centre, axis.direction()))
             }
-            Surface::Sphere(ball) => flat.project(ball.centre()),
-            Surface::Cone(_) | Surface::Torus(_) | Surface::Plane(_) | _ => return None,
-        };
-        let across = centre + (centre - self.corners[*corner].point);
-        across
-            .coordinates()
-            .iter()
-            .all(|value| value.is_finite())
-            .then_some(across)
+            Surface::Sphere(ball) => Some((flat, flat.project(ball.centre()), flat.normal())),
+            Surface::Cone(_) | Surface::Torus(_) | Surface::Plane(_) | _ => None,
+        }
     }
 
     /// The caller's face that `face`, written into `apart`, was cut out of.
@@ -11066,6 +11133,77 @@ mod tests {
             Some(true),
             "a whole cap circle goes right round the pipe once"
         );
+    }
+
+    /// The middle [`Assembly::one_shell_is_inside_another`] asks of an open arc
+    /// is half way round the arc its edge names, and not round the other one
+    /// between the same two ends (queue row Q2101).
+    ///
+    /// The pipe of radius one about `z` is cut by `z = 0` in a circle and by
+    /// `z = x` in an ellipse, both centred at the origin: `t` round from `+x` is
+    /// `(cos t, sin t, 0)` on the circle and `(cos t, sin t, cos t)` on the
+    /// ellipse. Each edge runs from `t = 0` to a quarter turn or a half turn,
+    /// leaving `t = 0` towards `+y` for the arc through the `t`s between, or
+    /// towards `−y` for the arc the other way round. Seen along the pipe's axis
+    /// the ellipse is the circle, so its middle is at the same `t`.
+    #[test]
+    fn the_middle_of_an_arc_is_half_way_round_the_arc_its_edge_names() {
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a radius"));
+        let quarter = std::f64::consts::FRAC_PI_2;
+        for (lean, normal) in [
+            (0.0, Vector::new(0.0, 0.0, 1.0)),
+            (1.0, Vector::new(-1.0, 0.0, 1.0)),
+        ] {
+            let flat = Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), normal)
+                    .expect("a normal with length"),
+            );
+            let at = |t: f64| Point::new(t.cos(), t.sin(), lean * t.cos());
+            let corner = |t: f64| Corner {
+                point: at(t),
+                wobble: 0.0,
+                from: None,
+                moved_by_the_policy: false,
+                where_pipes_touch: Vec::new(),
+            };
+            for (stop, leaving_along_y, half_way) in [
+                (quarter, 1.0, quarter / 2.0),
+                (quarter, -1.0, -1.5 * quarter),
+                (2.0 * quarter, 1.0, quarter),
+                (2.0 * quarter, -1.0, -quarter),
+            ] {
+                let assembly = Assembly {
+                    corners: vec![corner(0.0), corner(stop)],
+                    edges: vec![Edge {
+                        ends: [0, 1],
+                        carried_by: [pipe, flat],
+                        arc: WhichArc::LeavingACorner {
+                            corner: 0,
+                            towards: Vector::new(0.0, leaving_along_y, 0.0),
+                        },
+                        from: Vec::new(),
+                    }],
+                    runs: Vec::new(),
+                    faces: Vec::new(),
+                    shells: Vec::new(),
+                    solids: Vec::new(),
+                };
+                let what = format!(
+                    "the arc of z = {lean}x from t = 0 to {stop}, leaving towards \
+                     {leaving_along_y}y"
+                );
+                let middle = assembly
+                    .the_middle_of_an_open_arc(0)
+                    .unwrap_or_else(|| panic!("{what} has a middle"));
+                let wanted = at(half_way);
+                assert!(
+                    middle.distance_to(wanted) < 1e-15,
+                    "{what}: its middle is {:?}, and t = {half_way} is {:?}",
+                    middle.coordinates(),
+                    wanted.coordinates()
+                );
+            }
+        }
     }
 
     /// A thin pipe across a wall spelled twice, whose bits sort between the two
