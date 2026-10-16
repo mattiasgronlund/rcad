@@ -1508,20 +1508,23 @@ fn a_bend_turned_five_about_y_and_moved_comes_back_from_its_own_file() {
 /// found in 400 draws at a fixed seed (Q2184).
 ///
 /// **Unlike Q843's bend, no representable centre near the ring's own reads
-/// back as the seam's plane.** With `y` held at `11.0`, every representable
-/// `z` from seven million `f64`s below `19.0` to seven million above it was
-/// tried: the plane's offset differs from the ring's centre's own by `-2`
-/// bits at the `f64` just under `19.0` and by `+1` at `19.0` itself, a jump
-/// of three that steps clean over zero, and every other `z` tried is further
-/// off still. Walking `y` by up to a million `f64`s either way, solving `z`
-/// continuously and trying the three `f64`s nearest that solution, never
-/// found better than the one-bit gap `19.0` itself already has. `write.rs`'s
-/// `the_nearest_centre_its_faces_hold_the_circle_at` walks the same way, out
-/// to sixty-four steps, so it cannot do better either — this is not a search
-/// that needs to run longer, the gap does not close by searching the same
-/// line further.
+/// back as the seam's plane, and this is a limit, not a gap.** With `y` held
+/// at `11.0`, every representable `z` from seven million `f64`s below `19.0`
+/// to seven million above it was tried: the plane's offset differs from the
+/// ring's centre's own by `-2` bits at the `f64` just under `19.0` and by
+/// `+1` at `19.0` itself, a jump of three that steps clean over zero, and
+/// every other `z` tried is further off still. Walking `y` by up to a million
+/// `f64`s either way, solving `z` continuously and trying the three `f64`s
+/// nearest that solution, never found better than the one-bit gap `19.0`
+/// itself already has. `write.rs`'s `the_nearest_centre_its_faces_hold_the_circle_at`
+/// walks the same way, out to sixty-four steps, so it cannot do better
+/// either. Of the `14413` centres this ring's own circle holds within the
+/// reader's tolerance, not one reads back as this seam's cutting plane —
+/// `no_centre_the_reader_holds_on_the_ring_carries_the_seam_of_a_bend_of_ring_nine_turned_45_degrees`
+/// in `write.rs` tries them all. So the writer is right to refuse this bend's
+/// seam by name, and that is what this test now pins.
 #[test]
-fn a_bend_of_ring_nine_turned_about_x_and_moved_comes_back_from_its_own_file() {
+fn a_bend_of_ring_nine_turned_about_x_and_moved_is_refused_with_no_centre_the_reader_holds() {
     let turned = Isometry::translation(Vector::new(-25.0, 11.0, 19.0))
         .expect("a finite offset")
         .compose(
@@ -1535,11 +1538,20 @@ fn a_bend_of_ring_nine_turned_about_x_and_moved_comes_back_from_its_own_file() {
         .expect("the key came from this model");
     let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
     let reached = one_model_decoded_and_written(&bytes);
-    assert_eq!(
-        (reached.came_back_the_same, reached.solids_the_same),
-        (1, 1),
-        "{reached:?}, {:?}",
-        rcad_step::write(&model, "a turned bend").err()
+    assert_eq!((reached.written, reached.refused), (0, 1), "{reached:?}");
+    assert!(
+        matches!(
+            rcad_step::write(&model, "a turned bend"),
+            Err(
+                rcad_step::CannotWrite::ACurveTheFacesEitherSideOfItDoNotName {
+                    first: "ring",
+                    second: "ring",
+                    closed: false,
+                }
+            )
+        ),
+        "{:?}",
+        rcad_step::write(&model, "a turned bend")
     );
 }
 
