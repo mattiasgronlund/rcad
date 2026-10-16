@@ -3501,7 +3501,7 @@ impl<'f> Arrangement<'f> {
                         }
                         other => panic!("a decision nothing here knows: {other:?}"),
                     }
-                    let apart = the_furthest_two_boxes_may_be_apart(
+                    let apart = how_far_apart_two_boxes_may_be(
                         self.nodes[one].point,
                         self.nodes[next].point,
                     );
@@ -3782,6 +3782,17 @@ impl<'f> Arrangement<'f> {
     /// refused `ResultIsNotManifold { count: 1 }` in place of the
     /// `CannotMeshAFace` they are pinned to.
     ///
+    /// **No fifth surface runs through the point**
+    /// ([`Arrangement::a_fifth_surface_runs_there`]). With a fifth, the face's
+    /// crossings meet in more than three places there, and joining three of
+    /// them leaves the rest apart. Two cubes set corner to corner, a turn a
+    /// little short of a half turn apart, put six planes through one point:
+    /// each face there joined three of its meets and left four to seven other
+    /// nodes within the wobble apart, and the union, the difference and the turned
+    /// cube less the block, which answered before this rule, were refused
+    /// "could not settle 18 decisions" and "two regions of one face could not
+    /// be told apart" (`a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`).
+    ///
     /// **At most one of the three is a corner the input had**, since
     /// [`Arrangement::fold_the_nodes`] refuses two different corners folded
     /// into one, as an edge with no length. One is let in when every meet it
@@ -3823,11 +3834,13 @@ impl<'f> Arrangement<'f> {
             return;
         }
         let boxes = meets.map(|meet| self.nodes[meet].point);
-        if !the_other_three_meet_there_too([one, two, three], boxes, policy) {
+        if !the_other_three_meet_there_too([one, two, three], boxes, policy)
+            || self.a_fifth_surface_runs_there(meets, &four, boxes, policy)
+        {
             return;
         }
         let widest = [[0, 1], [1, 2], [0, 2]]
-            .map(|[one, other]| the_furthest_two_boxes_may_be_apart(boxes[one], boxes[other]))
+            .map(|[one, other]| how_far_apart_two_boxes_may_be(boxes[one], boxes[other]))
             .into_iter()
             .fold(0.0, f64::max);
         let record = Record::new(
@@ -3841,6 +3854,29 @@ impl<'f> Arrangement<'f> {
             same.join(meets[0], meets[1]);
             same.join(meets[0], meets[2]);
         }
+    }
+
+    /// Whether a crossing of the face with a surface not among `four` runs
+    /// through one of the three `meets`, or through another node within the
+    /// policy's wobble of one of their `boxes`.
+    fn a_fifth_surface_runs_there(
+        &self,
+        meets: [usize; 3],
+        four: &[Surface; 4],
+        boxes: [PredicatePoint; 3],
+        policy: &Policy,
+    ) -> bool {
+        let near = |node: &Node| {
+            boxes.iter().any(|&place| {
+                policy.wobble_is_acceptable(how_far_apart_two_boxes_may_be(place, node.point))
+            })
+        };
+        self.nodes
+            .iter()
+            .enumerate()
+            .filter(|&(at, node)| meets.contains(&at) || near(node))
+            .flat_map(|(_, node)| &node.crossings)
+            .any(|&crossing| !four.contains(&self.crossings[crossing].partner))
     }
 
     fn fold_the_nodes(&mut self, same: &mut Sameness) -> Result<()> {
@@ -8888,25 +8924,10 @@ fn the_other_three_meet_there_too(
         return false;
     };
     places.iter().any(|&place| {
-        boxes.iter().all(|&node| {
-            policy.wobble_is_acceptable(the_furthest_two_boxes_may_be_apart(place, node))
-        })
+        boxes
+            .iter()
+            .all(|&node| policy.wobble_is_acceptable(how_far_apart_two_boxes_may_be(place, node)))
     })
-}
-
-/// The furthest a point of one box can be from a point of the other, rounded
-/// up: `fuse/assemble.rs`'s `how_far_apart_two_boxes_may_be`, which is private
-/// there.
-fn the_furthest_two_boxes_may_be_apart(one: PredicatePoint, other: PredicatePoint) -> f64 {
-    let (one, other) = (one.enclosure(), other.enclosure());
-    let squared: f64 = (0..3)
-        .map(|axis| {
-            let furthest =
-                (one[axis].hi() - other[axis].lo()).max(other[axis].hi() - one[axis].lo());
-            furthest * furthest
-        })
-        .sum();
-    squared.sqrt() * (1.0 + 4.0 * f64::EPSILON)
 }
 
 /// Where a ball's skin pinches to a point, as a box round it.
