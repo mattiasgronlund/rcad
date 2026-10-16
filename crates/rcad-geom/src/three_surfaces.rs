@@ -3578,21 +3578,24 @@ fn the_ends_of_the_chord_at(
     flat: &Plane,
     axis: &AnAxis,
     reach: &Quadratic,
-    off_it: &Exact,
+    slant: &HowAPlaneSits,
     height: Interval,
     it_only_touches: bool,
 ) -> SmallVec<[PredicatePoint; 2]> {
     let normal = flat.normal().components();
     let squared_normal = dot_enclosing(exactly(normal), exactly(normal));
     let squared_axis = dot_enclosing(exactly(axis.along), exactly(axis.along));
-    let off = off_it.enclosure();
+    let [leaning, off, across] =
+        [&slant.leaning, &slant.off_it, &slant.across].map(Exact::enclosure);
+    let level = off * squared_axis + height * leaning;
+    let along = height * squared_normal + off * leaning;
     let foot: [Interval; 3] = core::array::from_fn(|coordinate| {
         Interval::exactly(axis.through[coordinate])
             + quotient_or_everything(
-                height * Interval::exactly(axis.along[coordinate]),
-                squared_axis,
+                along * Interval::exactly(axis.along[coordinate])
+                    - level * Interval::exactly(normal[coordinate]),
+                across,
             )
-            - quotient_or_everything(off * Interval::exactly(normal[coordinate]), squared_normal)
     });
     if it_only_touches {
         return smallvec![the_point_a_box_names(foot)];
@@ -3600,16 +3603,19 @@ fn the_ends_of_the_chord_at(
     let out_there = reach.squared.enclosure() * (height * height)
         + Interval::exactly(2.0) * reach.half_linear.enclosure() * height
         + reach.constant.enclosure();
-    let across = quotient_or_everything(
-        root_enclosing(out_there * squared_normal - off * off * squared_axis),
-        squared_normal,
+    let half = quotient_or_everything(
+        root_enclosing(quotient_or_everything(
+            out_there * across - level * level,
+            squared_axis,
+        )),
+        across,
     );
     let sideways = cross_enclosing(exactly(normal), exactly(axis.along));
-    [-across, across]
+    [-half, half]
         .into_iter()
         .map(|side| {
             the_point_a_box_names(core::array::from_fn(|coordinate| {
-                foot[coordinate] + quotient_or_everything(side * sideways[coordinate], squared_axis)
+                foot[coordinate] + side * sideways[coordinate]
             }))
         })
         .collect()
