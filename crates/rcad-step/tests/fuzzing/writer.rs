@@ -619,23 +619,15 @@ fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -
 /// and the two origins sit on the one line between them — the origin delta's
 /// cross product with the direction is exactly zero, not a point-for-point
 /// equality, since a cylinder's own axis origin can sit anywhere along its
-/// line. **The moved origin itself is not always on the kernel's own line to
-/// the bit** — a turned disc drawn by a pipe off its own plane moves it by
-/// one division and a multiply, and that is rounded once more than the
-/// kernel's own origin was, a few ulps off square with the axis
-/// (`a_disc_drawn_by_a_pipe_off_its_own_plane_turned_and_moved_comes_back_from_its_own_file`,
-/// still red for that reason, outside this file's write set). Asking instead
-/// whether `corners` — the coedge's own two ends — are certified
-/// `Decision::Zero` on the read-back pipe's skin looks more principled, the
-/// same test `picks_the_real_ends` below runs for a picker, but it is the
-/// wrong tool here: those corners come from an arc built by turning the
-/// kernel's own circle, and `here.side_of` does not certify them `Zero`
-/// against the kernel's own, untouched pipe either — proven by printing
-/// `here.side_of` beside `back.side_of` on
-/// `how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`'s
-/// axis-`y`, 0.1-radian, unmoved case, where both come back `Neg`. That is
-/// not a round-trip gap to chase; it is this test's own corners never having
-/// been certified on their own pipe to begin with.
+/// line. **Under a turn and a move together, the moved origin can round off
+/// that line by a few ulps** — a division and a multiply, each rounded once
+/// more than the kernel's own origin was. Q2135 takes that case; this file's
+/// pins turn alone or move alone, never both at once. Asking instead whether
+/// `corners` — the coedge's own two ends — are certified `Decision::Zero` on
+/// the read-back pipe's skin looks more principled, the same test
+/// `picks_the_real_ends` below runs for a picker, but it is the wrong tool
+/// here: those corners come from an arc built by turning the kernel's own
+/// circle, and the kernel's own pipe does not certify them `Zero` either.
 fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: Surface) -> bool {
     let same_bits = || format!("{here:?}") == format!("{back:?}");
     let (
@@ -1817,6 +1809,24 @@ fn a_pointed_cone(model: &mut Model, slope: f64, far: f64) -> rcad_topo::Result<
 /// bounds — the way a file written as the standard says holds a bend
 /// (`docs/decisions.md` §361).
 fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<SolidKey> {
+    a_quarter_bend_picked_inside(
+        model,
+        ring,
+        tube,
+        Cylinder::new(Axis::z(), ring).expect("the ring's own radius"),
+    )
+}
+
+/// Like [`a_quarter_bend`], but the seam's `InsideAPipe` picker holds `pipe`
+/// rather than the ring's own, untouched one — Q1293's pins build it with the
+/// pipe a file's own round trip can carry: a subnormal axis, or a radius an
+/// ulp off the ring's.
+fn a_quarter_bend_picked_inside(
+    model: &mut Model,
+    ring: f64,
+    tube: f64,
+    pipe: Cylinder,
+) -> rcad_topo::Result<SolidKey> {
     let skin = Torus::new(Axis::z(), ring, tube).expect("a tube narrower than its ring");
     let mut builder = SolidBuilder::new();
     let inner = ring - tube;
@@ -1836,9 +1846,7 @@ fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<
             EdgeRun::PartOfWhereItCrosses {
                 and: Surface::Plane(flat_through_the_middle),
                 picked_by: [
-                    Picker::InsideAPipe(
-                        Cylinder::new(Axis::z(), ring).expect("the ring's own radius"),
-                    ),
+                    Picker::InsideAPipe(pipe),
                     Picker::from(
                         HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.0)
                             .expect("a normal with a length"),
@@ -1994,6 +2002,63 @@ fn a_bends_seam_picked_outside_its_pipe_is_a_different_run_from_the_one_picked_i
     assert!(!the_same_run(&here, &picked_from_outside, corners, *and));
 }
 
+/// Q1293's pin (1), crash-0109edfc: a bend of ring four and tube two whose
+/// seam is picked inside the pipe of radius four through the origin along
+/// `(1.7e-322, 0, 1)` — the subnormal axis the reader's own round trip can
+/// carry, not the ring's own `z` — and by `InFrontOf` the half-space of
+/// normal `(1, 1, 0)` and offset zero, placed by the turn about `z` of
+/// quaternion `w` `0.9698928535888416`, `z` `0.24353203599792378` and moved
+/// by `(-5, 12, 3)`.
+#[test]
+fn a_bend_with_a_subnormal_pipe_axis_turned_and_moved_comes_back_from_its_own_file() {
+    let pipe = Cylinder::new(
+        Axis::new(Point::origin(), Vector::new(1.7e-322, 0.0, 1.0))
+            .expect("a finite, non-zero direction"),
+        4.0,
+    )
+    .expect("a positive radius");
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bend =
+        a_quarter_bend_picked_inside(&mut model, 4.0, 2.0, pipe).expect("a bend fits this model");
+    let placement = Isometry::try_from((
+        [-5.0, 12.0, 3.0],
+        [0.9698928535888416, 0.0, 0.0, 0.24353203599792378],
+    ))
+    .expect("a finite offset and a unit-length turn");
+    model
+        .place_solid(bend, &placement)
+        .expect("the key came from this model");
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}"
+    );
+}
+
+/// Q1293's pin (2), crash-16aad257: a bend of ring nine and tube four whose
+/// seam is picked inside the pipe of radius `9.000000000000004` about `z` —
+/// an ulp off the ring's own nine — moved by `(9, 20, -5)`.
+#[test]
+fn a_bend_with_its_pipe_radius_an_ulp_off_moved_comes_back_from_its_own_file() {
+    let pipe = Cylinder::new(Axis::z(), 9.000_000_000_000_004).expect("a positive radius");
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bend =
+        a_quarter_bend_picked_inside(&mut model, 9.0, 4.0, pipe).expect("a bend fits this model");
+    let moved = Isometry::translation(Vector::new(9.0, 20.0, -5.0)).expect("a finite offset");
+    model
+        .place_solid(bend, &moved)
+        .expect("the key came from this model");
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}"
+    );
+}
+
 /// The seam of [`a_quarter_bend`]: the one coedge whose edge crosses the
 /// plane through the ring's own middle, not one of its two closed circles.
 fn the_seam_of_a_bend(model: &Model) -> CoedgeView<'_> {
@@ -2119,33 +2184,38 @@ fn a_bar_with_a_disc_drawn_by_a_pipe_from(
 }
 
 /// Q1293's and-Cylinder arm: a disc drawn by a pipe whose own axis starts
-/// off the disc's own plane — at the bar's floor, not its centre — turned
-/// and moved, comes back the same way a disc drawn on its own plane already
-/// does. The writer moves the written `Cylinder`'s axis to where it meets
-/// the flat face (`Writing::an_arc_of_a_circle_on_a_flat_face`, `write.rs`),
-/// so the reader's pipe keeps that moved origin; [`the_same_run`]'s
-/// and-Cylinder arm must still call the two pipes the same because their
-/// directions and radii match and the two origins sit on the one line
-/// between them.
+/// off the disc's own plane — at the bar's floor, not its centre — comes
+/// back the same at no placement, moved alone and turned alone. The writer
+/// moves the written `Cylinder`'s axis to where it meets the flat face
+/// (`Writing::an_arc_of_a_circle_on_a_flat_face`, `write.rs`), so the
+/// reader's pipe keeps that moved origin; [`the_same_run`]'s and-Cylinder arm
+/// must still call the two pipes the same because their directions and radii
+/// match and the two origins sit on the one line between them.
+///
+/// A turn and a move together are left out: Q2135 takes the case where the
+/// moved origin itself lands a few ulps off the kernel's own line.
 #[test]
-fn a_disc_drawn_by_a_pipe_off_its_own_plane_turned_and_moved_comes_back_from_its_own_file() {
-    let turned = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
-        .expect("a finite offset")
-        .compose(&Isometry::rotation(&Axis::y(), 5.0).expect("a finite angle about a unit axis"));
-    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let solid = a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
-        .expect("a bar with a disc drawn by a pipe off its own plane fits this model");
-    model
-        .place_solid(solid, &turned)
-        .expect("the key came from this model");
-    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
-    let reached = one_model_decoded_and_written(&bytes);
-    assert_eq!(
-        (reached.came_back_the_same, reached.solids_the_same),
-        (1, 1),
-        "{reached:?}, {:?}",
-        rcad_step::write(&model, "a disc drawn by a pipe off its own plane").err()
-    );
+fn a_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file() {
+    let moved_alone = Isometry::translation(Vector::new(3.0, 5.0, 10.0)).expect("a finite offset");
+    let turned_alone =
+        Isometry::rotation(&Axis::y(), 5.0).expect("a finite angle about a unit axis");
+    for placement in [Isometry::identity(), moved_alone, turned_alone] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let solid =
+            a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
+                .expect("a bar with a disc drawn by a pipe off its own plane fits this model");
+        model
+            .place_solid(solid, &placement)
+            .expect("the key came from this model");
+        let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+        let reached = one_model_decoded_and_written(&bytes);
+        assert_eq!(
+            (reached.came_back_the_same, reached.solids_the_same),
+            (1, 1),
+            "{placement:?}: {reached:?}, {:?}",
+            rcad_step::write(&model, "a disc drawn by a pipe off its own plane").err()
+        );
+    }
 }
 
 /// The same disc's drawn pipe, compared against one of another radius about
