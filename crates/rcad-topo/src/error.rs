@@ -531,7 +531,12 @@ pub enum Error {
     /// the angle between their caps, and their intersection is refused this way
     /// (`a_piece_no_ray_can_place_names_its_refusal.rs`, Q2089). Until Q2089
     /// that was [`Invalid::VolumeIsNotPositive`], "its faces do not point
-    /// outwards", which nothing had shown.
+    /// outwards", which nothing had shown. So was a fin `2⁻⁵¹` thick whose
+    /// every mesh point rounds onto one plane, so that every mesh of it encloses
+    /// exactly `0` (`an_ellipse_start_between_two_places.rs`, Q1938), and a
+    /// half ball of 5 less a bowl four roundings smaller, which holds about
+    /// `54`, and whose closest mesh encloses `−38.7` and can be off by `2384`
+    /// (`a_piece_grazed_by_a_trimming_nothing_follows.rs`).
     ///
     /// A sum above zero that no mesh answered is still taken as the volume, so
     /// a solid turned inside out can still pass on one (Q2084).
