@@ -3473,8 +3473,63 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
                 let order = self.nodes_along(crossing, on_it, policy, log)?;
+                let probe = std::env::var("RCAD_PROBE_MERGE").is_ok();
+                if probe {
+                    eprintln!(
+                        "PROBE face {:?} crossing {crossing} partner {:?} order {order:?}",
+                        self.surface, self.crossings[crossing].partner
+                    );
+                    for &n in &order {
+                        eprintln!(
+                            "PROBE   node {n} {:?} vertex {:?} made_of {:?} crossings {:?}",
+                            self.nodes[n].point.enclosure(),
+                            self.nodes[n].vertex,
+                            self.nodes[n].made_of,
+                            self.nodes[n].crossings
+                        );
+                    }
+                }
                 for pair in order.windows(2) {
-                    match self.order_along(crossing, pair[0], pair[1], policy, log)? {
+                    let decided = self.order_along(crossing, pair[0], pair[1], policy, log)?;
+                    if probe {
+                        let boxes = self.as_the_boxes_say(crossing, pair[0], pair[1]);
+                        let own = match self.crossings[crossing].order {
+                            HowItRuns::RoundAClosedCurve {
+                                from,
+                                node,
+                                named_the_start,
+                                ref wound_as,
+                            } => {
+                                eprintln!(
+                                    "PROBE   from {:?} node {:?} named {:?}",
+                                    from.enclosure(),
+                                    node.enclosure(),
+                                    named_the_start.map(|p| p.enclosure())
+                                );
+                                Some(round_a_closed_crossing_and_what_it_measures(
+                                    [&wound_as[0], &wound_as[1]],
+                                    [from, named_the_start.unwrap_or(node)],
+                                    self.nodes[pair[0]].point,
+                                    self.nodes[pair[1]].point,
+                                ))
+                            }
+                            _ => None,
+                        };
+                        eprintln!(
+                            "PROBE   pair {:?} -> {decided:?} own {own:?} boxes {boxes:?} narrowed {:?} {:?} planes {:?} quadric {:?} axis {:?}",
+                            (pair[0], pair[1]),
+                            self.narrowed_box_of(pair[0]).enclosure(),
+                            self.narrowed_box_of(pair[1]).enclosure(),
+                            self.as_the_planes_say(crossing, pair[0], pair[1]),
+                            self.as_the_quadric_says(
+                                crossing,
+                                [pair[0], pair[1]],
+                                [pair[0], pair[1]].map(|node| self.nodes[node].point)
+                            ),
+                            self.as_the_pipes_axis_says(crossing, pair[0], pair[1]),
+                        );
+                    }
+                    match decided {
                         Decision::Zero => same.join(pair[0], pair[1]),
                         Decision::Pos => {}
                         Decision::Neg => unreachable!(
@@ -3935,7 +3990,19 @@ impl<'f> Arrangement<'f> {
             decided = proved;
         }
         if matches!(decided, Decision::Undecidable { .. })
-            && let Some(proved) = self.as_the_quadric_says(crossing, first, second)
+            && let Some(proved) = self
+                .as_the_quadric_says(
+                    crossing,
+                    [first, second],
+                    [first, second].map(|node| self.nodes[node].point),
+                )
+                .or_else(|| {
+                    self.as_the_quadric_says(
+                        crossing,
+                        [first, second],
+                        [first, second].map(|node| self.narrowed_box_of(node)),
+                    )
+                })
         {
             decided = proved;
         }
@@ -3977,7 +4044,19 @@ impl<'f> Arrangement<'f> {
             decided = proved;
         }
         if matches!(decided, Decision::Undecidable { .. })
-            && let Some(proved) = self.as_the_quadric_says(crossing, first, second)
+            && let Some(proved) = self
+                .as_the_quadric_says(
+                    crossing,
+                    [first, second],
+                    [first, second].map(|node| self.nodes[node].point),
+                )
+                .or_else(|| {
+                    self.as_the_quadric_says(
+                        crossing,
+                        [first, second],
+                        [first, second].map(|node| self.narrowed_box_of(node)),
+                    )
+                })
         {
             decided = proved;
         }
@@ -4067,9 +4146,22 @@ impl<'f> Arrangement<'f> {
             return Ok((decided, measures));
         }
         match self.how_far_apart_along(crossing, tight[0], tight[1]) {
-            Ok(proved @ (Decision::Pos | Decision::Neg)) => Ok((proved, measures)),
-            Ok(_) | Err(_) => Ok((decided, measures)),
+            Ok(proved @ (Decision::Pos | Decision::Neg)) => return Ok((proved, measures)),
+            Ok(_) | Err(_) => {}
         }
+        if let HowItRuns::RoundAClosedCurve {
+            from, ref wound_as, ..
+        } = self.crossings[crossing].order
+            && let Some(turned) = round_a_closed_crossing_by_its_angle(
+                [&wound_as[0], &wound_as[1]],
+                from,
+                tight[0],
+                tight[1],
+            )
+        {
+            return Ok((turned, measures));
+        }
+        Ok((decided, measures))
     }
 
     /// The node's own box narrowed, where the node is a meet of three planes,
@@ -4295,8 +4387,8 @@ impl<'f> Arrangement<'f> {
     fn as_the_quadric_says(
         &self,
         crossing: usize,
-        first: usize,
-        second: usize,
+        [first, second]: [usize; 2],
+        boxes: [PredicatePoint; 2],
     ) -> Option<Decision> {
         let HowItRuns::AlongAnAxis {
             axis,
@@ -4309,7 +4401,7 @@ impl<'f> Arrangement<'f> {
         let (Some(flat), Some(across)) = (self.surface.as_plane(), partner.as_plane()) else {
             return None;
         };
-        let [one, other] = [first, second].map(|node| self.nodes[node].point.enclosure()[axis]);
+        let [one, other] = boxes.map(|point| point.enclosure()[axis]);
         let (shared, first_is_short) = match (one.hi() == other.lo(), other.hi() == one.lo()) {
             (true, false) => (one.hi(), true),
             (false, true) => (other.hi(), false),
@@ -9486,13 +9578,16 @@ fn round_a_closed_crossing_by_its_angle(
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Option<Decision> {
-    let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
-    | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
-    else {
-        return None;
+    let (axis, a_pipe_cut_by) = match pair {
+        [Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)] => (pipe.axis(), Some(flat)),
+        [Surface::Plane(_), Surface::Cone(cone)] | [Surface::Cone(cone), Surface::Plane(_)] => {
+            (cone.axis(), None)
+        }
+        _ => return None,
     };
-    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
-    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let origin = axis.origin().coordinates().map(Interval::exactly);
+    let along = axis.direction().components().map(Interval::exactly);
     let off_the_axis = |place: PredicatePoint| {
         let at = place.enclosure();
         [0, 1, 2].map(|axis| at[axis] - origin[axis])
@@ -9520,6 +9615,12 @@ fn round_a_closed_crossing_by_its_angle(
     if proved(other_past_one) {
         return Some(other_past_one);
     }
+    let step = [0, 1, 2].map(|axis| second[axis] - first[axis]);
+    let stepped_past_one = (the_way_it_turns * turned(first, step)).sign();
+    if proved(stepped_past_one) {
+        return Some(stepped_past_one);
+    }
+    let flat = a_pipe_cut_by?;
     let other_up_past_one =
         (the_way_it_turns * turned_as_far_apart_up_the_axis(flat, along, first, second)).sign();
     proved(other_up_past_one).then_some(other_up_past_one)
