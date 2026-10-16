@@ -179,7 +179,15 @@ The rest were read, not run:
   C-shaped piece — Q897's kind of gap, but not Q897's own numbers: Q603's
   tube and bar are radius 3, 1 and 1.5, so this is a separate piece and not
   simply that one reproduced at another scale. Whether 365.6's rungs reach it
-  was not run here; Q715, running beside this row, replays it.
+  was not run here; Q715, running beside this row, replayed it: on
+  `39218a67` all 18 fuses (bar at `z` `0..4`, `-1..4` and `-1..3`, every rule
+  both orders) answered within `volume_error`, for example the `0..4` union at
+  `10894.322105` against the hand-worked `10894.409565`, error `0.5554`. A rung
+  placed each cap `C`, corners `(21, ±20)`, `(5, ±12)`, `(0, ∓13)` (gdb
+  breakpoints at `select.rs:428`, `:437` and `:158`). Q715 also answered the
+  39/25 tube (Q1031's other shape) six of six, before the rungs are even
+  reached. 365.6 adds the 29/13 tube and bar to the list of what the rungs
+  answer.
 
 ### 365.3 The choice: a piece placed from a side it shares with another solid's face
 
@@ -489,6 +497,14 @@ point worked by hand, `(−1.578125, 0)`, a quarter of the way back from
   search is still the six steps of the curved branch.
 - **Q714's closed circles** have no chord, so no rungs, as the row said
   (read, not run).
+- **Q576's/Q715's 29/13 tube and bar** (a tube of radius 29 less 13 united
+  with a bar of radius 20 at `(21, 0)`, pinned alongside Q603's tube and bar
+  in `a_tube_less_a_bar_united_with_a_second_bar.rs`, Q1031): all 18 fuses
+  (bar at `z` `0..4`, `-1..4` and `-1..3`, every rule both orders) answer
+  within `volume_error`, for example the `0..4` union at `10894.322105`
+  against the hand-worked `10894.409565`, error `0.5554`. A rung places each
+  cap `C`, corners `(21, ±20)`, `(5, ±12)`, `(0, ∓13)` (gdb breakpoints at
+  `select.rs:428`, `:437` and `:158`).
 
 **Pins that moved.** The row's files and the crate's own tests were run with
 their pins untouched, the slow tier among them: 525 tests, one failure.
