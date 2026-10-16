@@ -2882,9 +2882,10 @@ impl Assembly {
     /// one face (§426, queue row Q1446). More rings than that would leave the edge
     /// with no face along it, which [`Assembly::group_into_shells`] refuses as
     /// not a manifold. The edge still runs straight, since
-    /// [`Edge::how_it_runs`] reads two flat surfaces and two different ends as
-    /// straight whichever planes they are, and its two ends keep every other
-    /// edge they had.
+    /// [`Edge::how_it_runs`] writes `Straight` for every edge whose two
+    /// surfaces cross in a straight line between two different ends, a pipe's
+    /// ruling as much as two planes' line, and its two ends keep every other
+    /// edge they had. Which sides are straight is [`Edge::runs_straight`].
     ///
     /// **Which edge stays is chosen off what it runs along**, the lowest pair of
     /// [`name_of_surface_bits`] it is carried by, and never off its index here,
@@ -2937,8 +2938,8 @@ impl Assembly {
                 .map(|ring| match &ring[..] {
                     [one, other] => {
                         one.edge != other.edge
-                            && edges[one.edge].lies_on_two_planes()
-                            && edges[other.edge].lies_on_two_planes()
+                            && edges[one.edge].runs_straight()
+                            && edges[other.edge].runs_straight()
                     }
                     _ => false,
                 })
@@ -4837,6 +4838,24 @@ impl Edge {
         self.carried_by
             .iter()
             .all(|surface| surface.as_plane().is_some())
+    }
+
+    /// Whether this edge is a straight segment between two different corners,
+    /// whatever its two surfaces are.
+    ///
+    /// **A pipe's or a cone's ruling runs as straight as two planes' line.**
+    /// [`Edge::how_it_runs`] writes both [`EdgeRun::Straight`], and
+    /// `Model::wire_of_two_steps_bounds_a_face` reads that back, so a ruling
+    /// and a two-plane line between the same two corners are one segment
+    /// written twice. Asking [`Edge::lies_on_two_planes`] instead called them a
+    /// chord and its arc: a round bar notched by a block whose corner edge lies
+    /// on the bar's wall kept a sliver of the block's face between the two as a
+    /// ring of two sides, and the answer's own check refused it `WireTooShort`
+    /// (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`, queue rows
+    /// Q2067 and Q2079).
+    fn runs_straight(&self) -> bool {
+        self.ends[0] != self.ends[1]
+            && the_crossing_of_these_runs_straight(&self.carried_by) == Some(true)
     }
 
     /// The half-space holding the one nappe this edge runs on, when it runs
@@ -7970,14 +7989,25 @@ fn exactly_at(point: Point) -> [u64; 3] {
 /// hyperbola or a parabola a plane cuts on a cone, that cone and that plane;
 /// see [`which_open_crossing_of_a_cone_this_is`].
 ///
-/// The fifth is whether the edge is straight: both surfaces either side are
-/// planes. **A straight side and a curved one can share both corners**, and
-/// they are two edges. A half disk is one: `z ≤ 0.5` cut out of a half ball
-/// leaves on the plane `z = 0.5` a chord along `x = 0` and an arc round the
-/// ball, both from `(0, −√3/2, 0.5)` to `(0, √3/2, 0.5)`, and named by their
-/// corners alone the two were one edge with four faces along it. Whether the
-/// surfaces are planes is not a number, so it cannot split one edge in two
-/// the way the surfaces' own names would (see [`which_curve_it_is`]).
+/// The fifth is whether the edge is straight: the two surfaces either side
+/// cross in a straight line ([`the_crossing_of_these_runs_straight`]). **A
+/// straight side and a curved one can share both corners**, and they are two
+/// edges. A half disk is one: `z ≤ 0.5` cut out of a half ball leaves on the
+/// plane `z = 0.5` a chord along `x = 0` and an arc round the ball, both from
+/// `(0, −√3/2, 0.5)` to `(0, √3/2, 0.5)`, and named by their corners alone the
+/// two were one edge with four faces along it. Whether the crossing is
+/// straight is not a number, so it cannot split one edge in two the way the
+/// surfaces' own names would (see [`which_curve_it_is`]).
+///
+/// **Straight is what the crossing is, not what its surfaces are.** A pipe's
+/// ruling and the line two planes cross in, between the same two corners, are
+/// one segment, and [`Edge::how_it_runs`] writes both `Straight`. Asked
+/// whether both surfaces are planes, this field kept them two edges with one
+/// face each: a round bar notched by a block whose corner edge lies on the
+/// bar's wall, where the pipe's side `[pipe, x = 0.6r]` and the block's side
+/// `[y = 0.8r, x = 0.6r]` run between the same corners, was refused
+/// `ResultIsNotManifold` (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`,
+/// queue rows Q2074 and Q2079).
 type EdgeName = (
     [usize; 2],
     Option<CurveName>,
@@ -8079,9 +8109,7 @@ impl Edges {
             named,
             which_arc_of_a_circle_this_is(meet, from, to, policy, log)?,
             which_open_crossing_of_a_cone_this_is(meet, from, to),
-            carried_by
-                .iter()
-                .all(|surface| surface.as_plane().is_some()),
+            the_crossing_of_these_runs_straight(&carried_by) == Some(true),
         );
         let edge = match self.between.get(&key) {
             Some(&already) => {
@@ -9717,7 +9745,7 @@ fn a_ring_of_one_or_two_sides_bounds_something(ring: &[Side], edges: &[Edge]) ->
         [only] => edges[only.edge].ends[0] == edges[only.edge].ends[1],
         [one, other] => {
             one.edge != other.edge
-                && !(edges[one.edge].lies_on_two_planes() && edges[other.edge].lies_on_two_planes())
+                && !(edges[one.edge].runs_straight() && edges[other.edge].runs_straight())
         }
         _ => false,
     }
