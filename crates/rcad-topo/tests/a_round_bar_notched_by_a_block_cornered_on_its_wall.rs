@@ -1,7 +1,7 @@
 //! A round bar `add_round_bar(r, 2r)` and a block over `x ∈ [0.6r, 2r]`,
 //! `y ∈ [−2r, 0.8r]`, `z ∈ [−r, 3r]`, whose corner edge `(0.6r, 0.8r)` stands
 //! on the bar's wall, under a tolerant policy (rows Q2028, Q2067, Q2068,
-//! Q2074, Q2079, Q2081).
+//! Q2074, Q2079, Q2080, Q2081).
 //!
 //! **Q2074: with the corner edge exactly on the wall, every fuse was refused
 //! `ResultIsNotManifold { count: 1 }`**, at radius `5`, whose corner is
@@ -49,6 +49,25 @@
 //! `1.78e−15` from it, outside the bar.
 //! Q2079's change, which answers Q2074 and Q2067, leaves both unions and the
 //! bar less the block refused the same way; the row for it is Q2106.
+//!
+//! **Q2080: at working size `1`, every fuse at radii `8`, `12.8`, `16` and
+//! `25.6` was refused `Undecidable` at "order along a crossing".** On each cap
+//! the feet of the two rulings a hair apart are stored in boxes that overlap,
+//! and the sweep that orders them round the rim was undecided and filed as an
+//! area, `2.13e−14` at radius `8`, which `Policy::tolerant(1)` refuses, while
+//! at working sizes `10` to `100` the same fuses get past it. Two boxes that
+//! overlap may hold one point, so that order is now filed as a length: how far
+//! apart a point of one box may be from a point of the other, which bounds
+//! what a merge of the two moves a point by: `1.26e−15` at radius `8`, where
+//! the wider box's side is `1.78e−15`. That answers every fuse at radii `8`
+//! and `16`. At `12.8` and `25.6` the order is decided, and no fuse logs one,
+//! so they get past it without that change: put back to file the sweep as an
+//! area, the pins at those two radii still pass. Both
+//! intersections and the block less the bar answer with their volumes, and
+//! the union in either order and the bar less the block are refused
+//! `CannotMeshAFace` for two corners of a cap stored at one point, as at
+//! radius `24.32` above. Whether they are the same two feet as there was not
+//! checked.
 
 #![forbid(unsafe_code)]
 
@@ -57,7 +76,7 @@ use std::time::Duration;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_mesh::CannotTriangulate;
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Measures, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 /// Q2074's shapes, as `(radius, working size)`: radius `5`, whose corner
@@ -99,6 +118,128 @@ fn every_fuse_with_the_corner_edge_on_the_wall_answers_with_its_volume() {
 fn every_fuse_at_radius_17_92_and_its_images_answers_with_its_volume() {
     let wrong = what_each_fuse_gets_wrong(&A_SLIVER_BESIDE_THE_CORNER_EDGE);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Q2080's shapes: radii `8` and `16`, one an image of the other under a scale
+/// by two, at working size `1`.
+const THE_RULINGS_FEET_A_HAIR_APART_AT_WORKING_SIZE_1: [(f64, f64); 2] = [(8.0, 1.0), (16.0, 1.0)];
+
+#[test]
+fn every_fuse_with_the_rulings_feet_a_hair_apart_at_working_size_1_answers_with_its_volume() {
+    let wrong = what_each_fuse_gets_wrong(&THE_RULINGS_FEET_A_HAIR_APART_AT_WORKING_SIZE_1);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// At radius `8` and working size `1` every fuse files some order along a
+/// crossing as how far apart a point of one of its two boxes may be from a
+/// point of the other, rounded up by a few ulps, a length: `1.26e−15` at the
+/// widest, where the wider of those two boxes is `1.78e−15` wide. Filed as
+/// the wider box's side, the merge would have been read as wider than any
+/// two points of the boxes can be apart.
+#[test]
+fn the_rulings_feet_at_radius_8_are_ordered_by_how_far_apart_their_boxes_let_them_be() {
+    let (radius, size) = (8.0, 1.0);
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        for bar_first in [true, false] {
+            let (mut model, bar, block) = the_bar_and_the_block(radius, size);
+            let (arguments, tools) = if bar_first {
+                ([bar], [block])
+            } else {
+                ([block], [bar])
+            };
+            let mut log = ProvenanceLog::new();
+            model
+                .fuse(&arguments, &tools, rule, &Policy::tolerant(size), &mut log)
+                .unwrap_or_else(|why| panic!("{rule:?} {bar_first}: {why:?}"));
+            let widest = log
+                .records()
+                .iter()
+                .filter(|record| record.predicate() == "order along a crossing")
+                .filter_map(|record| {
+                    let [one, other] = record.inputs() else {
+                        return None;
+                    };
+                    let apart = how_far_apart_the_two_may_be(*one, *other);
+                    let side = one.uncertainty().max(other.uncertainty());
+                    let enclosure = record.enclosure();
+                    (record.measures() == Measures::Length
+                        && apart <= enclosure
+                        && enclosure <= apart * (1.0 + 8.0 * f64::EPSILON)
+                        && enclosure < side)
+                        .then_some((enclosure, side))
+                })
+                .max_by(|a, b| a.0.total_cmp(&b.0));
+            let Some((enclosure, side)) = widest else {
+                panic!("{rule:?} {bar_first}: {:#?}", log.records());
+            };
+            println!("{rule:?} bar first {bar_first}: filed {enclosure:e}, wider side {side:e}");
+        }
+    }
+}
+
+/// How far apart a point of the first box may be from a point of the second.
+fn how_far_apart_the_two_may_be(one: PredicatePoint, other: PredicatePoint) -> f64 {
+    let (mine, theirs) = (one.enclosure(), other.enclosure());
+    (0..3)
+        .map(|axis| {
+            let furthest =
+                (mine[axis].hi() - theirs[axis].lo()).max(theirs[axis].hi() - mine[axis].lo());
+            furthest * furthest
+        })
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// The rest of Q2080's shapes: radii `12.8` and `25.6`, one an image of the
+/// other under a scale by two, at working size `1`. Their fuses get past the
+/// order of the rulings' feet, whichever way it is filed, and three of the six
+/// then reach a cap that names one corner twice.
+const A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1: [(f64, f64); 2] = [(12.8, 1.0), (25.6, 1.0)];
+
+#[test]
+fn both_intersections_and_the_block_less_the_bar_at_radii_12_8_and_25_6_answer_with_their_volumes()
+{
+    let mut wrong = Vec::new();
+    for (radius, size) in A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1 {
+        for (rule, bar_first) in [
+            (Rule::Intersection, true),
+            (Rule::Intersection, false),
+            (Rule::Difference, false),
+        ] {
+            if let Err(why) = the_fuse_answers_with_its_volume(radius, size, rule, bar_first) {
+                wrong.push(format!(
+                    "radius {radius}, working size {size}, {rule:?}, bar first {bar_first}: {why}"
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Both unions and the bar less the block at radii `12.8` and `25.6` are
+/// refused by the mesher, for two corners of a cap stored at one point, as
+/// the unions at radius `24.32` are. This pins the gap, so that the row which
+/// answers it moves this test.
+#[test]
+fn both_unions_and_the_bar_less_the_block_at_radii_12_8_and_25_6_name_one_cap_corner_twice() {
+    for (radius, size) in A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1 {
+        for (rule, bar_first) in [
+            (Rule::Union, true),
+            (Rule::Union, false),
+            (Rule::Difference, true),
+        ] {
+            let answer = the_fuse_of_the_bar_and_the_block(radius, size, rule, bar_first);
+            let Err(Error::CannotMeshAFace {
+                why: CannotTriangulate::CornersCoincide { .. },
+                ..
+            }) = answer
+            else {
+                panic!(
+                    "radius {radius}, working size {size}, {rule:?}, bar first {bar_first}: {answer:?}"
+                );
+            };
+        }
+    }
 }
 
 #[test]
@@ -232,12 +373,27 @@ fn the_union_within_ten_seconds(radius: f64, size: f64) -> Option<rcad_topo::Res
 /// What the union, bar first, comes back as: how many solids it holds, or the
 /// refusal.
 fn the_union_of_the_bar_and_the_block(radius: f64, size: f64) -> rcad_topo::Result<usize> {
+    the_fuse_of_the_bar_and_the_block(radius, size, Rule::Union, true)
+}
+
+/// What one fuse comes back as: how many solids it holds, or the refusal.
+fn the_fuse_of_the_bar_and_the_block(
+    radius: f64,
+    size: f64,
+    rule: Rule,
+    bar_first: bool,
+) -> rcad_topo::Result<usize> {
     let (mut model, bar, block) = the_bar_and_the_block(radius, size);
+    let (arguments, tools) = if bar_first {
+        ([bar], [block])
+    } else {
+        ([block], [bar])
+    };
     model
         .fuse(
-            &[bar],
-            &[block],
-            Rule::Union,
+            &arguments,
+            &tools,
+            rule,
             &Policy::tolerant(size),
             &mut ProvenanceLog::new(),
         )
