@@ -1,7 +1,7 @@
 //! A round bar `add_round_bar(r, 2r)` and a block over `x ∈ [0.6r, 2r]`,
 //! `y ∈ [−2r, 0.8r]`, `z ∈ [−r, 3r]`, whose corner edge `(0.6r, 0.8r)` stands
 //! on the bar's wall, under a tolerant policy (rows Q2028, Q2067, Q2068,
-//! Q2074, Q2079, Q2081).
+//! Q2074, Q2079, Q2080, Q2081).
 //!
 //! **Q2074: with the corner edge exactly on the wall, every fuse was refused
 //! `ResultIsNotManifold { count: 1 }`**, at radius `5`, whose corner is
@@ -49,6 +49,21 @@
 //! `1.78e−15` from it, outside the bar.
 //! Q2079's change, which answers Q2074 and Q2067, leaves both unions and the
 //! bar less the block refused the same way; the row for it is Q2106.
+//!
+//! **Q2080: at working size `1`, every fuse at radii `8`, `12.8`, `16` and
+//! `25.6` was refused `Undecidable` at "order along a crossing".** On each cap
+//! the feet of the two rulings a hair apart are stored in boxes that overlap,
+//! and the sweep that orders them round the rim was undecided and filed as an
+//! area, `2.13e−14` at radius `8`, which `Policy::tolerant(1)` refuses, while
+//! at working sizes `10` to `100` the same fuses get past it. Two boxes that
+//! overlap may hold one point, so that order is now filed as a length, as wide
+//! as the wider box, which bounds what a merge of the two moves a point by.
+//! That answers radii `8` and `16`. At `12.8` and `25.6` the fuses get past
+//! the order and are refused `CannotTellTheCellsOfAFaceApart` on the bar's
+//! pipe face, since the top cap merges the two feet and the bottom cap proves
+//! them apart: that is Q2082's fault, at another working size. Past Q2082's
+//! fix, the union in either order and the bar less the block are refused for
+//! two corners of a cap stored at one point, Q2106's mechanism above.
 
 #![forbid(unsafe_code)]
 
@@ -101,10 +116,11 @@ fn every_fuse_at_radius_17_92_and_its_images_answers_with_its_volume() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Q2080's shapes: radii `8` and `16`, and `12.8` and `25.6`, each pair an
-/// image of the other under a scale by two, all at working size `1`.
-const THE_RULINGS_FEET_A_HAIR_APART_AT_WORKING_SIZE_1: [(f64, f64); 4] =
-    [(8.0, 1.0), (12.8, 1.0), (16.0, 1.0), (25.6, 1.0)];
+/// Q2080's shapes: radii `8` and `16`, one an image of the other under a scale
+/// by two, at working size `1`. Radii `12.8` and `25.6` at working size `1`
+/// are of the same family and are left out until they answer; the module's
+/// doc says what refuses them.
+const THE_RULINGS_FEET_A_HAIR_APART_AT_WORKING_SIZE_1: [(f64, f64); 2] = [(8.0, 1.0), (16.0, 1.0)];
 
 #[test]
 fn every_fuse_with_the_rulings_feet_a_hair_apart_at_working_size_1_answers_with_its_volume() {
