@@ -4,7 +4,7 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and nine ways round it
+//! # Two planes and a quadric is the road, and ten ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
@@ -433,7 +433,7 @@ impl MeetOfThree {
 /// # Errors
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
-/// the three are planes and none of the nine ways round that the module doc
+/// the three are planes and none of the ten ways round that the module doc
 /// names runs — for three curved surfaces, after the plane two of them differ
 /// by has taken one's place, or where no two of them differ by one.
 ///

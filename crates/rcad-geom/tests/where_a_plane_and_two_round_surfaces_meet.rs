@@ -28,11 +28,20 @@
 //!   other surface where a quadratic is zero. A floor along one of two bars
 //!   that cross is it.
 //!
-//! **One more is a quartic, but one with no root to find**: a plane cuts a
-//! ball, a pipe or a cone in a curve that keeps between two distances from
-//! where the axis crosses it, and where two such bands keep apart the three
-//! share nothing. A cap a rounding off square to a bar and its chamfer cone is
-//! it.
+//! **Two more are quartics, but ones no algebraic solver is needed for.** A
+//! plane cuts a ball, a pipe or a cone in a curve that keeps between two
+//! distances from where the axis crosses it:
+//!
+//! - Where two such bands keep apart the three share nothing. A cap a rounding
+//!   off square to a bar and a chamfer cone it keeps apart from is it.
+//! - Where the bands overlap and the plane is near enough square to both axes,
+//!   one curve is a line bent by little across the other, and they cross at two
+//!   points, one on each side of where the other's axis crosses the plane, or
+//!   nowhere.
+//!   The same cap across a bar and a cone it cuts in one circle on paper is it.
+//!   A ball whose centre is on a pipe's or a cone's axis touches it along a
+//!   circle on a plane known exactly, and that plane answers it instead: a
+//!   slanted cut through where a rod's round end meets it.
 //!
 //! Every corner below is worked out by hand first and written in the test, and
 //! every one of them lands on a whole number — so a box round it has no width
@@ -894,7 +903,11 @@ fn a_flat_beside_a_cone_and_a_ball_on_its_axis_touches_one_of_their_circles_or_m
 
 /// **An axis that leans to the plane is not this road**, even with a ball
 /// centred on it: the plane cuts the pipe in an ellipse, and an ellipse and a
-/// circle are the quartic again.
+/// circle are the quartic again. The road for curves that cross does not reach
+/// it either. The ball crosses the pipe in two circles rather than touching it
+/// along one, so no plane known exactly takes the pipe's place, and the floor
+/// leans too far off square to the pipe for its ellipse to be a line bent by
+/// little across the circle.
 ///
 /// A pipe of radius twelve along `(0, 3, 4)` through the origin and a ball of
 /// radius thirteen about `(0, 3, 4)`, cut by the floor `z = 0`. The `x` axis is
@@ -1267,8 +1280,8 @@ fn turning_the_whole_sweep_by_one_isometry_disagrees_with_the_closed_form_only_o
 
 /// **A cap turned by a different composition of turns from its pair rounds
 /// its stored axis off square. Where the closed form says the three share
-/// nothing it is answered nowhere, and where it says one circle it is refused
-/// rather than guessed.**
+/// nothing it is answered nowhere, and where it says one circle it is answered
+/// at two points or nowhere, and never refused.**
 ///
 /// [`Isometry::compose`]'s own doc comment says why this is a real path and
 /// not a contrived one: "Any other two turns are multiplied as quaternions,
@@ -1297,12 +1310,16 @@ fn turning_the_whole_sweep_by_one_isometry_disagrees_with_the_closed_form_only_o
 /// and the cap a rounding off square only widens each cut into a band about a
 /// rounding wide. So the bands keep apart, and every such row is answered
 /// nowhere: the test asserts it. Where the closed form says one shared
-/// circle, the rounding leaves two near-equal curves whose bands overlap, and
-/// where they cross is the quartic the module doc of `three_surfaces.rs`
-/// defers. Those rows are the refusals. Ball-ball and pipe-pipe have none,
-/// since two balls, or two pipes running the same way, differ by something
-/// linear and an earlier road answers them. Pinned in
-/// [`ROUNDING_OFF_SQUARE_CAP_REFUSALS`] as measured, the same way
+/// circle, the rounding leaves two near-equal curves whose bands overlap. The
+/// road for bands that cross answers those at two points where the curves
+/// cross, each a box no more than `1e-12` wide that no surface is certified
+/// off, and nowhere where one curve keeps inside the other. A ball and a pipe
+/// or a cone that touch along a circle, the ball's centre on the axis, have
+/// curves that touch rather than cross, and those rows are answered through
+/// the plane of that circle, which is known exactly. Ball-ball and pipe-pipe
+/// go to an earlier road, since two balls, or two pipes running the same way,
+/// differ by something linear. Pinned in
+/// [`ROUNDING_OFF_SQUARE_CAP_ANSWERS`] as measured, the same way
 /// [`TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED`] pins a count no formula derives —
 /// a change here says the rounding moved, not that it is wrong.
 #[test]
@@ -1452,9 +1469,11 @@ const ROUNDING_OFF_SQUARE_CAP_ANSWERS: [[usize; 3]; 6] = [
 /// radius two about that point in a circle of radius two. So no point is on all
 /// three, and no quartic is needed to say so.
 ///
-/// The bar of radius five against the same cone is still refused: the two
-/// bands overlap, the ellipses cross, and where is the quartic the module doc
-/// of `three_surfaces.rs` defers.
+/// The bar of radius five against the same cone has bands that overlap, and
+/// its ellipse crosses the cone's at `(±5, 0, 5)`, where the cap crosses the
+/// circle of radius five the two share. The cap is stored with its normal
+/// scaled to length one, which rounds, so the points come back within `1e-13`
+/// of those and not on them.
 #[test]
 fn a_cap_leaning_off_square_to_a_bar_meets_it_and_a_cone_or_a_ball_it_keeps_apart_nowhere() {
     let cap = flat([0.0, 1.0, 100.0], [0.0, 0.0, 5.0]);
