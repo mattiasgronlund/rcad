@@ -2313,6 +2313,43 @@ fn a_disc_drawn_by_a_pipe_from_far_below_its_top_comes_back_from_its_own_file() 
     );
 }
 
+/// Two of [`a_disc_drawn_by_a_pipe_from_far_below_its_top_comes_back_from_its_own_file`]'s
+/// bars in one model, one drawn by a pipe up `z` from `z = -15.9` and the
+/// other from `z = -7.3`, both placed by each of the first 300 movements
+/// [`a_movement`] draws and then by none. The two pipes are on one line with
+/// one radius, so each walks the other's circle round the same centre, to
+/// the bit, under some of the movements. A reader that took the first pipe of
+/// the file's whose walk lands on a circle's centre named one solid's circle
+/// by the other solid's pipe there, and 6 of the 301 came back with a
+/// different edge run (`docs/decisions.md` §249.8). So the circle names the
+/// pipe it is walked by (`Writing::an_arc_of_a_circle_on_a_flat_face`).
+#[test]
+fn two_discs_drawn_by_pipes_from_two_origins_on_one_line_come_back_from_their_own_file() {
+    for seed in 0..=300 {
+        let placement = if seed == 300 {
+            Isometry::identity()
+        } else {
+            a_movement(&mut Draw::new(seed))
+        };
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        for z in [-15.9, -7.3] {
+            let solid =
+                a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, z), 1.0)
+                    .expect("a bar with a disc drawn by a pipe from below fits this model");
+            model
+                .place_solid(solid, &placement)
+                .expect("the key came from this model");
+        }
+        let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+        let reached = one_model_decoded_and_written(&bytes);
+        assert_eq!(
+            (reached.came_back_the_same, reached.solids_the_same),
+            (1, 2),
+            "{seed}, {placement:?}: {reached:?}"
+        );
+    }
+}
+
 /// [`a_bar_with_a_leaning_disc_drawn_by_a_pipe_off_its_own_plane`], never
 /// placed: its pipe leans off every one of `x`, `y` and `z`, and its own
 /// origin starts at the bar's floor, off the flat face its circle is drawn
