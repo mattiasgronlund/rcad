@@ -57,14 +57,28 @@
 //! proved clear of that circle.
 //! `a_bar_turned_onto_x_by_a_float_angle_along_a_blocks_top_answers_every_rule`
 //! and its twin on the block's floor pin it.
+//!
+//! **The same bar turned the other way, by `−π/2`, is not clear of the block:
+//! it dips into it by `2⁻¹⁰⁵`** (queue row Q2141). Its cap at the low end is
+//! stored `2⁻⁵²` past the end of its axis, since the offset the cap's plane
+//! needs falls halfway between two `f64`s and rounds outward, and there the
+//! pipe's underside is already below the block's top. So the cap circle crosses
+//! the top, and the two share a sliver.
+//! `the_cap_circle_of_a_bar_turned_back_onto_x_crosses_the_blocks_top_and_floor`
+//! proves it. That sliver is the answer, and no fuse reaches it yet: every
+//! certified one is refused `Undecidable` at the order along a crossing of the
+//! two points the cap circle crosses the top at, and every tolerant one
+//! `TwoCurvesTouchWithoutCrossing`. The two pins under that test hold those
+//! refusals, along the top and along the floor.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, Deflection, Isometry, Plane, Scale, Surface, SurfaceMeet, Vector, intersect,
+    Axis, Cylinder, Deflection, Isometry, MeetOfThree, Plane, Point, Scale, Surface, SurfaceMeet,
+    Vector, intersect, meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{EdgeKey, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{EdgeKey, Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
 /// How far under the closed form a bar's meshed volume may be.
 ///
@@ -1346,18 +1360,138 @@ fn a_bar_turned_onto_x_by_a_float_angle_along_a_blocks_top_answers_every_rule() 
     );
 }
 
+/// Where the block's top or floor, the cap at the low end of a bar turned onto
+/// `x`, and the bar's pipe meet, read off the surfaces the model holds placed
+/// (queue row Q2141).
+///
+/// **Turned the other way, by `−π/2`, the bar dips into the block.** From
+/// `(3, 2, 5)` its axis runs along `(−1, 0, 2⁻⁵²)`, and its cap there is the
+/// plane `(1, 0, −2⁻⁵²) · p = 3 − 4·2⁻⁵²`. The plane square to the axis through
+/// its start has `3 − 5·2⁻⁵²` there, which falls halfway between two `f64`s
+/// and rounds to the even one, so the cap stands `2⁻⁵²` past the axis's end,
+/// where the pipe's underside is `2⁻¹⁰⁵` below the block's top. The three meet
+/// in two points round `(3, 2, 4)`, proved under `certified`: the cap circle
+/// crosses the top, and the bar and the block share a sliver. Sunk to
+/// `(3, 2, 1)`, the cap's `3 − 2⁻⁵²` rounds to `3` and the same happens round
+/// `(3, 2, 0)`.
+///
+/// The bars turned by `π/2` that Q2102 lays from `(1, 2, 5)` and `(1, 2, 1)`
+/// have caps at `−1 − 5·2⁻⁵²` and `−1 − 2⁻⁵²`, which `f64` holds, and meet the
+/// top and the floor nowhere.
+#[test]
+fn the_cap_circle_of_a_bar_turned_back_onto_x_crosses_the_blocks_top_and_floor() {
+    let mut wrong: Vec<String> = Vec::new();
+    for (turn, at, height, cap_offset, crosses) in [
+        (
+            -PI / 2.0,
+            [3.0, 2.0, 5.0],
+            4.0,
+            3.0 - 4.0 * f64::EPSILON,
+            true,
+        ),
+        (-PI / 2.0, [3.0, 2.0, 1.0], 0.0, 3.0, true),
+        (
+            PI / 2.0,
+            [1.0, 2.0, 5.0],
+            4.0,
+            -1.0 - 5.0 * f64::EPSILON,
+            false,
+        ),
+        (PI / 2.0, [1.0, 2.0, 1.0], 0.0, -1.0 - f64::EPSILON, false),
+    ] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = a_block(&mut model, [4.0, 4.0, 4.0]);
+        let bar = a_bar_turned_onto_x(&mut model, turn, at);
+        let (plane, cap, pipe) = the_plane_the_low_cap_and_the_pipe(&model, block, bar, height);
+        let mut log = ProvenanceLog::new();
+        let meet = meet_of_three_surfaces(
+            [
+                &Surface::Plane(plane),
+                &Surface::Plane(cap),
+                &Surface::Cylinder(pipe),
+            ],
+            &Policy::certified(),
+            &mut log,
+        );
+        let as_it_should = if crosses {
+            matches!(&meet, Ok(MeetOfThree::At(points)) if points.len() == 2
+            && points.iter().all(|point| {
+                point
+                    .enclosure()
+                    .iter()
+                    .zip([at[0], 2.0, height])
+                    .all(|(side, near)| near - 1e-14 < side.lo() && side.hi() < near + 1e-14)
+            }))
+        } else {
+            matches!(meet, Ok(MeetOfThree::Nowhere))
+        };
+        if !as_it_should || !log.records().is_empty() || cap.offset() != cap_offset {
+            wrong.push(format!(
+                "turned {turn} from {at:?}: {meet:?}, records {:?}, cap {cap:?}, pipe {pipe:?}",
+                log.records()
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The block's face at `height`, the cap of the bar whose plane runs nearest
+/// the start of the bar's axis, and the bar's pipe, as the model holds them
+/// placed.
+fn the_plane_the_low_cap_and_the_pipe(
+    model: &Model,
+    block: SolidKey,
+    bar: SolidKey,
+    height: f64,
+) -> (Plane, Plane, Cylinder) {
+    let plane = model
+        .solid(block)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.plane())
+        .find(|plane| {
+            plane.normal().z() != 0.0
+                && plane.signed_distance_to(Point::new(2.0, 2.0, height)) == 0.0
+        })
+        .expect("the block has a face at that height");
+    let surfaces: Vec<Surface> = model
+        .solid(bar)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.surface())
+        .collect();
+    let Some(Surface::Cylinder(pipe)) = surfaces
+        .iter()
+        .find(|surface| matches!(surface, Surface::Cylinder(_)))
+    else {
+        panic!("a bar has a round skin: {surfaces:?}");
+    };
+    let cap = surfaces
+        .iter()
+        .filter_map(|surface| {
+            if let Surface::Plane(cap) = surface {
+                Some(cap)
+            } else {
+                None
+            }
+        })
+        .min_by(|one, other| {
+            let off = |cap: &Plane| cap.signed_distance_to(pipe.axis().origin()).abs();
+            off(one).total_cmp(&off(other))
+        })
+        .expect("a bar has two caps");
+    (plane, *cap, *pipe)
+}
+
 /// The bar of the test above turned the other way, about `y` by `−π/2`, and
 /// shifted to `(3, 2, 5)`, so it lies on the same line `(x, 2, 4)` from `x = 3`
 /// to 1, its axis along `(−1, 0, 2⁻⁵²)` and its seam along its top (queue row
-/// Q2141). It is clear of the block by the same `1 − 1/√(1 + 2⁻¹⁰⁴)` at its
-/// near end, and every rule answers as the bar along the top does.
+/// Q2141). **Pinned as it answers**: every certified fuse, both ways round, is
+/// refused `Undecidable` at the order along a crossing, and every tolerant one
+/// `TwoCurvesTouchWithoutCrossing`.
 #[test]
-fn a_bar_turned_back_onto_x_by_a_float_angle_along_a_blocks_top_answers_every_rule() {
-    every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
-        -PI / 2.0,
-        [3.0, 2.0, 5.0],
-        a_bar_clear_of_the_block,
-    );
+fn every_fuse_of_a_bar_turned_back_onto_x_dipping_through_a_blocks_top_is_refused() {
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_is_refused(-PI / 2.0, [3.0, 2.0, 5.0]);
 }
 
 /// What every rule gives for the block `[0, 4]³` and a bar of radius one, two
@@ -1392,16 +1526,12 @@ fn a_block_less_a_bar_turned_onto_x_by_a_float_angle_along_its_floor_keeps_the_b
 }
 
 /// The bar turned about `y` by `−π/2` sunk onto the block's floor along
-/// `(x, 2, 0)`, its axis from `(3, 2, 1)` (queue row Q2141): the answers of the
-/// test above.
+/// `(x, 2, 0)`, its axis from `(3, 2, 1)` (queue row Q2141), which dips through
+/// the floor as the bar along the top dips through the top. Pinned as it
+/// answers, the refusals of the bar along the top.
 #[test]
-fn a_block_less_a_bar_turned_back_onto_x_by_a_float_angle_along_its_floor_keeps_the_bar_as_a_hollow()
- {
-    every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
-        -PI / 2.0,
-        [3.0, 2.0, 1.0],
-        a_bar_inside_the_block,
-    );
+fn every_fuse_of_a_bar_turned_back_onto_x_dipping_through_a_blocks_floor_is_refused() {
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_is_refused(-PI / 2.0, [3.0, 2.0, 1.0]);
 }
 
 /// What every rule gives for the block `[0, 4]³` and a bar of radius one, two
@@ -1430,25 +1560,14 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
 ) {
     let mut wrong: Vec<String> = Vec::new();
     for bar_first in [false, true] {
-        for policy_name in ["certified", "tolerant"] {
+        for certified in [true, false] {
             for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-                let mut model =
-                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-                let block = a_block(&mut model, [4.0, 4.0, 4.0]);
-                let bar = a_bar_turned_onto_x(&mut model, turn, at);
-                let [first, second] = if bar_first {
-                    [bar, block]
-                } else {
-                    [block, bar]
-                };
-                let policy = if policy_name == "certified" {
-                    Policy::certified()
-                } else {
-                    Policy::tolerant(100.0)
-                };
-                let what = format!("{rule:?}, bar first {bar_first}, {policy_name}");
+                let what = format!("{rule:?}, bar first {bar_first}, certified {certified}");
                 let mut log = ProvenanceLog::new();
-                let answer = match model.fuse(&[first], &[second], rule, &policy, &mut log) {
+                let (model, fused) = fuse_a_block_and_a_bar_turned_onto_x(
+                    turn, at, rule, bar_first, certified, &mut log,
+                );
+                let answer = match fused {
                     Ok(answer) => answer,
                     Err(why) => {
                         wrong.push(format!("{what}: refused {why:?}"));
@@ -1490,6 +1609,69 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every rule, both ways round, of the block `[0, 4]³` and
+/// [`a_bar_turned_onto_x`] by `turn` from `at`: refused `Undecidable` at the
+/// order along a crossing under `certified`, and refused
+/// `TwoCurvesTouchWithoutCrossing` under `tolerant`.
+fn every_fuse_of_a_block_and_a_bar_turned_onto_x_is_refused(turn: f64, at: [f64; 3]) {
+    let mut wrong: Vec<String> = Vec::new();
+    for bar_first in [false, true] {
+        for certified in [true, false] {
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                let (_, fused) = fuse_a_block_and_a_bar_turned_onto_x(
+                    turn,
+                    at,
+                    rule,
+                    bar_first,
+                    certified,
+                    &mut ProvenanceLog::new(),
+                );
+                let as_pinned = if certified {
+                    matches!(&fused, Err(Error::Undecidable { records })
+                        if records.records().last().map(|record| record.predicate())
+                            == Some("order along a crossing"))
+                } else {
+                    matches!(fused, Err(Error::TwoCurvesTouchWithoutCrossing { .. }))
+                };
+                if !as_pinned {
+                    wrong.push(format!(
+                        "{rule:?}, bar first {bar_first}, certified {certified}: {fused:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The block `[0, 4]³` and [`a_bar_turned_onto_x`] by `turn` from `at`, fused
+/// by `rule` with the bar first or second, under `certified` or under
+/// `tolerant`, and the model the answer is in.
+fn fuse_a_block_and_a_bar_turned_onto_x(
+    turn: f64,
+    at: [f64; 3],
+    rule: Rule,
+    bar_first: bool,
+    certified: bool,
+    log: &mut ProvenanceLog,
+) -> (Model, rcad_topo::Result<Fused>) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let block = a_block(&mut model, [4.0, 4.0, 4.0]);
+    let bar = a_bar_turned_onto_x(&mut model, turn, at);
+    let [first, second] = if bar_first {
+        [bar, block]
+    } else {
+        [block, bar]
+    };
+    let policy = if certified {
+        Policy::certified()
+    } else {
+        Policy::tolerant(100.0)
+    };
+    let fused = model.fuse(&[first], &[second], rule, &policy, log);
+    (model, fused)
 }
 
 /// One solid of an answer: the faces in each of its shells, and its volume.
