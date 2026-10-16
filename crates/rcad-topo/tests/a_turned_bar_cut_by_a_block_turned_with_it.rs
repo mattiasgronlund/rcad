@@ -403,46 +403,27 @@ fn the_frustums_own_volume() -> f64 {
 #[test]
 fn a_block_wholly_inside_a_frustum_unturned_or_turned_an_exact_half_turn_answers_every_fuse_both_ways_round()
  {
-    answers_every_frustum_fuse_both_ways_round("unturned", &Isometry::identity(), None);
-    answers_every_frustum_fuse_both_ways_round("an exact half turn", &half_a_turn_exactly(), None);
+    answers_every_frustum_fuse_both_ways_round("unturned", &Isometry::identity());
+    answers_every_frustum_fuse_both_ways_round("an exact half turn", &half_a_turn_exactly());
 }
 
-/// Turned half a turn about `y` by `rotation`, every combination still
-/// answers **except** `Difference` with the frustum as the argument — cutting
-/// the block out of the frustum. That one is refused
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] on the frustum's lateral
-/// face, under both policies, though the block never touches that face: its
-/// farthest corner is `0.88` inside it, at the tightest end. `sin π` rounds to
-/// `1.2e-16`, same as Q1737's bar, and
-/// [`the_node_round_the_start`](rcad_topo) — the step Q1737 added so a loop is
-/// counted from its own corner's box rather than losing the corner among the
-/// nodes near it — matches `[Surface::Plane, Surface::Cylinder]` only. A
-/// frustum's wall is `Surface::Cone`, so its own bottom corner, moved into the
-/// same kind of box by the same rounding, gets no such match, and whatever
-/// reads the frustum's cone face's loop from an un-arranged start refuses it.
-/// This is a
-/// different error, on a different shape, than Q1956's twelve plane-and-cone
-/// ellipse refusals (`CannotTellTheCellsOfAFaceApart` on a cube's plane
-/// crossing a cone sideways) — not a repeat of that row.
+/// Turned half a turn about `y` by `rotation`, every combination answers what
+/// it holds by hand too, cutting the block out of the frustum included. That
+/// one was refused `AFaceTrimmedByACurveThisCannotFollow` on the frustum's
+/// lateral face, under both policies, though the block never touches that
+/// face: its farthest corner is `0.88` inside it, at the tightest end (Q1969).
 #[test]
-fn turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refused() {
+fn turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_answers_by_hand() {
     answers_every_frustum_fuse_both_ways_round(
         "half a turn by rotation",
         &half_a_turn_by_rotation(),
-        Some(Rule::Difference),
     );
 }
 
 /// Fuses the frustum of [`FRUSTUM_NOTCH`] with the block wholly inside it,
 /// both placed by `turn`, by every rule both ways round, under both policies,
-/// and checks each answers what it holds by hand with nothing logged —
-/// except `refused_rule` with the frustum as the argument, which it checks is
-/// refused [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead.
-fn answers_every_frustum_fuse_both_ways_round(
-    which: &str,
-    turn: &Isometry,
-    refused_rule: Option<Rule>,
-) {
+/// and checks each answers what it holds by hand with nothing logged.
+fn answers_every_frustum_fuse_both_ways_round(which: &str, turn: &Isometry) {
     let frustum_volume = the_frustums_own_volume();
     let block_volume = SIDE * SIDE * SIDE;
     for tolerant in [false, true] {
@@ -463,16 +444,8 @@ fn answers_every_frustum_fuse_both_ways_round(
                     (notch, frustum)
                 };
                 let mut log = ProvenanceLog::new();
-                let result = model.fuse(&[first], &[second], rule, &policy, &mut log);
-                if Some(rule) == refused_rule && frustum_is_argument {
-                    let why = result.expect_err(&format!("{what}: expected a refusal"));
-                    assert!(
-                        matches!(why, Error::AFaceTrimmedByACurveThisCannotFollow { .. }),
-                        "{what}: {why:?}"
-                    );
-                    continue;
-                }
-                let fused = result
+                let fused = model
+                    .fuse(&[first], &[second], rule, &policy, &mut log)
                     .unwrap_or_else(|why| panic!("{what}: {why:?}"))
                     .solids()
                     .to_vec();
