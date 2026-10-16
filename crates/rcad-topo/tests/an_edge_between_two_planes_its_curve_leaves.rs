@@ -170,23 +170,24 @@ fn the_sweep_refuses_the_tilted_half_disc_read_back_from_bytes() {
 ///
 /// Each bar here runs from `z = −1000` up to its lid at 4, with the piece of
 /// its lid `2e-12` off the lid at the far side of its curve: a disc and a half
-/// disc that high above the lid, and a half disc leaning along its chord. That
+/// disc that high above the lid, a disc leaning through its corner and a half
+/// disc leaning along its chord. That
 /// is inside the `1.4e-11` room a corner `1000` out gets, so each builds and
 /// passes the sweep, and outside the `5.7e-14` room of the answer cut down to
 /// the top 4. Whatever the fuse answers, the model is left holding the two
 /// solids it held, or every solid it made passes the sweep.
 ///
 /// Today none of them reaches that sweep: two planes apart meet nowhere, and
-/// the half disc leaning along its chord is refused `Undecidable`, ordering
-/// corners along the lid's rim. The disc leaning through its corner is left
-/// out, because the fuse panics on it, in `arcs_an_edge_covers`.
+/// the fuse draws the edge of a piece leaning off the lid where the two planes
+/// cross, so it refuses both leaning pieces by name, as
+/// `a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it` pins.
 #[test]
 fn a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model() {
     let above =
         Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0 + 2e-12), up()).expect("a plane");
-    let leaning = leaning_off_the_lid_through(Point::new(0.0, 0.0, 4.0), 2e-12);
     let mut wrote = Vec::new();
     for inner_first in [false, true] {
+        let [disc_leaning, half_disc_leaning] = the_tall_bars_leaning_off_the_lid(inner_first);
         for (which, (mut model, built)) in [
             (
                 "disc above",
@@ -201,15 +202,8 @@ fn a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model() {
                     a_half_circle_and_its_chord(pipe(1.0)),
                 ),
             ),
-            (
-                "half disc leaning",
-                a_bar_whose_lid_is_split(
-                    -1000.0,
-                    leaning,
-                    inner_first,
-                    a_half_circle_and_its_chord(pipe(1.0)),
-                ),
-            ),
+            ("disc leaning", disc_leaning),
+            ("half disc leaning", half_disc_leaning),
         ] {
             let bar = built.unwrap_or_else(|why| panic!("{which}: the tall bar gave {why:?}"));
             model
@@ -252,6 +246,92 @@ fn a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model() {
         }
     }
     assert!(wrote.is_empty(), "{wrote:#?}");
+}
+
+/// The tall bars of `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model`
+/// whose piece leans off the lid, each intersected with the block from
+/// `z = 0`. The fuse draws the edge round the piece where the lid's plane and
+/// the piece's cross, a straight line, and not along the pipe its run names.
+/// On that line the disc's circle is a closed edge on a crossing that does not
+/// close (Q1675), and the half disc's arc covers the one stretch its chord
+/// covers (Q1914). The fuse panicked on each, and refuses each by name now,
+/// until the edge is drawn along the pipe (Q2125).
+#[test]
+fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
+    let mut not_refused = Vec::new();
+    for inner_first in [false, true] {
+        for (which, (mut model, built)) in ["disc", "half disc"]
+            .into_iter()
+            .zip(the_tall_bars_leaning_off_the_lid(inner_first))
+        {
+            let bar = built.unwrap_or_else(|why| panic!("{which}: the tall bar gave {why:?}"));
+            let block = a_block_whose_floor_is_at(0.0, &mut model);
+
+            let fused = model.fuse(
+                &[bar],
+                &[block],
+                Rule::Intersection,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+
+            if !matches!(
+                fused,
+                Err(Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. })
+            ) {
+                not_refused.push(format!(
+                    "{which}, inner piece first {inner_first}: {fused:?}"
+                ));
+            }
+        }
+    }
+    assert!(not_refused.is_empty(), "{not_refused:#?}");
+}
+
+/// The bar from `z = 0` whose disc leans a tenth through its corner, read back
+/// from bytes: the sweep refuses it, and a fuse does not sweep what it is
+/// handed. Fused every way with a cube of side 2 through the bar's floor, or
+/// moved `(10, 10, 0)` clear of the bar, the disc's circle is drawn on the
+/// straight line the lid's plane and the disc's cross in, a closed edge on a
+/// crossing that does not close. The fuse panicked on all 12 (Q1675).
+#[test]
+fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_round_it() {
+    let mut not_refused = Vec::new();
+    for disc_first in [false, true] {
+        let (model, built) = a_bar_with_its_lid_split_by_a_disc(pipe(1.0), the_lid(), disc_first);
+        built.expect("the disc on the lid's own plane builds");
+        for at in [Vector::new(-1.0, -1.0, -1.0), Vector::new(10.0, 10.0, 0.0)] {
+            for rule in [Rule::Union, Rule::Difference, Rule::Intersection] {
+                let mut tilted =
+                    with_the_inner_plane_swapped(&model, disc_first, tilted_through_the_corner());
+                let bar = tilted.solids().next().expect("the bar").key();
+                let cube = tilted
+                    .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+                    .expect("a cube");
+                tilted
+                    .place_solid(cube, &Isometry::translation(at).expect("a movement"))
+                    .expect("the cube moves");
+
+                let fused = tilted.fuse(
+                    &[bar],
+                    &[cube],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+
+                if !matches!(
+                    fused,
+                    Err(Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. })
+                ) {
+                    not_refused.push(format!(
+                        "disc first {disc_first}, the cube at {at:?}, {rule:?}: {fused:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(not_refused.is_empty(), "{not_refused:#?}");
 }
 
 /// Moving a solid and copying one are the two mutations
@@ -1011,6 +1091,26 @@ fn the_two_tilted_pieces_read_back_from_bytes(inner_first: bool) -> [(Model, Inv
         (
             the_tilted_half_disc_read_back_from_bytes(inner_first),
             Invalid::AnArcBetweenTwoFlatFacesOnDifferentPlanes,
+        ),
+    ]
+}
+
+/// The bar from `z = −1000` with the piece of its lid leaning `2e-12` off the
+/// lid at the far side of its curve: the disc leaning through the circle's
+/// corner `(1, 0, 4)`, and the half disc leaning along its chord.
+fn the_tall_bars_leaning_off_the_lid(inner_first: bool) -> [(Model, Result<SolidKey>); 2] {
+    [
+        a_bar_whose_lid_is_split(
+            -1000.0,
+            leaning_off_the_lid_through(Point::new(1.0, 0.0, 4.0), 1e-12),
+            inner_first,
+            a_circle_naming(pipe(1.0)),
+        ),
+        a_bar_whose_lid_is_split(
+            -1000.0,
+            leaning_off_the_lid_through(Point::new(0.0, 0.0, 4.0), 2e-12),
+            inner_first,
+            a_half_circle_and_its_chord(pipe(1.0)),
         ),
     ]
 }

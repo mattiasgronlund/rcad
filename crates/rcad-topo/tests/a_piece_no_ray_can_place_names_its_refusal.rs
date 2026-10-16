@@ -41,13 +41,15 @@
 //! - a torus a rounding off a torus: a bend and a copy of it moved a hair.
 //!
 //! Q1581 tried the two kinds left, a ball or a cone on the axis a hair off a
-//! face of its own kind. A quarter bend joined to a ball or a cone on its axis
-//! is refused at `order along a crossing` while the two are cut, so that ring
-//! solid is never built. A ball or a cone joined to a ring, built face by face
-//! with no seam, is built; but against a piece of its own kind on it, it is
-//! refused `ResultIsNotManifold`, or `Undecidable` at `side of sphere` or
+//! face of its own kind. A quarter bend joined to a cone on its axis is
+//! refused at `order along a crossing` while the two are cut, so that ring
+//! solid is never built. One joined to a ball on its axis was refused the same
+//! way until Q2118, and answers now; a piece of a ball a hair off that union's
+//! ball face has not been tried. A ball or a cone joined to a ring, built face
+//! by face with no seam, is built; but against a piece of its own kind on it,
+//! it is refused `ResultIsNotManifold`, or `Undecidable` at `side of sphere` or
 //! `side of cone`, and moved off the axis, the piece is refused when the two
-//! are crossed. So neither kind is reached.
+//! are crossed. So neither kind is reached by what was tried.
 //!
 //! Run with `settle_against_each`'s arm made to print, every fuse here, only
 //! the bends placed a quarter turn round reached it: 6 of their 36 fuses,
@@ -785,8 +787,9 @@ fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_answers_or_keeps_an_edge_a_
 /// hair off that flat face. Every rule both ways round is then refused
 /// `Undecidable` at `order along a crossing` while the pieces are cut, before
 /// any point is put to a ray: for hairs of a rounding, `1.1e-16` up and
-/// `5.6e-17` down, for `1e-12`, and for a quarter either way, which no rounding
-/// is in and which is a refusal of its own.
+/// `5.6e-17` down, and for `1e-12`. Moved a quarter either way, which no
+/// rounding is in, it answers, in
+/// `a_quarter_of_a_tube_a_quarter_off_half_a_ring_answers_with_its_volume`.
 #[test]
 fn a_quarter_of_a_tube_a_hair_under_half_a_ring_is_refused_before_a_ray() {
     for moves in [&[][..], &[-1.0, 1.0]] {
@@ -811,8 +814,6 @@ fn a_quarter_of_a_tube_a_hair_under_half_a_ring_is_refused_before_a_ray() {
         1.110_223_024_625_156_5e-16,
         -5.551_115_123_125_783e-17,
         1e-12,
-        0.25,
-        -0.25,
     ] {
         for rule in EVERY_RULE {
             for the_ring_first in [true, false] {
@@ -823,6 +824,53 @@ fn a_quarter_of_a_tube_a_hair_under_half_a_ring_is_refused_before_a_ray() {
                 let quarter = a_quarter_of_a_tube_moved_by(&mut model, &[hair]);
                 let refused = fused_or_refused(&mut model, ring, quarter, rule, the_ring_first);
                 expect(refused, Some("order along a crossing"), &what);
+            }
+        }
+    }
+}
+
+/// The quarter of a tube in
+/// `a_quarter_of_a_tube_a_hair_under_half_a_ring_is_refused_before_a_ray`,
+/// `12π`, moved up or down a quarter against the same half ring, `4π²`.
+///
+/// Moved up, the quarter's top cuts the half ring a quarter above its flat
+/// face, and the two share a quarter of the slice of the ring's tube from its
+/// middle up a quarter: `2π (h √(1 − h²) + asin h)` at `h = 1/4`, by Pappus,
+/// since that slice is a quarter turn of a piece of the tube's disc whose
+/// middle is on the ring's circle. Every rule both ways round answers one
+/// solid. Moved down, the two are a quarter apart: the union is the two of
+/// them, the intersection nothing, and each difference the first named.
+///
+/// Until Q2118 every one of these was refused `Undecidable` at `order along a
+/// crossing` (row Q1577).
+#[test]
+fn a_quarter_of_a_tube_a_quarter_off_half_a_ring_answers_with_its_volume() {
+    let quarter = 12.0 * PI;
+    let half_a_ring = 4.0 * PI * PI;
+    let h: f64 = 0.25;
+    let shared = 2.0 * PI * (h * (1.0 - h * h).sqrt() + h.asin());
+    for up in [h, -h] {
+        for rule in EVERY_RULE {
+            for the_ring_first in [true, false] {
+                let what = format!("moved by {up}, {rule:?}, the ring first {the_ring_first}");
+                let mut model = a_model();
+                let ring =
+                    the_top_half_of_a_ring(&mut model, 4.0, 1.0, false).expect("a half ring");
+                let tube = a_quarter_of_a_tube_moved_by(&mut model, &[up]);
+                let measured = fused_and_measured(&mut model, ring, tube, rule, the_ring_first)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                let expected = match (rule, up > 0.0, the_ring_first) {
+                    (Rule::Union, true, _) => vec![half_a_ring + quarter - shared],
+                    (Rule::Union, false, _) => vec![quarter, half_a_ring],
+                    (Rule::Intersection, true, _) => vec![shared],
+                    (Rule::Intersection, false, _) => vec![],
+                    (Rule::Difference, true, true) => vec![half_a_ring - shared],
+                    (Rule::Difference, true, false) => vec![quarter - shared],
+                    (Rule::Difference, false, true) => vec![half_a_ring],
+                    (Rule::Difference, false, false) => vec![quarter],
+                    (other, _, _) => panic!("not a rule this tries: {other:?}"),
+                };
+                each_within_its_error(measured, &expected, &what);
             }
         }
     }
@@ -1030,55 +1078,115 @@ fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
     }
 }
 
-/// A quarter bend of ring 4 round a tube of 1, and a ball about the origin of
-/// 3.5 or 4.5, or the frustum of the cone `ρ = (z + 8) / 2` from `z = −2` to
-/// `2`: a ball or a cone on the ring's axis, crossing its tube. Joined, they
-/// would be a ring solid with a ball or a cone face, for a piece of a ball or
-/// a cone a hair off that face to be put to a ray against.
+/// A quarter bend of ring 4 round a tube of 1, and the frustum of the cone
+/// `ρ = (z + 8) / 2` from `z = −2` to `2`: a cone on the ring's axis, crossing
+/// its tube. Joined, they would be a ring solid with a cone face, for a piece
+/// of a cone a hair off that face to be put to a ray against.
 ///
 /// They are never joined. Every rule both ways round is refused `Undecidable`
-/// at `order along a crossing` while the pieces are cut. For the union with
-/// the ball of 3.5, the bend named first, it is at the two points where the
-/// circle the ball crosses the ring in
-/// meets the bend's two caps, `(3.406, 0, −0.805)` and `(0, 3.406, −0.805)`.
-/// The ball and the frustum are turned `5π/4` round the axis, so the ball's
-/// seam and the frustum's straight edge are clear of the bend.
+/// at `order along a crossing` while the pieces are cut. The frustum is turned
+/// `5π/4` round the axis, so its straight edge is clear of the bend.
+///
+/// Until Q2118 this pinned a ball about the origin of 3.5 or 4.5 too, as
+/// `a_bend_and_a_ball_or_a_cone_on_its_axis_are_refused_while_they_are_cut`;
+/// those answer now, in
+/// `a_bend_and_a_ball_on_its_axis_answer_every_rule_with_their_volumes`.
 #[test]
-fn a_bend_and_a_ball_or_a_cone_on_its_axis_are_refused_while_they_are_cut() {
-    let a_ball_of_3_5: fn(&mut Model) -> SolidKey = |model| {
-        model
-            .add_ball(3.5, &turned(5.0 * PI / 4.0))
-            .expect("a ball")
-    };
-    let a_ball_of_4_5: fn(&mut Model) -> SolidKey = |model| {
-        model
-            .add_ball(4.5, &turned(5.0 * PI / 4.0))
-            .expect("a ball")
-    };
-    let a_frustum: fn(&mut Model) -> SolidKey =
-        |model| a_frustum_placed(model, 0.5, 6.0, 10.0, -8.0, 5.0 * PI / 4.0);
+fn a_bend_and_a_cone_on_its_axis_are_refused_while_they_are_cut() {
     let mut not_as_pinned = Vec::new();
-    for (named, made) in [
-        ("a ball of 3.5", a_ball_of_3_5),
-        ("a ball of 4.5", a_ball_of_4_5),
-        ("a frustum", a_frustum),
-    ] {
-        for rule in EVERY_RULE {
-            for the_bend_first in [true, false] {
-                let mut model = a_model();
-                let bend = a_quarter_bend(&mut model, 4.0, 1.0);
-                let other = made(&mut model);
-                let fused = fused_or_refused(&mut model, bend, other, rule, the_bend_first);
-                let said = the_refusal(&fused);
-                if said != "Undecidable at order along a crossing" {
-                    not_as_pinned.push(format!(
-                        "{named}, {rule:?}, the bend first {the_bend_first}: {said}"
-                    ));
-                }
+    for rule in EVERY_RULE {
+        for the_bend_first in [true, false] {
+            let mut model = a_model();
+            let bend = a_quarter_bend(&mut model, 4.0, 1.0);
+            let frustum = a_frustum_placed(&mut model, 0.5, 6.0, 10.0, -8.0, 5.0 * PI / 4.0);
+            let fused = fused_or_refused(&mut model, bend, frustum, rule, the_bend_first);
+            let said = the_refusal(&fused);
+            if said != "Undecidable at order along a crossing" {
+                not_as_pinned.push(format!("{rule:?}, the bend first {the_bend_first}: {said}"));
             }
         }
     }
     assert_eq!(not_as_pinned, Vec::<String>::new());
+}
+
+/// A quarter bend of ring 4 round a tube of 1, `2π²`, and a ball about the
+/// origin of 3.5 or 4.5, turned `5π/4` round the axis so its seam is clear of
+/// the bend: a ball on the ring's axis, crossing its tube. Every rule both
+/// ways round answers one solid, whose volume is the closed form's, with the
+/// part of the bend inside the ball from `how_much_of_the_bend_is_in_a_ball`.
+///
+/// Until Q2118 every one was refused `Undecidable` at `order along a crossing`
+/// while the pieces were cut (row Q1584): for the union with the ball of 3.5,
+/// the bend named first, at the two points where the circle the ball crosses
+/// the ring in meets the bend's two caps, `(3.406, 0, −0.805)` and
+/// `(0, 3.406, −0.805)`.
+#[test]
+fn a_bend_and_a_ball_on_its_axis_answer_every_rule_with_their_volumes() {
+    let bend = 2.0 * PI * PI;
+    for radius in [3.5, 4.5] {
+        let inside = how_much_of_the_bend_is_in_a_ball(radius);
+        let by_slices = how_much_of_the_bend_is_in_a_ball_by_slices(radius);
+        assert!(
+            (inside - by_slices).abs() <= inside * 1e-6,
+            "a ball of {radius}: {inside} closed, {by_slices} by slices"
+        );
+        let ball = 4.0 * PI * radius.powi(3) / 3.0;
+        for rule in EVERY_RULE {
+            for the_bend_first in [true, false] {
+                let what = format!("a ball of {radius}, {rule:?}, the bend first {the_bend_first}");
+                let mut model = a_model();
+                let quarter = a_quarter_bend(&mut model, 4.0, 1.0);
+                let round = model
+                    .add_ball(radius, &turned(5.0 * PI / 4.0))
+                    .expect("a ball");
+                let measured = fused_and_measured(&mut model, quarter, round, rule, the_bend_first)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                let expected = match (rule, the_bend_first) {
+                    (Rule::Union, _) => bend + ball - inside,
+                    (Rule::Intersection, _) => inside,
+                    (Rule::Difference, true) => bend - inside,
+                    (Rule::Difference, false) => ball - inside,
+                    (other, _) => panic!("not a rule this tries: {other:?}"),
+                };
+                each_within_its_error(measured, &[expected], &what);
+            }
+        }
+    }
+}
+
+/// The volume of the quarter bend of ring 4 round a tube of 1 that is inside a
+/// ball about the origin of `radius`, from 3 to 5.
+///
+/// In `(ρ, z)` the tube is the disc of radius 1 about `(4, 0)`, and the ball's
+/// skin crosses it at `ρ = 4 + c`, `c = (radius² − 17) / 8`, an angle `φ =
+/// acos c` round the disc from its outer side. The part of the disc inside the
+/// ball, each piece of it times its `ρ`, sums to `4 (c sin φ + π − φ)`, and a
+/// quarter turn of it is `π/2` of that, by Pappus.
+fn how_much_of_the_bend_is_in_a_ball(radius: f64) -> f64 {
+    assert!(
+        (3.0..=5.0).contains(&radius),
+        "a ball whose skin crosses the tube: {radius}"
+    );
+    let c = (radius * radius - 17.0) / 8.0;
+    let phi = c.acos();
+    2.0 * PI * (c * phi.sin() + PI - phi)
+}
+
+/// `how_much_of_the_bend_is_in_a_ball` summed over thin slices across `z`, as
+/// a check on its closed form.
+fn how_much_of_the_bend_is_in_a_ball_by_slices(radius: f64) -> f64 {
+    let slices = 200_000_u32;
+    let thick = 2.0 / f64::from(slices);
+    let each_piece_times_its_reach: f64 = (0..slices)
+        .map(|slice| {
+            let z = -1.0 + (f64::from(slice) + 0.5) * thick;
+            let half_across = (1.0 - z * z).sqrt();
+            let inner = 4.0 - half_across;
+            let outer = (4.0 + half_across).min((radius * radius - z * z).sqrt());
+            (outer * outer - inner * inner).max(0.0) / 2.0 * thick
+        })
+        .sum();
+    FRAC_PI_2 * each_piece_times_its_reach
 }
 
 /// A ball of 5 joined to a ring round it, and a frustum of a cone joined to a
@@ -1807,6 +1915,26 @@ fn fused_and_measured(
             Ok((measured.volume(), measured.volume_error()))
         })
         .collect()
+}
+
+/// That the fuse answered one solid for each of `expected`, and that each
+/// volume, smallest first, is within the measure's own error of the one of
+/// `expected` in the same place, smallest first.
+fn each_within_its_error(mut measured: Vec<(f64, f64)>, expected: &[f64], what: &str) {
+    assert_eq!(
+        measured.len(),
+        expected.len(),
+        "{what}: {measured:?} against {expected:?}"
+    );
+    measured.sort_by(|one, other| one.0.total_cmp(&other.0));
+    let mut expected = expected.to_vec();
+    expected.sort_by(f64::total_cmp);
+    for (&(volume, error), &closed) in measured.iter().zip(&expected) {
+        assert!(
+            (volume - closed).abs() <= error,
+            "{what}: {volume} ± {error}, against {closed}"
+        );
+    }
 }
 
 /// That the fuse answered when `said` is `None`, and was refused `Undecidable`

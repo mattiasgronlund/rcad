@@ -1770,23 +1770,128 @@ fn a_block_corner_exactly_on_a_balls_skin_is_answered() {
     );
 }
 
-/// The ball's controls, refusing by name a tenth either side.
+/// The ball's controls a tenth either side, and they are answered too, under
+/// every rule and either way round, so this entry and its controls come back
+/// the same way.
+///
+/// Until Q2118 both were refused at order along a crossing, the union with the
+/// ball first being all this pinned. Since Q2118 a node whose box holds a
+/// closed crossing's start and reads exactly nought along the way the crossing
+/// runs there is put first, where that way is proved not to be nothing
+/// (`round_a_closed_crossing_and_what_it_measures` in `fuse/arrange.rs`).
+///
+/// # What the volumes are checked against
+///
+/// A ball of radius five and a `3 × d × 4` block from the origin, with `V(d)`
+/// how much of the block is inside the ball: the union is `500π/3 + 12d − V`,
+/// the intersection `V`, the ball less the block `500π/3 − V` and the block
+/// less the ball `12d − V`. At `d = 4.1` the block's corner `(3, 4.1)` is past
+/// the ball's equator, and at `3.9` it is inside it.
+///
+/// `V(d)` has no closed form as short as `85π/6` at `d = 4`, so
+/// [`how_much_of_the_block_is_in_the_ball`] works it out, and this test
+/// first checks that it gives `85π/6` at `d = 4`.
+///
+/// The block less the ball is about three across, and [`A_DEFLECTION`] leaves
+/// it 0.81% over at `d = 3.9`. A fifth of it leaves 0.15%, which is why that
+/// rule alone is measured finer, as [`volume_of_at`] says of a thin answer.
 #[test]
-fn a_block_corner_a_tenth_off_a_balls_skin_is_refused_by_name_either_side() {
+fn a_block_corner_a_tenth_off_a_balls_skin_is_answered_either_side() {
+    let at_four = how_much_of_the_block_is_in_the_ball(4.0);
+    assert!(
+        (at_four - 85.0 * PI / 6.0).abs() < 1e-9,
+        "the sum gives {at_four} at d = 4, where the closed form is 85π/6"
+    );
+    let ball = 500.0 * PI / 3.0;
     for depth in [3.9, 4.1] {
-        let mut model = a_model();
-        let ball = model
-            .add_ball(5.0, &Isometry::identity())
-            .expect("a ball of radius five");
-        let standing = block(&mut model, [3.0, depth, 4.0], Vector::zero());
-        let why = refusal(
-            &mut model,
-            &Pair::of(ball, standing),
-            Rule::Union,
-            &Policy::certified(),
-        );
-        assert_eq!(what_it_gave_up_on(&why), "order along a crossing");
+        let inside = how_much_of_the_block_is_in_the_ball(depth);
+        let standing = 12.0 * depth;
+        for (rule, ball_first, closed_form, deflection, side) in [
+            (
+                Rule::Union,
+                true,
+                ball + standing - inside,
+                A_DEFLECTION,
+                Side::Under,
+            ),
+            (
+                Rule::Union,
+                false,
+                ball + standing - inside,
+                A_DEFLECTION,
+                Side::Under,
+            ),
+            (Rule::Intersection, true, inside, A_DEFLECTION, Side::Under),
+            (Rule::Intersection, false, inside, A_DEFLECTION, Side::Under),
+            (
+                Rule::Difference,
+                true,
+                ball - inside,
+                A_DEFLECTION,
+                Side::Under,
+            ),
+            (
+                Rule::Difference,
+                false,
+                standing - inside,
+                A_DEFLECTION / 5.0,
+                Side::Over,
+            ),
+        ] {
+            let mut model = a_model();
+            let ball_key = model
+                .add_ball(5.0, &Isometry::identity())
+                .expect("a ball of radius five");
+            let block_key = block(&mut model, [3.0, depth, 4.0], Vector::zero());
+            let pair = if ball_first {
+                Pair::of(ball_key, block_key)
+            } else {
+                Pair::of(block_key, ball_key)
+            };
+            let answer = fused(&mut model, &pair, rule);
+            assert_eq!(
+                answer.solids().len(),
+                1,
+                "d = {depth}, {rule:?}, ball first {ball_first}"
+            );
+            measures(
+                volume_of_at(&model, answer.solids(), deflection),
+                closed_form,
+                side,
+            );
+        }
     }
+}
+
+/// How much of the block `[0, 3] × [0, depth] × [0, 4]` is inside the ball of
+/// radius five about the origin.
+///
+/// Over each `x` the block is `min(4, √(25 − x² − y²))` high: four out to
+/// `y = √(9 − x²)`, then the ball's skin out to `depth` or the edge of the
+/// ball, whichever comes first. That skin integrates in `y` to
+/// `½(y√(a² − y²) + a² asin(y/a))` with `a² = 25 − x²`, and Simpson's rule
+/// over 200 000 steps in `x` does the rest.
+fn how_much_of_the_block_is_in_the_ball(depth: f64) -> f64 {
+    let steps = 200_000;
+    let step = 3.0 / f64::from(steps);
+    let over = |x: f64| {
+        let reach_squared = 25.0 - x * x;
+        let reach = reach_squared.sqrt();
+        let flat_top = (9.0 - x * x).max(0.0).sqrt();
+        let under_the_skin = |y: f64| {
+            (y * (reach_squared - y * y).max(0.0).sqrt()
+                + reach_squared * (y / reach).min(1.0).asin())
+                / 2.0
+        };
+        4.0 * flat_top + under_the_skin(depth.min(reach)) - under_the_skin(flat_top)
+    };
+    let inner: f64 = (1..steps)
+        .map(|at| {
+            let weight = if at % 2 == 1 { 4.0 } else { 2.0 };
+            weight * over(f64::from(at) * step)
+        })
+        .sum();
+    (over(0.0) + inner + over(3.0)) * step / 3.0
 }
 
 // 7. Zero-length edges — §7.4's fifth entry, asked of a curved surface.
