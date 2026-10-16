@@ -140,6 +140,41 @@ impl Interval {
         }
     }
 
+    /// The square root of every number in the range that is not below zero, or
+    /// `None` when every number in it is.
+    ///
+    /// Each end is rounded outwards by the hardware's own directed rounding,
+    /// so no range of two `f64`s that holds the root is narrower: a square
+    /// whose root is an `f64` comes back as that `f64` and nothing wider, and
+    /// `√2` one step of an `f64` wide. That holds down into the subnormals,
+    /// where squaring a root back to check which way it rounded no longer can.
+    ///
+    /// A range that dips below zero starts its root at zero. A sum of squares
+    /// that rounded a hair below zero is that rounding and not a negative
+    /// number.
+    ///
+    /// A range wholly below zero is `None` and not a panic, because whether
+    /// one is a bug is the caller's to say. `inari` hands back an empty range
+    /// there, and an empty range is what [`Interval::sign`] refuses.
+    ///
+    /// ```
+    /// # use rcad_predicates::Interval;
+    /// let root = |lo: f64, hi: f64| Interval::new(lo, hi).unwrap().sqrt();
+    /// let four = root(4.0, 4.0).unwrap();
+    /// assert_eq!((four.lo(), four.hi()), (2.0, 2.0));
+    /// let two = root(2.0, 2.0).unwrap();
+    /// assert_eq!(two.hi(), 2.0_f64.sqrt(), "which rounds √2 up");
+    /// assert_eq!(two.lo(), 2.0_f64.sqrt().next_down());
+    /// assert_eq!(root(-1.0, 4.0).unwrap().lo(), 0.0);
+    /// assert_eq!(root(-4.0, -1.0), None);
+    /// ```
+    pub fn sqrt(self) -> Option<Self> {
+        if self.hi() < 0.0 {
+            return None;
+        }
+        Some(Self(self.0.sqrt()))
+    }
+
     /// `self` divided by `divisor`.
     ///
     /// Kept out of the public API: dividing by a range that touches zero gives
@@ -342,6 +377,34 @@ mod tests {
         ];
         let swapped = [rows[1], rows[0], rows[2]];
         assert_eq!(determinant(rows).lo(), -determinant(swapped).lo());
+    }
+
+    /// The smallest subnormal is `2^-1074`, whose root `2^-537` is an `f64`,
+    /// and twice it has a root that is not. Each comes back as tight as an
+    /// `f64` range can be: no width at all, and one step.
+    #[test]
+    fn a_root_down_in_the_subnormals_is_as_tight_as_anywhere() {
+        let smallest = f64::from_bits(1);
+        let exact = Interval::exactly(smallest).sqrt().expect("a root");
+        assert_eq!(
+            (exact.lo(), exact.hi()),
+            (2.0_f64.powi(-537), 2.0_f64.powi(-537))
+        );
+
+        let twice = Interval::exactly(2.0 * smallest).sqrt().expect("a root");
+        assert_eq!(twice.hi(), twice.lo().next_up());
+        let scale = 2.0_f64.powi(537);
+        let (lo, hi) = (twice.lo() * scale, twice.hi() * scale);
+        assert!(
+            lo.mul_add(lo, -2.0) < 0.0 && hi.mul_add(hi, -2.0) > 0.0,
+            "√2 · 2^-537 lies inside, once both are scaled back up exactly"
+        );
+    }
+
+    #[test]
+    fn a_range_wholly_below_zero_has_no_root() {
+        assert_eq!(Interval::new(-4.0, -1.0).unwrap().sqrt(), None);
+        assert_eq!(Interval::exactly(-0.0).sqrt(), Some(Interval::exactly(0.0)));
     }
 
     #[test]
