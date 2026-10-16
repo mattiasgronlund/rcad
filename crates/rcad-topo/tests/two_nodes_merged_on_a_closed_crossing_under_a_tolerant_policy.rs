@@ -575,10 +575,15 @@ fn the_disc_inside_the_wedge(radius: f64, a: [f64; 2], b: [f64; 2]) -> f64 {
 /// unconditionally for a plane and a sphere. Searching the cone's own
 /// 5-scale x 7-size x 4-rule grid (the frustum's two scale/size lists narrowed
 /// to keep the search small, since a ball has no seam direction to vary)
-/// finds the same area-acceptable, volume-not-acceptable gap, at a shape
+/// found the same area-acceptable, volume-not-acceptable gap, at a shape
 /// scale of `0.18` and a working size of `0.6` among others — the cone's own
 /// pin values, which the half-diagonal construction shares by chance of the
 /// grids overlapping, not by the shapes being the same.
+///
+/// Since Q2080 the two corners' boxes overlap, so their order is filed as a
+/// length, how far apart a point of one box may be from a point of the other,
+/// by the overlap arm of `round_a_closed_crossing_and_what_it_measures`, and
+/// no order is left between the two readings.
 ///
 /// **The merged answer is not wrong**, by the same similarity-transform
 /// argument as the cone's apex case: scaled up by `1 / 0.18` and run at a
@@ -668,8 +673,12 @@ fn a_tolerant_fuse_of_a_cube_on_a_ball_through_its_corner_below_working_size_one
 /// seam": the cone's apex case's shape, with `a_frustum_seamed_towards`'s
 /// flat near cap (cut at `far / 300`) in place of the cone's sharp point,
 /// shrunk to a shape scale of `0.26` and fused at a `0.75` mm working size,
-/// merges the two corners round the ellipse under the area reading where the
-/// volume reading would have refused.
+/// merged the two corners round the ellipse under the area reading where the
+/// volume reading would have refused. Since Q2080 their boxes overlap, so the
+/// order is filed as a length, how far apart a point of one box may be from a
+/// point of the other, by the overlap arm of
+/// `round_a_closed_crossing_and_what_it_measures`, and the merge is inside
+/// that budget.
 ///
 /// **The merged answer is not wrong**, by the same similarity-transform
 /// argument as the cone's apex case: scaled up by `1 / 0.26` and run at a
@@ -1061,9 +1070,13 @@ fn a_corner_up_cube_round_the_origin(model: &mut Model, side: f64) -> SolidKey {
 
 /// The gap Q1273 left open below a working size of `1`: the cube-on-a-cone
 /// shape, shrunk to a shape scale of `0.18` and fused at a `0.6` mm working
-/// size, merges the two corners round the ellipse under the area reading
+/// size, merged the two corners round the ellipse under the area reading
 /// where the volume reading would have refused — the area budget covers more
-/// than the volume one below a working size of `1`, by `1/s`.
+/// than the volume one below a working size of `1`, by `1/s`. Since Q2080
+/// their boxes overlap, so the order is filed as a length, how far apart a
+/// point of one box may be from a point of the other, by the overlap arm of
+/// `round_a_closed_crossing_and_what_it_measures`, which is read the same at
+/// every working size, and the merge is inside that budget.
 ///
 /// **The merged answer is not wrong.** A tolerant fuse of the same pair,
 /// scaled up by `1/0.18` and run at a 10 mm working size — comfortably past

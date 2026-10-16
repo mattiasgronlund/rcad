@@ -9306,7 +9306,8 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// `[0, 5.6e-17]`. The node where they touch across the ellipse is clear of
 /// it, and the two were refused on the order until this arm.
 ///
-/// **Every arm but the sweep answers as wide as a box**, which is a length:
+/// **Every arm but the sweep, and but the overlap arm below, answers as wide
+/// as a box**, which is a length:
 /// [`one_point_if_both_are_exact`], [`the_one_the_start_is`] and the
 /// [`the_one_ahead_of_the_start`] behind it each hand back the wider of the two
 /// boxes' longest sides. Filed as a volume, as all of them were until Q706, a
@@ -9324,18 +9325,27 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// volume everywhere until Q1273, a plane conic's sweep was divided by the
 /// working size once too often, so a tolerant policy merged two nodes whose
 /// sweep was up to `s` times its budget for an area: the corner-up cube on a
-/// steep cone's apex at 2 mm was one (§318.5). The angle and the stretch
+/// steep cone's apex at 2 mm was one (§318.5). Read as an area, every fuse of
+/// it refused; since Q2080 the corners there whose boxes overlap go to the
+/// overlap arm below, the widest of them `9.9e-15` against the length budget
+/// of `64 ε · 2 = 2.84e-14`, and every fuse answers. The angle and the stretch
 /// below answer only a proved sign, which no policy reads the measure of.
 ///
-/// **An undecided sweep of two nodes whose boxes overlap is filed as wide as
-/// the wider box**, a length, as [`one_point_if_both_are_exact`] files it. The
-/// boxes share a point, so the two may be one, and what a merge moves a point
-/// by is bounded by the boxes and not by the sweep. The sweep's enclosure over
-/// its arm is not that bound: two points `Rδ` apart round a circle of radius
-/// `R`, at an angle `α` round from the start, sweep `2R²δ sin²(α/2)`, so over
-/// the chord `2R sin(α/2)` they read `Rδ sin(α/2)`, short of how far apart they
-/// are. A round bar of radius `8` notched by a block whose corner edge stands
-/// on its wall has the feet of two rulings a hair apart on each cap, in boxes
+/// **An undecided sweep of two nodes whose boxes overlap is filed as how far
+/// apart a point of one box may be from a point of the other**, rounded up as
+/// `how_far_apart_two_boxes_may_be` in `fuse/assemble.rs` rounds it, a
+/// length. The boxes share a point, so the two may be one, and a merge of
+/// them moves a point by no more than that: it is the length
+/// `Policy::take_as_one_point` reads (§417.7). Neither the sweep nor the wider
+/// box is that bound. The sweep's enclosure over its arm reads short of it:
+/// two points an angle `δ` apart round a circle of radius `R`, at an angle `α`
+/// round from the start, are `Rδ` apart and sweep `2R²δ sin²(α/2)`, so over
+/// the chord `2R sin(α/2)` they read `Rδ sin(α/2)`. The wider box's longest
+/// side reads short of it too, since two boxes that only touch hold points as
+/// far apart as the two together span: at the round bar of radius `12.8`
+/// below the wider side is `1.78e-15`, and the two may be `2.51e-15` apart.
+/// A round bar of radius `8` notched by a block whose corner edge stands on
+/// its wall has the feet of two rulings a hair apart on each cap, in boxes
 /// `1.8e-15` wide that overlap, and at working size `1` every fuse of the two
 /// was refused on their sweep, `2.1e-14` read as an area (Q2080).
 fn round_a_closed_crossing_and_what_it_measures(
