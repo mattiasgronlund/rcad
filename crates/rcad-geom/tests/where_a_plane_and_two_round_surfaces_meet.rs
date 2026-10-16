@@ -28,6 +28,12 @@
 //!   other surface where a quadratic is zero. A floor along one of two bars
 //!   that cross is it.
 //!
+//! **One more is a quartic, but one with no root to find**: a plane cuts a
+//! ball, a pipe or a cone in a curve that keeps between two distances from
+//! where the axis crosses it, and where two such bands keep apart the three
+//! share nothing. A cap a rounding off square to a bar and its chamfer cone is
+//! it.
+//!
 //! Every corner below is worked out by hand first and written in the test, and
 //! every one of them lands on a whole number — so a box round it has no width
 //! and the answer is checked against the arithmetic-free number and not against
