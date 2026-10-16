@@ -1339,15 +1339,38 @@ fn a_block_less_a_dome_whose_rim_touches_its_wall_keeps_the_dome_as_a_hollow() {
 /// the plane is proved clear of that circle (Q2102).
 #[test]
 fn a_bar_turned_onto_x_by_a_float_angle_along_a_blocks_top_answers_every_rule() {
-    every_fuse_of_a_block_and_a_bar_turned_onto_x_at([1.0, 2.0, 5.0], |rule, bar_first| {
-        match (rule, bar_first) {
-            (Rule::Union, _) => vec![(vec![3], 2.0 * PI), (vec![6], 64.0)],
-            (Rule::Intersection, _) => vec![],
-            (Rule::Difference, false) => vec![(vec![6], 64.0)],
-            (Rule::Difference, true) => vec![(vec![3], 2.0 * PI)],
-            _ => unreachable!("only the three rules are asked"),
-        }
-    });
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
+        PI / 2.0,
+        [1.0, 2.0, 5.0],
+        a_bar_clear_of_the_block,
+    );
+}
+
+/// The bar of the test above turned the other way, about `y` by `−π/2`, and
+/// shifted to `(3, 2, 5)`, so it lies on the same line `(x, 2, 4)` from `x = 3`
+/// to 1, its axis along `(−1, 0, 2⁻⁵²)` and its seam along its top (queue row
+/// Q2141). It is clear of the block by the same `1 − 1/√(1 + 2⁻¹⁰⁴)` at its
+/// near end, and every rule answers as the bar along the top does.
+#[test]
+fn a_bar_turned_back_onto_x_by_a_float_angle_along_a_blocks_top_answers_every_rule() {
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
+        -PI / 2.0,
+        [3.0, 2.0, 5.0],
+        a_bar_clear_of_the_block,
+    );
+}
+
+/// What every rule gives for the block `[0, 4]³` and a bar of radius one, two
+/// long, clear of it: the union is the two as they stand, the intersection no
+/// solid, and each difference the first solid whole.
+fn a_bar_clear_of_the_block(rule: Rule, bar_first: bool) -> Vec<ShellsAndVolume> {
+    match (rule, bar_first) {
+        (Rule::Union, _) => vec![(vec![3], 2.0 * PI), (vec![6], 64.0)],
+        (Rule::Intersection, _) => vec![],
+        (Rule::Difference, false) => vec![(vec![6], 64.0)],
+        (Rule::Difference, true) => vec![(vec![3], 2.0 * PI)],
+        _ => unreachable!("only the three rules are asked"),
+    }
 }
 
 /// The bar of the test above sunk into the block to lie on its floor along
@@ -1361,23 +1384,47 @@ fn a_bar_turned_onto_x_by_a_float_angle_along_a_blocks_top_answers_every_rule() 
 /// over the bar's seam corners, as the bar along the top was.
 #[test]
 fn a_block_less_a_bar_turned_onto_x_by_a_float_angle_along_its_floor_keeps_the_bar_as_a_hollow() {
-    every_fuse_of_a_block_and_a_bar_turned_onto_x_at([1.0, 2.0, 1.0], |rule, bar_first| {
-        match (rule, bar_first) {
-            (Rule::Union, _) => vec![(vec![6], 64.0)],
-            (Rule::Intersection, _) => vec![(vec![3], 2.0 * PI)],
-            (Rule::Difference, false) => vec![(vec![3, 6], 64.0 - 2.0 * PI)],
-            (Rule::Difference, true) => vec![],
-            _ => unreachable!("only the three rules are asked"),
-        }
-    });
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
+        PI / 2.0,
+        [1.0, 2.0, 1.0],
+        a_bar_inside_the_block,
+    );
+}
+
+/// The bar turned about `y` by `−π/2` sunk onto the block's floor along
+/// `(x, 2, 0)`, its axis from `(3, 2, 1)` (queue row Q2141): the answers of the
+/// test above.
+#[test]
+fn a_block_less_a_bar_turned_back_onto_x_by_a_float_angle_along_its_floor_keeps_the_bar_as_a_hollow()
+ {
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
+        -PI / 2.0,
+        [3.0, 2.0, 1.0],
+        a_bar_inside_the_block,
+    );
+}
+
+/// What every rule gives for the block `[0, 4]³` and a bar of radius one, two
+/// long, inside it clear of its faces: the union is the block, the
+/// intersection the bar, the block less the bar the block with the bar as a
+/// hollow, and the bar less the block nothing.
+fn a_bar_inside_the_block(rule: Rule, bar_first: bool) -> Vec<ShellsAndVolume> {
+    match (rule, bar_first) {
+        (Rule::Union, _) => vec![(vec![6], 64.0)],
+        (Rule::Intersection, _) => vec![(vec![3], 2.0 * PI)],
+        (Rule::Difference, false) => vec![(vec![3, 6], 64.0 - 2.0 * PI)],
+        (Rule::Difference, true) => vec![],
+        _ => unreachable!("only the three rules are asked"),
+    }
 }
 
 /// Every rule, both ways round, under `certified` and `tolerant`, of the block
-/// `[0, 4]³` and [`a_bar_turned_onto_x`] from `at`: never refused, every
-/// decision proved, the model validates, and the answer's solids, fewest faces
-/// first, have the faces in each shell and the volume `should` gives for the
-/// rule and whether the bar came first.
+/// `[0, 4]³` and [`a_bar_turned_onto_x`] by `turn` from `at`: never refused,
+/// every decision proved, the model validates, and the answer's solids, fewest
+/// faces first, have the faces in each shell and the volume `should` gives for
+/// the rule and whether the bar came first.
 fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
+    turn: f64,
     at: [f64; 3],
     should: fn(Rule, bool) -> Vec<ShellsAndVolume>,
 ) {
@@ -1388,7 +1435,7 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
                 let mut model =
                     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
                 let block = a_block(&mut model, [4.0, 4.0, 4.0]);
-                let bar = a_bar_turned_onto_x(&mut model, at);
+                let bar = a_bar_turned_onto_x(&mut model, turn, at);
                 let [first, second] = if bar_first {
                     [bar, block]
                 } else {
@@ -1449,10 +1496,12 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
 type ShellsAndVolume = (Vec<usize>, f64);
 
 /// A bar of radius one, two long, turned onto `x` by [`Isometry::rotation`]
-/// about `y` by `π/2` and then shifted to `at`: its axis runs from `at` along
-/// `(1, 0, 2⁻⁵²)`, and its seam along its underside, a radius below the axis.
-fn a_bar_turned_onto_x(model: &mut Model, [x, y, z]: [f64; 3]) -> SolidKey {
-    let onto_x = Isometry::rotation(&Axis::y(), PI / 2.0).expect("a finite angle");
+/// about `y` by `turn` and then shifted to `at`. Turned by `π/2`, its axis runs
+/// from `at` along `(1, 0, 2⁻⁵²)`, and its seam along its underside, a radius
+/// below the axis; turned by `−π/2`, along `(−1, 0, 2⁻⁵²)` with its seam along
+/// its top.
+fn a_bar_turned_onto_x(model: &mut Model, turn: f64, [x, y, z]: [f64; 3]) -> SolidKey {
+    let onto_x = Isometry::rotation(&Axis::y(), turn).expect("a finite angle");
     let shift = Isometry::translation(Vector::new(x, y, z)).expect("a whole-number shift");
     model
         .add_round_bar(1.0, 2.0, &shift.compose(&onto_x))
