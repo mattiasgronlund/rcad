@@ -210,8 +210,9 @@ pub enum MeetOfThree {
     /// to four points come in the order
     /// [`what_a_plane_through_their_one_axis_leaves`] gives: two circles, two
     /// points on each, or a cone's apex and one circle. A plane beside that
-    /// axis gives them in the same order, two on a circle it cuts and one on a
-    /// circle it touches ([`what_a_plane_beside_their_one_axis_leaves`]). A
+    /// axis, parallel to it or leaning, gives them in the same order, two on a
+    /// circle it cuts and one on a circle it touches
+    /// ([`what_a_plane_beside_their_one_axis_leaves`]). A
     /// plane that cuts both curved surfaces in circles gives them along the
     /// line it crosses the line the two circles differ by in, as two planes do
     /// ([`what_a_plane_that_cuts_both_in_circles_leaves`]). A plane along a
@@ -3739,11 +3740,13 @@ fn the_ends_of_the_chord_at(
 /// would differ by a line again — a mitre between two pipes of one radius cuts
 /// both in one ellipse — and this road does not look for them.
 ///
-/// It is asked after every road that takes two surfaces turned about one axis,
-/// which answer a circle about one centre against another, and after the road
-/// for a plane that grazes, so it takes only circles about two centres or
-/// planes that cut both. [`what_a_plane_along_a_pipe_leaves`] shares no triple
-/// with it: a pipe square to the plane is not a pipe along it.
+/// It is asked after every road that takes two surfaces turned about one axis
+/// but one, which answer a circle about one centre against another, and after
+/// the road for a plane that grazes, so it takes only circles about two centres
+/// or planes that cut both. The one is the leaning call of
+/// [`what_a_plane_beside_their_one_axis_leaves`], asked last of all.
+/// [`what_a_plane_along_a_pipe_leaves`] shares no triple with it: a pipe square
+/// to the plane is not a pipe along it.
 ///
 /// Arithmetic that runs out after the family is settled is
 /// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
@@ -3937,10 +3940,15 @@ fn the_line_two_circles_differ_by(mine: &ACircle, theirs: &ACircle) -> Option<([
 /// pipe's axis is not along it and cuts it in an ellipse, which
 /// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`] is asked about next.
 /// One that leans by a rounding and keeps off the pipe reaches it only far
-/// along it, which [`what_a_plane_beside_a_pipe_leaves`] is asked about last.
+/// along it, which [`what_a_plane_beside_a_pipe_leaves`] is asked about after
+/// that. One that leans by a rounding and cuts a pipe where it shares circles
+/// with the other surface about one axis — a D-flat on a chamfered shaft,
+/// placed by a turn — is taken by the leaning call of
+/// [`what_a_plane_beside_their_one_axis_leaves`], asked last of all.
 ///
-/// It is asked after every road but those two and the one for bands that
-/// cross, so every triple an earlier road answers keeps its answer. Arithmetic that runs out after the family is settled is
+/// It is asked after every road but those three and the one for bands that
+/// cross, so every triple an earlier road answers keeps its answer. Arithmetic
+/// that runs out after the family is settled is
 /// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
 fn what_a_plane_along_a_pipe_leaves(
     flat: &Plane,
@@ -4220,8 +4228,9 @@ impl TheLinesAlongAPipe {
 /// **What it leaves** is two bands that overlap, where the curves may cross,
 /// to [`what_a_plane_that_cuts_them_in_bands_that_cross_leaves`]. It leaves
 /// to the refusal a ring, a plane that misses a ball, and a plane parallel to
-/// a pipe's or a cone's axis, since it gives none of those a band. A plane a rounding off
-/// parallel to a pipe and a cone about one axis gets bands too wide to keep
+/// a pipe's or a cone's axis, since it gives none of those a band. A plane a
+/// rounding off parallel to a pipe and a cone about one axis gets bands too
+/// wide to keep
 /// apart, the cone's with no outer edge, so the side of a block three from a
 /// bar and its chamfer cone, the block and the bar placed by one turn, is
 /// handed on, and [`what_a_plane_beside_a_pipe_leaves`] answers it.
@@ -4852,8 +4861,10 @@ fn both(one: Interval, other: Interval) -> Interval {
 /// one: `k` is a rounding or less, so the side reaches the bar no nearer than
 /// about `10¹⁶` along it, where the cone is as wide.
 ///
-/// It is asked last of all and only ever answers that the three share
-/// nothing, so every triple an earlier road answers keeps its answer.
+/// It is asked after every road but the leaning call of
+/// [`what_a_plane_beside_their_one_axis_leaves`], and only ever answers that
+/// the three share nothing, so every triple an earlier road answers keeps its
+/// answer.
 fn what_a_plane_beside_a_pipe_leaves(
     flat: &Plane,
     one: &Surface,
