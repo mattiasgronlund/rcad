@@ -95,6 +95,7 @@ use crate::mesh::the_surface_pinches_at;
 use crate::validate::{name_of_surface, side_of_surface};
 use crate::{Error, FaceKey, Invalid, Result, VertexKey};
 
+use super::assemble::how_far_apart_two_boxes_may_be;
 use super::assemble::one_surface;
 use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedCorner, BakedFace};
 use super::select::InPlane;
@@ -9511,18 +9512,9 @@ fn round_a_closed_crossing_and_what_it_measures(
         return Ok((read, Measures::Volume));
     }
     if matches!(decided, Decision::Undecidable { .. }) && boxes_overlap(one, other) {
-        let (mine, theirs) = (one.enclosure(), other.enclosure());
-        let squared: f64 = (0..3)
-            .map(|axis| {
-                let furthest =
-                    (mine[axis].hi() - theirs[axis].lo()).max(theirs[axis].hi() - mine[axis].lo());
-                furthest * furthest
-            })
-            .sum();
-        let furthest_apart = squared.sqrt() * (1.0 + 4.0 * f64::EPSILON);
         return Ok((
             Decision::Undecidable {
-                enclosure: furthest_apart,
+                enclosure: how_far_apart_two_boxes_may_be(one, other),
             },
             Measures::Length,
         ));

@@ -314,6 +314,29 @@ the box and the taller one's test by its new name.
   turned pair makes a ring through one corner twice at the point the turn
   holds still. 351.8 shows it is the frame's C, upright or turned. The file was
   outside this row's, and Q936 fixes the doc.
-- 351.7's last item, how often an input corner keeps `bake`'s point, is Q927.
+- 351.7's last item, how often an input corner keeps `bake`'s point, is
+  counted in 351.10.
 - Q915's union answers since 351.6, by that section's scratch test. Q915 was
   dropped and re-filed as Q926, which is open for its own pins.
+
+### 351.10 How often an input corner keeps bake's point
+
+*Queue row Q927.* At `7ad57a1f`, a probe outside `assemble.rs` made the same
+calls `where_three_planes_meet_whichever_face_asks` does (each plane faced one
+way, `faced.sort_by(Surface::how_it_sorts_against)`, `Plane::meet_of_three`,
+then the point kept only when its uncertainty is finite) over every vertex of
+each solid the turned and the skew pair families (351.8's scratch test) drew,
+40 000 draws of each family at `RCAD_SOAK_FACTOR` 20, restricted to a vertex on
+exactly three distinct face planes — chosen by the probe itself, not by
+`input_corners_on_exactly_three_planes`, since that function is what the row
+says not to go through. 1 040 084 turned-family corners and 1 039 796
+skew-family corners lay on exactly three planes, and **none** left `Plane::meet_of_three`
+unable to bound the meet: every one of those 2 079 880 corners' three planes
+met with a finite uncertainty. So `bake`'s point was never kept for this
+family, and the either-way-round question 351.9 raised has no instance in it.
+
+Zero is what this family should give: a cube's corner is three planes at
+right angles, and the turned and skew pairs are boxes, so every input corner
+on exactly three planes is a right-angled corner like a cube's, the easiest
+case for Cramer's rule to bound. The question stays open for a family whose
+input corners meet three planes at some other angle.

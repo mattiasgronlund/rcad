@@ -54,7 +54,7 @@
 //! | a ball resting on a block | 78 of 78 | 78 of 78 | — |
 //! | a ball against a block's wall | 78 of 78 | 78 of 78 | — |
 //! | two bars touching along a line | 60 of 60 | 96 of 96 | — |
-//! | a bar inside a bar, touching | 50 of 60 | 96 of 96 | `Undecidable` at *one shell inside another* 10 |
+//! | a bar inside a bar, touching | 60 of 60 | 96 of 96 | — |
 //! | two balls touching at a point | 60 of 60 | 96 of 96 | — |
 //! | a ball inside a ball, touching once | 60 of 60 | 96 of 96 | — |
 //! | the dome on a shaft of its radius | 66 of 66 | 90 of 90 | — |
@@ -73,11 +73,11 @@
 //! fixed since `d12913d4` and `71feed66` (queue row Q28), and the table above
 //! is that cell's touching row, measured now that it no longer panics. By
 //! hand, before queue row Q649, the touching row (radius three, radius one at
-//! `(0, 2)`) refused every fuse on *which way a crossing runs*. Each of the 10
-//! fuses the touching row still refuses is the thick bar less the thin one, which
-//! leaves a hollow touching the thick bar's wall along a line: whether one
-//! solid may have two shells that touch is queue row Q1635's question. Every
-//! other rule of every shape the cell draws answers the closed forms in
+//! `(0, 2)`) refused every fuse on *which way a crossing runs*. The thick bar
+//! less the thin one leaves a hollow touching the thick bar's wall along a
+//! line, one solid of two shells that touch; since queue row Q1903 the far
+//! side of a closed edge places it too, and every rule of every shape the
+//! cell draws answers the closed forms in
 //! [`a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms`],
 //! which says what used to stop it.
 //!
@@ -343,10 +343,10 @@ fn a_bar_inside_a_bar_touching_its_wall() {
 /// the same piece of a flush cap in the test below, so the rule is no longer
 /// asked about it: with the rule switched off, all 60 answer.
 ///
-/// The thick bar less the thin one is left out: it is the thick bar with a
-/// hollow touching its wall along that line, and whether one solid may have
-/// two shells that touch is queue row Q1635's question. Today it is refused
-/// `Undecidable` at *one shell inside another* for every shape.
+/// The thick bar less the thin one is the thick bar with a hollow touching
+/// its wall along that line, one solid of two shells that touch. Since queue
+/// row Q1903 the far side of a closed edge places it, and it answers for
+/// every shape, against `4 π R² − 2 π r²`.
 #[test]
 fn a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms() {
     let policy = Policy::certified();
@@ -379,6 +379,7 @@ fn a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms() 
                     (outer, inner, Rule::Intersection, Some(thin_bar)),
                     (inner, outer, Rule::Intersection, Some(thin_bar)),
                     (inner, outer, Rule::Difference, None),
+                    (outer, inner, Rule::Difference, Some(whole - thin_bar)),
                 ] {
                     let case = format!(
                         "{rule:?} of R = {big}, r = {r} at ({x}, {y}), thick bar first: {}",
@@ -418,7 +419,7 @@ fn a_thin_bar_touching_a_thick_bars_wall_from_inside_against_the_closed_forms() 
     }
     assert!(
         wrong.is_empty(),
-        "{} of 60 fuses refused; since Q1537 every one answers:\n{}",
+        "{} of 72 fuses refused; since Q1537 and Q1903 every one answers:\n{}",
         wrong.len(),
         wrong.join("\n")
     );
