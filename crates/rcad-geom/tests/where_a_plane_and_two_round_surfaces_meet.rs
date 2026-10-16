@@ -1479,28 +1479,84 @@ fn a_cap_leaning_off_square_to_a_bar_meets_it_and_a_cone_or_a_ball_it_keeps_apar
         [&chamfer, &cap, &wide_bar],
         [&wide_bar, &chamfer, &cap],
     ] {
-        let answer = meet(order).expect("these three meet");
-        let MeetOfThree::At(points) = &answer else {
-            panic!("{order:?}: {answer:?}");
-        };
-        assert_eq!(points.len(), 2, "{order:?}: {answer:?}");
-        let mut points = points.to_vec();
-        points.sort_by(|one, other| {
-            one.enclosure()[0]
-                .lo()
-                .total_cmp(&other.enclosure()[0].lo())
-        });
-        for (point, x) in points.iter().zip([-5.0, 5.0]) {
-            let sides = point.enclosure();
-            for (side, expected) in [(sides[0], x), (sides[1], 0.0), (sides[2], 5.0)] {
-                assert!(
-                    side.width() <= 1e-12
-                        && side.lo() - 1e-15 <= expected
-                        && expected <= side.hi() + 1e-15,
-                    "{order:?}: {point:?} where the corner is ({x}, 0, 5)"
-                );
-            }
+        two_points_near(order, [[-5.0, 0.0, 5.0], [5.0, 0.0, 5.0]], 0);
+    }
+}
+
+/// The two points `surfaces` meet at, sorted along `sorted_along`, each a box
+/// at most `1e-13` wide and within `1e-13` of its corner, and neither certified
+/// off any of the three.
+///
+/// **Within, not on**: the corners are worked out for the plane as written,
+/// and the stored plane is its normal scaled to length one, which rounds. So
+/// the true corner of what is stored is a rounding or two from the one worked
+/// out by hand, and an exact comparison would test the rounding.
+fn two_points_near(surfaces: [&Surface; 3], corners: [[f64; 3]; 2], sorted_along: usize) {
+    let answer = meet(surfaces).expect("these three meet");
+    let MeetOfThree::At(points) = &answer else {
+        panic!("{surfaces:?}: {answer:?}");
+    };
+    assert_eq!(points.len(), 2, "{surfaces:?}: {answer:?}");
+    let mut points = points.to_vec();
+    points.sort_by(|one, other| {
+        one.enclosure()[sorted_along]
+            .lo()
+            .total_cmp(&other.enclosure()[sorted_along].lo())
+    });
+    for (point, corner) in points.iter().zip(corners) {
+        for (side, expected) in point.enclosure().into_iter().zip(corner) {
+            assert!(
+                side.width() <= 1e-13
+                    && side.lo() - 1e-13 <= expected
+                    && expected <= side.hi() + 1e-13,
+                "{surfaces:?}: {point:?} where the corner is {corner:?}"
+            );
         }
+        for surface in surfaces {
+            assert!(
+                !matches!(
+                    which_side_of(surface, *point),
+                    Decision::Pos | Decision::Neg
+                ),
+                "{surfaces:?}: {point:?} is certified off {surface:?}"
+            );
+        }
+    }
+}
+
+/// **A slanted cut through the circle where a rod's round end meets the rod.**
+/// The rod is the pipe of radius one up `z`, its end the ball of radius one
+/// about the origin, and the two touch along the circle `z = 0` rather than
+/// cross. The cut `x + z = 0` leans to the rod's axis, so it cuts the rod in an
+/// ellipse and the ball in a circle that touch at the two points where the cut
+/// crosses that circle, `(0, ±1, 0)`. Two curves that touch are the case the
+/// road for curves that cross cannot tell from two crossings close together.
+#[test]
+fn a_slanted_cut_through_where_a_rods_round_end_meets_it_meets_both_at_two_corners() {
+    let cut = flat([1.0, 0.0, 1.0], [0.0; 3]);
+    let rod = pipe([0.0; 3], [0.0, 0.0, 1.0], 1.0);
+    let end = ball([0.0; 3], 1.0);
+    for order in [[&cut, &rod, &end], [&end, &cut, &rod], [&rod, &end, &cut]] {
+        two_points_near(order, [[0.0, -1.0, 0.0], [0.0, 1.0, 0.0]], 1);
+    }
+}
+
+/// **A ball resting in a cone, and a plane leaning across the circle it rests
+/// on.** The cone of slope `3/4` up `z` from the origin and the ball of radius
+/// three about `(0, 0, 5)` touch along the circle of radius `2.4` at height
+/// `3.2`, where `(25/16)z² − 10z + 16`, the difference of the two, is a
+/// square. The cut `x + z = 3.2` crosses that circle at `(0, ±2.4, 3.2)`.
+#[test]
+fn a_plane_across_the_circle_a_ball_rests_on_in_a_cone_meets_both_there() {
+    let cut = flat([1.0, 0.0, 1.0], [0.0, 0.0, 3.2]);
+    let cone_of_it = cone([0.0; 3], [0.0, 0.0, 1.0], 0.75);
+    let resting = ball([0.0, 0.0, 5.0], 3.0);
+    for order in [
+        [&cut, &cone_of_it, &resting],
+        [&resting, &cut, &cone_of_it],
+        [&cone_of_it, &resting, &cut],
+    ] {
+        two_points_near(order, [[0.0, -2.4, 3.2], [0.0, 2.4, 3.2]], 1);
     }
 }
 

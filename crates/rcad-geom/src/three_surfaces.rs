@@ -140,6 +140,7 @@ use smallvec::{SmallVec, smallvec};
 
 use crate::enclosure::{
     cross_enclosing, dot_enclosing, exactly, quotient_or_everything, root_enclosing,
+    squared_length_enclosing,
 };
 use crate::exact::{Exact, Nearly, binary_exponent, multiplied_by_a_power_of_two, slid_exactly};
 use crate::intersect::{
@@ -1711,6 +1712,11 @@ fn where_one_plane_and_two_curved_surfaces_meet(
         return Ok(answer);
     }
     if let Some(answer) = what_a_plane_that_cuts_them_in_bands_apart_leaves(flat, one, other) {
+        return Ok(answer);
+    }
+    if let Some(answer) =
+        what_a_plane_that_cuts_them_in_bands_that_cross_leaves(flat, one, other, at, policy, log)?
+    {
         return Ok(answer);
     }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
@@ -4230,6 +4236,429 @@ fn how_far_apart_the_centres_of_two_bands_are(mine: &ABand, theirs: &ABand) -> O
         root_enclosing(Exact::squared_length_of(&apart)?.enclosure()),
         size,
     ))
+}
+
+/// **A plane that cuts a ball, a pipe or a cone and a second of them in two
+/// curves whose bands overlap**, which is what
+/// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`] hands on: the two
+/// points where the curves cross, nothing where they keep apart after all, or
+/// `None` where neither is proved and the triple goes on to the refusal.
+///
+/// A ball whose centre is on a pipe's or a cone's axis is asked first, since
+/// where the two touch along a whole circle the curves the plane cuts them in
+/// touch rather than cross, and the road for curves that cross cannot tell
+/// that from two crossings close together. The circle is on a plane known
+/// exactly, and the plane, that one and the ball are an earlier road's.
+///
+/// Then each of the two in turn is the one whose band is used, and the road
+/// is [`two_points_or_nowhere`].
+fn what_a_plane_that_cuts_them_in_bands_that_cross_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<MeetOfThree>> {
+    let ball_and_round = if matches!(one, Surface::Sphere(_)) {
+        Some((one, other))
+    } else if matches!(other, Surface::Sphere(_)) {
+        Some((other, one))
+    } else {
+        None
+    };
+    if let Some((ball, round)) = ball_and_round {
+        match where_a_ball_on_the_axis_meets_it(ball, round) {
+            Some(ABallOnTheAxis::MeetsItNowhere) => return Ok(Some(MeetOfThree::Nowhere)),
+            Some(ABallOnTheAxis::MeetsItOnAPlane { leaning, reach }) => {
+                return where_a_stored_plane_an_exact_one_and_a_quadric_meet(
+                    flat, &leaning, &reach, ball, at, policy, log,
+                )
+                .map(Some);
+            }
+            None => {}
+        }
+    }
+    Ok(two_points_or_nowhere(flat, one, other).or_else(|| two_points_or_nowhere(flat, other, one)))
+}
+
+/// What a ball whose centre is on a pipe's or a cone's axis shares with it.
+enum ABallOnTheAxis {
+    /// Not a point.
+    MeetsItNowhere,
+    /// Every point the two share is on `leaning·p = reach`, and every point of
+    /// the ball on that plane is on the other one.
+    MeetsItOnAPlane { leaning: [Exact; 3], reach: Exact },
+}
+
+/// Where `ball` and `round`, a pipe or a cone, share nothing or share one
+/// circle, or `None` where the ball's centre is off the axis, where they
+/// share two circles, or where a product falls out of range.
+///
+/// With `W = w·w` for the axis direction `w` and `β` one for a pipe and
+/// `1 + slope²` for a cone, `h = W·ball − round` squares `p` only as
+/// `β(w·p)²`, and is `β(w·p)² + 2b·p + c` written out. Where `b` runs along
+/// `w`, as it does exactly when the ball's centre is on the axis, `b·w = t`
+/// gives `βW²h = (βW(w·p) + t)² + βW²c − t²`. So the two share nothing where
+/// `βW²c − t²` is above nothing, and share the circle on `βW(w·p) = −t` where
+/// it is nothing — a ball resting in a cone, or a ball of a pipe's radius
+/// about a point on its axis. Every number here is exact, so both are proved
+/// and neither is a rounding's guess.
+fn where_a_ball_on_the_axis_meets_it(ball: &Surface, round: &Surface) -> Option<ABallOnTheAxis> {
+    let (along, squeeze) = match round {
+        Surface::Cylinder(pipe) => (pipe.axis().direction().components(), Exact::of(1.0)),
+        Surface::Cone(cone) => (
+            cone.axis().direction().components(),
+            Exact::of(1.0).plus(&Exact::product_of(cone.slope(), cone.slope())?),
+        ),
+        Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) => return None,
+    };
+    let ball_written = how_a_surface_is_written(ball)?;
+    let round_written = how_a_surface_is_written(round)?;
+    let squared_along = Exact::dot_of(along, along)?;
+    let mut linear = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, entry) in linear.iter_mut().enumerate() {
+        *entry = squared_along
+            .times(&ball_written.half_linear[axis])?
+            .minus(&round_written.half_linear[axis]);
+    }
+    let constant = squared_along
+        .times(&ball_written.constant)?
+        .minus(&round_written.constant);
+    if Exact::cross_of(&linear, along)?
+        .iter()
+        .any(|entry| entry.sign() != Decision::Zero)
+    {
+        return None;
+    }
+    let along_the_axis = Exact::dot_of_two_exact(&linear, &Exact::of_each(along))?;
+    let squeezed = squeeze.times(&squared_along)?;
+    let room = squeezed
+        .times(&squared_along)?
+        .times(&constant)?
+        .minus(&along_the_axis.times(&along_the_axis)?);
+    let sign = room.sign();
+    if sign == Decision::Pos {
+        return Some(ABallOnTheAxis::MeetsItNowhere);
+    }
+    if sign != Decision::Zero {
+        return None;
+    }
+    let mut leaning = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, entry) in leaning.iter_mut().enumerate() {
+        *entry = squeezed.times(&Exact::of(along[axis]))?;
+    }
+    Some(ABallOnTheAxis::MeetsItOnAPlane {
+        leaning,
+        reach: Exact::of(0.0).minus(&along_the_axis),
+    })
+}
+
+/// Where the curve `flat` cuts `mine` in crosses the one it cuts `theirs` in:
+/// two points, or nowhere, or `None` where neither is proved.
+///
+/// **The curves.** Both surfaces are written as
+/// `Qᵢ = Wᵢ|p − oᵢ|² − βᵢ((p − oᵢ)·wᵢ)² − γᵢ` ([`ARoundSurface`]). Take `c`
+/// where `mine`'s axis crosses the plane, and write a point of the plane as
+/// `c + v`. Every point of `mine`'s curve has `|v|` between `r_in` and `r_out`,
+/// the edges of its band ([`the_band_a_plane_cuts`]), and the curve is a
+/// circle or an ellipse with `c` inside, so a line through `c` crosses it
+/// once on each side of `c`. A point on both curves is a point on `mine`'s
+/// where `h = W₂Q₁ − W₁Q₂` is zero, and on the plane
+/// `h = h₀ + g·v + q(v)` with `q(v) = W₁β₂(w₂·v)² − W₂β₁(w₁·v)²`. Only the
+/// parts of `w₁` and `w₂` along the plane reach `q`, and a plane a rounding off
+/// square to both leaves those a rounding long, so `|q| ≤ κ|v|²` for a `κ` of
+/// about a rounding and `h` is a line `h₀ + g·v` bent by no more than
+/// `E = κ r_out²`.
+///
+/// **Nowhere** where `|h₀|` is more than `|g| r_out + E`: `h` is not zero
+/// anywhere on the curve.
+///
+/// **Two points** where the line `h = 0`, widened by `E` either side into a
+/// strip, keeps inside `r_in` of `c`. Write `v = λτ + μĝ`, with `ĝ` along `g`
+/// and `τ = n × ĝ / |n|` across it. The curve crosses the line through `c`
+/// along `ĝ` at a point with `μ` above `r_in` and one with `μ` below `−r_in`,
+/// and `h` is above nothing at the first and below at the second. So `h` is
+/// zero somewhere on each of the two arcs between them, the arc with `λ`
+/// below nothing and the one with `λ` above. It is zero only once on each
+/// where it turns the same way at every point of the arc inside the strip.
+/// That turn is `n·(∇h × ∇Q₁)` along the plane, which is `|n||g|·2W₁λ` give
+/// or take `|g|δ₂ + δ₁(W₁r_out + δ₂)`, for `δ₁ = 2κ r_out` how far `∇h` is from
+/// `g` and `δ₂ = β₁|w₁|² r_out + |f₁|/2` how far `∇Q₁/2` is from `W₁v`, with
+/// `f₁` the part of `∇Q₁` at `c` along the plane. So the road asks that `λ`
+/// keeps far enough from nothing inside the strip for the first to win.
+///
+/// **Where they are.** From `h = 0`, `μ = (−q − h₀)/|g|`, and from `Q₁ = 0`,
+/// `λ² = (−Q₁(c) − f₁·v + β₁(w₁·v)²)/W₁ − μ²`. Each holds at the point, so
+/// each turns a box that holds the point into one that holds it too, and a
+/// few rounds of both shrink the box the strip starts to a rounding or two.
+///
+/// **The numbers.** `k(c − oᵢ)` is `k(o₁ − oᵢ) + m w₁` for `k` and `m` of the
+/// band, so `k²Qᵢ(c)` and `k∇Qᵢ(c)` are worked out exactly, and so are `k²h₀`
+/// and `k g`, with nothing past degree twelve in the stored numbers. Only the
+/// quotients by `k` and the frame are enclosures, each a few roundings wide.
+fn two_points_or_nowhere(flat: &Plane, mine: &Surface, theirs: &Surface) -> Option<MeetOfThree> {
+    let band = the_band_a_plane_cuts(flat, mine)?;
+    let normal = flat.normal().components();
+    let my_surface = ARoundSurface::of(mine, normal)?;
+    let their_surface = ARoundSurface::of(theirs, normal)?;
+    let (my_value, my_slant) = my_surface.where_the_axis_crosses(&band)?;
+    let (their_value, their_slant) = their_surface.where_the_axis_crosses(&band)?;
+    let level = their_surface
+        .squared_along
+        .times(&my_value)?
+        .minus(&my_surface.squared_along.times(&their_value)?);
+    let mut slant = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, entry) in slant.iter_mut().enumerate() {
+        *entry = their_surface
+            .squared_along
+            .times(&my_slant[axis])?
+            .minus(&my_surface.squared_along.times(&their_slant[axis])?);
+    }
+
+    let squared_normal = Exact::dot_of(normal, normal)?;
+    let leaning = band.leaning.enclosure();
+    let squared_leaning = leaning * leaning;
+    let off_the_line = quotient_or_everything(level.enclosure(), squared_leaning);
+    let my_value = quotient_or_everything(my_value.enclosure(), squared_leaning);
+    let rising = the_part_along_the_plane(&slant, normal, &squared_normal, leaning)?;
+    let my_slant = the_part_along_the_plane(&my_slant, normal, &squared_normal, leaning)?;
+    let one = Interval::exactly(1.0);
+    let my_axis = the_part_along_the_plane(
+        &Exact::of_each(my_surface.along),
+        normal,
+        &squared_normal,
+        one,
+    )?;
+    let their_axis = the_part_along_the_plane(
+        &Exact::of_each(their_surface.along),
+        normal,
+        &squared_normal,
+        one,
+    )?;
+    let [my_square, their_square] =
+        [&my_surface, &their_surface].map(|it| it.squared_along.enclosure());
+    let [my_squeeze, their_squeeze] =
+        [&my_surface, &their_surface].map(|it| it.squeeze.enclosure());
+
+    let rise = root_enclosing(squared_length_enclosing(rising));
+    let outer = band.radius + band.outside;
+    let inner = band.radius - band.inside;
+    (rise.lo() > 0.0 && rise.hi().is_finite() && outer.hi().is_finite() && inner.lo() > 0.0)
+        .then_some(())?;
+    let bend = my_square * their_squeeze * squared_length_enclosing(their_axis)
+        + their_square * my_squeeze * squared_length_enclosing(my_axis);
+    let most_bent = (bend * outer * outer).hi();
+    if !most_bent.is_finite() {
+        return None;
+    }
+    if how_far_from_nothing(off_the_line) > (rise * outer).hi() + most_bent {
+        return Some(MeetOfThree::Nowhere);
+    }
+
+    let strip = quotient_or_everything(
+        Interval::new(-most_bent, most_bent).expect("a bound above nothing") - off_the_line,
+        rise,
+    );
+    let far = Interval::exactly(strip.lo().abs().max(strip.hi().abs()));
+    (far.hi() < inner.lo()).then_some(())?;
+    let near = if strip.contains_zero() {
+        Interval::exactly(0.0)
+    } else {
+        Interval::exactly(strip.lo().abs().min(strip.hi().abs()))
+    };
+    let least = (inner * inner - far * far).lo();
+    let most = (outer * outer - near * near).hi();
+    (least > 0.0).then_some(())?;
+    let across = root_enclosing(Interval::new(least, most).ok()?);
+
+    let two = Interval::exactly(2.0);
+    let swing = two * bend * outer;
+    let my_slant_size = root_enclosing(squared_length_enclosing(my_slant));
+    let pull = my_squeeze * squared_length_enclosing(my_axis) * outer
+        + my_slant_size * Interval::exactly(0.5);
+    let turn = rise * my_square * Interval::exactly(across.lo())
+        - (rise * pull + swing * (my_square * outer + pull));
+    (turn.lo() > 0.0).then_some(())?;
+
+    let up = rising.map(|entry| quotient_or_everything(entry, rise));
+    let side = cross_enclosing(exactly(normal), up)
+        .map(|entry| quotient_or_everything(entry, root_enclosing(squared_normal.enclosure())));
+    let [my_axis_across, my_axis_up] = [side, up].map(|it| dot_enclosing(my_axis, it));
+    let [their_axis_across, their_axis_up] = [side, up].map(|it| dot_enclosing(their_axis, it));
+    let [my_slant_across, my_slant_up] = [side, up].map(|it| dot_enclosing(my_slant, it));
+    let crossing = |sign: f64| {
+        let sign = Interval::exactly(sign);
+        let mut sideways = sign * across;
+        let mut upwards = strip;
+        for _ in 0..8 {
+            let widths = (sideways.width(), upwards.width());
+            let mine_along = squared(my_axis_across * sideways + my_axis_up * upwards);
+            let theirs_along = squared(their_axis_across * sideways + their_axis_up * upwards);
+            let bent =
+                my_square * their_squeeze * theirs_along - their_square * my_squeeze * mine_along;
+            upwards = both(upwards, quotient_or_everything(-bent - off_the_line, rise));
+            let squared_reach = quotient_or_everything(
+                -my_value - (my_slant_across * sideways + my_slant_up * upwards)
+                    + my_squeeze * mine_along,
+                my_square,
+            );
+            sideways = both(
+                sideways,
+                sign * root_enclosing(squared_reach - squared(upwards)),
+            );
+            if sideways.width() >= widths.0 && upwards.width() >= widths.1 {
+                break;
+            }
+        }
+        let towards = quotient_or_everything(band.reach.enclosure(), leaning);
+        the_point_a_box_names(core::array::from_fn(|axis| {
+            Interval::exactly(band.on_the_axis[axis])
+                + Interval::exactly(band.along[axis]) * towards
+                + side[axis] * sideways
+                + up[axis] * upwards
+        }))
+    };
+    Some(MeetOfThree::At(smallvec![crossing(-1.0), crossing(1.0)]))
+}
+
+/// A ball, a pipe or a cone written as
+/// `W|p − o|² − β((p − o)·w)² − γ`, the same surface its own sign expression
+/// names: a ball as `|p − o|² − R²`, a pipe as `W|p − o|² − ((p − o)·w)² − Wr²`
+/// and a cone as `W|p − o|² − (1 + slope²)((p − o)·w)²`, with `W = w·w`.
+struct ARoundSurface {
+    /// `o`: a ball's centre, a pipe's axis point or a cone's apex.
+    on_the_axis: [f64; 3],
+    /// `w`, which for a ball is the plane's normal and squeezed by nothing.
+    along: [f64; 3],
+    /// `W`.
+    squared_along: Exact,
+    /// `β`.
+    squeeze: Exact,
+    /// `γ`.
+    constant: Exact,
+}
+
+impl ARoundSurface {
+    /// `surface` written out, or `None` where it is not a ball, a pipe or a
+    /// cone, or where a product falls out of range.
+    fn of(surface: &Surface, normal: [f64; 3]) -> Option<Self> {
+        match surface {
+            Surface::Sphere(ball) => Some(ARoundSurface {
+                on_the_axis: ball.centre().coordinates(),
+                along: normal,
+                squared_along: Exact::of(1.0),
+                squeeze: Exact::of(0.0),
+                constant: Exact::product_of(ball.radius(), ball.radius())?,
+            }),
+            Surface::Cylinder(pipe) => {
+                let along = pipe.axis().direction().components();
+                let squared_along = Exact::dot_of(along, along)?;
+                let constant =
+                    squared_along.times(&Exact::product_of(pipe.radius(), pipe.radius())?)?;
+                Some(ARoundSurface {
+                    on_the_axis: pipe.axis().origin().coordinates(),
+                    along,
+                    squared_along,
+                    squeeze: Exact::of(1.0),
+                    constant,
+                })
+            }
+            Surface::Cone(cone) => {
+                let along = cone.axis().direction().components();
+                Some(ARoundSurface {
+                    on_the_axis: cone.apex().coordinates(),
+                    along,
+                    squared_along: Exact::dot_of(along, along)?,
+                    squeeze: Exact::of(1.0).plus(&Exact::product_of(cone.slope(), cone.slope())?),
+                    constant: Exact::of(0.0),
+                })
+            }
+            Surface::Plane(_) | Surface::Torus(_) => None,
+        }
+    }
+
+    /// `k²Q(c)` and `k∇Q(c)`, exactly, at `c` where `band`'s axis crosses its
+    /// plane, from `k(c − o) = k(o_band − o) + m w_band`.
+    fn where_the_axis_crosses(&self, band: &ABand) -> Option<(Exact, [Exact; 3])> {
+        let from_here = Exact::gap_between(self.on_the_axis, band.on_the_axis);
+        let mut reach = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+        for (axis, entry) in reach.iter_mut().enumerate() {
+            *entry = band
+                .leaning
+                .times(&from_here[axis])?
+                .plus(&band.reach.times(&Exact::of(band.along[axis]))?);
+        }
+        let along_it = Exact::dot_of_two_exact(&reach, &Exact::of_each(self.along))?;
+        let value = self
+            .squared_along
+            .times(&Exact::squared_length_of(&reach)?)?
+            .minus(&self.squeeze.times(&along_it.times(&along_it)?)?)
+            .minus(&self.constant.times(&band.leaning.times(&band.leaning)?)?);
+        let squeezed = self.squeeze.times(&along_it)?;
+        let mut slant = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+        for (axis, entry) in slant.iter_mut().enumerate() {
+            let half = self
+                .squared_along
+                .times(&reach[axis])?
+                .minus(&squeezed.times(&Exact::of(self.along[axis]))?);
+            *entry = half.plus(&half);
+        }
+        Some((value, slant))
+    }
+}
+
+/// The part of `x / under` along the plane with normal `n`, as
+/// `(N x − (x·n) n) / (N under)` with the top worked out exactly, or `None`
+/// where a product falls out of range.
+fn the_part_along_the_plane(
+    x: &[Exact; 3],
+    normal: [f64; 3],
+    squared_normal: &Exact,
+    under: Interval,
+) -> Option<[Interval; 3]> {
+    let across = Exact::dot_of_two_exact(x, &Exact::of_each(normal))?;
+    let below = squared_normal.enclosure() * under;
+    let mut part = [Interval::ENTIRE; 3];
+    for (axis, entry) in part.iter_mut().enumerate() {
+        let over = squared_normal
+            .times(&x[axis])?
+            .minus(&across.times(&Exact::of(normal[axis]))?);
+        *entry = quotient_or_everything(over.enclosure(), below);
+    }
+    Some(part)
+}
+
+/// The least `|x|` can be for an `x` in `value`.
+fn how_far_from_nothing(value: Interval) -> f64 {
+    if value.hi() < 0.0 {
+        -value.hi()
+    } else if value.lo() > 0.0 {
+        value.lo()
+    } else {
+        0.0
+    }
+}
+
+/// `x²` for every `x` in `value`, which is never below nothing where `value`
+/// holds nothing, as `value * value` would be.
+fn squared(value: Interval) -> Interval {
+    if !value.contains_zero() {
+        return value * value;
+    }
+    let size = Interval::exactly(value.lo().abs().max(value.hi().abs()));
+    Interval::new(0.0, (size * size).hi()).expect("a square is not below nothing")
+}
+
+/// Where two boxes that each hold one root overlap.
+///
+/// # Panics
+///
+/// Where they do not overlap, which means one of them does not hold the root
+/// after all.
+fn both(one: Interval, other: Interval) -> Interval {
+    Interval::new(one.lo().max(other.lo()), one.hi().min(other.hi()))
+        .unwrap_or_else(|_| panic!("two boxes that each hold one root miss: {one:?} and {other:?}"))
 }
 
 /// A line, written as `(through + s · direction) / divided_by`.
