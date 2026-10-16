@@ -81,23 +81,36 @@
 //! so a part placed twice can carry such a cap.
 //! [`what_a_plane_that_cuts_them_in_bands_apart_leaves`].
 //!
+//! **A tenth is a quartic whose two roots are found one at a time.** Where
+//! the bands overlap and the plane is near enough square to both axes, one
+//! curve is a line bent by little across the other, and it crosses it once
+//! on each side of where that one's axis crosses the plane. A sign at each
+//! end of each arc says a crossing is there, a bound on how the line turns
+//! says it is the only one, and a few rounds of two equations shrink a box
+//! round each — the same cap with a bar and a cone it cuts in one circle on
+//! paper, or a cap leaning a hundredth to a bar and its chamfer cone. A ball
+//! whose centre is on a pipe's or a cone's axis is taken first, since the two
+//! touch along a circle on a plane known exactly: a slanted cut through where
+//! a rod's round end meets it.
+//! [`what_a_plane_that_cuts_them_in_bands_that_cross_leaves`].
+//!
 //! **Three curved surfaces, two of which bend the same way, are one plane and
 //! two curved surfaces** by the first family's own argument: every point the
 //! two share is on the plane they differ by, and every point on that plane and
 //! one of them is on the other. So the plane takes the place of one of the
-//! two, and the nine roads answer the triple — two cones of one slope about one
+//! two, and the ten roads answer the triple — two cones of one slope about one
 //! axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
 //! quadrics that bend differently, cross the plane in curves, share no axis
 //! the plane is square or parallel to, are not both cut by it in circles,
-//! neither of which is a pipe it runs along, and whose bands overlap — a plane
-//! leaning to a pipe's axis, which cuts it in an ellipse, against a ball off
-//! that axis or the axis a ball and the pipe share whose circle comes near the
-//! ellipse, a cap of one bar across a second bar leaning to it, a cap a
-//! rounding off square to a bar and a cone it cuts in one circle on paper, or
-//! a wall a rounding off parallel to a bar and its chamfer cone and off their
+//! neither of which is a pipe it runs along, whose bands overlap, and whose
+//! curves the plane leans too far for one to be a line bent by little across
+//! the other, or which touch rather than cross — a plane leaning well off
+//! square to a pipe's axis, which cuts it in a long ellipse, against a ball
+//! off that axis, a cap of one bar across a second bar leaning to it, or a
+//! wall a rounding off parallel to a bar and its chamfer cone and off their
 //! axis —
 //! a plane along a pipe and a cone one of whose rulings runs along the
 //! pipe, three curved surfaces no two of which differ by a plane a stored
@@ -188,7 +201,11 @@ pub enum MeetOfThree {
     /// ([`what_a_plane_that_cuts_both_in_circles_leaves`]). A plane along a
     /// pipe gives up to two on each line it cuts the pipe in, the line on one
     /// side of the axis first and the lower point first along each, in the
-    /// order [`what_a_plane_along_a_pipe_leaves`] names.
+    /// order [`what_a_plane_along_a_pipe_leaves`] names. A plane that cuts two
+    /// round surfaces in curves that cross gives the two crossings in the
+    /// order [`two_points_or_nowhere`] finds them: the one on the side of `−τ`
+    /// first, for `τ = n × ĝ / |n|` and `ĝ` the way the difference of the two
+    /// rises along the plane.
     ///
     /// Most are a box the true meeting point is somewhere inside, because
     /// solving a quadratic divides and a quotient of two ranges almost never
@@ -1661,9 +1678,11 @@ fn where_three_curved_surfaces_meet(
 /// keep that answer, and the road beside the axis takes only a plane that cuts
 /// both surfaces in curves.
 ///
-/// The road for bands apart comes last of all, and it only ever answers that
-/// the three share nothing. Every triple an earlier road answers keeps that
-/// answer, and the band road takes what they all hand on.
+/// The road for bands apart comes after all of those, and it only ever
+/// answers that the three share nothing. Every triple an earlier road answers
+/// keeps that answer, and the band road takes what they all hand on. The road
+/// for bands that cross comes last of all and takes what the band road hands
+/// on, so it never changes an answer either.
 fn where_one_plane_and_two_curved_surfaces_meet(
     flat: &Plane,
     one: &Surface,
@@ -4063,10 +4082,10 @@ impl TheLinesAlongAPipe {
 /// twelve in the stored numbers, which [`Exact::times`] multiplies without
 /// falling off the bottom of the range.
 ///
-/// **What it leaves to the refusal** is two bands that overlap: the curves may
-/// cross, and where is the quartic the module doc names. It leaves as well a
-/// ring, a plane that misses a ball, and a plane parallel to a pipe's or a
-/// cone's axis, since it gives none of those a band. A plane a rounding off
+/// **What it leaves** is two bands that overlap, where the curves may cross,
+/// to [`what_a_plane_that_cuts_them_in_bands_that_cross_leaves`]. It leaves
+/// to the refusal a ring, a plane that misses a ball, and a plane parallel to
+/// a pipe's or a cone's axis, since it gives none of those a band. A plane a rounding off
 /// parallel to a pipe and a cone about one axis gets bands too wide to keep
 /// apart, the cone's with no outer edge, so the side of a block three from a
 /// bar and its chamfer cone, the block and the bar placed by one turn, is
