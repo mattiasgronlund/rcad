@@ -18,6 +18,7 @@ placement and measure differently.*
   249.5   A limit, and the demonstration
   249.6   What should change instead is the comparison
   249.7   What this leaves
+  249.8   A circle drawn on a flat face moves with no placement: a gap
 
 ### 249.1 What was compared
 
@@ -281,3 +282,105 @@ purpose, so changing it is a change to that decision.
 - Decide whether `BuildingAMesh::walk` should give the walk a placed face's stored corners rather than its located corners moved back (249.3's side finding), in `crates/rcad-topo/src/mesh.rs`.
 - ~~Find which triangle choice flips when a bar is moved by `(0.1, 0.2, 0.3)` and every mesh point stays the same (249.4 item 2), in `BuildingAMesh::cut_up`, `crates/rcad-topo/src/mesh.rs`.~~ Done: the caps' Delaunay tie, fixed in §362.
 - Correct §241.5 item 2's "the same bar also moved by (3, −5, 7) fails the same way": moved alone it passes, and turned then moved it fails. The fix goes in `docs/decisions.d/241-the-writer-fuzz-target-mutates-models-rather-than-bytes.md`.
+
+### 249.8 A circle drawn on a flat face moves with no placement: a gap
+
+*Queue row Q2151, from Q2135, 2026-10-16. Three lanes: the first on
+`lane-q2151-a-leaning-pipe-read-back-to-the-bit`, then two on
+`lane-q2151-b-class-the-leaning-pipes-centroid`. Every probe was a scratch
+test, deleted again.*
+
+**249.6's second bullet is wrong for a solid with a circle drawn on a flat
+face.** Such a solid at no placement is stored in the same frame on both
+sides, as the bullet says, but its measurement can still change on the way
+through the file. Two unplaced solids, every located number the same bits on
+both sides:
+
+| solid | kernel's circle centre | read-back centre | volume | area | centroid |
+|---|---|---|---|---|---|
+| a bar's top at `z = 4`, a disc on it drawn by a pipe up `z` from `z = −15.9` | `z = 3.9999999999999982` | `z = 4.0`, 4 ulps off | 1 ulp off | same bits | `z` 6 ulps off |
+| a face square to `(1, 1, 1)` through `(4, 4, 4)`, a disc on it drawn by a pipe along `(1, 1, 1)` from the origin | `3.9999999999999996` in each | `4.000000000000001` in each, 2 ulps off | same bits | same bits | 16, 2 and 3 ulps off |
+
+The first is `a_disc_drawn_by_a_pipe_from_far_below_its_top_comes_back_from_its_own_file`,
+which measured `50.240477976741204` going in and `50.2404779767412` coming
+back. The second is
+`an_unplaced_leaning_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file`,
+whose centroid went in at `(2.0000000000000084, 2.0000000000000013,
+2.0000000000000018)` and came back at `(2.0000000000000155,
+2.000000000000002, 2.000000000000003)`; 78 of its 304 mesh points differ.
+Both are in `crates/rcad-step/tests/fuzzing/writer.rs`. A pipe along a
+coordinate axis is no safer than one that leans: of the 400 origins
+`z = k/10`, `k` from −200 to 199, 40 walk to a centre other than `4.0`.
+
+**Where it moves.** The kernel stores the drawn pipe with its own origin.
+`rcad_geom::walk`'s `where_a_plane_cuts_a_pipe` centres the circle at that
+origin moved up the axis to the face, and that point rounds. The writer's
+`Writing::an_arc_of_a_circle_on_a_flat_face` (`crates/rcad-step/src/write.rs`)
+writes the `CIRCLE` at the same point, worked out the same way by
+`where_a_plane_crosses_a_pipe`, whenever the pipe's own origin is not on the
+face. The reader's `Walk::the_surface_that_names_the_curve`
+(`crates/rcad-step/src/brep.rs`) names the run by a pipe whose origin is the
+`CIRCLE`'s centre (`Axis::as_written(place.origin, …)`), and the walk centres
+the circle again from there. That second walk need not land on the first. On
+the `z` case, `4 − 3.9999999999999982` is exact and so is the sum, so it lands
+on `4.0`. The writer's own doc already says the reader's walk "can land a few
+ulps away"; what it did not say is that the measurement moves with it.
+
+**Families of fix, each run on the probe in scratch code.**
+
+1. **The writer writes the pipe's own origin.** Written literally, as the
+   `CIRCLE`'s centre, the reader refuses the file: "a sound model was written
+   as a file the reader refuses: what #80 describes is not a solid this kernel
+   can hold", since the faces must hold the circle at its centre. Nothing
+   else in the file can carry the origin today. There is no
+   `CYLINDRICAL_SURFACE` for a drawn pipe (the one in the `z` bar's file,
+   `#24`, is the bar's own wall), and `rcad-step`'s reader reads no
+   `SURFACE_CURVE` that could tie one to the circle. Writing the pipe as a
+   `CYLINDRICAL_SURFACE` beside the circle, at its own origin, is standard
+   geometry, unlike §249.5's private channels, but it needs a reader for it,
+   and it is not tried.
+2. **The writer writes another centre the faces hold.** On the `z` case none
+   works. Every one of the 2 097 153 origins within `2^20` ulps of `z = 4`
+   walks to exactly `4.0`, never to `3.9999999999999982`: for `c` from 2 to 8,
+   `4 − c` is exact and so is `c + (4 − c)`.
+3. **The reader searches for an origin whose walk lands on the file's
+   centre**, in a box of 4 ulps round it and in steps of `2^k` ulps along the
+   axis, and builds the pipe there. On the leaning probe it moved the pipe's
+   origin from `(3.9999999999999996, …)` to `(3.9999999999999982, …)` and the
+   probe came back the same bits with no narrowing. So an origin other than
+   the kernel's measures the same as the kernel's when it walks to the same
+   centre. With `the_same_run` also calling such a pipe the same, a run of
+   `rcad-step` and `rcad-fuzz-explain` stopped at its first failures, 212 of
+   473 tests in, with 210 passed and 2 failed. The lane read the failures as
+   the pin `how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`,
+   which now counted 84 of 372 axes moved; the other 261 tests were not run
+   with the search. It is incomplete: of 4000 random
+   leaning pipes, 2474 have a centre that does not walk back to itself, and
+   the search found an origin for 2138 of them and none for 336; of the 56
+   origins `z = k/10`, `k` from −400 to 399, that do not, it found 32 and
+   none for 24. A box of 4 ulps alone found 986 of the 2474.
+4. **Narrow the comparison.** The first lane left out every solid with a
+   drawn pipe that does not run along a coordinate axis. That is not enough:
+   the `z` case runs along `z` and fails. `every_drawn_circle_comes_back_round_the_same_centre` leaves out a
+   solid only where the reader's pipe walks a circle on a flat face to other
+   bits than the kernel's, and `read_back_and_compared` keeps it as a stopgap,
+   not as the answer.
+5. **Not tried: make the walk a fixed point**, so that a circle's centre,
+   walked again from itself, lands on itself. Then the file's centre would
+   read back as the kernel's. It changes how `rcad_geom::walk` centres every
+   circle a plane cuts from a pipe.
+
+**So this is a gap, class wrong/B.** The answer exists: the kernel's own
+origin walks to the kernel's centre, and on the probe an origin the reader
+found did too and measured the same bits. §249.5's argument does not carry
+over. There, two placements write one file and measure differently, so no
+reader can tell which one to rebuild. Here, two origins that walk to one
+centre measured the same, so a file that names the centre names the
+measurement, if the reader can find an origin that walks there or the file
+says which. The `z` shape, a disc drawn on a bar's top by a pipe up its axis
+from below, is a shape a designer makes on purpose, so it is B.
+
+**What this leaves.**
+
+- Make a circle drawn on a flat face come back walked round the centre the kernel walks it round, by family 1 with a reader for it, or by a search that always finds an origin, in `crates/rcad-step/src/write.rs`, `brep.rs` and `geometry.rs`. Then take `every_drawn_circle_comes_back_round_the_same_centre` out of `read_back_and_compared`, and the two tests above are its failing tests. Filed as a row from Q2151.
+- §129.5 item 3 says `read_back_and_compared` keeps the bit-for-bit measurement for every solid wholly flat or at no placement; it now also asks that every circle drawn on a flat face come back walked round the same centre. The fix goes in `docs/decisions.d/129-the-night-used-one-core-of-24-changed-2026-09-18.md`, filed as a row from Q2151.
