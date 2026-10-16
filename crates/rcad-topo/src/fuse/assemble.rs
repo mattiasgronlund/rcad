@@ -2898,7 +2898,7 @@ impl Assembly {
     /// [`Assembly::with_each_ring_of_two_straight_sides_left_out`] lists, or if
     /// a run of edges that became one edge does not have exactly two ends left.
     /// Both mean the joining above is wrong.
-    fn rebuild_from(&mut self, joined: &[JoinedFace], renumbered: Renumbered) -> Result<bool> {
+    fn rebuild_from(&mut self, joined: &[JoinedFace], mut renumbered: Renumbered) -> Result<bool> {
         let edges = self.edges_after_joining(&renumbered);
 
         let faces = joined
@@ -2931,24 +2931,13 @@ impl Assembly {
 
         // The run's sides read which way they walk it off the old corners
         // above, so the corner they close up at changes only after.
-        let starts = &mut self.where_closed_edges_start;
+        let mut starts = core::mem::take(&mut renumbered.starts_where_its_curve_does);
         self.corners = core::mem::take(&mut self.corners)
             .into_iter()
             .enumerate()
             .zip(&renumbered.corner_now)
             .filter_map(|((index, corner), now)| {
-                now.map(
-                    |_| match renumbered.starts_where_its_input_edge_did.get(&index) {
-                        Some(edge) => {
-                            let at = starts
-                                .iter()
-                                .position(|(starts, _)| starts == edge)
-                                .expect("a run closes up at the start of its edge once");
-                            starts.swap_remove(at).1
-                        }
-                        None => corner,
-                    },
-                )
+                now.map(|_| starts.remove(&index).unwrap_or(corner))
             })
             .collect();
         self.edges = edges;
@@ -5007,6 +4996,7 @@ struct Lump {
 }
 
 /// One corner of the result.
+#[derive(Clone)]
 struct Corner {
     point: Point,
     /// How wide the box this corner was solved as is. Representation wobble
