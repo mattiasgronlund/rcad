@@ -1306,7 +1306,7 @@ fn turning_the_whole_sweep_by_one_isometry_disagrees_with_the_closed_form_only_o
 /// [`TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED`] pins a count no formula derives —
 /// a change here says the rounding moved, not that it is wrong.
 #[test]
-fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_family() {
+fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_is_answered_in_every_family() {
     let shapes = balls_pipes_and_cones_about_one_axis();
 
     let axis =
@@ -1326,7 +1326,7 @@ fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_fam
         "cone-cone",
     ];
     let mut not_square = 0usize;
-    let mut refused = [0usize; 6];
+    let mut answered = [[0usize; 3]; 6];
     for (first, one) in shapes.iter().enumerate() {
         for other in &shapes[first + 1..] {
             let family = match (one, other) {
@@ -1381,14 +1381,33 @@ fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_fam
                 let what = format!("{one:?} and {other:?} cut at {height}, cap rounded off square");
                 if mine < 0.0 || theirs < 0.0 || mine != theirs {
                     assert_eq!(answer, Ok(MeetOfThree::Nowhere), "{what}");
-                } else if let Err(error) = answer {
-                    assert_eq!(
-                        error,
-                        Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat,
-                        "{what}"
-                    );
-                    refused[family] += 1;
+                    continue;
                 }
+                let answer = answer.unwrap_or_else(|refused| panic!("{what}: {refused:?}"));
+                let column = match &answer {
+                    MeetOfThree::At(points) => {
+                        assert_eq!(points.len(), 2, "{what}: {answer:?}");
+                        for point in points {
+                            for side in point.enclosure() {
+                                assert!(side.width() <= 1e-12, "{what}: {point:?}");
+                            }
+                            for surface in [&cap, &here, &there] {
+                                assert!(
+                                    !matches!(
+                                        which_side_of(surface, *point),
+                                        Decision::Pos | Decision::Neg
+                                    ),
+                                    "{what}: {point:?} is certified off {surface:?}"
+                                );
+                            }
+                        }
+                        0
+                    }
+                    MeetOfThree::Nowhere => 1,
+                    MeetOfThree::MoreThanAPoint => 2,
+                    other => panic!("{what}: {other:?}"),
+                };
+                answered[family][column] += 1;
             }
         }
     }
@@ -1397,22 +1416,31 @@ fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_fam
         not_square > 0,
         "the composed cap came out exactly square to every pair's axis after all"
     );
-    for (name, count) in families.iter().zip(refused) {
-        println!("{name}: refused {count}");
+    for (name, [at_two_points, nowhere, more]) in families.iter().zip(answered) {
+        println!("{name}: two points {at_two_points}, nowhere {nowhere}, more than a point {more}");
     }
     assert_eq!(
-        refused, ROUNDING_OFF_SQUARE_CAP_REFUSALS,
-        "how a cap rounded off square refuses, by family, moved"
+        answered, ROUNDING_OFF_SQUARE_CAP_ANSWERS,
+        "how a cap rounded off square is answered, by family, moved"
     );
 }
 
 /// Measured, and a watch rather than a bound (see
-/// [`a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_family`]):
-/// how often a cap one rounding off square refuses, by family, in the order
-/// ball-ball, ball-pipe, ball-cone, pipe-pipe, pipe-cone, cone-cone. Every
-/// refusal is a row the closed form calls one shared circle or one point.
-/// Before the road for bands apart it was `[0, 366, 1098, 0, 972, 972]`.
-const ROUNDING_OFF_SQUARE_CAP_REFUSALS: [usize; 6] = [0, 22, 40, 0, 104, 64];
+/// [`a_cap_turned_by_a_different_composition_of_turns_than_its_pair_is_answered_in_every_family`]):
+/// how a cap one rounding off square is answered on the rows the closed form
+/// calls one shared circle or one point, as `[two points, nowhere, more than a
+/// point]`, by family, in the order ball-ball, ball-pipe, ball-cone,
+/// pipe-pipe, pipe-cone, cone-cone. None is refused. Before the road for
+/// bands that cross it refused `[0, 22, 40, 0, 104, 64]` of them, and before
+/// the road for bands apart `[0, 366, 1098, 0, 972, 972]`.
+const ROUNDING_OFF_SQUARE_CAP_ANSWERS: [[usize; 3]; 6] = [
+    [3, 9, 0],
+    [22, 4, 0],
+    [34, 44, 0],
+    [0, 0, 27],
+    [92, 44, 0],
+    [60, 52, 81],
+];
 
 /// **A cap leaning a hundredth off square to a bar's axis cuts the bar, a
 /// chamfer cone and a ball in curves that keep apart.** The cap through
@@ -1446,10 +1474,34 @@ fn a_cap_leaning_off_square_to_a_bar_meets_it_and_a_cone_or_a_ball_it_keeps_apar
     }
 
     let wide_bar = pipe([0.0; 3], [0.0, 0.0, 1.0], 5.0);
-    assert_eq!(
-        meet([&cap, &wide_bar, &chamfer]),
-        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-    );
+    for order in [
+        [&cap, &wide_bar, &chamfer],
+        [&chamfer, &cap, &wide_bar],
+        [&wide_bar, &chamfer, &cap],
+    ] {
+        let answer = meet(order).expect("these three meet");
+        let MeetOfThree::At(points) = &answer else {
+            panic!("{order:?}: {answer:?}");
+        };
+        assert_eq!(points.len(), 2, "{order:?}: {answer:?}");
+        let mut points = points.to_vec();
+        points.sort_by(|one, other| {
+            one.enclosure()[0]
+                .lo()
+                .total_cmp(&other.enclosure()[0].lo())
+        });
+        for (point, x) in points.iter().zip([-5.0, 5.0]) {
+            let sides = point.enclosure();
+            for (side, expected) in [(sides[0], x), (sides[1], 0.0), (sides[2], 5.0)] {
+                assert!(
+                    side.width() <= 1e-12
+                        && side.lo() - 1e-15 <= expected
+                        && expected <= side.hi() + 1e-15,
+                    "{order:?}: {point:?} where the corner is ({x}, 0, 5)"
+                );
+            }
+        }
+    }
 }
 
 /// A ring about `z` through the origin.
