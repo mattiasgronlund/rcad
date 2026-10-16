@@ -112,7 +112,7 @@
 //!
 //! # The far rim the cube's edges run through
 //!
-//! A near cap cut this close (`far / 300`) sometimes refuses earlier, with
+//! A near cap cut this close (`far / 300`) sometimes refused earlier, with
 //! `CannotTellTheCellsOfAFaceApart`, before the crossing is even reached.
 //! Q2028 traced it, and it is not the near cap. In a grid of 21 shape scales
 //! (`0.1` to `0.5`), 17 working sizes (`0.1` to `0.9`) and the four fuses,
@@ -126,24 +126,37 @@
 //! point, the cap, the cone and two faces of the cube, and on the cap that
 //! point is three meets: the rim with each face's line, and the two lines
 //! with each other. Stored in `f64` they come back as three boxes a few
-//! `1e-16` apart, and `merge_points_that_are_one_point` decides them a pair at
-//! a time. At a shape scale of `0.1` and a working size of `0.25` it joins the
-//! rim's meet with one line to the meet of the two lines, and proves the
-//! rim's meet with the other line apart from both. That other line then meets
-//! the rim twice, a hair apart, and `spread_the_winding` cannot tell the
-//! cap's cells apart. The answer exists, so this is a gap (§16.10).
+//! `1e-16` apart, and `merge_points_that_are_one_point` decided them a pair
+//! at a time. At a shape scale of `0.1` and a working size of `0.25` it joined
+//! the rim's meet with one line to the meet of the two lines, and proved the
+//! rim's meet with the other line apart from both. That other line then met
+//! the rim twice, a hair apart, and `spread_the_winding` could not tell the
+//! cap's cells apart. The answer exists, so this was a gap (§16.10).
 //!
 //! **No answer was wrong.** The 48 fuses of that grid that answered pass
 //! `Model::validate`, have the solid, face, wire and shell counts of the same
 //! fuse at a scale of one and a working size of `10`, and its volume to
 //! within `1.9e-5`. Lifting the far cap by a thousandth of its height takes it
 //! off the edges' lines, and all 1428 fuses answer. Turning the seam to `+x`
-//! still leaves 347 refusals, so the seam plays no part. The two power-of-two
+//! still left 347 refusals, so the seam plays no part. The two power-of-two
 //! images of a scale of `0.1` and a size of `0.25`, which round the same way,
-//! refuse the same, so small numbers play no part either.
-//! `a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart`
-//! and `the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges`
-//! pin both. Q2133 is the row that answers the refusals.
+//! refused the same, so small numbers play no part either.
+//! `the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges`
+//! pins the lifted cap.
+//!
+//! **Since Q2133 the fuses answer.** Each face through the point, the cap, the
+//! cone and the cube's two faces, crosses the other three surfaces in three
+//! curves, and the three meets of those curves two at a time are three nodes
+//! round a sliver cell, each two of them neighbours along one curve and no
+//! further apart than the policy's wobble. `merge_points_that_are_one_point`
+//! now takes the three as one point at once, with one record of how far apart
+//! two of them may be, where the three surfaces besides the face's own are
+//! proved to meet within the wobble of all three too. At `0.1`/`0.25` and its
+//! images `0.8`/`2` and `6.4`/`16`, every fuse answers, passes
+//! `Model::validate`, and measures the volumes the frustum, the cube and what
+//! the two share give it
+//! (`a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_answers_with_its_volumes`).
+//! The rest of Q2028's grid was not run again.
 //!
 //! A designer draws the same kind of meeting on purpose: a round bar notched
 //! by a block whose inside corner stands on the bar's wall, at `(0.6 r, 0.8
@@ -169,6 +182,14 @@
 //! At other radii, before Q2082, the same bar was refused
 //! `ResultIsNotManifold` or `TheFuseWroteABrokenAnswer`, or ran for minutes;
 //! those are rows of their own.
+//!
+//! Q2133's join leaves this bar as it was. Its cap sees three meets round a
+//! sliver too, but the block's corner edge runs along the bar's axis a hair
+//! off its wall, so the wall and the block's two faces share no point, and
+//! no other face through the point sees three meets of its own. Joined on the
+//! cap alone, the union at `12.8`/`25` was refused
+//! `ResultIsNotManifold { count: 1 }`, so the join asks the three surfaces
+//! besides the face's own to meet there too.
 //!
 //! # Plane through a ball
 //!
