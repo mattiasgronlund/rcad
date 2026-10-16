@@ -278,7 +278,6 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
             });
         if every_number_the_same_bits
             && (here_solid.is_wholly_flat() || solid_has_no_placement(here_solid))
-            && every_drawn_circle_comes_back_round_the_same_centre(here_solid, back_solid)
         {
             assert!(
                 here.volume() == back.volume() && here.surface_area() == back.surface_area(),
