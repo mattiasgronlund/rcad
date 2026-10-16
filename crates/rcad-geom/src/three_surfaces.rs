@@ -4,7 +4,7 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and eight ways round it
+//! # Two planes and a quadric is the road, and nine ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
@@ -73,21 +73,33 @@
 //!   on a shaft of its outer radius.
 //!   [`what_a_plane_square_to_a_rings_axis_leaves`].
 //!
+//! **A ninth is a quartic, but one with no root to find.** A plane cuts a
+//! ball, a pipe or a cone in a curve that keeps between two distances from
+//! where the axis crosses it, and where the bands of two such curves keep
+//! apart the three share nothing. A cap a rounding off square to a bar and its
+//! chamfer cone is it: [`Isometry::compose`](crate::Isometry::compose) rounds,
+//! so a part placed twice can carry such a cap.
+//! [`what_a_plane_that_cuts_them_in_bands_apart_leaves`].
+//!
 //! **Three curved surfaces, two of which bend the same way, are one plane and
 //! two curved surfaces** by the first family's own argument: every point the
 //! two share is on the plane they differ by, and every point on that plane and
 //! one of them is on the other. So the plane takes the place of one of the
-//! two, and the eight roads answer the triple — two cones of one slope about one
+//! two, and the nine roads answer the triple — two cones of one slope about one
 //! axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
 //! quadrics that bend differently, cross the plane in curves, share no axis
-//! the plane is square or parallel to, are not both cut by it in circles, and
-//! neither of which is a pipe it runs along — a plane leaning to a pipe's
-//! axis, which cuts it in an ellipse, against a ball off that axis or the axis
-//! a ball and the pipe share, or a cap of one bar across a second bar leaning
-//! to it — a plane along a pipe and a cone one of whose rulings runs along the
+//! the plane is square or parallel to, are not both cut by it in circles,
+//! neither of which is a pipe it runs along, and whose bands overlap — a plane
+//! leaning to a pipe's axis, which cuts it in an ellipse, against a ball off
+//! that axis or the axis a ball and the pipe share whose circle comes near the
+//! ellipse, a cap of one bar across a second bar leaning to it, a cap a
+//! rounding off square to a bar and a cone it cuts in one circle on paper, or
+//! a wall a rounding off parallel to a bar and its chamfer cone and off their
+//! axis —
+//! a plane along a pipe and a cone one of whose rulings runs along the
 //! pipe, three curved surfaces no two of which differ by a plane a stored
 //! [`Plane`] is exactly, and any triple with a torus and fewer than two planes
 //! but the eighth family.
@@ -403,7 +415,7 @@ impl MeetOfThree {
 /// # Errors
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
-/// the three are planes and none of the six ways round that the module doc
+/// the three are planes and none of the nine ways round that the module doc
 /// names runs — for three curved surfaces, after the plane two of them differ
 /// by has taken one's place, or where no two of them differ by one.
 ///
@@ -1642,10 +1654,15 @@ fn where_three_curved_surfaces_meet(
 /// about that axis in two lines, so it neither misses nor grazes one: that road
 /// shares no triple with the ones either side of it.
 ///
-/// The road for a plane beside the axis comes last. Such a plane can miss a
-/// pipe or a ball, or touch one, and the road for a plane that grazes answered
-/// those before the last road existed; they keep that answer, and the last road
-/// takes only a plane that cuts both surfaces in curves.
+/// The road for a plane beside the axis comes after the one that grazes. Such
+/// a plane can miss a pipe or a ball, or touch one, and the road for a plane
+/// that grazes answered those before the road beside the axis existed; they
+/// keep that answer, and the road beside the axis takes only a plane that cuts
+/// both surfaces in curves.
+///
+/// The road for bands apart comes last of all, and it only ever answers that
+/// the three share nothing. Every triple an earlier road answers keeps that
+/// answer, and the band road takes what they all hand on.
 fn where_one_plane_and_two_curved_surfaces_meet(
     flat: &Plane,
     one: &Surface,
@@ -1691,6 +1708,9 @@ fn where_one_plane_and_two_curved_surfaces_meet(
         return Ok(answer);
     }
     if let Some(answer) = what_a_plane_along_a_pipe_leaves(flat, one, other, at)? {
+        return Ok(answer);
+    }
+    if let Some(answer) = what_a_plane_that_cuts_them_in_bands_apart_leaves(flat, one, other) {
         return Ok(answer);
     }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
@@ -2187,7 +2207,10 @@ fn cross_of_two_exact(u: &[Exact; 3], v: &[Exact; 3]) -> Option<[Exact; 3]> {
 /// stored direction crossed with the plane's normal is zero in every
 /// component, and so is the gap between the two points on the axes crossed with
 /// it. A direction a rounding off square cuts an ellipse, which is the quartic
-/// again, and is handed on. So is a triple where a product those two checks
+/// again, and is handed on: where the ellipse and the other curve keep apart,
+/// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`] proves it, and where
+/// they come near, as one circle on paper does, the triple is refused. So is a
+/// triple where a product those two checks
 /// need falls out of `f64`'s range, because that is a refusal to say whether
 /// this road is the one — the same rule [`how_a_surface_is_written`] keeps.
 ///
@@ -3549,12 +3572,14 @@ fn the_ends_of_the_chord_at(
 /// and the ball of radius three at `(0, 3, 5)` differ on the cap `z = 5` by
 /// `6y + 5z = 29`, so the three meet at `(±4√2/3, 2/3, 5)`.
 ///
-/// **What it leaves to the refusal.** A plane that leans to a pipe's or a
-/// cone's axis cuts it in an ellipse, a parabola or a hyperbola, whose `p·p`
-/// part is not a multiple of a circle's, so no `s₂C₁ − s₁C₂` takes the squares
-/// away and what is left is the quartic the module doc names. Two such conics
-/// of one shape would differ by a line again — a mitre between two pipes of one
-/// radius cuts both in one ellipse — and this road does not look for them.
+/// **What it hands on.** A plane that leans to a pipe's or a cone's axis cuts
+/// it in an ellipse, a parabola or a hyperbola, whose `p·p` part is not a
+/// multiple of a circle's, so no `s₂C₁ − s₁C₂` takes the squares away and what
+/// is left is the quartic the module doc names.
+/// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`] answers it where the
+/// two curves keep apart, and the rest is refused. Two such conics of one shape
+/// would differ by a line again — a mitre between two pipes of one radius cuts
+/// both in one ellipse — and this road does not look for them.
 ///
 /// It is asked after every road that takes two surfaces turned about one axis,
 /// which answer a circle about one centre against another, and after the road
@@ -3751,10 +3776,11 @@ fn the_line_two_circles_differ_by(mine: &ACircle, theirs: &ACircle) -> Option<([
 /// the other surface — a second pipe the same way, which the first family
 /// answers, or a cone one of whose rulings runs along `w` — and the quadratic
 /// on a line is a line's: this road hands that on. A plane that leans to the
-/// pipe's axis is not along it and cuts it in an ellipse.
+/// pipe's axis is not along it and cuts it in an ellipse, which
+/// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`] is asked about next.
 ///
-/// It is asked last, so every triple an earlier road answers keeps its
-/// answer. Arithmetic that runs out after the family is settled is
+/// It is asked after every road but that one, so every triple an earlier road
+/// answers keeps its answer. Arithmetic that runs out after the family is settled is
 /// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
 fn what_a_plane_along_a_pipe_leaves(
     flat: &Plane,
@@ -3987,6 +4013,223 @@ impl TheLinesAlongAPipe {
             })
             .collect()
     }
+}
+
+/// What a plane leaves of a ball, a pipe or a cone and a second one where the
+/// curves it cuts them in are proved apart, or `None` where that is not proved.
+///
+/// **Each curve lies in a band about where an axis crosses the plane.** Write
+/// the plane `n·p = d`, and give each surface a stored point `o` on an axis and
+/// that axis's direction `w`: a ball's centre and the plane's own normal, a
+/// pipe's axis origin and direction, or a cone's apex and direction. The axis
+/// crosses the plane at `c = o + w·m/k`, for `k = n·w` and `m = d − n·o`. Take
+/// a point `p = c + v` of the plane and `t` the angle between `n` and `w`.
+/// Since `v` is square to `n`, its part along the axis is at most `|v|·sin t`.
+///
+/// - A pipe of radius `r` holds `p` where `|v|² − (v·ŵ)² = r²`, so
+///   `r ≤ |v| ≤ r / cos t`. A ball is the same with `t = 0`: a circle of
+///   radius `ρ` about `c`, with `ρ² = (N R² − m²)/N` for `N = n·n`.
+/// - A cone of slope `s` holds `p` where `|v|² − x² = s²(h + x)²`, with `x`
+///   the part of `v` along the axis and `h = m √(w·w) / k` how far the plane
+///   is from the apex along it. With `ρ = s|h|`, `|x| ≤ |v| sin t` gives
+///   `ρ / (1 + s sin t) ≤ |v|`, and `|v| ≤ ρ / (cos t − s sin t)` where the
+///   bottom is above nothing. Where it is not, the plane runs at least as
+///   steep as a ruling and the cut has no outer edge.
+///
+/// So every point of each cut is between `ρ − ε⁻` and `ρ + ε⁺` from its `c`,
+/// and the pipe's band is the cone's with `s = 0`, the ball's the pipe's with
+/// `t = 0`. A point on both is `|c₁ − c₂|` at most nearer one centre than the
+/// other, so the three share nothing where `ρ₂ − ε₂⁻ − ρ₁ − ε₁⁺` or
+/// `ρ₁ − ε₁⁻ − ρ₂ − ε₂⁺` is above `|c₁ − c₂|`. The cap through `(0, 0, 5)`
+/// with normal `(0, 1, 100)` cuts the bar of radius three up `z` within
+/// `3.00015` of the axis and the cone of slope one from the origin no nearer
+/// than `4.95`, and the three share nothing.
+///
+/// **Every number is proved and none is a tolerance.** On a cap one rounding
+/// off square to a bar and a cone that it cuts in one circle on paper, `ρ₂ − ρ₁`,
+/// both slacks and `|c₁ − c₂|` are each about a rounding, and so is the margin
+/// between them. So nothing that cancels is left to the enclosures:
+/// `ρ₂ − ρ₁` is `(P₂Q₁ − P₁Q₂) / (Q₁Q₂(ρ₁ + ρ₂))` for `ρ² = P/Q`, with the top
+/// worked out exactly, and `c₁ − c₂` is `G / (k₁k₂)` for
+/// `G = k₁k₂(o₁ − o₂) + k₂m₁w₁ − k₁m₂w₂`, exactly, so each comes out to a few
+/// roundings of itself. `sin² t` is `|n × w|²/(N(w·w))` with the top exact,
+/// and `1 − cos t` is `sin² t / (1 + cos t)`. No number here is past degree
+/// twelve in the stored numbers, which [`Exact::times`] multiplies without
+/// falling off the bottom of the range.
+///
+/// **What it leaves to the refusal** is two bands that overlap: the curves may
+/// cross, and where is the quartic the module doc names. It leaves as well a
+/// ring, a plane that misses a ball, and a plane parallel to a pipe's or a
+/// cone's axis, since it gives none of those a band. A plane a rounding off
+/// parallel to a pipe and a cone about one axis gets bands too wide to keep
+/// apart, the cone's with no outer edge, so the side of a block three from a
+/// bar and its chamfer cone, the block and the bar placed by one turn, is
+/// refused though it misses both circles the two share.
+///
+/// It is asked last and only ever answers that the three share nothing, so a
+/// triple an earlier road answers keeps its answer, and where a product falls
+/// out of range it hands the triple on to the refusal it had before.
+fn what_a_plane_that_cuts_them_in_bands_apart_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+) -> Option<MeetOfThree> {
+    let mine = the_band_a_plane_cuts(flat, one)?;
+    let theirs = the_band_a_plane_cuts(flat, other)?;
+    let between = how_far_apart_the_centres_of_two_bands_are(&mine, &theirs)?;
+    let [my_top, my_bottom] = &mine.squared_radius;
+    let [their_top, their_bottom] = &theirs.squared_radius;
+    let squared_gap = their_top
+        .times(my_bottom)?
+        .minus(&my_top.times(their_bottom)?);
+    let gap = quotient_or_everything(
+        squared_gap.enclosure(),
+        my_bottom.times(their_bottom)?.enclosure() * (mine.radius + theirs.radius),
+    );
+    let theirs_beyond_mine = gap - theirs.inside - mine.outside - between;
+    let mine_beyond_theirs = -gap - mine.inside - theirs.outside - between;
+    (theirs_beyond_mine.lo() > 0.0 || mine_beyond_theirs.lo() > 0.0).then_some(MeetOfThree::Nowhere)
+}
+
+/// The band a plane cuts a ball, a pipe or a cone in, in
+/// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`]'s names: every point
+/// of the cut is between `radius − inside` and `radius + outside` from where
+/// the axis crosses the plane.
+struct ABand {
+    /// `o`.
+    on_the_axis: [f64; 3],
+    /// `w`.
+    along: [f64; 3],
+    /// `k`, exactly, and above or below nothing.
+    leaning: Exact,
+    /// `m`, exactly.
+    reach: Exact,
+    /// `P` and `Q`, exactly, with `Q` above nothing.
+    squared_radius: [Exact; 2],
+    /// `ρ`.
+    radius: Interval,
+    /// `ε⁻`.
+    inside: Interval,
+    /// `ε⁺`.
+    outside: Interval,
+}
+
+/// The band `flat` cuts `surface` in, or `None` where it is not a ball, a pipe
+/// or a cone, where the plane runs along its axis or misses a ball, or where a
+/// product falls out of range.
+fn the_band_a_plane_cuts(flat: &Plane, surface: &Surface) -> Option<ABand> {
+    let normal = flat.normal().components();
+    let (on_the_axis, along, slope) = match surface {
+        Surface::Sphere(ball) => (ball.centre().coordinates(), normal, 0.0),
+        Surface::Cylinder(pipe) => (
+            pipe.axis().origin().coordinates(),
+            pipe.axis().direction().components(),
+            0.0,
+        ),
+        Surface::Cone(cone) => (
+            cone.apex().coordinates(),
+            cone.axis().direction().components(),
+            cone.slope(),
+        ),
+        Surface::Plane(_) | Surface::Torus(_) => return None,
+    };
+    let leaning = Exact::dot_of(normal, along)?;
+    if !matches!(leaning.sign(), Decision::Pos | Decision::Neg) {
+        return None;
+    }
+    let reach = Exact::of(flat.offset()).minus(&Exact::dot_of(normal, on_the_axis)?);
+    let squared_normal = Exact::dot_of(normal, normal)?;
+    let squared_axis = Exact::dot_of(along, along)?;
+    let squared_radius = match surface {
+        Surface::Sphere(ball) => [
+            squared_normal
+                .times(&Exact::product_of(ball.radius(), ball.radius())?)?
+                .minus(&reach.times(&reach)?),
+            squared_normal.clone(),
+        ],
+        Surface::Cylinder(pipe) => [
+            Exact::product_of(pipe.radius(), pipe.radius())?,
+            Exact::of(1.0),
+        ],
+        Surface::Cone(cone) => [
+            Exact::product_of(cone.slope(), cone.slope())?
+                .times(&reach.times(&reach)?)?
+                .times(&squared_axis)?,
+            leaning.times(&leaning)?,
+        ],
+        Surface::Plane(_) | Surface::Torus(_) => {
+            unreachable!("only a ball, a pipe or a cone has a band: {surface:?}")
+        }
+    };
+    if !matches!(squared_radius[0].sign(), Decision::Pos | Decision::Zero) {
+        return None;
+    }
+    let radius = root_enclosing(quotient_or_everything(
+        squared_radius[0].enclosure(),
+        squared_radius[1].enclosure(),
+    ));
+
+    let both_squared = squared_normal.enclosure() * squared_axis.enclosure();
+    let squared_sine = quotient_or_everything(
+        Exact::squared_length_of(&exact_cross_of(normal, along)?)?.enclosure(),
+        both_squared,
+    );
+    let sine = root_enclosing(squared_sine);
+    let level = if leaning.sign() == Decision::Neg {
+        -leaning.enclosure()
+    } else {
+        leaning.enclosure()
+    };
+    let cosine = quotient_or_everything(level, root_enclosing(both_squared));
+    let one = Interval::exactly(1.0);
+    let slope = Interval::exactly(slope);
+    let inside = radius * quotient_or_everything(slope * sine, one + slope * sine);
+    let room = cosine - slope * sine;
+    let outside = if room.lo() > 0.0 {
+        radius
+            * quotient_or_everything(
+                quotient_or_everything(squared_sine, one + cosine) + slope * sine,
+                room,
+            )
+    } else {
+        Interval::ENTIRE
+    };
+    Some(ABand {
+        on_the_axis,
+        along,
+        leaning,
+        reach,
+        squared_radius,
+        radius,
+        inside,
+        outside,
+    })
+}
+
+/// `|c₁ − c₂|`, the distance between where the two bands' axes cross the
+/// plane, as `|G| / |k₁k₂|` with `G` worked out exactly, or `None` where a
+/// product falls out of range.
+fn how_far_apart_the_centres_of_two_bands_are(mine: &ABand, theirs: &ABand) -> Option<Interval> {
+    let both = mine.leaning.times(&theirs.leaning)?;
+    let from_theirs = Exact::gap_between(theirs.on_the_axis, mine.on_the_axis);
+    let my_reach = theirs.leaning.times(&mine.reach)?;
+    let their_reach = mine.leaning.times(&theirs.reach)?;
+    let mut apart = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, entry) in apart.iter_mut().enumerate() {
+        *entry = both
+            .times(&from_theirs[axis])?
+            .plus(&my_reach.times(&Exact::of(mine.along[axis]))?)
+            .minus(&their_reach.times(&Exact::of(theirs.along[axis]))?);
+    }
+    let size = if both.sign() == Decision::Neg {
+        -both.enclosure()
+    } else {
+        both.enclosure()
+    };
+    Some(quotient_or_everything(
+        root_enclosing(Exact::squared_length_of(&apart)?.enclosure()),
+        size,
+    ))
 }
 
 /// A line, written as `(through + s · direction) / divided_by`.
@@ -5915,8 +6158,9 @@ mod tests {
     }
 
     /// A plane that leans to the bar's axis cuts it in an ellipse, and an
-    /// ellipse and the ball's circle meet where a quartic is zero, so the
-    /// triple stays refused. The points are there: through `(0, 0, 5)` with
+    /// ellipse and the ball's circle meet where a quartic is zero, so where
+    /// the two come near the triple stays refused. The points are there, and
+    /// the band road cannot keep the two apart: through `(0, 0, 5)` with
     /// normal `(0, 0.6, 0.8)` the plane cuts the ball in a circle of radius
     /// `√(9 − 1.8²) = 2.4` about `(0, 1.92, 3.56)`, which runs through
     /// `(0, 0, 5)` on the bar's axis and out to `(0, 3.84, 2.12)` past the

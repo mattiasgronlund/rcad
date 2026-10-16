@@ -28,6 +28,12 @@
 //!   other surface where a quadratic is zero. A floor along one of two bars
 //!   that cross is it.
 //!
+//! **One more is a quartic, but one with no root to find**: a plane cuts a
+//! ball, a pipe or a cone in a curve that keeps between two distances from
+//! where the axis crosses it, and where two such bands keep apart the three
+//! share nothing. A cap a rounding off square to a bar and its chamfer cone is
+//! it.
+//!
 //! Every corner below is worked out by hand first and written in the test, and
 //! every one of them lands on a whole number — so a box round it has no width
 //! and the answer is checked against the arithmetic-free number and not against
@@ -1260,8 +1266,9 @@ fn turning_the_whole_sweep_by_one_isometry_disagrees_with_the_closed_form_only_o
 }
 
 /// **A cap turned by a different composition of turns from its pair rounds
-/// its stored axis off square, and a curved road that needs that squareness
-/// refuses rather than guesses.**
+/// its stored axis off square. Where the closed form says the three share
+/// nothing it is answered nowhere, and where it says one circle it is refused
+/// rather than guessed.**
 ///
 /// [`Isometry::compose`]'s own doc comment says why this is a real path and
 /// not a contrived one: "Any other two turns are multiplied as quaternions,
@@ -1284,12 +1291,20 @@ fn turning_the_whole_sweep_by_one_isometry_disagrees_with_the_closed_form_only_o
 /// which is the rounding-off-square case Q988 asked for and Q2093's
 /// same-isometry construction above never makes.
 ///
-/// Refusals cluster exactly where a road needs that squareness on **both**
-/// curved sides at once: ball-ball and pipe-pipe never need it there and
-/// never refuse, where ball-pipe, ball-cone, pipe-cone and cone-cone do and
-/// do. Pinned in [`ROUNDING_OFF_SQUARE_CAP_REFUSALS`] as measured, the same
-/// way [`TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED`] pins a count no formula
-/// derives — a change here says the rounding moved, not that it is wrong.
+/// The roads for circles need that squareness and hand such a triple on. Where
+/// the closed form says the three share nothing, either the cap misses a ball,
+/// which settles it alone, or the two cuts differ by far more than a rounding,
+/// and the cap a rounding off square only widens each cut into a band about a
+/// rounding wide. So the bands keep apart, and every such row is answered
+/// nowhere: the test asserts it. Where the closed form says one shared
+/// circle, the rounding leaves two near-equal curves whose bands overlap, and
+/// where they cross is the quartic the module doc of `three_surfaces.rs`
+/// defers. Those rows are the refusals. Ball-ball and pipe-pipe have none,
+/// since two balls, or two pipes running the same way, differ by something
+/// linear and an earlier road answers them. Pinned in
+/// [`ROUNDING_OFF_SQUARE_CAP_REFUSALS`] as measured, the same way
+/// [`TANGENT_ROWS_A_TURN_LEAVES_UNDECIDED`] pins a count no formula derives —
+/// a change here says the rounding moved, not that it is wrong.
 #[test]
 fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_family() {
     let shapes = balls_pipes_and_cones_about_one_axis();
@@ -1360,11 +1375,17 @@ fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_fam
                     }
                 }
 
-                if let Err(error) = meet([&cap, &here, &there]) {
+                let mine = one.squared_radius_at(height);
+                let theirs = other.squared_radius_at(height);
+                let answer = meet([&cap, &here, &there]);
+                let what = format!("{one:?} and {other:?} cut at {height}, cap rounded off square");
+                if mine < 0.0 || theirs < 0.0 || mine != theirs {
+                    assert_eq!(answer, Ok(MeetOfThree::Nowhere), "{what}");
+                } else if let Err(error) = answer {
                     assert_eq!(
                         error,
                         Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat,
-                        "{one:?} and {other:?} cut at {height}, cap rounded off square"
+                        "{what}"
                     );
                     refused[family] += 1;
                 }
@@ -1388,8 +1409,48 @@ fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_fam
 /// Measured, and a watch rather than a bound (see
 /// [`a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_family`]):
 /// how often a cap one rounding off square refuses, by family, in the order
-/// ball-ball, ball-pipe, ball-cone, pipe-pipe, pipe-cone, cone-cone.
-const ROUNDING_OFF_SQUARE_CAP_REFUSALS: [usize; 6] = [0, 366, 1098, 0, 972, 972];
+/// ball-ball, ball-pipe, ball-cone, pipe-pipe, pipe-cone, cone-cone. Every
+/// refusal is a row the closed form calls one shared circle or one point.
+/// Before the road for bands apart it was `[0, 366, 1098, 0, 972, 972]`.
+const ROUNDING_OFF_SQUARE_CAP_REFUSALS: [usize; 6] = [0, 22, 40, 0, 104, 64];
+
+/// **A cap leaning a hundredth off square to a bar's axis cuts the bar, a
+/// chamfer cone and a ball in curves that keep apart.** The cap through
+/// `(0, 0, 5)` with normal `(0, 1, 100)` leans by `t = atan(1/100)` and cuts
+/// the bar of radius three up `z` in an ellipse whose every point is between
+/// `3` and `3/cos t` from where the axis crosses it, `3.00015` at most. It cuts
+/// the cone of slope one from the origin, which is five across there, between
+/// `5/(1 + sin t)` and `5/(cos t − sin t)`, `4.95` at least, and the ball of
+/// radius two about that point in a circle of radius two. So no point is on all
+/// three, and no quartic is needed to say so.
+///
+/// The bar of radius five against the same cone is still refused: the two
+/// bands overlap, the ellipses cross, and where is the quartic the module doc
+/// of `three_surfaces.rs` defers.
+#[test]
+fn a_cap_leaning_off_square_to_a_bar_meets_it_and_a_cone_or_a_ball_it_keeps_apart_nowhere() {
+    let cap = flat([0.0, 1.0, 100.0], [0.0, 0.0, 5.0]);
+    let bar = pipe([0.0; 3], [0.0, 0.0, 1.0], 3.0);
+    let chamfer = cone([0.0; 3], [0.0, 0.0, 1.0], 1.0);
+    let steeper = cone([0.0; 3], [0.0, 0.0, -1.0], 2.0);
+    let small_ball = ball([0.0, 0.0, 5.0], 2.0);
+    for (one, other) in [
+        (&bar, &chamfer),
+        (&bar, &small_ball),
+        (&chamfer, &steeper),
+        (&chamfer, &small_ball),
+    ] {
+        for order in [[&cap, one, other], [other, &cap, one], [one, other, &cap]] {
+            assert_eq!(meet(order), Ok(MeetOfThree::Nowhere), "{order:?}");
+        }
+    }
+
+    let wide_bar = pipe([0.0; 3], [0.0, 0.0, 1.0], 5.0);
+    assert_eq!(
+        meet([&cap, &wide_bar, &chamfer]),
+        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+    );
+}
 
 /// A ring about `z` through the origin.
 fn ring(ring_radius: f64, tube_radius: f64) -> Surface {
