@@ -779,7 +779,7 @@ impl Writing {
     /// way for an arc, which the way round is what picks.
     fn round(&mut self, crossing: &Crossing, turning: Vector) -> u64 {
         match crossing.shape {
-            Shape::Circle { radius } => self.circle(crossing.centre, turning, radius),
+            Shape::Circle { radius } => self.circle(crossing.centre, turning, radius, None),
             Shape::Ellipse { first_way, sizes } => {
                 self.ellipse(crossing.centre, turning, first_way, sizes)
             }
@@ -1009,8 +1009,9 @@ impl Writing {
     ///
     /// **Where the pipe through that centre walks the circle round another
     /// point, the model's own pipe is written beside it**, as a
-    /// `CYLINDRICAL_SURFACE` nothing refers to, and the reader names the circle
-    /// by a pipe of the file's that walks it round the file's centre
+    /// `CYLINDRICAL_SURFACE` no other entity refers to, and the `CIRCLE` is
+    /// named `'#n'` after it. The reader takes the pipe the name points at
+    /// where it walks the circle round the file's centre
     /// ([`the_walk_centres_it_at`], shared with the reader). The walk is a
     /// second rounding, from the pipe's origin to the face, and need not land
     /// where the first did: a disc on a bar's top at `z = 4` drawn by a pipe up
@@ -1019,7 +1020,11 @@ impl Writing {
     /// off. No centre written instead helps there: every origin within `2^20`
     /// ulps of the top walks to `4.0` (`docs/decisions.md` §249.8).
     /// `a_disc_drawn_by_a_pipe_from_far_below_its_top_comes_back_from_its_own_file`
-    /// holds it.
+    /// holds it. **The name ties the pipe to its circle** because a search of
+    /// the file for a pipe of the same direction and radius that walks the
+    /// circle there can find another solid's: of two discs drawn by pipes up
+    /// one line from two heights, one came back named by the other's pipe
+    /// (`two_discs_drawn_by_pipes_from_two_origins_on_one_line_come_back_from_their_own_file`).
     fn an_arc_of_a_circle_on_a_flat_face(
         &mut self,
         flat: &Plane,
@@ -1058,18 +1063,15 @@ impl Writing {
             shape: Shape::Circle { radius },
         };
         let the_edge_runs_its_way = crossing.the_arc_runs_its_own_way(run, start, end)?;
-        let id = self.circle(centre, axis, radius);
         let faces: Vec<Plane> = either_side
             .iter()
             .filter_map(|face| face.as_plane().copied())
             .collect();
-        if !the_walk_centres_it_at(&read_back, &faces, centre)
-            && the_walk_centres_it_at(round, &faces, centre)
-        {
-            self.pipe(round);
-        }
+        let its_own_pipe = (!the_walk_centres_it_at(&read_back, &faces, centre)
+            && the_walk_centres_it_at(round, &faces, centre))
+        .then(|| self.pipe(round));
         Some(Curve {
-            id,
+            id: self.circle(centre, axis, radius, its_own_pipe),
             the_edge_runs_its_way,
         })
     }
@@ -1081,9 +1083,12 @@ impl Writing {
         self.entity(&format!("LINE('',#{at},#{vector})"))
     }
 
-    fn circle(&mut self, centre: Point, axis: Vector, radius: f64) -> u64 {
+    /// A `CIRCLE`, named `'#n'` after the `CYLINDRICAL_SURFACE` `#n` it is
+    /// walked by where there is one, and `''` otherwise.
+    fn circle(&mut self, centre: Point, axis: Vector, radius: f64, pipe: Option<u64>) -> u64 {
         let place = self.placement(centre, axis);
-        self.entity(&format!("CIRCLE('',#{place},{})", real(radius)))
+        let name = pipe.map(|id| format!("#{id}")).unwrap_or_default();
+        self.entity(&format!("CIRCLE('{name}',#{place},{})", real(radius)))
     }
 
     /// An `ELLIPSE` whose first size runs along `first_way`, so its placement

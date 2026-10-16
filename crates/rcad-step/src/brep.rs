@@ -1416,12 +1416,17 @@ impl Walk {
     /// a bar's top at `z = 4` drawn by a pipe up `z` from `z = −15.9` is centred
     /// at `z = 3.9999999999999982`, and the pipe through there walks it to
     /// `4.0`. Where it does, the writer writes the model's own pipe beside the
-    /// circle as a `CYLINDRICAL_SURFACE` nothing refers to, and the run takes
-    /// the first pipe of the file's with the same direction and radius, to the
-    /// bit, whose walk centres the circle on the centre the file wrote
+    /// circle as a `CYLINDRICAL_SURFACE` no other entity refers to, and names
+    /// the `CIRCLE` `'#n'` after it. The run takes the pipe the name points at
+    /// where it has the same direction and radius, to the bit, and its walk
+    /// centres the circle on the centre the file wrote
     /// ([`the_walk_centres_it_at`], shared with the writer;
-    /// `docs/decisions.md` §249.8). Where the file holds none, the pipe through
-    /// the centre stays.
+    /// `docs/decisions.md` §249.8); otherwise the pipe through the centre
+    /// stays. It does not search the file for such a pipe: of two pipes up one
+    /// line from two heights, one can walk the other's circle round that
+    /// circle's own centre, and a search named one solid's circle by the other
+    /// solid's pipe
+    /// (`two_discs_drawn_by_pipes_from_two_origins_on_one_line_come_back_from_their_own_file`).
     fn the_surface_that_names_the_curve(
         &self,
         reading: &Reading<'_>,
@@ -1461,14 +1466,12 @@ impl Walk {
                 return Ok(Surface::Cylinder(through_the_centre));
             }
             let bits = |way: Vector| way.components().map(f64::to_bits);
-            let one_the_file_holds = reading.every_pipe_the_file_holds().iter().find(|pipe| {
+            let its_own = reading.pipe_a_circle_names(curve, |pipe| {
                 bits(pipe.axis().direction()) == bits(through_the_centre.axis().direction())
                     && pipe.radius().to_bits() == radius.to_bits()
                     && walks_it_round_the_centre(pipe)
             });
-            return Ok(Surface::Cylinder(
-                one_the_file_holds.copied().unwrap_or(through_the_centre),
-            ));
+            return Ok(Surface::Cylinder(its_own.unwrap_or(through_the_centre)));
         }
         let flat = plane_through(place.origin, place.axis).map_err(not_a_working_shape)?;
         Ok(Surface::Plane(flat))
