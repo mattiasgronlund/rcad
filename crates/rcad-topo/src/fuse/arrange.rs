@@ -3473,8 +3473,59 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
                 let order = self.nodes_along(crossing, on_it, policy, log)?;
+                let probe = std::env::var("RCAD_PROBE_MERGE").is_ok();
+                if probe {
+                    eprintln!(
+                        "PROBE face {:?} crossing {crossing} partner {:?} order {order:?}",
+                        self.surface, self.crossings[crossing].partner
+                    );
+                    for &n in &order {
+                        eprintln!(
+                            "PROBE   node {n} {:?} vertex {:?} made_of {:?} crossings {:?}",
+                            self.nodes[n].point.enclosure(),
+                            self.nodes[n].vertex,
+                            self.nodes[n].made_of,
+                            self.nodes[n].crossings
+                        );
+                    }
+                }
                 for pair in order.windows(2) {
-                    match self.order_along(crossing, pair[0], pair[1], policy, log)? {
+                    let decided = self.order_along(crossing, pair[0], pair[1], policy, log)?;
+                    if probe {
+                        let boxes = self.as_the_boxes_say(crossing, pair[0], pair[1]);
+                        let own = match self.crossings[crossing].order {
+                            HowItRuns::RoundAClosedCurve {
+                                from,
+                                node,
+                                named_the_start,
+                                ref wound_as,
+                            } => {
+                                eprintln!(
+                                    "PROBE   from {:?} node {:?} named {:?}",
+                                    from.enclosure(),
+                                    node.enclosure(),
+                                    named_the_start.map(|p| p.enclosure())
+                                );
+                                Some(round_a_closed_crossing_and_what_it_measures(
+                                    [&wound_as[0], &wound_as[1]],
+                                    [from, named_the_start.unwrap_or(node)],
+                                    self.nodes[pair[0]].point,
+                                    self.nodes[pair[1]].point,
+                                ))
+                            }
+                            _ => None,
+                        };
+                        eprintln!(
+                            "PROBE   pair {:?} -> {decided:?} own {own:?} boxes {boxes:?} narrowed {:?} {:?} planes {:?} quadric {:?} axis {:?}",
+                            (pair[0], pair[1]),
+                            self.narrowed_box_of(pair[0]).enclosure(),
+                            self.narrowed_box_of(pair[1]).enclosure(),
+                            self.as_the_planes_say(crossing, pair[0], pair[1]),
+                            self.as_the_quadric_says(crossing, pair[0], pair[1]),
+                            self.as_the_pipes_axis_says(crossing, pair[0], pair[1]),
+                        );
+                    }
+                    match decided {
                         Decision::Zero => same.join(pair[0], pair[1]),
                         Decision::Pos => {}
                         Decision::Neg => unreachable!(
