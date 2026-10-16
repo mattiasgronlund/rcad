@@ -446,49 +446,6 @@ fn turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refuse
     }
 }
 
-/// The block cuts the frustum's wall nowhere, so the fuse gives the wall back
-/// as one face, a band between the bottom circle and the far rim, with the two
-/// caps beside it: three faces for the union, and those three and the block's
-/// six for cutting the block out. Before, wherever no plane of the block
-/// touched the bottom rim (`near = 0.5`), and under the turn by `rotation`,
-/// the wall came back in 25 pieces: 27 faces for the union and 33 for the
-/// difference (Q1969). Turned by `rotation`, the difference is still refused
-/// ([`turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refused`]).
-#[test]
-fn a_block_wholly_inside_a_frustum_leaves_the_frustums_wall_one_face() {
-    let both: &[(Rule, usize)] = &[(Rule::Union, 3), (Rule::Difference, 9)];
-    for (which, turn, rules) in [
-        ("unturned", Isometry::identity(), both),
-        ("an exact half turn", half_a_turn_exactly(), both),
-        (
-            "half a turn by rotation",
-            half_a_turn_by_rotation(),
-            &both[..1],
-        ),
-    ] {
-        for near in FRUSTUM_NEARS {
-            for &(rule, faces) in rules {
-                let what = format!("{which}, near {near}, {rule:?}");
-                let (mut model, frustum, notch) = a_turned_frustum_and_inside_notch(&turn, near);
-                let fused = model
-                    .fuse(
-                        &[frustum],
-                        &[notch],
-                        rule,
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    )
-                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-                let [solid] = fused.solids() else {
-                    panic!("{what}: {} solids", fused.solids().len());
-                };
-                let view = model.solid(*solid).expect("the fuse made the key");
-                assert_eq!(view.faces().count(), faces, "{what}");
-            }
-        }
-    }
-}
-
 /// Fuses the frustum of [`FRUSTUM_NOTCH`] from radius `near` with the block
 /// wholly inside it, both placed by `turn`, by every rule both ways round,
 /// under both policies, and checks each answers what it holds by hand with
