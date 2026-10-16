@@ -1,6 +1,18 @@
-//! A block standing flush on a bigger block: edge history does not depend on
+//! What `Fused` says became of an input edge or corner (§39.4), in two shapes.
+//!
+//! **A ball kept whole as a hollow** (queue row Q2114). A block less a ball
+//! that touches nothing keeps the ball's one face whole, walked down a seam
+//! between two poles as the ball's own face is. The ball's seam and both its
+//! poles come through as that seam and those poles, as every edge and corner
+//! of a box in the same place does. They used to read as deleted: a pole is
+//! not an input corner to the arrangement, and a seam is never one of its
+//! boundaries (`bake`'s header), so nothing carried their names across.
+//! The answer's seam and poles are its own, not the input's (§38.1), so a
+//! turned ball keeps only what its turn leaves on them.
+//!
+//! **A block standing flush on a bigger block**: edge history does not depend on
 //! which solid is handed to `fuse` first, even where the touch is a whole
-//! *face* and not a line (queue row Q809, §39.4).
+//! *face* and not a line (queue row Q809).
 //!
 //! Q801's own tests pinned argument-order independence for a round bar
 //! touching a wall along a line. Nobody had built a plain block standing on
@@ -29,9 +41,193 @@
 //!   `x = 4` survives, and the stretch from `x = 0` to `x = 2` merges away
 //!   with the upper block's own edges there, which are deleted outright.
 
-use rcad_geom::{Isometry, Scale, Vector};
+use rcad_geom::{Axis, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{EdgeKey, Fused, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{EdgeKey, Fused, Model, ProfileBuilder, Rule, SolidKey, VertexKey};
+
+#[test]
+fn a_hollow_ball_keeps_its_seam_and_poles() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let block = a_box(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+    let ball = model
+        .add_ball(
+            1.0,
+            &Isometry::translation(Vector::new(5.0, 5.0, 2.0)).expect("a whole-number shift"),
+        )
+        .expect("a ball of radius 1");
+    let &[(seam, _)] = located_edges_of(&model, ball).as_slice() else {
+        panic!("a ball has one edge, its seam");
+    };
+    let north = the_vertex_at(&model, ball, [5.0, 5.0, 3.0]);
+    let south = the_vertex_at(&model, ball, [5.0, 5.0, 1.0]);
+
+    let what = "a block less a ball inside it";
+    let answer = model
+        .fuse(
+            &[block],
+            &[ball],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{what} refused: {why}"));
+
+    let mut wrong: Vec<String> = Vec::new();
+    check_survives(
+        &model,
+        &answer,
+        seam,
+        [[5.0, 5.0, 1.0], [5.0, 5.0, 3.0]],
+        "the ball's seam",
+        what,
+        &mut wrong,
+    );
+    check_corner_survives(
+        &model,
+        &answer,
+        north,
+        [5.0, 5.0, 3.0],
+        "the ball's north pole",
+        what,
+        &mut wrong,
+    );
+    check_corner_survives(
+        &model,
+        &answer,
+        south,
+        [5.0, 5.0, 1.0],
+        "the ball's south pole",
+        what,
+        &mut wrong,
+    );
+    assert!(
+        wrong.is_empty(),
+        "a ball kept whole as a hollow keeps its seam and its poles:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// The answer cuts a ball kept whole open along a seam of its own, the `+x`
+/// half of the meridian square to `y`, with its poles straight up and straight
+/// down, however the ball was turned (§38.1). Turned upside down, the ball's
+/// north pole is the answer's bottom pole and its seam still runs down the
+/// `+x` half. Turned a quarter about `z`, both poles stay where they were, but
+/// the seam runs down the `+y` half, which is no edge of the answer.
+#[test]
+fn a_turned_hollow_ball_keeps_what_still_lands_on_the_answers_poles_and_seam() {
+    let mut wrong: Vec<String> = Vec::new();
+    for (axis, turn, quarters, seam_kept) in [("x", Axis::x(), 2, true), ("z", Axis::z(), 1, false)]
+    {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = a_box(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+        let placement = Isometry::translation(Vector::new(5.0, 5.0, 2.0))
+            .expect("a whole-number shift")
+            .compose(&Isometry::quarter_turns(&turn, quarters).expect("a turn about an axis"));
+        let ball = model.add_ball(1.0, &placement).expect("a ball of radius 1");
+        let &[(seam, _)] = located_edges_of(&model, ball).as_slice() else {
+            panic!("a ball has one edge, its seam");
+        };
+        let top = the_vertex_at(&model, ball, [5.0, 5.0, 3.0]);
+        let bottom = the_vertex_at(&model, ball, [5.0, 5.0, 1.0]);
+
+        let what = format!("a block less a ball turned {quarters} quarters about {axis}");
+        let answer = model
+            .fuse(
+                &[block],
+                &[ball],
+                Rule::Difference,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what} refused: {why}"));
+
+        if seam_kept {
+            check_survives(
+                &model,
+                &answer,
+                seam,
+                [[5.0, 5.0, 1.0], [5.0, 5.0, 3.0]],
+                "the ball's seam",
+                &what,
+                &mut wrong,
+            );
+        } else {
+            check_deleted(&model, &answer, seam, "the ball's seam", &what, &mut wrong);
+        }
+        check_corner_survives(
+            &model,
+            &answer,
+            top,
+            [5.0, 5.0, 3.0],
+            "the ball's pole on top",
+            &what,
+            &mut wrong,
+        );
+        check_corner_survives(
+            &model,
+            &answer,
+            bottom,
+            [5.0, 5.0, 1.0],
+            "the ball's pole underneath",
+            &what,
+            &mut wrong,
+        );
+    }
+    assert!(
+        wrong.is_empty(),
+        "a turned ball kept whole keeps what lands on the answer's poles and seam:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// A ball turned a quarter about `x` has its poles at `(5, 4, 2)` and
+/// `(5, 6, 2)`, on the answer's skin halfway between its poles, where the
+/// answer has no corner, and its seam runs where the answer has no edge.
+#[test]
+fn a_hollow_ball_lying_on_its_side_keeps_neither_its_poles_nor_its_seam() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let block = a_box(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+    let placement = Isometry::translation(Vector::new(5.0, 5.0, 2.0))
+        .expect("a whole-number shift")
+        .compose(&Isometry::quarter_turns(&Axis::x(), 1).expect("a turn about x"));
+    let ball = model.add_ball(1.0, &placement).expect("a ball of radius 1");
+    let &[(seam, _)] = located_edges_of(&model, ball).as_slice() else {
+        panic!("a ball has one edge, its seam");
+    };
+    let poles = [
+        the_vertex_at(&model, ball, [5.0, 4.0, 2.0]),
+        the_vertex_at(&model, ball, [5.0, 6.0, 2.0]),
+    ];
+
+    let what = "a block less a ball lying on its side";
+    let answer = model
+        .fuse(
+            &[block],
+            &[ball],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{what} refused: {why}"));
+
+    let mut wrong: Vec<String> = Vec::new();
+    check_deleted(&model, &answer, seam, "the ball's seam", what, &mut wrong);
+    for pole in poles {
+        let images = answer
+            .images_of_vertex(pole)
+            .expect("this model made the key");
+        if !images.is_empty() {
+            wrong.push(format!(
+                "{what}: the ball's pole {pole:?} should be deleted, got {images:?}"
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "a ball on its side keeps nothing of its poles and seam:\n{}",
+        wrong.join("\n")
+    );
+}
 
 #[test]
 fn edge_history_of_a_block_standing_flush_does_not_depend_on_argument_order() {
@@ -191,6 +387,42 @@ fn check_survives(
     }
 }
 
+/// A corner's one image is at exactly `wanted`.
+fn check_corner_survives(
+    model: &Model,
+    answer: &Fused,
+    corner: VertexKey,
+    wanted: [f64; 3],
+    name: &str,
+    what: &str,
+    wrong: &mut Vec<String>,
+) {
+    let found: Vec<[f64; 3]> = answer
+        .images_of_vertex(corner)
+        .expect("this model made the key")
+        .iter()
+        .map(|&image| locate_corner(model, answer.solids(), image))
+        .collect();
+    if found != vec![wanted] {
+        wrong.push(format!(
+            "{what}: {name} should be at {wanted:?}, got {found:?}"
+        ));
+    }
+}
+
+/// Where `corner` is, among the corners of `solids`, for [`locate`]'s reason.
+fn locate_corner(model: &Model, solids: &[SolidKey], corner: VertexKey) -> [f64; 3] {
+    for &solid in solids {
+        if let Some(at) = located_corners_of(model, solid)
+            .into_iter()
+            .find_map(|(key, at)| (key == corner).then_some(at))
+        {
+            return at;
+        }
+    }
+    panic!("no solid among {solids:?} has the corner {corner:?}")
+}
+
 /// Where `edge`'s two ends are, among the edges of `solids` — not
 /// `Model::edge`, which answers in the model's own frame and misses the
 /// placement a shell was built with (`Model::add_extrusion`'s doc comment).
@@ -228,6 +460,42 @@ fn the_edge_at(model: &Model, solid: SolidKey, at: impl Fn(f64, f64, f64) -> boo
         "expected exactly one such edge, got {matches:?}"
     );
     matches[0]
+}
+
+/// The one corner of `solid` at exactly `at`.
+fn the_vertex_at(model: &Model, solid: SolidKey, at: [f64; 3]) -> VertexKey {
+    let matches: Vec<VertexKey> = located_corners_of(model, solid)
+        .into_iter()
+        .filter(|&(_, there)| there == at)
+        .map(|(corner, _)| corner)
+        .collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected exactly one corner at {at:?}, got {matches:?}"
+    );
+    matches[0]
+}
+
+/// Every corner of a solid, once each, moved into place, the way
+/// [`located_edges_of`] reads the edges.
+fn located_corners_of(model: &Model, solid: SolidKey) -> Vec<(VertexKey, [f64; 3])> {
+    let mut corners: Vec<(VertexKey, [f64; 3])> = Vec::new();
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                for corner in [coedge.start(), coedge.end()] {
+                    let key = corner.key();
+                    if corners.iter().any(|&(seen, _)| seen == key) {
+                        continue;
+                    }
+                    let at = corner.point();
+                    corners.push((key, [at.x(), at.y(), at.z()]));
+                }
+            }
+        }
+    }
+    corners
 }
 
 /// Every edge of a solid, once each, with its two ends already moved into

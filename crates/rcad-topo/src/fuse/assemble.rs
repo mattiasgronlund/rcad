@@ -72,11 +72,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
     Cone, DynamicRange, EdgeRun, HalfSpace, Isometry, MeetOfThree, Orientation, Picker, Plane,
-    PlaneAgreement, Point, PointsAlongACrossing, Surface, SurfaceMeet, Vector,
+    PlaneAgreement, Point, PointsAlongACrossing, Sphere, Surface, SurfaceMeet, Vector,
     meet_of_three_surfaces, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
-    Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
+    Approximation, Cause, Decision, Interval, Level, Measures, Point as PredicatePoint, Policy,
     ProvenanceLog, Record, Strictness, orient2d, side_of_a_plane_where_three_planes_meet,
 };
 use smallvec::SmallVec;
@@ -96,7 +96,7 @@ use crate::validate::{
 use crate::view::how_far_apart;
 use crate::{
     Containment, EdgeKey, EdgeView, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey,
-    VertexView,
+    VertexView, WireStepView,
 };
 
 use super::arrange::{
@@ -9612,6 +9612,13 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// answer's corners are written (`docs/decisions.md` §365.7). Every face that
 /// has the side names its two ends through the same [`Corners`], so every one
 /// of them leaves it out, and no edge is left with one face along it.
+///
+/// **A pole of a ball kept whole is named here**, and not by [`Corners::of`].
+/// A pole is not an input corner to the arrangement, so the end arrives with
+/// no input vertex in it, and only the piece knows which input face it is a
+/// pole of. [`what_a_whole_ball_was`] says when the input's pole is the
+/// answer's, and the input vertex goes on the corner by [`Corners::of`]'s own
+/// rule: the first one to arrive stays (Q2114).
 #[expect(
     clippy::too_many_arguments,
     reason = "the policy and the log travel as arguments, never as fields (CLAUDE.md)"
@@ -9638,6 +9645,12 @@ fn sides_of(
                 .all(|surface| surface.as_plane().is_some())
         {
             continue;
+        }
+        for (end, corner) in meet.ends.iter().zip([from, to]) {
+            if let Some(pole) = the_input_pole_an_end_is(solid, ancestors, end) {
+                let made = &mut corners.made[corner];
+                made.from = made.from.or(Some(pole));
+            }
         }
         let seam = the_seam_a_side_runs_along(model, solid, ancestors, meet);
         sides.push(edges.of(
@@ -9739,12 +9752,23 @@ fn a_ring_of_one_or_two_sides_bounds_something(ring: &[Side], edges: &[Edge]) ->
 /// `(−1, 2, 1)` has its seam there from `(1, 0, 0)` to `(1, 0, 2)`, and the
 /// new corner `(0, 2, 2)` is on neither. Only a face with a seam is looked up
 /// in `solid`, since that takes a walk over the solid's faces.
+///
+/// **A side from pole to pole is the seam the answer cuts a whole ball open
+/// along**, since nothing else ends at a pole, and it is the input's seam
+/// when [`what_a_whole_ball_was`] says the two run in one place (Q2114).
 fn the_seam_a_side_runs_along(
     model: &Model,
     solid: SolidView<'_>,
     ancestors: &[FaceKey],
     side: &FaceMeet,
 ) -> Option<EdgeKey> {
+    if side
+        .ends
+        .iter()
+        .all(|end| matches!(end, MeetPoint::APoleOfAClosedSurface { .. }))
+    {
+        return what_a_whole_ball_was(solid, ancestors)?.seam;
+    }
     if !side.along.is_empty() || the_crossing_of_these_runs_straight(&side.carried_by) != Some(true)
     {
         return None;
@@ -9820,6 +9844,178 @@ fn where_on_the_seam(end: &MeetPoint, corners: [VertexView<'_>; 2]) -> Option<[f
     let between = (0..3)
         .all(|axis| from[axis].min(to[axis]) <= at[axis] && at[axis] <= from[axis].max(to[axis]));
     (on_the_line && between).then_some(at)
+}
+
+/// The input vertex `end` is, when it is a pole of a ball the answer keeps
+/// whole and [`what_a_whole_ball_was`] puts the input's pole there.
+fn the_input_pole_an_end_is(
+    solid: SolidView<'_>,
+    ancestors: &[FaceKey],
+    end: &MeetPoint,
+) -> Option<VertexKey> {
+    let MeetPoint::APoleOfAClosedSurface { at_the_top, .. } = end else {
+        return None;
+    };
+    let ball = what_a_whole_ball_was(solid, ancestors)?;
+    Some(if *at_the_top { ball.top } else { ball.bottom })
+}
+
+/// What the input called the poles and the seam of a ball a piece keeps whole,
+/// where they are the answer's own.
+struct WhatAWholeBallWas {
+    /// The input pole at the answer's top pole, `centre + (0, 0, r)`.
+    top: VertexKey,
+    /// The input pole at the answer's bottom pole, `centre − (0, 0, r)`.
+    bottom: VertexKey,
+    /// The input's seam, when it runs where the answer's does.
+    seam: Option<EdgeKey>,
+}
+
+/// Which of the input's poles and seam the answer's are, for a piece that is
+/// the whole of a ball, and `None` when the poles are not.
+///
+/// **The answer cuts a whole ball open along a seam of its own**, not the
+/// input's (`Arrangement::the_whole_surface`): a ball has no frame, so its
+/// poles are `centre ± (0, 0, r)` in the world's axes and its seam is the `+x`
+/// half of the meridian square to `y` through its centre, however the input
+/// was turned. So the input's poles are the answer's only when the input's
+/// placement turns `z` onto `+z` or `−z`, and its seam is the answer's only
+/// when the placement also leaves `x` as it was and the input stores its seam
+/// as the `+x` half of the meridian square to `y` through its own centre, as
+/// [`Model::add_ball`] does. Under any other turn the input's poles and seam
+/// lie on the answer's skin where it has no corner and no edge, and they read
+/// as deleted, which is what the answer's corners and edges say of them.
+///
+/// **Only exact comparisons.** `Isometry::apply_to_vector` hands an axis back
+/// bit for bit under no turn, a turn about that axis and a quarter turn, and a
+/// turn that moves an axis off itself by a rounding is not taken to keep it.
+/// A picker that cannot tell which half of the meridian a point is on names no
+/// seam.
+///
+/// Which pole is which is read in the frame the face is stored in, by which
+/// side of the ball's centre each is on along `z`.
+fn what_a_whole_ball_was(solid: SolidView<'_>, ancestors: &[FaceKey]) -> Option<WhatAWholeBallWas> {
+    ancestors.iter().find_map(|&face| {
+        let placed = solid
+            .faces()
+            .find(|placed| placed.key() == face)
+            .expect("a piece's ancestor is a face of the solid it was cut from");
+        let Surface::Sphere(ball) = placed.stored_surface() else {
+            panic!("only a ball's whole skin is cut open between two poles");
+        };
+        let up = placed
+            .location()
+            .apply_to_vector(Vector::new(0.0, 0.0, 1.0));
+        let upright = if up == Vector::new(0.0, 0.0, 1.0) {
+            true
+        } else if up == Vector::new(0.0, 0.0, -1.0) {
+            false
+        } else {
+            return None;
+        };
+        let poles: Vec<VertexView<'_>> = placed
+            .wires()
+            .flat_map(|wire| wire.steps())
+            .filter_map(|step| match step {
+                WireStepView::Pole(pole) => Some(pole),
+                WireStepView::Along(_) => None,
+            })
+            .collect();
+        let &[one, other] = poles.as_slice() else {
+            return None;
+        };
+        let height = |pole: VertexView<'_>| pole.stored_point().z().total_cmp(&ball.centre().z());
+        let (above, below) = match (height(one), height(other)) {
+            (Ordering::Greater, Ordering::Less) => (one.key(), other.key()),
+            (Ordering::Less, Ordering::Greater) => (other.key(), one.key()),
+            _ => return None,
+        };
+        let keeps_x = placed
+            .location()
+            .apply_to_vector(Vector::new(1.0, 0.0, 0.0))
+            == Vector::new(1.0, 0.0, 0.0);
+        let is_the_seam = |edge: &EdgeView<'_>| {
+            let ends = [edge.start().key(), edge.end().key()];
+            (ends == [above, below] || ends == [below, above])
+                && edge.neighbouring_faces().all(|other| other == face)
+                && runs_down_the_plus_x_half_of_the_meridian_square_to_y(*edge, &ball)
+        };
+        let seam = keeps_x
+            .then(|| {
+                placed
+                    .wires()
+                    .flat_map(|wire| wire.coedges())
+                    .map(|coedge| coedge.edge())
+                    .find(is_the_seam)
+            })
+            .flatten()
+            .map(|edge| edge.key());
+        let (top, bottom) = if upright {
+            (above, below)
+        } else {
+            (below, above)
+        };
+        Some(WhatAWholeBallWas { top, bottom, seam })
+    })
+}
+
+/// Whether an edge of `ball`'s face, from pole to pole, is stored as the half
+/// of the meridian square to `y` through the centre that holds
+/// `centre + (r, 0, 0)` and not `centre − (r, 0, 0)`.
+///
+/// The edge's two ends are the poles, so it is one of the meridian's two
+/// halves, and the two points say which.
+fn runs_down_the_plus_x_half_of_the_meridian_square_to_y(
+    edge: EdgeView<'_>,
+    ball: &Sphere,
+) -> bool {
+    let EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Plane(meridian),
+        picked_by,
+    } = edge.stored_run()
+    else {
+        return false;
+    };
+    let normal = meridian.normal();
+    let centre = ball.centre().coordinates();
+    let square_to_y = normal.x() == 0.0 && normal.z() == 0.0 && normal.y().abs() == 1.0;
+    let through_the_centre = match meridian.side_of_point(PredicatePoint::from(centre)) {
+        Decision::Zero => true,
+        Decision::Pos | Decision::Neg => false,
+        // Not shown through the centre, so not shown to be the meridian.
+        Decision::Undecidable { .. } | _ => false,
+    };
+    let out_along_x = |by: f64| {
+        as_exact_as_it_is(PredicatePoint::Constructed([
+            Interval::exactly(centre[0]) + Interval::exactly(by),
+            Interval::exactly(centre[1]),
+            Interval::exactly(centre[2]),
+        ]))
+    };
+    let holds = |point: PredicatePoint| {
+        picked_by
+            .iter()
+            .all(|picker| match picker.side_of_point(point) {
+                Decision::Pos | Decision::Zero => true,
+                Decision::Neg => false,
+                // Not shown to hold it, so the half is not shown to be this one.
+                Decision::Undecidable { .. } | _ => false,
+            })
+    };
+    let rules_out = |point: PredicatePoint| {
+        picked_by
+            .iter()
+            .any(|picker| match picker.side_of_point(point) {
+                Decision::Neg => true,
+                Decision::Pos | Decision::Zero => false,
+                // Not shown to rule it out, so the half is not shown to be this one.
+                Decision::Undecidable { .. } | _ => false,
+            })
+    };
+    square_to_y
+        && through_the_centre
+        && holds(out_along_x(ball.radius()))
+        && rules_out(out_along_x(-ball.radius()))
 }
 
 /// The input solid the piece at `piece` in [`Scratch::pieces`] was cut from,
