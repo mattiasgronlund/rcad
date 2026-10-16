@@ -1788,6 +1788,7 @@ impl Assembly {
             let seam = self.a_seam_across_the_band(&members, along, dissolved, &inside);
             match seam {
                 Some(seam) => staying.extend(seam),
+                None if self.a_band_off_a_whole_circle(&members, along, dissolved) => {}
                 None => staying.extend(inside),
             }
         }
@@ -1871,6 +1872,23 @@ impl Assembly {
                 .iter()
                 .all(|dart| self.faces[dart.face].wires[dart.wire].len() == 1)
         })
+    }
+
+    /// Whether the face `members` join into is a band between a whole circle
+    /// and one other ring, both going right round.
+    fn a_band_off_a_whole_circle(
+        &self,
+        members: &[usize],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> bool {
+        let surface = self.faces[members[0]].surface;
+        let rings = self.rings_of_a_curved_face(members, along, dissolved);
+        let [one, other] = rings.as_slice() else {
+            return false;
+        };
+        let round = |ring: &[Dart]| self.a_ring_goes_right_round(ring, &surface) == Some(true);
+        (one.len() == 1 || other.len() == 1) && round(one) && round(other)
     }
 
     /// Whether some ring of the face `members` join into is one
