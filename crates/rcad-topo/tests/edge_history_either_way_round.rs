@@ -10,6 +10,18 @@
 //! The answer's seam and poles are its own, not the input's (§38.1), so a
 //! turned ball keeps only what its turn leaves on them.
 //!
+//! **A bar kept whole keeps its rims and their corners, but not its seam**
+//! (queue row Q2126). The answer writes a bar's wall that nothing cuts as a
+//! band between its two rims, with no seam (`Assembly::needs_no_seam`,
+//! `docs/decisions.md` §36.12), so no edge of the answer runs where the
+//! input's seam ran, and history, which names only the answer's edges, reads
+//! it as deleted. A ball is not like this: the answer must cut a whole ball
+//! open along a seam of its own, and the input's seam lands on it. A bar
+//! standing clear of a wall loses its seam the same way
+//! (`a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule`, Q1765).
+//! Writing the seam back would give a wall nothing cuts a topology no other
+//! band has, for a history nothing outside the tests reads (§13).
+//!
 //! **A block standing flush on a bigger block**: edge history does not depend on
 //! which solid is handed to `fuse` first, even where the touch is a whole
 //! *face* and not a line (queue row Q809).
@@ -225,6 +237,108 @@ fn a_hollow_ball_lying_on_its_side_keeps_neither_its_poles_nor_its_seam() {
     assert!(
         wrong.is_empty(),
         "a ball on its side keeps nothing of its poles and seam:\n{}",
+        wrong.join("\n")
+    );
+}
+
+/// A bar inside a block, cut out of it or kept as what the two share: no
+/// rule cuts the bar's wall, so the answer writes it as a band between its two
+/// rims, with no edge where the bar's seam ran.
+#[test]
+fn a_bar_kept_whole_keeps_its_rims_and_their_corners_but_not_its_seam() {
+    let bottom = [6.0, 5.0, 1.0];
+    let top = [6.0, 5.0, 3.0];
+    let mut wrong: Vec<String> = Vec::new();
+    for (rule, bar_first) in [
+        (Rule::Difference, false),
+        (Rule::Intersection, false),
+        (Rule::Intersection, true),
+    ] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = a_box(&mut model, [0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+        let bar = model
+            .add_round_bar(
+                1.0,
+                2.0,
+                &Isometry::translation(Vector::new(5.0, 5.0, 1.0)).expect("a whole-number shift"),
+            )
+            .expect("a bar of radius 1 and height 2");
+        let seam = the_edge_between(&model, bar, [bottom, top]);
+        let bottom_rim = the_edge_between(&model, bar, [bottom, bottom]);
+        let top_rim = the_edge_between(&model, bar, [top, top]);
+        let bottom_corner = the_vertex_at(&model, bar, bottom);
+        let top_corner = the_vertex_at(&model, bar, top);
+
+        let [first, second] = if bar_first {
+            [bar, block]
+        } else {
+            [block, bar]
+        };
+        let what = format!("a bar inside a block, {rule:?}, bar first {bar_first}");
+        let answer = model
+            .fuse(
+                &[first],
+                &[second],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what} refused: {why}"));
+
+        check_deleted(&model, &answer, seam, "the bar's seam", &what, &mut wrong);
+        check_survives(
+            &model,
+            &answer,
+            bottom_rim,
+            [bottom, bottom],
+            "the bar's bottom rim",
+            &what,
+            &mut wrong,
+        );
+        check_survives(
+            &model,
+            &answer,
+            top_rim,
+            [top, top],
+            "the bar's top rim",
+            &what,
+            &mut wrong,
+        );
+        check_corner_survives(
+            &model,
+            &answer,
+            bottom_corner,
+            bottom,
+            "the bar's bottom corner",
+            &what,
+            &mut wrong,
+        );
+        check_corner_survives(
+            &model,
+            &answer,
+            top_corner,
+            top,
+            "the bar's top corner",
+            &what,
+            &mut wrong,
+        );
+        let along_the_seam: Vec<EdgeKey> = answer
+            .solids()
+            .iter()
+            .flat_map(|&solid| located_edges_of(&model, solid))
+            .filter(|&(_, ends)| ends == [bottom, top])
+            .map(|(edge, _)| edge)
+            .collect();
+        if !along_the_seam.is_empty() {
+            wrong.push(format!(
+                "{what}: the answer has edges {along_the_seam:?} where the bar's seam ran, \
+                 which its history should name"
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "a bar kept whole keeps its rims and their corners, and its seam has nowhere to go:\n{}",
         wrong.join("\n")
     );
 }
@@ -458,6 +572,23 @@ fn the_edge_at(model: &Model, solid: SolidKey, at: impl Fn(f64, f64, f64) -> boo
         matches.len(),
         1,
         "expected exactly one such edge, got {matches:?}"
+    );
+    matches[0]
+}
+
+/// The one edge of `solid` running from one of `ends` to the other; a closed
+/// edge starts and ends at the same place.
+fn the_edge_between(model: &Model, solid: SolidKey, ends: [[f64; 3]; 2]) -> EdgeKey {
+    let ends = sorted_ends(ends);
+    let matches: Vec<EdgeKey> = located_edges_of(model, solid)
+        .into_iter()
+        .filter(|&(_, there)| there == ends)
+        .map(|(edge, _)| edge)
+        .collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected exactly one edge between {ends:?}, got {matches:?}"
     );
     matches[0]
 }
