@@ -7154,6 +7154,88 @@ mod tests {
         }
     }
 
+    /// The wall `x + 2⁻⁵³z = 1`, a rounding off parallel to a bar of radius 2
+    /// up `z` and its chamfer cone of slope one with the apex at `(0, 0, −1)`,
+    /// cuts both circles of radius 2 the two share, at `z = −3` and `z = 1`, in
+    /// a chord `√3` either side of `y = 0`: a D-flat on a chamfered shaft. The
+    /// lower circle first and `+y` first on each, since `n × w` is `−y`.
+    /// Before row Q2177 this was refused: the road along a pipe takes only a
+    /// wall exactly parallel, and the road for a plane beside a pipe only one
+    /// that misses it.
+    #[test]
+    fn a_wall_a_rounding_off_parallel_to_a_bar_cuts_both_circles_it_shares_with_its_chamfer() {
+        let wall = flat([1.0, 0.0, 2f64.powi(-53)], [1.0, 0.0, 0.0]);
+        let bar = a_bar_up_z_of_radius(2.0);
+        let chamfer = a_cone([0.0, 0.0, -1.0], [0.0, 0.0, 1.0], 1.0);
+        let answer = meet([&wall, &bar, &chamfer]).expect("a wall along the bar is answered");
+        on_all_three([&wall, &bar, &chamfer], &answer);
+        let across = 3.0_f64.sqrt();
+        narrow_boxes_near(
+            &answer,
+            &[
+                [1.0, across, -3.0],
+                [1.0, -across, -3.0],
+                [1.0, across, 1.0],
+                [1.0, -across, 1.0],
+            ],
+        );
+        for order in [[&chamfer, &wall, &bar], [&bar, &chamfer, &wall]] {
+            assert_eq!(
+                meet(order).as_ref(),
+                Ok(&answer),
+                "the answer depends on which three they are, not the order they are asked in"
+            );
+        }
+    }
+
+    /// The plane `x + z = 0` leans to the axis of a cone of slope 2 at the
+    /// origin and of a bar of radius 4 about it, and holds the cone's apex but
+    /// not the axis. The two share circles of radius 4 at `z = ±2`, and the
+    /// plane cuts each in a chord `√12` either side of `y = 0`, at `x = ∓2`. The
+    /// plane `x + z = 7` misses both. The lower circle first and `+y` first on
+    /// each, since `n × w` is `−y`.
+    #[test]
+    fn a_plane_leaning_through_a_cones_apex_cuts_both_circles_it_shares_with_a_bar() {
+        let leaning = flat([1.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+        let cone = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 2.0);
+        let bar = a_bar_up_z_of_radius(4.0);
+        let answer = meet([&leaning, &cone, &bar]).expect("a leaning plane is answered");
+        on_all_three([&leaning, &cone, &bar], &answer);
+        let across = 12.0_f64.sqrt();
+        narrow_boxes_near(
+            &answer,
+            &[
+                [2.0, across, -2.0],
+                [2.0, -across, -2.0],
+                [-2.0, across, 2.0],
+                [-2.0, -across, 2.0],
+            ],
+        );
+
+        let further = flat([1.0, 0.0, 1.0], [7.0, 0.0, 0.0]);
+        assert_eq!(meet([&further, &cone, &bar]), Ok(MeetOfThree::Nowhere));
+    }
+
+    /// Each point of `answer` is a box no wider than `1e-13` whose middle is
+    /// within `1e-14` of the point in its own place in `wanted`, for a corner
+    /// that is a rounding off the `f64` named.
+    fn narrow_boxes_near(answer: &MeetOfThree, wanted: &[[f64; 3]]) {
+        let MeetOfThree::At(points) = answer else {
+            panic!("expected points, got {answer:?}");
+        };
+        assert_eq!(points.len(), wanted.len(), "{answer:?}");
+        for (point, wanted) in points.iter().zip(wanted) {
+            let boxed = point.enclosure();
+            assert!(
+                (0..3).all(|axis| {
+                    let middle = (boxed[axis].lo() + boxed[axis].hi()) / 2.0;
+                    (middle - wanted[axis]).abs() < 1e-14 && boxed[axis].width() < 1e-13
+                }),
+                "{point:?} is not a narrow box near {wanted:?}"
+            );
+        }
+    }
+
     /// The sign of `P + L·√Δ` for every way the two parts can point, a tie
     /// among them, against the same sum worked out in `f64`, which holds every
     /// one of these exactly.
