@@ -1729,9 +1729,15 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     {
         return Ok(answer);
     }
-    if let Some(answer) =
-        what_a_plane_beside_their_one_axis_leaves(flat, one, other, at, policy, log)?
-    {
+    if let Some(answer) = what_a_plane_beside_their_one_axis_leaves(
+        flat,
+        one,
+        other,
+        BesideTheAxis::Parallel,
+        at,
+        policy,
+        log,
+    )? {
         return Ok(answer);
     }
     if let Some(answer) =
@@ -1751,6 +1757,17 @@ fn where_one_plane_and_two_curved_surfaces_meet(
         return Ok(answer);
     }
     if let Some(answer) = what_a_plane_beside_a_pipe_leaves(flat, one, other) {
+        return Ok(answer);
+    }
+    if let Some(answer) = what_a_plane_beside_their_one_axis_leaves(
+        flat,
+        one,
+        other,
+        BesideTheAxis::Leaning,
+        at,
+        policy,
+        log,
+    )? {
         return Ok(answer);
     }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
@@ -3304,6 +3321,7 @@ fn what_a_plane_beside_their_one_axis_leaves(
     flat: &Plane,
     one: &Surface,
     other: &Surface,
+    which: BesideTheAxis,
     at: &[PredicatePoint],
     policy: &Policy,
     log: &mut ProvenanceLog,
@@ -3322,14 +3340,21 @@ fn what_a_plane_beside_their_one_axis_leaves(
         return Ok(None);
     }
     let [leaning, off_it, across] = signs;
+    let parallel = leaning == Decision::Zero;
+    if parallel != (which == BesideTheAxis::Parallel) {
+        return Ok(None);
+    }
     assert!(
-        leaning != Decision::Zero || off_it != Decision::Zero,
+        !parallel || off_it != Decision::Zero,
         "a plane holding the axis is answered by the road through it, asked before this one"
     );
     // `across` is `|n × w|²`, zero only for a plane square to the axis. That
     // road is asked first and answers every such plane whose products are in
     // range, so one that reaches here is handed on as it was handed on there.
     if across == Decision::Zero {
+        return Ok(None);
+    }
+    if !parallel && !slant.no_nearer_square_than_parallel() {
         return Ok(None);
     }
 
@@ -3438,6 +3463,32 @@ struct HowAPlaneSits {
     /// `(n·n)W − k²`, which is `|n × w|²`: zero where the plane is square to
     /// the axis and above zero everywhere else.
     across: Exact,
+}
+
+impl HowAPlaneSits {
+    /// Whether `k² ≤ A`, which is the plane making at least half a right
+    /// angle with the axis. A height boxed `δ` wide then moves the foot by at
+    /// most `√2·δ/√W`, since the foot moves `√(N/A)` per unit of `t`.
+    fn no_nearer_square_than_parallel(&self) -> bool {
+        let Some(squared) = self.leaning.times(&self.leaning) else {
+            return false;
+        };
+        matches!(
+            squared.minus(&self.across).sign(),
+            Decision::Neg | Decision::Zero
+        )
+    }
+}
+
+/// Which planes beside their one axis a call of
+/// [`what_a_plane_beside_their_one_axis_leaves`] takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BesideTheAxis {
+    /// A plane parallel to the axis, asked where that road always was.
+    Parallel,
+    /// A plane leaning to the axis and no nearer square to it than parallel,
+    /// asked after every other road, so no answer one of them gave moves.
+    Leaning,
 }
 
 /// How `flat` sits to `axis`, or `None` where a product falls out of range.
