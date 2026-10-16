@@ -1990,10 +1990,29 @@ fn the_seam_of_a_bend(model: &Model) -> CoedgeView<'_> {
 /// of its own on the same plane, so the circle between them is two half
 /// circles that name the pipe of radius one standing on the cap.
 fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    a_bar_with_a_disc_drawn_by_a_pipe_from(model, Point::new(0.0, 0.0, 4.0), 1.0)
+}
+
+/// Like [`a_bar_with_a_disc_drawn_on_its_top`], but the drawn pipe's own axis
+/// starts at `pipe_origin` rather than at the disc's own centre, and the disc
+/// has `radius` rather than one. `pipe_origin` still sits on the one line
+/// through the disc's centre pointing `+z` — the writer moves a drawn
+/// circle's pipe to where its axis meets the flat face it is drawn on
+/// when the pipe's own origin is not already there
+/// (`Writing::an_arc_of_a_circle_on_a_flat_face`), so a `pipe_origin` off the
+/// disc's own plane is what exercises that move.
+fn a_bar_with_a_disc_drawn_by_a_pipe_from(
+    model: &mut Model,
+    pipe_origin: Point,
+    radius: f64,
+) -> rcad_topo::Result<SolidKey> {
     let up = Vector::new(0.0, 0.0, 1.0);
     let centre = Point::new(0.0, 0.0, 4.0);
-    let drawn = Cylinder::new(Axis::new(centre, up).expect("a unit direction"), 1.0)
-        .expect("a positive radius");
+    let drawn = Cylinder::new(
+        Axis::new(pipe_origin, up).expect("a unit direction"),
+        radius,
+    )
+    .expect("a positive radius");
     let half_of_the_rim = |facing: Vector| EdgeRun::PartOfWhereItCrosses {
         and: Surface::Cylinder(drawn),
         picked_by: [Picker::from(
@@ -2006,8 +2025,8 @@ fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> rcad_topo::Result<So
     let [foot, rim, near, far] = [
         Point::new(2.0, 0.0, 0.0),
         Point::new(2.0, 0.0, 4.0),
-        Point::new(1.0, 0.0, 4.0),
-        Point::new(-1.0, 0.0, 4.0),
+        Point::new(radius, 0.0, 4.0),
+        Point::new(-radius, 0.0, 4.0),
     ]
     .map(|at| builder.add_vertex(at).expect("a finite point"));
     let bottom_circle = builder
