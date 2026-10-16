@@ -3474,8 +3474,41 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
                 let order = self.nodes_along(crossing, on_it, policy, log)?;
+                let probe = std::env::var("RCAD_PROBE_MERGE").is_ok();
+                if probe {
+                    eprintln!(
+                        "PROBE face {:?} crossing {crossing} partner {:?} how {:?} order {order:?}",
+                        self.surface,
+                        self.crossings[crossing].partner,
+                        match self.crossings[crossing].order {
+                            HowItRuns::AlongAnAxis { axis, .. } => format!("axis {axis}"),
+                            HowItRuns::AlongABend { .. } => "bend".to_string(),
+                            HowItRuns::RoundAClosedCurve { .. } => "closed".to_string(),
+                        }
+                    );
+                    for &n in &order {
+                        eprintln!(
+                            "PROBE   node {n} {:?} narrowed {:?} made_of {:?} also {:?}",
+                            self.nodes[n].point.enclosure(),
+                            self.narrowed_box_of(n).enclosure(),
+                            self.nodes[n].made_of,
+                            self.nodes[n].also,
+                        );
+                    }
+                }
                 for pair in order.windows(2) {
-                    match self.order_along(crossing, pair[0], pair[1], policy, log)? {
+                    let decided = self.order_along(crossing, pair[0], pair[1], policy, log)?;
+                    if probe {
+                        eprintln!(
+                            "PROBE   pair {:?} -> {decided:?} boxes {:?} planes {:?} quadric {:?} axis {:?}",
+                            (pair[0], pair[1]),
+                            self.as_the_boxes_say(crossing, pair[0], pair[1]),
+                            self.as_the_planes_say(crossing, pair[0], pair[1]),
+                            self.as_the_quadric_says(crossing, pair[0], pair[1]),
+                            self.as_the_pipes_axis_says(crossing, pair[0], pair[1]),
+                        );
+                    }
+                    match decided {
                         Decision::Zero => same.join(pair[0], pair[1]),
                         Decision::Pos => {}
                         Decision::Neg => unreachable!(

@@ -812,6 +812,32 @@ fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_t
     }
 }
 
+#[test]
+fn probe_q2133_all() {
+    for (scale, size) in [(0.1, 0.25), (0.8, 2.0), (6.4, 16.0)] {
+        for (rule, first) in EVERY_FUSE {
+            let (model, fused) = a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
+                scale, size, 1.0, rule, first,
+            );
+            let valid = fused
+                .as_ref()
+                .ok()
+                .map(|_| model.validate(&Policy::tolerant(size), &mut ProvenanceLog::new()));
+            eprintln!(
+                "PROBE frustum {scale} {size} {rule:?} {first}: {:?} valid {valid:?}",
+                fused.map(|_| "answer")
+            );
+        }
+    }
+}
+
+#[test]
+fn probe_q2133_one() {
+    let (_, fused) =
+        a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(0.1, 0.25, 1.0, Rule::Union, true);
+    eprintln!("PROBE result {:?}", fused.map(|_| "answer"));
+}
+
 /// The far cap lifted by a thousandth of its height is off the cube's edges'
 /// lines, so no four surfaces meet at one point there, and every fuse of the
 /// shape above at a scale of `0.1` and a working size of `0.25` answers with
