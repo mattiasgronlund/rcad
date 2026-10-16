@@ -1391,6 +1391,44 @@ fn a_cap_turned_by_a_different_composition_of_turns_than_its_pair_refuses_by_fam
 /// ball-ball, ball-pipe, ball-cone, pipe-pipe, pipe-cone, cone-cone.
 const ROUNDING_OFF_SQUARE_CAP_REFUSALS: [usize; 6] = [0, 366, 1098, 0, 972, 972];
 
+/// **A cap leaning a hundredth off square to a bar's axis cuts the bar, a
+/// chamfer cone and a ball in curves that keep apart.** The cap through
+/// `(0, 0, 5)` with normal `(0, 1, 100)` leans by `t = atan(1/100)` and cuts
+/// the bar of radius three up `z` in an ellipse whose every point is between
+/// `3` and `3/cos t` from where the axis crosses it, `3.00015` at most. It cuts
+/// the cone of slope one from the origin, which is five across there, between
+/// `5/(1 + sin t)` and `5/(cos t − sin t)`, `4.95` at least, and the ball of
+/// radius two about that point in a circle of radius two. So no point is on all
+/// three, and no quartic is needed to say so.
+///
+/// The bar of radius five against the same cone is still refused: the two
+/// bands overlap, the ellipses cross, and where is the quartic the module doc
+/// of `three_surfaces.rs` defers.
+#[test]
+fn a_cap_leaning_off_square_to_a_bar_meets_it_and_a_cone_or_a_ball_it_keeps_apart_nowhere() {
+    let cap = flat([0.0, 1.0, 100.0], [0.0, 0.0, 5.0]);
+    let bar = pipe([0.0; 3], [0.0, 0.0, 1.0], 3.0);
+    let chamfer = cone([0.0; 3], [0.0, 0.0, 1.0], 1.0);
+    let steeper = cone([0.0; 3], [0.0, 0.0, -1.0], 2.0);
+    let small_ball = ball([0.0, 0.0, 5.0], 2.0);
+    for (one, other) in [
+        (&bar, &chamfer),
+        (&bar, &small_ball),
+        (&chamfer, &steeper),
+        (&chamfer, &small_ball),
+    ] {
+        for order in [[&cap, one, other], [other, &cap, one], [one, other, &cap]] {
+            assert_eq!(meet(order), Ok(MeetOfThree::Nowhere), "{order:?}");
+        }
+    }
+
+    let wide_bar = pipe([0.0; 3], [0.0, 0.0, 1.0], 5.0);
+    assert_eq!(
+        meet([&cap, &wide_bar, &chamfer]),
+        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+    );
+}
+
 /// A ring about `z` through the origin.
 fn ring(ring_radius: f64, tube_radius: f64) -> Surface {
     Surface::Torus(Torus::new(Axis::z(), ring_radius, tube_radius).expect("a tube inside its ring"))
