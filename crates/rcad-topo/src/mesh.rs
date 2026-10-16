@@ -2777,9 +2777,8 @@ impl BuildingAMesh {
         walked: &[WalkedLoop],
         room: f64,
     ) -> Result<Option<(WalkedLoop, WalkedLoop)>> {
-        let (Some(whole), None, None) = (
+        let (Some(whole), None) = (
             how_far_the_longitude_wraps(stored),
-            stored.where_it_pinches(),
             how_far_the_second_coordinate_wraps(stored),
         ) else {
             return Ok(None);
@@ -2787,9 +2786,10 @@ impl BuildingAMesh {
         let [first, second] = walked else {
             return Ok(None);
         };
-        if [first, second]
-            .iter()
-            .any(|around| around.goes_right_round || !it_passes_each_of_its_points_once(around))
+        if !the_loops_keep_clear_of_where_it_pinches(stored, walked)
+            || [first, second]
+                .iter()
+                .any(|around| around.goes_right_round || !it_passes_each_of_its_points_once(around))
         {
             return Ok(None);
         }
@@ -6280,6 +6280,37 @@ fn where_a_slit_carries_on_to(around: &WalkedLoop, tip: usize) -> Option<(Walked
         return None;
     }
     Some((opened, [tip, far]))
+}
+
+/// Whether the patch `walked` bounds in `stored`'s own two coordinates holds no
+/// point where `stored` pinches, read off their corners.
+///
+/// **A cone's patch clear of the apex is a pipe's patch.** A cone pinches at its
+/// apex, height `0`, and nowhere else. A patch in the chart lies between the
+/// least and the greatest height of its corners, and so does a straight leg
+/// between two of them, so when every corner of every loop is at a height of
+/// one sign the patch and its legs keep off the apex, and there the chart is
+/// as regular as a pipe's. A loop that reaches the apex is walked through it
+/// on a pole side at height `0` ([`the_surface_pinches_at`]), so its corners
+/// there are not of one sign. A chip of a cone holed through, and a frustum
+/// halved and windowed, are refused without this
+/// (`a_walk_neither_winding_nor_the_axis_places.rs`).
+///
+/// **A ball is left out, as before.** It pinches at both poles, and no face on
+/// a ball whose outline reaches neither, with a hole, has been measured here.
+fn the_loops_keep_clear_of_where_it_pinches(stored: &Surface, walked: &[WalkedLoop]) -> bool {
+    if stored.where_it_pinches().is_none() {
+        return true;
+    }
+    let Surface::Cone(_) = stored else {
+        return false;
+    };
+    let mut heights = walked
+        .iter()
+        .flat_map(|around| &around.corners)
+        .map(|corner| corner[1]);
+    let first = heights.next().expect("a walked loop has a corner");
+    first != 0.0 && heights.all(|height| height * first.signum() > 0.0)
 }
 
 /// The corner of a loop furthest along latitude the way `way`'s sign says: the
