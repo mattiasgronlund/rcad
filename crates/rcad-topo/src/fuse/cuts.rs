@@ -196,6 +196,14 @@ use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedFace, BakedS
 /// lie in, and why each face is told the caps through the start of their
 /// axis that the faces cutting it carry.
 ///
+/// **No face pair is skipped, but [`how_two_faces_meet`] is only ever asked
+/// once per distinct pair of surfaces** ([`HowFacesMeetBySurface`]). The
+/// header's "every pair" is about faces, not about calls: a connector's whole
+/// row of pins holds the same cap height and the same two walls along the
+/// row, so the same two surfaces arrive on this loop's doorstep from many
+/// different pairs of faces, and the pair, not the geometry, is what used to
+/// be new every time.
+///
 /// # Errors
 ///
 /// [`Error::ArgumentIntersectsItself`] when a solid has two faces that really do
@@ -221,6 +229,7 @@ pub(crate) fn gather(
         .iter()
         .map(|solid| vec![Vec::new(); solid.faces.len()])
         .collect();
+    let mut how_they_meet = HowFacesMeetBySurface::new();
     for one in 0..solids.len() {
         for other in one..solids.len() {
             if within_reach.leader(one) != within_reach.leader(other) {
@@ -231,7 +240,8 @@ pub(crate) fn gather(
                 for theirs in from..solids[other].faces.len() {
                     let face = &solids[one].faces[mine];
                     let against = &solids[other].faces[theirs];
-                    let (onto_face, onto_against) = cuts_between(face, against, policy, log)?;
+                    let meet = how_they_meet.ask(&face.surface, &against.surface, policy, log)?;
+                    let (onto_face, onto_against) = cuts_from_how_they_meet(meet, face, against);
                     if !onto_face.is_empty() {
                         told[one][mine].extend(&against.caps_through_the_start_of_their_axis);
                     }
@@ -263,6 +273,91 @@ pub(crate) fn gather(
         tell_each_edge_what_its_neighbour_leaves_out(solid);
     }
     Ok(())
+}
+
+#[cfg(test)]
+static SURFACE_PAIRS_REALLY_ASKED: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Caches how two surfaces meet, keyed by the surfaces' own stored numbers,
+/// since the answer depends on nothing else — [`how_two_faces_meet`] takes
+/// two [`Surface`]s, not two faces — and a connector's whole row of pins
+/// repeats the same cap plane and the same two walls along the row, on every
+/// pin.
+struct HowFacesMeetBySurface {
+    seen: HashMap<[u64; 9], usize>,
+    answers: HashMap<(usize, usize), HowTwoFacesMeet>,
+}
+
+impl HowFacesMeetBySurface {
+    fn new() -> Self {
+        Self {
+            seen: HashMap::new(),
+            answers: HashMap::new(),
+        }
+    }
+
+    fn id_of(&mut self, surface: &Surface) -> usize {
+        let bits = super::arrange::name_of_surface_bits(surface);
+        let next = self.seen.len();
+        *self.seen.entry(bits).or_insert(next)
+    }
+
+    /// Both orders land on the same key, because [`how_two_faces_meet`] gives
+    /// the same answer whichever surface is handed first: `intersect`'s own
+    /// test helper `crossing` (`rcad_geom::intersect`'s tests) checks exactly
+    /// that for every pair it covers, and
+    /// [`a_line_they_rest_on`]'s `matches!` lists both orders of every mixed
+    /// pair it names, so the one place here that reads past the bare
+    /// [`SurfaceMeet`] stays symmetric too.
+    fn ask(
+        &mut self,
+        face: &Surface,
+        against: &Surface,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<HowTwoFacesMeet> {
+        let (a, b) = (self.id_of(face), self.id_of(against));
+        let key = if a <= b { (a, b) } else { (b, a) };
+        if let Some(&answer) = self.answers.get(&key) {
+            return Ok(answer);
+        }
+        #[cfg(test)]
+        SURFACE_PAIRS_REALLY_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let answer = how_two_faces_meet(face, against, policy, log)?;
+        self.answers.insert(key, answer);
+        Ok(answer)
+    }
+}
+
+/// The crossings each of two faces cuts in the other, each as the second surface
+/// of the pair — the face's own surface is the first and is not repeated.
+///
+/// [`intersect`] is the one authority on how two surfaces meet (§24.3), so
+/// [`how_two_faces_meet`] asks it rather than working the cases out again.
+/// That is also what makes the coincident case one rule for all three surface
+/// kinds: two faces on one *cylinder* answer [`SurfaceMeet::SameSurface`]
+/// exactly as two on one plane do, and the boundary of each is what cuts the
+/// other (§31.3).
+///
+/// **Which way round the two faces came in is not asked here**, and §31.3
+/// says why: "is it one surface" is geometry and this is where it is settled,
+/// while "does it face the same way" is topology and the faces' own
+/// orientations settle it, in selection. For a plane the two used to be welded
+/// together in `Plane::agreement_with`; a sphere has no reversed form, so they
+/// come apart.
+fn cuts_from_how_they_meet(
+    meet: HowTwoFacesMeet,
+    face: &BakedFace,
+    against: &BakedFace,
+) -> (Vec<Surface>, Vec<Surface>) {
+    match meet {
+        HowTwoFacesMeet::OnOneSurface => (boundary_of(against), boundary_of(face)),
+        HowTwoFacesMeet::Nowhere => (Vec::new(), Vec::new()),
+        HowTwoFacesMeet::AtOnePoint
+        | HowTwoFacesMeet::AlongALineTheyRestOn
+        | HowTwoFacesMeet::AlongCurves => (vec![against.surface], vec![face.surface]),
+    }
 }
 
 /// A cut found for a face, before it is hung on it.
@@ -1277,36 +1372,6 @@ fn hull(
         .unwrap_or(rcad_predicates::Interval::ENTIRE)
 }
 
-/// The crossings each of two faces cuts in the other, each as the second surface
-/// of the pair — the face's own surface is the first and is not repeated.
-///
-/// [`intersect`] is the one authority on how two surfaces meet (§24.3), so
-/// [`how_two_faces_meet`] asks it rather than working the cases out again.
-/// That is also what
-/// makes the coincident case one rule for all three surface kinds: two faces on
-/// one *cylinder* answer [`SurfaceMeet::SameSurface`] exactly as two on one
-/// plane do, and the boundary of each is what cuts the other (§31.3).
-///
-/// **Which way round the two face is not asked here**, and §31.3 says why: "is
-/// it one surface" is geometry and this is where it is settled, while "does it
-/// face the same way" is topology and the faces' own orientations settle it, in
-/// selection. For a plane the two used to be welded together in
-/// `Plane::agreement_with`; a sphere has no reversed form, so they come apart.
-fn cuts_between(
-    face: &BakedFace,
-    against: &BakedFace,
-    policy: &Policy,
-    log: &mut ProvenanceLog,
-) -> Result<(Vec<Surface>, Vec<Surface>)> {
-    match how_two_faces_meet(&face.surface, &against.surface, policy, log)? {
-        HowTwoFacesMeet::OnOneSurface => Ok((boundary_of(against), boundary_of(face))),
-        HowTwoFacesMeet::Nowhere => Ok((Vec::new(), Vec::new())),
-        HowTwoFacesMeet::AtOnePoint
-        | HowTwoFacesMeet::AlongALineTheyRestOn
-        | HowTwoFacesMeet::AlongCurves => Ok((vec![against.surface], vec![face.surface])),
-    }
-}
-
 /// One cut per edge of a face, for cutting a face that is on the same surface.
 fn boundary_of(face: &BakedFace) -> Vec<Surface> {
     face.wires
@@ -1481,9 +1546,10 @@ mod tests {
     use rcad_predicates::{Interval, Policy, ProvenanceLog};
 
     use super::{
-        ABandRoundAnAxis, a_face_misses_a_surface_by_its_band, a_surface_misses_a_band, gather,
-        no_face_of_one_meets_the_other, the_band_a_plane_crosses_a_cone_in,
-        the_band_a_plane_crosses_a_pipe_in, the_crossing_meets_none_of,
+        ABandRoundAnAxis, SURFACE_PAIRS_REALLY_ASKED, a_face_misses_a_surface_by_its_band,
+        a_surface_misses_a_band, gather, no_face_of_one_meets_the_other,
+        the_band_a_plane_crosses_a_cone_in, the_band_a_plane_crosses_a_pipe_in,
+        the_crossing_meets_none_of,
     };
     use crate::fuse::bake::{BakedFace, BakedSolid, bake};
     use crate::{Error, Model, SolidKey};
@@ -1504,6 +1570,32 @@ mod tests {
             )
             .expect("this model made the key");
         bake(&model, &[one, other], &policy, &mut ProvenanceLog::new()).expect("two cubes bake")
+    }
+
+    /// `n` cubes of side two, each one further along `z` by one unit than the
+    /// last, so each pair overlaps by one unit, every cube's four side walls
+    /// sit on the chain's own four planes — the way a connector's row of pins
+    /// shares its two long walls along the row — and only the top and bottom
+    /// caps differ from cube to cube.
+    fn chain_of_cubes(n: usize) -> Vec<BakedSolid> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut keys = Vec::with_capacity(n);
+        for i in 0..n {
+            let cube = model.add_cube(2.0, &policy, &mut log).expect("a cube");
+            if i > 0 {
+                model
+                    .place_solid(
+                        cube,
+                        &Isometry::translation(Vector::new(0.0, 0.0, i as f64))
+                            .expect("a finite shift"),
+                    )
+                    .expect("this model made the key");
+            }
+            keys.push(cube);
+        }
+        bake(&model, &keys, &policy, &mut ProvenanceLog::new()).expect("a chain of cubes bakes")
     }
 
     fn facing(solid: &BakedSolid, way: Vector) -> &BakedFace {
@@ -2139,5 +2231,64 @@ mod tests {
         shells.extend(theirs);
         let slot = model.add_solid(shells);
         model.key_for_solid(slot)
+    }
+
+    /// A wall shared by every cube in the chain is cut by the chain's other
+    /// two walls and, from every cube including its own, that cube's two
+    /// caps — the memoized path and the one it replaced hang the same
+    /// surfaces on a face, so this is unmoved by [`HowFacesMeetBySurface`]
+    /// existing at all.
+    ///
+    /// Worked by hand from how [`cuts_from_how_they_meet`] and
+    /// [`boundary_of`] fill a face's cuts: this wall's own four edges border
+    /// the chain's other two walls and its own cube's two caps (not the wall
+    /// directly opposite it, which it shares no edge with and which is
+    /// parallel to it besides); every other cube contributes those same two
+    /// walls again by the coplanar branch, and every cube's own two caps by
+    /// the crossing branch. The two other walls arrive once each, no matter
+    /// how many cubes repeat them; each cube's own two caps once each. Five
+    /// cubes: two walls plus ten caps, twelve surfaces.
+    #[test]
+    fn a_wall_the_whole_chain_shares_is_cut_by_every_cubes_caps() {
+        let mut solids = chain_of_cubes(5);
+
+        gathered(&mut solids);
+
+        let wall = facing(&solids[0], Vector::new(-1.0, 0.0, 0.0));
+        assert_eq!(
+            distinct_cuts(wall).len(),
+            12,
+            "the chain's other two walls and both caps of each of the five cubes"
+        );
+    }
+
+    /// [`HowFacesMeetBySurface`] asks [`how_two_faces_meet`] once per distinct
+    /// pair of surfaces, not once per pair of faces — a connector's row of
+    /// pins repeats the same cap height and the same two walls along the
+    /// row, and this chain of cubes repeats its four walls the same way.
+    ///
+    /// Worked by hand: five cubes carry four shared walls and two caps each
+    /// (ten caps, all distinct from each other and from every wall). The
+    /// distinct unordered surface pairs this chain's faces ever put in front
+    /// of [`HowFacesMeetBySurface::ask`] are the ten wall-wall pairs (four
+    /// walls, repeats allowed), the `4 * 10 = 40` wall-cap pairs, and the
+    /// cap-cap pairs — `4` crossing pairs for each of the ten unordered pairs
+    /// of distinct cubes plus one same-cube pair per cube, `4 * 10 + 5 = 45`
+    /// — for `10 + 40 + 45 = 95` real calls. [`gather`]'s loop puts
+    /// `36 * 10 + 15 * 5 = 435` face pairs in front of
+    /// [`HowFacesMeetBySurface::ask`] in all, so this is what caches a little
+    /// over four fifths of them away.
+    #[test]
+    fn a_chain_of_five_cubes_asks_how_two_faces_meet_ninety_five_times() {
+        let mut solids = chain_of_cubes(5);
+        SURFACE_PAIRS_REALLY_ASKED.store(0, std::sync::atomic::Ordering::Relaxed);
+
+        gathered(&mut solids);
+
+        assert_eq!(
+            SURFACE_PAIRS_REALLY_ASKED.load(std::sync::atomic::Ordering::Relaxed),
+            95,
+            "five cubes' worth of shared walls and distinct caps, worked out by hand above"
+        );
     }
 }
