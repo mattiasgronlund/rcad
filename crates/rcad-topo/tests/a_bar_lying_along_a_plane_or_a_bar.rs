@@ -47,6 +47,16 @@
 //! wide. A gap, not a limit: `fuse/arrange.rs` now reads that side off the
 //! pipe's axis wherever the plane is proved clear of a pipe the corner is on.
 //! `a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule` pins it.
+//!
+//! **A bar turned onto `x` by a float angle and laid along a block's top or
+//! floor answers as a bar clear of that plane** (queue rows Q2071 and Q2102).
+//! `Isometry::rotation` about `y` by `π/2` leaves the bar's axis along
+//! `(1, 0, 2⁻⁵²)`, so the plane crosses the pipe, far past the bar's end, and
+//! Q1765's reading does not answer. `fuse/arrange.rs` now reads the side of a
+//! seam corner off the centre of the cap circle it is on, where the plane is
+//! proved clear of that circle.
+//! `a_bar_turned_onto_x_by_a_float_angle_along_a_blocks_top_answers_every_rule`
+//! and its twin on the block's floor pin it.
 
 use core::f64::consts::PI;
 
