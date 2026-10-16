@@ -9756,6 +9756,11 @@ fn a_ring_of_one_or_two_sides_bounds_something(ring: &[Side], edges: &[Edge]) ->
 /// **A side from pole to pole is the seam the answer cuts a whole ball open
 /// along**, since nothing else ends at a pole, and it is the input's seam
 /// when [`what_a_whole_ball_was`] says the two run in one place (Q2114).
+///
+/// **A bar's wall that nothing cuts has no side along its seam.** The answer
+/// writes it as a band between its two rims with no seam
+/// ([`Assembly::needs_no_seam`], `docs/decisions.md` §36.12), so its seam
+/// reads as deleted, as a bar's standing clear of a wall does (Q1765, Q2126).
 fn the_seam_a_side_runs_along(
     model: &Model,
     solid: SolidView<'_>,
