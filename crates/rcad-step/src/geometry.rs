@@ -13,7 +13,7 @@ use rcad_geom::{Axis, Cone, Cylinder, Plane, Point, Sphere, Surface, Torus, Vect
 
 use crate::graph::{EntityId, Record, StepFile, Value};
 use crate::names::{
-    AXIS2_PLACEMENT_3D, CARTESIAN_POINT, CONICAL_SURFACE, CYLINDRICAL_SURFACE, DIRECTION,
+    AXIS2_PLACEMENT_3D, CARTESIAN_POINT, CIRCLE, CONICAL_SURFACE, CYLINDRICAL_SURFACE, DIRECTION,
     EnumerationName, FALSE, Keyword, PLANE, SPHERICAL_SURFACE, TOROIDAL_SURFACE, TRUE,
 };
 use crate::refusal::Refusal;
@@ -90,15 +90,7 @@ impl<'a> Reading<'a> {
                     .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
                 Ok(Surface::Plane(plane))
             }
-            Some(CYLINDRICAL_SURFACE) => {
-                let position = self.reference_at(id, CYLINDRICAL_SURFACE, 1)?;
-                let place = self.placement_at(id, position)?;
-                let radius = self.real_at(id, CYLINDRICAL_SURFACE, 2)?;
-                let pipe = Axis::as_written(place.origin, place.axis)
-                    .and_then(|axis| Cylinder::new(axis, radius))
-                    .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })?;
-                Ok(Surface::Cylinder(pipe))
-            }
+            Some(CYLINDRICAL_SURFACE) => Ok(Surface::Cylinder(self.pipe_at(id)?)),
             Some(SPHERICAL_SURFACE) => {
                 let position = self.reference_at(id, SPHERICAL_SURFACE, 1)?;
                 let place = self.placement_at(id, position)?;
@@ -147,6 +139,47 @@ impl<'a> Reading<'a> {
                 keyword: keyword.to_owned(),
             }),
         }
+    }
+
+    /// A `CYLINDRICAL_SURFACE`'s pipe.
+    fn pipe_at(&self, id: EntityId) -> Result<Cylinder, Refusal> {
+        let position = self.reference_at(id, CYLINDRICAL_SURFACE, 1)?;
+        let place = self.placement_at(id, position)?;
+        let radius = self.real_at(id, CYLINDRICAL_SURFACE, 2)?;
+        Axis::as_written(place.origin, place.axis)
+            .and_then(|axis| Cylinder::new(axis, radius))
+            .map_err(|why| Refusal::TheGeometryIsNotAWorkingShape { id, why })
+    }
+
+    /// The pipe a `CIRCLE` named `'#n'` points at, where `#n` is a
+    /// `CYLINDRICAL_SURFACE` that reads as a pipe and `keep` takes it.
+    ///
+    /// **For a circle drawn on a flat face whose own pipe starts off that
+    /// face.** This writer writes such a circle where the kernel's walk centres
+    /// it, and the pipe through that centre can walk it round another point, a
+    /// few ulps away; so it writes the kernel's own pipe beside the circle and
+    /// names the circle after it (`Writing::an_arc_of_a_circle_on_a_flat_face`,
+    /// `docs/decisions.md` §249.8). A name is free text in Part 21, so any
+    /// other name, and a pipe that does not read or that `keep` turns down,
+    /// gives `None` and is not refused.
+    ///
+    /// A `1` read as `1.` in a pipe `keep` turns down is not counted, since
+    /// that pipe takes no part in the model. One in a pipe it takes is: the
+    /// pipe this writer names a circle after is one no face sits on, so
+    /// nothing reads it again.
+    pub(crate) fn pipe_a_circle_names(
+        &self,
+        circle: EntityId,
+        keep: impl FnOnce(&Cylinder) -> bool,
+    ) -> Option<Cylinder> {
+        let name = self.record(circle, CIRCLE).ok()?.attribute(0)?.as_text()?;
+        let named = EntityId(name.strip_prefix('#')?.parse().ok()?);
+        let counted = self.integers_read_as_reals.get();
+        let pipe = self.pipe_at(named).ok().filter(keep);
+        if pipe.is_none() {
+            self.integers_read_as_reals.set(counted);
+        }
+        pipe
     }
 
     /// An `AXIS2_PLACEMENT_3D`: where it is, which way it points, and which way
@@ -490,6 +523,35 @@ pub(crate) struct Placement {
 /// apart.
 pub(crate) fn plane_through(origin: Point, axis: Vector) -> rcad_geom::Result<Plane> {
     Plane::from_point_and_normal_as_written(origin, axis)
+}
+
+/// Whether `rcad_geom::walk` centres the circle each of `planes` crosses
+/// `pipe` in at `centre`, to the bit.
+///
+/// The writer and the reader ask this of the same pipe and the same planes, so
+/// that where the writer names a drawn circle after the pipe it writes beside
+/// it, the reader takes that pipe (`docs/decisions.md` §249.8).
+pub(crate) fn the_walk_centres_it_at(pipe: &Cylinder, planes: &[Plane], centre: Point) -> bool {
+    let bits = |at: Point| at.coordinates().map(f64::to_bits);
+    planes.iter().all(|flat| {
+        where_the_walk_centres_a_circle(flat, pipe)
+            .is_some_and(|walked| bits(walked) == bits(centre))
+    })
+}
+
+/// Where `rcad_geom::walk` centres the circle `flat` crosses `pipe` in: the
+/// pipe's own origin moved up its axis to `flat`, in plain `f64`, as
+/// `walk.rs`'s `where_a_plane_cuts_a_pipe` works it out. `None` where the axis
+/// runs along `flat` and meets it nowhere.
+pub(crate) fn where_the_walk_centres_a_circle(flat: &Plane, pipe: &Cylinder) -> Option<Point> {
+    let along = pipe.axis().direction();
+    let leans = flat.normal().dot(along);
+    if leans == 0.0 {
+        return None;
+    }
+    let from = pipe.axis().origin();
+    let up = (flat.offset() - flat.normal().dot(from - Point::origin())) / leans;
+    Some(from + along * up)
 }
 
 /// A `CONICAL_SURFACE`'s half-angle, and how far the file may have cut it.

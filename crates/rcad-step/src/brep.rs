@@ -22,7 +22,7 @@ use rcad_topo::{
 use smallvec::smallvec;
 
 use crate::Value;
-use crate::geometry::{Reading, plane_through};
+use crate::geometry::{Reading, plane_through, the_walk_centres_it_at};
 use crate::graph::EntityId;
 use crate::names::{
     ADVANCED_FACE, CIRCLE, CLOSED_SHELL, CONICAL_SURFACE, EDGE_CURVE, EDGE_LOOP, ELLIPSE,
@@ -1408,6 +1408,25 @@ impl Walk {
     /// (`Writing::an_arc_of_a_circle_on_a_flat_face`). A disc drawn on a turned
     /// bar's top has that axis an ulp off length one, and [`Axis::new`] moved
     /// the last bit of 76 of 372 such axes (Q1001, §355.6).
+    ///
+    /// **That pipe runs through the circle's centre only where its walk
+    /// centres the circle there.** `rcad_geom::walk` centres a circle by moving
+    /// the pipe's own origin up its axis to each flat face, and from the
+    /// circle's centre that second rounding can land a few ulps away: a disc on
+    /// a bar's top at `z = 4` drawn by a pipe up `z` from `z = −15.9` is centred
+    /// at `z = 3.9999999999999982`, and the pipe through there walks it to
+    /// `4.0`. Where it does, the writer writes the model's own pipe beside the
+    /// circle as a `CYLINDRICAL_SURFACE` no other entity refers to, and names
+    /// the `CIRCLE` `'#n'` after it. The run takes the pipe the name points at
+    /// where it has the same direction and radius, to the bit, and its walk
+    /// centres the circle on the centre the file wrote
+    /// ([`the_walk_centres_it_at`], shared with the writer;
+    /// `docs/decisions.md` §249.8); otherwise the pipe through the centre
+    /// stays. It does not search the file for such a pipe: of two pipes up one
+    /// line from two heights, one can walk the other's circle round that
+    /// circle's own centre, and a search named one solid's circle by the other
+    /// solid's pipe
+    /// (`two_discs_drawn_by_pipes_from_two_origins_on_one_line_come_back_from_their_own_file`).
     fn the_surface_that_names_the_curve(
         &self,
         reading: &Reading<'_>,
@@ -1433,10 +1452,26 @@ impl Walk {
             && self.every_face_holds_the_curve(reading, edge_curve, curve, keyword, place)?
         {
             let radius = reading.real_at(curve, CIRCLE, 2)?;
-            let round = Axis::as_written(place.origin, place.axis)
+            let through_the_centre = Axis::as_written(place.origin, place.axis)
                 .and_then(|axis| Cylinder::new(axis, radius))
                 .map_err(not_a_working_shape)?;
-            return Ok(Surface::Cylinder(round));
+            let faces: Vec<Plane> = faces_along_it
+                .into_iter()
+                .flatten()
+                .filter_map(|face| face.as_plane().copied())
+                .collect();
+            let walks_it_round_the_centre =
+                |pipe: &Cylinder| the_walk_centres_it_at(pipe, &faces, place.origin);
+            if walks_it_round_the_centre(&through_the_centre) {
+                return Ok(Surface::Cylinder(through_the_centre));
+            }
+            let bits = |way: Vector| way.components().map(f64::to_bits);
+            let its_own = reading.pipe_a_circle_names(curve, |pipe| {
+                bits(pipe.axis().direction()) == bits(through_the_centre.axis().direction())
+                    && pipe.radius().to_bits() == radius.to_bits()
+                    && walks_it_round_the_centre(pipe)
+            });
+            return Ok(Surface::Cylinder(its_own.unwrap_or(through_the_centre)));
         }
         let flat = plane_through(place.origin, place.axis).map_err(not_a_working_shape)?;
         Ok(Surface::Plane(flat))
