@@ -2584,7 +2584,16 @@ check-fuzz-builds:
 # one variant, so it is not the `let … else` case. Each of the three counts
 # twice because `writer.rs` builds into both `rcad-step`'s own tests and
 # `rcad-fuzz-explain`.
-wildcard_arms := "101"
+#
+#     Q2151's lane  101 -> 103
+#
+# One more, in `writer.rs`'s new
+# `every_drawn_circles_pipe_runs_along_a_coordinate_axis`: it matches
+# `EdgeRun::PartOfWhereItCrosses { and: Surface::Cylinder(cylinder), .. }` and
+# keeps `_ => true` for every other run, a real catch-all since most edge runs
+# are not a cylinder's own pipe at all. Counts twice for the same reason as
+# Q2131's lane above.
+wildcard_arms := "103"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
