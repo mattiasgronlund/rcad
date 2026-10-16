@@ -849,8 +849,12 @@ fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_answers_
             );
             for (&(volume, error), exactly) in measured.iter().zip(expected) {
                 println!("{case}: measured {volume} ± {error}, exactly {exactly}");
+                // The cube's top corner is flat all round, so it is measured
+                // to about `1e-18`, under what writing `exactly` in `f64`
+                // rounds by.
+                let formula_rounds_by = 16.0 * f64::EPSILON * exactly;
                 assert!(
-                    (volume - exactly).abs() <= error,
+                    (volume - exactly).abs() <= error + formula_rounds_by,
                     "{case}: measured {volume} ± {error} against {exactly}"
                 );
             }
