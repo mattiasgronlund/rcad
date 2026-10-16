@@ -97,7 +97,7 @@ use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
     Point, Scale, Surface, Torus, Vector,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{CoedgeView, DraftStep, Model, SolidBuilder, SolidKey, SolidView, WireView};
 
@@ -380,9 +380,9 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) -> bool {
                 "a sound solid's coedge came back from its own file ending at a different corner"
             );
             let (here_run, back_run) = (here_coedge.edge().run(), back_coedge.edge().run());
-            let chord = here_coedge.end().point() - here_coedge.start().point();
+            let corners = [here_coedge.start().point(), here_coedge.end().point()];
             assert!(
-                the_same_run(&here_run, &back_run, chord, here_surface),
+                the_same_run(&here_run, &back_run, corners, here_surface),
                 "a sound solid's coedge came back from its own file with a different edge run: \
                  {here_run:?} went in, {back_run:?} came back"
             );
@@ -436,11 +436,11 @@ fn a_whole_ball_whose_seam_was_rewritten(
     };
     let here_seam = the_seam_of_a_whole_ball(here_face)?;
     let back_seam = the_seam_of_a_whole_ball(back_face)?;
-    let chord = here_seam.end().point() - here_seam.start().point();
+    let corners = [here_seam.start().point(), here_seam.end().point()];
     let same = the_same_run(
         &here_seam.edge().run(),
         &back_seam.edge().run(),
-        chord,
+        corners,
         here_face.surface(),
     );
     (!same).then_some(ball)
@@ -528,7 +528,7 @@ fn assert_cut_again_on_the_z_line(ball: rcad_geom::Sphere, back: &rcad_topo::Fac
         the_same_run(
             &add_balls_seam,
             &back_run,
-            seam.end().point() - seam.start().point(),
+            [seam.start().point(), seam.end().point()],
             Surface::Sphere(ball)
         ),
         "a sound solid's whole ball came back from its own file with a different edge run: \
@@ -595,7 +595,29 @@ fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -
 /// Beside any other surface the arc's plane is not to hand, so the pickers
 /// must be along each other — the cross product exactly zero — and not
 /// opposite.
-fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector, walked_by: Surface) -> bool {
+///
+/// **A pipe picker is no file carries either, and is told by what it picks,
+/// not by its numbers.** `InsideAPipe` and `OutsideAPipe` each hold a
+/// [`Cylinder`] the reader rebuilds from the ring's own axis and radius
+/// (`which_of_a_rings_two_circles`, `crates/rcad-step/src/brep.rs`), and that
+/// rebuild can carry a subnormal the kernel's own axis never had — turning
+/// `(0, 0, 1)` into `(1.5e-322, 8e-323, 1)`, which is no longer along the
+/// kernel's axis to the bit. So two pickers of the same arm are compared by
+/// what they pick: both must place `corners`, the coedge's own two ends, on
+/// the kept side — `Decision::Pos` — of both the kernel's picker and the
+/// read-back one. A picker that gets the actual ends of the actual edge wrong
+/// is not the same picker whatever its numbers say, and one that gets them
+/// right is the one this run needs, numbers or no.
+///
+/// **Where `and` is a pipe, its origin travels and its line does not.** The
+/// writer moves a drawn circle's pipe to where its axis meets the flat face
+/// it is drawn on, when the pipe's own origin is not already there
+/// (`Writing::an_arc_of_a_circle_on_a_flat_face`), keeping the axis direction
+/// and the radius exactly as the kernel wrote them — checked before the file
+/// is written, by asking the same constructors the reader will. So two `and`
+/// pipes are the same pipe when their directions and radii match to the bit
+/// and the two origins sit on the one line between them.
+fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: Surface) -> bool {
     let same_bits = || format!("{here:?}") == format!("{back:?}");
     let (
         EdgeRun::PartOfWhereItCrosses {
@@ -610,6 +632,7 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector, walked_by: Surfac
     else {
         return same_bits();
     };
+    let chord = corners[1] - corners[0];
     let the_arcs_plane = if let Surface::Plane(cut) = here_and {
         Some(*cut)
     } else if let Surface::Plane(face) = walked_by {
@@ -628,10 +651,31 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector, walked_by: Surfac
                 && here.normal().dot(back.normal()) > 0.0
         }
     };
-    format!("{here_and:?}") == format!("{back_and:?}")
+    let picks_the_real_ends = |picker: &Picker| {
+        corners.into_iter().all(|corner| {
+            picker.side_of_point(PredicatePoint::from(corner.coordinates())) == Decision::Pos
+        })
+    };
+    let same_pipe = |here: &Cylinder, back: &Cylinder| {
+        here.axis().direction() == back.axis().direction()
+            && here.radius() == back.radius()
+            && (back.axis().origin() - here.axis().origin()).cross(here.axis().direction())
+                == Vector::zero()
+    };
+    let same_and = match (here_and, back_and) {
+        (Surface::Cylinder(here_pipe), Surface::Cylinder(back_pipe)) => {
+            same_pipe(here_pipe, back_pipe)
+        }
+        (here, back) => format!("{here:?}") == format!("{back:?}"),
+    };
+    same_and
         && here_picks.len() == back_picks.len()
         && here_picks.iter().zip(back_picks).all(|pair| match pair {
             (Picker::InFrontOf(here), Picker::InFrontOf(back)) => facing_the_same_way(here, back),
+            (Picker::OutsideAPipe(_), Picker::OutsideAPipe(_))
+            | (Picker::InsideAPipe(_), Picker::InsideAPipe(_)) => {
+                picks_the_real_ends(pair.0) && picks_the_real_ends(pair.1)
+            }
             (here, back) => format!("{here:?}") == format!("{back:?}"),
         })
 }
@@ -830,14 +874,14 @@ fn a_seam_picked_from_the_other_side_is_a_different_run() {
         and: *and,
         picked_by: [Picker::from(picking.reversed())].into_iter().collect(),
     };
-    let chord = seam.end().point() - seam.start().point();
+    let corners = [seam.start().point(), seam.end().point()];
     let ball = the_one_solid(&model)
         .faces()
         .next()
         .expect("a ball has one face")
         .surface();
-    assert!(the_same_run(&here, &here, chord, ball));
-    assert!(!the_same_run(&here, &the_other_half, chord, ball));
+    assert!(the_same_run(&here, &here, corners, ball));
+    assert!(!the_same_run(&here, &the_other_half, corners, ball));
 }
 
 /// The ball draw 89 of `how_often_a_model_the_mutator_draws_is_refused` (in
