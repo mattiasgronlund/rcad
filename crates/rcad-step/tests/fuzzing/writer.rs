@@ -97,7 +97,7 @@ use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
     Point, Scale, Surface, Torus, Vector,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{CoedgeView, DraftStep, Model, SolidBuilder, SolidKey, SolidView, WireView};
 
@@ -380,9 +380,9 @@ fn assert_located_numbers_the_same(here: SolidView, back: SolidView) -> bool {
                 "a sound solid's coedge came back from its own file ending at a different corner"
             );
             let (here_run, back_run) = (here_coedge.edge().run(), back_coedge.edge().run());
-            let chord = here_coedge.end().point() - here_coedge.start().point();
+            let corners = [here_coedge.start().point(), here_coedge.end().point()];
             assert!(
-                the_same_run(&here_run, &back_run, chord, here_surface),
+                the_same_run(&here_run, &back_run, corners, here_surface),
                 "a sound solid's coedge came back from its own file with a different edge run: \
                  {here_run:?} went in, {back_run:?} came back"
             );
@@ -436,11 +436,11 @@ fn a_whole_ball_whose_seam_was_rewritten(
     };
     let here_seam = the_seam_of_a_whole_ball(here_face)?;
     let back_seam = the_seam_of_a_whole_ball(back_face)?;
-    let chord = here_seam.end().point() - here_seam.start().point();
+    let corners = [here_seam.start().point(), here_seam.end().point()];
     let same = the_same_run(
         &here_seam.edge().run(),
         &back_seam.edge().run(),
-        chord,
+        corners,
         here_face.surface(),
     );
     (!same).then_some(ball)
@@ -528,7 +528,7 @@ fn assert_cut_again_on_the_z_line(ball: rcad_geom::Sphere, back: &rcad_topo::Fac
         the_same_run(
             &add_balls_seam,
             &back_run,
-            seam.end().point() - seam.start().point(),
+            [seam.start().point(), seam.end().point()],
             Surface::Sphere(ball)
         ),
         "a sound solid's whole ball came back from its own file with a different edge run: \
@@ -595,7 +595,48 @@ fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -
 /// Beside any other surface the arc's plane is not to hand, so the pickers
 /// must be along each other — the cross product exactly zero — and not
 /// opposite.
-fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector, walked_by: Surface) -> bool {
+///
+/// **A pipe picker is no file carries either, and is told by what it picks,
+/// not by its numbers.** `InsideAPipe` and `OutsideAPipe` each hold a
+/// [`Cylinder`] the reader rebuilds from the ring's own axis and radius
+/// (`which_of_a_rings_two_circles`, `crates/rcad-step/src/brep.rs`), and that
+/// rebuild can carry a subnormal the kernel's own axis never had — turning
+/// `(0, 0, 1)` into `(1.5e-322, 8e-323, 1)`, which is no longer along the
+/// kernel's axis to the bit. So two pickers of the same arm are compared by
+/// what they pick: both must place `corners`, the coedge's own two ends, on
+/// the kept side — `Decision::Pos` — of both the kernel's picker and the
+/// read-back one. A picker that gets the actual ends of the actual edge wrong
+/// is not the same picker whatever its numbers say, and one that gets them
+/// right is the one this run needs, numbers or no.
+///
+/// **Where `and` is a pipe, its origin travels and its line does not.** The
+/// writer moves a drawn circle's pipe to where its axis meets the flat face
+/// it is drawn on, when the pipe's own origin is not already there
+/// (`Writing::an_arc_of_a_circle_on_a_flat_face`), keeping the axis direction
+/// and the radius exactly as the kernel wrote them — checked before the file
+/// is written, by asking the same constructors the reader will. So two `and`
+/// pipes are the same pipe when their directions and radii match to the bit
+/// and the two origins sit on the one line between them — the origin delta's
+/// cross product with the direction is exactly zero, not a point-for-point
+/// equality, since a cylinder's own axis origin can sit anywhere along its
+/// line. **The moved origin itself is not always on the kernel's own line to
+/// the bit** — a turned disc drawn by a pipe off its own plane moves it by
+/// one division and a multiply, and that is rounded once more than the
+/// kernel's own origin was, a few ulps off square with the axis
+/// (`a_disc_drawn_by_a_pipe_off_its_own_plane_turned_and_moved_comes_back_from_its_own_file`,
+/// still red for that reason, outside this file's write set). Asking instead
+/// whether `corners` — the coedge's own two ends — are certified
+/// `Decision::Zero` on the read-back pipe's skin looks more principled, the
+/// same test `picks_the_real_ends` below runs for a picker, but it is the
+/// wrong tool here: those corners come from an arc built by turning the
+/// kernel's own circle, and `here.side_of` does not certify them `Zero`
+/// against the kernel's own, untouched pipe either — proven by printing
+/// `here.side_of` beside `back.side_of` on
+/// `how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`'s
+/// axis-`y`, 0.1-radian, unmoved case, where both come back `Neg`. That is
+/// not a round-trip gap to chase; it is this test's own corners never having
+/// been certified on their own pipe to begin with.
+fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: Surface) -> bool {
     let same_bits = || format!("{here:?}") == format!("{back:?}");
     let (
         EdgeRun::PartOfWhereItCrosses {
@@ -610,6 +651,7 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector, walked_by: Surfac
     else {
         return same_bits();
     };
+    let chord = corners[1] - corners[0];
     let the_arcs_plane = if let Surface::Plane(cut) = here_and {
         Some(*cut)
     } else if let Surface::Plane(face) = walked_by {
@@ -628,10 +670,31 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, chord: Vector, walked_by: Surfac
                 && here.normal().dot(back.normal()) > 0.0
         }
     };
-    format!("{here_and:?}") == format!("{back_and:?}")
+    let picks_the_real_ends = |picker: &Picker| {
+        corners.into_iter().all(|corner| {
+            picker.side_of_point(PredicatePoint::from(corner.coordinates())) == Decision::Pos
+        })
+    };
+    let same_pipe = |here: &Cylinder, back: &Cylinder| {
+        here.axis().direction() == back.axis().direction()
+            && here.radius() == back.radius()
+            && (back.axis().origin() - here.axis().origin()).cross(here.axis().direction())
+                == Vector::zero()
+    };
+    let same_and = match (here_and, back_and) {
+        (Surface::Cylinder(here_pipe), Surface::Cylinder(back_pipe)) => {
+            same_pipe(here_pipe, back_pipe)
+        }
+        (here, back) => format!("{here:?}") == format!("{back:?}"),
+    };
+    same_and
         && here_picks.len() == back_picks.len()
         && here_picks.iter().zip(back_picks).all(|pair| match pair {
             (Picker::InFrontOf(here), Picker::InFrontOf(back)) => facing_the_same_way(here, back),
+            (Picker::OutsideAPipe(_), Picker::OutsideAPipe(_))
+            | (Picker::InsideAPipe(_), Picker::InsideAPipe(_)) => {
+                picks_the_real_ends(pair.0) && picks_the_real_ends(pair.1)
+            }
             (here, back) => format!("{here:?}") == format!("{back:?}"),
         })
 }
@@ -830,14 +893,14 @@ fn a_seam_picked_from_the_other_side_is_a_different_run() {
         and: *and,
         picked_by: [Picker::from(picking.reversed())].into_iter().collect(),
     };
-    let chord = seam.end().point() - seam.start().point();
+    let corners = [seam.start().point(), seam.end().point()];
     let ball = the_one_solid(&model)
         .faces()
         .next()
         .expect("a ball has one face")
         .surface();
-    assert!(the_same_run(&here, &here, chord, ball));
-    assert!(!the_same_run(&here, &the_other_half, chord, ball));
+    assert!(the_same_run(&here, &here, corners, ball));
+    assert!(!the_same_run(&here, &the_other_half, corners, ball));
 }
 
 /// The ball draw 89 of `how_often_a_model_the_mutator_draws_is_refused` (in
@@ -1832,15 +1895,143 @@ fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
+/// Q1293's crash-0109edfc: a bend whose ring is four and tube two comes back
+/// from its own file though the reader rebuilds the seam's pipe picker from
+/// the ring's own axis and radius (`which_of_a_rings_two_circles`,
+/// `crates/rcad-step/src/brep.rs`), and that rebuild can carry a subnormal
+/// the kernel's own axis never had — `(0, 0, 1)` read back as
+/// `(1.7e-322, 0, 1)`. [`the_same_run`] must still call this the same run,
+/// because both axes pick the same two corners.
+#[test]
+fn a_bends_seam_picked_inside_a_pipe_is_the_same_run_with_a_subnormal_axis() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bend = a_quarter_bend(&mut model, 4.0, 2.0).expect("a bend fits this model");
+    model
+        .place_solid(bend, &Isometry::identity())
+        .expect("the key came from this model");
+    let seam = the_seam_of_a_bend(&model);
+    let here = seam.edge().run();
+    let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &here else {
+        panic!("a bend's seam is part of where a plane crosses it, not {here:?}");
+    };
+    let subnormal_axis = Axis::new(Point::origin(), Vector::new(1.7e-322, 0.0, 1.0))
+        .expect("a finite, non-zero direction");
+    let rebuilt_from_a_file = EdgeRun::PartOfWhereItCrosses {
+        and: *and,
+        picked_by: picked_by
+            .iter()
+            .map(|picker| match picker {
+                Picker::InsideAPipe(pipe) => Picker::InsideAPipe(
+                    Cylinder::new(subnormal_axis, pipe.radius()).expect("a positive radius"),
+                ),
+                other => *other,
+            })
+            .collect(),
+    };
+    let corners = [seam.start().point(), seam.end().point()];
+    assert!(the_same_run(&here, &rebuilt_from_a_file, corners, *and));
+}
+
+/// Q1293's crash-16aad257: a bend whose ring is nine and tube four comes back
+/// from its own file though the reader rebuilds the ring's own radius an ulp
+/// off, `9.000000000000004` for `9.0`.
+#[test]
+fn a_bends_seam_picked_inside_a_pipe_is_the_same_run_with_a_radius_an_ulp_off() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bend = a_quarter_bend(&mut model, 9.0, 4.0).expect("a bend fits this model");
+    model
+        .place_solid(bend, &Isometry::identity())
+        .expect("the key came from this model");
+    let seam = the_seam_of_a_bend(&model);
+    let here = seam.edge().run();
+    let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &here else {
+        panic!("a bend's seam is part of where a plane crosses it, not {here:?}");
+    };
+    let rebuilt_from_a_file = EdgeRun::PartOfWhereItCrosses {
+        and: *and,
+        picked_by: picked_by
+            .iter()
+            .map(|picker| match picker {
+                Picker::InsideAPipe(pipe) => Picker::InsideAPipe(
+                    Cylinder::new(pipe.axis(), 9.000_000_000_000_004).expect("a positive radius"),
+                ),
+                other => *other,
+            })
+            .collect(),
+    };
+    let corners = [seam.start().point(), seam.end().point()];
+    assert!(the_same_run(&here, &rebuilt_from_a_file, corners, *and));
+}
+
+/// The same seam picked from outside its ring's own pipe, rather than inside
+/// it, is still a different run: [`the_same_run`]'s pipe-picker arm only
+/// pairs `InsideAPipe` with `InsideAPipe` and `OutsideAPipe` with
+/// `OutsideAPipe`, so it must not call these two the same.
+#[test]
+fn a_bends_seam_picked_outside_its_pipe_is_a_different_run_from_the_one_picked_inside_it() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bend = a_quarter_bend(&mut model, 9.0, 4.0).expect("a bend fits this model");
+    model
+        .place_solid(bend, &Isometry::identity())
+        .expect("the key came from this model");
+    let seam = the_seam_of_a_bend(&model);
+    let here = seam.edge().run();
+    let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &here else {
+        panic!("a bend's seam is part of where a plane crosses it, not {here:?}");
+    };
+    let picked_from_outside = EdgeRun::PartOfWhereItCrosses {
+        and: *and,
+        picked_by: picked_by
+            .iter()
+            .map(|picker| match picker {
+                Picker::InsideAPipe(pipe) => Picker::OutsideAPipe(*pipe),
+                other => *other,
+            })
+            .collect(),
+    };
+    let corners = [seam.start().point(), seam.end().point()];
+    assert!(the_same_run(&here, &here, corners, *and));
+    assert!(!the_same_run(&here, &picked_from_outside, corners, *and));
+}
+
+/// The seam of [`a_quarter_bend`]: the one coedge whose edge crosses the
+/// plane through the ring's own middle, not one of its two closed circles.
+fn the_seam_of_a_bend(model: &Model) -> CoedgeView<'_> {
+    the_one_solid(model)
+        .faces()
+        .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
+        .find(|coedge| matches!(coedge.edge().run(), EdgeRun::PartOfWhereItCrosses { .. }))
+        .expect("a bend has one seam cut from its ring's own plane")
+}
+
 /// A round bar of radius two about `+z`, four tall, with a disc of radius one
 /// drawn on its top cap: the cap is a ring round the disc and the disc a face
 /// of its own on the same plane, so the circle between them is two half
 /// circles that name the pipe of radius one standing on the cap.
 fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> rcad_topo::Result<SolidKey> {
+    a_bar_with_a_disc_drawn_by_a_pipe_from(model, Point::new(0.0, 0.0, 4.0), 1.0)
+}
+
+/// Like [`a_bar_with_a_disc_drawn_on_its_top`], but the drawn pipe's own axis
+/// starts at `pipe_origin` rather than at the disc's own centre, and the disc
+/// has `radius` rather than one. `pipe_origin` still sits on the one line
+/// through the disc's centre pointing `+z` — the writer moves a drawn
+/// circle's pipe to where its axis meets the flat face it is drawn on
+/// when the pipe's own origin is not already there
+/// (`Writing::an_arc_of_a_circle_on_a_flat_face`), so a `pipe_origin` off the
+/// disc's own plane is what exercises that move.
+fn a_bar_with_a_disc_drawn_by_a_pipe_from(
+    model: &mut Model,
+    pipe_origin: Point,
+    radius: f64,
+) -> rcad_topo::Result<SolidKey> {
     let up = Vector::new(0.0, 0.0, 1.0);
     let centre = Point::new(0.0, 0.0, 4.0);
-    let drawn = Cylinder::new(Axis::new(centre, up).expect("a unit direction"), 1.0)
-        .expect("a positive radius");
+    let drawn = Cylinder::new(
+        Axis::new(pipe_origin, up).expect("a unit direction"),
+        radius,
+    )
+    .expect("a positive radius");
     let half_of_the_rim = |facing: Vector| EdgeRun::PartOfWhereItCrosses {
         and: Surface::Cylinder(drawn),
         picked_by: [Picker::from(
@@ -1853,8 +2044,8 @@ fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> rcad_topo::Result<So
     let [foot, rim, near, far] = [
         Point::new(2.0, 0.0, 0.0),
         Point::new(2.0, 0.0, 4.0),
-        Point::new(1.0, 0.0, 4.0),
-        Point::new(-1.0, 0.0, 4.0),
+        Point::new(radius, 0.0, 4.0),
+        Point::new(-radius, 0.0, 4.0),
     ]
     .map(|at| builder.add_vertex(at).expect("a finite point"));
     let bottom_circle = builder
@@ -1925,6 +2116,90 @@ fn a_bar_with_a_disc_drawn_on_its_top(model: &mut Model) -> rcad_topo::Result<So
         ])
         .expect("four faces close");
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// Q1293's and-Cylinder arm: a disc drawn by a pipe whose own axis starts
+/// off the disc's own plane — at the bar's floor, not its centre — turned
+/// and moved, comes back the same way a disc drawn on its own plane already
+/// does. The writer moves the written `Cylinder`'s axis to where it meets
+/// the flat face (`Writing::an_arc_of_a_circle_on_a_flat_face`, `write.rs`),
+/// so the reader's pipe keeps that moved origin; [`the_same_run`]'s
+/// and-Cylinder arm must still call the two pipes the same because their
+/// directions and radii match and the two origins sit on the one line
+/// between them.
+#[test]
+fn a_disc_drawn_by_a_pipe_off_its_own_plane_turned_and_moved_comes_back_from_its_own_file() {
+    let turned = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&Axis::y(), 5.0).expect("a finite angle about a unit axis"));
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
+        .expect("a bar with a disc drawn by a pipe off its own plane fits this model");
+    model
+        .place_solid(solid, &turned)
+        .expect("the key came from this model");
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}, {:?}",
+        rcad_step::write(&model, "a disc drawn by a pipe off its own plane").err()
+    );
+}
+
+/// The same disc's drawn pipe, compared against one of another radius about
+/// the same axis, is still a different run: [`the_same_run`]'s and-Cylinder
+/// arm only calls two pipes the same when their radii match to the bit.
+#[test]
+fn a_disc_drawn_by_a_pipe_of_another_radius_is_a_different_run() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bar =
+        a_bar_with_a_disc_drawn_on_its_top(&mut model).expect("a bar with a disc fits this model");
+    model
+        .place_solid(bar, &Isometry::identity())
+        .expect("the key came from this model");
+    let drawn = a_drawn_discs_half_circle(&model);
+    let here = drawn.edge().run();
+    let EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Cylinder(pipe),
+        picked_by,
+    } = &here
+    else {
+        panic!("the disc's half circle is part of where its pipe crosses the cap, not {here:?}");
+    };
+    let another_radius = EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Cylinder(
+            Cylinder::new(pipe.axis(), pipe.radius() + 0.5).expect("a positive radius"),
+        ),
+        picked_by: picked_by.clone(),
+    };
+    let corners = [drawn.start().point(), drawn.end().point()];
+    let cap = Surface::Plane(
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a unit normal"),
+    );
+    assert!(the_same_run(&here, &here, corners, cap));
+    assert!(!the_same_run(&here, &another_radius, corners, cap));
+}
+
+/// One of the four coedges that walk the circle drawn on
+/// [`a_bar_with_a_disc_drawn_on_its_top`]'s cap: part of where the drawn
+/// pipe crosses the flat face.
+fn a_drawn_discs_half_circle(model: &Model) -> CoedgeView<'_> {
+    the_one_solid(model)
+        .faces()
+        .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
+        .find(|coedge| {
+            matches!(
+                coedge.edge().run(),
+                EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Cylinder(_),
+                    ..
+                }
+            )
+        })
+        .expect("a disc drawn on a bar has one circle, where its pipe crosses the cap")
 }
 
 /// A flat face through `at`, facing `outward`, trimmed by one closed edge.
