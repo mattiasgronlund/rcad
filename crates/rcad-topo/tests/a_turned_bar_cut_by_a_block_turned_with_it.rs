@@ -376,7 +376,10 @@ fn a_turned_ball_and_polar_notch(turn: &Isometry) -> (Model, SolidKey, SolidKey)
     (model, ball, notch)
 }
 
-const FRUSTUM_NEAR: f64 = 1.0;
+/// The frustum's radius at its bottom cap: `1`, where the block's planes
+/// `y = ±1` touch the bottom rim, or `0.5`, where none of the block's planes
+/// meets it.
+const FRUSTUM_NEARS: [f64; 2] = [1.0, 0.5];
 const FRUSTUM_FAR: f64 = 10.0;
 /// `slope = 1`, a power of two, so `slope · height` rounds to nothing at
 /// either cap (cones/mod.rs's own discipline).
@@ -388,62 +391,74 @@ const FRUSTUM_SLOPE: f64 = 1.0;
 const FRUSTUM_NOTCH: [f64; 3] = [2.0, -1.0, 5.0];
 
 /// `(π / 3) · height · (r_near² + r_near · r_far + r_far²)`.
-fn the_frustums_own_volume() -> f64 {
-    let height = FRUSTUM_FAR - FRUSTUM_NEAR;
-    let r_near = FRUSTUM_SLOPE * FRUSTUM_NEAR;
+fn the_frustums_own_volume(near: f64) -> f64 {
+    let height = FRUSTUM_FAR - near;
+    let r_near = FRUSTUM_SLOPE * near;
     let r_far = FRUSTUM_SLOPE * FRUSTUM_FAR;
     PI / 3.0 * height * (r_near * r_near + r_near * r_far + r_far * r_far)
 }
 
-/// A frustum from radius 1 to radius 10 and a block of side 2 that sits
-/// wholly inside it ([`FRUSTUM_NOTCH`]), unturned or turned an exact half turn
-/// about `y` (two quarter turns, which round nothing), fused by every rule
-/// both ways round, under both policies: every combination answers what it
-/// holds by hand, with nothing logged.
+/// A frustum from radius 1 or 0.5 to radius 10 and a block of side 2 that
+/// sits wholly inside it ([`FRUSTUM_NOTCH`]), unturned or turned an exact half
+/// turn about `y` (two quarter turns, which round nothing), fused by every
+/// rule both ways round, under both policies: every combination answers what
+/// it holds by hand, with nothing logged.
 #[test]
 fn a_block_wholly_inside_a_frustum_unturned_or_turned_an_exact_half_turn_answers_every_fuse_both_ways_round()
  {
-    answers_every_frustum_fuse_both_ways_round("unturned", &Isometry::identity(), None);
-    answers_every_frustum_fuse_both_ways_round("an exact half turn", &half_a_turn_exactly(), None);
+    for near in FRUSTUM_NEARS {
+        answers_every_frustum_fuse_both_ways_round("unturned", &Isometry::identity(), near, None);
+        answers_every_frustum_fuse_both_ways_round(
+            "an exact half turn",
+            &half_a_turn_exactly(),
+            near,
+            None,
+        );
+    }
 }
 
-/// Turned half a turn about `y` by `rotation`, every combination still
-/// answers **except** `Difference` with the frustum as the argument — cutting
-/// the block out of the frustum. That one is refused
+/// Turned half a turn about `y` by `rotation`, every combination still answers
+/// **except** `Difference` with the frustum as the argument — cutting the block
+/// out of the frustum. That one is refused
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] on the frustum's lateral
 /// face, under both policies, though the block never touches that face: its
-/// farthest corner is `0.88` inside it, at the tightest end. `sin π` rounds to
-/// `1.2e-16`, same as Q1737's bar, and
-/// [`the_node_round_the_start`](rcad_topo) — the step Q1737 added so a loop is
-/// counted from its own corner's box rather than losing the corner among the
-/// nodes near it — matches `[Surface::Plane, Surface::Cylinder]` only. A
-/// frustum's wall is `Surface::Cone`, so its own bottom corner, moved into the
-/// same kind of box by the same rounding, gets no such match, and whatever
-/// reads the frustum's cone face's loop from an un-arranged start refuses it.
-/// This is a
-/// different error, on a different shape, than Q1956's twelve plane-and-cone
-/// ellipse refusals (`CannotTellTheCellsOfAFaceApart` on a cube's plane
-/// crossing a cone sideways) — not a repeat of that row.
+/// farthest corner is `0.88` inside it, at the tightest end.
+///
+/// It is refused where the fuse asks which shell the block's hollow sits in.
+/// A ray from a corner of the hollow crosses the frustum's wall, and the wall
+/// keeps the side of its bottom circle's plane away from the apex, read off
+/// every corner of the wall off that plane. `sin π` rounds to `1.2e-16`, so the
+/// turned circle's own corner, `(−0.9999999999999998, 0, −1)`, is stored a
+/// rounding off the turned plane, `normal (−1.2e-16, 0, 1), offset −1`, on the
+/// apex's side, while the far rim's corners are on the other. So the corners
+/// disagree, and `holds.rs`'s `the_side_away_from_the_apex_a_face_keeps` gives
+/// up. Leaving the circle's own corner out of that reading, as a probe did,
+/// answers both radii with the volume by hand (Q1969).
 #[test]
 fn turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refused() {
-    answers_every_frustum_fuse_both_ways_round(
-        "half a turn by rotation",
-        &half_a_turn_by_rotation(),
-        Some(Rule::Difference),
-    );
+    for near in FRUSTUM_NEARS {
+        answers_every_frustum_fuse_both_ways_round(
+            "half a turn by rotation",
+            &half_a_turn_by_rotation(),
+            near,
+            Some(Rule::Difference),
+        );
+    }
 }
 
-/// Fuses the frustum of [`FRUSTUM_NOTCH`] with the block wholly inside it,
-/// both placed by `turn`, by every rule both ways round, under both policies,
-/// and checks each answers what it holds by hand with nothing logged —
-/// except `refused_rule` with the frustum as the argument, which it checks is
-/// refused [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead.
+/// Fuses the frustum of [`FRUSTUM_NOTCH`] from radius `near` with the block
+/// wholly inside it, both placed by `turn`, by every rule both ways round,
+/// under both policies, and checks each answers what it holds by hand with
+/// nothing logged — except `refused_rule` with the frustum as the argument,
+/// which it checks is refused [`Error::AFaceTrimmedByACurveThisCannotFollow`]
+/// instead.
 fn answers_every_frustum_fuse_both_ways_round(
     which: &str,
     turn: &Isometry,
+    near: f64,
     refused_rule: Option<Rule>,
 ) {
-    let frustum_volume = the_frustums_own_volume();
+    let frustum_volume = the_frustums_own_volume(near);
     let block_volume = SIDE * SIDE * SIDE;
     for tolerant in [false, true] {
         let policy = if tolerant {
@@ -456,7 +471,7 @@ fn answers_every_frustum_fuse_both_ways_round(
                 let what = format!(
                     "{which}, tolerant {tolerant}, {rule:?}, frustum is argument {frustum_is_argument}"
                 );
-                let (mut model, frustum, notch) = a_turned_frustum_and_inside_notch(turn);
+                let (mut model, frustum, notch) = a_turned_frustum_and_inside_notch(turn, near);
                 let (first, second) = if frustum_is_argument {
                     (frustum, notch)
                 } else {
@@ -499,10 +514,11 @@ fn answers_every_frustum_fuse_both_ways_round(
     }
 }
 
-/// The frustum and the block of [`FRUSTUM_NOTCH`], both turned by `turn`.
-fn a_turned_frustum_and_inside_notch(turn: &Isometry) -> (Model, SolidKey, SolidKey) {
+/// The frustum from radius `near` and the block of [`FRUSTUM_NOTCH`], both
+/// turned by `turn`.
+fn a_turned_frustum_and_inside_notch(turn: &Isometry, near: f64) -> (Model, SolidKey, SolidKey) {
     let mut model = Model::new(Scale::new(Unit::Millimetre, 5.0).expect("5 mm is a working size"));
-    let frustum = a_frustum(&mut model, FRUSTUM_SLOPE, FRUSTUM_NEAR, FRUSTUM_FAR);
+    let frustum = a_frustum(&mut model, FRUSTUM_SLOPE, near, FRUSTUM_FAR);
     model
         .place_solid(frustum, turn)
         .expect("a turn moves a frustum");
