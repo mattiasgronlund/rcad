@@ -97,7 +97,7 @@ use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
     Point, Scale, Surface, Torus, Vector,
 };
-use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{CoedgeView, DraftStep, Model, SolidBuilder, SolidKey, SolidView, WireView};
 
@@ -614,9 +614,17 @@ fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -
 /// it is drawn on, when the pipe's own origin is not already there
 /// (`Writing::an_arc_of_a_circle_on_a_flat_face`), keeping the axis direction
 /// and the radius exactly as the kernel wrote them — checked before the file
-/// is written, by asking the same constructors the reader will. So two `and`
-/// pipes are the same pipe when their directions and radii match to the bit
-/// and the two origins sit on the one line between them.
+/// is written, by asking the same constructors the reader will. **The moved
+/// origin itself is not on the kernel's own line to the bit** — a turned disc
+/// drawn by a pipe off its own plane moves it by one division and a multiply,
+/// and that is rounded once more than the kernel's own origin was, a few
+/// ulps off square with the axis
+/// (`a_disc_drawn_by_a_pipe_off_its_own_plane_turned_and_moved_comes_back_from_its_own_file`).
+/// So two `and` pipes are the same pipe when their directions and radii match
+/// to the bit and `corners`, the coedge's own two ends, are both certified on
+/// the read-back pipe's skin — `Decision::Zero` — the same test
+/// `picks_the_real_ends` below runs for a picker, asked of the pipe `and`
+/// names instead of the pipe a picker holds.
 fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: Surface) -> bool {
     let same_bits = || format!("{here:?}") == format!("{back:?}");
     let (
@@ -659,8 +667,9 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: 
     let same_pipe = |here: &Cylinder, back: &Cylinder| {
         here.axis().direction() == back.axis().direction()
             && here.radius() == back.radius()
-            && (back.axis().origin() - here.axis().origin()).cross(here.axis().direction())
-                == Vector::zero()
+            && corners.into_iter().all(|corner| {
+                back.side_of(PredicatePoint::from(corner.coordinates())) == Decision::Zero
+            })
     };
     let same_and = match (here_and, back_and) {
         (Surface::Cylinder(here_pipe), Surface::Cylinder(back_pipe)) => {
@@ -2097,6 +2106,90 @@ fn a_bar_with_a_disc_drawn_by_a_pipe_from(
         ])
         .expect("four faces close");
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+}
+
+/// Q1293's and-Cylinder arm: a disc drawn by a pipe whose own axis starts
+/// off the disc's own plane — at the bar's floor, not its centre — turned
+/// and moved, comes back the same way a disc drawn on its own plane already
+/// does. The writer moves the written `Cylinder`'s axis to where it meets
+/// the flat face (`Writing::an_arc_of_a_circle_on_a_flat_face`, `write.rs`),
+/// so the reader's pipe keeps that moved origin; [`the_same_run`]'s
+/// and-Cylinder arm must still call the two pipes the same because their
+/// directions and radii match and the two origins sit on the one line
+/// between them.
+#[test]
+fn a_disc_drawn_by_a_pipe_off_its_own_plane_turned_and_moved_comes_back_from_its_own_file() {
+    let turned = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&Axis::y(), 5.0).expect("a finite angle about a unit axis"));
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
+        .expect("a bar with a disc drawn by a pipe off its own plane fits this model");
+    model
+        .place_solid(solid, &turned)
+        .expect("the key came from this model");
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}, {:?}",
+        rcad_step::write(&model, "a disc drawn by a pipe off its own plane").err()
+    );
+}
+
+/// The same disc's drawn pipe, compared against one of another radius about
+/// the same axis, is still a different run: [`the_same_run`]'s and-Cylinder
+/// arm only calls two pipes the same when their radii match to the bit.
+#[test]
+fn a_disc_drawn_by_a_pipe_of_another_radius_is_a_different_run() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bar =
+        a_bar_with_a_disc_drawn_on_its_top(&mut model).expect("a bar with a disc fits this model");
+    model
+        .place_solid(bar, &Isometry::identity())
+        .expect("the key came from this model");
+    let drawn = a_drawn_discs_half_circle(&model);
+    let here = drawn.edge().run();
+    let EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Cylinder(pipe),
+        picked_by,
+    } = &here
+    else {
+        panic!("the disc's half circle is part of where its pipe crosses the cap, not {here:?}");
+    };
+    let another_radius = EdgeRun::PartOfWhereItCrosses {
+        and: Surface::Cylinder(
+            Cylinder::new(pipe.axis(), pipe.radius() + 0.5).expect("a positive radius"),
+        ),
+        picked_by: picked_by.clone(),
+    };
+    let corners = [drawn.start().point(), drawn.end().point()];
+    let cap = Surface::Plane(
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a unit normal"),
+    );
+    assert!(the_same_run(&here, &here, corners, cap));
+    assert!(!the_same_run(&here, &another_radius, corners, cap));
+}
+
+/// One of the four coedges that walk the circle drawn on
+/// [`a_bar_with_a_disc_drawn_on_its_top`]'s cap: part of where the drawn
+/// pipe crosses the flat face.
+fn a_drawn_discs_half_circle(model: &Model) -> CoedgeView<'_> {
+    the_one_solid(model)
+        .faces()
+        .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
+        .find(|coedge| {
+            matches!(
+                coedge.edge().run(),
+                EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Cylinder(_),
+                    ..
+                }
+            )
+        })
+        .expect("a disc drawn on a bar has one circle, where its pipe crosses the cap")
 }
 
 /// A flat face through `at`, facing `outward`, trimmed by one closed edge.
