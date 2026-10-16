@@ -196,6 +196,14 @@ use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedFace, BakedS
 /// lie in, and why each face is told the caps through the start of their
 /// axis that the faces cutting it carry.
 ///
+/// **No face pair is skipped, but [`how_two_faces_meet`] is only ever asked
+/// once per distinct pair of surfaces** ([`HowFacesMeetBySurface`]). The
+/// header's "every pair" is about faces, not about calls: a connector's whole
+/// row of pins holds the same cap height and the same two walls along the
+/// row, so the same two surfaces arrive on this loop's doorstep from many
+/// different pairs of faces, and the pair, not the geometry, is what used to
+/// be new every time.
+///
 /// # Errors
 ///
 /// [`Error::ArgumentIntersectsItself`] when a solid has two faces that really do
@@ -221,6 +229,7 @@ pub(crate) fn gather(
         .iter()
         .map(|solid| vec![Vec::new(); solid.faces.len()])
         .collect();
+    let mut how_they_meet = HowFacesMeetBySurface::new();
     for one in 0..solids.len() {
         for other in one..solids.len() {
             if within_reach.leader(one) != within_reach.leader(other) {
@@ -231,7 +240,9 @@ pub(crate) fn gather(
                 for theirs in from..solids[other].faces.len() {
                     let face = &solids[one].faces[mine];
                     let against = &solids[other].faces[theirs];
-                    let (onto_face, onto_against) = cuts_between(face, against, policy, log)?;
+                    let meet =
+                        how_they_meet.ask(&face.surface, &against.surface, policy, log)?;
+                    let (onto_face, onto_against) = cuts_from_how_they_meet(meet, face, against);
                     if !onto_face.is_empty() {
                         told[one][mine].extend(&against.caps_through_the_start_of_their_axis);
                     }
