@@ -97,7 +97,7 @@ use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
     Point, Scale, Surface, Torus, Vector,
 };
-use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{CoedgeView, DraftStep, Model, SolidBuilder, SolidKey, SolidView, WireView};
 
@@ -614,17 +614,28 @@ fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -
 /// it is drawn on, when the pipe's own origin is not already there
 /// (`Writing::an_arc_of_a_circle_on_a_flat_face`), keeping the axis direction
 /// and the radius exactly as the kernel wrote them — checked before the file
-/// is written, by asking the same constructors the reader will. **The moved
-/// origin itself is not on the kernel's own line to the bit** — a turned disc
-/// drawn by a pipe off its own plane moves it by one division and a multiply,
-/// and that is rounded once more than the kernel's own origin was, a few
-/// ulps off square with the axis
-/// (`a_disc_drawn_by_a_pipe_off_its_own_plane_turned_and_moved_comes_back_from_its_own_file`).
-/// So two `and` pipes are the same pipe when their directions and radii match
-/// to the bit and `corners`, the coedge's own two ends, are both certified on
-/// the read-back pipe's skin — `Decision::Zero` — the same test
-/// `picks_the_real_ends` below runs for a picker, asked of the pipe `and`
-/// names instead of the pipe a picker holds.
+/// is written, by asking the same constructors the reader will. So two `and`
+/// pipes are the same pipe when their directions and radii match to the bit
+/// and the two origins sit on the one line between them — the origin delta's
+/// cross product with the direction is exactly zero, not a point-for-point
+/// equality, since a cylinder's own axis origin can sit anywhere along its
+/// line. **The moved origin itself is not always on the kernel's own line to
+/// the bit** — a turned disc drawn by a pipe off its own plane moves it by
+/// one division and a multiply, and that is rounded once more than the
+/// kernel's own origin was, a few ulps off square with the axis
+/// (`a_disc_drawn_by_a_pipe_off_its_own_plane_turned_and_moved_comes_back_from_its_own_file`,
+/// still red for that reason, outside this file's write set). Asking instead
+/// whether `corners` — the coedge's own two ends — are certified
+/// `Decision::Zero` on the read-back pipe's skin looks more principled, the
+/// same test `picks_the_real_ends` below runs for a picker, but it is the
+/// wrong tool here: those corners come from an arc built by turning the
+/// kernel's own circle, and `here.side_of` does not certify them `Zero`
+/// against the kernel's own, untouched pipe either — proven by printing
+/// `here.side_of` beside `back.side_of` on
+/// `how_often_a_turned_disc_drawn_on_a_bar_comes_back_from_its_own_file`'s
+/// axis-`y`, 0.1-radian, unmoved case, where both come back `Neg`. That is
+/// not a round-trip gap to chase; it is this test's own corners never having
+/// been certified on their own pipe to begin with.
 fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: Surface) -> bool {
     let same_bits = || format!("{here:?}") == format!("{back:?}");
     let (
@@ -667,9 +678,8 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: 
     let same_pipe = |here: &Cylinder, back: &Cylinder| {
         here.axis().direction() == back.axis().direction()
             && here.radius() == back.radius()
-            && corners.into_iter().all(|corner| {
-                back.side_of(PredicatePoint::from(corner.coordinates())) == Decision::Zero
-            })
+            && (back.axis().origin() - here.axis().origin()).cross(here.axis().direction())
+                == Vector::zero()
     };
     let same_and = match (here_and, back_and) {
         (Surface::Cylinder(here_pipe), Surface::Cylinder(back_pipe)) => {
