@@ -724,7 +724,7 @@ pub enum Error {
     /// quadrics is a degree-eight system.
     ///
     /// **"In general" is doing real work in that sentence**, and
-    /// `three_surfaces.rs`'s module doc names ten families it answers. In
+    /// `three_surfaces.rs`'s module doc names eleven families it answers. In
     /// seven, the plane and two quadrics are no quartic at all: two quadrics
     /// that square `p` the same way differ by something flat; two surfaces
     /// turned about one axis are cut
@@ -766,14 +766,22 @@ pub enum Error {
     /// plane known exactly, and that plane takes the other one's place: a
     /// slanted cut through where a rod's round end meets it.
     ///
+    /// The eleventh is a plane a rounding off parallel to a pipe's axis and
+    /// farther from it than the pipe's radius, which reaches the pipe only
+    /// `10¹⁶` or more along it. A ball, a second pipe leaning to the first or a
+    /// cone with no ruling along the pipe is far off there, so the three share
+    /// nothing: the side of a block three from a bar and its chamfer cone, all
+    /// placed by one turn (Q2156).
+    ///
     /// This is what is left over — among it a plane leaning well off square to
     /// the axis of a pipe or a cone, which cuts it in a curve too far from a
     /// line for the road for crossing curves, against a second round surface
     /// (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
     /// in `rcad-topo`); two curves that touch rather than cross, where no ball
     /// is centred on the other surface's axis; a plane a rounding off parallel
-    /// to a pipe's or a cone's axis, which gives a cone's band no outer edge;
-    /// and three curved surfaces two of which differ by a plane that no stored
+    /// to a pipe's axis that cuts the pipe, which the road along a pipe takes
+    /// only where it is exactly parallel — a D-flat on a chamfered shaft, placed
+    /// by a turn; and three curved surfaces two of which differ by a plane that no stored
     /// [`Plane`](crate::Plane) is exactly, such as two balls whose centres lie
     /// along a diagonal.
     ///

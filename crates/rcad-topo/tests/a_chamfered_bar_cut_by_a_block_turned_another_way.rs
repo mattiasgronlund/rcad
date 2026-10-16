@@ -18,10 +18,12 @@
 //! rounding of its circle, so the two keep apart and the three share nothing.
 //!
 //! The block is sixty across. Six to eight across, its sides run a rounding
-//! off parallel to the bar's axis, three to four from it, and the triple of a
-//! side, the pipe and the cone is still refused, with the block placed by the
-//! bar's own turn as well as by two halves of it: the band road gives a plane
-//! that steep no outer edge. Ten across and more, the fuse answers.
+//! off parallel to the bar's axis, three to four from it, and before row
+//! Q2156 the triple of a side, the pipe and the cone was refused, with the
+//! block placed by the bar's own turn as well as by two halves of it: the band
+//! road gives a plane that steep no outer edge. The road for a plane beside a
+//! pipe answers it now, and the second test pins six across. Ten across and
+//! more, the fuse answered already.
 //!
 //! A cone in a solid of its own beside the bar does not reach that question:
 //! the fuse then asks where the pipe and the cone cross first.
@@ -52,7 +54,7 @@ fn a_chamfered_bar_less_a_block_placed_twice_keeps_the_bar_above_the_blocks_top(
     model
         .place_solid(bar, &turn)
         .expect("this model made the key");
-    let block = a_block_below_half(&mut model);
+    let block = a_block_below_half(&mut model, 60.0);
     model
         .place_solid(block, &half)
         .expect("this model made the key");
@@ -65,6 +67,40 @@ fn a_chamfered_bar_less_a_block_placed_twice_keeps_the_bar_above_the_blocks_top(
         "the block placed twice came out exactly square to the bar after all"
     );
 
+    the_bar_is_cut_at_the_blocks_top(&mut model, bar, block);
+}
+
+/// The block six across, whose sides run three from the bar's axis and a
+/// rounding off parallel to it, placed by the bar's own turn and by two halves
+/// of it. Each side cuts the pipe no nearer than about `10¹⁶` along it, where
+/// the cone is that wide, so the side, the pipe and the cone share nothing; before row
+/// Q2156 that was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
+#[test]
+fn a_chamfered_bar_less_a_block_six_across_keeps_the_bar_above_the_blocks_top() {
+    let axis =
+        Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+    let turn = Isometry::rotation(&axis, 1.1).expect("a finite angle");
+    let half = Isometry::rotation(&axis, 0.55).expect("a finite angle");
+
+    for turns in [vec![turn], vec![half, half]] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = a_chamfered_bar(&mut model);
+        model
+            .place_solid(bar, &turn)
+            .expect("this model made the key");
+        let block = a_block_below_half(&mut model, 6.0);
+        for placed in &turns {
+            model
+                .place_solid(block, placed)
+                .expect("this model made the key");
+        }
+        the_bar_is_cut_at_the_blocks_top(&mut model, bar, block);
+    }
+}
+
+/// The bar less the block, which leaves one bar of a chamfer, a pipe, the
+/// bar's top and the block's top.
+fn the_bar_is_cut_at_the_blocks_top(model: &mut Model, bar: SolidKey, block: SolidKey) {
     let solids = model
         .fuse(
             &[bar],
@@ -144,13 +180,19 @@ fn the_blocks_top_is_off_square_to_the_bars_axis(
         .any(|normal| (0..3).any(|which| normal[which].abs() != axis[which].abs()))
 }
 
-/// The block from `−30` to `30` across and from `z = −2` up to `z = ½`, not
-/// yet placed.
-fn a_block_below_half(model: &mut Model) -> SolidKey {
-    let square = ProfileBuilder::new(vec![[0.0, 0.0], [60.0, 0.0], [60.0, 60.0], [0.0, 60.0]])
-        .build(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a square is a profile");
-    let corner = Isometry::translation(Vector::new(-30.0, -30.0, -2.0)).expect("a shift");
+/// The block `across` wide about the `z` axis and from `z = −2` up to
+/// `z = ½`, not yet placed.
+fn a_block_below_half(model: &mut Model, across: f64) -> SolidKey {
+    let square = ProfileBuilder::new(vec![
+        [0.0, 0.0],
+        [across, 0.0],
+        [across, across],
+        [0.0, across],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a square is a profile");
+    let corner =
+        Isometry::translation(Vector::new(-across / 2.0, -across / 2.0, -2.0)).expect("a shift");
     model
         .add_extrusion(&square, 2.5, &corner)
         .expect("the block has a height")
