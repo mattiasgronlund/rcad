@@ -10,11 +10,12 @@
 //! and the rest of the half ball stands above it.
 //!
 //! **Every one of the 24 fuses was refused `Undecidable` at "order along a
-//! crossing"**, round the circle the plate's top cuts the ball in. That circle
-//! is walked from `(5.5, 2.5 − r, 1)`, which is where `x = 5.5` cuts it too, and
-//! the node there is a box round the walked start that reads exactly nought
-//! along the way the circle runs. The node across, at `(5.5, 2.5 + r, 1)`, is
-//! clear of it, and nothing put the one at the start first.
+//! crossing"**, round a circle whose walk starts where the plane `x = 5.5` cuts
+//! it. The circle the plate's top cuts the ball of radius `0.6` in is walked
+//! from `(5.5, 3.1, 1)`, and the circle the plane `y = 3` cuts the ball in from
+//! its foot, `(5.5, 3, 0.441)` at radius `0.75`. The node where `x = 5.5` cuts
+//! each is a box round the walked start that reads exactly nought along the way
+//! the circle runs, and nothing put it first against the nodes clear of it.
 //!
 //! At the larger radius the ball reaches into the hole: its centre is `√2/2`
 //! from the hole's corner `(5, 3)` across the plate's top, under `0.75`. So

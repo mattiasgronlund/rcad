@@ -3545,17 +3545,21 @@ impl<'f> Arrangement<'f> {
     /// order round: the order they give every pair of other nodes is the order
     /// round the loop from the place the start stands for.
     ///
-    /// **A node square to the way the loop runs at the start is left**, one
-    /// every point of whose box reads exactly nought along `∇S × ∇T` there
+    /// **A node square to the way the loop runs at the start is left here**,
+    /// one every point of whose box reads exactly nought along `∇S × ∇T` there
     /// ([`square_to_the_run_at_the_start`]). It is the start, or the place the
     /// start was rounded off, and the argument above holds for it, but
-    /// [`round_a_closed_crossing_and_what_it_measures`] leaves it too, for what
-    /// lies past it: the rim of the lid in
+    /// [`round_a_closed_crossing_and_what_it_measures`] reads such a node first
+    /// already, against each node clear of it and of the start that the sweep
+    /// cannot place, wherever the run at the start is proved to be something
+    /// (Q2118). It was left here while that arm left it too, for what lay past
+    /// it (Q1914): the rim of the lid in
     /// `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model` has
     /// such a node, the box `[−0, 0] × [3 − 1.8e-15, 3 + 1.3e-15] × [4, 4]`
-    /// round the start `(0, 3, 4)`. Counted from it, the fuse goes on to the
-    /// half disc leaning `2e-12` off the lid, whose arc and chord both run
-    /// along its one straight crossing with the lid, and panics there (Q1914).
+    /// round the start `(0, 3, 4)`, and counted from it the fuse goes on to the
+    /// half disc leaning `2e-12` off the lid, whose arc and chord are both drawn
+    /// along its one straight crossing with the lid. That is refused by name
+    /// now, in [`Arrangement::cut_the_crossings_into_arcs`].
     ///
     /// A round bar of radius 3 notched by a block and turned with it by
     /// `Isometry::rotation(y, π)` is the shape (Q1737). `sin π` rounds to
@@ -9393,17 +9397,34 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// nought, or a crossing turning on a radius near `d`, has not been shown
 /// clear of the stretch.
 ///
+/// **So does a box every point of which reads exactly nought, where the run is
+/// proved to be something.** Its node lies square to the run from the start,
+/// and inside a box round the start, so it is the start or the place the start
+/// was rounded off, and either of those comes first. Q992's notched plate with
+/// a half ball sunk in its top is the shape
+/// (`a_half_ball_sunk_in_a_notched_plate_answers_every_fuse_with_its_volume`,
+/// Q2118). The circle the plate's top `z = 1` cuts the ball of radius `0.6`
+/// about `(5.5, 2.5, 1)` in is walked from `(5.5, 3.1, 1)`, and the node where
+/// the plane `x = 5.5` cuts it is the box `[3.0999999999999996, 3.1]` along
+/// `y` round that start, which reads `[0, 0]` along the run `(±0.6, 0, 0)`.
+/// The circle the plane `y = 3` cuts the ball in is walked from its foot,
+/// `(5.5, 3, 0.441)` at radius `0.75`, inside the box one ulp tall of the node
+/// where `x = 5.5` cuts it. Every fuse of the plate with the half ball was
+/// refused on the order round one of these circles until this read the node
+/// first. The rim of the lid in
+/// `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model` has
+/// such a node too, exactly the start; read first there, the fuse goes on to a
+/// half disc leaning `2e-12` off the lid, whose arc and chord are drawn along
+/// one stretch of its crossing with the lid, and is refused there by name
+/// ([`Arrangement::cut_the_crossings_into_arcs`]).
+///
 /// **A box reaching behind the start is left as it was**, since its node may
 /// be a hair behind and come last: the `3.1e-13` box of the second bar's near
 /// cap corner in `a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`
-/// is one. So is a box every point of which reads exactly nought. Its node is
-/// square to the run from the start, so it is the start or the place the start
-/// was rounded off, and [`the_start_is_a_rounding_off`] has already declined
-/// it. The lid of `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model`
-/// has such a node on its rim, exactly the start; read first there, the fuse
-/// goes on to a half disc leaning `2e-12` off the lid, whose arc and chord run
-/// along one stretch of its crossing with the lid, and panics. Two nodes whose
-/// boxes share a point are left as they were too.
+/// is one. So is a box that reads exactly nought along a run not proved to be
+/// something. Two surfaces that touch at the start have no run there:
+/// `∇S × ∇T` is nought, and every box reads `[0, 0]` along it, wherever its
+/// node lies. Two nodes whose boxes share a point are left as they were too.
 ///
 /// Two bars of radius `1/4`, the second starting where their axes meet and
 /// turned 120° about `z`, are the shape (Q1900, Q1907). The second bar's near
@@ -9494,11 +9515,12 @@ fn round_a_closed_crossing_and_what_it_measures(
     }
     if matches!(decided, Decision::Undecidable { .. }) && !boxes_overlap(one, other) {
         let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+        let runs_somewhere = dot_of(runs, runs).sign() == Decision::Pos;
         let start = from.enclosure();
         let a_hair_ahead = |place: PredicatePoint| {
             let step = [0, 1, 2].map(|axis| place.enclosure()[axis] - start[axis]);
             let along = dot_of(step, runs);
-            along.lo() >= 0.0 && along.hi() > 0.0
+            along.lo() >= 0.0 && (along.hi() > 0.0 || runs_somewhere)
         };
         match (boxes_overlap(one, from), boxes_overlap(other, from)) {
             (true, false) if a_hair_ahead(one) => return Ok((Decision::Pos, Measures::Length)),
