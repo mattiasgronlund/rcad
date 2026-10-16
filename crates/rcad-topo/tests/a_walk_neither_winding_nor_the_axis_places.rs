@@ -1040,9 +1040,10 @@ fn the_top_of_a_ball_dented_by_another_holds_no_point_of_the_chord_its_two_arcs_
     }
 }
 
-/// The nearest cone face to a point on two chords at once, which
-/// `what_a_cone_face_seen_down_its_axis_holds` in `holds.rs` still refuses
-/// (queue row Q1258): it is never asked, because the solid is refused first.
+/// A cone face asked at points on two chords at once, which
+/// `what_a_cone_face_seen_down_its_axis_holds` in `holds.rs` refused
+/// `AFaceTrimmedByACurveThisCannotFollow` once the solid built (queue rows
+/// Q1258, Q1395 and Q2172).
 ///
 /// **A lens alone never gets there.** A face on one nappe bounded by an arc of
 /// each of two planes between the same two corners is crossed by each ruling
@@ -1061,10 +1062,16 @@ fn the_top_of_a_ball_dented_by_another_holds_no_point_of_the_chord_its_two_arcs_
 /// [`a_chip_of_a_cone_holed_through`] gives it a square hole along the axis,
 /// whose walls `x = 2.8125` and `y = ±1.5` each have the apex behind them.
 /// Seen down the axis its two hyperbolas' arcs still share the chord `x = 3`.
-/// But building it meshes its faces, and a cone face with a hole that goes
-/// round nothing is refused there: `CurvedFaceWithAHoleGoesTooFarRound`. The
-/// key it names is the builder's own, so which face is not asked here; the skin
-/// is the one curved face.
+/// Building it meshes its faces, and a cone face with a hole that goes round
+/// nothing was refused there, `CurvedFaceWithAHoleGoesTooFarRound`, until a
+/// hole was cut out to its outline on a cone face clear of its apex
+/// ([`a_chip_of_a_cone_holed_through_holds_the_chip_less_the_hole`]).
+///
+/// **Each point is on the cone exactly.** `(3, ±9/4, 15/4)` and `(3, 0, 3)` are
+/// on the chord `x = 3` seen down the axis, in front of both cuts and clear of
+/// the hole, so held. They are read a little way towards a corner of the hole,
+/// which is off that chord's line. `(12/5, 0, 12/5)` is inside the hole, so not
+/// held.
 #[test]
 fn the_skin_of_a_chip_holed_through_holds_the_lens_less_the_hole() {
     let mut model = a_model();
@@ -1082,13 +1089,15 @@ fn the_skin_of_a_chip_holed_through_holds_the_lens_less_the_hole() {
         ([3.0, 0.0, 3.0], OnAFace::Held),
         ([2.4, 0.0, 2.4], OnAFace::NotHeld),
     ] {
-        let held = solid.face_holds_the_point(
-            skin,
-            PredicatePoint::from(point),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
-        println!("the holed chip's skin at {point:?}: {held:?}, expected {answer:?}");
+        let held = solid
+            .face_holds_the_point(
+                skin,
+                PredicatePoint::from(point),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("the holed chip's skin at {point:?}: {why:?}"));
+        assert_eq!(held, answer, "the holed chip's skin at {point:?}");
     }
 }
 
