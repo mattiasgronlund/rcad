@@ -2570,7 +2570,21 @@ check-fuzz-builds:
 # matched each fuse's `CannotMeshAFace` by its rule and sent every other pair
 # of rule and order to `CornersCoincide`; every fuse of it now answers, and the
 # test that replaced it reads each entry's faces off its table, with no match.
-wildcard_arms := "95"
+#
+#     Q2131's lane  95 -> 101
+#
+# Six more, in three new tests in `writer.rs`:
+# `a_bends_seam_picked_inside_a_pipe_is_the_same_run_with_a_subnormal_axis`,
+# `a_bends_seam_picked_inside_a_pipe_is_the_same_run_with_a_radius_an_ulp_off`
+# and
+# `a_bends_seam_picked_outside_its_pipe_is_a_different_run_from_the_one_picked_inside_it`.
+# Each rebuilds one `Picker::InsideAPipe` arm — the one Q1293's bend pins need —
+# and keeps every other `Picker` as it is with `other => *other`; that is a
+# real catch-all over the non_exhaustive `Picker`, not a match that must name
+# one variant, so it is not the `let … else` case. Each of the three counts
+# twice because `writer.rs` builds into both `rcad-step`'s own tests and
+# `rcad-fuzz-explain`.
+wildcard_arms := "101"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
