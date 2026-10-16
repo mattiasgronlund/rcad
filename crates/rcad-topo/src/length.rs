@@ -248,31 +248,18 @@ fn two_to_the(power: i32) -> f64 {
     f64::from_bits(biased << 52)
 }
 
-/// The square root of every number in `of` that is not below zero.
+/// The square root of a sum of squares: each end a step of an `f64` outwards
+/// where `sqrt` rounded, and no step where it did not ([`Interval::sqrt`]).
 ///
-/// `sqrt` is correctly rounded, so one step outwards holds the true root — and
-/// no step at all where the root squares back to exactly what went in. That
-/// test is a fused multiply-add coming out zero, which proves it only where
-/// what is left over could not have fallen below the subnormals, so it is only
-/// trusted from [`SMALLEST_EXACT_PRODUCT`] up.
+/// # Panics
+///
+/// If every number in `of` is below zero. The top of an interval times itself
+/// is at least the square of one of its ends, so it is never below zero, and
+/// neither is the top of a sum of such squares.
 fn square_root(of: Interval) -> Interval {
-    let root = |value: f64, outwards: fn(f64) -> f64| {
-        let root = value.sqrt();
-        let squares_back =
-            value == 0.0 || (value >= SMALLEST_EXACT_PRODUCT && root.mul_add(root, -value) == 0.0);
-        if squares_back { root } else { outwards(root) }
-    };
-    let lo = root(of.lo().max(0.0), f64::next_down).max(0.0);
-    let hi = root(of.hi().max(0.0), f64::next_up);
-    Interval::new(lo, hi).expect("a root is no smaller than the root of a smaller number")
+    of.sqrt()
+        .expect("the top of a sum of squares is not below zero")
 }
-
-/// The smallest value whose product residual [`square_root`] trusts: below
-/// `2^-969` what a fused multiply-add leaves over can fall into the subnormals
-/// and round to zero without being zero — the threshold
-/// [`product_is_exact`](rcad_predicates::expansion::product_is_exact) draws for
-/// the same reason.
-const SMALLEST_EXACT_PRODUCT: f64 = f64::MIN_POSITIVE * 9_007_199_254_740_992.0;
 
 /// `numerator / denominator` for every pair of numbers the two hold, or `None`
 /// when the denominator holds zero.
@@ -429,7 +416,8 @@ impl Circle {
                     // round for nothing.
                     return Some(radius);
                 }
-                Some(square_root((radius - apart) * (radius + apart)))
+                let square = (radius - apart) * (radius + apart);
+                Some(square.sqrt().unwrap_or(Interval::exactly(0.0)))
             }
         }
     }

@@ -5,23 +5,34 @@
 //! deviation, and the separation tests that say a half-space really does hold
 //! two pieces of a crossing apart.
 //!
-//! # Why there is a square root here and not in `rcad-predicates`
+//! # Why a square root, and why its panic is here
 //!
 //! Naming where two pipes cross compares a distance against a sum of two radii,
 //! and the distance is `|T| / √K` for two polynomials in the stored numbers.
 //! Squaring that comparison away costs eight degrees and runs into the limit
 //! `docs/decisions.md` §29 measures; enclosing the root costs one rounding.
 //!
-//! `rcad-predicates` is frozen for M3 (§24.4), and this needs nothing from it:
-//! `f64::sqrt` is correctly rounded, so stepping one `f64` outwards at each end
-//! of an enclosure gives an enclosure of the root.
+//! The root is [`Interval::sqrt`]. It was written here by hand while
+//! `rcad-predicates` was frozen for M3 (§24.4), out of `f64::sqrt` and a check
+//! of which side of the true root it landed, and below `2^-969` that check
+//! cannot be made: there it left the high end where `sqrt` put it, which for
+//! `2e-295` is under the true root
+//! (`the_root_of_a_tiny_number_still_holds_the_true_root`). What stays here is
+//! what this crate says about its own callers — that what they take the root
+//! of is a square.
 
 use rcad_predicates::Interval;
 
 use crate::de_boor::quotient_enclosing;
-use rcad_predicates::expansion::{product_is_exact, two_product};
 
 /// `√value`, as an enclosure, for a value that cannot be below zero.
+///
+/// [`Interval::sqrt`]: each end a step of an `f64` outwards where `sqrt`
+/// rounded and no step where it did not. Widening every root by a step would
+/// cost the exact cases their exactness: a pipe whose axis is a coordinate
+/// direction has `w·w` exactly one, and an enclosure of `√1` two steps wide
+/// spreads through every point built on it and leaves a contact point that no
+/// predicate can place.
 ///
 /// The low end is clamped at zero: a sum of squares is never negative, and an
 /// enclosure of one that dips a rounding below zero is that rounding and not a
@@ -32,58 +43,9 @@ use rcad_predicates::expansion::{product_is_exact, two_product};
 /// If the whole enclosure is below zero, which means a caller asked for the root
 /// of something that is not a square.
 pub fn root_enclosing(value: Interval) -> Interval {
-    assert!(
-        value.hi() >= 0.0,
-        "this is not a square, so nothing here takes its root: {value:?}"
-    );
-    let lo = rounded_down(value.lo().max(0.0)).max(0.0);
-    let hi = rounded_up(value.hi());
-    Interval::new(lo, hi).expect("a root grows with what it is taken of")
-}
-
-/// The largest `f64` at or below `√value`.
-///
-/// **A step outwards only where one is needed.** Widening every root by an ulp
-/// would cost the exact cases their exactness: a pipe whose axis is a coordinate
-/// direction has `w·w` exactly one, and an enclosure of `√1` two ulps wide
-/// spreads through every point built on it and leaves a contact point that no
-/// predicate can place. `f64::sqrt` is correctly rounded, so squaring what it
-/// gives back and comparing exactly says which side of the true root it landed.
-fn rounded_down(value: f64) -> f64 {
-    let root = value.sqrt();
-    if squared_is_at_most(root, value) {
-        root
-    } else {
-        root.next_down()
-    }
-}
-
-/// The smallest `f64` at or above `√value`.
-fn rounded_up(value: f64) -> f64 {
-    let root = value.sqrt();
-    if squared_is_at_most(root, value) && !squared_is_exactly(root, value) {
-        root.next_up()
-    } else {
-        root
-    }
-}
-
-/// Whether `root · root` is at or below `value`, exactly.
-fn squared_is_at_most(root: f64, value: f64) -> bool {
-    if !product_is_exact(root, root) {
-        return false;
-    }
-    let (high, low) = two_product(root, root);
-    high < value || (high == value && low <= 0.0)
-}
-
-/// Whether `root · root` is exactly `value`.
-fn squared_is_exactly(root: f64, value: f64) -> bool {
-    if !product_is_exact(root, root) {
-        return false;
-    }
-    let (high, low) = two_product(root, root);
-    high == value && low == 0.0
+    value.sqrt().unwrap_or_else(|| {
+        panic!("this is not a square, so nothing here takes its root: {value:?}")
+    })
 }
 
 /// `over / under` as an enclosure, or everything where `under` touches zero.
