@@ -297,6 +297,13 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// answers whether every number came back the same bits, which is what lets
 /// [`read_back_and_compared`] compare the solid's measurement bit for bit too.
 ///
+/// **A drawn circle's pipe can come back with another origin and not be a
+/// mismatch.** [`the_same_run`] calls it the same pipe where its origin is on
+/// the kernel's line or where the kernel's walk centres the circle, and that
+/// does not clear the answer, so an unplaced solid with such a pipe is still
+/// measured bit for bit. Whether a pipe that leans and starts off its flat
+/// face can then measure an ulp off has not been run.
+///
 /// A plane is the one surface whose numbers are not written as they are
 /// stored. The writer picks the point it writes so that the reader's offset
 /// comes back the same bits (§313). The normal it writes as stored, and the
