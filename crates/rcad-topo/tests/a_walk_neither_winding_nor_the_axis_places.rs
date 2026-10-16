@@ -1092,6 +1092,61 @@ fn the_skin_of_a_chip_holed_through_holds_the_lens_less_the_hole() {
     }
 }
 
+/// [`a_chip_of_a_cone_holed_through`] builds, validates and holds the chip less
+/// its hole (queue row Q2172).
+///
+/// Its skin is a face on one nappe clear of the apex, with an outline that goes
+/// more than a quarter turn round the axis and a hole, neither loop round the
+/// axis. Meshing it was refused `CurvedFaceWithAHoleGoesTooFarRound`, since a
+/// cone's hole was cut out to its outline only where the surface pinches
+/// nowhere, and a cone pinches at its apex.
+///
+/// **The answer.** The chip is [`the_chips_volume`]. The hole is the column over
+/// the square `[2, 2.8125] × [−1.5, 1.5]` from the skin `z = √(x² + y²)` up to
+/// the top `z = 2x − 1`, whose slice at `x` is `3(2x − 1)` less
+/// `1.5 √(x² + 2.25) + x² asinh(1.5/x)`, the integral of `√(x² + y²)` over
+/// `|y| ≤ 1.5`.
+#[test]
+fn a_chip_of_a_cone_holed_through_holds_the_chip_less_the_hole() {
+    let mut model = a_model();
+    let chip = a_chip_of_a_cone_holed_through(&mut model)
+        .unwrap_or_else(|why| panic!("the holed chip: {why:?}"));
+    let hole = by_simpsons_rule(2.0, 2.8125, |x| {
+        3.0 * (2.0 * x - 1.0) - (1.5 * (x * x + 2.25).sqrt() + x * x * (1.5 / x).asinh())
+    });
+    assert_holds(&model, chip, the_chips_volume() - hole, "the holed chip");
+}
+
+/// The frustum of slope 1 from `z = 1` to `5`, cut to `x ≥ 0`, less the slot
+/// `|y| ≤ 0.5`, `2.5 ≤ z ≤ 3.5` straight through it along `x` (queue row Q2172).
+///
+/// The slot cuts a window in the half frustum's skin, clear of the apex, inside
+/// an outline that goes half a turn round the axis. Fusing it was refused
+/// `CurvedFaceWithAHoleGoesTooFarRound` when the answer was meshed, since a
+/// cone's hole was cut out to its outline only where the surface pinches
+/// nowhere, and a cone pinches at its apex.
+///
+/// **The answer.** The half frustum is `π(5³ − 1³)/6 = 124π/6`. The slot takes
+/// the slice at `z` of the half disc `r ≤ z` within `|y| ≤ 0.5`, which is the
+/// integral of `√(z² − y²)` over `|y| ≤ 0.5`,
+/// `0.5 √(z² − 0.25) + z² asin(0.5/z)`. The answer is one solid.
+#[test]
+fn a_halved_frustum_less_a_slot_through_its_skin_holds_the_half_less_the_slot() {
+    use std::f64::consts::PI;
+    let mut model = a_model();
+    let frustum = cones::a_frustum(&mut model, 1.0, 1.0, 5.0);
+    let half = block(&mut model, [0.0, -10.0, 0.0], [10.0, 10.0, 10.0]);
+    let half = fuse_one(&mut model, frustum, half, Rule::Intersection);
+    let slot = block(&mut model, [-10.0, -0.5, 2.5], [10.0, 0.5, 3.5]);
+    let what = "the halved frustum less the slot";
+    let answer = fuse(&mut model, half, slot, Rule::Difference, true)
+        .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+    let slot = by_simpsons_rule(2.5, 3.5, |z| {
+        0.5 * (z * z - 0.25).sqrt() + z * z * (0.5 / z).asin()
+    });
+    assert_each_holds(&model, &answer, &[124.0 * PI / 6.0 - slot], what);
+}
+
 /// The part of the cone `r ≤ z` under the roof of
 /// `a_roofed_frustum_beside_a_plate_with_a_triangular_hole_is_answered_under_every_rule`
 /// and `a_frustum_under_two_steep_planes_is_answered_under_every_rule` from
