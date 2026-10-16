@@ -9300,6 +9300,18 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// sweep was up to `s` times its budget for an area: the corner-up cube on a
 /// steep cone's apex at 2 mm was one (§318.5). The angle and the stretch
 /// below answer only a proved sign, which no policy reads the measure of.
+///
+/// **An undecided sweep of two nodes whose boxes overlap is filed as wide as
+/// the wider box**, a length, as [`one_point_if_both_are_exact`] files it. The
+/// boxes share a point, so the two may be one, and what a merge moves a point
+/// by is bounded by the boxes and not by the sweep. The sweep's enclosure over
+/// its arm is not that bound: two points `Rδ` apart round a circle of radius
+/// `R`, at an angle `α` round from the start, sweep `2R²δ sin²(α/2)`, so over
+/// the chord `2R sin(α/2)` they read `Rδ sin(α/2)`, short of how far apart they
+/// are. A round bar of radius `8` notched by a block whose corner edge stands
+/// on its wall has the feet of two rulings a hair apart on each cap, in boxes
+/// `1.8e-15` wide that overlap, and at working size `1` every fuse of the two
+/// was refused on their sweep, `2.1e-14` read as an area (Q2080).
 fn round_a_closed_crossing_and_what_it_measures(
     pair: [&Surface; 2],
     [from, node]: [PredicatePoint; 2],
@@ -9351,6 +9363,9 @@ fn round_a_closed_crossing_and_what_it_measures(
         && let Some(read) = along_the_stretch_between_the_two(pair, from, one, other)
     {
         return Ok((read, Measures::Volume));
+    }
+    if matches!(decided, Decision::Undecidable { .. }) && boxes_overlap(one, other) {
+        return Ok((one_point_if_both_are_exact(one, other), Measures::Length));
     }
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
