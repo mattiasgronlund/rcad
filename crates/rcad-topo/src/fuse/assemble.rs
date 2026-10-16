@@ -1850,7 +1850,13 @@ impl Assembly {
     /// so the wall's far ring is the far rim in arcs, and the wall itself is a
     /// grid. Where no chain of the grid reached the near rim the wall stayed in
     /// 25 pieces, and where one did it kept that chain as a seam, though the
-    /// block met no face of the frustum (Q2170). **Not where the group was
+    /// block met no face of the frustum (Q2170). **Only on a cone, and only
+    /// where every ring goes right round.** A cone face with a ring right
+    /// round beside a hole is refused by the mesher, which takes islands only
+    /// on a pipe's ring or a ball's cap (`AWireWillNotLieFlatOnItsFace`, in
+    /// `pieces_of_one_curved_surface.rs` and `a_walk_neither_winding_nor_the_axis_places.rs`).
+    /// On a pipe, closed up, 3 tests of the bar files failed, an answer
+    /// `TheFuseWroteABrokenAnswer` among them. **Not where the group was
     /// joined only across whole closed curves**
     /// ([`Assembly::joined_only_across_whole_rings`]): a frustum beside a block
     /// whose floor cuts a circle round its wall has a far rim cut where the
@@ -1871,7 +1877,11 @@ impl Assembly {
         {
             return true;
         }
-        let may_close_up = !self.joined_only_across_whole_rings(inside, along);
+        let may_close_up = matches!(surface, Surface::Cone(_))
+            && !self.joined_only_across_whole_rings(inside, along)
+            && rings.iter().all(|ring| {
+                ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(true)
+            });
         rings.iter().all(|ring| {
             ring.len() == 1
                 || (may_close_up && self.a_ring_that_closes_up(ring, dissolved))
