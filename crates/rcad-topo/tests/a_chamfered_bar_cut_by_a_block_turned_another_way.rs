@@ -29,7 +29,9 @@
 //! along the whole bar. Placed by the bar's turn, the side is a rounding off
 //! parallel to the axis and cuts both circles the pipe and the cone share,
 //! and before row Q2177 no road took a plane that cuts them and leans to the
-//! axis they share. The third test pins it.
+//! axis they share. The third test pins the four points that triple meets at,
+//! and the refusal the difference still gets: the fuse reads the side and the
+//! pipe as straight lines, where they cross in an ellipse.
 //!
 //! A cone in a solid of its own beside the bar does not reach that question:
 //! the fuse then asks where the pipe and the cone cross first.
@@ -41,11 +43,12 @@
 //! Q566's fault.
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
+    Axis, Cone, Cylinder, EdgeRun, Isometry, MeetOfThree, Orientation, Plane, Point, Scale,
+    Surface, Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftStep, DraftWire, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+    DraftEdge, DraftStep, DraftWire, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
 };
 
 #[test]
@@ -114,12 +117,20 @@ fn a_chamfered_bar_less_a_block_six_across_keeps_the_bar_above_the_blocks_top() 
 
 /// The block from `x = 1.5` out past the bar, taller and wider than it, placed
 /// by the bar's own turn. Its side `x = 1.5` runs a rounding off parallel to
-/// the bar's axis and cuts a D-flat along the whole bar, through both circles
-/// of radius two the pipe and the cone share, the one at `z = 1` and the one
-/// at `z = −3` past the apex. Before row Q2177 the triple of that side, the
-/// pipe and the cone was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
+/// the bar's axis and cuts both circles of radius two the pipe and the cone
+/// share, the one at `z = 1` and the one at `z = −3` past the apex, at
+/// `y = ±√1.75`. Before row Q2177 the triple of that side, the pipe and the
+/// cone was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`; it is the four
+/// points, each a rounding off where the turn puts them.
+///
+/// The difference, a D-flat along the whole bar, is still refused, by
+/// `ACrossingThisCannotBeOrderedAlong`: the fuse reads the side and the pipe as
+/// a plane along a pipe, which it walks as two straight lines, where they cross
+/// in an ellipse about `10¹⁶` long. The row filed from Q2177 for that turns
+/// this into `(1, 1, 3)`: the chamfer, the pipe, the bar's bottom, its top and
+/// the flat.
 #[test]
-fn a_chamfered_bar_less_a_block_beside_its_axis_keeps_a_d_shaped_bar() {
+fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_its_flat_is_refused() {
     let axis =
         Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
     let turn = Isometry::rotation(&axis, 1.1).expect("a finite angle");
@@ -134,11 +145,90 @@ fn a_chamfered_bar_less_a_block_beside_its_axis_keeps_a_d_shaped_bar() {
         .place_solid(block, &turn)
         .expect("this model made the key");
 
-    assert_eq!(
-        what_the_bar_less_the_block_is_made_of(&mut model, bar, block),
-        (1, 1, 3),
-        "the chamfer, the pipe, the bar's bottom, the bar's top and the flat"
+    let [side, pipe, cone] = the_side_the_pipe_and_the_cone(&model, bar, block, &turn);
+    let answer = meet_of_three_surfaces(
+        [&side, &pipe, &cone],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("the side, the pipe and the cone are answered");
+    let MeetOfThree::At(points) = &answer else {
+        panic!("expected four points, got {answer:?}");
+    };
+    assert_eq!(points.len(), 4, "{answer:?}");
+    let out = 1.75_f64.sqrt();
+    for unplaced in [
+        [1.5, out, -3.0],
+        [1.5, -out, -3.0],
+        [1.5, out, 1.0],
+        [1.5, -out, 1.0],
+    ] {
+        let placed = turn.apply_to_point(Point::new(unplaced[0], unplaced[1], unplaced[2]));
+        let wanted = [placed.x(), placed.y(), placed.z()];
+        assert!(
+            points.iter().any(|point| {
+                let boxed = point.enclosure();
+                (0..3).all(|axis| {
+                    let middle = (boxed[axis].lo() + boxed[axis].hi()) / 2.0;
+                    (middle - wanted[axis]).abs() < 1e-13 && boxed[axis].width() < 1e-13
+                })
+            }),
+            "no narrow box round {wanted:?}, {unplaced:?} turned, in {answer:?}"
+        );
+    }
+
+    let refused = model.fuse(
+        &[bar],
+        &[block],
+        Rule::Difference,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
     );
+    assert!(
+        matches!(refused, Err(Error::ACrossingThisCannotBeOrderedAlong)),
+        "{refused:?}"
+    );
+}
+
+/// The block's side that was `x = 1.5` before the turn, and the bar's pipe and
+/// cone, each where the turn put it.
+fn the_side_the_pipe_and_the_cone(
+    model: &Model,
+    bar: SolidKey,
+    block: SolidKey,
+    turn: &Isometry,
+) -> [Surface; 3] {
+    let facing = turn
+        .apply_to_vector(Vector::new(-1.0, 0.0, 0.0))
+        .components();
+    let side = model
+        .solid(block)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.surface())
+        .find(|surface| {
+            let Surface::Plane(plane) = surface else {
+                return false;
+            };
+            let normal = plane.normal().components();
+            (0..3)
+                .map(|which| normal[which] * facing[which])
+                .sum::<f64>()
+                > 0.999
+        })
+        .expect("the block has a side facing the bar");
+    let curved = |wanted: fn(&Surface) -> bool| {
+        model
+            .solid(bar)
+            .expect("this model made the key")
+            .faces()
+            .map(|face| face.surface())
+            .find(wanted)
+            .expect("the bar has a pipe and a cone")
+    };
+    let pipe = curved(|surface| matches!(surface, Surface::Cylinder(_)));
+    let cone = curved(|surface| matches!(surface, Surface::Cone(_)));
+    [side, pipe, cone]
 }
 
 /// The bar less the block, which is one solid: how many cones, pipes and
