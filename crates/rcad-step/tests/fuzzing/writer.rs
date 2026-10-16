@@ -2218,6 +2218,252 @@ fn a_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file() {
     }
 }
 
+#[test]
+fn probe_q2135_turned_and_moved_disc() {
+    let placement = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&Axis::y(), 5.0).expect("a finite angle"));
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
+        .expect("fits");
+    model.place_solid(solid, &placement).expect("the key");
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{placement:?}: {reached:?}"
+    );
+}
+
+#[test]
+fn probe_q2135_count() {
+    std::panic::set_hook(Box::new(|_| {}));
+    let (mut same, mut refused, mut other, mut panicked) = (0, 0, 0, Vec::new());
+    let (mut moved_only, mut moved_only_same) = (0, 0);
+    for seed in 0..300 {
+        let mut draw = Draw::new(seed);
+        let placement = a_movement(&mut draw);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let solid =
+            a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
+                .expect("fits");
+        model.place_solid(solid, &placement).expect("the key");
+        let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+        let turned = format!("{placement:?}").contains("rotation: Rotation")
+            && !format!("{placement:?}").contains("[[1.0, 0.0, 0.0]");
+        let _ = turned;
+        let result = std::panic::catch_unwind(|| one_model_decoded_and_written(&bytes));
+        match result {
+            Ok(reached) if reached.came_back_the_same == 1 => same += 1,
+            Ok(reached) if reached.refused == 1 => refused += 1,
+            Ok(_) => other += 1,
+            Err(why) => {
+                let text = why
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .unwrap_or_else(|| "?".to_owned());
+                panicked.push(format!(
+                    "{seed}: {placement:?}: {}",
+                    &text[..text.len().min(120)]
+                ));
+            }
+        }
+        if draw.0 == 0 {
+            moved_only += 1;
+            moved_only_same += 0;
+        }
+    }
+    let _ = (moved_only, moved_only_same);
+    println!(
+        "same {same}, refused {refused}, other {other}, panicked {}",
+        panicked.len()
+    );
+    for line in &panicked {
+        println!("{line}");
+    }
+}
+
+fn probe_ulps(x: f64, k: i32) -> f64 {
+    let mut v = x;
+    for _ in 0..k.abs() {
+        v = if k > 0 { v.next_up() } else { v.next_down() };
+    }
+    v
+}
+
+#[test]
+fn probe_q2135_explore() {
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let (mut failing, mut walks_same, mut cross_zero_found, mut cross_zero_and_walk_same) =
+        (0, 0, 0, 0);
+    let mut fixed_point_found = 0;
+    let mut walk_differs = Vec::new();
+    for seed in 0..300 {
+        let mut draw = Draw::new(seed);
+        let placement = a_movement(&mut draw);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let solid =
+            a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
+                .expect("fits");
+        model.place_solid(solid, &placement).expect("the key");
+        let text = rcad_step::write(&model, "probe").expect("writes");
+        let file = StepFile::read(text.as_bytes()).expect("parses");
+        let back = Import::read(&file, &policy, &mut log).expect("reads");
+        let deflection = Deflection::for_scale(back.model().scale());
+        let here_solid = the_one_solid(&model);
+        let back_solid = the_one_solid(back.model());
+        let mut this_fails = false;
+        let mut this_walks_same = true;
+        let mut found_any = true;
+        let mut found_walk_same = true;
+        let mut found_fixed = true;
+        for (here_face, back_face) in here_solid.faces().zip(back_solid.faces()) {
+            let surface = here_face.surface();
+            let back_surface = back_face.surface();
+            let here_coedges: Vec<_> = here_face.wires().flat_map(WireView::coedges).collect();
+            let back_coedges: Vec<_> = back_face.wires().flat_map(WireView::coedges).collect();
+            for (h, b) in here_coedges.iter().zip(&back_coedges) {
+                let (hr, br) = (h.edge().run(), b.edge().run());
+                let corners = [h.start().point(), h.end().point()];
+                let EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Cylinder(hp),
+                    ..
+                } = &hr
+                else {
+                    continue;
+                };
+                let EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Cylinder(bp),
+                    picked_by: bpicks,
+                } = &br
+                else {
+                    continue;
+                };
+                if the_same_run(&hr, &br, corners, surface) {
+                    continue;
+                }
+                this_fails = true;
+                let ends = corners.map(|c| PredicatePoint::from(c.coordinates()));
+                let walk_of = |run: &EdgeRun, log: &mut ProvenanceLog| {
+                    rcad_geom::walk(
+                        &rcad_geom::NamedRun::new(run.clone(), ends).expect("ends"),
+                        [&surface, &back_surface],
+                        deflection,
+                        &policy,
+                        log,
+                    )
+                    .map(|w| format!("{:?}", w.points()))
+                };
+                let hw = walk_of(&hr, &mut log);
+                let bw = walk_of(&br, &mut log);
+                if hw != bw {
+                    this_walks_same = false;
+                    if walk_differs.len() < 3 {
+                        walk_differs.push(format!(
+                            "{seed}: {:?} vs {:?}",
+                            hw.as_ref().map(|s| s.chars().take(200).collect::<String>()),
+                            bw.as_ref().map(|s| s.chars().take(200).collect::<String>())
+                        ));
+                    }
+                }
+                let o = hp.axis().origin();
+                let d = hp.axis().direction();
+                let c = bp.axis().origin().coordinates();
+                let mut found = false;
+                let mut found_same_walk = false;
+                let Surface::Plane(flat) = surface else {
+                    panic!("flat")
+                };
+                let centre_of = |from: Point| {
+                    let leans = flat.normal().dot(d);
+                    let up = (flat.offset() - flat.normal().dot(from - Point::origin())) / leans;
+                    from + d * up
+                };
+                assert_eq!(
+                    format!("{:?}", centre_of(o)),
+                    format!("{:?}", bp.axis().origin())
+                );
+                let mut fixed_here = false;
+                'search: for i in -4..=4 {
+                    for j in -4..=4 {
+                        for k in -4..=4 {
+                            let candidate = Point::new(
+                                probe_ulps(c[0], i),
+                                probe_ulps(c[1], j),
+                                probe_ulps(c[2], k),
+                            );
+                            if format!("{:?}", centre_of(candidate))
+                                == format!("{:?}", bp.axis().origin())
+                            {
+                                let run = EdgeRun::PartOfWhereItCrosses {
+                                    and: Surface::Cylinder(
+                                        Cylinder::new(
+                                            Axis::as_written(candidate, d).expect("axis"),
+                                            1.0,
+                                        )
+                                        .expect("pipe"),
+                                    ),
+                                    picked_by: bpicks.clone(),
+                                };
+                                fixed_here = walk_of(&run, &mut log) == hw;
+                                break 'search;
+                            }
+                        }
+                    }
+                }
+                found_fixed &= fixed_here;
+                for i in -4..=4 {
+                    for j in -4..=4 {
+                        for k in -4..=4 {
+                            let candidate = Point::new(
+                                probe_ulps(c[0], i),
+                                probe_ulps(c[1], j),
+                                probe_ulps(c[2], k),
+                            );
+                            if (candidate - o).cross(d) != Vector::zero() {
+                                continue;
+                            }
+                            found = true;
+                            let Ok(axis) = Axis::as_written(candidate, d) else {
+                                continue;
+                            };
+                            let Ok(pipe) = Cylinder::new(axis, 1.0) else {
+                                continue;
+                            };
+                            let run = EdgeRun::PartOfWhereItCrosses {
+                                and: Surface::Cylinder(pipe),
+                                picked_by: bpicks.clone(),
+                            };
+                            if walk_of(&run, &mut log) == hw {
+                                found_same_walk = true;
+                            }
+                        }
+                    }
+                }
+                found_any &= found;
+                found_walk_same &= found_same_walk;
+            }
+        }
+        if this_fails {
+            failing += 1;
+            walks_same += usize::from(this_walks_same);
+            cross_zero_found += usize::from(found_any);
+            cross_zero_and_walk_same += usize::from(found_walk_same);
+            fixed_point_found += usize::from(found_fixed);
+        }
+    }
+    println!(
+        "failing {failing}, walks the same {walks_same}, a centre within 4 ulps with cross zero \
+         {cross_zero_found}, and walking the same {cross_zero_and_walk_same}; a centre that \
+         walks to the kernel's centre and walks the same {fixed_point_found}"
+    );
+    for line in &walk_differs {
+        println!("{line}");
+    }
+}
+
 /// The same disc's drawn pipe, compared against one of another radius about
 /// the same axis, is still a different run: [`the_same_run`]'s and-Cylinder
 /// arm only calls two pipes the same when their radii match to the bit.
