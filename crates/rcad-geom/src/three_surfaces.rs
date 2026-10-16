@@ -3311,22 +3311,25 @@ fn what_a_plane_beside_their_one_axis_leaves(
     let Some(axis) = the_axis_both_are_turned_about(one, other) else {
         return Ok(None);
     };
-    let normal = flat.normal().components();
-    let (Some(leaning), Some(off_it)) = (
-        Exact::dot_of(normal, axis.along),
-        how_far_a_plane_is_from(flat, axis.through),
-    ) else {
+    let Some(slant) = how_the_plane_sits_to(flat, &axis) else {
         return Ok(None);
     };
-    if leaning.sign() != Decision::Zero {
+    let signs = [&slant.leaning, &slant.off_it, &slant.across].map(Exact::sign);
+    if !signs
+        .iter()
+        .all(|sign| matches!(sign, Decision::Pos | Decision::Neg | Decision::Zero))
+    {
         return Ok(None);
     }
-    let side = off_it.sign();
+    let [leaning, off_it, across] = signs;
     assert!(
-        side != Decision::Zero,
+        leaning != Decision::Zero || off_it != Decision::Zero,
         "a plane holding the axis is answered by the road through it, asked before this one"
     );
-    if !matches!(side, Decision::Pos | Decision::Neg) {
+    // `across` is `|n × w|²`, zero only for a plane square to the axis. That
+    // road is asked first and answers every such plane whose products are in
+    // range, so one that reaches here is handed on as it was handed on there.
+    if across == Decision::Zero {
         return Ok(None);
     }
 
@@ -3360,7 +3363,7 @@ fn what_a_plane_beside_their_one_axis_leaves(
         ),
     };
     let (Some(chord), Some(squared), Some(half_linear), Some(constant)) = (
-        how_wide_the_chord_is(flat, &axis, &reach, &off_it),
+        how_wide_the_chord_is(&axis, &reach, &slant),
         heights.squared.exactly(),
         heights.half_linear.exactly(),
         heights.constant.exactly(),
@@ -3397,7 +3400,7 @@ fn what_a_plane_beside_their_one_axis_leaves(
             flat,
             &axis,
             &reach,
-            &off_it,
+            &slant,
             height,
             it_only_touches,
         ));
@@ -3425,23 +3428,52 @@ enum WhichRoot {
     AddingTheRoot,
 }
 
-/// `κ₂`, `κ₁` and `κ₀` of `k(t) = (n·n)·g(t) − e²·W`, whose sign at a height
-/// says whether the plane misses, touches or cuts the circle there — or `None`
-/// where a product falls out of range.
+/// How a plane `n·p = d` sits to an axis `o + s·w`, each number exactly.
+struct HowAPlaneSits {
+    /// `k = n·w`, zero where the plane is parallel to the axis.
+    leaning: Exact,
+    /// `e = n·o − d`, how far the axis's stored point is in front of the
+    /// plane, times `‖n‖`.
+    off_it: Exact,
+    /// `(n·n)W − k²`, which is `|n × w|²`: zero where the plane is square to
+    /// the axis and above zero everywhere else.
+    across: Exact,
+}
+
+/// How `flat` sits to `axis`, or `None` where a product falls out of range.
+fn how_the_plane_sits_to(flat: &Plane, axis: &AnAxis) -> Option<HowAPlaneSits> {
+    let normal = flat.normal().components();
+    let leaning = Exact::dot_of(normal, axis.along)?;
+    let across = Exact::dot_of(normal, normal)?
+        .times(&Exact::dot_of(axis.along, axis.along)?)?
+        .minus(&leaning.times(&leaning)?);
+    Some(HowAPlaneSits {
+        leaning,
+        off_it: how_far_a_plane_is_from(flat, axis.through)?,
+        across,
+    })
+}
+
+/// `κ₂`, `κ₁` and `κ₀` of `K(t) = A·g(t) − (e·W + k·t)²`, for
+/// `A = (n·n)W − k²`, whose sign at a height says whether the plane misses,
+/// touches or cuts the circle there — or `None` where a product falls out of
+/// range.
 fn how_wide_the_chord_is(
-    flat: &Plane,
     axis: &AnAxis,
     reach: &Quadratic,
-    off_it: &Exact,
+    slant: &HowAPlaneSits,
 ) -> Option<[Exact; 3]> {
-    let normal = flat.normal().components();
-    let squared_normal = Exact::dot_of(normal, normal)?;
-    let squared_axis = Exact::dot_of(axis.along, axis.along)?;
-    let scaled = |term: &Term| squared_normal.times(&term.exactly()?);
+    let HowAPlaneSits {
+        leaning,
+        off_it,
+        across,
+    } = slant;
+    let level = off_it.times(&Exact::dot_of(axis.along, axis.along)?)?;
+    let scaled = |term: &Term| across.times(&term.exactly()?);
     Some([
-        scaled(&reach.squared)?,
-        scaled(&reach.half_linear)?,
-        scaled(&reach.constant)?.minus(&off_it.times(off_it)?.times(&squared_axis)?),
+        scaled(&reach.squared)?.minus(&leaning.times(leaning)?),
+        scaled(&reach.half_linear)?.minus(&level.times(leaning)?),
+        scaled(&reach.constant)?.minus(&level.times(&level)?),
     ])
 }
 
