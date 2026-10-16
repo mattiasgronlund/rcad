@@ -28,7 +28,7 @@
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Isometry, Scale, Surface, Vector};
+use rcad_geom::{Axis, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidKey};
 
@@ -155,6 +155,198 @@ fn every_face_of_a_bar_fused_with_a_block_holds_what_the_solid_says() {
         "enough points were answered to mean something: {totals:?}"
     );
     assert_eq!(refused, REFUSED);
+}
+
+/// The notch's wall, asked the same way as the pipe faces above are, once the
+/// block that notches it is turned a few degrees about the bar's own axis
+/// (`docs/decisions.md` §167, row Q1039).
+///
+/// **Only the pipe's faces are asked.** The turned block's own six faces are
+/// trimmed by a different family (`what_a_flat_face_holds` in `holds.rs`),
+/// which this row does not touch; asking them too would not say anything
+/// about the one it does.
+///
+/// Before Q975, a ruling between two patches of one pipe that no flat face of
+/// the solid holds is read against the planes square to `x` or `y` that hold
+/// both its ends exactly. Before the block is turned, its own back face is
+/// one of those square planes, so it is the plane the fuse cut along as well
+/// as the one this fallback finds. Turned, the back face still stands along
+/// the bar's axis — rotating about that axis cannot tip a vertical face over
+/// — so the ruling it cuts is still a vertical line at one fixed point of the
+/// circle, and that point's `x` and `y` are still shared bit for bit between
+/// the ruling's two ends, stored once and reused for both. So the fallback
+/// still finds a plane through it, and this turned notch answers every wall
+/// face the same as the one standing square to the axes does: no refusal.
+#[test]
+fn every_wall_face_of_the_notch_united_holds_what_the_solid_says_with_the_block_turned_a_little() {
+    let bar = Bar {
+        radius: 5.0,
+        axis: [0.0, 0.0],
+        ends: [0.0, 4.0],
+    };
+    let low = [2.0, -2.0, 1.0];
+    let high = [10.0, 2.0, 3.0];
+    let size: [f64; 3] = core::array::from_fn(|axis| high[axis] - low[axis]);
+
+    let turn_axis = Axis::new(
+        Point::new(bar.axis[0], bar.axis[1], 0.0),
+        Vector::new(0.0, 0.0, 1.0),
+    )
+    .expect("the bar's own axis is a fine turning axis");
+    let turn =
+        Isometry::rotation(&turn_axis, 7.0_f64.to_radians()).expect("7 degrees is a finite angle");
+    let placement = turn.compose(&at(low));
+    let placed_back = placement.inverse();
+
+    let inside_the_turned_block = |point: [f64; 3]| {
+        let local = placed_back.apply_to_point(Point::from(point)).coordinates();
+        (0..3).all(|axis| 0.0 < local[axis] && local[axis] < size[axis])
+    };
+
+    let heights: Vec<f64> = [bar.ends[0], bar.ends[1], low[2], high[2]]
+        .into_iter()
+        .flat_map(|z| [z - 0.5, z + 0.5])
+        .chain([(bar.ends[0] + bar.ends[1]) / 2.0])
+        .collect();
+    let pythagorean = [
+        [5.0, 0.0],
+        [4.0, 3.0],
+        [3.0, 4.0],
+        [0.0, 5.0],
+        [-3.0, 4.0],
+        [-4.0, 3.0],
+        [-5.0, 0.0],
+        [-4.0, -3.0],
+        [-3.0, -4.0],
+        [0.0, -5.0],
+        [3.0, -4.0],
+        [4.0, -3.0],
+    ];
+    let turned_points = [10.0, 100.0, 190.0, 280.0, 350.0].map(|degrees: f64| {
+        let radians = degrees * PI / 180.0;
+        [5.0 * radians.cos(), 5.0 * radians.sin()]
+    });
+
+    let mut totals = [0usize; 3];
+    for bar_first in [true, false] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar_solid = bar.build(&mut model);
+        let rectangle = ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [size[0], 0.0],
+            [size[0], size[1]],
+            [0.0, size[1]],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+        let block_solid = model
+            .add_extrusion(&rectangle, size[2], &placement)
+            .expect("a positive height");
+
+        let [one, other] = if bar_first {
+            [bar_solid, block_solid]
+        } else {
+            [block_solid, bar_solid]
+        };
+        let mut log = ProvenanceLog::new();
+        let answer = model
+            .fuse(
+                &[one],
+                &[other],
+                Rule::Union,
+                &Policy::certified(),
+                &mut log,
+            )
+            .unwrap_or_else(|why| panic!("the turned notch's union is refused: {why:?}"));
+        assert!(log.is_empty(), "a certified fuse logs nothing: {log:?}");
+
+        let mut pipe_faces: Vec<(SolidKey, FaceKey)> = Vec::new();
+        for &solid in answer.solids() {
+            for face in model.solid(solid).expect("this model made the key").faces() {
+                if matches!(face.surface(), Surface::Cylinder(_)) {
+                    pipe_faces.push((solid, face.key()));
+                }
+            }
+        }
+        assert!(
+            !pipe_faces.is_empty(),
+            "the notch keeps part of the bar's wall"
+        );
+
+        let mut refusing: Vec<FaceKey> = Vec::new();
+        for [x, y] in pythagorean.into_iter().chain(turned_points) {
+            for &z in &heights {
+                let point = [x, y, z];
+                let clear_of_the_bars_caps =
+                    bar.ends.iter().all(|&end| (point[2] - end).abs() > CLEAR);
+                let local = placed_back.apply_to_point(Point::from(point)).coordinates();
+                let clear_of_the_block = (0..3).all(|axis| {
+                    local[axis].abs() > CLEAR && (local[axis] - size[axis]).abs() > CLEAR
+                });
+                if !clear_of_the_bars_caps || !clear_of_the_block {
+                    continue;
+                }
+
+                let off = [x / bar.radius, y / bar.radius, 0.0];
+                let away = core::array::from_fn(|axis| point[axis] + STEP * off[axis]);
+                let back = core::array::from_fn(|axis| point[axis] - STEP * off[axis]);
+                let inside = |p: [f64; 3]| bar.holds(p) || inside_the_turned_block(p);
+                let on_the_skin = inside(away) != inside(back);
+
+                let mut holding = 0;
+                let mut a_face_refused = false;
+                for &(solid, face) in &pipe_faces {
+                    match holds(&model, solid, face, point) {
+                        Ok(OnAFace::Held) => holding += 1,
+                        Ok(OnAFace::NotHeld) => (),
+                        Ok(other) => panic!(
+                            "bar first {bar_first}: {point:?} is clear of every edge and {face:?} says {other:?}"
+                        ),
+                        Err(named) => {
+                            assert_eq!(named, face, "a refusal names the face asked about");
+                            a_face_refused = true;
+                            if !refusing.contains(&face) {
+                                refusing.push(face);
+                            }
+                        }
+                    }
+                }
+                let expected = usize::from(on_the_skin);
+                let agrees = if a_face_refused {
+                    holding <= expected
+                } else {
+                    holding == expected
+                };
+                assert!(
+                    agrees,
+                    "bar first {bar_first}: {point:?} on the pipe is {} the skin, and {holding} faces hold it",
+                    if on_the_skin { "on" } else { "off" }
+                );
+                if !a_face_refused {
+                    if on_the_skin {
+                        totals[0] += 1;
+                    } else {
+                        totals[1] += 1;
+                    }
+                }
+            }
+        }
+        totals[2] += refusing.len();
+        println!(
+            "the notch turned, union, bar first {bar_first}: {} wall faces, {} refused",
+            pipe_faces.len(),
+            refusing.len()
+        );
+    }
+    println!(
+        "in all: {} points held, {} points not held, {} wall faces refused",
+        totals[0], totals[1], totals[2]
+    );
+    assert_eq!(
+        totals,
+        [220, 86, 0],
+        "a turned back face still stands along the bar's axis, so no wall face should refuse"
+    );
 }
 
 /// What one fuse's faces said, counted.
