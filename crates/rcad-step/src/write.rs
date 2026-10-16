@@ -997,7 +997,12 @@ impl Writing {
     /// ([`where_a_plane_crosses_a_pipe`]), which makes it the circle the model's
     /// edge is walked along. **That point rounds**, so the pipe read back runs
     /// through it and not along the model's line, and the reader's own walk of
-    /// it can land a few ulps away. The check above bounds how far: the faces
+    /// it can land a few ulps away. Another centre would not always do better:
+    /// for a disc drawn on a bar's top, turned about `y` by `5` and moved by
+    /// `(3, 5, 10)`, no point an `f64` holds lies on the model's line where the
+    /// top holds it
+    /// (`no_centre_on_a_turned_and_moved_discs_own_pipe_axis_is_one_its_top_holds`
+    /// in `tests/fuzzing/writer.rs`). The check above bounds how far: the faces
     /// hold the circle only where its centre is within the reader's allowance of
     /// them and its axis square to them to within it, and the walk moves the
     /// centre along the axis by how far off the face it is.

@@ -297,6 +297,13 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// answers whether every number came back the same bits, which is what lets
 /// [`read_back_and_compared`] compare the solid's measurement bit for bit too.
 ///
+/// **A drawn circle's pipe can come back with another origin and not be a
+/// mismatch.** [`the_same_run`] calls it the same pipe where its origin is on
+/// the kernel's line or where the kernel's walk centres the circle, and that
+/// does not clear the answer, so an unplaced solid with such a pipe is still
+/// measured bit for bit. Whether a pipe that leans and starts off its flat
+/// face can then measure an ulp off has not been run.
+///
 /// A plane is the one surface whose numbers are not written as they are
 /// stored. The writer picks the point it writes so that the reader's offset
 /// comes back the same bits (§313). The normal it writes as stored, and the
@@ -616,18 +623,30 @@ fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -
 /// and the radius exactly as the kernel wrote them — checked before the file
 /// is written, by asking the same constructors the reader will. So two `and`
 /// pipes are the same pipe when their directions and radii match to the bit
-/// and the two origins sit on the one line between them — the origin delta's
-/// cross product with the direction is exactly zero, not a point-for-point
-/// equality, since a cylinder's own axis origin can sit anywhere along its
-/// line. **Under a turn and a move together, the moved origin can round off
-/// that line by a few ulps** — a division and a multiply, each rounded once
-/// more than the kernel's own origin was. Q2135 takes that case; this file's
-/// pins turn alone or move alone, never both at once. Asking instead whether
-/// `corners` — the coedge's own two ends — are certified `Decision::Zero` on
-/// the read-back pipe's skin looks more principled, the same test
-/// `picks_the_real_ends` below runs for a picker, but it is the wrong tool
-/// here: those corners come from an arc built by turning the kernel's own
-/// circle, and the kernel's own pipe does not certify them `Zero` either.
+/// and the origin read back is one of two places. Either it sits on the
+/// kernel's own line — the origin delta's cross product with the direction is
+/// exactly zero, not a point-for-point equality, since a cylinder's own axis
+/// origin can sit anywhere along its line. Or, where the arc's plane is to
+/// hand, it is to the bit where `rcad_geom::walk` centres the circle that
+/// plane crosses the kernel's pipe in ([`where_the_walk_centres_a_circle`]),
+/// which is the point the writer works out and writes.
+///
+/// **Under a turn and a move together, that point rounds off the kernel's
+/// line** — a division and a multiply, each rounded once more than the
+/// kernel's own origin was — and no other centre would do: for the disc
+/// turned about `y` by `5` and moved by `(3, 5, 10)`, no point an `f64` holds
+/// lies exactly on the kernel's line where the top holds it
+/// ([`no_centre_on_a_turned_and_moved_discs_own_pipe_axis_is_one_its_top_holds`]).
+/// Comparing what the two pipes walk, bit for bit, does not call them the
+/// same either: the reader's walk centres its circle again from the origin it
+/// read back, so its points need not land on the kernel's.
+///
+/// Asking instead whether `corners` — the coedge's own two ends — are
+/// certified `Decision::Zero` on the read-back pipe's skin looks more
+/// principled, the same test `picks_the_real_ends` below runs for a picker,
+/// but it is the wrong tool here: those corners come from an arc built by
+/// turning the kernel's own circle, and the kernel's own pipe does not
+/// certify them `Zero` either.
 fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: Surface) -> bool {
     let same_bits = || format!("{here:?}") == format!("{back:?}");
     let (
@@ -668,10 +687,17 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: 
         })
     };
     let same_pipe = |here: &Cylinder, back: &Cylinder| {
+        let read_back = back.axis().origin();
+        let on_the_kernels_line =
+            (read_back - here.axis().origin()).cross(here.axis().direction()) == Vector::zero();
+        let where_the_kernels_walk_centres_it = the_arcs_plane
+            .and_then(|flat| where_the_walk_centres_a_circle(&flat, here))
+            .is_some_and(|centre| {
+                centre.coordinates().map(f64::to_bits) == read_back.coordinates().map(f64::to_bits)
+            });
         here.axis().direction() == back.axis().direction()
             && here.radius() == back.radius()
-            && (back.axis().origin() - here.axis().origin()).cross(here.axis().direction())
-                == Vector::zero()
+            && (on_the_kernels_line || where_the_kernels_walk_centres_it)
     };
     let same_and = match (here_and, back_and) {
         (Surface::Cylinder(here_pipe), Surface::Cylinder(back_pipe)) => {
@@ -689,6 +715,22 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: 
             }
             (here, back) => format!("{here:?}") == format!("{back:?}"),
         })
+}
+
+/// Where `rcad_geom::walk` centres the circle `flat` crosses `pipe` in: the
+/// pipe's own origin moved up its axis to `flat`, in plain `f64`, as
+/// `walk.rs`'s `where_a_plane_cuts_a_pipe` works it out and the writer's
+/// `where_a_plane_crosses_a_pipe` too. `None` where the axis runs along
+/// `flat` and meets it nowhere.
+fn where_the_walk_centres_a_circle(flat: &Plane, pipe: &Cylinder) -> Option<Point> {
+    let along = pipe.axis().direction();
+    let leans = flat.normal().dot(along);
+    if leans == 0.0 {
+        return None;
+    }
+    let from = pipe.axis().origin();
+    let up = (flat.offset() - flat.normal().dot(from - Point::origin())) / leans;
+    Some(from + along * up)
 }
 
 /// Whether `solid` carries no placement at all: every shell it uses sits at
@@ -2185,21 +2227,30 @@ fn a_bar_with_a_disc_drawn_by_a_pipe_from(
 
 /// Q1293's and-Cylinder arm: a disc drawn by a pipe whose own axis starts
 /// off the disc's own plane — at the bar's floor, not its centre — comes
-/// back the same at no placement, moved alone and turned alone. The writer
-/// moves the written `Cylinder`'s axis to where it meets the flat face
-/// (`Writing::an_arc_of_a_circle_on_a_flat_face`, `write.rs`), so the
-/// reader's pipe keeps that moved origin; [`the_same_run`]'s and-Cylinder arm
-/// must still call the two pipes the same because their directions and radii
-/// match and the two origins sit on the one line between them.
+/// back the same at no placement, moved alone, turned alone, and turned and
+/// moved. The writer moves the written `Cylinder`'s axis to where it meets
+/// the flat face (`Writing::an_arc_of_a_circle_on_a_flat_face`, `write.rs`),
+/// so the reader's pipe keeps that moved origin; [`the_same_run`]'s
+/// and-Cylinder arm must still call the two pipes the same because their
+/// directions and radii match and the origin read back is where the kernel's
+/// own walk centres the circle.
 ///
-/// A turn and a move together are left out: Q2135 takes the case where the
-/// moved origin itself lands a few ulps off the kernel's own line.
+/// Turned and moved, that centre is off the kernel's line through
+/// `(3, 5, 10)`, and no point an `f64` holds lies on that line where the top
+/// holds it
+/// ([`no_centre_on_a_turned_and_moved_discs_own_pipe_axis_is_one_its_top_holds`]).
 #[test]
 fn a_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file() {
     let moved_alone = Isometry::translation(Vector::new(3.0, 5.0, 10.0)).expect("a finite offset");
     let turned_alone =
         Isometry::rotation(&Axis::y(), 5.0).expect("a finite angle about a unit axis");
-    for placement in [Isometry::identity(), moved_alone, turned_alone] {
+    let turned_and_moved = moved_alone.compose(&turned_alone);
+    for placement in [
+        Isometry::identity(),
+        moved_alone,
+        turned_alone,
+        turned_and_moved,
+    ] {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let solid =
             a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
@@ -2215,6 +2266,288 @@ fn a_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file() {
             "{placement:?}: {reached:?}, {:?}",
             rcad_step::write(&model, "a disc drawn by a pipe off its own plane").err()
         );
+    }
+}
+
+/// The disc of [`a_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file`]
+/// under each of the first 300 movements [`a_movement`] draws, which is how
+/// the fuzzer places a solid: every one comes back the same. Until Q2135, a
+/// turn off `z` together with a move could panic with a different edge run.
+#[test]
+fn every_turned_disc_drawn_by_a_pipe_off_its_top_comes_back_from_its_own_file() {
+    for seed in 0..300 {
+        let placement = a_movement(&mut Draw::new(seed));
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let solid =
+            a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
+                .expect("a bar with a disc drawn by a pipe off its own plane fits this model");
+        model
+            .place_solid(solid, &placement)
+            .expect("the key came from this model");
+        let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+        let reached = one_model_decoded_and_written(&bytes);
+        assert_eq!(
+            (reached.came_back_the_same, reached.solids_the_same),
+            (1, 1),
+            "{seed}, {placement:?}: {reached:?}"
+        );
+    }
+}
+
+/// **The writer cannot write the kernel's own pipe for the turned and moved
+/// disc**, which is why [`the_same_run`] takes the origin it reads back at
+/// where the kernel's walk centres the circle, and not only on the kernel's
+/// line (`docs/decisions.md` §16.10).
+///
+/// The file names the pipe by a `CIRCLE`, and the reader builds the pipe
+/// through the circle's centre, with the axis and radius it was written with,
+/// and names the run by it only where the top holds that centre: within
+/// `16` roundings of the largest number in the bound (`brep.rs`'s
+/// `a_surface_holds_the_circle`). So the one way to bring the kernel's pipe
+/// back is a centre an `f64` holds, exactly on the kernel's line, that close
+/// to the top. Searched here with four times that room, along the whole
+/// stretch of the line it allows, in integers: for the disc turned about `y`
+/// by `5` and moved by `(3, 5, 10)` there is no such point, and of the 86
+/// among the first 300 movements of
+/// [`every_turned_disc_drawn_by_a_pipe_off_its_top_comes_back_from_its_own_file`]
+/// whose centre lands off the line, 80 have none.
+#[test]
+fn no_centre_on_a_turned_and_moved_discs_own_pipe_axis_is_one_its_top_holds() {
+    let the_rows_disc = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+        .expect("a finite offset")
+        .compose(&Isometry::rotation(&Axis::y(), 5.0).expect("a finite angle about a unit axis"));
+    assert_eq!(
+        centres_on_the_drawn_pipes_own_axis_its_top_could_hold(&the_rows_disc),
+        Some(Vec::new())
+    );
+    let (mut off_the_line, mut with_none) = (0, 0);
+    for seed in 0..300 {
+        let placement = a_movement(&mut Draw::new(seed));
+        let Some(centres) = centres_on_the_drawn_pipes_own_axis_its_top_could_hold(&placement)
+        else {
+            continue;
+        };
+        off_the_line += 1;
+        with_none += usize::from(centres.is_empty());
+    }
+    println!(
+        "{off_the_line} of 300 movements write a centre off the kernel's line, and {with_none} \
+         of those have no centre on it that the top could hold"
+    );
+    assert_eq!((off_the_line, with_none), (86, 80));
+}
+
+/// Every point an `f64` holds that lies exactly on the axis of the drawn
+/// pipe of [`a_bar_with_a_disc_drawn_by_a_pipe_from`] placed by `placement`,
+/// close enough to its top for the top to hold it, or `None` where the
+/// centre the writer works out lies on that axis in `f64` already.
+fn centres_on_the_drawn_pipes_own_axis_its_top_could_hold(
+    placement: &Isometry,
+) -> Option<Vec<Point>> {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, 0.0), 1.0)
+        .expect("a bar with a disc drawn by a pipe off its own plane fits this model");
+    model
+        .place_solid(solid, placement)
+        .expect("the key came from this model");
+    let (pipe, top) = the_drawn_pipe_and_the_top_it_is_drawn_on(&model);
+    let (from, along) = (pipe.axis().origin(), pipe.axis().direction());
+    let centre =
+        where_the_walk_centres_a_circle(&top, &pipe).expect("the drawn pipe crosses its top");
+    if (centre - from).cross(along) == Vector::zero() {
+        return None;
+    }
+    let leans = top.normal().dot(along);
+    let up = (centre - from).dot(along) / along.dot(along);
+    let largest = centre
+        .largest_coordinate_magnitude()
+        .max(pipe.radius())
+        .max(top.offset().abs());
+    let room = 4.0 * 16.0 * rcad_geom::NEAREST_F64_POINT_ROUNDOFF * largest / leans.abs();
+    Some(
+        points_an_f64_holds_on_the_line_near(from, along, up, room)
+            .expect("the room spans few enough f64s to try each"),
+    )
+}
+
+/// The pipe that draws the disc of [`a_bar_with_a_disc_drawn_by_a_pipe_from`],
+/// where `model` placed it, and the plane of the flat face it is drawn on.
+fn the_drawn_pipe_and_the_top_it_is_drawn_on(model: &Model) -> (Cylinder, Plane) {
+    the_one_solid(model)
+        .faces()
+        .find_map(|face| {
+            let Surface::Plane(flat) = face.surface() else {
+                return None;
+            };
+            face.wires().flat_map(WireView::coedges).find_map(|coedge| {
+                let EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Cylinder(pipe),
+                    ..
+                } = coedge.edge().run()
+                else {
+                    return None;
+                };
+                Some((pipe, flat))
+            })
+        })
+        .expect("a disc drawn by a pipe has an edge where the pipe crosses its flat face")
+}
+
+/// Every point an `f64` holds that lies exactly on the line `from + t·along`
+/// for some `t` within `band` of `near`, worked out in integers; `None` where
+/// there are more than a million to try along the coordinate that has
+/// fewest, or a product outgrows an `i128`.
+///
+/// Each `f64` the line's coordinate `i` takes in the band names one `t`,
+/// and the point at that `t` is one an `f64` holds when every other
+/// coordinate `from_j + (x − from_i)·along_j / along_i` is an `f64` too. So
+/// one coordinate is walked `f64` by `f64` and the others are tested, which
+/// finds every such point there is.
+fn points_an_f64_holds_on_the_line_near(
+    from: Point,
+    along: Vector,
+    near: f64,
+    band: f64,
+) -> Option<Vec<Point>> {
+    let [from, along] = [from.coordinates(), along.components()];
+    let how_many_along = |i: usize| {
+        let ends = [near - band, near + band].map(|t| from[i] + t * along[i]);
+        let nearest_nought = if ends[0].signum() == ends[1].signum() {
+            ends[0].abs().min(ends[1].abs())
+        } else {
+            0.0
+        };
+        (ends[1] - ends[0]).abs() / (nearest_nought.next_up() - nearest_nought)
+    };
+    let walked = (0..3)
+        .filter(|&i| along[i] != 0.0)
+        .min_by(|&a, &b| how_many_along(a).total_cmp(&how_many_along(b)))
+        .expect("a direction is not nothing");
+    let ends = [near - band, near + band].map(|t| from[walked] + t * along[walked]);
+    let [low, high] = [
+        ends[0].min(ends[1]).next_down(),
+        ends[0].max(ends[1]).next_up(),
+    ];
+    let mut points = Vec::new();
+    let mut x = low;
+    let mut tried = 0;
+    while x <= high {
+        tried += 1;
+        if tried > 1_000_000 {
+            return None;
+        }
+        if ((x - from[walked]) / along[walked] - near).abs() > band {
+            x = x.next_up();
+            continue;
+        }
+        let mut point = [0.0; 3];
+        point[walked] = x;
+        let mut held = true;
+        for other in (0..3).filter(|&j| j != walked) {
+            match the_coordinate_there(from, along, walked, x, other)? {
+                Some(value) => point[other] = value,
+                None => {
+                    held = false;
+                    break;
+                }
+            }
+        }
+        if held {
+            points.push(Point::new(point[0], point[1], point[2]));
+        }
+        x = x.next_up();
+    }
+    Some(points)
+}
+
+/// Coordinate `other` of the point on the line where coordinate `walked` is
+/// `x`, as `Some(Some(value))` where an `f64` holds it exactly, `Some(None)`
+/// where none does, and `None` where a product outgrows an `i128`.
+fn the_coordinate_there(
+    from: [f64; 3],
+    along: [f64; 3],
+    walked: usize,
+    x: f64,
+    other: usize,
+) -> Option<Option<f64>> {
+    let gone = Dyadic::of(x).plus(Dyadic::of(-from[walked]))?;
+    let [over, by] = [Dyadic::of(along[walked]), Dyadic::of(along[other])];
+    let top = gone.whole.checked_mul(by.whole)?;
+    if top % over.whole != 0 {
+        return Some(None);
+    }
+    let moved = Dyadic {
+        whole: top / over.whole,
+        power: gone.power + by.power - over.power,
+    };
+    Some(moved.plus(Dyadic::of(from[other]))?.as_f64())
+}
+
+/// `whole · 2^power`, exactly.
+#[derive(Clone, Copy)]
+struct Dyadic {
+    whole: i128,
+    power: i32,
+}
+
+impl Dyadic {
+    fn of(value: f64) -> Self {
+        assert!(value.is_finite(), "{value} is a number");
+        if value == 0.0 {
+            return Self { whole: 0, power: 0 };
+        }
+        let bits = value.to_bits();
+        let stored = i32::try_from((bits >> 52) & 0x7ff).expect("eleven bits");
+        let fraction = i128::from(bits & ((1 << 52) - 1));
+        let (whole, power) = if stored == 0 {
+            (fraction, -1074)
+        } else {
+            (fraction | (1 << 52), stored - 1075)
+        };
+        let signed = if bits >> 63 == 1 { -whole } else { whole };
+        Self {
+            whole: signed,
+            power,
+        }
+        .reduced()
+    }
+
+    fn reduced(self) -> Self {
+        if self.whole == 0 {
+            return Self { whole: 0, power: 0 };
+        }
+        let zeros = self.whole.trailing_zeros();
+        Self {
+            whole: self.whole >> zeros,
+            power: self.power + i32::try_from(zeros).expect("under 128"),
+        }
+    }
+
+    fn plus(self, other: Self) -> Option<Self> {
+        let power = self.power.min(other.power);
+        let lifted = |number: Self| {
+            let shift = u32::try_from(number.power - power).ok()?;
+            if shift > 120 {
+                return None;
+            }
+            number.whole.checked_mul(1_i128 << shift)
+        };
+        Some(
+            Self {
+                whole: lifted(self)?.checked_add(lifted(other)?)?,
+                power,
+            }
+            .reduced(),
+        )
+    }
+
+    fn as_f64(self) -> Option<f64> {
+        let bits = 128 - self.whole.unsigned_abs().leading_zeros();
+        let fits = self.whole == 0
+            || (bits <= 53
+                && self.power >= -1074
+                && self.power + i32::try_from(bits).expect("under 129") <= 1024);
+        fits.then(|| self.whole as f64 * 2_f64.powi(self.power))
     }
 }
 
