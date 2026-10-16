@@ -2703,11 +2703,16 @@ fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
         .faces()
         .map(|face| (face.key(), the_smallest_radius_it_bends_at(&face.surface())))
         .collect();
+    let flat_faces: HashMap<FaceKey, (Plane, Vec<u32>)> = view
+        .faces()
+        .filter_map(|face| {
+            let plane = *face.surface().as_plane()?;
+            Some((face.key(), (plane, the_corners_it_holds(face, mesh))))
+        })
+        .collect();
     let mut hidden = 0.0;
+    let mut furthest_off_a_plane = 0.0f64;
     for triangle in mesh.triangles() {
-        let Some(radius) = radius_of[&triangle.face()] else {
-            continue;
-        };
         let [a, b, c] = triangle
             .corners()
             .map(|corner| mesh.points()[corner as usize]);
@@ -2715,6 +2720,15 @@ fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
         if area == 0.0 {
             continue;
         }
+        let Some(radius) = radius_of[&triangle.face()] else {
+            let (plane, held) = flat_faces
+                .get(&triangle.face())
+                .expect("a face that does not bend lies on a plane");
+            let off = how_far_the_points_stray_off(mesh, triangle.corners(), plane, held);
+            hidden += off * area;
+            furthest_off_a_plane = furthest_off_a_plane.max(off);
+            continue;
+        };
         if radius == 0.0 {
             return None;
         }
@@ -2724,6 +2738,9 @@ fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
         } else {
             f64::INFINITY
         };
+    }
+    if furthest_off_a_plane > 0.0 {
+        hidden += furthest_off_a_plane * deviation * rim_of_the_flat_faces(mesh, &flat_faces);
     }
     Some(hidden)
 }
@@ -2740,6 +2757,93 @@ fn the_smallest_radius_it_bends_at(surface: &Surface) -> Option<f64> {
         Surface::Cone(_) => Some(0.0),
         _ => Some(0.0),
     }
+}
+
+/// Which entries of the mesh are `face`'s own corners, which the mesh holds
+/// exactly where the model does, as [`Mesh::point_at_vertex`] says.
+fn the_corners_it_holds(face: FaceView<'_>, mesh: &Mesh) -> Vec<u32> {
+    face.wires()
+        .flat_map(|wire| wire.coedges())
+        .map(|coedge| {
+            mesh.point_at_vertex(coedge.start().key())
+                .expect("every corner of the solid has its point in the mesh")
+        })
+        .collect()
+}
+
+/// How far the furthest of `corners` lies off `plane`, leaving out the ones
+/// `held`, rounded up: `measure.rs`'s charge for one triangle rather than one
+/// face, so never more than it.
+///
+/// Worked out exactly, as `measure.rs` works it out and for its reason:
+/// [`Plane::signed_distance_to`]'s own rounding at coordinates of `4` is eight
+/// times the `4.3e-16` the caps of a sliver of ring stray. Each product of the
+/// normal and a coordinate is kept with what rounding it lost, so the sum less
+/// the offset is `n · p − o` exactly, and adding up the sizes of its entries,
+/// rounding up, bounds it. A turned normal is a unit to within
+/// [`Plane::NORMAL_LENGTH_ROUNDOFF`], which the last factor covers.
+fn how_far_the_points_stray_off(
+    mesh: &Mesh,
+    corners: [u32; 3],
+    plane: &Plane,
+    held: &[u32],
+) -> f64 {
+    let normal = plane.normal().components();
+    let mut furthest = 0.0f64;
+    for corner in corners {
+        if held.contains(&corner) {
+            continue;
+        }
+        let point = mesh.points()[corner as usize];
+        let mut height = vec![-plane.offset()];
+        for (along, at) in normal.into_iter().zip(point.coordinates()) {
+            let (product, lost) = two_product(along, at);
+            let mut sum = vec![0.0; height.len() + 2];
+            let used = expansion_sum(&height, &[lost, product], &mut sum);
+            sum.truncate(used);
+            height = sum;
+        }
+        let size = height
+            .iter()
+            .fold(0.0, |total: f64, entry| rounded_up(total + entry.abs()));
+        furthest = furthest.max(size);
+    }
+    rounded_up(furthest * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF))
+}
+
+/// The next `f64` up from a sum of sizes, which may have rounded down; zero
+/// stays zero, since only sizes that were all zero sum to it.
+fn rounded_up(sum: f64) -> f64 {
+    if sum == 0.0 { 0.0 } else { sum.next_up() }
+}
+
+/// The total length of the mesh sides where a flat face meets another face,
+/// counted once for each flat face along a side, as `measure.rs` counts it:
+/// the inscribed outline of a flat face is short of its curved rim by a
+/// segment per side, each within the deviation of that side.
+fn rim_of_the_flat_faces(mesh: &Mesh, flat_faces: &HashMap<FaceKey, (Plane, Vec<u32>)>) -> f64 {
+    let mut first_seen: HashMap<(u32, u32), FaceKey> = HashMap::new();
+    let mut rim = 0.0;
+    for triangle in mesh.triangles() {
+        let [first, second, third] = triangle.corners();
+        for (from, to) in [(first, second), (second, third), (third, first)] {
+            let side = (from.min(to), from.max(to));
+            let Some(&already) = first_seen.get(&side) else {
+                first_seen.insert(side, triangle.face());
+                continue;
+            };
+            if already == triangle.face() {
+                continue;
+            }
+            let length = mesh.points()[from as usize].distance_to(mesh.points()[to as usize]);
+            for face in [already, triangle.face()] {
+                if flat_faces.contains_key(&face) {
+                    rim += length;
+                }
+            }
+        }
+    }
+    rim
 }
 
 /// Whether every point of the mesh lies within a rounding of one plane, so
