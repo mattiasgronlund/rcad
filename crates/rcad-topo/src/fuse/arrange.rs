@@ -83,8 +83,8 @@ use rcad_predicates::expansion::{
     difference_of_two_products, expansion_sign, expansion_sum, product_is_exact, scale_expansion,
 };
 use rcad_predicates::{
-    Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
-    ProvenanceLog, orient2d, orient3d, orient3d_of_points,
+    Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
+    ProvenanceLog, Record, orient2d, orient3d, orient3d_of_points,
 };
 
 use smallvec::SmallVec;
@@ -3459,6 +3459,15 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), since
     /// a fold can move a node or bring one onto a loop, and the order is asked
     /// again after it.
+    ///
+    /// **Three meets that four surfaces make at one point are taken as one at
+    /// once** ([`Arrangement::take_each_sliver_of_three_meets_as_one_point`]).
+    /// Asked a pair at a time, two of them were joined and the third proved
+    /// apart from both, so one crossing met another twice a hair apart and the
+    /// face's cells could not be told apart (Q2133). So each pair of
+    /// neighbours along a crossing whose boxes may be no further apart than
+    /// the policy's wobble is gathered while the order is asked, and the three
+    /// are looked for among those pairs once every crossing is done.
     fn merge_points_that_are_one_point(
         &mut self,
         policy: &Policy,
@@ -3468,6 +3477,7 @@ impl<'f> Arrangement<'f> {
             let on_each = self.the_nodes_on_each_crossing();
             self.count_each_loop_from_the_node_round_its_start(&on_each);
             let mut same = Sameness::of(self.nodes.len());
+            let mut near = Vec::new();
             for (crossing, on_it) in on_each.iter().enumerate() {
                 if !self.crossings[crossing].reaches_the_face
                     || self.either_way_round_cuts_the_same_arcs(crossing, on_it)?
@@ -3476,13 +3486,13 @@ impl<'f> Arrangement<'f> {
                 }
                 let order = self.nodes_along(crossing, on_it, policy, log)?;
                 for pair in order.windows(2) {
-                    match self.order_along(crossing, pair[0], pair[1], policy, log)? {
-                        Decision::Zero => same.join(pair[0], pair[1]),
+                    let [one, next] = [pair[0], pair[1]];
+                    match self.order_along(crossing, one, next, policy, log)? {
+                        Decision::Zero => same.join(one, next),
                         Decision::Pos => {}
                         Decision::Neg => unreachable!(
                             "nodes_along proved this pair the other way round: \
-                             {} then {} on crossing {crossing}",
-                            pair[0], pair[1]
+                             {one} then {next} on crossing {crossing}"
                         ),
                         // `order_along` asks under the policy, so an undecided
                         // pair left as the error at the `?` above.
@@ -3491,8 +3501,16 @@ impl<'f> Arrangement<'f> {
                         }
                         other => panic!("a decision nothing here knows: {other:?}"),
                     }
+                    let apart = the_furthest_two_boxes_may_be_apart(
+                        self.nodes[one].point,
+                        self.nodes[next].point,
+                    );
+                    if policy.wobble_is_acceptable(apart) {
+                        near.push((crossing, [one, next]));
+                    }
                 }
             }
+            self.take_each_sliver_of_three_meets_as_one_point(&near, &mut same, policy, log);
             if !same.joined_anything() {
                 return Ok(());
             }
@@ -3680,6 +3698,149 @@ impl<'f> Arrangement<'f> {
             }
         }
         on_each
+    }
+
+    /// Take each sliver cell of three meets of four surfaces as one point.
+    ///
+    /// `near` is every pair of nodes next to each other along a crossing, with
+    /// that crossing, that may be no further apart than the policy's wobble.
+    /// Three nodes each two of which are such a pair, along three different
+    /// crossings, are the corners of a cell of three sides no longer than the
+    /// wobble. Where the face's surface and three others meet at one point,
+    /// the face's crossings with those three meet two at a time in three
+    /// places stored a few `1e-16` apart, and they make such a cell.
+    /// [`Arrangement::take_three_meets_as_one_point`] says which cells are
+    /// that, and joins them.
+    ///
+    /// The pairs are written down both ways round and sorted, so the
+    /// neighbours of a node are one run of the list, and each three is found
+    /// once, from its lowest node.
+    fn take_each_sliver_of_three_meets_as_one_point(
+        &self,
+        near: &[(usize, [usize; 2])],
+        same: &mut Sameness,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) {
+        let mut ends: Vec<(usize, usize, usize)> = near
+            .iter()
+            .flat_map(|&(crossing, [one, other])| [(one, other, crossing), (other, one, crossing)])
+            .collect();
+        ends.sort_unstable();
+        let from = |node: usize| {
+            let first = ends.partition_point(|&(at, ..)| at < node);
+            let past = ends.partition_point(|&(at, ..)| at <= node);
+            &ends[first..past]
+        };
+        for &(one, two, first) in &ends {
+            if two < one {
+                continue;
+            }
+            for &(_, three, last) in from(one) {
+                if three <= two || last == first {
+                    continue;
+                }
+                let between = from(two).iter().find(|&&(_, end, crossing)| {
+                    end == three && crossing != first && crossing != last
+                });
+                if let Some(&(_, _, second)) = between {
+                    self.take_three_meets_as_one_point(
+                        [one, two, three],
+                        [first, second, last],
+                        same,
+                        policy,
+                        log,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Join the three `meets` round a sliver cell, each two of them neighbours
+    /// along one of `crossings`, when they are the meets of four surfaces at
+    /// one point and the policy takes them as one point (§417.7). The record
+    /// is how far apart any two of the three boxes may be, a length.
+    /// [`Policy::take_as_one_point`] takes nothing and logs nothing under a
+    /// certified policy, so only a tolerant fuse ever joins here.
+    ///
+    /// **Four different surfaces, and every name of each meet a meet of three
+    /// of them**: the face's own surface and the three partners of
+    /// `crossings`, and each name in a meet's `made_of` and `also`. That is
+    /// the case the rule is for, and it asks for nothing wider.
+    ///
+    /// **The three partners must meet there too**
+    /// ([`the_other_three_meet_there_too`]), within the wobble of all three
+    /// boxes. Only then does each other face through the point see three meets
+    /// of its own there and take them as one, as this face does. A round bar
+    /// notched by a block whose inside corner edge stands on the bar's wall is
+    /// the shape where they do not: the edge runs along the bar's axis a hair
+    /// off the wall (at a radius of `24.32`, outside it, its foot on the cap
+    /// `1.78e-15` from the foot of the ruling the block's face `x = 0.6 r`
+    /// cuts, Q2106), so the wall and the block's two faces share no point, and
+    /// only the cap sees three meets. Joined on the cap alone, the union at a radius of
+    /// `24.32` and a working size of `6.4`, and at `12.8` and `25`, were
+    /// refused `ResultIsNotManifold { count: 1 }` in place of the
+    /// `CannotMeshAFace` they are pinned to.
+    ///
+    /// **At most one of the three is a corner the input had**, since
+    /// [`Arrangement::fold_the_nodes`] refuses two different corners folded
+    /// into one, as an edge with no length. One is let in when every meet it
+    /// already stands for is of the four. Where one of a cube's edges runs
+    /// through the frustum's seam corner on its far rim, the cone's face folds
+    /// one meet into that corner on a first pass, and on the next it sees the
+    /// corner and the other two meets round a sliver. With the corner kept
+    /// out, the cap took the point as one and the cone's face did not, and the
+    /// union was refused `ResultIsNotManifold { count: 1 }` for the cone's rim
+    /// there.
+    fn take_three_meets_as_one_point(
+        &self,
+        meets: [usize; 3],
+        crossings: [usize; 3],
+        same: &mut Sameness,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) {
+        if meets
+            .iter()
+            .all(|&meet| same.leader(meet) == same.leader(meets[0]))
+        {
+            return;
+        }
+        let [one, two, three] = crossings.map(|crossing| self.crossings[crossing].partner);
+        let four = [self.surface, one, two, three];
+        let four_different = (0..4).all(|i| (i + 1..4).all(|j| four[i] != four[j]));
+        let each_a_meet_of_three_of_them = meets.iter().all(|&meet| {
+            let node = &self.nodes[meet];
+            let mut names = node.made_of.iter().chain(&node.also).peekable();
+            names.peek().is_some()
+                && names.all(|(three, _)| three.iter().all(|surface| four.contains(surface)))
+        });
+        let input_corners = meets
+            .iter()
+            .filter(|&&meet| self.nodes[meet].vertex.is_some())
+            .count();
+        if !four_different || !each_a_meet_of_three_of_them || input_corners > 1 {
+            return;
+        }
+        let boxes = meets.map(|meet| self.nodes[meet].point);
+        if !the_other_three_meet_there_too([one, two, three], boxes, policy) {
+            return;
+        }
+        let widest = [[0, 1], [1, 2], [0, 2]]
+            .map(|[one, other]| the_furthest_two_boxes_may_be_apart(boxes[one], boxes[other]))
+            .into_iter()
+            .fold(0.0, f64::max);
+        let record = Record::new(
+            "three meets of four surfaces taken as one point",
+            &boxes,
+            Level::Interval,
+            widest,
+            Measures::Length,
+        );
+        if policy.take_as_one_point(record, log) {
+            same.join(meets[0], meets[1]);
+            same.join(meets[0], meets[2]);
+        }
     }
 
     fn fold_the_nodes(&mut self, same: &mut Sameness) -> Result<()> {
@@ -8704,6 +8865,48 @@ fn prove_the_hinted_order(
         }
     }
     Ok(())
+}
+
+/// Whether the three surfaces a face's three meets are made with, besides the
+/// face's own, are proved to meet at a point within the policy's wobble of
+/// every one of the three `boxes`.
+///
+/// Asked under [`Policy::certified`], into a log of its own: a meet nothing
+/// could place only leaves the three meets apart, which is where they were,
+/// so no tolerant step is taken here that the fuse would have to log.
+fn the_other_three_meet_there_too(
+    others: [Surface; 3],
+    boxes: [PredicatePoint; 3],
+    policy: &Policy,
+) -> bool {
+    let asked = three_planes_faced_the_one_way(others);
+    let Ok(MeetOfThree::At(places)) = meet_of_three_surfaces(
+        [&asked[0], &asked[1], &asked[2]],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) else {
+        return false;
+    };
+    places.iter().any(|&place| {
+        boxes.iter().all(|&node| {
+            policy.wobble_is_acceptable(the_furthest_two_boxes_may_be_apart(place, node))
+        })
+    })
+}
+
+/// The furthest a point of one box can be from a point of the other, rounded
+/// up: `fuse/assemble.rs`'s `how_far_apart_two_boxes_may_be`, which is private
+/// there.
+fn the_furthest_two_boxes_may_be_apart(one: PredicatePoint, other: PredicatePoint) -> f64 {
+    let (one, other) = (one.enclosure(), other.enclosure());
+    let squared: f64 = (0..3)
+        .map(|axis| {
+            let furthest =
+                (one[axis].hi() - other[axis].lo()).max(other[axis].hi() - one[axis].lo());
+            furthest * furthest
+        })
+        .sum();
+    squared.sqrt() * (1.0 + 4.0 * f64::EPSILON)
 }
 
 /// Where a ball's skin pinches to a point, as a box round it.
