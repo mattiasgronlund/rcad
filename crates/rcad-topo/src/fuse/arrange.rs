@@ -9341,9 +9341,12 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// two points an angle `δ` apart round a circle of radius `R`, at an angle `α`
 /// round from the start, are `Rδ` apart and sweep `2R²δ sin²(α/2)`, so over
 /// the chord `2R sin(α/2)` they read `Rδ sin(α/2)`. The wider box's longest
-/// side reads short of it too, since two boxes that only touch hold points as
-/// far apart as the two together span: at the round bar of radius `12.8`
-/// below the wider side is `1.78e-15`, and the two may be `2.51e-15` apart.
+/// side is not it either: two boxes that only touch hold points further apart
+/// than either is wide, and a small box in the middle of a wide one holds
+/// none as far apart as the wide one is wide. On the corner-up cube on the
+/// cone's apex at 2 mm the widest bound this arm files is `9.9e-15`, where the
+/// widest side is `8.0e-15`; on the round bar below, at radius `8`, it files
+/// `1.26e-15` where the wider side is `1.78e-15`.
 /// A round bar of radius `8` notched by a block whose corner edge stands on
 /// its wall has the feet of two rulings a hair apart on each cap, in boxes
 /// `1.8e-15` wide that overlap, and at working size `1` every fuse of the two
