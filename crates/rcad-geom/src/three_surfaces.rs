@@ -1738,6 +1738,9 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     {
         return Ok(answer);
     }
+    if let Some(answer) = what_a_plane_beside_a_pipe_leaves(flat, one, other) {
+        return Ok(answer);
+    }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
@@ -4678,6 +4681,117 @@ fn squared(value: Interval) -> Interval {
 fn both(one: Interval, other: Interval) -> Interval {
     Interval::new(one.lo().max(other.lo()), one.hi().min(other.hi()))
         .unwrap_or_else(|_| panic!("two boxes that each hold one root miss: {one:?} and {other:?}"))
+}
+
+/// **A plane that reaches a pipe only far along it, past where a ball, a
+/// second pipe or a cone could share a point with the pipe**: nothing, or
+/// `None` where that is not proved.
+///
+/// A plane a rounding off parallel to a bar's axis and farther from it than
+/// its radius reaches the bar only very far along it, and a chamfer cone on
+/// the bar is as wide as that there. [`what_a_plane_along_a_pipe_leaves`]
+/// takes only a plane exactly parallel, and the band roads give a cone cut by
+/// a plane that steep no outer edge, so neither reaches it.
+///
+/// **Where the plane reaches the pipe.** Write the pipe as the points
+/// `p = o + τw + v`, for `v` square to `w` and `r` long, and the plane as
+/// `n·p = d`, with `N = n·n`, `k = n·w` and `δ = n·o − d`. On the plane
+/// `τk = −(δ + n·v)`, and `|n·v|` is at most `r√N`. So where `|δ|` is more
+/// than `r√N` — the plane keeps off the pipe where it passes `o` — every point
+/// the two share has `|τ||k| ≥ m` for `m = |δ| − r√N`.
+///
+/// **The other surface there.** Write it `Q(p) = p·(Mp) + 2b·p + c`. Along
+/// the pipe, `Q(o + τw + v) = Aτ² + 2βτ + γ` for `A = w·(Mw)`,
+/// `β = (Mw)·o + b·w + (Mw)·v` and `γ = Q(o) + 2(Mo + b)·v + v·(Mv)`. So `|β|`
+/// is at most `B = |(Mw)·o + b·w| + r|Mw|` and `|γ|` at most
+/// `C = |Q(o)| + 2r|Mo + b| + r²|M|`, with `|M|` the root of the sum of its
+/// nine entries squared. Where `|A|m² > 2Bm|k| + Ck²`, `|A|τ² > 2B|τ| + C`
+/// at the nearest `|τ|` the plane reaches, `m/|k|`. That puts it past
+/// `2B/|A|`, where `|A|τ² − 2B|τ| − C` only grows further out. So `Q` has the
+/// sign of `A` everywhere the plane reaches the pipe, and the three share
+/// nothing.
+///
+/// **Every number is proved and none is a tolerance**: `k`, `δ`, `A`, `N` and
+/// the rest are worked out exactly and only then boxed, and each side of the
+/// comparison is taken at its worst end. The side of a block three from a bar
+/// of radius two and its chamfer cone of slope one, all placed by one turn, is
+/// one: `k` is about a rounding, so the side reaches the bar some `10¹⁶` along
+/// it, where the cone is as wide.
+///
+/// It is asked last of all and only ever answers that the three share
+/// nothing, so every triple an earlier road answers keeps its answer.
+fn what_a_plane_beside_a_pipe_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+) -> Option<MeetOfThree> {
+    [(one, other), (other, one)]
+        .into_iter()
+        .any(|(this, that)| match this {
+            Surface::Cylinder(pipe) => {
+                the_plane_reaches_the_pipe_only_off_the_other(flat, pipe, that) == Some(true)
+            }
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_) => false,
+        })
+        .then_some(MeetOfThree::Nowhere)
+}
+
+/// Whether every point `flat` shares with `pipe` is proved off `other`, as
+/// [`what_a_plane_beside_a_pipe_leaves`] proves it, or `None` where `other` is
+/// not a ball, a pipe or a cone, or where a product falls out of range.
+fn the_plane_reaches_the_pipe_only_off_the_other(
+    flat: &Plane,
+    pipe: &Cylinder,
+    other: &Surface,
+) -> Option<bool> {
+    let written = how_a_surface_is_written(other)?;
+    let normal = flat.normal().components();
+    let origin = pipe.axis().origin().coordinates();
+    let leaning = Exact::dot_of(normal, pipe.axis().direction().components())?;
+    let off = how_far_a_plane_is_from(flat, origin)?;
+    let squared_normal = Exact::dot_of(normal, normal)?;
+
+    let along = Exact::of_each(pipe.axis().direction().components());
+    let from = Exact::of_each(origin);
+    let half_linear = &written.half_linear;
+    let towards = rows_times(&written.squared, &along)?;
+    let bend = Exact::dot_of_two_exact(&along, &towards)?;
+    let level = Exact::dot_of_two_exact(&towards, &from)?
+        .plus(&Exact::dot_of_two_exact(half_linear, &along)?);
+    let from_the_origin = rows_times(&written.squared, &from)?;
+    let pull: [Exact; 3] =
+        core::array::from_fn(|axis| from_the_origin[axis].plus(&half_linear[axis]));
+    let linear_at_the_origin = Exact::dot_of_two_exact(half_linear, &from)?;
+    let at_the_origin = Exact::dot_of_two_exact(&from, &from_the_origin)?
+        .plus(&linear_at_the_origin.plus(&linear_at_the_origin))
+        .plus(&written.constant);
+    let mut squared_size = Exact::of(0.0);
+    for row in &written.squared {
+        squared_size = squared_size.plus(&Exact::squared_length_of(row)?);
+    }
+
+    let most = |value: &Exact| {
+        let value = value.enclosure();
+        Interval::exactly(value.lo().abs().max(value.hi().abs()))
+    };
+    let least = |value: &Exact| Interval::exactly(how_far_from_nothing(value.enclosure()));
+    let length =
+        |value: &[Exact; 3]| Some(root_enclosing(Exact::squared_length_of(value)?.enclosure()));
+    let radius = Interval::exactly(pipe.radius());
+    let two = Interval::exactly(2.0);
+    let room = least(&off) - radius * root_enclosing(squared_normal.enclosure());
+    if room.lo() <= 0.0 {
+        return Some(false);
+    }
+    let room = Interval::exactly(room.lo());
+    let tilt = most(&leaning);
+    let sway = most(&level) + radius * length(&towards)?;
+    let spread = most(&at_the_origin)
+        + two * radius * length(&pull)?
+        + radius * radius * root_enclosing(squared_size.enclosure());
+    let held = least(&bend) * room * room;
+    let pushed = two * sway * room * tilt + spread * tilt * tilt;
+    Some(held.lo() > pushed.hi())
 }
 
 /// A line, written as `(through + s · direction) / divided_by`.
