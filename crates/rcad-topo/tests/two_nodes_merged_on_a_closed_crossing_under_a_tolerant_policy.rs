@@ -723,6 +723,39 @@ fn probe_q2082_bar() {
 }
 
 #[test]
+fn probe_q2082_all() {
+    for (radius, size) in [(12.8, 25.0), (12.8, 10.0), (12.8, 100.0), (25.6, 25.0)] {
+        for (rule, bar_first) in EVERY_FUSE {
+            let (model, fused) =
+                a_round_bar_fused_with_a_block_cornered_on_its_wall(radius, size, rule, bar_first);
+            let valid = fused
+                .as_ref()
+                .ok()
+                .map(|_| model.validate(&Policy::tolerant(size), &mut ProvenanceLog::new()));
+            eprintln!(
+                "PROBE bar {radius} {size} {rule:?} {bar_first}: {:?} valid {valid:?}",
+                fused.map(|_| "answer")
+            );
+        }
+    }
+    for (scale, size) in [(0.1, 0.25), (0.8, 2.0), (6.4, 16.0)] {
+        for (rule, first) in EVERY_FUSE {
+            let (model, fused) = a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
+                scale, size, 1.0, rule, first,
+            );
+            let valid = fused
+                .as_ref()
+                .ok()
+                .map(|_| model.validate(&Policy::tolerant(size), &mut ProvenanceLog::new()));
+            eprintln!(
+                "PROBE frustum {scale} {size} {rule:?} {first}: {:?} valid {valid:?}",
+                fused.map(|_| "answer")
+            );
+        }
+    }
+}
+
+#[test]
 fn probe_q2082_frustum() {
     let (_, fused) =
         a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(0.1, 0.25, 1.0, Rule::Union, true);
