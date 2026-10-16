@@ -129,7 +129,17 @@ use fuzzing::writer::{Reached, one_model_decoded_and_written, still_a_model};
 /// `byte_mutate` stand-in that panics, to never draw `Draw::below(8)` as 0, 1
 /// or 2 on the first draw — the one branch that calls `byte_mutate` rather than
 /// drawing only from the seed (§241.1). Found by that check, not chosen by hand.
-const MUTATOR_SEEDS: [u32; 5] = [0, 3, 7, 16, 34];
+///
+/// Was `[0, 3, 7, 16, 34]` before Q1011 added a seventh shape to
+/// `a_drawn_solid`: that shape draws nothing of its own, but the extra arm
+/// shifts how many numbers `a_drawn_solid` draws for some seeds, which moves
+/// where the later `below(8)` draw lands for any corpus entry that does not
+/// decode (`still_a_model` draws a fresh model, and so a solid, before that
+/// draw). Re-run after the shape was added: `0` no longer avoids the
+/// byte-mutation branch on every entry, so it dropped out; `16` and `34` also
+/// dropped, and `8`, `11` and `12` took their place, alongside `3` and `7`,
+/// which still avoid it. Now `[3, 7, 8, 11, 12]`.
+const MUTATOR_SEEDS: [u32; 5] = [3, 7, 8, 11, 12];
 
 /// Every checked-in seed, mutated by each of [`MUTATOR_SEEDS`], still decodes
 /// into a `Model`.
@@ -174,6 +184,13 @@ fn every_seed_mutated_by_a_fixed_seed_still_decodes_into_a_model() {
 /// [`MUTATOR_SEEDS`] is chosen to miss. Found by running the same check the
 /// other way: for each of these five, all 1190 corpus entries take that
 /// branch, decoded or not.
+///
+/// Re-run after Q1011's seventh shape, for the same reason [`MUTATOR_SEEDS`]
+/// was — the shape draws nothing of its own, but the extra arm can still
+/// shift how many numbers an undecoded entry's `a_drawn_solid` draws before
+/// the later `below(8)` draw. Checked unchanged at `[4, 6, 10, 33, 51]`: for
+/// every one of these five, every corpus entry still lands `below(8)` on 0, 1
+/// or 2, decoded or not.
 const BYTE_MUTATION_SEEDS: [u32; 5] = [4, 6, 10, 33, 51];
 
 /// How many times [`one_bit_flipped`] has run since it was last reset.
