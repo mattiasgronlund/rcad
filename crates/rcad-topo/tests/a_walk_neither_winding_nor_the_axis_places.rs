@@ -1040,9 +1040,10 @@ fn the_top_of_a_ball_dented_by_another_holds_no_point_of_the_chord_its_two_arcs_
     }
 }
 
-/// The nearest cone face to a point on two chords at once, which
-/// `what_a_cone_face_seen_down_its_axis_holds` in `holds.rs` still refuses
-/// (queue row Q1258): it is never asked, because the solid is refused first.
+/// A cone face asked at points on two chords at once, which
+/// `what_a_cone_face_seen_down_its_axis_holds` in `holds.rs` refused
+/// `AFaceTrimmedByACurveThisCannotFollow` once the solid built (queue rows
+/// Q1258, Q1395 and Q2172).
 ///
 /// **A lens alone never gets there.** A face on one nappe bounded by an arc of
 /// each of two planes between the same two corners is crossed by each ruling
@@ -1061,21 +1062,98 @@ fn the_top_of_a_ball_dented_by_another_holds_no_point_of_the_chord_its_two_arcs_
 /// [`a_chip_of_a_cone_holed_through`] gives it a square hole along the axis,
 /// whose walls `x = 2.8125` and `y = ±1.5` each have the apex behind them.
 /// Seen down the axis its two hyperbolas' arcs still share the chord `x = 3`.
-/// But building it meshes its faces, and a cone face with a hole that goes
-/// round nothing is refused there: `CurvedFaceWithAHoleGoesTooFarRound`. The
-/// key it names is the builder's own, so which face is not asked here; the skin
-/// is the one curved face.
+/// Building it meshes its faces, and a cone face with a hole that goes round
+/// nothing was refused there, `CurvedFaceWithAHoleGoesTooFarRound`, until a
+/// hole was cut out to its outline on a cone face clear of its apex
+/// ([`a_chip_of_a_cone_holed_through_holds_the_chip_less_the_hole`]).
+///
+/// **Each point is on the cone exactly.** `(3, ±9/4, 15/4)` and `(3, 0, 3)` are
+/// on the chord `x = 3` seen down the axis, in front of both cuts and clear of
+/// the hole, so held. They are read a little way towards a corner of the hole,
+/// which is off that chord's line. `(12/5, 0, 12/5)` is inside the hole, so not
+/// held.
 #[test]
-fn a_chip_of_a_cone_holed_through_is_refused_before_its_chord_is_asked() {
+fn the_skin_of_a_chip_holed_through_holds_the_lens_less_the_hole() {
     let mut model = a_model();
-    let refused = a_chip_of_a_cone_holed_through(&mut model);
-    assert!(
-        matches!(
-            refused,
-            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
-        ),
-        "the holed chip: {refused:?}"
-    );
+    let chip = a_chip_of_a_cone_holed_through(&mut model)
+        .unwrap_or_else(|why| panic!("the holed chip: {why:?}"));
+    let solid = model.solid(chip).expect("this model made the key");
+    let skin = solid
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Cone(_)))
+        .expect("the holed chip has a face on the cone")
+        .key();
+    for (point, answer) in [
+        ([3.0, 2.25, 3.75], OnAFace::Held),
+        ([3.0, -2.25, 3.75], OnAFace::Held),
+        ([3.0, 0.0, 3.0], OnAFace::Held),
+        ([2.4, 0.0, 2.4], OnAFace::NotHeld),
+    ] {
+        let held = solid
+            .face_holds_the_point(
+                skin,
+                PredicatePoint::from(point),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("the holed chip's skin at {point:?}: {why:?}"));
+        assert_eq!(held, answer, "the holed chip's skin at {point:?}");
+    }
+}
+
+/// [`a_chip_of_a_cone_holed_through`] builds, validates and holds the chip less
+/// its hole (queue row Q2172).
+///
+/// Its skin is a face on one nappe clear of the apex, with an outline that goes
+/// more than a quarter turn round the axis and a hole, neither loop round the
+/// axis. Meshing it was refused `CurvedFaceWithAHoleGoesTooFarRound`, since a
+/// cone's hole was cut out to its outline only where the surface pinches
+/// nowhere, and a cone pinches at its apex.
+///
+/// **The answer.** The chip is [`the_chips_volume`]. The hole is the column over
+/// the square `[2, 2.8125] × [−1.5, 1.5]` from the skin `z = √(x² + y²)` up to
+/// the top `z = 2x − 1`, whose slice at `x` is `3(2x − 1)` less
+/// `1.5 √(x² + 2.25) + x² asinh(1.5/x)`, the integral of `√(x² + y²)` over
+/// `|y| ≤ 1.5`.
+#[test]
+fn a_chip_of_a_cone_holed_through_holds_the_chip_less_the_hole() {
+    let mut model = a_model();
+    let chip = a_chip_of_a_cone_holed_through(&mut model)
+        .unwrap_or_else(|why| panic!("the holed chip: {why:?}"));
+    let hole = by_simpsons_rule(2.0, 2.8125, |x| {
+        3.0 * (2.0 * x - 1.0) - (1.5 * (x * x + 2.25).sqrt() + x * x * (1.5 / x).asinh())
+    });
+    assert_holds(&model, chip, the_chips_volume() - hole, "the holed chip");
+}
+
+/// The frustum of slope 1 from `z = 1` to `5`, cut to `x ≥ 0`, less the slot
+/// `|y| ≤ 0.5`, `2.5 ≤ z ≤ 3.5` straight through it along `x` (queue row Q2172).
+///
+/// The slot cuts a window in the half frustum's skin, clear of the apex, inside
+/// an outline that goes half a turn round the axis. Fusing it was refused
+/// `CurvedFaceWithAHoleGoesTooFarRound` when the answer was meshed, since a
+/// cone's hole was cut out to its outline only where the surface pinches
+/// nowhere, and a cone pinches at its apex.
+///
+/// **The answer.** The half frustum is `π(5³ − 1³)/6 = 124π/6`. The slot takes
+/// the slice at `z` of the half disc `r ≤ z` within `|y| ≤ 0.5`, which is the
+/// integral of `√(z² − y²)` over `|y| ≤ 0.5`,
+/// `0.5 √(z² − 0.25) + z² asin(0.5/z)`. The answer is one solid.
+#[test]
+fn a_halved_frustum_less_a_slot_through_its_skin_holds_the_half_less_the_slot() {
+    use std::f64::consts::PI;
+    let mut model = a_model();
+    let frustum = cones::a_frustum(&mut model, 1.0, 1.0, 5.0);
+    let half = block(&mut model, [0.0, -10.0, 0.0], [10.0, 10.0, 10.0]);
+    let half = fuse_one(&mut model, frustum, half, Rule::Intersection);
+    let slot = block(&mut model, [-10.0, -0.5, 2.5], [10.0, 0.5, 3.5]);
+    let what = "the halved frustum less the slot";
+    let answer = fuse(&mut model, half, slot, Rule::Difference, true)
+        .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+    let slot = by_simpsons_rule(2.5, 3.5, |z| {
+        0.5 * (z * z - 0.25).sqrt() + z * z * (0.5 / z).asin()
+    });
+    assert_each_holds(&model, &answer, &[124.0 * PI / 6.0 - slot], what);
 }
 
 /// The part of the cone `r ≤ z` under the roof of
