@@ -2850,6 +2850,97 @@ mod plane_round_trip_tests {
         );
     }
 
+    /// The seam of a quarter bend of ring `9` tube `2`, turned `45°` about
+    /// `x` and moved to `(-25, 11, 19)`: no centre the reader holds on the
+    /// ring carries the seam of that bend as it was written, so the writer
+    /// refuses it with `ACurveTheFacesEitherSideOfItDoNotName` (Q2184).
+    ///
+    /// **The cut plane's own centre already misses by one ulp.** Its normal
+    /// has no `x` (`(0, −0.7071…, 0.7071…)`, a plain `45°` turn of `(0, 0,
+    /// 1)` about `x`), so `x` plays no part in the plane's offset and only
+    /// `y` and `z` do. `cut.offset()` is `5.656854249492378`; the plane
+    /// through the ring's own centre reads back as `5.656854249492379`, one
+    /// ulp away.
+    ///
+    /// **Every centre the reader could hold is searched**, over `y` and `z`
+    /// (`x` fixed, since the normal has none of it), the same `reach` as the
+    /// bend above and the ball below use. `14413` are held on the ring's
+    /// circle, and not one reads back as the cut plane. So this refusal is a
+    /// limit of a seam carried by its circle's centre, not a gap a wider
+    /// search would close (`docs/decisions.md` §16.10).
+    #[test]
+    fn no_centre_the_reader_holds_on_the_ring_carries_the_seam_of_a_bend_of_ring_nine_turned_45_degrees()
+     {
+        let turned = Isometry::translation(Vector::new(-25.0, 11.0, 19.0))
+            .and_then(|moved| {
+                Isometry::rotation(&Axis::x(), core::f64::consts::FRAC_PI_4)
+                    .map(|turn| moved.compose(&turn))
+            })
+            .expect("a finite move and turn");
+        let through_the_middle =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal");
+        let Surface::Plane(cut) = Surface::Plane(through_the_middle).transformed(&turned) else {
+            unreachable!("a plane moves as a plane");
+        };
+        let Surface::Torus(ring) =
+            Surface::Torus(Torus::new(Axis::z(), 9.0, 2.0).expect("a tube narrower than its ring"))
+                .transformed(&turned)
+        else {
+            unreachable!("a ring moves as a ring");
+        };
+        let normal = cut.normal();
+        assert_eq!(normal.cross(ring.axis().direction()), Vector::zero());
+        assert_eq!(normal.components()[0], 0.0);
+        let centre = ring.centre();
+        assert_eq!(cut.offset(), 5.656_854_249_492_378);
+        let read_back = plane_through(centre, normal)
+            .expect("a finite point")
+            .offset();
+        assert_eq!(read_back.to_bits().abs_diff(cut.offset().to_bits()), 1);
+
+        let corner = turned.apply_to_point(Point::new(7.0, 0.0, 0.0));
+        let crossing = where_a_plane_square_to_a_ring_crosses_it_nearest(&cut, &ring, corner)
+            .expect("a plane square to the axis through the ring's centre");
+        let Shape::Circle { radius } = crossing.shape else {
+            unreachable!("a plane square to a ring's axis crosses it in circles");
+        };
+        assert_eq!((crossing.centre, radius), (centre, 7.0));
+
+        let [x, y, z] = centre.coordinates();
+        let reach = 2.0 * A_CIRCLE_MAY_MISS_ITS_FACE_BY * NEAREST_F64_POINT_ROUNDOFF * 30.0;
+        let steps = |of: f64| (reach / (of.next_up() - of)).ceil() as i32;
+        let mut found = Vec::new();
+        let mut held = 0;
+        for along_y in -steps(y)..=steps(y) {
+            for along_z in -steps(z)..=steps(z) {
+                let at = Point::new(x, stepped(y, along_y), stepped(z, along_z));
+                if !a_surface_holds_the_circle(&Surface::Torus(ring), at, normal, radius) {
+                    continue;
+                }
+                held += 1;
+                let reads_back = plane_through(at, normal)
+                    .is_ok_and(|back| back.offset().to_bits() == cut.offset().to_bits());
+                if reads_back {
+                    found.push((along_y, along_z));
+                }
+            }
+        }
+        assert_eq!((held, found), (14413, Vec::new()));
+        assert_eq!(
+            a_centre_its_plane_reads_back_from(&cut, centre, |_| true),
+            None
+        );
+        assert_eq!(
+            the_nearest_centre_its_faces_hold_the_circle_at(
+                &cut,
+                &[&Surface::Torus(ring)],
+                &crossing
+            ),
+            None
+        );
+    }
+
     /// The seam of `add_ball(3)` turned `149°` about `z` and moved to
     /// `(10, −6, 5)`: no centre the reader holds on the ball reads back as the
     /// plane the seam is cut from, so no file carries that seam as it is, and
