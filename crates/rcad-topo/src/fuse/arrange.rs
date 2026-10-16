@@ -3467,6 +3467,7 @@ impl<'f> Arrangement<'f> {
             let on_each = self.the_nodes_on_each_crossing();
             self.count_each_loop_from_the_node_round_its_start(&on_each);
             let mut same = Sameness::of(self.nodes.len());
+            let mut near = Vec::new();
             for (crossing, on_it) in on_each.iter().enumerate() {
                 if !self.crossings[crossing].reaches_the_face
                     || self.either_way_round_cuts_the_same_arcs(crossing, on_it)?
@@ -3474,61 +3475,14 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
                 let order = self.nodes_along(crossing, on_it, policy, log)?;
-                let probe = std::env::var("RCAD_PROBE_MERGE").is_ok();
-                if probe {
-                    eprintln!(
-                        "PROBE face {:?} crossing {crossing} partner {:?} how {:?} order {order:?}",
-                        self.surface,
-                        self.crossings[crossing].partner,
-                        match self.crossings[crossing].order {
-                            HowItRuns::AlongAnAxis { axis, .. } => format!("axis {axis}"),
-                            HowItRuns::AlongABend { .. } => "bend".to_string(),
-                            HowItRuns::RoundAClosedCurve { .. } => "closed".to_string(),
-                        }
-                    );
-                    for &n in &order {
-                        eprintln!(
-                            "PROBE   node {n} {:?} narrowed {:?} made_of {:?} also {:?}",
-                            self.nodes[n].point.enclosure(),
-                            self.narrowed_box_of(n).enclosure(),
-                            self.nodes[n].made_of,
-                            self.nodes[n].also,
-                        );
-                    }
-                }
                 for pair in order.windows(2) {
-                    let decided = self.order_along(crossing, pair[0], pair[1], policy, log)?;
-                    if probe {
-                        eprintln!(
-                            "PROBE   pair {:?} -> {decided:?} boxes {:?} planes {:?} quadric {:?} axis {:?}",
-                            (pair[0], pair[1]),
-                            self.as_the_boxes_say(crossing, pair[0], pair[1]),
-                            self.as_the_planes_say(crossing, pair[0], pair[1]),
-                            self.as_the_quadric_says(crossing, pair[0], pair[1]),
-                            self.as_the_pipes_axis_says(crossing, pair[0], pair[1]),
-                        );
-                    }
-                    match decided {
-                        Decision::Zero => same.join(pair[0], pair[1]),
-                        Decision::Pos => {
-                            if same.leader(pair[0]) != same.leader(pair[1])
-                                && self.two_crossings_that_meet_twice_are_taken_to_meet_once(
-                                    crossing,
-                                    [pair[0], pair[1]],
-                                    policy,
-                                    log,
-                                )
-                            {
-                                if probe {
-                                    eprintln!("PROBE   taken as one {:?}", (pair[0], pair[1]));
-                                }
-                                same.join(pair[0], pair[1]);
-                            }
-                        }
+                    let [one, next] = [pair[0], pair[1]];
+                    match self.order_along(crossing, one, next, policy, log)? {
+                        Decision::Zero => same.join(one, next),
+                        Decision::Pos => {}
                         Decision::Neg => unreachable!(
                             "nodes_along proved this pair the other way round: \
-                             {} then {} on crossing {crossing}",
-                            pair[0], pair[1]
+                             {one} then {next} on crossing {crossing}"
                         ),
                         // `order_along` asks under the policy, so an undecided
                         // pair left as the error at the `?` above.
@@ -3537,8 +3491,16 @@ impl<'f> Arrangement<'f> {
                         }
                         other => panic!("a decision nothing here knows: {other:?}"),
                     }
+                    let apart = the_furthest_two_boxes_may_be_apart(
+                        self.nodes[one].point,
+                        self.nodes[next].point,
+                    );
+                    if policy.wobble_is_acceptable(apart) {
+                        near.push((crossing, [one, next]));
+                    }
                 }
             }
+            self.take_each_sliver_of_three_meets_as_one_point(&near, &mut same, policy, log);
             if !same.joined_anything() {
                 return Ok(());
             }
@@ -3728,38 +3690,97 @@ impl<'f> Arrangement<'f> {
         on_each
     }
 
-    /// Whether two nodes proved apart along `crossing` are one point all the
-    /// same, by the policy's leave to take two points proved apart as one
-    /// (§417.7): when both lie on a second crossing too, and one of them
-    /// already stands for more than one meet.
-    fn two_crossings_that_meet_twice_are_taken_to_meet_once(
+    /// Take each sliver cell of three meets of four surfaces as one point.
+    ///
+    /// `near` is every pair of nodes next to each other along a crossing, with
+    /// that crossing, that may be no further apart than the policy's wobble.
+    fn take_each_sliver_of_three_meets_as_one_point(
         &self,
-        crossing: usize,
-        [one, other]: [usize; 2],
+        near: &[(usize, [usize; 2])],
+        same: &mut Sameness,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> bool {
-        let [mine, theirs] = [one, other].map(|node| &self.nodes[node]);
-        let on_a_second_crossing = mine.crossings.iter().any(|&shared| {
-            shared != crossing
-                && self.crossings[shared].reaches_the_face
-                && theirs.crossings.contains(&shared)
-        });
-        let two_input_corners = mine.vertex.is_some() && theirs.vertex.is_some();
-        if !on_a_second_crossing
-            || two_input_corners
-            || (mine.also.is_empty() && theirs.also.is_empty())
-        {
-            return false;
+    ) {
+        let mut ends: Vec<(usize, usize, usize)> = near
+            .iter()
+            .flat_map(|&(crossing, [one, other])| [(one, other, crossing), (other, one, crossing)])
+            .collect();
+        ends.sort_unstable();
+        let from = |node: usize| {
+            let first = ends.partition_point(|&(at, ..)| at < node);
+            let past = ends.partition_point(|&(at, ..)| at <= node);
+            &ends[first..past]
+        };
+        for &(one, two, first) in &ends {
+            if two < one {
+                continue;
+            }
+            for &(_, three, last) in from(one) {
+                if three <= two || last == first {
+                    continue;
+                }
+                let between = from(two).iter().find(|&&(_, end, crossing)| {
+                    end == three && crossing != first && crossing != last
+                });
+                if let Some(&(_, _, second)) = between {
+                    self.take_three_meets_as_one_point(
+                        [one, two, three],
+                        [first, second, last],
+                        same,
+                        policy,
+                        log,
+                    );
+                }
+            }
         }
+    }
+
+    fn take_three_meets_as_one_point(
+        &self,
+        meets: [usize; 3],
+        crossings: [usize; 3],
+        same: &mut Sameness,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) {
+        if meets
+            .iter()
+            .all(|&meet| same.leader(meet) == same.leader(meets[0]))
+        {
+            return;
+        }
+        let [one, two, three] = crossings.map(|crossing| self.crossings[crossing].partner);
+        let four = [self.surface, one, two, three];
+        let four_different = (0..4).all(|i| (i + 1..4).all(|j| four[i] != four[j]));
+        let each_a_meet_of_three_of_them = meets.iter().all(|&meet| {
+            let node = &self.nodes[meet];
+            let mut names = node.made_of.iter().chain(&node.also).peekable();
+            names.peek().is_some()
+                && names.all(|(three, _)| three.iter().all(|surface| four.contains(surface)))
+        });
+        let input_corners = meets
+            .iter()
+            .filter(|&&meet| self.nodes[meet].vertex.is_some())
+            .count();
+        if !four_different || !each_a_meet_of_three_of_them || input_corners > 1 {
+            return;
+        }
+        let boxes = meets.map(|meet| self.nodes[meet].point);
+        let widest = [[0, 1], [1, 2], [0, 2]]
+            .map(|[one, other]| the_furthest_two_boxes_may_be_apart(boxes[one], boxes[other]))
+            .into_iter()
+            .fold(0.0, f64::max);
         let record = Record::new(
-            "two meets of two crossings proved apart taken as one point",
-            &[mine.point, theirs.point],
+            "three meets of four surfaces taken as one point",
+            &boxes,
             Level::Interval,
-            the_furthest_two_boxes_may_be_apart(mine.point, theirs.point),
+            widest,
             Measures::Length,
         );
-        policy.take_as_one_point(record, log)
+        if policy.take_as_one_point(record, log) {
+            same.join(meets[0], meets[1]);
+            same.join(meets[0], meets[2]);
+        }
     }
 
     fn fold_the_nodes(&mut self, same: &mut Sameness) -> Result<()> {
