@@ -17,17 +17,20 @@
 //! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Each ellipse keeps within a
 //! rounding of its circle, so the two keep apart and the three share nothing.
 //!
-//! The block is sixty across. Three across each side of the axis, its sides
-//! run a rounding off parallel to the axis three from it, and the triple of a
-//! side, the pipe and the cone is still refused: the band road gives a plane
-//! that steep no outer edge. Thirty from the axis it is answered.
+//! The block is sixty across. Six to eight across, its sides run a rounding
+//! off parallel to the bar's axis, three to four from it, and the triple of a
+//! side, the pipe and the cone is still refused, with the block placed by the
+//! bar's own turn as well as by two halves of it: the band road gives a plane
+//! that steep no outer edge. Ten across and more, the fuse answers.
 //!
 //! A cone in a solid of its own beside the bar does not reach that question:
 //! the fuse then asks where the pipe and the cone cross first.
 //!
 //! What is left is not measured: the bar alone, before any fuse, is refused
 //! `DeflectionBelowWhatAMeshCanReach` with `closest` about `242259` at every
-//! deflection asked.
+//! deflection asked. Unplaced, or turned about its own axis, it measures, and a
+//! bar of two pipes split at the same circle is refused the same way: row
+//! Q566's fault.
 
 use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,

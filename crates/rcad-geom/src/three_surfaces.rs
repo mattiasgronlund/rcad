@@ -95,8 +95,10 @@
 //! neither of which is a pipe it runs along, and whose bands overlap — a plane
 //! leaning to a pipe's axis, which cuts it in an ellipse, against a ball off
 //! that axis or the axis a ball and the pipe share whose circle comes near the
-//! ellipse, a cap of one bar across a second bar leaning to it, or a cap a
-//! rounding off square to a bar and a cone it cuts in one circle on paper —
+//! ellipse, a cap of one bar across a second bar leaning to it, a cap a
+//! rounding off square to a bar and a cone it cuts in one circle on paper, or
+//! a wall a rounding off parallel to a bar and its chamfer cone and off their
+//! axis —
 //! a plane along a pipe and a cone one of whose rulings runs along the
 //! pipe, three curved surfaces no two of which differ by a plane a stored
 //! [`Plane`] is exactly, and any triple with a torus and fewer than two planes
@@ -4058,7 +4060,11 @@ impl TheLinesAlongAPipe {
 /// **What it leaves to the refusal** is two bands that overlap: the curves may
 /// cross, and where is the quartic the module doc names. It leaves as well a
 /// ring, a plane that misses a ball, and a plane parallel to a pipe's or a
-/// cone's axis, since it gives none of those a band.
+/// cone's axis, since it gives none of those a band. A plane a rounding off
+/// parallel to a pipe and a cone about one axis gets bands too wide to keep
+/// apart, the cone's with no outer edge, so the side of a block three from a
+/// bar and its chamfer cone, the block and the bar placed by one turn, is
+/// refused though it misses both circles the two share.
 ///
 /// It is asked last and only ever answers that the three share nothing, so a
 /// triple an earlier road answers keeps its answer, and where a product falls
