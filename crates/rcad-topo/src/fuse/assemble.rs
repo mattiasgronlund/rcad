@@ -3458,7 +3458,10 @@ impl Assembly {
     /// along had nothing cut it, as the corner it would make there: the
     /// corner [`Corners::of`] makes of a
     /// [`MeetPoint::WhereAClosedCurveStarts`] end. `None` where the two
-    /// surfaces do not cross in one closed curve.
+    /// surfaces do not cross in one closed curve, or where
+    /// [`rcad_geom::where_a_closed_crossing_starts`] cannot name its start, a
+    /// curve too big for `f64` among them; the run then keeps the corner
+    /// [`Assembly::the_corners_each_closed_run_keeps`] picked.
     ///
     /// # Errors
     ///
