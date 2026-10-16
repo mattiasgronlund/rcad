@@ -616,18 +616,30 @@ fn a_slope_comes_back_as_near_as_a_half_angle_carries_it(here: f64, back: f64) -
 /// and the radius exactly as the kernel wrote them — checked before the file
 /// is written, by asking the same constructors the reader will. So two `and`
 /// pipes are the same pipe when their directions and radii match to the bit
-/// and the two origins sit on the one line between them — the origin delta's
-/// cross product with the direction is exactly zero, not a point-for-point
-/// equality, since a cylinder's own axis origin can sit anywhere along its
-/// line. **Under a turn and a move together, the moved origin can round off
-/// that line by a few ulps** — a division and a multiply, each rounded once
-/// more than the kernel's own origin was. Q2135 takes that case; this file's
-/// pins turn alone or move alone, never both at once. Asking instead whether
-/// `corners` — the coedge's own two ends — are certified `Decision::Zero` on
-/// the read-back pipe's skin looks more principled, the same test
-/// `picks_the_real_ends` below runs for a picker, but it is the wrong tool
-/// here: those corners come from an arc built by turning the kernel's own
-/// circle, and the kernel's own pipe does not certify them `Zero` either.
+/// and the origin read back is one of two places. Either it sits on the
+/// kernel's own line — the origin delta's cross product with the direction is
+/// exactly zero, not a point-for-point equality, since a cylinder's own axis
+/// origin can sit anywhere along its line. Or, where the arc's plane is to
+/// hand, it is to the bit where `rcad_geom::walk` centres the circle that
+/// plane crosses the kernel's pipe in ([`where_the_walk_centres_a_circle`]),
+/// which is the point the writer works out and writes.
+///
+/// **Under a turn and a move together, that point rounds off the kernel's
+/// line** — a division and a multiply, each rounded once more than the
+/// kernel's own origin was — and no other centre would do: for the disc
+/// turned about `y` by `5` and moved by `(3, 5, 10)`, no point an `f64` holds
+/// lies exactly on the kernel's line where the top holds it
+/// ([`no_centre_on_a_turned_and_moved_discs_own_pipe_axis_is_one_its_top_holds`]).
+/// Comparing what the two pipes walk, bit for bit, does not call them the
+/// same either: the reader's walk centres its circle again from the origin it
+/// read back, so its points need not land on the kernel's.
+///
+/// Asking instead whether `corners` — the coedge's own two ends — are
+/// certified `Decision::Zero` on the read-back pipe's skin looks more
+/// principled, the same test `picks_the_real_ends` below runs for a picker,
+/// but it is the wrong tool here: those corners come from an arc built by
+/// turning the kernel's own circle, and the kernel's own pipe does not
+/// certify them `Zero` either.
 fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: Surface) -> bool {
     let same_bits = || format!("{here:?}") == format!("{back:?}");
     let (
@@ -668,10 +680,17 @@ fn the_same_run(here: &EdgeRun, back: &EdgeRun, corners: [Point; 2], walked_by: 
         })
     };
     let same_pipe = |here: &Cylinder, back: &Cylinder| {
+        let read_back = back.axis().origin();
+        let on_the_kernels_line =
+            (read_back - here.axis().origin()).cross(here.axis().direction()) == Vector::zero();
+        let where_the_kernels_walk_centres_it = the_arcs_plane
+            .and_then(|flat| where_the_walk_centres_a_circle(&flat, here))
+            .is_some_and(|centre| {
+                centre.coordinates().map(f64::to_bits) == read_back.coordinates().map(f64::to_bits)
+            });
         here.axis().direction() == back.axis().direction()
             && here.radius() == back.radius()
-            && (back.axis().origin() - here.axis().origin()).cross(here.axis().direction())
-                == Vector::zero()
+            && (on_the_kernels_line || where_the_kernels_walk_centres_it)
     };
     let same_and = match (here_and, back_and) {
         (Surface::Cylinder(here_pipe), Surface::Cylinder(back_pipe)) => {
@@ -2209,10 +2228,9 @@ fn a_bar_with_a_disc_drawn_by_a_pipe_from(
 /// directions and radii match and the origin read back is where the kernel's
 /// own walk centres the circle.
 ///
-/// Turned and moved, that centre is `(-0.8356970986525543, 5.0,
-/// 11.134648741852905)`, and it is off the kernel's line through `(3, 5, 10)`
-/// by a cross product of about `6.7e-16`: no point an `f64` holds lies on
-/// that line where the top holds it
+/// Turned and moved, that centre is off the kernel's line through
+/// `(3, 5, 10)`, and no point an `f64` holds lies on that line where the top
+/// holds it
 /// ([`no_centre_on_a_turned_and_moved_discs_own_pipe_axis_is_one_its_top_holds`]).
 #[test]
 fn a_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file() {
@@ -2282,7 +2300,8 @@ fn every_turned_disc_drawn_by_a_pipe_off_its_top_comes_back_from_its_own_file() 
 /// back is a centre an `f64` holds, exactly on the kernel's line, that close
 /// to the top. Searched here with four times that room, along the whole
 /// stretch of the line it allows, in integers: for the disc turned about `y`
-/// by `5` and moved by `(3, 5, 10)` there is no such point, and of the 86 among the first 300 movements of
+/// by `5` and moved by `(3, 5, 10)` there is no such point, and of the 86
+/// among the first 300 movements of
 /// [`every_turned_disc_drawn_by_a_pipe_off_its_top_comes_back_from_its_own_file`]
 /// whose centre lands off the line, 80 have none.
 #[test]
@@ -2325,7 +2344,7 @@ fn centres_on_the_drawn_pipes_own_axis_its_top_could_hold(
         .place_solid(solid, placement)
         .expect("the key came from this model");
     let (pipe, top) = the_drawn_pipe_and_the_top_it_is_drawn_on(&model);
-    let [from, along] = [pipe.axis().origin(), pipe.axis().direction()];
+    let (from, along) = (pipe.axis().origin(), pipe.axis().direction());
     let centre =
         where_the_walk_centres_a_circle(&top, &pipe).expect("the drawn pipe crosses its top");
     if (centre - from).cross(along) == Vector::zero() {
