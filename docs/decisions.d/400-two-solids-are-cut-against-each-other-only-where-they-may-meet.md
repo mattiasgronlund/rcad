@@ -229,8 +229,11 @@ it moves here.
   chain of overlapping boxes joins them, and `bake.rs`'s `Bounds` says a box
   test changes no answer. **Since Q896, the `cuts.rs` half is fixed**: the
   header now says two solids are skipped only when no chain of solids that may
-  meet joins them, which is what the code does. `bake.rs`'s `Bounds` sentence
-  is still stale and is outside this lane's write set.
+  meet joins them, which is what the code does. **Since Q872, the `bake.rs`
+  half is fixed too**: `BakedSolid::bounds`'s doc now carries 400.3's caveat,
+  that a box round a pipe, cone or torus face (or a flat face with a side on
+  one) is read off stored corners in plain `f64`, and a miss between two such
+  boxes can still leave a pair of faces that really touch uncut.
 - A face on a pipe or a cone has no box in 400.2, so a pipe or a cone clear of
   a block whose boxes miss face by face only in `bake`'s boxes is left uncut by
   400.3's standard and not by a proof, and one whose `bake` boxes touch is
