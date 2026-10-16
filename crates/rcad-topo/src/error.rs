@@ -769,6 +769,35 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// A fuse drew an edge of this face along where the face's plane crosses
+    /// the plane of the face across the edge, and the edge runs along the
+    /// curve its run names instead.
+    ///
+    /// A fuse draws each edge of a face where the face's surface crosses the
+    /// surface of the face across it. Between two flat faces that is the
+    /// straight line their planes cross in, and an edge between them whose run
+    /// names a third surface, a circle round a pipe say, runs along that
+    /// surface's crossing with the face's plane. Drawn on the line, a closed
+    /// edge starts and ends at one node of a crossing that does not close, and
+    /// an arc and its chord both cover the one stretch of the line between
+    /// their two corners. A round bar whose lid is split by such a circle into
+    /// an annulus and a disc leaning off the lid, or by half of it and its
+    /// chord into a half disc leaning off the lid, is each of the two
+    /// (`a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model`).
+    ///
+    /// **A gap for a solid that passes the sweep** (§16.10): drawn along the
+    /// named surface's crossing with the face's own plane, the edge is where
+    /// the face puts it, and the fuse has its answer (Q2125). A fuse does not
+    /// sweep what it is handed, so a solid read back from bytes whose two
+    /// planes put the edge in two places reaches this too, and there no answer
+    /// exists. Nothing here tells the two apart, so
+    /// [`Error::limit_or_gap`] says not known.
+    #[error("an edge of this face is drawn where two planes cross, not along the curve it names")]
+    AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
     /// A fuse had to say whether a hollow of its answer is inside another
     /// shell, and no point of the hollow it asked could fire a ray at the
     /// other shell: the ray would have had to meet this face, which sits on a
@@ -1319,6 +1348,7 @@ impl Error {
             | Self::AnEdgeBendsButEveryFaceAlongItIsFlat { .. }
             | Self::MoreMeshPointsThanASolidWillHold { .. }
             | Self::AFaceTrimmedByACurveThisCannotFollow { .. }
+            | Self::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. }
             | Self::CannotFireARayAtAFacesSurface { .. }
             | Self::AFaceMissesPartOfWhereItsSurfacesCross { .. }
             | Self::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { .. }
