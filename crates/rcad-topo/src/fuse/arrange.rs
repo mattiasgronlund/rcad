@@ -4032,6 +4032,18 @@ impl<'f> Arrangement<'f> {
     /// be one point. The node's own box has been asked by name already, and an
     /// undecided answer means neither node was the start.
     ///
+    /// **Where the sweep over them cannot say, round a plane's loop on a pipe
+    /// the tighter boxes are turned about the pipe's axis**
+    /// ([`round_a_closed_crossing_by_its_angle`]), which names no start either.
+    /// A round bar of radius `12.8` notched by a block whose faces `x = 0.6 r`
+    /// and `y = 0.8 r` meet on its wall has, on its top cap, the feet of the
+    /// two rulings those faces cut the wall in a rounding apart, at `x = 7.68`
+    /// and `x ≈ 7.679999999999999`. The sweep over their tighter boxes does not
+    /// part them, and turned they are. Without that turn the bar's three pins in
+    /// `two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs` fail,
+    /// its union refused `CannotTellTheCellsOfAFaceApart` as every fuse of it
+    /// was before (Q2082).
+    ///
     /// **Hands back what an undecided answer's enclosure measures, alongside
     /// the answer**, so [`Arrangement::order_along`] does not ask
     /// [`round_a_closed_crossing_and_what_it_measures`] a second time for it.
@@ -4066,10 +4078,24 @@ impl<'f> Arrangement<'f> {
         if tight == [one, other] {
             return Ok((decided, measures));
         }
-        match self.how_far_apart_along(crossing, tight[0], tight[1]) {
-            Ok(proved @ (Decision::Pos | Decision::Neg)) => Ok((proved, measures)),
-            Ok(_) | Err(_) => Ok((decided, measures)),
+        if let Ok(proved @ (Decision::Pos | Decision::Neg)) =
+            self.how_far_apart_along(crossing, tight[0], tight[1])
+        {
+            return Ok((proved, measures));
         }
+        if let HowItRuns::RoundAClosedCurve {
+            from, ref wound_as, ..
+        } = self.crossings[crossing].order
+            && let Some(turned) = round_a_closed_crossing_by_its_angle(
+                [&wound_as[0], &wound_as[1]],
+                from,
+                tight[0],
+                tight[1],
+            )
+        {
+            return Ok((turned, measures));
+        }
+        Ok((decided, measures))
     }
 
     /// The node's own box narrowed, where the node is a meet of three planes,
@@ -9451,11 +9477,15 @@ fn the_start_is_a_rounding_off(
 /// `w·((from − c) × (p − c))` has that sign, and in the half turn behind where
 /// it has the other. A point ahead comes before a point behind, and of two in
 /// one half turn the one the other is turned ahead of comes first. Where two
-/// are too nearly over one point of the circle for that turn to be proved, its
-/// sign is read from how far apart they are up the axis instead
-/// (`turned_as_far_apart_up_the_axis`). Nothing here forms the loop's centre:
-/// any point of the axis is as good as `c`, and what lies along `w` drops out
-/// of each determinant.
+/// are too nearly over one point of the circle for that turn to be proved, it
+/// is read again as `w·(a × (b − a))`, for `a` and `b` the two taken from `c`.
+/// For two points that is the same number, since `a × a` is nothing, and for
+/// two boxes it encloses the same turns, but it rounds products with the short
+/// step between them rather than two long products that nearly cancel. Where
+/// that is not proved either, its sign is read from how far apart they are up
+/// the axis instead (`turned_as_far_apart_up_the_axis`). Nothing here forms the
+/// loop's centre: any point of the axis is as good as `c`, and what lies along
+/// `w` drops out of each determinant.
 ///
 /// **Where the sweep cannot say, this can, for a point a rounding past the
 /// start.** A square bar standing on an edge, its top edge on the plane `y = 0`
@@ -9468,6 +9498,21 @@ fn the_start_is_a_rounding_off(
 /// that corner is `2·y`, proved ahead by its box's `y` alone, since the
 /// start's `y` is exactly nothing, and the next corner is ahead of it
 /// (Q1817).
+///
+/// **The step parts two points a rounding apart round the circle.** A round
+/// bar of radius `12.8` up `z`, notched by a block whose faces `x = 0.6 r` and
+/// `y = 0.8 r` meet on its wall, has on its top cap, `z = 25.6`, the feet of
+/// the two rulings those faces cut the wall in. Their tighter boxes
+/// ([`Arrangement::narrowed_box_of`]), which [`Arrangement::as_the_boxes_say`]
+/// hands here, are `x = 7.68`, `y` in `[10.24, 10.240000000000002]`, and `x`
+/// in `[7.679999999999998, 7.679999999999999]`, `y = 10.240000000000002`. `w·(a × b) = a_x b_y − a_y b_x` takes two products
+/// of about `78.64`, each rounded out by up to an ulp of `1.4e-14`, against a
+/// turn of at least `10.24 · 8.9e-16 = 9.1e-15`, so its enclosure, `[−4.3e-14,
+/// 0]`, touches zero. `w·(a × (b − a))` takes `7.68` and `10.24` times a step
+/// under `1.8e-15` along `x` and along `y`, and its enclosure, `[−3.2e-14,
+/// −9.1e-15]`, does not. Without it the bar's tolerant intersection at a
+/// working size of `25` is refused `CannotTellTheCellsOfAFaceApart`, as every
+/// fuse of it was before (Q2082).
 ///
 /// **It is read only where the sweep cannot say**, and that is the reading
 /// this has to agree with. Where the start is on the loop the two count from
@@ -9519,6 +9564,11 @@ fn round_a_closed_crossing_by_its_angle(
     let other_past_one = (the_way_it_turns * turned(first, second)).sign();
     if proved(other_past_one) {
         return Some(other_past_one);
+    }
+    let step = [0, 1, 2].map(|axis| second[axis] - first[axis]);
+    let stepped_past_one = (the_way_it_turns * turned(first, step)).sign();
+    if proved(stepped_past_one) {
+        return Some(stepped_past_one);
     }
     let other_up_past_one =
         (the_way_it_turns * turned_as_far_apart_up_the_axis(flat, along, first, second)).sign();

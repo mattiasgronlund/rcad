@@ -124,16 +124,31 @@
 //! refuse the same, so small numbers play no part either.
 //! `a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart`
 //! and `the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges`
-//! pin both.
+//! pin both. Q2133 is the row that answers the refusals.
 //!
 //! A designer draws the same kind of meeting on purpose: a round bar notched
 //! by a block whose inside corner stands on the bar's wall, at `(0.6 r, 0.8
 //! r)`. At a radius of `12.8` or `25.6` and working sizes of `10`, `25` and
-//! `100`, every fuse is refused from the same place in `spread_the_winding`,
-//! on the bar's wall, with two meets whose boxes overlap kept apart.
-//! `a_tolerant_fuse_of_a_round_bar_and_a_block_cornered_on_its_wall_cannot_tell_the_walls_cells_apart`
-//! pins the `12.8`/`25` case. At other radii the same bar is refused
-//! `ResultIsNotManifold` or `TheFuseWroteABrokenAnswer`, or runs for minutes;
+//! `100`, every fuse was refused from the same place in `spread_the_winding`,
+//! on the bar's wall, until Q2082. On the top cap the feet of the two rulings
+//! the block's faces `x = 0.6 r` and `y = 0.8 r` cut the wall in are an ulp
+//! of `7.68` apart, and neither the sweep round the cap's rim nor the angle
+//! about the bar's axis could part them. The tighter boxes of the two, turned
+//! from one to the step to the other, are parted (`as_the_boxes_say` and
+//! `round_a_closed_crossing_by_its_angle` in `fuse/arrange.rs`).
+//!
+//! Now the intersection answers at `12.8`/`25`, `12.8`/`10`, `12.8`/`100`
+//! and `25.6`/`25`, passes `Model::validate`, and measures the slice of the
+//! bar past the block's face to within the measure's published error
+//! (`a_tolerant_intersection_of_a_round_bar_and_a_block_cornered_on_its_wall_is_the_slice_of_the_bar_past_the_blocks_face`).
+//! The union and the bar less the block are refused `CannotMeshAFace` with
+//! `CornersCoincide`, Q2106's mechanism
+//! (`a_tolerant_union_of_a_round_bar_and_a_block_cornered_on_its_wall_and_the_bar_less_the_block_name_one_cap_corner_twice`).
+//! The block less the bar answers too, now that Q2079 keys the ruling and the
+//! block's corner edge as one edge, and measures the block less that slice
+//! (`a_tolerant_fuse_of_the_block_less_a_round_bar_cornered_on_its_wall_is_the_block_less_the_bars_slice`).
+//! At other radii, before Q2082, the same bar was refused
+//! `ResultIsNotManifold` or `TheFuseWroteABrokenAnswer`, or ran for minutes;
 //! those are rows of their own.
 //!
 //! # Plane through a ball
@@ -183,8 +198,9 @@ mod cones;
 
 use cones::{a_frustum_seamed_towards, a_pointed_cone};
 use rcad_geom::{
-    Axis, Isometry, MeetOfThree, Point, Scale, Surface, Vector, meet_of_three_surfaces,
+    Axis, Deflection, Isometry, MeetOfThree, Point, Scale, Surface, Vector, meet_of_three_surfaces,
 };
+use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -636,7 +652,8 @@ fn a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_o
 /// slope-two frustum whose far cap is at half the cube's side. So four
 /// surfaces meet at one point there, and every tolerant fuse refuses on the
 /// far cap, `z = 3 s`: at a shape scale of `0.1` and a working size of `0.25`,
-/// and at its two power-of-two images, which round the same way.
+/// and at its two power-of-two images, which round the same way. Q2133 is the
+/// row that answers it, so it moves this test.
 #[test]
 fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart()
  {
@@ -691,28 +708,122 @@ fn the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges() {
     }
 }
 
+/// The radii and working sizes the round bar notched on its wall is fused at.
+const THE_BARS_RADII_AND_SIZES: [(f64, f64); 4] =
+    [(12.8, 25.0), (12.8, 10.0), (12.8, 100.0), (25.6, 25.0)];
+
 /// A designer draws the same kind of meeting on purpose: a round bar notched
-/// by a block whose inside corner edge stands on the bar's wall. At a radius
-/// of `12.8` and a working size of `25`, every tolerant fuse refuses on the
-/// bar's wall.
+/// by a block whose inside corner edge stands on the bar's wall. Where the two
+/// overlap is the slice of the bar past the block's face `x = 0.6 r`: the
+/// circle's segment past that chord, `r² (acos 0.6 − 0.6 · 0.8)`, times the
+/// bar's height `2 r`. The block's face `y = 0.8 r` cuts nothing off it, since
+/// the circle is no higher than `0.8 r` past `x = 0.6 r`.
+///
+/// Each tolerant intersection answers with one solid that `Model::validate`
+/// passes, and its measured volume is that one to within the measure's own
+/// published error. Writing `0.6 r` in `f64` moves the face by under `1e-15`
+/// and the volume by under `1e-12`, and the formula rounds by about as much:
+/// both far under the published error, which is printed beside the volume.
 #[test]
-fn a_tolerant_fuse_of_a_round_bar_and_a_block_cornered_on_its_wall_cannot_tell_the_walls_cells_apart()
+fn a_tolerant_intersection_of_a_round_bar_and_a_block_cornered_on_its_wall_is_the_slice_of_the_bar_past_the_blocks_face()
  {
-    for (rule, bar_first) in EVERY_FUSE {
-        let (model, fused) =
-            a_round_bar_fused_with_a_block_cornered_on_its_wall(12.8, 25.0, rule, bar_first);
-        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = fused else {
-            panic!(
-                "{rule:?} {bar_first}: {:?}",
-                fused.map(|_: Fused| "an answer")
-            );
-        };
-        let surface = model.face(face).expect("the refused face").surface();
-        assert!(
-            matches!(surface, Surface::Cylinder(_)),
-            "{rule:?} {bar_first}: {surface:?}"
+    for (radius, size) in THE_BARS_RADII_AND_SIZES {
+        let (model, fused) = a_round_bar_fused_with_a_block_cornered_on_its_wall(
+            radius,
+            size,
+            Rule::Intersection,
+            true,
         );
+        let exactly = 2.0 * radius.powi(3) * (0.6f64.acos() - 0.6 * 0.8);
+        one_solid_that_validates_and_measures(radius, size, &model, fused, exactly);
     }
+}
+
+/// The union and the bar less the block reach the mesher and are refused
+/// there, on one of the bar's caps: the foot of the ruling where `x = 0.6 r`
+/// cuts the bar's wall and the foot of the block's corner edge are stored at
+/// one point, though they are `1.78e-15` apart, and the cap's ring names that
+/// point twice. Q2106's mechanism, at its own radius of `24.32` too, so the row
+/// that answers it moves this test.
+#[test]
+fn a_tolerant_union_of_a_round_bar_and_a_block_cornered_on_its_wall_and_the_bar_less_the_block_name_one_cap_corner_twice()
+ {
+    for (radius, size) in THE_BARS_RADII_AND_SIZES {
+        for rule in [Rule::Union, Rule::Difference] {
+            let (_, fused) =
+                a_round_bar_fused_with_a_block_cornered_on_its_wall(radius, size, rule, true);
+            let Err(Error::CannotMeshAFace {
+                why: CannotTriangulate::CornersCoincide { .. },
+                ..
+            }) = fused
+            else {
+                panic!(
+                    "{radius} {size} {rule:?}: {:?}",
+                    fused.map(|_: Fused| "an answer")
+                );
+            };
+        }
+    }
+}
+
+/// The block less the bar is the block, `1.4 r · 2.8 r · 4 r = 15.68 r³`, less
+/// the slice of the bar the intersection measures. It was refused for a ring
+/// of two straight sides it wrote, a sliver of the block's face `x = 0.6 r`
+/// between the bar's ruling and the block's corner edge (Q2067's mechanism),
+/// until Q2079 keyed those two sides as one edge.
+#[test]
+fn a_tolerant_fuse_of_the_block_less_a_round_bar_cornered_on_its_wall_is_the_block_less_the_bars_slice()
+ {
+    for (radius, size) in THE_BARS_RADII_AND_SIZES {
+        let (model, fused) = a_round_bar_fused_with_a_block_cornered_on_its_wall(
+            radius,
+            size,
+            Rule::Difference,
+            false,
+        );
+        let exactly = radius.powi(3) * (15.68 - 2.0 * (0.6f64.acos() - 0.6 * 0.8));
+        one_solid_that_validates_and_measures(radius, size, &model, fused, exactly);
+    }
+}
+
+/// Panics unless `fused` is one solid that `Model::validate` passes, whose
+/// volume, measured at a deflection of `0.0001`, is `exactly` to within the
+/// measure's own published error, which is printed beside it.
+fn one_solid_that_validates_and_measures(
+    radius: f64,
+    size: f64,
+    model: &Model,
+    fused: rcad_topo::Result<Fused>,
+    exactly: f64,
+) {
+    let fused = fused.unwrap_or_else(|refused| panic!("{radius} {size}: {refused:?}"));
+    let policy = Policy::tolerant(size);
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|broken| panic!("{radius} {size}: {broken:?}"));
+    let [solid] = fused.solids() else {
+        panic!("{radius} {size}: {:?}", fused.solids());
+    };
+    let measured = model
+        .solid(*solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.0001).expect("a positive length"),
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refused| panic!("{radius} {size}: {refused:?}"));
+    println!(
+        "radius {radius}, working size {size}: measured {} ± {}, exactly {exactly}",
+        measured.volume(),
+        measured.volume_error()
+    );
+    assert!(
+        (measured.volume() - exactly).abs() <= measured.volume_error(),
+        "{radius} {size}: measured {} ± {} against {exactly}",
+        measured.volume(),
+        measured.volume_error()
+    );
 }
 
 /// The cube of side `6 scale` stood on its corner with its middle at the
