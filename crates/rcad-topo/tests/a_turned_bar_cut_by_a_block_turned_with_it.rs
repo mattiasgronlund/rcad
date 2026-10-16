@@ -446,6 +446,89 @@ fn turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refuse
     }
 }
 
+/// The block meets no face of the frustum, so the union is the frustum, three
+/// faces with its own two corners, and cutting the block out adds the block's
+/// six faces and eight corners and nothing else. Both ways round, under both
+/// policies, at both radii, unturned and turned either way, but for the cut
+/// [`turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refused`]
+/// pins.
+///
+/// The block's planes still cross the frustum's wall and far cap, and the fuse
+/// cuts both along those crossings and joins the pieces back up. Where no
+/// crossing ran from rim to rim, at radius `0.5` and at radius `1` turned by
+/// `rotation`, the wall stayed in 25 pieces, 27 faces for the union and 33 for
+/// the cut (Q2170). Where one did, the wall kept it as a seam, and the far rim
+/// kept a corner wherever a block plane crossed it and lost the frustum's own.
+#[test]
+fn a_block_wholly_inside_a_frustum_leaves_the_frustums_faces_and_corners_as_they_were() {
+    let turns = [
+        ("unturned", Isometry::identity()),
+        ("an exact half turn", half_a_turn_exactly()),
+        ("half a turn by rotation", half_a_turn_by_rotation()),
+    ];
+    for (which, turn) in &turns {
+        for near in FRUSTUM_NEARS {
+            for tolerant in [false, true] {
+                let policy = if tolerant {
+                    Policy::tolerant(5.0)
+                } else {
+                    Policy::certified()
+                };
+                for (rule, frustum_is_argument) in [
+                    (Rule::Union, true),
+                    (Rule::Union, false),
+                    (Rule::Difference, true),
+                ] {
+                    if rule == Rule::Difference && *which == "half a turn by rotation" {
+                        continue;
+                    }
+                    let what = format!(
+                        "{which}, near {near}, tolerant {tolerant}, {rule:?}, frustum is argument \
+                         {frustum_is_argument}"
+                    );
+                    let (mut model, frustum, notch) = a_turned_frustum_and_inside_notch(turn, near);
+                    let mut expected = corners_of(&model, &[frustum]);
+                    let mut faces = 3;
+                    if rule == Rule::Difference {
+                        expected.extend(corners_of(&model, &[notch]));
+                        expected.sort_unstable();
+                        faces += 6;
+                    }
+                    let (first, second) = if frustum_is_argument {
+                        (frustum, notch)
+                    } else {
+                        (notch, frustum)
+                    };
+                    let fused = model
+                        .fuse(
+                            &[first],
+                            &[second],
+                            rule,
+                            &policy,
+                            &mut ProvenanceLog::new(),
+                        )
+                        .unwrap_or_else(|why| panic!("{what}: {why:?}"))
+                        .solids()
+                        .to_vec();
+                    let [solid] = fused.as_slice() else {
+                        panic!("{what}: {} solids", fused.len());
+                    };
+                    assert_eq!(
+                        model
+                            .solid(*solid)
+                            .expect("the fuse made it")
+                            .faces()
+                            .count(),
+                        faces,
+                        "{what}: faces"
+                    );
+                    assert_eq!(corners_of(&model, &fused), expected, "{what}: corners");
+                }
+            }
+        }
+    }
+}
+
 /// Fuses the frustum of [`FRUSTUM_NOTCH`] from radius `near` with the block
 /// wholly inside it, both placed by `turn`, by every rule both ways round,
 /// under both policies, and checks each answers what it holds by hand with
@@ -537,6 +620,22 @@ fn a_turned_frustum_and_inside_notch(turn: &Isometry, near: f64) -> (Model, Soli
         .place_solid(notch, turn)
         .expect("a turn moves a block");
     (model, frustum, notch)
+}
+
+/// Every corner of every face of `solids`, once each, by its bits.
+fn corners_of(model: &Model, solids: &[SolidKey]) -> Vec<[u64; 3]> {
+    let mut corners: Vec<[u64; 3]> = solids
+        .iter()
+        .flat_map(|&solid| model.solid(solid).expect("this model made the key").faces())
+        .flat_map(|face| {
+            face.wires()
+                .flat_map(|wire| wire.points().collect::<Vec<_>>())
+        })
+        .map(|at| at.coordinates().map(f64::to_bits))
+        .collect();
+    corners.sort_unstable();
+    corners.dedup();
+    corners
 }
 
 /// Fuses the seam notch tilted off the bar's axis with the bar, unturned and
