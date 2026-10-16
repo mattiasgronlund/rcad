@@ -1,7 +1,8 @@
 //! Two nodes merged round a closed crossing by a tolerant policy that read
 //! what it was handed as a volume: first two places a ball is cut at, whose
 //! boxes' width is a length, then two corners round a cone's ellipse, whose
-//! sweep from the start is an area.
+//! sweep from the start is an area. Since Q2080 those two corners' order is
+//! filed as a length too, since their boxes overlap.
 //!
 //! # The ball's shape
 //!
@@ -56,29 +57,47 @@
 //! the widest, `1.06e-13`, so the corners were merged and every fuse
 //! answered. Q1273's probe held those answers to the checks of the nappe
 //! file, with the model at 100 mm and the policy at 2 to 2.6 mm, and each was
-//! right. Read over `2`, the enclosure the order refuses on is past the
-//! budget, and every fuse refuses. An area budget covers the widest from a
-//! working size of `2.73` up.
+//! right. Read over `2`, as Q1273 filed it, the enclosure the order refused on
+//! was past the budget, and every fuse refused. An area budget covers the
+//! widest from a working size of `2.73` up.
+//!
+//! The two corners' boxes overlap, though, so they may be one point, and how
+//! far a merge of them moves a point is bounded by how far apart two points of
+//! the two boxes may be, not by the sweep (Q2080). Filed as that length, the
+//! widest such order of these fuses is `9.9e-15`, inside the budget, and
+//! every fuse answers with the volume the cone, the cube and what they share
+//! give it
+//! (`a_tolerant_fuse_of_a_cube_on_a_cones_apex_at_2_mm_answers_with_its_volumes`).
 //!
 //! # Below a working size of one
 //!
 //! Below `1`, the area reading is the more lenient one, by `1/s`: at a shape
 //! scale of `0.18` and a working size of `0.6`, the cube on the cone's apex
-//! merges two corners the volume reading would have refused — a real gap,
+//! merged two corners the volume reading would have refused — a real gap,
 //! searched across 13 shape scales (`0.1` to `0.5`), 17 working sizes (`0.1`
 //! to `0.9`) and the four rule/order combinations above (884 fuses, no
 //! panics). **No wrong answer came of it.**
 //! `a_tolerant_fuse_of_a_cube_on_a_cone_below_working_size_one_merges_the_same_shape_as_at_full_scale`
-//! pins one such merge and compares its solid's face, wire and shell counts
+//! pins that fuse and compares its solid's face, wire and shell counts
 //! against the same pair fused at full scale and a 10 mm working size — past
 //! `2.73`, so trusted — and they agree: fusing is a similarity transform, so
 //! scaling the shape and the working size together cannot change which of two
 //! points comes first round the ellipse.
 //!
-//! The same gap shows up for "frustum cut near its seam": swap the cone's
+//! **Since Q2080 the gap is closed.** The corners the area reading merged have
+//! boxes that overlap, so their order is filed as how far apart two points of
+//! the two boxes may be, a length, which is read the same at every working
+//! size, so the area reading's `1/s` no longer reaches it. The fuse answers
+//! the same, no order is left that
+//! the area reading accepts and the volume reading refuses, and some order is
+//! such a length, which is what the three tests below working size one now
+//! check, beside the counts. The same holds for the frustum and the ball
+//! below.
+//!
+//! The same gap showed up for "frustum cut near its seam": swap the cone's
 //! sharp apex for `a_frustum_seamed_towards`'s flat near cap, cut at a
 //! three-hundredth of the far end (`far / 300`), and the same 13-scale x
-//! 17-size x 4-rule grid merges two corners the volume reading would have
+//! 17-size x 4-rule grid merged two corners the volume reading would have
 //! refused at, among others, a shape scale of `0.26` and a working size of
 //! `0.75`. The seam's own direction never matters to where the two faces of
 //! the cube cross the cone (`probe_family_a_angles`, run during this search,
@@ -153,7 +172,7 @@
 //!
 //! # Plane through a ball
 //!
-//! The same gap shows up a third time for "plane through a ball", the one
+//! The same gap showed up a third time for "plane through a ball", the one
 //! remaining family a plane's conic sweep runs through
 //! (`along_a_crossing.rs`'s `WhichWayItWinds::About` arm, reached for a plane
 //! and a sphere at `along_a_crossing.rs:401-402` unconditionally — a sphere
@@ -166,13 +185,14 @@
 //! cone's apex in ellipses.
 //!
 //! A `5`-scale x `7`-size x `4`-rule grid (narrower than the cone's own,
-//! since a ball has no seam direction to vary) finds the gap at, among
+//! since a ball has no seam direction to vary) found the gap at, among
 //! others, a shape scale of `0.18` and a working size of `0.6` — the cone's
 //! own pin values, shared by chance of the two narrower grids overlapping,
 //! not because the shapes are the same.
 //! `a_tolerant_fuse_of_a_cube_on_a_ball_through_its_corner_below_working_size_one_merges_the_same_shape_as_at_full_scale`
-//! pins that merge the same way the other two families' tests do. **No wrong
-//! answer came of this one either.**
+//! pins that fuse the same way the other two families' tests do. **No wrong
+//! answer came of this one either**, and since Q2080 its gap is closed the
+//! same way: the orders the area reading took are lengths now.
 //!
 //! A first attempt at this family — tilting `a_ball_grazing_the_z_axis`'s
 //! wall, and later a three-solid construction meant to separate the walk's
