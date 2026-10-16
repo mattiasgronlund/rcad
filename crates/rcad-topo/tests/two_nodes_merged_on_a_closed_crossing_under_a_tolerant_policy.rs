@@ -368,58 +368,178 @@ const EVERY_FUSE: [(Rule, bool); 4] = [
     (Rule::Difference, false),
 ];
 
-/// The regression: every tolerant fuse of the cube and the cone refuses on the
-/// order of two corners round an ellipse, filed as an area, with a sweep past
-/// the policy's budget read as an area and inside it read as a volume.
+/// Q1273's cube on a cone's apex at a 2 mm working size answers every fuse,
+/// with a model `Model::validate` passes and the volumes the cone, the cube
+/// and what the two share give it, each measured to within its own published
+/// error.
 ///
-/// Filed as a volume, the policy merged them, and every fuse answered.
+/// The cone holds `36π`, a disc of radius `6` with its apex `3` below it, and
+/// the cube `216`. What they share is summed up `z` by Simpson's rule over
+/// 3000 slices, each the exact area of the disc of radius `2z` inside the
+/// cube's slice there; 30000 slices move it by under `4e-8`. The cube less
+/// the cone is two solids: the cube's top corner above the cap `z = 3`, whose
+/// volume is `h³√3/2` for `h = 3√3 − 3` how far the corner is above the cap,
+/// and the rest.
+///
+/// Until Q2080 every fuse was refused on the order of two corners round an
+/// ellipse: an undecided sweep, filed as an area past the policy's budget for
+/// one (§318.5). Their boxes overlap, so the two may be one point, and the
+/// order is now filed as how far apart two points of the two boxes may be, a
+/// length the budget covers.
 #[test]
-fn a_tolerant_fuse_of_a_cube_on_a_cones_apex_refuses_a_sweep_past_an_area_budget() {
+fn a_tolerant_fuse_of_a_cube_on_a_cones_apex_at_2_mm_answers_with_its_volumes() {
     let policy = Policy::tolerant(THE_CUBES_WORKING_SIZE);
+    let cone = 36.0 * core::f64::consts::PI;
+    let cube = 216.0;
+    let shared = what_the_cube_and_the_cone_share(6.0, 3.0, 3000);
+    let above_the_cap = 3.0 * 3.0f64.sqrt() - 3.0;
+    let the_cubes_top_corner = above_the_cap.powi(3) * 3.0f64.sqrt() / 2.0;
     for (rule, cone_first) in EVERY_FUSE {
         let mut model =
             Model::new(Scale::millimetres(THE_CUBES_WORKING_SIZE).expect("a working size"));
-        let cone = a_pointed_cone(&mut model, 2.0, 3.0);
-        let cube = a_corner_up_cube_of_side_six_round_the_origin(&mut model);
+        let pointed = a_pointed_cone(&mut model, 2.0, 3.0);
+        let cornered = a_corner_up_cube_of_side_six_round_the_origin(&mut model);
         let (arguments, tools) = if cone_first {
-            ([cone], [cube])
+            ([pointed], [cornered])
         } else {
-            ([cube], [cone])
+            ([cornered], [pointed])
         };
-        let mut log = ProvenanceLog::new();
-        let fused = model.fuse(&arguments, &tools, rule, &policy, &mut log);
-        let Err(Error::Undecidable { records }) = fused else {
-            let merged: Vec<_> = log
-                .records()
-                .iter()
-                .filter(|record| record.predicate() == ALONG_A_CROSSING)
-                .map(|record| (record.measures(), record.enclosure()))
-                .collect();
-            panic!(
-                "{rule:?}, cone first {cone_first}: {:?}, after merging {merged:?}",
-                fused.map(|_: Fused| "an answer")
-            );
+        let fused = model
+            .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|refused| panic!("{rule:?}, cone first {cone_first}: {refused:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("{rule:?}, cone first {cone_first}: {broken:?}"));
+        let mut measured: Vec<(f64, f64)> = fused
+            .solids()
+            .iter()
+            .map(|solid| {
+                let measure = model
+                    .solid(*solid)
+                    .expect("the fuse made the key")
+                    .measure(
+                        Deflection::of(0.001).expect("a positive length"),
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|refused| {
+                        panic!("{rule:?}, cone first {cone_first}: {refused:?}")
+                    });
+                (measure.volume(), measure.volume_error())
+            })
+            .collect();
+        measured.sort_by(|one, other| one.0.total_cmp(&other.0));
+        let expected = match (rule, cone_first) {
+            (Rule::Union, _) => vec![cone + cube - shared],
+            (Rule::Intersection, _) => vec![shared],
+            (Rule::Difference, true) => vec![cone - shared],
+            (Rule::Difference, false) => {
+                vec![the_cubes_top_corner, cube - shared - the_cubes_top_corner]
+            }
+            (other, _) => panic!("no volume for {other:?}"),
         };
-        let refused = records.records().last().expect("a refusal names why");
-        let enclosure = refused.enclosure();
         assert_eq!(
-            refused.predicate(),
-            ALONG_A_CROSSING,
-            "{rule:?} {cone_first}"
+            measured.len(),
+            expected.len(),
+            "{rule:?}, cone first {cone_first}: {measured:?} against {expected:?}"
         );
-        assert_eq!(refused.measures(), Measures::Area, "{rule:?} {cone_first}");
-        assert!(
-            !policy
-                .wobble_is_acceptable(Measures::Area.wobble_of(enclosure, THE_CUBES_WORKING_SIZE)),
-            "{rule:?} {cone_first}: {enclosure}"
-        );
-        assert!(
-            policy.wobble_is_acceptable(
-                Measures::Volume.wobble_of(enclosure, THE_CUBES_WORKING_SIZE)
-            ),
-            "{rule:?} {cone_first}: {enclosure}"
-        );
+        for (&(volume, error), exactly) in measured.iter().zip(expected) {
+            assert!(
+                (volume - exactly).abs() <= error,
+                "{rule:?}, cone first {cone_first}: measured {volume} ± {error} against {exactly}"
+            );
+        }
     }
+}
+
+/// The volume a corner-up cube of `side` round the origin shares with the
+/// cone of slope two about `z` from its apex at the origin up to `far`, by
+/// Simpson's rule over `slices` slices up `z`.
+fn what_the_cube_and_the_cone_share(side: f64, far: f64, slices: usize) -> f64 {
+    let step = far / slices as f64;
+    let area = |z: f64| the_disc_inside_the_cubes_slice(side, z, 2.0 * z);
+    let mut sum = area(0.0) + area(far);
+    for i in 1..slices {
+        let weight = if i % 2 == 1 { 4.0 } else { 2.0 };
+        sum += weight * area(i as f64 * step);
+    }
+    sum * step / 3.0
+}
+
+/// The area of the disc of `radius` about the `z` axis at height `z` that
+/// lies inside the corner-up cube of `side` round the origin. The cube is
+/// `|n · p| ≤ side / 2` for its three face normals
+/// `n = (√(2/3) cos θ, √(2/3) sin θ, 1/√3)`, `θ` a third of a turn apart. The
+/// cube is turned about `z` in the model too, which moves no such area, since
+/// the disc is centred on `z`.
+fn the_disc_inside_the_cubes_slice(side: f64, z: f64, radius: f64) -> f64 {
+    let lean = (2.0f64 / 3.0).sqrt();
+    let rise = (1.0f64 / 3.0).sqrt();
+    let far = 4.0 * side;
+    let mut slice = vec![[-far, -far], [far, -far], [far, far], [-far, far]];
+    for k in 0..3 {
+        let turn = 2.0 * core::f64::consts::PI * f64::from(k) / 3.0;
+        for sign in [1.0, -1.0] {
+            let out = [sign * lean * turn.cos(), sign * lean * turn.sin()];
+            slice = clipped(&slice, out, side / 2.0 - sign * rise * z);
+        }
+    }
+    (0..slice.len())
+        .map(|i| the_disc_inside_the_wedge(radius, slice[i], slice[(i + 1) % slice.len()]))
+        .sum()
+}
+
+/// The part of `polygon` where `out · p ≤ reach`.
+fn clipped(polygon: &[[f64; 2]], out: [f64; 2], reach: f64) -> Vec<[f64; 2]> {
+    let past = |p: [f64; 2]| out[0] * p[0] + out[1] * p[1] - reach;
+    let mut kept = Vec::new();
+    for i in 0..polygon.len() {
+        let (p, q) = (polygon[i], polygon[(i + 1) % polygon.len()]);
+        let (by_p, by_q) = (past(p), past(q));
+        if by_p <= 0.0 {
+            kept.push(p);
+        }
+        if (by_p <= 0.0) != (by_q <= 0.0) {
+            let t = by_p / (by_p - by_q);
+            kept.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]);
+        }
+    }
+    kept
+}
+
+/// The area, signed by which way `a` to `b` turns about the origin, of the
+/// disc of `radius` round the origin inside the triangle of the origin, `a`
+/// and `b`: the side `ab` is split where it crosses the circle, and each piece
+/// adds a triangle where it is inside the disc and a sector where it is not.
+fn the_disc_inside_the_wedge(radius: f64, a: [f64; 2], b: [f64; 2]) -> f64 {
+    let dot = |p: [f64; 2], q: [f64; 2]| p[0] * q[0] + p[1] * q[1];
+    let cross = |p: [f64; 2], q: [f64; 2]| p[0] * q[1] - p[1] * q[0];
+    let run = [b[0] - a[0], b[1] - a[1]];
+    let at = |t: f64| [a[0] + t * run[0], a[1] + t * run[1]];
+    let (square, half, rest) = (dot(run, run), dot(a, run), dot(a, a) - radius * radius);
+    let mut cuts = vec![0.0];
+    let reach = half * half - square * rest;
+    if reach > 0.0 {
+        for t in [
+            (-half - reach.sqrt()) / square,
+            (-half + reach.sqrt()) / square,
+        ] {
+            if 0.0 < t && t < 1.0 {
+                cuts.push(t);
+            }
+        }
+    }
+    cuts.push(1.0);
+    cuts.windows(2)
+        .map(|pair| {
+            let (p, q, middle) = (at(pair[0]), at(pair[1]), at((pair[0] + pair[1]) / 2.0));
+            if dot(middle, middle) <= radius * radius {
+                cross(p, q) / 2.0
+            } else {
+                radius * radius * cross(p, q).atan2(dot(p, q)) / 2.0
+            }
+        })
+        .sum()
 }
 
 /// The gap found below a working size of `1` for "plane through a ball": a
@@ -470,18 +590,7 @@ fn a_tolerant_fuse_of_a_cube_on_a_ball_through_its_corner_below_working_size_one
         )
         .expect("the gap case answers Ok");
 
-    gap_log
-        .records()
-        .iter()
-        .find(|record| {
-            record.predicate() == ALONG_A_CROSSING
-                && record.measures() == Measures::Area
-                && gap_policy
-                    .wobble_is_acceptable(Measures::Area.wobble_of(record.enclosure(), gap_size))
-                && !gap_policy
-                    .wobble_is_acceptable(Measures::Volume.wobble_of(record.enclosure(), gap_size))
-        })
-        .expect("the area reading merges a sweep the volume reading would have refused");
+    the_orders_the_area_reading_took_are_lengths_now(&gap_log, gap_size);
 
     let gap_solid = gap_model
         .solid(gap_fused.solids()[0])
@@ -577,18 +686,7 @@ fn a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_o
         )
         .expect("the gap case answers Ok");
 
-    gap_log
-        .records()
-        .iter()
-        .find(|record| {
-            record.predicate() == ALONG_A_CROSSING
-                && record.measures() == Measures::Area
-                && gap_policy
-                    .wobble_is_acceptable(Measures::Area.wobble_of(record.enclosure(), gap_size))
-                && !gap_policy
-                    .wobble_is_acceptable(Measures::Volume.wobble_of(record.enclosure(), gap_size))
-        })
-        .expect("the area reading merges a sweep the volume reading would have refused");
+    the_orders_the_area_reading_took_are_lengths_now(&gap_log, gap_size);
 
     let gap_solid = gap_model
         .solid(gap_fused.solids()[0])
@@ -975,18 +1073,7 @@ fn a_tolerant_fuse_of_a_cube_on_a_cone_below_working_size_one_merges_the_same_sh
         )
         .expect("the gap case answers Ok");
 
-    gap_log
-        .records()
-        .iter()
-        .find(|record| {
-            record.predicate() == ALONG_A_CROSSING
-                && record.measures() == Measures::Area
-                && gap_policy
-                    .wobble_is_acceptable(Measures::Area.wobble_of(record.enclosure(), gap_size))
-                && !gap_policy
-                    .wobble_is_acceptable(Measures::Volume.wobble_of(record.enclosure(), gap_size))
-        })
-        .expect("the area reading merges a sweep the volume reading would have refused");
+    the_orders_the_area_reading_took_are_lengths_now(&gap_log, gap_size);
 
     let gap_solid = gap_model
         .solid(gap_fused.solids()[0])
@@ -1033,4 +1120,60 @@ fn a_tolerant_fuse_of_a_cube_on_a_cone_below_working_size_one_merges_the_same_sh
         gap_shape, reference_shape,
         "the gap case's topology should match the full-scale reference's"
     );
+}
+
+/// Panics unless the orders along a crossing in the log of a tolerant fuse at
+/// working size `size` show the gap below a working size of one closed: none
+/// is an area the area reading accepts and the volume reading refuses, and
+/// some is a length that the policy's budget covers and that bounds how far
+/// apart a point of one of its two boxes may be from a point of the other,
+/// rounded up by no more than a few ulps.
+fn the_orders_the_area_reading_took_are_lengths_now(log: &ProvenanceLog, size: f64) {
+    let policy = Policy::tolerant(size);
+    let orders: Vec<(Measures, f64, f64)> = log
+        .records()
+        .iter()
+        .filter(|record| record.predicate() == ALONG_A_CROSSING)
+        .map(|record| {
+            (
+                record.measures(),
+                record.enclosure(),
+                how_far_apart_the_two_may_be(record.inputs()),
+            )
+        })
+        .collect();
+    let between_the_readings: Vec<&(Measures, f64, f64)> = orders
+        .iter()
+        .filter(|&&(measures, enclosure, _)| {
+            measures == Measures::Area
+                && policy.wobble_is_acceptable(Measures::Area.wobble_of(enclosure, size))
+                && !policy.wobble_is_acceptable(Measures::Volume.wobble_of(enclosure, size))
+        })
+        .collect();
+    assert!(between_the_readings.is_empty(), "{between_the_readings:?}");
+    assert!(
+        orders.iter().any(|&(measures, enclosure, apart)| {
+            measures == Measures::Length
+                && apart <= enclosure
+                && enclosure <= apart * (1.0 + 8.0 * f64::EPSILON)
+                && policy.wobble_is_acceptable(Measures::Length.wobble_of(enclosure, size))
+        }),
+        "{orders:?}"
+    );
+}
+
+/// How far apart a point of the first box may be from a point of the second.
+fn how_far_apart_the_two_may_be(boxes: &[PredicatePoint]) -> f64 {
+    let [one, other] = boxes else {
+        panic!("an order is of two points: {boxes:?}");
+    };
+    let (mine, theirs) = (one.enclosure(), other.enclosure());
+    (0..3)
+        .map(|axis| {
+            let furthest =
+                (mine[axis].hi() - theirs[axis].lo()).max(theirs[axis].hi() - mine[axis].lo());
+            furthest * furthest
+        })
+        .sum::<f64>()
+        .sqrt()
 }

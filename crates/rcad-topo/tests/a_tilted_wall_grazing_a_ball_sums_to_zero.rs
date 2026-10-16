@@ -61,9 +61,13 @@
 //! The fuses are a whole ball at `(0, y, 0)` against the other ball with its
 //! cap above `z = 1` cut off. At `y = 16` a certified fuse refuses on the
 //! order of the two places round a ball's circle in `z = 1`, which does not
-//! sweep them to zero. A tolerant fuse reaches the overlap arm, takes the order
-//! there, and goes on to §346's limit: a piece no solid can place a point in. At
-//! `y = 0` both policies refuse on a point inside a piece of a face.
+//! sweep them to zero: the sweep straddles. Since the two boxes touch, the two
+//! places may be one point, so that order is filed as how far apart two points
+//! of the two boxes may be, a length, and no longer as the sweep, an area
+//! (Q2080). A tolerant fuse takes that order, reaches the overlap arm round
+//! the two balls' circle, takes the order there too, and goes on to §346's
+//! limit: a piece no solid can place a point in. At `y = 0` both policies
+//! refuse on a point inside a piece of a face.
 //!
 //! # A tilted plane
 //!
@@ -94,6 +98,11 @@ const WORKING_SIZE: f64 = 25.0;
 /// How wide the sweep round a ball's circle in `z = 1` straddles, from its
 /// walked start, for the two places at `y = 16`.
 const ROUND_A_BALLS_CIRCLE_IN_Z_1: f64 = 1.5881867761018131e-22;
+
+/// How far apart a point of one of the two boxes at `y = 16` may be from a
+/// point of the other: they differ only in `y`, from `15.999999999999998` to
+/// `16.000000000000004`, a step of `3·2⁻⁴⁹`, here rounded up.
+const ACROSS_THE_TWO_BOXES_AT_Y_16: f64 = 5.329070518200756e-15;
 
 /// The geometry the fuse is handed: both walls' circles start on the axis,
 /// the two places are apart, and round either circle they sweep exactly zero.
@@ -287,11 +296,20 @@ fn two_balls_at_y_0_cut_z_1_in_two_exact_places_that_are_apart() {
     }
 }
 
-/// A certified fuse at `y = 16` refuses before the overlap arm: the order of
-/// the two places is asked round a ball's circle in `z = 1` first, and that
-/// sweep straddles.
+/// A certified fuse at `y = 16` refuses on the order of the two places round
+/// a ball's circle in `z = 1`, before it reaches the overlap arm round the two
+/// balls' circle. That sweep straddles, and the two boxes touch at `y = 16`,
+/// so the two places may be one point, and the order is filed as how far
+/// apart they may be: a length, the step across both boxes. Until Q2080 it
+/// was filed as the sweep, an area of `1.6e-22`.
 #[test]
 fn two_balls_at_y_16_refuse_under_a_certified_policy_round_a_circle_in_z_1() {
+    let step = 3.0 * f64::powi(2.0, -49);
+    assert!(
+        step < ACROSS_THE_TWO_BOXES_AT_Y_16
+            && ACROSS_THE_TWO_BOXES_AT_Y_16 <= step * (1.0 + 8.0 * f64::EPSILON),
+        "{step} rounded up"
+    );
     let places = the_two_places_at_y_16();
     for rule in EVERY_RULE {
         for ball_first in [true, false] {
@@ -306,8 +324,12 @@ fn two_balls_at_y_16_refuse_under_a_certified_policy_round_a_circle_in_z_1() {
                 is_the_order_of(refused, places),
                 "{rule:?}, ball first {ball_first}: {refused:#?}"
             );
-            assert_eq!(refused.measures(), Measures::Area, "{rule:?}");
-            assert_eq!(refused.enclosure(), ROUND_A_BALLS_CIRCLE_IN_Z_1, "{rule:?}");
+            assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
+            assert_eq!(
+                refused.enclosure(),
+                ACROSS_THE_TWO_BOXES_AT_Y_16,
+                "{rule:?}"
+            );
         }
     }
 }
