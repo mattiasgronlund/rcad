@@ -140,7 +140,8 @@ pub struct Reached {
     /// Solids whose located numbers were compared bit for bit with the solid
     /// that went in, and matched — plus, for a solid wholly flat or at no
     /// placement, whose volume, surface area and centroid also matched bit
-    /// for bit (§249.6).
+    /// for bit (§249.6), unless a circle drawn on one of its flat faces came
+    /// back walked round another centre (§249.8).
     pub solids_the_same: usize,
     /// Models written, read back, and the same in every solid.
     pub came_back_the_same: usize,
@@ -208,8 +209,11 @@ pub fn one_model_decoded_and_written(bytes: &[u8]) -> Reached {
 /// a stopgap for a gap, not a limit (`docs/decisions.md` §249.8): a circle
 /// drawn on a flat face comes back named by a pipe whose origin is the
 /// circle's centre, and the walk can centre it a few ulps from where the
-/// kernel's own pipe put it. Measured on an unplaced solid, that moved the
-/// centroid by 16, 2 and 3 ulps, and the volume by one.
+/// kernel's own pipe put it. Measured on two unplaced solids: a pipe leaning
+/// along `(1, 1, 1)` came back centred two ulps off in each coordinate, with
+/// the volume and area the same bits and the centroid 16, 2 and 3 ulps off;
+/// a pipe up `z` from `z = -15.9` came back centred four ulps off in `z`,
+/// with the volume one ulp off and the centroid's `z` six.
 fn read_back_and_compared(source: &Model, text: &str) -> Reached {
     let mut reached = Reached::default();
     let file = StepFile::read(text.as_bytes()).unwrap_or_else(|why| {
@@ -2345,13 +2349,43 @@ fn a_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file() {
     }
 }
 
+/// A disc on a bar's top at `z = 4`, drawn by a pipe up `z` from far below at
+/// `z = -15.9` and never placed. The pipe runs along a coordinate axis and
+/// the solid carries no placement, yet it comes back measuring differently
+/// (`docs/decisions.md` §249.8). Walked up from `-15.9`, the kernel's circle
+/// is centred at `z = 3.9999999999999982`, four ulps under the top it is
+/// drawn on. The file writes that centre, and the reader's pipe starts there,
+/// so its walk to the top lands on `4.0`. Measured: the volume one ulp off,
+/// the centroid's `z` six. Before
+/// [`every_drawn_circle_comes_back_round_the_same_centre`],
+/// [`read_back_and_compared`] measured such a solid bit for bit and failed it
+/// as "a sound solid came back from its own file with a different volume or
+/// area".
+#[test]
+fn a_disc_drawn_by_a_pipe_from_far_below_its_top_comes_back_from_its_own_file() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let _ = a_bar_with_a_disc_drawn_by_a_pipe_from(&mut model, Point::new(0.0, 0.0, -15.9), 1.0)
+        .expect("a bar with a disc drawn by a pipe from far below fits this model");
+    assert!(solid_has_no_placement(the_one_solid(&model)));
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}, {:?}",
+        rcad_step::write(&model, "a disc drawn by a pipe from far below its top").err()
+    );
+}
+
 /// [`a_bar_with_a_leaning_disc_drawn_by_a_pipe_off_its_own_plane`], never
 /// placed: its pipe leans off every one of `x`, `y` and `z`, and its own
 /// origin starts at the bar's floor, off the flat face its circle is drawn
 /// on at the bar's top. [`solid_has_no_placement`] holds for it without
-/// calling [`Model::place_solid`] at all, which is the case
-/// [`assert_located_numbers_the_same`]'s doc comment says had not been run —
-/// see there for the measured result this found.
+/// calling [`Model::place_solid`] at all. It comes back walked round a centre
+/// two ulps off in each coordinate, and its centroid moves, so
+/// [`every_drawn_circle_comes_back_round_the_same_centre`] leaves its
+/// measurement out (`docs/decisions.md` §249.8); see
+/// [`assert_located_numbers_the_same`] for what was measured.
 #[test]
 fn an_unplaced_leaning_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
