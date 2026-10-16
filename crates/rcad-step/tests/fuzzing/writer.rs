@@ -1731,11 +1731,11 @@ fn a_movement(draw: &mut Draw) -> Isometry {
     moved.compose(&turned)
 }
 
-/// One of the six shapes, with whole-number sizes and a power-of-two slope.
+/// One of the seven shapes, with whole-number sizes and a power-of-two slope.
 fn a_drawn_solid(model: &mut Model, draw: &mut Draw) -> rcad_topo::Result<SolidKey> {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
-    match draw.below(6) {
+    match draw.below(7) {
         0 => model.add_cube(draw.whole(1, 8), &policy, &mut log),
         1 => model.add_round_bar(draw.whole(1, 8), draw.whole(1, 16), &Isometry::identity()),
         2 => model.add_ball(draw.whole(1, 8), &Isometry::identity()),
@@ -1745,6 +1745,7 @@ fn a_drawn_solid(model: &mut Model, draw: &mut Draw) -> rcad_topo::Result<SolidK
             a_frustum(model, a_slope(draw), near, far)
         }
         4 => a_pointed_cone(model, a_slope(draw), draw.whole(1, 8)),
+        5 => a_bar_with_a_disc_drawn_on_its_top(model),
         _ => {
             let tube = draw.whole(1, 4);
             a_quarter_bend(model, tube + draw.whole(1, 8), tube)
