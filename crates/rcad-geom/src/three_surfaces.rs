@@ -1693,6 +1693,9 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     if let Some(answer) = what_a_plane_along_a_pipe_leaves(flat, one, other, at)? {
         return Ok(answer);
     }
+    if let Some(answer) = what_a_plane_that_cuts_them_in_bands_apart_leaves(flat, one, other) {
+        return Ok(answer);
+    }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
@@ -3987,6 +3990,218 @@ impl TheLinesAlongAPipe {
             })
             .collect()
     }
+}
+
+/// What a plane leaves of a ball, a pipe or a cone and a second one where the
+/// curves it cuts them in are proved apart, or `None` where that is not proved.
+///
+/// **Each curve lies in a band about where an axis crosses the plane.** Write
+/// the plane `n·p = d`, and give each surface a stored point `o` on an axis and
+/// that axis's direction `w`: a ball's centre and the plane's own normal, a
+/// pipe's axis origin and direction, or a cone's apex and direction. The axis
+/// crosses the plane at `c = o + w·m/k`, for `k = n·w` and `m = d − n·o`. Take
+/// a point `p = c + v` of the plane and `t` the angle between `n` and `w`.
+/// Since `v` is square to `n`, its part along the axis is at most `|v|·sin t`.
+///
+/// - A pipe of radius `r` holds `p` where `|v|² − (v·ŵ)² = r²`, so
+///   `r ≤ |v| ≤ r / cos t`. A ball is the same with `t = 0`: a circle of
+///   radius `ρ` about `c`, with `ρ² = (N R² − m²)/N` for `N = n·n`.
+/// - A cone of slope `s` holds `p` where `|v|² − x² = s²(h + x)²`, with `x`
+///   the part of `v` along the axis and `h = m √(w·w) / k` how far the plane
+///   is from the apex along it. With `ρ = s|h|`, `|x| ≤ |v| sin t` gives
+///   `ρ / (1 + s sin t) ≤ |v|`, and `|v| ≤ ρ / (cos t − s sin t)` where the
+///   bottom is above nothing. Where it is not, the plane runs at least as
+///   steep as a ruling and the cut has no outer edge.
+///
+/// So every point of each cut is between `ρ − ε⁻` and `ρ + ε⁺` from its `c`,
+/// and the pipe's band is the cone's with `s = 0`, the ball's the pipe's with
+/// `t = 0`. A point on both is `|c₁ − c₂|` at most nearer one centre than the
+/// other, so the three share nothing where `ρ₂ − ε₂⁻ − ρ₁ − ε₁⁺` or
+/// `ρ₁ − ε₁⁻ − ρ₂ − ε₂⁺` is above `|c₁ − c₂|`. The cap through `(0, 0, 5)`
+/// with normal `(0, 1, 100)` cuts the bar of radius three up `z` within
+/// `3.00015` of the axis and the cone of slope one from the origin no nearer
+/// than `4.95`, and the three share nothing.
+///
+/// **Every number is proved and none is a tolerance.** On a cap one rounding
+/// off square to a bar and a cone that it cuts in one circle on paper, `ρ₂ − ρ₁`,
+/// both slacks and `|c₁ − c₂|` are each about a rounding, and so is the margin
+/// between them. So nothing that cancels is left to the enclosures:
+/// `ρ₂ − ρ₁` is `(P₂Q₁ − P₁Q₂) / (Q₁Q₂(ρ₁ + ρ₂))` for `ρ² = P/Q`, with the top
+/// worked out exactly, and `c₁ − c₂` is `G / (k₁k₂)` for
+/// `G = k₁k₂(o₁ − o₂) + k₂m₁w₁ − k₁m₂w₂`, exactly, so each comes out to a few
+/// roundings of itself. `sin² t` is `|n × w|²/(N(w·w))` with the top exact,
+/// and `1 − cos t` is `sin² t / (1 + cos t)`. No number here is past degree
+/// twelve in the stored numbers, which [`Exact::times`] multiplies without
+/// falling off the bottom of the range.
+///
+/// **What it leaves to the refusal** is two bands that overlap: the curves may
+/// cross, and where is the quartic the module doc names. So does a ring, a
+/// plane that misses a ball, and a pipe or a cone the plane runs along.
+///
+/// It is asked last and only ever answers that the three share nothing, so a
+/// triple an earlier road answers keeps its answer, and where a product falls
+/// out of range it hands the triple on to the refusal it had before.
+fn what_a_plane_that_cuts_them_in_bands_apart_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+) -> Option<MeetOfThree> {
+    let mine = the_band_a_plane_cuts(flat, one)?;
+    let theirs = the_band_a_plane_cuts(flat, other)?;
+    let between = how_far_apart_the_centres_of_two_bands_are(&mine, &theirs)?;
+    let [my_top, my_bottom] = &mine.squared_radius;
+    let [their_top, their_bottom] = &theirs.squared_radius;
+    let squared_gap = their_top
+        .times(my_bottom)?
+        .minus(&my_top.times(their_bottom)?);
+    let gap = quotient_or_everything(
+        squared_gap.enclosure(),
+        my_bottom.times(their_bottom)?.enclosure() * (mine.radius + theirs.radius),
+    );
+    let theirs_beyond_mine = gap - theirs.inside - mine.outside - between;
+    let mine_beyond_theirs = -gap - mine.inside - theirs.outside - between;
+    (theirs_beyond_mine.lo() > 0.0 || mine_beyond_theirs.lo() > 0.0).then_some(MeetOfThree::Nowhere)
+}
+
+/// The band a plane cuts a ball, a pipe or a cone in, in
+/// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`]'s names: every point
+/// of the cut is between `radius − inside` and `radius + outside` from where
+/// the axis crosses the plane.
+struct ABand {
+    /// `o`.
+    on_the_axis: [f64; 3],
+    /// `w`.
+    along: [f64; 3],
+    /// `k`, exactly, and above or below nothing.
+    leaning: Exact,
+    /// `m`, exactly.
+    reach: Exact,
+    /// `P` and `Q`, exactly, with `Q` above nothing.
+    squared_radius: [Exact; 2],
+    /// `ρ`.
+    radius: Interval,
+    /// `ε⁻`.
+    inside: Interval,
+    /// `ε⁺`.
+    outside: Interval,
+}
+
+/// The band `flat` cuts `surface` in, or `None` where it is not a ball, a pipe
+/// or a cone, where the plane runs along its axis or misses a ball, or where a
+/// product falls out of range.
+fn the_band_a_plane_cuts(flat: &Plane, surface: &Surface) -> Option<ABand> {
+    let normal = flat.normal().components();
+    let (on_the_axis, along, slope) = match surface {
+        Surface::Sphere(ball) => (ball.centre().coordinates(), normal, 0.0),
+        Surface::Cylinder(pipe) => (
+            pipe.axis().origin().coordinates(),
+            pipe.axis().direction().components(),
+            0.0,
+        ),
+        Surface::Cone(cone) => (
+            cone.apex().coordinates(),
+            cone.axis().direction().components(),
+            cone.slope(),
+        ),
+        Surface::Plane(_) | Surface::Torus(_) => return None,
+    };
+    let leaning = Exact::dot_of(normal, along)?;
+    if !matches!(leaning.sign(), Decision::Pos | Decision::Neg) {
+        return None;
+    }
+    let reach = Exact::of(flat.offset()).minus(&Exact::dot_of(normal, on_the_axis)?);
+    let squared_normal = Exact::dot_of(normal, normal)?;
+    let squared_axis = Exact::dot_of(along, along)?;
+    let squared_radius = match surface {
+        Surface::Sphere(ball) => [
+            squared_normal
+                .times(&Exact::product_of(ball.radius(), ball.radius())?)?
+                .minus(&reach.times(&reach)?),
+            squared_normal.clone(),
+        ],
+        Surface::Cylinder(pipe) => [
+            Exact::product_of(pipe.radius(), pipe.radius())?,
+            Exact::of(1.0),
+        ],
+        Surface::Cone(cone) => [
+            Exact::product_of(cone.slope(), cone.slope())?
+                .times(&reach.times(&reach)?)?
+                .times(&squared_axis)?,
+            leaning.times(&leaning)?,
+        ],
+        Surface::Plane(_) | Surface::Torus(_) => {
+            unreachable!("only a ball, a pipe or a cone has a band: {surface:?}")
+        }
+    };
+    if !matches!(squared_radius[0].sign(), Decision::Pos | Decision::Zero) {
+        return None;
+    }
+    let radius = root_enclosing(quotient_or_everything(
+        squared_radius[0].enclosure(),
+        squared_radius[1].enclosure(),
+    ));
+
+    let both_squared = squared_normal.enclosure() * squared_axis.enclosure();
+    let squared_sine = quotient_or_everything(
+        Exact::squared_length_of(&exact_cross_of(normal, along)?)?.enclosure(),
+        both_squared,
+    );
+    let sine = root_enclosing(squared_sine);
+    let level = if leaning.sign() == Decision::Neg {
+        -leaning.enclosure()
+    } else {
+        leaning.enclosure()
+    };
+    let cosine = quotient_or_everything(level, root_enclosing(both_squared));
+    let one = Interval::exactly(1.0);
+    let slope = Interval::exactly(slope);
+    let inside = radius * quotient_or_everything(slope * sine, one + slope * sine);
+    let room = cosine - slope * sine;
+    let outside = if room.lo() > 0.0 {
+        radius
+            * quotient_or_everything(
+                quotient_or_everything(squared_sine, one + cosine) + slope * sine,
+                room,
+            )
+    } else {
+        Interval::ENTIRE
+    };
+    Some(ABand {
+        on_the_axis,
+        along,
+        leaning,
+        reach,
+        squared_radius,
+        radius,
+        inside,
+        outside,
+    })
+}
+
+/// `|c₁ − c₂|`, the distance between where the two bands' axes cross the
+/// plane, as `|G| / |k₁k₂|` with `G` worked out exactly, or `None` where a
+/// product falls out of range.
+fn how_far_apart_the_centres_of_two_bands_are(mine: &ABand, theirs: &ABand) -> Option<Interval> {
+    let both = mine.leaning.times(&theirs.leaning)?;
+    let from_theirs = Exact::gap_between(theirs.on_the_axis, mine.on_the_axis);
+    let my_reach = theirs.leaning.times(&mine.reach)?;
+    let their_reach = mine.leaning.times(&theirs.reach)?;
+    let mut apart = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (axis, entry) in apart.iter_mut().enumerate() {
+        *entry = both
+            .times(&from_theirs[axis])?
+            .plus(&my_reach.times(&Exact::of(mine.along[axis]))?)
+            .minus(&their_reach.times(&Exact::of(theirs.along[axis]))?);
+    }
+    let size = if both.sign() == Decision::Neg {
+        -both.enclosure()
+    } else {
+        both.enclosure()
+    };
+    Some(quotient_or_everything(
+        root_enclosing(Exact::squared_length_of(&apart)?.enclosure()),
+        size,
+    ))
 }
 
 /// A line, written as `(through + s · direction) / divided_by`.
