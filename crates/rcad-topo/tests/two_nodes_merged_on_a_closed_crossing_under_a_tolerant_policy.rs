@@ -130,11 +130,11 @@
 //! by a block whose inside corner stands on the bar's wall, at `(0.6 r, 0.8
 //! r)`. At a radius of `12.8` or `25.6` and working sizes of `10`, `25` and
 //! `100`, every fuse was refused from the same place in `spread_the_winding`,
-//! on the bar's wall, until Q2082. On each cap the feet of the two rulings the
-//! block's faces `x = 0.6 r` and `y = 0.8 r` cut the wall in are an ulp of
-//! `7.68` apart, and neither the sweep round the cap's rim nor the angle about
-//! the bar's axis could part them. The tighter boxes of the two, turned from
-//! one to the step to the other, are parted (`as_the_boxes_say` and
+//! on the bar's wall, until Q2082. On the top cap the feet of the two rulings
+//! the block's faces `x = 0.6 r` and `y = 0.8 r` cut the wall in are an ulp
+//! of `7.68` apart, and neither the sweep round the cap's rim nor the angle
+//! about the bar's axis could part them. The tighter boxes of the two, turned
+//! from one to the step to the other, are parted (`as_the_boxes_say` and
 //! `round_a_closed_crossing_by_its_angle` in `fuse/arrange.rs`).
 //!
 //! Now the intersection answers at `12.8`/`25`, `12.8`/`10`, `12.8`/`100`

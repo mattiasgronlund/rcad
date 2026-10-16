@@ -4036,10 +4036,10 @@ impl<'f> Arrangement<'f> {
     /// the tighter boxes are turned about the pipe's axis**
     /// ([`round_a_closed_crossing_by_its_angle`]), which names no start either.
     /// A round bar of radius `12.8` notched by a block whose faces `x = 0.6 r`
-    /// and `y = 0.8 r` meet on its wall has, on each cap, the feet of the two
-    /// rulings those faces cut the wall in a rounding apart, at `x = 7.68` and
-    /// `x ≈ 7.679999999999999`. The sweep over their tighter boxes does not part
-    /// them, and turned they are. Without that turn the bar's three pins in
+    /// and `y = 0.8 r` meet on its wall has, on its top cap, the feet of the
+    /// two rulings those faces cut the wall in a rounding apart, at `x = 7.68`
+    /// and `x ≈ 7.679999999999999`. The sweep over their tighter boxes does not
+    /// part them, and turned they are. Without that turn the bar's three pins in
     /// `two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs` fail,
     /// its union refused `CannotTellTheCellsOfAFaceApart` as every fuse of it
     /// was before (Q2082).
@@ -9501,11 +9501,11 @@ fn the_start_is_a_rounding_off(
 ///
 /// **The step parts two points a rounding apart round the circle.** A round
 /// bar of radius `12.8` up `z`, notched by a block whose faces `x = 0.6 r` and
-/// `y = 0.8 r` meet on its wall, has on each cap the feet of the two rulings
-/// those faces cut the wall in. Their tighter boxes
-/// ([`Arrangement::as_the_boxes_say`]) are `x = 7.68`, `y` in `[10.24,
-/// 10.240000000000002]`, and `x` in `[7.679999999999998, 7.679999999999999]`,
-/// `y = 10.240000000000002`. `w·(a × b) = a_x b_y − a_y b_x` takes two products
+/// `y = 0.8 r` meet on its wall, has on its top cap, `z = 25.6`, the feet of
+/// the two rulings those faces cut the wall in. Their tighter boxes
+/// ([`Arrangement::narrowed_box_of`]), which [`Arrangement::as_the_boxes_say`]
+/// hands here, are `x = 7.68`, `y` in `[10.24, 10.240000000000002]`, and `x`
+/// in `[7.679999999999998, 7.679999999999999]`, `y = 10.240000000000002`. `w·(a × b) = a_x b_y − a_y b_x` takes two products
 /// of about `78.64`, each rounded out by up to an ulp of `1.4e-14`, against a
 /// turn of at least `10.24 · 8.9e-16 = 9.1e-15`, so its enclosure, `[−4.3e-14,
 /// 0]`, touches zero. `w·(a × (b − a))` takes `7.68` and `10.24` times a step
