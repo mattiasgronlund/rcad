@@ -1408,6 +1408,20 @@ impl Walk {
     /// (`Writing::an_arc_of_a_circle_on_a_flat_face`). A disc drawn on a turned
     /// bar's top has that axis an ulp off length one, and [`Axis::new`] moved
     /// the last bit of 76 of 372 such axes (Q1001, §355.6).
+    ///
+    /// **That pipe runs through the circle's centre only where its walk
+    /// centres the circle there.** `rcad_geom::walk` centres a circle by moving
+    /// the pipe's own origin up its axis to each flat face, and from the
+    /// circle's centre that second rounding can land a few ulps away: a disc on
+    /// a bar's top at `z = 4` drawn by a pipe up `z` from `z = −15.9` is centred
+    /// at `z = 3.9999999999999982`, and the pipe through there walks it to
+    /// `4.0`. Where it does, the writer writes the model's own pipe beside the
+    /// circle as a `CYLINDRICAL_SURFACE` nothing refers to, and the run takes
+    /// the first pipe of the file's with the same direction and radius, to the
+    /// bit, whose walk centres the circle on the centre the file wrote
+    /// ([`the_walk_centres_it_at`], shared with the writer;
+    /// `docs/decisions.md` §249.8). Where the file holds none, the pipe through
+    /// the centre stays.
     fn the_surface_that_names_the_curve(
         &self,
         reading: &Reading<'_>,
