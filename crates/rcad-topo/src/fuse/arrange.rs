@@ -1852,6 +1852,7 @@ impl<'f> Arrangement<'f> {
                             .collect();
                         Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
                             .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
+                            .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
                             .unwrap_or(undecided)
                     }
                 }
@@ -8112,6 +8113,112 @@ impl<'f> Arrangement<'f> {
         })
     }
 
+    /// Which side of `partner` a point lies that is on a pipe and on a plane
+    /// square to the pipe's axis, both among the surfaces it is `on`, where
+    /// `partner` is clear of the circle the two meet in: the side of the
+    /// circle's centre. `None` where no such pair is among them or `partner`
+    /// reaches the circle, and the caller keeps the box's answer.
+    ///
+    /// A bar turned onto `x` by `Isometry::rotation` about `y` by `π/2` has
+    /// its axis along `(1, 0, 2⁻⁵²)`, so laid along a block's top or floor it
+    /// is clear of that plane by `1 − 1/√(1 + 2⁻¹⁰⁴)` at its near seam corner
+    /// and by more at its far one. Both corners are boxes `1e−13` wide that the
+    /// plane runs through, and every fuse of the pair was refused for it.
+    /// [`Arrangement::side_of_a_plane_clear_of_a_pipe`] does not answer there:
+    /// the plane leans to the axis by `2⁻⁵²`, so it crosses the pipe, in an
+    /// ellipse far past the bar's end (Q2102).
+    ///
+    /// **Every point of the circle is on one side of `partner`.** The cap
+    /// `n_c·p = d_c` is square to the axis through `o` along `w`, so it meets
+    /// the pipe in the circle of radius `r` round `c = o + t·w`, where `t` is
+    /// `(d_c − n_c·o)/k` for `k = n_c·w`, which is not nought since `n_c` lies
+    /// along `w`. A point of the circle is `c + r·u` for a `u` of length one
+    /// square to `w`, so for `partner`'s normal `n` and offset `d`, `n·p − d`
+    /// is `(n·c − d) + r·(n·u)`, and `|n·u|` is at most the length of `n` less
+    /// its part along `w`, `√(|n|² − (n·w)²/|w|²)`. So where `(n·c − d)²·|w|²`
+    /// is more than `r²·(|n|²·|w|² − (n·w)²)`, the sign all round the circle
+    /// is the sign of `n·c − d`. Both sides are multiplied by `k²` so that `t`
+    /// needs no division: `a = k·(n·o − d) + (d_c − n_c·o)·(n·w)` is
+    /// `k·(n·c − d)`, the test is `a²·|w|²` against
+    /// `k²·r²·(|n|²·|w|² − (n·w)²)`, and the side is the sign of `k·a`, which
+    /// is `k²·(n·c − d)`. That is products and sums of stored
+    /// numbers, decided exactly ([`rcad_predicates::expansion`]); at the bar's
+    /// near cap above it is `1 + 2⁻¹⁰⁴` against `1`.
+    ///
+    /// The cap is asked to be square to the axis exactly
+    /// ([`lie_along_one_line`]): a cap leaning by a rounding meets the pipe in
+    /// an ellipse, which a circle's reach does not bound.
+    fn side_of_a_plane_clear_of_a_cap_circle(on: &[Surface], partner: &Plane) -> Option<Decision> {
+        on.iter().find_map(|pipe| {
+            let Surface::Cylinder(pipe) = pipe else {
+                return None;
+            };
+            on.iter().find_map(|cap| {
+                let Surface::Plane(cap) = cap else {
+                    return None;
+                };
+                let along = pipe.axis().direction().components();
+                if !lie_along_one_line(cap.normal().components(), along) {
+                    return None;
+                }
+                Self::side_of_a_plane_clear_of_a_circle(
+                    partner,
+                    cap,
+                    pipe.axis().origin().coordinates(),
+                    along,
+                    pipe.radius(),
+                )
+            })
+        })
+    }
+
+    /// The side of `partner` all round the circle where `cap` meets the pipe
+    /// of `radius` along `along` from `origin`, or `None` where `partner`
+    /// reaches the circle or a product would round
+    /// ([`Arrangement::side_of_a_plane_clear_of_a_cap_circle`] says why).
+    fn side_of_a_plane_clear_of_a_circle(
+        partner: &Plane,
+        cap: &Plane,
+        origin: [f64; 3],
+        along: [f64; 3],
+        radius: f64,
+    ) -> Option<Decision> {
+        let (normal, its_normal) = (partner.normal().components(), cap.normal().components());
+        let k = exactly_dotted(its_normal, along)?;
+        let along_the_axis = exactly_dotted(normal, along)?;
+        let off_partner = exactly_added(&exactly_dotted(normal, origin)?, &[-partner.offset()]);
+        let off_the_cap = exactly_added(
+            &[cap.offset()],
+            &negated(&exactly_dotted(its_normal, origin)?),
+        );
+        let a = exactly_added(
+            &exactly_multiplied(&k, &off_partner)?,
+            &exactly_multiplied(&off_the_cap, &along_the_axis)?,
+        );
+        let [squared_normal, squared_along] = [normal, along].map(|way| exactly_dotted(way, way));
+        let across = exactly_added(
+            &exactly_multiplied(&squared_normal?, squared_along.as_ref()?)?,
+            &negated(&exactly_multiplied(&along_the_axis, &along_the_axis)?),
+        );
+        let reach = exactly_multiplied(
+            &exactly_multiplied(
+                &exactly_multiplied(&k, &k)?,
+                &exactly_scaled(&[radius], radius)?,
+            )?,
+            &across,
+        )?;
+        let distance = exactly_multiplied(&exactly_multiplied(&a, &a)?, squared_along.as_ref()?)?;
+        if expansion_sign(&exactly_added(&distance, &negated(&reach))) != Decision::Pos {
+            return None;
+        }
+        let side = expansion_sign(&exactly_multiplied(&k, &a)?);
+        assert!(
+            matches!(side, Decision::Pos | Decision::Neg),
+            "a plane clear of a circle has the circle's centre off it: {a:?} at {k:?}"
+        );
+        Some(side)
+    }
+
     /// How many times the face's boundary winds round each walk, counting only
     /// what one lump of the drawing can say on its own.
     ///
@@ -10666,6 +10773,21 @@ fn exactly_added(left: &[f64], right: &[f64]) -> Vec<f64> {
     let used = expansion_sum(left, right, &mut sum);
     sum.truncate(used);
     sum
+}
+
+/// `one·other`, exactly; `None` where one of the products would round.
+fn exactly_dotted(one: [f64; 3], other: [f64; 3]) -> Option<Vec<f64>> {
+    (0..3).try_fold(Vec::new(), |total, axis| {
+        Some(exactly_added(
+            &total,
+            &exactly_scaled(&[one[axis]], other[axis])?,
+        ))
+    })
+}
+
+/// `expansion` turned round, which is exact: no entry changes but its sign.
+fn negated(expansion: &[f64]) -> Vec<f64> {
+    expansion.iter().map(|entry| -entry).collect()
 }
 
 /// The three surfaces the two nodes where four half ellipses meet are named
