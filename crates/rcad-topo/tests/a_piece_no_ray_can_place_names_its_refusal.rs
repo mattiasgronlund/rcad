@@ -544,8 +544,6 @@ fn every_side_of_a_bend_placed_round_from_another_is_used_once_each_way() {
 #[test]
 fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver() {
     let one_bend = PI * PI * 4.0 / 2.0;
-    let policy = Policy::certified();
-    let deflection = rcad_geom::Deflection::of(0.01).expect("a deflection");
     for (rule, expected) in [(Rule::Union, 2.0 * one_bend), (Rule::Difference, one_bend)] {
         for the_first_first in [true, false] {
             let what = format!("{rule:?}, the first first {the_first_first}");
