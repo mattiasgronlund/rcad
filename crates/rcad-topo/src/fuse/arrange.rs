@@ -9391,7 +9391,21 @@ fn round_a_closed_crossing_and_what_it_measures(
         return Ok((read, Measures::Volume));
     }
     if matches!(decided, Decision::Undecidable { .. }) && boxes_overlap(one, other) {
-        return Ok((one_point_if_both_are_exact(one, other), Measures::Length));
+        let (mine, theirs) = (one.enclosure(), other.enclosure());
+        let squared: f64 = (0..3)
+            .map(|axis| {
+                let furthest =
+                    (mine[axis].hi() - theirs[axis].lo()).max(theirs[axis].hi() - mine[axis].lo());
+                furthest * furthest
+            })
+            .sum();
+        let furthest_apart = squared.sqrt() * (1.0 + 4.0 * f64::EPSILON);
+        return Ok((
+            Decision::Undecidable {
+                enclosure: furthest_apart,
+            },
+            Measures::Length,
+        ));
     }
     // Compared rather than matched: only a proved zero is re-read, and every
     // other answer goes back as it came (§40).
