@@ -57,14 +57,17 @@
 //!
 //! The same ball in a bar 4 by 4 across, from `x = 3` to `x = 7`, touches the
 //! bar's two sides as well, and the seam's middle is where it touches `x = 7`.
-//! Every point asked is on the skin, so the bar less the ball is still refused,
-//! and the one record names the two poles and the seam's middle.
+//! Every point of the ball's edge that is asked is on the bar's skin, and the
+//! bar less the ball was refused `Undecidable`, with one record naming the two
+//! poles and the seam's middle (row Q2115). Since row Q2147 a point of the
+//! ball's face off its seam is asked after them, and it is inside the bar: one
+//! solid with the ball as a hollow, measuring `160 − 32π/3`.
 
 use core::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 /// The block with its hollow, less the bar: the hollow stays a shell of its
 /// own, and the notch takes a quarter of the bar out of the block.
@@ -151,13 +154,40 @@ fn a_block_less_a_ball_touching_its_top_with_one_pole_keeps_the_ball_as_a_hollow
 /// is a gap in history, not in this answer.
 #[test]
 fn a_block_less_a_ball_touching_its_top_and_bottom_keeps_the_ball_as_a_hollow() {
+    the_ball_touching_its_top_and_bottom_is_a_hollow_of([0.0, 0.0, 0.0], [10.0, 10.0, 4.0]);
+}
+
+/// The same ball in a square bar as wide as it is, 4 by 4 and 10 long from
+/// `x = 3` to `x = 7`: one solid, the bar's six faces and the ball's one face
+/// as a hollow, holding the bar's 160 less the ball's `32π/3`, under a
+/// certified policy and a tolerant one.
+///
+/// The ball touches the bar's top and bottom with its poles and its two sides
+/// at `(3, 5, 2)` and `(7, 5, 2)`. The second is the middle of the ball's seam,
+/// so every point of the ball's edge that is asked is on the bar's skin, and
+/// it was refused `Undecidable` at *one shell inside another*, naming the two
+/// poles and the seam's middle (queue row Q2115). A gap and not a limit
+/// (§16.10): a point of the ball's face off its seam is inside the bar, and it
+/// is asked since queue row Q2147.
+#[test]
+fn a_square_bar_less_a_ball_as_wide_as_it_is_keeps_the_ball_as_a_hollow() {
+    the_ball_touching_its_top_and_bottom_is_a_hollow_of([3.0, 0.0, 0.0], [4.0, 10.0, 4.0]);
+}
+
+/// The block from `low`, `size` across, less a ball of radius 2 centred at
+/// `(5, 5, 2)`, under a certified policy and a tolerant one: one solid, the
+/// block's six faces and the ball's one face as a hollow walked down its seam
+/// from pole to pole and back, holding the block's volume less the ball's
+/// `32π/3`.
+fn the_ball_touching_its_top_and_bottom_is_a_hollow_of(low: [f64; 3], size: [f64; 3]) {
     let poles = [[5.0, 5.0, 4.0], [5.0, 5.0, 0.0]];
     for (name, policy) in [
         ("certified", Policy::certified()),
         ("tolerant", Policy::tolerant(100.0)),
     ] {
         let mut model = a_model();
-        let (block, ball) = a_block_and_a_ball_touching_its_top_and_bottom(&mut model);
+        let block = a_block(&mut model, low, size);
+        let ball = a_ball(&mut model, 2.0, at(5.0, 5.0, 2.0));
         let answer = model
             .fuse(
                 &[block],
@@ -210,7 +240,7 @@ fn a_block_less_a_ball_touching_its_top_and_bottom_keeps_the_ball_as_a_hollow() 
                 &mut ProvenanceLog::new(),
             )
             .expect("a solid measures");
-        let by_hand = 400.0 - 32.0 * PI / 3.0;
+        let by_hand = size.iter().product::<f64>() - 32.0 * PI / 3.0;
         assert!(
             (measured.volume() - by_hand).abs() <= measured.volume_error(),
             "{name}: measured {} ± {} against {by_hand} by hand",
@@ -218,47 +248,6 @@ fn a_block_less_a_ball_touching_its_top_and_bottom_keeps_the_ball_as_a_hollow() 
             measured.volume_error()
         );
     }
-}
-
-/// The same ball in a square bar as wide as it is, 4 by 4 and 10 long from
-/// `x = 3` to `x = 7`: the ball touches the bar's top and bottom with its poles
-/// and its two sides at `(3, 5, 2)` and `(7, 5, 2)`. The second is the middle
-/// of the ball's seam, so every point asked of the hollow is on the bar's skin,
-/// and the refusal names the two poles and the seam's middle, each once, in the
-/// order they were asked: each side's first corner, then each side's middle.
-///
-/// A gap and not a limit (§16.10): the ball is a hollow of the bar, and a point
-/// of the ball's face off its seam would say so. Pinned as it stands.
-#[test]
-fn a_square_bar_less_a_ball_as_wide_as_it_is_refused_naming_both_poles_and_the_seams_middle() {
-    let mut model = a_model();
-    let bar = a_block(&mut model, [3.0, 0.0, 0.0], [4.0, 10.0, 4.0]);
-    let ball = a_ball(&mut model, 2.0, at(5.0, 5.0, 2.0));
-    let refusal = model
-        .fuse(
-            &[bar],
-            &[ball],
-            Rule::Difference,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
-        .expect_err("every point asked of the hollow is on the bar's skin");
-    let Error::Undecidable { records } = refusal else {
-        panic!("refused as undecided, not {refusal:?}");
-    };
-    let [record] = records.records() else {
-        panic!("one record, not {records:?}");
-    };
-    assert_eq!(record.predicate(), "one shell inside another");
-    assert_eq!(
-        record.inputs(),
-        [
-            PredicatePoint::from([5.0, 5.0, 4.0]),
-            PredicatePoint::from([5.0, 5.0, 0.0]),
-            PredicatePoint::from([7.0, 5.0, 2.0])
-        ],
-        "the two poles and the seam's middle, each once"
-    );
 }
 
 /// The other five fuses of that block and ball, which leave no hollow and so

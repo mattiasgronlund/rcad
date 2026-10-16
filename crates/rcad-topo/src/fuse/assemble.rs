@@ -4023,6 +4023,11 @@ impl Assembly {
     /// §39.4, the 2026-10-13 note; queue row Q1903,
     /// `tests/a_bar_lying_along_a_plane_or_a_bar.rs`).
     ///
+    /// **Then the middle of each open arc, and last a point of each whole ball
+    /// off its seam** ([`Assembly::the_points_asked_of`] names the shapes that
+    /// need each, rows Q2101 and Q2147). Each comes after every point asked
+    /// before it, so a hollow placed before is placed by the same point.
+    ///
     /// **Running out of points is a refusal, and it says which one.** A point
     /// whose ray met a face of `outer` that [`SolidView::face_holds_the_point`]
     /// cannot follow was never asked at all, and that is
@@ -4059,18 +4064,19 @@ impl Assembly {
     /// names nothing.
     ///
     /// **The record names the points that were asked.** When every corner, far
-    /// side and arc's middle came back on the skin of `outer` or undecided, the
-    /// one record says "one shell inside another" over each of those points
-    /// once, in the order they were asked. It used to name the first corner of
-    /// the whole answer, which nothing asked: a block less a ball touching its
-    /// top and bottom with its two poles named the block's corner at the
-    /// origin. That ball has no closed edge, so no far side is asked of it, but
-    /// its seam is half a circle from pole to pole on the plane through its
-    /// centre, and the seam's middle, on the ball's equator, is inside the
-    /// block: since Q2101 the block less that ball answers. The same ball in a
-    /// square bar as wide as it is, `x` from 3 to 7, is still refused: the
-    /// seam's middle is where the ball touches the bar's side, so the record
-    /// names the two poles and that middle.
+    /// side, arc's middle and point off a ball's seam came back on the skin of
+    /// `outer` or undecided, the one record says "one shell inside another"
+    /// over each of those points once, in the order they were asked. It used
+    /// to name the first corner of the whole answer, which nothing asked: a
+    /// block less a ball touching its top and bottom with its two poles named
+    /// the block's corner at the origin. That ball has no closed edge, so no
+    /// far side is asked of it, but its seam is half a circle from pole to pole
+    /// on the plane through its centre, and the seam's middle, on the ball's
+    /// equator, is inside the block: since Q2101 the block less that ball
+    /// answers. The same ball in a square bar as wide as it is, `x` from 3 to
+    /// 7, was refused, naming the two poles and the seam's middle, which is
+    /// where the ball touches the bar's side; since Q2147 a point of the ball
+    /// off its seam is asked as well, and it is inside the bar.
     ///
     /// # Errors
     ///
@@ -4141,8 +4147,9 @@ impl Assembly {
 
     /// The points of `shell` that [`Assembly::one_shell_is_inside_another`]
     /// asks, in the order it asks them: the corner each side starts at, then
-    /// the far side of each closed edge a side runs along, and then the middle
-    /// of each open arc a side runs along.
+    /// the far side of each closed edge a side runs along, then the middle of
+    /// each open arc a side runs along, and last a point off the seam of each
+    /// face that is the whole of a ball.
     ///
     /// A closed edge has a side in each face either side of it, so its far
     /// side is asked twice, as a corner is asked once for each side that
@@ -4155,6 +4162,17 @@ impl Assembly {
     /// each cap circle is two arcs whose four ends are all on the walls. That
     /// was refused `Undecidable`, for one solid of two shells
     /// (`tests/a_bar_lying_along_a_plane_or_a_bar.rs`).
+    ///
+    /// **A point off a ball's seam is what a ball touching the outer shell at
+    /// both poles and at its seam's middle has left** (queue row Q2147). Every
+    /// other point asked of a whole ball is on its one edge, and the answer
+    /// lays that edge down in the world's axes however the ball was turned
+    /// (`what_a_whole_ball_was`), so a ball as wide as the square bar it is
+    /// in, touching the bar's top and bottom with its poles and a side with
+    /// its seam's middle, was refused `Undecidable`, for one solid of two
+    /// shells (`tests/a_shell_inside_another_names_its_refusal.rs`). It is
+    /// asked last, so a hollow a corner, a far side or an arc's middle places
+    /// is placed by the same point as before.
     fn the_points_asked_of(&self, shell: usize) -> impl Iterator<Item = Point> + '_ {
         let sides = move || {
             self.shells[shell]
@@ -4166,7 +4184,10 @@ impl Assembly {
         let far_sides =
             sides().filter_map(|side| self.across_a_closed_edge_from_its_corner(side.edge));
         let middles = sides().filter_map(|side| self.the_middle_of_an_open_arc(side.edge));
-        corners.chain(far_sides).chain(middles)
+        let off_a_seam = self.shells[shell]
+            .iter()
+            .filter_map(|&face| self.a_point_off_the_seam_of_a_whole_ball(face));
+        corners.chain(far_sides).chain(middles).chain(off_a_seam)
     }
 
     /// The point of a closed edge across its curve from the one corner it
@@ -4266,6 +4287,42 @@ impl Assembly {
             Surface::Sphere(ball) => Some((flat, flat.project(ball.centre()), flat.normal())),
             Surface::Cone(_) | Surface::Torus(_) | Surface::Plane(_) | _ => None,
         }
+    }
+
+    /// A point of a face that is the whole of a ball, off its seam, or `None`
+    /// for any other face.
+    ///
+    /// The face's one wire is its seam, half of the meridian square to `y`
+    /// through the ball's centre, from pole to pole (`what_a_whole_ball_was`),
+    /// so every point of the ball off that meridian's plane is a point of the
+    /// face off its boundary. The one asked is out from the centre along
+    /// `(−1, 1, 1)`, which is off that plane and off the other two planes
+    /// through the centre square to an axis as well: a ball in a box, touching
+    /// its six walls straight out along the axes, is not asked where it
+    /// touches.
+    ///
+    /// It is worked out in `f64`, as an arc's middle is, so it is on the ball
+    /// to within a few roundings. One that does not fit in an `f64` is not
+    /// asked.
+    ///
+    /// **A face its wires trim is not asked here**: a point off its boundary is
+    /// a point inside its trimming, and this puts no question to a trimming.
+    ///
+    /// # Panics
+    ///
+    /// If a face that is the whole of a closed surface is on anything but a
+    /// ball: `Arrangement::the_whole_surface` keeps no other surface whole.
+    fn a_point_off_the_seam_of_a_whole_ball(&self, face: usize) -> Option<Point> {
+        let face = &self.faces[face];
+        if !face.is_a_whole_closed_surface {
+            return None;
+        }
+        let Surface::Sphere(ball) = &face.surface else {
+            panic!("only a ball is kept whole and cut open along a seam of its own");
+        };
+        let out = Vector::new(-1.0, 1.0, 1.0) * (ball.radius() / 3.0_f64.sqrt());
+        let point = ball.centre() + out;
+        point.is_finite().then_some(point)
     }
 
     /// The caller's face that `face`, written into `apart`, was cut out of.
