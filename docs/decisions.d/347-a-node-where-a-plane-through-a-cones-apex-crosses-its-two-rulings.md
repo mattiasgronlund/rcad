@@ -194,9 +194,26 @@ showed that group in both unions and the cone less the block.
   `how_often_a_certified_fuse_with_a_cone_in_it_refuses` and
   `uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_asked`
   (rings of 3, 6 and 9 sides, seven pieces each, the corner-up cube round a
-  pointed cone's apex). Whether their printed counts moved was not compared.
-  The rim case on `Assembly::the_corners_each_closed_run_keeps` was not
-  measured again.
+  pointed cone's apex).
+
+  **2026-10-16 (Q999):** compared, by running each with `--no-capture` at
+  `8ac9f1c8` (the tree right before this change) and at `78c8df3a` (this
+  change's merge). None of the three tests' printed counts moved.
+  `how_often_a_certified_fuse_with_a_cone_in_it_refuses` printed the same five
+  lines both times: a frustum against a corner-up cube 96 fuses, 48 answered,
+  48 refused; a pointed cone against a corner-up cube 96 fuses, 84 answered,
+  12 refused; a frustum against a block 96 fuses, 96 answered, 0 refused; a
+  frustum against a bar 96 fuses, 0 answered, 96 refused; two frustums on one
+  axis 96 fuses, 0 answered, 96 refused.
+  `uniting_a_cone_with_a_cube_gives_the_same_answer_whichever_way_round_it_is_asked`
+  printed the same line both times: a cone and a corner-up cube, both ways
+  round, 44 pairs compared, 20 refused both ways.
+  `a_pointed_cone_standing_on_its_apex_on_a_block` printed the same counts
+  both times: touching, 15 shapes, 98 laws checked, 28/28/28 answered and
+  2/2/2 refused for difference/intersection/union; ClearByOne, 11 shapes, 77
+  laws checked, 22/22/22 answered for difference/intersection/union. The rim
+  case on `Assembly::the_corners_each_closed_run_keeps` was not measured
+  again.
 - **A pin outside Q207's write set moved.** In
   `a_frustum_cut_in_half_down_its_axis.rs`,
   `a_block_whose_floor_runs_through_the_apex_is_refused_there` pinned all six
