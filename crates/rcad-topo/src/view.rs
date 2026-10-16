@@ -1732,3 +1732,25 @@ impl<'m> VertexView<'m> {
         &self.model.data().vertices[self.slot]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::root_rounded_up;
+
+    /// `sqrt` rounds `√(1e-280)` to the `f64` above it already, so that is the
+    /// smallest `f64` at or above the root, however far down the root is.
+    /// Scaled by an even power of two nothing rounds, and there the square can
+    /// be checked.
+    #[test]
+    fn a_tiny_root_rounded_up_is_not_stepped_past_the_f64_above_it() {
+        let square = 1e-280_f64;
+        let nearest = square.sqrt();
+        let scale = 2.0_f64.powi(500);
+        let (scaled_root, scaled_square) = (nearest * scale, square * scale * scale);
+        assert!(
+            scaled_root.mul_add(scaled_root, -scaled_square) > 0.0,
+            "the nearest f64 is above √{square}"
+        );
+        assert_eq!(root_rounded_up(square), nearest);
+    }
+}

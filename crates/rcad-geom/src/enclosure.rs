@@ -208,6 +208,25 @@ mod tests {
         }
     }
 
+    /// Below `2^-969` the square of a root falls into the subnormals, and
+    /// squaring it back no longer says which side of the true root `sqrt`
+    /// landed on. `√(2e-295)` lands below it, so the top of the range has to be
+    /// the `f64` above. Scaled by an even power of two nothing rounds, and
+    /// there the square can be checked.
+    #[test]
+    fn the_root_of_a_tiny_number_still_holds_the_true_root() {
+        let value = 2e-295_f64;
+        let nearest = value.sqrt();
+        let scale = 2.0_f64.powi(500);
+        let (scaled_root, scaled_value) = (nearest * scale, value * scale * scale);
+        assert!(
+            scaled_root.mul_add(scaled_root, -scaled_value) < 0.0,
+            "the nearest f64 is below √{value}"
+        );
+        let enclosed = root_enclosing(Interval::exactly(value));
+        assert_eq!((enclosed.lo(), enclosed.hi()), (nearest, nearest.next_up()));
+    }
+
     /// A direction whose squared length underflows to nothing divides into a
     /// box that says nothing is known, rather than into a panic.
     #[test]

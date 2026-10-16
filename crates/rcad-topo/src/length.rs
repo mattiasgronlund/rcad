@@ -613,3 +613,23 @@ fn verdict(pickers: &[Picker], point: PredicatePoint) -> Verdict {
     }
     verdict
 }
+
+#[cfg(test)]
+mod tests {
+    use rcad_predicates::Interval;
+
+    use super::square_root;
+
+    /// `sqrt` rounds `√2` to the `f64` above it, so the range that holds the
+    /// root runs from the `f64` below that one up to it, and no further.
+    #[test]
+    fn the_root_of_two_is_one_step_of_an_f64_wide() {
+        let nearest = 2.0_f64.sqrt();
+        assert!(
+            nearest.mul_add(nearest, -2.0) > 0.0,
+            "the nearest f64 is above √2"
+        );
+        let root = square_root(Interval::exactly(2.0));
+        assert_eq!((root.lo(), root.hi()), (nearest.next_down(), nearest));
+    }
+}
