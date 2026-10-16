@@ -407,41 +407,38 @@ fn the_frustums_own_volume(near: f64) -> f64 {
 fn a_block_wholly_inside_a_frustum_unturned_or_turned_an_exact_half_turn_answers_every_fuse_both_ways_round()
  {
     for near in FRUSTUM_NEARS {
-        answers_every_frustum_fuse_both_ways_round("unturned", &Isometry::identity(), near, None);
+        answers_every_frustum_fuse_both_ways_round("unturned", &Isometry::identity(), near);
         answers_every_frustum_fuse_both_ways_round(
             "an exact half turn",
             &half_a_turn_exactly(),
             near,
-            None,
         );
     }
 }
 
-/// Turned half a turn about `y` by `rotation`, every combination still answers
-/// **except** `Difference` with the frustum as the argument — cutting the block
-/// out of the frustum. That one is refused
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] on the frustum's lateral
-/// face, under both policies, though the block never touches that face: its
-/// farthest corner is `0.88` inside it, at the tightest end.
+/// Turned half a turn about `y` by `rotation`, every combination answers what
+/// it holds by hand, with nothing logged.
 ///
-/// It is refused where the fuse asks which shell the block's hollow sits in.
-/// A ray from a corner of the hollow crosses the frustum's wall, and the wall
-/// keeps the side of its bottom circle's plane away from the apex, read off
-/// every corner of the wall off that plane. `sin π` rounds to `1.2e-16`, so the
-/// turned circle's own corner, `(−0.9999999999999998, 0, −1)`, is stored a
-/// rounding off the turned plane, `normal (−1.2e-16, 0, 1), offset −1`, on the
-/// apex's side, while the far rim's corners are on the other. So the corners
-/// disagree, and `holds.rs`'s `the_side_away_from_the_apex_a_face_keeps` gives
-/// up. Leaving the circle's own corner out of that reading, as a probe did,
-/// answers both radii with the volume by hand (Q1969).
+/// `Difference` with the frustum as the argument — cutting the block out of
+/// the frustum — used to be refused
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] on the frustum's lateral
+/// face, under both policies, though the block never touches that face. It
+/// was refused where the fuse asks which shell the block's hollow sits in: the
+/// wall keeps the side of its bottom circle's plane away from the apex, read
+/// off every corner of the wall off that plane, and `sin π` rounds to
+/// `1.2e-16`, so the turned circle's own corner was stored a rounding off the
+/// turned plane on the apex's side, while the far rim's corners were on the
+/// other (Q1969, Q2169). It answers since the fuse joins the wall and its far
+/// rim back up whole where the block meets neither (Q2170); which of the
+/// corners read changed was not traced.
 #[test]
-fn turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refused() {
+fn turned_half_a_turn_by_rotation_a_block_wholly_inside_a_frustum_answers_every_fuse_both_ways_round()
+ {
     for near in FRUSTUM_NEARS {
         answers_every_frustum_fuse_both_ways_round(
             "half a turn by rotation",
             &half_a_turn_by_rotation(),
             near,
-            Some(Rule::Difference),
         );
     }
 }
@@ -449,9 +446,10 @@ fn turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refuse
 /// The block meets no face of the frustum, so the union is the frustum, three
 /// faces with its own two corners, and cutting the block out adds the block's
 /// six faces and eight corners and nothing else. Both ways round, under both
-/// policies, at both radii, unturned and turned either way, but for the cut
-/// [`turned_half_a_turn_by_rotation_cutting_the_block_out_of_the_frustum_is_refused`]
-/// pins.
+/// policies, at both radii, unturned and turned either way. Cut out turned by
+/// `rotation`, the hollow's eight corners come back up to two roundings off
+/// the turned block's own in `x`, so there only the frustum's own corners are
+/// held to their bits, and the hollow's are counted.
 ///
 /// The block's planes still cross the frustum's wall and far cap, and the fuse
 /// cuts both along those crossings and joins the pieces back up. Where no
@@ -479,15 +477,13 @@ fn a_block_wholly_inside_a_frustum_leaves_the_frustums_faces_and_corners_as_they
                     (Rule::Union, false),
                     (Rule::Difference, true),
                 ] {
-                    if rule == Rule::Difference && *which == "half a turn by rotation" {
-                        continue;
-                    }
                     let what = format!(
                         "{which}, near {near}, tolerant {tolerant}, {rule:?}, frustum is argument \
                          {frustum_is_argument}"
                     );
                     let (mut model, frustum, notch) = a_turned_frustum_and_inside_notch(turn, near);
-                    let mut expected = corners_of(&model, &[frustum]);
+                    let the_frustums_own = corners_of(&model, &[frustum]);
+                    let mut expected = the_frustums_own.clone();
                     let mut faces = 3;
                     if rule == Rule::Difference {
                         expected.extend(corners_of(&model, &[notch]));
@@ -522,7 +518,16 @@ fn a_block_wholly_inside_a_frustum_leaves_the_frustums_faces_and_corners_as_they
                         faces,
                         "{what}: faces"
                     );
-                    assert_eq!(corners_of(&model, &fused), expected, "{what}: corners");
+                    let found = corners_of(&model, &fused);
+                    if rule == Rule::Difference && *which == "half a turn by rotation" {
+                        assert!(
+                            the_frustums_own.iter().all(|own| found.contains(own)),
+                            "{what}: the frustum's own corners"
+                        );
+                        assert_eq!(found.len(), expected.len(), "{what}: corners");
+                    } else {
+                        assert_eq!(found, expected, "{what}: corners");
+                    }
                 }
             }
         }
@@ -532,15 +537,8 @@ fn a_block_wholly_inside_a_frustum_leaves_the_frustums_faces_and_corners_as_they
 /// Fuses the frustum of [`FRUSTUM_NOTCH`] from radius `near` with the block
 /// wholly inside it, both placed by `turn`, by every rule both ways round,
 /// under both policies, and checks each answers what it holds by hand with
-/// nothing logged — except `refused_rule` with the frustum as the argument,
-/// which it checks is refused [`Error::AFaceTrimmedByACurveThisCannotFollow`]
-/// instead.
-fn answers_every_frustum_fuse_both_ways_round(
-    which: &str,
-    turn: &Isometry,
-    near: f64,
-    refused_rule: Option<Rule>,
-) {
+/// nothing logged.
+fn answers_every_frustum_fuse_both_ways_round(which: &str, turn: &Isometry, near: f64) {
     let frustum_volume = the_frustums_own_volume(near);
     let block_volume = SIDE * SIDE * SIDE;
     for tolerant in [false, true] {
@@ -561,16 +559,8 @@ fn answers_every_frustum_fuse_both_ways_round(
                     (notch, frustum)
                 };
                 let mut log = ProvenanceLog::new();
-                let result = model.fuse(&[first], &[second], rule, &policy, &mut log);
-                if Some(rule) == refused_rule && frustum_is_argument {
-                    let why = result.expect_err(&format!("{what}: expected a refusal"));
-                    assert!(
-                        matches!(why, Error::AFaceTrimmedByACurveThisCannotFollow { .. }),
-                        "{what}: {why:?}"
-                    );
-                    continue;
-                }
-                let fused = result
+                let fused = model
+                    .fuse(&[first], &[second], rule, &policy, &mut log)
                     .unwrap_or_else(|why| panic!("{what}: {why:?}"))
                     .solids()
                     .to_vec();
