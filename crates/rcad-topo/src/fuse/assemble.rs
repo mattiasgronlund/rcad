@@ -1779,7 +1779,7 @@ impl Assembly {
                 }
                 continue;
             }
-            if self.needs_no_seam(&members, along, dissolved)
+            if self.needs_no_seam(&members, along, dissolved, &inside)
                 || (self.joined_only_across_whole_rings(&inside, along)
                     && self.a_ring_cannot_be_counted(&members, along, dissolved))
             {
@@ -1826,7 +1826,29 @@ impl Assembly {
     /// (`a_block_face_through_a_cones_apex.rs`, `docs/decisions.md` §347.4).
     /// On a pipe one ring right round bounds no face, so this is the cone's
     /// alone.
-    fn needs_no_seam(&self, members: &[usize], along: &[[Dart; 2]], dissolved: &[bool]) -> bool {
+    ///
+    /// **A ring that closes up is one closed side too**
+    /// ([`Assembly::a_ring_that_closes_up`]): it is pieces of one closed input
+    /// edge with nothing else at any corner between them, and
+    /// [`Assembly::what_is_left`] gives the input's whole edge back. A block
+    /// wholly inside a frustum cuts the far cap and the wall along its planes,
+    /// so the wall's far ring is the far rim in arcs, and the wall itself is a
+    /// grid. Where no chain of the grid reached the near rim the wall stayed in
+    /// 25 pieces, and where one did it kept that chain as a seam, though the
+    /// block met no face of the frustum (Q2170). **Not where the group was
+    /// joined only across whole closed curves**
+    /// ([`Assembly::joined_only_across_whole_rings`]): a frustum beside a block
+    /// whose floor cuts a circle round its wall has a far rim cut where the
+    /// block's walls touch it, and joined whole across that circle, the three
+    /// tests of `a_rim_a_fuse_cut_round_one_cone.rs` that pin it failed.
+    /// Whether that circle stays is row Q1051's.
+    fn needs_no_seam(
+        &self,
+        members: &[usize],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+        inside: &[usize],
+    ) -> bool {
         let surface = self.faces[members[0]].surface;
         let rings = self.rings_of_a_curved_face(members, along, dissolved);
         if let (Surface::Cone(_), [ring]) = (&surface, rings.as_slice())
@@ -1834,9 +1856,47 @@ impl Assembly {
         {
             return true;
         }
+        let may_close_up = !self.joined_only_across_whole_rings(inside, along);
         rings.iter().all(|ring| {
-            ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(false)
+            ring.len() == 1
+                || (may_close_up && self.a_ring_that_closes_up(ring, dissolved))
+                || self.a_ring_goes_right_round(ring, &surface) == Some(false)
         })
+    }
+
+    /// Whether `ring` is two or more pieces of one closed input edge with
+    /// nothing at any corner between them but the two pieces either side, so
+    /// that [`Assembly::what_is_left`] closes it up into that one edge again.
+    ///
+    /// **The ends are counted over every edge that stays**, and not one lump
+    /// at a time as [`Assembly::what_is_left`] counts them, so this never
+    /// says a ring closes up where that does not close it up. A corner the two
+    /// pieces either side of meet at the apex of a cone is never walked
+    /// straight through ([`Assembly::is_the_apex_of_a_cone_along`]).
+    fn a_ring_that_closes_up(&self, ring: &[Dart], dissolved: &[bool]) -> bool {
+        let pieces: Vec<&[EdgeKey]> = ring
+            .iter()
+            .map(|&dart| self.edges[self.edge_of(dart)].from.as_slice())
+            .collect();
+        ring.len() > 1
+            && is_one_input_edge(&pieces)
+            && ring.iter().all(|&dart| {
+                let corner = self.starts_at(dart);
+                let ending_here: Vec<usize> = (0..self.edges.len())
+                    .filter(|&edge| !dissolved[edge])
+                    .flat_map(|edge| {
+                        self.edges[edge]
+                            .ends
+                            .into_iter()
+                            .filter(move |&end| end == corner)
+                            .map(move |_| edge)
+                    })
+                    .collect();
+                matches!(ending_here[..], [one, other]
+                    if one != other
+                        && !self.is_the_apex_of_a_cone_along(corner, one)
+                        && !self.is_the_apex_of_a_cone_along(corner, other))
+            })
     }
 
     /// Whether every edge dissolved inside one group, `inside`, is a whole
@@ -3212,22 +3272,6 @@ impl Assembly {
             }
         }
 
-        // **A corner where pieces of one cone, pipe or ball met stays a corner**, and
-        // that departs from §224.2 item 3 on purpose. It has only two surfaces
-        // round it, which §31.3 reads out of the model rather than re-deriving,
-        // so nothing needs it gone. And folding the arcs either side into one
-        // can make an arc longer than half its circle — a frustum's rim with a
-        // notch taken out of it — whose centre is then in front of any picker
-        // that holds the whole arc, and the next fuse cannot follow it (§224.1).
-        let mut where_curved_pieces_met = vec![false; self.corners.len()];
-        for (edge, [one, _]) in along.iter().enumerate() {
-            if dissolved[edge] && self.faces[one.face].surface.as_plane().is_none() {
-                for end in self.edges[edge].ends {
-                    where_curved_pieces_met[end] = true;
-                }
-            }
-        }
-
         let mut straight_through: BTreeSet<(usize, usize)> = BTreeSet::new();
         let mut still_a_corner = vec![false; self.corners.len()];
         for (&(lump, corner), by) in &leaving {
@@ -3240,7 +3284,6 @@ impl Assembly {
             match by[..] {
                 [one, other]
                     if one != other
-                        && !where_curved_pieces_met[corner]
                         && !by
                             .iter()
                             .any(|&edge| self.is_the_apex_of_a_cone_along(corner, edge)) =>
@@ -3249,6 +3292,15 @@ impl Assembly {
                 }
                 _ => still_a_corner[corner] = true,
             }
+        }
+        for (lump, corner) in self.where_curved_pieces_met_off_a_run_that_closes_up(
+            &leaving,
+            &straight_through,
+            along,
+            dissolved,
+        ) {
+            straight_through.remove(&(lump, corner));
+            still_a_corner[corner] = true;
         }
         let kept = self.the_corners_each_closed_run_keeps(&leaving, &straight_through);
         let closed_a_curve_up = !kept.closed_up.is_empty();
@@ -3321,6 +3373,61 @@ impl Assembly {
                 // as having an apex.
                 _ => false,
             })
+    }
+
+    /// Every corner where pieces of one cone, pipe or ball met, as lump and
+    /// corner, that `straight_through` walks on a run that does not close up
+    /// into the one closed input edge it was cut from. Each stays a corner.
+    ///
+    /// **A corner where pieces of one cone, pipe or ball met stays a corner**,
+    /// and that departs from §224.2 item 3 on purpose. It has only two surfaces
+    /// round it, which §31.3 reads out of the model rather than re-deriving, so
+    /// nothing needs it gone. And folding the arcs either side into one can
+    /// make an arc longer than half its circle — a frustum's rim with a notch
+    /// taken out of it — whose centre is then in front of any picker that holds
+    /// the whole arc, and the next fuse cannot follow it (§224.1).
+    ///
+    /// **Except on a run that closes up**: every corner along it walked
+    /// straight through, and every piece of it cut out of one closed input
+    /// edge ([`Assembly::the_corners_each_closed_run_keeps`]). That run becomes
+    /// the input's whole closed edge again, with one corner, and a whole closed
+    /// edge is no arc for a picker to hold. A block wholly inside a frustum
+    /// cuts the frustum's far cap and wall along its planes, and once both are
+    /// joined back up each corner on the far rim has the two arcs either side
+    /// of it and nothing else. Kept, the rim came back as eight arcs where the
+    /// frustum had one circle, and the frustum's own corner on it went, since
+    /// nothing kept that one (Q2170). The corners left here are walked as they
+    /// were before, so the runs that do not close up are the runs they were.
+    fn where_curved_pieces_met_off_a_run_that_closes_up(
+        &self,
+        leaving: &BTreeMap<(usize, usize), Vec<usize>>,
+        straight_through: &BTreeSet<(usize, usize)>,
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> Vec<(usize, usize)> {
+        let mut where_curved_pieces_met = vec![false; self.corners.len()];
+        for (edge, [one, _]) in along.iter().enumerate() {
+            if dissolved[edge] && self.faces[one.face].surface.as_plane().is_none() {
+                for end in self.edges[edge].ends {
+                    where_curved_pieces_met[end] = true;
+                }
+            }
+        }
+        let runs = runs_through(self.edges.len(), leaving, straight_through);
+        let closed_up: BTreeSet<usize> = self
+            .the_corners_each_closed_run_keeps(leaving, straight_through)
+            .closed_up
+            .into_iter()
+            .map(|at| runs.leader(leaving[&at][0]))
+            .collect();
+        straight_through
+            .iter()
+            .copied()
+            .filter(|&(lump, corner)| {
+                where_curved_pieces_met[corner]
+                    && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
+            })
+            .collect()
     }
 
     /// The corners to keep on each run of edges that closes on itself with
