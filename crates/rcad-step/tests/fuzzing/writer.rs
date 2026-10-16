@@ -1876,6 +1876,115 @@ fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> rcad_topo::Result<
     builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
+/// Q1293's crash-0109edfc: a bend whose ring is four and tube two comes back
+/// from its own file though the reader rebuilds the seam's pipe picker from
+/// the ring's own axis and radius (`which_of_a_rings_two_circles`,
+/// `crates/rcad-step/src/brep.rs`), and that rebuild can carry a subnormal
+/// the kernel's own axis never had — `(0, 0, 1)` read back as
+/// `(1.7e-322, 0, 1)`. [`the_same_run`] must still call this the same run,
+/// because both axes pick the same two corners.
+#[test]
+fn a_bends_seam_picked_inside_a_pipe_is_the_same_run_with_a_subnormal_axis() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bend = a_quarter_bend(&mut model, 4.0, 2.0).expect("a bend fits this model");
+    model
+        .place_solid(bend, &Isometry::identity())
+        .expect("the key came from this model");
+    let seam = the_seam_of_a_bend(&model);
+    let here = seam.edge().run();
+    let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &here else {
+        panic!("a bend's seam is part of where a plane crosses it, not {here:?}");
+    };
+    let subnormal_axis = Axis::new(Point::origin(), Vector::new(1.7e-322, 0.0, 1.0))
+        .expect("a finite, non-zero direction");
+    let rebuilt_from_a_file = EdgeRun::PartOfWhereItCrosses {
+        and: *and,
+        picked_by: picked_by
+            .iter()
+            .map(|picker| match picker {
+                Picker::InsideAPipe(pipe) => Picker::InsideAPipe(
+                    Cylinder::new(subnormal_axis, pipe.radius()).expect("a positive radius"),
+                ),
+                other => *other,
+            })
+            .collect(),
+    };
+    let corners = [seam.start().point(), seam.end().point()];
+    assert!(the_same_run(&here, &rebuilt_from_a_file, corners, *and));
+}
+
+/// Q1293's crash-16aad257: a bend whose ring is nine and tube four comes back
+/// from its own file though the reader rebuilds the ring's own radius an ulp
+/// off, `9.000000000000004` for `9.0`.
+#[test]
+fn a_bends_seam_picked_inside_a_pipe_is_the_same_run_with_a_radius_an_ulp_off() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bend = a_quarter_bend(&mut model, 9.0, 4.0).expect("a bend fits this model");
+    model
+        .place_solid(bend, &Isometry::identity())
+        .expect("the key came from this model");
+    let seam = the_seam_of_a_bend(&model);
+    let here = seam.edge().run();
+    let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &here else {
+        panic!("a bend's seam is part of where a plane crosses it, not {here:?}");
+    };
+    let rebuilt_from_a_file = EdgeRun::PartOfWhereItCrosses {
+        and: *and,
+        picked_by: picked_by
+            .iter()
+            .map(|picker| match picker {
+                Picker::InsideAPipe(pipe) => Picker::InsideAPipe(
+                    Cylinder::new(pipe.axis(), 9.000_000_000_000_004).expect("a positive radius"),
+                ),
+                other => *other,
+            })
+            .collect(),
+    };
+    let corners = [seam.start().point(), seam.end().point()];
+    assert!(the_same_run(&here, &rebuilt_from_a_file, corners, *and));
+}
+
+/// The same seam picked from outside its ring's own pipe, rather than inside
+/// it, is still a different run: [`the_same_run`]'s pipe-picker arm only
+/// pairs `InsideAPipe` with `InsideAPipe` and `OutsideAPipe` with
+/// `OutsideAPipe`, so it must not call these two the same.
+#[test]
+fn a_bends_seam_picked_outside_its_pipe_is_a_different_run_from_the_one_picked_inside_it() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let bend = a_quarter_bend(&mut model, 9.0, 4.0).expect("a bend fits this model");
+    model
+        .place_solid(bend, &Isometry::identity())
+        .expect("the key came from this model");
+    let seam = the_seam_of_a_bend(&model);
+    let here = seam.edge().run();
+    let EdgeRun::PartOfWhereItCrosses { and, picked_by } = &here else {
+        panic!("a bend's seam is part of where a plane crosses it, not {here:?}");
+    };
+    let picked_from_outside = EdgeRun::PartOfWhereItCrosses {
+        and: *and,
+        picked_by: picked_by
+            .iter()
+            .map(|picker| match picker {
+                Picker::InsideAPipe(pipe) => Picker::OutsideAPipe(*pipe),
+                other => *other,
+            })
+            .collect(),
+    };
+    let corners = [seam.start().point(), seam.end().point()];
+    assert!(the_same_run(&here, &here, corners, *and));
+    assert!(!the_same_run(&here, &picked_from_outside, corners, *and));
+}
+
+/// The seam of [`a_quarter_bend`]: the one coedge whose edge crosses the
+/// plane through the ring's own middle, not one of its two closed circles.
+fn the_seam_of_a_bend(model: &Model) -> CoedgeView<'_> {
+    the_one_solid(model)
+        .faces()
+        .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
+        .find(|coedge| matches!(coedge.edge().run(), EdgeRun::PartOfWhereItCrosses { .. }))
+        .expect("a bend has one seam cut from its ring's own plane")
+}
+
 /// A round bar of radius two about `+z`, four tall, with a disc of radius one
 /// drawn on its top cap: the cap is a ring round the disc and the disc a face
 /// of its own on the same plane, so the circle between them is two half
