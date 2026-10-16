@@ -1307,6 +1307,145 @@ fn a_block_less_a_dome_whose_rim_touches_its_wall_keeps_the_dome_as_a_hollow() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// A bar of radius one, two long, turned onto `x` and laid along the top of
+/// the block `[0, 4]³` on the line `(x, 2, 4)`, `x` from 1 to 3, its seam
+/// along that line (queue row Q2071).
+///
+/// **For the numbers the kernel is handed, the bar is clear of the block.**
+/// The turn is [`Isometry::rotation`] about `y` by `π/2`, the `f64` nearest a
+/// quarter turn, so the bar's axis is along `(1, 0, 2⁻⁵²)` and rises as it
+/// goes. The bar's underside is clear of the block's top by
+/// `1 − 1/√(1 + 2⁻¹⁰⁴)` at its near end and by more past it. So every rule,
+/// both ways round, under `certified` and `tolerant`, answers as a bar clear
+/// of a block does: the union is the two as they stand, the intersection no
+/// solid, and each difference the first solid whole, every decision proved.
+///
+/// Every one used to be refused `Undecidable` at the side of the block's top
+/// over the bar's seam corners: a corner moved by a turn that is not one of a
+/// cube's is a box `1e−13` wide, and the plane runs through it. Q1765 reads
+/// that side off the pipe's axis, but only where the plane misses the whole
+/// pipe, and this one crosses it in an ellipse far past the bar's end. The
+/// side is now read off the centre of the cap circle the corner is on, where
+/// the plane is proved clear of that circle (Q2102).
+#[test]
+fn a_bar_turned_onto_x_by_a_float_angle_along_a_blocks_top_answers_every_rule() {
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_at([1.0, 2.0, 5.0], |rule, bar_first| {
+        match (rule, bar_first) {
+            (Rule::Union, _) => vec![(vec![3], 2.0 * PI), (vec![6], 64.0)],
+            (Rule::Intersection, _) => vec![],
+            (Rule::Difference, false) => vec![(vec![6], 64.0)],
+            (Rule::Difference, true) => vec![(vec![3], 2.0 * PI)],
+            _ => unreachable!("only the three rules are asked"),
+        }
+    });
+}
+
+/// The bar of the test above sunk into the block to lie on its floor along
+/// `(x, 2, 0)`, its axis from `(1, 2, 1)`, and clear of the floor by the same
+/// `1 − 1/√(1 + 2⁻¹⁰⁴)` (queue row Q2071). The bar is inside the block, so the
+/// union is the block alone, the intersection the bar alone, and the bar less
+/// the block nothing. The block less the bar is one solid of two shells, the
+/// block's six faces and the bar's three as a hollow, measuring `64 − 2π`.
+///
+/// The block less the bar was refused `Undecidable` at the side of the floor
+/// over the bar's seam corners, as the bar along the top was.
+#[test]
+fn a_block_less_a_bar_turned_onto_x_by_a_float_angle_along_its_floor_keeps_the_bar_as_a_hollow() {
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_at([1.0, 2.0, 1.0], |rule, bar_first| {
+        match (rule, bar_first) {
+            (Rule::Union, _) => vec![(vec![6], 64.0)],
+            (Rule::Intersection, _) => vec![(vec![3], 2.0 * PI)],
+            (Rule::Difference, false) => vec![(vec![3, 6], 64.0 - 2.0 * PI)],
+            (Rule::Difference, true) => vec![],
+            _ => unreachable!("only the three rules are asked"),
+        }
+    });
+}
+
+/// Every rule, both ways round, under `certified` and `tolerant`, of the block
+/// `[0, 4]³` and [`a_bar_turned_onto_x`] from `at`: never refused, every
+/// decision proved, the model validates, and the answer's solids, fewest faces
+/// first, have the faces in each shell and the volume `should` gives for the
+/// rule and whether the bar came first.
+fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
+    at: [f64; 3],
+    should: fn(Rule, bool) -> Vec<(Vec<usize>, f64)>,
+) {
+    let mut wrong: Vec<String> = Vec::new();
+    for bar_first in [false, true] {
+        for policy_name in ["certified", "tolerant"] {
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let block = a_block(&mut model, [4.0, 4.0, 4.0]);
+                let bar = a_bar_turned_onto_x(&mut model, at);
+                let [first, second] = if bar_first {
+                    [bar, block]
+                } else {
+                    [block, bar]
+                };
+                let policy = if policy_name == "certified" {
+                    Policy::certified()
+                } else {
+                    Policy::tolerant(100.0)
+                };
+                let what = format!("{rule:?}, bar first {bar_first}, {policy_name}");
+                let mut log = ProvenanceLog::new();
+                let answer = match model.fuse(&[first], &[second], rule, &policy, &mut log) {
+                    Ok(answer) => answer,
+                    Err(why) => {
+                        wrong.push(format!("{what}: refused {why:?}"));
+                        continue;
+                    }
+                };
+                if !log.records().is_empty() {
+                    wrong.push(format!(
+                        "{what}: not every decision is proved: {:?}",
+                        log.records()
+                    ));
+                }
+                if let Err(why) = model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
+                    wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                    continue;
+                }
+                let mut found: Vec<(Vec<usize>, f64)> = answer
+                    .solids()
+                    .iter()
+                    .map(|&solid| (faces_of_each_shell(&model, solid), volume_of(&model, solid)))
+                    .collect();
+                found.sort_by(|one, other| one.0.cmp(&other.0));
+                let expected = should(rule, bar_first);
+                let near = found.len() == expected.len()
+                    && found.iter().zip(&expected).all(
+                        |((shells, volume), (wanted_shells, wanted_volume))| {
+                            shells == wanted_shells
+                                && ((wanted_volume - volume) / wanted_volume).abs()
+                                    < HOW_FAR_A_MESH_MAY_BE
+                        },
+                    );
+                if !near {
+                    wrong.push(format!(
+                        "{what}: the faces of each shell and the volume of each solid are \
+                         {found:?}, and the answer is {expected:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A bar of radius one, two long, turned onto `x` by [`Isometry::rotation`]
+/// about `y` by `π/2` and then shifted to `at`: its axis runs from `at` along
+/// `(1, 0, 2⁻⁵²)`, and its seam along its underside, a radius below the axis.
+fn a_bar_turned_onto_x(model: &mut Model, [x, y, z]: [f64; 3]) -> SolidKey {
+    let onto_x = Isometry::rotation(&Axis::y(), PI / 2.0).expect("a finite angle");
+    let shift = Isometry::translation(Vector::new(x, y, z)).expect("a whole-number shift");
+    model
+        .add_round_bar(1.0, 2.0, &shift.compose(&onto_x))
+        .expect("a bar")
+}
+
 /// The top half of a ball of radius one centred at `centre`, cut off flat
 /// at its equator by a box laid over it.
 fn a_dome(model: &mut Model, [x, y, z]: [f64; 3]) -> SolidKey {
