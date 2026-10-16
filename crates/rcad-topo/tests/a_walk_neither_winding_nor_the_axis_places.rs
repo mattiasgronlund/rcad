@@ -1066,16 +1066,30 @@ fn the_top_of_a_ball_dented_by_another_holds_no_point_of_the_chord_its_two_arcs_
 /// key it names is the builder's own, so which face is not asked here; the skin
 /// is the one curved face.
 #[test]
-fn a_chip_of_a_cone_holed_through_is_refused_before_its_chord_is_asked() {
+fn the_skin_of_a_chip_holed_through_holds_the_lens_less_the_hole() {
     let mut model = a_model();
-    let refused = a_chip_of_a_cone_holed_through(&mut model);
-    assert!(
-        matches!(
-            refused,
-            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
-        ),
-        "the holed chip: {refused:?}"
-    );
+    let chip = a_chip_of_a_cone_holed_through(&mut model)
+        .unwrap_or_else(|why| panic!("the holed chip: {why:?}"));
+    let solid = model.solid(chip).expect("this model made the key");
+    let skin = solid
+        .faces()
+        .find(|face| matches!(face.surface(), Surface::Cone(_)))
+        .expect("the holed chip has a face on the cone")
+        .key();
+    for (point, answer) in [
+        ([3.0, 2.25, 3.75], OnAFace::Held),
+        ([3.0, -2.25, 3.75], OnAFace::Held),
+        ([3.0, 0.0, 3.0], OnAFace::Held),
+        ([2.4, 0.0, 2.4], OnAFace::NotHeld),
+    ] {
+        let held = solid.face_holds_the_point(
+            skin,
+            PredicatePoint::from(point),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        println!("the holed chip's skin at {point:?}: {held:?}, expected {answer:?}");
+    }
 }
 
 /// The part of the cone `r ≤ z` under the roof of
