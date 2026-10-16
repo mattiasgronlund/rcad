@@ -51,8 +51,9 @@
 //! surface, its poles and its seam (§404).
 //! Volume, surface area and centroid are then also checked bit for bit, but
 //! only for a solid whose every number came back the same bits, that sits
-//! wholly on planes or carries no placement at all, and whose every drawn
-//! circle's pipe runs along a coordinate axis. A
+//! wholly on planes or carries no placement at all, and whose every circle
+//! drawn on a flat face the reader's model walks round the centre the
+//! kernel's walks it round. A
 //! curved solid placed with a turn is meshed in the frame it is stored in on
 //! the way out and in the frame the reader baked it into on the way back — two
 //! different roundings of the same true surface — so its measurement can come
@@ -60,10 +61,11 @@
 //! (§249.5, a limit, not a defect). `two_turns_that_write_the_same_placement.rs`
 //! pins that limit down: two turns that turn the three axes to the same nine
 //! numbers, so that STEP would write them as one placement, still leave a bar
-//! measuring differently. A pipe that leans off every one of `x`, `y` and `z`
-//! hits the same mechanism with no placement at all, from its own origin's
-//! move to the flat face it is drawn on
-//! (`every_drawn_circles_pipe_runs_along_a_coordinate_axis`, this file).
+//! measuring differently. A circle drawn on a flat face can move a few ulps
+//! with no placement at all, because the pipe that names it comes back from
+//! the file with another origin and the walk centres the circle from that
+//! origin (`every_drawn_circle_comes_back_round_the_same_centre`, this file).
+//! That one is a gap, not a limit (§249.8), and the condition is a stopgap.
 //!
 //! What the source explains is counted and not failed. A model that does not
 //! pass `Model::validate` was never a solid, so a file of it owes nothing on
@@ -200,6 +202,14 @@ pub fn one_model_decoded_and_written(bytes: &[u8]) -> Reached {
 /// Read `text` back and compare it with `source`, the model it was written
 /// from — `round_trip_one`'s checks, in
 /// `a_real_file_written_out_and_read_back_is_the_same_solid.rs`.
+///
+/// A solid's volume, area and centroid are compared bit for bit only where
+/// [`every_drawn_circle_comes_back_round_the_same_centre`] holds too. That is
+/// a stopgap for a gap, not a limit (`docs/decisions.md` §249.8): a circle
+/// drawn on a flat face comes back named by a pipe whose origin is the
+/// circle's centre, and the walk can centre it a few ulps from where the
+/// kernel's own pipe put it. Measured on an unplaced solid, that moved the
+/// centroid by 16, 2 and 3 ulps, and the volume by one.
 fn read_back_and_compared(source: &Model, text: &str) -> Reached {
     let mut reached = Reached::default();
     let file = StepFile::read(text.as_bytes()).unwrap_or_else(|why| {
@@ -264,7 +274,7 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
             });
         if every_number_the_same_bits
             && (here_solid.is_wholly_flat() || solid_has_no_placement(here_solid))
-            && every_drawn_circles_pipe_runs_along_a_coordinate_axis(here_solid)
+            && every_drawn_circle_comes_back_round_the_same_centre(here_solid, back_solid)
         {
             assert!(
                 here.volume() == back.volume() && here.surface_area() == back.surface_area(),
@@ -302,20 +312,23 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// answers whether every number came back the same bits, which is one of the
 /// two things [`read_back_and_compared`] asks before it compares the
 /// solid's measurement bit for bit too — the other is
-/// [`every_drawn_circles_pipe_runs_along_a_coordinate_axis`], for the reason
+/// [`every_drawn_circle_comes_back_round_the_same_centre`], for the reason
 /// right below.
 ///
 /// **A drawn circle's pipe can come back with another origin and not be a
-/// mismatch, but only when it runs along a coordinate axis.** [`the_same_run`]
-/// calls it the same pipe where its origin is on the kernel's line or where
-/// the kernel's walk centres the circle, and that does not clear the answer
-/// by itself: moving the pipe's origin to meet the flat face it is drawn on
-/// is exact along a coordinate axis, so an unplaced solid with such a pipe is
-/// still measured bit for bit, but a pipe that leans off every one of `x`,
-/// `y` and `z` needs an irrational projection for that same move, and it
-/// measures an ulp off — every located number came back the same bits, and so
-/// did the volume and surface area, but not the centroid, measured on
-/// [`an_unplaced_leaning_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file`].
+/// mismatch here, but its solid can then measure differently.**
+/// [`the_same_run`] calls it the same pipe where its origin is on the
+/// kernel's line or where the kernel's walk centres the circle, and that does
+/// not clear the answer. The walk centres the circle again from the origin
+/// read back, and that need not land where it landed from the kernel's own
+/// origin, whichever way the pipe runs (`docs/decisions.md` §249.8). Run, with
+/// no placement: a disc on a bar's top at `z = 4` drawn by a pipe up `z` from
+/// `z = -15.9` came back walked round another centre, and its volume and
+/// centroid moved
+/// ([`a_disc_drawn_by_a_pipe_from_far_below_its_top_comes_back_from_its_own_file`]);
+/// so did a pipe leaning along `(1, 1, 1)` from the origin, two ulps in each
+/// coordinate of the centre and 16, 2 and 3 in the centroid's
+/// ([`an_unplaced_leaning_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file`]).
 ///
 /// A plane is the one surface whose numbers are not written as they are
 /// stored. The writer picks the point it writes so that the reader's offset
@@ -775,44 +788,53 @@ fn solid_has_no_placement(solid: SolidView) -> bool {
         .all(|shell| shell.location() == Isometry::identity())
 }
 
-/// Whether every drawn circle's own pipe in `solid` runs along one of `x`,
-/// `y` or `z`.
+/// Whether the reader's model walks every circle drawn on a flat face of
+/// `back` round the very centre the kernel walks it round in `here`.
 ///
-/// Moving a drawn circle's pipe to where its axis meets the flat face it is
-/// drawn on (`Writing::an_arc_of_a_circle_on_a_flat_face`) is exact when the
-/// axis runs along a coordinate direction: the move changes one coordinate
-/// and nothing else rounds. [`solid_has_no_placement`] alone used to be
-/// taken as enough for [`read_back_and_compared`]'s bit-for-bit volume, area
-/// and centroid check, but a pipe that leans off every one of `x`, `y` and
-/// `z` needs an irrational projection to make that same move, which rounds
-/// differently in the model that went in and the one read back —
-/// measured, on
-/// [`an_unplaced_leaning_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file`],
-/// as a centroid two ulps off while every located number and the volume and
-/// surface area still came back the same bits. This is the mechanism
-/// §249.5 names for a curved solid placed with a turn, "two different
-/// roundings of the same true surface," here from the pipe's own moved
-/// origin rather than from a placement — so `read_back_and_compared` asks
-/// this too before taking that branch.
-fn every_drawn_circles_pipe_runs_along_a_coordinate_axis(solid: SolidView) -> bool {
-    solid
-        .faces()
-        .flat_map(|face| face.wires().flat_map(WireView::coedges).collect::<Vec<_>>())
-        .all(|coedge| match coedge.edge().run() {
-            EdgeRun::PartOfWhereItCrosses {
-                and: Surface::Cylinder(cylinder),
-                ..
-            } => {
-                cylinder
-                    .axis()
-                    .direction()
-                    .components()
-                    .iter()
-                    .filter(|&&c| c != 0.0)
-                    .count()
-                    <= 1
-            }
-            _ => true,
+/// The writer writes such a circle at the centre the kernel's walk gives it,
+/// and the reader names it by a pipe whose origin is that centre
+/// (`Writing::an_arc_of_a_circle_on_a_flat_face`,
+/// `Walk::the_surface_that_names_the_curve`). The walk then centres it again
+/// from that origin, and the second rounding need not land on the first
+/// (`docs/decisions.md` §249.8). Where it does not, the mesh's points round
+/// the circle move and so does the measurement, so
+/// [`read_back_and_compared`] leaves that solid's measurement out. A run of
+/// any other kind answers `true`, the strict side: the solid stays measured
+/// bit for bit and a new kind of run that moves fails there loudly.
+///
+/// Called after [`assert_located_numbers_the_same`], which has already
+/// checked that both sides hold as many faces and coedges, in walk order.
+fn every_drawn_circle_comes_back_round_the_same_centre(here: SolidView, back: SolidView) -> bool {
+    here.faces()
+        .zip(back.faces())
+        .all(|(here_face, back_face)| {
+            let Surface::Plane(flat) = here_face.surface() else {
+                return true;
+            };
+            here_face
+                .wires()
+                .flat_map(WireView::coedges)
+                .zip(back_face.wires().flat_map(WireView::coedges))
+                .all(|(here_coedge, back_coedge)| {
+                    let (
+                        EdgeRun::PartOfWhereItCrosses {
+                            and: Surface::Cylinder(here_pipe),
+                            ..
+                        },
+                        EdgeRun::PartOfWhereItCrosses {
+                            and: Surface::Cylinder(back_pipe),
+                            ..
+                        },
+                    ) = (here_coedge.edge().run(), back_coedge.edge().run())
+                    else {
+                        return true;
+                    };
+                    let centre = |pipe: &Cylinder| {
+                        where_the_walk_centres_a_circle(&flat, pipe)
+                            .map(|at| at.coordinates().map(f64::to_bits))
+                    };
+                    centre(&here_pipe) == centre(&back_pipe)
+                })
         })
 }
 
