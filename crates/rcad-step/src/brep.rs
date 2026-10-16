@@ -22,7 +22,7 @@ use rcad_topo::{
 use smallvec::smallvec;
 
 use crate::Value;
-use crate::geometry::{Reading, plane_through};
+use crate::geometry::{Reading, plane_through, the_walk_centres_it_at};
 use crate::graph::EntityId;
 use crate::names::{
     ADVANCED_FACE, CIRCLE, CLOSED_SHELL, CONICAL_SURFACE, EDGE_CURVE, EDGE_LOOP, ELLIPSE,
@@ -1433,10 +1433,28 @@ impl Walk {
             && self.every_face_holds_the_curve(reading, edge_curve, curve, keyword, place)?
         {
             let radius = reading.real_at(curve, CIRCLE, 2)?;
-            let round = Axis::as_written(place.origin, place.axis)
+            let through_the_centre = Axis::as_written(place.origin, place.axis)
                 .and_then(|axis| Cylinder::new(axis, radius))
                 .map_err(not_a_working_shape)?;
-            return Ok(Surface::Cylinder(round));
+            let faces: Vec<Plane> = faces_along_it
+                .into_iter()
+                .flatten()
+                .filter_map(|face| face.as_plane().copied())
+                .collect();
+            let walks_it_round_the_centre =
+                |pipe: &Cylinder| the_walk_centres_it_at(pipe, &faces, place.origin);
+            if walks_it_round_the_centre(&through_the_centre) {
+                return Ok(Surface::Cylinder(through_the_centre));
+            }
+            let bits = |way: Vector| way.components().map(f64::to_bits);
+            let one_the_file_holds = reading.every_pipe_the_file_holds().iter().find(|pipe| {
+                bits(pipe.axis().direction()) == bits(through_the_centre.axis().direction())
+                    && pipe.radius().to_bits() == radius.to_bits()
+                    && walks_it_round_the_centre(pipe)
+            });
+            return Ok(Surface::Cylinder(
+                one_the_file_holds.copied().unwrap_or(through_the_centre),
+            ));
         }
         let flat = plane_through(place.origin, place.axis).map_err(not_a_working_shape)?;
         Ok(Surface::Plane(flat))
