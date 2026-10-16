@@ -589,6 +589,60 @@ fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_
     }
 }
 
+/// The same two bends placed round by `−1.984` and a quarter turn back, where
+/// the first bend's start cap and the copy's end cap overlap too, in a wedge
+/// `4π` times the angle between them (Q2089).
+///
+/// The wedge is thinner than the space any mesh of it can leave out, so no mesh
+/// says which way its faces point, and the sum the closest mesh leaves is below
+/// zero. The fuse refused the intersection [`Invalid::VolumeIsNotPositive`] on
+/// it, both ways round, which says the faces point inwards. They point out.
+#[test]
+fn two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name() {
+    let start = -1.984;
+    for the_first_first in [true, false] {
+        let mut model = a_model();
+        let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
+        let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
+        let wedge = 4.0 * PI * the_angle_where_the_caps_overlap(&model, [first, copy], start);
+        let fused = fused_or_refused(&mut model, first, copy, Rule::Intersection, the_first_first);
+        let Err(Error::CannotTellWhichWayASolidsFacesPoint {
+            enclosed,
+            leaves_out: Some(leaves_out),
+        }) = fused
+        else {
+            panic!("the first first {the_first_first}: {fused:?}, a wedge of {wedge}");
+        };
+        assert!(
+            0.0 < wedge && wedge < leaves_out && enclosed <= 0.0 && -enclosed <= leaves_out,
+            "the first first {the_first_first}: a wedge of {wedge}, enclosed {enclosed}, \
+             off by up to {leaves_out}"
+        );
+    }
+}
+
+/// The angle by which the start cap of the first of `bends` reaches past the
+/// end cap of the second, both on planes through the ring's axis at the angle
+/// `start` round it: the angle between the two caps of their sliver, worked
+/// out as [`the_angle_between_the_caps_of`] works it out.
+fn the_angle_where_the_caps_overlap(model: &Model, bends: [SolidKey; 2], start: f64) -> f64 {
+    let [first, second] = bends.map(|bend| {
+        model
+            .solid(bend)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| face.surface().as_plane().is_some())
+            .map(|face| face.outward_normal())
+            .collect::<Vec<_>>()
+    });
+    let left_over = first
+        .iter()
+        .flat_map(|&one| second.iter().map(move |&two| one + two))
+        .min_by(|one, two| one.length().total_cmp(&two.length()))
+        .expect("each bend has two caps");
+    -(left_over.x() * start.cos() + left_over.y() * start.sin())
+}
+
 /// The angle between the two caps of the sliver, which sits at the angle `−2`
 /// round the ring's axis.
 ///
