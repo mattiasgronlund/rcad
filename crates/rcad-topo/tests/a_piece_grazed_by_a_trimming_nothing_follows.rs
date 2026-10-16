@@ -50,11 +50,10 @@
 use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftStep, DraftWire, Error, FaceKey, Invalid, Model, Rule, SolidBuilder, SolidKey,
-    SolidView,
+    DraftEdge, DraftStep, DraftWire, Error, FaceKey, Model, Rule, SolidBuilder, SolidKey, SolidView,
 };
 
-use Answer::{CannotMesh, EnclosesNothing, NamesTheCap, Solids, Undecidable};
+use Answer::{CannotMesh, NamesTheCap, NoMeshCanTell, Solids, Undecidable};
 
 const RADIUS: f64 = 5.0;
 
@@ -70,8 +69,9 @@ enum Answer {
     NamesTheCap,
     /// `Error::CannotMeshAFace`.
     CannotMesh,
-    /// `Invalid::VolumeIsNotPositive`.
-    EnclosesNothing,
+    /// `Error::CannotTellWhichWayASolidsFacesPoint`: a curved solid no mesh
+    /// signs whose closest sum is not above zero.
+    NoMeshCanTell,
 }
 
 /// What the half ball is fused with, centred where it is.
@@ -197,8 +197,9 @@ fn a_bowl_just_off_the_caps_ball_names_the_cap_or_is_undecidable() {
 /// clear of the half ball and is two solids with it. Kept below `z = -3` they
 /// answer. Kept below the floor, the bowls a rounding off are `Undecidable`
 /// and those four off answer. Kept below `z = 3`, the bowls bigger answer, the
-/// half ball less the bowl four roundings smaller is refused for enclosing
-/// nothing, and the union with the bowl a rounding smaller cannot be meshed.
+/// half ball less the bowl four roundings smaller holds about `54` but is
+/// refused because no mesh can tell which way its faces point, and the union
+/// with the bowl a rounding smaller cannot be meshed.
 #[test]
 fn a_bowl_just_off_the_half_ball_alone_answers_or_is_undecidable() {
     let [one_up, four_up] = roundings_up();
@@ -258,7 +259,7 @@ fn a_bowl_just_off_the_half_ball_alone_answers_or_is_undecidable() {
             Solids(1),
             Solids(1),
             Solids(1),
-            EnclosesNothing,
+            NoMeshCanTell,
             Solids(1)
         ]
     );
@@ -312,7 +313,7 @@ fn six_answers(other: Other, half: Half) -> [Answer; 6] {
                     NamesTheCap
                 }
                 Err(Error::CannotMeshAFace { .. }) => CannotMesh,
-                Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. })) => EnclosesNothing,
+                Err(Error::CannotTellWhichWayASolidsFacesPoint { .. }) => NoMeshCanTell,
                 Err(other) => panic!("{rule:?}, half ball first {half_first}: {other:?}"),
             };
         }

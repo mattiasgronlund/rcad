@@ -518,6 +518,42 @@ pub enum Error {
         enclosed_where_placed: f64,
     },
 
+    /// No mesh of this curved solid says which way its faces point.
+    ///
+    /// [`Model::validate`](crate::Model::validate) and the fuse read a curved
+    /// solid's sign off what a mesh of it encloses, and a sum says it only once
+    /// it is larger than all the space the mesh can leave out between its
+    /// triangles and the solid's faces. A solid thinner than that at every mesh
+    /// asked of it has no mesh that answers, and the sum the closest of them
+    /// left was zero or below. A solid turned inside out leaves such a sum, and
+    /// so can a sound sliver: two quarter bends of ring 4 and tube 1 placed
+    /// round by `−1.984` and a quarter turn back overlap in a wedge `4π` times
+    /// the angle between their caps, and their intersection is refused this way
+    /// (`a_piece_no_ray_can_place_names_its_refusal.rs`, Q2089). Until Q2089
+    /// that was [`Invalid::VolumeIsNotPositive`], "its faces do not point
+    /// outwards", which nothing had shown. So was a fin `2⁻⁵¹` thick whose
+    /// every mesh point rounds onto one plane, so that every mesh of it encloses
+    /// exactly `0` (`an_ellipse_start_between_two_places.rs`, Q1938), and a
+    /// half ball of 5 less a bowl four roundings smaller, which holds about
+    /// `54`, and whose closest mesh encloses `−38.7` and can be off by `2384`
+    /// (`a_piece_grazed_by_a_trimming_nothing_follows.rs`).
+    ///
+    /// A sum above zero that no mesh answered is still taken as the volume, so
+    /// a solid turned inside out can still pass on one (Q2084).
+    #[error(
+        "no mesh of this solid says which way its faces point: the closest encloses {enclosed}, \
+         and can be off by {leaves_out:?}"
+    )]
+    CannotTellWhichWayASolidsFacesPoint {
+        /// What the mesh closest to the solid encloses: zero or less.
+        enclosed: f64,
+        /// How far that sum can be from the solid's volume: the space the mesh
+        /// can leave out and the sum's own rounding. `None` when the solid has
+        /// a face that space cannot be charged for yet, a cone's, and then
+        /// every mesh asked of it lay flat.
+        leaves_out: Option<f64>,
+    },
+
     /// A closed edge of the answer would start at a **pole** of the surface it is
     /// drawn on, where nothing says which way it runs.
     ///
@@ -1274,6 +1310,7 @@ impl Error {
             | Self::AWireWillNotLieFlatOnItsFace { .. }
             | Self::TwoPatchesOfTheMeshDrewTheSameSide { .. }
             | Self::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }
+            | Self::CannotTellWhichWayASolidsFacesPoint { .. }
             | Self::AClosedEdgeOfTheAnswerWouldStartAtAPole { .. }
             | Self::ACurvedFaceGoesRightRoundWithNoSeam { .. }
             | Self::ACurvedFaceCannotBeCutSmallEnoughToMesh { .. }

@@ -3926,7 +3926,10 @@ impl Assembly {
     /// # Errors
     ///
     /// [`Error::Invalid`] when a shell encloses nothing at all, or when a void
-    /// has no shell around it. [`Error::AFaceTrimmedByACurveThisCannotFollow`]
+    /// has no shell around it. [`Error::CannotTellWhichWayASolidsFacesPoint`],
+    /// through [`how_much_space_it_encloses`]'s `?`, when a curved shell no
+    /// mesh signs whose closest sum is not above zero.
+    /// [`Error::AFaceTrimmedByACurveThisCannotFollow`]
     /// naming the input face, when no point on a shell could be placed and one
     /// met a face of another shell that nobody can follow.
     /// [`Error::Undecidable`] when no point on a shell could be placed inside or
