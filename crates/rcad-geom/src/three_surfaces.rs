@@ -4,7 +4,7 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and ten ways round it
+//! # Two planes and a quadric is the road, and eleven ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
@@ -94,11 +94,21 @@
 //! a rod's round end meets it.
 //! [`what_a_plane_that_cuts_them_in_bands_that_cross_leaves`].
 //!
+//! **An eleventh is a plane that reaches a pipe only far along it.** A plane
+//! a rounding off parallel to a pipe's axis, and farther from it than the
+//! pipe's radius, reaches the pipe only `10¹⁶` or more along it. Out there a
+//! ball, a second pipe that leans to the first or a cone with no ruling along
+//! the pipe is far from the pipe, and a bound on its own expression along the
+//! pipe proves it — the side of a block three from a bar and its chamfer
+//! cone, all placed by one turn. The band road gives the cone's cut by a
+//! plane that steep no outer edge, so it does not reach that.
+//! [`what_a_plane_beside_a_pipe_leaves`].
+//!
 //! **Three curved surfaces, two of which bend the same way, are one plane and
 //! two curved surfaces** by the first family's own argument: every point the
 //! two share is on the plane they differ by, and every point on that plane and
 //! one of them is on the other. So the plane takes the place of one of the
-//! two, and the ten roads answer the triple — two cones of one slope about one
+//! two, and the eleven roads answer the triple — two cones of one slope about one
 //! axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
@@ -107,11 +117,11 @@
 //! the plane is square or parallel to, are not both cut by it in circles,
 //! neither of which is a pipe it runs along, whose bands overlap, and whose
 //! curves the plane leans too far for one to be a line bent by little across
-//! the other, or which touch rather than cross — a plane leaning well off
-//! square to a pipe's axis, which cuts it in a long ellipse, against a ball
-//! off that axis, a cap of one bar across a second bar leaning to it, or a
-//! wall a rounding off parallel to a bar and its chamfer cone and off their
-//! axis —
+//! the other, or which touch rather than cross, and which the plane does not
+//! reach only far along a pipe — a plane leaning well off square to a pipe's
+//! axis, which cuts it in a long ellipse, against a ball off that axis, a cap
+//! of one bar across a second bar leaning to it, or a wall a rounding off
+//! parallel to a bar and its chamfer cone that cuts the bar —
 //! a plane along a pipe and a cone one of whose rulings runs along the
 //! pipe, three curved surfaces no two of which differ by a plane a stored
 //! [`Plane`] is exactly, and any triple with a torus and fewer than two planes
@@ -433,7 +443,7 @@ impl MeetOfThree {
 /// # Errors
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
-/// the three are planes and none of the ten ways round that the module doc
+/// the three are planes and none of the eleven ways round that the module doc
 /// names runs — for three curved surfaces, after the plane two of them differ
 /// by has taken one's place, or where no two of them differ by one.
 ///
@@ -1681,8 +1691,10 @@ fn where_three_curved_surfaces_meet(
 /// The road for bands apart comes after all of those, and it only ever
 /// answers that the three share nothing. Every triple an earlier road answers
 /// keeps that answer, and the band road takes what they all hand on. The road
-/// for bands that cross comes last of all and takes what the band road hands
-/// on, so it never changes an answer either.
+/// for bands that cross comes next and takes what the band road hands on, so
+/// it never changes an answer either. The road for a plane beside a pipe comes
+/// last of all, takes what every other road hands on, and also only ever
+/// answers that the three share nothing.
 fn where_one_plane_and_two_curved_surfaces_meet(
     flat: &Plane,
     one: &Surface,
@@ -3806,9 +3818,11 @@ fn the_line_two_circles_differ_by(mine: &ACircle, theirs: &ACircle) -> Option<([
 /// on a line is a line's: this road hands that on. A plane that leans to the
 /// pipe's axis is not along it and cuts it in an ellipse, which
 /// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`] is asked about next.
+/// One that leans by a rounding and keeps off the pipe reaches it only far
+/// along it, which [`what_a_plane_beside_a_pipe_leaves`] is asked about last.
 ///
-/// It is asked after every road but that one, so every triple an earlier road
-/// answers keeps its answer. Arithmetic that runs out after the family is settled is
+/// It is asked after every road but those two and the one for bands that
+/// cross, so every triple an earlier road answers keeps its answer. Arithmetic that runs out after the family is settled is
 /// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
 fn what_a_plane_along_a_pipe_leaves(
     flat: &Plane,
@@ -4092,11 +4106,12 @@ impl TheLinesAlongAPipe {
 /// parallel to a pipe and a cone about one axis gets bands too wide to keep
 /// apart, the cone's with no outer edge, so the side of a block three from a
 /// bar and its chamfer cone, the block and the bar placed by one turn, is
-/// refused though it misses both circles the two share.
+/// handed on, and [`what_a_plane_beside_a_pipe_leaves`] answers it.
 ///
-/// It is asked last and only ever answers that the three share nothing, so a
-/// triple an earlier road answers keeps its answer, and where a product falls
-/// out of range it hands the triple on to the refusal it had before.
+/// It is asked after every road but the one for bands that cross and the one
+/// for a plane beside a pipe, and only ever answers that the three share
+/// nothing, so a triple an earlier road answers keeps its answer, and where a
+/// product falls out of range it hands the triple on.
 fn what_a_plane_that_cuts_them_in_bands_apart_leaves(
     flat: &Plane,
     one: &Surface,
@@ -4715,8 +4730,8 @@ fn both(one: Interval, other: Interval) -> Interval {
 /// the rest are worked out exactly and only then boxed, and each side of the
 /// comparison is taken at its worst end. The side of a block three from a bar
 /// of radius two and its chamfer cone of slope one, all placed by one turn, is
-/// one: `k` is about a rounding, so the side reaches the bar some `10¹⁶` along
-/// it, where the cone is as wide.
+/// one: `k` is a rounding or less, so the side reaches the bar no nearer than
+/// about `10¹⁶` along it, where the cone is as wide.
 ///
 /// It is asked last of all and only ever answers that the three share
 /// nothing, so every triple an earlier road answers keeps its answer.
@@ -7116,6 +7131,27 @@ mod tests {
                 PredicatePoint::Exact([4.0, 0.0, 4.0]),
             ]))
         );
+    }
+
+    /// The wall `x + 2⁻⁵³z = 3`, a rounding off parallel to a bar of radius 2
+    /// up `z` and its chamfer cone of slope one with the apex at `(0, 0, −1)`,
+    /// and one past the bar. It reaches the bar only from `z = 2⁵³` up, where
+    /// the cone is that wide, so the three share nothing. Before the road for a
+    /// plane beside a pipe this was refused: the road along a pipe takes only a
+    /// wall exactly parallel, and the band road gives the cone's cut no outer
+    /// edge.
+    #[test]
+    fn a_wall_a_rounding_off_parallel_to_a_bar_and_its_chamfer_cone_meets_them_nowhere() {
+        let wall = flat([1.0, 0.0, 2f64.powi(-53)], [3.0, 0.0, 0.0]);
+        let bar = a_bar_up_z_of_radius(2.0);
+        let chamfer = a_cone([0.0, 0.0, -1.0], [0.0, 0.0, 1.0], 1.0);
+        for order in [
+            [&wall, &bar, &chamfer],
+            [&chamfer, &wall, &bar],
+            [&bar, &chamfer, &wall],
+        ] {
+            assert_eq!(meet(order), Ok(MeetOfThree::Nowhere), "{order:?}");
+        }
     }
 
     /// The sign of `P + L·√Δ` for every way the two parts can point, a tie
