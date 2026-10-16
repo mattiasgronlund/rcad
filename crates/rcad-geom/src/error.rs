@@ -724,9 +724,10 @@ pub enum Error {
     /// quadrics is a degree-eight system.
     ///
     /// **"In general" is doing real work in that sentence**, and
-    /// `three_surfaces.rs`'s module doc names the seven
-    /// families of quadrics it excludes: two quadrics that square `p` the same
-    /// way differ by something flat; two surfaces turned about one axis are cut
+    /// `three_surfaces.rs`'s module doc names ten families it answers. In
+    /// seven, the plane and two quadrics are no quartic at all: two quadrics
+    /// that square `p` the same way differ by something flat; two surfaces
+    /// turned about one axis are cut
     /// by a plane square to it in two circles about one centre, which are one
     /// circle or share nothing; the same two share circles square to the axis,
     /// which a plane holding the axis cuts in two points each; a plane that
@@ -746,17 +747,35 @@ pub enum Error {
     /// two bars that cross is the seventh. All seven are answered, and so are
     /// three curved surfaces two of which square `p` the same way, since the
     /// plane those two differ by takes one of their places (Q1284): two cones of
-    /// one slope about one axis and a ball. So is a ring with a ball, a pipe or
-    /// a cone on its axis and a plane that holds that axis or is square to it:
+    /// one slope about one axis and a ball. The eighth is a ring with a ball, a
+    /// pipe or a cone on its axis and a plane that holds that axis or is square
+    /// to it:
     /// a bend's end cap across a bar of the bend's own radius, and a bead's
-    /// flat face on a shaft of its outer radius (Q1566). This is what is left
-    /// over — among it
-    /// a plane leaning to the axis of a pipe or a cone, which cuts it in an
-    /// ellipse or another conic, against anything but a surface it bends the
-    /// same way as (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
-    /// in `rcad-topo`), and three curved surfaces two of which differ by a
-    /// plane that no stored [`Plane`](crate::Plane) is exactly, such as two
-    /// balls whose centres lie along a diagonal.
+    /// flat face on a shaft of its outer radius (Q1566).
+    ///
+    /// The ninth and tenth are quartics, and need no algebraic solver. A plane cuts
+    /// a ball, a pipe or a cone in a curve that keeps within a band about where
+    /// the axis crosses it, and where the bands of the two are proved apart the
+    /// three share nothing (Q2127). Where they overlap and the plane is near
+    /// enough square to both axes, one curve is a line bent by little across
+    /// the other, and the two cross at two points or nowhere (Q2155) — a cap a
+    /// rounding off square to a bar and its chamfer cone, which
+    /// [`Isometry::compose`](crate::Isometry::compose)'s rounding puts on a
+    /// part placed twice. A ball whose centre is on a pipe's or a cone's axis
+    /// is answered exactly instead, since the two touch along a circle on a
+    /// plane known exactly, and that plane takes the other one's place: a
+    /// slanted cut through where a rod's round end meets it.
+    ///
+    /// This is what is left over — among it a plane leaning well off square to
+    /// the axis of a pipe or a cone, which cuts it in a curve too far from a
+    /// line for the road for crossing curves, against a second round surface
+    /// (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
+    /// in `rcad-topo`); two curves that touch rather than cross, where no ball
+    /// is centred on the other surface's axis; a plane a rounding off parallel
+    /// to a pipe's or a cone's axis, which gives a cone's band no outer edge;
+    /// and three curved surfaces two of which differ by a plane that no stored
+    /// [`Plane`](crate::Plane) is exactly, such as two balls whose centres lie
+    /// along a diagonal.
     ///
     /// A **gap** and not a limit (§16.10): the points are there, and a real
     /// algebraic solver reaches them. The family of fixes is the
@@ -767,7 +786,8 @@ pub enum Error {
     /// the plane no stored plane is, the fix is smaller: roads that take the
     /// plane as the exact numbers it is, as the first family's road already
     /// does. `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`,
-    /// `a_plane_leaning_to_a_bars_axis_through_a_ball_off_it_is_refused_by_name`
+    /// `a_plane_leaning_to_a_bars_axis_through_a_ball_off_it_is_refused_by_name`,
+    /// `a_ball_resting_on_a_rod_cut_leaning_through_where_they_touch_is_still_refused`
     /// and `two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused`
     /// are the demonstrations that the points exist.
     #[error(
