@@ -1501,6 +1501,48 @@ fn a_bend_turned_five_about_y_and_moved_comes_back_from_its_own_file() {
     );
 }
 
+/// A quarter bend of ring nine and tube two, turned a quarter about `x` and
+/// moved to `(-25, 11, 19)`, so its seam's cutting plane crosses the ring
+/// exactly at the ring's own centre (`up` is `0.0` to the bit): one of the
+/// six ring/ring refusals `how_often_a_model_the_mutator_draws_is_refused`
+/// found in 400 draws at a fixed seed (Q2184).
+///
+/// **Unlike Q843's bend, no representable centre near the ring's own reads
+/// back as the seam's plane.** With `y` held at `11.0`, every representable
+/// `z` from seven million `f64`s below `19.0` to seven million above it was
+/// tried: the plane's offset differs from the ring's centre's own by `-2`
+/// bits at the `f64` just under `19.0` and by `+1` at `19.0` itself, a jump
+/// of three that steps clean over zero, and every other `z` tried is further
+/// off still. Walking `y` by up to a million `f64`s either way, solving `z`
+/// continuously and trying the three `f64`s nearest that solution, never
+/// found better than the one-bit gap `19.0` itself already has. `write.rs`'s
+/// `the_nearest_centre_its_faces_hold_the_circle_at` walks the same way, out
+/// to sixty-four steps, so it cannot do better either — this is not a search
+/// that needs to run longer, the gap does not close by searching the same
+/// line further.
+#[test]
+fn a_bend_of_ring_nine_turned_about_x_and_moved_comes_back_from_its_own_file() {
+    let turned = Isometry::translation(Vector::new(-25.0, 11.0, 19.0))
+        .expect("a finite offset")
+        .compose(
+            &Isometry::rotation(&Axis::x(), std::f64::consts::FRAC_PI_4)
+                .expect("a finite angle about a unit axis"),
+        );
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let solid = a_quarter_bend(&mut model, 9.0, 2.0).expect("a bend fits this model");
+    model
+        .place_solid(solid, &turned)
+        .expect("the key came from this model");
+    let bytes = postcard::to_allocvec(&model).expect("a model always encodes");
+    let reached = one_model_decoded_and_written(&bytes);
+    assert_eq!(
+        (reached.came_back_the_same, reached.solids_the_same),
+        (1, 1),
+        "{reached:?}, {:?}",
+        rcad_step::write(&model, "a turned bend").err()
+    );
+}
+
 fn a_round_bar(model: &mut Model) -> rcad_topo::Result<SolidKey> {
     model.add_round_bar(3.0, 5.0, &Isometry::identity())
 }
