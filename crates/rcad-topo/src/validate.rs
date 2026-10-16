@@ -2600,11 +2600,11 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(view, policy, log)?;
     every_side_of_the_skin_is_used_both_ways(&coarsest)?;
     let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&coarsest);
-    if the_sum_answers(view, &coarsest, enclosed, rounding) {
+    let leaves_out = how_far_the_sum_can_be_off(view, &coarsest, rounding);
+    if the_sum_answers(&coarsest, enclosed, leaves_out) {
         return Ok(enclosed);
     }
-    let mut finest_that_is_not_flat =
-        (enclosed != 0.0 && !it_lies_flat(&coarsest)).then_some(enclosed);
+    let mut closest = (enclosed, leaves_out);
     let top = how_far_across(&coarsest) / 2.0;
     let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
     let mut room = top;
@@ -2618,12 +2618,13 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         match view.mesh(less, policy, &mut this_rung) {
             Ok(finer) => {
                 let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(&finer);
-                if the_sum_answers(view, &finer, finer_encloses, rounding) {
+                let leaves_out = how_far_the_sum_can_be_off(view, &finer, rounding);
+                if the_sum_answers(&finer, finer_encloses, leaves_out) {
                     this_rung.drain_into(log);
                     return Ok(finer_encloses);
                 }
                 if finer_encloses != 0.0 && !it_lies_flat(&finer) {
-                    finest_that_is_not_flat = Some(finer_encloses);
+                    closest = (finer_encloses, leaves_out);
                 }
             }
             Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
@@ -2638,7 +2639,14 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         }
         room /= 2.0;
     }
-    Ok(finest_that_is_not_flat.unwrap_or(enclosed))
+    let (enclosed, leaves_out) = closest;
+    if enclosed.is_finite() && enclosed <= 0.0 {
+        return Err(Error::CannotTellWhichWayASolidsFacesPoint {
+            enclosed,
+            leaves_out,
+        });
+    }
+    Ok(enclosed)
 }
 
 /// How many times [`how_much_space_a_curved_solid_encloses`]'s own ladder has
@@ -2651,25 +2659,32 @@ static RUNGS_THE_SECOND_LADDER_HAS_ASKED: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
 /// Whether what a mesh of this solid encloses says which way the solid's faces
-/// point: it is not zero, and the sum, less `rounding`, how far it can be from
-/// what the mesh's triangles enclose exactly, is still larger than all the
-/// space the mesh can leave out. A solid with a face that space cannot be
-/// charged for answers, as it did before that space was weighed, whenever the
-/// mesh does not lie flat.
+/// point: it is not zero, and it is further from zero than `leaves_out`, what
+/// [`how_far_the_sum_can_be_off`] says of it. A solid with a face that space
+/// cannot be charged for answers, as it did before that space was weighed,
+/// whenever the mesh does not lie flat.
+fn the_sum_answers(mesh: &Mesh, enclosed: f64, leaves_out: Option<f64>) -> bool {
+    if enclosed == 0.0 {
+        return false;
+    }
+    match leaves_out {
+        Some(leaves_out) => enclosed.abs() > leaves_out,
+        None => !it_lies_flat(mesh),
+    }
+}
+
+/// How far a mesh's sum can be from the solid's volume: all the space the mesh
+/// can leave out, and `rounding`, how far the sum can be from what the mesh's
+/// triangles enclose exactly. `None` when the solid has a face that space
+/// cannot be charged for.
 ///
 /// **The rounding is charged because the size is read, not only the sign.**
 /// [`signed_volume_over_and_how_far_it_rounded`] keeps a rounded sum whenever
 /// it is further from zero than its own slack, so a sum just past that slack
 /// can be off by nearly all of itself, and a mesh whose exact volume is under
 /// the hidden space would then pass.
-fn the_sum_answers(view: SolidView<'_>, mesh: &Mesh, enclosed: f64, rounding: f64) -> bool {
-    if enclosed == 0.0 {
-        return false;
-    }
-    match how_much_space_hides_under(view, mesh) {
-        Some(hidden) => enclosed.abs() > (hidden + rounding).next_up(),
-        None => !it_lies_flat(mesh),
-    }
+fn how_far_the_sum_can_be_off(view: SolidView<'_>, mesh: &Mesh, rounding: f64) -> Option<f64> {
+    how_much_space_hides_under(view, mesh).map(|hidden| (hidden + rounding).next_up())
 }
 
 /// The most space there can be between a mesh of this solid and the solid,
@@ -5283,10 +5298,11 @@ mod tests {
         Decision, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO, Mesh, RUNGS_THE_SECOND_LADDER_HAS_ASKED, Scope,
         a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
         as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space,
-        how_far_across, how_far_it_strays_from_one_plane, how_much_space_a_curved_solid_encloses,
-        how_much_space_hides_under, how_wide_an_arc_of_one_branch_is, it_lies_flat,
-        largest_coordinate_of, signed_volume_over_and_how_far_it_rounded,
-        the_coarsest_mesh_whose_sides_do_not_cross, the_sum_answers, winding_of, winding_round,
+        how_far_across, how_far_it_strays_from_one_plane, how_far_the_sum_can_be_off,
+        how_much_space_a_curved_solid_encloses, how_much_space_hides_under,
+        how_wide_an_arc_of_one_branch_is, it_lies_flat, largest_coordinate_of,
+        signed_volume_over_and_how_far_it_rounded, the_coarsest_mesh_whose_sides_do_not_cross,
+        the_sum_answers, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -8088,8 +8104,9 @@ mod tests {
                     meshed += 1;
                     let strays = mesh.deviation().magnitude();
                     let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+                    let leaves_out = how_far_the_sum_can_be_off(view, &mesh, rounding);
                     assert!(
-                        strays > thick && sum > 0.0 && !the_sum_answers(view, &mesh, sum, rounding),
+                        strays > thick && sum > 0.0 && !the_sum_answers(&mesh, sum, leaves_out),
                         "room {room}: strays {strays}, encloses {sum}"
                     );
                 }
@@ -8138,8 +8155,9 @@ mod tests {
                 )
                 .unwrap_or_else(|why| panic!("room {room}: {why:?}"));
             let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+            let leaves_out = how_far_the_sum_can_be_off(view, &mesh, rounding);
             assert!(
-                !the_sum_answers(view, &mesh, sum, rounding),
+                !the_sum_answers(&mesh, sum, leaves_out),
                 "room {room}: {sum} answers"
             );
             sum
