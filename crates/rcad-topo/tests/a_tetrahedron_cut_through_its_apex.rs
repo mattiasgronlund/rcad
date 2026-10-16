@@ -282,8 +282,10 @@ fn a_front_face_through_the_apex_placed_first_is_refused_where_the_placement_rou
 }
 
 /// The fuse of the tetrahedron and the block, placed, answers one solid that
-/// holds its half and validates. Under `tolerant` its log holds one record,
-/// where the corners of the speck at the apex are taken as the apex.
+/// holds its half and validates. Under `tolerant` its log holds five records.
+/// Four, where three meets of the three side planes and the cut, which the
+/// rounding wrote a hair apart, are taken as one point (§417.7, Q2133), and
+/// one, where the corners of the speck at the apex are taken as the apex.
 fn answers(placement: Placement, half: Half, policy: &Policy) {
     let case = format!("{placement:?}, {half:?}, {policy:?}");
     let mut log = ProvenanceLog::new();
@@ -297,7 +299,13 @@ fn answers(placement: Placement, half: Half, policy: &Policy) {
     let expected: &[&str] = if *policy == Policy::certified() {
         &[]
     } else {
-        &["three meets of one plane taken as an input corner"]
+        &[
+            "three meets of four surfaces taken as one point",
+            "three meets of four surfaces taken as one point",
+            "three meets of four surfaces taken as one point",
+            "three meets of four surfaces taken as one point",
+            "three meets of one plane taken as an input corner",
+        ]
     };
     assert_eq!(records, expected, "{case}");
     the_answer_holds_its_half(&model, &answer, half, policy, &case);

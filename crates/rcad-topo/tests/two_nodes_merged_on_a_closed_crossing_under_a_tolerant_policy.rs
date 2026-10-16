@@ -112,7 +112,7 @@
 //!
 //! # The far rim the cube's edges run through
 //!
-//! A near cap cut this close (`far / 300`) sometimes refuses earlier, with
+//! A near cap cut this close (`far / 300`) sometimes refused earlier, with
 //! `CannotTellTheCellsOfAFaceApart`, before the crossing is even reached.
 //! Q2028 traced it, and it is not the near cap. In a grid of 21 shape scales
 //! (`0.1` to `0.5`), 17 working sizes (`0.1` to `0.9`) and the four fuses,
@@ -126,24 +126,37 @@
 //! point, the cap, the cone and two faces of the cube, and on the cap that
 //! point is three meets: the rim with each face's line, and the two lines
 //! with each other. Stored in `f64` they come back as three boxes a few
-//! `1e-16` apart, and `merge_points_that_are_one_point` decides them a pair at
-//! a time. At a shape scale of `0.1` and a working size of `0.25` it joins the
-//! rim's meet with one line to the meet of the two lines, and proves the
-//! rim's meet with the other line apart from both. That other line then meets
-//! the rim twice, a hair apart, and `spread_the_winding` cannot tell the
-//! cap's cells apart. The answer exists, so this is a gap (§16.10).
+//! `1e-16` apart, and `merge_points_that_are_one_point` decided them a pair
+//! at a time. At a shape scale of `0.1` and a working size of `0.25` it joined
+//! the rim's meet with one line to the meet of the two lines, and proved the
+//! rim's meet with the other line apart from both. That other line then met
+//! the rim twice, a hair apart, and `spread_the_winding` could not tell the
+//! cap's cells apart. The answer exists, so this was a gap (§16.10).
 //!
 //! **No answer was wrong.** The 48 fuses of that grid that answered pass
 //! `Model::validate`, have the solid, face, wire and shell counts of the same
 //! fuse at a scale of one and a working size of `10`, and its volume to
 //! within `1.9e-5`. Lifting the far cap by a thousandth of its height takes it
 //! off the edges' lines, and all 1428 fuses answer. Turning the seam to `+x`
-//! still leaves 347 refusals, so the seam plays no part. The two power-of-two
+//! still left 347 refusals, so the seam plays no part. The two power-of-two
 //! images of a scale of `0.1` and a size of `0.25`, which round the same way,
-//! refuse the same, so small numbers play no part either.
-//! `a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart`
-//! and `the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges`
-//! pin both. Q2133 is the row that answers the refusals.
+//! refused the same, so small numbers play no part either.
+//! `the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges`
+//! pins the lifted cap.
+//!
+//! **Since Q2133 the fuses answer.** Each face through the point, the cap, the
+//! cone and the cube's two faces, crosses the other three surfaces in three
+//! curves, and the three meets of those curves two at a time are three nodes
+//! round a sliver cell, each two of them neighbours along one curve and no
+//! further apart than the policy's wobble. `merge_points_that_are_one_point`
+//! now takes the three as one point at once, with one record of how far apart
+//! two of them may be, where the three surfaces besides the face's own are
+//! proved to meet within the wobble of all three too. At `0.1`/`0.25` and its
+//! images `0.8`/`2` and `6.4`/`16`, every fuse answers, passes
+//! `Model::validate`, and measures the volumes the frustum, the cube and what
+//! the two share give it
+//! (`a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_answers_with_its_volumes`).
+//! The rest of Q2028's grid was not run again.
 //!
 //! A designer draws the same kind of meeting on purpose: a round bar notched
 //! by a block whose inside corner stands on the bar's wall, at `(0.6 r, 0.8
@@ -169,6 +182,14 @@
 //! At other radii, before Q2082, the same bar was refused
 //! `ResultIsNotManifold` or `TheFuseWroteABrokenAnswer`, or ran for minutes;
 //! those are rows of their own.
+//!
+//! Q2133's join leaves this bar as it was. Its cap sees three meets round a
+//! sliver too, but the block's corner edge runs along the bar's axis a hair
+//! off its wall, so the wall and the block's two faces share no point, and
+//! no other face through the point sees three meets of its own. Joined on the
+//! cap alone, the union at `12.8`/`25` was refused
+//! `ResultIsNotManifold { count: 1 }`, so the join asks the three surfaces
+//! besides the face's own to meet there too.
 //!
 //! # Plane through a ball
 //!
@@ -774,18 +795,37 @@ fn a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_o
     );
 }
 
-/// Q2028's trace. Each of the six edges round a corner-up cube's middle,
-/// carried on past its upper corner, runs exactly through the far rim of a
-/// slope-two frustum whose far cap is at half the cube's side. So four
-/// surfaces meet at one point there, and every tolerant fuse refuses on the
-/// far cap, `z = 3 s`: at a shape scale of `0.1` and a working size of `0.25`,
-/// and at its two power-of-two images, which round the same way. Q2133 is the
-/// row that answers it, so it moves this test.
+/// Q2028's trace, answered by Q2133. Each of the six edges round a corner-up
+/// cube's middle, carried on past its upper corner, runs exactly through the
+/// far rim of a slope-two frustum whose far cap is at half the cube's side. So
+/// four surfaces meet at one point there, and each face through it sees three
+/// of their meets a few `1e-16` apart. Every tolerant fuse at a shape scale of
+/// `0.1` and a working size of `0.25`, and at its two power-of-two images,
+/// which round the same way, was refused `CannotTellTheCellsOfAFaceApart` on
+/// the far cap. Each now answers with a model `Model::validate` passes and the
+/// volumes the frustum, the cube and what the two share give it, each measured
+/// to within its own published error.
+///
+/// The frustum is the cone of `a_tolerant_fuse_of_a_cube_on_a_cones_apex_at_2_mm_answers_with_its_volumes`
+/// less the small cone below its near cap, `4π near³ / 3`, and that small cone
+/// lies inside the cube, so it comes off what the two share as well. The cube
+/// less the frustum is two solids, as it is for the cone: the cube's top
+/// corner above the far cap, and the rest.
 #[test]
-fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart()
- {
-    for (scale, size) in [(0.1, 0.25), (0.8, 2.0), (6.4, 16.0)] {
+fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_answers_with_its_volumes() {
+    let pi = core::f64::consts::PI;
+    for (scale, size) in [(0.1f64, 0.25), (0.8, 2.0), (6.4, 16.0)] {
+        let policy = Policy::tolerant(size);
+        let (side, far) = (6.0 * scale, 3.0 * scale);
+        let near = far / 300.0;
+        let below_the_near_cap = 4.0 * pi * near.powi(3) / 3.0;
+        let frustum = 4.0 * pi * far.powi(3) / 3.0 - below_the_near_cap;
+        let cube = side.powi(3);
+        let shared = what_the_cube_and_the_cone_share(side, far, 3000) - below_the_near_cap;
+        let above_the_cap = (3.0 * 3.0f64.sqrt() - 3.0) * scale;
+        let the_cubes_top_corner = above_the_cap.powi(3) * 3.0f64.sqrt() / 2.0;
         for (rule, frustum_first) in EVERY_FUSE {
+            let case = format!("{scale} {size} {rule:?}, frustum first {frustum_first}");
             let (model, fused) = a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
                 scale,
                 size,
@@ -793,21 +833,52 @@ fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_t
                 rule,
                 frustum_first,
             );
-            let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = fused else {
-                panic!(
-                    "{scale} {size} {rule:?} {frustum_first}: {:?}",
-                    fused.map(|_: Fused| "an answer")
-                );
-            };
-            let surface = model.face(face).expect("the refused face").surface();
-            let Surface::Plane(cap) = surface else {
-                panic!("{scale} {size} {rule:?} {frustum_first}: {surface:?}");
+            let fused = fused.unwrap_or_else(|refused| panic!("{case}: {refused:?}"));
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{case}: {broken:?}"));
+            let mut measured: Vec<(f64, f64)> = fused
+                .solids()
+                .iter()
+                .map(|solid| {
+                    let measure = model
+                        .solid(*solid)
+                        .expect("the fuse made the key")
+                        .measure(
+                            Deflection::of(0.001 * scale).expect("a positive length"),
+                            &policy,
+                            &mut ProvenanceLog::new(),
+                        )
+                        .unwrap_or_else(|refused| panic!("{case}: {refused:?}"));
+                    (measure.volume(), measure.volume_error())
+                })
+                .collect();
+            measured.sort_by(|one, other| one.0.total_cmp(&other.0));
+            let expected = match (rule, frustum_first) {
+                (Rule::Union, _) => vec![frustum + cube - shared],
+                (Rule::Intersection, _) => vec![shared],
+                (Rule::Difference, true) => vec![frustum - shared],
+                (Rule::Difference, false) => {
+                    vec![the_cubes_top_corner, cube - shared - the_cubes_top_corner]
+                }
+                (other, _) => panic!("no volume for {other:?}"),
             };
             assert_eq!(
-                (cap.normal().components(), cap.offset()),
-                ([0.0, 0.0, 1.0], 3.0 * scale),
-                "{scale} {size} {rule:?} {frustum_first}"
+                measured.len(),
+                expected.len(),
+                "{case}: {measured:?} against {expected:?}"
             );
+            for (&(volume, error), exactly) in measured.iter().zip(expected) {
+                println!("{case}: measured {volume} ± {error}, exactly {exactly}");
+                // The cube's top corner is flat all round, so it is measured
+                // to about `1e-18`, under what writing `exactly` in `f64`
+                // rounds by.
+                let formula_rounds_by = 16.0 * f64::EPSILON * exactly;
+                assert!(
+                    (volume - exactly).abs() <= error + formula_rounds_by,
+                    "{case}: measured {volume} ± {error} against {exactly}"
+                );
+            }
         }
     }
 }
