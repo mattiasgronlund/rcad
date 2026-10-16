@@ -774,18 +774,37 @@ fn a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_o
     );
 }
 
-/// Q2028's trace. Each of the six edges round a corner-up cube's middle,
-/// carried on past its upper corner, runs exactly through the far rim of a
-/// slope-two frustum whose far cap is at half the cube's side. So four
-/// surfaces meet at one point there, and every tolerant fuse refuses on the
-/// far cap, `z = 3 s`: at a shape scale of `0.1` and a working size of `0.25`,
-/// and at its two power-of-two images, which round the same way. Q2133 is the
-/// row that answers it, so it moves this test.
+/// Q2028's trace, answered by Q2133. Each of the six edges round a corner-up
+/// cube's middle, carried on past its upper corner, runs exactly through the
+/// far rim of a slope-two frustum whose far cap is at half the cube's side. So
+/// four surfaces meet at one point there, and each face through it sees three
+/// of their meets a few `1e-16` apart. Every tolerant fuse at a shape scale of
+/// `0.1` and a working size of `0.25`, and at its two power-of-two images,
+/// which round the same way, was refused `CannotTellTheCellsOfAFaceApart` on
+/// the far cap. Each now answers with a model `Model::validate` passes and the
+/// volumes the frustum, the cube and what the two share give it, each measured
+/// to within its own published error.
+///
+/// The frustum is the cone of `a_tolerant_fuse_of_a_cube_on_a_cones_apex_at_2_mm_answers_with_its_volumes`
+/// less the small cone below its near cap, `4π near³ / 3`, and that small cone
+/// lies inside the cube, so it comes off what the two share as well. The cube
+/// less the frustum is two solids, as it is for the cone: the cube's top
+/// corner above the far cap, and the rest.
 #[test]
-fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart()
- {
-    for (scale, size) in [(0.1, 0.25), (0.8, 2.0), (6.4, 16.0)] {
+fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_answers_with_its_volumes() {
+    let pi = core::f64::consts::PI;
+    for (scale, size) in [(0.1f64, 0.25), (0.8, 2.0), (6.4, 16.0)] {
+        let policy = Policy::tolerant(size);
+        let (side, far) = (6.0 * scale, 3.0 * scale);
+        let near = far / 300.0;
+        let below_the_near_cap = 4.0 * pi * near.powi(3) / 3.0;
+        let frustum = 4.0 * pi * far.powi(3) / 3.0 - below_the_near_cap;
+        let cube = side.powi(3);
+        let shared = what_the_cube_and_the_cone_share(side, far, 3000) - below_the_near_cap;
+        let above_the_cap = (3.0 * 3.0f64.sqrt() - 3.0) * scale;
+        let the_cubes_top_corner = above_the_cap.powi(3) * 3.0f64.sqrt() / 2.0;
         for (rule, frustum_first) in EVERY_FUSE {
+            let case = format!("{scale} {size} {rule:?}, frustum first {frustum_first}");
             let (model, fused) = a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
                 scale,
                 size,
@@ -793,49 +812,50 @@ fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_t
                 rule,
                 frustum_first,
             );
-            let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = fused else {
-                panic!(
-                    "{scale} {size} {rule:?} {frustum_first}: {:?}",
-                    fused.map(|_: Fused| "an answer")
-                );
-            };
-            let surface = model.face(face).expect("the refused face").surface();
-            let Surface::Plane(cap) = surface else {
-                panic!("{scale} {size} {rule:?} {frustum_first}: {surface:?}");
+            let fused = fused.unwrap_or_else(|refused| panic!("{case}: {refused:?}"));
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{case}: {broken:?}"));
+            let mut measured: Vec<(f64, f64)> = fused
+                .solids()
+                .iter()
+                .map(|solid| {
+                    let measure = model
+                        .solid(*solid)
+                        .expect("the fuse made the key")
+                        .measure(
+                            Deflection::of(0.001 * scale).expect("a positive length"),
+                            &policy,
+                            &mut ProvenanceLog::new(),
+                        )
+                        .unwrap_or_else(|refused| panic!("{case}: {refused:?}"));
+                    (measure.volume(), measure.volume_error())
+                })
+                .collect();
+            measured.sort_by(|one, other| one.0.total_cmp(&other.0));
+            let expected = match (rule, frustum_first) {
+                (Rule::Union, _) => vec![frustum + cube - shared],
+                (Rule::Intersection, _) => vec![shared],
+                (Rule::Difference, true) => vec![frustum - shared],
+                (Rule::Difference, false) => {
+                    vec![the_cubes_top_corner, cube - shared - the_cubes_top_corner]
+                }
+                (other, _) => panic!("no volume for {other:?}"),
             };
             assert_eq!(
-                (cap.normal().components(), cap.offset()),
-                ([0.0, 0.0, 1.0], 3.0 * scale),
-                "{scale} {size} {rule:?} {frustum_first}"
+                measured.len(),
+                expected.len(),
+                "{case}: {measured:?} against {expected:?}"
             );
+            for (&(volume, error), exactly) in measured.iter().zip(expected) {
+                println!("{case}: measured {volume} ± {error}, exactly {exactly}");
+                assert!(
+                    (volume - exactly).abs() <= error,
+                    "{case}: measured {volume} ± {error} against {exactly}"
+                );
+            }
         }
     }
-}
-
-#[test]
-fn probe_q2133_all() {
-    for (scale, size) in [(0.1, 0.25), (0.8, 2.0), (6.4, 16.0)] {
-        for (rule, first) in EVERY_FUSE {
-            let (model, fused) = a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(
-                scale, size, 1.0, rule, first,
-            );
-            let valid = fused
-                .as_ref()
-                .ok()
-                .map(|_| model.validate(&Policy::tolerant(size), &mut ProvenanceLog::new()));
-            eprintln!(
-                "PROBE frustum {scale} {size} {rule:?} {first}: {:?} valid {valid:?}",
-                fused.map(|_| "answer")
-            );
-        }
-    }
-}
-
-#[test]
-fn probe_q2133_one() {
-    let (_, fused) =
-        a_frustum_cut_near_its_seam_fused_with_a_corner_up_cube(0.1, 0.25, 1.0, Rule::Union, true);
-    eprintln!("PROBE result {:?}", fused.map(|_| "answer"));
 }
 
 /// The far cap lifted by a thousandth of its height is off the cube's edges'
