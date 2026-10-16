@@ -1435,11 +1435,12 @@ impl BuildingAMesh {
         //
         // §31.10 item 5 and §35.7 both say this claim is the one lane 5
         // falsifies, and the sentence that stops being true is *"the fuse
-        // refuses a curved solid outright"*. A pipe's patch whose outline
-        // does not go right round, with one hole in it, which a slanted pin
-        // from a bar's axis leaves where the bar ends beside where the pin
-        // would come out, is cut from the hole up to its outline and down to
-        // it. A ball's skin whose outer loop reaches both poles and whose hole
+        // refuses a curved solid outright"*. A patch on a pipe, or on a cone
+        // clear of its apex, whose outline does not go right round, with one
+        // hole in it, which a slanted pin from a bar's axis leaves where the
+        // bar ends beside where the pin would come out, and a slot through a
+        // halved frustum leaves in its skin, is cut from the hole up to its
+        // outline and down to it. A ball's skin whose outer loop reaches both poles and whose hole
         // reaches neither, which a half ball cut again leaves, is cut from the
         // hole up to each pole instead. A ball's skin with only holes
         // was opened into strips above, a cap on a ball with islands in it
@@ -2739,9 +2740,10 @@ impl BuildingAMesh {
         Ok(Some(patches))
     }
 
-    /// Cut a face on a pipe whose outline does not go right round, with one
-    /// hole in it, into two pieces with one loop each, or `None` when the face
-    /// is not that shape or a leg cannot be shown to stay on it.
+    /// Cut a face on a pipe, or on a cone clear of its apex, whose outline does
+    /// not go right round, with one hole in it, into two pieces with one loop
+    /// each, or `None` when the face is not that shape or a leg cannot be shown
+    /// to stay on it.
     ///
     /// A slanted pin starting on a bar's axis leaves one, when the bar ends
     /// beside where the pin would come out the other side. The plane of the
@@ -2751,6 +2753,13 @@ impl BuildingAMesh {
     /// (`one_pipe_whose_origin_sits_at_two_places.rs`). Nothing could cut a
     /// pipe's patch with a hole, and it was refused
     /// `CurvedFaceWithAHoleGoesTooFarRound`.
+    ///
+    /// **A cone's face whose loops keep clear of the apex is cut the same
+    /// way** ([`the_loops_keep_clear_of_where_it_pinches`]), since its chart
+    /// there is as regular as a pipe's. A frustum halved along its axis less a
+    /// slot through its skin leaves one, and so does a chip of a cone holed
+    /// through; both were refused here until row Q2172
+    /// (`a_walk_neither_winding_nor_the_axis_places.rs`).
     ///
     /// **Two legs, one from the hole's highest corner up to the outline and one
     /// from its lowest down to it**, leave a piece either side, each walked
@@ -5991,10 +6000,10 @@ fn how_far_round(around: &WalkedLoop) -> f64 {
 /// safe.** A torus crosses its two coordinates *into* the material, so the sign
 /// of this sum would read backwards there. It never gets the chance: a call
 /// site whose sign matters either runs only on a surface that pinches
-/// ([`Surface::where_it_pinches`]), and a torus pinches nowhere, or runs on a
-/// pipe and asks [`how_far_the_second_coordinate_wraps`] that it is not a
-/// torus, as [`a_ring_on_a_pipe_with_islands_in_it`] and
-/// [`BuildingAMesh::cut_a_hole_out_to_its_outline`] do.
+/// ([`Surface::where_it_pinches`]), and a torus pinches nowhere, or asks
+/// [`how_far_the_second_coordinate_wraps`] that it is not a torus, as
+/// [`a_ring_on_a_pipe_with_islands_in_it`] does on a pipe and
+/// [`BuildingAMesh::cut_a_hole_out_to_its_outline`] on a pipe or a cone.
 /// `every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
 /// in `rcad-geom` is the measurement, over all five surfaces.
 fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
