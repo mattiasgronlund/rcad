@@ -36,7 +36,7 @@ use crate::{Error, Result};
 ///   which every edge of a cube is. Off an axis, at most `4 · f64::EPSILON` of
 ///   the length: each square carries three steps of an `f64` at most, the two
 ///   sums two more, and the root halves that and adds one. Measured at
-///   `1.24 · f64::EPSILON` over right triangles.
+///   `0.89 · f64::EPSILON` over right triangles.
 /// - **A whole circle on a pipe** — `2π` times the radius, which is stored.
 ///   `2π` is held between its two neighbouring `f64`s, which is `0.64` of an
 ///   `f64::EPSILON` either way, relatively, and the product steps out once
@@ -248,8 +248,9 @@ fn two_to_the(power: i32) -> f64 {
     f64::from_bits(biased << 52)
 }
 
-/// The square root of a sum of squares: each end a step of an `f64` outwards
-/// where `sqrt` rounded, and no step where it did not ([`Interval::sqrt`]).
+/// The square root of a sum of squares: each end the nearest `f64` on its own
+/// side of the true root, which is the root itself where that is an `f64`
+/// ([`Interval::sqrt`]).
 ///
 /// # Panics
 ///

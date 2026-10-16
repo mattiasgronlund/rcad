@@ -27,8 +27,9 @@ use crate::de_boor::quotient_enclosing;
 
 /// `√value`, as an enclosure, for a value that cannot be below zero.
 ///
-/// [`Interval::sqrt`]: each end a step of an `f64` outwards where `sqrt`
-/// rounded and no step where it did not. Widening every root by a step would
+/// [`Interval::sqrt`]: each end the nearest `f64` on its own side of the true
+/// root, which is the root itself where that is an `f64`. Widening every root
+/// by a step would
 /// cost the exact cases their exactness: a pipe whose axis is a coordinate
 /// direction has `w·w` exactly one, and an enclosure of `√1` two steps wide
 /// spreads through every point built on it and leaves a contact point that no

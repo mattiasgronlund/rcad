@@ -675,9 +675,9 @@ fn box_round_a_side_on_an_axis(
 /// `slope · |up| · √(b² + c²)/|a|²`.
 ///
 /// **Every step rounds outward**: the squares and the sums and products in
-/// interval arithmetic, the quotients and the root to nearest and then a step
-/// outward unless the rounding is shown to be exact ([`quotient_of`],
-/// [`root_rounded_up`]). So a bar along a coordinate axis whose numbers are
+/// interval arithmetic, the quotients to nearest and then a step outward
+/// unless the rounding is shown to be exact ([`quotient_of`]), and the root
+/// upward ([`root_rounded_up`]). So a bar along a coordinate axis whose numbers are
 /// whole gets the box it always had, bit for bit, and a tipped one a rounding
 /// wider where it needs one. What is still rounded to nearest is `up` itself
 /// ([`RoundAnAxis::up_of`]), which the caller works out.
@@ -760,22 +760,14 @@ fn quotient_of(top: f64, bottom: f64) -> Interval {
     Interval::new(low, high).expect("a finite quotient and its neighbours are a range")
 }
 
-/// The square root of `square`, which is at least zero, rounded up: the root
-/// rounded to nearest, or the next `f64` above it where that came out short.
-///
-/// Whether it came out short is the sign of `root² − square`, which one fused
-/// multiply-add gets right while nothing is near the subnormals.
+/// The smallest `f64` at or above the square root of `square`, which is at
+/// least zero: the top of [`Interval::sqrt`], which rounds it upward directly,
+/// down into the subnormals too.
 fn root_rounded_up(square: f64) -> f64 {
-    debug_assert!(square >= 0.0, "a root of {square}");
-    if square == 0.0 {
-        return 0.0;
-    }
-    let root = square.sqrt();
-    if square < 1e-270 || root.mul_add(root, -square) < 0.0 {
-        root.next_up()
-    } else {
-        root
-    }
+    Interval::exactly(square)
+        .sqrt()
+        .expect("a quotient of two sums of squares is not below zero")
+        .hi()
 }
 
 /// The smallest box holding both of two boxes.
