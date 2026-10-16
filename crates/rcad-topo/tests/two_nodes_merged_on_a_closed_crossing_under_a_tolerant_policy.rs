@@ -124,16 +124,31 @@
 //! refuse the same, so small numbers play no part either.
 //! `a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart`
 //! and `the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges`
-//! pin both.
+//! pin both. Q2133 is the row that answers the refusals.
 //!
 //! A designer draws the same kind of meeting on purpose: a round bar notched
 //! by a block whose inside corner stands on the bar's wall, at `(0.6 r, 0.8
 //! r)`. At a radius of `12.8` or `25.6` and working sizes of `10`, `25` and
-//! `100`, every fuse is refused from the same place in `spread_the_winding`,
-//! on the bar's wall, with two meets whose boxes overlap kept apart.
-//! `a_tolerant_fuse_of_a_round_bar_and_a_block_cornered_on_its_wall_cannot_tell_the_walls_cells_apart`
-//! pins the `12.8`/`25` case. At other radii the same bar is refused
-//! `ResultIsNotManifold` or `TheFuseWroteABrokenAnswer`, or runs for minutes;
+//! `100`, every fuse was refused from the same place in `spread_the_winding`,
+//! on the bar's wall, until Q2082. On each cap the feet of the two rulings the
+//! block's faces `x = 0.6 r` and `y = 0.8 r` cut the wall in are an ulp of
+//! `7.68` apart, and neither the sweep round the cap's rim nor the angle about
+//! the bar's axis could part them. The tighter boxes of the two, turned from
+//! one to the step to the other, are parted (`as_the_boxes_say` and
+//! `round_a_closed_crossing_by_its_angle` in `fuse/arrange.rs`).
+//!
+//! Now the intersection answers at `12.8`/`25`, `12.8`/`10`, `12.8`/`100`
+//! and `25.6`/`25`, passes `Model::validate`, and measures the slice of the
+//! bar past the block's face to within the measure's published error
+//! (`a_tolerant_intersection_of_a_round_bar_and_a_block_cornered_on_its_wall_is_the_slice_of_the_bar_past_the_blocks_face`).
+//! The union and the bar less the block are refused `CannotMeshAFace` with
+//! `CornersCoincide`, Q2106's mechanism
+//! (`a_tolerant_union_of_a_round_bar_and_a_block_cornered_on_its_wall_and_the_bar_less_the_block_name_one_cap_corner_twice`).
+//! The block less the bar is refused `WireTooShort` with a count of two,
+//! Q2067's mechanism
+//! (`a_tolerant_fuse_of_the_block_less_a_round_bar_cornered_on_its_wall_writes_a_ring_of_two_straight_sides`).
+//! At other radii, before Q2082, the same bar was refused
+//! `ResultIsNotManifold` or `TheFuseWroteABrokenAnswer`, or ran for minutes;
 //! those are rows of their own.
 //!
 //! # Plane through a ball
@@ -637,7 +652,8 @@ fn a_tolerant_fuse_of_a_cube_on_a_frustum_cut_near_its_seam_below_working_size_o
 /// slope-two frustum whose far cap is at half the cube's side. So four
 /// surfaces meet at one point there, and every tolerant fuse refuses on the
 /// far cap, `z = 3 s`: at a shape scale of `0.1` and a working size of `0.25`,
-/// and at its two power-of-two images, which round the same way.
+/// and at its two power-of-two images, which round the same way. Q2133 is the
+/// row that answers it, so it moves this test.
 #[test]
 fn a_tolerant_fuse_of_a_cube_whose_edges_run_through_a_frustums_far_rim_cannot_tell_the_caps_cells_apart()
  {
