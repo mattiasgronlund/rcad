@@ -1379,7 +1379,7 @@ fn a_block_less_a_bar_turned_onto_x_by_a_float_angle_along_its_floor_keeps_the_b
 /// rule and whether the bar came first.
 fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
     at: [f64; 3],
-    should: fn(Rule, bool) -> Vec<(Vec<usize>, f64)>,
+    should: fn(Rule, bool) -> Vec<ShellsAndVolume>,
 ) {
     let mut wrong: Vec<String> = Vec::new();
     for bar_first in [false, true] {
@@ -1418,7 +1418,7 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
                     wrong.push(format!("{what}: the model does not validate: {why:?}"));
                     continue;
                 }
-                let mut found: Vec<(Vec<usize>, f64)> = answer
+                let mut found: Vec<ShellsAndVolume> = answer
                     .solids()
                     .iter()
                     .map(|&solid| (faces_of_each_shell(&model, solid), volume_of(&model, solid)))
@@ -1444,6 +1444,9 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// One solid of an answer: the faces in each of its shells, and its volume.
+type ShellsAndVolume = (Vec<usize>, f64);
 
 /// A bar of radius one, two long, turned onto `x` by [`Isometry::rotation`]
 /// about `y` by `π/2` and then shifted to `at`: its axis runs from `at` along
