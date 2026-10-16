@@ -1,6 +1,6 @@
 //! Hollows whose points are asked whether they are inside the shell round
-//! them: a box in a notched block, and a ball touching a block's skin with its
-//! poles.
+//! them: a box in a notched block, a ball touching a block's skin with its
+//! poles, and a diamond touching a square bar's walls with its tips.
 //!
 //! # A box in a block with a bar through its edge
 //!
@@ -62,6 +62,19 @@
 //! poles and the seam's middle (row Q2115). Since row Q2147 a point of the
 //! ball's face off its seam is asked after them, and it is inside the bar: one
 //! solid with the ball as a hollow, measuring `160 − 32π/3`.
+//!
+//! # A diamond in a square bar, touching its four walls
+//!
+//! A square bar 4 by 4 across and 10 tall less a prism whose cross-section is
+//! the square turned a quarter, its four tips at the middles of the bar's four
+//! walls, from `z = 2` to `z = 8`. The prism's four long edges lie along the
+//! bar's walls, so all eight of its corners are on the bar's skin, and none of
+//! its edges is an arc or closes: every point asked was on the skin, and the
+//! bar less the prism was refused `Undecidable` at *one shell inside another*.
+//! Since row Q2147 the middle of each straight edge is asked as well, and the
+//! middle of an edge across an end of the prism is inside the bar: one solid
+//! with the prism as a hollow touching the bar along four lines, measuring
+//! `160 − 48`.
 
 use core::f64::consts::PI;
 
@@ -174,6 +187,124 @@ fn a_square_bar_less_a_ball_as_wide_as_it_is_keeps_the_ball_as_a_hollow() {
     the_ball_touching_its_top_and_bottom_is_a_hollow_of([3.0, 0.0, 0.0], [4.0, 10.0, 4.0]);
 }
 
+/// The other five fuses of that block and ball, which leave no hollow and so
+/// ask nothing of the poles, answer: the block less the ball's union is the
+/// block, their intersection is the ball, and the ball less the block is
+/// nothing.
+#[test]
+fn the_other_fuses_of_a_block_and_a_ball_touching_its_top_and_bottom_answer() {
+    let ball = 32.0 * PI / 3.0;
+    for (rule, block_first, by_hand) in [
+        (Rule::Union, true, Some(400.0)),
+        (Rule::Union, false, Some(400.0)),
+        (Rule::Intersection, true, Some(ball)),
+        (Rule::Intersection, false, Some(ball)),
+        (Rule::Difference, false, None),
+    ] {
+        let mut model = a_model();
+        let (block, round) = a_block_and_a_ball_touching_its_top_and_bottom(&mut model);
+        let (one, other) = if block_first {
+            (block, round)
+        } else {
+            (round, block)
+        };
+        let policy = Policy::certified();
+        let answer = model
+            .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?}, block first {block_first}: {why:?}"));
+        let Some(by_hand) = by_hand else {
+            assert!(
+                answer.solids().is_empty(),
+                "the ball less the block is nothing, not {:?}",
+                answer.solids()
+            );
+            continue;
+        };
+        let [solid] = answer.solids()[..] else {
+            panic!("{rule:?} is one solid, not {:?}", answer.solids());
+        };
+        let measured = model
+            .solid(solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid measures");
+        assert!(
+            (measured.volume() - by_hand).abs() <= measured.volume_error(),
+            "{rule:?}, block first {block_first}: measured {} ± {} against {by_hand}",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
+/// A square bar 4 by 4 across and 10 tall less a diamond prism from `z = 2` to
+/// `z = 8` whose four tips touch the middles of the bar's four walls: one
+/// solid, the bar's six faces and the prism's six as a hollow touching the bar
+/// along four lines, holding the bar's 160 less the prism's 48, under a
+/// certified policy and a tolerant one.
+///
+/// Every corner of the prism is on the bar's skin and none of its edges is an
+/// arc or closes, so no corner, far side or arc's middle says which side of
+/// the skin it is, and it was refused `Undecidable`. The middle of each edge
+/// across an end of the prism is inside the bar, and it is asked since queue
+/// row Q2147.
+#[test]
+fn a_square_bar_less_a_diamond_touching_its_four_walls_keeps_the_diamond_as_a_hollow() {
+    for (name, policy) in [
+        ("certified", Policy::certified()),
+        ("tolerant", Policy::tolerant(100.0)),
+    ] {
+        let mut model = a_model();
+        let bar = a_block(&mut model, [0.0, 0.0, 0.0], [4.0, 4.0, 10.0]);
+        let diamond = ProfileBuilder::new(vec![[2.0, 0.0], [4.0, 2.0], [2.0, 4.0], [0.0, 2.0]])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a square turned a quarter");
+        let diamond = model
+            .add_extrusion(&diamond, 6.0, &at(0.0, 0.0, 2.0))
+            .expect("a positive height");
+        let answer = model
+            .fuse(
+                &[bar],
+                &[diamond],
+                Rule::Difference,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{name}: refused {why:?}"));
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{name}: the model does not validate: {why:?}"));
+        let [solid] = answer.solids()[..] else {
+            panic!("{name}: one solid, not {:?}", answer.solids());
+        };
+        let view = model.solid(solid).expect("this model made the key");
+        let faces: Vec<usize> = view.shells().map(|shell| shell.face_count()).collect();
+        assert_eq!(
+            faces,
+            [6, 6],
+            "{name}: the bar's six faces and the prism's six"
+        );
+        let measured = view
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a solid measures");
+        let by_hand = 160.0 - 48.0;
+        assert!(
+            (measured.volume() - by_hand).abs() <= measured.volume_error(),
+            "{name}: measured {} ± {} against {by_hand} by hand",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
 /// The block from `low`, `size` across, less a ball of radius 2 centred at
 /// `(5, 5, 2)`, under a certified policy and a tolerant one: one solid, the
 /// block's six faces and the ball's one face as a hollow walked down its seam
@@ -244,60 +375,6 @@ fn the_ball_touching_its_top_and_bottom_is_a_hollow_of(low: [f64; 3], size: [f64
         assert!(
             (measured.volume() - by_hand).abs() <= measured.volume_error(),
             "{name}: measured {} ± {} against {by_hand} by hand",
-            measured.volume(),
-            measured.volume_error()
-        );
-    }
-}
-
-/// The other five fuses of that block and ball, which leave no hollow and so
-/// ask nothing of the poles, answer: the block less the ball's union is the
-/// block, their intersection is the ball, and the ball less the block is
-/// nothing.
-#[test]
-fn the_other_fuses_of_a_block_and_a_ball_touching_its_top_and_bottom_answer() {
-    let ball = 32.0 * PI / 3.0;
-    for (rule, block_first, by_hand) in [
-        (Rule::Union, true, Some(400.0)),
-        (Rule::Union, false, Some(400.0)),
-        (Rule::Intersection, true, Some(ball)),
-        (Rule::Intersection, false, Some(ball)),
-        (Rule::Difference, false, None),
-    ] {
-        let mut model = a_model();
-        let (block, round) = a_block_and_a_ball_touching_its_top_and_bottom(&mut model);
-        let (one, other) = if block_first {
-            (block, round)
-        } else {
-            (round, block)
-        };
-        let policy = Policy::certified();
-        let answer = model
-            .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| panic!("{rule:?}, block first {block_first}: {why:?}"));
-        let Some(by_hand) = by_hand else {
-            assert!(
-                answer.solids().is_empty(),
-                "the ball less the block is nothing, not {:?}",
-                answer.solids()
-            );
-            continue;
-        };
-        let [solid] = answer.solids()[..] else {
-            panic!("{rule:?} is one solid, not {:?}", answer.solids());
-        };
-        let measured = model
-            .solid(solid)
-            .expect("this model made the key")
-            .measure(
-                Deflection::of(0.01).expect("a positive length"),
-                &policy,
-                &mut ProvenanceLog::new(),
-            )
-            .expect("a solid measures");
-        assert!(
-            (measured.volume() - by_hand).abs() <= measured.volume_error(),
-            "{rule:?}, block first {block_first}: measured {} ± {} against {by_hand}",
             measured.volume(),
             measured.volume_error()
         );
