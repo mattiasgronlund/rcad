@@ -1751,11 +1751,25 @@ impl Assembly {
     /// (Q1660). That is asked only where some ring cannot be counted, as a
     /// ring of half ellipses cannot.
     ///
+    /// **A band between a whole circle and a second ring, both right round,
+    /// needs no seam where no chain of dissolved edges reaches the circle**
+    /// ([`Assembly::a_band_off_a_whole_circle`]). That is the shape the
+    /// arrangement already makes, and the writer, the mesher
+    /// (`BuildingAMesh::cut_a_ring_across` in `mesh.rs`) and the next fuse
+    /// take it as it is: a block wholly inside a frustum cuts the wall
+    /// nowhere, but its planes' crossings with the cone cut the far end into a
+    /// grid, and the piece below that grid is a band between the bottom circle
+    /// and a ring of the crossings' arcs, with no seam. Where none of those
+    /// arcs reaches the bottom circle, as when the frustum's bottom radius is
+    /// `0.5`, or after `Isometry::rotation(y, π)` rounds away the point where
+    /// the planes `y = ±1` touch a bottom radius of `1`, the wall stayed in 25
+    /// pieces (Q1969, `a_turned_bar_cut_by_a_block_turned_with_it.rs`).
+    ///
     /// Anything else that goes right round — a group with other than two such
-    /// rings, no chain of dissolved edges across, or a seam that
-    /// still leaves a ring going round — and a group whose rings cannot be
-    /// counted, stays apart. The answer is then the one the fuse gave before it
-    /// joined curved faces at all.
+    /// rings, no chain of dissolved edges across between two rings of several
+    /// sides, or a seam that still leaves a ring going round — and a group
+    /// whose rings cannot be counted, stays apart. The answer is then the one
+    /// the fuse gave before it joined curved faces at all.
     fn edges_a_curved_face_keeps(&self, along: &[[Dart; 2]], dissolved: &[bool]) -> Vec<usize> {
         let same = joined_across(along, dissolved, self.faces.len());
         let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
@@ -1812,7 +1826,9 @@ impl Assembly {
     /// not covered: the band between them does need a seam where the joining
     /// cut it open across, and [`Assembly::a_seam_across_the_band`] finds it.
     /// Where it joined only across whole closed curves it does not
-    /// ([`Assembly::joined_only_across_whole_rings`]).
+    /// ([`Assembly::joined_only_across_whole_rings`]), and nor does it where
+    /// the second ring is a whole circle that no dissolved edge reaches
+    /// ([`Assembly::a_band_off_a_whole_circle`]).
     ///
     /// **One ring right round a cone and nothing else is a cap round its
     /// apex**, and needs no seam either, however many sides it has. The other
@@ -1876,6 +1892,13 @@ impl Assembly {
 
     /// Whether the face `members` join into is a band between a whole circle
     /// and one other ring, both going right round.
+    ///
+    /// **Asked only where [`Assembly::a_seam_across_the_band`] found no seam**,
+    /// so no chain of dissolved edges runs from the circle to the other ring.
+    /// The joining then opened nothing up across the band: the piece that
+    /// holds the circle was already a band between it and a ring right round,
+    /// with no seam, and the joined face is that band reaching on to the
+    /// other ring.
     fn a_band_off_a_whole_circle(
         &self,
         members: &[usize],
