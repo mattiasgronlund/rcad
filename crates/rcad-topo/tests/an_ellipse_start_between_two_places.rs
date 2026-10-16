@@ -42,7 +42,7 @@ use rcad_geom::{
     meet_of_three_surfaces, where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
 /// The bar's radius, `1 + 2⁻⁵¹`.
 const RADIUS: f64 = 1.0 + 2.0 * f64::EPSILON;
@@ -253,9 +253,11 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
 /// `1.7e-22`. So the union is `576`, the intersection `10 π r²`, and the block
 /// less the bar `576 − 10 π r²`, and none of them can hold the fin.
 ///
-/// **The fin alone** is refused `VolumeIsNotPositive` at exactly `0` under
-/// either policy, since every point of it rounds onto `x = −17`. That refusal
-/// is Q1938's.
+/// **The fin alone** is refused `CannotTellWhichWayASolidsFacesPoint` with
+/// `enclosed: 0.0`, since it holds about `1.7e-22`, less than any mesh the
+/// ladder asks for can leave out, so no mesh can tell which way its faces
+/// point. That refusal is Q1980's, which files Q1938's `VolumeIsNotPositive`
+/// again.
 ///
 /// **The fin's ends.** Its bottom and top faces are each three corners on one
 /// line, `(−17, ±2⁻²⁵)` and the bar's rim corner `(−17, ∓6.1e-17)`. The
@@ -298,8 +300,10 @@ fn every_fuse_with_the_upright_block_answers_its_closed_form_but_the_fin_alone()
                         assert!(
                             matches!(
                                 fused,
-                                Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume }))
-                                    if volume == 0.0
+                                Err(Error::CannotTellWhichWayASolidsFacesPoint {
+                                    enclosed,
+                                    ..
+                                }) if enclosed == 0.0
                             ),
                             "{case}: {fused:?}"
                         );

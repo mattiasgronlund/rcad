@@ -38,10 +38,10 @@ impl Measurement {
     /// **Can be negative, but never by more than [`Measurement::volume_error`].**
     /// A curved solid as thin as a sliver can sum over its mesh to a little
     /// under zero while the true volume is a little over; the two quarter bends
-    /// in `a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver`
-    /// leave a wedge of `5.4e-17` that sums to `-8.7e-17` at a deflection of
-    /// `0.01`, with an error of `2.0e-15`. A sum further below zero than that is
-    /// refused, as [`SolidView::measure`] says.
+    /// in `two_bends_overlapping_in_a_sliver_a_mesh_can_tell_measure_its_wedge`
+    /// leave a wedge of `2.5e-15` and sum to `2.7e-15` at a deflection of `0.01`,
+    /// within an error of `1.0e-15` of it. A sum below zero by more than its
+    /// error is refused, as [`SolidView::measure`] says.
     ///
     /// A mesh so coarse that it owes more than the solid holds does the same to
     /// a solid of any thickness. A ball of radius one meshed to a deflection of
@@ -408,9 +408,8 @@ impl SolidView<'_> {
     /// `0.5`, `1` and `2`: at `2` a sound ball with a cube taken out of it sums
     /// below zero too, and `validate` is what refuses the inside-out one
     /// (`an_inside_out_solid_meshed_coarse_answers_negative.rs`).
-    /// `validate` does not yet charge a curved solid's flat faces what
-    /// [`SolidView::skin_of`] charges them, so it can still refuse a sliver
-    /// this answers (Q2089).
+    /// `validate` charges a curved solid's flat faces the same way
+    /// [`SolidView::skin_of`] does (Q2089), so the two agree on a sliver.
     ///
     /// **This used to be an assert, and §20.1 settled it that way.** The
     /// argument then was that the only route to an inside-out solid was a bug
@@ -583,12 +582,12 @@ impl SolidView<'_> {
     /// places along its curved edges lie on its plane only as nearly as their
     /// coordinates can be written down, and a turned plane's rarely can: the
     /// caps of the sliver in
-    /// `a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver`
-    /// are meshed up to `4.3e-16` off their planes, and the space between those
-    /// triangles and their planes moved the sum by anywhere from `-4.9e-16` to
-    /// `3.2e-16` (Q2087) against a wedge of `5.4e-17`. So each flat face is
-    /// charged [`how_far_the_points_stray_off`] its plane times its area, the
-    /// slab its triangles can stray through.
+    /// `two_bends_overlapping_in_a_sliver_a_mesh_can_tell_measure_its_wedge`
+    /// are meshed up to `1.7e-16` off their planes at a deflection of `0.01`,
+    /// and that space times their area of `3.1` moved the sum by about `1e-15`
+    /// (Q2087) against a wedge of `2.5e-15`. So each flat face is charged
+    /// [`how_far_the_points_stray_off`] its plane times its area, the slab its
+    /// triangles can stray through.
     ///
     /// **The face's own corners are not charged**, because a corner is where
     /// the solid really reaches and the mesh holds it exactly, as a wholly flat
