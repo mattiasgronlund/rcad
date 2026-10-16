@@ -3458,6 +3458,15 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), since
     /// a fold can move a node or bring one onto a loop, and the order is asked
     /// again after it.
+    ///
+    /// **Three meets that four surfaces make at one point are taken as one at
+    /// once** ([`Arrangement::take_each_sliver_of_three_meets_as_one_point`]).
+    /// Asked a pair at a time, two of them were joined and the third proved
+    /// apart from both, so one crossing met another twice a hair apart and the
+    /// face's cells could not be told apart (Q2133). So each pair of
+    /// neighbours along a crossing whose boxes may be no further apart than
+    /// the policy's wobble is gathered while the order is asked, and the three
+    /// are looked for among those pairs once every crossing is done.
     fn merge_points_that_are_one_point(
         &mut self,
         policy: &Policy,
@@ -3694,6 +3703,17 @@ impl<'f> Arrangement<'f> {
     ///
     /// `near` is every pair of nodes next to each other along a crossing, with
     /// that crossing, that may be no further apart than the policy's wobble.
+    /// Three nodes each two of which are such a pair, along three different
+    /// crossings, are the corners of a cell of three sides no longer than the
+    /// wobble. Where the face's surface and three others meet at one point,
+    /// the face's crossings with those three meet two at a time in three
+    /// places stored a few `1e-16` apart, and they make such a cell.
+    /// [`Arrangement::take_three_meets_as_one_point`] says which cells are
+    /// that, and joins them.
+    ///
+    /// The pairs are written down both ways round and sorted, so the
+    /// neighbours of a node are one run of the list, and each three is found
+    /// once, from its lowest node.
     fn take_each_sliver_of_three_meets_as_one_point(
         &self,
         near: &[(usize, [usize; 2])],
@@ -3735,6 +3755,42 @@ impl<'f> Arrangement<'f> {
         }
     }
 
+    /// Join the three `meets` round a sliver cell, each two of them neighbours
+    /// along one of `crossings`, when they are the meets of four surfaces at
+    /// one point and the policy takes them as one point (§417.7). The record
+    /// is how far apart any two of the three boxes may be, a length.
+    /// [`Policy::take_as_one_point`] takes nothing and logs nothing under a
+    /// certified policy, so only a tolerant fuse ever joins here.
+    ///
+    /// **Four different surfaces, and every name of each meet a meet of three
+    /// of them**: the face's own surface and the three partners of
+    /// `crossings`, and each name in a meet's `made_of` and `also`. That is
+    /// the case the rule is for, and it asks for nothing wider.
+    ///
+    /// **The three partners must meet there too**
+    /// ([`the_other_three_meet_there_too`]), within the wobble of all three
+    /// boxes. Only then does each other face through the point see three meets
+    /// of its own there and take them as one, as this face does. A round bar
+    /// notched by a block whose inside corner edge stands on the bar's wall is
+    /// the shape where they do not: the edge runs along the bar's axis a hair
+    /// off the wall (at a radius of `24.32`, outside it, its foot on the cap
+    /// `1.78e-15` from the foot of the ruling the block's face `x = 0.6 r`
+    /// cuts, Q2106), so the wall and the block's two faces share no point, and
+    /// only the cap sees three meets. Joined on the cap alone, the union at a radius of
+    /// `24.32` and a working size of `6.4`, and at `12.8` and `25`, were
+    /// refused `ResultIsNotManifold { count: 1 }` in place of the
+    /// `CannotMeshAFace` they are pinned to.
+    ///
+    /// **At most one of the three is a corner the input had**, since
+    /// [`Arrangement::fold_the_nodes`] refuses two different corners folded
+    /// into one, as an edge with no length. One is let in when every meet it
+    /// already stands for is of the four. Where one of a cube's edges runs
+    /// through the frustum's seam corner on its far rim, the cone's face folds
+    /// one meet into that corner on a first pass, and on the next it sees the
+    /// corner and the other two meets round a sliver. With the corner kept
+    /// out, the cap took the point as one and the cone's face did not, and the
+    /// union was refused `ResultIsNotManifold { count: 1 }` for the cone's rim
+    /// there.
     fn take_three_meets_as_one_point(
         &self,
         meets: [usize; 3],
@@ -3766,6 +3822,9 @@ impl<'f> Arrangement<'f> {
             return;
         }
         let boxes = meets.map(|meet| self.nodes[meet].point);
+        if !the_other_three_meet_there_too([one, two, three], boxes, policy) {
+            return;
+        }
         let widest = [[0, 1], [1, 2], [0, 2]]
             .map(|[one, other]| the_furthest_two_boxes_may_be_apart(boxes[one], boxes[other]))
             .into_iter()
@@ -8805,6 +8864,33 @@ fn prove_the_hinted_order(
         }
     }
     Ok(())
+}
+
+/// Whether the three surfaces a face's three meets are made with, besides the
+/// face's own, are proved to meet at a point within the policy's wobble of
+/// every one of the three `boxes`.
+///
+/// Asked under [`Policy::certified`], into a log of its own: a meet nothing
+/// could place only leaves the three meets apart, which is where they were,
+/// so no tolerant step is taken here that the fuse would have to log.
+fn the_other_three_meet_there_too(
+    others: [Surface; 3],
+    boxes: [PredicatePoint; 3],
+    policy: &Policy,
+) -> bool {
+    let asked = three_planes_faced_the_one_way(others);
+    let Ok(MeetOfThree::At(places)) = meet_of_three_surfaces(
+        [&asked[0], &asked[1], &asked[2]],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) else {
+        return false;
+    };
+    places.iter().any(|&place| {
+        boxes.iter().all(|&node| {
+            policy.wobble_is_acceptable(the_furthest_two_boxes_may_be_apart(place, node))
+        })
+    })
 }
 
 /// The furthest a point of one box can be from a point of the other, rounded
