@@ -6817,7 +6817,7 @@ fn furthest_from(corner: PredicatePoint, points: &[PredicatePoint]) -> Option<f6
 
 /// The furthest a point of one box can be from a point of the other, rounded
 /// up.
-fn how_far_apart_two_boxes_may_be(one: PredicatePoint, other: PredicatePoint) -> f64 {
+pub(super) fn how_far_apart_two_boxes_may_be(one: PredicatePoint, other: PredicatePoint) -> f64 {
     let (one, other) = (one.enclosure(), other.enclosure());
     let squared: f64 = (0..3)
         .map(|axis| {
