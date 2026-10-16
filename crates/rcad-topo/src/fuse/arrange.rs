@@ -1167,7 +1167,6 @@ impl<'f> Arrangement<'f> {
         arrangement.start_every_closed_crossing_that_has_no_node(log)?;
         arrangement.work_out_how_each_crossing_runs(log)?;
         arrangement.merge_points_that_are_one_point(policy, log)?;
-        arrangement.fold_the_straight_cuts_along_one_line();
         arrangement.cut_the_crossings_into_arcs(policy, log)?;
         arrangement.walk_the_cycles(policy, log)?;
         arrangement.count_the_windings_inside_each_lump();
@@ -3543,6 +3542,9 @@ impl<'f> Arrangement<'f> {
                 }
             }
             if !same.joined_anything() {
+                if self.fold_the_straight_cuts_along_one_line() {
+                    continue;
+                }
                 return Ok(());
             }
             self.fold_the_nodes(&mut same)?;
@@ -4560,7 +4562,8 @@ impl<'f> Arrangement<'f> {
     /// first cut ([`Arrangement::draw_the_crossings`]). The cut's nodes move
     /// onto the crossing it is folded into, and a cut surface that turned into
     /// it now turns into that one.
-    fn fold_the_straight_cuts_along_one_line(&mut self) {
+    fn fold_the_straight_cuts_along_one_line(&mut self) -> bool {
+        let mut folded_any = false;
         for cut in 0..self.crossings.len() {
             if !self.crossings[cut].reaches_the_face
                 || !self.crossings[cut].order.runs_straight()
@@ -4590,7 +4593,9 @@ impl<'f> Arrangement<'f> {
             }
             self.crossings[kept].cuts = true;
             self.crossings[cut].reaches_the_face = false;
+            folded_any = true;
         }
+        folded_any
     }
 
     /// Whether two crossings are straight and share a node whose two ways out
