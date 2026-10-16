@@ -317,7 +317,6 @@ fn read_back_and_compared(source: &Model, text: &str) -> Reached {
 /// did the volume and surface area, but not the centroid, measured on
 /// [`an_unplaced_leaning_disc_drawn_by_a_pipe_off_its_own_plane_comes_back_from_its_own_file`].
 ///
-
 /// A plane is the one surface whose numbers are not written as they are
 /// stored. The writer picks the point it writes so that the reader's offset
 /// comes back the same bits (§313). The normal it writes as stored, and the
