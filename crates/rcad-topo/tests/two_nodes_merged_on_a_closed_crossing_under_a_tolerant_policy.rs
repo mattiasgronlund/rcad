@@ -183,10 +183,11 @@ mod cones;
 
 use cones::{a_frustum_seamed_towards, a_pointed_cone};
 use rcad_geom::{
-    Axis, Isometry, MeetOfThree, Point, Scale, Surface, Vector, meet_of_three_surfaces,
+    Axis, Deflection, Isometry, MeetOfThree, Point, Scale, Surface, Vector, meet_of_three_surfaces,
 };
+use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 /// The name `order_along` records a refusal under.
 const ALONG_A_CROSSING: &str = "order along a crossing";
@@ -691,27 +692,111 @@ fn the_same_fuses_answer_once_the_far_cap_is_lifted_off_the_cubes_edges() {
     }
 }
 
+/// The radii and working sizes the round bar notched on its wall is fused at.
+const THE_BARS_RADII_AND_SIZES: [(f64, f64); 4] =
+    [(12.8, 25.0), (12.8, 10.0), (12.8, 100.0), (25.6, 25.0)];
+
 /// A designer draws the same kind of meeting on purpose: a round bar notched
-/// by a block whose inside corner edge stands on the bar's wall. At a radius
-/// of `12.8` and a working size of `25`, every tolerant fuse refuses on the
-/// bar's wall.
+/// by a block whose inside corner edge stands on the bar's wall. Where the two
+/// overlap is the slice of the bar past the block's face `x = 0.6 r`: the
+/// circle's segment past that chord, `r² (acos 0.6 − 0.6 · 0.8)`, times the
+/// bar's height `2 r`. The block's face `y = 0.8 r` cuts nothing off it, since
+/// the circle is no higher than `0.8 r` past `x = 0.6 r`.
+///
+/// Each tolerant intersection answers with one solid that `Model::validate`
+/// passes, and its measured volume is that one to within the measure's own
+/// published error. Writing `0.6 r` in `f64` moves the face by under `1e-15`
+/// and the volume by under `1e-12`, and the formula rounds by about as much:
+/// both far under the published error, which is printed beside the volume.
 #[test]
-fn a_tolerant_fuse_of_a_round_bar_and_a_block_cornered_on_its_wall_cannot_tell_the_walls_cells_apart()
+fn a_tolerant_intersection_of_a_round_bar_and_a_block_cornered_on_its_wall_is_the_slice_of_the_bar_past_the_blocks_face()
  {
-    for (rule, bar_first) in EVERY_FUSE {
-        let (model, fused) =
-            a_round_bar_fused_with_a_block_cornered_on_its_wall(12.8, 25.0, rule, bar_first);
-        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = fused else {
-            panic!(
-                "{rule:?} {bar_first}: {:?}",
-                fused.map(|_: Fused| "an answer")
-            );
-        };
-        let surface = model.face(face).expect("the refused face").surface();
-        assert!(
-            matches!(surface, Surface::Cylinder(_)),
-            "{rule:?} {bar_first}: {surface:?}"
+    for (radius, size) in THE_BARS_RADII_AND_SIZES {
+        let (model, fused) = a_round_bar_fused_with_a_block_cornered_on_its_wall(
+            radius,
+            size,
+            Rule::Intersection,
+            true,
         );
+        let fused = fused.unwrap_or_else(|refused| panic!("{radius} {size}: {refused:?}"));
+        let policy = Policy::tolerant(size);
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("{radius} {size}: {broken:?}"));
+        let [solid] = fused.solids() else {
+            panic!("{radius} {size}: {:?}", fused.solids());
+        };
+        let measured = model
+            .solid(*solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.0001).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("{radius} {size}: {refused:?}"));
+        let exactly = 2.0 * radius.powi(3) * (0.6f64.acos() - 0.6 * 0.8);
+        println!(
+            "radius {radius}, working size {size}: measured {} ± {}, exactly {exactly}",
+            measured.volume(),
+            measured.volume_error()
+        );
+        assert!(
+            (measured.volume() - exactly).abs() <= measured.volume_error(),
+            "{radius} {size}: measured {} ± {} against {exactly}",
+            measured.volume(),
+            measured.volume_error()
+        );
+    }
+}
+
+/// The union and the bar less the block reach the mesher and are refused
+/// there, on one of the bar's caps: the foot of the ruling where `x = 0.6 r`
+/// cuts the bar's wall and the foot of the block's corner edge are stored at
+/// one point, though they are `1.78e-15` apart, and the cap's ring names that
+/// point twice. Q2106's mechanism, at its own radius of `24.32` too, so the row
+/// that answers it moves this test.
+#[test]
+fn a_tolerant_union_of_a_round_bar_and_a_block_cornered_on_its_wall_and_the_bar_less_the_block_name_one_cap_corner_twice()
+ {
+    for (radius, size) in THE_BARS_RADII_AND_SIZES {
+        for rule in [Rule::Union, Rule::Difference] {
+            let (_, fused) =
+                a_round_bar_fused_with_a_block_cornered_on_its_wall(radius, size, rule, true);
+            let Err(Error::CannotMeshAFace {
+                why: CannotTriangulate::CornersCoincide { .. },
+                ..
+            }) = fused
+            else {
+                panic!(
+                    "{radius} {size} {rule:?}: {:?}",
+                    fused.map(|_: Fused| "an answer")
+                );
+            };
+        }
+    }
+}
+
+/// The block less the bar is refused for a ring of two straight sides it
+/// wrote: a sliver of the block's face `x = 0.6 r` between the bar's ruling
+/// and the block's corner edge, whose ends the cap joins. Q2067's mechanism,
+/// so Q2079, which keys those two sides as one edge, may move this test.
+#[test]
+fn a_tolerant_fuse_of_the_block_less_a_round_bar_cornered_on_its_wall_writes_a_ring_of_two_straight_sides()
+ {
+    for (radius, size) in THE_BARS_RADII_AND_SIZES {
+        let (_, fused) = a_round_bar_fused_with_a_block_cornered_on_its_wall(
+            radius,
+            size,
+            Rule::Difference,
+            false,
+        );
+        let Err(Error::TheFuseWroteABrokenAnswer {
+            broken: Invalid::WireTooShort { count: 2 },
+        }) = fused
+        else {
+            panic!("{radius} {size}: {:?}", fused.map(|_: Fused| "an answer"));
+        };
     }
 }
 
