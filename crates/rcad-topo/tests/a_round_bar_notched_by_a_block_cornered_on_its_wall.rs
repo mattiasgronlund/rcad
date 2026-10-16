@@ -47,9 +47,8 @@
 //! `(0.6r, 0.8r)` rounded: the foot of the ruling where `x = 0.6r` cuts the
 //! pipe, and the foot of the block's corner edge, which in exact arithmetic is
 //! `1.78e−15` from it, outside the bar.
-//! The row Q2081 filed for it follows Q2079, which also writes this file, and
-//! a probe of Q2079's change at this branch's tip left these two unions
-//! refused the same way.
+//! Q2079's change, which answers Q2074 and Q2067, leaves both unions and the
+//! bar less the block refused the same way; the row for it is Q2106.
 
 #![forbid(unsafe_code)]
 
