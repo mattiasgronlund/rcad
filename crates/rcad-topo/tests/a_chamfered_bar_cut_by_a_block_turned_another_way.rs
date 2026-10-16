@@ -18,10 +18,12 @@
 //! rounding of its circle, so the two keep apart and the three share nothing.
 //!
 //! The block is sixty across. Six to eight across, its sides run a rounding
-//! off parallel to the bar's axis, three to four from it, and the triple of a
-//! side, the pipe and the cone is still refused, with the block placed by the
-//! bar's own turn as well as by two halves of it: the band road gives a plane
-//! that steep no outer edge. Ten across and more, the fuse answers.
+//! off parallel to the bar's axis, three to four from it, and before row
+//! Q2156 the triple of a side, the pipe and the cone was refused, with the
+//! block placed by the bar's own turn as well as by two halves of it: the band
+//! road gives a plane that steep no outer edge. The road for a plane beside a
+//! pipe answers it now, and the second test pins six across. Ten across and
+//! more, the fuse answered already.
 //!
 //! A cone in a solid of its own beside the bar does not reach that question:
 //! the fuse then asks where the pipe and the cone cross first.
@@ -70,8 +72,8 @@ fn a_chamfered_bar_less_a_block_placed_twice_keeps_the_bar_above_the_blocks_top(
 
 /// The block six across, whose sides run three from the bar's axis and a
 /// rounding off parallel to it, placed by the bar's own turn and by two halves
-/// of it. Each side cuts the pipe only some `10¹⁵` along it, where the cone
-/// is that wide, so the side, the pipe and the cone share nothing; before row
+/// of it. Each side cuts the pipe no nearer than about `10¹⁶` along it, where
+/// the cone is that wide, so the side, the pipe and the cone share nothing; before row
 /// Q2156 that was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
 #[test]
 fn a_chamfered_bar_less_a_block_six_across_keeps_the_bar_above_the_blocks_top() {
