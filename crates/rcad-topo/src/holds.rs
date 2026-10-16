@@ -5470,17 +5470,30 @@ fn a_pipes_axis_turned_to_cross(pipe: &rcad_geom::Cylinder, flat: &Plane) -> Opt
 ///   it. [`where_a_side_lies`] reads a straight side against a cone only as
 ///   [`Lies::Beside`]`(`[`Decision::Neg`]`)` — and it is right to: a segment
 ///   between two points *outside* a convex region can run straight through it,
-///   where one between two points inside cannot. And the ellipse such a face is
+///   where one between two points inside cannot. The ellipse such a face is
 ///   ringed by is **closed**, so neither of its ends is on any of the straight
-///   cuts, which is [`where_a_side_lies`]'s `[..] => Lies::Across` arm.
-/// - Measured, on the `Union` answer of the side-6 corner-up cube centred on the
-///   pointed cone's apex and turned `0.7`
-///   (the case of
-///   `a_corner_up_cube_of_side_six_turned_about_the_axis_round_a_pointed_cones_apex_answers_right`,
-///   whose 9 326 decided grid points are the floor §215.3 named): deleting the
-///   conjunct leaves 9 326, and deleting it *and* letting a straight side read
-///   `Beside(Pos)` against a cone leaves 9 326 again, with all 13 187 refusals
-///   moving from this gate to that `Lies::Across`.
+///   cuts — which sent it to [`where_a_side_lies`]'s `[..] => Lies::Across` arm
+///   before row Q976's [`an_arc_never_reaches_the_plane`] gave that arm a way to
+///   answer `Beside` instead. Row Q1037's recount, next, finds that arc side is
+///   no longer asked there at all in the pinned case: the face it rings takes
+///   [`what_a_flat_face_of_chords_and_arcs_holds`] first (row Q1002), so what the
+///   two mutations below actually move is a **straight** side.
+/// - Re-measured for row Q1037, with a probe on the current base: on the
+///   `Union` answer of the side-6 corner-up cube centred on the pointed cone's
+///   apex and turned `0.7` (the case of
+///   `a_corner_up_cube_of_side_six_turned_about_the_axis_round_a_pointed_cones_apex_answers_right`),
+///   every one of its 30 101 grid points is already decided and right — the
+///   9 326 floor §215.3 named was from before rows Q976 and Q1002, and between
+///   them they moved it. The `Surface::Cone` arm here is reached 55 572 times:
+///   39 642 with `cut.kept == Decision::Pos` (always refusing) and 15 930 with
+///   `Decision::Neg` (always passing, since this shape's cone cut is always a
+///   closed curve). Deleting the conjunct lets all 55 572 through and the
+///   answer still decides 30 101: the 39 642 that used to refuse here move to
+///   [`where_a_side_lies`], but not to its arc arm's `Lies::Across` — that arm
+///   is never reached for a cone in this run — they move to its
+///   **straight**-side fallback instead, every one with both ends read `Pos`.
+///   Letting that fallback also answer `Beside(Pos)` there, mirroring the pipe
+///   arm, still decides the same 30 101: the floor moves for neither mutation.
 ///
 /// So the family of fixes here is "loosen what this admits", and it is the only
 /// one that keeps the shape of [`what_a_face_cut_by_part_of_a_crossing_holds`]'s
