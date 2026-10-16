@@ -4078,9 +4078,10 @@ impl<'f> Arrangement<'f> {
         if tight == [one, other] {
             return Ok((decided, measures));
         }
-        match self.how_far_apart_along(crossing, tight[0], tight[1]) {
-            Ok(proved @ (Decision::Pos | Decision::Neg)) => return Ok((proved, measures)),
-            Ok(_) | Err(_) => {}
+        if let Ok(proved @ (Decision::Pos | Decision::Neg)) =
+            self.how_far_apart_along(crossing, tight[0], tight[1])
+        {
+            return Ok((proved, measures));
         }
         if let HowItRuns::RoundAClosedCurve {
             from, ref wound_as, ..
