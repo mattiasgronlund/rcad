@@ -3783,15 +3783,27 @@ impl<'f> Arrangement<'f> {
     /// `CannotMeshAFace` they are pinned to.
     ///
     /// **No fifth surface runs through the point**
-    /// ([`Arrangement::a_fifth_surface_runs_there`]). With a fifth, the face's
-    /// crossings meet in more than three places there, and joining three of
-    /// them leaves the rest apart. Two cubes set corner to corner, a turn a
-    /// little short of a half turn apart, put six planes through one point:
-    /// each face there joined three of its meets and left four to seven other
-    /// nodes within the wobble apart, and the union, the difference and the turned
-    /// cube less the block, which answered before this rule, were refused
-    /// "could not settle 18 decisions" and "two regions of one face could not
-    /// be told apart" (`a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`).
+    /// ([`Arrangement::a_fifth_surface_runs_through`] the nodes within the
+    /// wobble of the three). With a fifth, the face's crossings meet in more
+    /// than three places there, and joining three of them leaves the rest
+    /// apart. Two cubes set corner to corner, a turn a little short of a half
+    /// turn apart, put six planes through one point: each face there joined
+    /// three of its meets and left four to seven other nodes within the wobble
+    /// apart, and the union, the difference and the turned cube less the
+    /// block, which answered before this rule, were refused "could not settle
+    /// 18 decisions" and "two regions of one face could not be told apart"
+    /// (`a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`).
+    ///
+    /// **No meet of three surfaces is there at two of its places**
+    /// ([`one_meet_at_two_places`]). Then the three meets are a piece of the
+    /// face smaller than the wobble, not one point rounding wrote three ways.
+    /// A ball of radius `13 × 2⁻⁴⁸` through a unit cube's corner meets each of
+    /// the cube's edges there and again `6`, `8` or `24 × 2⁻⁴⁸` along it, all
+    /// within the wobble of `Policy::tolerant(25.0)`; joined, `select` refused
+    /// the ball's piece where the answer had been refused as a face that
+    /// cannot be meshed. A block whose corner stands on a ball one of its
+    /// edges grazes, at the two places `2⁻⁵⁰` apart where that edge meets the
+    /// ball, is the other shape (`two_meets_reach_one_corner.rs`).
     ///
     /// **At most one of the three is a corner the input had**, since
     /// [`Arrangement::fold_the_nodes`] refuses two different corners folded
@@ -3834,9 +3846,11 @@ impl<'f> Arrangement<'f> {
             return;
         }
         let boxes = meets.map(|meet| self.nodes[meet].point);
-        if !the_other_three_meet_there_too([one, two, three], boxes, policy)
-            || self.a_fifth_surface_runs_there(meets, &four, boxes, policy)
-        {
+        if !the_other_three_meet_there_too([one, two, three], boxes, policy) {
+            return;
+        }
+        let near = self.the_nodes_near(meets, boxes, policy);
+        if self.a_fifth_surface_runs_through(&near, &four) || one_meet_at_two_places(&near) {
             return;
         }
         let widest = [[0, 1], [1, 2], [0, 2]]
@@ -3856,16 +3870,14 @@ impl<'f> Arrangement<'f> {
         }
     }
 
-    /// Whether a crossing of the face with a surface not among `four` runs
-    /// through one of the three `meets`, or through another node within the
-    /// policy's wobble of one of their `boxes`.
-    fn a_fifth_surface_runs_there(
+    /// The three `meets`, and every other node within the policy's wobble of
+    /// one of their `boxes`.
+    fn the_nodes_near(
         &self,
         meets: [usize; 3],
-        four: &[Surface; 4],
         boxes: [PredicatePoint; 3],
         policy: &Policy,
-    ) -> bool {
+    ) -> Vec<&Node> {
         let near = |node: &Node| {
             boxes.iter().any(|&place| {
                 policy.wobble_is_acceptable(how_far_apart_two_boxes_may_be(place, node.point))
@@ -3875,7 +3887,15 @@ impl<'f> Arrangement<'f> {
             .iter()
             .enumerate()
             .filter(|&(at, node)| meets.contains(&at) || near(node))
-            .flat_map(|(_, node)| &node.crossings)
+            .map(|(_, node)| node)
+            .collect()
+    }
+
+    /// Whether a crossing of the face with a surface not among `four` runs
+    /// through one of the `near` nodes.
+    fn a_fifth_surface_runs_through(&self, near: &[&Node], four: &[Surface; 4]) -> bool {
+        near.iter()
+            .flat_map(|node| &node.crossings)
             .any(|&crossing| !four.contains(&self.crossings[crossing].partner))
     }
 
@@ -8927,6 +8947,22 @@ fn the_other_three_meet_there_too(
         boxes
             .iter()
             .all(|&node| policy.wobble_is_acceptable(how_far_apart_two_boxes_may_be(place, node)))
+    })
+}
+
+/// Whether the `near` nodes name one meet of three surfaces at two of its
+/// places: a feature smaller than the wobble, such as a ball through a corner
+/// that meets an edge there and again a little way along it, and not one point
+/// rounding wrote down three ways.
+fn one_meet_at_two_places(near: &[&Node]) -> bool {
+    let names: Vec<&([Surface; 3], u8)> = near
+        .iter()
+        .flat_map(|node| node.made_of.iter().chain(&node.also))
+        .collect();
+    names.iter().enumerate().any(|(at, (three, place))| {
+        names[at + 1..].iter().any(|(other, other_place)| {
+            other_place != place && three.iter().all(|surface| other.contains(surface))
+        })
     })
 }
 
