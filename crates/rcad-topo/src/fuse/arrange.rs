@@ -4120,9 +4120,22 @@ impl<'f> Arrangement<'f> {
             return Ok((decided, measures));
         }
         match self.how_far_apart_along(crossing, tight[0], tight[1]) {
-            Ok(proved @ (Decision::Pos | Decision::Neg)) => Ok((proved, measures)),
-            Ok(_) | Err(_) => Ok((decided, measures)),
+            Ok(proved @ (Decision::Pos | Decision::Neg)) => return Ok((proved, measures)),
+            Ok(_) | Err(_) => {}
         }
+        if let HowItRuns::RoundAClosedCurve {
+            from, ref wound_as, ..
+        } = self.crossings[crossing].order
+            && let Some(turned) = round_a_closed_crossing_by_its_angle(
+                [&wound_as[0], &wound_as[1]],
+                from,
+                tight[0],
+                tight[1],
+            )
+        {
+            return Ok((turned, measures));
+        }
+        Ok((decided, measures))
     }
 
     /// The node's own box narrowed, where the node is a meet of three planes,
@@ -9575,6 +9588,11 @@ fn round_a_closed_crossing_by_its_angle(
     let other_past_one = (the_way_it_turns * turned(first, second)).sign();
     if proved(other_past_one) {
         return Some(other_past_one);
+    }
+    let step = [0, 1, 2].map(|axis| second[axis] - first[axis]);
+    let stepped_past_one = (the_way_it_turns * turned(first, step)).sign();
+    if proved(stepped_past_one) {
+        return Some(stepped_past_one);
     }
     let other_up_past_one =
         (the_way_it_turns * turned_as_far_apart_up_the_axis(flat, along, first, second)).sign();
