@@ -4616,6 +4616,15 @@ impl<'f> Arrangement<'f> {
     /// nodes leave `n` arcs rather than `n − 1`, and one node on its own leaves
     /// one arc that starts and ends there. That is the whole of the difference,
     /// and it is the difference a cap circle and a round hole are made of.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`] when two edges of
+    /// the face cover one stretch of a crossing: an arc of a circle and its
+    /// chord, both drawn on the line where the face's plane crosses the plane
+    /// across them, as the half disc leaning off a round bar's lid draws them
+    /// (`a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it`). The
+    /// arc's own run names the pipe, so the stretch is the chord's alone.
     fn cut_the_crossings_into_arcs(
         &mut self,
         policy: &Policy,
@@ -4649,10 +4658,11 @@ impl<'f> Arrangement<'f> {
                     let walked =
                         self.arcs_an_edge_covers(crossing, &order, [wire, position], policy, log)?;
                     for (step, runs_forward) in walked {
-                        assert!(
-                            boundary[step].is_none(),
-                            "two edges of one face run along the same stretch of one crossing"
-                        );
+                        if boundary[step].is_some() {
+                            return Err(Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve {
+                                face: self.face.keys[0],
+                            });
+                        }
                         boundary[step] = Some(Boundary {
                             wire,
                             runs_forward,
@@ -4904,6 +4914,14 @@ impl<'f> Arrangement<'f> {
     /// crossing's order starts at, so the steps are counted round and the
     /// indices of the two ends say nothing about which arc it is. What does is
     /// the edge itself: [`Arrangement::which_way_an_edge_runs_round`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`] when an edge starts
+    /// and ends at one corner on a crossing that does not close: a closed
+    /// circle round a pipe, drawn on the line where the face's plane crosses
+    /// the plane across it, as the disc leaning off a round bar's lid draws it
+    /// (`a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it`).
     fn arcs_an_edge_covers(
         &self,
         crossing: usize,
@@ -4922,10 +4940,11 @@ impl<'f> Arrangement<'f> {
                 .collect());
         }
         if from == to {
-            assert!(
-                closes,
-                "an edge that starts and ends at one corner runs right round a closed curve"
-            );
+            if !closes {
+                return Err(Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve {
+                    face: self.face.keys[0],
+                });
+            }
             let runs_forward = self.material_is_left_of_forward(crossing, [wire, position]);
             return Ok((0..order.len()).map(|step| (step, runs_forward)).collect());
         }
