@@ -2490,23 +2490,34 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// again, so a cone sliver walks to the floor as it did before. Row Q1883 gives
 /// cones measure.rs's charge.
 ///
-/// **When no rung answers, the finest sum that does not lie flat comes back**,
-/// as the closest to the solid's volume this saw, and the coarse sum, the zero
-/// or the rounding it was, when every mesh lay flat, so a solid flat at every
-/// mesh is judged as it was before this ladder ran for it (row Q1891).
+/// **When no rung answers, the finest sum that does not lie flat is the
+/// closest** to the solid's volume this saw, and the coarse sum, the zero or
+/// the rounding it was, when every mesh lay flat (row Q1891).
 ///
-/// **Nothing says that sum has the solid's sign, and it can have the wrong
-/// one** (row Q2047). A ball poking `2^-28` into a pipe of radius 5 makes a
-/// lens `9.9e-9` thick. Turned `6/40` about `x`, every mesh this walk asks
-/// of it strays `2.65e-8`, more than the lens is thick, and encloses about
-/// `2.76e-16` of the wrong sign, where the space it can leave out is
-/// `7.8e-15`. No rung answers, the finer ones fold, and that sum comes back:
-/// the sound lens is refused [`Invalid::VolumeIsNotPositive`] and the lens
+/// **A closest sum of zero or below is refused
+/// [`Error::CannotTellWhichWayASolidsFacesPoint`]**, and not handed on to be
+/// refused [`Invalid::VolumeIsNotPositive`], "its faces do not point
+/// outwards": a sound sliver leaves such a sum as readily as a solid turned
+/// inside out (row Q2089). Two quarter bends of ring 4 and tube 1 placed round
+/// by `−1.984` and a quarter turn back overlap in a wedge of `7.9e-17`. Every
+/// mesh this walk asks of it can leave out more than that, the closest
+/// encloses `−2.6e-16`, and the fuse refuses the intersection by that name
+/// (`two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name`
+/// in `a_piece_no_ray_can_place_names_its_refusal.rs`).
+///
+/// **A closest sum above zero still comes back, and nothing says it has the
+/// solid's sign** (rows Q2047, Q2084). A ball poking `2^-28` into a pipe of
+/// radius 5 makes a lens `9.9e-9` thick. Turned `6/40` about `x`, every mesh
+/// this walk asks of it strays `2.65e-8`, more than the lens is thick, and
+/// encloses about `2.76e-16` of the wrong sign, where the space it can leave
+/// out is `7.8e-15`. No rung answers and the finer ones fold: the sound lens
+/// is refused [`Error::CannotTellWhichWayASolidsFacesPoint`] and the lens
 /// built inside out passes
 /// (`a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out`).
 /// Refusing whenever no rung answers stops passing the inside-out lens, but
-/// fifteen other tests pass on such a sum today and fail then, so it waits on
-/// a way to tell the sign that those solids can still meet.
+/// fifteen other tests passed on such a sum when Q2047 counted them, and
+/// failed then, so it waits on a way to tell the sign that those solids can
+/// still meet.
 ///
 /// # A fold is retried; every other refusal but one still stops it
 ///
@@ -2573,15 +2584,16 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// (`a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung`
 /// in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`).
 ///
-/// **The cap can change the sum that comes back, though not yet an answer.**
-/// Every rung Q2060's measurement saw past the thirteenth still answered
+/// **The cap can change what comes back when no rung answers.** Every rung
+/// Q2060's measurement saw past the thirteenth still answered
 /// `meshed-still-unsure` or folded, so no rung past the cap was where the sum
-/// was going to clear [`the_sum_answers`]. But what comes back when no rung
-/// answers is the finest sum that does not lie flat, and a rung past the cap
-/// can turn it round. The inside-out lens above, turned `8/40`, is meshed
-/// `2.65e-8` off at the last rung under the cap and encloses `2.76e-16`, the
-/// wrong sign; one rung on it is meshed `9.9e-9` off, the lens's own
-/// thickness, and encloses `−2.81e-16`, the right sign, still not answering
+/// was going to clear [`the_sum_answers`]. But the closest sum is the finest
+/// that does not lie flat, and a rung past the cap can turn it round. The
+/// inside-out lens above, turned `8/40`, is meshed `2.65e-8` off at the last
+/// rung under the cap and encloses `2.76e-16`, the wrong sign, so it passes;
+/// one rung on it is meshed `9.9e-9` off, the lens's own thickness, and
+/// encloses `−2.81e-16`, the right sign, still not answering, which would have
+/// refused it [`Error::CannotTellWhichWayASolidsFacesPoint`]
 /// (`a_rung_past_the_cap_can_turn_round_the_sum_no_rung_answered`). A sum
 /// that would have cleared past the cap is not ruled out either, only not
 /// waited for, exactly as for the first ladder.
@@ -2590,8 +2602,10 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 ///
 /// Whatever [`the_coarsest_mesh_whose_sides_do_not_cross`] makes of the solid,
 /// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one
-/// side do not, and [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] when a
-/// finer mesh is refused that way.
+/// side do not, [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] when a
+/// finer mesh is refused that way, and
+/// [`Error::CannotTellWhichWayASolidsFacesPoint`] when no rung answers and the
+/// closest sum is zero or below.
 pub(crate) fn how_much_space_a_curved_solid_encloses(
     view: SolidView<'_>,
     policy: &Policy,
@@ -2692,13 +2706,25 @@ fn how_far_the_sum_can_be_off(view: SolidView<'_>, mesh: &Mesh, rounding: f64) -
 ///
 /// Each curved face is charged `area · (r³ − (r − d)³) / (3(r − d)²)`, with
 /// `area` its triangles' area, `d` the mesh's [`Mesh::deviation`] and `r` the
-/// smallest radius the face bends at, and a flat face nothing. That is the
-/// shell `measure::how_much_space_hides_under_a_flat_stand_in` charges, so
+/// smallest radius the face bends at. That is the shell
+/// `measure::how_much_space_hides_under_a_flat_stand_in` charges, so
 /// `Measurement::volume_error`'s own argument and not a looser one. The looser
 /// `area · d · (r / (r − d))²` that `Mesh::deviation`'s doc publishes charged a
 /// ball meshed a quarter of its radius out a third more, and every sum that
 /// lands between the two asks for a finer mesh it does not need
 /// (`the_space_a_mesh_can_leave_out_is_no_more_than_measure_charges`).
+///
+/// **A flat face is charged too, for how far its points stray off its plane**,
+/// as `SolidView::skin_of` charges it: each triangle its area times
+/// [`how_far_the_points_stray_off`] the plane, and the furthest any strays
+/// times `d` times [`rim_of_the_flat_faces`], for the inscribed outline that
+/// falls short of a curved rim. A turned plane's points can rarely be written
+/// down on it, and the caps of the sliver two quarter bends placed round by
+/// `−2` overlap in are meshed up to `4.3e-16` off their planes, against a
+/// wedge of `5.4e-17`. Charged nothing, that sliver's sum answered on
+/// `3.04e-16` against `2.94e-16` at room `0.25`, right by luck, and the fuse
+/// refused the sliver of the same two bends placed round by `−1.984`
+/// [`Invalid::VolumeIsNotPositive`] on `−5.1e-17` (row Q2089).
 ///
 /// `None` when a triangle with area stands in for a face this cannot charge,
 /// wherever in the mesh it comes, and otherwise `f64::INFINITY` when the mesh
@@ -8048,20 +8074,24 @@ mod tests {
         );
     }
 
-    /// Row Q2047. **This test asserts a wrong verdict**, so a fix to it turns
-    /// this test round. The lens of
+    /// Row Q2047. **This test asserts a wrong verdict for the inside-out
+    /// build**, so a fix to it turns this test round (Q2084). The lens of
     /// [`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`], with
     /// the ball poking only `2^-28` in, is `8/3` of that poke thick, `9.9e-9`,
     /// and turned `6/40` about `x`, `Model::validate` passes it built inside
-    /// out and the sound build is refused [`Invalid::VolumeIsNotPositive`].
+    /// out, and the sound build is refused
+    /// [`Error::CannotTellWhichWayASolidsFacesPoint`].
     ///
     /// Every mesh [`how_much_space_a_curved_solid_encloses`] asks of it says
     /// it may be off the lens by `2.65e-8`, `64/9` of the poke. That is more
     /// than the lens is thick, so nothing keeps the meshes of its two faces
     /// in their order, and what the mesh encloses has the wrong sign: about
-    /// `2.76e-16`, where the space it can leave out is `7.8e-15`. No rung
-    /// answers, the finer ones fold, and the walk hands back that sum,
-    /// unchecked, as its last line does whenever no rung answers.
+    /// `2.76e-16` inside out and `−2.76e-16` sound, where the space it can
+    /// leave out is `7.8e-15`. No rung answers and the finer ones fold. The
+    /// walk hands back the sum above zero, unchecked, and refuses the one
+    /// below by the name that says no mesh tells. Until Q2089 that was
+    /// [`Invalid::VolumeIsNotPositive`], which says the sound lens's faces
+    /// point inwards.
     #[test]
     fn a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out() {
         let poke = f64::powi(2.0, -28);
@@ -8070,12 +8100,16 @@ mod tests {
             .expect("a finite turn");
         let sound =
             a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), poke, &turn, false);
+        let Err(Error::CannotTellWhichWayASolidsFacesPoint {
+            enclosed,
+            leaves_out: Some(leaves_out),
+        }) = sound
+        else {
+            panic!("sound {sound:?}");
+        };
         assert!(
-            matches!(
-                sound,
-                Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
-            ),
-            "sound {sound:?}"
+            enclosed <= 0.0 && -enclosed <= leaves_out,
+            "sound: encloses {enclosed}, off by up to {leaves_out}"
         );
 
         let policy = Policy::certified();

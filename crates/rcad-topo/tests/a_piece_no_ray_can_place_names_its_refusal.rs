@@ -523,108 +523,146 @@ fn every_side_of_a_bend_placed_round_from_another_is_used_once_each_way() {
 /// `select.rs` now drops what the ray says of a point of a flat piece when a
 /// face of the solid it is fired at may run between the point and the piece's
 /// plane, as the copy's end cap does here. Each cap is then placed inside the
-/// other bend by a piece it shares a side with. So every rule both ways round
-/// answers one solid that validates: the union two bends' worth of ring and
-/// the difference one, each within the measure's own error of `π² R r² / 2` a
-/// bend.
+/// other bend by a piece it shares a side with. So the union and the
+/// difference both ways round answer one solid that validates: the union two
+/// bends' worth of ring and the difference one, each within the measure's own
+/// error of `π² R r² / 2` a bend.
 ///
 /// The intersection is the sliver, a wedge of the ring as wide as the angle
 /// between the two caps, `4.3e-18`, so it holds `4π` times that angle,
-/// `5.4e-17`. `Model::validate` passes it. Its mesh's caps lie up to `4.3e-16`
-/// off their planes, and the space between those triangles and their planes
-/// moves the mesh's sum anywhere from `−4.9e-16` to `3.2e-16` over deflections
-/// from `0.01` to `5e-5` (Q2087). The measure charged a flat face nothing for
-/// that space, so at `0.01` it refused the sliver `VolumeIsNotPositive` on a
-/// sum of `−8.7e-17` (Q2077), and at `0.001` and `1e-4` its answer's range
-/// missed the wedge (Q2078). A flat face now owes how far the points the
-/// mesher places on it stray off its plane, and a sum within its own error of
-/// zero is answered rather than refused, so the sliver is held against the
-/// wedge at all three.
+/// `5.4e-17`. Its mesh's caps lie up to `4.3e-16` off their planes, and the
+/// space between those triangles and their planes moves the mesh's sum
+/// anywhere from `−4.9e-16` to `3.2e-16` over deflections from `0.01` to
+/// `5e-5` (Q2087). `Model::validate` charged a flat face nothing for that
+/// space, and passed the sliver on a sum that answered by luck. Charged, no
+/// mesh says which way its faces point, and the fuse refuses it
+/// [`Error::CannotTellWhichWayASolidsFacesPoint`]
+/// (`two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name`).
+/// The measure charges a flat face that space too (Q2077, Q2078), and a
+/// sliver a mesh can tell is measured against its wedge in
+/// `two_bends_overlapping_in_a_sliver_a_mesh_can_tell_measure_its_wedge`.
 #[test]
 fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_sliver() {
     let one_bend = PI * PI * 4.0 / 2.0;
     let policy = Policy::certified();
-    for rule in EVERY_RULE {
+    let deflection = rcad_geom::Deflection::of(0.01).expect("a deflection");
+    for (rule, expected) in [(Rule::Union, 2.0 * one_bend), (Rule::Difference, one_bend)] {
         for the_first_first in [true, false] {
             let what = format!("{rule:?}, the first first {the_first_first}");
             let mut model = a_model();
             let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, -2.0);
             let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, -2.0 - FRAC_PI_2);
-            let (arguments, tools) = if the_first_first {
-                ([first], [copy])
-            } else {
-                ([copy], [first])
+            let [(volume, error)] =
+                fused_and_measured(&mut model, first, copy, rule, the_first_first)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"))[..]
+            else {
+                panic!("{what}: not one solid");
             };
-            let answer = model
-                .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
-                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            model
-                .validate(&policy, &mut ProvenanceLog::new())
-                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            let [solid] = answer.solids()[..] else {
-                panic!("{what}: one solid, not {:?}", answer.solids());
-            };
-            let (expected, deflections) = match rule {
-                Rule::Union => (2.0 * one_bend, &[0.01][..]),
-                Rule::Difference => (one_bend, &[0.01][..]),
-                Rule::Intersection => (
-                    4.0 * PI * the_angle_between_the_caps_of(&model, solid),
-                    &[0.01, 0.001, 1e-4][..],
-                ),
-                other => panic!("not a rule this tries: {other:?}"),
-            };
-            for &size in deflections {
-                let deflection = rcad_geom::Deflection::of(size).expect("a deflection");
-                let (volume, error) = model
-                    .solid(solid)
-                    .and_then(|solid| solid.measure(deflection, &policy, &mut ProvenanceLog::new()))
-                    .map(|measured| (measured.volume(), measured.volume_error()))
-                    .unwrap_or_else(|why| panic!("{what}, deflection {size}: {why:?}"));
-                assert!(
-                    (volume - expected).abs() <= error,
-                    "{what}, deflection {size}: {volume} ± {error}, expected {expected}"
-                );
-            }
+            assert!(
+                (volume - expected).abs() <= error,
+                "{what}: {volume} ± {error}, expected {expected}"
+            );
         }
     }
 }
 
-/// The same two bends placed round by `−1.984` and a quarter turn back, where
-/// the first bend's start cap and the copy's end cap overlap too, in a wedge
-/// `4π` times the angle between them (Q2089).
+/// The same two bends placed round by `−2` or `−1.984` and a quarter turn
+/// back, where the first bend's start cap and the copy's end cap overlap in a
+/// wedge `4π` times the angle between them (Q2089).
 ///
-/// The wedge is thinner than the space any mesh of it can leave out, so no mesh
-/// says which way its faces point, and the sum the closest mesh leaves is below
-/// zero. The fuse refused the intersection [`Invalid::VolumeIsNotPositive`] on
-/// it, both ways round, which says the faces point inwards. They point out.
+/// The wedge is thinner than the space any mesh of it can leave out, so no
+/// mesh says which way its faces point. The sum the closest mesh leaves is
+/// below zero, `−3.3e-16` and `−2.6e-16`, against wedges of `5.4e-17` and
+/// `7.9e-17`. The fuse refused the intersection at `−1.984`
+/// [`Invalid::VolumeIsNotPositive`] on such a sum, both ways round, which says
+/// the faces point inwards; they point out. At `−2` it passed on a sum that
+/// answered only because the caps' flat faces were charged nothing for the
+/// space their mesh can leave out.
 #[test]
 fn two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name() {
-    let start = -1.984;
+    for start in [-2.0, -1.984] {
+        for the_first_first in [true, false] {
+            let what = format!("placed round by {start}, the first first {the_first_first}");
+            let mut model = a_model();
+            let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
+            let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
+            let wedge = 4.0 * PI * the_angle_where_the_caps_overlap(&model, [first, copy], start);
+            let fused =
+                fused_or_refused(&mut model, first, copy, Rule::Intersection, the_first_first);
+            let Err(Error::CannotTellWhichWayASolidsFacesPoint {
+                enclosed,
+                leaves_out: Some(leaves_out),
+            }) = fused
+            else {
+                panic!("{what}: {fused:?}, a wedge of {wedge}");
+            };
+            assert!(
+                0.0 < wedge && wedge < leaves_out && enclosed <= 0.0 && -enclosed <= leaves_out,
+                "{what}: a wedge of {wedge}, enclosed {enclosed}, off by up to {leaves_out}"
+            );
+        }
+    }
+}
+
+/// The same two bends placed round by `−1.75` and a quarter turn back overlap
+/// in a wedge of `2.5e-15`, thick enough that a mesh of it says which way its
+/// faces point. The intersection both ways round answers it, `Model::validate`
+/// passes it, and the measure holds it against the wedge at deflections of
+/// `0.01`, `0.001` and `1e-4`, its caps charged for how far the points the
+/// mesher places on them stray off their planes (Q2077, Q2078).
+#[test]
+fn two_bends_overlapping_in_a_sliver_a_mesh_can_tell_measure_its_wedge() {
+    let start = -1.75;
+    let policy = Policy::certified();
     for the_first_first in [true, false] {
+        let what = format!("the first first {the_first_first}");
         let mut model = a_model();
         let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
         let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
         let wedge = 4.0 * PI * the_angle_where_the_caps_overlap(&model, [first, copy], start);
-        let fused = fused_or_refused(&mut model, first, copy, Rule::Intersection, the_first_first);
-        let Err(Error::CannotTellWhichWayASolidsFacesPoint {
-            enclosed,
-            leaves_out: Some(leaves_out),
-        }) = fused
-        else {
-            panic!("the first first {the_first_first}: {fused:?}, a wedge of {wedge}");
+        let (arguments, tools) = if the_first_first {
+            ([first], [copy])
+        } else {
+            ([copy], [first])
         };
-        assert!(
-            0.0 < wedge && wedge < leaves_out && enclosed <= 0.0 && -enclosed <= leaves_out,
-            "the first first {the_first_first}: a wedge of {wedge}, enclosed {enclosed}, \
-             off by up to {leaves_out}"
-        );
+        let answer = model
+            .fuse(
+                &arguments,
+                &tools,
+                Rule::Intersection,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let [solid] = answer.solids()[..] else {
+            panic!("{what}: one solid, not {:?}", answer.solids());
+        };
+        for size in [0.01, 0.001, 1e-4] {
+            let deflection = rcad_geom::Deflection::of(size).expect("a deflection");
+            let (volume, error) = model
+                .solid(solid)
+                .and_then(|solid| solid.measure(deflection, &policy, &mut ProvenanceLog::new()))
+                .map(|measured| (measured.volume(), measured.volume_error()))
+                .unwrap_or_else(|why| panic!("{what}, deflection {size}: {why:?}"));
+            assert!(
+                0.0 < wedge && (volume - wedge).abs() <= error,
+                "{what}, deflection {size}: {volume} ± {error}, a wedge of {wedge}"
+            );
+        }
     }
 }
 
 /// The angle by which the start cap of the first of `bends` reaches past the
 /// end cap of the second, both on planes through the ring's axis at the angle
-/// `start` round it: the angle between the two caps of their sliver, worked
-/// out as [`the_angle_between_the_caps_of`] works it out.
+/// `start` round it: the angle between the two caps of their sliver.
+///
+/// Each cap faces out of the sliver, so their outward normals all but cancel,
+/// and what is left of their sum points in along the radius by that angle.
+/// Each cap's plane runs through the axis, so the wedge between them holds the
+/// tube's area times the angle times the ring, by Pappus.
 fn the_angle_where_the_caps_overlap(model: &Model, bends: [SolidKey; 2], start: f64) -> f64 {
     let [first, second] = bends.map(|bend| {
         model
@@ -641,35 +679,6 @@ fn the_angle_where_the_caps_overlap(model: &Model, bends: [SolidKey; 2], start: 
         .min_by(|one, two| one.length().total_cmp(&two.length()))
         .expect("each bend has two caps");
     -(left_over.x() * start.cos() + left_over.y() * start.sin())
-}
-
-/// The angle between the two caps of the sliver, which sits at the angle `−2`
-/// round the ring's axis.
-///
-/// Each cap faces out of the sliver, so their outward normals all but cancel,
-/// and what is left of their sum points in along the radius by that angle.
-/// Each cap's plane runs through the axis, so the wedge between them holds the
-/// tube's area times the angle times the ring, by Pappus.
-fn the_angle_between_the_caps_of(model: &Model, solid: SolidKey) -> f64 {
-    let caps: Vec<_> = model
-        .solid(solid)
-        .expect("this model made the key")
-        .faces()
-        .filter_map(|face| {
-            let plane = *face.surface().as_plane()?;
-            Some((plane.offset(), face.outward_normal()))
-        })
-        .collect();
-    let [(one_offset, one), (two_offset, two)] = caps[..] else {
-        panic!("two caps, not {caps:?}");
-    };
-    assert_eq!(
-        (one_offset, two_offset),
-        (0.0, 0.0),
-        "each cap's plane runs through the axis"
-    );
-    let left_over = one + two;
-    -(left_over.x() * (-2.0f64).cos() + left_over.y() * (-2.0f64).sin())
 }
 
 /// A quarter of a round bar of radius 6, `z` from −2 to 2, holds a quarter
