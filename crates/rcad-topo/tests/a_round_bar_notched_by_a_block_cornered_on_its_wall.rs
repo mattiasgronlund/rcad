@@ -101,6 +101,17 @@ fn every_fuse_at_radius_17_92_and_its_images_answers_with_its_volume() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Q2080's shapes: radii `8` and `16`, and `12.8` and `25.6`, each pair an
+/// image of the other under a scale by two, all at working size `1`.
+const THE_RULINGS_FEET_A_HAIR_APART_AT_WORKING_SIZE_1: [(f64, f64); 4] =
+    [(8.0, 1.0), (12.8, 1.0), (16.0, 1.0), (25.6, 1.0)];
+
+#[test]
+fn every_fuse_with_the_rulings_feet_a_hair_apart_at_working_size_1_answers_with_its_volume() {
+    let wrong = what_each_fuse_gets_wrong(&THE_RULINGS_FEET_A_HAIR_APART_AT_WORKING_SIZE_1);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 #[test]
 fn the_union_at_radius_24_32_comes_back_within_ten_seconds() {
     assert!(
