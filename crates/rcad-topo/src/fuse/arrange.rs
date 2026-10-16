@@ -83,8 +83,8 @@ use rcad_predicates::expansion::{
     difference_of_two_products, expansion_sign, expansion_sum, product_is_exact, scale_expansion,
 };
 use rcad_predicates::{
-    Decision, Interval, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
-    ProvenanceLog, orient2d, orient3d, orient3d_of_points,
+    Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
+    ProvenanceLog, Record, orient2d, orient3d, orient3d_of_points,
 };
 
 use smallvec::SmallVec;
@@ -3510,7 +3510,21 @@ impl<'f> Arrangement<'f> {
                     }
                     match decided {
                         Decision::Zero => same.join(pair[0], pair[1]),
-                        Decision::Pos => {}
+                        Decision::Pos => {
+                            if same.leader(pair[0]) != same.leader(pair[1])
+                                && self.two_crossings_that_meet_twice_are_taken_to_meet_once(
+                                    crossing,
+                                    [pair[0], pair[1]],
+                                    policy,
+                                    log,
+                                )
+                            {
+                                if probe {
+                                    eprintln!("PROBE   taken as one {:?}", (pair[0], pair[1]));
+                                }
+                                same.join(pair[0], pair[1]);
+                            }
+                        }
                         Decision::Neg => unreachable!(
                             "nodes_along proved this pair the other way round: \
                              {} then {} on crossing {crossing}",
@@ -3712,6 +3726,40 @@ impl<'f> Arrangement<'f> {
             }
         }
         on_each
+    }
+
+    /// Whether two nodes proved apart along `crossing` are one point all the
+    /// same, by the policy's leave to take two points proved apart as one
+    /// (§417.7): when both lie on a second crossing too, and one of them
+    /// already stands for more than one meet.
+    fn two_crossings_that_meet_twice_are_taken_to_meet_once(
+        &self,
+        crossing: usize,
+        [one, other]: [usize; 2],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        let [mine, theirs] = [one, other].map(|node| &self.nodes[node]);
+        let on_a_second_crossing = mine.crossings.iter().any(|&shared| {
+            shared != crossing
+                && self.crossings[shared].reaches_the_face
+                && theirs.crossings.contains(&shared)
+        });
+        let two_input_corners = mine.vertex.is_some() && theirs.vertex.is_some();
+        if !on_a_second_crossing
+            || two_input_corners
+            || (mine.also.is_empty() && theirs.also.is_empty())
+        {
+            return false;
+        }
+        let record = Record::new(
+            "two meets of two crossings proved apart taken as one point",
+            &[mine.point, theirs.point],
+            Level::Interval,
+            the_furthest_two_boxes_may_be_apart(mine.point, theirs.point),
+            Measures::Length,
+        );
+        policy.take_as_one_point(record, log)
     }
 
     fn fold_the_nodes(&mut self, same: &mut Sameness) -> Result<()> {
@@ -8736,6 +8784,21 @@ fn prove_the_hinted_order(
         }
     }
     Ok(())
+}
+
+/// The furthest a point of one box can be from a point of the other, rounded
+/// up: `fuse/assemble.rs`'s `how_far_apart_two_boxes_may_be`, which is private
+/// there.
+fn the_furthest_two_boxes_may_be_apart(one: PredicatePoint, other: PredicatePoint) -> f64 {
+    let (one, other) = (one.enclosure(), other.enclosure());
+    let squared: f64 = (0..3)
+        .map(|axis| {
+            let furthest =
+                (one[axis].hi() - other[axis].lo()).max(other[axis].hi() - one[axis].lo());
+            furthest * furthest
+        })
+        .sum();
+    squared.sqrt() * (1.0 + 4.0 * f64::EPSILON)
 }
 
 /// Where a ball's skin pinches to a point, as a box round it.
