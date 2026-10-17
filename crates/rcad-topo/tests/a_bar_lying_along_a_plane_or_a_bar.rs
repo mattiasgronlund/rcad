@@ -71,11 +71,25 @@
 //! `6 · 2⁵¹`, where the kernel works to `1e11`. It was refused `Undecidable`
 //! at the order of those two points along a crossing, and then at which way
 //! three surfaces turn at them, until queue row Q2160 read both off which of
-//! the two meets of one line a point is. The tolerant fuses are refused
-//! `CannotMeshAFace` or answer with a record, and are pinned as they answer
-//! (queue row Q2161).
+//! the two meets of one line a point is.
+//!
+//! **Under `tolerant`, the three fuses whose answer is the bar less the sliver
+//! answer, and the nine whose answer holds the sliver or the hole it leaves
+//! are refused `CannotMeshAFace`** (queue rows Q2161 and Q2195). Every
+//! decision the arrangement takes is proved; the refusals come from the mesh
+//! that checks each answer before it is written. No double lies inside the
+//! sliver: it spans `x` from `3 + 2⁻⁵³` to `3 + 2⁻⁵²`, and the doubles there
+//! are `2⁻⁵¹` apart. So every point drawn on it rounds onto `x = 3`. The cap
+//! circle's two crossings are stored at `y = 2 − 2⁻⁵¹` and `y = 2`, and the
+//! one point `mesh.rs` puts inside each of the sliver's two arcs at
+//! `y = 2 − 2⁻⁵²`, between them. The hole in the block's face is then three
+//! points on one line, `LoopsTouch`, and the sliver's piece of the pipe names
+//! that one point for both its arcs, `CornersCoincide`. Each answer validates
+//! under `tolerant` and is refused `DynamicRangeTooWide` under `certified`,
+//! which is what a tolerant fuse promises, and right: valid is a property of a
+//! model and a policy (`Model::fuse`'s doc, §68).
 //! `a_bar_dipping_through_a_blocks_top_leaves_an_edge_too_short_for_its_coordinates`
-//! and its twin on the floor pin both.
+//! and its twin on the floor pin all of it.
 //!
 //! **The same bar turned twice, so that its seam is underneath, shares a
 //! sliver with the block along nearly its whole length** (queue row Q2187).
@@ -1522,8 +1536,9 @@ fn the_plane_the_low_cap_and_the_pipe(
 /// of the two meets a point is.
 ///
 /// Every tolerant fuse is pinned as it answers, in
-/// [`what_tolerant_gives_for_a_bar_dipping_through_the_top`] (queue row
-/// Q2161).
+/// [`what_tolerant_gives_for_a_bar_dipping_through_the_top`] (queue rows
+/// Q2161 and Q2195): the one answer validates under `tolerant` alone, and
+/// the five refusals come from meshing the sliver, which holds no double.
 #[test]
 fn a_bar_dipping_through_a_blocks_top_leaves_an_edge_too_short_for_its_coordinates() {
     every_fuse_of_a_block_and_a_bar_dipping_through_it_leaves_an_edge_too_short(
@@ -1535,11 +1550,13 @@ fn a_bar_dipping_through_a_blocks_top_leaves_an_edge_too_short_for_its_coordinat
 }
 
 /// What a tolerant fuse of the block and the bar dipping through its top gives
-/// as it stands. Either way round, the union is refused `LoopsTouch` and the
-/// intersection `CornersCoincide`, and the block less the bar `LoopsTouch`.
-/// The bar less the block is one shell of four faces, the bar's three and the
-/// piece of the top that cuts the sliver off, with a record that the answer
-/// is wider than the kernel works to.
+/// as it stands. The bar less the block is one shell of four faces, the bar's
+/// three and the piece of the top that cuts the sliver off, with a record that
+/// the answer is wider than the kernel works to. Every other answer holds the
+/// sliver or the hole it leaves in the top, and is refused meshing it: either
+/// way round the union is refused `LoopsTouch` for the top with its hole, the
+/// block less the bar the same, and the intersection, the sliver alone,
+/// `CornersCoincide` for the sliver's piece of the pipe.
 fn what_tolerant_gives_for_a_bar_dipping_through_the_top(
     rule: Rule,
     bar_first: bool,
@@ -1589,7 +1606,8 @@ fn a_block_less_a_bar_turned_onto_x_by_a_float_angle_along_its_floor_keeps_the_b
 /// fuse is refused `DynamicRangeTooWide` as there, the edge `2⁻⁵¹` long against
 /// the block's corners at 4, a spread of `2⁵³`. Every tolerant one is pinned
 /// as it answers, in [`what_tolerant_gives_for_a_bar_dipping_through_the_floor`]
-/// (queue row Q2161).
+/// (queue rows Q2161 and Q2195): the two answers validate under `tolerant`
+/// alone, and the four refusals come from meshing the sliver.
 #[test]
 fn a_bar_dipping_through_a_blocks_floor_leaves_an_edge_too_short_for_its_coordinates() {
     every_fuse_of_a_block_and_a_bar_dipping_through_it_leaves_an_edge_too_short(
@@ -1601,11 +1619,14 @@ fn a_bar_dipping_through_a_blocks_floor_leaves_an_edge_too_short_for_its_coordin
 }
 
 /// What a tolerant fuse of the block and the bar dipping through its floor
-/// gives as it stands. With the block first, the union and the block less the
-/// bar are refused `LoopsTouch`; with the bar first, `CornersCoincide`. The
-/// intersection, either way round, is the bar less the sliver below the
-/// floor: one shell of four faces, the bar's three and the floor's piece,
-/// with a record that the answer is wider than the kernel works to.
+/// gives as it stands. The intersection, either way round, is the bar less the
+/// sliver below the floor: one shell of four faces, the bar's three and the
+/// floor's piece, with a record that the answer is wider than the kernel works
+/// to. Every other answer holds the sliver or the hole it leaves in the floor,
+/// and is refused meshing it. With the block first, the union and the block
+/// less the bar are refused `LoopsTouch` for the floor with its hole. With the
+/// bar first, the union is refused `CornersCoincide` for the sliver's piece of
+/// the pipe, and so is the bar less the block, the sliver alone.
 fn what_tolerant_gives_for_a_bar_dipping_through_the_floor(
     rule: Rule,
     bar_first: bool,
@@ -1714,16 +1735,25 @@ enum WithTheSeamUnderneath {
 }
 
 /// What a tolerant fuse of the block `[0, 4]³` and a bar dipping `2⁻¹⁰⁵`
-/// through one of its faces gives, as it stands until queue row Q2161.
+/// through one of its faces gives, as it stands (queue rows Q2161 and Q2195).
+///
+/// Both refusals come from meshing the answer before it is written, and both
+/// from the sliver holding no double: the one point `mesh.rs` puts inside each
+/// of its two arcs is stored at `(3, 2 − 2⁻⁵², h)`, between the two points the
+/// cap circle crosses the face at, `(3, 2 − 2⁻⁵¹, h)` and `(3, 2, h)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tolerantly {
     /// Refused `CannotMeshAFace`, a corner of one loop on a side of another,
-    /// at one of the two points the cap circle crosses the face at.
+    /// at `(3, 2 − 2⁻⁵², h)`: the hole the sliver leaves in the block's face
+    /// is drawn as three points on one line.
     LoopsTouch,
-    /// Refused `CannotMeshAFace`, a loop naming its fourth corner twice.
+    /// Refused `CannotMeshAFace`, a loop naming its fourth corner twice: the
+    /// sliver's piece of the pipe gets `(3, 2 − 2⁻⁵², h)` from both its arcs.
     CornersCoincide,
     /// One solid of one shell of four faces, and one record, of the check of
-    /// the answer's spread the tolerant policy lets through.
+    /// the answer's spread the tolerant policy lets through. The model
+    /// validates under `tolerant` and is refused `DynamicRangeTooWide` under
+    /// `certified`, which is the answer a tolerant fuse promises (§68).
     OneShellOfFourFaces,
 }
 
@@ -1808,7 +1838,10 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
 /// [`a_bar_turned_onto_x`] by `turn` from `at`, dipping through the block's
 /// face at `height`: refused `DynamicRangeTooWide` past the spread the kernel
 /// works to under `certified`, and under `tolerant` what `tolerant` gives for
-/// the rule and whether the bar came first.
+/// the rule and whether the bar came first. A tolerant answer must validate
+/// under `tolerant` and be refused `DynamicRangeTooWide` under `certified`:
+/// valid is a property of a model and a policy, and `Model::fuse` promises
+/// the first and not the second (§68).
 ///
 /// An answer is not measured: its sliver is too thin to mesh to the
 /// deflection `volume_of` asks for.
@@ -1840,7 +1873,7 @@ fn every_fuse_of_a_block_and_a_bar_dipping_through_it_leaves_an_edge_too_short(
                                 why: CannotTriangulate::LoopsTouch { at, .. },
                                 ..
                             }) if at.x() == 3.0
-                                && (at.y() - 2.0).abs() <= f64::EPSILON
+                                && at.y() == 2.0 - f64::EPSILON
                                 && at.z() == height
                         ),
                         Tolerantly::CornersCoincide => matches!(
@@ -1851,6 +1884,23 @@ fn every_fuse_of_a_block_and_a_bar_dipping_through_it_leaves_an_edge_too_short(
                             })
                         ),
                         Tolerantly::OneShellOfFourFaces => {
+                            let tolerantly =
+                                model.validate(&Policy::tolerant(100.0), &mut ProvenanceLog::new());
+                            let certainly =
+                                model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                            let valid_only_tolerantly = tolerantly.is_ok()
+                                && matches!(
+                                    &certainly,
+                                    Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
+                                        if *ratio > DynamicRange::LARGEST_SUPPORTED_RATIO
+                                );
+                            if !valid_only_tolerantly {
+                                wrong.push(format!(
+                                    "{rule:?}, bar first {bar_first}: the answer validates \
+                                     {tolerantly:?} under tolerant and {certainly:?} under \
+                                     certified"
+                                ));
+                            }
                             matches!(&fused, Ok(answer)
                                 if answer.solids().iter()
                                     .map(|&solid| faces_of_each_shell(&model, solid))
