@@ -18,6 +18,50 @@
 //!
 //! `a_quarter_bend` is the one `two_quarter_bends_on_one_torus.rs` in
 //! `rcad-topo` builds, at this ring and tube.
+//!
+//! **Q1351 asked whether `HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF`
+//! (`mesh.rs:622-623`, `8.9e-5` rad) covers a read-back bend's longitude
+//! error once the bend is moved far from the origin.** A sweep moved this
+//! bend out by `1e3`, `1e6` and `1e9` along `(1, 1, 1)`, every whole degree
+//! about `x`, measured at deflections `0.5`, `1.8` and `2.0` — 3240 runs —
+//! and found **no fold and no `CornersCoincide`** anywhere in it: neither the
+//! `cut_in_two` route the margin guards nor the
+//! `the_most_even_chord_that_stays_inside` route the row named as a second,
+//! unrun one, ever fired. The question is unanswered by this sweep, not
+//! because the margin held, but because two unrelated, already-known
+//! refusals are reached first almost every time the bend is moved far
+//! enough out to matter:
+//!
+//! - At `1e3`, 1077 of the 1080 runs round-trip and measure the same volume;
+//!   the other 3 (one per deflection, since the write step runs before
+//!   deflection matters) refuse at write time with
+//!   `ACurveTheFacesEitherSideOfItDoNotName`, the same limit
+//!   `write.rs:2850`'s own test pins for Q2184: no centre the reader could
+//!   hold on the seam's circle reads back as the plane the writer cut it
+//!   with. That is this file's one write-time refusal shape, not a new one.
+//! - At `1e6` and `1e9`, 1065 of 1080 runs each refuse on read-back with
+//!   `Geometry(CannotNameWhichPieceOfACrossingThisIs)`, out of `rcad-geom`'s
+//!   `walk.rs`, before the longitude margin is ever reached — the extra
+//!   rounding a far offset adds to the written text is, almost always,
+//!   enough on its own to make the crossing decision ambiguous on import.
+//!   Only 12 of 1080 runs at each of these two offsets get far enough to
+//!   compare volumes at all, and none of those 12 folds either.
+//!
+//! So at this ring and tube, moving the bend out by a factor that would
+//! stress the longitude margin also, almost always, trips an unrelated
+//! read-back refusal first; the margin's coverage at these offsets stays
+//! unmeasured, not confirmed.
+//!
+//! **The row's other half — ring `1000`, tube `0.01`, at the origin — could
+//! not be swept at all.** Before any placement, measurement, write or read,
+//! `SolidBuilder::build`'s own `Model::validate` call takes `2.1s` at a
+//! ring/tube ratio of `1e3` but does not finish in `60s` at ratio `1e4`
+//! (regardless of absolute scale — ring `100` and ring `1000` both hang the
+//! same way) nor in `3000s` at the row's own ratio `1e5`. The cost tracks the
+//! ratio, not the size, and is untraced past that one call; this half of the
+//! row is "not measurable at this ratio" rather than a volume comparison,
+//! and the blow-up itself is a separate performance question, not this
+//! file's margin question.
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point,
@@ -80,47 +124,41 @@ fn the_bend_turned_137_degrees_about_x_measures_after_its_file_at_a_deflection_o
         .unwrap_or_else(|why| panic!("{why}"));
 }
 
+/// Moved out by `1e3` along `(1, 1, 1)` and turned `45°` about `x`: the same
+/// limit as `write.rs:2850`'s own test (Q2184), reached here through this
+/// file's own shape instead of that one's. No centre the reader could hold on
+/// the seam's circle reads back as the plane the writer cut it with, at any
+/// finite offset. Q1351's own sweep over every whole degree at three
+/// deflections saw this refusal 3 times at offset `1e3` (once per deflection,
+/// since the write step runs before deflection matters) and 3 more times each
+/// at `1e6` and `1e9` — never a second shape of it.
 #[test]
-fn probe_q1351_offset_sweep() {
-    let mut by_name: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
-    let mut folds: Vec<String> = Vec::new();
-    let mut total = 0u32;
-    for &factor in &[1e3_f64, 1e6, 1e9] {
-        let offset = Vector::new(factor, factor, factor);
-        for whole in 0..360 {
-            let degrees = f64::from(whole);
-            for &deflection in &[0.5_f64, 1.8, 2.0] {
-                total += 1;
-                match the_same_volume_after_its_file(RING, TUBE, offset, degrees, deflection) {
-                    Ok(()) => {}
-                    Err(why) if why.contains(" apart where each may miss") => {
-                        folds.push(format!(
-                            "offset {factor} degrees {degrees} deflection {deflection}: {why}"
-                        ));
-                    }
-                    Err(why) => {
-                        let name = refusal_name(&why).to_owned();
-                        *by_name.entry(name).or_insert(0) += 1;
-                    }
-                }
-            }
-        }
-    }
-    println!(
-        "total {total} folds {} by_name {by_name:?}\n{}",
-        folds.len(),
-        folds.join("\n")
+fn the_bend_moved_out_by_a_thousand_and_turned_45_degrees_refuses_to_write() {
+    let offset = Vector::new(1e3, 1e3, 1e3);
+    let why = the_same_volume_after_its_file(RING, TUBE, offset, 45.0, 0.5)
+        .expect_err("the seam's own centre search is exhausted at this offset, same as Q2184");
+    assert!(
+        why.contains("ACurveTheFacesEitherSideOfItDoNotName"),
+        "{why}"
     );
-    panic!("probe");
 }
 
-fn refusal_name(why: &str) -> &str {
-    let after = why.rsplit("why: ").next().unwrap_or(why);
-    let after = after.trim_start_matches(|c: char| !c.is_alphabetic());
-    after
-        .split(|c: char| c == ' ' || c == '{' || c == '(')
-        .next()
-        .unwrap_or(after)
+/// Moved out by `1e6` along `(1, 1, 1)`: the file reads back and refuses
+/// `CannotNameWhichPieceOfACrossingThisIs` before the longitude margin in
+/// `cut_in_two` is ever reached. This is not the margin the row asks about —
+/// it is the STEP round trip's own crossing decision, out of `rcad-geom`'s
+/// `walk.rs`, made ambiguous by the extra rounding a far offset adds on top of
+/// the usual one. 1065 of the 1080 degree/deflection combinations swept at
+/// `1e6`, and the same count at `1e9`, are refused this way; this pins one.
+#[test]
+fn the_bend_moved_out_by_a_million_refuses_on_read_back() {
+    let offset = Vector::new(1e6, 1e6, 1e6);
+    let why = the_same_volume_after_its_file(RING, TUBE, offset, 1.0, 0.5)
+        .expect_err("the crossing is ambiguous on read back at this offset");
+    assert!(
+        why.contains("CannotNameWhichPieceOfACrossingThisIs"),
+        "{why}"
+    );
 }
 
 /// The bend of `ring` and `tube`, moved by `offset` and turned `degrees`
