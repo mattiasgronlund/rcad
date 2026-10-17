@@ -41,8 +41,8 @@ use crate::enclosure::{
 };
 use crate::exact::Exact;
 use crate::intersect::{
-    Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS, ask,
-    how_a_ball_on_a_cones_axis_meets_it, one_cone_either_way_round,
+    Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS,
+    ask, how_a_ball_on_a_cones_axis_meets_it, one_cone_either_way_round,
     whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
     whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
@@ -837,12 +837,19 @@ fn what_a_run_between_these_two_lies_on(
         // A plane along a pipe's axis cuts it in straight lines, and a run that
         // is one of those is picked out by a half-space rather than being
         // `Straight`, so it reaches here and there is no ellipse to build.
+        // **Asked exactly, as `intersect` asks it.** A side a rounding off
+        // parallel to a pipe can have an `f64` dot with its axis of exactly
+        // nothing, and read that way the closed ellipse `intersect` names was
+        // read as straight lines (Q2189).
         [Surface::Plane(flat), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Plane(flat)] => {
-            if flat.normal().dot(pipe.axis().direction()) == 0.0 {
-                return Ok(WhatARunLiesOn::StraightLine);
+            match how_a_plane_leans_against_a_pipes_axis(&flat, &pipe, policy, log)? {
+                Decision::Zero => Ok(WhatARunLiesOn::StraightLine),
+                Decision::Pos | Decision::Neg => {
+                    where_a_plane_cuts_a_pipe(&flat, &pipe).map(WhatARunLiesOn::Conic)
+                }
+                other => unreachable!("a sign question answers with a sign: {other:?}"),
             }
-            where_a_plane_cuts_a_pipe(&flat, &pipe).map(WhatARunLiesOn::Conic)
         }
         // Every shape a plane and a cone cross in reaches here, and every one
         // of them is answered: `where_a_plane_cuts_a_cone` asks the same two
@@ -3821,6 +3828,36 @@ fn where_a_plane_cuts_a_ball(flat: &Plane, ball: &Sphere) -> Result<Conic> {
     })
 }
 
+/// How a plane leans against a pipe's axis: the sign of `n·w`, asked through
+/// the cascade and then the policy, with the same question, measure and
+/// inputs [`intersect`](crate::intersect) names the pair's crossing by, so the
+/// two never disagree on whether it is straight lines or one ellipse.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when neither the cascade nor the policy settles the
+/// sign, which only a product of a normal and a direction component down among
+/// the subnormals leaves.
+fn how_a_plane_leans_against_a_pipes_axis(
+    flat: &Plane,
+    pipe: &Cylinder,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Decision> {
+    let normal = flat.normal().components();
+    let along = pipe.axis().direction().components();
+    let leans = Question {
+        named: WHERE_A_PLANE_AND_A_PIPE_CROSS,
+        enclosing: || dot_enclosing(exactly(normal), exactly(along)),
+        exactly: || Exact::dot_of(normal, along),
+    };
+    let at = [
+        PredicatePoint::from(flat.origin().coordinates()),
+        PredicatePoint::from(pipe.axis().origin().coordinates()),
+    ];
+    ask(&leans, Measures::Length, &at, policy, log)
+}
+
 /// The ellipse where a plane cuts a pipe it leans across.
 ///
 /// The centre is where the axis meets the plane. Across the pipe the ellipse is
@@ -3831,22 +3868,35 @@ fn where_a_plane_cuts_a_ball(flat: &Plane, ball: &Sphere) -> Result<Conic> {
 /// length it has while the lean is an angle, and the pipe is `radius` wide at
 /// any such length (`docs/decisions.md` §118.10).
 ///
+/// **`n·w` is summed exactly and rounded once.** Summed in `f64` it can come
+/// out exactly nothing for a plane a rounding off parallel to the axis, whose
+/// ellipse is about `10¹⁶` long, and dividing by it then is dividing by zero.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a product of a normal and a
+/// direction component falls below where it can be kept exactly, as
+/// [`where_a_plane_cuts_a_cone`] refuses the same product.
+///
 /// # Panics
 ///
-/// Never, and unlike [`where_a_plane_cuts_a_cone`] below this one can say so
-/// without asking anything twice. The only call is in
-/// [`what_a_run_between_these_two_lies_on`], which answers `StraightLine` three
-/// lines earlier on `flat.normal().dot(pipe.axis().direction()) == 0.0` — the
-/// same two `f64`s through the same product as the assert reads, in the same
-/// function, with no branch between. A caller-stated run gets that answer and
-/// never arrives here, which
+/// Never. The only call is in [`what_a_run_between_these_two_lies_on`], which
+/// answers `StraightLine` unless [`how_a_plane_leans_against_a_pipes_axis`]
+/// proved `n·w` above or below zero. The exact sum is then not zero, and
+/// [`Exact::nearest_f64`] is within a rounding or two of it, so not zero
+/// either. A
+/// caller-stated run on a plane along the axis gets `StraightLine` and never
+/// arrives here, which
 /// `a_closed_run_a_caller_names_on_a_crossing_of_straight_lines_is_refused_by_name`
 /// (`crates/rcad-geom/tests/the_degeneracies_a_crossing_has_to_answer.rs`)
 /// walks in through both public doors to show.
 fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
     let normal = flat.normal();
     let along = pipe.axis().direction();
-    let leans = normal.dot(along);
+    let Some(leans) = Exact::dot_of(normal.components(), along.components()) else {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    };
+    let leans = leans.nearest_f64();
     assert!(
         leans != 0.0,
         "a plane along a pipe's axis crosses it in straight lines, which are walked by their ends"
