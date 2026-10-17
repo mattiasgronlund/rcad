@@ -8527,7 +8527,12 @@ impl<'f> Arrangement<'f> {
     /// square to that axis, and the axis is the cone's. On a ball it is a cone
     /// whose axis runs through the ball's centre, cutting it in two circles
     /// square to the cone's axis, and the axis is the cone's: `intersect` names
-    /// no other cone against a ball. Two pipes are read another way: a fat pipe
+    /// no other cone against a ball. Or it is a ring whose axis runs through
+    /// the ball's centre, cutting it in two circles square to the ring's axis,
+    /// and the axis is the ring's: `intersect` names no other ring against a
+    /// ball, and a ball cuts a ring on its axis in two circles at most, since
+    /// a half-plane through the axis meets the ball in one circle and the
+    /// ring's tube in another (Q2212). Two pipes are read another way: a fat pipe
     /// cuts a thin one it swallows in two loops round the thin pipe's axis, the
     /// half-space's flat surface holds the fat pipe's axis rather than facing
     /// along either, and
@@ -8600,6 +8605,7 @@ impl<'f> Arrangement<'f> {
         let axis = match (self.surface, partner) {
             (Surface::Cylinder(pipe), _) => pipe.axis(),
             (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) => cone.axis(),
+            (Surface::Sphere(_), Surface::Torus(ring)) => ring.axis(),
             (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) => {
                 return PastThePicker::No;
             }
