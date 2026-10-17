@@ -3223,8 +3223,13 @@ fn settle_against_each(
         // A classification nobody could make is not a decision anybody took, so
         // it says nothing in the log (§5) — and criterion 7 would otherwise read
         // it as slop this fuse had accepted, which is exactly the conflation
-        // §17.2 spends a section keeping apart.
-        if !matches!(placed, Containment::Undecidable { .. }) {
+        // §17.2 spends a section keeping apart. Nor does one on the skin, which
+        // places nothing: the point is abandoned, or placed by the one face its
+        // box meets, which asks nothing of the ray.
+        if !matches!(
+            placed,
+            Containment::Undecidable { .. } | Containment::OnBoundary
+        ) {
             ray.drain_into(log);
         }
         match placed {
@@ -3255,7 +3260,11 @@ fn settle_against_each(
             Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(Settled::Abandoned),
             // Coincidence was asked above and found no face the piece lies on.
             Containment::OnBoundary | Containment::Undecidable { .. } => {
-                return Ok(Settled::Abandoned);
+                match by_the_one_face_its_box_meets(solid, piece, point, policy, log) {
+                    Some(true) => return Ok(Settled::At(Placement::Inside)),
+                    Some(false) => (),
+                    None => return Ok(Settled::Abandoned),
+                }
             }
         }
     }
@@ -3371,6 +3380,98 @@ fn the_corners_of_the_plane_in(flat: &Plane, reach: PredicatePoint) -> [[[f64; 4
     let [first, second] = ends(and_across);
     [(one, first), (one, second), (other, first), (other, second)]
         .map(|(this, that)| [flat.coefficients(), at(across, this), at(and_across, that)])
+}
+
+/// Whether a flat piece is inside `solid`, read off the one face of `solid`
+/// that the box of `point` meets, where that face's plane is parallel to the
+/// piece's, number for number, and not the same plane: inside when the piece's
+/// plane is behind the face's, outside when it is in front. `None` where the
+/// box meets no such face, or meets another face too, or a sign is not proved.
+///
+/// **Inside a box that one face alone meets, the solid's skin is that face.**
+/// The box is `point`'s stretched until it holds points of the piece's plane,
+/// which [`the_piece_holds`] showed the piece holds, and then of the face's
+/// plane `n · x = e`, turned out of the solid. Every other face has its surface
+/// leave the box strictly on one side or holds no part of it, as
+/// [`a_face_may_run_between_it_and_the_plane`] asks it, and the face holds the
+/// whole box: every point `g` of its plane in the box is in its material, clear
+/// of its boundary. The piece's plane, with the same normal `n`, is
+/// `n · x = d`. Take a point `x` of the piece in the box. The segment from `g`
+/// to `x` lies in the box, so it meets no other face, and none of it but `g` is
+/// on the face's plane, which `d ≠ e` keeps `x` off. Beside `g` the solid is
+/// the side of the face's plane its material is on, so the whole segment past
+/// `g` is inside the solid where `d < e` and outside it where `d > e`, and so is
+/// `x`. The piece was cut by every surface of the solid, so all of it lies
+/// where `x` does (§17.4). `d` and `e` are two `f64`s compared exactly, and
+/// nothing is a tolerance but what the policy lets the faces' own tests take.
+///
+/// The ray cannot see this. A box across a face's plane is one it cannot put
+/// on either side, though every point of the piece in it is on one.
+///
+/// A half bar cut flush along its flat face by a block, the two turned 0.4
+/// about `x` and then shifted by `(7, −5, 2.5)`, has the block's face one ulp
+/// past the flat face, on the side away from the bar: the bar's material is
+/// `n · x < −3.6317591142427994` and the block's `n · x > −3.631759114242799`.
+/// Every point found inside the block's face across from the flat face is a
+/// box `4e−15` across both planes, and every fuse of the two was refused
+/// placing that piece against the bar (Q2043).
+fn by_the_one_face_its_box_meets(
+    solid: SolidView<'_>,
+    piece: &Piece,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<bool> {
+    let flat = piece.surface.as_plane()?;
+    let reach = stretched_to_the_plane(flat, point)?;
+    solid.faces().find_map(|face| {
+        let Surface::Plane(plane) = face.surface() else {
+            return None;
+        };
+        let outward = if face.orientation().is_reversed() {
+            plane.reversed()
+        } else {
+            plane
+        };
+        let normal = outward.normal().components();
+        let along = [*flat, flat.reversed()]
+            .into_iter()
+            .find(|one| one.normal().components() == normal)?;
+        let (piece_at, face_at) = (along.offset(), outward.offset());
+        if !(piece_at.is_finite() && face_at.is_finite()) || piece_at == face_at {
+            return None;
+        }
+        let inside = piece_at < face_at;
+        let reach = stretched_to_the_plane(&plane, reach)?;
+        let mut asked = ProvenanceLog::new();
+        if !matches!(
+            solid.face_holds_the_point(face.key(), reach, policy, &mut asked),
+            Ok(OnAFace::Held)
+        ) {
+            return None;
+        }
+        let only_this_one_meets_it =
+            solid
+                .faces()
+                .filter(|other| other.key() != face.key())
+                .all(|other| {
+                    let surface = other.surface();
+                    let clear = match surface.as_plane() {
+                        Some(plane) => side_of_a_flat_face(plane, reach),
+                        None => side_of_surface(&surface, reach),
+                    };
+                    matches!(clear, Decision::Pos | Decision::Neg)
+                        || matches!(
+                            solid.face_holds_the_point(other.key(), reach, policy, &mut asked),
+                            Ok(OnAFace::NotHeld)
+                        )
+                });
+        if !only_this_one_meets_it {
+            return None;
+        }
+        asked.drain_into(log);
+        Some(inside)
+    })
 }
 
 /// What one point inside a piece says about where the piece sits.
