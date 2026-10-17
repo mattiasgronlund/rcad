@@ -57,9 +57,9 @@
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
-    Sphere, Surface, Vector,
+    Sphere, Surface, Torus, Vector,
 };
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
     DraftStep, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
 };
@@ -1344,22 +1344,22 @@ fn the_ball_inside_a_hole(radius: f64, off: f64) -> f64 {
 }
 
 /// A ball of radius `0.5` centred on the wall of a bar of radius 2, height 10,
-/// is refused `AClosedEdgeOfTheAnswerWouldStartAtAPole` under every rule both
-/// ways round: on the bar's pipe with the bar first, and on the ball with the
-/// ball first. So it is with the slab `|x| < 1` along the bar, which was to
-/// make a walk going round nothing on a pipe, and without it; and so it is
-/// with the ball on the bar's seam at `(2, 0, 5)` and a quarter turn round at
-/// `(0, 2, 5)`.
+/// is answered under every rule both ways round, with the ball on the bar's
+/// seam at `(2, 0, 5)` and a quarter turn round at `(0, 2, 5)`. Each answer is
+/// one solid.
 ///
 /// **The ball's poles lie on the wall.** A sphere stores only its centre and
 /// radius, and is parametrised about world `z` (`validate.rs`'s
 /// `the_way_it_is_parametrised_about`), so turning the ball moves neither pole.
 /// On the seam they are `(2, 0, 4.5)` and `(2, 0, 5.5)`, both on the wall. The
 /// ball crosses the wall in one loop, `16 sin²(θ/2) + (z − 5)² = 0.25` with `θ`
-/// round the bar from the ball's centre, whose top and bottom are those poles.
-/// A probe in Q1985 moved the ball's centre `0.1` in or out from the wall, and
-/// the bar and the ball alone then answered every rule both ways round with
-/// one solid, volumes not checked. The answer exists, so this is a gap.
+/// round the bar from the ball's centre, whose top and bottom are those poles,
+/// and the loop starts at the top one. Until Q2171 its one closed edge started
+/// there, and every rule was refused `AClosedEdgeOfTheAnswerWouldStartAtAPole`,
+/// on the bar's pipe with the bar first and on the ball with the ball first:
+/// `fuse/arrange.rs`'s `across_a_circle_that_starts_at_a_pole` cut a loop a
+/// second time only for a ball against a plane. It now cuts this one at the
+/// other pole too, so it is two edges with a direction each.
 ///
 /// The loop runs back and forth round the bar's axis, which no determinant
 /// orders (§34.10). Q1554 ordered only the two loops of a ball that swallows a
@@ -1374,53 +1374,207 @@ fn the_ball_inside_a_hole(radius: f64, off: f64) -> f64 {
 /// refused `CannotTellTheCellsOfAFaceApart` on the pipe, until Q1777's
 /// `the_one_on_its_side_of_every_cut` told those cells apart.
 ///
+/// **The answer.** The bar is `40π` and the ball `π/6`, and the two share
+/// [`the_small_ball_inside_the_bar`].
+///
 /// Named `a_small_ball_on_a_bars_wall_is_refused_before_any_cell` until Q1766,
-/// and `a_small_ball_on_a_bars_seam_is_refused_telling_the_pipes_cells_apart`
-/// until Q1985.
+/// `a_small_ball_on_a_bars_seam_is_refused_telling_the_pipes_cells_apart`
+/// until Q1985, and
+/// `a_small_ball_centred_on_a_bars_wall_is_refused_where_its_poles_lie_on_the_wall`
+/// until Q2171.
 #[test]
-fn a_small_ball_centred_on_a_bars_wall_is_refused_where_its_poles_lie_on_the_wall() {
-    for (what, [x, y, z], with_the_slab) in [
-        ("on its seam, with the slab", [2.0, 0.0, 5.0], true),
-        ("on its seam", [2.0, 0.0, 5.0], false),
-        ("a quarter turn from its seam", [0.0, 2.0, 5.0], false),
+fn a_small_ball_centred_on_a_bars_wall_is_answered_where_its_poles_lie_on_the_wall() {
+    use std::f64::consts::PI;
+    let (bar, ball, shared) = (40.0 * PI, PI / 6.0, the_small_ball_inside_the_bar());
+    for (what, [x, y, z]) in [
+        ("on its seam", [2.0, 0.0, 5.0]),
+        ("a quarter turn from its seam", [0.0, 2.0, 5.0]),
     ] {
         for (rule, first) in every_rule_both_ways() {
             let mut model = a_model();
-            let bar = model
+            let pipe = model
                 .add_round_bar(2.0, 10.0, &Isometry::identity())
                 .expect("a bar");
-            let mut others = Vec::new();
-            if with_the_slab {
-                others.push(block(&mut model, [-1.0, -5.0, -1.0], [1.0, 5.0, 11.0]));
-            }
-            others.push(model.add_ball(0.5, &shift(x, y, z)).expect("a small ball"));
-            let (arguments, tools) = if first {
-                (vec![bar], others)
-            } else {
-                (others, vec![bar])
+            let small = model.add_ball(0.5, &shift(x, y, z)).expect("a small ball");
+            let what = format!("a ball {what}, {rule:?}, the bar first {first}");
+            let answer = fuse(&mut model, pipe, small, rule, first)
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let volumes = match (rule, first) {
+                (Rule::Union, _) => vec![bar + ball - shared],
+                (Rule::Intersection, _) => vec![shared],
+                (Rule::Difference, true) => vec![bar - shared],
+                (Rule::Difference, false) => vec![ball - shared],
+                (other, _) => panic!("not a rule this probes: {other:?}"),
             };
-            let refused = model.fuse(
+            assert_each_holds(&model, &answer, &volumes, &what);
+        }
+    }
+}
+
+/// The ball and bar of
+/// [`a_small_ball_centred_on_a_bars_wall_is_answered_where_its_poles_lie_on_the_wall`],
+/// the ball on the seam, with the block `|x| < 1`, `|y| < 5`, `−1 < z < 11`
+/// beside the ball and through the bar, which was to make a walk going round
+/// nothing on the pipe. It is fused with the ball, against the bar, under every
+/// rule both ways round, and was refused `AClosedEdgeOfTheAnswerWouldStartAtAPole`
+/// with the ball and bar alone until Q2171.
+///
+/// **The answer.** The block misses the ball, and holds the strip of the bar
+/// between `x = ±1`, `10(2√3 + 4π/3)`, which leaves the bar's two sides
+/// `10(4π/3 − √3)` each. So the bar and the block less the bar are each one
+/// solid, and the bar less the block is two, its side at `x > 1` dented by the
+/// ball.
+#[test]
+fn a_small_ball_on_a_bars_wall_beside_a_block_through_the_bar_is_answered_under_every_rule() {
+    use std::f64::consts::PI;
+    let (bar, ball, shared) = (40.0 * PI, PI / 6.0, the_small_ball_inside_the_bar());
+    let (slab, strip) = (240.0, 10.0 * (2.0 * 3f64.sqrt() + 4.0 * PI / 3.0));
+    let side = 10.0 * (4.0 * PI / 3.0 - 3f64.sqrt());
+    for (rule, first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let pipe = model
+            .add_round_bar(2.0, 10.0, &Isometry::identity())
+            .expect("a bar");
+        let others = vec![
+            block(&mut model, [-1.0, -5.0, -1.0], [1.0, 5.0, 11.0]),
+            model
+                .add_ball(0.5, &shift(2.0, 0.0, 5.0))
+                .expect("a small ball"),
+        ];
+        let (arguments, tools) = if first {
+            (vec![pipe], others)
+        } else {
+            (others, vec![pipe])
+        };
+        let what = format!("{rule:?}, the bar first {first}");
+        let answer = model
+            .fuse(
                 &arguments,
                 &tools,
                 rule,
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"))
+            .solids()
+            .to_vec();
+        let mut volumes = match (rule, first) {
+            (Rule::Union, _) => vec![bar + slab - strip + ball - shared],
+            (Rule::Intersection, _) => vec![shared, strip],
+            (Rule::Difference, true) => vec![side - shared, side],
+            (Rule::Difference, false) => vec![ball - shared, slab - strip],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        volumes.sort_by(f64::total_cmp);
+        assert_each_holds(&model, &answer, &volumes, &what);
+    }
+}
+
+/// The part of the ball of radius `0.5` at `(2, 0, 5)` inside the bar of
+/// radius 2 up `z`, by Simpson's rule over its slices.
+///
+/// The slice at height `z` is the lens the ball's disc of radius
+/// `s = √(0.25 − (z − 5)²)` shares with the bar's disc, two centres 2 apart:
+/// `s² acos(s/4) + 4 acos(1 − s²/8) − (s/2)√(16 − s²)`.
+fn the_small_ball_inside_the_bar() -> f64 {
+    by_simpsons_rule(4.5, 5.5, |z| {
+        let s = (0.25 - (z - 5.0) * (z - 5.0)).max(0.0).sqrt();
+        s * s * (s / 4.0).acos() + 4.0 * (1.0 - s * s / 8.0).acos()
+            - s / 2.0 * (16.0 - s * s).sqrt()
+    })
+}
+
+/// A ball of radius `3/8` at the origin against a ball of radius `5/8` whose
+/// centre is `1/2` away along `x` or `y`, under every rule both ways round.
+///
+/// The two cross in the circle of radius `3/8` on the plane through the small
+/// ball's centre square to the line between the centres, which is a great
+/// circle of the small ball through both its poles, `(0, 0, ±3/8)`. The walk
+/// starts that circle at one of the poles, and each fuse was refused
+/// `AClosedEdgeOfTheAnswerWouldStartAtAPole` until Q2171 cut it at the other
+/// pole as well, the point across. Probed at eight times this size, the big
+/// ball along `−x` was answered before, so it is not run here.
+///
+/// **The answer.** The balls are `9π/128` and `125π/384`, and they share
+/// [`the_lens_two_balls_share`]: the small ball's half past the circle and a
+/// cap `1/8` deep of the big one, `17π/384`.
+#[test]
+fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_every_rule() {
+    use std::f64::consts::PI;
+    let (small, big) = (9.0 * PI / 128.0, 125.0 * PI / 384.0);
+    let lens = the_lens_two_balls_share(0.625, 0.375, 0.5);
+    for (what, [x, y]) in [("x", [0.5, 0.0]), ("y", [0.0, 0.5])] {
+        for (rule, small_first) in every_rule_both_ways() {
+            let mut model = a_model();
+            let one = model
+                .add_ball(0.375, &Isometry::identity())
+                .expect("a ball");
+            let other = model.add_ball(0.625, &shift(x, y, 0.0)).expect("a ball");
+            let what =
+                format!("the big ball along {what}, {rule:?}, the small first {small_first}");
+            let answer = fuse(&mut model, one, other, rule, small_first)
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let volumes = match (rule, small_first) {
+                (Rule::Union, _) => vec![small + big - lens],
+                (Rule::Intersection, _) => vec![lens],
+                (Rule::Difference, true) => vec![small - lens],
+                (Rule::Difference, false) => vec![big - lens],
+                (other, _) => panic!("not a rule this probes: {other:?}"),
+            };
+            assert_each_holds(&model, &answer, &volumes, &what);
+        }
+    }
+}
+
+/// A whole ring about `x`, 4 round a tube of 1, against a ball of radius 4 at
+/// `(1, 0, 0)` or `(−1, 0, 0)`, under every rule both ways round.
+///
+/// For the ball at `(1, 0, 0)`, the two cross in two circles round `x`: one at
+/// `x = 1` of radius 4, the top of the tube and a great circle of the ball
+/// through both its poles, and one at `x = −15/17` of radius `60/17`. The walk
+/// starts the first at one of the poles, and each fuse was refused
+/// `AClosedEdgeOfTheAnswerWouldStartAtAPole` until Q2171 cut it at the point
+/// across as well, the ball's other pole. Each is refused in `fuse/select.rs`
+/// now: no point was found inside a piece of a face whose corners are the
+/// ball's two poles. The ball at `(−1, 0, 0)` is the same shape mirrored.
+///
+/// **The answer exists.** The ring is `8π²` and the ball `256π/3`, and the part
+/// of the ring inside the ball at `(1, 0, 0)` is `π(2π + 4 atan(15/8) − 32/17)`.
+/// Its slice at `x` is the ring's annulus between radii `4 ± √(1 − x²)` inside
+/// the ball's disc of radius `√(16 − (x − 1)²)`, which never reaches past the
+/// annulus, so the slice is `π(8√(1 − x²) + 2x − 2)` wherever that is above
+/// nothing: from `x = −15/17`, where `4√(1 − x²) = 1 − x`, to `x = 1`.
+#[test]
+fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_finds_no_point_inside_a_piece() {
+    for x in [1.0, -1.0] {
+        let poles = [-4.0, 4.0].map(|z| PredicatePoint::Exact([x, 0.0, z]));
+        for (rule, ring_first) in every_rule_both_ways() {
+            let mut model = a_model();
+            let one = a_whole_ring_about_x(&mut model);
+            let other = model.add_ball(4.0, &shift(x, 0.0, 0.0)).expect("a ball");
+            let what = format!("the ball at x = {x}, {rule:?}, the ring first {ring_first}");
+            let refused = fuse(&mut model, one, other, rule, ring_first);
+            let Err(Error::Undecidable { records }) = refused else {
+                panic!("{what}: {refused:?}");
+            };
+            let [record] = records.records() else {
+                panic!("{what}: one record, the refusal: {records:#?}");
+            };
+            assert_eq!(
+                record.predicate(),
+                "a point inside a piece of a face",
+                "{what}: {record:#?}"
             );
-            let what = format!("a ball {what}, {rule:?}, the bar first {first}");
-            let face = match refused {
-                Err(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face }) => face,
-                other => panic!("{what}: {:?}", other.map(|fused| fused.solids().to_vec())),
-            };
-            let surface = model
-                .face(face)
-                .expect("the refusal names a face of the model")
-                .surface();
-            let on_the_first = if first {
-                matches!(surface, Surface::Cylinder(_))
-            } else {
-                matches!(surface, Surface::Sphere(_))
-            };
-            assert!(on_the_first, "{what}: refused on {surface:?}");
+            assert_eq!(record.level(), Level::Interval, "{what}: {record:#?}");
+            assert!(
+                matches!(record.outcome(), Decision::Undecidable { enclosure } if enclosure == f64::INFINITY),
+                "{what}: no point was found at all, so nothing could be measured: {record:#?}"
+            );
+            let corners = record.inputs();
+            assert!(
+                corners.len() == poles.len() && poles.iter().all(|pole| corners.contains(pole)),
+                "{what}: the piece's corners are the ball's two poles: {corners:?}"
+            );
         }
     }
 }
@@ -2010,4 +2164,69 @@ fn a_polyhedron(model: &mut Model, corners: &[[f64; 3]], faces: &[&[usize]]) -> 
     builder
         .build(model, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a polyhedron")
+}
+
+/// The whole ring 4 round a tube of 1, about `z` and turned a quarter about `y`
+/// onto `x`. Its two faces are the ring's halves either side of `z = 0`, joined
+/// along the two circles that plane cuts it in, as
+/// `a_ring_crossed_in_two_closed_curves.rs` writes it.
+fn a_whole_ring_about_x(model: &mut Model) -> SolidKey {
+    let cut = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+        .expect("the z axis is a unit normal");
+    let skin = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower"));
+    let mut builder = SolidBuilder::new();
+    let [outer, inner] = [5.0, 3.0].map(|reach| {
+        let corner = builder
+            .add_vertex(Point::new(reach, 0.0, 0.0))
+            .expect("a corner on the ring and on the plane");
+        builder
+            .add_edge(
+                corner,
+                corner,
+                EdgeRun::RightRoundWhereItCrosses {
+                    and: Surface::Plane(cut),
+                },
+            )
+            .expect("a rim is a whole closed curve, so one corner twice is an edge")
+    });
+    let face = |builder: &mut SolidBuilder, walks: [(_, Orientation); 2]| {
+        let wires = walks.map(|(edge, turn)| {
+            let coedge = builder
+                .add_coedge(edge, turn)
+                .expect("an edge of this build");
+            builder
+                .add_wire(&[DraftStep::Along(coedge)])
+                .expect("one closed edge is a wire")
+        });
+        builder
+            .add_face(skin, &wires)
+            .expect("a band between two circles")
+    };
+    let top = face(
+        &mut builder,
+        [
+            (outer, Orientation::Reversed),
+            (inner, Orientation::Forward),
+        ],
+    );
+    let bottom = face(
+        &mut builder,
+        [
+            (outer, Orientation::Forward),
+            (inner, Orientation::Reversed),
+        ],
+    );
+    builder
+        .add_shell(&[(top, Orientation::Forward), (bottom, Orientation::Forward)])
+        .expect("two halves close");
+    let ring = builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a whole ring in two faces is a solid");
+    model
+        .place_solid(
+            ring,
+            &Isometry::quarter_turns(&Axis::y(), 1).expect("y is a whole direction"),
+        )
+        .expect("a solid of this model");
+    ring
 }
