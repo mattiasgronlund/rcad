@@ -29,8 +29,8 @@
 //! along the whole bar. Placed by the bar's turn, the side is a rounding off
 //! parallel to the axis and cuts both circles the pipe and the cone share,
 //! and before row Q2177 no road took a plane that cuts them and leans to the
-//! axis they share. The third test pins the four points that triple meets at,
-//! the difference and the union, and the refusal the intersection still gets.
+//! axis they share. The third test pins the four points that triple meets at
+//! and every rule.
 //! The side's normal and the axis have an `f64` dot of exactly nothing, and
 //! before row Q2233 ordering points round the ellipse they cross in read that
 //! dot and called them straight lines.
@@ -53,11 +53,12 @@
 //! it to `1.6e−16` under it. The sixth test pins that every rule is refused,
 //! and the seventh that the answer would need a spread past `10¹⁶`: a limit.
 //!
-//! None of these answers is measured: the bar alone, before any fuse, is refused
-//! `DeflectionBelowWhatAMeshCanReach` with `closest` about `242259` at every
-//! deflection asked. Unplaced, or turned about its own axis, it measures, and a
-//! bar of two pipes split at the same circle is refused the same way: row
-//! Q566's fault.
+//! The answers are counted by the faces they have and not measured. The bar
+//! alone, placed by the turn, meshes at `0.01` and at `4.06`. Before row Q2183
+//! it was refused `DeflectionBelowWhatAMeshCanReach` with `closest` about
+//! `242259`: the circle the pipe and the cone share was bounded on the pipe
+//! only by the pipe crossed with itself, read in `f64` as running about `10¹⁶`
+//! up the axis, and since then the plane its run names bounds it too.
 
 use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, Isometry, MeetOfThree, Orientation, Plane, Point, Scale,
@@ -153,8 +154,16 @@ fn a_chamfered_bar_less_a_block_six_across_keeps_the_bar_above_the_blocks_top() 
 /// The difference is a D-flat along the whole bar: the chamfer, the pipe, the
 /// bar's bottom, its top and the flat. The union is the chamfer and the pipe
 /// with the bar's bottom and top and the block's six sides. The intersection
-/// is refused `TwoPatchesOfTheMeshDrewTheSameSide`: the coarsest mesh of the
-/// sliver folds, and row Q2240 has that.
+/// is the sliver past the side: a piece of the chamfer and of the pipe, closed
+/// by the flat and by the bar's top, its bottom missing the block.
+///
+/// Before row Q2240 the intersection was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`. The coarsest
+/// mesh of the sliver folds, and the next one finer was refused
+/// `DeflectionBelowWhatAMeshCanReach` with `closest` about `242259`: the
+/// sliver's arc of the circle the pipe and the cone share is a piece of a
+/// crossing whose second surface is the pipe itself, and the pipe crossed
+/// with itself was read as running about `10¹⁶` up the axis.
 #[test]
 fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_cuts_a_flat_along_it() {
     let turn = the_turn();
@@ -205,7 +214,11 @@ fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_cuts_a_flat_a
          what this pins"
     );
 
-    for (rule, wanted) in [(Rule::Difference, (1, 1, 3)), (Rule::Union, (1, 1, 8))] {
+    for (rule, wanted) in [
+        (Rule::Difference, (1, 1, 3)),
+        (Rule::Union, (1, 1, 8)),
+        (Rule::Intersection, (1, 1, 2)),
+    ] {
         let (mut model, bar, block) = a_bar_and_a_block_beside_its_axis(&turn);
         assert_eq!(
             what_the_fuse_is_made_of(&mut model, bar, block, rule),
@@ -213,22 +226,6 @@ fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_cuts_a_flat_a
             "the cones, pipes and planes {rule:?} has faces on"
         );
     }
-
-    let (mut model, bar, block) = a_bar_and_a_block_beside_its_axis(&turn);
-    let refused = model.fuse(
-        &[bar],
-        &[block],
-        Rule::Intersection,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(
-            refused,
-            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 })
-        ),
-        "{refused:?}"
-    );
 }
 
 /// The bar and the block from `x = 1.5`, each placed by `turn`.
