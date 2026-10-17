@@ -2045,7 +2045,10 @@ impl<'f> Arrangement<'f> {
     /// the pin's cap.
     fn place_the_meets(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         let never_left_out = self.crossings_never_left_out();
-        let mut reached_by_no_face: Vec<usize> = Vec::new();
+        let mut known_unreached: Vec<Option<bool>> = vec![None; self.crossings.len()];
+        let mut left_out_where_it_refuses: Vec<usize> = Vec::new();
+        let mut left_out_where_it_answers: Vec<usize> = Vec::new();
+        let mut set_aside: Vec<(usize, usize, MeetOfThree)> = Vec::new();
         let mut folded_into_a_corner: Vec<usize> = Vec::new();
         let mut held: Option<rcad_geom::Error> = None;
         for first in 0..self.crossings.len() {
@@ -2082,9 +2085,10 @@ impl<'f> Arrangement<'f> {
                         let unreached: SmallVec<[usize; 2]> = [first, second]
                             .into_iter()
                             .filter(|&crossing| {
-                                self.no_face_that_draws_it_reaches_it(
+                                self.no_face_reaches(
                                     crossing,
                                     &never_left_out,
+                                    &mut known_unreached,
                                     log,
                                 )
                             })
@@ -2093,100 +2097,187 @@ impl<'f> Arrangement<'f> {
                             return Err(gave_up_on_it.into());
                         }
                         for crossing in unreached {
-                            if !reached_by_no_face.contains(&crossing) {
-                                reached_by_no_face.push(crossing);
+                            if !left_out_where_it_refuses.contains(&crossing) {
+                                left_out_where_it_refuses.push(crossing);
                             }
                         }
                         held.get_or_insert(gave_up_on_it);
                         continue;
                     }
                 };
-                // The tighter box is read here by a fold into a corner on both
-                // crossings and by nothing else; the order along a crossing
-                // narrows a node's box itself, only where it asks
-                // (`Arrangement::narrowed_box_of`). Working it out for every
-                // meet of three planes was 11 of 22 samples taken in placing
-                // the meets of a cut through the 1x39 pin header (§200.1).
-                let tight = if self.a_corner_is_on_both(first, second) {
-                    meet.boxed_tight(asked)
-                } else {
-                    meet.clone()
-                };
-                let MeetOfThree::At(places) = meet else {
-                    continue;
-                };
-                let MeetOfThree::At(tight) = tight else {
-                    unreachable!("a meet at points boxed tighter is still a meet at those points")
-                };
-                let places: SmallVec<[PredicatePoint; 2]> =
-                    places.into_iter().map(as_exact_as_it_is).collect();
-                let tight: SmallVec<[PredicatePoint; 2]> =
-                    tight.into_iter().map(as_exact_as_it_is).collect();
-                for (which, (&place, &boxed_tight)) in places.iter().zip(&tight).enumerate() {
-                    // Being *on* both surfaces is what the meet just worked out,
-                    // and asking a predicate to confirm it would be a second
-                    // opinion about a fact this line already holds — one that a
-                    // box straddling the surface cannot prove and would refuse.
-                    // What is still open is which curve of each pair it is on,
-                    // and only a pair naming more than one has anything to say.
-                    if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
-                        || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
-                    {
+                if self.a_place_of_it_is_on_both(first, second, &meet) {
+                    let unreached: SmallVec<[usize; 2]> = [first, second]
+                        .into_iter()
+                        .filter(|&crossing| {
+                            self.no_face_reaches(
+                                crossing,
+                                &never_left_out,
+                                &mut known_unreached,
+                                log,
+                            )
+                        })
+                        .collect();
+                    if !unreached.is_empty() {
+                        for crossing in unreached {
+                            if !left_out_where_it_answers.contains(&crossing) {
+                                left_out_where_it_answers.push(crossing);
+                            }
+                        }
+                        set_aside.push((first, second, meet));
                         continue;
                     }
-                    let mut sorted = surfaces;
-                    sorted.sort_by(|one, other| {
-                        name_of_surface_bits(one).cmp(&name_of_surface_bits(other))
-                    });
-                    let which = u8::try_from(which).expect("three surfaces meet at most twice");
-                    if let Some(corner) = self.the_corner_that_is_this_place(
-                        first,
-                        second,
-                        place,
-                        boxed_tight,
-                        &places,
-                    ) {
-                        self.nodes[corner].stands_for_too((sorted, which));
-                        folded_into_a_corner.extend([first, second]);
-                        continue;
-                    }
-                    self.nodes.push(Node {
-                        point: place,
-                        vertex: None,
-                        made_of: Some((sorted, which)),
-                        also: Vec::new(),
-                        half_way_round: false,
-                        crossings: vec![first, second],
-                    });
                 }
+                self.place_where_the_partners_meet(first, second, meet, &mut folded_into_a_corner);
             }
         }
-        if let Some(gave_up_on_it) = held {
-            let met_elsewhere = reached_by_no_face.iter().any(|crossing| {
-                folded_into_a_corner.contains(crossing)
-                    || self
-                        .nodes
-                        .iter()
-                        .any(|node| node.crossings.contains(crossing))
-            });
-            if met_elsewhere {
+        let mut left_out = left_out_where_it_refuses.clone();
+        for crossing in left_out_where_it_answers {
+            if !left_out.contains(&crossing) {
+                left_out.push(crossing);
+            }
+        }
+        if self.something_placed_is_on(&left_out, &folded_into_a_corner) {
+            for (first, second, meet) in set_aside {
+                self.place_where_the_partners_meet(first, second, meet, &mut folded_into_a_corner);
+            }
+            if let Some(gave_up_on_it) = held
+                && self.something_placed_is_on(&left_out_where_it_refuses, &folded_into_a_corner)
+            {
                 return Err(gave_up_on_it.into());
             }
-            for crossing in reached_by_no_face {
-                self.crossings[crossing].reaches_the_face = false;
-                let drawn_by: Vec<Surface> = self.crossings[crossing]
-                    .every_surface_that_draws_it()
-                    .copied()
-                    .collect();
-                for surface in drawn_by {
-                    if !self.cuts_reached_by_no_face.contains(&surface) {
-                        self.cuts_reached_by_no_face.push(surface);
-                    }
+            left_out = left_out_where_it_refuses;
+        }
+        for crossing in left_out {
+            self.crossings[crossing].reaches_the_face = false;
+            let drawn_by: Vec<Surface> = self.crossings[crossing]
+                .every_surface_that_draws_it()
+                .copied()
+                .collect();
+            for surface in drawn_by {
+                if !self.cuts_reached_by_no_face.contains(&surface) {
+                    self.cuts_reached_by_no_face.push(surface);
                 }
             }
         }
         self.place_the_middle_of_each_half();
         Ok(())
+    }
+
+    /// Whether a place where `meet` has the face's surface and the partners of
+    /// `first` and `second` meet is on both crossings, as far as what picks
+    /// each out of its pair's others can say: where
+    /// [`Arrangement::place_where_the_partners_meet`] would put a node or fold
+    /// one into a corner.
+    fn a_place_of_it_is_on_both(&self, first: usize, second: usize, meet: &MeetOfThree) -> bool {
+        let MeetOfThree::At(places) = meet else {
+            return false;
+        };
+        places.iter().any(|&place| {
+            let place = as_exact_as_it_is(place);
+            nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
+                && nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
+        })
+    }
+
+    /// [`Arrangement::no_face_that_draws_it_reaches_it`], worked out once per
+    /// crossing and kept in `known`, since a crossing is asked about once for
+    /// every other crossing it meets.
+    fn no_face_reaches(
+        &self,
+        crossing: usize,
+        never_left_out: &[bool],
+        known: &mut [Option<bool>],
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        *known[crossing].get_or_insert_with(|| {
+            self.no_face_that_draws_it_reaches_it(crossing, never_left_out, log)
+        })
+    }
+
+    /// Whether a node of any kind is on one of `crossings`, or a meet on one
+    /// was folded into a corner of the face.
+    fn something_placed_is_on(&self, crossings: &[usize], folded_into_a_corner: &[usize]) -> bool {
+        crossings.iter().any(|crossing| {
+            folded_into_a_corner.contains(crossing)
+                || self
+                    .nodes
+                    .iter()
+                    .any(|node| node.crossings.contains(crossing))
+        })
+    }
+
+    /// One node at each place in `meet` where the face's surface and the
+    /// partners of `first` and `second` meet, unless what picks a crossing out
+    /// rules the place off it, or a corner of the face already is that place
+    /// ([`Arrangement::the_corner_that_is_this_place`]), which then stands for
+    /// it and is noted in `folded_into_a_corner`.
+    fn place_where_the_partners_meet(
+        &mut self,
+        first: usize,
+        second: usize,
+        meet: MeetOfThree,
+        folded_into_a_corner: &mut Vec<usize>,
+    ) {
+        let surfaces = [
+            self.surface,
+            self.crossings[first].partner,
+            self.crossings[second].partner,
+        ];
+        let asked = three_planes_faced_the_one_way(surfaces);
+        let asked = [&asked[0], &asked[1], &asked[2]];
+        // The tighter box is read here by a fold into a corner on both
+        // crossings and by nothing else; the order along a crossing
+        // narrows a node's box itself, only where it asks
+        // (`Arrangement::narrowed_box_of`). Working it out for every
+        // meet of three planes was 11 of 22 samples taken in placing
+        // the meets of a cut through the 1x39 pin header (§200.1).
+        let tight = if self.a_corner_is_on_both(first, second) {
+            meet.boxed_tight(asked)
+        } else {
+            meet.clone()
+        };
+        let MeetOfThree::At(places) = meet else {
+            return;
+        };
+        let MeetOfThree::At(tight) = tight else {
+            unreachable!("a meet at points boxed tighter is still a meet at those points")
+        };
+        let places: SmallVec<[PredicatePoint; 2]> =
+            places.into_iter().map(as_exact_as_it_is).collect();
+        let tight: SmallVec<[PredicatePoint; 2]> =
+            tight.into_iter().map(as_exact_as_it_is).collect();
+        for (which, (&place, &boxed_tight)) in places.iter().zip(&tight).enumerate() {
+            // Being *on* both surfaces is what the meet just worked out,
+            // and asking a predicate to confirm it would be a second
+            // opinion about a fact this line already holds — one that a
+            // box straddling the surface cannot prove and would refuse.
+            // What is still open is which curve of each pair it is on,
+            // and only a pair naming more than one has anything to say.
+            if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
+                || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
+            {
+                continue;
+            }
+            let mut sorted = surfaces;
+            sorted
+                .sort_by(|one, other| name_of_surface_bits(one).cmp(&name_of_surface_bits(other)));
+            let which = u8::try_from(which).expect("three surfaces meet at most twice");
+            if let Some(corner) =
+                self.the_corner_that_is_this_place(first, second, place, boxed_tight, &places)
+            {
+                self.nodes[corner].stands_for_too((sorted, which));
+                folded_into_a_corner.extend([first, second]);
+                continue;
+            }
+            self.nodes.push(Node {
+                point: place,
+                vertex: None,
+                made_of: Some((sorted, which)),
+                also: Vec::new(),
+                half_way_round: false,
+                crossings: vec![first, second],
+            });
+        }
     }
 
     /// The nodes where two crossings of one pair meet: where two half
