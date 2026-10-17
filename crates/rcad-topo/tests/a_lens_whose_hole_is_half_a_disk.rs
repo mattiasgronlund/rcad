@@ -53,16 +53,16 @@
 //! all run, three curved surfaces, and
 //! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` refused every one of those
 //! twelve fuses until Q1284 read three pipes up `z` as the plane two of them
-//! differ by and two pipes. Now every one answers but **the union of the bars
+//! differ by and two pipes. Now every one answers. The union of the bars
 //! united and the half bar, both ways round, and the bars united less the half
-//! bar, which panic** in `rings_round`. The bars less the half bar would be
-//! `200π − 4L − 1.5π`, for the lens's area `L`, again one solid touching
+//! bar panicked in `rings_round` until queue row Q2228. The bars less the half
+//! bar is `200π − 4L − 1.5π`, for the lens's area `L`, again one solid touching
 //! itself along that line. There the line is an edge of both inputs: the bars'
 //! two walls meet along it, and so do the half bar's flat side and its pipe.
 //! So four input faces lie round it, and it was refused
 //! `ResultIsNotManifold { count: 4 }` until queue row Q1913, which parts such
 //! a line where one solid lies on both sides of it (`docs/decisions.md`
-//! §39.4). Parted, it meets the union's panic: the bars' cap touches itself at
+//! §39.4). Parted, it met the union's panic: the bars' cap touches itself at
 //! the lens corner in both (queue row Q1290).
 //!
 //! A half bar of radius 4 at the origin, whose flat side is the whole chord,
@@ -91,11 +91,12 @@
 //! answers that it holds the other, as under gdb above. A second ring that
 //! nothing could place is, since Q1253, refused
 //! `Error::CannotPlaceTheRingsOfAJoinedFlatFace` rather than reaching a panic
-//! in `rings_round`; only rings that each answer they hold none of the
-//! others still reach a panic there. The second is what
-//! the union of the bars united and the half bar at the lens corner reaches
-//! (`a_half_bar_whose_corner_is_the_lens_corner_mostly_answers`), on base
-//! `1c002fe1` with Q1284's change, and it was not traced.
+//! in `rings_round`. The union of the bars united and the half bar at the
+//! lens corner (`a_half_bar_whose_corner_is_the_lens_corner_answers`)
+//! reached a panic there on base `1c002fe1` with Q1284's change. Measured by
+//! Q2228, its cap is one ring, through the lens corner twice, whose corners
+//! wind against the plane, with no ring winding with it and none enclosing
+//! nothing. Since Q2228 that ring is the outline.
 //!
 //! `the_rings_of_the_cap` reads the outline first, as the face stores it, so
 //! the pins hold `rings_round` to that choice. Nothing else here would notice
@@ -527,22 +528,24 @@ fn assert_every_fuse_answers(
 /// lens `4L` and the half bar `2.5π` share `3A`.
 ///
 /// United first, the two bars answer the intersection both ways round,
-/// `1.5π`, and the half bar less the bars, `π`, as against the one bar. **The
-/// union panics, both ways round**, in `rings_round` in `fuse/assemble.rs`:
-/// every ring of a joined face answers that it holds none of the others, which
-/// that function says no face can bring. It would be the bars and the half
-/// bar's part above the cap, `201π − 4L`.
+/// `1.5π`, and the half bar less the bars, `π`, as against the one bar. The
+/// union, both ways round, is the bars and the half bar's part above the cap,
+/// `201π − 4L`. It panicked in `rings_round` in `fuse/assemble.rs` until queue
+/// row Q2228: the cap is one ring, round the outline and through the lens
+/// corner `(0, −4, 4)` a second time round the half disk's hole, and its
+/// corners wind against the plane, so it was read as a hole with no outline.
+/// Since Q2228 a ring with a side that is not straight, winding against the
+/// plane, can be the outline.
 ///
-/// **The bars less the half bar panics the same way.** It would be
-/// `200π − 4L − 1.5π`, one solid touching itself along the same line. That
-/// line is an edge of both inputs, where the bars' two walls meet and where
-/// the half bar's flat side meets its pipe, so four input faces lie round it,
-/// and it was refused `ResultIsNotManifold { count: 4 }` until queue row
-/// Q1913 parted it as one solid (`docs/decisions.md` §39.4). What then panics
-/// is the bars' cap, which touches itself at the lens corner `(0, −4, 4)` in
-/// the difference as in the union (queue row Q1290).
+/// The bars less the half bar is `200π − 4L − 1.5π`, one solid touching
+/// itself along the same line. That line is an edge of both inputs, where the
+/// bars' two walls meet and where the half bar's flat side meets its pipe, so
+/// four input faces lie round it, and it was refused
+/// `ResultIsNotManifold { count: 4 }` until queue row Q1913 parted it as one
+/// solid (`docs/decisions.md` §39.4). Its cap is the same one ring as the
+/// union's, and panicked the same way until Q2228.
 #[test]
-fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
+fn a_half_bar_whose_corner_is_the_lens_corner_answers() {
     assert_each_fuse(
         "one bar and the half bar at the lens corner",
         |model| {
@@ -582,39 +585,18 @@ fn a_half_bar_whose_corner_is_the_lens_corner_mostly_answers() {
         "the two bars united, then the half bar",
         the_bars_and_the_half_bar,
         &[
+            (Rule::Union, true, 201.0 * PI - 4.0 * the_lens()),
+            (Rule::Union, false, 201.0 * PI - 4.0 * the_lens()),
             (Rule::Intersection, true, 1.5 * PI),
             (Rule::Intersection, false, 1.5 * PI),
+            (
+                Rule::Difference,
+                true,
+                200.0 * PI - 4.0 * the_lens() - 1.5 * PI,
+            ),
             (Rule::Difference, false, PI),
         ],
     );
-    for (rule, first_first) in [
-        (Rule::Union, true),
-        (Rule::Union, false),
-        (Rule::Difference, true),
-    ] {
-        let answer = std::panic::catch_unwind(|| {
-            let mut model = a_model();
-            let [first, second] = the_bars_and_the_half_bar(&mut model);
-            let [one, other] = if first_first {
-                [first, second]
-            } else {
-                [second, first]
-            };
-            fuse(&mut model, one, other, rule)
-        });
-        let Err(why) = answer else {
-            panic!("the {rule:?}, the bars first {first_first}, gives {answer:?}; pin it");
-        };
-        assert_eq!(
-            why.downcast_ref::<&str>(),
-            Some(
-                &"every face joined here brought an outline of its own and joining only takes \
-                  edges away, so the joined face has one too, and none of its rings winds with \
-                  the plane or bounds a region holding the others"
-            ),
-            "the {rule:?}, the bars first {first_first}"
-        );
-    }
 }
 
 /// The pair `build` makes, fused by each rule and way round in `answers`:

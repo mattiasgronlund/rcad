@@ -953,7 +953,11 @@ pub enum Error {
     /// normal. Corners that sweep no area say nothing, and such a ring is
     /// placed by the region it bounds instead — but that region is read only
     /// for a ring along one pipe, ball, cone or ring, or one whose corners lie
-    /// on one line. Two or more rings of one face read neither way are this.
+    /// on one line. Where no ring winds with the normal and none sweeps
+    /// nothing, the corners of a ring with a side that is not straight say
+    /// nothing either, since a rounding off one line can turn them against it
+    /// (`a_stepped_shaft_cut_in_half_and_turned.rs`, Q2228). Two or more rings
+    /// of one face read neither way are this.
     /// The cap along four pipes in `a_joined_flat_face_whose_rings_enclose_no_area.rs`,
     /// whose corners sweep exactly nothing, with its own shape an eighth the
     /// size standing through it, is refused this in the union and in the big

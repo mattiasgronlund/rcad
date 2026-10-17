@@ -152,7 +152,7 @@ use super::{
 /// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
 /// coplanar pieces both wind as its outline, and
 /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] when nothing could say
-/// which of two or more rings that enclose nothing is its outline.
+/// which of two or more rings whose corners cannot place them is its outline.
 #[expect(
     clippy::too_many_arguments,
     reason = "the scratch, what is kept, which points are one, how far the inputs reach, the policy and two logs are each their own input"
@@ -272,7 +272,7 @@ pub(crate) fn the_pieces_of_each_shell_both_hold_taken_as_flat(
 /// [`Error::TheFuseWroteABrokenAnswer`] when two rings of a face joined from
 /// its coplanar faces both wind as its outline, and
 /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] when nothing could say
-/// which of two or more rings that enclose nothing is its outline.
+/// which of two or more rings whose corners cannot place them is its outline.
 pub(crate) fn joined_faces_of_an_input(
     model: &Model,
     solid: SolidView<'_>,
@@ -1666,7 +1666,7 @@ impl Assembly {
     /// all, [`Error::TheFuseWroteABrokenAnswer`] when two rings of a joined
     /// flat face both wind as its outline,
     /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] when nothing could say
-    /// which of two or more rings that enclose nothing is its outline (both
+    /// which of two or more rings whose corners cannot place them is its outline (both
     /// [`Assembly::rings_round`]), and whatever
     /// [`intersect`](rcad_geom::intersect) gives for a plane and a ring whose
     /// circle a ring of a joined face runs round.
@@ -2439,9 +2439,9 @@ impl Assembly {
     /// face is one [`Model::validate`] refuses for that `broken`.
     ///
     /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] where two or more rings
-    /// enclose nothing and nothing could place them: the ones
-    /// [`Assembly::holds_the_other_rings`] answers `None` for, with no ring
-    /// winding with the plane and none shown to hold the others. A cap along
+    /// whose corners cannot place them, below, are left and nothing else could:
+    /// the ones [`Assembly::holds_the_other_rings`] answers `None` for, with no
+    /// ring winding with the plane and none shown to hold the others. A cap along
     /// four pipes whose corners sweep exactly nothing, with its own shape an
     /// eighth the size standing through it, reaches it: united, or less the
     /// small one, its top is joined from nine pieces with two such rings,
@@ -2462,6 +2462,25 @@ impl Assembly {
     /// knives at 90 degrees, as a union). With one outline found among the other
     /// rings it is a hole; with none, and it the only such ring, it is the
     /// outline.
+    ///
+    /// **A ring with a side that is not straight is not placed by its corners
+    /// alone**, since the polygon through them is not the ring, and where they
+    /// lie a rounding off one line the way they wind is the rounding's. A
+    /// stepped shaft cut beside its axis leaves on its bottom, joined from two
+    /// pieces split where the narrow bar's pipe crosses it, one ring: an arc
+    /// and three sides back along its chord. Unturned its four corners lie on
+    /// one line and enclose nothing; turned about the axis they come off it,
+    /// and can wind against the plane (`a_stepped_shaft_cut_in_half_and_turned.rs`,
+    /// Q2228). So with no ring winding with the plane and none enclosing
+    /// nothing, the outline is among those winding against it with a side that
+    /// is not straight: a ring every side of which is straight *is* the polygon
+    /// through its corners, so it winds against the plane and is a hole. One
+    /// such ring is the outline. Two bars united and then united with the half
+    /// bar whose corner is their lens's corner leave their cap one ring, round
+    /// the outline and through that corner a second time round the half disk's
+    /// hole, and its corners wind against the plane too, both ways round and
+    /// in the bars less the half bar (`a_lens_whose_hole_is_half_a_disk.rs`,
+    /// Q1290).
     ///
     /// **Two or more such rings and no outline are placed by the regions they
     /// bound**, since the outline is the one ring that holds the others
@@ -2484,12 +2503,12 @@ impl Assembly {
     ///
     /// - **A ring winding neither way.** Nothing reaches it:
     ///   [`winding_round`] answers `Neg`, `Zero` or `Pos`, or refuses.
-    /// - **No ring winding with the plane, and none of those enclosing nothing
-    ///   holding the others**, every one of them answering `Some(false)`.
-    ///   Nothing keeps answers off it: two bars united and then united with the
-    ///   half bar whose corner is their lens's corner reach it, both ways round
-    ///   (`a_half_bar_whose_corner_is_the_lens_corner_mostly_answers` in
-    ///   `a_lens_whose_hole_is_half_a_disk.rs`, Q1290).
+    /// - **No ring winding with the plane, and none of those whose corners
+    ///   cannot place them holding the others**, every one answering `Some(false)`,
+    ///   or there being none: every ring straight-sided and winding against the
+    ///   plane. No shape is known to reach it since the rule above for a ring
+    ///   with a side that is not straight (Q2228), which answers the lens cap
+    ///   that did.
     /// - **Two or more rings each holding the others**, which would mean the
     ///   answer's rings cross. Nobody has traced whether any shape reaches it.
     fn rings_round(
@@ -2543,66 +2562,77 @@ impl Assembly {
                 holes.extend(enclosing_nothing);
                 outline
             }
-            None if enclosing_nothing.len() == 1 => enclosing_nothing.remove(0),
             None => {
-                let mut held: Vec<Option<bool>> = Vec::with_capacity(enclosing_nothing.len());
-                for ring in 0..enclosing_nothing.len() {
-                    let others = enclosing_nothing
-                        .iter()
-                        .enumerate()
-                        .filter(|&(other, _)| other != ring)
-                        .map(|(_, other)| other)
-                        .chain(&holes);
-                    held.push(self.holds_the_other_rings(
-                        &enclosing_nothing[ring],
-                        others,
-                        &plane,
-                        policy,
-                        log,
-                    )?);
-                }
-                let holding: Vec<usize> = (0..held.len())
-                    .filter(|&ring| held[ring] == Some(true))
-                    .collect();
-                let unplaced: Vec<usize> = (0..held.len())
-                    .filter(|&ring| held[ring].is_none())
-                    .collect();
-                let which = match (holding.as_slice(), unplaced.as_slice()) {
-                    ([only], _) | ([], [only]) => *only,
-                    ([], []) => panic!(
-                        "every face joined here brought an outline of its own and joining only \
-                         takes edges away, so the joined face has one too, and none of its rings \
-                         winds with the plane or bounds a region holding the others"
-                    ),
-                    ([], _) => {
-                        let corners: Vec<PredicatePoint> = unplaced
+                let mut may_be_it = enclosing_nothing;
+                if may_be_it.is_empty() {
+                    (may_be_it, holes) = holes.into_iter().partition(|ring| {
+                        !ring
                             .iter()
-                            .flat_map(|&ring| {
-                                let corners = corners_of(&enclosing_nothing[ring]);
-                                let first = corners[0];
-                                corners.into_iter().chain([first])
-                            })
-                            .map(PredicatePoint::from)
-                            .collect();
-                        log.push(Record::new(
-                            WHICH_RING_IS_THE_OUTLINE,
-                            &corners,
-                            Level::Interval,
-                            f64::INFINITY,
-                            Measures::Area,
-                        ));
-                        return Err(Error::CannotPlaceTheRingsOfAJoinedFlatFace {
-                            face: self.faces[members[0]].ancestors[0],
-                        });
+                            .all(|&dart| self.edges[self.edge_of(dart)].runs_straight())
+                    });
+                }
+                let which = if may_be_it.len() == 1 {
+                    0
+                } else {
+                    let mut held: Vec<Option<bool>> = Vec::with_capacity(may_be_it.len());
+                    for ring in 0..may_be_it.len() {
+                        let others = may_be_it
+                            .iter()
+                            .enumerate()
+                            .filter(|&(other, _)| other != ring)
+                            .map(|(_, other)| other)
+                            .chain(&holes);
+                        held.push(self.holds_the_other_rings(
+                            &may_be_it[ring],
+                            others,
+                            &plane,
+                            policy,
+                            log,
+                        )?);
                     }
-                    (_, _) => panic!(
-                        "a face joined out of coplanar pieces has one outline, and {} of its rings \
-                         each hold the others, so the answer's rings cross",
-                        holding.len()
-                    ),
+                    let holding: Vec<usize> = (0..held.len())
+                        .filter(|&ring| held[ring] == Some(true))
+                        .collect();
+                    let unplaced: Vec<usize> = (0..held.len())
+                        .filter(|&ring| held[ring].is_none())
+                        .collect();
+                    match (holding.as_slice(), unplaced.as_slice()) {
+                        ([only], _) | ([], [only]) => *only,
+                        ([], []) => panic!(
+                            "every face joined here brought an outline of its own and joining \
+                             only takes edges away, so the joined face has one too, and none of \
+                             its rings winds with the plane or bounds a region holding the others"
+                        ),
+                        ([], _) => {
+                            let corners: Vec<PredicatePoint> = unplaced
+                                .iter()
+                                .flat_map(|&ring| {
+                                    let corners = corners_of(&may_be_it[ring]);
+                                    let first = corners[0];
+                                    corners.into_iter().chain([first])
+                                })
+                                .map(PredicatePoint::from)
+                                .collect();
+                            log.push(Record::new(
+                                WHICH_RING_IS_THE_OUTLINE,
+                                &corners,
+                                Level::Interval,
+                                f64::INFINITY,
+                                Measures::Area,
+                            ));
+                            return Err(Error::CannotPlaceTheRingsOfAJoinedFlatFace {
+                                face: self.faces[members[0]].ancestors[0],
+                            });
+                        }
+                        (_, _) => panic!(
+                            "a face joined out of coplanar pieces has one outline, and {} of its \
+                             rings each hold the others, so the answer's rings cross",
+                            holding.len()
+                        ),
+                    }
                 };
-                let outline = enclosing_nothing.remove(which);
-                holes.extend(enclosing_nothing);
+                let outline = may_be_it.remove(which);
+                holes.extend(may_be_it);
                 outline
             }
         };
