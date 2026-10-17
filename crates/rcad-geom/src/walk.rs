@@ -4926,6 +4926,21 @@ fn where_a_ring_and_a_surface_on_its_axis_cut(
 /// than one candidate standing, which is every run that has no ends at all and
 /// so every run `intersect` builds.
 ///
+/// # An end is held as close as where its run was stored allows
+///
+/// A candidate is on an end that is within [`POINT_ALONG_A_CROSSING_ROUNDOFF`]
+/// of the candidate's own size **and how far out the run was stored**, which
+/// [`NamedRun::moved_in_from`] says. The ends are corners kept apart from the
+/// surfaces, each rounded where it was stored, and moving both in to the origin
+/// takes away none of that rounding. A seam corner a file wrote a million out
+/// was `1.0133e-10` off its circle of radius 7 once `rcad-topo`'s mesher had
+/// moved it in, `0.87` of one rounding at a million, against a bound of
+/// `3.979e-13` that knew only the 7; at a billion it was `7.186e-8` off. The
+/// circle of radius 9 the same plane cuts is `2` from both corners, and the
+/// bound at a billion out is `5.7e-5`
+/// (`a_seam_moved_in_from_a_billion_out_is_named_by_its_ends_and_not_by_the_other_circle`,
+/// queue row Q2218).
+///
 /// # The pickers are asked at two points of a candidate, half a turn apart
 ///
 /// A candidate is held where its pickers hold its point at angle zero **or** at
@@ -4961,15 +4976,20 @@ fn which_of_these_circles_this_run_is(
         .filter(|end| *end != nowhere_in_particular())
         .map(|end| Point::from(end.enclosure().map(middle_of)))
         .collect();
-    let on_the_ends: Vec<Conic> = candidates
-        .into_iter()
-        .filter(|circle| {
-            let deviation =
-                POINT_ALONG_A_CROSSING_ROUNDOFF * circle.the_size_it_was_worked_out_from();
-            ends.iter()
-                .all(|end| circle.how_far_off_it(*end) <= deviation)
-        })
-        .collect();
+    let mut on_the_ends: Vec<Conic> = Vec::with_capacity(candidates.len());
+    for circle in candidates {
+        let how_far_off_an_end_can_be = POINT_ALONG_A_CROSSING_ROUNDOFF
+            * (circle.the_size_it_was_worked_out_from() + run.how_far_out_it_was_stored());
+        if !how_far_off_an_end_can_be.is_finite() {
+            return Err(Error::CannotWorkOutHowBigACrossingIs);
+        }
+        if ends
+            .iter()
+            .all(|end| circle.how_far_off_it(*end) <= how_far_off_an_end_can_be)
+        {
+            on_the_ends.push(circle);
+        }
+    }
     if let [only] = on_the_ends.as_slice() {
         return Ok(*only);
     }
@@ -6846,5 +6866,60 @@ mod tests {
             "the run starts at the far end of the corner's step and ends at its near end"
         );
         assert_eq!(walked.points().len(), marched.points().len() + 1);
+    }
+
+    /// The seam of a quarter bend of a ring of 8 and a tube of 1 that a file
+    /// put a billion out, moved back in to the origin. The plane through the
+    /// ring's middle cuts it in circles of radius 7 and 9, and the seam's
+    /// corners are on the one of 7, the second `7.2e-8` off it, where a
+    /// rounding at a billion left it (Q2218).
+    ///
+    /// **Nothing picks the run**, so a run whose ends held both circles would
+    /// be a tie and refused. Told how far out it was stored, the ends hold the
+    /// circle of 7 and not the one of 9, `2` off them against a bound of
+    /// `5.7e-5`; untold, they hold neither, against a bound of `4.0e-13`.
+    #[test]
+    fn a_seam_moved_in_from_a_billion_out_is_named_by_its_ends_and_not_by_the_other_circle() {
+        let ring = Surface::Torus(
+            Torus::new(crate::Axis::z(), 8.0, 1.0).expect("a tube narrower than its ring"),
+        );
+        let middle = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+        let seam = NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and: middle,
+                picked_by: SmallVec::new(),
+            },
+            [
+                Point::new(7.0, 0.0, 0.0),
+                Point::new(0.0, 7.0 + 7.2e-8, 0.0),
+            ]
+            .map(|end| PredicatePoint::from(end.coordinates())),
+        )
+        .expect("a run with two ends");
+        let lies_on = |seam: &NamedRun| {
+            what_a_run_between_these_two_lies_on(
+                [middle, ring],
+                seam,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+        };
+
+        let Ok(WhatARunLiesOn::Conic(circle)) = lies_on(
+            &seam
+                .clone()
+                .moved_in_from(Vector::new(1e9, 1e9, 1e9))
+                .expect("a finite shift"),
+        ) else {
+            panic!("the seam moved in from a billion out is on one circle");
+        };
+        assert_eq!(circle.how_far_it_reaches(), 7.0);
+        assert!(matches!(
+            lies_on(&seam),
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+        ));
     }
 }

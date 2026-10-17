@@ -69,6 +69,7 @@ pub enum SurfaceMeet {
 pub struct NamedRun {
     run: EdgeRun,
     ends: [PredicatePoint; 2],
+    stored_this_far_out: f64,
 }
 
 impl NamedRun {
@@ -89,7 +90,11 @@ impl NamedRun {
                 end: Box::new(ends[1]),
             });
         }
-        Ok(Self { run, ends })
+        Ok(Self {
+            run,
+            ends,
+            stored_this_far_out: 0.0,
+        })
     }
 
     /// The whole of what `run` names, with no ends to cut it at.
@@ -132,7 +137,50 @@ impl NamedRun {
         Ok(Self {
             run,
             ends: [nowhere_in_particular(); 2],
+            stored_this_far_out: 0.0,
         })
+    }
+
+    /// The same run, whose surfaces and ends were stored `shift` further out
+    /// than they are now and were moved in by taking it off.
+    ///
+    /// **A number keeps the rounding of the place it was stored at.** A corner
+    /// a file wrote a million out sits up to a rounding at a million,
+    /// `1.16e-10`, off the circle its two faces cut, and moving the corner and
+    /// the faces in together leaves it that far off a circle that is now of
+    /// radius 7 round the origin. [`walk`](crate::walk) tells which of a
+    /// crossing's circles a run is on by how far its ends are off each,
+    /// against a bound that is a multiple of the size the circle was worked
+    /// out from, and that bound grows by this shift's largest coordinate. So a
+    /// run moved in is held no tighter than where it was stored, where the
+    /// circle's size counted the million. `rcad-topo`'s mesher moves a face
+    /// stored far out in until its numbers are small, and says so with this:
+    /// without it the quarter bend of a ring of 8 moved a million out was
+    /// refused [`Error::CannotNameWhichPieceOfACrossingThisIs`] once it had
+    /// been through a file (queue row Q2218).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotFinite`] if `shift` has a component that is not a finite
+    /// number.
+    pub fn moved_in_from(self, shift: Vector) -> Result<Self> {
+        if !shift.is_finite() {
+            return Err(Error::NotFinite {
+                what: "shift a run was moved in from",
+            });
+        }
+        let [x, y, z] = shift.components().map(f64::abs);
+        Ok(Self {
+            stored_this_far_out: x.max(y).max(z),
+            ..self
+        })
+    }
+
+    /// The largest coordinate of the shift [`NamedRun::moved_in_from`] says
+    /// this run was moved in by, and zero for a run worked out where it was
+    /// stored.
+    pub(crate) fn how_far_out_it_was_stored(&self) -> f64 {
+        self.stored_this_far_out
     }
 
     /// Which piece of which crossing this is.
