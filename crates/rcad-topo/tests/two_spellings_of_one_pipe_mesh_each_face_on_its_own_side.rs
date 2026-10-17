@@ -327,10 +327,8 @@ fn a_bar_in_two_bands_on_the_two_spellings_meshes_each_band_on_its_own_side() {
 /// `DeflectionBelowWhatAMeshCanReach` at `0.01` in all four ways of building
 /// it, with a floor between `96460` and `356599`.
 ///
-/// **The placed bars are not validated**, unlike in the test above: on two
-/// spellings, `Model::validate` refuses some of them
-/// `AClosedEdgeIsWalkedAgainstItsSurface`, which is a refusal of its own and
-/// not this one. Each bar built on the turned pipe is validated by its build.
+/// Each bar built on the turned pipe is validated by its build, and each placed
+/// one here.
 #[test]
 fn a_bar_in_two_bands_turned_off_z_meshes_each_band_on_its_own_side() {
     let up = Cylinder::new(Axis::z(), RADIUS).expect("a radius");
@@ -406,6 +404,9 @@ fn a_bar_in_two_bands_turned_off_z_meshes_each_band_on_its_own_side() {
                     model
                         .place_solid(bar, turn)
                         .expect("this model made the key");
+                    model
+                        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                        .unwrap_or_else(|why| panic!("{what}: the bar validates: {why:?}"));
                 }
                 wrong.extend(what_is_wrong_with_each_face(&model, bar, turn, &what));
             }
