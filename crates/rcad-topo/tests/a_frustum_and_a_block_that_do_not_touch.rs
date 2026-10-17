@@ -1,19 +1,27 @@
 //! A frustum and a block standing clear of each other, fused.
 //!
 //! The two solids do not reach each other at all, so a union of them is the two
-//! of them side by side and there is nothing to work out. It refused anyway, and
-//! §214 is the whole story of why: the fuse puts the block's cap plane to the
-//! cone face whether or not the solids meet (`fuse/cuts.rs` keeps no box test, on
-//! purpose — §17.4), so the answer carries the cone face cut in two with a circle
-//! between them. Walking that circle hands `rcad_geom::walk` **the same cone
-//! twice**, and `what_a_run_between_these_two_lies_on` had no arm for a pair that
-//! is one surface: it fell through to *a cone crossing another curved surface*
-//! and named a second curved surface a frustum and a block have not got between
-//! them.
+//! of them side by side and there is nothing to work out, and that is what each
+//! fuse below now answers. It used to refuse, and §214 is the whole story of
+//! why: the fuse put the block's cap plane to the cone face whether or not the
+//! solids met, so the answer carried the cone face cut in two with a circle
+//! between them. Walking that circle handed `rcad_geom::walk` **the same cone
+//! twice**, and `what_a_run_between_these_two_lies_on` had no arm for a pair
+//! that is one surface: it fell through to *a cone crossing another curved
+//! surface* and named a second curved surface a frustum and a block have not
+//! got between them.
+//!
+//! §400's band proof (`ABandRoundAnAxis`, since Q896) is what stops the cut
+//! from being tried at all: a cone or a pipe whose every side is a circle
+//! square to its axis lies in a band, and the block's cap plane misses that
+//! band here, so `fuse/cuts.rs`'s `two_faces_provably_apart` proves the cone
+//! face and the block's faces apart without a box test on the round face. No
+//! cut is put to the cone, no circle appears, and `walk` is never asked about
+//! it.
 //!
 //! The draw here is the smallest of the three §214.5 measured, and that section
-//! records that all three refuse on `Union` both ways and on `Difference` with
-//! the cone first — so those are the three fuses asked below.
+//! records that all three refused on `Union` both ways and on `Difference` with
+//! the cone first, back before §400 — so those are the three fuses asked below.
 
 use rcad_geom::{Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
