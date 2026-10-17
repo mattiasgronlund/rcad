@@ -1851,7 +1851,11 @@ impl<'f> Arrangement<'f> {
                         let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
                             .chain(corner.around.iter().copied())
                             .collect();
-                        Self::side_of_a_plane_parallel_to_one_it_is_on(&on, plane)
+                        corner
+                            .solved_from
+                            .and_then(|three| {
+                                Self::side_of_a_plane_parallel_to_one_it_is_on(&three, plane)
+                            })
                             .or_else(|| {
                                 Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
                             })
@@ -8583,10 +8587,16 @@ impl<'f> Arrangement<'f> {
             .any(|&through| self.crossings[through].partner == *partner)
     }
 
-    /// Which side of `partner` a point lies that is on a plane among the
-    /// surfaces it is `on` whose normal is `partner`'s, or `partner`'s turned
-    /// round, number for number: the side the two offsets say. `None` where no
-    /// plane among them is parallel to `partner` that exactly.
+    /// Which side of `partner` a corner lies that `bake` solved as the meet of
+    /// `three` surfaces, one of them a plane whose normal is `partner`'s, or
+    /// `partner`'s turned round, number for number: the side the two offsets
+    /// say. `None` where no plane among them is parallel to `partner` that
+    /// exactly.
+    ///
+    /// **Only the three it was solved from.** The box holds where exactly
+    /// those three meet ([`BakedCorner::solved_from`]); a fourth surface round
+    /// the corner may pass a rounding off that point, and the offsets would
+    /// then answer for a point the corner is not.
     ///
     /// A half bar cut flush along its flat face by a block, the two turned 0.4
     /// about `x` and then shifted by `(7, −5, 2.5)`, has the block's face on
@@ -8603,11 +8613,11 @@ impl<'f> Arrangement<'f> {
     /// `−d`. So the side is which of two `f64`s is the larger, decided exactly
     /// and never divided, and nought only where the two are one plane.
     fn side_of_a_plane_parallel_to_one_it_is_on(
-        on: &[Surface],
+        three: &[Surface; 3],
         partner: &Plane,
     ) -> Option<Decision> {
         let normal = partner.normal().components();
-        on.iter().find_map(|flat| {
+        three.iter().find_map(|flat| {
             let Surface::Plane(flat) = flat else {
                 return None;
             };
