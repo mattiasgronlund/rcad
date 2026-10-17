@@ -1295,55 +1295,100 @@ fn a_cut_cone_and_a_second_cone_on_its_axis(model: &mut Model) -> [SolidKey; 2] 
 /// radius 12 less radius 4 from `z = −10` to `20`, and the cone are each cut
 /// to the far side of that plane by a wedge built face by face, the only door
 /// to a plane leaning along `x` (extrusions run along `z`, and a quarter turn
-/// is not exact). United, the two faces on the plane would join into one whose
+/// is not exact). United, the two faces on the plane join into one whose
 /// outline is the outer pipe's ellipse, one corner, and whose hole is an arc of
 /// the inner pipe's ellipse and an arc of the parabola meeting at `(0, ±4, 4)`,
-/// two corners. Neither encloses any area between its corners, and the hole
-/// runs along a parabola, which `holds_the_other_rings` answers `None` for.
+/// two corners. Neither encloses any area between its corners.
 ///
-/// **That is not reached: every rule, both ways round, is refused before
-/// `rings_round`, on `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.** Cone first
-/// used to stop earlier, on `AFaceTrimmedByACurveThisCannotFollow` naming a
-/// face of the tube; sharing the arc picker between `holds.rs` and
-/// `arrange.rs` (Q1033) takes it one step further, to the same three-surface
-/// meet as tube first. The hole's corners are where the cone, the inner pipe
-/// and the leaning plane meet, and `rcad-geom` works out a meet of two curved
-/// surfaces and a plane about one axis only when the plane is square to that
-/// axis (a gap, `docs/decisions.md` §31.2). Two other shapes were run on the
-/// way, and their set-up fuses refused as well (Q634): the bar of radius 12
-/// cut to this side less the cut cone, and the cut cone less a bar of radius
-/// 1 up its axis, both the same three-surface refusal since Q1033 (Q1092 had
-/// the second one on `AFaceTrimmedByACurveThisCannotFollow`, before it).
+/// **Every rule, both ways round, is answered with one solid that validates
+/// and holds what the slices give.** Until Q2188 every one was refused before
+/// `rings_round`, on `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`: the hole's
+/// corners are where the cone, the inner pipe and the leaning plane meet, and
+/// `rcad-geom` worked out a meet of two curved surfaces and a plane about one
+/// axis only where the plane was square to that axis or parallel to it. The
+/// plane leans at exactly half a right angle to the axis, the most the road for
+/// a plane leaning beside the one axis two round surfaces share takes (Q2177).
+/// Cone first used to stop earlier still, on
+/// `AFaceTrimmedByACurveThisCannotFollow` naming a face of the tube, until the
+/// arc picker was shared between `holds.rs` and `arrange.rs` (Q1033).
 ///
 /// Both solids are measured before they are fused. The tube holds the ring's
 /// area times its mean height, `128π · 16 = 2048π`. The cone holds
 /// `1000π/3 − (2000/3)·atan(1/2) + 416/9`, of which `320π/3 − 512/9` lies inside
-/// the inner pipe; the union is then `2048π + 320π/3 − 512/9`, and the
-/// intersection the rest of the cone. All four agree with a quadrature of the
-/// slices to 1e-12 (Q634).
+/// the inner pipe: that part is the cone less the tube, the rest of the cone is
+/// what the two share, the union is the tube and that part, and the tube less
+/// the cone is the tube less what they share. All four agree with a quadrature
+/// of the slices to 1e-12 (Q634).
 #[test]
-fn a_tube_and_a_cone_cut_by_one_leaning_plane_are_refused_before_their_rings_are_placed() {
+fn a_tube_and_a_cone_cut_by_one_leaning_plane_hold_what_the_slices_give_under_every_rule() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let [tube, cone] = a_tube_and_a_cone_cut_by_one_leaning_plane(&mut model);
-    assert_holds(&model, tube, 2048.0 * PI, "the cut tube");
-    let the_cut_cone = 1000.0 * PI / 3.0 - 2000.0 / 3.0 * 0.5_f64.atan() + 416.0 / 9.0;
+    let the_cut_tube = 2048.0 * PI;
+    assert_holds(&model, tube, the_cut_tube, "the cut tube");
+    let the_cut_cone = the_cut_cone();
     assert_holds(&model, cone, the_cut_cone, "the cut cone");
+    let inside_the_inner_pipe = 320.0 * PI / 3.0 - 512.0 / 9.0;
+    let shared = the_cut_cone - inside_the_inner_pipe;
 
     for (rule, swapped) in every_rule_both_ways() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let pair = a_tube_and_a_cone_cut_by_one_leaning_plane(&mut model);
-        let refused = fused_in_order(&mut model, pair, rule, swapped);
+        let answer = fused_in_order(&mut model, pair, rule, swapped);
         let first = if swapped { "cone" } else { "tube" };
-        assert!(
-            matches!(
-                refused,
-                Err(Error::Geometry(
-                    rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                ))
-            ),
-            "{rule:?}, {first} first: {refused:?}"
-        );
+        let what = format!("{rule:?}, {first} first");
+        let volume = match (rule, swapped) {
+            (Rule::Union, _) => the_cut_tube + inside_the_inner_pipe,
+            (Rule::Intersection, _) => shared,
+            (Rule::Difference, false) => the_cut_tube - shared,
+            (Rule::Difference, true) => inside_the_inner_pipe,
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_holds(&model, the_only(answer, &what), volume, &what);
     }
+}
+
+/// **The cut cone less a bar of radius 1 up its axis**, and every other rule
+/// both ways round, is answered and holds what the slices give. Inside radius
+/// 1 the plane `z = x + 4` stands at least 3 high, above the cone's skin, so
+/// the cut cone's part there runs from the plane up to `z = 10`, whose mean
+/// height over the disk is 6: `6π`. The bar runs from `z = −2` to `12`, `14π`,
+/// and less the cone it is two pieces, `6π` below the plane and `2π` above the
+/// cone's base. Until Q2188 every rule was refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` as the tube and the cone above
+/// were, and before Q1033 `AFaceTrimmedByACurveThisCannotFollow` (Q1092).
+#[test]
+fn the_cut_cone_and_a_bar_up_its_axis_hold_what_the_slices_give_under_every_rule() {
+    let the_cut_cone = the_cut_cone();
+    let (the_bar, shared) = (14.0 * PI, 6.0 * PI);
+    for (rule, swapped) in every_rule_both_ways() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let [_, cone] = a_tube_and_a_cone_cut_by_one_leaning_plane(&mut model);
+        let bar = model
+            .add_round_bar(1.0, 14.0, &at(0.0, 0.0, -2.0))
+            .expect("a bar of radius one");
+        let answer = fused_in_order(&mut model, [cone, bar], rule, swapped);
+        let first = if swapped { "bar" } else { "cone" };
+        let what = format!("{rule:?}, {first} first");
+        let volume = match (rule, swapped) {
+            (Rule::Union, _) => the_cut_cone + the_bar - shared,
+            (Rule::Intersection, _) => shared,
+            (Rule::Difference, false) => the_cut_cone - shared,
+            (Rule::Difference, true) => {
+                let [above, below] = the_two_smaller_first(&model, answer, &what);
+                assert_holds(&model, above, 2.0 * PI, &what);
+                assert_holds(&model, below, 6.0 * PI, &what);
+                continue;
+            }
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_holds(&model, the_only(answer, &what), volume, &what);
+    }
+}
+
+/// What the pointed cone of slope 1 to `z = 10` holds on the far side of
+/// `z = x + 4`.
+fn the_cut_cone() -> f64 {
+    1000.0 * PI / 3.0 - 2000.0 / 3.0 * 0.5_f64.atan() + 416.0 / 9.0
 }
 
 /// The tube and the cone, each cut to the far side of the leaning plane, tube
@@ -1510,7 +1555,7 @@ fn a_tube_cut_by_a_block_whose_top_clears_it_is_the_tube_from_the_blocks_floor_u
 
 /// **The holed tube cut to the far side of the leaning plane by the wedge**,
 /// both ways round, is the tube
-/// `a_tube_and_a_cone_cut_by_one_leaning_plane_are_refused_before_their_rings_are_placed`
+/// `a_tube_and_a_cone_cut_by_one_leaning_plane_hold_what_the_slices_give_under_every_rule`
 /// measures, `2048π`. The
 /// wedge's top, `z = 22`, clears the tube as the block's above does, and was
 /// cut along the same two circles and refused the same way until Q1090.
