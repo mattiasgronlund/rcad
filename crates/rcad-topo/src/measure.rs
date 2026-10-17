@@ -634,6 +634,7 @@ impl SolidView<'_> {
                     .get(&face)
                     .expect("a face that does not bend lies on a plane");
                 let off = how_far_the_points_stray_off(mesh, triangles, plane, held);
+                skin.area_error += how_much_area_leaning_adds(mesh, triangles, plane);
                 skin.volume_error += off * area;
                 furthest_off_a_plane = furthest_off_a_plane.max(off);
                 continue;
@@ -965,15 +966,17 @@ impl SolidView<'_> {
                 (error, deviation, 3.0 * error)
             }
             (None, None) => {
-                let error = deviation * rim_of_the_flat_faces(mesh, |other| other == face);
                 let view = self
                     .faces()
                     .find(|used| used.key() == face)
                     .expect("the face was measured as one of this solid's");
+                let plane = view.plane();
+                let error = deviation * rim_of_the_flat_faces(mesh, |other| other == face)
+                    + how_much_area_leaning_adds(mesh, triangles, &plane);
                 let off = how_far_the_points_stray_off(
                     mesh,
                     triangles,
-                    &view.plane(),
+                    &plane,
                     &the_corners_it_holds(view, mesh),
                 );
                 (error, off, error)
