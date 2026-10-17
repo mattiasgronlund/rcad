@@ -4175,10 +4175,13 @@ impl<'f> Arrangement<'f> {
     /// The boxes are asked first, and the planes
     /// ([`Arrangement::as_the_planes_say`]), a quadric
     /// ([`Arrangement::as_the_quadric_says`]), a pipe's axis
-    /// ([`Arrangement::as_the_pipes_axis_says`]) and which of a line's two
+    /// ([`Arrangement::as_the_pipes_axis_says`]), which of a line's two
     /// meets with a ball or a pipe each is
-    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]) only where the boxes
-    /// cannot say, because the boxes are cheaper and nearly always enough.
+    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]) and where a second
+    /// plane cuts a plane's loop
+    /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) only where the
+    /// boxes cannot say, because the boxes are cheaper and nearly always
+    /// enough.
     ///
     /// **A refusal is filed under what its enclosure measures.** Along an axis
     /// it is a step between two boxes, and across a bend the same step read
@@ -4214,6 +4217,11 @@ impl<'f> Arrangement<'f> {
         }
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_two_meets_of_one_line_say(crossing, first, second)
+        {
+            decided = proved;
+        }
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) = self.as_a_flat_cut_through_the_loop_says(crossing, first, second)
         {
             decided = proved;
         }
@@ -4835,6 +4843,124 @@ impl<'f> Arrangement<'f> {
             HowItRuns::AlongABend { .. } => return None,
         };
         Some(if (mine == 0) == lower_first {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
+    }
+
+    /// Which of two nodes on the loop a plane cuts a ball, a pipe or a cone in
+    /// comes first, where one is an exact point and the other is where a second
+    /// plane cuts the loop, read off the line the two planes cross in: `None`
+    /// everywhere else.
+    ///
+    /// The sweep the boxes are asked
+    /// ([`round_a_closed_crossing_and_what_it_measures`]) is `m · (b − s)`, for
+    /// `s` the start, `a` the exact node, `b` the other, and `m = n × (a − s)`
+    /// with `n` the normal the loop winds about. It is above nought where `a`
+    /// comes first. Read over the box of `b`, it straddles nought wherever
+    /// that box reaches across the line through `s` and `a`.
+    ///
+    /// **`b` lies on the line `L` the cutting plane `C` and the loop's plane
+    /// cross in**, which runs along `d = n_loop × n_C`, and that is read
+    /// instead of the box. `L` crosses the line through `s` and `a` at
+    /// `Y = a + t (a − s)`, for `t = −C(a) / (n_C · (a − s))`, and the sweep is
+    /// nought there, since `m` is square to `a − s`. So at `b = Y + λ d` the
+    /// sweep is `λ (m · d)`, and `λ` has the sign of `d · (b − Y)`, which is
+    /// `d · (b − a) − t (d · (a − s))`. Multiplied through by `n_C · (a − s)`
+    /// nothing is divided:
+    ///
+    /// ```text
+    /// sign of the sweep = sign of (m · d) (n_C · (a − s)) ((n_C · (a − s)) (d · (b − a)) + C(a) (d · (a − s)))
+    /// ```
+    ///
+    /// The box of `b` enters only through `d · (b − a)`. `C(a)`, how far the
+    /// cut misses `a`, is worked out exactly and only then held as an
+    /// interval: at the shape below it is `−1.5·2⁻⁵²`, and worked out in
+    /// intervals it is `[−8.9e−16, 4.4e−16]`, which says nothing.
+    ///
+    /// `Y` is on `L` only where `s` and `a` lie on the loop's plane, so both
+    /// must be exact points proved on it. Only a node that stands for one meet
+    /// is read, as in [`Arrangement::as_the_quadric_says`], and only a loop
+    /// that winds about its plane's normal.
+    ///
+    /// Two bars of radius `1/4`, the second starting where their axes meet and
+    /// turned about `z` by 90° worked out in radians, are the shape (Q2015).
+    /// The second bar's near cap leans a rounding off `y = −3.25` and cuts the
+    /// first bar's cap circle at `x = 13` in a box a few roundings wide that
+    /// holds the seam's end `(13, −3.25, 0.25)`, which the near cap misses by
+    /// `1.5·2⁻⁵²`. The circle is walked from `(13, −3.25, 0.75)`, half a turn
+    /// from the seam's end, and every certified fuse of the two bars was
+    /// refused on which of the two comes first round it. Here `m · d` and
+    /// `n_C · (a − s)` are both `−2⁻⁵³`, and `Y` is `(13, −3.25, 1.75)`, so the
+    /// meet comes first.
+    fn as_a_flat_cut_through_the_loop_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve {
+            from, ref wound_as, ..
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let round = |surface: &Surface| {
+            matches!(
+                surface,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            )
+        };
+        let (flat, winds) = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) if round(&wound_as[1]) => (flat, flat.normal()),
+            (None, Some(flat)) if round(&wound_as[0]) => (flat, -flat.normal()),
+            (Some(_) | None, Some(_) | None) => return None,
+        };
+        let (exact, meet, exact_first) =
+            match [first, second].map(|node| self.nodes[node].point.exact_coordinates()) {
+                [Some(exact), None] => (exact, second, true),
+                [None, Some(exact)] => (exact, first, false),
+                [Some(_), Some(_)] | [None, None] => return None,
+            };
+        let (surfaces, _) = self.the_one_meet_it_stands_for(meet)?;
+        if !wound_as.iter().all(|surface| surfaces.contains(surface)) {
+            return None;
+        }
+        let mut others = surfaces
+            .iter()
+            .filter(|surface| !wound_as.contains(surface));
+        let (Some(Surface::Plane(cut)), None) = (others.next(), others.next()) else {
+            return None;
+        };
+        let start = from.exact_coordinates()?;
+        // Compared rather than matched: only a proved nought is read (§40).
+        if [start, exact]
+            .iter()
+            .any(|&point| flat.side_of_point(PredicatePoint::Exact(point)) != Decision::Zero)
+        {
+            return None;
+        }
+        let towards =
+            [0, 1, 2].map(|axis| Interval::exactly(exact[axis]) - Interval::exactly(start[axis]));
+        let across = cut.normal().components().map(Interval::exactly);
+        let along = cross_of_intervals(flat.normal().components().map(Interval::exactly), across);
+        let square = cross_of_intervals(winds.components().map(Interval::exactly), towards);
+        let closing = dot_of(across, towards);
+        let missed_by = held_as_an_interval(&exactly_added(
+            &exactly_dotted(cut.normal().components(), exact)?,
+            &[-cut.offset()],
+        ));
+        let at = self.nodes[meet].point.enclosure();
+        let past_a = [0, 1, 2].map(|axis| at[axis] - Interval::exactly(exact[axis]));
+        let beyond = closing * dot_of(along, past_a) + missed_by * dot_of(along, towards);
+        let sweep = (dot_of(square, along) * closing * beyond).sign();
+        // Compared rather than matched: only a proved order is read, and every
+        // other answer leaves the pair to the policy (§40).
+        if sweep != Decision::Pos && sweep != Decision::Neg {
+            return None;
+        }
+        Some(if (sweep == Decision::Pos) == exact_first {
             Decision::Pos
         } else {
             Decision::Neg
@@ -11453,6 +11579,16 @@ fn exactly_dotted(one: [f64; 3], other: [f64; 3]) -> Option<Vec<f64>> {
 /// `expansion` turned round, which is exact: no entry changes but its sign.
 fn negated(expansion: &[f64]) -> Vec<f64> {
     expansion.iter().map(|entry| -entry).collect()
+}
+
+/// An interval holding what `expansion` adds up to. Each entry is exact and
+/// the entries do not overlap, so nothing cancels and only the adding rounds.
+fn held_as_an_interval(expansion: &[f64]) -> Interval {
+    expansion
+        .iter()
+        .fold(Interval::exactly(0.0), |so_far, &entry| {
+            so_far + Interval::exactly(entry)
+        })
 }
 
 /// The three surfaces the two nodes where four half ellipses meet are named
