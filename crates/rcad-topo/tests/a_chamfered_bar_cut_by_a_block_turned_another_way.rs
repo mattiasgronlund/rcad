@@ -30,9 +30,10 @@
 //! parallel to the axis and cuts both circles the pipe and the cone share,
 //! and before row Q2177 no road took a plane that cuts them and leans to the
 //! axis they share. The third test pins the four points that triple meets at,
-//! and the refusal the difference still gets: the side's normal and the axis
-//! have an `f64` dot of exactly nothing, and where they cross in an ellipse,
-//! ordering points round it reads that dot and calls them straight lines.
+//! the difference and the union, and the refusal the intersection still gets.
+//! The side's normal and the axis have an `f64` dot of exactly nothing, and
+//! before row Q2233 ordering points round the ellipse they cross in read that
+//! dot and called them straight lines.
 //!
 //! A cone in a solid of its own beside the bar does not reach that question:
 //! the fuse then asks where the pipe and the cone cross first.
@@ -140,32 +141,24 @@ fn a_chamfered_bar_less_a_block_six_across_keeps_the_bar_above_the_blocks_top() 
 /// cone was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`; it is the four
 /// points, each a rounding off where the turn puts them.
 ///
-/// The difference, a D-flat along the whole bar, is still refused. The side's
-/// normal and the pipe's axis have an `f64` dot of exactly nothing, and they
-/// cross in an ellipse about `10¹⁶` long. Before row Q2189 the walk read that
-/// dot, took the side and the pipe for a plane along a pipe, which crosses it
-/// in straight lines, and the fuse was refused
-/// `ACrossingThisCannotBeOrderedAlong`. The walk asks the dot exactly now and
-/// starts on the ellipse, and what refuses is
-/// `which_comes_first_round_a_crossing`, which still reads the rounded dot and
-/// says the two do not cross in a conic. The row filed from Q2189 for that
-/// turns this into `(1, 1, 3)`: the chamfer, the pipe, the bar's bottom, its
-/// top and the flat.
+/// The side's normal and the pipe's axis have an `f64` dot of exactly nothing,
+/// and they cross in an ellipse about `10¹⁶` long. Before row Q2189 the walk
+/// read that dot, took the side and the pipe for a plane along a pipe, which
+/// crosses it in straight lines, and the fuse was refused
+/// `ACrossingThisCannotBeOrderedAlong`. Before row Q2233
+/// `which_comes_first_round_a_crossing` read it too, said the two do not cross
+/// in a conic, and the difference was refused
+/// `TheseTwoSurfacesDoNotCrossInAConic`. Both ask the dot exactly now.
+///
+/// The difference is a D-flat along the whole bar: the chamfer, the pipe, the
+/// bar's bottom, its top and the flat. The union is the chamfer and the pipe
+/// with the bar's bottom and top and the block's six sides. The intersection
+/// is refused `TwoPatchesOfTheMeshDrewTheSameSide`: the coarsest mesh of the
+/// sliver folds, and row Q2240 has that.
 #[test]
-fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_its_flat_is_refused() {
-    let axis =
-        Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
-    let turn = Isometry::rotation(&axis, 1.1).expect("a finite angle");
-
-    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    let bar = a_chamfered_bar(&mut model);
-    model
-        .place_solid(bar, &turn)
-        .expect("this model made the key");
-    let block = a_block_from_x_one_and_a_half(&mut model);
-    model
-        .place_solid(block, &turn)
-        .expect("this model made the key");
+fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_cuts_a_flat_along_it() {
+    let turn = the_turn();
+    let (model, bar, block) = a_bar_and_a_block_beside_its_axis(&turn);
 
     let [side, pipe, cone] = the_side_the_pipe_and_the_cone(&model, bar, block, &turn);
     let answer = meet_of_three_surfaces(
@@ -212,22 +205,44 @@ fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_its_flat_is_r
          what this pins"
     );
 
+    for (rule, wanted) in [(Rule::Difference, (1, 1, 3)), (Rule::Union, (1, 1, 8))] {
+        let (mut model, bar, block) = a_bar_and_a_block_beside_its_axis(&turn);
+        assert_eq!(
+            what_the_fuse_is_made_of(&mut model, bar, block, rule),
+            wanted,
+            "the cones, pipes and planes {rule:?} has faces on"
+        );
+    }
+
+    let (mut model, bar, block) = a_bar_and_a_block_beside_its_axis(&turn);
     let refused = model.fuse(
         &[bar],
         &[block],
-        Rule::Difference,
+        Rule::Intersection,
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     );
     assert!(
         matches!(
             refused,
-            Err(Error::Geometry(
-                rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic
-            ))
+            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 })
         ),
         "{refused:?}"
     );
+}
+
+/// The bar and the block from `x = 1.5`, each placed by `turn`.
+fn a_bar_and_a_block_beside_its_axis(turn: &Isometry) -> (Model, SolidKey, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let bar = a_chamfered_bar(&mut model);
+    model
+        .place_solid(bar, turn)
+        .expect("this model made the key");
+    let block = a_block_from_x_one_and_a_half(&mut model);
+    model
+        .place_solid(block, turn)
+        .expect("this model made the key");
+    (model, bar, block)
 }
 
 /// The block sixty across from `z = −2` up to `z = 1`, neither solid placed, so

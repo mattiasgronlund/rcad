@@ -135,8 +135,9 @@ use crate::enclosure::{cross_enclosing, dot_enclosing, exactly, gap_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{
     halfway_between_a_cones_apex_and_a_ball_on_its_axis, how_a_ball_on_a_cones_axis_meets_it,
-    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
-    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
+    how_a_plane_leans_against_a_pipe, whether_a_ball_runs_through_a_cones_apex,
+    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
+    whether_two_cones_share_an_axis,
 };
 use crate::{
     Cone, Cylinder, Error, HalfSpace, Plane, Point, Result, Sphere, Surface, Torus, Vector,
@@ -189,14 +190,11 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// there is no direction to run round it in — and for a ball inscribed in a
 /// pipe or in a cone, which touches it round one circle the same way.
 ///
-/// **"A plane along a pipe's axis" is decided here by a rounded `f64` and by
-/// [`intersect`](crate::intersect) exactly**, so the two disagree about a plane
-/// whose dot with the axis cancels to zero in `f64` and does not cancel
-/// exactly. Such a pair *is* a conic, `intersect` names it one closed curve, and
-/// this refuses it —
-/// `a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently`
-/// is the demonstration. A **gap**: the answer exists and is worked out
-/// correctly one file away. `docs/decisions.md` §39.
+/// **"A plane along a pipe's axis" is decided exactly**, as
+/// [`intersect`](crate::intersect) decides it, so a plane whose dot with the
+/// axis cancels to zero in `f64` and not exactly is the conic `intersect` names
+/// it:
+/// `a_conic_the_intersector_names_is_ordered_here_too_because_the_two_ask_it_alike`.
 ///
 /// [`Surface::which_comes_first_round_a_crossing_and_what_it_measures`] gives
 /// the same answer and says what an undecided one's enclosure measures.
@@ -400,17 +398,12 @@ fn the_way_this_crossing_winds(
     let winds = match pair {
         [Surface::Plane(flat), Surface::Sphere(_)] => flat.normal(),
         [Surface::Sphere(_), Surface::Plane(flat)] => -flat.normal(),
-        // A plane along a pipe's axis cuts it in straight lines, and those are
-        // ordered by their dominant axis rather than round anything. `walk`
-        // dispatches on the same comparison for the same reason.
-        [Surface::Plane(flat), Surface::Cylinder(pipe)]
-        | [Surface::Cylinder(pipe), Surface::Plane(flat)]
-            if flat.normal().dot(pipe.axis().direction()) == 0.0 =>
-        {
-            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        [Surface::Plane(flat), Surface::Cylinder(pipe)] => {
+            return the_way_a_plane_cuts_a_pipe(flat, pipe);
         }
-        [Surface::Plane(flat), Surface::Cylinder(_)] => flat.normal(),
-        [Surface::Cylinder(_), Surface::Plane(flat)] => -flat.normal(),
+        [Surface::Cylinder(pipe), Surface::Plane(flat)] => {
+            return Ok(the_way_a_plane_cuts_a_pipe(flat, pipe)?.the_other_way());
+        }
         // A plane cuts a cone in a conic lying in that plane, exactly as it cuts
         // a pipe. The four shapes that are not one closed curve — a parabola, a
         // hyperbola, one ruling and two — never reach here, because
@@ -507,6 +500,29 @@ fn the_way_this_crossing_winds(
         return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
     }
     Ok(WhichWayItWinds::About(winds))
+}
+
+/// The normal the ellipse a plane leaning to a pipe's axis cuts out of it runs
+/// anticlockwise about, for the pair taken plane first.
+///
+/// A plane along the axis cuts the pipe in straight lines instead, which are
+/// ordered by their dominant axis rather than round anything. Whether it is
+/// along is [`how_a_plane_leans_against_a_pipe`]: the sign of `n·w` on the
+/// stored numbers, through the cascade that [`intersect`](crate::intersect)
+/// and `walk` ask the same sign through before their policy, so a plane whose
+/// dot with the axis cancels in `f64` and not exactly is the ellipse all three
+/// say it is. Where the cascade cannot tell, neither is the way round known.
+///
+/// # Errors
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a plane along the axis.
+fn the_way_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<WhichWayItWinds> {
+    match how_a_plane_leans_against_a_pipe(flat, pipe) {
+        Decision::Pos | Decision::Neg => Ok(WhichWayItWinds::About(flat.normal())),
+        Decision::Zero => Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
+        other => unreachable!("how a plane leans against a pipe is a sign: {other:?}"),
+    }
 }
 
 /// The normal the circle a plane cuts out of a torus runs anticlockwise about.
@@ -2414,6 +2430,7 @@ mod tests {
             [&ground, &wall],
             // A plane down the pipe's own axis: two straight lines, not a conic.
             [&wall, &pipe],
+            [&pipe, &wall],
             [&ball_beside, &pipe],
             [&pipe, &ball_beside],
             [&pipe, &pipe],
@@ -2454,34 +2471,26 @@ mod tests {
         }
     }
 
-    /// Two authorities on "is this plane along this pipe's axis", asking it two
-    /// different ways and disagreeing.
+    /// Two authorities on "is this plane along this pipe's axis", asking it the
+    /// same way and agreeing.
     ///
-    /// [`intersect`](crate::intersect) runs the certified cascade on the exact
-    /// dot of the two stored triples and names one closed curve.
-    /// [`the_way_this_crossing_winds`] runs `== 0.0` on the same two triples in
-    /// plain `f64`, reads "two straight lines", and refuses. `(2, 0, 3)` against
-    /// a plane facing `(−12, −7, 8)` is a pair of small whole numbers where the
-    /// `f64` dot cancels and the exact one does not, and the two answers are as
-    /// far apart as they can be.
+    /// `(2, 0, 3)` against a plane facing `(−12, −7, 8)` is a pair of small
+    /// whole numbers whose `f64` dot cancels and whose exact dot does not, so
+    /// they cross in an ellipse. [`intersect`](crate::intersect) runs the
+    /// certified cascade on the exact dot and names one closed curve, and
+    /// [`the_way_this_crossing_winds`] asks [`how_a_plane_leans_against_a_pipe`],
+    /// the same sign of the same two triples, and orders round it: three points
+    /// at one place sweep nothing. Before row Q2233 it ran `== 0.0` on the
+    /// rounded dot, read "two straight lines" and refused the pair, the gap §39
+    /// recorded.
     ///
-    /// **This witness has dissolved twice and the gap has not moved once.** It
-    /// was `(1, 0, 3)` against `(−12, −12, 4)` until §120 rounded the stored axis
-    /// correctly and that pair's `f64` dot came out at `−2.8e-17`; it was
-    /// `(2, 0, 3)` against `(−12, −12, 8)` until §121 rounded the stored normal
-    /// correctly and the *exact* dot of that pair came out at zero, which is a
-    /// pair the two authorities agree about. A sweep of small whole-number pipes
-    /// against small whole-number planes still finds dozens where the `f64` dot
-    /// cancels and the exact one does not — for this one pipe alone, more than
-    /// twenty normals inside `±12` — and this is one of them.
-    ///
-    /// **A gap, and this test pins today's answer so a fix fails it loudly**
-    /// (§19's shape). Closing it means the two asking the same question, which is
-    /// §23.8, and it moves `walk`'s own dispatch too — `walk.rs` has the same
-    /// `== 0.0` for the same reason — so it is a lane rather than a gate. §39
-    /// records it.
+    /// A sweep of small whole-number pipes against small whole-number planes
+    /// finds dozens where the `f64` dot cancels and the exact one does not — for
+    /// this one pipe alone, more than twenty normals inside `±12` — and this is
+    /// one of them. §120 and §121 each dissolved an earlier one by rounding the
+    /// stored axis and the stored normal correctly.
     #[test]
-    fn a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently() {
+    fn a_conic_the_intersector_names_is_ordered_here_too_because_the_two_ask_it_alike() {
         let pipe = Surface::Cylinder(
             Cylinder::new(
                 Axis::new(Point::origin(), Vector::new(2.0, 0.0, 3.0)).expect("a direction"),
@@ -2527,8 +2536,13 @@ mod tests {
         let somewhere = PredicatePoint::from([1.0, 0.0, 0.0]);
         assert_eq!(
             which_comes_first_round_a_crossing([&leaning, &pipe], somewhere, somewhere, somewhere),
-            Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
-            "and this refuses the very same pair"
+            Ok(Decision::Zero),
+            "and this orders round the very same pair"
+        );
+        assert_eq!(
+            which_comes_first_round_a_crossing([&pipe, &leaning], somewhere, somewhere, somewhere),
+            Ok(Decision::Zero),
+            "both ways round"
         );
     }
 
