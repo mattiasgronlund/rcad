@@ -2878,13 +2878,18 @@ impl<'f> Arrangement<'f> {
     ///
     /// **Or a flat surface cuts a pipe, of the three, in a curve wholly outside
     /// what picks one of the two crossings out**
-    /// ([`Arrangement::a_cut_of_a_pipe_is_clear_of_a_picker`]). This is a bar's
-    /// wall with a slanted pin starting on its axis, and the bar's end across
-    /// where the pin's pipe would come out of the wall if it ran on through the
-    /// axis (Q1909). The pin's pipe crosses the wall in two loops, and the one
-    /// the pin makes is picked by `x ≤ 0`; the end's plane crosses the pin's
-    /// pipe in an ellipse at `x > 0`, which the bar's wall runs through, so the
-    /// second proof fails on the pair of that loop and the bar's rim.
+    /// ([`Arrangement::a_cut_of_a_pipe_is_clear_of_a_picker`]). It was written
+    /// for a bar's wall with a slanted pin starting on its axis, and the bar's
+    /// end across where the pin's pipe would come out of the wall if it ran on
+    /// through the axis (Q1909): the pin's pipe crosses the wall in two loops,
+    /// the one the pin makes picked by `x ≤ 0`, and the end's plane crosses the
+    /// pin's pipe in an ellipse at `x > 0` that the bar's wall runs through, so
+    /// the second proof fails on the pair of that loop and the bar's rim. That
+    /// meet answers now, since the wall through the two axes mirrors all three
+    /// (Q2196), and a meet that answers asks no proof. Over every test of the
+    /// workspace this one is asked 101 times, in 4 tests, and never holds
+    /// (Q2201). It stays for two axes that pass each other by, which no wall
+    /// mirrors and [`meet_of_three_surfaces`] still refuses.
     ///
     /// None is a distance or a threshold: a ball a millionth of a unit clear
     /// of a pipe is skipped, and a ball resting against one is not.
