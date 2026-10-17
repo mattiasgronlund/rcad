@@ -47,7 +47,8 @@ Two faces share no point when any of these holds, each a proof:
 4. they touch at one point (`TouchAtOnePoint`) and that point is outside the
    part of space both boxes hold;
 5. one surface misses the band round an axis the other face lies in — how far
-   up that axis and how far out from it;
+   up that axis and how far out from it — a ball's skin wherever its centre
+   is;
 6. one surface is a ball that holds every corner's own box of the other face,
    a flat face whose every side is straight, strictly inside it.
 
@@ -73,6 +74,29 @@ expression in up and out, and a proved sign of that expression over the band is
 proof 5. This is what joins a frustum inside a bar, a pointed cone inside a
 bar, and a bar inside a ball apart without a box test on the round faces, none
 of which proof 2's boxes reach.
+
+**Since Q2252, item 5 asks a ball off the axis too.** Write `c` for the ball's
+centre, and `a = (p − origin) × w`, `b = (c − origin) × w` for a point `p` of
+the band. Lagrange's identity makes `(|p − c|² − radius²)·|w|²` equal to
+`near − 2a·b`, with `near = (up − c's up)² + out + c's out − radius²·|w|²`, and
+`2a·b` is never farther from nought than `2√(out·c's out)`. So the skin misses
+the band where `near` keeps one sign over it and `near² > 4·out·c's out` —
+below nought the band is inside the ball, above it outside — both in interval
+arithmetic on the stored numbers (`a_ball_misses_a_band` in `cuts.rs`). On the
+axis `b` is exactly nought and this is the old test. Off it, the band's point
+farthest from `c` is on the circle at its top or bottom and its greatest
+`out`, which for a pipe face is one of its sides and for a flat face the circle
+through its farthest corner, so the ball holds the face when it holds the
+circles its sides run on, and the test asks no more than that. A ball of radius
+1 less a bar of radius 0.2 and height 0.6 standing at `(0.4, 0)` inside it had
+no proof — nothing bounds a pipe face, or a flat face with a side on a pipe,
+in a box, item 6 asks every side straight, and the band asked a ball centred on
+the bar's axis — and the answer had the ball's skin in 5 faces, 8 in all, where
+the bar on the ball's axis left it in one; united with the ball it left the
+ball in 5. `a_ball_hollowed_by_an_off_centre_bar_keeps_its_skin_whole.rs` pins
+4 faces with the volume for the bar on the axis, at `(0.4, 0)`, and at
+`(0.75, 0)`, whose caps' rims are `√0.9925` out, and the ball alone after the
+union either way round.
 
 **Since Q2247, item 6.** A flat face whose every side is straight lies in the
 hull of its corners, and a ball holds the hull of any points it holds, so the
@@ -294,6 +318,17 @@ it moves here.
   `bake`'s boxes. A pipe or a cone face with a side running some other way —
   slanted, or with no side at all — is still left to 400.3, and 400.3 still
   stands for it.
+- **Since Q2252, a band whose square plane interval arithmetic cannot show
+  square.** The same bar at `(0.4, 0)` turned half a radian about `y` has no
+  band at all, and the answer is 8 faces again: each cap's normal is the
+  pipe's axis exactly, turned round, but `is_square_to` takes the cross
+  product in intervals, and `n_z·w_x − n_x·w_z` comes out a range one
+  rounding either side of nought. Each part worked as an exact difference of
+  two products (`rcad_predicates::expansion::difference_of_two_products`)
+  gives the bar its band and the four faces, and moves the pin of
+  `a_turned_bar_through_a_block_cuts_ellipses_and_nothing_has_to_be_approximated`
+  in `fuse/arrange.rs`, two block faces cut by 6 surfaces and not 7 with the
+  same pieces, which is outside Q2252's files. A row from Q2252 carries it.
 - A draw where two solids meet that reaches the §345 fold.
 - Q451 and Q453 wait on this row and were written around Q316's four draws,
   which no longer reach the mesher.
