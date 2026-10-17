@@ -691,6 +691,23 @@ moved them.
 >   the bar first as well:
 >   `a_ball_with_a_bar_through_it_off_its_axis_crosses_it_in_two_loops_and_every_fuse_with_the_bar_first_answers`.
 
+> **2026-10-17 note (Q2227, from Q2043): a box across a surface is a limit
+> only where nothing but the box says where the point is.** §294.24 traces a
+> sound half bar cut flush along its flat face, fused again with the same
+> block placed the same way, turned `0.4` about `x` and then shifted by
+> `(7, −5, 2.5)`: the difference and the intersection were refused
+> `Undecidable` "side of plane" at a corner's box `3.55e−15` across, which
+> does straddle the block's face. §294.24 found a gap there, not this row's
+> limit, because the box is not the only thing that says where the point is:
+> the corner was solved from the bar's flat face, a plane parallel to the
+> block's face and one ulp from it, and that other stored plane says which
+> side of the block's face the point is on though the box cannot. The answer
+> exists and the arithmetic reaches it once that plane is read directly
+> instead of narrowed through the box. So this row's "limit where the box
+> straddles the surface" holds only where the box is the only thing that
+> places the point; where some other stored number also places it, straddling
+> is a gap, as §294.24 closes.
+
 **Not refusals about arithmetic.** `Invalid::FacesDoNotAgreeWhichWayTheyFace` and
 `Invalid::VolumeIsNotPositive` out of the fuse are this crate saying it cannot
 assemble what it cut, before writing anything — `two_balls_that_really_cross_are_refused_by_name`
