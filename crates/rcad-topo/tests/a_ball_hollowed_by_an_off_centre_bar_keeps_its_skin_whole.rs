@@ -7,10 +7,15 @@
 //! skin in 5 pieces, and united with the ball it left the ball in 5 faces.
 //! Nothing proved the ball's skin misses the bar's faces: the band round the
 //! bar's axis was asked only of a ball centred on that axis.
+//!
+//! The same bar at `(0.4, 0)` turned half a radian about `y` came back with 8
+//! faces again, after the band was asked of a ball off the axis: interval
+//! arithmetic could not show either cap square to the pipe, so neither had a
+//! band (Q2256).
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Deflection, Isometry, Scale, Surface, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, Rule, SolidKey};
 
@@ -38,9 +43,28 @@ fn a_ball_united_with_a_bar_standing_off_its_axis_inside_it_is_the_ball() {
     assert_the_ball_alone(&off(0.4).compose(&centred()), "the bar at (0.4, 0)");
 }
 
+#[test]
+fn a_ball_less_a_bar_leaning_half_a_radian_inside_it_is_four_faces() {
+    assert_the_ball_with_a_hollow(&off(0.4).compose(&leaning()), "the bar leaning at (0.4, 0)");
+}
+
+#[test]
+fn a_ball_united_with_a_bar_leaning_half_a_radian_inside_it_is_the_ball() {
+    assert_the_ball_alone(&off(0.4).compose(&leaning()), "the bar leaning at (0.4, 0)");
+}
+
 /// The bar centred on the ball's own centre, standing along `z`.
 fn centred() -> Isometry {
     Isometry::translation(Vector::new(0.0, 0.0, -HEIGHT / 2.0)).expect("a shift")
+}
+
+/// The bar centred on the ball's own centre, turned half a radian about `y`.
+/// Each cap's normal is then the exact negative of the pipe's axis, and
+/// `n_z·w_x − n_x·w_z` worked in intervals is a range either side of nought.
+fn leaning() -> Isometry {
+    Isometry::rotation(&Axis::y(), 0.5)
+        .expect("a turn")
+        .compose(&centred())
 }
 
 fn off(x: f64) -> Isometry {
