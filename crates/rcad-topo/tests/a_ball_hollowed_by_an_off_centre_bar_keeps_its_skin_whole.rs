@@ -4,7 +4,14 @@
 //!
 //! A bar of radius 0.2 and height 0.6 on the ball's axis came back so, 4
 //! faces. The same bar moved off to `(0.4, 0)` came back with 8, the ball's
-//! skin in 5 pieces.
+//! skin in 5 pieces, and united with the ball it left the ball in 5 faces.
+//! Nothing proved the ball's skin misses the bar's faces: the band round the
+//! bar's axis was asked only of a ball centred on that axis.
+//!
+//! Leaning half a radian it came back with 8 faces still, for a second reason:
+//! the band was not built at all, since interval arithmetic could not show the
+//! caps square to the pipe's axis though each cap's normal is that axis
+//! exactly, turned round.
 
 use core::f64::consts::PI;
 
@@ -18,76 +25,84 @@ const HEIGHT: f64 = 0.6;
 
 #[test]
 fn a_ball_less_a_bar_standing_off_its_axis_inside_it_is_four_faces() {
-    for (what, placement) in placements() {
-        let (mut model, ball, bar) = a_ball_and_a_bar(&placement);
-        let [solid] = fused(&mut model, ball, bar, Rule::Difference, what)[..] else {
-            panic!("{what}: one solid");
-        };
-        let view = model.solid(solid).expect("this model made the key");
-        let on_the_ball = view
-            .faces()
-            .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
-            .count();
-        let on_the_pipe = view
-            .faces()
-            .filter(|face| matches!(face.surface(), Surface::Cylinder(_)))
-            .count();
-        let flat = view
-            .faces()
-            .filter(|face| face.surface().as_plane().is_some())
-            .count();
-        assert_eq!(
-            (
-                on_the_ball,
-                on_the_pipe,
-                flat,
-                view.faces().count(),
-                view.shells().count()
-            ),
-            (1, 1, 2, 4, 2),
-            "{what}: the ball's skin in one face, the bar's pipe and caps facing in, two shells"
-        );
-        assert_measured_near(&model, solid, BALL - PI * RADIUS * RADIUS * HEIGHT, what);
-    }
+    assert_the_ball_with_a_hollow(&centred(), "the bar on the ball's axis");
+    assert_the_ball_with_a_hollow(&off().compose(&centred()), "the bar at (0.4, 0)");
 }
 
 #[test]
 fn a_ball_united_with_a_bar_standing_off_its_axis_inside_it_is_the_ball() {
-    for (what, placement) in placements() {
-        for ball_first in [true, false] {
-            let what = format!("{what}, ball first {ball_first}");
-            let (mut model, ball, bar) = a_ball_and_a_bar(&placement);
-            let (arguments, tools) = if ball_first { (ball, bar) } else { (bar, ball) };
-            let [solid] = fused(&mut model, arguments, tools, Rule::Union, &what)[..] else {
-                panic!("{what}: one solid");
-            };
-            let view = model.solid(solid).expect("this model made the key");
-            let surfaces: Vec<Surface> = view.faces().map(|face| face.surface()).collect();
-            assert!(
-                matches!(surfaces[..], [Surface::Sphere(_)]),
-                "{what}: the ball in one face, got {} faces",
-                surfaces.len()
-            );
-            assert_measured_near(&model, solid, BALL, &what);
-        }
-    }
+    assert_the_ball_alone(&centred(), "the bar on the ball's axis");
+    assert_the_ball_alone(&off().compose(&centred()), "the bar at (0.4, 0)");
 }
 
-/// The bar of radius 0.2 and height 0.6 centred on the ball's own centre and
-/// standing along `z`, then off at `(0.4, 0)`, then off there and leaning half
-/// a radian towards `x`.
-fn placements() -> [(&'static str, Isometry); 3] {
-    let centred = Isometry::translation(Vector::new(0.0, 0.0, -HEIGHT / 2.0)).expect("a shift");
-    let off = Isometry::translation(Vector::new(0.4, 0.0, 0.0)).expect("a shift");
+#[test]
+fn a_ball_less_or_united_with_a_leaning_bar_inside_it_keeps_its_skin_whole() {
     let leaning = Isometry::rotation(&Axis::y(), 0.5).expect("a turn");
-    [
-        ("the bar on the ball's axis", centred),
-        ("the bar at (0.4, 0)", off.compose(&centred)),
+    let what = "the bar at (0.4, 0) leaning half a radian towards x";
+    let placement = off().compose(&leaning).compose(&centred());
+    assert_the_ball_with_a_hollow(&placement, what);
+    assert_the_ball_alone(&placement, what);
+}
+
+/// The bar centred on the ball's own centre, standing along `z`.
+fn centred() -> Isometry {
+    Isometry::translation(Vector::new(0.0, 0.0, -HEIGHT / 2.0)).expect("a shift")
+}
+
+fn off() -> Isometry {
+    Isometry::translation(Vector::new(0.4, 0.0, 0.0)).expect("a shift")
+}
+
+fn assert_the_ball_with_a_hollow(placement: &Isometry, what: &str) {
+    let (mut model, ball, bar) = a_ball_and_a_bar(placement);
+    let [solid] = fused(&mut model, ball, bar, Rule::Difference, what)[..] else {
+        panic!("{what}: one solid");
+    };
+    let view = model.solid(solid).expect("this model made the key");
+    let on_the_ball = view
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
+        .count();
+    let on_the_pipe = view
+        .faces()
+        .filter(|face| matches!(face.surface(), Surface::Cylinder(_)))
+        .count();
+    let flat = view
+        .faces()
+        .filter(|face| face.surface().as_plane().is_some())
+        .count();
+    assert_eq!(
         (
-            "the bar at (0.4, 0) leaning",
-            off.compose(&leaning).compose(&centred),
+            on_the_ball,
+            on_the_pipe,
+            flat,
+            view.faces().count(),
+            view.shells().count()
         ),
-    ]
+        (1, 1, 2, 4, 2),
+        "{what}: the ball's skin in one face, the bar's pipe and caps facing in, two shells"
+    );
+    assert_measured_near(&model, solid, BALL - PI * RADIUS * RADIUS * HEIGHT, what);
+}
+
+/// The ball and the bar united, either way round, are the ball.
+fn assert_the_ball_alone(placement: &Isometry, what: &str) {
+    for ball_first in [true, false] {
+        let what = format!("{what}, ball first {ball_first}");
+        let (mut model, ball, bar) = a_ball_and_a_bar(placement);
+        let (arguments, tools) = if ball_first { (ball, bar) } else { (bar, ball) };
+        let [solid] = fused(&mut model, arguments, tools, Rule::Union, &what)[..] else {
+            panic!("{what}: one solid");
+        };
+        let view = model.solid(solid).expect("this model made the key");
+        let surfaces: Vec<Surface> = view.faces().map(|face| face.surface()).collect();
+        assert!(
+            matches!(surfaces[..], [Surface::Sphere(_)]),
+            "{what}: the ball in one face, got {} faces",
+            surfaces.len()
+        );
+        assert_measured_near(&model, solid, BALL, &what);
+    }
 }
 
 fn assert_measured_near(model: &Model, solid: SolidKey, truth: f64, what: &str) {
@@ -108,7 +123,8 @@ fn assert_measured_near(model: &Model, solid: SolidKey, truth: f64, what: &str) 
     );
 }
 
-/// A ball of radius 1 at the origin, and the bar placed with `placement`.
+/// A ball of radius 1 at the origin, and a bar of radius 0.2 and height 0.6
+/// placed with `placement`.
 fn a_ball_and_a_bar(placement: &Isometry) -> (Model, SolidKey, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let ball = model
