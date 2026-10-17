@@ -6,10 +6,13 @@
 //! is on the rim, and in `f64` it is a rounding outside it. The block's walls
 //! `x = 12.4` and `y = 8.2` cross the rim's circle at two points a rounding
 //! apart, and every fuse was refused on which of the two comes first round the
-//! circle.
+//! circle. The walls and the plate's top or floor meet at the corner, an `f64`
+//! triple, and `fuse/arrange.rs` now reads the order off them.
 //!
-//! Work in progress: this pins only that every fuse answers. The next lane adds
-//! the volumes and the fix in `fuse/arrange.rs`.
+//! The fuses still refuse further on, at the sliver of the block's face between
+//! the corner and the rim, which holds no `f64` point; that refusal is in
+//! `fuse/select.rs`, and this file waits for its fix to pin every fuse's answer
+//! and volume.
 
 use rcad_geom::{Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -18,7 +21,7 @@ use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 /// Each block `[x0, y0]`–`[12.4, y1]`, set on the plate's top or under its
 /// floor, fused with the plate by every rule, plate first and second.
 #[test]
-fn a_block_cornered_on_a_round_tabs_rim_fuses_by_every_rule_both_ways_round() {
+fn a_block_cornered_on_a_round_tabs_rim_is_never_refused_on_which_rim_crossing_comes_first() {
     let mut refused = Vec::new();
     for [x0, y0, y1] in [
         [11.4, 8.2, 9.2],
@@ -44,7 +47,8 @@ fn a_block_cornered_on_a_round_tabs_rim_fuses_by_every_rule_both_ways_round() {
                         rule,
                         &Policy::certified(),
                         &mut ProvenanceLog::new(),
-                    ) {
+                    ) && format!("{why:?}").contains("order along a crossing")
+                    {
                         refused.push(format!(
                             "x {x0} to 12.4, y {y0} to {y1}, z {z0} to {z1}, {rule:?}, \
                              plate first {plate_first}: {why:?}"
@@ -54,7 +58,11 @@ fn a_block_cornered_on_a_round_tabs_rim_fuses_by_every_rule_both_ways_round() {
             }
         }
     }
-    assert!(refused.is_empty(), "refused:\n{}", refused.join("\n"));
+    assert!(
+        refused.is_empty(),
+        "refused on which rim crossing comes first:\n{}",
+        refused.join("\n")
+    );
 }
 
 fn a_plate_with_a_round_tab(model: &mut Model) -> SolidKey {

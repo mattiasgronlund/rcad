@@ -15293,6 +15293,88 @@ mod tests {
         }
     }
 
+    /// Q992's plate again, cut by `x = 5.375` and by a ball at
+    /// `(5.375, 2.5, 1)` whose circle on the top passes the hole's corner
+    /// `(5, 3)` a rounding outside or inside it (Q2110, Q1484's shapes G and
+    /// I). `0.375² + 0.5² = 0.625²`, so radius `0.625` runs through the corner.
+    ///
+    /// The hole's edge lines `x = 5` and `y = 3` meet the circle at two nodes
+    /// a rounding apart, in boxes that overlap, and the sweep from the start
+    /// straddles nought, so the boxes cannot say which comes first round the
+    /// circle. The top and the two edge lines meet at the corner, an `f64`
+    /// triple, and how far the corner is off the ball says it
+    /// ([`Arrangement::as_two_cuts_through_one_corner_say`]).
+    #[test]
+    fn a_ball_whose_circle_passes_a_rounding_off_a_holes_corner_is_split_by_the_planes_through_it()
+    {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let plate = ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 1.0],
+            [5.0, 1.0],
+            [5.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 5.0],
+            [7.0, 5.0],
+            [7.0, 6.0],
+            [8.0, 6.0],
+            [8.0, 8.0],
+            [5.0, 8.0],
+            [5.0, 7.0],
+            [3.0, 7.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
+            [0.0, 5.0],
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ])
+        .with_hole(vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0], [3.0, 5.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a square hole");
+        let solid = model
+            .add_extrusion(&plate, 1.0, &Isometry::identity())
+            .expect("an extrusion");
+        let top = bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the plate bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(facing_up)
+        .expect("the plate has a top");
+
+        for radius in [0.625 - f64::powi(2.0, -53), 0.625 + f64::powi(2.0, -53)] {
+            let mut cut = cut_by(&top, &[[1.0, 0.0, 0.0, -5.375]]);
+            cut.cuts.push(Surface::Sphere(
+                rcad_geom::Sphere::new(Point::new(5.375, 2.5, 1.0), radius).expect("a radius"),
+            ));
+
+            let mut log = ProvenanceLog::new();
+            let pieces = split_a_face(&cut, &Policy::certified(), &mut log)
+                .unwrap_or_else(|why| panic!("radius {radius:e}: {why:?}"))
+                .pieces;
+
+            assert!(
+                log.is_empty(),
+                "radius {radius:e}: the corner's planes decide exactly"
+            );
+            assert_eq!(
+                pieces.len(),
+                4,
+                "radius {radius:e}: either side of the cut, each split by the circle"
+            );
+            for piece in &pieces {
+                every_wire_closes(piece);
+            }
+        }
+    }
+
     /// Planes that keep the whole box round a face on one side are left out
     /// before any meet is placed, so no node is on them, not even where they
     /// cross the one plane that does cut the face, and the face comes apart as
