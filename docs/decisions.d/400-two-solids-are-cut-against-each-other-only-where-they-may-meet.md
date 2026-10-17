@@ -216,6 +216,31 @@ place a point at its own centre.
 in `a_ball_split_on_itself_united_with_a_block_clear_of_it.rs` pins it, under
 every rule both ways round, held by the row after Q977 (Q1024).
 
+**Note, 2026-10-17, Q1384: the ball is kept as one face, and the two pole
+arcs are gone.** The last note above still said "the union keeps the ball in
+two faces either side of `x = 0`". Since Q1380 (`4039e989`, §229.2) the
+joiner's ball arm joins two pieces of one ball used the same way round into
+one face, and this union is one of the three cases that move: the plane
+`x = 0` still cuts the ball into two arcs from pole to pole that are pieces
+of no input edge, but the union now keeps both pieces either side of that
+plane as the one face the joiner makes of them, so neither pole has an arc
+left along it to fold. `a_ball_cut_through_both_poles_by_a_linked_blocks_plane.rs`
+pins it: `the_union_fused_again_with_a_far_cube_is_the_union_and_the_cube`
+pins the ball as `1` face (`balls_faces`), where the note above still read
+two.
+
+Measured: breaking the else arm of `the_corners_each_closed_run_keeps` in
+`fuse/assemble.rs` — the path Q871 added, which keeps every corner of a
+closed run cut from no input edge, reached when nothing in a fuse joins it —
+and running `just t -p rcad-topo --no-fail-fast` (in a lane's own tree, never
+committed) passes all three tests of
+`a_ball_cut_through_both_poles_by_a_linked_blocks_plane.rs` even so: none of
+them reach that path any more for this union. The path itself is not dead —
+43 other tests elsewhere in `rcad-topo` still panic on it, among them several
+of `two_equal_bars_leaning_at_each_other` and `fuses_that_must_agree` — so
+Q871's answer still holds wherever a fuse joins nothing; this union is just no
+longer one of the cases that needs it.
+
 ### 400.6 Q452
 
 Q452 was dropped under §330.2 before this landed, and
