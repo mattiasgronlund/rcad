@@ -1825,3 +1825,135 @@ kept): `top corner moved [3.0, -3.894183423086505, 9.210609940028851]`.
 Turned and shifted, the guess changes which refusal is hit — "order along a
 crossing" rather than "side of plane" — not whether one is.
 Neither guess reaches a point both halves of the cut agree is the corner.
+
+### 294.24 Q2043: the half bar cut again flush along its flat face, turned then shifted, is a gap, and closed — 2026-10-17
+
+*Queue row Q2043, was Q2034. Lane
+`lane-q2043-a-half-bar-turned-and-shifted-cut-flush`, carried on by three
+relays to `a6256de8`, and `lane-q2043-b-finish-the-half-bar-cut-flush`, which
+merged it at `de5e987b` off `5b5532db` and added the unit tests. Pinned in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`.*
+
+**What refused.** The sound half bar, `add_round_bar(3, 10)` less
+`THE_HALF_PAST_THE_SEAM` under `certified` and then placed, fused again with
+that same block placed the same way, flush along its flat face `y = 0`.
+Turned 0.4 about `x` and then shifted by `(7, −5, 2.5)`, the difference and
+the intersection were both refused: under `certified`, `Undecidable` "side of
+plane" at a corner's box round `(10, −5, 2.5)`, `3.55e−15` across, and under
+`tolerant(100)`, `TwoCurvesTouchWithoutCrossing`. Every other placement
+answered. The base's source run with this branch's test file prints, for
+`a_sound_half_bar_cut_flush_along_its_flat_face_answers_in_every_placement`,
+`Difference refused: Undecidable { … predicate: "side of plane" … enclosure:
+3.552713678800501e-15 … }`.
+
+**A gap, and not §294.23's limit.** §294.23 measured the same two offsets.
+Turned and shifted, the block's face holds `3.631759114242799`
+(`0x400d0dd7b8f4fb64`) where the bar's seam plane holds `3.6317591142427994`
+(`0x400d0dd7b8f4fb65`), one ulp apart, with the normals equal bit for bit.
+There the whole bar is cut, so the block's face crosses the bar's wall a
+rounding from the seam corner, and the answer would hold an edge `3.9e−16`
+long beside coordinates near 11. That does not fit an `f64`, so it is a
+limit. Here the bar was cut by that face where it was built, so its flat face
+is the block's face moved by the bar's placement. It is stored as
+`0xc00d0dd7b8f4fb65`, which is `3.6317591142427994` along the block's normal
+turned round. The block's own placement is composed with its shift
+`(−5, 0, −1)` and rounds one ulp lower (§294.23). Along the flat face's
+outward normal, the bar's material is `n · x < −3.6317591142427994` and the
+block's `n · x > −3.631759114242799`. The two solids are one ulp apart and do
+not touch. The answer is the whole half bar for the difference and nothing
+for the intersection. Nothing in it is small, and it is the answer of the
+numbers the kernel is handed, so the refusal is a gap (§16.10).
+
+**Three rules, each reading two offsets instead of a box.** Each place that
+refused asked a box both planes run through:
+
+1. **The side of a plane parallel to one a corner is on.**
+   `Arrangement::side_of_a_plane_parallel_to_one_it_is_on`, in
+   `fuse/arrange.rs`, is asked first in `passes_through`'s `None =>` arm, and
+   only of the three surfaces `bake` solved the corner from
+   (`BakedCorner::solved_from`). A corner of the flat face was solved from
+   the cap's plane, the wall and the flat face, and the flat face's normal is
+   the block's face's turned round, number for number. Every point of a plane
+   is on one side of a plane parallel to it, so the corner's side of the
+   block's face is which of the two offsets is the larger.
+2. **The order of two points on a circle, by two parallel cuts.**
+   `Arrangement::as_two_parallel_cuts_through_the_loop_say` is the last
+   fallback in `order_along`. Circles on the bar's wall meet the flat face and
+   the block's face in pairs of points a rounding apart. Across the two
+   planes a circle climbs along one half and falls along the other, so which
+   of a pair comes first round it is the sign of the offsets' difference
+   against the way the circle runs at the two points.
+3. **The one face a box meets.** `by_the_one_face_its_box_meets`, in
+   `fuse/select.rs`, is called by `settle_against_each` where the ray answers
+   `OnBoundary` or `Undecidable`. A point found inside the piece of the
+   block's face across from the flat face sits in a box `4e−15` across both
+   planes, which no ray can place. Where the bar's flat face is the only face
+   of the bar that the box meets, and that face holds the box, the piece is
+   inside the bar where its offset is behind the face's and outside where it
+   is in front.
+
+**Each compares two `f64` offsets exactly, with no tolerance.** Each asks
+first that one plane's normal is the other's, or the other's turned round,
+component for component with `==`, and then compares two stored offsets.
+Nothing is divided and nothing is rounded between the stored numbers and the
+answer. Where the normals differ at all, each answers `None` and the old path
+asks the box as before. The order rule also asks which way the circle runs at
+each of the two points, and takes that only where interval arithmetic proves
+one sign at both. The one-face rule asks the faces' own tests
+(`face_holds_the_point`, `side_of_a_flat_face`, `side_of_surface`) under the
+policy, as before, and lets them take nothing more.
+
+**The row's lead was not §294.9's seam plane.** Q2043 guessed that the "side
+of plane" might be the sound bar's refusal of §294.9, beside Q1398. It is
+not. `BakedCorner::seam_plane` answers a seam corner against its own moved
+seam plane, and the partner here is the block's face, one ulp off that plane
+(§294.23). What places the corner is a plane among the three it was solved
+from, the flat face, which is parallel to the partner.
+
+**Which rule each test needs.** Each rule was taken out on its own, with the
+other two left in, and the test file run again (`mise exec -- just t -p
+rcad-topo --test a_broken_three_surface_corner_read_back_from_bytes`):
+
+- Without the side rule, 12 of 14 pass.
+  `a_sound_half_bar_cut_flush_along_its_flat_face_answers_in_every_placement`
+  refuses "side of plane" (enclosure `3.55e−15`) under `certified`, and
+  `TwoCurvesTouchWithoutCrossing` with the pin cut to `tolerant(100)` alone.
+  `a_half_bar_whose_corner_is_moved_onto_the_other_end_of_its_cut_answers_no_fuse`
+  refuses "side of plane", turned then shifted under `certified`, where it
+  now expects "order along a crossing".
+- Without the order rule, 13 of 14 pass. The flush pin refuses "order along a
+  crossing" (enclosure `6.6e−15`) under `certified`, and
+  `TwoCurvesTouchWithoutCrossing` under `tolerant(100)` alone.
+- Without the one-face rule, 13 of 14 pass. The flush pin refuses "a point in
+  a piece that every solid could place", and under `tolerant(100)` alone the
+  same.
+
+So each rule is needed, under both policies. With the base's source, the
+flush pin fails on "side of plane", and the moved-corner pin fails with
+`left: Undecidable(["side of plane"])` against `right:
+Undecidable(["order along a crossing"])`.
+
+The unit tests: `a_flat_piece_a_step_off_a_blocks_floor_is_placed_by_the_floor`
+and `a_box_a_side_leaning_over_a_wall_runs_through_is_not_placed_by_the_wall`
+in `fuse/select.rs` pin the one-face rule, the second on a wedge whose long
+side leans over its wall and runs through the box, where the rule must
+answer `None`.
+`a_corner_solved_from_a_plane_parallel_to_the_partner_is_where_the_offsets_say`
+in `fuse/arrange.rs` pins the side rule with Q2043's own offsets. The order
+rule has no unit test of its own: it needs a whole arrangement with a
+crossing round a closed curve and baked corners, and the flush pin is what
+fails without it.
+
+**How §39.4 bears.** Its table has no row for "side of plane". It files
+"order along a crossing" (the turned notched bar) and the refusals to place a
+point in a piece as gaps, which agrees with this. The row that bears is
+"`Undecidable` out of `face_holds_the_point`", filed a **limit** where the
+box straddles the surface, and never demonstrated ("no generator reaches
+either"). Q2043's boxes each straddle a surface, and the answer exists: the
+point the box stands for lies on a plane parallel to the surface, one ulp
+from it, so its side is known though the box cannot say it. A box across a
+surface is a limit only where nothing but the box says where the point is.
+§39.4's file is outside this row's write set, so a row adds the note there.
+
+**What this leaves.** A small row to add that note under §39.4's
+`face_holds_the_point` row. Nothing else: no new defect was found.
