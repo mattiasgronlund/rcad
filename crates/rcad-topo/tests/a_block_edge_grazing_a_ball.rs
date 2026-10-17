@@ -50,24 +50,31 @@ const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference
 #[test]
 fn two_meets_whose_boxes_touch_are_what_a_certified_fuse_refuses_on() {
     for rule in EVERY_RULE {
-        let records = what_it_recorded(16.0, rule, &Policy::certified());
-        assert_eq!(
-            records.len(),
-            1,
-            "{rule:?}: a certified refusal carries the one decision it could not take, \
-             and this carried {records:#?}"
-        );
-        let refused = &records[0];
-        assert_eq!(
-            refused.predicate(),
-            ALONG_A_CROSSING,
-            "{rule:?}: {refused:#?}"
-        );
-        assert_eq!(refused.level(), Level::Interval, "{rule:?}");
-        assert!(
-            is_the_two_meets(refused),
-            "{rule:?}: the pair it refused on is not the two meets: {refused:#?}"
-        );
+        for ball_first in [true, false] {
+            let records = what_it_recorded(16.0, rule, &Policy::certified(), ball_first);
+            assert_eq!(
+                records.len(),
+                1,
+                "{rule:?}, ball first {ball_first}: a certified refusal carries the one \
+                 decision it could not take, and this carried {records:#?}"
+            );
+            let refused = &records[0];
+            assert_eq!(
+                refused.predicate(),
+                ALONG_A_CROSSING,
+                "{rule:?}, ball first {ball_first}: {refused:#?}"
+            );
+            assert_eq!(
+                refused.level(),
+                Level::Interval,
+                "{rule:?}, ball first {ball_first}"
+            );
+            assert!(
+                is_the_two_meets(refused),
+                "{rule:?}, ball first {ball_first}: the pair it refused on is not the two \
+                 meets: {refused:#?}"
+            );
+        }
     }
 }
 
@@ -84,22 +91,25 @@ fn two_meets_whose_boxes_touch_are_what_a_certified_fuse_refuses_on() {
 #[test]
 fn a_tolerant_policy_asked_about_the_same_two_meets_folds_them() {
     for rule in EVERY_RULE {
-        let records = what_it_recorded(16.0, rule, &Policy::tolerant(25.0));
-        let folded = records
-            .iter()
-            .filter(|record| record.predicate() == ALONG_A_CROSSING && is_the_two_meets(record))
-            .collect::<Vec<_>>();
-        assert!(
-            !folded.is_empty(),
-            "{rule:?}: the policy was never asked about the two meets: {records:#?}"
-        );
-        for record in folded {
-            assert_eq!(
-                record.outcome(),
-                Decision::Zero,
-                "{rule:?}: a wobble of 5.3e-15 at a 25 mm working size is inside the budget, \
-                 so the two are one point: {record:#?}"
+        for ball_first in [true, false] {
+            let records = what_it_recorded(16.0, rule, &Policy::tolerant(25.0), ball_first);
+            let folded = records
+                .iter()
+                .filter(|record| record.predicate() == ALONG_A_CROSSING && is_the_two_meets(record))
+                .collect::<Vec<_>>();
+            assert!(
+                !folded.is_empty(),
+                "{rule:?}, ball first {ball_first}: the policy was never asked about the two \
+                 meets: {records:#?}"
             );
+            for record in folded {
+                assert_eq!(
+                    record.outcome(),
+                    Decision::Zero,
+                    "{rule:?}, ball first {ball_first}: a wobble of 5.3e-15 at a 25 mm \
+                     working size is inside the budget, so the two are one point: {record:#?}"
+                );
+            }
         }
     }
 }
@@ -254,12 +264,12 @@ fn no_point_with_f64_coordinates_is_inside_the_piece_between_the_two_places() {
 ///
 /// On any error but a refusal: this shape is a ball and a block, and anything
 /// else coming back is not what this file is about.
-fn what_it_recorded(height: f64, rule: Rule, policy: &Policy) -> Vec<Record> {
+fn what_it_recorded(height: f64, rule: Rule, policy: &Policy, ball_first: bool) -> Vec<Record> {
     let mut log = ProvenanceLog::new();
-    match fuse_a_block_edge_grazing_a_ball(height, rule, policy, true, &mut log) {
+    match fuse_a_block_edge_grazing_a_ball(height, rule, policy, ball_first, &mut log) {
         Ok(_) => log.records().to_vec(),
         Err(Error::Undecidable { records }) => records.records().to_vec(),
-        Err(other) => panic!("{rule:?} at height {height}: {other:?}"),
+        Err(other) => panic!("{rule:?} at height {height}, ball first {ball_first}: {other:?}"),
     }
 }
 
