@@ -317,3 +317,66 @@ What this leaves:
   sit under what the configurations predict by more than one would expect
   together. A run of 48 seeds a family at factor 66, with the per-block counts
   of each, would say whether they are chance. Q1427.
+
+### 303.7 The narrow factor-66 spread was chance
+
+*Queue row Q1427. Seeds 1 to 48, `RCAD_SOAK_FACTOR=66 RCAD_SOAK_SEED=<1..48>
+<fuses_that_must_agree binary> --exact <test> --nocapture --test-threads 1`,
+from `crates/rcad-topo`, 20 at a time. The binary is built with `cargo nextest
+run --cargo-profile test --no-run -p rcad-topo --test fuses_that_must_agree`.
+Scripts are under `target/q1427/` (gitignored): `one.sh <family> <seed>` runs
+one, `run-<family>.sh` the batch of 48, `extract.py <family>` the table below.
+`fuses_that_must_agree.proptest-regressions` gained the turned family's own
+`cc` lines below and lost them again before this file was committed, the same
+as §303.6's own seed-2 line.*
+
+**Lattice, chance.** All 48 complete, no refusals, and `together` is 1.0000:
+no configuration gave more than one of its three fuses not a solid (18 486 of
+406 560). The pooled rate is 1.5156% (18 486 of 1 219 680 fuses) — well under
+§303.2's 2.227%, consistent with the gaps fixed since 09-27 moving answers
+from not a solid to a solid. The denominator moved too: 25 410 fuses a seed,
+not §303.2's 25 401, since the regression file now replays 22 lines against
+this strategy rather than 19, `3 × (128 × 66 + 22)`; held on every one of the
+96 runs below that completed.
+
+The per-seed spread over the 48 is 0.0656 points against a
+configuration-predicted 0.0755 (the binomial's own 0.0766 is close, since
+`together` is 1), a ratio of variances of 0.76. A chi-square test of the
+sample variance against that predicted variance, 35.546 on 47 degrees of
+freedom, lands at its 11th percentile: an eleven-in-a-hundred draw, not a
+one-in-twenty one. **The narrow lattice spread §303.6 asked about is chance.**
+
+One side effect of the rate's fall is worth naming without being a finding:
+1.5156% sits only 0.016 points above `A_LATTICE_PAIR_IS_NOT_A_SOLID`'s raw
+floor of 1.5%, where §303.2's 2.227% sat 0.73 points above it.
+`band_for_a_draw_of`'s three-spread widening still took in every one of the
+48 seeds, so nothing failed here — but the floor is worth a fresh look if the
+rate keeps falling, the way Q228 looked at it the first time.
+
+**Turned, too few seeds left to tell.** Of seeds 1 to 48, 24 panic with
+Q2236's own message (`fuse/assemble.rs:2572`, "every face joined here brought
+an outline of its own..."), needing no new row, and 12 more fail a different
+way (below), leaving 12 complete: seeds 3, 4, 7, 10, 12, 13 and 15 to 20. Over
+those, the pooled rate is 0.6776% (2 066 of 304 920 fuses, same 25 410 a
+seed), `together` is 1.0116 (4 configurations of 101 640 gave three of three,
+none gave two), the per-seed spread is 0.0461 against a configuration-predicted
+0.0514 (ratio 0.80), and the chi-square on 11 degrees of freedom lands at its
+36th percentile — also inside chance, but with two in three seeds thrown out
+before they can answer, this says little either way.
+
+**A new failure, 12 of the 48 turned seeds (1 and 38 to 48): `Union went
+wrong: this kernel built an answer that does not validate, and wrote nothing:
+a hole in a face winds the same way as the outer wire.`** That is
+`Error::TheFuseWroteABrokenAnswer { broken: Invalid::HoleWindsWithTheOuterWire
+}`, which `fused`'s `a_flat_refusal` does not allow for
+`Coordinates::AreUnderAGeneralRotation`, so the test counts it a failure
+rather than a refusal. Unlike §417's family, these are small, ordinary pairs
+near the origin, not far-apart turns with huge coordinate ranges. Seed 1
+shrinks to `Ell { width: 2, depth: 5, bite_width: 1, bite_depth: 2 }` height 3
+at the origin and `Ell { width: 2, depth: 3, bite_width: 1, bite_depth: 2 }`
+height 1 at `[0, 1, 1]`, turned by `Turn { direction: [-1, 2, -3], steps: 36
+}`; proptest's line was `cc
+082ed6006b7346baf41062500b56e870dfe4db56b24fbee9d3ad8fd965c2e125`, and this
+lane took it back out, the same as §303.6's own. A row to say whether each of
+the 12 is §417's gap reached by ordinary numbers or a new one, and fix or pin
+it by name, is below.
