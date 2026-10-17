@@ -779,7 +779,11 @@ pub enum Error {
     /// This is what is left over — among it a plane leaning well off square to
     /// the axis of a pipe or a cone, which cuts it in a curve too far from a
     /// line for the road for crossing curves, against a second round surface
-    /// off that axis; a plane leaning to the one axis a pipe or a cone shares
+    /// off that axis, such as the plane `x + 16z = 8` against a pipe of radius
+    /// one along `x` and a ball of radius three half a unit off that axis,
+    /// which meet in four points
+    /// (`a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_is_refused_with_four_points_there`
+    /// in `rcad-topo`); a plane leaning to the one axis a pipe or a cone shares
     /// with a second round surface, nearer square to it than to parallel but
     /// too far off square for the road for crossing curves, such as the cut
     /// `x + 2z = 6` across a bar of radius three up `z` and the cone of slope
