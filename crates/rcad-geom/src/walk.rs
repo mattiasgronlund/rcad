@@ -843,13 +843,11 @@ fn what_a_run_between_these_two_lies_on(
         // read as straight lines (Q2189).
         [Surface::Plane(flat), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Plane(flat)] => {
-            match how_a_plane_leans_against_a_pipes_axis(&flat, &pipe, policy, log)? {
-                Decision::Zero => Ok(WhatARunLiesOn::StraightLine),
-                Decision::Pos | Decision::Neg => {
-                    where_a_plane_cuts_a_pipe(&flat, &pipe).map(WhatARunLiesOn::Conic)
-                }
-                other => unreachable!("a sign question answers with a sign: {other:?}"),
+            if how_a_plane_leans_against_a_pipes_axis(&flat, &pipe, policy, log)? == Decision::Zero
+            {
+                return Ok(WhatARunLiesOn::StraightLine);
             }
+            where_a_plane_cuts_a_pipe(&flat, &pipe).map(WhatARunLiesOn::Conic)
         }
         // Every shape a plane and a cone cross in reaches here, and every one
         // of them is answered: `where_a_plane_cuts_a_cone` asks the same two
@@ -3871,36 +3869,34 @@ fn how_a_plane_leans_against_a_pipes_axis(
 /// **`n·w` is summed exactly and rounded once.** Summed in `f64` it can come
 /// out exactly nothing for a plane a rounding off parallel to the axis, whose
 /// ellipse is about `10¹⁶` long, and dividing by it then is dividing by zero.
+/// Where a product of a normal and a direction component is too small to keep
+/// exactly, under `2⁻⁹⁶⁹`, it is summed to about a hundred bits instead. The
+/// fuzzer draws that often — a normal of `(−3e-179, −2e-204, 1)` against an
+/// axis of `(−5e-12, 1e-128, −1)` — and the soak over its draws walks nearly
+/// half its points along such crossings.
 ///
 /// # Errors
 ///
-/// [`Error::CannotWorkOutHowBigACrossingIs`] when a product of a normal and a
-/// direction component falls below where it can be kept exactly, as
-/// [`where_a_plane_cuts_a_cone`] refuses the same product.
-///
-/// # Panics
-///
-/// Never. The only call is in [`what_a_run_between_these_two_lies_on`], which
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when `n·w` still comes out
+/// nothing. The only call is in [`what_a_run_between_these_two_lies_on`], which
 /// answers `StraightLine` unless [`how_a_plane_leans_against_a_pipes_axis`]
-/// proved `n·w` above or below zero. The exact sum is then not zero, and
-/// [`Exact::nearest_f64`] is within a rounding or two of it, so not zero
-/// either. A
-/// caller-stated run on a plane along the axis gets `StraightLine` and never
-/// arrives here, which
+/// proved `n·w` above or below zero, so the exact sum is then not zero and
+/// [`Exact::nearest_f64`] of it is not either; only the hundred-bit sum can
+/// still cancel to nothing. A caller-stated run on a plane along the axis gets
+/// `StraightLine` and never arrives here, which
 /// `a_closed_run_a_caller_names_on_a_crossing_of_straight_lines_is_refused_by_name`
 /// (`crates/rcad-geom/tests/the_degeneracies_a_crossing_has_to_answer.rs`)
 /// walks in through both public doors to show.
 fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
     let normal = flat.normal();
     let along = pipe.axis().direction();
-    let Some(leans) = Exact::dot_of(normal.components(), along.components()) else {
-        return Err(Error::CannotWorkOutHowBigACrossingIs);
-    };
-    let leans = leans.nearest_f64();
-    assert!(
-        leans != 0.0,
-        "a plane along a pipe's axis crosses it in straight lines, which are walked by their ends"
+    let leans = Exact::dot_of(normal.components(), along.components()).map_or_else(
+        || normal.dot_rounded_once(along),
+        |exact| exact.nearest_f64(),
     );
+    if leans == 0.0 {
+        return Err(Error::CannotWorkOutHowBigACrossingIs);
+    }
 
     let up_the_axis = (flat.offset() - normal.dot(pipe.axis().origin() - Point::origin())) / leans;
     let middle = pipe.axis().origin() + along * up_the_axis;
