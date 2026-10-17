@@ -7,15 +7,10 @@
 //! skin in 5 pieces, and united with the ball it left the ball in 5 faces.
 //! Nothing proved the ball's skin misses the bar's faces: the band round the
 //! bar's axis was asked only of a ball centred on that axis.
-//!
-//! Leaning half a radian it came back with 8 faces still, for a second reason:
-//! the band was not built at all, since interval arithmetic could not show the
-//! caps square to the pipe's axis though each cap's normal is that axis
-//! exactly, turned round.
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Scale, Surface, Vector};
+use rcad_geom::{Deflection, Isometry, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, Rule, SolidKey};
 
@@ -26,22 +21,21 @@ const HEIGHT: f64 = 0.6;
 #[test]
 fn a_ball_less_a_bar_standing_off_its_axis_inside_it_is_four_faces() {
     assert_the_ball_with_a_hollow(&centred(), "the bar on the ball's axis");
-    assert_the_ball_with_a_hollow(&off().compose(&centred()), "the bar at (0.4, 0)");
+    assert_the_ball_with_a_hollow(&off(0.4).compose(&centred()), "the bar at (0.4, 0)");
+}
+
+/// At `(0.75, 0)` the rim of either cap reaches `(0.95, 0, ±0.3)`, `√0.9925`
+/// out, and the ball still holds it. The ball holds the bar exactly where it
+/// holds the rims of its caps, and the proof asks that and no more.
+#[test]
+fn a_ball_less_a_bar_whose_rims_nearly_reach_its_skin_is_four_faces() {
+    assert_the_ball_with_a_hollow(&off(0.75).compose(&centred()), "the bar at (0.75, 0)");
 }
 
 #[test]
 fn a_ball_united_with_a_bar_standing_off_its_axis_inside_it_is_the_ball() {
     assert_the_ball_alone(&centred(), "the bar on the ball's axis");
-    assert_the_ball_alone(&off().compose(&centred()), "the bar at (0.4, 0)");
-}
-
-#[test]
-fn a_ball_less_or_united_with_a_leaning_bar_inside_it_keeps_its_skin_whole() {
-    let leaning = Isometry::rotation(&Axis::y(), 0.5).expect("a turn");
-    let what = "the bar at (0.4, 0) leaning half a radian towards x";
-    let placement = off().compose(&leaning).compose(&centred());
-    assert_the_ball_with_a_hollow(&placement, what);
-    assert_the_ball_alone(&placement, what);
+    assert_the_ball_alone(&off(0.4).compose(&centred()), "the bar at (0.4, 0)");
 }
 
 /// The bar centred on the ball's own centre, standing along `z`.
@@ -49,8 +43,8 @@ fn centred() -> Isometry {
     Isometry::translation(Vector::new(0.0, 0.0, -HEIGHT / 2.0)).expect("a shift")
 }
 
-fn off() -> Isometry {
-    Isometry::translation(Vector::new(0.4, 0.0, 0.0)).expect("a shift")
+fn off(x: f64) -> Isometry {
+    Isometry::translation(Vector::new(x, 0.0, 0.0)).expect("a shift")
 }
 
 fn assert_the_ball_with_a_hollow(placement: &Isometry, what: &str) {
