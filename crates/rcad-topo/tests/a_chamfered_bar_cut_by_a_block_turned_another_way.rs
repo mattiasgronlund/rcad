@@ -30,9 +30,9 @@
 //! parallel to the axis and cuts both circles the pipe and the cone share,
 //! and before row Q2177 no road took a plane that cuts them and leans to the
 //! axis they share. The third test pins the four points that triple meets at,
-//! and the difference. Before row Q2189 that was refused: the side's normal
-//! and the axis have an `f64` dot of exactly nothing, so the fuse read the side
-//! and the pipe as straight lines, where they cross in an ellipse.
+//! and the refusal the difference still gets: the side's normal and the axis
+//! have an `f64` dot of exactly nothing, and where they cross in an ellipse,
+//! ordering points round it reads that dot and calls them straight lines.
 //!
 //! A cone in a solid of its own beside the bar does not reach that question:
 //! the fuse then asks where the pipe and the cone cross first.
@@ -140,14 +140,19 @@ fn a_chamfered_bar_less_a_block_six_across_keeps_the_bar_above_the_blocks_top() 
 /// cone was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`; it is the four
 /// points, each a rounding off where the turn puts them.
 ///
-/// The difference is a D-flat along the whole bar: the chamfer, the pipe, the
-/// bar's bottom, its top and the flat. Before row Q2189 it was refused
-/// `ACrossingThisCannotBeOrderedAlong`: the side's normal and the pipe's axis
-/// have an `f64` dot of exactly nothing, so the walk read the side and the pipe
-/// as a plane along a pipe, which crosses it in straight lines, where they
-/// cross in an ellipse about `10¹⁶` long.
+/// The difference, a D-flat along the whole bar, is still refused. The side's
+/// normal and the pipe's axis have an `f64` dot of exactly nothing, and they
+/// cross in an ellipse about `10¹⁶` long. Before row Q2189 the walk read that
+/// dot, took the side and the pipe for a plane along a pipe, which crosses it
+/// in straight lines, and the fuse was refused
+/// `ACrossingThisCannotBeOrderedAlong`. The walk asks the dot exactly now and
+/// starts on the ellipse, and what refuses is
+/// `which_comes_first_round_a_crossing`, which still reads the rounded dot and
+/// says the two do not cross in a conic. The row filed from Q2189 for that
+/// turns this into `(1, 1, 3)`: the chamfer, the pipe, the bar's bottom, its
+/// top and the flat.
 #[test]
-fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_cuts_a_d_flat_along_it() {
+fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_its_flat_is_refused() {
     let axis =
         Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
     let turn = Isometry::rotation(&axis, 1.1).expect("a finite angle");
@@ -207,10 +212,21 @@ fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_cuts_a_d_flat
          what this pins"
     );
 
-    assert_eq!(
-        what_the_bar_less_the_block_is_made_of(&mut model, bar, block),
-        (1, 1, 3),
-        "the chamfer, the pipe, the bar's bottom, its top and the flat"
+    let refused = model.fuse(
+        &[bar],
+        &[block],
+        Rule::Difference,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(Error::Geometry(
+                rcad_geom::Error::TheseTwoSurfacesDoNotCrossInAConic
+            ))
+        ),
+        "{refused:?}"
     );
 }
 
