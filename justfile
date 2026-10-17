@@ -2584,7 +2584,15 @@ check-fuzz-builds:
 # one variant, so it is not the `let … else` case. Each of the three counts
 # twice because `writer.rs` builds into both `rcad-step`'s own tests and
 # `rcad-fuzz-explain`.
-wildcard_arms := "101"
+#
+#     Q2171's lane  101 -> 99
+#
+# Two fewer, both composite, at the same site named at line 2530 above.
+# `across_a_circle_that_starts_at_a_pole`'s pair of surfaces now names
+# `Cylinder` and `Torus` beside the ball and the plane it already named, so a
+# circle through a ball's pole gets its second node against a pipe or a ring
+# too, and only `Cone` is left to `_`.
+wildcard_arms := "99"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
