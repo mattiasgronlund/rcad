@@ -1273,12 +1273,12 @@ fn a_block_leaned_one_across_a_unit_pointed_cone_answers_right_or_refuses() {
 /// `ResultIsNotManifold`, and this test pinned `36` right; which of Q1461's two
 /// steps moved them is not traced. Crossing `−0.5` misses the cone by `2` at
 /// the apex ([`APART`]), the other two crossings meet it ([`OVERLAPPING`]),
-/// and thirty-four of those thirty-six answer right. Crossing `1.5`, turn `1`
-/// keeps the cone's band between its rim and the leaning face's ellipse whole
-/// since Q2170, and the mesher refuses that band on the union and on the cone
-/// less the block (`CannotMeshAFace`, `RanOutOfRoomBeforeMeetingTheDeflection`),
-/// as it refuses the same band with the block made long enough that nothing
-/// else cuts it.
+/// and all thirty-six answer right. Crossing `1.5`, turn `1` keeps the cone's
+/// band between its rim and the leaning face's ellipse whole since Q2170, and
+/// until Q2192 the mesher refused that band on the union and on the cone less
+/// the block (`CannotMeshAFace`, `RanOutOfRoomBeforeMeetingTheDeflection`), and
+/// this test pinned `38` right
+/// ([`a_unit_cone_less_a_lean_four_block_turned_one_meshes_the_band_up_to_its_rim`]).
 fn a_unit_pointed_cones_lean_four_cases_away_from_the_range_refusals() -> Vec<Case> {
     let mut cases = vec![a_leaning_case(THE_UNIT_CONE, 4.0, 0.0, 3.0)];
     for crossing in [0.5, -0.5, 1.5] {
@@ -1296,10 +1296,36 @@ fn a_unit_pointed_cone_with_a_lean_of_four_answers_right_away_from_the_range_ref
             &a_unit_pointed_cones_lean_four_cases_away_from_the_range_refusals()
         ),
         Tally {
-            right: 38,
-            refused: [("the answer does not measure: CannotMeshAFace", 2)].into()
+            right: 40,
+            refused: BTreeMap::new()
         }
     );
+}
+
+/// The cone's band between its rim and the ellipse a face leaned `4` cuts
+/// through it at crossing `1.5`, turned `1`. The refinement left three slivers
+/// there. In the first, two points it had put down `0.0316` apart round the
+/// cone at one height and a third just above and beside them made a long side
+/// running `0.0532` round at `v ≈ 2.26`, straying `0.00225` where `0.002` was
+/// asked. The middle of that side was `0.0161` from the sliver's own third
+/// corner in the scaled domain, under the eighth of a step, `0.0163`, that a
+/// new point must keep from every placed one, and the triangle across the side
+/// ran up a ruling to the rim. The other two were the same, nothing else had a
+/// point to place, and the band was refused
+/// `RanOutOfRoomBeforeMeetingTheDeflection`. Since Q2192 a crowded middle hands
+/// the cut across that side, to the long side of the triangle running up to the
+/// rim, and the band meshes.
+#[test]
+fn a_unit_cone_less_a_lean_four_block_turned_one_meshes_the_band_up_to_its_rim() {
+    let case = a_leaning_case(THE_UNIT_CONE, 4.0, 1.5, 1.0);
+    assert_eq!(case.solids, OVERLAPPING);
+    for (rule, cone_first) in [(Rule::Union, true), (Rule::Difference, true)] {
+        assert_eq!(
+            fuse_and_check(&case, rule, cone_first, 1, 2),
+            None,
+            "{rule:?} (cone first: {cone_first})"
+        );
+    }
 }
 
 /// The corner-up cube round the unit cone, the same sides and middles as
