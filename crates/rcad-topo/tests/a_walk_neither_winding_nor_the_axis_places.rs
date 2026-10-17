@@ -59,7 +59,7 @@ use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
     Sphere, Surface, Torus, Vector,
 };
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
     DraftStep, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
 };
@@ -1534,45 +1534,49 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 /// through both its poles, and one at `x = −15/17` of radius `60/17`. The walk
 /// starts the first at one of the poles, and each fuse was refused
 /// `AClosedEdgeOfTheAnswerWouldStartAtAPole` until Q2171 cut it at the point
-/// across as well. The ball at `(−1, 0, 0)` is the same shape mirrored.
+/// across as well, the ball's other pole. Each is refused in `fuse/select.rs`
+/// now: no point was found inside a piece of a face whose corners are the
+/// ball's two poles. The ball at `(−1, 0, 0)` is the same shape mirrored.
 ///
-/// **The answer.** The ring is `8π²` and the ball `256π/3`, and they share
-/// [`the_ring_inside_the_ball`].
+/// **The answer exists.** The ring is `8π²` and the ball `256π/3`, and the part
+/// of the ring inside the ball at `(1, 0, 0)` is `π(2π + 4 atan(15/8) − 32/17)`.
+/// Its slice at `x` is the ring's annulus between radii `4 ± √(1 − x²)` inside
+/// the ball's disc of radius `√(16 − (x − 1)²)`, which never reaches past the
+/// annulus, so the slice is `π(8√(1 − x²) + 2x − 2)` wherever that is above
+/// nothing: from `x = −15/17`, where `4√(1 − x²) = 1 − x`, to `x = 1`.
 #[test]
-fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_answered_under_every_rule() {
-    use std::f64::consts::PI;
-    let (ring, ball, shared) = (8.0 * PI * PI, 256.0 * PI / 3.0, the_ring_inside_the_ball());
+fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_finds_no_point_inside_a_piece() {
     for x in [1.0, -1.0] {
+        let poles = [-4.0, 4.0].map(|z| PredicatePoint::Exact([x, 0.0, z]));
         for (rule, ring_first) in every_rule_both_ways() {
             let mut model = a_model();
             let one = a_whole_ring_about_x(&mut model);
             let other = model.add_ball(4.0, &shift(x, 0.0, 0.0)).expect("a ball");
             let what = format!("the ball at x = {x}, {rule:?}, the ring first {ring_first}");
-            let answer = fuse(&mut model, one, other, rule, ring_first)
-                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            let volumes = match (rule, ring_first) {
-                (Rule::Union, _) => vec![ring + ball - shared],
-                (Rule::Intersection, _) => vec![shared],
-                (Rule::Difference, true) => vec![ring - shared],
-                (Rule::Difference, false) => vec![ball - shared],
-                (other, _) => panic!("not a rule this probes: {other:?}"),
+            let refused = fuse(&mut model, one, other, rule, ring_first);
+            let Err(Error::Undecidable { records }) = refused else {
+                panic!("{what}: {refused:?}");
             };
-            assert_each_holds(&model, &answer, &volumes, &what);
+            let [record] = records.records() else {
+                panic!("{what}: one record, the refusal: {records:#?}");
+            };
+            assert_eq!(
+                record.predicate(),
+                "a point inside a piece of a face",
+                "{what}: {record:#?}"
+            );
+            assert_eq!(record.level(), Level::Interval, "{what}: {record:#?}");
+            assert!(
+                matches!(record.outcome(), Decision::Undecidable { enclosure } if enclosure == f64::INFINITY),
+                "{what}: no point was found at all, so nothing could be measured: {record:#?}"
+            );
+            let corners = record.inputs();
+            assert!(
+                corners.len() == poles.len() && poles.iter().all(|pole| corners.contains(pole)),
+                "{what}: the piece's corners are the ball's two poles: {corners:?}"
+            );
         }
     }
-}
-
-/// The part of the ring of
-/// [`a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_answered_under_every_rule`]
-/// inside the ball at `(1, 0, 0)`: `π(2π + 4 atan(15/8) − 32/17)`.
-///
-/// Its slice at `x` is the ring's annulus between radii `4 ± √(1 − x²)` inside
-/// the ball's disc of radius `√(16 − (x − 1)²)`, which never reaches past the
-/// annulus, so the slice is `π(8√(1 − x²) + 2x − 2)` wherever that is above
-/// nothing: from `x = −15/17`, where `4√(1 − x²) = 1 − x`, to `x = 1`.
-fn the_ring_inside_the_ball() -> f64 {
-    use std::f64::consts::PI;
-    PI * (2.0 * PI + 4.0 * (15.0f64 / 8.0).atan() - 32.0 / 17.0)
 }
 
 /// Each rule, with `true` for the first solid built named first.
