@@ -2246,6 +2246,18 @@ impl<'f> Arrangement<'f> {
     /// crossing the face across draws there. Asked of the two the same way and
     /// in either order, so the face across asks just this of the same three
     /// and gets the same answer.
+    ///
+    /// **And so does every other surface that draws `gone`**
+    /// ([`Crossing::every_surface_that_draws_it`]), since the face across
+    /// leaves its crossing out only where no face carrying any of them reaches
+    /// it ([`Arrangement::no_face_that_draws_it_reaches_it`]). Two bars stacked
+    /// on one pipe, the upper one's axis written pointing down, and a block
+    /// turned an eighth of a turn poking out under the lower one are the shape:
+    /// the block's bottom face crosses the pipe below both bars, but its face
+    /// beside it crosses the pipe up into the lower bar's wall, so that face
+    /// splits the edge the two share where it pierces the pipe. Asked of the
+    /// upper bar alone, the bottom face did not, and the fuse refused the edge
+    /// as one face along it (Q2201).
     fn the_face_across_leaves_it_out_too(
         &self,
         stays: usize,
@@ -2257,17 +2269,20 @@ impl<'f> Arrangement<'f> {
         };
         let places: SmallVec<[PredicatePoint; 2]> =
             places.iter().copied().map(as_exact_as_it_is).collect();
-        let third = self.crossings[gone].partner;
         let across = self.crossings[stays].partner;
-        self.face
-            .sides_the_faces_of_each_cut_lie_in
-            .iter()
-            .filter(|(cut, _)| *cut == third)
-            .flat_map(|(_, sides)| sides)
-            .any(|&side| {
-                [self.surface, across]
+        let sides = &self.face.sides_the_faces_of_each_cut_lie_in;
+        self.crossings[gone]
+            .every_surface_that_draws_it()
+            .all(|&third| {
+                sides
                     .iter()
-                    .all(|&other| a_curve_of_two_lies_wholly_past([other, third], &places, side))
+                    .filter(|(cut, _)| *cut == third)
+                    .flat_map(|(_, sides)| sides)
+                    .any(|&side| {
+                        [self.surface, across].iter().all(|&other| {
+                            a_curve_of_two_lies_wholly_past([other, third], &places, side)
+                        })
+                    })
             })
     }
 
