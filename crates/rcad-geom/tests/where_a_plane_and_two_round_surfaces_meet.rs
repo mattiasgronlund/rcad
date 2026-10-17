@@ -901,21 +901,21 @@ fn a_flat_beside_a_cone_and_a_ball_on_its_axis_touches_one_of_their_circles_or_m
     assert_eq!(meet([&missing, &pointed, &round]), Ok(MeetOfThree::Nowhere));
 }
 
-/// **An axis that leans to the plane is not this road**, even with a ball
-/// centred on it: the plane cuts the pipe in an ellipse, and an ellipse and a
-/// circle are the quartic again. The road for curves that cross does not reach
-/// it either. The ball crosses the pipe in two circles rather than touching it
-/// along one, so no plane known exactly takes the pipe's place, and the floor
-/// leans too far off square to the pipe for its ellipse to be a line bent by
-/// little across the circle.
+/// **A bar leaning to the floor, and a ball on its axis.** The floor cuts the
+/// pipe in an ellipse and the ball in a circle, which is a quartic in general.
+/// But the wall `x = 0` holds the floor's normal and the pipe's axis, and the
+/// ball's centre is on it, so each curve is its own mirror image across where
+/// that wall meets the floor, and the two meet where a quadratic is zero.
 ///
 /// A pipe of radius twelve along `(0, 3, 4)` through the origin and a ball of
 /// radius thirteen about `(0, 3, 4)`, cut by the floor `z = 0`. The `x` axis is
 /// square to the pipe's axis whatever its stored direction rounded to, so
-/// `(±12, 0, 0)` is on the pipe, and `144 + 9 + 16 = 169` puts it on the ball:
-/// two corners, in whole numbers, that nothing here reaches.
+/// `(±12, 0, 0)` is on the pipe, and `144 + 9 + 16 = 169` puts it on the ball.
+/// The stored direction rounds, so the ball's centre is a rounding off the
+/// pipe's axis and the roads for two surfaces turned about one axis do not
+/// take it; the mirror does not need that.
 #[test]
-fn a_bar_leaning_to_the_plane_is_still_refused_though_a_ball_sits_on_its_axis() {
+fn a_bar_leaning_to_the_floor_meets_it_and_a_ball_on_its_axis_at_two_corners() {
     let floor = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
     let leaning = pipe([0.0, 0.0, 0.0], [0.0, 3.0, 4.0], 12.0);
     let round = ball([0.0, 3.0, 4.0], 13.0);
@@ -930,10 +930,115 @@ fn a_bar_leaning_to_the_plane_is_still_refused_though_a_ball_sits_on_its_axis() 
         }
     }
 
-    assert_eq!(
-        meet([&floor, &leaning, &round]),
-        Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-    );
+    for order in [
+        [&floor, &leaning, &round],
+        [&round, &floor, &leaning],
+        [&leaning, &round, &floor],
+    ] {
+        two_points_near(order, [[-12.0, 0.0, 0.0], [12.0, 0.0, 0.0]], 0);
+    }
+}
+
+/// **A cut steeper than half a right angle to a bar and its chamfer cone.**
+/// The two share circles square to their axis, and the cut crosses one of
+/// them. Nearer square than parallel, the road beside their one axis does not
+/// take it, since the point it works out moves faster than the height it works
+/// it out from. But the wall through the axis and the cut's normal is a mirror
+/// of both, so where the two curves meet is where a quadratic is zero.
+///
+/// The bar of radius three up `z` and the cone of slope one from the origin
+/// share the circles `z = ±3`, and `x + 2z = 6` crosses the upper at
+/// `(0, ±3, 3)` and misses the lower, where `x` would be twelve. The bar of
+/// radius four and the cone of slope two share `z = ±2`, and `x + 2z = 1`
+/// crosses the upper at `(−3, ±√7, 2)`. The first again, moved by
+/// `(5, 7, 1)`, so the mirror is the wall `y = 7` and not one through the
+/// origin.
+#[test]
+fn a_cut_steeper_than_half_a_right_angle_to_a_bar_and_its_chamfer_cone_meets_both_at_two_corners() {
+    let root_seven = 7.0_f64.sqrt();
+    for (cut, bar, chamfer, corners) in [
+        (
+            flat([1.0, 0.0, 2.0], [0.0, 0.0, 3.0]),
+            pipe([0.0; 3], [0.0, 0.0, 1.0], 3.0),
+            cone([0.0; 3], [0.0, 0.0, 1.0], 1.0),
+            [[0.0, -3.0, 3.0], [0.0, 3.0, 3.0]],
+        ),
+        (
+            flat([1.0, 0.0, 2.0], [-3.0, 0.0, 2.0]),
+            pipe([0.0; 3], [0.0, 0.0, 1.0], 4.0),
+            cone([0.0; 3], [0.0, 0.0, 1.0], 2.0),
+            [[-3.0, -root_seven, 2.0], [-3.0, root_seven, 2.0]],
+        ),
+        (
+            flat([1.0, 0.0, 2.0], [5.0, 7.0, 4.0]),
+            pipe([5.0, 7.0, 1.0], [0.0, 0.0, 1.0], 3.0),
+            cone([5.0, 7.0, 1.0], [0.0, 0.0, 1.0], 1.0),
+            [[5.0, 4.0, 4.0], [5.0, 10.0, 4.0]],
+        ),
+    ] {
+        for order in [
+            [&cut, &bar, &chamfer],
+            [&chamfer, &cut, &bar],
+            [&bar, &chamfer, &cut],
+        ] {
+            two_points_near(order, corners, 1);
+        }
+    }
+}
+
+/// **A cut leaning to a bar, and a ball beside the bar.** The ball's centre is
+/// off the bar's axis, but on the wall through that axis and the cut's normal,
+/// so the wall is a mirror of all three.
+///
+/// The bar of radius five up `z`, the ball of radius five about `(3, 0, 6)`,
+/// and the cut `z = x`. On the cut the bar is `x² + y² = 25` and the ball
+/// `(x − 3)² + y² + (x − 6)² = 25`, which differ by `x² − 18x + 45 = 0`, at
+/// `x = 3` and `15`. At three `y = ±4`; at fifteen the bar has no `y`.
+#[test]
+fn a_cut_leaning_to_a_bar_meets_it_and_a_ball_beside_it_on_the_wall_through_its_axis() {
+    let cut = flat([1.0, 0.0, -1.0], [0.0; 3]);
+    let bar = pipe([0.0; 3], [0.0, 0.0, 1.0], 5.0);
+    let beside = ball([3.0, 0.0, 6.0], 5.0);
+    for order in [
+        [&cut, &bar, &beside],
+        [&beside, &cut, &bar],
+        [&bar, &beside, &cut],
+    ] {
+        two_points_near(order, [[3.0, -4.0, 3.0], [3.0, 4.0, 3.0]], 1);
+    }
+}
+
+/// **A wall a rounding off parallel to a bar, and a ball beside the bar.**
+/// `x + 2⁻⁵³z = 1` leans to the bar's axis by a rounding, as a wall placed by
+/// a turn can, so the road for a plane along a pipe does not take it. The
+/// ball's centre `(1, 0, 3)` is off the bar's axis, so the two share no axis,
+/// and the wall `y = 0` through the bar's axis and the cut's normal holds the
+/// ball's centre, so it is a mirror of all three.
+///
+/// On `x = 1` the bar of radius two is `y² = 3` and the ball of radius two
+/// about `(1, 0, 3)` is `y² + (z − 3)² = 4`, so they meet at `(1, ±√3, 2)` and
+/// `(1, ±√3, 4)`. The wall leans, which moves each a few roundings.
+#[test]
+fn a_wall_a_rounding_off_parallel_to_a_bar_meets_it_and_a_ball_beside_it_at_four_corners() {
+    let wall = flat([1.0, 0.0, 2.0_f64.powi(-53)], [1.0, 0.0, 0.0]);
+    let bar = pipe([0.0; 3], [0.0, 0.0, 1.0], 2.0);
+    let beside = ball([1.0, 0.0, 3.0], 2.0);
+    let root_three = 3.0_f64.sqrt();
+    for order in [
+        [&wall, &bar, &beside],
+        [&beside, &wall, &bar],
+        [&bar, &beside, &wall],
+    ] {
+        points_near(
+            order,
+            &[
+                [1.0, -root_three, 2.0],
+                [1.0, root_three, 2.0],
+                [1.0, -root_three, 4.0],
+                [1.0, root_three, 4.0],
+            ],
+        );
+    }
 }
 
 /// **Three curved surfaces, two of which bend the same way, are a plane and
@@ -1543,6 +1648,43 @@ fn two_points_near(surfaces: [&Surface; 3], corners: [[f64; 3]; 2], sorted_along
     }
 }
 
+/// The points `surfaces` meet at, one near each of `corners` as
+/// [`two_points_near`] means near, in whatever order they come.
+fn points_near(surfaces: [&Surface; 3], corners: &[[f64; 3]]) {
+    let answer = meet(surfaces).expect("these three meet");
+    let MeetOfThree::At(points) = &answer else {
+        panic!("{surfaces:?}: {answer:?}");
+    };
+    assert_eq!(points.len(), corners.len(), "{surfaces:?}: {answer:?}");
+    for corner in corners {
+        let near: Vec<&PredicatePoint> = points
+            .iter()
+            .filter(|point| {
+                point
+                    .enclosure()
+                    .into_iter()
+                    .zip(corner)
+                    .all(|(side, expected)| {
+                        side.width() <= 1e-13
+                            && side.lo() - 1e-13 <= *expected
+                            && *expected <= side.hi() + 1e-13
+                    })
+            })
+            .collect();
+        assert_eq!(near.len(), 1, "{surfaces:?}: {answer:?} near {corner:?}");
+        for surface in surfaces {
+            assert!(
+                !matches!(
+                    which_side_of(surface, *near[0]),
+                    Decision::Pos | Decision::Neg
+                ),
+                "{surfaces:?}: {:?} is certified off {surface:?}",
+                near[0]
+            );
+        }
+    }
+}
+
 /// **A slanted cut through the circle where a rod's round end meets the rod.**
 /// The rod is the pipe of radius one up `z`, its end the ball of radius one
 /// about the origin, and the two touch along the circle `z = 0` rather than
@@ -1579,16 +1721,17 @@ fn a_plane_across_the_circle_a_ball_rests_on_in_a_cone_meets_both_there() {
     }
 }
 
-/// **A ball resting on a rod, cut leaning through where they touch, is still
-/// refused, and that is a gap.** The ball of radius one about `(0, 0, 2)` sits
-/// on the rod of radius one along `x`, and the two touch at `(0, 0, 1)` and
-/// nowhere else. A cut through that point cuts them in two curves that touch
-/// there. The ball's centre is off the rod's axis, so the road for a ball on
-/// the axis does not take it, and the road for curves that cross cannot tell a
-/// touch from two crossings close together. `(0, 0, 1)` is exactly on all
-/// three: the point is there.
+/// **A ball resting on a rod, cut leaning through where they touch, meets
+/// both there.** The ball of radius one about `(0, 0, 2)` sits on the rod of
+/// radius one along `x`, and the two touch at `(0, 0, 1)` and nowhere else. A
+/// cut through that point cuts them in two curves that touch there. The
+/// ball's centre is off the rod's axis, so the road for a ball on the axis
+/// does not take it, and the road for curves that cross cannot tell a touch
+/// from two crossings close together. But the wall `y = 0` holds the rod's
+/// axis, the ball's centre and the cut's normal, so it is a mirror of all
+/// three, and the touch is where the mirror crosses both curves at once.
 #[test]
-fn a_ball_resting_on_a_rod_cut_leaning_through_where_they_touch_is_still_refused() {
+fn a_ball_resting_on_a_rod_cut_leaning_through_where_they_touch_meets_both_there() {
     let touch = [0.0, 0.0, 1.0];
     let rod = pipe([0.0; 3], [1.0, 0.0, 0.0], 1.0);
     let resting = ball([0.0, 0.0, 2.0], 1.0);
@@ -1601,10 +1744,50 @@ fn a_ball_resting_on_a_rod_cut_leaning_through_where_they_touch_is_still_refused
                 "{touch:?} is exactly on {surface:?}"
             );
         }
+        for order in [
+            [&cut, &rod, &resting],
+            [&resting, &cut, &rod],
+            [&rod, &resting, &cut],
+        ] {
+            points_near(order, &[touch]);
+        }
+    }
+}
+
+/// **A bar's cap across a second bar leaning to it, their axes crossing.**
+/// The cap `z = 5` cuts the bar of radius `1.25` up `z` in a circle, and a bar
+/// of radius one along `(1, 0, 1)` through `(0, 0, 5)` in an ellipse about the
+/// same centre with half-axes `√2` and one, so the two cross where
+/// `x² = 1.125` and `y² = 0.4375`. Moved `0.25` along `x`, the ellipse meets
+/// the circle where `x² + 0.5x = 1.1875`, at `x = (√5 − 0.5)/2` inside it.
+/// Both times the wall `y = 0` holds both axes and the cap's normal, so it is
+/// a mirror of all three. Moved `0.125` along `y` instead, the leaning bar's
+/// axis passes the first one's by, no wall through either axis and the normal
+/// holds the other, and the three are refused.
+#[test]
+fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_is_refused_where_they_pass() {
+    let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]);
+    let upright = pipe([0.0; 3], [0.0, 0.0, 1.0], 1.25);
+    let crossing = pipe([0.0, 0.0, 5.0], [1.0, 0.0, 1.0], 1.0);
+    let moved_along_x = pipe([0.25, 0.0, 5.0], [1.0, 0.0, 1.0], 1.0);
+    let passing = pipe([0.0, 0.125, 5.0], [1.0, 0.0, 1.0], 1.0);
+    let (x, y) = (1.125_f64.sqrt(), 0.4375_f64.sqrt());
+    let moved_x = (5.0_f64.sqrt() - 0.5) / 2.0;
+    let moved_y = (1.5625 - moved_x * moved_x).sqrt();
+    for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
+        let [crossing, moved_along_x, passing] = [&crossing, &moved_along_x, &passing]
+            .map(|leaning| order.map(|at| [&cap, &upright, leaning][at]));
+        points_near(
+            crossing,
+            &[[-x, -y, 5.0], [-x, y, 5.0], [x, -y, 5.0], [x, y, 5.0]],
+        );
+        points_near(
+            moved_along_x,
+            &[[moved_x, -moved_y, 5.0], [moved_x, moved_y, 5.0]],
+        );
         assert_eq!(
-            meet([&cut, &rod, &resting]),
-            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat),
-            "the cut with normal {normal:?}"
+            meet(passing),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
         );
     }
 }

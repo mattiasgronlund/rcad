@@ -333,21 +333,31 @@ fn a_crossing_whose_size_overflows_is_a_gap() {
     }
 }
 
-/// The floor, a pipe of radius twelve leaning along `(0, 3, 4)` and a ball of
-/// radius thirteen on its axis all hold `(±12, 0, 0)` exactly, and no order of
-/// the three reaches it.
+/// The plane `x + 16z = 8`, a pipe of radius one along `x` and a ball of
+/// radius three about `(0, ½, 0)` meet in four points, and no order of the
+/// three reaches them.
+///
+/// On the pipe the ball is `x² = y + 7.75`, so a point is on all three where
+/// `y² + ((8 − x)/16)² = 1` with that `y`, and that sum is below one at
+/// `x = ±2.8` and above it at `x = ±2.598` and `±2.96`: two roots on each
+/// side. The plane leans well off square to the pipe's axis, and the ball's
+/// centre is half a unit off the wall through that axis and the plane's
+/// normal, so no wall mirrors the three (Q2196). The floor across a pipe of
+/// radius twelve along `(0, 3, 4)` and a ball of thirteen about `(0, 3, 4)`,
+/// which held `(±12, 0, 0)` exactly, was this test's shape until such a wall
+/// answered it.
 #[test]
-fn three_surfaces_with_one_flat_meeting_at_a_whole_number_point_are_a_gap() {
-    let floor = a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
-    let leaning = a_pipe([0.0, 3.0, 4.0], [0.0, 0.0, 0.0], 12.0);
-    let round = a_ball([0.0, 3.0, 4.0], 13.0);
+fn a_plane_leaning_across_a_pipe_and_a_ball_off_its_axis_is_a_gap() {
+    let leaning = a_plane([1.0, 0.0, 16.0], [8.0, 0.0, 0.0]);
+    let pipe = a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 1.0);
+    let round = a_ball([0.0, 0.5, 0.0], 3.0);
     for order in [
-        [&floor, &leaning, &round],
-        [&floor, &round, &leaning],
-        [&leaning, &floor, &round],
-        [&leaning, &round, &floor],
-        [&round, &floor, &leaning],
-        [&round, &leaning, &floor],
+        [&leaning, &pipe, &round],
+        [&leaning, &round, &pipe],
+        [&pipe, &leaning, &round],
+        [&pipe, &round, &leaning],
+        [&round, &leaning, &pipe],
+        [&round, &pipe, &leaning],
     ] {
         let refusal =
             meet_of_three_surfaces(order, &Policy::certified(), &mut ProvenanceLog::new())
