@@ -76,12 +76,13 @@
 //! shells** (queue row Q1923): the prism's edge lies along the corner, its
 //! walls lean into the corner square, and the hollow touches the plate's skin
 //! along that line alone. The difference turns the hollow's faces round, and
-//! that says which faces bound each full wedge round the line. Two shapes like
-//! it are still refused `ResultIsNotManifold { count: 4 }`: that answer fused
-//! on with a far cube, or the plate intersected with a block the prism
-//! hollows, where no face along the line is turned round; and the plate less
-//! a prism whose walls open across both arms, where no side along the line
-//! names an input edge.
+//! that says which faces bound each full wedge round the line. That answer
+//! fused on with a far cube, and the plate intersected with a block the prism
+//! hollows, turn no face along the line round, and answer since queue row
+//! Q2210, where each pair's faces lying inside the solid the other pair's
+//! bound says it instead. The plate less a prism whose walls open across both
+//! arms is still refused `ResultIsNotManifold { count: 4 }`, since no side
+//! along the line names an input edge.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -960,6 +961,44 @@ fn the_l_plate_intersected_with_a_block_the_prism_hollows_is_the_plate_less_the_
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// **Two L plates whose missing squares face each other across the line
+/// `x = 1, y = 1`, intersected, are refused `ResultIsNotManifold { count: 4
+/// }`**: the answer is two unit bars, `1 ≤ x ≤ 2, 0 ≤ y ≤ 1` and
+/// `0 ≤ x ≤ 1, 1 ≤ y ≤ 2`, touching along the line, two touching solids
+/// `docs/decisions.md` §80.9 leaves unbuilt. The union is the square of 4,
+/// and each difference the unit square the other plate is missing.
+///
+/// Round the line each plate's two faces lie inside the solid the other
+/// plate's two bound, as the plate's and the hollow's do in the test above,
+/// so since queue row Q2210 `fuse/assemble.rs` joins across both full wedges
+/// there too. But each full wedge is one bar, nothing else joins the two, and
+/// the line stays one edge.
+#[test]
+fn two_l_plates_whose_missing_squares_face_each_other_intersected_are_refused() {
+    let mut wrong = Vec::new();
+    for swapped in [false, true] {
+        for rule in EVERY_RULE {
+            let what = format!("{rule:?}, the other plate first {swapped}");
+            let (model, answer) = fuse(swapped, rule, |model| {
+                [
+                    an_l_plate(model),
+                    an_l_plate_missing_the_square_at_the_origin(model),
+                ]
+            });
+            let outcome = match (rule, swapped) {
+                (Rule::Union, _) => differs(&model, answer, &[4.0]),
+                (Rule::Difference, _) => differs(&model, answer, &[1.0]),
+                (Rule::Intersection, _) => refused_as_not_manifold(answer, &[1.0, 1.0]),
+                _ => unreachable!("EVERY_RULE holds only these three"),
+            };
+            if let Some(why) = outcome {
+                wrong.push(format!("{what}: {why}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// What is wrong with an answer that should be refused
 /// `ResultIsNotManifold { count: 4 }` where the right answer is the solids of
 /// `should`; `None` when it is refused so.
@@ -1383,6 +1422,25 @@ fn an_l_plate(model: &mut Model) -> SolidKey {
             [1.0, 1.0],
             [1.0, 2.0],
             [0.0, 2.0],
+        ],
+        [0.0, 0.0, 0.0],
+        1.0,
+    )
+}
+
+/// The square `0 ≤ x, y ≤ 2` less the unit square at the origin, one high:
+/// an L plate whose missing square faces [`an_l_plate`]'s across its inner
+/// corner.
+fn an_l_plate_missing_the_square_at_the_origin(model: &mut Model) -> SolidKey {
+    a_prism(
+        model,
+        [
+            [1.0, 0.0],
+            [2.0, 0.0],
+            [2.0, 2.0],
+            [0.0, 2.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
         ],
         [0.0, 0.0, 0.0],
         1.0,
