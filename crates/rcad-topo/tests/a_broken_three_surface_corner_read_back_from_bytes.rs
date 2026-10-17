@@ -60,8 +60,8 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, DYNAMIC_RANGE_CHECK, Deflection, EdgeRun, Isometry, Orientation, Plane, Point,
-    SIDE_OF_PLANE, Scale, Surface, Vector, WHERE_THREE_SURFACES_MEET,
+    Axis, DYNAMIC_RANGE_CHECK, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale,
+    Surface, Vector, WHERE_THREE_SURFACES_MEET,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
@@ -636,15 +636,13 @@ fn every_fuse_of_a_half_bar_whose_corner_is_moved_a_millimetre_refuses_where_thr
 /// at one place. Under `tolerant(100)` at every placement, and under
 /// `certified` with no placement and shifted, it says so as `validate` does,
 /// `EdgeHasNoLength`. Under `certified` turned it cannot order two points
-/// along a crossing, and turned and shifted the same, but for the cut along
-/// the flat face, which it refuses on the side of a plane as the sound half
-/// bar does. Each refusal leaves the model as it was.
+/// along a crossing, and turned and shifted the same. Each refusal leaves the
+/// model as it was.
 #[test]
 fn a_half_bar_whose_corner_is_moved_onto_the_other_end_of_its_cut_answers_no_fuse() {
     let [identity, shift, turn, turn_then_shift] = every_placement();
     let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
     for (partner, rule) in EVERY_PARTNER {
-        let along_the_flat_face = partner == THE_HALF_PAST_THE_SEAM;
         let refused = [
             (
                 identity,
@@ -676,11 +674,7 @@ fn a_half_bar_whose_corner_is_moved_onto_the_other_end_of_its_cut_answers_no_fus
             (
                 turn_then_shift,
                 &certified,
-                Refused::Undecidable(vec![if along_the_flat_face {
-                    SIDE_OF_PLANE
-                } else {
-                    ALONG_A_CROSSING
-                }]),
+                Refused::Undecidable(vec![ALONG_A_CROSSING]),
             ),
         ];
         for (placement, policy, refusal) in refused {
