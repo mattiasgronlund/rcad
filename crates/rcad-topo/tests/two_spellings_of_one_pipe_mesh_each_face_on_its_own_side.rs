@@ -116,7 +116,9 @@ fn two_bars_stacked_on_one_pipe_mesh_each_face_where_it_is_however_the_pipe_is_w
                     1,
                     "{what}: the two walls are joined into one face"
                 );
-                wrong.extend(what_is_wrong_with_each_face(&model, *solid, &turn, &what));
+                wrong.extend(what_is_wrong_with_each_face(
+                    &model, *solid, &turn, RADIUS, &what,
+                ));
             }
         }
     }
@@ -137,93 +139,97 @@ fn two_bars_stacked_on_one_pipe_mesh_each_face_where_it_is_however_the_pipe_is_w
 /// Fails on the base for the 24 intersections and differences of opposite
 /// spellings, refused `TheFuseWroteABrokenAnswer { CoedgesRunTheSameWay }`.
 ///
-/// **The bars are `RADIUS`, `1`, and not the `3` of the file the STEP test
-/// reads**: at radius `3`, turned by `1` about `x`, every one of these fuses is
-/// refused `Undecidable` on "a point in a piece that every solid could place",
-/// on one spelling as on two, which is a refusal of its own and not this one.
+/// Run at `RADIUS`, `1`, and at the `3` of the file the STEP test reads: all
+/// 72 fuses this builds at each radius answer, validate, and measure within
+/// their closed-form error — `6π` or `2π` at radius `1`, `54π` or `18π` at
+/// radius `3`.
 #[test]
 fn two_overlapping_bars_on_one_pipe_fuse_into_one_bar_however_the_pipe_is_written() {
-    let up = Cylinder::new(Axis::z(), RADIUS).expect("a radius");
-    let down = Cylinder::new(Axis::z().reversed(), RADIUS).expect("a radius");
     let mut wrong = Vec::new();
-    for (turn_name, turn) in the_turns(&[], &[(&Axis::x(), 1.0), (&Axis::x(), -1.0)]) {
-        for (lower, upper) in [(up, up), (up, down), (down, up), (down, down)] {
-            for (rule, lower_first, rule_name, height) in [
-                (Rule::Union, true, "united, the lower first", 6.0),
-                (Rule::Union, false, "united, the upper first", 6.0),
-                (
-                    Rule::Intersection,
-                    true,
-                    "intersected, the lower first",
-                    2.0,
-                ),
-                (
-                    Rule::Intersection,
-                    false,
-                    "intersected, the upper first",
-                    2.0,
-                ),
-                (Rule::Difference, true, "the lower less the upper", 2.0),
-                (Rule::Difference, false, "the upper less the lower", 2.0),
-            ] {
-                let closed_form = core::f64::consts::PI * RADIUS * RADIUS * height;
-                let what = format!(
-                    "the bars on {} and {}, {rule_name}, turned {turn_name}",
-                    which_way(lower),
-                    which_way(upper)
-                );
-                let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-                let policy = Policy::certified();
-                let bars = [(0.0, 4.0, lower), (2.0, 6.0, upper)].map(|(from, to, wall)| {
-                    let bar = a_bar_between(&mut model, from, to, wall);
-                    model
-                        .place_solid(bar, &turn)
-                        .expect("this model made the key");
-                    bar
-                });
-                let [arguments, tools] = if lower_first {
-                    bars
-                } else {
-                    [bars[1], bars[0]]
-                };
-                let fused = match model.fuse(
-                    &[arguments],
-                    &[tools],
-                    rule,
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                ) {
-                    Ok(fused) => fused,
-                    Err(why) => {
-                        wrong.push(format!("{what}: refused {why:?}"));
-                        continue;
-                    }
-                };
-                if let Err(why) = model.validate(&policy, &mut ProvenanceLog::new()) {
-                    wrong.push(format!("{what}: the answer does not validate: {why:?}"));
-                    continue;
-                }
-                let [solid] = fused.solids() else {
-                    wrong.push(format!("{what}: {} solids", fused.solids().len()));
-                    continue;
-                };
-                let measured = model
-                    .solid(*solid)
-                    .expect("this model made the key")
-                    .measure(
-                        Deflection::of(DEFLECTION).expect("a positive length"),
+    for radius in [RADIUS, 3.0] {
+        let up = Cylinder::new(Axis::z(), radius).expect("a radius");
+        let down = Cylinder::new(Axis::z().reversed(), radius).expect("a radius");
+        for (turn_name, turn) in the_turns(&[], &[(&Axis::x(), 1.0), (&Axis::x(), -1.0)]) {
+            for (lower, upper) in [(up, up), (up, down), (down, up), (down, down)] {
+                for (rule, lower_first, rule_name, height) in [
+                    (Rule::Union, true, "united, the lower first", 6.0),
+                    (Rule::Union, false, "united, the upper first", 6.0),
+                    (
+                        Rule::Intersection,
+                        true,
+                        "intersected, the lower first",
+                        2.0,
+                    ),
+                    (
+                        Rule::Intersection,
+                        false,
+                        "intersected, the upper first",
+                        2.0,
+                    ),
+                    (Rule::Difference, true, "the lower less the upper", 2.0),
+                    (Rule::Difference, false, "the upper less the lower", 2.0),
+                ] {
+                    let closed_form = core::f64::consts::PI * radius * radius * height;
+                    let what = format!(
+                        "the bars of radius {radius} on {} and {}, {rule_name}, turned {turn_name}",
+                        which_way(lower),
+                        which_way(upper)
+                    );
+                    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+                    let policy = Policy::certified();
+                    let bars = [(0.0, 4.0, lower), (2.0, 6.0, upper)].map(|(from, to, wall)| {
+                        let bar = a_bar_between(&mut model, from, to, wall);
+                        model
+                            .place_solid(bar, &turn)
+                            .expect("this model made the key");
+                        bar
+                    });
+                    let [arguments, tools] = if lower_first {
+                        bars
+                    } else {
+                        [bars[1], bars[0]]
+                    };
+                    let fused = match model.fuse(
+                        &[arguments],
+                        &[tools],
+                        rule,
                         &policy,
                         &mut ProvenanceLog::new(),
-                    )
-                    .unwrap_or_else(|why| panic!("{what}: the answer measures: {why:?}"));
-                if (measured.volume() - closed_form).abs() > measured.volume_error() {
-                    wrong.push(format!(
-                        "{what}: measured {} ± {}, and by hand it is {closed_form}",
-                        measured.volume(),
-                        measured.volume_error()
+                    ) {
+                        Ok(fused) => fused,
+                        Err(why) => {
+                            wrong.push(format!("{what}: refused {why:?}"));
+                            continue;
+                        }
+                    };
+                    if let Err(why) = model.validate(&policy, &mut ProvenanceLog::new()) {
+                        wrong.push(format!("{what}: the answer does not validate: {why:?}"));
+                        continue;
+                    }
+                    let [solid] = fused.solids() else {
+                        wrong.push(format!("{what}: {} solids", fused.solids().len()));
+                        continue;
+                    };
+                    let measured = model
+                        .solid(*solid)
+                        .expect("this model made the key")
+                        .measure(
+                            Deflection::of(DEFLECTION).expect("a positive length"),
+                            &policy,
+                            &mut ProvenanceLog::new(),
+                        )
+                        .unwrap_or_else(|why| panic!("{what}: the answer measures: {why:?}"));
+                    if (measured.volume() - closed_form).abs() > measured.volume_error() {
+                        wrong.push(format!(
+                            "{what}: measured {} ± {}, and by hand it is {closed_form}",
+                            measured.volume(),
+                            measured.volume_error()
+                        ));
+                    }
+                    wrong.extend(what_is_wrong_with_each_face(
+                        &model, *solid, &turn, radius, &what,
                     ));
                 }
-                wrong.extend(what_is_wrong_with_each_face(&model, *solid, &turn, &what));
             }
         }
     }
@@ -236,16 +242,8 @@ fn two_overlapping_bars_on_one_pipe_fuse_into_one_bar_however_the_pipe_is_writte
 /// The circle is offered both ways round, and exactly one of them builds: a
 /// band bounded by two circles on a pipe is one region, so only one use of the
 /// circle leaves each band on its own side of it. The one that builds is then
-/// meshed with its faces listed either way round, placed three ways as well as
+/// meshed with its faces listed either way round, placed six ways as well as
 /// not at all.
-///
-/// **Only turns that keep the solid valid are here.** Turned by `π/2`, `1` or
-/// `π` about `x` — the turns that put the up spelling first — `Model::validate`
-/// refuses the placed bar `AClosedEdgeIsWalkedAgainstItsSurface`, though it was
-/// built and validated unturned, and a bar in two bands on one spelling passes
-/// every one of those turns. The mesh of every face still lands on its own side
-/// at those turns, and the refusal is reported for a row of its own rather than
-/// pinned here.
 #[test]
 fn a_bar_in_two_bands_on_the_two_spellings_meshes_each_band_on_its_own_side() {
     let up = Cylinder::new(Axis::z(), RADIUS).expect("a radius");
@@ -258,6 +256,9 @@ fn a_bar_in_two_bands_on_the_two_spellings_meshes_each_band_on_its_own_side() {
         &[
             (&Axis::x(), -1.0),
             (&Axis::y(), core::f64::consts::FRAC_PI_2),
+            (&Axis::x(), 1.0),
+            (&Axis::x(), core::f64::consts::FRAC_PI_2),
+            (&Axis::x(), core::f64::consts::PI),
         ],
     );
     let mut wrong = Vec::new();
@@ -305,7 +306,9 @@ fn a_bar_in_two_bands_on_the_two_spellings_meshes_each_band_on_its_own_side() {
                     placed
                         .validate(&Policy::certified(), &mut ProvenanceLog::new())
                         .unwrap_or_else(|why| panic!("{what}: the bar validates: {why:?}"));
-                    wrong.extend(what_is_wrong_with_each_face(&placed, bar, turn, &what));
+                    wrong.extend(what_is_wrong_with_each_face(
+                        &placed, bar, turn, RADIUS, &what,
+                    ));
                 }
             }
         }
@@ -408,7 +411,9 @@ fn a_bar_in_two_bands_turned_off_z_meshes_each_band_on_its_own_side() {
                         .validate(&Policy::certified(), &mut ProvenanceLog::new())
                         .unwrap_or_else(|why| panic!("{what}: the bar validates: {why:?}"));
                 }
-                wrong.extend(what_is_wrong_with_each_face(&model, bar, turn, &what));
+                wrong.extend(what_is_wrong_with_each_face(
+                    &model, bar, turn, RADIUS, &what,
+                ));
             }
         }
     }
@@ -448,6 +453,7 @@ fn what_is_wrong_with_each_face(
     model: &Model,
     solid: SolidKey,
     turn: &Isometry,
+    radius: f64,
     what: &str,
 ) -> Vec<String> {
     let view = model.solid(solid).expect("this model made the key");
@@ -466,13 +472,13 @@ fn what_is_wrong_with_each_face(
     for face in view.faces() {
         let (low, high) = the_span_of_its_corners(face, height);
         let closed_form = if face.surface().as_plane().is_some() {
-            core::f64::consts::PI * RADIUS * RADIUS
+            core::f64::consts::PI * radius * radius
         } else {
-            2.0 * core::f64::consts::PI * RADIUS * (high - low)
+            2.0 * core::f64::consts::PI * radius * (high - low)
         };
         let (area, beyond) = what_this_face_was_meshed_as(&mesh, face, height, (low, high));
         let under = (closed_form - area) / closed_form;
-        if beyond > strays || !(0.0..3.0 * DEFLECTION / RADIUS).contains(&under) {
+        if beyond > strays || !(0.0..3.0 * DEFLECTION / radius).contains(&under) {
             wrong.push(format!(
                 "{what}: the face on {:?} between heights {low} and {high} measures {area} \
                  against {closed_form}, and a point of it is {beyond} outside that where the \
@@ -520,16 +526,16 @@ fn what_this_face_was_meshed_as(
     (area, beyond)
 }
 
-/// A bar of `RADIUS` on `wall` between two heights, built as
+/// A bar of `wall`'s own radius on `wall` between two heights, built as
 /// `two_bars_on_one_pipe_answer_the_same_however_the_pipe_is_written` builds
 /// one, because `Model::add_round_bar` writes its own spelling.
 fn a_bar_between(model: &mut Model, from: f64, to: f64, wall: Cylinder) -> SolidKey {
     let mut draft = SolidBuilder::new();
     let bottom_corner = draft
-        .add_vertex(Point::new(RADIUS, 0.0, from))
+        .add_vertex(Point::new(wall.radius(), 0.0, from))
         .expect("a corner");
     let top_corner = draft
-        .add_vertex(Point::new(RADIUS, 0.0, to))
+        .add_vertex(Point::new(wall.radius(), 0.0, to))
         .expect("a corner");
     let seam = draft
         .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
