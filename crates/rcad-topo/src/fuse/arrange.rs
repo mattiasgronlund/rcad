@@ -18248,14 +18248,13 @@ mod what_the_curved_arrangement_reaches {
     /// the plane lay along the axis, so [`how_a_crossing_runs`] ordered that
     /// ellipse along an axis as though it were an endless ruling.
     ///
-    /// **What it gets now is a refusal and not an order.** The pair falls to the
-    /// conic gate, which lets a plane and a pipe through, and
-    /// `where_a_closed_crossing_starts` gives up — an ellipse this nearly along
-    /// the axis is of order `1/(n·w)` long, and finding a place to start on it
-    /// runs out of `f64`. `ACrossingThisCannotBeOrderedAlong` for a conic whose
-    /// shape is known is a **gap** of the same kind §34.10 files, and it is the
-    /// honest end of a pair that used to come back with an answer that was
-    /// wrong.
+    /// **What it gets now is a place to start and an order round the ellipse.**
+    /// The pair falls to the conic gate, which lets a plane and a pipe through,
+    /// and `where_a_closed_crossing_starts` walks the ellipse, which is of order
+    /// `1/(n·w)` long. It used to give up here with
+    /// `ACrossingThisCannotBeOrderedAlong`, because `rcad-geom`'s walk read the
+    /// same rounded dot this row is about, called the crossing straight lines,
+    /// and found no closed curve to start on (Q2189).
     #[test]
     fn a_plane_a_rounded_dot_calls_flush_with_an_axis_is_not() {
         let policy = Policy::certified();
@@ -18319,10 +18318,10 @@ mod what_the_curved_arrangement_reaches {
                     PredicatePoint::from([0.0; 3]),
                     &mut log
                 ),
-                Err(Error::ACrossingThisCannotBeOrderedAlong)
+                Ok(HowItRuns::RoundAClosedCurve { .. })
             ),
             "the pair goes to the conic gate, which lets a plane and a pipe through, \
-             and what gives up is finding a place to start on an ellipse this long"
+             and the walk finds a place to start on an ellipse this long"
         );
     }
 
