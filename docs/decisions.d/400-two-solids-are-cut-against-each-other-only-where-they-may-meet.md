@@ -47,7 +47,9 @@ Two faces share no point when any of these holds, each a proof:
 4. they touch at one point (`TouchAtOnePoint`) and that point is outside the
    part of space both boxes hold;
 5. one surface misses the band round an axis the other face lies in — how far
-   up that axis and how far out from it.
+   up that axis and how far out from it;
+6. one surface is a ball that holds every corner's own box of the other face,
+   a flat face whose every side is straight, strictly inside it.
 
 The boxes for these are built here and rounded outward: a ball's face is inside
 the box round the ball, and a flat face whose sides are straight, or on a ball,
@@ -71,6 +73,28 @@ expression in up and out, and a proved sign of that expression over the band is
 proof 5. This is what joins a frustum inside a bar, a pointed cone inside a
 bar, and a bar inside a ball apart without a box test on the round faces, none
 of which proof 2's boxes reach.
+
+**Since Q2247, item 6.** A flat face whose every side is straight lies in the
+hull of its corners, and a ball holds the hull of any points it holds, so the
+ball holding each corner's own box strictly inside it — the squared distance
+from its centre to the box's furthest point less its squared radius proved
+negative, in interval arithmetic on the stored numbers — proves its skin misses
+the face (`a_ball_holds_a_flat_face` in `cuts.rs`). Proof 2 asks the one box
+round all the corners, and that box can leave the ball at a corner of its own
+that no corner of the face is near: the top of a 12-sided prism of radius `r`
+at height `h` has its box reach `(r, r, h)`. A ball of radius 1 less a cube of
+side 0.9 turned an eighth turn about `z` was joined to the cube for that, every
+plane of the cube cut the ball's face in a circle, and the answer had the
+ball's skin in 26 faces where the cube square to the axes left it in one; a
+12-sided prism of radius 0.81 and height 1 left it in 98, under union as well
+as difference. Q2119 measured the edge: a 12-sided prism of height 0.6 went
+from 15 faces to 136 between `r = 0.674` and `0.675`, where `2r² + 0.09 = 1`,
+and started a twenty-fourth of a turn round between `0.698` and `0.699`.
+`a_ball_hollowed_by_a_turned_cube_keeps_its_skin_whole.rs` pins 15 faces on
+both sides of both edges and at `r = 0.95`, whose corners are `0.996` out, the
+cube at 7, and the volumes within what each measure publishes. A side on
+anything but a plane may bulge past its corners, so a flat face with such a
+side is left to the other proofs.
 
 **No face pair sharing a point is enough to leave two solids uncut against each
 other**, whether they stand apart or one is wholly inside the other: no edge of
