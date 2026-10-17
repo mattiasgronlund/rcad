@@ -1754,6 +1754,44 @@ fn a_ball_resting_on_a_rod_cut_leaning_through_where_they_touch_meets_both_there
     }
 }
 
+/// **A bar's cap across a second bar leaning to it, their axes crossing.**
+/// The cap `z = 5` cuts the bar of radius `1.25` up `z` in a circle, and a bar
+/// of radius one along `(1, 0, 1)` through `(0, 0, 5)` in an ellipse about the
+/// same centre with half-axes `√2` and one, so the two cross where
+/// `x² = 1.125` and `y² = 0.4375`. Moved `0.25` along `x`, the ellipse meets
+/// the circle where `x² + 0.5x = 1.1875`, at `x = (√5 − 0.5)/2` inside it.
+/// Both times the wall `y = 0` holds both axes and the cap's normal, so it is
+/// a mirror of all three. Moved `0.125` along `y` instead, the leaning bar's
+/// axis passes the first one's by, no wall through either axis and the normal
+/// holds the other, and the three are refused.
+#[test]
+fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_is_refused_where_they_pass() {
+    let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]);
+    let upright = pipe([0.0; 3], [0.0, 0.0, 1.0], 1.25);
+    let crossing = pipe([0.0, 0.0, 5.0], [1.0, 0.0, 1.0], 1.0);
+    let moved_along_x = pipe([0.25, 0.0, 5.0], [1.0, 0.0, 1.0], 1.0);
+    let passing = pipe([0.0, 0.125, 5.0], [1.0, 0.0, 1.0], 1.0);
+    let (x, y) = (1.125_f64.sqrt(), 0.4375_f64.sqrt());
+    let moved_x = (5.0_f64.sqrt() - 0.5) / 2.0;
+    let moved_y = (1.5625 - moved_x * moved_x).sqrt();
+    for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
+        let [crossing, moved_along_x, passing] = [&crossing, &moved_along_x, &passing]
+            .map(|leaning| order.map(|at| [&cap, &upright, leaning][at]));
+        points_near(
+            crossing,
+            &[[-x, -y, 5.0], [-x, y, 5.0], [x, -y, 5.0], [x, y, 5.0]],
+        );
+        points_near(
+            moved_along_x,
+            &[[moved_x, -moved_y, 5.0], [moved_x, moved_y, 5.0]],
+        );
+        assert_eq!(
+            meet(passing),
+            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        );
+    }
+}
+
 /// A ring about `z` through the origin.
 fn ring(ring_radius: f64, tube_radius: f64) -> Surface {
     Surface::Torus(Torus::new(Axis::z(), ring_radius, tube_radius).expect("a tube inside its ring"))
