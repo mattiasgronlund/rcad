@@ -568,22 +568,27 @@ pub enum Error {
     /// *away* from a pole, where the vector is tiny and the sign of a dot with it
     /// is decided in `f64` the way it always was.
     ///
-    /// A ball cut by a plane containing its **polar axis** reaches it, and only
-    /// that: the great circle such a plane cuts runs through both poles, so the
-    /// one corner the arrangement puts on that closed crossing is one of them.
-    /// A plane through the ball's centre that does *not* contain the polar axis
-    /// is answered — measured, at the equator and at a plane leaning 0.4 of a
-    /// radian through the middle.
+    /// A closed crossing that starts at a pole of a ball reaches it when
+    /// `fuse/arrange.rs`'s `across_a_circle_that_starts_at_a_pole` names no
+    /// second node on it, so it is left one closed edge whose one corner is the
+    /// pole. That function cuts such a crossing straight across for a ball
+    /// against a plane, a ball, or a ring whose axis holds the ball's centre,
+    /// and at the ball's other pole for a ball against a pipe. It names none for
+    /// any other pair, for a pipe whose other pole is not on the one loop, for a
+    /// ring whose axis misses the ball's centre, or where the point across a
+    /// circle with a ball or a ring is not certified exactly.
     ///
-    /// **A gap and not a limit** (§16.10), and the direction rule is not what
-    /// makes it one. Handed a direction the rule cannot derive, the same fuse
-    /// gets two steps further and refuses
-    /// [`Error::ACurvedFaceGoesRightRoundWithNoSeam`]: the piece is half a ball
-    /// bounded by one curve right round its skin, with the poles on that curve
-    /// rather than inside the piece, and no face of this kernel holds that shape.
-    /// §38.3 records the run that measured it. Closing it takes the other half of
-    /// what §38.1 built — a *cut* closed face written out with a seam and poles
-    /// of its own.
+    /// **Every shape run that reached it is answered now, or refused
+    /// elsewhere.** A ball cut by a plane down its polar axis is answered since
+    /// §194.5. A ball centred on a bar's wall, and two balls crossing in a great
+    /// circle of one, are answered under every rule both ways round since
+    /// Q2171. A ball crossing a ring in a circle through its poles is cut there
+    /// since Q2171 too, and is refused [`Error::Undecidable`] for want of a
+    /// point inside a piece of a face instead.
+    ///
+    /// **A gap and not a limit** (§16.10): each of those shapes has an answer,
+    /// and cut a second time, each half of the crossing has two corners and a
+    /// direction read the way any edge with two ends is.
     #[error(
         "a closed edge of the answer would start at a pole, where nothing says which way it runs"
     )]

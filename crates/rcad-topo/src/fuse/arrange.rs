@@ -3293,11 +3293,11 @@ impl<'f> Arrangement<'f> {
     /// [`walk`](rcad_geom::walk) starts, which §34.4 made a function of the
     /// unordered pair (§31.3).
     ///
-    /// A circle between a ball and a plane that starts at the ball's pole gets
-    /// a second node straight across from the first, and a loop between a ball
-    /// and a pipe one at the ball's other pole, so that it is two edges with a
-    /// direction each rather than one with none — see
-    /// [`across_a_circle_that_starts_at_a_pole`].
+    /// A circle that starts at a ball's pole, where the ball meets a plane, a
+    /// ball, or a ring whose axis holds the ball's centre, gets a second node
+    /// straight across from the first, and a loop between a ball and a pipe one
+    /// at the ball's other pole, so that it is two edges with a direction each
+    /// rather than one with none — see [`across_a_circle_that_starts_at_a_pole`].
     fn start_every_closed_crossing_that_has_no_node(
         &mut self,
         log: &mut ProvenanceLog,
@@ -9758,9 +9758,10 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
     Some(PredicatePoint::from(pole.coordinates()))
 }
 
-/// Where a circle between a ball and a plane is cut a second time, when the
-/// one place it starts is a pole of the ball: straight across the circle. A
-/// loop between a ball and a pipe is cut at the ball's other pole.
+/// Where a closed crossing is cut a second time, when the one place it starts
+/// is a pole of a ball. A circle between a ball and a plane, a ball, or a ring
+/// whose axis holds the ball's centre is cut straight across the circle, and a
+/// loop between a ball and a pipe at the ball's other pole.
 ///
 /// **A closed edge starting at a pole has no direction anyone can read.** It
 /// is stored running the way the ball's longitude runs at its corner, and at a
@@ -9788,10 +9789,16 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
 /// the mesh's. A circle starting anywhere else keeps its one corner.
 ///
 /// **A ball against a plane**, whose circle has a centre this can name: the
-/// ball's centre dropped onto the plane. **And a ball against a pipe**, whose
+/// ball's centre dropped onto the plane. **A ball against a ball, or against a
+/// ring whose axis holds the ball's centre**, whose circle is square to a line
+/// through its middle, the line between the two centres or the ring's axis,
+/// and is cut where both surfaces certify the point across exactly
+/// ([`across_a_circle_round_a_line`]). **And a ball against a pipe**, whose
 /// loop is cut at the ball's other pole where that is on the loop
 /// ([`the_other_pole_on_the_one_loop`]). `None` for every other pair, and one
-/// of those starting at a pole is still refused where it was.
+/// of those starting at a pole is still refused where it was. A ball against a
+/// cone is one of those, but no frustum Q2171 ran against a ball centred on its
+/// axis, seamed or not, reached that refusal.
 ///
 /// **Including where the point across is the other pole.** That is a plane
 /// exactly down the ball's polar axis, and cut there each half is a meridian
@@ -9805,9 +9812,11 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
 ///
 /// # Its box
 ///
-/// The start sits within [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of its largest
-/// coordinate off the circle, and mirroring it through the circle's centre
-/// carries that distance across unchanged. The drop onto the plane and the
+/// Only a ball against a plane gets a box; every other pair gets a point both
+/// surfaces certify, or `None`. The start sits within
+/// [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of its largest coordinate off the
+/// circle, and mirroring it through the circle's centre carries that distance
+/// across unchanged. The drop onto the plane and the
 /// mirror round a few units in the last place of the largest coordinate in
 /// play, which a second allowance of the same size covers many times over.
 /// Where both surfaces certify the rounded point is on them, it is used as it
