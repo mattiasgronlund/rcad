@@ -17051,6 +17051,114 @@ mod curved {
             .expect("the top half of a ring described this way is a solid")
     }
 
+    /// A whole ring about `x`, four round a tube of one, and a ball of four at
+    /// `(1, 0, 0)` cross in two circles round `x`: one at `x = 1`, the top of
+    /// the tube and a great circle of the ball through both its poles, and one
+    /// at `x = −15/17` on the inside of the ring. They cut the ring in two
+    /// bands, and the ball in two caps and the band between them. The ball at
+    /// `(−1, 0, 0)` is the same shape mirrored, with its great circle at the
+    /// bottom of the tube.
+    ///
+    /// Each face came back as four pieces of one wire each (Q2212). Every node
+    /// is on the ball, the partner of both circles, so no walk could say which
+    /// side of the other circle it was on. The ring's face is now put in order
+    /// round the tube by `the_bands_round_the_tube`, and a walk on the ball
+    /// reads its side of the circle it does not use past the plane halfway
+    /// between the two, in `whether_past_the_picker`.
+    #[test]
+    fn a_ball_crossing_a_whole_ring_in_two_circles_cuts_it_in_two_bands_and_itself_in_three() {
+        for x in [1.0, -1.0] {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let policy = Policy::certified();
+            let mut log = ProvenanceLog::new();
+            let ring = a_whole_ring_of_four_round_a_tube_of_one_about_x(&mut model);
+            let ball = model
+                .add_ball(
+                    4.0,
+                    &Isometry::translation(Vector::new(x, 0.0, 0.0)).expect("a shift"),
+                )
+                .expect("a ball of radius four");
+            let mut solids = bake(&model, &[ring, ball], &policy, &mut log).expect("it bakes");
+            cuts::gather(&mut solids, &policy, &mut log).expect("the two cross in two circles");
+            let mut table: Vec<(&'static str, Vec<usize>)> = solids
+                .iter()
+                .flat_map(|solid| &solid.faces)
+                .map(|face| {
+                    let mut wires: Vec<usize> =
+                        split(face).iter().map(|piece| piece.wires.len()).collect();
+                    wires.sort_unstable();
+                    (kind(&face.surface), wires)
+                })
+                .collect();
+            table.sort();
+            assert_eq!(
+                table,
+                [("ball", vec![1, 1, 2]), ("ring", vec![2, 2])],
+                "the ball at x = {x}"
+            );
+        }
+    }
+
+    /// The whole ring four round a tube of one, about `z` and turned a quarter
+    /// about `y` onto `x`, in two faces either side of `z = 0` joined along the
+    /// two circles that plane cuts it in, as `a_whole_ring_about_x` in
+    /// `tests/a_walk_neither_winding_nor_the_axis_places.rs` builds it.
+    fn a_whole_ring_of_four_round_a_tube_of_one_about_x(model: &mut Model) -> crate::SolidKey {
+        let cut = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the z axis is a unit normal");
+        let skin = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower"));
+        let mut builder = SolidBuilder::new();
+        let [outer, inner] = [5.0, 3.0].map(|reach| {
+            let corner = builder
+                .add_vertex(Point::new(reach, 0.0, 0.0))
+                .expect("a corner on the ring and on the plane");
+            builder
+                .add_edge(
+                    corner,
+                    corner,
+                    EdgeRun::RightRoundWhereItCrosses {
+                        and: Surface::Plane(cut),
+                    },
+                )
+                .expect("a rim is a whole closed curve, so one corner twice is an edge")
+        });
+        let mut face = |walks: [(_, Orientation); 2]| {
+            let wires = walks.map(|(edge, turn)| {
+                let coedge = builder
+                    .add_coedge(edge, turn)
+                    .expect("an edge of this build");
+                builder
+                    .add_wire(&[DraftStep::Along(coedge)])
+                    .expect("one closed edge is a wire")
+            });
+            builder
+                .add_face(skin, &wires)
+                .expect("a band between two circles")
+        };
+        let top = face([
+            (outer, Orientation::Reversed),
+            (inner, Orientation::Forward),
+        ]);
+        let bottom = face([
+            (outer, Orientation::Forward),
+            (inner, Orientation::Reversed),
+        ]);
+        builder
+            .add_shell(&[(top, Orientation::Forward), (bottom, Orientation::Forward)])
+            .expect("two halves close");
+        let ring = builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a whole ring in two faces is a solid");
+        model
+            .place_solid(
+                ring,
+                &Isometry::quarter_turns(&Axis::y(), 1).expect("y is a whole direction"),
+            )
+            .expect("a solid of this model");
+        ring
+    }
+
     /// Half a ring cut through its axis, with nothing cutting it, comes
     /// through whole: its ring's face is one piece bounded by both circles
     /// `y = 0` cuts the ring in, and each cap is one piece.
