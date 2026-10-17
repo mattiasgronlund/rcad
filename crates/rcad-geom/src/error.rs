@@ -732,19 +732,22 @@ pub enum Error {
     /// circle or share nothing; the same two share circles square to the axis,
     /// which a plane holding the axis cuts in two points each; a plane that
     /// misses or barely touches one of the two settles the triple with a sign;
-    /// a plane beside that axis, parallel to it, cuts each shared circle in a
-    /// chord, touches it or misses it, as an exact sign at its height says; a
-    /// plane that cuts both in circles about two centres — a ball anywhere, a
-    /// pipe or a cone square to it — cuts them in two circles that differ by a
-    /// line; and a plane along a pipe cuts it in lines, each of which meets the
-    /// other surface where a quadratic is zero. Two pipes running the same way
-    /// and a cap plane — a union of two overlapping parallel bars — is the
-    /// first, a bar through a ball and a cap across both is the second, a wall
-    /// through the circle a frustum crosses a bar in is the third, a ball and a
-    /// bar both resting on a block's floor is the fourth, a D-flat on a shaft
-    /// across the circle a chamfer cone crosses it in is the fifth, a bar's cap
-    /// across a ball off its axis is the sixth, and a wall through the axes of
-    /// two bars that cross is the seventh. All seven are answered, and so are
+    /// a plane beside that axis, parallel to it or leaning to it by no more
+    /// than half a right angle, cuts each shared circle in a chord, touches it
+    /// or misses it, as an exact sign at its height says; a plane that cuts
+    /// both in circles about two centres — a ball anywhere, a pipe or a cone
+    /// square to it — cuts them in two circles that differ by a line; and a
+    /// plane along a pipe cuts it in lines, each of which meets the other
+    /// surface where a quadratic is zero. Two pipes running the same way and a
+    /// cap plane — a union of two overlapping parallel bars — is the first, a
+    /// bar through a ball and a cap across both is the second, a wall through
+    /// the circle a frustum crosses a bar in is the third, a ball and a bar
+    /// both resting on a block's floor is the fourth, a D-flat on a shaft
+    /// across the circle a chamfer cone crosses it in, even where a turn leaves
+    /// the flat a rounding off parallel to the shaft (Q2177), is the fifth, a
+    /// bar's cap across a ball off its axis is the sixth, and a wall through
+    /// the axes of two bars that cross is the seventh. All seven are answered,
+    /// and so are
     /// three curved surfaces two of which square `p` the same way, since the
     /// plane those two differ by takes one of their places (Q1284): two cones of
     /// one slope about one axis and a ball. The eighth is a ring with a ball, a
@@ -776,12 +779,20 @@ pub enum Error {
     /// This is what is left over — among it a plane leaning well off square to
     /// the axis of a pipe or a cone, which cuts it in a curve too far from a
     /// line for the road for crossing curves, against a second round surface
-    /// (`a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
-    /// in `rcad-topo`); two curves that touch rather than cross, where no ball
-    /// is centred on the other surface's axis; a plane a rounding off parallel
-    /// to a pipe's axis that cuts the pipe, which the road along a pipe takes
-    /// only where it is exactly parallel — a D-flat on a chamfered shaft, placed
-    /// by a turn; and three curved surfaces two of which differ by a plane that no stored
+    /// off that axis, such as the plane `x + 16z = 8` against a pipe of radius
+    /// one along `x` and a ball of radius three half a unit off that axis,
+    /// which meet in four points
+    /// (`a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_is_refused_with_four_points_there`
+    /// in `rcad-topo`); a plane leaning to the one axis a pipe or a cone shares
+    /// with a second round surface, nearer square to it than to parallel but
+    /// too far off square for the road for crossing curves, such as the cut
+    /// `x + 2z = 6` across a bar of radius three up `z` and the cone of slope
+    /// one from the origin, which meet at `(0, ±3, 3)` (Q2165); two curves that
+    /// touch rather than cross, where no ball is centred on the other surface's
+    /// axis; a plane a rounding off parallel to a pipe's axis that cuts the
+    /// pipe, against a second round surface off that axis, which the road
+    /// along a pipe takes only where it is exactly parallel; and three curved
+    /// surfaces two of which differ by a plane that no stored
     /// [`Plane`](crate::Plane) is exactly, such as two balls whose centres lie
     /// along a diagonal.
     ///

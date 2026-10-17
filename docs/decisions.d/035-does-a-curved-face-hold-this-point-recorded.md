@@ -22,7 +22,7 @@ boundary of a ball with a pipe through it — §31.7 criterion 13's own shape �
 runs along where the ball crosses the pipe. So every crossing that ray has to
 count is a point of ball, plane and pipe together, and
 `meet_of_three_surfaces` refuses fewer than two planes by name (§34.10, first
-row). `a_ray_along_a_balls_skin_needs_a_meet_of_three_that_this_milestone_refuses`
+row). `a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_is_refused_with_four_points_there`
 is that, with the same call and two planes in it as the control, because what is
 refused has to be shown to be the degree and not the call.
 
@@ -31,10 +31,21 @@ square to that axis, one holding it (Q1259) and one parallel to it and off it
 (Q1271) are answered now, because the ball and the pipe share circles square
 to the axis and each of those planes cuts them without a quartic. The
 demonstration's first ray plane, `z = 0.5`, is the third kind, and is kept as a
-control that is answered. Its ray plane is now `x + 16z = 8`, which leans to the
-pipe's axis and cuts the pipe in an ellipse and the ball in a circle: that is
-the quartic, and it is refused, with four points there to find. Nearly every
-ray through a point is such a plane, so the route's verdict stands.
+control that is answered. Its ray plane became `x + 16z = 8`, which leans to the
+pipe's axis and cuts the pipe in an ellipse and the ball in a circle.
+
+**Corrected again for Q2188 (for Q2177).** That plane is answered too now, in
+four points, `(±√8, ±√(1 − z²), (8 ∓ √8)/16)`: it cuts the same shared circles,
+and the road for a plane leaning beside the one axis two round surfaces share
+takes any plane no nearer square to that axis than to parallel
+(`a_ray_along_a_balls_skin_leaning_to_a_pipe_through_its_centre_meets_both_in_four_points`).
+What still refuses is the ball off the pipe's axis. Moved half a unit along
+`y`, it shares no circle with the pipe, and the same plane meets the three where
+a quartic in `z` is zero, at four points near `z = 0.316`, `0.337`, `0.665` and
+`0.682`; that is the demonstration now. A ball and a pipe through it share an
+axis only when the solid was built that way. Off it, a ray leaning to the
+pipe's axis falls in the leftover of `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`
+as this one does, so the route's verdict stands.
 
 That is a demonstration and not a paragraph, which is what CLAUDE.md asks of a
 claim that something cannot be done. **The family of fixes is named and it is
