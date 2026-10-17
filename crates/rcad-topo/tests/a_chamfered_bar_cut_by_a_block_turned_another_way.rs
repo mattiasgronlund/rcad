@@ -222,6 +222,104 @@ fn a_block_whose_top_holds_the_circle_where_the_cone_meets_the_pipe_cuts_the_bar
     }
 }
 
+#[test]
+fn probe_q2181() {
+    let axis =
+        Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+    let turn = Isometry::rotation(&axis, 1.1).expect("a finite angle");
+    let half = Isometry::rotation(&axis, 0.55).expect("a finite angle");
+    for turns in [vec![turn], vec![half, half]] {
+        for rule in [Rule::Difference, Rule::Union, Rule::Intersection] {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let bar = a_chamfered_bar(&mut model);
+            model.place_solid(bar, &turn).expect("key");
+            let block = a_block_from_below(&mut model, 60.0, 1.0);
+            for placed in &turns {
+                model.place_solid(block, placed).expect("key");
+            }
+            if rule == Rule::Difference {
+                let circle_plane = Surface::Plane(level(1.0, 1.0).transformed(&turn));
+                println!("PROBE circle plane moved {circle_plane:?}");
+                let bars: Vec<Surface> = model
+                    .solid(bar)
+                    .expect("k")
+                    .faces()
+                    .map(|f| f.surface())
+                    .collect();
+                let blocks: Vec<Surface> = model
+                    .solid(block)
+                    .expect("k")
+                    .faces()
+                    .map(|f| f.surface())
+                    .collect();
+                for s in &bars {
+                    println!("PROBE bar {s:?}");
+                }
+                for s in &blocks {
+                    println!("PROBE block {s:?}");
+                }
+                let pipe = bars[2];
+                let cone = bars[1];
+                let top = *blocks
+                    .iter()
+                    .find(|s| {
+                        let Surface::Plane(p) = s else { return false };
+                        let n = p.normal().components();
+                        let c = circle_plane.as_plane().unwrap().normal().components();
+                        (0..3).map(|i| n[i] * c[i]).sum::<f64>() > 0.999
+                    })
+                    .expect("top");
+                if let (Surface::Plane(t), Surface::Plane(c)) = (top, circle_plane) {
+                    println!(
+                        "PROBE top bits {:?} {:x} circle bits {:?} {:x}",
+                        t.normal().components().map(f64::to_bits),
+                        t.offset().to_bits(),
+                        c.normal().components().map(f64::to_bits),
+                        c.offset().to_bits()
+                    );
+                }
+                let pol = Policy::certified();
+                println!(
+                    "PROBE meet3 top pipe cone {:?}",
+                    meet_of_three_surfaces([&top, &pipe, &cone], &pol, &mut ProvenanceLog::new())
+                );
+                println!(
+                    "PROBE meet3 circleplane pipe cone {:?}",
+                    meet_of_three_surfaces(
+                        [&circle_plane, &pipe, &cone],
+                        &pol,
+                        &mut ProvenanceLog::new()
+                    )
+                );
+                println!(
+                    "PROBE top x pipe {:?}",
+                    rcad_geom::intersect(&top, &pipe, &pol, &mut ProvenanceLog::new())
+                );
+                println!(
+                    "PROBE top x cone {:?}",
+                    rcad_geom::intersect(&top, &cone, &pol, &mut ProvenanceLog::new())
+                );
+                println!(
+                    "PROBE pipe x cone {:?}",
+                    rcad_geom::intersect(&pipe, &cone, &pol, &mut ProvenanceLog::new())
+                );
+            }
+            let answer = model.fuse(
+                &[bar],
+                &[block],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            println!(
+                "PROBE turns {} {rule:?}: {:?}",
+                turns.len(),
+                answer.map(|f| f.solids().len())
+            );
+        }
+    }
+}
+
 /// The block's side that was `x = 1.5` before the turn, and the bar's pipe and
 /// cone, each where the turn put it.
 fn the_side_the_pipe_and_the_cone(

@@ -1851,6 +1851,28 @@ impl<'f> Arrangement<'f> {
                         let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
                             .chain(corner.around.iter().copied())
                             .collect();
+                        if let [a, b] = &corner.around[..] {
+                            let meet = meet_of_three_surfaces(
+                                [a, b, &partner],
+                                &Policy::certified(),
+                                &mut ProvenanceLog::new(),
+                            );
+                            eprintln!("PROTO meet {meet:?}");
+                            if let Ok(MeetOfThree::Nowhere) = meet {
+                                return Ok(false);
+                            }
+                            if let Ok(MeetOfThree::At(places)) = &meet {
+                                let mine = point.enclosure();
+                                if places.iter().all(|place| {
+                                    let p = place.enclosure();
+                                    (0..3).any(|i| {
+                                        p[i].hi() < mine[i].lo() || mine[i].hi() < p[i].lo()
+                                    })
+                                }) {
+                                    return Ok(false);
+                                }
+                            }
+                        }
                         Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
                             .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
                             .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
