@@ -5117,14 +5117,15 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        InPlane, Piece, Rule, a_face_of_the_input_holds, candidate_points, choose, corners_of,
-        every_picker_keeps, midway_between, the_meridian_circle_each_side_runs_round,
-        the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
+        InPlane, Piece, Rule, a_face_of_the_input_holds, by_the_one_face_its_box_meets,
+        candidate_points, choose, corners_of, every_picker_keeps, midway_between,
+        the_meridian_circle_each_side_runs_round, the_middles_of_a_round_wire,
+        the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
     use crate::fuse::bake::{BakedEdge, BakedFace, BakedSolid, bake};
     use crate::fuse::{FaceMeet, MeetPoint, Scratch};
-    use crate::{Model, ProfileBuilder};
+    use crate::{Model, ProfileBuilder, SolidKey};
 
     /// Adding first overflows here: `1e308 + 1.5e308` is past the largest
     /// double, and the middle, `1.25e308`, is not.
@@ -5603,6 +5604,99 @@ mod tests {
     /// The plane `x = 0`, facing `−x`, out of a plate on `x ≥ 0`.
     fn the_plane_x_0() -> Surface {
         Surface::Plane(Plane::from_coefficients([-1.0, 0.0, 0.0, 0.0]).expect("a normal"))
+    }
+
+    /// The block from `(0, 0, 0)` to `(4, 4, 4)` has its floor on `z = 0`,
+    /// facing `−z`. A flat piece one step of an `f64` below the floor is
+    /// outside the block, and one step above it is inside, though a box
+    /// `2e−15` tall round the middle of the floor runs through both planes and
+    /// the ray can put it on neither side. What the floor's offset and the
+    /// piece's say is the answer, since no other face of the block comes near
+    /// the box (Q2043). A piece on the floor's own plane is not this rule's
+    /// to place: coincidence is asked of it first.
+    #[test]
+    fn a_flat_piece_a_step_off_a_blocks_floor_is_placed_by_the_floor() {
+        let (model, block) =
+            a_prism_four_tall_on(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]]);
+        let solid = model.solid(block).expect("the block is in the model");
+        let one_step = f64::from_bits(1);
+        let mid_floor = PredicatePoint::Constructed([
+            Interval::exactly(2.0),
+            Interval::exactly(2.0),
+            Interval::around(0.0, 1e-15).expect("a finite box"),
+        ]);
+        let placed = |height: f64| {
+            by_the_one_face_its_box_meets(
+                solid,
+                &a_flat_piece_on([0.0, 0.0, 1.0, -height]),
+                mid_floor,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+        };
+        assert_eq!(placed(-one_step), Some(false), "below the floor");
+        assert_eq!(placed(one_step), Some(true), "above the floor");
+        assert_eq!(placed(0.0), None, "on the floor itself");
+    }
+
+    /// A wedge on the triangle `(0, 0)`, `(4, 0)`, `(0, ¼)` has a wall on
+    /// `y = 0`, facing `−y`, and its long side `x + 16y = 4` leans over that
+    /// wall towards `x = 4`, a sixteenth as high as it is far from that end.
+    /// A box `2⁻²⁰` short of the end, `2⁻²²` tall, is held by the wall and is
+    /// also run through by the side, `2⁻²⁴` to `2⁻²³` above the wall. The wall
+    /// cannot place a piece by that box alone: a piece of the plane
+    /// `y = 3·2⁻²⁵` is inside the wedge in one part of the box and outside it
+    /// in the other, and the wall would call all of it inside. Nor a step off
+    /// the wall either way, where the wall's word happens to be right.
+    #[test]
+    fn a_box_a_side_leaning_over_a_wall_runs_through_is_not_placed_by_the_wall() {
+        let (model, wedge) = a_prism_four_tall_on(vec![[0.0, 0.0], [4.0, 0.0], [0.0, 0.25]]);
+        let solid = model.solid(wedge).expect("the wedge is in the model");
+        let short = f64::powi(2.0, -20);
+        let under_the_side = PredicatePoint::Constructed([
+            Interval::new(4.0 - 2.0 * short, 4.0 - short).expect("a finite box"),
+            Interval::around(0.0, short / 8.0).expect("a finite box"),
+            Interval::exactly(2.0),
+        ]);
+        let one_step = f64::from_bits(1);
+        for height in [-one_step, one_step, 3.0 * short / 32.0] {
+            assert_eq!(
+                by_the_one_face_its_box_meets(
+                    solid,
+                    &a_flat_piece_on([0.0, 1.0, 0.0, -height]),
+                    under_the_side,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                ),
+                None,
+                "the piece on y = {height:e}"
+            );
+        }
+    }
+
+    /// `outline` on `z = 0` drawn straight up to `z = 4`, its floor on `z = 0`.
+    fn a_prism_four_tall_on(outline: Vec<[f64; 2]>) -> (Model, SolidKey) {
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let outline = ProfileBuilder::new(outline)
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("an outline");
+        let prism = model
+            .add_extrusion(&outline, 4.0, &Isometry::identity())
+            .expect("a positive height");
+        (model, prism)
+    }
+
+    /// A piece of the plane with these coefficients. It has no sides:
+    /// [`by_the_one_face_its_box_meets`] reads the piece's plane and nothing
+    /// else.
+    fn a_flat_piece_on(coefficients: [f64; 4]) -> Piece {
+        Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(Plane::from_coefficients(coefficients).expect("a normal")),
+            orientation: Orientation::Forward,
+            wires: Vec::new(),
+            is_the_whole_surface: false,
+        }
     }
 
     /// A piece of the wall `y = −10` inside the lower nappe of `x² + y² = (z/2)²`:
