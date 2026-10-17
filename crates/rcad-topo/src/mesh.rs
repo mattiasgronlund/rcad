@@ -8883,15 +8883,29 @@ fn a_plane_cuts_this_cone_or_pipe_in_an_ellipse_its_ends_are_walked_by(
 /// caller asks the plane-and-cone case exactly before it gets here
 /// ([`a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever`]).
 ///
-/// **The pipe arm reaches its on a pipe crossed with itself**, on either
-/// spelling, along a turned axis: [`a_unit_axis`] can leave such a direction a
-/// rounding off length one, so the part of it square to itself comes out
-/// between `1.4e-16` and `5e-16` rather than zero — at 125 of 250 turns of `z`
-/// tried for Q2183 — and a crossing that is the whole pipe is charged `2` over
-/// that. A rim between two bands of one pipe is such an edge
-/// (`two_spellings_of_one_pipe_mesh_each_face_on_its_own_side.rs`); the caller
-/// folds in the plane its run names and takes the smaller answer, and that is
-/// all that bounds it. The other arms have no shape known to reach theirs.
+/// **The pipe arm reads its room as a cross product**, `|straight_on × ŵ|`
+/// with `ŵ` the other pipe's way, and not as the length of the part of
+/// `straight_on` square to `ŵ`. The two are one length in the reals. They part
+/// on a pipe crossed with itself, on either spelling, which bounds nothing:
+/// along a turned axis [`a_unit_axis`] can leave the direction a rounding off
+/// length one, so the part of it square to itself came out between `1.4e-16`
+/// and `5e-16` rather than zero — at 125 of 250 turns of `z` tried for Q2183 —
+/// and the crossing was charged its distance out over that. Each component of
+/// the cross product of a direction with itself or its negation is `a·b − b·a`
+/// up to sign, which is exactly zero in `f64` too, so that crossing bounds
+/// nothing here either.
+///
+/// Every curved edge of a pipe face asks this about the pipe itself, since the
+/// face is one of the two along it, and two shapes found nothing smaller to
+/// take. A rim between two bands of one pipe
+/// (`two_spellings_of_one_pipe_mesh_each_face_on_its_own_side.rs`), which the
+/// caller now bounds by the plane its run names. And an arc of the circle a
+/// pipe and a cone on one axis share, cut off at both ends by a plane: on the
+/// pipe face of the sliver of a chamfered bar past a block's side
+/// (`a_chamfered_bar_cut_by_a_block_turned_another_way.rs`) it was charged
+/// `9.99e15` up the axis, and every mesh finer than the coarsest, which folds,
+/// was refused under a floor of `242259` (Q2240). The other arms have no shape
+/// known to reach theirs.
 fn how_far_along_an_axis_a_crossing_with_this_surface_runs(
     origin: Point,
     straight_on: Vector,
@@ -8917,7 +8931,7 @@ fn how_far_along_an_axis_a_crossing_with_this_surface_runs(
         }
         Surface::Cylinder(pipe) => {
             let (its_origin, its_way) = a_unit_axis(&pipe.axis());
-            let room = square_to(straight_on, its_way).length() - slope;
+            let room = straight_on.cross(its_way).length() - slope;
             (room > 0.0).then(|| {
                 (pipe.radius() + square_to(origin - its_origin, its_way).length() + radius) / room
             })
