@@ -1854,6 +1854,9 @@ impl<'f> Arrangement<'f> {
                         Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
                             .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
                             .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
+                            .or_else(|| {
+                                Self::side_of_a_plane_crossing_a_cap_circle(&on, point, plane)
+                            })
                             .unwrap_or(undecided)
                     }
                 }
@@ -8080,6 +8083,7 @@ impl<'f> Arrangement<'f> {
                             .chain(node.crossings.iter().map(|&on| self.crossings[on].partner))
                             .collect();
                         Self::side_of_a_plane_holding_a_rings_axis(&on, at, plane)
+                            .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
                             .unwrap_or(undecided)
                     }
                     (side, _) => side,
@@ -8706,6 +8710,15 @@ impl<'f> Arrangement<'f> {
     /// the plane leans to the axis by `2⁻⁵²`, so it crosses the pipe, in an
     /// ellipse far past the bar's end (Q2102).
     ///
+    /// [`Arrangement::which_side_of_everything`] asks it too, of a node of a
+    /// walk on a pipe's face. The bar of
+    /// [`Arrangement::side_of_a_plane_crossing_a_cap_circle`], with its seam
+    /// underneath, has a walk on its pipe whose one node is its near seam
+    /// corner, a box round `(3, 2, 4)` that the block's top runs through; its
+    /// near cap's circle is clear of the top by about `1e−31`, and every fuse
+    /// of the pair was refused there once its far seam corner was answered
+    /// (Q2187).
+    ///
     /// **Every point of the circle is on one side of `partner`.** The cap
     /// `n_c·p = d_c` is square to the axis through `o` along `w`, so it meets
     /// the pipe in the circle of radius `r` round `c = o + t·w`, where `t` is
@@ -8761,18 +8774,9 @@ impl<'f> Arrangement<'f> {
         along: [f64; 3],
         radius: f64,
     ) -> Option<Decision> {
-        let (normal, its_normal) = (partner.normal().components(), cap.normal().components());
-        let k = exactly_dotted(its_normal, along)?;
+        let normal = partner.normal().components();
+        let [k, a] = Self::the_cap_circles_centre_against(partner, cap, origin, along)?;
         let along_the_axis = exactly_dotted(normal, along)?;
-        let off_partner = exactly_added(&exactly_dotted(normal, origin)?, &[-partner.offset()]);
-        let off_the_cap = exactly_added(
-            &[cap.offset()],
-            &negated(&exactly_dotted(its_normal, origin)?),
-        );
-        let a = exactly_added(
-            &exactly_multiplied(&k, &off_partner)?,
-            &exactly_multiplied(&off_the_cap, &along_the_axis)?,
-        );
         let [squared_normal, squared_along] = [normal, along].map(|way| exactly_dotted(way, way));
         let across = exactly_added(
             &exactly_multiplied(&squared_normal?, squared_along.as_ref()?)?,
@@ -8795,6 +8799,165 @@ impl<'f> Arrangement<'f> {
             "a plane clear of a circle has the circle's centre off it: {a:?} at {k:?}"
         );
         Some(side)
+    }
+
+    /// Which side of `partner` a point lies that is on a pipe and on a plane
+    /// square to the pipe's axis, both among the surfaces it is `on`, where
+    /// `partner` crosses the circle the two meet in and the point's box `at`
+    /// holds only points of the arc between the two crossings that is not on
+    /// the centre's side: the side away from the centre. `None` where no such
+    /// pair is among them or the box cannot be shown to hold only points of
+    /// that arc, and the caller keeps the box's answer.
+    ///
+    /// A bar placed by `Isometry::rotation` about `y` by `π/2` and then about
+    /// `x` by `π`, shifted to `(3, 2, 5)`, lies along the top of the block
+    /// `[0, 4]³` with its seam underneath, its axis along
+    /// `(−1, −1.2e−16, −2⁻⁵²)`. Its far end drops `4.4e−16`, so the far cap's
+    /// circle dips below the top and crosses it at `y = 2 ± 2.98e−8`, and the
+    /// far seam corner, the circle's lowest point, is a box `2.8e−13` wide that
+    /// the top runs through. The top reaches that circle, so
+    /// [`Arrangement::side_of_a_plane_clear_of_a_cap_circle`] does not answer,
+    /// and every fuse of the pair was refused for it (Q2187).
+    ///
+    /// **Every point of that arc is on the side away from the centre.** Let
+    /// `partner` be `n·p = d` with the centre `c` on its side `σ`, `g` the part
+    /// of `n` square to the axis, and `e = n × n_c` for the cap's normal `n_c`,
+    /// which is square to `n` and to the axis. A point of the circle is
+    /// `c + r·(−σ·cos θ·ĝ + sin θ·ê)`, so `σ·(n·p − d)` is
+    /// `|n·c − d| − r·|g|·cos θ`, and `e·p` is `e·c + r·|e|·sin θ`. The
+    /// circle crosses `partner` where `cos θ` is `|n·c − d|/(r·|g|)`, at `±θ₀`
+    /// with `cos θ₀` above nought, and is on side `−σ` exactly where
+    /// `|θ| < θ₀`.
+    ///
+    /// - **Where `|n·p − d|` is below `|n·c − d|` all over the box**, every
+    ///   point of the circle in the box has `cos θ` above nought. That is
+    ///   `a²` against `F²·k²`, for `F` the most `|n·p − d|` reaches over the
+    ///   box and `a` and `k` as in
+    ///   [`Arrangement::side_of_a_plane_clear_of_a_cap_circle`], decided
+    ///   exactly.
+    /// - **Where `e·p` is between its values at the two crossings all over the
+    ///   box**, every such point has `|θ| < θ₀`, since `sin θ` grows with `θ`
+    ///   while `cos θ` is above nought. The two crossings are the two points
+    ///   [`meet_of_three_surfaces`] proves `partner`, the cap and the pipe meet
+    ///   at, and their boxes hold them, so a sign of `e·(p − X)` that the
+    ///   boxes give is the sign at the points.
+    fn side_of_a_plane_crossing_a_cap_circle(
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        on.iter().find_map(|pipe| {
+            let Surface::Cylinder(pipe) = pipe else {
+                return None;
+            };
+            on.iter().find_map(|cap| {
+                let Surface::Plane(cap) = cap else {
+                    return None;
+                };
+                if !lie_along_one_line(
+                    cap.normal().components(),
+                    pipe.axis().direction().components(),
+                ) {
+                    return None;
+                }
+                Self::side_of_a_plane_over_the_arc_it_cuts_off(partner, cap, pipe, at)
+            })
+        })
+    }
+
+    /// The side of `partner` at a point of the circle where `cap` meets `pipe`
+    /// whose box is `at`, or `None` where the box cannot be shown to hold only
+    /// points of the arc `partner` cuts off away from the circle's centre or a
+    /// product would round
+    /// ([`Arrangement::side_of_a_plane_crossing_a_cap_circle`] says why).
+    fn side_of_a_plane_over_the_arc_it_cuts_off(
+        partner: &Plane,
+        cap: &Plane,
+        pipe: &Cylinder,
+        at: PredicatePoint,
+    ) -> Option<Decision> {
+        let [k, a] = Self::the_cap_circles_centre_against(
+            partner,
+            cap,
+            pipe.axis().origin().coordinates(),
+            pipe.axis().direction().components(),
+        )?;
+        let (normal, box_) = (
+            partner.normal().components().map(Interval::exactly),
+            at.enclosure(),
+        );
+        let off = dot_of(normal, box_) - Interval::exactly(partner.offset());
+        let furthest = off.lo().abs().max(off.hi().abs());
+        let reach = exactly_scaled(
+            &exactly_scaled(&exactly_multiplied(&k, &k)?, furthest)?,
+            furthest,
+        )?;
+        let centre_off = exactly_multiplied(&a, &a)?;
+        if expansion_sign(&exactly_added(&centre_off, &negated(&reach))) != Decision::Pos {
+            return None;
+        }
+        let Ok(MeetOfThree::At(crossings)) = meet_of_three_surfaces(
+            [
+                &Surface::Plane(*partner),
+                &Surface::Plane(*cap),
+                &Surface::Cylinder(*pipe),
+            ],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) else {
+            return None;
+        };
+        let &[first, second] = crossings.as_slice() else {
+            return None;
+        };
+        let across = cross_of_intervals(normal, cap.normal().components().map(Interval::exactly));
+        let past = |crossing: PredicatePoint| {
+            let crossing = crossing.enclosure();
+            dot_of(
+                across,
+                core::array::from_fn(|index| box_[index] - crossing[index]),
+            )
+            .sign()
+        };
+        if !matches!(
+            (past(first), past(second)),
+            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
+        ) {
+            return None;
+        }
+        let centre = expansion_sign(&exactly_multiplied(&k, &a)?);
+        assert!(
+            matches!(centre, Decision::Pos | Decision::Neg),
+            "a circle's centre further off a plane than a box is is off it: {a:?} at {k:?}"
+        );
+        Some(the_other_way(centre))
+    }
+
+    /// `k = n_c·w` and `a = k·(n·c − d)`, exactly, for `partner`'s normal `n`
+    /// and offset `d`, `cap`'s normal `n_c`, and the centre `c` of the circle
+    /// where `cap` meets the pipe along `w = along` from `origin`; `None` where
+    /// a product would round. `a` is worked out without dividing by `k`
+    /// ([`Arrangement::side_of_a_plane_clear_of_a_cap_circle`] says how), and
+    /// `k·a` has the sign of `n·c − d`.
+    fn the_cap_circles_centre_against(
+        partner: &Plane,
+        cap: &Plane,
+        origin: [f64; 3],
+        along: [f64; 3],
+    ) -> Option<[Vec<f64>; 2]> {
+        let (normal, its_normal) = (partner.normal().components(), cap.normal().components());
+        let k = exactly_dotted(its_normal, along)?;
+        let along_the_axis = exactly_dotted(normal, along)?;
+        let off_partner = exactly_added(&exactly_dotted(normal, origin)?, &[-partner.offset()]);
+        let off_the_cap = exactly_added(
+            &[cap.offset()],
+            &negated(&exactly_dotted(its_normal, origin)?),
+        );
+        let a = exactly_added(
+            &exactly_multiplied(&k, &off_partner)?,
+            &exactly_multiplied(&off_the_cap, &along_the_axis)?,
+        );
+        Some([k, a])
     }
 
     /// How many times the face's boundary winds round each walk, counting only
