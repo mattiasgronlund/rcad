@@ -107,11 +107,13 @@ impl Measurement {
     /// really has — a **distance**, and a **squared** quantity in the model's
     /// own unit.
     ///
-    /// Two things are charged and both are counted:
+    /// Three things are charged and all are counted:
     /// [`how_much_more_surface_there_can_be`] for the curved faces, whose true
-    /// surface bulges away from the flat triangles standing in for it, and
+    /// surface bulges away from the flat triangles standing in for it,
     /// [`rim_of_the_flat_faces`] for the flat ones, whose meshed outline is a
-    /// polygon inscribed in a curve.
+    /// polygon inscribed in a curve, and [`how_much_area_leaning_adds`] for a
+    /// flat face whose mesh points stand off its plane, so that its triangles
+    /// lean and are larger than the face they stand for.
     ///
     /// **A distance for the same reason [`Measurement::volume_error`] is, and
     /// the two terms are what pull opposite ways.** On a round bar both are
@@ -220,11 +222,13 @@ impl FaceMeasurement {
     ///
     /// The one charge [`Measurement::area_error`] makes for this face and no
     /// other: [`how_much_more_surface_there_can_be`] on a curved face, what a
-    /// cone face reaching its own apex costs on one of those, and the
-    /// deviation times [`rim_of_the_flat_faces`] on a flat face of a curved
-    /// solid — the sides where this face meets another, whose meshed outline is
-    /// a polygon inscribed in a curve. So the faces' errors add up to the
-    /// solid's, to within the rounding of adding them in a different order.
+    /// cone face reaching its own apex costs on one of those, and on a flat
+    /// face of a curved solid the deviation times [`rim_of_the_flat_faces`] —
+    /// the sides where this face meets another, whose meshed outline is a
+    /// polygon inscribed in a curve — plus [`how_much_area_leaning_adds`], what
+    /// its triangles gain by leaning off its plane. So the faces' errors add up
+    /// to the solid's, to within the rounding of adding them in a different
+    /// order.
     ///
     /// **How big it is against the area, measured** at a deflection of `0.01`:
     /// `3.32e-3` of a round bar's cap and `3.33e-3` of its wall at radius
@@ -291,7 +295,10 @@ impl FaceMeasurement {
     ///   `0` where every other point lies on the plane exactly, and a rounding
     ///   or so on a turned plane, whose points rarely can; and what is
     ///   unpaired is the slivers between the inscribed outline and the curve,
-    ///   at most `E` of them and within `d` of a side of the mesh.
+    ///   within `d` of a side of the mesh, and what leaning triangles lose by
+    ///   moving straight on to the plane, which shrinks each by the cosine of
+    ///   its lean and so is exactly [`how_much_area_leaning_adds`]. Those two
+    ///   are the two terms of `E`, so they are at most `E`.
     ///
     /// Infinite whenever `E` is — a mesh cut a whole radius out — or is not
     /// smaller than `A`, because then nothing bounds the true area away from
@@ -604,6 +611,14 @@ impl SolidView<'_> {
     /// plane, and those slivers are at most the deviation times
     /// [`rim_of_the_flat_faces`] in area, so that much again is charged times
     /// the furthest any flat face strays.
+    ///
+    /// **A flat face whose points stray owes area too**, because triangles
+    /// drawn up to points off the plane lean, and a leaning triangle is larger
+    /// than its shadow on the plane. So each flat face is charged
+    /// [`how_much_area_leaning_adds`] on top of its rim. The rest of the lid in
+    /// `area_error_ignores_a_tilted_triangles_extra_area.rs` leans up to points
+    /// `0.3` off its plane and came out `0.138` over, against a rim charge of
+    /// `0.012`.
     fn skin_of(self, mesh: &Mesh) -> Skin {
         let bends = bend_of_each_face(self, mesh);
         let flat_faces: HashMap<FaceKey, (Plane, Vec<u32>)> = self
@@ -634,6 +649,7 @@ impl SolidView<'_> {
                     .get(&face)
                     .expect("a face that does not bend lies on a plane");
                 let off = how_far_the_points_stray_off(mesh, triangles, plane, held);
+                skin.area_error += how_much_area_leaning_adds(mesh, triangles, plane);
                 skin.volume_error += off * area;
                 furthest_off_a_plane = furthest_off_a_plane.max(off);
                 continue;
@@ -965,15 +981,17 @@ impl SolidView<'_> {
                 (error, deviation, 3.0 * error)
             }
             (None, None) => {
-                let error = deviation * rim_of_the_flat_faces(mesh, |other| other == face);
                 let view = self
                     .faces()
                     .find(|used| used.key() == face)
                     .expect("the face was measured as one of this solid's");
+                let plane = view.plane();
+                let error = deviation * rim_of_the_flat_faces(mesh, |other| other == face)
+                    + how_much_area_leaning_adds(mesh, triangles, &plane);
                 let off = how_far_the_points_stray_off(
                     mesh,
                     triangles,
-                    &view.plane(),
+                    &plane,
                     &the_corners_it_holds(view, mesh),
                 );
                 (error, off, error)
@@ -1745,17 +1763,7 @@ fn each_face_and_its_triangles(mesh: &Mesh) -> Vec<(FaceKey, &[MeshTriangle])> {
 /// cylinder's wall goes right round and its vector areas cancel to nothing, so
 /// the shorter sum would say a bar has no wall.
 fn area_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> f64 {
-    let mut widest = 0.0f64;
-    for triangle in triangles {
-        let [a, b, c] = corners_of(mesh, triangle);
-        for edge in [b - a, c - a] {
-            for component in edge.components() {
-                widest = widest.max(component.abs());
-            }
-        }
-    }
-    let across = shift_for(widest);
-
+    let across = the_shrink_for_the_sides_of(mesh, triangles);
     let mut total = 0.0;
     for triangle in triangles {
         let [a, b, c] = corners_of(mesh, triangle);
@@ -1944,6 +1952,75 @@ fn how_far_the_points_stray_off(
         }
     }
     upward(furthest * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF))
+}
+
+/// How much more area a flat face's `triangles` have than their shadow
+/// straight down on its `plane`, rounded up: a squared quantity, in the
+/// model's own unit.
+///
+/// **A triangle whose corners stand off the plane leans, and a leaning
+/// triangle is larger than its shadow.** The shadow is what stands for the
+/// face, and [`rim_of_the_flat_faces`] charges how far the shadow's outline
+/// falls inside the face's own. The rest of the lid in
+/// `area_error_ignores_a_tilted_triangles_extra_area.rs` leans up to an arc
+/// drawn `0.3` above it, and its triangles came out `0.138` over its area
+/// against a rim charge of `0.012`.
+///
+/// **That rests on the shadow's outline being the face's, inscribed**, which
+/// holds where the points off the plane sit on a surface running straight
+/// along its normal, as that lid's arc sits on a pipe square to the lid. Where
+/// the surface runs aslant, the shadow of a point on it is moved sideways off
+/// it, and neither charge covers that: listed after the lid, the half disc of
+/// that file, leaning `0.3` off the lid, is meshed on the lid and measures
+/// `1.5704` with an error of `0.0688`, against a true `1.6400`.
+/// `a_half_disc_meshed_on_the_lid_it_leans_off_is_short_by_more_than_its_area_error`
+/// pins that gap.
+///
+/// **Worked out from the triangles and not bounded from
+/// [`how_far_the_points_stray_off`].** Twice a triangle's vector area is `v`,
+/// and with `n` the plane's normal, of length one, the triangle is `|v|` and
+/// its shadow `|n · v|`, so what leaning adds is `|n × v|² / (|v| + |n · v|)`
+/// — no cancellation, where `|v| − |n · v|` would cancel to nothing on a
+/// face that does not lean. A bound from how far the points stray alone has
+/// to allow every triangle to be as steep as that distance over its narrowest
+/// height, and the triangles a mesher lays across a flat face are long and
+/// thin. What leaning really adds to a triangle is about half its area times
+/// the square of how far its corners stray over its height.
+///
+/// `0.0` exactly when every triangle lies square to the plane's normal, as a
+/// round bar's caps do.
+fn how_much_area_leaning_adds(mesh: &Mesh, triangles: &[MeshTriangle], plane: &Plane) -> f64 {
+    let across = the_shrink_for_the_sides_of(mesh, triangles);
+    let normal = plane.normal();
+    let mut total = 0.0;
+    for triangle in triangles {
+        let [a, b, c] = corners_of(mesh, triangle);
+        let twice = shrink(b - a, across).cross(shrink(c - a, across));
+        let whole = twice.length();
+        if whole == 0.0 {
+            continue;
+        }
+        let shadow = normal.dot(twice).abs();
+        let leaning = normal.cross(twice).length();
+        total += leaning * leaning / (whole + shadow);
+    }
+    upward(shift_up(total * 0.5, 2 * across))
+}
+
+/// The power of two that brings the widest side of `triangles`, along any
+/// axis, to between one and two, so their areas are taken in a scale of
+/// their own for the reason [`SolidView::surface_area`] gives.
+fn the_shrink_for_the_sides_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> i32 {
+    let mut widest = 0.0f64;
+    for triangle in triangles {
+        let [a, b, c] = corners_of(mesh, triangle);
+        for edge in [b - a, c - a] {
+            for component in edge.components() {
+                widest = widest.max(component.abs());
+            }
+        }
+    }
+    shift_for(widest)
 }
 
 /// Which entries of the mesh are `face`'s own corners: the point the model
