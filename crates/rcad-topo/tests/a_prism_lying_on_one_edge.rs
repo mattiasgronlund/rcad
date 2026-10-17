@@ -723,6 +723,48 @@ fn an_l_plate_less_a_pocket_in_its_corner_square_touches_itself_along_an_edge_of
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The L plate of the test above less a triangular prism lying in its inner
+/// corner: the triangle `(1, 1)`, `(0.25, 0.5)`, `(0.5, 0.25)`, area
+/// `0.15625`, from `z = 0.25` to `z = 0.75`, volume `0.078125`. Its edge at
+/// `(1, 1)` lies along the plate's inner corner and its walls lean into the
+/// corner square, so it touches the plate's skin along that line and nowhere
+/// else.
+///
+/// The union is the plate, 3, the intersection the prism, and the prism less
+/// the plate nothing. **The plate less the prism is one solid of two shells**,
+/// `3 − 0.078125`: the plate's eight faces round a hollow of five that touches
+/// them along `x = 1, y = 1` from `z = 0.25` to `z = 0.75`, an edge of both
+/// inputs. It was refused `ResultIsNotManifold { count: 4 }` (queue row
+/// Q1923): nothing but the line joins the plate's faces to the hollow's, and
+/// the parting in `fuse/assemble.rs` asked that a face of one pair be joined
+/// to a face of the other walking the line the same way, which is one shell
+/// (`docs/decisions.md` §39.4).
+#[test]
+fn an_l_plate_less_a_prism_lying_in_its_inner_corner_is_one_solid_of_two_shells() {
+    let mut wrong = Vec::new();
+    for swapped in [false, true] {
+        for rule in EVERY_RULE {
+            let what = format!("{rule:?}, prism first {swapped}");
+            let (model, answer) = fuse(swapped, rule, |model| {
+                [
+                    an_l_plate(model),
+                    a_prism_in_the_l_plates_inner_corner(model),
+                ]
+            });
+            let outcome = match (rule, swapped) {
+                (Rule::Union, _) => differs(&model, answer, &[3.0]),
+                (Rule::Intersection, _) => differs(&model, answer, &[0.078_125]),
+                (Rule::Difference, false) => differs(&model, answer, &[3.0 - 0.078_125]),
+                _ => differs(&model, answer, &[]),
+            };
+            if let Some(why) = outcome {
+                wrong.push(format!("{what}: {why}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// **Each answer touching itself along a line is parted where it touches**:
 /// the block less the prism inside it is the block's six faces round the
 /// hollow's five, two shells meeting only along the prism's edge, and the
@@ -1196,6 +1238,37 @@ fn a_turn(fortieths: u8) -> f64 {
 /// edge on the top.
 fn a_prism_inside_the_block(model: &mut Model) -> SolidKey {
     a_prism(model, INSIDE, [0.0, 0.0, 2.0], 6.0)
+}
+
+/// The L plate of
+/// [`an_l_plate_less_a_pocket_in_its_corner_square_touches_itself_along_an_edge_of_both`],
+/// one high, its inner corner the line `x = 1, y = 1`.
+fn an_l_plate(model: &mut Model) -> SolidKey {
+    a_prism(
+        model,
+        [
+            [0.0, 0.0],
+            [2.0, 0.0],
+            [2.0, 1.0],
+            [1.0, 1.0],
+            [1.0, 2.0],
+            [0.0, 2.0],
+        ],
+        [0.0, 0.0, 0.0],
+        1.0,
+    )
+}
+
+/// A triangular prism inside the L plate, its edge along the plate's inner
+/// corner from `z = 0.25` to `z = 0.75` and its walls leaning into the
+/// corner square.
+fn a_prism_in_the_l_plates_inner_corner(model: &mut Model) -> SolidKey {
+    a_prism(
+        model,
+        [[1.0, 1.0], [0.25, 0.5], [0.5, 0.25]],
+        [0.0, 0.0, 0.25],
+        0.5,
+    )
 }
 
 fn the_block_less_the_prism_inside_it(model: &mut Model) -> SolidKey {
