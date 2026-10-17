@@ -25,14 +25,24 @@
 //! The lens between two overlapping balls of radius 10 and 0.5. It has exactly
 //! two faces, both spheres, twenty times apart in how tightly they bend, and
 //! they share one edge — the circle where the two balls cross. A ball against
-//! a bar is sharper still, fifty-fold, and it is a solid to mesh now: down the
-//! ball's own axis ([`a_bar_down_a_balls_axis_is_answered_under_every_rule`])
-//! and turned onto `x` by an exact quarter turn
+//! a bar is sharper still, fifty-fold, and now it is asked the same two
+//! questions too: a ball of radius 10 fused with a bar of radius 0.2 down the
+//! ball's own axis, under `Rule::Union`
+//! ([`a_bar_down_a_balls_axis_is_answered_under_every_rule`]). The union is one
+//! sphere, two coaxial cylinder patches of the bar's wall either side of the
+//! ball, and two flat caps — five faces, and the cylinder oracle below answers
+//! for the two curved ones that are not spheres.
+//! [`the_unions_published_deviation_covers_what_the_triangles_really_do`] and
+//! [`no_face_of_the_union_strays_further_than_the_deflection_asked_for`] ask
+//! it.
+//!
+//! The same bar turned onto `x` by an exact quarter turn
 //! ([`a_bar_turned_exactly_onto_x_is_answered_under_every_rule`]) or by
 //! `FRAC_PI_2`, which leans it off the ball's centre
-//! ([`a_bar_turned_by_frac_pi_2_leans_off_the_balls_centre_and_is_answered_under_every_rule`]).
-//! It is not the shape the two questions are asked of because its wall is a
-//! pipe, and the closed-form oracle below is written for a sphere. Two
+//! ([`a_bar_turned_by_frac_pi_2_leans_off_the_balls_centre_and_is_answered_under_every_rule`]),
+//! is answered under every rule too, but is not asked the two questions here:
+//! turning the bar changes none of the curvatures or the shared edge, only the
+//! placement, and the budget argument below does not depend on placement. Two
 //! *coaxial* bars of different radii, the other shape to reach for, meet along
 //! a flat annulus and not along an edge at all, so the annulus is a plane face
 //! between them and neither curved face ever sees the other's boundary.
@@ -53,11 +63,17 @@
 //!
 //! # The oracle is closed form, and that is the point
 //!
-//! Both faces are spheres, so how far a flat triangle gets from the surface it
-//! stands in for is exact arithmetic and not a sampled guess: over a closed
-//! triangle the distance to the centre is largest at a corner and smallest at
-//! the one point of the triangle nearest the centre, and both are worked out
-//! rather than searched for. No tolerance appears anywhere below.
+//! Every curved face here is a sphere or a cylinder, so how far a flat
+//! triangle gets from the surface it stands in for is exact arithmetic and not
+//! a sampled guess: over a closed triangle the distance to the centre, or to
+//! the axis, is largest at a corner and smallest at the one point of the
+//! triangle nearest it, and both are worked out rather than searched for. A
+//! cylinder's distance is a sphere's with the centre traded for an axis: the
+//! triangle's corners are flattened into the plane square to the axis first —
+//! dropping the component along it, which does not change how far a point sits
+//! from the skin — and then it is the same largest-at-a-corner,
+//! nearest-point-of-a-triangle case analysis, pointed at the axis's own origin
+//! rather than a sphere's centre. No tolerance appears anywhere below.
 //!
 //! [`measuring_a_coarse_mesh_against_a_fine_ones_number_finds_it_out`] is what
 //! says the measurement has teeth: the same machinery, pointed at a mesh cut
@@ -65,9 +81,9 @@
 
 use core::f64::consts::{FRAC_PI_2, PI};
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Sphere, Surface, Vector};
+use rcad_geom::{Axis, Cylinder, Deflection, Isometry, Point, Scale, Sphere, Surface, Vector};
 use rcad_predicates::{Cause, Policy, ProvenanceLog};
-use rcad_topo::{Mesh, Model, Rule, SolidKey};
+use rcad_topo::{FaceKey, Mesh, Model, Rule, SolidKey};
 
 /// The deflections every shape here is cut at.
 const HOW_FINE: [f64; 3] = [0.1, 0.01, 0.001];
@@ -122,6 +138,46 @@ fn a_lens_between_two_balls(
         "a lens has one face on each ball"
     );
     (model, lens)
+}
+
+/// A ball of radius 10 fused with a bar of radius 0.2 and length 40 down its
+/// own axis, under `Rule::Union`, which is the shape that leaves one sphere,
+/// two coaxial cylinder patches of the bar's wall either side of the ball, and
+/// two flat caps, per `a_bar_down_a_balls_axis_is_answered_under_every_rule`.
+fn a_ball_with_a_bar_down_its_axis_unioned_in() -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let ball = model
+        .add_ball(10.0, &Isometry::identity())
+        .expect("a ball at the origin");
+    let bar = model
+        .add_round_bar(
+            0.2,
+            40.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, -20.0)).expect("a shift"),
+        )
+        .expect("a bar reaching past the ball both ends");
+    let fused = model
+        .fuse(
+            &[ball],
+            &[bar],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a ball and a bar down its axis have one union");
+    let solids = fused.solids().to_vec();
+    assert_eq!(solids.len(), 1, "the union is one solid");
+    let union = solids[0];
+    assert_eq!(
+        model
+            .solid(union)
+            .expect("this model made the key")
+            .faces()
+            .count(),
+        5,
+        "the ball's skin, the bar's wall above and below it, and the bar's two caps"
+    );
+    (model, union)
 }
 
 /// Q1. The number `Mesh::deviation` publishes covers every triangle there is.
@@ -311,6 +367,74 @@ fn no_triangle_of_either_face_strays_further_than_the_deflection_asked_for() {
         closest_to_the_deflection > 0.1,
         "no face came within a tenth of its deflection ({closest_to_the_deflection:e}), so this \
          would not notice a mesh cut twice as coarse as it asked for"
+    );
+}
+
+/// Q1 asked of [`a_ball_with_a_bar_down_its_axis_unioned_in`], the same check
+/// as [`the_published_deviation_covers_what_the_triangles_really_do`] at each
+/// of `HOW_FINE`'s three deflections.
+#[test]
+fn the_unions_published_deviation_covers_what_the_triangles_really_do() {
+    let mut closest_to_the_bound = 0.0_f64;
+    for how_fine in HOW_FINE {
+        let (model, solid) = a_ball_with_a_bar_down_its_axis_unioned_in();
+        let mesh = meshed(&model, solid, how_fine);
+        let published = mesh.deviation().magnitude();
+        let really = the_worst_each_face_of_the_union_really_strays(&model, solid, &mesh)
+            .into_iter()
+            .map(|(_, strays)| strays)
+            .fold(0.0, f64::max);
+        assert!(
+            really <= published,
+            "the union cut at {how_fine} publishes {published:e} and a triangle of it really \
+             strays {really:e}"
+        );
+        assert!(
+            really > 0.0,
+            "the union cut at {how_fine} strays nothing at all, so the bound is untested from \
+             below"
+        );
+        closest_to_the_bound = closest_to_the_bound.max(really / published);
+    }
+    println!(
+        "the closest the union's three meshes came to their own published number was \
+         {:.1}% of it",
+        closest_to_the_bound * 100.0
+    );
+    assert!(
+        closest_to_the_bound > 0.1,
+        "the worst measured was under a tenth of the bound everywhere ({closest_to_the_bound:e}), \
+         so nothing here would notice the bound halving"
+    );
+}
+
+/// Q2 second half asked of the same union: the same check as
+/// [`no_triangle_of_either_face_strays_further_than_the_deflection_asked_for`],
+/// at each of `HOW_FINE`'s three deflections.
+#[test]
+fn no_face_of_the_union_strays_further_than_the_deflection_asked_for() {
+    let mut closest_to_the_deflection = 0.0_f64;
+    for how_fine in HOW_FINE {
+        let (model, solid) = a_ball_with_a_bar_down_its_axis_unioned_in();
+        let mesh = meshed(&model, solid, how_fine);
+        for (name, really) in the_worst_each_face_of_the_union_really_strays(&model, solid, &mesh) {
+            assert!(
+                really <= how_fine,
+                "the union's {name} face cut at {how_fine} strays {really:e}"
+            );
+            closest_to_the_deflection = closest_to_the_deflection.max(really / how_fine);
+        }
+    }
+    println!(
+        "the closest any face of the union came to the deflection it was cut at was \
+         {:.1}% of it",
+        closest_to_the_deflection * 100.0
+    );
+    assert!(
+        closest_to_the_deflection > 0.1,
+        "no face of the union came within a tenth of its deflection \
+         ({closest_to_the_deflection:e}), so this would not notice a mesh cut twice as coarse as \
+         it asked for"
     );
 }
 
@@ -572,6 +696,98 @@ fn how_far_a_flat_triangle_gets_from_a_ball(ball: &Sphere, corners: [Point; 3]) 
         (the_point_of_a_triangle_nearest(corners, ball.centre()) - ball.centre()).length();
     (furthest - ball.radius())
         .max(ball.radius() - nearest)
+        .max(0.0)
+}
+
+/// The same, one entry per face of
+/// [`a_ball_with_a_bar_down_its_axis_unioned_in`], named by what it sits on
+/// rather than carried by a radius, since the union's two cylinder faces
+/// share both the radius and the axis of the sphere's own axis of symmetry
+/// and a radius alone would not tell every face apart.
+fn the_worst_each_face_of_the_union_really_strays(
+    model: &Model,
+    solid: SolidKey,
+    mesh: &Mesh,
+) -> Vec<(&'static str, f64)> {
+    let view = model.solid(solid).expect("this model made the key");
+    let mut worst = Vec::new();
+    for face in view.faces() {
+        let (name, strays) = match face.surface() {
+            Surface::Sphere(ball) => (
+                "sphere",
+                the_worst_triangle_of_this_face_strays(mesh, face.key(), |corners| {
+                    how_far_a_flat_triangle_gets_from_a_ball(&ball, corners)
+                }),
+            ),
+            Surface::Cylinder(pipe) => (
+                "cylinder",
+                the_worst_triangle_of_this_face_strays(mesh, face.key(), |corners| {
+                    how_far_a_flat_triangle_gets_from_a_pipe(&pipe, corners)
+                }),
+            ),
+            // A flat cap's triangles already sit exactly in the plane they
+            // stand in for; nothing strays, but the face still has to have
+            // triangles.
+            Surface::Plane(_) => (
+                "plane",
+                the_worst_triangle_of_this_face_strays(mesh, face.key(), |_| 0.0),
+            ),
+            other @ (Surface::Cone(_) | Surface::Torus(_)) | other => {
+                panic!("the ball-with-a-bar union has no {other:?} face")
+            }
+        };
+        worst.push((name, strays));
+    }
+    assert_eq!(worst.len(), 5, "the union has five faces");
+    worst
+}
+
+/// The worst `how_far` comes back over every triangle of `mesh` standing in
+/// for `face`.
+fn the_worst_triangle_of_this_face_strays(
+    mesh: &Mesh,
+    face: FaceKey,
+    mut how_far: impl FnMut([Point; 3]) -> f64,
+) -> f64 {
+    let mut strays = 0.0_f64;
+    let mut triangles = 0;
+    for triangle in mesh.triangles() {
+        if triangle.face() != face {
+            continue;
+        }
+        let corners = triangle.corners().map(|at| mesh.points()[at as usize]);
+        strays = strays.max(how_far(corners));
+        triangles += 1;
+    }
+    assert!(triangles > 0, "a face of the union has no triangles at all");
+    strays
+}
+
+/// How far the furthest point of a flat triangle is from a pipe's skin,
+/// exactly.
+///
+/// How far a point sits from a pipe's axis depends only on its position in the
+/// plane square to the axis, so every corner is flattened into that plane
+/// first — dropping the component along `pipe.axis().direction()` — and then
+/// this is [`how_far_a_flat_triangle_gets_from_a_ball`]'s case analysis again:
+/// largest at a (flattened) corner, smallest at
+/// [`the_point_of_a_triangle_nearest`] the axis's own origin, which sits in
+/// that plane already.
+fn how_far_a_flat_triangle_gets_from_a_pipe(pipe: &Cylinder, corners: [Point; 3]) -> f64 {
+    let axis = pipe.axis();
+    let flattened = |corner: Point| {
+        let from_origin = corner - axis.origin();
+        corner - axis.direction() * from_origin.dot(axis.direction())
+    };
+    let flat_corners = corners.map(flattened);
+    let furthest = flat_corners
+        .iter()
+        .map(|&corner| (corner - axis.origin()).length())
+        .fold(0.0, f64::max);
+    let nearest =
+        (the_point_of_a_triangle_nearest(flat_corners, axis.origin()) - axis.origin()).length();
+    (furthest - pipe.radius())
+        .max(pipe.radius() - nearest)
         .max(0.0)
 }
 
