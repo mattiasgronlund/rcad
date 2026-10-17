@@ -51,9 +51,8 @@
 //! place and come back a wrong `Ok`. The fuse does put the corner there, on
 //! top of the half bar's own, and **every fuse refuses**, most of them as
 //! `validate` does, with `EdgeHasNoLength`. The sound half bar answers every
-//! partner but the block that cut it, fused again flush along its flat face,
-//! which it answers turned and refuses turned then shifted: a defect of its
-//! own, pinned here as it stands.
+//! partner, the block that cut it too, fused again flush along its flat face,
+//! at every placement (§294.24).
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
@@ -61,8 +60,8 @@
 use std::f64::consts::PI;
 
 use rcad_geom::{
-    Axis, DYNAMIC_RANGE_CHECK, Deflection, EdgeRun, Isometry, Orientation, Plane, Point,
-    SIDE_OF_PLANE, Scale, Surface, Vector, WHERE_THREE_SURFACES_MEET,
+    Axis, DYNAMIC_RANGE_CHECK, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale,
+    Surface, Vector, WHERE_THREE_SURFACES_MEET,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
@@ -574,7 +573,7 @@ fn a_half_bar_whose_corner_is_moved_in_its_file_reads_back_and_does_not_validate
 /// pyramid's: the same bytes with the corner left alone answer every partner
 /// but one, and the answer holds what the half bar and the block hold, to the
 /// bound the measure publishes for a curved solid. The one left out is the cut
-/// along the half bar's flat face, pinned on its own below.
+/// along the half bar's flat face, which answers too, on its own below.
 #[test]
 fn the_sound_half_bar_answers_every_partner_but_a_cut_along_its_flat_face_with_what_the_two_hold() {
     let not_along_the_flat_face: Vec<(Block, Rule)> = EVERY_PARTNER
@@ -589,18 +588,16 @@ fn the_sound_half_bar_answers_every_partner_but_a_cut_along_its_flat_face_with_w
     );
 }
 
-/// **The sound half bar cut again by the block that made it refuses when
-/// turned and shifted**, which is a defect and not the moved corner's
-/// refusal (§294.18). `THE_HALF_PAST_THE_SEAM`'s face `y = 0` lies on the
-/// half bar's flat face, and the answers exist: the whole half bar for the
-/// difference and nothing for the intersection. They come back with no
-/// placement, shifted and turned, under both policies. Turned then shifted,
-/// `certified` cannot say which side of a plane something is on, and
-/// `tolerant(100)` finds two curves on a face that touch without crossing.
+/// **The sound half bar cut again by the block that made it answers at every
+/// placement, under both policies.** `THE_HALF_PAST_THE_SEAM`'s face `y = 0`
+/// lies on the half bar's flat face, and the answers are the whole half bar for
+/// the difference and nothing for the intersection. Turned then shifted, the
+/// block's face lands one ulp past the flat face, on the side away from the
+/// bar, and every fuse was refused, `certified` on the side of a plane and
+/// `tolerant(100)` on two curves on a face that touch without crossing (Q2043,
+/// §294.24).
 #[test]
-fn a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned_and_shifted() {
-    let [identity, shift, turn, turn_then_shift] = every_placement();
-    let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
+fn a_sound_half_bar_cut_flush_along_its_flat_face_answers_in_every_placement() {
     let (solids, volume) =
         what_the_half_bar_and_a_block_hold(THE_HALF_PAST_THE_SEAM, Rule::Difference);
     assert_eq!(solids, 1);
@@ -609,50 +606,14 @@ fn a_sound_half_bar_cut_flush_along_its_flat_face_refuses_when_turned_and_shifte
         what_the_half_bar_and_a_block_hold(THE_HALF_PAST_THE_SEAM, Rule::Intersection),
         (0, 0.0)
     );
-
-    for rule in [Rule::Difference, Rule::Intersection] {
-        let answered = [
-            (identity, &certified),
-            (identity, &tolerant),
-            (shift, &certified),
-            (shift, &tolerant),
-            (turn, &certified),
-            (turn, &tolerant),
-        ];
-        for (placement, policy) in answered {
-            fuses_into_what_the_two_hold(
-                the_half_bar_read_back(placement, WHERE_THE_HALF_BAR_PUTS_IT),
-                placement,
-                (THE_HALF_PAST_THE_SEAM, rule),
-                policy,
-                what_the_half_bar_and_a_block_hold,
-            );
-        }
-        let refused = [
-            (
-                turn_then_shift,
-                &certified,
-                Refused::Undecidable(vec![SIDE_OF_PLANE]),
-            ),
-            (
-                turn_then_shift,
-                &tolerant,
-                Refused::TwoCurvesTouchWithoutCrossing,
-            ),
-        ];
-        for (placement, policy, refusal) in refused {
-            assert_eq!(
-                the_half_bar_refuses(
-                    WHERE_THE_HALF_BAR_PUTS_IT,
-                    placement,
-                    (THE_HALF_PAST_THE_SEAM, rule),
-                    policy
-                ),
-                refusal,
-                "{policy:?}, {placement:?}, {rule:?}"
-            );
-        }
-    }
+    answers_with_what_the_two_hold(
+        |placement| the_half_bar_read_back(placement, WHERE_THE_HALF_BAR_PUTS_IT),
+        &[
+            (THE_HALF_PAST_THE_SEAM, Rule::Difference),
+            (THE_HALF_PAST_THE_SEAM, Rule::Intersection),
+        ],
+        what_the_half_bar_and_a_block_hold,
+    );
 }
 
 /// **Every millimetre move of the half bar's corner gets the box's refusal**,
@@ -675,15 +636,13 @@ fn every_fuse_of_a_half_bar_whose_corner_is_moved_a_millimetre_refuses_where_thr
 /// at one place. Under `tolerant(100)` at every placement, and under
 /// `certified` with no placement and shifted, it says so as `validate` does,
 /// `EdgeHasNoLength`. Under `certified` turned it cannot order two points
-/// along a crossing, and turned and shifted the same, but for the cut along
-/// the flat face, which it refuses on the side of a plane as the sound half
-/// bar does. Each refusal leaves the model as it was.
+/// along a crossing, and turned and shifted the same. Each refusal leaves the
+/// model as it was.
 #[test]
 fn a_half_bar_whose_corner_is_moved_onto_the_other_end_of_its_cut_answers_no_fuse() {
     let [identity, shift, turn, turn_then_shift] = every_placement();
     let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
     for (partner, rule) in EVERY_PARTNER {
-        let along_the_flat_face = partner == THE_HALF_PAST_THE_SEAM;
         let refused = [
             (
                 identity,
@@ -715,11 +674,7 @@ fn a_half_bar_whose_corner_is_moved_onto_the_other_end_of_its_cut_answers_no_fus
             (
                 turn_then_shift,
                 &certified,
-                Refused::Undecidable(vec![if along_the_flat_face {
-                    SIDE_OF_PLANE
-                } else {
-                    ALONG_A_CROSSING
-                }]),
+                Refused::Undecidable(vec![ALONG_A_CROSSING]),
             ),
         ];
         for (placement, policy, refusal) in refused {

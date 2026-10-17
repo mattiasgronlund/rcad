@@ -3223,8 +3223,13 @@ fn settle_against_each(
         // A classification nobody could make is not a decision anybody took, so
         // it says nothing in the log (§5) — and criterion 7 would otherwise read
         // it as slop this fuse had accepted, which is exactly the conflation
-        // §17.2 spends a section keeping apart.
-        if !matches!(placed, Containment::Undecidable { .. }) {
+        // §17.2 spends a section keeping apart. Nor does one on the skin, which
+        // places nothing: the point is abandoned, or placed by the one face its
+        // box meets, which asks nothing of the ray.
+        if !matches!(
+            placed,
+            Containment::Undecidable { .. } | Containment::OnBoundary
+        ) {
             ray.drain_into(log);
         }
         match placed {
@@ -3255,7 +3260,11 @@ fn settle_against_each(
             Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(Settled::Abandoned),
             // Coincidence was asked above and found no face the piece lies on.
             Containment::OnBoundary | Containment::Undecidable { .. } => {
-                return Ok(Settled::Abandoned);
+                match by_the_one_face_its_box_meets(solid, piece, point, policy, log) {
+                    Some(true) => return Ok(Settled::At(Placement::Inside)),
+                    Some(false) => (),
+                    None => return Ok(Settled::Abandoned),
+                }
             }
         }
     }
@@ -3371,6 +3380,98 @@ fn the_corners_of_the_plane_in(flat: &Plane, reach: PredicatePoint) -> [[[f64; 4
     let [first, second] = ends(and_across);
     [(one, first), (one, second), (other, first), (other, second)]
         .map(|(this, that)| [flat.coefficients(), at(across, this), at(and_across, that)])
+}
+
+/// Whether a flat piece is inside `solid`, read off the one face of `solid`
+/// that the box of `point` meets, where that face's plane is parallel to the
+/// piece's, number for number, and not the same plane: inside when the piece's
+/// plane is behind the face's, outside when it is in front. `None` where the
+/// box meets no such face, or meets another face too, or a sign is not proved.
+///
+/// **Inside a box that one face alone meets, the solid's skin is that face.**
+/// The box is `point`'s stretched until it holds points of the piece's plane,
+/// which [`the_piece_holds`] showed the piece holds, and then of the face's
+/// plane `n · x = e`, turned out of the solid. Every other face has its surface
+/// leave the box strictly on one side or holds no part of it, as
+/// [`a_face_may_run_between_it_and_the_plane`] asks it, and the face holds the
+/// whole box: every point `g` of its plane in the box is in its material, clear
+/// of its boundary. The piece's plane, with the same normal `n`, is
+/// `n · x = d`. Take a point `x` of the piece in the box. The segment from `g`
+/// to `x` lies in the box, so it meets no other face, and none of it but `g` is
+/// on the face's plane, which `d ≠ e` keeps `x` off. Beside `g` the solid is
+/// the side of the face's plane its material is on, so the whole segment past
+/// `g` is inside the solid where `d < e` and outside it where `d > e`, and so is
+/// `x`. The piece was cut by every surface of the solid, so all of it lies
+/// where `x` does (§17.4). `d` and `e` are two `f64`s compared exactly, and
+/// nothing is a tolerance but what the policy lets the faces' own tests take.
+///
+/// The ray cannot see this. A box across a face's plane is one it cannot put
+/// on either side, though every point of the piece in it is on one.
+///
+/// A half bar cut flush along its flat face by a block, the two turned 0.4
+/// about `x` and then shifted by `(7, −5, 2.5)`, has the block's face one ulp
+/// past the flat face, on the side away from the bar: the bar's material is
+/// `n · x < −3.6317591142427994` and the block's `n · x > −3.631759114242799`.
+/// Every point found inside the block's face across from the flat face is a
+/// box `4e−15` across both planes, and every fuse of the two was refused
+/// placing that piece against the bar (Q2043).
+fn by_the_one_face_its_box_meets(
+    solid: SolidView<'_>,
+    piece: &Piece,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<bool> {
+    let flat = piece.surface.as_plane()?;
+    let reach = stretched_to_the_plane(flat, point)?;
+    solid.faces().find_map(|face| {
+        let Surface::Plane(plane) = face.surface() else {
+            return None;
+        };
+        let outward = if face.orientation().is_reversed() {
+            plane.reversed()
+        } else {
+            plane
+        };
+        let normal = outward.normal().components();
+        let along = [*flat, flat.reversed()]
+            .into_iter()
+            .find(|one| one.normal().components() == normal)?;
+        let (piece_at, face_at) = (along.offset(), outward.offset());
+        if !(piece_at.is_finite() && face_at.is_finite()) || piece_at == face_at {
+            return None;
+        }
+        let inside = piece_at < face_at;
+        let reach = stretched_to_the_plane(&plane, reach)?;
+        let mut asked = ProvenanceLog::new();
+        if !matches!(
+            solid.face_holds_the_point(face.key(), reach, policy, &mut asked),
+            Ok(OnAFace::Held)
+        ) {
+            return None;
+        }
+        let only_this_one_meets_it =
+            solid
+                .faces()
+                .filter(|other| other.key() != face.key())
+                .all(|other| {
+                    let surface = other.surface();
+                    let clear = match surface.as_plane() {
+                        Some(plane) => side_of_a_flat_face(plane, reach),
+                        None => side_of_surface(&surface, reach),
+                    };
+                    matches!(clear, Decision::Pos | Decision::Neg)
+                        || matches!(
+                            solid.face_holds_the_point(other.key(), reach, policy, &mut asked),
+                            Ok(OnAFace::NotHeld)
+                        )
+                });
+        if !only_this_one_meets_it {
+            return None;
+        }
+        asked.drain_into(log);
+        Some(inside)
+    })
 }
 
 /// What one point inside a piece says about where the piece sits.
@@ -5016,14 +5117,15 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        InPlane, Piece, Rule, a_face_of_the_input_holds, candidate_points, choose, corners_of,
-        every_picker_keeps, midway_between, the_meridian_circle_each_side_runs_round,
-        the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
+        InPlane, Piece, Rule, a_face_of_the_input_holds, by_the_one_face_its_box_meets,
+        candidate_points, choose, corners_of, every_picker_keeps, midway_between,
+        the_meridian_circle_each_side_runs_round, the_middles_of_a_round_wire,
+        the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
     use crate::fuse::bake::{BakedEdge, BakedFace, BakedSolid, bake};
     use crate::fuse::{FaceMeet, MeetPoint, Scratch};
-    use crate::{Model, ProfileBuilder};
+    use crate::{Model, ProfileBuilder, SolidKey};
 
     /// Adding first overflows here: `1e308 + 1.5e308` is past the largest
     /// double, and the middle, `1.25e308`, is not.
@@ -5502,6 +5604,99 @@ mod tests {
     /// The plane `x = 0`, facing `−x`, out of a plate on `x ≥ 0`.
     fn the_plane_x_0() -> Surface {
         Surface::Plane(Plane::from_coefficients([-1.0, 0.0, 0.0, 0.0]).expect("a normal"))
+    }
+
+    /// The block from `(0, 0, 0)` to `(4, 4, 4)` has its floor on `z = 0`,
+    /// facing `−z`. A flat piece one step of an `f64` below the floor is
+    /// outside the block, and one step above it is inside, though a box
+    /// `2e−15` tall round the middle of the floor runs through both planes and
+    /// the ray can put it on neither side. What the floor's offset and the
+    /// piece's say is the answer, since no other face of the block comes near
+    /// the box (Q2043). A piece on the floor's own plane is not this rule's
+    /// to place: coincidence is asked of it first.
+    #[test]
+    fn a_flat_piece_a_step_off_a_blocks_floor_is_placed_by_the_floor() {
+        let (model, block) =
+            a_prism_four_tall_on(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]]);
+        let solid = model.solid(block).expect("the block is in the model");
+        let one_step = f64::from_bits(1);
+        let mid_floor = PredicatePoint::Constructed([
+            Interval::exactly(2.0),
+            Interval::exactly(2.0),
+            Interval::around(0.0, 1e-15).expect("a finite box"),
+        ]);
+        let placed = |height: f64| {
+            by_the_one_face_its_box_meets(
+                solid,
+                &a_flat_piece_on([0.0, 0.0, 1.0, -height]),
+                mid_floor,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+        };
+        assert_eq!(placed(-one_step), Some(false), "below the floor");
+        assert_eq!(placed(one_step), Some(true), "above the floor");
+        assert_eq!(placed(0.0), None, "on the floor itself");
+    }
+
+    /// A wedge on the triangle `(0, 0)`, `(4, 0)`, `(0, ¼)` has a wall on
+    /// `y = 0`, facing `−y`, and its long side `x + 16y = 4` leans over that
+    /// wall towards `x = 4`, a sixteenth as high as it is far from that end.
+    /// A box `2⁻²⁰` short of the end, `2⁻²²` tall, is held by the wall and is
+    /// also run through by the side, `2⁻²⁴` to `2⁻²³` above the wall. The wall
+    /// cannot place a piece by that box alone: a piece of the plane
+    /// `y = 3·2⁻²⁵` is inside the wedge in one part of the box and outside it
+    /// in the other, and the wall would call all of it inside. Nor a step off
+    /// the wall either way, where the wall's word happens to be right.
+    #[test]
+    fn a_box_a_side_leaning_over_a_wall_runs_through_is_not_placed_by_the_wall() {
+        let (model, wedge) = a_prism_four_tall_on(vec![[0.0, 0.0], [4.0, 0.0], [0.0, 0.25]]);
+        let solid = model.solid(wedge).expect("the wedge is in the model");
+        let short = f64::powi(2.0, -20);
+        let under_the_side = PredicatePoint::Constructed([
+            Interval::new(4.0 - 2.0 * short, 4.0 - short).expect("a finite box"),
+            Interval::around(0.0, short / 8.0).expect("a finite box"),
+            Interval::exactly(2.0),
+        ]);
+        let one_step = f64::from_bits(1);
+        for height in [-one_step, one_step, 3.0 * short / 32.0] {
+            assert_eq!(
+                by_the_one_face_its_box_meets(
+                    solid,
+                    &a_flat_piece_on([0.0, 1.0, 0.0, -height]),
+                    under_the_side,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                ),
+                None,
+                "the piece on y = {height:e}"
+            );
+        }
+    }
+
+    /// `outline` on `z = 0` drawn straight up to `z = 4`, its floor on `z = 0`.
+    fn a_prism_four_tall_on(outline: Vec<[f64; 2]>) -> (Model, SolidKey) {
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let outline = ProfileBuilder::new(outline)
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("an outline");
+        let prism = model
+            .add_extrusion(&outline, 4.0, &Isometry::identity())
+            .expect("a positive height");
+        (model, prism)
+    }
+
+    /// A piece of the plane with these coefficients. It has no sides:
+    /// [`by_the_one_face_its_box_meets`] reads the piece's plane and nothing
+    /// else.
+    fn a_flat_piece_on(coefficients: [f64; 4]) -> Piece {
+        Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(Plane::from_coefficients(coefficients).expect("a normal")),
+            orientation: Orientation::Forward,
+            wires: Vec::new(),
+            is_the_whole_surface: false,
+        }
     }
 
     /// A piece of the wall `y = −10` inside the lower nappe of `x² + y² = (z/2)²`:
