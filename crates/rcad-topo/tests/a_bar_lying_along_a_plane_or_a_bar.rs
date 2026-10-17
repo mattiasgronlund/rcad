@@ -76,6 +76,21 @@
 //! (queue row Q2161).
 //! `a_bar_dipping_through_a_blocks_top_leaves_an_edge_too_short_for_its_coordinates`
 //! and its twin on the floor pin both.
+//!
+//! **The same bar turned twice, so that its seam is underneath, shares a
+//! sliver with the block along nearly its whole length** (queue row Q2187).
+//! Turned about `x` by `π` and then about `y` by `π/2`, its axis runs along
+//! `(−1, −1.2e−16, −2⁻⁵²)`, so its far end drops `4.4e−16` and its far cap's
+//! circle crosses the top. Every fuse was refused at the side of the top over
+//! the far seam corner, the lowest point of that circle, in a box the top runs
+//! through. The top reaches the circle, so Q2102's reading does not answer;
+//! `fuse/arrange.rs` now reads the side off which arc of the circle the box is
+//! on, between the two points `meet_of_three_surfaces` proves the circle
+//! crosses the top at, and the near seam corner's off the near cap's circle,
+//! which is clear of the top. Every fuse answers but the union with the block
+//! first.
+//! `a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top` and
+//! its twin on the floor pin them.
 
 use core::f64::consts::PI;
 
@@ -1603,6 +1618,95 @@ fn what_tolerant_gives_for_a_bar_dipping_through_the_floor(
     }
 }
 
+/// A bar laid along the block `[0, 4]³`'s top from `(3, 2, 5)` to `x = 1`, as
+/// the bar dipping through it is, but turned by [`Isometry::rotation`] about
+/// `y` by `π/2` and then about `x` by `π`, which leaves its seam along its
+/// underside (queue row Q2187). Its axis runs along `(−1, −1.2e−16, −2⁻⁵²)`,
+/// so its far end drops `4.4e−16` and its far cap's circle crosses the top at
+/// `y = 2 ± 2.98e−8`. The bar and the block share a sliver from there back to
+/// the bar's near end, where its near cap's circle is clear of the top by
+/// about `1e−31`.
+///
+/// **Every fuse but one answers with that sliver**, under `certified` and
+/// `tolerant`, every decision proved, and the model validates. The union with
+/// the bar first is one shell of the block's six faces and the bar's three,
+/// the intersection the sliver's three, the block less the bar eight faces,
+/// and the bar less the block four. Every fuse used to be refused: under
+/// `certified`, `Undecidable` at the side of the top over the far seam corner,
+/// a box `2.8e−13` wide the top runs through, and under `tolerant`,
+/// `CannotTellTheCellsOfAFaceApart`. `fuse/arrange.rs` now reads that side off
+/// which arc of the far cap's circle the box is on, and the side of the top at
+/// the near seam corner off the near cap's circle, which is clear of it.
+///
+/// The union with the block first is still refused `CannotMeshAFace`, a loop
+/// naming its fourth corner twice, under both policies, though the union the
+/// other way round answers. The answers are not measured: the sliver is too
+/// thin to mesh to the deflection `volume_of` asks for.
+#[test]
+fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top() {
+    every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
+        [3.0, 2.0, 5.0],
+        what_a_bar_with_its_seam_underneath_dipping_through_the_top_gives,
+    );
+}
+
+/// What each fuse of the block and the bar along its top with its seam
+/// underneath gives, as it stands.
+fn what_a_bar_with_its_seam_underneath_dipping_through_the_top_gives(
+    rule: Rule,
+    bar_first: bool,
+) -> WithTheSeamUnderneath {
+    match (rule, bar_first) {
+        (Rule::Union, false) => WithTheSeamUnderneath::CornersCoincide,
+        (Rule::Union, true) => WithTheSeamUnderneath::Solids(vec![vec![9]]),
+        (Rule::Intersection, _) => WithTheSeamUnderneath::Solids(vec![vec![3]]),
+        (Rule::Difference, false) => WithTheSeamUnderneath::Solids(vec![vec![8]]),
+        (Rule::Difference, true) => WithTheSeamUnderneath::Solids(vec![vec![4]]),
+        _ => unreachable!("only the three rules are asked"),
+    }
+}
+
+/// The bar of the test above sunk to `(3, 2, 1)`, along the block's floor,
+/// where its far end drops through the floor in the same sliver (queue row
+/// Q2187). The union is one shell of the block's six faces and the sliver's
+/// pipe and far cap, the intersection the bar less the sliver in four faces,
+/// the block less the bar a hollow open through the floor in nine, and the
+/// bar less the block the sliver's three. Every one used to be refused as the
+/// bar along the top was, round `(1, 2, 0)`.
+#[test]
+fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_floor() {
+    every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
+        [3.0, 2.0, 1.0],
+        what_a_bar_with_its_seam_underneath_dipping_through_the_floor_gives,
+    );
+}
+
+/// What each fuse of the block and the bar along its floor with its seam
+/// underneath gives.
+fn what_a_bar_with_its_seam_underneath_dipping_through_the_floor_gives(
+    rule: Rule,
+    bar_first: bool,
+) -> WithTheSeamUnderneath {
+    match (rule, bar_first) {
+        (Rule::Union, _) => WithTheSeamUnderneath::Solids(vec![vec![8]]),
+        (Rule::Intersection, _) => WithTheSeamUnderneath::Solids(vec![vec![4]]),
+        (Rule::Difference, false) => WithTheSeamUnderneath::Solids(vec![vec![9]]),
+        (Rule::Difference, true) => WithTheSeamUnderneath::Solids(vec![vec![3]]),
+        _ => unreachable!("only the three rules are asked"),
+    }
+}
+
+/// What a fuse of the block `[0, 4]³` and a bar with its seam underneath,
+/// dipping through one of its faces, gives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WithTheSeamUnderneath {
+    /// The answer's solids, fewest faces first, each as the faces in each of
+    /// its shells.
+    Solids(Vec<Vec<usize>>),
+    /// Refused `CannotMeshAFace`, a loop naming its fourth corner twice.
+    CornersCoincide,
+}
+
 /// What a tolerant fuse of the block `[0, 4]³` and a bar dipping `2⁻¹⁰⁵`
 /// through one of its faces gives, as it stands until queue row Q2161.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1763,6 +1867,69 @@ fn every_fuse_of_a_block_and_a_bar_dipping_through_it_leaves_an_edge_too_short(
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Every rule, both ways round, under `certified` and `tolerant`, of the block
+/// `[0, 4]³` and [`a_bar_with_its_seam_underneath`] from `at`: what `should`
+/// gives for the rule and whether the bar came first, and where that is an
+/// answer, every decision proved and the model valid.
+fn every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
+    at: [f64; 3],
+    should: fn(Rule, bool) -> WithTheSeamUnderneath,
+) {
+    let mut wrong: Vec<String> = Vec::new();
+    for bar_first in [false, true] {
+        for certified in [true, false] {
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                let what = format!("{rule:?}, bar first {bar_first}, certified {certified}");
+                let mut log = ProvenanceLog::new();
+                let (model, fused) = fuse_the_block_and_a_bar(
+                    |model| a_bar_with_its_seam_underneath(model, at),
+                    rule,
+                    bar_first,
+                    certified,
+                    &mut log,
+                );
+                let found = match &fused {
+                    Ok(answer) => {
+                        let mut solids: Vec<Vec<usize>> = answer
+                            .solids()
+                            .iter()
+                            .map(|&solid| faces_of_each_shell(&model, solid))
+                            .collect();
+                        solids.sort();
+                        WithTheSeamUnderneath::Solids(solids)
+                    }
+                    Err(Error::CannotMeshAFace {
+                        why: CannotTriangulate::CornersCoincide { position: 3 },
+                        ..
+                    }) => WithTheSeamUnderneath::CornersCoincide,
+                    Err(why) => {
+                        wrong.push(format!("{what}: refused {why:?}"));
+                        continue;
+                    }
+                };
+                let expected = should(rule, bar_first);
+                if found != expected {
+                    wrong.push(format!("{what}: {found:?}, and it should be {expected:?}"));
+                }
+                if fused.is_ok() {
+                    if !log.records().is_empty() {
+                        wrong.push(format!(
+                            "{what}: not every decision is proved: {:?}",
+                            log.records()
+                        ));
+                    }
+                    if let Err(why) =
+                        model.validate(&Policy::certified(), &mut ProvenanceLog::new())
+                    {
+                        wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// The block `[0, 4]³` and [`a_bar_turned_onto_x`] by `turn` from `at`, fused
 /// by `rule` with the bar first or second, under `certified` or under
 /// `tolerant`, and the model the answer is in.
@@ -1774,9 +1941,28 @@ fn fuse_a_block_and_a_bar_turned_onto_x(
     certified: bool,
     log: &mut ProvenanceLog,
 ) -> (Model, rcad_topo::Result<Fused>) {
+    fuse_the_block_and_a_bar(
+        |model| a_bar_turned_onto_x(model, turn, at),
+        rule,
+        bar_first,
+        certified,
+        log,
+    )
+}
+
+/// The block `[0, 4]³` and the bar `bar` puts in the model after it, fused by
+/// `rule` with the bar first or second, under `certified` or under `tolerant`,
+/// and the model the answer is in.
+fn fuse_the_block_and_a_bar(
+    bar: impl FnOnce(&mut Model) -> SolidKey,
+    rule: Rule,
+    bar_first: bool,
+    certified: bool,
+    log: &mut ProvenanceLog,
+) -> (Model, rcad_topo::Result<Fused>) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let block = a_block(&mut model, [4.0, 4.0, 4.0]);
-    let bar = a_bar_turned_onto_x(&mut model, turn, at);
+    let bar = bar(&mut model);
     let [first, second] = if bar_first {
         [bar, block]
     } else {
@@ -1804,6 +1990,19 @@ fn a_bar_turned_onto_x(model: &mut Model, turn: f64, [x, y, z]: [f64; 3]) -> Sol
     let shift = Isometry::translation(Vector::new(x, y, z)).expect("a whole-number shift");
     model
         .add_round_bar(1.0, 2.0, &shift.compose(&onto_x))
+        .expect("a bar")
+}
+
+/// A bar of radius one, two long, turned by [`Isometry::rotation`] about `x`
+/// by `π`, then about `y` by `π/2`, and then shifted to `at`. Its axis runs
+/// from `at` along `(−1, −1.2e−16, −2⁻⁵²)`, and its seam along its underside,
+/// a radius below the axis.
+fn a_bar_with_its_seam_underneath(model: &mut Model, [x, y, z]: [f64; 3]) -> SolidKey {
+    let flip = Isometry::rotation(&Axis::x(), PI).expect("a finite angle");
+    let onto_x = Isometry::rotation(&Axis::y(), PI / 2.0).expect("a finite angle");
+    let shift = Isometry::translation(Vector::new(x, y, z)).expect("a whole-number shift");
+    model
+        .add_round_bar(1.0, 2.0, &shift.compose(&onto_x).compose(&flip))
         .expect("a bar")
 }
 
