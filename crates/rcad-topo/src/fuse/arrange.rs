@@ -4218,10 +4218,12 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_the_quadric_says`]), a pipe's axis
     /// ([`Arrangement::as_the_pipes_axis_says`]), which of a line's two
     /// meets with a ball or a pipe each is
-    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]) and where a second
+    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]), where a second
     /// plane cuts a plane's loop
-    /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) only where the
-    /// boxes cannot say, because the boxes are cheaper and nearly always
+    /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) and where two
+    /// parallel planes cut it
+    /// ([`Arrangement::as_two_parallel_cuts_through_the_loop_say`]) only where
+    /// the boxes cannot say, because the boxes are cheaper and nearly always
     /// enough.
     ///
     /// **A refusal is filed under what its enclosure measures.** Along an axis
@@ -4263,6 +4265,12 @@ impl<'f> Arrangement<'f> {
         }
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_a_flat_cut_through_the_loop_says(crossing, first, second)
+        {
+            decided = proved;
+        }
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) =
+                self.as_two_parallel_cuts_through_the_loop_say(crossing, first, second)
         {
             decided = proved;
         }
@@ -5002,6 +5010,130 @@ impl<'f> Arrangement<'f> {
             return None;
         }
         Some(if (sweep == Decision::Pos) == exact_first {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
+    }
+
+    /// Which of two nodes on the loop a plane cuts a ball, a pipe or a cone in
+    /// comes first, where each is exactly on one of two planes that face one
+    /// way number for number: read off the two planes' offsets and which way
+    /// the loop runs across them at each node. `None` everywhere else, and
+    /// wherever a sign it reads is not proved.
+    ///
+    /// **Across a direction `n` the loop rises along one half and falls along
+    /// the other.** It is a circle or an ellipse, so `n · x` along it has one
+    /// highest point and one lowest, and climbs or falls without turning back
+    /// along each half between them. `n · x` is `d` at `first` and `e` at
+    /// `second`, for `d` and `e` the offsets of their planes along `n`. Where
+    /// the loop runs the same way across `n` at both, `n · (∇W₀ × ∇W₁)` proved
+    /// one sign over both boxes, the two are on one half, and the arc of that
+    /// half between them is the part of the loop in the strip between `d` and
+    /// `e`. From a start outside that strip the loop reaches the arc at the end
+    /// it runs into the strip by: the lower of `d` and `e` on the rising half,
+    /// and the higher on the falling one. So the answer is the sign of `e − d`
+    /// against the way the loop runs, and `f64`s compare exactly with nothing
+    /// divided. Where `d` and `e` are one number the two are one point, since a
+    /// half crosses a plane across it once.
+    ///
+    /// Both starts are asked, as in [`the_lower_meet_first_round_the_loop`],
+    /// because the walked start may be a rounding off the loop.
+    ///
+    /// A corner is read as the meet of the three `bake` solved it from
+    /// ([`BakedCorner::solved_from`]), whose box holds where exactly those
+    /// three meet, and any other node only where it stands for one meet, as in
+    /// [`Arrangement::as_the_quadric_says`].
+    ///
+    /// A half bar cut flush along its flat face by a block, the two turned 0.4
+    /// about `x` and then shifted by `(7, −5, 2.5)`, has the block's face one
+    /// ulp past the flat face (Q2043). Each cap circle and each circle the
+    /// block's ends cut the bar's wall in meets the flat face and the block's
+    /// face at two pairs of points a rounding apart, and every certified fuse
+    /// of the two was refused on which of a pair comes first round its circle.
+    fn as_two_parallel_cuts_through_the_loop_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve {
+            from,
+            node,
+            named_the_start,
+            ref wound_as,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let round = |surface: &Surface| {
+            matches!(
+                surface,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            )
+        };
+        match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(_), None) if round(&wound_as[1]) => (),
+            (None, Some(_)) if round(&wound_as[0]) => (),
+            (Some(_) | None, Some(_) | None) => return None,
+        }
+        let the_cut_through = |at: usize| {
+            let three = match self.nodes[at].vertex {
+                Some(_) => self.the_baked_corner_of(&self.nodes[at]).solved_from?,
+                None => self.the_one_meet_it_stands_for(at)?.0,
+            };
+            if !wound_as.iter().all(|surface| three.contains(surface)) {
+                return None;
+            }
+            let mut others = three.iter().filter(|surface| !wound_as.contains(surface));
+            let (Some(Surface::Plane(cut)), None) = (others.next(), others.next()) else {
+                return None;
+            };
+            Some(*cut)
+        };
+        let (mine, theirs) = (the_cut_through(first)?, the_cut_through(second)?);
+        let across = mine.normal().components();
+        let theirs = [theirs, theirs.reversed()]
+            .into_iter()
+            .find(|one| one.normal().components() == across)?;
+        let (at_mine, at_theirs) = (mine.offset(), theirs.offset());
+        if !across
+            .iter()
+            .chain([&at_mine, &at_theirs])
+            .all(|number| number.is_finite())
+        {
+            return None;
+        }
+        let across = across.map(Interval::exactly);
+        let runs_at = |at: usize| {
+            let place = self.nodes[at].point;
+            let forward = cross_of_intervals(
+                gradient_at(&wound_as[0], place).enclosure(),
+                gradient_at(&wound_as[1], place).enclosure(),
+            );
+            dot_of(across, forward).sign()
+        };
+        let (runs, runs_there) = (runs_at(first), runs_at(second));
+        // Compared rather than matched: only one proved way is read, and every
+        // other answer leaves the pair to the policy (§40).
+        if runs != runs_there || !(runs == Decision::Pos || runs == Decision::Neg) {
+            return None;
+        }
+        let theirs_is_higher = match at_mine.partial_cmp(&at_theirs)? {
+            Ordering::Equal => return Some(Decision::Zero),
+            Ordering::Less => Decision::Pos,
+            Ordering::Greater => Decision::Neg,
+        };
+        let clear_of_the_strip = |start: PredicatePoint| {
+            let along = dot_of(across, start.enclosure());
+            let [past_mine, past_theirs] =
+                [at_mine, at_theirs].map(|offset| (along - Interval::exactly(offset)).sign());
+            past_mine == past_theirs && (past_mine == Decision::Pos || past_mine == Decision::Neg)
+        };
+        if !(clear_of_the_strip(from) && clear_of_the_strip(named_the_start.unwrap_or(node))) {
+            return None;
+        }
+        Some(if theirs_is_higher == runs {
             Decision::Pos
         } else {
             Decision::Neg
