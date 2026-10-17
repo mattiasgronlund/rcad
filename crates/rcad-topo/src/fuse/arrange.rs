@@ -1851,31 +1851,14 @@ impl<'f> Arrangement<'f> {
                         let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
                             .chain(corner.around.iter().copied())
                             .collect();
-                        if let [a, b] = &corner.around[..] {
-                            let meet = meet_of_three_surfaces(
-                                [a, b, &partner],
-                                &Policy::certified(),
-                                &mut ProvenanceLog::new(),
-                            );
-                            eprintln!("PROTO meet {meet:?}");
-                            if let Ok(MeetOfThree::Nowhere) = meet {
-                                return Ok(false);
-                            }
-                            if let Ok(MeetOfThree::At(places)) = &meet {
-                                let mine = point.enclosure();
-                                if places.iter().all(|place| {
-                                    let p = place.enclosure();
-                                    (0..3).any(|i| {
-                                        p[i].hi() < mine[i].lo() || mine[i].hi() < p[i].lo()
-                                    })
-                                }) {
-                                    return Ok(false);
-                                }
-                            }
-                        }
                         Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
                             .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
                             .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
+                            .or_else(|| {
+                                Self::side_of_a_plane_square_to_a_pipe_and_a_cones_one_axis(
+                                    &on, point, plane,
+                                )
+                            })
                             .unwrap_or(undecided)
                     }
                 }
@@ -8101,6 +8084,11 @@ impl<'f> Arrangement<'f> {
                             .chain(node.crossings.iter().map(|&on| self.crossings[on].partner))
                             .collect();
                         Self::side_of_a_plane_holding_a_rings_axis(&on, at, plane)
+                            .or_else(|| {
+                                Self::side_of_a_plane_square_to_a_pipe_and_a_cones_one_axis(
+                                    &on, at, plane,
+                                )
+                            })
                             .unwrap_or(undecided)
                     }
                     (side, _) => side,
@@ -8816,6 +8804,102 @@ impl<'f> Arrangement<'f> {
             "a plane clear of a circle has the circle's centre off it: {a:?} at {k:?}"
         );
         Some(side)
+    }
+
+    /// Which side of `partner` a point lies that is on a pipe and on a cone
+    /// about one axis, both among the surfaces it is `on`, where `partner` is
+    /// square to that axis: the side of the circle the two share on the
+    /// cone's nappe the point is on, read off the stored numbers, and off the
+    /// point's box only for which nappe that is. `None` where it is not that
+    /// shape, and the caller keeps the box's answer.
+    ///
+    /// A bar chamfered by a cone up to a pipe, and a block whose top held the
+    /// circle the two share, both placed by the turn of `1.1` about
+    /// `(1, 2, 3)`: the block's placement composes its own offset in and
+    /// rounds, so its top comes out square to the bar's axis to the bit and
+    /// `2e−15` up it from that circle, inside the `1e−13` box round the
+    /// bar's seam corner on it, and every fuse of the pair was refused there
+    /// (Q2181).
+    ///
+    /// **Every point of the circle is one distance from `partner`.** For the
+    /// cone's apex `a`, axis `w` and slope `s`, the pipe's radius `r`, and
+    /// `partner`'s normal `n` and offset `d`, the circle on the nappe `σ`
+    /// (`+1` along `w`, `−1` against it) is `r/s` from the apex along the
+    /// axis, and `n` lies along `w`, so `n·p − d` all round it is
+    /// `D + σ·τ·(r/s)·|n|` for `D = n·a − d` and `τ` the sign of `n·w`. Where
+    /// `D` is nought or has the sign `σ·τ`, that is the sign. Otherwise it is
+    /// the sign of `D` where `s²·D²` is more than `r²·(n·n)`, `σ·τ` where it
+    /// is less, and nought where they are equal, since then `partner` holds
+    /// the circle. Products and sums of stored numbers, decided exactly
+    /// ([`rcad_predicates::expansion`]).
+    ///
+    /// Square and one axis are asked exactly too: `n` along both axes
+    /// ([`lie_along_one_line`]), and the pipe's axis origin on the cone's
+    /// axis ([`lies_exactly_on_the_axis`]). A plane off square by a rounding
+    /// cuts each in an ellipse, and the two can cross.
+    fn side_of_a_plane_square_to_a_pipe_and_a_cones_one_axis(
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        let pipe = on.iter().find_map(|surface| {
+            let Surface::Cylinder(pipe) = surface else {
+                return None;
+            };
+            Some(*pipe)
+        })?;
+        let cone = on.iter().find_map(|surface| {
+            let Surface::Cone(cone) = surface else {
+                return None;
+            };
+            Some(*cone)
+        })?;
+        let (normal, along) = (
+            partner.normal().components(),
+            cone.axis().direction().components(),
+        );
+        if !lie_along_one_line(normal, along)
+            || !lie_along_one_line(normal, pipe.axis().direction().components())
+            || lies_exactly_on_the_axis(pipe.axis().origin(), cone.axis()) != Some(true)
+        {
+            return None;
+        }
+        let apex = cone.apex().coordinates();
+        let box_ = at.enclosure();
+        let nappe = dot_of(
+            core::array::from_fn(|axis| box_[axis] - Interval::exactly(apex[axis])),
+            along.map(Interval::exactly),
+        )
+        .sign();
+        let towards_the_circle = match (nappe, expansion_sign(&exactly_dotted(normal, along)?)) {
+            (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => Decision::Pos,
+            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => Decision::Neg,
+            (
+                Decision::Zero | Decision::Undecidable { .. } | _,
+                Decision::Zero | Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _,
+            ) => return None,
+        };
+        let off_the_apex = exactly_added(&exactly_dotted(normal, apex)?, &[-partner.offset()]);
+        let past_the_apex = expansion_sign(&off_the_apex);
+        if past_the_apex == Decision::Zero || past_the_apex == towards_the_circle {
+            return Some(towards_the_circle);
+        }
+        let apex_reach = exactly_multiplied(
+            &exactly_multiplied(&off_the_apex, &off_the_apex)?,
+            &exactly_scaled(&[cone.slope()], cone.slope())?,
+        )?;
+        let circle_reach = exactly_multiplied(
+            &exactly_dotted(normal, normal)?,
+            &exactly_scaled(&[pipe.radius()], pipe.radius())?,
+        )?;
+        match expansion_sign(&exactly_added(&apex_reach, &negated(&circle_reach))) {
+            Decision::Pos => Some(past_the_apex),
+            Decision::Neg => Some(towards_the_circle),
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Undecidable { .. } | _ => {
+                unreachable!("an exact sum has a sign: {apex_reach:?} against {circle_reach:?}")
+            }
+        }
     }
 
     /// How many times the face's boundary winds round each walk, counting only
