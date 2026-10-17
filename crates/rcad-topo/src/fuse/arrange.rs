@@ -4772,17 +4772,10 @@ impl<'f> Arrangement<'f> {
         first: usize,
         second: usize,
     ) -> Option<Decision> {
-        let one_meet = |node: usize| match &self.nodes[node] {
-            Node {
-                vertex: None,
-                made_of: Some(named),
-                also,
-                half_way_round: false,
-                ..
-            } if also.is_empty() => Some(*named),
-            Node { .. } => None,
-        };
-        let ((surfaces, mine), (named_too, theirs)) = (one_meet(first)?, one_meet(second)?);
+        let ((surfaces, mine), (named_too, theirs)) = (
+            self.the_one_meet_it_stands_for(first)?,
+            self.the_one_meet_it_stands_for(second)?,
+        );
         if surfaces != named_too || mine == theirs || mine.max(theirs) > 1 {
             return None;
         }
@@ -4793,7 +4786,7 @@ impl<'f> Arrangement<'f> {
         let quadric = surfaces
             .iter()
             .find(|surface| matches!(surface, Surface::Sphere(_) | Surface::Cylinder(_)))?;
-        let up = the_one_axis_two_planes_cross_along(one, other)?;
+        let (up, _) = the_one_axis_two_planes_cross_along(one, other)?;
         let lower_first = match &self.crossings[crossing].order {
             HowItRuns::AlongAnAxis {
                 axis,
@@ -5809,6 +5802,11 @@ impl<'f> Arrangement<'f> {
     /// The block edge grazing a ball of `a_block_edge_grazing_a_ball.rs`
     /// folds its two meets `2⁻⁵¹` apart under a tolerant policy, and read off
     /// one of them the turn there gave `CannotTellTheCellsOfAFaceApart`.
+    ///
+    /// **Where the node's box holds both meets of the planes' line with a ball
+    /// or a pipe**, that reading has no one meet to find in it, and which of
+    /// the two meets the node was placed as says the sign instead
+    /// ([`Arrangement::the_turn_at_one_of_two_meets_of_a_line`]).
     fn turns_anticlockwise(
         &self,
         node: usize,
@@ -5851,6 +5849,14 @@ impl<'f> Arrangement<'f> {
             turn = proved;
         }
         if matches!(turn, Decision::Undecidable { .. })
+            && let Some(proved) = self.the_turn_at_one_of_two_meets_of_a_line(
+                node,
+                [&self.surface, &first_partner, &second_partner],
+            )
+        {
+            turn = proved;
+        }
+        if matches!(turn, Decision::Undecidable { .. })
             && (a_plane_rests_along_a_cone(&first_partner, &second_partner)
                 || a_plane_rests_along_a_pipe(&first_partner, &second_partner)
                 || self.is_where_two_pipes_touch(node, &first_partner, &second_partner))
@@ -5870,6 +5876,63 @@ impl<'f> Arrangement<'f> {
         } else {
             the_other_way(decision)
         })
+    }
+
+    /// The sign of `det(∇S, ∇Q₁, ∇Q₂)` for the three surfaces of `rows`, two
+    /// planes and a ball or a pipe, at a node that is one of the two meets of
+    /// the planes' line with the curved one, read off which of the two it is
+    /// ([`the_turn_at_one_of_two_meets`]): `None` everywhere else.
+    ///
+    /// **Only where the line meets the curved one twice.** A line that touches
+    /// it is handed back as one meet, numbered `0` too, and there the
+    /// determinant is nothing. Meet `1` is only ever the second of two, and
+    /// meet `0` is read only where some node of the face stands for meet `1`
+    /// of the same three.
+    ///
+    /// A round bar turned about `y` by `−π/2` from `(3, 2, 5)` dips `2⁻¹⁰⁵`
+    /// through the top of the block `[0, 4]³`, and the cap's circle crosses the
+    /// top at `y = 2 ∓ 2⁻⁵²`. The pipe's gradient there is a box whose part
+    /// along `y` straddles nothing, so the determinant does too by `1.6e-15`,
+    /// and with both meets inside each node's box
+    /// [`the_turn_where_two_planes_cross_a_quadric`] cannot say which one the
+    /// node is. Every certified fuse of the two was refused here (Q2160).
+    fn the_turn_at_one_of_two_meets_of_a_line(
+        &self,
+        node: usize,
+        rows: [&Surface; 3],
+    ) -> Option<Decision> {
+        let (surfaces, which) = self.the_one_meet_it_stands_for(node)?;
+        if rows.iter().any(|row| !surfaces.contains(row)) {
+            return None;
+        }
+        let the_higher = (surfaces, 1);
+        if which == 0
+            && !self
+                .nodes
+                .iter()
+                .any(|other| other.made_of == Some(the_higher) || other.also.contains(&the_higher))
+        {
+            return None;
+        }
+        the_turn_at_one_of_two_meets(rows, which)
+    }
+
+    /// The three surfaces that placed `node` and which of their meets it is,
+    /// where it is a meet of three surfaces placed by this arrangement and
+    /// stands for that one meet alone: `None` for a corner of the input, a
+    /// node that stands for more than one meet, and a place a crossing is cut
+    /// half way round.
+    fn the_one_meet_it_stands_for(&self, node: usize) -> Option<([Surface; 3], u8)> {
+        match &self.nodes[node] {
+            Node {
+                vertex: None,
+                made_of: Some(named),
+                also,
+                half_way_round: false,
+                ..
+            } if also.is_empty() => Some(*named),
+            Node { .. } => None,
+        }
     }
 
     /// [`Arrangement::turns_anticlockwise`] for a pair one of which is a ruling
@@ -10369,36 +10432,6 @@ fn the_way_a_plane_and_a_pipe_wind(pair: &[Surface; 2], across: Decision) -> Dec
     }
 }
 
-/// The one axis the line two planes cross in runs along, where `a × b` for
-/// their normals is proved nothing in two components and something in the
-/// third: `None` everywhere else.
-///
-/// Each component is a two-by-two determinant of stored numbers, which is
-/// [`orient2d`] measured from the origin, as in
-/// [`two_pipes_run_along_one_line`].
-fn the_one_axis_two_planes_cross_along(one: &Plane, other: &Plane) -> Option<usize> {
-    let [mine, theirs] = [one, other].map(|flat| flat.normal().components());
-    let mut along = None;
-    for axis in 0..3 {
-        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
-        let sign = orient2d(
-            [0.0, 0.0],
-            [mine[next], mine[after]],
-            [theirs[next], theirs[after]],
-        );
-        // Compared rather than matched: only a proved nothing is passed over,
-        // and every other answer is read as something or gives up (§40).
-        if sign == Decision::Zero {
-            continue;
-        }
-        if along.is_some() || !(sign == Decision::Pos || sign == Decision::Neg) {
-            return None;
-        }
-        along = Some(axis);
-    }
-    along
-}
-
 /// Whether, going round the loop a plane `P` cuts a ball or a pipe `Q` in,
 /// from where it starts, the lower of its two meets with a line comes first:
 /// `None` where `wound_as` is not `P` and `Q`, either start's box shares a
@@ -10908,6 +10941,74 @@ fn the_turn_where_two_planes_cross_a_quadric(
     };
     let way = MeetOfThree::which_way_a_line_runs_through_a_quadric([a, b], rows[curved], at)?;
     Some(if curved == 1 { the_other_way(way) } else { way })
+}
+
+/// The sign of `det(∇S, ∇Q₁, ∇Q₂)` for three surfaces two of which are planes
+/// and one a ball or a pipe, at meet `which` of the planes' line with the
+/// curved one, where the line meets it twice and runs along one axis: `None`
+/// for any other three, or for a meet past the second.
+///
+/// **The determinant is `g · (a × b)` up to which row the curved one is
+/// in**, for `a` and `b` the planes' normals in the order their rows come and
+/// `g` the curved one's gradient, as in
+/// [`the_turn_where_two_planes_cross_a_quadric`]. Where `a × b` has one
+/// component that is not nothing, along axis `k`, `g · (a × b)` is that
+/// component times `g`'s own along `k`. [`meet_of_three_surfaces`] hands the
+/// two meets back lower first up axis `k`
+/// ([`Arrangement::as_the_two_meets_of_one_line_say`]), and a ball's or a
+/// pipe's value falls through the lower going up the line and rises through
+/// the higher, so `g` points down axis `k` at meet `0` and up it at meet `1`.
+fn the_turn_at_one_of_two_meets(rows: [&Surface; 3], which: u8) -> Option<Decision> {
+    let curved = rows
+        .iter()
+        .position(|surface| matches!(surface, Surface::Sphere(_) | Surface::Cylinder(_)))?;
+    let mut planes = rows.iter().filter_map(|surface| surface.as_plane());
+    let (Some(a), Some(b), None) = (planes.next(), planes.next(), planes.next()) else {
+        return None;
+    };
+    let climbs = match which {
+        0 => Decision::Neg,
+        1 => Decision::Pos,
+        _ => return None,
+    };
+    let (_, across) = the_one_axis_two_planes_cross_along(a, b)?;
+    let way = if across == climbs {
+        Decision::Pos
+    } else {
+        Decision::Neg
+    };
+    Some(if curved == 1 { the_other_way(way) } else { way })
+}
+
+/// The one axis the line two planes cross in runs along, and the sign of the
+/// part of `a × b` along it, for `a` and `b` their normals in the order
+/// given, where `a × b` is proved nothing in two components and something in
+/// the third: `None` everywhere else.
+///
+/// Each component is a two-by-two determinant of stored numbers, which is
+/// [`orient2d`] measured from the origin, as in
+/// [`two_pipes_run_along_one_line`].
+fn the_one_axis_two_planes_cross_along(one: &Plane, other: &Plane) -> Option<(usize, Decision)> {
+    let [mine, theirs] = [one, other].map(|flat| flat.normal().components());
+    let mut along = None;
+    for axis in 0..3 {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        let sign = orient2d(
+            [0.0, 0.0],
+            [mine[next], mine[after]],
+            [theirs[next], theirs[after]],
+        );
+        // Compared rather than matched: only a proved nothing is passed over,
+        // and every other answer is read as something or gives up (§40).
+        if sign == Decision::Zero {
+            continue;
+        }
+        if along.is_some() || !(sign == Decision::Pos || sign == Decision::Neg) {
+            return None;
+        }
+        along = Some((axis, sign));
+    }
+    along
 }
 
 /// How fast a surface's gradient turns along a direction: `d·H·d` for the very
