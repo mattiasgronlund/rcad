@@ -101,8 +101,18 @@
 //! `fuse/arrange.rs` now reads the side off which arc of the circle the box is
 //! on, between the two points `meet_of_three_surfaces` proves the circle
 //! crosses the top at, and the near seam corner's off the near cap's circle,
-//! which is clear of the top. Every fuse answers but the union with the block
-//! first.
+//! which is clear of the top.
+//!
+//! **Every answer of that bar holds a feature too small for its coordinates,
+//! so every certified fuse is refused `DynamicRangeTooWide`** (queue row
+//! Q2237). An answer holding the sliver holds the piece of the far cap that
+//! closes it, a segment of the cap's circle `4.4e−16` thick, and one holding
+//! the bar less the sliver holds its pipe, where the arc the top cuts turns
+//! about `5e−16` from the near seam corner, the corner of the pipe's other
+//! loop. Both are §3.5's limit, at coordinates of 4 to 6. Under `tolerant`
+//! every fuse answers with one record of that spread, and the model validates
+//! under `tolerant` alone, but the union with the block first, which is still
+//! refused meshing the pipe (queue row Q2238).
 //! `a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top` and
 //! its twin on the floor pin them.
 
@@ -1648,25 +1658,39 @@ fn what_tolerant_gives_for_a_bar_dipping_through_the_floor(
 /// the bar's near end, where its near cap's circle is clear of the top by
 /// about `1e−31`.
 ///
-/// **Every fuse but one answers with that sliver**, under `certified` and
-/// `tolerant`, every decision proved, and the model validates. The union with
-/// the bar first is one shell of the block's six faces and the bar's three,
-/// the intersection the sliver's three, the block less the bar eight faces,
-/// and the bar less the block four. Every fuse used to be refused: under
-/// `certified`, `Undecidable` at the side of the top over the far seam corner,
-/// a box `2.8e−13` wide the top runs through, and under `tolerant`,
-/// `CannotTellTheCellsOfAFaceApart`. `fuse/arrange.rs` now reads that side off
-/// which arc of the far cap's circle the box is on, and the side of the top at
-/// the near seam corner off the near cap's circle, which is clear of it.
+/// **Every certified fuse is refused `DynamicRangeTooWide`, and that is §3.5's
+/// limit, not a gap** (queue row Q2237). The intersection, the sliver, and the
+/// block less the bar, a groove the sliver leaves, each hold the piece of the
+/// far cap the sliver ends in: a segment of the cap's circle between the two
+/// points it crosses the top at, `5.96e−8` apart, and so `4.4e−16` thick. The
+/// union and the bar less the block each hold the bar's pipe less the sliver,
+/// a face of two loops: the near cap's circle, whose one corner is the near
+/// seam corner `(3, 2, 4)`, and the arc the top cuts the pipe in with the far
+/// cap's long arc. That arc turns at its tip about `5e−16` from the near seam
+/// corner, and the corner is stored on the top itself. Either way the spread
+/// is past `1e15` at coordinates of 4 to 6. Until Q2237 the range read only
+/// the edges' chords, `5.96e−8` at the shortest, and every fuse answered.
 ///
-/// The union with the block first is still refused `CannotMeshAFace`, a loop
-/// naming its fourth corner twice, under both policies, though the union the
-/// other way round answers. `mesh.rs` puts one point inside the arc where the
-/// bar's pipe meets the top, at the arc's tip, and with the block first that
-/// point is stored at exactly the near seam corner's numbers `(3, 2, 4)`; with
-/// the bar first it is stored one rounding step off in `y`, and the pipe
-/// meshes. The answers are not measured: the sliver is too thin to mesh to the
-/// deflection `volume_of` asks for.
+/// Under `tolerant` every fuse answers with one record of that spread, every
+/// other decision proved, and the model validates under `tolerant` alone: the
+/// union with the bar first is one shell of the block's six faces and the
+/// bar's three, the intersection the sliver's three, the block less the bar
+/// eight faces, and the bar less the block four. Every fuse used to be
+/// refused: under `certified`, `Undecidable` at the side of the top over the
+/// far seam corner, a box `2.8e−13` wide the top runs through, and under
+/// `tolerant`, `CannotTellTheCellsOfAFaceApart`. `fuse/arrange.rs` now reads
+/// that side off which arc of the far cap's circle the box is on, and the side
+/// of the top at the near seam corner off the near cap's circle, which is
+/// clear of it.
+///
+/// The tolerant union with the block first is still refused
+/// `CannotMeshAFace`, a loop naming its fourth corner twice, though the union
+/// the other way round answers (queue row Q2238). `mesh.rs` puts one point
+/// inside the arc where the bar's pipe meets the top, at the arc's tip, and
+/// with the block first that point is stored at exactly the near seam corner's
+/// numbers `(3, 2, 4)`; with the bar first it is stored one rounding step off
+/// in `y`, and the pipe meshes. The answers are not measured: the sliver is
+/// too thin to mesh to the deflection `volume_of` asks for.
 #[test]
 fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top() {
     every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
@@ -1675,8 +1699,8 @@ fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top() {
     );
 }
 
-/// What each fuse of the block and the bar along its top with its seam
-/// underneath gives, as it stands.
+/// What each tolerant fuse of the block and the bar along its top with its
+/// seam underneath gives, as it stands.
 fn what_a_bar_with_its_seam_underneath_dipping_through_the_top_gives(
     rule: Rule,
     bar_first: bool,
@@ -1693,11 +1717,17 @@ fn what_a_bar_with_its_seam_underneath_dipping_through_the_top_gives(
 
 /// The bar of the test above sunk to `(3, 2, 1)`, along the block's floor,
 /// where its far end drops through the floor in the same sliver (queue row
-/// Q2187). The union is one shell of the block's six faces and the sliver's
-/// pipe and far cap, the intersection the bar less the sliver in four faces,
-/// the block less the bar a hollow open through the floor in nine, and the
-/// bar less the block the sliver's three. Every one used to be refused as the
-/// bar along the top was, round `(1, 2, 0)`.
+/// Q2187). Every certified fuse is refused `DynamicRangeTooWide` as there
+/// (queue row Q2237): the union and the bar less the block hold the sliver's
+/// far cap, and the intersection and the block less the bar the bar's pipe
+/// less the sliver, whose arc along the floor turns about `5e−16` from the
+/// near seam corner `(3, 2, 0)`. Under `tolerant` each answers with one record
+/// of that spread and validates under `tolerant` alone: the union is one shell
+/// of the block's six faces and the sliver's pipe and far cap, the
+/// intersection the bar less the sliver in four faces, the block less the bar
+/// a hollow open through the floor in nine, and the bar less the block the
+/// sliver's three. Every one used to be refused as the bar along the top was,
+/// round `(1, 2, 0)`.
 #[test]
 fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_floor() {
     every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
@@ -1706,8 +1736,8 @@ fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_floor() {
     );
 }
 
-/// What each fuse of the block and the bar along its floor with its seam
-/// underneath gives.
+/// What each tolerant fuse of the block and the bar along its floor with its
+/// seam underneath gives.
 fn what_a_bar_with_its_seam_underneath_dipping_through_the_floor_gives(
     rule: Rule,
     bar_first: bool,
@@ -1721,12 +1751,14 @@ fn what_a_bar_with_its_seam_underneath_dipping_through_the_floor_gives(
     }
 }
 
-/// What a fuse of the block `[0, 4]³` and a bar with its seam underneath,
-/// dipping through one of its faces, gives.
+/// What a tolerant fuse of the block `[0, 4]³` and a bar with its seam
+/// underneath, dipping through one of its faces, gives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum WithTheSeamUnderneath {
     /// The answer's solids, fewest faces first, each as the faces in each of
-    /// its shells.
+    /// its shells, with one record, of the check of the answer's spread the
+    /// tolerant policy lets through. The model validates under `tolerant` and
+    /// is refused `DynamicRangeTooWide` under `certified` (§68).
     Solids(Vec<Vec<usize>>),
     /// Refused `CannotMeshAFace`, a loop naming its fourth corner twice: the
     /// one point `mesh.rs` puts inside the arc where the pipe meets the top is
@@ -1923,13 +1955,17 @@ fn every_fuse_of_a_block_and_a_bar_dipping_through_it_leaves_an_edge_too_short(
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Every rule, both ways round, under `certified` and `tolerant`, of the block
-/// `[0, 4]³` and [`a_bar_with_its_seam_underneath`] from `at`: what `should`
-/// gives for the rule and whether the bar came first, and where that is an
-/// answer, every decision proved and the model valid.
+/// Every rule, both ways round, of the block `[0, 4]³` and
+/// [`a_bar_with_its_seam_underneath`] from `at`: refused `DynamicRangeTooWide`
+/// past the spread the kernel works to under `certified`, and under `tolerant`
+/// what `tolerant` gives for the rule and whether the bar came first. A
+/// tolerant answer must carry one record, of the range check, validate under
+/// `tolerant`, and be refused `DynamicRangeTooWide` under `certified`: valid
+/// is a property of a model and a policy, and `Model::fuse` promises the
+/// first and not the second (§68).
 fn every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
     at: [f64; 3],
-    should: fn(Rule, bool) -> WithTheSeamUnderneath,
+    tolerant: fn(Rule, bool) -> WithTheSeamUnderneath,
 ) {
     let mut wrong: Vec<String> = Vec::new();
     for bar_first in [false, true] {
@@ -1944,6 +1980,22 @@ fn every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
                     certified,
                     &mut log,
                 );
+                if certified {
+                    if !matches!(
+                        &fused,
+                        Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
+                            if *ratio > DynamicRange::LARGEST_SUPPORTED_RATIO
+                    ) {
+                        let got = match &fused {
+                            Ok(_) => "answered".to_owned(),
+                            Err(why) => format!("refused {why:?}"),
+                        };
+                        wrong.push(format!(
+                            "{what}: {got}, and it should be refused DynamicRangeTooWide"
+                        ));
+                    }
+                    continue;
+                }
                 let found = match &fused {
                     Ok(answer) => {
                         let mut solids: Vec<Vec<usize>> = answer
@@ -1963,21 +2015,33 @@ fn every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
                         continue;
                     }
                 };
-                let expected = should(rule, bar_first);
+                let expected = tolerant(rule, bar_first);
                 if found != expected {
                     wrong.push(format!("{what}: {found:?}, and it should be {expected:?}"));
                 }
                 if fused.is_ok() {
-                    if !log.records().is_empty() {
+                    let only_the_range = log.records().len() == 1
+                        && log.records()[0].predicate() == "dynamic range check";
+                    if !only_the_range {
                         wrong.push(format!(
-                            "{what}: not every decision is proved: {:?}",
+                            "{what}: the records are not the range check's one: {:?}",
                             log.records()
                         ));
                     }
-                    if let Err(why) =
-                        model.validate(&Policy::certified(), &mut ProvenanceLog::new())
-                    {
-                        wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                    let tolerantly =
+                        model.validate(&Policy::tolerant(100.0), &mut ProvenanceLog::new());
+                    let certainly = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                    let valid_only_tolerantly = tolerantly.is_ok()
+                        && matches!(
+                            &certainly,
+                            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
+                                if *ratio > DynamicRange::LARGEST_SUPPORTED_RATIO
+                        );
+                    if !valid_only_tolerantly {
+                        wrong.push(format!(
+                            "{what}: the model validates {tolerantly:?} under tolerant and \
+                             {certainly:?} under certified"
+                        ));
                     }
                 }
             }
