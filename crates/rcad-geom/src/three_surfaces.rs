@@ -46,7 +46,11 @@
 //! - **Two surfaces turned about one axis, and a plane beside it.** The same
 //!   circles, each cut in a chord, touched or missed by a plane parallel to the
 //!   axis and off it, as a sign at a root of that quadratic says — a D-flat on
-//!   a shaft across the circle a chamfer cone crosses it in.
+//!   a shaft across the circle a chamfer cone crosses it in. A plane that leans
+//!   to the axis and is no nearer square to it than to parallel is asked the
+//!   same way, after every other road: the same D-flat placed by a turn, whose
+//!   side comes out a rounding off parallel, or a cut at half a right angle
+//!   across those circles.
 //!   [`what_a_plane_beside_their_one_axis_leaves`].
 //! - **A plane that cuts both in circles, about two centres.** A plane cuts a
 //!   ball in a circle wherever it is, and a pipe or a cone square to it, and
@@ -114,14 +118,16 @@
 //!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
 //! quadrics that bend differently, cross the plane in curves, share no axis
-//! the plane is square or parallel to, are not both cut by it in circles,
+//! the plane is square to, parallel to or no nearer square to than parallel,
+//! are not both cut by it in circles,
 //! neither of which is a pipe it runs along, whose bands overlap, and whose
 //! curves the plane leans too far for one to be a line bent by little across
 //! the other, or which touch rather than cross, and which the plane does not
 //! reach only far along a pipe — a plane leaning well off square to a pipe's
 //! axis, which cuts it in a long ellipse, against a ball off that axis, a cap
-//! of one bar across a second bar leaning to it, or a wall a rounding off
-//! parallel to a bar and its chamfer cone that cuts the bar —
+//! of one bar across a second bar leaning to it, or a plane nearer square
+//! than parallel to the axis a bar and its chamfer cone share, which cuts them
+//! where their bands overlap, too steep for the band road —
 //! a plane along a pipe and a cone one of whose rulings runs along the
 //! pipe, three curved surfaces no two of which differ by a plane a stored
 //! [`Plane`] is exactly, and any triple with a torus and fewer than two planes
@@ -204,8 +210,9 @@ pub enum MeetOfThree {
     /// to four points come in the order
     /// [`what_a_plane_through_their_one_axis_leaves`] gives: two circles, two
     /// points on each, or a cone's apex and one circle. A plane beside that
-    /// axis gives them in the same order, two on a circle it cuts and one on a
-    /// circle it touches ([`what_a_plane_beside_their_one_axis_leaves`]). A
+    /// axis, parallel to it or leaning, gives them in the same order, two on a
+    /// circle it cuts and one on a circle it touches
+    /// ([`what_a_plane_beside_their_one_axis_leaves`]). A
     /// plane that cuts both curved surfaces in circles gives them along the
     /// line it crosses the line the two circles differ by in, as two planes do
     /// ([`what_a_plane_that_cuts_both_in_circles_leaves`]). A plane along a
@@ -1693,8 +1700,10 @@ fn where_three_curved_surfaces_meet(
 /// keeps that answer, and the band road takes what they all hand on. The road
 /// for bands that cross comes next and takes what the band road hands on, so
 /// it never changes an answer either. The road for a plane beside a pipe comes
-/// last of all, takes what every other road hands on, and also only ever
-/// answers that the three share nothing.
+/// next, takes what every road before it hands on, and also only ever answers
+/// that the three share nothing. Last of all, the road beside the axis is
+/// asked again for a plane that leans to the axis, no nearer square to it
+/// than to parallel, and takes only what every other road handed on.
 fn where_one_plane_and_two_curved_surfaces_meet(
     flat: &Plane,
     one: &Surface,
@@ -1729,9 +1738,15 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     {
         return Ok(answer);
     }
-    if let Some(answer) =
-        what_a_plane_beside_their_one_axis_leaves(flat, one, other, at, policy, log)?
-    {
+    if let Some(answer) = what_a_plane_beside_their_one_axis_leaves(
+        flat,
+        one,
+        other,
+        BesideTheAxis::Parallel,
+        at,
+        policy,
+        log,
+    )? {
         return Ok(answer);
     }
     if let Some(answer) =
@@ -1751,6 +1766,17 @@ fn where_one_plane_and_two_curved_surfaces_meet(
         return Ok(answer);
     }
     if let Some(answer) = what_a_plane_beside_a_pipe_leaves(flat, one, other) {
+        return Ok(answer);
+    }
+    if let Some(answer) = what_a_plane_beside_their_one_axis_leaves(
+        flat,
+        one,
+        other,
+        BesideTheAxis::Leaning,
+        at,
+        policy,
+        log,
+    )? {
         return Ok(answer);
     }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
@@ -2249,7 +2275,9 @@ fn cross_of_two_exact(u: &[Exact; 3], v: &[Exact; 3]) -> Option<[Exact; 3]> {
 /// it. A direction a rounding off square cuts an ellipse, which is the quartic
 /// again, and is handed on: where the ellipse and the other curve keep apart,
 /// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`] proves it, and where
-/// they come near, as one circle on paper does, the triple is refused. So is a
+/// they cross, as the cuts of a bar and a cone that share one circle on paper
+/// do, [`what_a_plane_that_cuts_them_in_bands_that_cross_leaves`] finds the
+/// crossings. A triple no road after this one takes is refused. So is a
 /// triple where a product those two checks
 /// need falls out of `f64`'s range, because that is a refusal to say whether
 /// this road is the one — the same rule [`how_a_surface_is_written`] keeps.
@@ -2566,7 +2594,8 @@ fn it_runs_square_to(flat: &Plane, along: [f64; 3]) -> bool {
 /// circle in a chord, touches it or misses it, and which of the three takes the
 /// sign of `G·(n·n) − (n·o − d)²·W` at a root, decided exactly. It is handed
 /// on, past the road for a plane that grazes, to
-/// [`what_a_plane_beside_their_one_axis_leaves`].
+/// [`what_a_plane_beside_their_one_axis_leaves`]. So, after every other road,
+/// is a plane that leans to the axis, which cuts each circle the same way.
 fn what_a_plane_through_their_one_axis_leaves(
     flat: &Plane,
     one: &Surface,
@@ -3262,40 +3291,56 @@ fn a_touching_point_could_not_be_placed(
 }
 
 /// What a plane that runs beside the one axis two curved surfaces are turned
-/// about — parallel to it and off it — leaves of the three, or `None` where
-/// the three are not that.
+/// about leaves of the three, or `None` where the three are not that or
+/// `which` does not take this plane.
 ///
 /// A D-flat ground along a shaft is one. The flat runs along the shaft's axis
 /// and clear of it, and crosses the chamfer cone at the shaft's end, or a ball
-/// on its axis, where the two round surfaces share a circle.
+/// on its axis, where the two round surfaces share a circle. Placed by a turn,
+/// the flat comes out a rounding off parallel to the axis; a cut at half a
+/// right angle across the circle a chamfer cone crosses a shaft in leans to
+/// the axis on purpose. Both cut the same circles the same way.
 ///
 /// **The circles are the ones a plane through the axis cuts**, at the roots of
 /// `g₁ − g₂` that [`what_a_plane_through_their_one_axis_leaves`] works out,
-/// with the same `o`, `w`, `W` and `g`. The plane's normal `n` is square to
-/// `w`, and the plane is `e/‖n‖` from the axis, for `e = n·o − d`. So at a
-/// height whose circle is `W·ρ² = G` the plane misses the circle, touches it
-/// or cuts it in a chord as `K = G·(n·n) − e²·W` is below, at or above zero,
-/// and the chord's ends are
-/// `o + (t·w ± (√K/(n·n))·(n × w))/W − (e/(n·n))·n`: the foot of the plane
-/// on the axis at height `t`, and `√K/((n·n)·W)` along `n × w` either side of
-/// it. A touch is the foot alone.
+/// with the same `o`, `w`, `W` and `g`. For the plane's normal `n` write
+/// `N = n·n`, `k = n·w`, `e = n·o − d` and `A = N·W − k²`, which is
+/// `|n × w|²`. At a height `t` whose circle is `W·ρ² = G` the plane misses the
+/// circle, touches it or cuts it in a chord as `K = A·G − (e·W + k·t)²` is
+/// below, at or above zero, and the chord's ends are
+/// `o + ((t·N + e·k)·w − (e·W + t·k)·n)/A ± (√(K/W)/A)·(n × w)`: the foot,
+/// where the plane comes nearest the circle's centre in the circle's own
+/// plane, and `√(K/W)/A` along `n × w` either side of it. A touch is the foot
+/// alone. A plane parallel to the axis has `k = 0`, and there `K` is
+/// `W·(N·G − e²·W)` and the foot `o + t·w/W − (e/N)·n`.
 ///
 /// **Which of the three is decided exactly, at the root itself and not at a
-/// box round it.** `K` is `k(t) = κ₂t² + 2κ₁t + κ₀` for `κ = (n·n)·g`, with
-/// `e²W` taken off `κ₀`, and [`the_sign_of_the_chord_at`] puts the root into
-/// it with nothing rounded: a root that is a fraction as the fraction, and one
-/// that is a square root — which is where a cone meets a ball — through the
-/// one comparison of two squares that tells a chord from a touch. The plane
-/// `x + y = 2` touches both circles a cone of slope one and a ball of radius
-/// two about its apex share, at `(1, 1, ±√2)`, and the comparison there is of
-/// two numbers that are both exactly zero.
+/// box round it.** `K` is `κ₂t² + 2κ₁t + κ₀` for `κ = A·g`, with `k²` taken
+/// off `κ₂`, `e·W·k` off `κ₁` and `(e·W)²` off `κ₀`, and
+/// [`the_sign_of_the_chord_at`] puts the root into it with nothing rounded: a
+/// root that is a fraction as the fraction, and one that is a square root —
+/// which is where a cone meets a ball — through the one comparison of two
+/// squares that tells a chord from a touch. The plane `x + y = 2` touches both
+/// circles a cone of slope one and a ball of radius two about its apex share,
+/// at `(1, 1, ±√2)`, and the comparison there is of two numbers that are both
+/// exactly zero.
 ///
-/// **It is asked after [`what_a_plane_that_grazes_one_of_them_leaves`]**,
-/// which already answered a plane beside the axis that misses a pipe or a
-/// ball, or touches one: those answers stand as they were, and this road
-/// takes what that one hands on, a plane that cuts both surfaces in curves.
-/// The road through the axis is asked before either, so `e` here is never
-/// zero.
+/// **It is asked twice.** With [`BesideTheAxis::Parallel`] it takes a plane
+/// with `k = 0`, after [`what_a_plane_that_grazes_one_of_them_leaves`], which
+/// already answered a plane beside the axis that misses a pipe or a ball, or
+/// touches one: those answers stand as they were, and this road takes what
+/// that one hands on, a plane that cuts both surfaces in curves. The road
+/// through the axis is asked before either, so `e` there is never zero.
+///
+/// With [`BesideTheAxis::Leaning`] it takes a plane with `k ≠ 0` and
+/// `k² ≤ A`, no nearer square to the axis than to parallel, after every other
+/// road, so no answer one of them gave moves. The foot moves `√(N/A)` per unit
+/// of `t`, which grows without bound as the plane comes square, and the root
+/// `t` is a box a rounding wide; so a plane nearer square is left to the band
+/// roads, which give its points in narrower boxes. Asked ahead of them with no
+/// limit on the lean, this road took two caps of
+/// `tests/where_a_plane_and_two_round_surfaces_meet.rs` that lean off square
+/// and gave their points in far wider boxes than those roads do.
 ///
 /// Arithmetic that runs out after the family is settled is
 /// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there, and
@@ -3304,6 +3349,7 @@ fn what_a_plane_beside_their_one_axis_leaves(
     flat: &Plane,
     one: &Surface,
     other: &Surface,
+    which: BesideTheAxis,
     at: &[PredicatePoint],
     policy: &Policy,
     log: &mut ProvenanceLog,
@@ -3311,22 +3357,32 @@ fn what_a_plane_beside_their_one_axis_leaves(
     let Some(axis) = the_axis_both_are_turned_about(one, other) else {
         return Ok(None);
     };
-    let normal = flat.normal().components();
-    let (Some(leaning), Some(off_it)) = (
-        Exact::dot_of(normal, axis.along),
-        how_far_a_plane_is_from(flat, axis.through),
-    ) else {
+    let Some(slant) = how_the_plane_sits_to(flat, &axis) else {
         return Ok(None);
     };
-    if leaning.sign() != Decision::Zero {
+    let signs = [&slant.leaning, &slant.off_it, &slant.across].map(Exact::sign);
+    if !signs
+        .iter()
+        .all(|sign| matches!(sign, Decision::Pos | Decision::Neg | Decision::Zero))
+    {
         return Ok(None);
     }
-    let side = off_it.sign();
+    let [leaning, off_it, across] = signs;
+    let parallel = leaning == Decision::Zero;
+    if parallel != (which == BesideTheAxis::Parallel) {
+        return Ok(None);
+    }
     assert!(
-        side != Decision::Zero,
+        !parallel || off_it != Decision::Zero,
         "a plane holding the axis is answered by the road through it, asked before this one"
     );
-    if !matches!(side, Decision::Pos | Decision::Neg) {
+    // `across` is `|n × w|²`, zero only for a plane square to the axis. That
+    // road is asked first and answers every such plane whose products are in
+    // range, so one that reaches here is handed on as it was handed on there.
+    if across == Decision::Zero {
+        return Ok(None);
+    }
+    if !parallel && !slant.no_nearer_square_than_parallel() {
         return Ok(None);
     }
 
@@ -3360,7 +3416,7 @@ fn what_a_plane_beside_their_one_axis_leaves(
         ),
     };
     let (Some(chord), Some(squared), Some(half_linear), Some(constant)) = (
-        how_wide_the_chord_is(flat, &axis, &reach, &off_it),
+        how_wide_the_chord_is(&axis, &reach, &slant),
         heights.squared.exactly(),
         heights.half_linear.exactly(),
         heights.constant.exactly(),
@@ -3397,7 +3453,7 @@ fn what_a_plane_beside_their_one_axis_leaves(
             flat,
             &axis,
             &reach,
-            &off_it,
+            &slant,
             height,
             it_only_touches,
         ));
@@ -3425,23 +3481,80 @@ enum WhichRoot {
     AddingTheRoot,
 }
 
-/// `κ₂`, `κ₁` and `κ₀` of `k(t) = (n·n)·g(t) − e²·W`, whose sign at a height
-/// says whether the plane misses, touches or cuts the circle there — or `None`
-/// where a product falls out of range.
+/// How a plane `n·p = d` sits to an axis `o + s·w`, each number exactly.
+struct HowAPlaneSits {
+    /// `k = n·w`, zero where the plane is parallel to the axis.
+    leaning: Exact,
+    /// `e = n·o − d`, how far the axis's stored point is in front of the
+    /// plane, times `‖n‖`.
+    off_it: Exact,
+    /// `(n·n)W − k²`, which is `|n × w|²`: zero where the plane is square to
+    /// the axis and above zero everywhere else.
+    across: Exact,
+}
+
+impl HowAPlaneSits {
+    /// Whether `k² ≤ A`, which is the plane making at most half a right angle
+    /// with the axis: `k` is `‖n‖‖w‖` times the cosine of the angle between
+    /// the normal and the axis, and `√A` the same times its sine. A height
+    /// boxed `δ` wide then moves the foot by at most `√2·δ/√W`, since the foot
+    /// moves `√(N/A)` per unit of `t` and `N·W = A + k²` is at most `2A`.
+    fn no_nearer_square_than_parallel(&self) -> bool {
+        let Some(squared) = self.leaning.times(&self.leaning) else {
+            return false;
+        };
+        matches!(
+            squared.minus(&self.across).sign(),
+            Decision::Neg | Decision::Zero
+        )
+    }
+}
+
+/// Which planes beside their one axis a call of
+/// [`what_a_plane_beside_their_one_axis_leaves`] takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BesideTheAxis {
+    /// A plane parallel to the axis, asked where that road always was.
+    Parallel,
+    /// A plane leaning to the axis and no nearer square to it than parallel,
+    /// asked after every other road, so no answer one of them gave moves.
+    Leaning,
+}
+
+/// How `flat` sits to `axis`, or `None` where a product falls out of range.
+fn how_the_plane_sits_to(flat: &Plane, axis: &AnAxis) -> Option<HowAPlaneSits> {
+    let normal = flat.normal().components();
+    let leaning = Exact::dot_of(normal, axis.along)?;
+    let across = Exact::dot_of(normal, normal)?
+        .times(&Exact::dot_of(axis.along, axis.along)?)?
+        .minus(&leaning.times(&leaning)?);
+    Some(HowAPlaneSits {
+        leaning,
+        off_it: how_far_a_plane_is_from(flat, axis.through)?,
+        across,
+    })
+}
+
+/// `κ₂`, `κ₁` and `κ₀` of `K(t) = A·g(t) − (e·W + k·t)²`, for
+/// `A = (n·n)W − k²`, whose sign at a height says whether the plane misses,
+/// touches or cuts the circle there — or `None` where a product falls out of
+/// range.
 fn how_wide_the_chord_is(
-    flat: &Plane,
     axis: &AnAxis,
     reach: &Quadratic,
-    off_it: &Exact,
+    slant: &HowAPlaneSits,
 ) -> Option<[Exact; 3]> {
-    let normal = flat.normal().components();
-    let squared_normal = Exact::dot_of(normal, normal)?;
-    let squared_axis = Exact::dot_of(axis.along, axis.along)?;
-    let scaled = |term: &Term| squared_normal.times(&term.exactly()?);
+    let HowAPlaneSits {
+        leaning,
+        off_it,
+        across,
+    } = slant;
+    let level = off_it.times(&Exact::dot_of(axis.along, axis.along)?)?;
+    let scaled = |term: &Term| across.times(&term.exactly()?);
     Some([
-        scaled(&reach.squared)?,
-        scaled(&reach.half_linear)?,
-        scaled(&reach.constant)?.minus(&off_it.times(off_it)?.times(&squared_axis)?),
+        scaled(&reach.squared)?.minus(&leaning.times(leaning)?),
+        scaled(&reach.half_linear)?.minus(&level.times(leaning)?),
+        scaled(&reach.constant)?.minus(&level.times(&level)?),
     ])
 }
 
@@ -3539,28 +3652,31 @@ fn the_sign_with_a_root_in_it(plain: &Exact, rooted: &Exact, under: &Exact) -> O
 }
 
 /// Where the plane beside the axis meets the circle at `height`, which it
-/// does not miss: the foot of the plane on the axis where it only touches the
-/// circle, and the chord's two ends, the `−(n × w)` side first, where it cuts
-/// it.
+/// does not miss: the foot, where the plane comes nearest the circle's centre
+/// in the circle's own plane, where it only touches the circle, and the
+/// chord's two ends, the `−(n × w)` side first, where it cuts it.
 fn the_ends_of_the_chord_at(
     flat: &Plane,
     axis: &AnAxis,
     reach: &Quadratic,
-    off_it: &Exact,
+    slant: &HowAPlaneSits,
     height: Interval,
     it_only_touches: bool,
 ) -> SmallVec<[PredicatePoint; 2]> {
     let normal = flat.normal().components();
     let squared_normal = dot_enclosing(exactly(normal), exactly(normal));
     let squared_axis = dot_enclosing(exactly(axis.along), exactly(axis.along));
-    let off = off_it.enclosure();
+    let [leaning, off, across] =
+        [&slant.leaning, &slant.off_it, &slant.across].map(Exact::enclosure);
+    let level = off * squared_axis + height * leaning;
+    let along = height * squared_normal + off * leaning;
     let foot: [Interval; 3] = core::array::from_fn(|coordinate| {
         Interval::exactly(axis.through[coordinate])
             + quotient_or_everything(
-                height * Interval::exactly(axis.along[coordinate]),
-                squared_axis,
+                along * Interval::exactly(axis.along[coordinate])
+                    - level * Interval::exactly(normal[coordinate]),
+                across,
             )
-            - quotient_or_everything(off * Interval::exactly(normal[coordinate]), squared_normal)
     });
     if it_only_touches {
         return smallvec![the_point_a_box_names(foot)];
@@ -3568,16 +3684,19 @@ fn the_ends_of_the_chord_at(
     let out_there = reach.squared.enclosure() * (height * height)
         + Interval::exactly(2.0) * reach.half_linear.enclosure() * height
         + reach.constant.enclosure();
-    let across = quotient_or_everything(
-        root_enclosing(out_there * squared_normal - off * off * squared_axis),
-        squared_normal,
+    let half = quotient_or_everything(
+        root_enclosing(quotient_or_everything(
+            out_there * across - level * level,
+            squared_axis,
+        )),
+        across,
     );
     let sideways = cross_enclosing(exactly(normal), exactly(axis.along));
-    [-across, across]
+    [-half, half]
         .into_iter()
         .map(|side| {
             the_point_a_box_names(core::array::from_fn(|coordinate| {
-                foot[coordinate] + quotient_or_everything(side * sideways[coordinate], squared_axis)
+                foot[coordinate] + side * sideways[coordinate]
             }))
         })
         .collect()
@@ -3621,11 +3740,13 @@ fn the_ends_of_the_chord_at(
 /// would differ by a line again — a mitre between two pipes of one radius cuts
 /// both in one ellipse — and this road does not look for them.
 ///
-/// It is asked after every road that takes two surfaces turned about one axis,
-/// which answer a circle about one centre against another, and after the road
-/// for a plane that grazes, so it takes only circles about two centres or
-/// planes that cut both. [`what_a_plane_along_a_pipe_leaves`] shares no triple
-/// with it: a pipe square to the plane is not a pipe along it.
+/// It is asked after every road that takes two surfaces turned about one axis
+/// but one, which answer a circle about one centre against another, and after
+/// the road for a plane that grazes, so it takes only circles about two centres
+/// or planes that cut both. The one is the leaning call of
+/// [`what_a_plane_beside_their_one_axis_leaves`], asked last of all.
+/// [`what_a_plane_along_a_pipe_leaves`] shares no triple with it: a pipe square
+/// to the plane is not a pipe along it.
 ///
 /// Arithmetic that runs out after the family is settled is
 /// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
@@ -3819,10 +3940,15 @@ fn the_line_two_circles_differ_by(mine: &ACircle, theirs: &ACircle) -> Option<([
 /// pipe's axis is not along it and cuts it in an ellipse, which
 /// [`what_a_plane_that_cuts_them_in_bands_apart_leaves`] is asked about next.
 /// One that leans by a rounding and keeps off the pipe reaches it only far
-/// along it, which [`what_a_plane_beside_a_pipe_leaves`] is asked about last.
+/// along it, which [`what_a_plane_beside_a_pipe_leaves`] is asked about after
+/// that. One that leans by a rounding and cuts a pipe where it shares circles
+/// with the other surface about one axis — a D-flat on a chamfered shaft,
+/// placed by a turn — is taken by the leaning call of
+/// [`what_a_plane_beside_their_one_axis_leaves`], asked last of all.
 ///
-/// It is asked after every road but those two and the one for bands that
-/// cross, so every triple an earlier road answers keeps its answer. Arithmetic that runs out after the family is settled is
+/// It is asked after every road but those three and the one for bands that
+/// cross, so every triple an earlier road answers keeps its answer. Arithmetic
+/// that runs out after the family is settled is
 /// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
 fn what_a_plane_along_a_pipe_leaves(
     flat: &Plane,
@@ -4102,14 +4228,16 @@ impl TheLinesAlongAPipe {
 /// **What it leaves** is two bands that overlap, where the curves may cross,
 /// to [`what_a_plane_that_cuts_them_in_bands_that_cross_leaves`]. It leaves
 /// to the refusal a ring, a plane that misses a ball, and a plane parallel to
-/// a pipe's or a cone's axis, since it gives none of those a band. A plane a rounding off
-/// parallel to a pipe and a cone about one axis gets bands too wide to keep
+/// a pipe's or a cone's axis, since it gives none of those a band. A plane a
+/// rounding off parallel to a pipe and a cone about one axis gets bands too
+/// wide to keep
 /// apart, the cone's with no outer edge, so the side of a block three from a
 /// bar and its chamfer cone, the block and the bar placed by one turn, is
 /// handed on, and [`what_a_plane_beside_a_pipe_leaves`] answers it.
 ///
-/// It is asked after every road but the one for bands that cross and the one
-/// for a plane beside a pipe, and only ever answers that the three share
+/// It is asked after every road but the one for bands that cross, the one
+/// for a plane beside a pipe and the second call of the one for a plane beside
+/// two surfaces' one axis, and only ever answers that the three share
 /// nothing, so a triple an earlier road answers keeps its answer, and where a
 /// product falls out of range it hands the triple on.
 fn what_a_plane_that_cuts_them_in_bands_apart_leaves(
@@ -4733,8 +4861,10 @@ fn both(one: Interval, other: Interval) -> Interval {
 /// one: `k` is a rounding or less, so the side reaches the bar no nearer than
 /// about `10¹⁶` along it, where the cone is as wide.
 ///
-/// It is asked last of all and only ever answers that the three share
-/// nothing, so every triple an earlier road answers keeps its answer.
+/// It is asked after every road but the leaning call of
+/// [`what_a_plane_beside_their_one_axis_leaves`], and only ever answers that
+/// the three share nothing, so every triple an earlier road answers keeps its
+/// answer.
 fn what_a_plane_beside_a_pipe_leaves(
     flat: &Plane,
     one: &Surface,
@@ -7151,6 +7281,88 @@ mod tests {
             [&bar, &chamfer, &wall],
         ] {
             assert_eq!(meet(order), Ok(MeetOfThree::Nowhere), "{order:?}");
+        }
+    }
+
+    /// The wall `x + 2⁻⁵³z = 1`, a rounding off parallel to a bar of radius 2
+    /// up `z` and its chamfer cone of slope one with the apex at `(0, 0, −1)`,
+    /// cuts both circles of radius 2 the two share, at `z = −3` and `z = 1`, in
+    /// a chord `√3` either side of `y = 0`: a D-flat on a chamfered shaft. The
+    /// lower circle first and `+y` first on each, since `n × w` is `−y`.
+    /// Before row Q2177 this was refused: the road along a pipe takes only a
+    /// wall exactly parallel, and the road for a plane beside a pipe only one
+    /// that misses it.
+    #[test]
+    fn a_wall_a_rounding_off_parallel_to_a_bar_cuts_both_circles_it_shares_with_its_chamfer() {
+        let wall = flat([1.0, 0.0, 2f64.powi(-53)], [1.0, 0.0, 0.0]);
+        let bar = a_bar_up_z_of_radius(2.0);
+        let chamfer = a_cone([0.0, 0.0, -1.0], [0.0, 0.0, 1.0], 1.0);
+        let answer = meet([&wall, &bar, &chamfer]).expect("a wall along the bar is answered");
+        on_all_three([&wall, &bar, &chamfer], &answer);
+        let across = 3.0_f64.sqrt();
+        narrow_boxes_near(
+            &answer,
+            &[
+                [1.0, across, -3.0],
+                [1.0, -across, -3.0],
+                [1.0, across, 1.0],
+                [1.0, -across, 1.0],
+            ],
+        );
+        for order in [[&chamfer, &wall, &bar], [&bar, &chamfer, &wall]] {
+            assert_eq!(
+                meet(order).as_ref(),
+                Ok(&answer),
+                "the answer depends on which three they are, not the order they are asked in"
+            );
+        }
+    }
+
+    /// The plane `x + z = 0` leans to the axis of a cone of slope 2 at the
+    /// origin and of a bar of radius 4 about it, and holds the cone's apex but
+    /// not the axis. The two share circles of radius 4 at `z = ±2`, and the
+    /// plane cuts each in a chord `√12` either side of `y = 0`, at `x = ∓2`. The
+    /// plane `x + z = 7` misses both. The lower circle first and `+y` first on
+    /// each, since `n × w` is `−y`.
+    #[test]
+    fn a_plane_leaning_through_a_cones_apex_cuts_both_circles_it_shares_with_a_bar() {
+        let leaning = flat([1.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+        let cone = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 2.0);
+        let bar = a_bar_up_z_of_radius(4.0);
+        let answer = meet([&leaning, &cone, &bar]).expect("a leaning plane is answered");
+        on_all_three([&leaning, &cone, &bar], &answer);
+        let across = 12.0_f64.sqrt();
+        narrow_boxes_near(
+            &answer,
+            &[
+                [2.0, across, -2.0],
+                [2.0, -across, -2.0],
+                [-2.0, across, 2.0],
+                [-2.0, -across, 2.0],
+            ],
+        );
+
+        let further = flat([1.0, 0.0, 1.0], [7.0, 0.0, 0.0]);
+        assert_eq!(meet([&further, &cone, &bar]), Ok(MeetOfThree::Nowhere));
+    }
+
+    /// Each point of `answer` is a box no wider than `1e-13` whose middle is
+    /// within `1e-14` of the point in its own place in `wanted`, for a corner
+    /// that is a rounding off the `f64` named.
+    fn narrow_boxes_near(answer: &MeetOfThree, wanted: &[[f64; 3]]) {
+        let MeetOfThree::At(points) = answer else {
+            panic!("expected points, got {answer:?}");
+        };
+        assert_eq!(points.len(), wanted.len(), "{answer:?}");
+        for (point, wanted) in points.iter().zip(wanted) {
+            let boxed = point.enclosure();
+            assert!(
+                (0..3).all(|axis| {
+                    let middle = (boxed[axis].lo() + boxed[axis].hi()) / 2.0;
+                    (middle - wanted[axis]).abs() < 1e-14 && boxed[axis].width() < 1e-13
+                }),
+                "{point:?} is not a narrow box near {wanted:?}"
+            );
         }
     }
 
