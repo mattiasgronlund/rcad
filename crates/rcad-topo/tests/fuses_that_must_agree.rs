@@ -620,7 +620,24 @@ const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.019..=0.084;
 /// rule both ways round as one: ten that answered one way round only and five
 /// that answered neither way answer both ways now, and two unions that
 /// answered both ways answer neither, so 24 fuses not a solid became 8.
-const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0052..=0.023;
+///
+/// **Re-derived for Q1425.** The 0.52%–2.3% band above came from one soak's
+/// rate, 0.78%, not from two thirds to three times a soaked rate the way the
+/// lattice row's does (§303.3). §303.6 already measured this family's soaked
+/// rate at 0.867%, 24 937/661/1/1 of 25 600 fuses over two hundred fresh seeds
+/// at factor 1, and found the 0.52% floor catches a halved rate only 8 times
+/// in 100 at a soak of factor 66 — too close to fire reliably. Two thirds to
+/// three times 0.867% is 0.58% to 2.6%. Forty fresh seeds at factor 1 on this
+/// tree, which replay the regression file's 23 cases the way an ordinary run
+/// does, pool to 195 of 18 000, 1.08% — higher than either older figure, which
+/// the replayed cases' own higher rate explains (§303.2) rather than a moved
+/// kernel: the shipped corpus's own 5 of 450, 1.1%, agrees with it, and the
+/// new band covers every one of the forty seeds and the shipped draw with room
+/// either side. One of the forty, factor 66 seed 1, panics in
+/// `fuse/assemble.rs` on an ell and a frame turned 56 steps — a different
+/// input from Q1426's seed 2 — and is left for its own row rather than fixed
+/// here.
+const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0058..=0.026;
 
 /// How many of its own spreads a draw may land past an end of a not-a-solid
 /// rate band before [`Tally::rate_of_answers_that_were_not_solids_must_be_within`]
@@ -739,7 +756,19 @@ const A_SKEW_PAIR_IS_NOT_A_SOLID_AT_LEAST: usize = 1;
 /// through [`band_for_a_draw_of`] alongside the other two Q258 measured: the
 /// band stays 1.1%–4.9%, and only the comparison scales to the draw's own
 /// size.
-const A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.011..=0.049;
+///
+/// **Re-derived for Q1425.** The 1.1%–4.9% band above is two thirds to three
+/// times a single draw's 1.6%, not two thirds to three times the soaked rate
+/// just above it, so its floor is half that soaked rate and
+/// [`band_for_a_draw_of`] never fires on the rate halving at any factor to 660
+/// (§303.6). §303.6 pools the same kind of soak slightly differently, 4 536 of
+/// 203 262, 2.232%, against the 4 515 of 203 256, 2.22% above; the two are
+/// close enough that either gives the same band. Two thirds to three times
+/// 2.232% is 1.5% to 6.7%, the band §303.3 gives the lattice row from its own
+/// close rate, 2.227%. A fresh twenty-seed soak at factor 1 here pools to 176
+/// of 9 000, 1.96%, and the shipped corpus gives 8 of 450, 1.8%; both sit
+/// inside 1.5%–6.7% with room either side.
+const A_PAIR_LEANING_ALIKE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.015..=0.067;
 
 #[test]
 fn what_the_union_and_the_overlap_take_up_is_what_the_two_solids_take_up() {
