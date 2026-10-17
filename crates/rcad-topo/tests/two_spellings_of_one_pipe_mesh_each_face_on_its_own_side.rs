@@ -280,6 +280,7 @@ fn a_bar_in_two_bands_on_the_two_spellings_meshes_each_band_on_its_own_side() {
                             rim_plane,
                             lower_walks_the_rim,
                             lower_first,
+                            &Isometry::identity(),
                         ) {
                             Ok(bar) => Some(bar),
                             Err(Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface)) => {
@@ -306,6 +307,107 @@ fn a_bar_in_two_bands_on_the_two_spellings_meshes_each_band_on_its_own_side() {
                         .unwrap_or_else(|why| panic!("{what}: the bar validates: {why:?}"));
                     wrong.extend(what_is_wrong_with_each_face(&placed, bar, turn, &what));
                 }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The bar in two bands of the test above, on one spelling and on two, turned
+/// off `z` ten ways: built on the turned pipe, and built upright and placed.
+///
+/// The rim between the bands names its plane, and the bands either side of it
+/// are on the one pipe, which crossed with itself bounds nothing — so the plane
+/// is the only thing that says how far up the pipe the rim runs. The mesher
+/// read the plane only off a run that is part of a crossing, and charged a rim
+/// that goes right round by the pipe crossed with itself: the part of the
+/// pipe's unit axis square to itself, which is zero, came out about `5e-16` on
+/// a turned axis that is not exactly length one, and the rim was charged `2`
+/// divided by that. Each of these turns was refused
+/// `DeflectionBelowWhatAMeshCanReach` at `0.01` in all four ways of building
+/// it, with a floor between `96460` and `356599`.
+///
+/// **The placed bars are not validated**, unlike in the test above: on two
+/// spellings, `Model::validate` refuses some of them
+/// `AClosedEdgeIsWalkedAgainstItsSurface`, which is a refusal of its own and
+/// not this one. Each bar built on the turned pipe is validated by its build.
+#[test]
+fn a_bar_in_two_bands_turned_off_z_meshes_each_band_on_its_own_side() {
+    let up = Cylinder::new(Axis::z(), RADIUS).expect("a radius");
+    let down = Cylinder::new(Axis::z().reversed(), RADIUS).expect("a radius");
+    let facing_up =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 2.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal");
+    let turns = [
+        ((1.0, 0.0, 0.0), 0.25),
+        ((0.0, 1.0, 0.0), 0.25),
+        ((1.0, 1.0, 0.0), 0.25),
+        ((1.0, 0.0, 1.0), 0.75),
+        ((0.0, 1.0, 1.0), 0.75),
+        ((1.0, 2.0, 3.0), 1.75),
+        ((-1.0, 2.0, 0.5), 1.25),
+        ((3.0, -1.0, 2.0), 0.5),
+        ((1.0, 1.0, 1.0), 0.5),
+        ((2.0, 0.0, -1.0), 1.0),
+    ]
+    .map(|((x, y, z), angle)| {
+        let axis = Axis::new(Point::origin(), Vector::new(x, y, z)).expect("a direction");
+        (
+            format!("{angle} about {:?}", (x, y, z)),
+            Isometry::rotation(&axis, angle).expect("a finite turn"),
+        )
+    });
+    let mut wrong = Vec::new();
+    for (turn_name, turn) in &turns {
+        for (lower, upper) in [(up, up), (up, down)] {
+            for built_turned in [true, false] {
+                let what = format!(
+                    "bands on {} and {}, turned {turn_name}, {}",
+                    which_way(lower),
+                    which_way(upper),
+                    if built_turned {
+                        "built turned"
+                    } else {
+                        "placed"
+                    }
+                );
+                let built_on = if built_turned {
+                    *turn
+                } else {
+                    Isometry::identity()
+                };
+                let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+                let built: Vec<SolidKey> = [Orientation::Forward, Orientation::Reversed]
+                    .into_iter()
+                    .filter_map(|lower_walks_the_rim| {
+                        match a_bar_in_two_bands(
+                            &mut model,
+                            [lower, upper],
+                            facing_up,
+                            lower_walks_the_rim,
+                            true,
+                            &built_on,
+                        ) {
+                            Ok(bar) => Some(bar),
+                            Err(Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface)) => {
+                                None
+                            }
+                            Err(why) => panic!("{what}: refused {why:?}"),
+                        }
+                    })
+                    .collect();
+                let [bar] = built[..] else {
+                    panic!(
+                        "{what}: one way round the rim builds, and {} did",
+                        built.len()
+                    );
+                };
+                if !built_turned {
+                    model
+                        .place_solid(bar, turn)
+                        .expect("this model made the key");
+                }
+                wrong.extend(what_is_wrong_with_each_face(&model, bar, turn, &what));
             }
         }
     }
@@ -436,8 +538,15 @@ fn a_bar_between(model: &mut Model, from: f64, to: f64, wall: Cylinder) -> Solid
             .add_edge(corner, corner, EdgeRun::RightRoundWhereItsFacesCross)
             .expect("a cap circle")
     });
-    let bottom = a_cap(&mut draft, from, -1.0, bottom_circle, wall);
-    let top = a_cap(&mut draft, to, 1.0, top_circle, wall);
+    let bottom = a_cap(
+        &mut draft,
+        from,
+        -1.0,
+        bottom_circle,
+        wall,
+        &Isometry::identity(),
+    );
+    let top = a_cap(&mut draft, to, 1.0, top_circle, wall, &Isometry::identity());
     let round_the_wall = [
         draft
             .add_coedge(
@@ -479,7 +588,8 @@ fn a_bar_between(model: &mut Model, from: f64, to: f64, wall: Cylinder) -> Solid
 /// lower band and the other way by the upper.
 ///
 /// `lower_first` lists the lower band's face before the upper's, in the order
-/// they are added and in the shell.
+/// they are added and in the shell. Every point and surface is moved by
+/// `built_on` before the builder sees it.
 ///
 /// # Errors
 ///
@@ -490,12 +600,13 @@ fn a_bar_in_two_bands(
     rim_plane: Plane,
     lower_walks_the_rim: Orientation,
     lower_first: bool,
+    built_on: &Isometry,
 ) -> rcad_topo::Result<SolidKey> {
     let [lower, upper] = walls;
     let mut draft = SolidBuilder::new();
     let [at_0, at_2, at_4] = [0.0, 2.0, 4.0].map(|z| {
         draft
-            .add_vertex(Point::new(RADIUS, 0.0, z))
+            .add_vertex(built_on.apply_to_point(Point::new(RADIUS, 0.0, z)))
             .expect("a corner")
     });
     let seam_below = draft.add_edge(at_0, at_2, EdgeRun::Straight)?;
@@ -505,12 +616,12 @@ fn a_bar_in_two_bands(
         at_2,
         at_2,
         EdgeRun::RightRoundWhereItCrosses {
-            and: Surface::Plane(rim_plane),
+            and: Surface::Plane(rim_plane.transformed(built_on)),
         },
     )?;
     let top_circle = draft.add_edge(at_4, at_4, EdgeRun::RightRoundWhereItsFacesCross)?;
-    let bottom = a_cap(&mut draft, 0.0, -1.0, bottom_circle, lower);
-    let top = a_cap(&mut draft, 4.0, 1.0, top_circle, upper);
+    let bottom = a_cap(&mut draft, 0.0, -1.0, bottom_circle, lower, built_on);
+    let top = a_cap(&mut draft, 4.0, 1.0, top_circle, upper, built_on);
 
     let below = [
         (
@@ -530,12 +641,13 @@ fn a_bar_in_two_bands(
         ),
         (seam_above, Orientation::Reversed),
     ];
+    let (lower_wall, upper_wall) = (lower.transformed(built_on), upper.transformed(built_on));
     let (low, high) = if lower_first {
-        let low = a_band(&mut draft, lower, below)?;
-        (low, a_band(&mut draft, upper, above)?)
+        let low = a_band(&mut draft, lower_wall, below)?;
+        (low, a_band(&mut draft, upper_wall, above)?)
     } else {
-        let high = a_band(&mut draft, upper, above)?;
-        (a_band(&mut draft, lower, below)?, high)
+        let high = a_band(&mut draft, upper_wall, above)?;
+        (a_band(&mut draft, lower_wall, below)?, high)
     };
     let faces = if lower_first {
         [bottom, low, high, top]
@@ -559,19 +671,21 @@ fn a_band(
     draft.add_face(Surface::Cylinder(wall), &[wire])
 }
 
-/// A flat cap at height `z` facing `outward` along `z`, bounded by `circle`
-/// walked the way the wall on `wall` needs it: against the wall's use, which is
-/// `Reversed` for the bottom cap and `Forward` for the top.
+/// A flat cap at height `z` facing `outward` along `z`, moved by `built_on`,
+/// bounded by `circle` walked the way the wall on `wall` needs it: against the
+/// wall's use, which is `Reversed` for the bottom cap and `Forward` for the top.
 fn a_cap(
     draft: &mut SolidBuilder,
     z: f64,
     outward: f64,
     circle: DraftEdge,
     wall: Cylinder,
+    built_on: &Isometry,
 ) -> DraftFace {
     let plane =
         Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, outward))
-            .expect("the z axis is a unit normal");
+            .expect("the z axis is a unit normal")
+            .transformed(built_on);
     let used = if outward < 0.0 {
         Orientation::Reversed
     } else {
