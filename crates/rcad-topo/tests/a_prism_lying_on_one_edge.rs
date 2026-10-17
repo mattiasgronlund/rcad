@@ -867,9 +867,10 @@ fn each_answer_touching_itself_along_a_line_fuses_on_with_a_far_cube() {
 /// between a face of the plate and a face of the hollow. With no face turned
 /// round, `fuse/assemble.rs` cannot tell that from two solids each between its
 /// own two faces, which two blocks united along an edge give, so it leaves
-/// the line one edge (queue row Q1923). The other rules answer: the far cube
-/// less the plate is the cube, the two intersected nothing, the plate and the
-/// hollowed block united the block, 48, and the plate less it the prism.
+/// the line one edge (a row filed by queue row Q1923's lane). The other rules
+/// answer: the far cube less the plate is the cube, the two intersected
+/// nothing, the plate and the hollowed block united the block, 48, and the
+/// plate less it the prism.
 #[test]
 fn a_fuse_keeping_the_l_plates_four_faces_along_the_prism_unturned_is_refused() {
     let as_they_stand = [3.0 - 0.078_125, 1.0];
@@ -886,7 +887,10 @@ fn a_fuse_keeping_the_l_plates_four_faces_along_the_prism_unturned_is_refused() 
             let outcome = match (rule, swapped) {
                 (Rule::Intersection, _) => differs(&model, answer, &[]),
                 (Rule::Difference, true) => differs(&model, answer, &[1.0]),
-                _ => refused_as_not_manifold(answer, &as_they_stand),
+                (Rule::Union, _) | (Rule::Difference, false) => {
+                    refused_as_not_manifold(answer, &as_they_stand)
+                }
+                _ => unreachable!("EVERY_RULE holds only these three"),
             };
             if let Some(why) = outcome {
                 wrong.push(format!("{what}: {why}"));
@@ -903,7 +907,8 @@ fn a_fuse_keeping_the_l_plates_four_faces_along_the_prism_unturned_is_refused() 
                 (Rule::Union, _) => differs(&model, answer, &[48.0]),
                 (Rule::Difference, false) => differs(&model, answer, &[0.078_125]),
                 (Rule::Difference, true) => differs(&model, answer, &[45.0]),
-                _ => refused_as_not_manifold(answer, &[3.0 - 0.078_125]),
+                (Rule::Intersection, _) => refused_as_not_manifold(answer, &[3.0 - 0.078_125]),
+                _ => unreachable!("EVERY_RULE holds only these three"),
             };
             if let Some(why) = outcome {
                 wrong.push(format!("{what}: {why}"));
