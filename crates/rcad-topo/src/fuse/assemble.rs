@@ -102,7 +102,7 @@ use crate::{
 use super::arrange::{
     a_plane_cuts_a_cone_in_rulings, a_plane_lies_along_a_pipes_axis, agreement_of_two_planes,
     name_of_surface_bits, name_of_the_surface_either_way_round, two_pipes_run_along_one_line,
-    where_two_halves_meet,
+    where_the_crossing_starts, where_two_halves_meet,
 };
 use super::bake::{grown_by, what_writing_the_corner_down_cost};
 use super::select::Chosen;
@@ -486,6 +486,10 @@ pub(crate) enum SideName {
 /// The whole result, in scratch.
 pub(crate) struct Assembly {
     corners: Vec<Corner>,
+    /// The corner each closed input edge starts at where the kept pieces read
+    /// that start past, for a run of its pieces to close up at
+    /// ([`Corners::where_each_closed_edge_read_past_starts`]).
+    where_closed_edges_start: Vec<(EdgeKey, Corner)>,
     edges: Vec<Edge>,
     /// What each edge runs along, worked out once so that the scratch model the
     /// shells are nested in and the caller's model are built the same way.
@@ -803,15 +807,18 @@ impl Assembly {
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
         let on_three_planes = input_corners_on_exactly_three_planes(model, scratch);
-        let no_corner_of_the_answer = vertices_read_through(
-            model,
+        let wires_kept = || {
             chosen
                 .iter()
                 .flat_map(|kept| &scratch.pieces[kept.piece].wires)
-                .collect(),
+        };
+        let no_corner_of_the_answer = vertices_read_through(
+            model,
+            wires_kept().collect(),
             names_of_one_point,
             &on_three_planes,
         );
+        let closed_edges_read_past = the_closed_edge_each_vertex_only_starts(model, wires_kept());
         let kept_wires: Vec<Vec<Cow<'_, [FaceMeet]>>> = chosen
             .iter()
             .map(|kept| {
@@ -876,8 +883,15 @@ impl Assembly {
                 is_a_whole_closed_surface: piece.is_the_whole_surface,
             });
         }
+        let where_closed_edges_start = corners.where_each_closed_edge_read_past_starts(
+            model,
+            &closed_edges_read_past,
+            policy,
+            log,
+        )?;
         let mut assembly = Self {
             corners: corners.made,
+            where_closed_edges_start,
             edges: edges.made,
             runs: Vec::new(),
             faces,
@@ -1148,6 +1162,7 @@ impl Assembly {
 
         Self {
             corners,
+            where_closed_edges_start: Vec::new(),
             edges,
             runs: Vec::new(),
             faces,
@@ -1532,7 +1547,7 @@ impl Assembly {
             &mut dissolved,
             log,
         )?;
-        let renumbered = self.what_is_left(&joined, &along, &dissolved);
+        let renumbered = self.what_is_left(&joined, &along, &dissolved, policy, log)?;
         // **A closed curve cut where nothing meets it** is joined back up even
         // where no face was: a pointed cone less a block whose walls are tangent
         // to its rim keeps the rim in arcs otherwise, and a ring of arcs right
@@ -1779,7 +1794,7 @@ impl Assembly {
                 }
                 continue;
             }
-            if self.needs_no_seam(&members, along, dissolved)
+            if self.needs_no_seam(&members, along, dissolved, &inside)
                 || (self.joined_only_across_whole_rings(&inside, along)
                     && self.a_ring_cannot_be_counted(&members, along, dissolved))
             {
@@ -1826,7 +1841,35 @@ impl Assembly {
     /// (`a_block_face_through_a_cones_apex.rs`, `docs/decisions.md` §347.4).
     /// On a pipe one ring right round bounds no face, so this is the cone's
     /// alone.
-    fn needs_no_seam(&self, members: &[usize], along: &[[Dart; 2]], dissolved: &[bool]) -> bool {
+    ///
+    /// **A ring that closes up is one closed side too**
+    /// ([`Assembly::a_ring_that_closes_up`]): it is pieces of one closed curve
+    /// with nothing else at any corner between them, and
+    /// [`Assembly::what_is_left`] gives that curve back whole. A block
+    /// wholly inside a frustum cuts the far cap and the wall along its planes,
+    /// so the wall's far ring is the far rim in arcs, and the wall itself is a
+    /// grid. Where no chain of the grid reached the near rim the wall stayed in
+    /// 25 pieces, and where one did it kept that chain as a seam, though the
+    /// block met no face of the frustum (Q2170). **Only on a cone, and only
+    /// where every ring goes right round.** A cone face with a ring right
+    /// round beside a hole is refused by the mesher, which takes islands only
+    /// on a pipe's ring or a ball's cap (`AWireWillNotLieFlatOnItsFace`, in
+    /// `pieces_of_one_curved_surface.rs` and `a_walk_neither_winding_nor_the_axis_places.rs`).
+    /// On a pipe, closed up, 3 tests of the bar files failed, an answer
+    /// `TheFuseWroteABrokenAnswer` among them. **Not where the group was
+    /// joined only across whole closed curves**
+    /// ([`Assembly::joined_only_across_whole_rings`]): a frustum beside a block
+    /// whose floor cuts a circle round its wall has a far rim cut where the
+    /// block's walls touch it, and joined whole across that circle, the three
+    /// tests of `a_rim_a_fuse_cut_round_one_cone.rs` that pin it failed.
+    /// Whether that circle stays is row Q1051's.
+    fn needs_no_seam(
+        &self,
+        members: &[usize],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+        inside: &[usize],
+    ) -> bool {
         let surface = self.faces[members[0]].surface;
         let rings = self.rings_of_a_curved_face(members, along, dissolved);
         if let (Surface::Cone(_), [ring]) = (&surface, rings.as_slice())
@@ -1834,9 +1877,49 @@ impl Assembly {
         {
             return true;
         }
+        let may_close_up = matches!(surface, Surface::Cone(_))
+            && !self.joined_only_across_whole_rings(inside, along)
+            && rings.iter().all(|ring| {
+                ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(true)
+            });
         rings.iter().all(|ring| {
-            ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(false)
+            ring.len() == 1
+                || (may_close_up && self.a_ring_that_closes_up(ring, dissolved))
+                || self.a_ring_goes_right_round(ring, &surface) == Some(false)
         })
+    }
+
+    /// Whether `ring` is two or more pieces of one closed curve
+    /// ([`Assembly::are_pieces_of_one_closed_curve`]) with nothing at any
+    /// corner between them but the two pieces either side, so that
+    /// [`Assembly::what_is_left`] closes it up into that one edge again.
+    ///
+    /// **The ends are counted over every edge that stays**, and not one lump
+    /// at a time as [`Assembly::what_is_left`] counts them, so this never
+    /// says a ring closes up where that does not close it up. A corner the two
+    /// pieces either side of meet at the apex of a cone is never walked
+    /// straight through ([`Assembly::is_the_apex_of_a_cone_along`]).
+    fn a_ring_that_closes_up(&self, ring: &[Dart], dissolved: &[bool]) -> bool {
+        let pieces: Vec<usize> = ring.iter().map(|&dart| self.edge_of(dart)).collect();
+        ring.len() > 1
+            && self.are_pieces_of_one_closed_curve(&pieces)
+            && ring.iter().all(|&dart| {
+                let corner = self.starts_at(dart);
+                let ending_here: Vec<usize> = (0..self.edges.len())
+                    .filter(|&edge| !dissolved[edge])
+                    .flat_map(|edge| {
+                        self.edges[edge]
+                            .ends
+                            .into_iter()
+                            .filter(move |&end| end == corner)
+                            .map(move |_| edge)
+                    })
+                    .collect();
+                matches!(ending_here[..], [one, other]
+                    if one != other
+                        && !self.is_the_apex_of_a_cone_along(corner, one)
+                        && !self.is_the_apex_of_a_cone_along(corner, other))
+            })
     }
 
     /// Whether every edge dissolved inside one group, `inside`, is a whole
@@ -2813,7 +2896,7 @@ impl Assembly {
     /// [`Assembly::with_each_ring_of_two_straight_sides_left_out`] lists, or if
     /// a run of edges that became one edge does not have exactly two ends left.
     /// Both mean the joining above is wrong.
-    fn rebuild_from(&mut self, joined: &[JoinedFace], renumbered: Renumbered) -> Result<bool> {
+    fn rebuild_from(&mut self, joined: &[JoinedFace], mut renumbered: Renumbered) -> Result<bool> {
         let edges = self.edges_after_joining(&renumbered);
 
         let faces = joined
@@ -2844,10 +2927,16 @@ impl Assembly {
         let (edges, faces, left_a_ring_out) =
             Self::with_each_ring_of_two_straight_sides_left_out(edges, faces);
 
+        // The run's sides read which way they walk it off the old corners
+        // above, so the corner they close up at changes only after.
+        let mut starts = core::mem::take(&mut renumbered.starts_where_its_curve_does);
         self.corners = core::mem::take(&mut self.corners)
             .into_iter()
+            .enumerate()
             .zip(&renumbered.corner_now)
-            .filter_map(|(corner, now)| now.map(|_| corner))
+            .filter_map(|((index, corner), now)| {
+                now.map(|_| starts.remove(&index).unwrap_or(corner))
+            })
             .collect();
         self.edges = edges;
         self.faces = faces;
@@ -3182,12 +3271,19 @@ impl Assembly {
     /// same two corners, and a corner sitting in the middle of one of them can be
     /// a real corner of the other. A corner stops being a corner for the lump it
     /// runs straight through and stays one for the lump it does not.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Assembly::closed_up_runs_that_start_where_their_curve_does`]
+    /// gives.
     fn what_is_left(
         &self,
         joined: &[JoinedFace],
         along: &[[Dart; 2]],
         dissolved: &[bool],
-    ) -> Renumbered {
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Renumbered> {
         let mut lump_of_face = vec![0usize; self.faces.len()];
         for (index, face) in joined.iter().enumerate() {
             for &member in &face.members {
@@ -3212,22 +3308,6 @@ impl Assembly {
             }
         }
 
-        // **A corner where pieces of one cone, pipe or ball met stays a corner**, and
-        // that departs from §224.2 item 3 on purpose. It has only two surfaces
-        // round it, which §31.3 reads out of the model rather than re-deriving,
-        // so nothing needs it gone. And folding the arcs either side into one
-        // can make an arc longer than half its circle — a frustum's rim with a
-        // notch taken out of it — whose centre is then in front of any picker
-        // that holds the whole arc, and the next fuse cannot follow it (§224.1).
-        let mut where_curved_pieces_met = vec![false; self.corners.len()];
-        for (edge, [one, _]) in along.iter().enumerate() {
-            if dissolved[edge] && self.faces[one.face].surface.as_plane().is_none() {
-                for end in self.edges[edge].ends {
-                    where_curved_pieces_met[end] = true;
-                }
-            }
-        }
-
         let mut straight_through: BTreeSet<(usize, usize)> = BTreeSet::new();
         let mut still_a_corner = vec![false; self.corners.len()];
         for (&(lump, corner), by) in &leaving {
@@ -3240,7 +3320,6 @@ impl Assembly {
             match by[..] {
                 [one, other]
                     if one != other
-                        && !where_curved_pieces_met[corner]
                         && !by
                             .iter()
                             .any(|&edge| self.is_the_apex_of_a_cone_along(corner, edge)) =>
@@ -3250,8 +3329,23 @@ impl Assembly {
                 _ => still_a_corner[corner] = true,
             }
         }
+        for (lump, corner) in self.where_curved_pieces_met_off_a_run_that_closes_up(
+            &leaving,
+            &straight_through,
+            along,
+            dissolved,
+        ) {
+            straight_through.remove(&(lump, corner));
+            still_a_corner[corner] = true;
+        }
         let kept = self.the_corners_each_closed_run_keeps(&leaving, &straight_through);
         let closed_a_curve_up = !kept.closed_up.is_empty();
+        let starts_where_its_curve_does = self.closed_up_runs_that_start_where_their_curve_does(
+            &kept.closed_up,
+            &leaving,
+            policy,
+            log,
+        )?;
         for (lump, corner) in kept.closed_up.into_iter().chain(kept.left_in_pieces) {
             straight_through.remove(&(lump, corner));
             still_a_corner[corner] = true;
@@ -3269,14 +3363,151 @@ impl Assembly {
             (0..self.edges.len())
                 .map(|edge| lump_of_edge[edge].is_some() && runs.leader(edge) == edge),
         );
-        Renumbered {
+        Ok(Renumbered {
             lump_of_edge,
             straight_through,
             runs,
             corner_now,
             edge_now,
             closed_a_curve_up,
+            starts_where_its_curve_does,
+        })
+    }
+
+    /// Each corner in `closed_up` that [`Assembly::rebuild_from`] puts the
+    /// start of its run's closed curve in place of, with that start.
+    ///
+    /// **A run that closes up is one closed curve given back whole**
+    /// ([`Assembly::the_corners_each_closed_run_keeps`]), so it starts where
+    /// that curve does whichever fuse cut it. A closed input edge starts where
+    /// it did, and where the kept pieces read that start past it is no corner
+    /// here ([`Corners::where_each_closed_edge_read_past_starts`]). A closed
+    /// crossing this fuse made starts where the arrangement starts one it
+    /// cuts nowhere ([`Assembly::where_a_closed_crossing_made_here_starts`]).
+    /// Either way the run kept the lowest corner the arrangement made on it
+    /// instead, and so the same solid came back with its curve starting at
+    /// another corner depending on which fuse cut the curve: a frustum, a
+    /// block over its middle and a cube whose plane cuts the frustum's wall
+    /// gave the circle the block's floor cuts round the wall one corner
+    /// united one way round and another the other (Q2170).
+    ///
+    /// **Only where nothing else needs the corner kept**: one the arrangement
+    /// made, which no other lump has, on no other corner's `f64` triple, and
+    /// where the rule a closed edge is stored running by reads the same at the
+    /// two places, since the sides along the run read it at the corner kept.
+    /// One start two runs both close up at is left alone.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Assembly::where_a_closed_crossing_made_here_starts`] gives.
+    ///
+    /// # Panics
+    ///
+    /// If a run that closes up is pieces of more than one input edge, which
+    /// [`Assembly::are_pieces_of_one_closed_curve`] never lets close up.
+    fn closed_up_runs_that_start_where_their_curve_does(
+        &self,
+        closed_up: &[(usize, usize)],
+        leaving: &BTreeMap<(usize, usize), Vec<usize>>,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<BTreeMap<usize, Corner>> {
+        let mut by_start: BTreeMap<[u64; 3], (Corner, Vec<usize>)> = BTreeMap::new();
+        for &(lump, corner) in closed_up {
+            let run = leaving[&(lump, corner)][0];
+            let start = match self.edges[run].from.as_slice() {
+                [edge] => self
+                    .where_closed_edges_start
+                    .iter()
+                    .find(|(starts, _)| starts == edge)
+                    .map(|(_, start)| start.clone()),
+                [] => self.where_a_closed_crossing_made_here_starts(run, policy, log)?,
+                [_, _, ..] => panic!("a run that closes up is pieces of one closed curve"),
+            };
+            let Some(start) = start else { continue };
+            let at = exactly_at(start.point);
+            if self.corners[corner].from.is_none()
+                && leaving.keys().filter(|&&(_, at)| at == corner).count() == 1
+                && self
+                    .corners
+                    .iter()
+                    .all(|other| exactly_at(other.point) != at)
+                && self.the_stored_way_reads_the_same_at(
+                    run,
+                    self.corners[corner].point,
+                    start.point,
+                )
+            {
+                by_start
+                    .entry(at)
+                    .or_insert_with(|| (start, Vec::new()))
+                    .1
+                    .push(corner);
+            }
         }
+        Ok(by_start
+            .into_values()
+            .filter_map(|(start, corners)| match corners[..] {
+                [corner] => Some((corner, start)),
+                _ => None,
+            })
+            .collect())
+    }
+
+    /// Where the arrangement would start the closed crossing `edge` runs
+    /// along had nothing cut it, as the corner it would make there: the
+    /// corner [`Corners::of`] makes of a
+    /// [`MeetPoint::WhereAClosedCurveStarts`] end. `None` where the two
+    /// surfaces do not cross in one closed curve, or where
+    /// [`rcad_geom::where_a_closed_crossing_starts`] cannot name its start, a
+    /// curve too big for `f64` among them; the run then keeps the corner
+    /// [`Assembly::the_corners_each_closed_run_keeps`] picked.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`rcad_geom::intersect`] gives.
+    fn where_a_closed_crossing_made_here_starts(
+        &self,
+        edge: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Option<Corner>> {
+        let [one, other] = &self.edges[edge].carried_by;
+        let SurfaceMeet::Curves(runs) = rcad_geom::intersect(one, other, policy, log)? else {
+            return Ok(None);
+        };
+        let [run] = runs.as_slice() else {
+            return Ok(None);
+        };
+        let Ok(from) = rcad_geom::where_a_closed_crossing_starts(run, [one, other], log) else {
+            return Ok(None);
+        };
+        let point = where_the_crossing_starts(one, other, from);
+        Ok(Some(Corner {
+            point: middle_of(point),
+            wobble: point.uncertainty(),
+            from: None,
+            moved_by_the_policy: false,
+            where_pipes_touch: Vec::new(),
+        }))
+    }
+
+    /// Whether [`a_closed_crossing_is_walked_the_way_it_is_stored`] says the
+    /// same of the crossing `edge` runs along at `one` as at `other`.
+    fn the_stored_way_reads_the_same_at(&self, edge: usize, one: Point, other: Point) -> bool {
+        let pair = self.edges[edge].carried_by;
+        let stored_way = |at: Point| {
+            a_closed_crossing_is_walked_the_way_it_is_stored(
+                [&pair[0], &pair[1]],
+                pair.map(|surface| gradient_of(&surface, at)),
+                at,
+                Decision::Neg,
+            )
+        };
+        matches!(
+            (stored_way(one), stored_way(other)),
+            (Ok(Some(one)), Ok(Some(other))) if one == other
+        )
     }
 
     /// Whether `corner` is the apex of a cone `edge` is carried by, which no
@@ -3323,6 +3554,61 @@ impl Assembly {
             })
     }
 
+    /// Every corner where pieces of one cone, pipe or ball met, as lump and
+    /// corner, that `straight_through` walks on a run that does not close up
+    /// into the one closed input edge it was cut from. Each stays a corner.
+    ///
+    /// **A corner where pieces of one cone, pipe or ball met stays a corner**,
+    /// and that departs from §224.2 item 3 on purpose. It has only two surfaces
+    /// round it, which §31.3 reads out of the model rather than re-deriving, so
+    /// nothing needs it gone. And folding the arcs either side into one can
+    /// make an arc longer than half its circle — a frustum's rim with a notch
+    /// taken out of it — whose centre is then in front of any picker that holds
+    /// the whole arc, and the next fuse cannot follow it (§224.1).
+    ///
+    /// **Except on a run that closes up**: every corner along it walked
+    /// straight through, and every piece of it cut out of one closed input
+    /// edge ([`Assembly::the_corners_each_closed_run_keeps`]). That run becomes
+    /// the input's whole closed edge again, with one corner, and a whole closed
+    /// edge is no arc for a picker to hold. A block wholly inside a frustum
+    /// cuts the frustum's far cap and wall along its planes, and once both are
+    /// joined back up each corner on the far rim has the two arcs either side
+    /// of it and nothing else. Kept, the rim came back as eight arcs where the
+    /// frustum had one circle, and the frustum's own corner on it went, since
+    /// nothing kept that one (Q2170). The corners left here are walked as they
+    /// were before, so the runs that do not close up are the runs they were.
+    fn where_curved_pieces_met_off_a_run_that_closes_up(
+        &self,
+        leaving: &BTreeMap<(usize, usize), Vec<usize>>,
+        straight_through: &BTreeSet<(usize, usize)>,
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> Vec<(usize, usize)> {
+        let mut where_curved_pieces_met = vec![false; self.corners.len()];
+        for (edge, [one, _]) in along.iter().enumerate() {
+            if dissolved[edge] && self.faces[one.face].surface.as_plane().is_none() {
+                for end in self.edges[edge].ends {
+                    where_curved_pieces_met[end] = true;
+                }
+            }
+        }
+        let runs = runs_through(self.edges.len(), leaving, straight_through);
+        let closed_up: BTreeSet<usize> = self
+            .the_corners_each_closed_run_keeps(leaving, straight_through)
+            .closed_up
+            .into_iter()
+            .map(|at| runs.leader(leaving[&at][0]))
+            .collect();
+        straight_through
+            .iter()
+            .copied()
+            .filter(|&(lump, corner)| {
+                where_curved_pieces_met[corner]
+                    && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
+            })
+            .collect()
+    }
+
     /// The corners to keep on each run of edges that closes on itself with
     /// every corner along it walked straight through: one corner where the run
     /// is closed up, and every corner where it is left in pieces. Folding all
@@ -3338,12 +3624,13 @@ impl Assembly {
     /// round a cone with no seam, which the writer refuses
     /// (`AWireWillNotLieFlatOnItsFace`) — measured on that same pair.
     ///
-    /// **Only a run that is all pieces of one input edge is closed up**, which
-    /// is then a closed input edge given back whole. A ball's meridian circle
-    /// cut at both poles is a closed run too, of pieces of two different edges,
-    /// and closing it up puts a closed edge's one corner on a pole, where
-    /// nothing says which way it runs: 22 tests across the ball-and-block files
-    /// failed when every closed run was closed up.
+    /// **Only a run that is all pieces of one closed curve is closed up**
+    /// ([`Assembly::are_pieces_of_one_closed_curve`]), which is then that curve
+    /// given back whole. A ball's meridian circle cut at both poles is a closed
+    /// run too, of pieces of two different edges, and closing it up puts a
+    /// closed edge's one corner on a pole, where nothing says which way it
+    /// runs: 22 tests across the ball-and-block files failed when every closed
+    /// run was closed up.
     ///
     /// **Any other closed run is left in the pieces it was cut into**, every
     /// corner kept, which is what the answer is when nothing else in the fuse
@@ -3358,7 +3645,10 @@ impl Assembly {
     ///
     /// Which corner a closed-up run keeps is chosen off what the corner *is*
     /// and never off its index here, which depends on the order the solids
-    /// were handed over: an input vertex first, then the lowest point.
+    /// were handed over: an input vertex first, then the lowest point. A
+    /// lowest point the arrangement made is then moved onto where the curve
+    /// itself starts, where nothing else needs it kept
+    /// ([`Assembly::closed_up_runs_that_start_where_their_curve_does`]).
     fn the_corners_each_closed_run_keeps(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
@@ -3367,7 +3657,7 @@ impl Assembly {
         let runs = runs_through(self.edges.len(), leaving, straight_through);
         let mut corners_of_run: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
         let mut run_keeps_a_corner: BTreeSet<usize> = BTreeSet::new();
-        let mut pieces_of: BTreeMap<usize, Vec<&[EdgeKey]>> = BTreeMap::new();
+        let mut edges_of: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for (&(lump, corner), by) in leaving {
             if straight_through.contains(&(lump, corner)) {
                 corners_of_run
@@ -3378,10 +3668,7 @@ impl Assembly {
                 run_keeps_a_corner.extend(by.iter().map(|&edge| runs.leader(edge)));
             }
             for &edge in by {
-                pieces_of
-                    .entry(runs.leader(edge))
-                    .or_default()
-                    .push(&self.edges[edge].from);
+                edges_of.entry(runs.leader(edge)).or_default().push(edge);
             }
         }
         let mut kept = ClosedRuns {
@@ -3392,7 +3679,7 @@ impl Assembly {
             if run_keeps_a_corner.contains(&run) {
                 continue;
             }
-            if is_one_input_edge(&pieces_of[&run]) {
+            if self.are_pieces_of_one_closed_curve(&edges_of[&run]) {
                 kept.closed_up.push(
                     corners
                         .into_iter()
@@ -3404,6 +3691,51 @@ impl Assembly {
             }
         }
         kept
+    }
+
+    /// Whether `edges` are pieces of one closed curve and of nothing else, so
+    /// that joined back up they are that one curve whole: pieces of one input
+    /// edge, or pieces of the one crossing of a plane and a cone that this
+    /// fuse made.
+    ///
+    /// **A crossing made here closes up as an input edge does**, or a curve
+    /// comes back cut or whole depending on which fuse cut it. A frustum, a
+    /// block over its middle and a cube whose plane cuts the frustum's wall:
+    /// united with the block first, the circle the block's floor cuts round the
+    /// wall is an input edge to the second fuse, and the wall comes back with
+    /// it whole and no seam. United with the cube first, the second fuse makes
+    /// that circle, the cube's plane cuts it in two, and the wall kept a seam
+    /// up the plane's cut to hold the two arcs (Q2170).
+    ///
+    /// **A plane and a cone only.** The crossing of a ball and a plane can run
+    /// through the ball's poles, which the arrangement makes corners of, and
+    /// closed up across them a closed edge's one corner sits on a pole: 22
+    /// tests across the ball-and-block files failed (§400.5). A pipe is left
+    /// out as [`Assembly::needs_no_seam`] leaves it out: a ring right round a
+    /// pipe is an island the mesher takes, and closing rings up on a pipe
+    /// there failed 3 tests of the bar files.
+    fn are_pieces_of_one_closed_curve(&self, edges: &[usize]) -> bool {
+        let pieces: Vec<&[EdgeKey]> = edges
+            .iter()
+            .map(|&edge| self.edges[edge].from.as_slice())
+            .collect();
+        if is_one_input_edge(&pieces) {
+            return true;
+        }
+        let Some(&first) = edges.first() else {
+            return false;
+        };
+        let pair @ ([Surface::Plane(_), Surface::Cone(_)] | [Surface::Cone(_), Surface::Plane(_)]) =
+            &self.edges[first].carried_by
+        else {
+            return false;
+        };
+        edges.iter().all(|&edge| {
+            let [one, other] = &self.edges[edge].carried_by;
+            self.edges[edge].from.is_empty()
+                && ((one_surface(one, &pair[0]) && one_surface(other, &pair[1]))
+                    || (one_surface(one, &pair[1]) && one_surface(other, &pair[0])))
+        })
     }
 
     /// Every corner walked straight through on a run of edges whose two ends
@@ -4777,6 +5109,7 @@ struct Lump {
 }
 
 /// One corner of the result.
+#[derive(Clone)]
 struct Corner {
     point: Point,
     /// How wide the box this corner was solved as is. Representation wobble
@@ -5562,6 +5895,10 @@ struct Renumbered {
     edge_now: Vec<Option<usize>>,
     /// Whether some closed curve cut into pieces is joined back into one edge.
     closed_a_curve_up: bool,
+    /// Each corner a run that closes up keeps that becomes the start of the
+    /// closed curve the run was cut from, with the corner it becomes
+    /// ([`Assembly::closed_up_runs_that_start_where_their_curve_does`]).
+    starts_where_its_curve_does: BTreeMap<usize, Corner>,
 }
 
 /// The corners kept on the runs of edges that close on themselves with every
@@ -6261,9 +6598,20 @@ fn vertices_that_only_start_a_closed_edge<'a>(
     model: &Model,
     kept_wires: impl Iterator<Item = &'a Vec<FaceMeet>>,
 ) -> BTreeSet<VertexSlot> {
+    the_closed_edge_each_vertex_only_starts(model, kept_wires)
+        .into_keys()
+        .collect()
+}
+
+/// Each of [`vertices_that_only_start_a_closed_edge`], with the closed input
+/// edge it starts and one end of a kept side that names it.
+fn the_closed_edge_each_vertex_only_starts<'a>(
+    model: &Model,
+    kept_wires: impl Iterator<Item = &'a Vec<FaceMeet>>,
+) -> BTreeMap<VertexSlot, (EdgeKey, &'a MeetPoint)> {
     let mut sides_ending: BTreeMap<VertexSlot, usize> = BTreeMap::new();
     let mut walked_through: BTreeMap<VertexSlot, usize> = BTreeMap::new();
-    let mut edge_at: BTreeMap<VertexSlot, EdgeKey> = BTreeMap::new();
+    let mut edge_at: BTreeMap<VertexSlot, (EdgeKey, &'a MeetPoint)> = BTreeMap::new();
     let mut a_corner: BTreeSet<VertexSlot> = BTreeSet::new();
     for wire in kept_wires {
         for (index, side) in wire.iter().enumerate() {
@@ -6274,7 +6622,7 @@ fn vertices_that_only_start_a_closed_edge<'a>(
                 let slot = vertex.slot_in(model.id());
                 *sides_ending.entry(slot).or_default() += 1;
                 match the_closed_edge_it_only_starts(model, side, *vertex) {
-                    Some(edge) if *edge_at.entry(slot).or_insert(edge) == edge => {}
+                    Some(edge) if edge_at.entry(slot).or_insert((edge, end)).0 == edge => {}
                     Some(_) | None => {
                         a_corner.insert(slot);
                     }
@@ -6296,7 +6644,7 @@ fn vertices_that_only_start_a_closed_edge<'a>(
             !a_corner.contains(slot)
                 && walked_through.get(slot).copied().unwrap_or(0) * 2 == *ending
         })
-        .map(|(slot, _)| slot)
+        .map(|(slot, _)| (slot, edge_at[&slot]))
         .collect()
 }
 
@@ -7535,6 +7883,32 @@ impl Corners {
         if let Some(&chosen) = self.taken_over.get(&name) {
             return Ok(chosen);
         }
+        let corner = self.the_corner_it_would_be(model, name, end);
+        if let Some(&already) = self.named.get(&name) {
+            self.settle_on_the_lower_rounding(already, corner.point, corner.wobble);
+            self.made[already].moved_by_the_policy |= corner.moved_by_the_policy;
+            return Ok(already);
+        }
+        let index = match self.at.get(&exactly_at(corner.point)) {
+            Some(&already) => {
+                self.made[already].wobble = self.made[already].wobble.max(corner.wobble);
+                self.made[already].from = self.made[already].from.or(corner.from);
+                self.made[already].moved_by_the_policy |= corner.moved_by_the_policy;
+                already
+            }
+            None => {
+                self.at.insert(exactly_at(corner.point), self.made.len());
+                self.made.push(corner);
+                self.made.len() - 1
+            }
+        };
+        self.named.insert(name, index);
+        Ok(index)
+    }
+
+    /// The corner [`Corners::of`] makes of `end`, which goes by `name`, where
+    /// no corner of that name or at that point is made yet, without making it.
+    fn the_corner_it_would_be(&self, model: &Model, name: CornerName, end: &MeetPoint) -> Corner {
         let moved = self.moved.get(&name).copied();
         let (point, wobble, was) = match self.put_at.get(&name) {
             Some(&(input_corner, vertex)) => (
@@ -7557,34 +7931,53 @@ impl Corners {
                 (point, point.uncertainty(), was)
             }
         };
-        let at = middle_of(point);
-        let moved_by_the_policy = moved.is_some();
-        if let Some(&already) = self.named.get(&name) {
-            self.settle_on_the_lower_rounding(already, at, wobble);
-            self.made[already].moved_by_the_policy |= moved_by_the_policy;
-            return Ok(already);
+        Corner {
+            point: middle_of(point),
+            wobble,
+            from: was,
+            moved_by_the_policy: moved.is_some(),
+            where_pipes_touch: Vec::new(),
         }
-        let index = match self.at.get(&exactly_at(at)) {
-            Some(&already) => {
-                self.made[already].wobble = self.made[already].wobble.max(wobble);
-                self.made[already].from = self.made[already].from.or(was);
-                self.made[already].moved_by_the_policy |= moved_by_the_policy;
-                already
+    }
+
+    /// The corner each closed input edge in `started` starts at, by
+    /// [`Corners::of`]'s rule but not made, where the kept pieces read that
+    /// start past ([`vertices_that_only_start_a_closed_edge`]).
+    ///
+    /// **[`Assembly::what_is_left`] gives a run that closes up this corner.**
+    /// Read past, the start is no corner of the pieces, so a run of pieces of
+    /// that edge joined back into the whole edge had only the corners the
+    /// arrangement made on it to keep, and kept the lowest: a block wholly
+    /// inside a frustum gave the frustum's far rim back starting at
+    /// `(-9.95, -1, 10)`, where the plane `y = -1` crossed it, and not at the
+    /// frustum's `(10, 0, 10)` (Q2170).
+    ///
+    /// **Left out where the start is a corner after all**: where another
+    /// corner took its name over, was made under it, or sits on its very `f64`
+    /// triple. A run through such a corner keeps it, or keeps the one it is.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Corners::name_of`] gives.
+    fn where_each_closed_edge_read_past_starts(
+        &self,
+        model: &Model,
+        started: &BTreeMap<VertexSlot, (EdgeKey, &MeetPoint)>,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Vec<(EdgeKey, Corner)>> {
+        let mut starts = Vec::new();
+        for &(edge, end) in started.values() {
+            let name = self.goes_by(self.name_of(model, end, policy, log)?);
+            if self.taken_over.contains_key(&name) || self.named.contains_key(&name) {
+                continue;
             }
-            None => {
-                self.made.push(Corner {
-                    point: at,
-                    wobble,
-                    from: was,
-                    moved_by_the_policy,
-                    where_pipes_touch: Vec::new(),
-                });
-                self.at.insert(exactly_at(at), self.made.len() - 1);
-                self.made.len() - 1
+            let corner = self.the_corner_it_would_be(model, name, end);
+            if !self.at.contains_key(&exactly_at(corner.point)) {
+                starts.push((edge, corner));
             }
-        };
-        self.named.insert(name, index);
-        Ok(index)
+        }
+        Ok(starts)
     }
 
     /// The name every name of `name`'s point goes by: `name` itself unless an
@@ -11383,6 +11776,7 @@ mod tests {
                 .expect("the z axis is a unit normal"),
         );
         let assembly = Assembly {
+            where_closed_edges_start: Vec::new(),
             corners: vec![Corner {
                 point: Point::new(2.0, 0.0, 4.0),
                 wobble: 0.0,
@@ -11462,6 +11856,7 @@ mod tests {
                 (2.0 * quarter, -1.0, -quarter),
             ] {
                 let assembly = Assembly {
+                    where_closed_edges_start: Vec::new(),
                     corners: vec![corner(0.0), corner(stop)],
                     edges: vec![Edge {
                         ends: [0, 1],
@@ -11543,6 +11938,7 @@ mod tests {
                 is_a_whole_closed_surface: false,
             };
             let mut assembly = Assembly {
+                where_closed_edges_start: Vec::new(),
                 corners: vec![Corner {
                     point: Point::new(2.0, 0.0, across_at + 0.5),
                     wobble: 0.0,
@@ -11635,6 +12031,7 @@ mod tests {
         };
 
         Assembly {
+            where_closed_edges_start: Vec::new(),
             corners: vec![corner(0.0, 0.0), corner(1.0, 0.0), corner(0.0, 1.0)],
             edges: vec![edge([0, 1]), edge([1, 2]), edge([2, 0])],
             runs: vec![EdgeRun::Straight, EdgeRun::Straight, EdgeRun::Straight],
@@ -11681,6 +12078,7 @@ mod tests {
             where_pipes_touch: Vec::new(),
         };
         let assembly = Assembly {
+            where_closed_edges_start: Vec::new(),
             corners: vec![
                 corner(apex),
                 corner(Point::new(-0.0, -0.7, 3.3)),

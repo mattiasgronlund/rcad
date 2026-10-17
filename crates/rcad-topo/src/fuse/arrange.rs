@@ -9341,7 +9341,11 @@ fn inside_the_curve_a_plane_cuts(
 /// between two surfaces the model already accepted, and both refuse a
 /// coordinate that is not finite when they are built. A seed that is not a
 /// place is a bug in the walk, and a box round it is not a box.
-fn where_the_crossing_starts(surface: &Surface, partner: &Surface, from: Point) -> PredicatePoint {
+pub(super) fn where_the_crossing_starts(
+    surface: &Surface,
+    partner: &Surface,
+    from: Point,
+) -> PredicatePoint {
     assert!(
         from.is_finite(),
         "a closed crossing is walked between two surfaces built from finite numbers, so where it \
