@@ -866,12 +866,18 @@ fn each_answer_touching_itself_along_a_line_is_the_shells_its_faces_part_into() 
 }
 
 /// **Each answer touching itself along a line fuses on**: the block less the
-/// prism inside it, 216, and the block united with the hook, 276, each fused
-/// with a cube of 1 far from it, every rule both ways round. The L plate less
-/// the prism in its inner corner does not yet, and the test after this one
-/// says where. The union is the
-/// two as they stand, the intersection no solid, and each difference its
-/// first solid whole. Queue row Q1902 asked whether the answer the parting
+/// prism inside it, 216, the block united with the hook, 276, and the L plate
+/// less the prism in its inner corner, `3 − 0.078125`, each fused with a cube
+/// of 1 far from it, every rule both ways round. The union is the two as they
+/// stand, the intersection no solid, and each difference its first solid
+/// whole.
+///
+/// The L plate's was refused `ResultIsNotManifold { count: 4 }` under the
+/// union and its own difference until queue row Q2210. No face along its line
+/// is turned round there, and both pairs of faces come from the one solid, so
+/// neither the rule nor where each face came from says which wedges round the
+/// line are full. Each pair's faces lying inside the solid the other pair
+/// bounds says it (`docs/decisions.md` §39.4). Queue row Q1902 asked whether the answer the parting
 /// gives a bar resting on a stepped block's wall is refused
 /// `ArgumentIntersectsItself` by every fuse after it; these two are not, and
 /// since Q1902 that answer fuses on too
@@ -890,6 +896,11 @@ fn each_answer_touching_itself_along_a_line_fuses_on_with_a_far_cube() {
             "the block united with the hook",
             the_block_united_with_the_hook,
             BLOCK + 36.0,
+        ),
+        (
+            "the L plate less the prism in its inner corner",
+            the_l_plate_less_the_prism_in_its_inner_corner,
+            3.0 - 0.078_125,
         ),
     ] {
         for swapped in [false, true] {
@@ -912,51 +923,25 @@ fn each_answer_touching_itself_along_a_line_fuses_on_with_a_far_cube() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// **A fuse that keeps the four faces along the L plate's inner corner and
-/// turns none of them round is refused `ResultIsNotManifold { count: 4 }`**,
-/// though its answer is one solid touching itself along the line. The L plate
-/// less the prism in its inner corner, united with a far cube either way
-/// round or with the cube taken from it, should be the two as they stand. The
-/// L plate intersected with a block hollowed by the same prism, either way
-/// round, should be the L plate less the prism again, `3 − 0.078125`.
+/// **The L plate intersected with a block hollowed by the prism in its inner
+/// corner is the L plate less the prism again**, `3 − 0.078125`, either way
+/// round: one solid of two shells touching along the plate's inner corner.
+/// The plate and the hollowed block united are the block, 48, the plate less
+/// it the prism, and the block less the plate 45.
 ///
-/// Round the line each is what the difference gave: the two full wedges lie
-/// between a face of the plate and a face of the hollow. With no face turned
-/// round, `fuse/assemble.rs` cannot tell that from two solids each between its
-/// own two faces, which two blocks united along an edge give, so it leaves
-/// the line one edge (a row filed by queue row Q1923's lane). The other rules
-/// answer: the far cube less the plate is the cube, the two intersected
-/// nothing, the plate and the hollowed block united the block, 48, and the
-/// plate less it the prism.
+/// The intersection was refused `ResultIsNotManifold { count: 4 }` until queue
+/// row Q2210. Round the line it is what the difference gave, the two full
+/// wedges each between a face of the plate and a face of the hollow, but no
+/// face is turned round, and `fuse/assemble.rs` could not tell that from two
+/// solids each between its own two faces, which two blocks united along an
+/// edge give. Now the hollow's faces lie inside the plate and the plate's
+/// inside the hollowed block, and that says which wedges are full.
 #[test]
-fn a_fuse_keeping_the_l_plates_four_faces_along_the_prism_unturned_is_refused() {
-    let as_they_stand = [3.0 - 0.078_125, 1.0];
+fn the_l_plate_intersected_with_a_block_the_prism_hollows_is_the_plate_less_the_prism() {
     let mut wrong = Vec::new();
     for swapped in [false, true] {
         for rule in EVERY_RULE {
-            let what = format!("the far cube, {rule:?}, the cube first {swapped}");
-            let (model, answer) = fuse(swapped, rule, |model| {
-                [
-                    the_l_plate_less_the_prism_in_its_inner_corner(model),
-                    a_far_cube(model),
-                ]
-            });
-            let outcome = match (rule, swapped) {
-                (Rule::Intersection, _) => differs(&model, answer, &[]),
-                (Rule::Difference, true) => differs(&model, answer, &[1.0]),
-                (Rule::Union, _) | (Rule::Difference, false) => {
-                    refused_as_not_manifold(answer, &as_they_stand)
-                }
-                _ => unreachable!("EVERY_RULE holds only these three"),
-            };
-            if let Some(why) = outcome {
-                wrong.push(format!("{what}: {why}"));
-            }
-        }
-    }
-    for swapped in [false, true] {
-        for rule in EVERY_RULE {
-            let what = format!("the hollowed block, {rule:?}, the block first {swapped}");
+            let what = format!("{rule:?}, the block first {swapped}");
             let (model, answer) = fuse(swapped, rule, |model| {
                 [an_l_plate(model), a_block_hollowed_by_the_prism(model)]
             });
@@ -964,7 +949,7 @@ fn a_fuse_keeping_the_l_plates_four_faces_along_the_prism_unturned_is_refused() 
                 (Rule::Union, _) => differs(&model, answer, &[48.0]),
                 (Rule::Difference, false) => differs(&model, answer, &[0.078_125]),
                 (Rule::Difference, true) => differs(&model, answer, &[45.0]),
-                (Rule::Intersection, _) => refused_as_not_manifold(answer, &[3.0 - 0.078_125]),
+                (Rule::Intersection, _) => differs(&model, answer, &[3.0 - 0.078_125]),
                 _ => unreachable!("EVERY_RULE holds only these three"),
             };
             if let Some(why) = outcome {
