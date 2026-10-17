@@ -321,9 +321,9 @@ fn a_bar_in_two_bands_on_the_two_spellings_meshes_each_band_on_its_own_side() {
 /// is the only thing that says how far up the pipe the rim runs. The mesher
 /// read the plane only off a run that is part of a crossing, and charged a rim
 /// that goes right round by the pipe crossed with itself: the part of the
-/// pipe's unit axis square to itself, which is zero, came out about `5e-16` on
-/// a turned axis that is not exactly length one, and the rim was charged `2`
-/// divided by that. Each of these turns was refused
+/// pipe's unit axis square to itself, which is zero, came out between `1.4e-16`
+/// and `5e-16` on a turned axis that is not exactly length one, and the rim was
+/// charged `2` divided by that. Each of these turns was refused
 /// `DeflectionBelowWhatAMeshCanReach` at `0.01` in all four ways of building
 /// it, with a floor between `96460` and `356599`.
 ///

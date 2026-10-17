@@ -8691,20 +8691,34 @@ fn how_far_along_its_axis_this_face_runs(
             .iter()
             .map(SurfaceAlongAnEdge::where_it_really_is)
             .collect();
+        // A run that goes right round is the whole of a closed curve on `and`:
+        // `rcad_geom::which_two_surfaces_a_run_is_between` names `and` as one of
+        // the two surfaces it is walked along whatever lies either side, so
+        // `and` bounds it. Two bands of one pipe either side of their rim name
+        // the pipe crossed with itself, which bounds nothing in the reals and
+        // in `f64` can come out `2` over a rounding of `5e-16` on a turned axis
+        // (see `how_far_along_an_axis_a_crossing_with_this_surface_runs`): with
+        // nothing else to read, the rim was charged that, and every mesh of the
+        // bar at `0.01` was refused under a floor of a hundred thousand
+        // (`two_spellings_of_one_pipe_mesh_each_face_on_its_own_side.rs`).
+        //
         // A seam has this face's own surface on both sides of it, and a surface
-        // crossed with itself names nothing; the run carries the second surface
-        // for exactly that reason, and only that reason — an edge with a
-        // different face either side already has its second surface in
-        // `others`, and `and` there can be any plane that picks out this edge's
-        // own piece of a curve shared with other edges, not a bound on where
-        // this one runs. A chord through a cone's apex is such a plane: it cuts
-        // the cone in two rulings, which run on for ever, and folding that in
-        // charged a face's own upper arc its two ends at `z = 4` though the arc
-        // reaches `z = 8` between them, bounded correctly by the plane the two
-        // faces already named (`a_plane_face_cut_by_a_cone_it_crosses_in_an_ellipse.rs`,
-        // §406).
-        if others.iter().all(|other| *other == ours)
-            && let EdgeRun::PartOfWhereItCrosses { and, .. } = edge.run()
+        // crossed with itself names nothing; a run that is part of a crossing
+        // carries the second surface for exactly that reason, and only that
+        // reason — an edge with a different face either side already has its
+        // second surface in `others`, and `and` there can be any plane that
+        // picks out this edge's own piece of a curve shared with other edges,
+        // not a bound on where this one runs. A chord through a cone's apex is
+        // such a plane: it cuts the cone in two rulings, which run on for ever,
+        // and folding that in charged a face's own upper arc its two ends at
+        // `z = 4` though the arc reaches `z = 8` between them, bounded correctly
+        // by the plane the two faces already named
+        // (`a_plane_face_cut_by_a_cone_it_crosses_in_an_ellipse.rs`, §406).
+        let run = edge.run();
+        if let EdgeRun::RightRoundWhereItCrosses { and } = run {
+            others.push(and);
+        } else if others.iter().all(|other| *other == ours)
+            && let EdgeRun::PartOfWhereItCrosses { and, .. } = run
         {
             others.push(and);
         }
@@ -8866,8 +8880,17 @@ fn a_plane_cuts_this_cone_or_pipe_in_an_ellipse_its_ends_are_walked_by(
 /// `room` is a difference of rounded terms, and where it is zero in the reals
 /// it can come out a rounding above zero and divide a length by `1e-17`. The
 /// caller asks the plane-and-cone case exactly before it gets here
-/// ([`a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever`]); the other
-/// arms have no shape known to reach theirs.
+/// ([`a_plane_cuts_this_cone_in_a_curve_that_runs_on_for_ever`]).
+///
+/// **The pipe arm reaches its on a pipe crossed with itself**, on either
+/// spelling, along a turned axis: [`a_unit_axis`] can leave such a direction a
+/// rounding off length one, so the part of it square to itself comes out
+/// between `1.4e-16` and `5e-16` rather than zero — at 125 of 250 turns of `z`
+/// tried for Q2183 — and a crossing that is the whole pipe is charged `2` over
+/// that. A rim between two bands of one pipe is such an edge
+/// (`two_spellings_of_one_pipe_mesh_each_face_on_its_own_side.rs`); the caller
+/// folds in the plane its run names and takes the smaller answer, and that is
+/// all that bounds it. The other arms have no shape known to reach theirs.
 fn how_far_along_an_axis_a_crossing_with_this_surface_runs(
     origin: Point,
     straight_on: Vector,
