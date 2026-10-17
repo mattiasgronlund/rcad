@@ -54,7 +54,11 @@ the ray plane by a quadratic in the height up the pipe's axis alone, and the
 road for a plane one wall mirrors with both answers the three at the ends of
 the pipe's chords at its roots. The demonstration is not such a ray: the wall
 through the `x` axis and the normal `(1, 0, 16)` is `y = 0`, and the ball's
-centre `(0, 0.5, 0)` is off it, so it is still refused. The route's verdict
+centre `(0, 0.5, 0)` is off it, so it is still refused. Those three are now
+also what shows the refusal a gap
+(`a_plane_leaning_across_a_pipe_and_a_ball_off_its_axis_is_a_gap`, Q2201),
+since the floor, the pipe and the ball §437 names it by, at `(±12, 0, 0)`, are
+answered by that road. The route's verdict
 stands: for a ball off the pipe's axis the one wall through that axis and the
 ball's centre is the only candidate, and it mirrors the ray plane only when
 the plane's normal lies in it, so a ray plane leaning any other way is still

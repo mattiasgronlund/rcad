@@ -2021,18 +2021,13 @@ impl<'f> Arrangement<'f> {
     /// [`Arrangement::leave_out_the_cuts_clear_of_the_face`] left out in it:
     /// its meets are off the face.
     ///
-    /// # A crossing no face of its cut reaches is left out where its meet refuses
+    /// # A crossing no face of its cut reaches is left out
     ///
     /// When neither proof of nothing answers, a crossing of the pair that lies
     /// wholly past a plane every face carrying its cut lies behind
     /// ([`Arrangement::no_face_that_draws_it_reaches_it`]) is marked, the
     /// refusal is held, and the meets of every other pair are still placed
-    /// (Q1909). A slanted pin starting on a bar's axis, with the bar's end
-    /// across where the pin's pipe would come out of the wall if it ran on
-    /// through the axis, is the shape: the end's plane crosses that pipe in an
-    /// ellipse behind the pin's own cap, and where it meets the bar's rim is a
-    /// plane and two pipes at a slant, which [`meet_of_three_surfaces`] has no
-    /// road to.
+    /// (Q1909).
     ///
     /// Once every pair is asked, a node of any kind on a marked crossing, or a
     /// meet folded into a corner of the face on one, means the crossing meets
@@ -2043,13 +2038,36 @@ impl<'f> Arrangement<'f> {
     /// refuses, so that a node placed on it before, or one a later pair would
     /// have placed, is seen rather than set aside.
     ///
+    /// **A meet that answers leaves such a crossing out too** (Q2201). Its
+    /// pair is set aside until every other pair is placed, and then each of
+    /// its crossings that no face reaches and nothing placed is on is left
+    /// undrawn the same way. A slanted pin starting on a bar's axis, with the
+    /// bar's end across where the pin's pipe would come out of the wall if it
+    /// ran on through the axis, is the shape: the end's plane crosses that pipe
+    /// in an ellipse behind the pin's own cap. Where the ellipse meets the
+    /// bar's rim was refused until one wall mirrored the three (Q2196), and
+    /// drawn once answered, it put two corners on the rim where nothing of the
+    /// pin is.
+    ///
+    /// **The meet is a node on the crossing that stays, alone, where the face
+    /// across may split that crossing there**
+    /// ([`Arrangement::kept_where_a_crossing_left_out_meets_it`]). A block's
+    /// floor crosses a bar standing against the block's wall in a circle no
+    /// face of the bar reaches, while the wall crosses the bar in a line its
+    /// face does, and the wall's face splits the floor's edge where that line
+    /// ends. Where the face across leaves its own crossing with the third
+    /// surface out as well, neither face places the node
+    /// ([`Arrangement::the_face_across_leaves_it_out_too`]): with the bar's end
+    /// at the top of the loop behind the pin's cap, the end, the wall and the
+    /// pin's pipe meet in one double point on the rim's seam corner, and a node
+    /// there could not be put in order with the corner.
+    ///
     /// **The face across places no node where the three meet either, or
     /// refuses.** [`meet_of_three_surfaces`] puts the three surfaces in one
-    /// order before it solves them, so it refuses the same three on every
-    /// face that asks, and there each way past the refusal places no node of
-    /// those three. Where the bar's end crosses the pin's pipe, the bar's wall
-    /// proves its own loop clear of the ellipse and leaves out the loop behind
-    /// the pin's cap.
+    /// order before it solves them, so it answers or refuses the same three on
+    /// every face that asks. Where it refuses, each way past the refusal
+    /// places no node of those three; where it answers, the two faces along
+    /// the crossing that stays ask the same test of the same three.
     fn place_the_meets(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         let never_left_out = self.crossings_never_left_out();
         let mut known_unreached: Vec<Option<bool>> = vec![None; self.crossings.len()];
@@ -2838,8 +2856,10 @@ impl<'f> Arrangement<'f> {
     /// square to its own pipe, and a second pipe at a slant to the first: the
     /// cap and the second pipe cross in an ellipse, so the first proof fails,
     /// and [`meet_of_three_surfaces`] has no road for a flat surface and two
-    /// pipes at a slant (Q1646). Every bar crossing another at a slant
-    /// anywhere but square was refused for it.
+    /// pipes at a slant whose axes pass each other by (Q1646). Every bar
+    /// crossing another at a slant anywhere but square was refused for it.
+    /// Where the two axes meet, the wall through them mirrors all three, and
+    /// it answers (Q2196).
     ///
     /// **Or a flat surface cuts a pipe, of the three, in a curve wholly outside
     /// what picks one of the two crossings out**
@@ -5986,7 +6006,13 @@ impl<'f> Arrangement<'f> {
     ///
     /// **A node put where a surface touches the face is not joined across**,
     /// for the reason an input corner is not: the face next door splits the
-    /// edge there ([`Arrangement::place_the_touches`]).
+    /// edge there ([`Arrangement::place_the_touches`]). **Nor is a meet kept on
+    /// one crossing because the other of its pair was left out**
+    /// ([`Arrangement::kept_where_a_crossing_left_out_meets_it`]), since it is
+    /// kept only where the face across may split that crossing there: a
+    /// block's floor joined across where a bar standing against its wall
+    /// meets it left the floor's edge whole while the wall split it, and the
+    /// fuse refused that edge as one face along it (Q2201).
     fn the_two_arcs_to_join_at(&self, node: usize, touching: &[usize]) -> Option<(usize, usize)> {
         if self.nodes[node].vertex.is_some()
             || self.nodes[node].half_way_round
