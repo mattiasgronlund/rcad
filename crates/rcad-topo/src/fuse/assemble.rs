@@ -77,7 +77,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{
     Approximation, Cause, Decision, Interval, Level, Measures, Point as PredicatePoint, Policy,
-    ProvenanceLog, Record, Strictness, orient2d, side_of_a_plane_where_three_planes_meet,
+    ProvenanceLog, Record, Strictness, orient2d, orient3d, side_of_a_plane_where_three_planes_meet,
 };
 use smallvec::SmallVec;
 
@@ -1262,9 +1262,11 @@ impl Assembly {
     /// (queue row Q1913): an L plate less a pocket cut into its corner square,
     /// whose two arms the plate's floor joins, or less a prism lying in its
     /// inner corner, whose hollow joins them (Q1923,
-    /// `a_prism_lying_on_one_edge.rs`).
+    /// `a_prism_lying_on_one_edge.rs`), and that answer fused on or the plate
+    /// intersected with a block the prism hollows (Q2210).
     /// [`Assembly::pair_each_line_one_solid_touches_itself_along`] decides it,
-    /// with `chosen` to say which faces the rule turned round.
+    /// with `chosen` to say which faces the rule turned round and the faces'
+    /// planes to say it where none is.
     /// Elsewhere they stay one edge and are refused: two cubes touching along
     /// part of an edge, the frame and the comb of `degenerate_fuses.rs`, or the
     /// leaning frame less the comb, whose square between two teeth touches the
@@ -1368,10 +1370,18 @@ impl Assembly {
     /// the other way. An L plate less a prism lying in its inner corner needs
     /// it: the plate's faces and the hollow's are two shells that nothing but
     /// the line joins, and the hollow's two faces bound the two full wedges
-    /// (`a_prism_lying_on_one_edge.rs`). Nothing turned round, the own wedges
-    /// are full for a union and may be empty for an intersection of two solids
-    /// whose wedges cross, so neither pairing of faces is known to bound one
-    /// full wedge and none is joined.
+    /// (`a_prism_lying_on_one_edge.rs`).
+    ///
+    /// **Nothing turned round, the faces' planes say it** (queue row Q2210):
+    /// the own wedges are empty exactly where each pair's two faces lie inside
+    /// the solid the other pair's two faces bound. The rule alone cannot say
+    /// it, since both pairs may be one solid's: that L plate less its prism
+    /// fused with a far cube, or the plate intersected with a block the prism
+    /// hollows, where the plate's faces and the hollow's keep their way round.
+    /// Where a face is curved or the arithmetic cannot tell, nothing is joined.
+    /// Joined across a full wedge is not yet one solid: two L plates whose
+    /// missing corners face each other across the line, intersected, leave two
+    /// bars, each full wedge one of them, and the line stays one edge (§80.9).
     fn pair_each_line_one_solid_touches_itself_along(
         &self,
         model: &Model,
@@ -1393,12 +1403,14 @@ impl Assembly {
                 Some((edge, self.the_pairs_round_two_input_edges(model, edge, by)?))
             })
             .collect();
-        for &(_, [staying, moving]) in &waiting {
+        for &(edge, [staying, moving]) in &waiting {
             let turned_round = staying
                 .iter()
                 .chain(&moving)
                 .any(|&dart| self.turned_round_by_the_rule(chosen, dart));
-            if !turned_round {
+            if !turned_round
+                && !self.each_pair_lies_inside_the_solid_the_other_bounds(edge, [staying, moving])
+            {
                 continue;
             }
             let [one, other] = moving;
@@ -1432,6 +1444,83 @@ impl Assembly {
             if waiting.len() == before {
                 return;
             }
+        }
+    }
+
+    /// Whether the two faces of each pair along `edge` lie, next to the line,
+    /// inside the solid the other pair's two faces bound there, so that each
+    /// pair's own wedge is empty and the two between the pairs are full.
+    /// `false` where a face is curved or the arithmetic cannot tell.
+    fn each_pair_lies_inside_the_solid_the_other_bounds(
+        &self,
+        edge: usize,
+        [one, other]: [[Dart; 2]; 2],
+    ) -> bool {
+        let [start, end] = self.edges[edge].ends;
+        let along = (self.corners[end].point - self.corners[start].point).components();
+        [(one, other), (other, one)]
+            .into_iter()
+            .all(|(round, inside)| {
+                inside
+                    .iter()
+                    .all(|&dart| self.lies_inside_the_solid_round(round, dart, along))
+            })
+    }
+
+    /// Whether the face `dart` walks is known to leave the line into the solid
+    /// the two faces of `pair` bound along it, `along` the way the line runs.
+    ///
+    /// The two walk the line opposite ways and each keeps that solid behind its
+    /// plane. Where each lies behind the other's plane the solid is narrower
+    /// than a half turn and is what lies behind both; where each lies in front
+    /// it is wider and is what lies behind either. A face on the plane of one
+    /// of the pair, running off on the far side of the line from it, is told by
+    /// the other's plane alone.
+    fn lies_inside_the_solid_round(&self, pair: [Dart; 2], dart: Dart, along: [f64; 3]) -> bool {
+        let behind = |plane: Dart| self.lies_behind(plane, dart, along) == Some(true);
+        match self.lies_behind(pair[0], pair[1], along) {
+            Some(true) => behind(pair[0]) && behind(pair[1]),
+            Some(false) => behind(pair[0]) || behind(pair[1]),
+            None => false,
+        }
+    }
+
+    /// Whether the face `dart` walks leaves the line behind the plane of the
+    /// face `plane` walks, `along` the way the line runs; `None` where either
+    /// is curved, where the face lies on that plane, or where the arithmetic
+    /// cannot tell.
+    ///
+    /// A face keeps its material on the left of the way it walks, seen from
+    /// outside, so it leaves the line along `m × t` where it walks the line
+    /// forward and `t × m` where it walks it backward, `m` its plane's normal
+    /// and `t` the line's way. Behind the plane of normal `n` is where that has
+    /// a negative dot with `n`, and `n · (m × t)` is the determinant of `t`,
+    /// `n` and `m`, which is what [`orient3d`] signs with the fourth point at
+    /// the origin.
+    fn lies_behind(&self, plane: Dart, dart: Dart, along: [f64; 3]) -> Option<bool> {
+        let across = self.faces[plane.face]
+            .surface
+            .as_plane()?
+            .normal()
+            .components();
+        let own = self.faces[dart.face]
+            .surface
+            .as_plane()?
+            .normal()
+            .components();
+        let sign = if self.side_of(dart).forward {
+            orient3d(along, across, own, [0.0; 3])
+        } else {
+            orient3d(along, own, across, [0.0; 3])
+        };
+        match sign {
+            Decision::Neg => Some(true),
+            Decision::Pos => Some(false),
+            Decision::Zero | Decision::Undecidable { .. } => None,
+            other => panic!(
+                "which side of a plane a face along a line leaves it on came back as a \
+                 decision nothing here knows: {other:?}"
+            ),
         }
     }
 
