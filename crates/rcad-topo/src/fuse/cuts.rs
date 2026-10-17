@@ -798,7 +798,10 @@ fn no_face_of_one_meets_the_other(one: &BakedSolid, other: &BakedSolid) -> bool 
 /// frustum's top cap reaches `√18` from the axis at its corners, so the bar's
 /// wall runs through that box although it never comes within 1 of the cap. Round
 /// the axis the cap reaches 3 out and the wall is 4 out, and nothing in between
-/// is a guess.
+/// is a guess. A ball need not be centred on that axis: a bar of radius 0.2 and
+/// height 0.6 standing at `(0.4, 0)` inside a ball of radius 1 reaches `√0.45`,
+/// 0.67, out from the ball's centre, and nothing else here bounds a pipe face
+/// (Q2252).
 ///
 /// **Where one of the two has no box here, `bake`'s own boxes are asked
 /// whether they miss.** Those are read off stored corners in plain `f64`
@@ -1137,13 +1140,12 @@ fn band_a_face_is_inside(face: &BakedFace) -> Option<ABandRoundAnAxis> {
 /// Whether `surface` provably passes through no point of `band`.
 ///
 /// A surface about the band's own axis is asked as one expression: a pipe or a
-/// cone on that line, a ball centred on it, or a plane square to it. Each is
-/// one expression in `up` and `out`, worked over the band in interval
-/// arithmetic on the numbers the surface stores (§17.1), and a sign proved for
-/// it is a sign of the surface itself. A ball is `out + (up − its centre's
-/// up)² = radius²·|w|²`, which is Lagrange's identity, and a plane square to
-/// the line is `(n·w)·(up + w·origin) + d·|w|² = 0`, its own equation scaled
-/// by `|w|²`. A plane leaning to the line is asked by
+/// cone on that line, or a plane square to it. Each is one expression in `up`
+/// and `out`, worked over the band in interval arithmetic on the numbers the
+/// surface stores (§17.1), and a sign proved for it is a sign of the surface
+/// itself. A plane square to the line is `(n·w)·(up + w·origin) + d·|w|² = 0`,
+/// its own equation scaled by `|w|²`. A ball, wherever its centre is, is asked
+/// by [`a_ball_misses_a_band`], a plane leaning to the line by
 /// [`a_leaning_plane_misses_a_band`], and a torus about the line by
 /// [`a_torus_on_the_axis_misses_a_band`]; anything else is not asked.
 fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
@@ -1171,14 +1173,7 @@ fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
             let apex = band.up_of(cone.apex().coordinates().map(exactly));
             band.out - squared(exactly(cone.slope())) * squared(band.up - apex)
         }
-        Surface::Sphere(ball) => {
-            let centre = ball.centre().coordinates().map(exactly);
-            if !band.runs_along(difference(centre, band.origin)) {
-                return false;
-            }
-            band.out + squared(band.up - band.up_of(centre))
-                - squared(exactly(ball.radius())) * band.length()
-        }
+        Surface::Sphere(ball) => return a_ball_misses_a_band(ball, band),
         Surface::Torus(ring) => {
             return band.is_on_the_axis(ring.axis())
                 && a_torus_on_the_axis_misses_a_band(ring, band);
@@ -1188,6 +1183,46 @@ fn a_surface_misses_a_band(surface: &Surface, band: ABandRoundAnAxis) -> bool {
     matches!(
         over_the_band.sign(),
         rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
+    )
+}
+
+/// Whether the skin of `ball`, centred anywhere, provably passes through no
+/// point of `band` (Q2252).
+///
+/// With `c` the ball's centre, write `a = (p − origin) × w` for a point `p` of
+/// the band and `b = (c − origin) × w`. Lagrange's identity gives `|p − c|²·|w|²
+/// = (up − c's up)² + |a − b|²`, where `|a|² = out` and `|b|²` is the centre's
+/// own `out`. So `(|p − c|² − radius²)·|w|²` is `near − 2a·b`, with
+///
+/// ```text
+/// near = (up − c's up)² + out + c's out − radius²·|w|²
+/// ```
+///
+/// and `2a·b` is never farther from nought than `2√(out·c's out)`. The skin
+/// misses the band where `near` keeps one sign over it and `near² > 4·out·c's
+/// out` everywhere in it: below nought the band is wholly inside the ball,
+/// above it wholly outside. Both are worked in interval arithmetic on the
+/// numbers the ball stores, as the leaning plane's two tests are.
+///
+/// A ball centred on the band's line has `b` exactly nought, and this is the
+/// sign of `near` alone. Off the line, the band's point farthest from the
+/// centre is on the circle about the axis at the band's top or bottom and its
+/// greatest `out`: for a pipe face those are its two sides, and for a flat face
+/// the circle through its farthest corner. Holding the band is holding them,
+/// and the interval sums ask exactly that, since `near` and `4·out·c's out`
+/// both grow with `out` and `near` with how far `up` is from `c`'s.
+fn a_ball_misses_a_band(ball: &rcad_geom::Sphere, band: ABandRoundAnAxis) -> bool {
+    let exactly = rcad_predicates::Interval::exactly;
+    let centre = ball.centre().coordinates().map(exactly);
+    let off_the_line = band.out_of(centre);
+    let near = band.out + squared(band.up - band.up_of(centre)) + off_the_line
+        - squared(exactly(ball.radius())) * band.length();
+    matches!(
+        near.sign(),
+        rcad_predicates::Decision::Pos | rcad_predicates::Decision::Neg
+    ) && matches!(
+        (squared(near) - exactly(4.0) * band.out * off_the_line).sign(),
+        rcad_predicates::Decision::Pos
     )
 }
 
