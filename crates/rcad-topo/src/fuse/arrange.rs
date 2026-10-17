@@ -14523,6 +14523,55 @@ mod tests {
         }
     }
 
+    /// Q2043's two faces, laid along `z`: the half bar's flat face, facing
+    /// `−z` at the offset `0xc00d0dd7b8f4fb65`, and the block's face across
+    /// from it, facing `+z` at `0x400d0dd7b8f4fb64`, one step of an `f64`
+    /// short of the flat face turned round. Every point of the flat face is
+    /// on the side of the block's face its normal points to, so a corner
+    /// solved from the flat face is there too, however wide its box. One step
+    /// past the flat face the block's face has it behind, and turned exactly
+    /// round it is on it. A partner parallel, number for number, to none of
+    /// the three is not this rule's to answer.
+    #[test]
+    fn a_corner_solved_from_a_plane_parallel_to_the_partner_is_where_the_offsets_say() {
+        let flat_face =
+            Plane::from_coefficients([0.0, 0.0, -1.0, -f64::from_bits(0xc00d_0dd7_b8f4_fb65)])
+                .expect("a normal");
+        assert_eq!(flat_face.offset().to_bits(), 0xc00d_0dd7_b8f4_fb65);
+        let three = [
+            Surface::Plane(flat_face),
+            Surface::Plane(Plane::from_coefficients([1.0, 0.0, 0.0, 0.0]).expect("a normal")),
+            Surface::Plane(Plane::from_coefficients([0.0, -1.0, 0.0, 2.0]).expect("a normal")),
+        ];
+        let facing_up_at = |bits: u64| {
+            let partner =
+                Plane::from_coefficients([0.0, 0.0, 1.0, -f64::from_bits(bits)]).expect("a normal");
+            assert_eq!(partner.offset().to_bits(), bits);
+            Arrangement::side_of_a_plane_parallel_to_one_it_is_on(&three, &partner)
+        };
+        assert_eq!(
+            facing_up_at(0x400d_0dd7_b8f4_fb64),
+            Some(Decision::Pos),
+            "the block's face, a step short"
+        );
+        assert_eq!(
+            facing_up_at(0x400d_0dd7_b8f4_fb66),
+            Some(Decision::Neg),
+            "a step past"
+        );
+        assert_eq!(
+            facing_up_at(0x400d_0dd7_b8f4_fb65),
+            Some(Decision::Zero),
+            "the flat face turned round"
+        );
+        let leaning = Plane::from_coefficients([0.0, 1.0, 1.0, -3.0]).expect("a normal");
+        assert_eq!(
+            Arrangement::side_of_a_plane_parallel_to_one_it_is_on(&three, &leaning),
+            None,
+            "parallel to none of the three"
+        );
+    }
+
     /// Whether a baked face is the flat one pointing up the z axis.
     fn facing_up(face: &BakedFace) -> bool {
         face.surface
