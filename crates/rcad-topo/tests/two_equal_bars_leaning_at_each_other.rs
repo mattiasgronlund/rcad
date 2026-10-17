@@ -8,8 +8,8 @@
 //! each bar first in turn. Every one answers: through either point at 50°,
 //! 60°, 70°, 100° and 120°, through `(11, −3.25, 0.5)` at each odd angle from
 //! 83° to 97° too and at an exact quarter turn, and through `(11, 0, 0)` at 80°
-//! and at the angles from 105° to 135° tested here. Through `(11, −3.25, 0.5)`
-//! at 90° worked out in radians, every one is still refused.
+//! and at the angles from 105° to 135° tested here, and through `(11, −3.25,
+//! 0.5)` at 90° worked out in radians as well.
 //!
 //! **What they should come to**, with `r = 1/4` and `a` the angle: the first
 //! bar is `A = π/4`. What two pipes of one width share where their axes cross at
@@ -231,42 +231,36 @@ fn a_bar_starting_where_it_crosses_another_a_quarter_turn_round_answers_every_fu
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Turned by 90° worked out in radians rather than by a quarter turn, the same
-/// two bars are still refused, every fuse `order along a crossing`. The turn
-/// leaves the second bar's stored direction at `(6.1e-17, 1, 0)`, so its near
-/// cap leans a rounding off `y = −3.25` and crosses the first bar's seam, `z =
-/// 0.25`, near the meeting point, running within a rounding of it from one of
-/// the first bar's caps to the other. On the cap at `x = 13` two nodes are to
-/// be put in order round the cap's circle: the seam's end `(13, −3.25, 0.25)`,
-/// exact, and where the near cap crosses that circle, a box a few roundings
-/// wide that holds the seam's end. Nothing the arrangement asks tells the two
-/// apart.
+/// As above, turned by 90° worked out in radians rather than by a quarter turn.
+/// The turn leaves the second bar's stored direction at `(6.1e-17, 1, 0)`, so
+/// its near cap leans a rounding off `y = −3.25` and crosses the first bar's
+/// seam, `z = 0.25`, near the meeting point, running within a rounding of it
+/// from one of the first bar's caps to the other.
+///
+/// **Until Q2015 every fuse was refused `order along a crossing`** on the first
+/// bar's cap at `x = 13`, putting two nodes in order round the cap's circle:
+/// the seam's end `(13, −3.25, 0.25)`, exact, and where the near cap crosses
+/// that circle, a box a few roundings wide that holds the seam's end. The near
+/// cap misses the seam's end by `1.5·2⁻⁵²`, so the two are different points,
+/// and which comes first is now read off where the line the near cap cuts the
+/// cap's plane in crosses the line from the crossing's start through the
+/// seam's end (`as_a_flat_cut_through_the_loop_says` in `fuse/arrange.rs`).
+///
+/// **Past that, every fuse was refused the same way on the first bar's wall**,
+/// round the ellipse the near cap cuts it in. The cap leans `2⁻⁵²` off parallel
+/// to the first bar's axis, so that ellipse is about `2.3e15` long, and it is
+/// walked from the seam's end, a rounding off it. Where the cap at `x = 13`
+/// crosses it is a node whose box holds that start, and nothing put it in
+/// order against the node at `x = 9`. The node at `x = 13` and the start lie
+/// on one half of the ellipse, the near side of its long axis, and the other
+/// nodes are 2 and 4 along that half or on the half across, so none lies
+/// between the start and that node, and the loop is counted from it
+/// (`off_the_stretch_along_one_half` in `fuse/arrange.rs`).
 #[test]
-fn a_bar_starting_where_it_crosses_another_turned_90_degrees_in_radians_is_still_refused() {
-    for (rule, first_first) in six_fuses() {
-        let mut model =
-            Model::new(rcad_geom::Scale::millimetres(100.0).expect("100 mm is a working size"));
-        let said = fuse_in(
-            &mut model,
-            &turned_by(90.0),
-            [11.0, -3.25, 0.5],
-            rule,
-            first_first,
-        );
-        let Err(Error::Undecidable { records }) = &said else {
-            panic!("{rule:?} (first first: {first_first}): {said:?}");
-        };
-        let asked: Vec<&str> = records
-            .records()
-            .iter()
-            .map(|record| record.predicate())
-            .collect();
-        assert_eq!(
-            asked,
-            ["order along a crossing"],
-            "{rule:?} (first first: {first_first})"
-        );
-    }
+fn a_bar_starting_where_it_crosses_another_turned_90_degrees_in_radians_answers_every_fuse() {
+    let wrong =
+        what_goes_wrong_with_a_bar_starting_where_the_axes_meet_turned(90.0, &turned_by(90.0));
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// One line for each of the six fuses of the bar starting where the axes meet
