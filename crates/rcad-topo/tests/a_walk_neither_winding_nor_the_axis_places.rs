@@ -1527,71 +1527,72 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 }
 
 /// A whole ring about `x`, 4 round a tube of 1, against a ball of radius 4 at
-/// `(1, 0, 0)` or `(−1, 0, 0)`, under every rule both ways round.
+/// `(1, 0, 0)` or `(−1, 0, 0)`, and a ball of 3 at `(±3/4, 0, 0)` pressed into
+/// an O-ring lying on its side, 4 round a tube of `5/4`, under every rule both
+/// ways round.
 ///
-/// For the ball at `(1, 0, 0)`, the two cross in two circles round `x`: one at
-/// `x = 1` of radius 4, the top of the tube and a great circle of the ball
-/// through both its poles, and one at `x = −15/17` of radius `60/17`. The walk
-/// starts the first at one of the poles, and each fuse was refused
-/// `AClosedEdgeOfTheAnswerWouldStartAtAPole` until Q2171 cut it at the point
-/// across as well, the ball's other pole. Each was then refused for want of a
-/// point inside a piece whose corners were the ball's two poles, because the
-/// four walks of the two circles were left a piece each, on the ring's face and
-/// on the ball's, until Q2212 put the ring's two bands in order round the tube
-/// and read the ball's caps past the picker. Each is refused in
-/// `fuse/select.rs` now: no point was found inside a piece of a face with a
-/// corner on each circle, the ball's two poles and `(−15/17, 0, 60/17)`. The
-/// ball at `(−1, 0, 0)` is the same shape mirrored.
+/// For the ball of 4 at `(1, 0, 0)`, the two cross in two circles round `x`:
+/// one at `x = 1` of radius 4, the top of the tube and a great circle of the
+/// ball through both its poles, and one at `x = −15/17` of radius `60/17`. The
+/// ball of 3 at `(3/4, 0, 0)` is the same shape: its great circle at `x = 3/4`
+/// lies on the ring's inner wall, and its other circle is at `x = −357/1060`.
+/// The walk starts the first circle at one of the poles, and each fuse was
+/// refused `AClosedEdgeOfTheAnswerWouldStartAtAPole` until Q2171 cut it at the
+/// point across as well, the ball's other pole. Each was then refused for want
+/// of a point inside a piece whose corners were the ball's two poles, until
+/// Q2212 put the ring's two bands in order round the tube. Each was then
+/// refused for want of a point inside the ring's band outside the ball, whose
+/// every candidate came back onto the inner half of the tube, inside the ball,
+/// until Q2205 offered the point half way round the tube between two corners.
+///
+/// **Each is refused `AClosedEdgeOfTheAnswerWouldStartAtAPole` again now**, on
+/// a face of whichever solid is named first, by `fuse/assemble.rs`. Its
+/// `with_the_halves_of_each_whole_curve_joined` joins the two halves of the
+/// circle through the poles back into one closed side starting at a pole,
+/// because the other circle closes on itself and the ring and the ball's two
+/// circles go by one name: `which_of_the_pairs_closed_crossings_it_is` tells no
+/// circles of a ring and a ball apart. The ball at `(−1, 0, 0)` is the same
+/// shape mirrored.
 ///
 /// **The answer exists.** The ring is `8π²` and the ball `256π/3`, and the part
 /// of the ring inside the ball at `(1, 0, 0)` is `π(2π + 4 atan(15/8) − 32/17)`.
 /// Its slice at `x` is the ring's annulus between radii `4 ± √(1 − x²)` inside
 /// the ball's disc of radius `√(16 − (x − 1)²)`, which never reaches past the
 /// annulus, so the slice is `π(8√(1 − x²) + 2x − 2)` wherever that is above
-/// nothing: from `x = −15/17`, where `4√(1 − x²) = 1 − x`, to `x = 1`.
+/// nothing: from `x = −15/17`, where `4√(1 − x²) = 1 − x`, to `x = 1`. For the
+/// O-ring the slice is `π(8√(25/16 − x²) + 3x/2 − 73/8)`, from `x = −357/1060`
+/// to `x = 3/4`.
 #[test]
-fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_finds_no_point_inside_a_piece() {
-    for x in [1.0, -1.0] {
-        let poles = [-4.0, 4.0].map(|z| PredicatePoint::Exact([x, 0.0, z]));
-        let on_the_other_circle = [-15.0 / 17.0 * x, 0.0, 60.0 / 17.0];
+fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_refused_a_closed_edge_from_a_pole() {
+    for (tube, radius, x) in [
+        (1.0, 4.0, 1.0),
+        (1.0, 4.0, -1.0),
+        (1.25, 3.0, 0.75),
+        (1.25, 3.0, -0.75),
+    ] {
         for (rule, ring_first) in every_rule_both_ways() {
             let mut model = a_model();
-            let one = a_whole_ring_about_x(&mut model);
-            let other = model.add_ball(4.0, &shift(x, 0.0, 0.0)).expect("a ball");
-            let what = format!("the ball at x = {x}, {rule:?}, the ring first {ring_first}");
+            let one = a_whole_ring_about_x(&mut model, tube);
+            let other = model.add_ball(radius, &shift(x, 0.0, 0.0)).expect("a ball");
+            let what = format!(
+                "the ring round a tube of {tube} and the ball of {radius} at x = {x}, {rule:?}, \
+                 the ring first {ring_first}"
+            );
             let refused = fuse(&mut model, one, other, rule, ring_first);
-            let Err(Error::Undecidable { records }) = refused else {
+            let Err(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face }) = refused else {
                 panic!("{what}: {refused:?}");
             };
-            let [record] = records.records() else {
-                panic!("{what}: one record, the refusal: {records:#?}");
-            };
-            assert_eq!(
-                record.predicate(),
-                "a point inside a piece of a face",
-                "{what}: {record:#?}"
-            );
-            assert_eq!(record.level(), Level::Interval, "{what}: {record:#?}");
+            let surface = model
+                .face(face)
+                .expect("the refusal names a face of the model")
+                .surface();
             assert!(
-                matches!(record.outcome(), Decision::Undecidable { enclosure } if enclosure == f64::INFINITY),
-                "{what}: no point was found at all, so nothing could be measured: {record:#?}"
-            );
-            let corners = record.inputs();
-            let (on_the_poles, elsewhere): (Vec<_>, Vec<_>) =
-                corners.iter().partition(|corner| poles.contains(corner));
-            assert_eq!(
-                on_the_poles.len(),
-                poles.len(),
-                "{what}: two of the piece's corners are the ball's two poles: {corners:?}"
-            );
-            let [PredicatePoint::Constructed(box_)] = elsewhere[..] else {
-                panic!("{what}: one corner is worked out on the other circle: {corners:?}");
-            };
-            assert!(
-                box_.iter()
-                    .zip(on_the_other_circle)
-                    .all(|(along, at)| along.lo() <= at && at <= along.hi()),
-                "{what}: the corner on the other circle holds {on_the_other_circle:?}: {corners:?}"
+                if ring_first {
+                    matches!(surface, Surface::Torus(_))
+                } else {
+                    matches!(surface, Surface::Sphere(_))
+                },
+                "{what}: refused on a face of the solid named first, not {surface:?}"
             );
         }
     }
@@ -2184,16 +2185,16 @@ fn a_polyhedron(model: &mut Model, corners: &[[f64; 3]], faces: &[&[usize]]) -> 
         .expect("a polyhedron")
 }
 
-/// The whole ring 4 round a tube of 1, about `z` and turned a quarter about `y`
-/// onto `x`. Its two faces are the ring's halves either side of `z = 0`, joined
-/// along the two circles that plane cuts it in, as
+/// The whole ring 4 round a tube of `tube`, about `z` and turned a quarter
+/// about `y` onto `x`. Its two faces are the ring's halves either side of
+/// `z = 0`, joined along the two circles that plane cuts it in, as
 /// `a_ring_crossed_in_two_closed_curves.rs` writes it.
-fn a_whole_ring_about_x(model: &mut Model) -> SolidKey {
+fn a_whole_ring_about_x(model: &mut Model, tube: f64) -> SolidKey {
     let cut = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
         .expect("the z axis is a unit normal");
-    let skin = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower"));
+    let skin = Surface::Torus(Torus::new(Axis::z(), 4.0, tube).expect("a tube narrower"));
     let mut builder = SolidBuilder::new();
-    let [outer, inner] = [5.0, 3.0].map(|reach| {
+    let [outer, inner] = [4.0 + tube, 4.0 - tube].map(|reach| {
         let corner = builder
             .add_vertex(Point::new(reach, 0.0, 0.0))
             .expect("a corner on the ring and on the plane");
