@@ -9039,15 +9039,19 @@ impl<'f> Arrangement<'f> {
             .map(|&half_edge| {
                 let arc = &self.arcs[half_edge / 2];
                 let crossing = &self.crossings[arc.crossing];
+                let material_side = match crossing.touching {
+                    Some(touch) => touch.face_lies_on,
+                    None if half_edge.is_multiple_of(2) != arc.against_its_gradients => {
+                        Decision::Neg
+                    }
+                    None => Decision::Pos,
+                };
+                let (partner, material_side) = self
+                    .named_by_the_plane_it_lies_in(half_edge, material_side)
+                    .unwrap_or((crossing.partner, material_side));
                 Ok(FaceMeet {
-                    carried_by: [self.surface, crossing.partner],
-                    material_side: match crossing.touching {
-                        Some(touch) => touch.face_lies_on,
-                        None if half_edge.is_multiple_of(2) != arc.against_its_gradients => {
-                            Decision::Neg
-                        }
-                        None => Decision::Pos,
-                    },
+                    carried_by: [self.surface, partner],
+                    material_side,
                     ends: [
                         self.meet_point(self.from(half_edge)),
                         self.meet_point(self.to(half_edge)),
@@ -9061,6 +9065,69 @@ impl<'f> Arrangement<'f> {
                 })
             })
             .collect()
+    }
+
+    /// The plane a side along `half_edge` is named by in place of its
+    /// crossing's partner, and the side of that plane its material is on,
+    /// given `material_side`, the side of the partner it is on; or `None` where
+    /// the side keeps its partner's name.
+    ///
+    /// **One curve gets one name.** A curved face and a curved partner can
+    /// cross in a curve that a plane cuts the face in too, and the two are
+    /// folded into one crossing ([`Arrangement::one_curve_two_partners_cut`]):
+    /// a chamfered bar's pipe and cone cross in the circle a block's top lies
+    /// on. The plane's own face names that curve by the plane and a curved
+    /// surface, and the answer takes two such names on one plane for one curve
+    /// (`the_name_each_closed_curve_goes_by` in [`assemble`](super::assemble)),
+    /// but never a name of two curved surfaces. Named by its partner, the
+    /// bar's pipe kept the circle as the bar's own edge, started at the seam
+    /// corner, and the block's top named it a new crossing started somewhere
+    /// else: one circle was two edges with one face along each, and the bar
+    /// less the block, and the two united, were refused as not a manifold
+    /// (Q2179).
+    ///
+    /// **The side is read again against the plane, from one sign.** Left of a
+    /// forward half-edge is the partner's negative side, so `material_side`
+    /// says whether the walk runs along `∇S × ∇A` for the partner `A`; along
+    /// the plane `P` the same holds of `∇S × ∇P`. On the one curve both lie
+    /// along its one tangent, so the side is the same where the two point the
+    /// same way and the other where they point opposite ways, as
+    /// [`Arrangement::side_off_a_curve_it_also_cuts`] reads it. It is read at
+    /// the node the half-edge leaves. A dot product that cannot be signed
+    /// there, which two surfaces touching there give, keeps the partner's name,
+    /// and so does a crossing along a touch or through a cone's apex, whose
+    /// side is not read off its gradients.
+    fn named_by_the_plane_it_lies_in(
+        &self,
+        half_edge: usize,
+        material_side: Decision,
+    ) -> Option<(Surface, Decision)> {
+        let crossing = &self.crossings[self.arcs[half_edge / 2].crossing];
+        if self.surface.as_plane().is_some()
+            || crossing.partner.as_plane().is_some()
+            || crossing.touching.is_some()
+            || crossing.through_an_apex.is_some()
+        {
+            return None;
+        }
+        let plane = *crossing
+            .also_cut_by
+            .iter()
+            .find(|surface| surface.as_plane().is_some())?;
+        let at = self.nodes[self.from(half_edge)].point;
+        let face = gradient_at(&self.surface, at).enclosure();
+        let along_the_partner =
+            cross_of_intervals(face, gradient_at(&crossing.partner, at).enclosure());
+        let along_the_plane = cross_of_intervals(face, gradient_at(&plane, at).enclosure());
+        let sign = dot_of(along_the_partner, along_the_plane).sign();
+        let (Decision::Pos | Decision::Neg) = sign else {
+            return None;
+        };
+        if sign == Decision::Pos {
+            Some((plane, material_side))
+        } else {
+            Some((plane, the_other_way(material_side)))
+        }
     }
 
     fn meet_point(&self, node: usize) -> MeetPoint {
