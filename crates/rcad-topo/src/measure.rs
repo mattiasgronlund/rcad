@@ -1745,17 +1745,7 @@ fn each_face_and_its_triangles(mesh: &Mesh) -> Vec<(FaceKey, &[MeshTriangle])> {
 /// cylinder's wall goes right round and its vector areas cancel to nothing, so
 /// the shorter sum would say a bar has no wall.
 fn area_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> f64 {
-    let mut widest = 0.0f64;
-    for triangle in triangles {
-        let [a, b, c] = corners_of(mesh, triangle);
-        for edge in [b - a, c - a] {
-            for component in edge.components() {
-                widest = widest.max(component.abs());
-            }
-        }
-    }
-    let across = shift_for(widest);
-
+    let across = the_shrink_for_the_sides_of(mesh, triangles);
     let mut total = 0.0;
     for triangle in triangles {
         let [a, b, c] = corners_of(mesh, triangle);
@@ -1944,6 +1934,68 @@ fn how_far_the_points_stray_off(
         }
     }
     upward(furthest * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF))
+}
+
+/// How much more area a flat face's `triangles` have than their shadow
+/// straight down on its `plane`, rounded up: a squared quantity, in the
+/// model's own unit.
+///
+/// **A triangle whose corners stand off the plane leans, and a leaning
+/// triangle is larger than its shadow.** The shadow is what stands for the
+/// face: where the points the mesher placed along a curved edge stray off the
+/// plane but still sit on the curve's own surface, their shadow is the
+/// outline the face really has, inscribed, which [`rim_of_the_flat_faces`]
+/// already charges. The rest of the lid in
+/// `area_error_ignores_a_tilted_triangles_extra_area.rs` leans up to an arc
+/// drawn `0.3` above it, and its triangles came out `0.138` over its area
+/// against a rim charge of `0.012`.
+///
+/// **Worked out from the triangles and not bounded from
+/// [`how_far_the_points_stray_off`].** Twice a triangle's vector area is `v`,
+/// and with `n` the plane's normal, of length one, the triangle is `|v|` and
+/// its shadow `|n · v|`, so what leaning adds is `|n × v|² / (|v| + |n · v|)`
+/// — no cancellation, where `|v| − |n · v|` would cancel to nothing on a
+/// face that does not lean. A bound from how far the points stray alone has
+/// to allow every triangle to be as steep as that distance over its narrowest
+/// width, and the triangles a mesher lays across a flat face are long and
+/// thin. What leaning really adds goes as the square of how far the points
+/// stray, so a face whose points stray a rounding owes about a rounding
+/// squared, under the rounding of its own area.
+///
+/// `0.0` exactly when every triangle lies square to the plane's normal, as a
+/// round bar's caps do.
+fn how_much_area_leaning_adds(mesh: &Mesh, triangles: &[MeshTriangle], plane: &Plane) -> f64 {
+    let across = the_shrink_for_the_sides_of(mesh, triangles);
+    let normal = plane.normal();
+    let mut total = 0.0;
+    for triangle in triangles {
+        let [a, b, c] = corners_of(mesh, triangle);
+        let twice = shrink(b - a, across).cross(shrink(c - a, across));
+        let whole = twice.length();
+        if whole == 0.0 {
+            continue;
+        }
+        let shadow = normal.dot(twice).abs();
+        let leaning = normal.cross(twice).length();
+        total += leaning * leaning / (whole + shadow);
+    }
+    upward(shift_up(total * 0.5, 2 * across))
+}
+
+/// The power of two that brings the widest side of `triangles`, along any
+/// axis, to between one and two, so their areas are taken in a scale of
+/// their own for the reason [`SolidView::surface_area`] gives.
+fn the_shrink_for_the_sides_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> i32 {
+    let mut widest = 0.0f64;
+    for triangle in triangles {
+        let [a, b, c] = corners_of(mesh, triangle);
+        for edge in [b - a, c - a] {
+            for component in edge.components() {
+                widest = widest.max(component.abs());
+            }
+        }
+    }
+    shift_for(widest)
 }
 
 /// Which entries of the mesh are `face`'s own corners: the point the model
