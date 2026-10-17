@@ -3866,14 +3866,22 @@ fn how_a_plane_leans_against_a_pipes_axis(
 /// length it has while the lean is an angle, and the pipe is `radius` wide at
 /// any such length (`docs/decisions.md` §118.10).
 ///
-/// **`n·w` is summed exactly and rounded once.** Summed in `f64` it can come
-/// out exactly nothing for a plane a rounding off parallel to the axis, whose
-/// ellipse is about `10¹⁶` long, and dividing by it then is dividing by zero.
-/// Where a product of a normal and a direction component is too small to keep
-/// exactly, under `2⁻⁹⁶⁹`, it is summed to about a hundred bits instead. The
-/// fuzzer draws that often — a normal of `(−3e-179, −2e-204, 1)` against an
-/// axis of `(−5e-12, 1e-128, −1)` — and the soak over its draws walks nearly
-/// half its points along such crossings.
+/// **`n·w` is the `f64` dot unless that comes out exactly nothing.** It does
+/// for a plane a rounding off parallel to the axis, whose ellipse is about
+/// `10¹⁶` long, and dividing by it then is dividing by zero. There `n·w` is
+/// summed exactly and rounded once, or, where a product of a normal and a
+/// direction component is too small to keep exactly, under `2⁻⁹⁶⁹`, summed to
+/// about a hundred bits. The fuzzer draws that often — a normal of
+/// `(−3e-179, −2e-204, 1)` against an axis of `(−5e-12, 1e-128, −1)` — and the
+/// soak over its draws walks nearly half its points along such crossings.
+///
+/// **A dot that is not nothing is kept as `f64` gave it**, though for such a
+/// plane it can be far off the exact one. Summed exactly for every plane, the
+/// bar of `crates/rcad-topo/tests/a_turned_bar_cut_by_a_block_turned_with_it.rs`
+/// turned one radian about `(1, 1, 1)`, whose notch sides all have a dot that
+/// is not nothing, had its union refused *order along a crossing* between two
+/// points about `3.5e16` and `6.2e16` from the origin, a fuse the `f64` dot
+/// answers (Q2189).
 ///
 /// # Errors
 ///
@@ -3890,10 +3898,15 @@ fn how_a_plane_leans_against_a_pipes_axis(
 fn where_a_plane_cuts_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<Conic> {
     let normal = flat.normal();
     let along = pipe.axis().direction();
-    let leans = Exact::dot_of(normal.components(), along.components()).map_or_else(
-        || normal.dot_rounded_once(along),
-        |exact| exact.nearest_f64(),
-    );
+    let rounded = normal.dot(along);
+    let leans = if rounded == 0.0 {
+        Exact::dot_of(normal.components(), along.components()).map_or_else(
+            || normal.dot_rounded_once(along),
+            |exact| exact.nearest_f64(),
+        )
+    } else {
+        rounded
+    };
     if leans == 0.0 {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     }
