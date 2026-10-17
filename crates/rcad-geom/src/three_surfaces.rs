@@ -4,7 +4,7 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and eleven ways round it
+//! # Two planes and a quadric is the road, and twelve ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
@@ -108,11 +108,23 @@
 //! plane that steep no outer edge, so it does not reach that.
 //! [`what_a_plane_beside_a_pipe_leaves`].
 //!
+//! **A twelfth is a quartic that one wall mirrors down to a quadratic.** The
+//! wall through a pipe's or a cone's axis and the plane's normal is a mirror
+//! of both. Where it is a mirror of the other curved surface too — a ball
+//! whose centre is on it, or a pipe or a cone whose axis lies in it — the two
+//! curved surfaces differ on the plane by a quadratic in the height up the
+//! first one's axis alone, and the points are the ends of that one's chords
+//! at its roots. A cut steeper than half a right angle to a bar and its
+//! chamfer cone is it, and so is a bar leaning to the floor with a ball on its
+//! axis, whose stored direction rounds and leaves the ball's centre a rounding
+//! off it, and a ball resting on a rod cut leaning through where they touch.
+//! [`what_a_plane_one_wall_mirrors_with_both_leaves`].
+//!
 //! **Three curved surfaces, two of which bend the same way, are one plane and
 //! two curved surfaces** by the first family's own argument: every point the
 //! two share is on the plane they differ by, and every point on that plane and
 //! one of them is on the other. So the plane takes the place of one of the
-//! two, and the eleven roads answer the triple — two cones of one slope about one
+//! two, and the twelve roads answer the triple — two cones of one slope about one
 //! axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
@@ -122,12 +134,13 @@
 //! are not both cut by it in circles,
 //! neither of which is a pipe it runs along, whose bands overlap, and whose
 //! curves the plane leans too far for one to be a line bent by little across
-//! the other, or which touch rather than cross, and which the plane does not
-//! reach only far along a pipe — a plane leaning well off square to a pipe's
-//! axis, which cuts it in a long ellipse, against a ball off that axis, a cap
-//! of one bar across a second bar leaning to it, or a plane nearer square
-//! than parallel to the axis a bar and its chamfer cone share, which cuts them
-//! where their bands overlap, too steep for the band road —
+//! the other, or which touch rather than cross, which the plane does not
+//! reach only far along a pipe, and which no wall through a pipe's or a
+//! cone's axis and the plane's normal mirrors both — a plane leaning well off
+//! square to a pipe's axis, which cuts it in a long ellipse, against a ball
+//! whose centre is off the wall through that axis and the plane's normal, or a
+//! cap of one bar across a second bar leaning to it whose axis passes the
+//! first one's by rather than crossing it —
 //! a plane along a pipe and a cone one of whose rulings runs along the
 //! pipe, three curved surfaces no two of which differ by a plane a stored
 //! [`Plane`] is exactly, and any triple with a torus and fewer than two planes
@@ -212,7 +225,11 @@ pub enum MeetOfThree {
     /// points on each, or a cone's apex and one circle. A plane beside that
     /// axis, parallel to it or leaning, gives them in the same order, two on a
     /// circle it cuts and one on a circle it touches
-    /// ([`what_a_plane_beside_their_one_axis_leaves`]). A
+    /// ([`what_a_plane_beside_their_one_axis_leaves`]). A plane one wall
+    /// mirrors with both gives them the same way, up the axis of the pipe or
+    /// the cone the wall is read off: the lower height first, and at each
+    /// height the `−(n × w)` end of the chord first
+    /// ([`what_a_plane_one_wall_mirrors_with_both_leaves`]). A
     /// plane that cuts both curved surfaces in circles gives them along the
     /// line it crosses the line the two circles differ by in, as two planes do
     /// ([`what_a_plane_that_cuts_both_in_circles_leaves`]). A plane along a
@@ -450,7 +467,7 @@ impl MeetOfThree {
 /// # Errors
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
-/// the three are planes and none of the eleven ways round that the module doc
+/// the three are planes and none of the twelve ways round that the module doc
 /// names runs — for three curved surfaces, after the plane two of them differ
 /// by has taken one's place, or where no two of them differ by one.
 ///
@@ -1701,9 +1718,11 @@ fn where_three_curved_surfaces_meet(
 /// for bands that cross comes next and takes what the band road hands on, so
 /// it never changes an answer either. The road for a plane beside a pipe comes
 /// next, takes what every road before it hands on, and also only ever answers
-/// that the three share nothing. Last of all, the road beside the axis is
-/// asked again for a plane that leans to the axis, no nearer square to it
-/// than to parallel, and takes only what every other road handed on.
+/// that the three share nothing. Then the road beside the axis is asked again
+/// for a plane that leans to the axis, no nearer square to it than to
+/// parallel, and takes only what every road before it handed on. Last of all
+/// the road for a plane one wall mirrors with both is asked, and takes only
+/// what every other road handed on, so no answer one of them gives moves.
 fn where_one_plane_and_two_curved_surfaces_meet(
     flat: &Plane,
     one: &Surface,
@@ -7159,27 +7178,32 @@ mod tests {
         assert_eq!(meet([&bar, &cone, &wall]), Ok(answer), "in any order");
     }
 
-    /// A plane that leans to the bar's axis cuts it in an ellipse, and an
-    /// ellipse and the ball's circle meet where a quartic is zero, so where
-    /// the two come near the triple stays refused. The points are there, and
-    /// the band road cannot keep the two apart: through `(0, 0, 5)` with
-    /// normal `(0, 0.6, 0.8)` the plane cuts the ball in a circle of radius
-    /// `√(9 − 1.8²) = 2.4` about `(0, 1.92, 3.56)`, which runs through
-    /// `(0, 0, 5)` on the bar's axis and out to `(0, 3.84, 2.12)` past the
-    /// bar, so it crosses the ellipse.
+    /// A plane that leans to the bar's axis cuts it in an ellipse, and the
+    /// ball in a circle: through `(0, 0, 5)` with normal `(0, 0.6, 0.8)`, one
+    /// of radius `√(9 − 1.8²) = 2.4` about `(0, 1.92, 3.56)`, which runs
+    /// through `(0, 0, 5)` on the bar's axis and out to `(0, 3.84, 2.12)` past
+    /// the bar, so it crosses the ellipse. An ellipse and a circle meet where a
+    /// quartic is zero, and this was refused by name until Q2196.
+    ///
+    /// The wall `x = 0` holds the bar's axis, the plane's normal and the
+    /// ball's centre, so it is a mirror of all three, and the mirror road
+    /// answers it. On the plane `z = 5 − 0.75y`, and the bar and the ball
+    /// differ by `0.5625y² − 6y + 4`, nothing at `y = 16/3 − 8√3/3`, about
+    /// `0.7145`, and at about `9.95`, past the bar. So the three meet at
+    /// `(±√(4 − y²), y, 5 − 0.75y)` for the first, the `−(n × w) = (−0.6, 0,
+    /// 0)` end first, each a rounding off it.
     #[test]
-    fn a_plane_leaning_to_a_bars_axis_through_a_ball_off_it_is_refused_by_name() {
+    fn a_plane_leaning_to_a_bars_axis_through_a_ball_off_it_meets_both_at_two_corners() {
         let leaning = flat([0.0, 0.6, 0.8], [0.0, 0.0, 5.0]);
         let bar = a_bar_up_z_of_radius(2.0);
         let ball = the_ball_of_radius_at_0_3_5(3.0);
-        assert_eq!(
-            meet([&leaning, &bar, &ball]),
-            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-        );
-        assert_eq!(
-            meet([&ball, &leaning, &bar]),
-            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-        );
+        let answer = meet([&leaning, &bar, &ball]).expect("one wall mirrors all three");
+        on_all_three([&leaning, &bar, &ball], &answer);
+        let y = (16.0 - 8.0 * 3.0_f64.sqrt()) / 3.0;
+        let x = (4.0 - y * y).sqrt();
+        let z = 5.0 - 0.75 * y;
+        narrow_boxes_near(&answer, &[[-x, y, z], [x, y, z]]);
+        assert_eq!(meet([&ball, &leaning, &bar]), Ok(answer), "in any order");
     }
 
     /// `-0.0 == 0.0`, so no pin that compares corners sees which zero a corner
