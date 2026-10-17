@@ -9832,13 +9832,13 @@ fn across_a_circle_that_starts_at_a_pole(
             let between = (first.centre(), second.centre() - first.centre());
             return across_a_circle_round_a_line(pair, between, from, at);
         }
-        [Surface::Sphere(_), Surface::Cone(cone)] | [Surface::Cone(cone), Surface::Sphere(_)] => {
-            let axis = (cone.axis().origin(), cone.axis().direction());
-            return across_a_circle_round_a_line(pair, axis, from, at);
-        }
-        [Surface::Sphere(_), Surface::Torus(ring)] | [Surface::Torus(ring), Surface::Sphere(_)] => {
-            let axis = (ring.axis().origin(), ring.axis().direction());
-            return across_a_circle_round_a_line(pair, axis, from, at);
+        [Surface::Sphere(ball), Surface::Torus(ring)]
+        | [Surface::Torus(ring), Surface::Sphere(ball)] => {
+            let axis = ring.axis();
+            if !the_balls_centre_is_on(ball, &axis) {
+                return None;
+            }
+            return across_a_circle_round_a_line(pair, (axis.origin(), axis.direction()), from, at);
         }
         _ => return None,
     };
@@ -9938,15 +9938,17 @@ fn a_ball_crosses_a_pipe_in_one_loop_at_most(ball: &Sphere, pipe: &Cylinder) -> 
     room.sign() == Decision::Pos
 }
 
-/// The point straight across a circle a ball crosses a ball, a cone or a ring
-/// in, where the circle starts at a pole of a ball and both surfaces certify
-/// that point is on them.
+/// The point straight across a circle a ball crosses a ball or a ring in,
+/// where the circle starts at a pole of a ball and both surfaces certify that
+/// point is on them.
 ///
 /// **Each such circle is square to a line through its middle**, given as a
 /// point of the line and its direction: the line between two balls' centres,
-/// or the axis of a cone or a ring, which the walk draws a circle round only
-/// where the ball's centre is on it. So the point across is `from` mirrored
-/// through its foot on that line. Two balls come in the order
+/// or the axis of a ring whose ball is centred on it
+/// ([`the_balls_centre_is_on`]). Both surfaces are then turned about that line,
+/// so every loop they cross in is a circle round it, and turning a point of one
+/// half a turn about the line, which is mirroring it through its foot on the
+/// line, keeps it on that same circle. Two balls come in the order
 /// [`Surface::how_it_sorts_against`] puts them, as the walk takes them, so the
 /// line, and how the foot rounds, does not depend on which the caller named
 /// first.
@@ -9977,6 +9979,21 @@ fn across_a_circle_round_a_line(
     pair.iter()
         .all(|surface| side_of_surface(surface, exact) == Decision::Zero)
         .then_some(exact)
+}
+
+/// Whether the ball's centre is certified to lie on `axis`, so that the ball
+/// is turned about it as well.
+///
+/// Off the axis, nothing says the point half a turn round it from a point of
+/// one loop is on that same loop, even where both surfaces certify it is on
+/// them, and a node there would cut a loop at a point it may not pass through.
+fn the_balls_centre_is_on(ball: &Sphere, axis: &Axis) -> bool {
+    let centre = ball.centre().coordinates().map(Interval::exactly);
+    let origin = axis.origin().coordinates().map(Interval::exactly);
+    let along = axis.direction().components().map(Interval::exactly);
+    cross_of_intervals([0, 1, 2].map(|at| centre[at] - origin[at]), along)
+        .iter()
+        .all(|square_off| square_off.sign() == Decision::Zero)
 }
 
 /// The smallest box holding both boxes.
