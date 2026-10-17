@@ -36,6 +36,12 @@
 //! A cone in a solid of its own beside the bar does not reach that question:
 //! the fuse then asks where the pipe and the cone cross first.
 //!
+//! A block whose top is `z = 1`, neither solid placed, holds the circle the
+//! pipe and the cone share in its top. The pipe and the cone each name the
+//! side along that circle by the block's top since row Q2179, the name the
+//! top's own face gives it, so the circle is one edge; the fourth test pins
+//! the difference, the union and the intersection.
+//!
 //! What is left is not measured: the bar alone, before any fuse, is refused
 //! `DeflectionBelowWhatAMeshCanReach` with `closest` about `242259` at every
 //! deflection asked. Unplaced, or turned about its own axis, it measures, and a
