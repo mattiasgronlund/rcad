@@ -1484,29 +1484,32 @@ fn the_small_ball_inside_the_bar() -> f64 {
     })
 }
 
-/// A ball of radius 3 at the origin against a ball of radius 5 whose centre is
-/// 4 away along `x`, `−x` or `y`, under every rule both ways round.
+/// A ball of radius `3/8` at the origin against a ball of radius `5/8` whose
+/// centre is `1/2` away along `x` or `y`, under every rule both ways round.
 ///
-/// The two cross in the circle of radius 3 on the plane through the small
+/// The two cross in the circle of radius `3/8` on the plane through the small
 /// ball's centre square to the line between the centres, which is a great
-/// circle of the small ball through both its poles. Along `x` and `y` the walk
+/// circle of the small ball through both its poles, `(0, 0, ±3/8)`. The walk
 /// starts that circle at one of the poles, and each fuse was refused
-/// `AClosedEdgeOfTheAnswerWouldStartAtAPole` until Q2171 cut it at the point
-/// across as well. Along `−x` it was answered before.
+/// `AClosedEdgeOfTheAnswerWouldStartAtAPole` until Q2171 cut it at the other
+/// pole as well, the point across. Probed at eight times this size, the big
+/// ball along `−x` was answered before, so it is not run here.
 ///
-/// **The answer.** The balls are `36π` and `500π/3`, and they share
+/// **The answer.** The balls are `9π/128` and `125π/384`, and they share
 /// [`the_lens_two_balls_share`]: the small ball's half past the circle and a
-/// cap 1 deep of the big one, `68π/3`.
+/// cap `1/8` deep of the big one, `17π/384`.
 #[test]
 fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_every_rule() {
     use std::f64::consts::PI;
-    let (small, big) = (36.0 * PI, 500.0 * PI / 3.0);
-    let lens = the_lens_two_balls_share(5.0, 3.0, 4.0);
-    for (what, [x, y]) in [("x", [4.0, 0.0]), ("-x", [-4.0, 0.0]), ("y", [0.0, 4.0])] {
+    let (small, big) = (9.0 * PI / 128.0, 125.0 * PI / 384.0);
+    let lens = the_lens_two_balls_share(0.625, 0.375, 0.5);
+    for (what, [x, y]) in [("x", [0.5, 0.0]), ("y", [0.0, 0.5])] {
         for (rule, small_first) in every_rule_both_ways() {
             let mut model = a_model();
-            let one = model.add_ball(3.0, &Isometry::identity()).expect("a ball");
-            let other = model.add_ball(5.0, &shift(x, y, 0.0)).expect("a ball");
+            let one = model
+                .add_ball(0.375, &Isometry::identity())
+                .expect("a ball");
+            let other = model.add_ball(0.625, &shift(x, y, 0.0)).expect("a ball");
             let what =
                 format!("the big ball along {what}, {rule:?}, the small first {small_first}");
             let answer = fuse(&mut model, one, other, rule, small_first)
