@@ -89,9 +89,9 @@ use crate::holds::{
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse, WireStep};
 use crate::validate::{
-    a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
-    how_much_space_a_curved_solid_encloses, the_curved_one_of, the_way_it_is_parametrised_about,
-    winding_round,
+    SideOfAFace, a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
+    how_much_space_a_curved_solid_encloses, the_curved_one_of, the_narrowest_a_face_is,
+    the_way_it_is_parametrised_about, winding_round,
 };
 use crate::view::how_far_apart;
 use crate::{
@@ -119,9 +119,10 @@ use super::{
 /// [`fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it`]
 /// takes (`Model::fused_under`, `docs/decisions.md` §417.9).
 ///
-/// **The range is asked here, once, of the corners and edges as they are once
-/// the pieces are joined and any shell a tolerant policy takes as flat is left
-/// out, and before the edges are named.** `inputs_reach` is
+/// **The range is asked here and nowhere else in a fuse, of the corners and
+/// edges as they are once the pieces are joined and any shell a tolerant
+/// policy takes as flat is left out, and before the edges are named.**
+/// `inputs_reach` is
 /// `the_inputs_fit_in_f64`'s answer, and `None` asks nothing
 /// ([`Assembly::check_dynamic_range`] says why). Naming an edge reads which
 /// way it leaves its corner, and an arc from a pole to a corner a rounding off
@@ -129,9 +130,12 @@ use super::{
 /// narrow lune of a ball was refused
 /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for it, where the
 /// chord a rounding long is the limit the range names (Q1664,
-/// `tests/a_narrow_lune_from_a_pole_corner.rs`). A tolerant policy's warning
-/// goes into `range_warning`, so the caller can hold it back from the wobble
-/// check.
+/// `tests/a_narrow_lune_from_a_pole_corner.rs`). How thin each face is is
+/// asked once the edges are named, since that reads the pickers naming gives
+/// them, and only of an answer the corners and edges let through without a
+/// word ([`Assembly::check_how_thin_each_face_is`]), so a tolerant policy
+/// warns once at most. Its warning goes into `range_warning`, so the caller
+/// can hold it back from the wobble check.
 ///
 /// **Which shell is a void of which is left to
 /// [`Assembly::nest_the_shells`]**, which the fuse asks after this: nesting
@@ -170,10 +174,14 @@ pub(crate) fn assemble(
     let mut assembly =
         Assembly::joined_into_shells(model, scratch, chosen, names_of_one_point, policy, log)?;
     assembly.leave_out_each_shell_thinner_than_the_wobble(policy, log)?;
-    if let Some(inputs_reach) = inputs_reach {
-        assembly.check_dynamic_range(inputs_reach, policy, range_warning)?;
-    }
+    let still_to_measure = match inputs_reach {
+        Some(inputs_reach) => assembly.check_dynamic_range(inputs_reach, policy, range_warning)?,
+        None => None,
+    };
     assembly.runs = assembly.how_each_edge_runs()?;
+    if let Some(range) = still_to_measure {
+        assembly.check_how_thin_each_face_is(range, policy, range_warning)?;
+    }
     Ok(assembly)
 }
 
@@ -544,9 +552,16 @@ impl Assembly {
     /// by name. Nothing here can make the answer smaller, either — the sliver is
     /// where the two inputs really are.
     ///
-    /// **The smallest feature is the shortest chord, or the cone's radius at a
-    /// corner of a cone face**, the two `Model::check_dynamic_range` takes off
-    /// an answer. The radius of a ball, a pipe or a ring is left out: a curved
+    /// **The smallest feature here is the shortest chord, or the cone's radius
+    /// at a corner of a cone face**, two of the three things
+    /// `Model::check_dynamic_range` takes off an answer. The third, how thin a
+    /// face is where [`the_narrowest_a_face_is`] can say, is asked by
+    /// [`Assembly::check_how_thin_each_face_is`] once the edges are named,
+    /// with what this measured, and only when this let the answer through
+    /// without a word, which is what `Some` hands back. A face of a bar
+    /// dipping `4.4e−16` through a block's top is that thin where its
+    /// shortest chord is `5.96e−8` (Q2237). The radius of a ball, a pipe or a
+    /// ring is left out: a curved
     /// face of the answer sits on a surface inherited from its ancestor bit for
     /// bit (§17.1), and those radii are numbers of the surface that an input
     /// already carried. A cone's radius is not: it depends on how far up the
@@ -571,7 +586,9 @@ impl Assembly {
     /// of which naming an edge changes. Until Q1664 it was asked after, and
     /// seven narrow lunes of a ball were refused naming an arc whose chord a
     /// rounding long lay along the tangent at a pole, where this names the
-    /// limit (`docs/decisions.md` §87.3).
+    /// limit (`docs/decisions.md` §87.3). The faces cannot be asked here, since
+    /// telling a piece of a cut from its sibling reads the pickers naming
+    /// gives it, so they are the half asked after.
     ///
     /// # Errors
     ///
@@ -581,12 +598,12 @@ impl Assembly {
     /// [`Error::Geometry`] when two corners of the answer with different names
     /// landed on the very same `f64` triple, which leaves an edge of no length
     /// at all.
-    pub(crate) fn check_dynamic_range(
+    fn check_dynamic_range(
         &self,
         inputs_reach: f64,
         policy: &Policy,
         log: &mut ProvenanceLog,
-    ) -> Result<()> {
+    ) -> Result<Option<Range>> {
         let largest = self
             .corners
             .iter()
@@ -607,22 +624,62 @@ impl Assembly {
             })
             .fold(f64::INFINITY, f64::min);
         let shortest = shortest_chord.min(self.narrowest_a_cone_face_is_at_a_corner());
-        if !shortest.is_finite() || largest == 0.0 {
-            return Ok(());
+        if largest == 0.0 {
+            return Ok(None);
         }
+        if shortest.is_finite() && the_range_asked(largest, shortest, policy, log)?.is_some() {
+            return Ok(None);
+        }
+        Ok(Some(Range { largest, shortest }))
+    }
 
-        match DynamicRange::measure(largest, shortest)?.check_under_policy(policy, log) {
-            // The tag says how much slop an answer this wide carries. What a
-            // caller can act on is the record it pushed into `log`, the same as
-            // in the sweep.
-            Ok(_) => Ok(()),
-            // Both layers have a name for this. Keep reporting the topology one,
-            // since a fuse is what built it.
-            Err(rcad_geom::Error::DynamicRangeTooWide { ratio }) => {
-                Err(Invalid::DynamicRangeTooWide { ratio }.into())
-            }
-            Err(other) => Err(other.into()),
+    /// Refuse an answer with a face thinner than [`the_narrowest_a_face_is`]
+    /// lets `range` stand, where the faces are what the range is asked of
+    /// again: the second half of [`Assembly::check_dynamic_range`].
+    ///
+    /// **Asked once the edges are named**, since telling a piece of a cut from
+    /// its sibling reads the pickers naming gives it. Asked only when the
+    /// first half let the answer through without a word, and only when a face
+    /// is thinner than what the first half measured, so a tolerant policy's
+    /// answer carries one record of its range and not two.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::DynamicRangeTooWide`] as [`Assembly::check_dynamic_range`]
+    /// gives it.
+    fn check_how_thin_each_face_is(
+        &self,
+        range: Range,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let narrowest = self
+            .faces
+            .iter()
+            .map(|face| {
+                let loops: Vec<Vec<SideOfAFace<'_>>> = face
+                    .wires
+                    .iter()
+                    .map(|wire| {
+                        wire.iter()
+                            .map(|side| {
+                                let edge = &self.edges[side.edge];
+                                SideOfAFace {
+                                    ends: edge.ends.map(|corner| self.corners[corner].point),
+                                    either_side: edge.carried_by,
+                                    run: &self.runs[side.edge],
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect();
+                the_narrowest_a_face_is(&face.surface, &loops)
+            })
+            .fold(f64::INFINITY, f64::min);
+        if narrowest < range.shortest {
+            the_range_asked(range.largest, narrowest, policy, log)?;
         }
+        Ok(())
     }
 
     /// The smallest radius above zero any cone face of the answer has at one
@@ -673,8 +730,9 @@ impl Assembly {
     /// keys-resolve pass back.
     ///
     /// The thirteenth, the coordinate range, is the one this must not ask.
-    /// [`Assembly::check_dynamic_range`] asks it before either write, before
-    /// the edges are even named, and only
+    /// [`Assembly::check_dynamic_range`] asks it before either write, of the
+    /// corners and edges before the edges are even named and of the faces
+    /// just after, and only
     /// behind `the_inputs_fit_in_f64`, so that a caller whose own solids sit
     /// further apart than `f64` can resolve still gets an answer the arithmetic
     /// reached exactly. A fold over a model holding only the answer would put
@@ -5141,6 +5199,41 @@ impl Assembly {
                 .expect("the edges were tagged with exactly this much just now");
         }
         worst.max(inherited.magnitude())
+    }
+}
+
+/// What the first half of the range check measured and let through without a
+/// word, for [`Assembly::check_how_thin_each_face_is`] to ask again with the
+/// faces in.
+#[derive(Clone, Copy)]
+struct Range {
+    /// The larger of the inputs' reach and the answer's largest coordinate.
+    largest: f64,
+    /// The answer's shortest chord, or its narrowest cone at a corner;
+    /// infinite where it has neither.
+    shortest: f64,
+}
+
+/// [`DynamicRange::check_under_policy`] of `largest` over `shortest`, with the
+/// slop it hands back when it warned, and its refusal named as
+/// [`Invalid::DynamicRangeTooWide`].
+///
+/// The slop is not hung on the answer. What a caller can act on is the record
+/// pushed into `log`, the same as in the sweep. Both layers have a name for
+/// the refusal, and the topology one is reported, since a fuse is what built
+/// the answer.
+fn the_range_asked(
+    largest: f64,
+    shortest: f64,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Approximation>> {
+    match DynamicRange::measure(largest, shortest)?.check_under_policy(policy, log) {
+        Ok(warned) => Ok(warned),
+        Err(rcad_geom::Error::DynamicRangeTooWide { ratio }) => {
+            Err(Invalid::DynamicRangeTooWide { ratio }.into())
+        }
+        Err(other) => Err(other.into()),
     }
 }
 

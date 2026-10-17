@@ -28,7 +28,7 @@ use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlo
 use crate::measure::signed_volume_over_and_how_far_it_rounded;
 use crate::mesh::Mesh;
 use crate::model::{ModelData, WireData, WireStep};
-use crate::view::{CoedgeView, FaceView, SolidView, WireStepView, WireView};
+use crate::view::{CoedgeView, FaceView, SolidView, WireStepView, WireView, how_far_apart};
 use crate::{EdgeView, Error, FaceKey, Invalid, Model, Result, SolidKey};
 
 impl Model {
@@ -1485,7 +1485,10 @@ impl Model {
     /// and those are located.
     ///
     /// Lengths are not affected by placement, so the smallest feature is read
-    /// straight off the edges.
+    /// straight off what is stored: the shortest chord of an edge that does not
+    /// close, the smallest radius of a curved face, and how thin a face is
+    /// where [`the_narrowest_a_face_is`] can say, the measure a fuse asks of
+    /// its answer before writing it.
     ///
     /// Both ends of the range are read off `scope` alone. Over the whole model
     /// that is a fold across every solid, so two solids each narrow enough on
@@ -1589,7 +1592,27 @@ impl Model {
             })
             .filter(|radius| radius.is_finite())
             .fold(f64::INFINITY, f64::min);
-        let smallest_feature = smallest_chord.min(smallest_radius);
+        let mut narrowest_face = f64::INFINITY;
+        for face in solids().flat_map(|solid| solid.faces()) {
+            let loops = face
+                .wires()
+                .map(|wire| {
+                    wire.coedges()
+                        .map(|coedge| {
+                            let edge = coedge.edge();
+                            Ok(SideOfAFace {
+                                ends: edge.stored_ends(),
+                                either_side: edge.stored_surfaces_either_side()?,
+                                run: edge.stored_run(),
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()
+                })
+                .collect::<Result<Vec<_>>>()?;
+            narrowest_face =
+                narrowest_face.min(the_narrowest_a_face_is(&face.stored_surface(), &loops));
+        }
+        let smallest_feature = smallest_chord.min(smallest_radius).min(narrowest_face);
         if !smallest_feature.is_finite() || largest == 0.0 {
             return Ok(());
         }
@@ -1815,6 +1838,225 @@ impl Model {
             })
             .fold(0.0, f64::max)
     }
+}
+
+/// One side of one loop of a face, as [`the_narrowest_a_face_is`] reads it:
+/// the two corners it runs between, the surfaces of the faces either side of
+/// it, and what it runs along.
+pub(crate) struct SideOfAFace<'a> {
+    pub(crate) ends: [Point; 2],
+    pub(crate) either_side: [Surface; 2],
+    pub(crate) run: &'a EdgeRun,
+}
+
+/// How thin a face on `surface` with the loops `loops` is somewhere no chord
+/// of its edges and no radius of its surface says, or infinite when nothing
+/// here measures it.
+///
+/// **A face can be thinner than any of its edges is short.** A bar lying along
+/// a block's top and dipping `4.4e−16` through it at its far end leaves two
+/// such faces (queue row Q2237, `tests/a_bar_lying_along_a_plane_or_a_bar.rs`).
+/// The sliver's piece of the far cap is a segment of the cap's circle cut off
+/// by a chord `5.96e−8` long, so `4.4e−16` thick, and the bar's pipe less the
+/// sliver has two loops, one of which turns `5e−16` from the corner of the
+/// other. Each answer's shortest chord is the `5.96e−8`, which fits beside
+/// coordinates of 6, and every certified fuse of them answered.
+///
+/// So two more things are measured, each only where it can be measured
+/// exactly enough to be an upper bound: how close a corner of one loop comes
+/// to a side of another ([`how_close_a_corner_comes_to_a_side_of_another_loop`]),
+/// and how thick a flat face cut off a round bar's circle by a chord is
+/// ([`how_thick_a_flat_face_cut_off_a_circle_by_a_chord_is`]). Each is a length
+/// the face is at most that thin across, so a small one is a small feature and
+/// never a guess at one.
+///
+/// **One measure for both callers**, `Assembly::check_dynamic_range` on what
+/// a fuse is about to write and [`Model::check_dynamic_range`] on what is
+/// written, so a fuse cannot answer what the sweep then refuses (§68).
+pub(crate) fn the_narrowest_a_face_is(surface: &Surface, loops: &[Vec<SideOfAFace<'_>>]) -> f64 {
+    how_close_a_corner_comes_to_a_side_of_another_loop(surface, loops).min(
+        how_thick_a_flat_face_cut_off_a_circle_by_a_chord_is(surface, loops)
+            .unwrap_or(f64::INFINITY),
+    )
+}
+
+/// The least distance from a corner of one of `loops` to a side of another
+/// that does not end at that corner, where
+/// [`how_far_a_corner_is_from_a_side`] can say it, and never less than a
+/// rounding of the numbers it was read off.
+///
+/// **A corner and a side that are the very same `f64` point are not asked**:
+/// two loops that share a corner touch there, which is a solid touching
+/// itself and an answer (§39.4), and not a neck of no width.
+///
+/// **A distance under a rounding is a rounding.** The bar's near seam corner
+/// is stored at `(3, 2, 4)`, on the block's top itself, so the ruling from it
+/// meets the top after no length at all, and the true gap is the `5e−16` the
+/// stored corner rounded away. [`DynamicRange::measure`] takes no feature of
+/// zero, and a rounding is the least the gap can be read as.
+fn how_close_a_corner_comes_to_a_side_of_another_loop(
+    surface: &Surface,
+    loops: &[Vec<SideOfAFace<'_>>],
+) -> f64 {
+    let mut closest = f64::INFINITY;
+    for (one, sides_of_one) in loops.iter().enumerate() {
+        for corner in sides_of_one.iter().flat_map(|side| side.ends) {
+            let sides_of_the_others = loops
+                .iter()
+                .enumerate()
+                .filter(|&(other, _)| other != one)
+                .flat_map(|(_, sides)| sides);
+            for side in sides_of_the_others {
+                if side.ends.contains(&corner) {
+                    continue;
+                }
+                let Some(how_far) = how_far_a_corner_is_from_a_side(corner, side, surface) else {
+                    continue;
+                };
+                let rounding = side
+                    .ends
+                    .iter()
+                    .map(Point::largest_coordinate_magnitude)
+                    .fold(corner.largest_coordinate_magnitude(), f64::max)
+                    * f64::EPSILON;
+                closest = closest.min(how_far.max(rounding));
+            }
+        }
+    }
+    closest
+}
+
+/// How far `corner` is from `side` at most, of a face on `surface`, or `None`
+/// where this cannot say.
+///
+/// A straight side is a segment, and the distance to it is the distance to
+/// its nearest point. A side where a pipe face meets a flat one is a piece of
+/// where the flat cuts the pipe, and a corner on the pipe meets that cut by
+/// running along the pipe's ruling: the distance up the ruling is the bound,
+/// once the point it lands on is on this piece and not another. That is read
+/// off the side's own pickers, and a picker that cannot tell measures nothing.
+/// A side right round the cut has no pickers, and every point of the cut is on
+/// it.
+fn how_far_a_corner_is_from_a_side(
+    corner: Point,
+    side: &SideOfAFace<'_>,
+    surface: &Surface,
+) -> Option<f64> {
+    let picked_by: &[Picker] = match side.run {
+        EdgeRun::Straight => return Some(how_far_a_point_is_from_a_segment(corner, side.ends)),
+        EdgeRun::RightRoundWhereItsFacesCross | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
+        EdgeRun::PartOfWhereItCrosses { picked_by, .. } => picked_by,
+        // A run this crate has not heard of says nothing about where it lies.
+        _ => return None,
+    };
+    let Surface::Cylinder(pipe) = surface else {
+        return None;
+    };
+    let flat = side.either_side.iter().find_map(Surface::as_plane)?;
+    let up = pipe.axis().direction();
+    let leans = flat.normal().dot(up);
+    if leans == 0.0 {
+        return None;
+    }
+    let up_the_ruling = -flat.signed_distance_to(corner) / leans;
+    let landed = PredicatePoint::from((corner + up * up_the_ruling).coordinates());
+    let on_this_piece = picked_by
+        .iter()
+        .all(|picker| matches!(picker.side_of_point(landed), Decision::Pos | Decision::Zero));
+    on_this_piece.then(|| up_the_ruling.abs() * up.length())
+}
+
+/// How far `point` is from the nearest point of the segment from `start` to
+/// `end`.
+fn how_far_a_point_is_from_a_segment(point: Point, [start, end]: [Point; 2]) -> f64 {
+    let along = end - start;
+    let length_squared = along.length_squared();
+    let how_far_along = if length_squared > 0.0 {
+        (along.dot(point - start) / length_squared).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    how_far_apart(point, start + along * how_far_along)
+}
+
+/// How thick a flat face of one loop of two sides is, where one side is the
+/// chord between two corners and the other a short arc of the circle a round
+/// bar's pipe cuts the face's plane in, square to its axis. `None` for any
+/// other face, and for the long arc, which leaves the face no thinner than the
+/// circle's radius.
+///
+/// The thickness is how far the short arc bows off its chord, `r − √(r² −
+/// h²)` for half a chord `h`, written as `h² / (r + √(r² − h²))` so that a
+/// chord far shorter than the radius does not lose it all to cancelling.
+///
+/// **The arc is told from its sibling at the long arc's middle**, the point
+/// of the circle opposite the chord's middle across the centre: a picker of
+/// the short arc rules it out. The short arc's own middle is no use there,
+/// since it can sit nearer its chord than a rounding of where it is.
+///
+/// **Square to the axis exactly**, which a bar's own cap is. A plane leaning
+/// off square cuts the pipe in an ellipse, and how far an arc of one bows off
+/// its chord is not this.
+fn how_thick_a_flat_face_cut_off_a_circle_by_a_chord_is(
+    surface: &Surface,
+    loops: &[Vec<SideOfAFace<'_>>],
+) -> Option<f64> {
+    let Surface::Plane(flat) = surface else {
+        return None;
+    };
+    let [sides] = loops else {
+        return None;
+    };
+    let [one, other] = sides.as_slice() else {
+        return None;
+    };
+    let [chord, arc] = if *one.run == EdgeRun::Straight {
+        [one, other]
+    } else {
+        [other, one]
+    };
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = arc.run else {
+        return None;
+    };
+    let [a, b] = chord.ends;
+    if *chord.run != EdgeRun::Straight || a == b {
+        return None;
+    }
+    let pipe = arc.either_side.iter().find_map(|surface| {
+        let Surface::Cylinder(pipe) = surface else {
+            return None;
+        };
+        Some(pipe)
+    })?;
+    let up = pipe.axis().direction();
+    let leans = flat.normal().dot(up);
+    if leans.abs() != 1.0 {
+        return None;
+    }
+    let through = pipe.axis().origin();
+    let centre = through + up * (-flat.signed_distance_to(through) / leans);
+    let radius = pipe.radius();
+    let middle = a + (b - a) * 0.5;
+    let half_the_chord = how_far_apart(a, b) / 2.0;
+    let middle_off_the_centre = how_far_apart(centre, middle);
+    if middle_off_the_centre == 0.0 || half_the_chord >= radius {
+        return None;
+    }
+    let middle_of_the_long_arc = centre - (middle - centre) * (radius / middle_off_the_centre);
+    let landed = PredicatePoint::from(middle_of_the_long_arc.coordinates());
+    let it_is_the_short_arc = picked_by
+        .iter()
+        .any(|picker| matches!(picker.side_of_point(landed), Decision::Neg));
+    if !it_is_the_short_arc {
+        return None;
+    }
+    let bow = half_the_chord * half_the_chord
+        / (radius + (radius * radius - half_the_chord * half_the_chord).sqrt());
+    let rounding = a
+        .largest_coordinate_magnitude()
+        .max(b.largest_coordinate_magnitude())
+        * f64::EPSILON;
+    Some(bow.max(rounding))
 }
 
 /// How far off each kind of surface the sweep lets one solid's corner sit
