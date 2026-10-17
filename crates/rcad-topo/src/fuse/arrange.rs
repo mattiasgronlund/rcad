@@ -66,16 +66,16 @@
 //! axis on a cone or a pipe
 //! ([`Arrangement::the_walk_of_each_other_lump_each_walk_faces`]), and a cell
 //! left holding two walks of one lump is refused (§36.3). A ring's face drawn
-//! on only by circles of planes square to its axis is not read by sides,
-//! since no sign tells two of its bands apart: its bands are put in order
-//! round the tube instead ([`Arrangement::the_bands_round_the_tube`]).
+//! on only by circles round its axis is not read by sides, since no sign
+//! tells two of its bands apart: its bands are put in order round the tube
+//! instead ([`Arrangement::the_bands_round_the_tube`]).
 
 use core::cmp::Ordering;
 
 use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, HalfSpace, MeetOfThree, NamedRun, Orientation,
     POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
-    SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
+    SurfaceMeet, Torus, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
     intersect, meet_of_three_surfaces, root_enclosing, where_a_closed_crossing_starts,
     where_a_cones_apex_stands_against_a_plane, which_comes_first_round_a_crossing,
 };
@@ -7139,9 +7139,10 @@ impl<'f> Arrangement<'f> {
     /// along and a bounded face to hit, and a closed curve has neither — which
     /// is why there are two and not one.
     ///
-    /// **A ring's face drawn on only by circles of planes square to its axis**
-    /// is placed by neither. No sign tells its bands apart (§428.4), so they
-    /// are put in order round the tube instead
+    /// **A ring's face drawn on only by circles round its axis**, a plane's
+    /// square to it or a ball's, a pipe's or a cone's on it, is placed by
+    /// neither. No sign tells its bands apart (§428.4), so they are put in
+    /// order round the tube instead
     /// ([`Arrangement::the_bands_round_the_tube`]).
     ///
     /// # Errors
@@ -7200,98 +7201,82 @@ impl<'f> Arrangement<'f> {
         self.make_the_cells(&same, &lump)
     }
 
-    /// On a ring's face where every curve drawn is a whole circle that a plane
-    /// square to the ring's axis cuts it in: the two walks round each band the
-    /// circles cut the ring into. `None` for any other drawing, and where a
-    /// sign below cannot be told.
+    /// On a ring's face where every curve drawn is a whole circle round the
+    /// ring's axis: the two walks round each band the circles cut the ring
+    /// into. `None` for any other drawing, and where a sign below cannot be
+    /// told.
     ///
-    /// **Such a plane cuts the ring in circles of one angle round the tube
-    /// each.** Write a point of the ring as `R + r·cos φ` out from the axis and
-    /// `r·sin φ` up it. A plane square to the axis holds one height, so it cuts
-    /// the ring where `sin φ` is one number: once on the outside of the ring,
-    /// where `cos φ` is above nought, and once on the inside. On the outside the
-    /// height rises as `φ` grows, and on the inside it falls. So going round
-    /// the tube, `φ` meets the outer circles by rising height and then the
-    /// inner ones by falling height.
+    /// The circles are those a plane square to the axis cuts the ring in, and
+    /// those a ball, a pipe or a cone on the axis shares with it, which
+    /// `intersect` names by the plane square to the axis each lies in
+    /// ([`EdgeRun::RightRoundWhereItCrosses`]).
+    ///
+    /// **Each such circle is one angle round the tube.** Write a point of the
+    /// ring as `R + r·cos φ` out from the axis and `r·sin φ` up it. A circle
+    /// round the axis holds one height, so it is where `sin φ` is one number:
+    /// on the outside of the ring, where `cos φ` is above nought, on the
+    /// inside, or at the very top or bottom of the tube, where `cos φ` is
+    /// nought. A ball of four on the axis of a ring four round a tube of one
+    /// meets the top of its tube (Q2212). On the outside the height rises as
+    /// `φ` grows, and on the inside it falls. So going round the tube from its
+    /// bottom, `φ` meets the outer circles by rising height, then the one at
+    /// the top, then the inner ones by falling height, and last the one at the
+    /// bottom.
     ///
     /// **The ring less those circles is the bands between neighbours, and
     /// nothing else.** Each circle goes once round the axis and no two meet, so
     /// they cut `φ`'s turn into stretches, and each stretch is one band: the
     /// walk on the side of one circle that `φ` grows to, and the walk on the
     /// other side of the next circle round. One circle leaves one band, bounded
-    /// by both its own walks.
+    /// by both its own walks. A circle can be cut at more than one node, as a
+    /// ball's great circle is at both its poles (Q2171), and its arcs must
+    /// then make just two walks, one along each side of it.
     ///
     /// Which walk of a circle is on the side `φ` grows to is read off the
-    /// plane. Left of a forward half-edge is the plane's negative side
-    /// ([`Arrangement::which_side_of_everything`]), and that is below the plane
-    /// where its normal points up the axis. Below an outer circle `φ` is
-    /// smaller, and below an inner one it is larger.
+    /// partner's gradient. `φ` grows along `∇T × (w × d)`, for the ring's
+    /// gradient `∇T`, its axis `w` and `d` out from its centre to the circle:
+    /// on the outside of the ring, where `∇T` points out from the axis, that
+    /// is `w`. Left of a forward half-edge is the partner's negative side
+    /// ([`Arrangement::which_side_of_everything`]), so the forward walk is on
+    /// the side `φ` grows to where the partner's gradient points against that
+    /// way. Every node of a circle is asked, and they must agree.
     ///
     /// No sign against the planes tells these bands apart, and this is why the
     /// route is here (§428.4). Two planes cut a ring in four bands, and the
     /// one between them on the outside and the one between them on the inside
     /// are both above one plane and below the other. A plate whose top cuts a
     /// half ring standing on it was refused for that
-    /// (`a_half_ring_standing_on_a_round_plate.rs`).
+    /// (`a_half_ring_standing_on_a_round_plate.rs`). A ball's sign does no
+    /// better: every node of either circle it cuts a ring in is on it.
     fn the_bands_round_the_tube(&self) -> Option<Vec<[usize; 2]>> {
         let Surface::Torus(ring) = self.surface else {
             return None;
         };
         let axis = ring.axis().direction().components();
-        let up = axis.map(Interval::exactly);
-        let centre = ring.centre().coordinates().map(Interval::exactly);
-        let ring_radius = Interval::exactly(ring.ring_radius());
-        let mut nodes: Vec<usize> = self.arcs.iter().map(|arc| arc.ends[0]).collect();
-        nodes.sort_unstable();
-        nodes.dedup();
-        if self.arcs.is_empty() || nodes.len() != self.arcs.len() || nodes.len() != self.nodes.len()
-        {
-            return None;
-        }
-        let mut circles: Vec<CircleRoundTheTube> = Vec::with_capacity(self.arcs.len());
+        let mut arcs_of: std::collections::BTreeMap<usize, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        let mut crossing_at: Vec<Option<usize>> = vec![None; self.nodes.len()];
         for (index, arc) in self.arcs.iter().enumerate() {
-            let Surface::Plane(plane) = self.crossings[arc.crossing].partner else {
-                return None;
-            };
-            if arc.ends[0] != arc.ends[1]
-                || arc.against_its_gradients
+            if arc.against_its_gradients
                 || !self.drawn_in_full[arc.crossing]
-                || !lie_along_one_line(plane.normal().components(), axis)
+                || !self.is_a_circle_round_the_axis(arc.crossing, axis)
             {
                 return None;
             }
-            let at = self.nodes[arc.ends[0]].point.enclosure();
-            let from_the_centre: [Interval; 3] = core::array::from_fn(|i| at[i] - centre[i]);
-            let height = dot_of(from_the_centre, up);
-            let squared = dot_of(up, up);
-            let out_from_the_tube = dot_of(from_the_centre, from_the_centre) * squared
-                - height * height
-                - ring_radius * ring_radius * squared;
-            let outer = match out_from_the_tube.sign() {
-                Decision::Pos => true,
-                Decision::Neg => false,
-                Decision::Zero | Decision::Undecidable { .. } | _ => return None,
-            };
-            let facing_up =
-                match dot_of(plane.normal().components().map(Interval::exactly), up).sign() {
-                    Decision::Pos => true,
-                    Decision::Neg => false,
-                    Decision::Zero | Decision::Undecidable { .. } | _ => return None,
-                };
-            circles.push(CircleRoundTheTube {
-                arc: index,
-                outer,
-                rank: if outer {
-                    height
-                } else {
-                    Interval::exactly(0.0) - height
-                },
-                forward_is_where_it_grows: outer != facing_up,
-            });
+            for end in arc.ends {
+                if *crossing_at[end].get_or_insert(arc.crossing) != arc.crossing {
+                    return None;
+                }
+            }
+            arcs_of.entry(arc.crossing).or_default().push(index);
+        }
+        if arcs_of.is_empty() || crossing_at.contains(&None) {
+            return None;
         }
 
-        let mut round: Vec<CircleRoundTheTube> = Vec::with_capacity(circles.len());
-        for circle in circles {
+        let mut round: Vec<CircleRoundTheTube> = Vec::with_capacity(arcs_of.len());
+        for (crossing, arcs) in arcs_of {
+            let circle = self.the_circle_round_the_tube(&ring, crossing, &arcs)?;
             let mut at = round.len();
             while at > 0 && circle.comes_before(&round[at - 1])? {
                 at -= 1;
@@ -7299,8 +7284,11 @@ impl<'f> Arrangement<'f> {
             round.insert(at, circle);
         }
         let walk = |circle: &CircleRoundTheTube, where_it_grows: bool| {
-            self.cycle_of
-                [2 * circle.arc + usize::from(circle.forward_is_where_it_grows != where_it_grows)]
+            if circle.forward_is_where_it_grows == where_it_grows {
+                circle.forward
+            } else {
+                circle.backward
+            }
         };
         Some(
             (0..round.len())
@@ -7312,6 +7300,98 @@ impl<'f> Arrangement<'f> {
                 })
                 .collect(),
         )
+    }
+
+    /// Whether a crossing on a ring's face is a circle round the ring's axis
+    /// `axis`: one a plane square to it cuts, or one named by such a plane.
+    fn is_a_circle_round_the_axis(&self, crossing: usize, axis: [f64; 3]) -> bool {
+        let crossing = &self.crossings[crossing];
+        if let Surface::Plane(plane) = crossing.partner {
+            return lie_along_one_line(plane.normal().components(), axis);
+        }
+        if let EdgeRun::RightRoundWhereItCrosses {
+            and: Surface::Plane(level),
+        } = crossing.run.run()
+        {
+            return lie_along_one_line(level.normal().components(), axis);
+        }
+        false
+    }
+
+    /// One circle round the ring's axis, drawn as `arcs`, all of `crossing`,
+    /// read for where it comes round the tube; `None` where its arcs are not
+    /// just two walks, one along each side of it, or where its nodes cannot
+    /// say, or do not agree, where it is and which of those walks is on the
+    /// side the angle round the tube grows to
+    /// ([`Arrangement::the_bands_round_the_tube`]).
+    fn the_circle_round_the_tube(
+        &self,
+        ring: &Torus,
+        crossing: usize,
+        arcs: &[usize],
+    ) -> Option<CircleRoundTheTube> {
+        let (forward, backward) = (self.cycle_of[2 * arcs[0]], self.cycle_of[2 * arcs[0] + 1]);
+        if forward == backward
+            || self.cycles[forward].len() != arcs.len()
+            || self.cycles[backward].len() != arcs.len()
+            || arcs.iter().any(|&arc| {
+                self.cycle_of[2 * arc] != forward || self.cycle_of[2 * arc + 1] != backward
+            })
+        {
+            return None;
+        }
+        let partner = self.crossings[crossing].partner;
+        let up = ring.axis().direction().components().map(Interval::exactly);
+        let centre = ring.centre().coordinates().map(Interval::exactly);
+        let ring_radius = Interval::exactly(ring.ring_radius());
+        let mut read: Option<CircleRoundTheTube> = None;
+        for &arc in arcs {
+            let node = self.nodes[self.arcs[arc].ends[0]].point;
+            let at = node.enclosure();
+            let from_the_centre: [Interval; 3] = core::array::from_fn(|i| at[i] - centre[i]);
+            let height = dot_of(from_the_centre, up);
+            let squared = dot_of(up, up);
+            let out_from_the_tube = dot_of(from_the_centre, from_the_centre) * squared
+                - height * height
+                - ring_radius * ring_radius * squared;
+            let place = match out_from_the_tube.sign() {
+                Decision::Pos => RoundTheTube::Outside,
+                Decision::Neg => RoundTheTube::Inside,
+                Decision::Zero if height.sign() == Decision::Pos => RoundTheTube::AtTheTop,
+                Decision::Zero if height.sign() == Decision::Neg => RoundTheTube::AtTheBottom,
+                Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+            };
+            let the_way_it_grows = cross_of_intervals(
+                gradient_at(&self.surface, node).enclosure(),
+                cross_of_intervals(up, from_the_centre),
+            );
+            let forward_is_where_it_grows =
+                match dot_of(gradient_at(&partner, node).enclosure(), the_way_it_grows).sign() {
+                    Decision::Neg => true,
+                    Decision::Pos => false,
+                    Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+                };
+            match &read {
+                None => {
+                    read = Some(CircleRoundTheTube {
+                        forward,
+                        backward,
+                        place,
+                        rank: if place == RoundTheTube::Inside {
+                            Interval::exactly(0.0) - height
+                        } else {
+                            height
+                        },
+                        forward_is_where_it_grows,
+                    });
+                }
+                Some(first)
+                    if first.place == place
+                        && first.forward_is_where_it_grows == forward_is_where_it_grows => {}
+                Some(_) => return None,
+            }
+        }
+        read
     }
 
     /// One cell for each set of walks `same` has joined, and a refusal where a
@@ -7425,9 +7505,9 @@ impl<'f> Arrangement<'f> {
     /// Three ways, one for a flat face, one for a ball and one for a face
     /// round an axis, and none for a torus. What none answers is a gap
     /// (§16.10): the regions are there, and the walk is in one of them. A
-    /// ring's face drawn on only by circles of planes square to its axis is
-    /// answered before this is asked, by putting its bands in order round the
-    /// tube ([`Arrangement::the_bands_round_the_tube`]).
+    /// ring's face drawn on only by circles round its axis is answered before
+    /// this is asked, by putting its bands in order round the tube
+    /// ([`Arrangement::the_bands_round_the_tube`]).
     fn which_of_them_holds(&self, walk: usize, candidates: &[usize]) -> Option<usize> {
         if let Surface::Sphere(ball) = self.surface {
             return self
@@ -8651,7 +8731,12 @@ impl<'f> Arrangement<'f> {
     /// square to that axis, and the axis is the cone's. On a ball it is a cone
     /// whose axis runs through the ball's centre, cutting it in two circles
     /// square to the cone's axis, and the axis is the cone's: `intersect` names
-    /// no other cone against a ball. Two pipes are read another way: a fat pipe
+    /// no other cone against a ball. Or it is a ring whose axis runs through
+    /// the ball's centre, cutting it in two circles square to the ring's axis,
+    /// and the axis is the ring's: `intersect` names no other ring against a
+    /// ball, and a ball cuts a ring on its axis in two circles at most, since
+    /// a half-plane through the axis meets the ball in one circle and the
+    /// ring's tube in another (Q2212). Two pipes are read another way: a fat pipe
     /// cuts a thin one it swallows in two loops round the thin pipe's axis, the
     /// half-space's flat surface holds the fat pipe's axis rather than facing
     /// along either, and
@@ -8724,6 +8809,7 @@ impl<'f> Arrangement<'f> {
         let axis = match (self.surface, partner) {
             (Surface::Cylinder(pipe), _) => pipe.axis(),
             (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) => cone.axis(),
+            (Surface::Sphere(_), Surface::Torus(ring)) => ring.axis(),
             (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) => {
                 return PastThePicker::No;
             }
@@ -10196,31 +10282,54 @@ fn half_way_across_the_widest_gap_between(
     core::array::from_fn(|axis| first[axis] * half_way.cos() + second[axis] * half_way.sin())
 }
 
-/// One circle a plane square to a ring's axis cuts the ring's face in, read
-/// for where it comes round the tube
-/// ([`Arrangement::the_bands_round_the_tube`]).
+/// One circle round a ring's axis on the ring's face, read for where it
+/// comes round the tube ([`Arrangement::the_bands_round_the_tube`]).
 struct CircleRoundTheTube {
-    arc: usize,
-    /// Whether it is on the outside of the ring, further from the axis than
-    /// the middle of the tube.
-    outer: bool,
+    /// The walk along its forward half-edges.
+    forward: usize,
+    /// The walk along its backward half-edges.
+    backward: usize,
+    place: RoundTheTube,
     /// Its height up the axis on the outside of the ring, and that height
     /// turned round on the inside, so that going round the tube the rank
-    /// rises on both.
+    /// rises on both. At the top or the bottom of the tube it is the height,
+    /// and nothing reads it: one circle is there at most.
     rank: Interval,
     /// Whether the walk along its forward half-edge is on the side of it
     /// that the angle round the tube grows to.
     forward_is_where_it_grows: bool,
 }
 
+/// Which stretch of the turn round a ring's tube a circle round its axis is
+/// on, in the order the angle round the tube meets them from the bottom of
+/// the tube.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RoundTheTube {
+    /// Further from the axis than the middle of the tube.
+    Outside,
+    /// At the very top of the tube: as far from the axis as the middle of the
+    /// tube, and up the axis from it.
+    AtTheTop,
+    /// Nearer the axis than the middle of the tube.
+    Inside,
+    /// At the very bottom of the tube.
+    AtTheBottom,
+}
+
 impl CircleRoundTheTube {
-    /// Whether going round the tube from below the ring's outside meets this
-    /// circle before `other`; `None` where the two ranks cannot be told
-    /// apart. Two circles with one rank on one side of the ring are one
-    /// circle, and nothing drawn twice is put in order here.
+    /// Whether going round the tube from its bottom meets this circle before
+    /// `other`; `None` where the two cannot be told apart. Two circles with
+    /// one rank on one side of the ring, or both at the top or the bottom of
+    /// the tube, are one circle, and nothing drawn twice is put in order here.
     fn comes_before(&self, other: &Self) -> Option<bool> {
-        if self.outer != other.outer {
-            return Some(self.outer);
+        if self.place != other.place {
+            return Some(self.place < other.place);
+        }
+        if matches!(
+            self.place,
+            RoundTheTube::AtTheTop | RoundTheTube::AtTheBottom
+        ) {
+            return None;
         }
         match (self.rank - other.rank).sign() {
             Decision::Neg => Some(true),
@@ -17284,6 +17393,114 @@ mod curved {
         builder
             .build(model, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("the top half of a ring described this way is a solid")
+    }
+
+    /// A whole ring about `x`, four round a tube of one, and a ball of four at
+    /// `(1, 0, 0)` cross in two circles round `x`: one at `x = 1`, the top of
+    /// the tube and a great circle of the ball through both its poles, and one
+    /// at `x = −15/17` on the inside of the ring. They cut the ring in two
+    /// bands, and the ball in two caps and the band between them. The ball at
+    /// `(−1, 0, 0)` is the same shape mirrored, with its great circle at the
+    /// bottom of the tube.
+    ///
+    /// Each face came back as four pieces of one wire each (Q2212). Every node
+    /// is on the ball, the partner of both circles, so no walk could say which
+    /// side of the other circle it was on. The ring's face is now put in order
+    /// round the tube by `the_bands_round_the_tube`, and a walk on the ball
+    /// reads its side of the circle it does not use past the plane halfway
+    /// between the two, in `whether_past_the_picker`.
+    #[test]
+    fn a_ball_crossing_a_whole_ring_in_two_circles_cuts_it_in_two_bands_and_itself_in_three() {
+        for x in [1.0, -1.0] {
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let policy = Policy::certified();
+            let mut log = ProvenanceLog::new();
+            let ring = a_whole_ring_of_four_round_a_tube_of_one_about_x(&mut model);
+            let ball = model
+                .add_ball(
+                    4.0,
+                    &Isometry::translation(Vector::new(x, 0.0, 0.0)).expect("a shift"),
+                )
+                .expect("a ball of radius four");
+            let mut solids = bake(&model, &[ring, ball], &policy, &mut log).expect("it bakes");
+            cuts::gather(&mut solids, &policy, &mut log).expect("the two cross in two circles");
+            let mut table: Vec<(&'static str, Vec<usize>)> = solids
+                .iter()
+                .flat_map(|solid| &solid.faces)
+                .map(|face| {
+                    let mut wires: Vec<usize> =
+                        split(face).iter().map(|piece| piece.wires.len()).collect();
+                    wires.sort_unstable();
+                    (kind(&face.surface), wires)
+                })
+                .collect();
+            table.sort();
+            assert_eq!(
+                table,
+                [("ball", vec![1, 1, 2]), ("ring", vec![2, 2])],
+                "the ball at x = {x}"
+            );
+        }
+    }
+
+    /// The whole ring four round a tube of one, about `z` and turned a quarter
+    /// about `y` onto `x`, in two faces either side of `z = 0` joined along the
+    /// two circles that plane cuts it in, as `a_whole_ring_about_x` in
+    /// `tests/a_walk_neither_winding_nor_the_axis_places.rs` builds it.
+    fn a_whole_ring_of_four_round_a_tube_of_one_about_x(model: &mut Model) -> crate::SolidKey {
+        let cut = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+            .expect("the z axis is a unit normal");
+        let skin = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a tube narrower"));
+        let mut builder = SolidBuilder::new();
+        let [outer, inner] = [5.0, 3.0].map(|reach| {
+            let corner = builder
+                .add_vertex(Point::new(reach, 0.0, 0.0))
+                .expect("a corner on the ring and on the plane");
+            builder
+                .add_edge(
+                    corner,
+                    corner,
+                    EdgeRun::RightRoundWhereItCrosses {
+                        and: Surface::Plane(cut),
+                    },
+                )
+                .expect("a rim is a whole closed curve, so one corner twice is an edge")
+        });
+        let mut face = |walks: [(_, Orientation); 2]| {
+            let wires = walks.map(|(edge, turn)| {
+                let coedge = builder
+                    .add_coedge(edge, turn)
+                    .expect("an edge of this build");
+                builder
+                    .add_wire(&[DraftStep::Along(coedge)])
+                    .expect("one closed edge is a wire")
+            });
+            builder
+                .add_face(skin, &wires)
+                .expect("a band between two circles")
+        };
+        let top = face([
+            (outer, Orientation::Reversed),
+            (inner, Orientation::Forward),
+        ]);
+        let bottom = face([
+            (outer, Orientation::Forward),
+            (inner, Orientation::Reversed),
+        ]);
+        builder
+            .add_shell(&[(top, Orientation::Forward), (bottom, Orientation::Forward)])
+            .expect("two halves close");
+        let ring = builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a whole ring in two faces is a solid");
+        model
+            .place_solid(
+                ring,
+                &Isometry::quarter_turns(&Axis::y(), 1).expect("y is a whole direction"),
+            )
+            .expect("a solid of this model");
+        ring
     }
 
     /// Half a ring cut through its axis, with nothing cutting it, comes
