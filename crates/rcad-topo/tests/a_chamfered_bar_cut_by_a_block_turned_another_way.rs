@@ -314,8 +314,18 @@ fn probe_q2181() {
             println!(
                 "PROBE turns {} {rule:?}: {:?}",
                 turns.len(),
-                answer.map(|f| f.solids().len())
+                answer.as_ref().map(|f| f.solids().len())
             );
+            if let Ok(fused) = answer {
+                let solids = fused.solids().to_vec();
+                println!(
+                    "PROBE validate {:?}",
+                    model.validate(&Policy::certified(), &mut ProvenanceLog::new())
+                );
+                for face in model.solid(solids[0]).expect("k").faces() {
+                    println!("PROBE face {:?}", face.surface());
+                }
+            }
         }
     }
 }

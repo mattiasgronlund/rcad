@@ -1855,8 +1855,8 @@ impl<'f> Arrangement<'f> {
                             .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
                             .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
                             .or_else(|| {
-                                Self::side_of_a_plane_square_to_a_pipe_and_a_cones_one_axis(
-                                    &on, point, plane,
+                                Self::side_of_one_of_a_plane_a_pipe_and_a_cone_on_one_axis(
+                                    &on, point, &partner,
                                 )
                             })
                             .unwrap_or(undecided)
@@ -8079,14 +8079,17 @@ impl<'f> Arrangement<'f> {
                 }
                 let at = node.point;
                 let read = match (side_of_surface(&partner, at), partner.as_plane()) {
-                    (undecided @ Decision::Undecidable { .. }, Some(plane)) => {
+                    (undecided @ Decision::Undecidable { .. }, plane) => {
                         let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
                             .chain(node.crossings.iter().map(|&on| self.crossings[on].partner))
                             .collect();
-                        Self::side_of_a_plane_holding_a_rings_axis(&on, at, plane)
+                        plane
+                            .and_then(|plane| {
+                                Self::side_of_a_plane_holding_a_rings_axis(&on, at, plane)
+                            })
                             .or_else(|| {
-                                Self::side_of_a_plane_square_to_a_pipe_and_a_cones_one_axis(
-                                    &on, at, plane,
+                                Self::side_of_one_of_a_plane_a_pipe_and_a_cone_on_one_axis(
+                                    &on, at, &partner,
                                 )
                             })
                             .unwrap_or(undecided)
@@ -8806,84 +8809,156 @@ impl<'f> Arrangement<'f> {
         Some(side)
     }
 
-    /// Which side of `partner` a point lies that is on a pipe and on a cone
-    /// about one axis, both among the surfaces it is `on`, where `partner` is
-    /// square to that axis: the side of the circle the two share on the
-    /// cone's nappe the point is on, read off the stored numbers, and off the
-    /// point's box only for which nappe that is. `None` where it is not that
-    /// shape, and the caller keeps the box's answer.
+    /// Which side of `partner` a point lies that is on the other two of a
+    /// plane, a pipe and a cone round one axis, with the plane square to it,
+    /// where those two are among the surfaces it is `on`: read off the stored
+    /// numbers, and off the point's box only for which half of the cone it is
+    /// on, where `partner` is the plane. `None` where it is not that shape,
+    /// and the caller keeps the box's answer.
     ///
     /// A bar chamfered by a cone up to a pipe, and a block whose top held the
     /// circle the two share, both placed by the turn of `1.1` about
     /// `(1, 2, 3)`: the block's placement composes its own offset in and
     /// rounds, so its top comes out square to the bar's axis to the bit and
-    /// `2e−15` up it from that circle, inside the `1e−13` box round the
-    /// bar's seam corner on it, and every fuse of the pair was refused there
-    /// (Q2181).
+    /// `2e−15` up it from that circle. The bar's seam corner on the circle
+    /// has a box `1e−13` wide, and every fuse of the pair was refused its
+    /// side of the top there. Past that, the top's own drawing asked a point
+    /// where the top cuts the pipe, `2e−15` inside the cone, which side of
+    /// the cone it is, with a box as wide, and was refused again (Q2181).
     ///
-    /// **Every point of the circle is one distance from `partner`.** For the
-    /// cone's apex `a`, axis `w` and slope `s`, the pipe's radius `r`, and
-    /// `partner`'s normal `n` and offset `d`, the circle on the nappe `σ`
-    /// (`+1` along `w`, `−1` against it) is `r/s` from the apex along the
-    /// axis, and `n` lies along `w`, so `n·p − d` all round it is
-    /// `D + σ·τ·(r/s)·|n|` for `D = n·a − d` and `τ` the sign of `n·w`. Where
-    /// `D` is nought or has the sign `σ·τ`, that is the sign. Otherwise it is
-    /// the sign of `D` where `s²·D²` is more than `r²·(n·n)`, `σ·τ` where it
-    /// is less, and nought where they are equal, since then `partner` holds
-    /// the circle. Products and sums of stored numbers, decided exactly
-    /// ([`rcad_predicates::expansion`]).
+    /// **Each answer is a sign of stored numbers.** For the cone's apex `a`,
+    /// axis `w` and slope `s`, the pipe's radius `r`, and the plane's normal
+    /// `n` and offset `d`, let `D = n·a − d` and `τ` be the sign of `n·w`. A
+    /// point on the plane is `t = −τ·D/|n|` along the axis from the apex, so
+    /// `t² = D²/(n·n)`; one on the pipe is `r` from the axis, and one on the
+    /// cone `s·|t|`.
     ///
-    /// Square and one axis are asked exactly too: `n` along both axes
+    /// - On the plane and the pipe, the cone's own value,
+    ///   `|(p − a) × w|² − s²·((p − a)·w)²`, is `|w|²·(r² − s²·t²)`, which has
+    ///   the sign of `r²·(n·n) − s²·D²`.
+    /// - On the plane and the cone, the pipe's, `|(p − o) × u|² − r²·|u|²`, is
+    ///   `|u|²·(s²·t² − r²)`, which has the sign of `s²·D² − r²·(n·n)`.
+    /// - On the pipe and the cone, on the half `σ` of the cone (`+1` along
+    ///   `w`, `−1` against it), the point is on the circle `t = σ·r/s`, and the
+    ///   plane's value `n·p − d` all round it is `D + σ·τ·(r/s)·|n|`. Where `D`
+    ///   is nought or has the sign `σ·τ`, that is the sign. Otherwise it is the
+    ///   sign of `D` where `s²·D²` is more than `r²·(n·n)`, `σ·τ` where it is
+    ///   less, and nought where they are equal, since then the plane holds the
+    ///   circle.
+    ///
+    /// Products and sums of stored numbers, decided exactly
+    /// ([`rcad_predicates::expansion`]), in
+    /// [`Arrangement::where_a_plane_cuts_a_pipe_and_a_cones_one_axis`].
+    fn side_of_one_of_a_plane_a_pipe_and_a_cone_on_one_axis(
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Surface,
+    ) -> Option<Decision> {
+        let a_pipe = || {
+            on.iter().find_map(|surface| {
+                let Surface::Cylinder(pipe) = surface else {
+                    return None;
+                };
+                Some(*pipe)
+            })
+        };
+        let a_cone = || {
+            on.iter().find_map(|surface| {
+                let Surface::Cone(cone) = surface else {
+                    return None;
+                };
+                Some(*cone)
+            })
+        };
+        let a_plane_square_to = |cone: &Cone| {
+            let along = cone.axis().direction().components();
+            on.iter()
+                .filter_map(Surface::as_plane)
+                .find(|plane| lie_along_one_line(plane.normal().components(), along))
+                .copied()
+        };
+        if let Surface::Cone(cone) = partner {
+            let (_, beyond_the_circles) = Self::where_a_plane_cuts_a_pipe_and_a_cones_one_axis(
+                &a_plane_square_to(cone)?,
+                &a_pipe()?,
+                cone,
+            )?;
+            return Some(the_other_way(beyond_the_circles));
+        }
+        if let Surface::Cylinder(pipe) = partner {
+            let cone = a_cone()?;
+            let (_, beyond_the_circles) = Self::where_a_plane_cuts_a_pipe_and_a_cones_one_axis(
+                &a_plane_square_to(&cone)?,
+                pipe,
+                &cone,
+            )?;
+            return Some(beyond_the_circles);
+        }
+        let plane = partner.as_plane()?;
+        let cone = a_cone()?;
+        let (past_the_apex, beyond_the_circles) =
+            Self::where_a_plane_cuts_a_pipe_and_a_cones_one_axis(plane, &a_pipe()?, &cone)?;
+        let along = cone.axis().direction().components();
+        let facing = expansion_sign(&exactly_dotted(plane.normal().components(), along)?);
+        let apex = cone.apex().coordinates();
+        let box_ = at.enclosure();
+        let half = dot_of(
+            core::array::from_fn(|axis| box_[axis] - Interval::exactly(apex[axis])),
+            along.map(Interval::exactly),
+        )
+        .sign();
+        let ways = [Decision::Pos, Decision::Neg];
+        if !ways.contains(&half) || !ways.contains(&facing) {
+            return None;
+        }
+        let towards_the_circle = if half == facing {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        };
+        Some(
+            if past_the_apex == Decision::Zero
+                || past_the_apex == towards_the_circle
+                || beyond_the_circles == Decision::Neg
+            {
+                towards_the_circle
+            } else if beyond_the_circles == Decision::Pos {
+                past_the_apex
+            } else {
+                Decision::Zero
+            },
+        )
+    }
+
+    /// Where a plane square to the one axis of a pipe and a cone cuts it: the
+    /// sign of `D = n·a − d`, for the plane's normal `n` and offset `d` and
+    /// the cone's apex `a`, and the sign of `s²·D² − r²·(n·n)`, for the cone's
+    /// slope `s` and the pipe's radius `r`. The second is `Pos` where the plane
+    /// cuts the axis farther from the apex than the circles the pipe and the
+    /// cone share, `Neg` nearer, and `Zero` where it holds one of them. Both
+    /// are decided exactly, and both are signs.
+    ///
+    /// `None` where a product rounds, or where it is not that shape. Square and
+    /// one axis are asked exactly: `n` along both axes
     /// ([`lie_along_one_line`]), and the pipe's axis origin on the cone's
     /// axis ([`lies_exactly_on_the_axis`]). A plane off square by a rounding
     /// cuts each in an ellipse, and the two can cross.
-    fn side_of_a_plane_square_to_a_pipe_and_a_cones_one_axis(
-        on: &[Surface],
-        at: PredicatePoint,
-        partner: &Plane,
-    ) -> Option<Decision> {
-        let pipe = on.iter().find_map(|surface| {
-            let Surface::Cylinder(pipe) = surface else {
-                return None;
-            };
-            Some(*pipe)
-        })?;
-        let cone = on.iter().find_map(|surface| {
-            let Surface::Cone(cone) = surface else {
-                return None;
-            };
-            Some(*cone)
-        })?;
-        let (normal, along) = (
-            partner.normal().components(),
-            cone.axis().direction().components(),
-        );
-        if !lie_along_one_line(normal, along)
+    fn where_a_plane_cuts_a_pipe_and_a_cones_one_axis(
+        plane: &Plane,
+        pipe: &Cylinder,
+        cone: &Cone,
+    ) -> Option<(Decision, Decision)> {
+        let normal = plane.normal().components();
+        if !lie_along_one_line(normal, cone.axis().direction().components())
             || !lie_along_one_line(normal, pipe.axis().direction().components())
             || lies_exactly_on_the_axis(pipe.axis().origin(), cone.axis()) != Some(true)
         {
             return None;
         }
-        let apex = cone.apex().coordinates();
-        let box_ = at.enclosure();
-        let nappe = dot_of(
-            core::array::from_fn(|axis| box_[axis] - Interval::exactly(apex[axis])),
-            along.map(Interval::exactly),
-        )
-        .sign();
-        let towards_the_circle = match (nappe, expansion_sign(&exactly_dotted(normal, along)?)) {
-            (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => Decision::Pos,
-            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => Decision::Neg,
-            (
-                Decision::Zero | Decision::Undecidable { .. } | _,
-                Decision::Zero | Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _,
-            ) => return None,
-        };
-        let off_the_apex = exactly_added(&exactly_dotted(normal, apex)?, &[-partner.offset()]);
-        let past_the_apex = expansion_sign(&off_the_apex);
-        if past_the_apex == Decision::Zero || past_the_apex == towards_the_circle {
-            return Some(towards_the_circle);
-        }
+        let off_the_apex = exactly_added(
+            &exactly_dotted(normal, cone.apex().coordinates())?,
+            &[-plane.offset()],
+        );
         let apex_reach = exactly_multiplied(
             &exactly_multiplied(&off_the_apex, &off_the_apex)?,
             &exactly_scaled(&[cone.slope()], cone.slope())?,
@@ -8892,14 +8967,11 @@ impl<'f> Arrangement<'f> {
             &exactly_dotted(normal, normal)?,
             &exactly_scaled(&[pipe.radius()], pipe.radius())?,
         )?;
-        match expansion_sign(&exactly_added(&apex_reach, &negated(&circle_reach))) {
-            Decision::Pos => Some(past_the_apex),
-            Decision::Neg => Some(towards_the_circle),
-            Decision::Zero => Some(Decision::Zero),
-            Decision::Undecidable { .. } | _ => {
-                unreachable!("an exact sum has a sign: {apex_reach:?} against {circle_reach:?}")
-            }
-        }
+        let past_the_apex = expansion_sign(&off_the_apex);
+        let beyond_the_circles =
+            expansion_sign(&exactly_added(&apex_reach, &negated(&circle_reach)));
+        (past_the_apex.is_certified() && beyond_the_circles.is_certified())
+            .then_some((past_the_apex, beyond_the_circles))
     }
 
     /// How many times the face's boundary winds round each walk, counting only
