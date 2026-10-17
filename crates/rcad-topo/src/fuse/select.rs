@@ -3689,6 +3689,33 @@ fn of_two_curved_kinds(one: &Surface, other: &Surface) -> bool {
 /// here, as a zero winding does not count above: a point on the face's rim says
 /// nothing about the piece around it.
 ///
+/// **A face that cannot tell leaves the point off it**, for the next face and
+/// then the ray, as [`the_model_says_one_of_its_faces_holds`] does for straight
+/// sides. `holds.rs`'s `what_a_flat_face_of_chords_and_arcs_holds` asks which
+/// side of every chord the point is on, the chord under each arc too, and a
+/// point that is a box a rounding wide across the line of a chord has no side.
+/// A block resting on a plate's round tab, with two opposite corners on the
+/// line of the chord of the tab's arc, has such a point offered where its
+/// diagonal crosses that line, and passed up, the refusal refused the whole
+/// fuse under every rule for half of the block's outlines
+/// (`tests/a_bar_cut_beside_its_axis_and_united_again.rs`, row Q2036).
+///
+/// **What the ray then makes of it.** On the face's plane every ray asks this
+/// face again whether it holds the point (`classify.rs`'s
+/// `ask_whether_the_face_holds_it`), gets the same refusal and takes it as a
+/// graze, so no count of crossings places the point; only the plane of a
+/// turned flat face beside it could, where that face's corners and plane part
+/// about the ray. A rounding off the plane, a point the ray did place is still
+/// abandoned unless this face says it holds none of the plane in the point's
+/// box ([`a_face_may_run_between_it_and_the_plane`]). An abandoned point leaves
+/// the piece to its next one, which on that block is on the other diagonal. In
+/// row Q2036's measurement each of the 704 points dropped here, by that test
+/// and by probes of blocks along each of the tab's chords, was on the plane
+/// and the ray could not tell; no other test in `rcad-topo`, and no file of
+/// the `two_solids_fused_by_a_stranger` fuzz corpus, dropped one. The other
+/// refusals are about the face's trimming and not about one point, so they
+/// still refuse the fuse by name.
+///
 /// **A curved face of the input can be several faces of the model**, which the
 /// bake hands over as one because they are one surface used one way: a bar's
 /// wall in two bands on one pipe is one face with a key per band. It holds a
@@ -3714,8 +3741,16 @@ fn a_face_of_the_input_holds(
             .any(|side| side.across.as_plane().is_none())
         {
             for &key in &face.keys {
-                if view.face_holds_the_point(key, point, policy, log)? == crate::OnAFace::Held {
-                    return Ok(true);
+                let mut trial = ProvenanceLog::new();
+                match view.face_holds_the_point(key, point, policy, &mut trial) {
+                    Ok(said) => {
+                        trial.drain_into(log);
+                        if said == OnAFace::Held {
+                            return Ok(true);
+                        }
+                    }
+                    Err(Error::Undecidable { .. }) => (),
+                    Err(refused) => return Err(refused),
                 }
             }
             return Ok(false);

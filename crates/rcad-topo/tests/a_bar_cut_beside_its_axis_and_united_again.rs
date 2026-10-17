@@ -10,6 +10,12 @@
 //! corners, so the other sat on the half-line's line, its side had no sign, and
 //! the union was refused `Undecidable` for every `c` off the axis. On the axis
 //! the corners are exact and so is the point, and the sign there is zero.
+//!
+//! A flat face with a round side meets the same box on the line of a chord
+//! (row Q2036). A block resting on a plate's round tab with two opposite
+//! corners on the chord of the tab's arc gets a point offered on that chord, as
+//! a box a rounding wide, and the plate's face had no sign for it, so the
+//! whole fuse was refused `Undecidable`.
 
 use core::f64::consts::PI;
 
@@ -105,6 +111,86 @@ fn a_half_bars_cut_face_holds_a_box_at_its_middle() {
     }
 }
 
+/// A plate `10 × 10 × 2` with a round tab of radius 3 about its corner at
+/// `(10, 10)`, and a block `0.8 × 0.8 × 1` resting on its top or under its
+/// bottom, inside the tab's circle, with its corners `(11.1, 8.1)` and
+/// `(11.9, 8.9)` on the line `x − y = 3`.
+///
+/// The tab's arc runs from `(10, 7)` to `(7, 10)` and is cut in three where
+/// the bar's seam and the square's sides cross it, so its first piece runs
+/// from `(10, 7)` to `(13, 10)` and has its chord on that line. The piece of
+/// the block's face lying on the plate is offered a point a quarter of the way
+/// along the block's diagonal, as a box a rounding wide, which straddles the
+/// chord's line. Which corner the piece's outline starts at says which
+/// diagonal that is, so the block's outline is started at each corner, either
+/// way round. Where the plate's face could not tell which side of the chord
+/// that box was on, the fuse was refused `Undecidable` for half of those
+/// outlines under every rule, either way round. The point is dropped instead,
+/// and the next one is on the other diagonal.
+///
+/// Every rule both ways round answers, logs nothing, and keeps the volume:
+/// the plate's `200 + 13.5 π`, the block's `0.64`, both added, or nothing for
+/// what the two share, since they only touch.
+#[test]
+fn a_block_resting_on_a_round_tab_along_a_chord_of_its_arc_answers_every_rule() {
+    assert_eq!(11.1 - 8.1, 3.0, "one corner of the block is on the chord");
+    assert_eq!(11.9 - 8.9, 3.0, "so is the opposite one");
+    let block = [[11.1, 8.1], [11.9, 8.1], [11.9, 8.9], [11.1, 8.9]];
+    let plates_volume = 200.0 + 13.5 * PI;
+    let blocks_volume = (11.9 - 11.1) * (8.9 - 8.1);
+    for start in 0..4 {
+        for clockwise in [false, true] {
+            let mut corners: Vec<[f64; 2]> = (0..4).map(|step| block[(start + step) % 4]).collect();
+            if clockwise {
+                corners.reverse();
+            }
+            for (heights, side) in [([2.0, 3.0], "on top"), ([-1.0, 0.0], "underneath")] {
+                for (rule, plate_first, volume) in [
+                    (Rule::Union, true, Some(plates_volume + blocks_volume)),
+                    (Rule::Union, false, Some(plates_volume + blocks_volume)),
+                    (Rule::Intersection, true, None),
+                    (Rule::Intersection, false, None),
+                    (Rule::Difference, true, Some(plates_volume)),
+                    (Rule::Difference, false, Some(blocks_volume)),
+                ] {
+                    let asked = format!(
+                        "block {side} with corners {corners:?}, {rule:?}, plate first {plate_first}"
+                    );
+                    let mut model = a_model();
+                    let plate = a_plate_with_a_round_tab(&mut model);
+                    let block = a_prism(&mut model, corners.clone(), heights);
+                    let [one, other] = if plate_first {
+                        [plate, block]
+                    } else {
+                        [block, plate]
+                    };
+                    let mut log = ProvenanceLog::new();
+                    let fused = model
+                        .fuse(&[one], &[other], rule, &Policy::certified(), &mut log)
+                        .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+                    assert!(
+                        log.is_empty(),
+                        "{asked}: a certified fuse logs nothing: {log:?}"
+                    );
+                    match volume {
+                        Some(volume) => {
+                            let [solid] = fused.solids() else {
+                                panic!("{asked}: one solid, not {:?}", fused.solids());
+                            };
+                            holds(&model, *solid, volume, &asked);
+                        }
+                        None => assert!(
+                            fused.solids().is_empty(),
+                            "{asked}: nothing, not {:?}",
+                            fused.solids()
+                        ),
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The half's face on the plane `x = cut`, and its four corners in the order
 /// its wire runs.
 fn the_cut_face(view: SolidView<'_>, cut: f64) -> (FaceView<'_>, [[f64; 3]; 4]) {
@@ -179,13 +265,39 @@ fn a_bar(model: &mut Model, bottom: f64, height: f64) -> SolidKey {
 }
 
 fn a_box(model: &mut Model, [x, y, z]: [[f64; 2]; 3]) -> SolidKey {
-    let rectangle =
-        ProfileBuilder::new(vec![[x[0], y[0]], [x[1], y[0]], [x[1], y[1]], [x[0], y[1]]])
-            .build(&Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a rectangle");
+    a_prism(
+        model,
+        vec![[x[0], y[0]], [x[1], y[0]], [x[1], y[1]], [x[0], y[1]]],
+        z,
+    )
+}
+
+/// The square `0..10` on both axes, `2` high, united with a round bar of
+/// radius 3 about its corner at `(10, 10)`.
+fn a_plate_with_a_round_tab(model: &mut Model) -> SolidKey {
+    let square = a_prism(
+        model,
+        vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+        [0.0, 2.0],
+    );
+    let tab = model
+        .add_round_bar(
+            3.0,
+            2.0,
+            &Isometry::translation(Vector::new(10.0, 10.0, 0.0)).expect("a finite shift"),
+        )
+        .expect("a bar of radius three");
+    the_one_solid(model, square, tab, Rule::Union)
+}
+
+/// The outline through `corners`, in their order, from `z[0]` up to `z[1]`.
+fn a_prism(model: &mut Model, corners: Vec<[f64; 2]>, z: [f64; 2]) -> SolidKey {
+    let outline = ProfileBuilder::new(corners)
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("an outline");
     model
         .add_extrusion(
-            &rectangle,
+            &outline,
             z[1] - z[0],
             &Isometry::translation(Vector::new(0.0, 0.0, z[0])).expect("a finite shift"),
         )
