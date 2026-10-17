@@ -16,6 +16,13 @@
 //! and every face's true area is known. The lid is `9π − π/2`, the half disc
 //! `π/2 · √(1 + 0.3²)`, the wall `24π` and the floor `9π`.
 //!
+//! **Listed the other way round, the half disc is short and nothing charges
+//! it.** The mesher then draws the arc on the lid, and the half disc's
+//! triangles lie on the lid too. Their shadow on the half disc's own plane is
+//! moved sideways off the pipe rather than along it, so it is not the half
+//! disc's outline, and the face is meshed smaller than it is by more than its
+//! area error. The last test here pins that gap.
+//!
 //! **A model only bytes can carry.** `Model::validate` refuses it
 //! `AnArcBetweenTwoFlatFacesOnDifferentPlanes`, and the builder will not build
 //! it; it is the sound bar written out with postcard, the half disc's plane
@@ -41,7 +48,7 @@ const LEAN: f64 = 0.3;
 /// nothing for the lean.
 #[test]
 fn a_lid_whose_triangles_lean_up_to_an_arc_off_its_plane_measures_within_its_area_error() {
-    let model = the_bar_with_its_half_disc_leaning();
+    let model = the_bar_with_its_half_disc_leaning(Listed::HalfDiscFirst);
     let solid = model.solids().next().expect("the bar");
     let lid = solid
         .faces()
@@ -71,7 +78,7 @@ fn a_lid_whose_triangles_lean_up_to_an_arc_off_its_plane_measures_within_its_are
 /// area error of `0.0492`.
 #[test]
 fn a_bar_whose_lid_leans_up_to_an_arc_off_its_plane_measures_within_its_area_error() {
-    let model = the_bar_with_its_half_disc_leaning();
+    let model = the_bar_with_its_half_disc_leaning(Listed::HalfDiscFirst);
     let solid = model.solids().next().expect("the bar");
 
     let measured = solid
@@ -82,8 +89,7 @@ fn a_bar_whose_lid_leans_up_to_an_arc_off_its_plane_measures_within_its_area_err
         )
         .expect("the bar measures");
 
-    let half_disc = PI / 2.0 * (1.0 + LEAN * LEAN).sqrt();
-    let truth = 24.0 * PI + 9.0 * PI + (9.0 * PI - PI / 2.0) + half_disc;
+    let truth = 24.0 * PI + 9.0 * PI + (9.0 * PI - PI / 2.0) + the_half_discs_area();
     let miss = (measured.surface_area() - truth).abs();
     assert!(
         miss <= measured.area_error(),
@@ -93,19 +99,59 @@ fn a_bar_whose_lid_leans_up_to_an_arc_off_its_plane_measures_within_its_area_err
     );
 }
 
+/// **A gap, pinned so that closing it is noticed.** Measured: `1.5704` with an
+/// error of `0.0688`, against a true `1.6400` — the half disc meshed flat on
+/// the lid, and charged its rim and what its triangles lean off its own
+/// plane, which is the area they would lose straight down on to it and not
+/// what they lack against the face. When this fails, the half disc measures
+/// within its error, and this test and the paragraph on
+/// `how_much_area_leaning_adds` in `measure.rs` that cites it are out of date.
+#[test]
+fn a_half_disc_meshed_on_the_lid_it_leans_off_is_short_by_more_than_its_area_error() {
+    let model = the_bar_with_its_half_disc_leaning(Listed::LidFirst);
+    let solid = model.solids().next().expect("the bar");
+    let half_disc = solid
+        .faces()
+        .find(|face| face.surface().as_plane() == Some(&the_half_discs_plane()))
+        .expect("the half disc");
+
+    let measured = solid
+        .measure_one_face(
+            half_disc.key(),
+            deflection(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the half disc measures");
+
+    let truth = the_half_discs_area();
+    let short = truth - measured.area();
+    assert!(
+        short > measured.area_error(),
+        "the half disc measured {} ± {}, {short} short of its true {truth}",
+        measured.area(),
+        measured.area_error()
+    );
+}
+
 fn deflection() -> Deflection {
     Deflection::of(0.001).expect("a length")
 }
 
-/// The bar with the half disc listed first, on the lid's own plane, which
-/// builds; written out, the half disc's plane swapped for one through the
-/// chord leaning [`LEAN`] along `x`, and read back.
-fn the_bar_with_its_half_disc_leaning() -> Model {
-    let (model, built) = a_bar_with_its_lid_split_by_a_half_disc();
+/// Which of the two faces on the lid's plane the shell lists first, which is
+/// the one the mesher draws the arc on.
+#[derive(Clone, Copy)]
+enum Listed {
+    HalfDiscFirst,
+    LidFirst,
+}
+
+/// The bar with the half disc on the lid's own plane, which builds; written
+/// out, the half disc's plane swapped for [`the_half_discs_plane`], and read
+/// back.
+fn the_bar_with_its_half_disc_leaning(listed: Listed) -> Model {
+    let (model, built) = a_bar_with_its_lid_split_by_a_half_disc(listed);
     built.expect("the half disc on the lid's own plane builds");
-    let leaning =
-        Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(-LEAN, 0.0, 1.0))
-            .expect("a plane");
     let mut bytes = postcard::to_allocvec(&model).expect("a model writes out");
     let stored = the_bytes_of(the_lid());
     let places: Vec<usize> = bytes
@@ -114,11 +160,27 @@ fn the_bar_with_its_half_disc_leaning() -> Model {
         .filter(|(_, window)| *window == stored.as_slice())
         .map(|(at, _)| at)
         .collect();
-    let [half_disc, _] = places[..] else {
+    let [first, second] = places[..] else {
         panic!("the lid's plane is written once per face on it, and it was found {places:?}");
     };
-    bytes[half_disc..half_disc + stored.len()].copy_from_slice(&the_bytes_of(leaning));
+    let half_disc = match listed {
+        Listed::HalfDiscFirst => first,
+        Listed::LidFirst => second,
+    };
+    bytes[half_disc..half_disc + stored.len()]
+        .copy_from_slice(&the_bytes_of(the_half_discs_plane()));
     postcard::from_bytes(&bytes).expect("reading back does not ask where a face is")
+}
+
+/// The plane through the chord leaning [`LEAN`] along `x`.
+fn the_half_discs_plane() -> Plane {
+    Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(-LEAN, 0.0, 1.0))
+        .expect("a plane")
+}
+
+/// Half the ellipse the pipe of radius 1 cuts from [`the_half_discs_plane`].
+fn the_half_discs_area() -> f64 {
+    PI / 2.0 * (1.0 + LEAN * LEAN).sqrt()
 }
 
 /// A plane the way postcard writes one: its four coefficients, little-endian.
@@ -147,9 +209,10 @@ fn pipe(radius: f64) -> Surface {
 
 /// The bar of radius 3 up `z` from 0 to 4, its lid split by the half of the
 /// circle of radius 1 at `x ≥ 0` and the chord `x = 0`, the half disc on the
-/// lid's own plane and listed before the rest of the lid. Every edge is walked
-/// the way `an_edge_between_two_planes_its_curve_leaves.rs` walks it.
-fn a_bar_with_its_lid_split_by_a_half_disc() -> (Model, Result<SolidKey>) {
+/// lid's own plane, the two faces on it made and listed in the order `listed`
+/// says. Every edge is walked the way
+/// `an_edge_between_two_planes_its_curve_leaves.rs` walks it.
+fn a_bar_with_its_lid_split_by_a_half_disc(listed: Listed) -> (Model, Result<SolidKey>) {
     let base = Plane::from_point_and_normal(Point::origin(), -up()).expect("a plane");
     let mut builder = SolidBuilder::new();
     let at_the_bottom = builder
@@ -204,19 +267,22 @@ fn a_bar_with_its_lid_split_by_a_half_disc() -> (Model, Result<SolidKey>) {
     let hole = round_the_half(&mut builder, R);
     let round_the_half_disc = round_the_half(&mut builder, F);
 
-    let half_disc = builder
-        .add_face(Surface::Plane(the_lid()), &[round_the_half_disc])
-        .expect("a face");
     let outer = one_step_round(&mut builder, top, F);
-    let rest_of_the_lid = builder
-        .add_face(Surface::Plane(the_lid()), &[outer, hole])
-        .expect("a face");
+    let on_the_lid = match listed {
+        Listed::HalfDiscFirst => [vec![round_the_half_disc], vec![outer, hole]],
+        Listed::LidFirst => [vec![outer, hole], vec![round_the_half_disc]],
+    }
+    .map(|wires| {
+        builder
+            .add_face(Surface::Plane(the_lid()), &wires)
+            .expect("a face")
+    });
     let floor_round = one_step_round(&mut builder, bottom, R);
     let floor = builder
         .add_face(Surface::Plane(base), &[floor_round])
         .expect("a face");
     builder
-        .add_shell(&[wall, half_disc, rest_of_the_lid, floor].map(|face| (face, F)))
+        .add_shell(&[wall, on_the_lid[0], on_the_lid[1], floor].map(|face| (face, F)))
         .expect("a shell");
     let mut model = Model::new(Scale::millimetres(10.0).expect("a size"));
     let built = builder.build(&mut model, &Policy::certified(), &mut ProvenanceLog::new());
