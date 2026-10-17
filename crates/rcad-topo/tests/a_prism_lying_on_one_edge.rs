@@ -71,6 +71,17 @@
 //! parting read the prism's wall's far corner by its written point, a rounding
 //! inside the top, and then asked where the corner's three planes meet
 //! (`docs/decisions.md` §438).
+//!
+//! **An L plate less a prism lying in its inner corner is one solid of two
+//! shells** (queue row Q1923): the prism's edge lies along the corner, its
+//! walls lean into the corner square, and the hollow touches the plate's skin
+//! along that line alone. The difference turns the hollow's faces round, and
+//! that says which faces bound each full wedge round the line. Two shapes like
+//! it are still refused `ResultIsNotManifold { count: 4 }`: that answer fused
+//! on with a far cube, or the plate intersected with a block the prism
+//! hollows, where no face along the line is turned round; and the plate less
+//! a prism whose walls open across both arms, where no side along the line
+//! names an input edge.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -767,6 +778,52 @@ fn an_l_plate_less_a_prism_lying_in_its_inner_corner_is_one_solid_of_two_shells(
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// **The L plate less a prism whose walls open across its two arms is refused
+/// `ResultIsNotManifold { count: 4 }`**, though like the plate less the prism
+/// of the test above it is one solid of two shells, `3 − 0.078125`. Its
+/// triangle `(1, 1)`, `(0.25, 1.5)`, `(1.5, 0.25)` has the same area,
+/// `0.15625`, from `z = 0.25` to `z = 0.75`, and its edge at `(1, 1)` lies
+/// along the plate's inner corner too. But its walls leave the line into the
+/// two arms, so the plane of each of the plate's two walls along the line has
+/// the prism on both sides of it.
+///
+/// Round the line the four faces lie as they do for the other prism, the
+/// plate's two and then the hollow's two. But none of the four sides along it
+/// carries the plate's edge or the prism's as an input edge it runs along, as
+/// a piece of a cut does not, so `fuse/assemble.rs` finds no two pairs round
+/// two input edges there and leaves the line one edge (a row filed by queue
+/// row Q1923's lane). The other rules answer: the union is the plate, the
+/// intersection the prism as it stood, and the prism less the plate nothing.
+#[test]
+fn an_l_plate_less_a_prism_opening_across_its_two_arms_is_refused() {
+    let mut alone = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let prism = a_prism_opening_across_the_l_plates_arms(&mut alone);
+    let prism = AsItStands::of(&alone, prism);
+    let mut wrong = Vec::new();
+    for swapped in [false, true] {
+        for rule in EVERY_RULE {
+            let what = format!("{rule:?}, prism first {swapped}");
+            let (model, answer) = fuse(swapped, rule, |model| {
+                [
+                    an_l_plate(model),
+                    a_prism_opening_across_the_l_plates_arms(model),
+                ]
+            });
+            let outcome = match (rule, swapped) {
+                (Rule::Union, _) => differs(&model, answer, &[3.0]),
+                (Rule::Intersection, _) => differs_from_as_they_stand(&model, answer, &[&prism]),
+                (Rule::Difference, false) => refused_as_not_manifold(answer, &[3.0 - 0.078_125]),
+                (Rule::Difference, true) => differs(&model, answer, &[]),
+                _ => unreachable!("EVERY_RULE holds only these three"),
+            };
+            if let Some(why) = outcome {
+                wrong.push(format!("{what}: {why}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// **Each answer touching itself along a line is parted where it touches**:
 /// the block less the prism inside it is the block's six faces round the
 /// hollow's five, two shells meeting only along the prism's edge, the block
@@ -1354,6 +1411,18 @@ fn a_prism_in_the_l_plates_inner_corner(model: &mut Model) -> SolidKey {
     a_prism(
         model,
         [[1.0, 1.0], [0.25, 0.5], [0.5, 0.25]],
+        [0.0, 0.0, 0.25],
+        0.5,
+    )
+}
+
+/// A triangular prism inside the L plate, its edge along the plate's inner
+/// corner from `z = 0.25` to `z = 0.75` and its walls leaving the corner into
+/// the plate's two arms.
+fn a_prism_opening_across_the_l_plates_arms(model: &mut Model) -> SolidKey {
+    a_prism(
+        model,
+        [[1.0, 1.0], [0.25, 1.5], [1.5, 0.25]],
         [0.0, 0.0, 0.25],
         0.5,
     )
