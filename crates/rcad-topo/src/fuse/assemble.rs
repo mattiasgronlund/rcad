@@ -2473,14 +2473,32 @@ impl Assembly {
     /// and can wind against the plane (`a_stepped_shaft_cut_in_half_and_turned.rs`,
     /// Q2228). So with no ring winding with the plane and none enclosing
     /// nothing, the outline is among those winding against it with a side that
-    /// is not straight: a ring every side of which is straight *is* the polygon
-    /// through its corners, so it winds against the plane and is a hole. One
-    /// such ring is the outline. Two bars united and then united with the half
-    /// bar whose corner is their lens's corner leave their cap one ring, round
-    /// the outline and through that corner a second time round the half disk's
+    /// is not straight, and the straight-sided ones are holes. One such ring is
+    /// the outline. Two bars united and then united with the half bar whose
+    /// corner is their lens's corner leave their cap one ring, round the
+    /// outline and through that corner a second time round the half disk's
     /// hole, and its corners wind against the plane too, both ways round and
     /// in the bars less the half bar (`a_lens_whose_hole_is_half_a_disk.rs`,
     /// Q1290).
+    ///
+    /// **With none of those either, every ring is straight-sided, and the
+    /// outline is among all of them**, since the face has one. A ring every
+    /// side of which is straight is the polygon through its corners, but its
+    /// corners are where they rounded to, and where they stand a rounding apart
+    /// across the ring the way they wind is the rounding's too. A turned ell
+    /// with a frame flush against its wall overlaps it in a slab a rounding
+    /// thick, and the slab's floor, joined from two pieces, is one ring of six
+    /// corners in three pairs a rounding apart, which wind against the plane as
+    /// stored (`fuses_that_must_agree.rs`,
+    /// `a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_short`,
+    /// Q2236). That one ring is the outline, and two or more are placed by the
+    /// rule below. The face is written with its corners as they wind, so what
+    /// refuses it is what refuses a face that thin: under a certified policy
+    /// [`Assembly::check_dynamic_range`], for the slab's edges a rounding long,
+    /// in every rule both ways round. A tolerant policy lets that range
+    /// through, and the ell less the frame and the frame less the ell are then
+    /// refused [`Error::TheFuseWroteABrokenAnswer`],
+    /// [`Invalid::OuterWireWindsAgainstTheNormal`], once written.
     ///
     /// **Two or more such rings and no outline are placed by the regions they
     /// bound**, since the outline is the one ring that holds the others
@@ -2503,12 +2521,13 @@ impl Assembly {
     ///
     /// - **A ring winding neither way.** Nothing reaches it:
     ///   [`winding_round`] answers `Neg`, `Zero` or `Pos`, or refuses.
-    /// - **No ring winding with the plane, and none of those whose corners
-    ///   cannot place them holding the others**, every one answering `Some(false)`,
-    ///   or there being none: every ring straight-sided and winding against the
-    ///   plane. No shape is known to reach it since the rule above for a ring
-    ///   with a side that is not straight (Q2228), which answers the lens cap
-    ///   that did.
+    /// - **No ring winding with the plane, and none of those that may be the
+    ///   outline holding the others**, every one answering `Some(false)`, or
+    ///   the face having no ring at all. No shape is known to reach it since
+    ///   the rule above for a ring with a side that is not straight (Q2228),
+    ///   which answers the lens cap that did, and the rule for every ring
+    ///   straight-sided (Q2236), which answers the turned ell and frame that
+    ///   did.
     /// - **Two or more rings each holding the others**, which would mean the
     ///   answer's rings cross. Nobody has traced whether any shape reaches it.
     fn rings_round(
@@ -2570,6 +2589,9 @@ impl Assembly {
                             .iter()
                             .all(|&dart| self.edges[self.edge_of(dart)].runs_straight())
                     });
+                }
+                if may_be_it.is_empty() {
+                    may_be_it = core::mem::take(&mut holes);
                 }
                 let which = if may_be_it.len() == 1 {
                     0
