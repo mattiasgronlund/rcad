@@ -57,7 +57,7 @@ fn every_tenth_of_a_degree_measures_after_its_file(tenths: std::ops::Range<u32>)
     let mut refused = Vec::new();
     for tenth in tenths.clone() {
         let degrees = f64::from(tenth) / 10.0;
-        if let Err(why) = the_same_volume_after_its_file(degrees, 1.8) {
+        if let Err(why) = the_same_volume_after_its_file(RING, TUBE, Vector::zero(), degrees, 1.8) {
             refused.push(format!("{degrees}: {why}"));
         }
     }
@@ -76,21 +76,74 @@ fn every_tenth_of_a_degree_measures_after_its_file(tenths: std::ops::Range<u32>)
 /// than drawing a side once.
 #[test]
 fn the_bend_turned_137_degrees_about_x_measures_after_its_file_at_a_deflection_of_two() {
-    the_same_volume_after_its_file(137.0, 2.0).unwrap_or_else(|why| panic!("{why}"));
+    the_same_volume_after_its_file(RING, TUBE, Vector::zero(), 137.0, 2.0)
+        .unwrap_or_else(|why| panic!("{why}"));
 }
 
-/// The bend turned `degrees` about `x` and measured at `deflection`, then
-/// written, read back and measured again: `Err` saying what went wrong unless
-/// both measure and the two volumes are within the sum of their stated
-/// errors of each other.
-fn the_same_volume_after_its_file(degrees: f64, deflection: f64) -> Result<(), String> {
+#[test]
+fn probe_q1351_offset_sweep() {
+    let mut by_name: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    let mut folds: Vec<String> = Vec::new();
+    let mut total = 0u32;
+    for &factor in &[1e3_f64, 1e6, 1e9] {
+        let offset = Vector::new(factor, factor, factor);
+        for whole in 0..360 {
+            let degrees = f64::from(whole);
+            for &deflection in &[0.5_f64, 1.8, 2.0] {
+                total += 1;
+                match the_same_volume_after_its_file(RING, TUBE, offset, degrees, deflection) {
+                    Ok(()) => {}
+                    Err(why) if why.contains(" apart where each may miss") => {
+                        folds.push(format!(
+                            "offset {factor} degrees {degrees} deflection {deflection}: {why}"
+                        ));
+                    }
+                    Err(why) => {
+                        let name = refusal_name(&why).to_owned();
+                        *by_name.entry(name).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "total {total} folds {} by_name {by_name:?}\n{}",
+        folds.len(),
+        folds.join("\n")
+    );
+    panic!("probe");
+}
+
+fn refusal_name(why: &str) -> &str {
+    let after = why.rsplit("why: ").next().unwrap_or(why);
+    let after = after.trim_start_matches(|c: char| !c.is_alphabetic());
+    after
+        .split(|c: char| c == ' ' || c == '{' || c == '(')
+        .next()
+        .unwrap_or(after)
+}
+
+/// The bend of `ring` and `tube`, moved by `offset` and turned `degrees`
+/// about `x`, measured at `deflection`, then written, read back and measured
+/// again: `Err` saying what went wrong unless both measure and the two
+/// volumes are within the sum of their stated errors of each other.
+fn the_same_volume_after_its_file(
+    ring: f64,
+    tube: f64,
+    offset: Vector,
+    degrees: f64,
+    deflection: f64,
+) -> Result<(), String> {
     let policy = Policy::certified();
     let deflection = Deflection::of(deflection).expect("a positive length");
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    let bend = a_quarter_bend(&mut model);
+    let bend = a_quarter_bend(&mut model, ring, tube);
     let turn = Isometry::rotation(&Axis::x(), degrees.to_radians()).expect("a turn about an axis");
+    let placement = Isometry::translation(offset)
+        .expect("a finite offset")
+        .compose(&turn);
     model
-        .place_solid(bend, &turn)
+        .place_solid(bend, &placement)
         .expect("the bend is in the model");
     let here = model
         .solid(bend)
@@ -98,7 +151,8 @@ fn the_same_volume_after_its_file(degrees: f64, deflection: f64) -> Result<(), S
         .measure(deflection, &policy, &mut ProvenanceLog::new())
         .map_err(|why| format!("the placed bend did not measure: {why:?}"))?;
 
-    let text = rcad_step::write(&model, "a quarter bend").expect("a placed bend is written");
+    let text = rcad_step::write(&model, "a quarter bend")
+        .map_err(|why| format!("the placed bend did not write: {why:?}"))?;
     let file = StepFile::read(text.as_bytes()).expect("the writer writes Part 21");
     let import = Import::read(&file, &policy, &mut ProvenanceLog::new())
         .map_err(|why| format!("the file did not read back: {why:?}"))?;
@@ -123,19 +177,19 @@ fn the_same_volume_after_its_file(degrees: f64, deflection: f64) -> Result<(), S
     Ok(())
 }
 
-/// A quarter bend of ring `RING` and tube `TUBE` about `z` at the origin, from
-/// the inner equator's point on `x` round to the one on `y`: the wall used
-/// forwards, each cap circle walked right-handed about the outward normal of
-/// the cap it bounds, and the seam along the inner equator.
-fn a_quarter_bend(model: &mut Model) -> SolidKey {
+/// A quarter bend of ring `ring` and tube `tube` about `z` at the origin,
+/// from the inner equator's point on `x` round to the one on `y`: the wall
+/// used forwards, each cap circle walked right-handed about the outward
+/// normal of the cap it bounds, and the seam along the inner equator.
+fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> SolidKey {
     let skin =
-        Surface::Torus(Torus::new(Axis::z(), RING, TUBE).expect("a tube narrower than its ring"));
+        Surface::Torus(Torus::new(Axis::z(), ring, tube).expect("a tube narrower than its ring"));
     let mut builder = SolidBuilder::new();
     let start_corner = builder
-        .add_vertex(Point::new(RING - TUBE, 0.0, 0.0))
+        .add_vertex(Point::new(ring - tube, 0.0, 0.0))
         .expect("a finite point");
     let end_corner = builder
-        .add_vertex(Point::new(0.0, RING - TUBE, 0.0))
+        .add_vertex(Point::new(0.0, ring - tube, 0.0))
         .expect("a finite point");
     let middle = Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
         .expect("the z axis is a unit normal");
@@ -146,7 +200,7 @@ fn a_quarter_bend(model: &mut Model) -> SolidKey {
             EdgeRun::PartOfWhereItCrosses {
                 and: Surface::Plane(middle),
                 picked_by: [
-                    Picker::InsideAPipe(Cylinder::new(Axis::z(), RING).expect("a radius")),
+                    Picker::InsideAPipe(Cylinder::new(Axis::z(), ring).expect("a radius")),
                     Picker::from(
                         HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.0)
                             .expect("a normal with a length"),
