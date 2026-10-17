@@ -2149,6 +2149,12 @@ impl<'f> Arrangement<'f> {
                 .into_iter()
                 .filter(|crossing| !left_out.contains(crossing))
                 .collect();
+            if let [stays] = on[..] {
+                let gone = if stays == first { second } else { first };
+                if self.the_face_across_leaves_it_out_too(stays, gone, &meet) {
+                    continue;
+                }
+            }
             self.place_where_the_partners_meet(first, second, &on, meet, &mut folded_into_a_corner);
         }
         for crossing in left_out {
@@ -2208,6 +2214,43 @@ impl<'f> Arrangement<'f> {
                     .iter()
                     .any(|node| node.crossings.contains(crossing))
         })
+    }
+
+    /// Whether, where the face's surface and the partners of `stays` and
+    /// `gone` meet, the face on the partner of `stays` leaves out its crossing
+    /// with the partner of `gone` too, so that it splits `stays` nowhere there
+    /// and neither may this face.
+    ///
+    /// **Both curves the partner of `gone` crosses the other two in lie wholly
+    /// past one plane every face carrying it lies behind**
+    /// ([`a_curve_of_two_lies_wholly_past`]). The one through the face's
+    /// surface is `gone`, and the one through the partner of `stays` is the
+    /// crossing the face across draws there. Asked of the two the same way and
+    /// in either order, so the face across asks just this of the same three
+    /// and gets the same answer.
+    fn the_face_across_leaves_it_out_too(
+        &self,
+        stays: usize,
+        gone: usize,
+        meet: &MeetOfThree,
+    ) -> bool {
+        let MeetOfThree::At(places) = meet else {
+            return false;
+        };
+        let places: SmallVec<[PredicatePoint; 2]> =
+            places.iter().copied().map(as_exact_as_it_is).collect();
+        let third = self.crossings[gone].partner;
+        let across = self.crossings[stays].partner;
+        self.face
+            .sides_the_faces_of_each_cut_lie_in
+            .iter()
+            .filter(|(cut, _)| *cut == third)
+            .flat_map(|(_, sides)| sides)
+            .any(|&side| {
+                [self.surface, across]
+                    .iter()
+                    .all(|&other| a_curve_of_two_lies_wholly_past([other, third], &places, side))
+            })
     }
 
     /// One node on the crossings `on`, of `first` and `second`, at each place
@@ -12659,6 +12702,36 @@ fn lies_exactly_on_the_axis(point: Point, axis: Axis) -> Option<bool> {
         }
     }
     Some(true)
+}
+
+/// Whether the curve the two surfaces cross in through `places`, points on
+/// both, lies wholly past `side`'s plane, as
+/// [`Arrangement::lies_wholly_past`] asks it of a crossing.
+///
+/// - **A flat surface and a pipe** cross in one curve, held whole by
+///   [`a_box_round_where_a_flat_surface_cuts_a_pipe`].
+/// - **Two pipes** can cross in two loops. Where the plane provably shares no
+///   point with both ([`a_cut_of_a_pipe_is_clear_of_the_third`]), each loop
+///   lies wholly on one side, and every place past the plane puts the loop it
+///   is on past it.
+/// - Anything else is not asked.
+fn a_curve_of_two_lies_wholly_past(
+    two: [Surface; 2],
+    places: &[PredicatePoint],
+    side: ASideOfAPlane,
+) -> bool {
+    let past = |point: PredicatePoint| side.plane.side_of_point(point) == side.past_it();
+    if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Plane(flat)] = two
+    {
+        return a_box_round_where_a_flat_surface_cuts_a_pipe(&flat, &pipe)
+            .is_some_and(|boxed| past(PredicatePoint::Constructed(boxed)));
+    }
+    let [Surface::Cylinder(_), Surface::Cylinder(_)] = two else {
+        return false;
+    };
+    a_cut_of_a_pipe_is_clear_of_the_third([two[0], two[1], Surface::Plane(side.plane)])
+        && places.iter().all(|&place| past(place))
 }
 
 /// Whether, of these three surfaces, a flat one cuts a pipe in a curve that
