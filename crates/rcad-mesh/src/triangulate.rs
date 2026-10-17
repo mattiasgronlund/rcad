@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use spade::handles::FixedVertexHandle;
+use spade::handles::{FixedDirectedEdgeHandle, FixedFaceHandle, FixedVertexHandle, InnerTag};
 use spade::{ConstrainedDelaunayTriangulation, InsertionError, Point2, Triangulation};
 
 use rcad_geom::{Cone, Deflection, Point, Surface, Torus};
@@ -1759,7 +1759,9 @@ struct HowFineToGo<'a> {
 /// is a question about which side makes the triangle big, and the scaled domain
 /// is where that is asked, so the pieces come out shaped like pieces. Choosing
 /// the longest chord instead makes a mesh a third bigger, because it keeps
-/// cutting across the same direction and leaves slivers behind it.
+/// cutting across the same direction and leaves slivers behind it. Where a
+/// placed point crowds the middle of that side, the cut goes across it to the
+/// next triangle's longest side instead ([`where_to_cut`]).
 ///
 /// A loop is never cut: only an interior side is ever chosen. A triangle made
 /// of nothing but boundary sides therefore has nothing to offer, and it almost
@@ -1777,10 +1779,13 @@ struct HowFineToGo<'a> {
 ///
 /// The eighth is not a tolerance and nothing is measured against it. It is
 /// there so the count above is finite, and it is set well under the spacing the
-/// mesh is aiming for so that it does not decide the answer: it declines points
-/// that are no longer dividing anything. A round that places nothing is the end
-/// of the road, and the answer there is a refusal rather than a mesh that
-/// quietly missed.
+/// mesh is aiming for so that it does not decide the answer. **It did decide
+/// one**: the middle of a sliver's long side sits next to the sliver's own third
+/// corner, and declining it left the sliver straying too far with nothing else
+/// to place (Q2192). A crowded middle is therefore not given up but handed
+/// across its side, and every point that offers still keeps the eighth. A round
+/// that places nothing is the end of the road, and the answer there is a
+/// refusal rather than a mesh that quietly missed.
 ///
 /// # Errors
 ///
@@ -1808,21 +1813,6 @@ fn refine_the_inside(
                 .vertices()
                 .map(|vertex| corners[corner_of[vertex.index()] as usize]);
             let across = the_range_of_each_coordinate(&at);
-            let mut to_split: Option<(f64, [f64; 2], [f64; 2])> = None;
-            for edge in face.adjacent_edges() {
-                let from = corners[corner_of[edge.from().index()] as usize];
-                let to = corners[corner_of[edge.to().index()] as usize];
-                if edge.is_constraint_edge() {
-                    continue;
-                }
-                let (here, there) = (edge.from().position(), edge.to().position());
-                let (dx, dy) = (there.x - here.x, there.y - here.y);
-                let reach = dx.mul_add(dx, dy * dy);
-                if to_split.is_none_or(|(longest, _, _)| reach > longest) {
-                    to_split = Some((reach, from, to));
-                }
-            }
-
             let strays = how_far_a_flat_piece_strays(aim.surface, across, &at, aim.slop);
             furthest = furthest.max(strays);
             if strays <= aim.deflection {
@@ -1837,10 +1827,11 @@ fn refine_the_inside(
             // corners at once, which is not the same number as any one side's.
             // There is nothing to cut there, and the refusal below is the
             // answer.
-            let Some((_, from, to)) = to_split else {
+            let Some(corner) = where_to_cut(mesh, face.fix(), corners, corner_of, &placed, aim)
+            else {
                 continue;
             };
-            wanted.push([(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0]);
+            wanted.push(corner);
         }
 
         // **A side cutting off a corner is cut whether or not a point is close
@@ -1897,6 +1888,88 @@ fn refine_the_inside(
             });
         }
     }
+}
+
+/// Where to put the point that cuts `face`, a triangle that strays too far:
+/// the middle of its longest side off the loops, or, when a point already
+/// placed crowds that middle, the middle of the longest side of the triangle
+/// across it, and on along the path of longest sides for as long as each side
+/// is longer than the one before. `None` when `face` has no side off the loops,
+/// or the path ends before a middle with room.
+///
+/// **The middle that was seen crowded is the middle of a sliver's long side**,
+/// crowded by the sliver's own third corner, which sits nearly on that side.
+/// The middle of a triangle's longest side is at least `L/√12` from the
+/// opposite corner while the angle there is under 120°, so it takes a sliver
+/// to put the two close. On a cone, where a triangle running up a ruling
+/// strays by nothing however long it is, the refinement leaves such slivers:
+/// three points round one height under a triangle that reaches up a ruling to
+/// the rim. Q2192's band of a unit cone cut by a face leaned `4` and turned `1`
+/// had three, their third corners `0.0135` to `0.0161` from their long sides'
+/// middles in the scaled domain where a new point keeps `0.0163`, and the band
+/// was refused for want of the three points that would have cut those sides.
+///
+/// **The triangle across a sliver's long side is the one to cut.** Its far
+/// corner is outside the sliver's circumcircle, which is what the triangulation
+/// being Delaunay means, and where the sliver's angle is over 120° that corner
+/// sees the shared side at under 60°, so the shared side is not that
+/// triangle's longest and the path goes on. A point put down along it lands
+/// inside the sliver's circumcircle when it lands close enough to the shared
+/// side, and the triangulation then flips the shared side away; the next round
+/// asks again of whatever is left.
+///
+/// Each step goes to a strictly longer side, so the path ends. Every point it
+/// offers still has to keep the eighth of a step from every placed point, so
+/// the packing argument on [`refine_the_inside`] holds as it stands.
+fn where_to_cut(
+    mesh: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    face: FixedFaceHandle<InnerTag>,
+    corners: &[[f64; 2]],
+    corner_of: &[u32],
+    placed: &PointsAlreadyPlaced,
+    aim: &HowFineToGo<'_>,
+) -> Option<[f64; 2]> {
+    let (mut reach, mut side) = the_longest_side_off_the_loops(mesh, face)?;
+    loop {
+        let edge = mesh.directed_edge(side);
+        let [from, to] =
+            [edge.from(), edge.to()].map(|end| corners[corner_of[end.index()] as usize]);
+        let middle = [(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0];
+        if placed.has_room_for(Point2::new(middle[0] * aim.across, middle[1] * aim.along)) {
+            return Some(middle);
+        }
+        let beyond = edge
+            .rev()
+            .face()
+            .as_inner()
+            .expect("a side off the loops of a triangle inside the patch has one across it");
+        let (further, next) = the_longest_side_off_the_loops(mesh, beyond.fix())?;
+        if further <= reach {
+            return None;
+        }
+        (reach, side) = (further, next);
+    }
+}
+
+/// The longest side of `face` that is not on a loop, by the square of its
+/// length in the scaled domain, or `None` when every side is on one.
+fn the_longest_side_off_the_loops(
+    mesh: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    face: FixedFaceHandle<InnerTag>,
+) -> Option<(f64, FixedDirectedEdgeHandle)> {
+    let mut longest: Option<(f64, FixedDirectedEdgeHandle)> = None;
+    for edge in mesh.face(face).adjacent_edges() {
+        if edge.is_constraint_edge() {
+            continue;
+        }
+        let (here, there) = (edge.from().position(), edge.to().position());
+        let (dx, dy) = (there.x - here.x, there.y - here.y);
+        let reach = dx.mul_add(dx, dy * dy);
+        if longest.is_none_or(|(so_far, _)| reach > so_far) {
+            longest = Some((reach, edge.fix()));
+        }
+    }
+    longest
 }
 
 /// The corners of a curved patch that one side of the triangulation cuts
@@ -2328,17 +2401,20 @@ pub enum CannotTriangulate {
     /// cancel and the triangulation will not take what is left, or the place it
     /// would go is already occupied.
     ///
-    /// **Only the first of those two is reached by anything in this
-    /// workspace.** Counted rather than reasoned about: with the two ways
-    /// [`refine_the_inside`] can decline a point tallied separately and the
+    /// **Only the first of those two is known to reach this.** With the two
+    /// ways [`refine_the_inside`] can decline a point tallied separately and the
     /// whole test suite run, this refusal came back exactly once in 1694 tests,
     /// with no point declined for crowding and two declined by the
     /// triangulation — `a_refinement_point_the_triangulation_will_not_take_is_refused_and_never_a_panic`.
     /// The packing floor used to be reached by a pointed cone chasing a
     /// deflection the collapsed bound invented for it, and
-    /// [`how_far_a_flat_piece_of_a_cone_strays`] no longer invents it. The floor
-    /// stays because it is what makes [`refine_the_inside`] terminate at all,
-    /// not because something is expected to land on it.
+    /// [`how_far_a_flat_piece_of_a_cone_strays`] no longer invents it. It was
+    /// reached once more, after that count, by a sliver on a cone whose long
+    /// side's middle sat next to its own third corner (Q2192), and a crowded
+    /// middle is now handed across its side rather than given up
+    /// ([`where_to_cut`]). The floor stays because it is what makes
+    /// [`refine_the_inside`] terminate at all, not because something is
+    /// expected to land on it.
     #[error(
         "the mesh still strays {strays}, the deflection is {deflection}, and there is nowhere left to put a point"
     )]
