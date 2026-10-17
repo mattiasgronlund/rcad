@@ -2414,6 +2414,7 @@ mod tests {
             [&ground, &wall],
             // A plane down the pipe's own axis: two straight lines, not a conic.
             [&wall, &pipe],
+            [&pipe, &wall],
             [&ball_beside, &pipe],
             [&pipe, &ball_beside],
             [&pipe, &pipe],
@@ -2454,34 +2455,26 @@ mod tests {
         }
     }
 
-    /// Two authorities on "is this plane along this pipe's axis", asking it two
-    /// different ways and disagreeing.
+    /// Two authorities on "is this plane along this pipe's axis", asking it the
+    /// same way and agreeing.
     ///
-    /// [`intersect`](crate::intersect) runs the certified cascade on the exact
-    /// dot of the two stored triples and names one closed curve.
-    /// [`the_way_this_crossing_winds`] runs `== 0.0` on the same two triples in
-    /// plain `f64`, reads "two straight lines", and refuses. `(2, 0, 3)` against
-    /// a plane facing `(−12, −7, 8)` is a pair of small whole numbers where the
-    /// `f64` dot cancels and the exact one does not, and the two answers are as
-    /// far apart as they can be.
+    /// `(2, 0, 3)` against a plane facing `(−12, −7, 8)` is a pair of small
+    /// whole numbers whose `f64` dot cancels and whose exact dot does not, so
+    /// they cross in an ellipse. [`intersect`](crate::intersect) runs the
+    /// certified cascade on the exact dot and names one closed curve, and
+    /// [`the_way_this_crossing_winds`] asks [`how_a_plane_leans_against_a_pipe`],
+    /// the same sign of the same two triples, and orders round it: three points
+    /// at one place sweep nothing. Before row Q2233 it ran `== 0.0` on the
+    /// rounded dot, read "two straight lines" and refused the pair, the gap §39
+    /// recorded.
     ///
-    /// **This witness has dissolved twice and the gap has not moved once.** It
-    /// was `(1, 0, 3)` against `(−12, −12, 4)` until §120 rounded the stored axis
-    /// correctly and that pair's `f64` dot came out at `−2.8e-17`; it was
-    /// `(2, 0, 3)` against `(−12, −12, 8)` until §121 rounded the stored normal
-    /// correctly and the *exact* dot of that pair came out at zero, which is a
-    /// pair the two authorities agree about. A sweep of small whole-number pipes
-    /// against small whole-number planes still finds dozens where the `f64` dot
-    /// cancels and the exact one does not — for this one pipe alone, more than
-    /// twenty normals inside `±12` — and this is one of them.
-    ///
-    /// **A gap, and this test pins today's answer so a fix fails it loudly**
-    /// (§19's shape). Closing it means the two asking the same question, which is
-    /// §23.8, and it moves `walk`'s own dispatch too — `walk.rs` has the same
-    /// `== 0.0` for the same reason — so it is a lane rather than a gate. §39
-    /// records it.
+    /// A sweep of small whole-number pipes against small whole-number planes
+    /// finds dozens where the `f64` dot cancels and the exact one does not — for
+    /// this one pipe alone, more than twenty normals inside `±12` — and this is
+    /// one of them. §120 and §121 each dissolved an earlier one by rounding the
+    /// stored axis and the stored normal correctly.
     #[test]
-    fn a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently() {
+    fn a_conic_the_intersector_names_is_ordered_here_too_because_the_two_ask_it_alike() {
         let pipe = Surface::Cylinder(
             Cylinder::new(
                 Axis::new(Point::origin(), Vector::new(2.0, 0.0, 3.0)).expect("a direction"),
@@ -2527,8 +2520,13 @@ mod tests {
         let somewhere = PredicatePoint::from([1.0, 0.0, 0.0]);
         assert_eq!(
             which_comes_first_round_a_crossing([&leaning, &pipe], somewhere, somewhere, somewhere),
-            Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
-            "and this refuses the very same pair"
+            Ok(Decision::Zero),
+            "and this orders round the very same pair"
+        );
+        assert_eq!(
+            which_comes_first_round_a_crossing([&pipe, &leaning], somewhere, somewhere, somewhere),
+            Ok(Decision::Zero),
+            "both ways round"
         );
     }
 
