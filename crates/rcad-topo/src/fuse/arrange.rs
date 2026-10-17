@@ -4766,6 +4766,19 @@ impl<'f> Arrangement<'f> {
     ///
     /// Only a node that stands for one meet is read, as in
     /// [`Arrangement::as_the_quadric_says`].
+    ///
+    /// **Two meets whose boxes have one middle are not read.** The answer
+    /// writes each meet at the middle of its box, and two names written at one
+    /// triple are one corner there ([`middle_of`], and `Corners::of` in
+    /// `assemble`). An order proved between the two would draw an arc from
+    /// that corner back to itself, which no shell can keep, so the pair goes to
+    /// the policy as it did before this step: a certified fuse refuses, and a
+    /// tolerant one folds the two. A ball of radius `1 + 2⁻⁵¹` round
+    /// `(0, 0, 16)` meets the block edge `x = −1, y = 2⁻²⁵` at `z = 16 ± 2⁻⁵¹`,
+    /// and the two boxes, `[16 − 2⁻⁴⁹, 16]` and `[16, 16 + 2⁻⁴⁸]` along `z`,
+    /// both have their middle at `16`. Read here, every fuse of the two was
+    /// refused as a curved face going too far round, or as faces that do not
+    /// agree which way they face (`a_block_edge_grazing_a_ball.rs`).
     fn as_the_two_meets_of_one_line_say(
         &self,
         crossing: usize,
@@ -4777,6 +4790,9 @@ impl<'f> Arrangement<'f> {
             self.the_one_meet_it_stands_for(second)?,
         );
         if surfaces != named_too || mine == theirs || mine.max(theirs) > 1 {
+            return None;
+        }
+        if middle_of(self.nodes[first].point) == middle_of(self.nodes[second].point) {
             return None;
         }
         let mut planes = surfaces.iter().filter_map(Surface::as_plane);
