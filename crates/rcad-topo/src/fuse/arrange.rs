@@ -4226,6 +4226,19 @@ impl<'f> Arrangement<'f> {
     /// the boxes cannot say, because the boxes are cheaper and nearly always
     /// enough.
     ///
+    /// **Where two planes through one corner cut it
+    /// ([`Arrangement::as_two_cuts_through_one_corner_say`]) is asked only
+    /// where the policy would refuse.** That route answers where the corner is
+    /// a rounding off the loop's surface, and keeps the two nodes a rounding
+    /// apart; a tolerant policy reads them as one point, the corner as on the
+    /// surface. Kept apart, they leave a sliver too thin to mesh or to close:
+    /// a round bar notched by a block cornered on its wall, at radius `8` and
+    /// working size `1` or radius `16` and working size `10`, was refused
+    /// `ResultIsNotManifold` by the union both ways round and by the bar less
+    /// the block, and at radius `17.92` `CannotMeshAFace`, where read as one
+    /// point every fuse answers with its volume
+    /// (`tests/a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`).
+    ///
     /// **A refusal is filed under what its enclosure measures.** Along an axis
     /// it is a step between two boxes, and across a bend the same step read
     /// against `n × w`, the plane's normal and the cone's axis, both of length
@@ -4277,14 +4290,23 @@ impl<'f> Arrangement<'f> {
         let Decision::Undecidable { .. } = decided else {
             return Ok(decided);
         };
-        must_decide(
+        let nodes = [self.nodes[first].point, self.nodes[second].point];
+        let mut read_as_one_point = ProvenanceLog::new();
+        if let Ok(settled) = must_decide(
             decided,
             ALONG_A_CROSSING,
-            &[self.nodes[first].point, self.nodes[second].point],
+            &nodes,
             measures,
             policy,
-            log,
-        )
+            &mut read_as_one_point,
+        ) {
+            read_as_one_point.drain_into(log);
+            return Ok(settled);
+        }
+        if let Some(proved) = self.as_two_cuts_through_one_corner_say(crossing, first, second) {
+            return Ok(proved);
+        }
+        must_decide(decided, ALONG_A_CROSSING, &nodes, measures, policy, log)
     }
 
     /// Which of two nodes on a crossing comes first along it, from their boxes
@@ -5077,21 +5099,10 @@ impl<'f> Arrangement<'f> {
             (None, Some(_)) if round(&wound_as[0]) => (),
             (Some(_) | None, Some(_) | None) => return None,
         }
-        let the_cut_through = |at: usize| {
-            let three = match self.nodes[at].vertex {
-                Some(_) => self.the_baked_corner_of(&self.nodes[at]).solved_from?,
-                None => self.the_one_meet_it_stands_for(at)?.0,
-            };
-            if !wound_as.iter().all(|surface| three.contains(surface)) {
-                return None;
-            }
-            let mut others = three.iter().filter(|surface| !wound_as.contains(surface));
-            let (Some(Surface::Plane(cut)), None) = (others.next(), others.next()) else {
-                return None;
-            };
-            Some(*cut)
-        };
-        let (mine, theirs) = (the_cut_through(first)?, the_cut_through(second)?);
+        let (mine, theirs) = (
+            self.the_cut_through_the_loop_at(first, wound_as)?,
+            self.the_cut_through_the_loop_at(second, wound_as)?,
+        );
         let across = mine.normal().components();
         let theirs = [theirs, theirs.reversed()]
             .into_iter()
@@ -5138,6 +5149,165 @@ impl<'f> Arrangement<'f> {
         } else {
             Decision::Neg
         })
+    }
+
+    /// Which of two nodes on the loop a plane `S` cuts a ball or a pipe `Q` in
+    /// comes first, where each is where the loop meets a plane of its own, `P₁`
+    /// and `P₂`, and the three planes meet at one corner `C` that is an `f64`
+    /// triple: read off the two lines `S ∩ Pᵢ` out of `C` and how far `C` is
+    /// off `Q`. `None` everywhere else, and wherever a sign it reads is not
+    /// proved.
+    ///
+    /// **Each node is `C + λᵢdᵢ`, for `dᵢ = n_S × n_Pᵢ` the way its line
+    /// runs.** Along that line `Q` is `δ + 2βᵢλ + cᵢλ²`, for `δ` its value at
+    /// `C` ([`how_far_off_its_skin`]), `βᵢ` the gradient at `C`
+    /// ([`gradient_at`], half of `∇Q`) along `dᵢ`, and `cᵢ` how that gradient
+    /// turns along `dᵢ` ([`bend_along`]). The node is the root nearer `C`,
+    /// `λᵢ = −δ/Dᵢ` with `Dᵢ = βᵢ + sign(βᵢ)·√(βᵢ² − cᵢδ)`, and that is proved
+    /// and not assumed: the gradient along `dᵢ` keeps one sign over the box
+    /// round `C` and the node, so `Q` climbs or falls all the way from `C` to
+    /// the node and has no other root between them, and the parabola turns on
+    /// the far side of `C`, where its other root is further off.
+    ///
+    /// **The sweep `((A − s) × (B − s)) · n` is then `λ₂E₂ + λ₁E₁ + λ₁λ₂E₁₂`**,
+    /// for `E₂ = ((C − s) × d₂) · n`, `E₁ = (d₁ × (C − s)) · n` and `E₁₂ = (d₁ ×
+    /// d₂) · n`, and with the two roots put in it is `−δ/(D₁D₂)` times
+    /// `H = E₂D₁ + E₁D₂ − δE₁₂`. So it has the sign of `−δ`, `β₁`, `β₂` and `H`
+    /// multiplied, and nothing is divided. `H` is worked in intervals, where an
+    /// enclosure of `δ` is enough, and only the sign of `δ` must be exact: it
+    /// is asked of `Q` itself ([`side_of_surface`]). Where `C` is on `Q` both
+    /// nodes are `C`, and the two are one point.
+    ///
+    /// Both starts are asked, as in
+    /// [`Arrangement::as_two_parallel_cuts_through_the_loop_say`].
+    ///
+    /// A plate of the square `[0, 10]²` and a round tab of radius 3 at
+    /// `(10, 10)`, fused with a block cornered at `(12.4, 8.2)`, has `C` on the
+    /// tab's rim by a 3-4-5 triangle and, in `f64`, `4.3e-15` outside it. The
+    /// block's walls `x = 12.4` and `y = 8.2` cut the rim's circle on the
+    /// plate's top and on its floor a rounding apart, in boxes that share `C`,
+    /// and every certified fuse of the two was refused on which comes first
+    /// (Q2232).
+    fn as_two_cuts_through_one_corner_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve {
+            from,
+            node,
+            named_the_start,
+            ref wound_as,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let (flat, round, winds) = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) => (flat, &wound_as[1], flat.normal()),
+            (None, Some(flat)) => (flat, &wound_as[0], -flat.normal()),
+            (Some(_), Some(_)) | (None, None) => return None,
+        };
+        let (mine, theirs) = (
+            self.the_cut_through_the_loop_at(first, wound_as)?,
+            self.the_cut_through_the_loop_at(second, wound_as)?,
+        );
+        let corner = Plane::meet_of_three(flat, &mine, &theirs)
+            .ok()?
+            .exact_coordinates()?;
+        let off_by = how_far_off_its_skin(round, corner)?;
+        let at_the_corner = PredicatePoint::Exact(corner);
+        let facing = flat.normal().components().map(Interval::exactly);
+        let [one_way, other_way] = [mine, theirs].map(|cut| {
+            cross_of_intervals(facing, cut.normal().components().map(Interval::exactly))
+        });
+        let leaving = |at: usize, along: [Interval; 3]| {
+            let near = self.nodes[at].point.enclosure();
+            let mut between = near;
+            for axis in 0..3 {
+                between[axis] = Interval::new(
+                    near[axis].lo().min(corner[axis]),
+                    near[axis].hi().max(corner[axis]),
+                )
+                .ok()?;
+            }
+            let rises = dot_of(
+                gradient_at(round, PredicatePoint::Constructed(between)).enclosure(),
+                along,
+            )
+            .sign();
+            // Compared rather than matched: only one proved sign is read (§40).
+            if !(rises == Decision::Pos || rises == Decision::Neg) {
+                return None;
+            }
+            let climbs = dot_of(gradient_at(round, at_the_corner).enclosure(), along);
+            let root =
+                (climbs * climbs - bend_along(round, at_the_corner, along) * off_by).sqrt()?;
+            Some((
+                rises,
+                if rises == Decision::Pos {
+                    climbs + root
+                } else {
+                    climbs - root
+                },
+            ))
+        };
+        let (rises_one, reach_one) = leaving(first, one_way)?;
+        let (rises_other, reach_other) = leaving(second, other_way)?;
+        let outside = side_of_surface(round, at_the_corner);
+        // Compared rather than matched: only a proved side or a proved nought
+        // is read, and every other answer leaves the pair to the policy (§40).
+        if outside == Decision::Zero {
+            return Some(Decision::Zero);
+        }
+        if !(outside == Decision::Pos || outside == Decision::Neg) {
+            return None;
+        }
+        let about = winds.components().map(Interval::exactly);
+        let both_turn = dot_of(cross_of_intervals(one_way, other_way), about);
+        let swept_from = |start: PredicatePoint| {
+            let start = start.enclosure();
+            let out = [0, 1, 2].map(|axis| Interval::exactly(corner[axis]) - start[axis]);
+            let other_turns = dot_of(cross_of_intervals(out, other_way), about);
+            let one_turns = dot_of(cross_of_intervals(one_way, out), about);
+            (other_turns * reach_one + one_turns * reach_other - off_by * both_turn).sign()
+        };
+        let [swept, swept_too] = [from, named_the_start.unwrap_or(node)].map(swept_from);
+        if swept != swept_too || !(swept == Decision::Pos || swept == Decision::Neg) {
+            return None;
+        }
+        let behind = [outside, rises_one, rises_other, swept]
+            .into_iter()
+            .filter(|&sign| sign == Decision::Neg)
+            .count();
+        Some(if behind % 2 == 1 {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
+    }
+
+    /// The plane that cuts the loop `wound_as` winds at node `at`: the third of
+    /// the three surfaces `at` is the meet of, where the other two are
+    /// `wound_as`'s and it is a plane, and `None` everywhere else.
+    ///
+    /// A corner is read as the meet of the three `bake` solved it from
+    /// ([`BakedCorner::solved_from`]), whose box holds where exactly those
+    /// three meet, and any other node only where it stands for one meet
+    /// ([`Arrangement::the_one_meet_it_stands_for`]).
+    fn the_cut_through_the_loop_at(&self, at: usize, wound_as: &[Surface; 2]) -> Option<Plane> {
+        let three = match self.nodes[at].vertex {
+            Some(_) => self.the_baked_corner_of(&self.nodes[at]).solved_from?,
+            None => self.the_one_meet_it_stands_for(at)?.0,
+        };
+        if !wound_as.iter().all(|surface| three.contains(surface)) {
+            return None;
+        }
+        let mut others = three.iter().filter(|surface| !wound_as.contains(surface));
+        let (Some(Surface::Plane(cut)), None) = (others.next(), others.next()) else {
+            return None;
+        };
+        Some(*cut)
     }
 
     /// Fold each cut that runs straight along a straight crossing drawn before
@@ -12056,6 +12226,34 @@ fn bend_along(surface: &Surface, at: PredicatePoint, along: [Interval; 3]) -> In
     }
 }
 
+/// How far `at` is off the skin of a ball or a pipe, as a box: the very
+/// polynomial [`gradient_at`] hands back half the gradient of, `|x − c|² − r²`
+/// for a ball and `|w|²|x − o|² − (w·(x − o))² − |w|²r²` for a pipe, which is
+/// `(x − o) · g − |w|²r²` for `g` what [`gradient_at`] hands back. `None` for
+/// any other surface.
+fn how_far_off_its_skin(round: &Surface, at: [f64; 3]) -> Option<Interval> {
+    let (middle, skin) = if let Surface::Sphere(ball) = round {
+        let radius = Interval::exactly(ball.radius());
+        (ball.centre().coordinates(), radius * radius)
+    } else if let Surface::Cylinder(pipe) = round {
+        let along = pipe.axis().direction().components().map(Interval::exactly);
+        let radius = Interval::exactly(pipe.radius());
+        (
+            pipe.axis().origin().coordinates(),
+            radius * radius * dot_of(along, along),
+        )
+    } else {
+        return None;
+    };
+    let step = [0, 1, 2].map(|axis| Interval::exactly(at[axis]) - Interval::exactly(middle[axis]));
+    Some(
+        dot_of(
+            step,
+            gradient_at(round, PredicatePoint::Exact(at)).enclosure(),
+        ) - skin,
+    )
+}
+
 fn dot_of(one: [Interval; 3], other: [Interval; 3]) -> Interval {
     (0..3)
         .map(|axis| one[axis] * other[axis])
@@ -15107,6 +15305,88 @@ mod tests {
         );
         for piece in &pieces {
             every_wire_closes(piece);
+        }
+    }
+
+    /// Q992's plate again, cut by `x = 5.375` and by a ball at
+    /// `(5.375, 2.5, 1)` whose circle on the top passes the hole's corner
+    /// `(5, 3)` a rounding outside or inside it (Q2110, Q1484's shapes G and
+    /// I). `0.375² + 0.5² = 0.625²`, so radius `0.625` runs through the corner.
+    ///
+    /// The hole's edge lines `x = 5` and `y = 3` meet the circle at two nodes
+    /// a rounding apart, in boxes that overlap, and the sweep from the start
+    /// straddles nought, so the boxes cannot say which comes first round the
+    /// circle. The top and the two edge lines meet at the corner, an `f64`
+    /// triple, and how far the corner is off the ball says it
+    /// ([`Arrangement::as_two_cuts_through_one_corner_say`]).
+    #[test]
+    fn a_ball_whose_circle_passes_a_rounding_off_a_holes_corner_is_split_by_the_planes_through_it()
+    {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let plate = ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 1.0],
+            [5.0, 1.0],
+            [5.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 5.0],
+            [7.0, 5.0],
+            [7.0, 6.0],
+            [8.0, 6.0],
+            [8.0, 8.0],
+            [5.0, 8.0],
+            [5.0, 7.0],
+            [3.0, 7.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
+            [0.0, 5.0],
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ])
+        .with_hole(vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0], [3.0, 5.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a plate with a square hole");
+        let solid = model
+            .add_extrusion(&plate, 1.0, &Isometry::identity())
+            .expect("an extrusion");
+        let top = bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the plate bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(facing_up)
+        .expect("the plate has a top");
+
+        for radius in [0.625 - f64::powi(2.0, -53), 0.625 + f64::powi(2.0, -53)] {
+            let mut cut = cut_by(&top, &[[1.0, 0.0, 0.0, -5.375]]);
+            cut.cuts.push(Surface::Sphere(
+                rcad_geom::Sphere::new(Point::new(5.375, 2.5, 1.0), radius).expect("a radius"),
+            ));
+
+            let mut log = ProvenanceLog::new();
+            let pieces = split_a_face(&cut, &Policy::certified(), &mut log)
+                .unwrap_or_else(|why| panic!("radius {radius:e}: {why:?}"))
+                .pieces;
+
+            assert!(
+                log.is_empty(),
+                "radius {radius:e}: the corner's planes decide exactly"
+            );
+            assert_eq!(
+                pieces.len(),
+                4,
+                "radius {radius:e}: either side of the cut, each split by the circle"
+            );
+            for piece in &pieces {
+                every_wire_closes(piece);
+            }
         }
     }
 
