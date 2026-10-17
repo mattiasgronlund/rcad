@@ -1640,8 +1640,12 @@ fn what_tolerant_gives_for_a_bar_dipping_through_the_floor(
 ///
 /// The union with the block first is still refused `CannotMeshAFace`, a loop
 /// naming its fourth corner twice, under both policies, though the union the
-/// other way round answers. The answers are not measured: the sliver is too
-/// thin to mesh to the deflection `volume_of` asks for.
+/// other way round answers. `mesh.rs` puts one point inside the arc where the
+/// bar's pipe meets the top, at the arc's tip, and with the block first that
+/// point is stored at exactly the near seam corner's numbers `(3, 2, 4)`; with
+/// the bar first it is stored one rounding step off in `y`, and the pipe
+/// meshes. The answers are not measured: the sliver is too thin to mesh to the
+/// deflection `volume_of` asks for.
 #[test]
 fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top() {
     every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
@@ -1703,7 +1707,9 @@ enum WithTheSeamUnderneath {
     /// The answer's solids, fewest faces first, each as the faces in each of
     /// its shells.
     Solids(Vec<Vec<usize>>),
-    /// Refused `CannotMeshAFace`, a loop naming its fourth corner twice.
+    /// Refused `CannotMeshAFace`, a loop naming its fourth corner twice: the
+    /// one point `mesh.rs` puts inside the arc where the pipe meets the top is
+    /// stored at the near seam corner's own numbers.
     CornersCoincide,
 }
 
