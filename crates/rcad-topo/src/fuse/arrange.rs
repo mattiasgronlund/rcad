@@ -9824,6 +9824,22 @@ fn across_a_circle_that_starts_at_a_pole(
         | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
             return the_other_pole_on_the_one_loop(ball, pipe, at);
         }
+        [Surface::Sphere(one), Surface::Sphere(other)] => {
+            let (first, second) = match pair[0].how_it_sorts_against(pair[1]) {
+                Ordering::Greater => (other, one),
+                Ordering::Less | Ordering::Equal => (one, other),
+            };
+            let between = (first.centre(), second.centre() - first.centre());
+            return across_a_circle_round_a_line(pair, between, from, at);
+        }
+        [Surface::Sphere(_), Surface::Cone(cone)] | [Surface::Cone(cone), Surface::Sphere(_)] => {
+            let axis = (cone.axis().origin(), cone.axis().direction());
+            return across_a_circle_round_a_line(pair, axis, from, at);
+        }
+        [Surface::Sphere(_), Surface::Torus(ring)] | [Surface::Torus(ring), Surface::Sphere(_)] => {
+            let axis = (ring.axis().origin(), ring.axis().direction());
+            return across_a_circle_round_a_line(pair, axis, from, at);
+        }
         _ => return None,
     };
     let round = Surface::Sphere(*ball);
@@ -9920,6 +9936,47 @@ fn a_ball_crosses_a_pipe_in_one_loop_at_most(ball: &Sphere, pipe: &Cylinder) -> 
     let square_off = cross_of_intervals([0, 1, 2].map(|axis| centre[axis] - origin[axis]), along);
     let room = dot_of(square_off, square_off) - wider_by * wider_by * dot_of(along, along);
     room.sign() == Decision::Pos
+}
+
+/// The point straight across a circle a ball crosses a ball, a cone or a ring
+/// in, where the circle starts at a pole of a ball and both surfaces certify
+/// that point is on them.
+///
+/// **Each such circle is square to a line through its middle**, given as a
+/// point of the line and its direction: the line between two balls' centres,
+/// or the axis of a cone or a ring, which the walk draws a circle round only
+/// where the ball's centre is on it. So the point across is `from` mirrored
+/// through its foot on that line. Two balls come in the order
+/// [`Surface::how_it_sorts_against`] puts them, as the walk takes them, so the
+/// line, and how the foot rounds, does not depend on which the caller named
+/// first.
+///
+/// **Only where both surfaces certify the point exactly**, unlike the box a
+/// ball and a plane get, since nothing here has measured how far the foot and
+/// the mirror round. A rounded point across is `None`, and a circle that
+/// starts at a pole is then still refused where it was.
+fn across_a_circle_round_a_line(
+    pair: [&Surface; 2],
+    (through, along): (Point, Vector),
+    from: Point,
+    at: Point,
+) -> Option<PredicatePoint> {
+    let at_a_pole = pair.iter().any(|surface| {
+        matches!(surface, Surface::Sphere(_))
+            && the_surface_pinches_at(surface, surface.coordinates_of(at).1)
+    });
+    if !at_a_pole {
+        return None;
+    }
+    let foot = through + along * ((from - through).dot(along) / along.dot(along));
+    let across = foot + (foot - from);
+    if !across.is_finite() {
+        return None;
+    }
+    let exact = PredicatePoint::from(across.coordinates());
+    pair.iter()
+        .all(|surface| side_of_surface(surface, exact) == Decision::Zero)
+        .then_some(exact)
 }
 
 /// The smallest box holding both boxes.
