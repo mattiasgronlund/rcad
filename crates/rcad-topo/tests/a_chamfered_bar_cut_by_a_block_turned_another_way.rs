@@ -190,6 +190,32 @@ fn a_block_beside_a_chamfered_bars_axis_meets_both_its_circles_and_its_flat_is_r
     );
 }
 
+/// The block sixty across from `z = −2` up to `z = 1`, neither solid placed, so
+/// the block's top holds the circle where the bar's cone meets its pipe. Less
+/// the block, the bar is the pipe from `z = 1` up, closed by a disc there; with
+/// it, the block with the pipe standing on it; and the two share the cone
+/// closed by two discs. Before row Q2179 the difference and the union were
+/// refused `ResultIsNotManifold { count: 1 }`: the pipe kept the circle as the
+/// bar's own edge, and the block's top named it a new crossing of the top and
+/// the pipe, so one circle was two edges with one face along each.
+#[test]
+fn a_block_whose_top_holds_the_circle_where_the_cone_meets_the_pipe_cuts_the_bar_there() {
+    for (rule, wanted) in [
+        (Rule::Difference, (0, 1, 2)),
+        (Rule::Union, (0, 1, 7)),
+        (Rule::Intersection, (1, 0, 2)),
+    ] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = a_chamfered_bar(&mut model);
+        let block = a_block_from_below(&mut model, 60.0, 1.0);
+        assert_eq!(
+            what_the_fuse_is_made_of(&mut model, bar, block, rule),
+            wanted,
+            "the cones, pipes and planes {rule:?} has faces on"
+        );
+    }
+}
+
 /// The block's side that was `x = 1.5` before the turn, and the bar's pipe and
 /// cone, each where the turn put it.
 fn the_side_the_pipe_and_the_cone(
@@ -238,21 +264,32 @@ fn what_the_bar_less_the_block_is_made_of(
     bar: SolidKey,
     block: SolidKey,
 ) -> (usize, usize, usize) {
+    what_the_fuse_is_made_of(model, bar, block, Rule::Difference)
+}
+
+/// The bar and the block fused under `rule`, which is one solid: how many
+/// cones, pipes and planes it has faces on.
+fn what_the_fuse_is_made_of(
+    model: &mut Model,
+    bar: SolidKey,
+    block: SolidKey,
+    rule: Rule,
+) -> (usize, usize, usize) {
     let solids = model
         .fuse(
             &[bar],
             &[block],
-            Rule::Difference,
+            rule,
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
-        .unwrap_or_else(|why| panic!("the difference was refused: {why:?}"))
+        .unwrap_or_else(|why| panic!("the {rule:?} was refused: {why:?}"))
         .solids()
         .to_vec();
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
-        .unwrap_or_else(|why| panic!("the difference does not validate: {why}"));
-    assert_eq!(solids.len(), 1, "one bar is left");
+        .unwrap_or_else(|why| panic!("the {rule:?} does not validate: {why}"));
+    assert_eq!(solids.len(), 1, "one solid is left");
 
     let (mut cones, mut pipes, mut planes) = (0, 0, 0);
     for face in model
@@ -316,6 +353,12 @@ fn the_blocks_top_is_off_square_to_the_bars_axis(
 /// The block `across` wide about the `z` axis and from `z = −2` up to
 /// `z = ½`, not yet placed.
 fn a_block_below_half(model: &mut Model, across: f64) -> SolidKey {
+    a_block_from_below(model, across, 0.5)
+}
+
+/// The block `across` wide about the `z` axis and from `z = −2` up to
+/// `z = top`, not yet placed.
+fn a_block_from_below(model: &mut Model, across: f64, top: f64) -> SolidKey {
     let square = ProfileBuilder::new(vec![
         [0.0, 0.0],
         [across, 0.0],
@@ -327,7 +370,7 @@ fn a_block_below_half(model: &mut Model, across: f64) -> SolidKey {
     let corner =
         Isometry::translation(Vector::new(-across / 2.0, -across / 2.0, -2.0)).expect("a shift");
     model
-        .add_extrusion(&square, 2.5, &corner)
+        .add_extrusion(&square, top + 2.0, &corner)
         .expect("the block has a height")
 }
 
