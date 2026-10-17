@@ -660,6 +660,11 @@ fn assert_narrow_boxes_round(answer: &MeetOfThree, wanted: &[[f64; 3]]) {
 /// [`meet_of_three_surfaces`] refuses the three by name — §31.2's row 4, a gap
 /// deferred to the milestone that builds an algebraic solver.
 ///
+/// No wall is a mirror of all three either. The one wall through the pipe's
+/// axis and the plane's normal is `y = 0`, and the ball's centre `(0, 0.5, 0)`
+/// is off it, so the road for a plane one wall mirrors with both, which takes
+/// a ball whose centre is on that wall (Q2196), does not take this one.
+///
 /// The controls are what the same call *can* do: the plane `z = 0.5` it leaned
 /// from runs along the pipe and cuts it in two lines, and two planes and the
 /// ball come back answered, so what is refused is the degree and not the call.

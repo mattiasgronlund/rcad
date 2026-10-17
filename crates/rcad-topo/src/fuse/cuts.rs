@@ -137,9 +137,9 @@
 //! face's box can reach across such a plane where a crossing on it does not:
 //! a pin slanting up out of a bar's axis has the pipe of its wall cross the
 //! bar's end in an ellipse on the far side of the axis, wholly behind the
-//! pin's own cap. No face of the pin reaches that ellipse, and where the
-//! arrangement cannot place where it meets the bar's rim, that is what lets it
-//! leave the ellipse out.
+//! pin's own cap. No face of the pin reaches that ellipse, and that is what
+//! lets the arrangement leave it out, whether or not it can place where the
+//! ellipse meets the bar's rim (Q2201).
 //!
 //! # Each face is told the caps through the start of their axis that cut it
 //!

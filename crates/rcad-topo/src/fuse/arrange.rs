@@ -759,6 +759,12 @@ struct Arrangement<'f> {
     /// keep one side over a whole cell, and
     /// [`Arrangement::the_one_on_its_side_of_every_cut`] does not ask them.
     cuts_reached_by_no_face: Vec<Surface>,
+    /// The name, as [`Node::made_of`] has it, of every meet placed on one
+    /// crossing alone because the other crossing of its pair was left out
+    /// where no face reaches it ([`Arrangement::place_the_meets`]). The face
+    /// across that one crossing may split its edge there, so
+    /// [`Arrangement::the_two_arcs_to_join_at`] never joins across such a node.
+    kept_where_a_crossing_left_out_meets_it: Vec<([Surface; 3], u8)>,
 }
 
 /// One curve on the face: one of the curves where the face's surface crosses
@@ -1158,6 +1164,7 @@ impl<'f> Arrangement<'f> {
             cells: Vec::new(),
             winding: Vec::new(),
             cuts_reached_by_no_face: Vec::new(),
+            kept_where_a_crossing_left_out_meets_it: Vec::new(),
         };
         arrangement.draw_the_crossings(cuts, policy, log)?;
         arrangement.place_the_corners(policy, log)?;
@@ -2014,18 +2021,13 @@ impl<'f> Arrangement<'f> {
     /// [`Arrangement::leave_out_the_cuts_clear_of_the_face`] left out in it:
     /// its meets are off the face.
     ///
-    /// # A crossing no face of its cut reaches is left out where its meet refuses
+    /// # A crossing no face of its cut reaches is left out
     ///
     /// When neither proof of nothing answers, a crossing of the pair that lies
     /// wholly past a plane every face carrying its cut lies behind
     /// ([`Arrangement::no_face_that_draws_it_reaches_it`]) is marked, the
     /// refusal is held, and the meets of every other pair are still placed
-    /// (Q1909). A slanted pin starting on a bar's axis, with the bar's end
-    /// across where the pin's pipe would come out of the wall if it ran on
-    /// through the axis, is the shape: the end's plane crosses that pipe in an
-    /// ellipse behind the pin's own cap, and where it meets the bar's rim is a
-    /// plane and two pipes at a slant, which [`meet_of_three_surfaces`] has no
-    /// road to.
+    /// (Q1909).
     ///
     /// Once every pair is asked, a node of any kind on a marked crossing, or a
     /// meet folded into a corner of the face on one, means the crossing meets
@@ -2036,16 +2038,41 @@ impl<'f> Arrangement<'f> {
     /// refuses, so that a node placed on it before, or one a later pair would
     /// have placed, is seen rather than set aside.
     ///
+    /// **A meet that answers leaves such a crossing out too** (Q2201). Its
+    /// pair is set aside until every other pair is placed, and then each of
+    /// its crossings that no face reaches and nothing placed is on is left
+    /// undrawn the same way. A slanted pin starting on a bar's axis, with the
+    /// bar's end across where the pin's pipe would come out of the wall if it
+    /// ran on through the axis, is the shape: the end's plane crosses that pipe
+    /// in an ellipse behind the pin's own cap. Where the ellipse meets the
+    /// bar's rim was refused until one wall mirrored the three (Q2196), and
+    /// drawn once answered, it put two corners on the rim where nothing of the
+    /// pin is.
+    ///
+    /// **The meet is a node on the crossing that stays, alone, where the face
+    /// across may split that crossing there**
+    /// ([`Arrangement::kept_where_a_crossing_left_out_meets_it`]). A block's
+    /// floor crosses a bar standing against the block's wall in a circle no
+    /// face of the bar reaches, while the wall crosses the bar in a line its
+    /// face does, and the wall's face splits the floor's edge where that line
+    /// ends. Where the face across leaves its own crossing with the third
+    /// surface out as well, neither face places the node
+    /// ([`Arrangement::the_face_across_leaves_it_out_too`]): with the bar's end
+    /// at the top of the loop behind the pin's cap, the end, the wall and the
+    /// pin's pipe meet in one double point on the rim's seam corner, and a node
+    /// there could not be put in order with the corner.
+    ///
     /// **The face across places no node where the three meet either, or
     /// refuses.** [`meet_of_three_surfaces`] puts the three surfaces in one
-    /// order before it solves them, so it refuses the same three on every
-    /// face that asks, and there each way past the refusal places no node of
-    /// those three. Where the bar's end crosses the pin's pipe, the bar's wall
-    /// proves its own loop clear of the ellipse and leaves out the loop behind
-    /// the pin's cap.
+    /// order before it solves them, so it answers or refuses the same three on
+    /// every face that asks. Where it refuses, each way past the refusal
+    /// places no node of those three; where it answers, the two faces along
+    /// the crossing that stays ask the same test of the same three.
     fn place_the_meets(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         let never_left_out = self.crossings_never_left_out();
-        let mut reached_by_no_face: Vec<usize> = Vec::new();
+        let mut known_unreached: Vec<Option<bool>> = vec![None; self.crossings.len()];
+        let mut left_out_where_it_refuses: Vec<usize> = Vec::new();
+        let mut set_aside: Vec<(usize, usize, MeetOfThree)> = Vec::new();
         let mut folded_into_a_corner: Vec<usize> = Vec::new();
         let mut held: Option<rcad_geom::Error> = None;
         for first in 0..self.crossings.len() {
@@ -2082,9 +2109,10 @@ impl<'f> Arrangement<'f> {
                         let unreached: SmallVec<[usize; 2]> = [first, second]
                             .into_iter()
                             .filter(|&crossing| {
-                                self.no_face_that_draws_it_reaches_it(
+                                self.no_face_reaches(
                                     crossing,
                                     &never_left_out,
+                                    &mut known_unreached,
                                     log,
                                 )
                             })
@@ -2093,100 +2121,251 @@ impl<'f> Arrangement<'f> {
                             return Err(gave_up_on_it.into());
                         }
                         for crossing in unreached {
-                            if !reached_by_no_face.contains(&crossing) {
-                                reached_by_no_face.push(crossing);
+                            if !left_out_where_it_refuses.contains(&crossing) {
+                                left_out_where_it_refuses.push(crossing);
                             }
                         }
                         held.get_or_insert(gave_up_on_it);
                         continue;
                     }
                 };
-                // The tighter box is read here by a fold into a corner on both
-                // crossings and by nothing else; the order along a crossing
-                // narrows a node's box itself, only where it asks
-                // (`Arrangement::narrowed_box_of`). Working it out for every
-                // meet of three planes was 11 of 22 samples taken in placing
-                // the meets of a cut through the 1x39 pin header (§200.1).
-                let tight = if self.a_corner_is_on_both(first, second) {
-                    meet.boxed_tight(asked)
-                } else {
-                    meet.clone()
-                };
-                let MeetOfThree::At(places) = meet else {
+                if self.a_place_of_it_is_on_both(first, second, &meet)
+                    && [first, second].into_iter().any(|crossing| {
+                        self.no_face_reaches(crossing, &never_left_out, &mut known_unreached, log)
+                    })
+                {
+                    set_aside.push((first, second, meet));
                     continue;
-                };
-                let MeetOfThree::At(tight) = tight else {
-                    unreachable!("a meet at points boxed tighter is still a meet at those points")
-                };
-                let places: SmallVec<[PredicatePoint; 2]> =
-                    places.into_iter().map(as_exact_as_it_is).collect();
-                let tight: SmallVec<[PredicatePoint; 2]> =
-                    tight.into_iter().map(as_exact_as_it_is).collect();
-                for (which, (&place, &boxed_tight)) in places.iter().zip(&tight).enumerate() {
-                    // Being *on* both surfaces is what the meet just worked out,
-                    // and asking a predicate to confirm it would be a second
-                    // opinion about a fact this line already holds — one that a
-                    // box straddling the surface cannot prove and would refuse.
-                    // What is still open is which curve of each pair it is on,
-                    // and only a pair naming more than one has anything to say.
-                    if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
-                        || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
-                    {
-                        continue;
-                    }
-                    let mut sorted = surfaces;
-                    sorted.sort_by(|one, other| {
-                        name_of_surface_bits(one).cmp(&name_of_surface_bits(other))
-                    });
-                    let which = u8::try_from(which).expect("three surfaces meet at most twice");
-                    if let Some(corner) = self.the_corner_that_is_this_place(
-                        first,
-                        second,
-                        place,
-                        boxed_tight,
-                        &places,
-                    ) {
-                        self.nodes[corner].stands_for_too((sorted, which));
-                        folded_into_a_corner.extend([first, second]);
-                        continue;
-                    }
-                    self.nodes.push(Node {
-                        point: place,
-                        vertex: None,
-                        made_of: Some((sorted, which)),
-                        also: Vec::new(),
-                        half_way_round: false,
-                        crossings: vec![first, second],
-                    });
+                }
+                self.place_where_the_partners_meet(
+                    first,
+                    second,
+                    &[first, second],
+                    meet,
+                    &mut folded_into_a_corner,
+                );
+            }
+        }
+        if let Some(gave_up_on_it) = held
+            && self.something_placed_is_on(&left_out_where_it_refuses, &folded_into_a_corner)
+        {
+            return Err(gave_up_on_it.into());
+        }
+        let mut left_out = left_out_where_it_refuses;
+        for &(first, second, _) in &set_aside {
+            for crossing in [first, second] {
+                if !left_out.contains(&crossing)
+                    && self.no_face_reaches(crossing, &never_left_out, &mut known_unreached, log)
+                    && !self.something_placed_is_on(&[crossing], &folded_into_a_corner)
+                {
+                    left_out.push(crossing);
                 }
             }
         }
-        if let Some(gave_up_on_it) = held {
-            let met_elsewhere = reached_by_no_face.iter().any(|crossing| {
-                folded_into_a_corner.contains(crossing)
-                    || self
-                        .nodes
-                        .iter()
-                        .any(|node| node.crossings.contains(crossing))
-            });
-            if met_elsewhere {
-                return Err(gave_up_on_it.into());
+        for (first, second, meet) in set_aside {
+            let on: SmallVec<[usize; 2]> = [first, second]
+                .into_iter()
+                .filter(|crossing| !left_out.contains(crossing))
+                .collect();
+            if let [stays] = on[..] {
+                let gone = if stays == first { second } else { first };
+                if self.the_face_across_leaves_it_out_too(stays, gone, &meet) {
+                    continue;
+                }
             }
-            for crossing in reached_by_no_face {
-                self.crossings[crossing].reaches_the_face = false;
-                let drawn_by: Vec<Surface> = self.crossings[crossing]
-                    .every_surface_that_draws_it()
-                    .copied()
-                    .collect();
-                for surface in drawn_by {
-                    if !self.cuts_reached_by_no_face.contains(&surface) {
-                        self.cuts_reached_by_no_face.push(surface);
-                    }
+            self.place_where_the_partners_meet(first, second, &on, meet, &mut folded_into_a_corner);
+        }
+        for crossing in left_out {
+            self.crossings[crossing].reaches_the_face = false;
+            let drawn_by: Vec<Surface> = self.crossings[crossing]
+                .every_surface_that_draws_it()
+                .copied()
+                .collect();
+            for surface in drawn_by {
+                if !self.cuts_reached_by_no_face.contains(&surface) {
+                    self.cuts_reached_by_no_face.push(surface);
                 }
             }
         }
         self.place_the_middle_of_each_half();
         Ok(())
+    }
+
+    /// Whether a place where `meet` has the face's surface and the partners of
+    /// `first` and `second` meet is on both crossings, as far as what picks
+    /// each out of its pair's others can say: where
+    /// [`Arrangement::place_where_the_partners_meet`] would put a node or fold
+    /// one into a corner.
+    fn a_place_of_it_is_on_both(&self, first: usize, second: usize, meet: &MeetOfThree) -> bool {
+        let MeetOfThree::At(places) = meet else {
+            return false;
+        };
+        places.iter().any(|&place| {
+            let place = as_exact_as_it_is(place);
+            nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
+                && nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
+        })
+    }
+
+    /// [`Arrangement::no_face_that_draws_it_reaches_it`], worked out once per
+    /// crossing and kept in `known`, since a crossing is asked about once for
+    /// every other crossing it meets.
+    fn no_face_reaches(
+        &self,
+        crossing: usize,
+        never_left_out: &[bool],
+        known: &mut [Option<bool>],
+        log: &mut ProvenanceLog,
+    ) -> bool {
+        *known[crossing].get_or_insert_with(|| {
+            self.no_face_that_draws_it_reaches_it(crossing, never_left_out, log)
+        })
+    }
+
+    /// Whether a node of any kind is on one of `crossings`, or a meet on one
+    /// was folded into a corner of the face.
+    fn something_placed_is_on(&self, crossings: &[usize], folded_into_a_corner: &[usize]) -> bool {
+        crossings.iter().any(|crossing| {
+            folded_into_a_corner.contains(crossing)
+                || self
+                    .nodes
+                    .iter()
+                    .any(|node| node.crossings.contains(crossing))
+        })
+    }
+
+    /// Whether, where the face's surface and the partners of `stays` and
+    /// `gone` meet, the face on the partner of `stays` leaves out its crossing
+    /// with the partner of `gone` too, so that it splits `stays` nowhere there
+    /// and neither may this face.
+    ///
+    /// **Both curves the partner of `gone` crosses the other two in lie wholly
+    /// past one plane every face carrying it lies behind**
+    /// ([`a_curve_of_two_lies_wholly_past`]). The one through the face's
+    /// surface is `gone`, and the one through the partner of `stays` is the
+    /// crossing the face across draws there. Asked of the two the same way and
+    /// in either order, so the face across asks just this of the same three
+    /// and gets the same answer.
+    ///
+    /// **And so does every other surface that draws `gone`**
+    /// ([`Crossing::every_surface_that_draws_it`]), since the face across
+    /// leaves its crossing out only where no face carrying any of them reaches
+    /// it ([`Arrangement::no_face_that_draws_it_reaches_it`]). Two bars stacked
+    /// on one pipe, the upper one's axis written pointing down, and a block
+    /// turned an eighth of a turn poking out under the lower one are the shape:
+    /// the block's bottom face crosses the pipe below both bars, but its face
+    /// beside it crosses the pipe up into the lower bar's wall, so that face
+    /// splits the edge the two share where it pierces the pipe. Asked of the
+    /// upper bar alone, the bottom face did not, and the fuse refused the edge
+    /// as one face along it (Q2201).
+    fn the_face_across_leaves_it_out_too(
+        &self,
+        stays: usize,
+        gone: usize,
+        meet: &MeetOfThree,
+    ) -> bool {
+        let MeetOfThree::At(places) = meet else {
+            return false;
+        };
+        let places: SmallVec<[PredicatePoint; 2]> =
+            places.iter().copied().map(as_exact_as_it_is).collect();
+        let across = self.crossings[stays].partner;
+        let sides = &self.face.sides_the_faces_of_each_cut_lie_in;
+        self.crossings[gone]
+            .every_surface_that_draws_it()
+            .all(|&third| {
+                sides
+                    .iter()
+                    .filter(|(cut, _)| *cut == third)
+                    .flat_map(|(_, sides)| sides)
+                    .any(|&side| {
+                        [self.surface, across].iter().all(|&other| {
+                            a_curve_of_two_lies_wholly_past([other, third], &places, side)
+                        })
+                    })
+            })
+    }
+
+    /// One node on the crossings `on`, of `first` and `second`, at each place
+    /// in `meet` where the face's surface and the partners of `first` and
+    /// `second` meet, unless what picks a crossing out rules the place off
+    /// it, or a corner of the face already is that place
+    /// ([`Arrangement::the_corner_that_is_this_place`]), which then stands for
+    /// it and is noted in `folded_into_a_corner`. None when `on` is empty.
+    fn place_where_the_partners_meet(
+        &mut self,
+        first: usize,
+        second: usize,
+        on: &[usize],
+        meet: MeetOfThree,
+        folded_into_a_corner: &mut Vec<usize>,
+    ) {
+        if on.is_empty() {
+            return;
+        }
+        let surfaces = [
+            self.surface,
+            self.crossings[first].partner,
+            self.crossings[second].partner,
+        ];
+        let asked = three_planes_faced_the_one_way(surfaces);
+        let asked = [&asked[0], &asked[1], &asked[2]];
+        // The tighter box is read here by a fold into a corner on both
+        // crossings and by nothing else; the order along a crossing
+        // narrows a node's box itself, only where it asks
+        // (`Arrangement::narrowed_box_of`). Working it out for every
+        // meet of three planes was 11 of 22 samples taken in placing
+        // the meets of a cut through the 1x39 pin header (§200.1).
+        let tight = if self.a_corner_is_on_both(first, second) {
+            meet.boxed_tight(asked)
+        } else {
+            meet.clone()
+        };
+        let MeetOfThree::At(places) = meet else {
+            return;
+        };
+        let MeetOfThree::At(tight) = tight else {
+            unreachable!("a meet at points boxed tighter is still a meet at those points")
+        };
+        let places: SmallVec<[PredicatePoint; 2]> =
+            places.into_iter().map(as_exact_as_it_is).collect();
+        let tight: SmallVec<[PredicatePoint; 2]> =
+            tight.into_iter().map(as_exact_as_it_is).collect();
+        for (which, (&place, &boxed_tight)) in places.iter().zip(&tight).enumerate() {
+            // Being *on* both surfaces is what the meet just worked out,
+            // and asking a predicate to confirm it would be a second
+            // opinion about a fact this line already holds — one that a
+            // box straddling the surface cannot prove and would refuse.
+            // What is still open is which curve of each pair it is on,
+            // and only a pair naming more than one has anything to say.
+            if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
+                || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
+            {
+                continue;
+            }
+            let mut sorted = surfaces;
+            sorted.sort_by_key(name_of_surface_bits);
+            let which = u8::try_from(which).expect("three surfaces meet at most twice");
+            if let Some(corner) =
+                self.the_corner_that_is_this_place(first, second, place, boxed_tight, &places)
+            {
+                self.nodes[corner].stands_for_too((sorted, which));
+                folded_into_a_corner.extend(on);
+                continue;
+            }
+            if on.len() < 2 {
+                self.kept_where_a_crossing_left_out_meets_it
+                    .push((sorted, which));
+            }
+            self.nodes.push(Node {
+                point: place,
+                vertex: None,
+                made_of: Some((sorted, which)),
+                also: Vec::new(),
+                half_way_round: false,
+                crossings: on.to_vec(),
+            });
+        }
     }
 
     /// The nodes where two crossings of one pair meet: where two half
@@ -2691,18 +2870,25 @@ impl<'f> Arrangement<'f> {
     /// square to its own pipe, and a second pipe at a slant to the first: the
     /// cap and the second pipe cross in an ellipse, so the first proof fails,
     /// and [`meet_of_three_surfaces`] has no road for a flat surface and two
-    /// pipes at a slant (Q1646). Every bar crossing another at a slant
-    /// anywhere but square was refused for it.
+    /// pipes at a slant whose axes pass each other by (Q1646). Every bar
+    /// crossing another at a slant anywhere but square was refused for it.
+    /// Where the two axes meet, the wall through them mirrors all three, and
+    /// it answers (Q2196).
     ///
     /// **Or a flat surface cuts a pipe, of the three, in a curve wholly outside
     /// what picks one of the two crossings out**
-    /// ([`Arrangement::a_cut_of_a_pipe_is_clear_of_a_picker`]). This is a bar's
-    /// wall with a slanted pin starting on its axis, and the bar's end across
-    /// where the pin's pipe would come out of the wall if it ran on through the
-    /// axis (Q1909). The pin's pipe crosses the wall in two loops, and the one
-    /// the pin makes is picked by `x ≤ 0`; the end's plane crosses the pin's
-    /// pipe in an ellipse at `x > 0`, which the bar's wall runs through, so the
-    /// second proof fails on the pair of that loop and the bar's rim.
+    /// ([`Arrangement::a_cut_of_a_pipe_is_clear_of_a_picker`]). It was written
+    /// for a bar's wall with a slanted pin starting on its axis, and the bar's
+    /// end across where the pin's pipe would come out of the wall if it ran on
+    /// through the axis (Q1909): the pin's pipe crosses the wall in two loops,
+    /// the one the pin makes picked by `x ≤ 0`, and the end's plane crosses the
+    /// pin's pipe in an ellipse at `x > 0` that the bar's wall runs through, so
+    /// the second proof fails on the pair of that loop and the bar's rim. That
+    /// meet answers now, since the wall through the two axes mirrors all three
+    /// (Q2196), and a meet that answers asks no proof. Over every test of the
+    /// workspace this one is asked 101 times, in 4 tests, and never holds
+    /// (Q2201). It stays for two axes that pass each other by, which no wall
+    /// mirrors and [`meet_of_three_surfaces`] still refuses.
     ///
     /// None is a distance or a threshold: a ball a millionth of a unit clear
     /// of a pipe is skipped, and a ball resting against one is not.
@@ -6009,11 +6195,18 @@ impl<'f> Arrangement<'f> {
     ///
     /// **A node put where a surface touches the face is not joined across**,
     /// for the reason an input corner is not: the face next door splits the
-    /// edge there ([`Arrangement::place_the_touches`]).
+    /// edge there ([`Arrangement::place_the_touches`]). **Nor is a meet kept on
+    /// one crossing because the other of its pair was left out**
+    /// ([`Arrangement::kept_where_a_crossing_left_out_meets_it`]), since it is
+    /// kept only where the face across may split that crossing there: a
+    /// block's floor joined across where a bar standing against its wall
+    /// meets it left the floor's edge whole while the wall split it, and the
+    /// fuse refused that edge as one face along it (Q2201).
     fn the_two_arcs_to_join_at(&self, node: usize, touching: &[usize]) -> Option<(usize, usize)> {
         if self.nodes[node].vertex.is_some()
             || self.nodes[node].half_way_round
             || self.a_touch_is_at(node)
+            || self.a_crossing_left_out_meets_one_at(node)
         {
             return None;
         }
@@ -6032,6 +6225,17 @@ impl<'f> Arrangement<'f> {
             && first.against_its_gradients == second.against_its_gradients
             && !self.crossings[first.crossing].order.closes())
         .then_some((lower, higher))
+    }
+
+    /// Whether `node` stands for a meet kept on one crossing because the other
+    /// crossing of its pair was left out
+    /// ([`Arrangement::kept_where_a_crossing_left_out_meets_it`]).
+    fn a_crossing_left_out_meets_one_at(&self, node: usize) -> bool {
+        let Node { made_of, also, .. } = &self.nodes[node];
+        made_of
+            .iter()
+            .chain(also)
+            .any(|name| self.kept_where_a_crossing_left_out_meets_it.contains(name))
     }
 
     /// Whether `node` stands for a place where a surface touching the face
@@ -12743,6 +12947,36 @@ fn lies_exactly_on_the_axis(point: Point, axis: Axis) -> Option<bool> {
     Some(true)
 }
 
+/// Whether the curve the two surfaces cross in through `places`, points on
+/// both, lies wholly past `side`'s plane, as
+/// [`Arrangement::lies_wholly_past`] asks it of a crossing.
+///
+/// - **A flat surface and a pipe** cross in one curve, held whole by
+///   [`a_box_round_where_a_flat_surface_cuts_a_pipe`].
+/// - **Two pipes** can cross in two loops. Where the plane provably shares no
+///   point with both ([`a_cut_of_a_pipe_is_clear_of_the_third`]), each loop
+///   lies wholly on one side, and every place past the plane puts the loop it
+///   is on past it.
+/// - Anything else is not asked.
+fn a_curve_of_two_lies_wholly_past(
+    two: [Surface; 2],
+    places: &[PredicatePoint],
+    side: ASideOfAPlane,
+) -> bool {
+    let past = |point: PredicatePoint| side.plane.side_of_point(point) == side.past_it();
+    if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Plane(flat)] = two
+    {
+        return a_box_round_where_a_flat_surface_cuts_a_pipe(&flat, &pipe)
+            .is_some_and(|boxed| past(PredicatePoint::Constructed(boxed)));
+    }
+    let [Surface::Cylinder(_), Surface::Cylinder(_)] = two else {
+        return false;
+    };
+    a_cut_of_a_pipe_is_clear_of_the_third([two[0], two[1], Surface::Plane(side.plane)])
+        && places.iter().all(|&place| past(place))
+}
+
 /// Whether, of these three surfaces, a flat one cuts a pipe in a curve that
 /// the third is certainly wholly inside or wholly outside of, so that no point
 /// is on all three.
@@ -16274,6 +16508,7 @@ mod tests {
             cells: Vec::new(),
             winding: Vec::new(),
             cuts_reached_by_no_face: Vec::new(),
+            kept_where_a_crossing_left_out_meets_it: Vec::new(),
         };
         let mut log = ProvenanceLog::new();
         arrangement
