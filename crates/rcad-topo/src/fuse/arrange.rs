@@ -15957,6 +15957,132 @@ mod curved {
              sum is hardly asked: {far_and_undecided_by_the_box}"
         );
     }
+
+    /// **At either meet of a line with a ball or a pipe, which meet it is gives
+    /// the turn [`orient3d_of_points`] gives over the three gradients there.**
+    ///
+    /// [`super::the_turn_at_one_of_two_meets`] reads that turn off the meet's
+    /// number alone, on two claims: that [`meet_of_three_surfaces`] hands the
+    /// two meets back lower first up the one axis the line runs along, in
+    /// whatever order the three surfaces come, and that the curved one's
+    /// gradient points down that axis at the lower meet and up it at the
+    /// higher. Both are checked here, at places whose boxes are narrow enough
+    /// to show them: a ball and pipes of radius two, cut by lines along each
+    /// axis, the two planes through each line facing either way, the three
+    /// handed over in each of their six orders, and the turn read with the
+    /// rows in each of their six orders.
+    ///
+    /// [`meet_of_three_surfaces`]: rcad_geom::meet_of_three_surfaces
+    /// [`orient3d_of_points`]: rcad_predicates::orient3d_of_points
+    #[test]
+    fn at_either_meet_of_a_line_with_a_ball_or_a_pipe_the_turn_is_the_one_orient3d_gives() {
+        use rcad_geom::{Cylinder, MeetOfThree, Sphere, meet_of_three_surfaces};
+        use rcad_predicates::{Decision, orient3d_of_points};
+
+        use super::{gradient_at, the_turn_at_one_of_two_meets};
+
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.1, 0.2, 0.3), 2.0).expect("a ball"));
+        let pipe = |along: Vector| {
+            let axis = Axis::new(Point::new(-0.2, 0.4, 0.1), along).expect("an axis");
+            Surface::Cylinder(Cylinder::new(axis, 2.0).expect("a pipe"))
+        };
+        let orders = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        for (up, [x, y, z], normals, curved) in [
+            (
+                2,
+                [0.5, -0.3, 0.0],
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                ball,
+            ),
+            (
+                2,
+                [0.4, 0.1, 0.0],
+                [[1.0, 1.0, 0.0], [1.0, -2.0, 0.0]],
+                pipe(Vector::new(1.0, 0.5, 0.0)),
+            ),
+            (
+                0,
+                [0.0, 0.5, -0.4],
+                [[0.0, 1.0, 2.0], [0.0, -3.0, 1.0]],
+                ball,
+            ),
+            (
+                0,
+                [0.0, 0.5, -0.4],
+                [[0.0, 1.0, 2.0], [0.0, -3.0, 1.0]],
+                pipe(Vector::new(0.3, 1.0, 0.2)),
+            ),
+            (
+                1,
+                [0.3, 0.0, -0.2],
+                [[2.0, 0.0, -1.0], [1.0, 0.0, 1.0]],
+                ball,
+            ),
+            (
+                1,
+                [0.3, 0.0, -0.2],
+                [[2.0, 0.0, -1.0], [1.0, 0.0, 1.0]],
+                pipe(Vector::new(1.0, 0.5, 2.0)),
+            ),
+        ] {
+            for facing in [[1.0, 1.0], [1.0, -1.0], [-1.0, 1.0], [-1.0, -1.0]] {
+                let [one, other] = [0, 1].map(|plane| {
+                    let [along_x, along_y, along_z] = normals[plane];
+                    let normal = Vector::new(along_x, along_y, along_z) * facing[plane];
+                    Surface::Plane(
+                        Plane::from_point_and_normal(Point::new(x, y, z), normal).expect("a plane"),
+                    )
+                });
+                let three = [one, other, curved];
+                for order in orders {
+                    let handed = order.map(|row| &three[row]);
+                    let Ok(MeetOfThree::At(meets)) = meet_of_three_surfaces(
+                        handed,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    ) else {
+                        panic!("{handed:?}: the line meets the curved one");
+                    };
+                    assert_eq!(
+                        meets.len(),
+                        2,
+                        "{handed:?}: the line meets the curved one twice"
+                    );
+                    assert!(
+                        meets[0].enclosure()[up].hi() < meets[1].enclosure()[up].lo(),
+                        "{handed:?}: the lower up axis {up} first: {meets:?}"
+                    );
+                    for (which, &meet) in (0_u8..).zip(&meets) {
+                        for rows in orders.map(|order| order.map(|row| &three[row])) {
+                            let [first, second, third] = rows.map(|row| gradient_at(row, meet));
+                            let over_the_box = orient3d_of_points(
+                                first,
+                                second,
+                                third,
+                                PredicatePoint::from([0.0; 3]),
+                            );
+                            assert!(
+                                over_the_box == Decision::Pos || over_the_box == Decision::Neg,
+                                "{rows:?} at meet {which}: {over_the_box:?}"
+                            );
+                            assert_eq!(
+                                the_turn_at_one_of_two_meets(rows, which),
+                                Some(over_the_box),
+                                "{rows:?} at meet {which}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
