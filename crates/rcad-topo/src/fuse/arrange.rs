@@ -2344,8 +2344,7 @@ impl<'f> Arrangement<'f> {
                 continue;
             }
             let mut sorted = surfaces;
-            sorted
-                .sort_by(|one, other| name_of_surface_bits(one).cmp(&name_of_surface_bits(other)));
+            sorted.sort_by_key(name_of_surface_bits);
             let which = u8::try_from(which).expect("three surfaces meet at most twice");
             if let Some(corner) =
                 self.the_corner_that_is_this_place(first, second, place, boxed_tight, &places)
