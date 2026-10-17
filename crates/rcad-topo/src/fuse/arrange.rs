@@ -3294,8 +3294,9 @@ impl<'f> Arrangement<'f> {
     /// unordered pair (§31.3).
     ///
     /// A circle between a ball and a plane that starts at the ball's pole gets
-    /// a second node straight across from the first, so that it is two edges
-    /// with a direction each rather than one with none — see
+    /// a second node straight across from the first, and a loop between a ball
+    /// and a pipe one at the ball's other pole, so that it is two edges with a
+    /// direction each rather than one with none — see
     /// [`across_a_circle_that_starts_at_a_pole`].
     fn start_every_closed_crossing_that_has_no_node(
         &mut self,
@@ -9758,7 +9759,8 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
 }
 
 /// Where a circle between a ball and a plane is cut a second time, when the
-/// one place it starts is a pole of the ball: straight across the circle.
+/// one place it starts is a pole of the ball: straight across the circle. A
+/// loop between a ball and a pipe is cut at the ball's other pole.
 ///
 /// **A closed edge starting at a pole has no direction anyone can read.** It
 /// is stored running the way the ball's longitude runs at its corner, and at a
@@ -9785,9 +9787,11 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
 /// Two spellings of "is this a pole" are how the two disagreed, so this asks
 /// the mesh's. A circle starting anywhere else keeps its one corner.
 ///
-/// **Only a ball against a plane**, whose circle has a centre this can name:
-/// the ball's centre dropped onto the plane. `None` for every other pair, and
-/// one of those starting at a pole is still refused where it was.
+/// **A ball against a plane**, whose circle has a centre this can name: the
+/// ball's centre dropped onto the plane. **And a ball against a pipe**, whose
+/// loop is cut at the ball's other pole where that is on the loop
+/// ([`the_other_pole_on_the_one_loop`]). `None` for every other pair, and one
+/// of those starting at a pole is still refused where it was.
 ///
 /// **Including where the point across is the other pole.** That is a plane
 /// exactly down the ball's polar axis, and cut there each half is a meridian
@@ -9816,6 +9820,10 @@ fn across_a_circle_that_starts_at_a_pole(
     let (ball, flat) = match pair {
         [Surface::Sphere(ball), Surface::Plane(flat)]
         | [Surface::Plane(flat), Surface::Sphere(ball)] => (ball, flat),
+        [Surface::Sphere(ball), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
+            return the_other_pole_on_the_one_loop(ball, pipe, at);
+        }
         _ => return None,
     };
     let round = Surface::Sphere(*ball);
@@ -9846,6 +9854,72 @@ fn across_a_circle_that_starts_at_a_pole(
                 .expect("a finite point and a positive reach leave a low end below a high one")
         },
     )))
+}
+
+/// The ball's other pole, where the loop a ball and a pipe cross in starts at
+/// one of its poles and runs through both.
+///
+/// **That loop has no centre to mirror the start through**, being of degree
+/// four, but a ball centred on a pipe's wall has both its poles on the wall,
+/// since a ball is parametrised about world `z` whatever it is turned by, and
+/// so both are on the one loop it crosses the wall in. Cut at both, each half
+/// of the loop runs from pole to pole, as each half of a great circle down a
+/// ball's polar axis does (§194.5).
+///
+/// Only where the ball and the pipe both certify the other pole is on them, so
+/// nothing is guessed, and only where the ball is proved to cross the pipe in
+/// one loop at most ([`a_ball_crosses_a_pipe_in_one_loop_at_most`]). A ball
+/// that crosses it in two has one loop each side of the plane through its
+/// centre square to the pipe's axis, and its two poles lie either side of that
+/// plane too, or both on it where no loop reaches; so where both are on the
+/// pipe, each is on a loop of its own. `None` otherwise, and a loop that
+/// starts at a pole is still refused where it was.
+fn the_other_pole_on_the_one_loop(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    at: Point,
+) -> Option<PredicatePoint> {
+    let round = Surface::Sphere(*ball);
+    let latitude = round.coordinates_of(at).1;
+    if !the_surface_pinches_at(&round, latitude) {
+        return None;
+    }
+    let [x, y, z] = ball.centre().coordinates();
+    let height = if latitude > 0.0 {
+        z - ball.radius()
+    } else {
+        z + ball.radius()
+    };
+    let other = PredicatePoint::from([x, y, height]);
+    let on_both = [round, Surface::Cylinder(*pipe)]
+        .iter()
+        .all(|surface| side_of_surface(surface, other) == Decision::Zero);
+    (on_both && a_ball_crosses_a_pipe_in_one_loop_at_most(ball, pipe)).then_some(other)
+}
+
+/// Whether `ball` is proved not to hold the whole cross-section of `pipe`
+/// through its centre, so that the two cross in one loop at most: `R < d + r`,
+/// for `R` the ball's radius, `r` the pipe's and `d` how far the ball's centre
+/// is from the pipe's axis.
+///
+/// Where `R > r`, that is `(R − r)²|w|² < |(c − o) × w|²`, for `c` the ball's
+/// centre, `o` a point of the axis and `w` its direction: squared, so that
+/// nothing is divided and no root is taken. A ball no wider than the pipe
+/// never holds its cross-section.
+fn a_ball_crosses_a_pipe_in_one_loop_at_most(ball: &Sphere, pipe: &Cylinder) -> bool {
+    let wider_by = Interval::exactly(ball.radius()) - Interval::exactly(pipe.radius());
+    match wider_by.sign() {
+        Decision::Neg | Decision::Zero => return true,
+        Decision::Undecidable { .. } => return false,
+        Decision::Pos => {}
+        other => panic!("a decision nothing here knows: {other:?}"),
+    }
+    let centre = ball.centre().coordinates().map(Interval::exactly);
+    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let square_off = cross_of_intervals([0, 1, 2].map(|axis| centre[axis] - origin[axis]), along);
+    let room = dot_of(square_off, square_off) - wider_by * wider_by * dot_of(along, along);
+    room.sign() == Decision::Pos
 }
 
 /// The smallest box holding both boxes.
