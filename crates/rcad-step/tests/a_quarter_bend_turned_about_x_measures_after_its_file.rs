@@ -27,30 +27,29 @@
 //! and found **no fold and no `CornersCoincide`** anywhere in it: neither the
 //! `cut_in_two` route the margin guards nor the
 //! `the_most_even_chord_that_stays_inside` route the row named as a second,
-//! unrun one, ever fired. The question is unanswered by this sweep, not
-//! because the margin held, but because two unrelated, already-known
-//! refusals are reached first almost every time the bend is moved far
-//! enough out to matter:
+//! unrun one, ever fired.
 //!
-//! - At `1e3`, 1077 of the 1080 runs round-trip and measure the same volume;
-//!   the other 3 (one per deflection, since the write step runs before
-//!   deflection matters) refuse at write time with
-//!   `ACurveTheFacesEitherSideOfItDoNotName`, the same limit
-//!   `write.rs:2850`'s own test pins for Q2184: no centre the reader could
-//!   hold on the seam's circle reads back as the plane the writer cut it
-//!   with. That is this file's one write-time refusal shape, not a new one.
-//! - At `1e6` and `1e9`, 1065 of 1080 runs each refuse on read-back with
-//!   `Geometry(CannotNameWhichPieceOfACrossingThisIs)`, out of `rcad-geom`'s
-//!   `walk.rs`, before the longitude margin is ever reached — the extra
-//!   rounding a far offset adds to the written text is, almost always,
-//!   enough on its own to make the crossing decision ambiguous on import.
-//!   Only 12 of 1080 runs at each of these two offsets get far enough to
-//!   compare volumes at all, and none of those 12 folds either.
+//! - At each of the three offsets, 1077 of the 1080 runs round-trip and
+//!   measure the same volume. The other 3 (one per deflection, since the
+//!   write step runs before deflection matters) are the turn of 45 degrees,
+//!   refused at write time with `ACurveTheFacesEitherSideOfItDoNotName`, the
+//!   same limit `write.rs:2850`'s own test pins for Q2184: no centre the
+//!   reader could hold on the seam's circle reads back as the plane the
+//!   writer cut it with. That is this file's one write-time refusal shape,
+//!   not a new one.
+//! - At `1e6` and `1e9` that count was once 12 of 1080: 1065 runs at each were
+//!   refused on read-back `CannotNameWhichPieceOfACrossingThisIs`, out of
+//!   `rcad-geom`'s `walk.rs`, before the longitude margin was ever reached.
+//!   The mesher moves the read-back wall in near the origin before it walks
+//!   the seam, and the seam's corners kept the rounding of where the file
+//!   stored them, a million or a billion out, against a bound that knew only
+//!   the circle's radius of 7. `NamedRun::moved_in_from` tells the walk how
+//!   far out they were (Q2218), and run again after that the sweep came out
+//!   as the first bullet says.
 //!
-//! So at this ring and tube, moving the bend out by a factor that would
-//! stress the longitude margin also, almost always, trips an unrelated
-//! read-back refusal first; the margin's coverage at these offsets stays
-//! unmeasured, not confirmed.
+//! So at this ring and tube every run that writes reads back and measures
+//! the same out to a billion; the sweep does not say whether it was the
+//! longitude margin that held each one.
 //!
 //! **The row's other half — ring `1000`, tube `0.01`, at the origin — could
 //! not be swept at all.** Before any placement, measurement, write or read,
@@ -143,22 +142,27 @@ fn the_bend_moved_out_by_a_thousand_and_turned_45_degrees_refuses_to_write() {
     );
 }
 
-/// Moved out by `1e6` along `(1, 1, 1)`: the file reads back and refuses
-/// `CannotNameWhichPieceOfACrossingThisIs` before the longitude margin in
-/// `cut_in_two` is ever reached. This is not the margin the row asks about —
-/// it is the STEP round trip's own crossing decision, out of `rcad-geom`'s
-/// `walk.rs`, made ambiguous by the extra rounding a far offset adds on top of
-/// the usual one. 1065 of the 1080 degree/deflection combinations swept at
-/// `1e6`, and the same count at `1e9`, are refused this way; this pins one.
+/// Moved out by `1e6` along `(1, 1, 1)` and turned one degree about `x`, the
+/// bend reads back and measures the same. It used to be refused
+/// `CannotNameWhichPieceOfACrossingThisIs` (Q2218): the mesher shifts the
+/// read-back wall in near the origin before it walks the seam, and the seam's
+/// second corner was `1.0133e-10` off the circle of radius 7 it lies on —
+/// `0.87` of one rounding at `1e6`, where the file stored it — against a bound
+/// of `3.979e-13` that scaled with the circle and not with how far out the
+/// corner had been.
 #[test]
-fn the_bend_moved_out_by_a_million_refuses_on_read_back() {
-    let offset = Vector::new(1e6, 1e6, 1e6);
-    let why = the_same_volume_after_its_file(RING, TUBE, offset, 1.0, 0.5)
-        .expect_err("the crossing is ambiguous on read back at this offset");
-    assert!(
-        why.contains("CannotNameWhichPieceOfACrossingThisIs"),
-        "{why}"
-    );
+fn the_bend_moved_out_by_a_million_measures_after_its_file() {
+    the_same_volume_after_its_file(RING, TUBE, Vector::new(1e6, 1e6, 1e6), 1.0, 0.5)
+        .unwrap_or_else(|why| panic!("{why}"));
+}
+
+/// The same at `1e9`, where one rounding is a thousand times wider and the
+/// circle of radius 9 the cut plane also makes on the ring is still `2` from
+/// the seam's corners.
+#[test]
+fn the_bend_moved_out_by_a_billion_measures_after_its_file() {
+    the_same_volume_after_its_file(RING, TUBE, Vector::new(1e9, 1e9, 1e9), 1.0, 0.5)
+        .unwrap_or_else(|why| panic!("{why}"));
 }
 
 /// The bend of `ring` and `tube`, moved by `offset` and turned `degrees`

@@ -847,11 +847,12 @@ impl BuildingAMesh {
         let (from, to) = ends_in_the_stored_order(edge);
         let ends =
             [from, to].map(|end| where_this_corner_is_in_the_frame_it_is_meshed_in(end, face));
+        let shift = the_shift_this_face_is_meshed_with(face);
         let run = NamedRun::new(
-            edge.stored_run()
-                .shifted(the_shift_this_face_is_meshed_with(face))?,
+            edge.stored_run().shifted(shift)?,
             ends.map(|end| PredicatePoint::from(end.coordinates())),
-        )?;
+        )?
+        .moved_in_from(shift)?;
         let along = the_two_surfaces_either_side(edge, &self.along_each_edge, &back)?;
         if nothing_curved_says_where_it_bends(run.run(), along) {
             return Err(Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge: edge.key() });
