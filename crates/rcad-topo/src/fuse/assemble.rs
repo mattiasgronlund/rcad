@@ -900,7 +900,7 @@ impl Assembly {
         };
         assembly.leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways(log)?;
         assembly.leave_out_what_no_wire_walks();
-        assembly.part_each_line_two_faces_rest_against_each_other_along(model);
+        assembly.part_each_line_two_faces_rest_against_each_other_along(model, chosen);
         every_closed_edge_read_off_one_spelling(
             &assembly.edges,
             &assembly.corners,
@@ -1260,8 +1260,11 @@ impl Assembly {
     /// **Four darts from four input faces, along a line both solids have an
     /// edge along, are parted only where one solid lies on both sides of it**
     /// (queue row Q1913): an L plate less a pocket cut into its corner square,
-    /// whose two arms the plate's floor joins (`a_prism_lying_on_one_edge.rs`).
-    /// [`Assembly::pair_each_line_one_solid_touches_itself_along`] decides it.
+    /// whose two arms the plate's floor joins, or less a prism lying in its
+    /// inner corner, whose hollow joins them (Q1923,
+    /// `a_prism_lying_on_one_edge.rs`).
+    /// [`Assembly::pair_each_line_one_solid_touches_itself_along`] decides it,
+    /// with `chosen` to say which faces the rule turned round.
     /// Elsewhere they stay one edge and are refused: two cubes touching along
     /// part of an edge, the frame and the comb of `degenerate_fuses.rs`, or the
     /// leaning frame less the comb, whose square between two teeth touches the
@@ -1281,13 +1284,22 @@ impl Assembly {
     /// If an input edge the line is a piece of runs along none of the four
     /// faces' input faces. Every one was named by a side of a piece of one of
     /// them, along that face's own boundary or its seam.
-    fn part_each_line_two_faces_rest_against_each_other_along(&mut self, model: &Model) {
+    fn part_each_line_two_faces_rest_against_each_other_along(
+        &mut self,
+        model: &Model,
+        chosen: &[Chosen],
+    ) {
         let claimants = self.claimants_of_each_edge();
         let mut partings: Vec<Option<[[Dart; 2]; 2]>> = claimants
             .iter()
             .map(|by| self.the_two_pairs_along(by))
             .collect();
-        self.pair_each_line_one_solid_touches_itself_along(model, &claimants, &mut partings);
+        self.pair_each_line_one_solid_touches_itself_along(
+            model,
+            chosen,
+            &claimants,
+            &mut partings,
+        );
         for (kept, parting) in partings.into_iter().enumerate() {
             let Some([staying, moving]) = parting else {
                 continue;
@@ -1344,9 +1356,26 @@ impl Assembly {
     /// this has already paired, so it runs until a pass pairs nothing more. A
     /// line the other rules part is not crossed: an empty wedge between its
     /// pair may sit between two solids.
+    ///
+    /// **Joined also means across a full wedge, where the rule turned one of
+    /// the four faces round** (queue row Q1923). The two faces round each input
+    /// edge are neighbours round the line, since the four alternate in which
+    /// way they walk it, so each pair has a wedge of its own with no face of
+    /// the other pair in it. A face turned round is a tool's, kept where it lies
+    /// inside the argument, so its pair's own wedge is inside the tool and
+    /// empty. Then both own wedges are empty and the two others are full, each
+    /// between a face of one pair and the face of the other walking the line
+    /// the other way. An L plate less a prism lying in its inner corner needs
+    /// it: the plate's faces and the hollow's are two shells that nothing but
+    /// the line joins, and the hollow's two faces bound the two full wedges
+    /// (`a_prism_lying_on_one_edge.rs`). Nothing turned round, the own wedges
+    /// are full for a union and may be empty for an intersection of two solids
+    /// whose wedges cross, so neither pairing of faces is known to bound one
+    /// full wedge and none is joined.
     fn pair_each_line_one_solid_touches_itself_along(
         &self,
         model: &Model,
+        chosen: &[Chosen],
         claimants: &[Vec<Dart>],
         partings: &mut [Option<[[Dart; 2]; 2]>],
     ) {
@@ -1364,6 +1393,24 @@ impl Assembly {
                 Some((edge, self.the_pairs_round_two_input_edges(model, edge, by)?))
             })
             .collect();
+        for &(_, [staying, moving]) in &waiting {
+            let turned_round = staying
+                .iter()
+                .chain(&moving)
+                .any(|&dart| self.turned_round_by_the_rule(chosen, dart));
+            if !turned_round {
+                continue;
+            }
+            let [one, other] = moving;
+            for mine in staying {
+                let the_other_way = if self.side_of(mine).forward == self.side_of(one).forward {
+                    other
+                } else {
+                    one
+                };
+                one_solid.join(mine.face, the_other_way.face);
+            }
+        }
         loop {
             let before = waiting.len();
             waiting.retain(|&(edge, [staying, moving])| {
@@ -1423,6 +1470,23 @@ impl Assembly {
         ]
         .into_iter()
         .find(|&[staying, moving]| round_one_input_edge(staying) && round_one_input_edge(moving))
+    }
+
+    /// Whether the rule turned the face `dart` walks round.
+    ///
+    /// # Panics
+    ///
+    /// If the face is not one piece the rule kept. Every face is one until
+    /// faces on one plane are joined, after the lines are parted.
+    fn turned_round_by_the_rule(&self, chosen: &[Chosen], dart: Dart) -> bool {
+        let &[piece] = self.faces[dart.face].pieces.as_slice() else {
+            panic!("a face is one piece until faces on one plane are joined");
+        };
+        chosen
+            .iter()
+            .find(|kept| kept.piece == piece)
+            .expect("each face is made of a piece the rule kept")
+            .reversed
     }
 
     /// The two pairs four darts along one edge part into, the pair holding the
