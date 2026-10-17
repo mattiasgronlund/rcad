@@ -759,6 +759,12 @@ struct Arrangement<'f> {
     /// keep one side over a whole cell, and
     /// [`Arrangement::the_one_on_its_side_of_every_cut`] does not ask them.
     cuts_reached_by_no_face: Vec<Surface>,
+    /// The name, as [`Node::made_of`] has it, of every meet placed on one
+    /// crossing alone because the other crossing of its pair was left out
+    /// where no face reaches it ([`Arrangement::place_the_meets`]). The face
+    /// across that one crossing may split its edge there, so
+    /// [`Arrangement::the_two_arcs_to_join_at`] never joins across such a node.
+    kept_where_a_crossing_left_out_meets_it: Vec<([Surface; 3], u8)>,
 }
 
 /// One curve on the face: one of the curves where the face's surface crosses
@@ -1158,6 +1164,7 @@ impl<'f> Arrangement<'f> {
             cells: Vec::new(),
             winding: Vec::new(),
             cuts_reached_by_no_face: Vec::new(),
+            kept_where_a_crossing_left_out_meets_it: Vec::new(),
         };
         arrangement.draw_the_crossings(cuts, policy, log)?;
         arrangement.place_the_corners(policy, log)?;
@@ -2047,7 +2054,6 @@ impl<'f> Arrangement<'f> {
         let never_left_out = self.crossings_never_left_out();
         let mut known_unreached: Vec<Option<bool>> = vec![None; self.crossings.len()];
         let mut left_out_where_it_refuses: Vec<usize> = Vec::new();
-        let mut left_out_where_it_answers: Vec<usize> = Vec::new();
         let mut set_aside: Vec<(usize, usize, MeetOfThree)> = Vec::new();
         let mut folded_into_a_corner: Vec<usize> = Vec::new();
         let mut held: Option<rcad_geom::Error> = None;
@@ -2105,47 +2111,45 @@ impl<'f> Arrangement<'f> {
                         continue;
                     }
                 };
-                if self.a_place_of_it_is_on_both(first, second, &meet) {
-                    let unreached: SmallVec<[usize; 2]> = [first, second]
-                        .into_iter()
-                        .filter(|&crossing| {
-                            self.no_face_reaches(
-                                crossing,
-                                &never_left_out,
-                                &mut known_unreached,
-                                log,
-                            )
-                        })
-                        .collect();
-                    if !unreached.is_empty() {
-                        for crossing in unreached {
-                            if !left_out_where_it_answers.contains(&crossing) {
-                                left_out_where_it_answers.push(crossing);
-                            }
-                        }
-                        set_aside.push((first, second, meet));
-                        continue;
-                    }
+                if self.a_place_of_it_is_on_both(first, second, &meet)
+                    && [first, second].into_iter().any(|crossing| {
+                        self.no_face_reaches(crossing, &never_left_out, &mut known_unreached, log)
+                    })
+                {
+                    set_aside.push((first, second, meet));
+                    continue;
                 }
-                self.place_where_the_partners_meet(first, second, meet, &mut folded_into_a_corner);
+                self.place_where_the_partners_meet(
+                    first,
+                    second,
+                    &[first, second],
+                    meet,
+                    &mut folded_into_a_corner,
+                );
             }
         }
-        let mut left_out = left_out_where_it_refuses.clone();
-        for crossing in left_out_where_it_answers {
-            if !left_out.contains(&crossing) {
-                left_out.push(crossing);
+        if let Some(gave_up_on_it) = held
+            && self.something_placed_is_on(&left_out_where_it_refuses, &folded_into_a_corner)
+        {
+            return Err(gave_up_on_it.into());
+        }
+        let mut left_out = left_out_where_it_refuses;
+        for &(first, second, _) in &set_aside {
+            for crossing in [first, second] {
+                if !left_out.contains(&crossing)
+                    && self.no_face_reaches(crossing, &never_left_out, &mut known_unreached, log)
+                    && !self.something_placed_is_on(&[crossing], &folded_into_a_corner)
+                {
+                    left_out.push(crossing);
+                }
             }
         }
-        if self.something_placed_is_on(&left_out, &folded_into_a_corner) {
-            for (first, second, meet) in set_aside {
-                self.place_where_the_partners_meet(first, second, meet, &mut folded_into_a_corner);
-            }
-            if let Some(gave_up_on_it) = held
-                && self.something_placed_is_on(&left_out_where_it_refuses, &folded_into_a_corner)
-            {
-                return Err(gave_up_on_it.into());
-            }
-            left_out = left_out_where_it_refuses;
+        for (first, second, meet) in set_aside {
+            let on: SmallVec<[usize; 2]> = [first, second]
+                .into_iter()
+                .filter(|crossing| !left_out.contains(crossing))
+                .collect();
+            self.place_where_the_partners_meet(first, second, &on, meet, &mut folded_into_a_corner);
         }
         for crossing in left_out {
             self.crossings[crossing].reaches_the_face = false;
@@ -2206,18 +2210,23 @@ impl<'f> Arrangement<'f> {
         })
     }
 
-    /// One node at each place in `meet` where the face's surface and the
-    /// partners of `first` and `second` meet, unless what picks a crossing out
-    /// rules the place off it, or a corner of the face already is that place
+    /// One node on the crossings `on`, of `first` and `second`, at each place
+    /// in `meet` where the face's surface and the partners of `first` and
+    /// `second` meet, unless what picks a crossing out rules the place off
+    /// it, or a corner of the face already is that place
     /// ([`Arrangement::the_corner_that_is_this_place`]), which then stands for
-    /// it and is noted in `folded_into_a_corner`.
+    /// it and is noted in `folded_into_a_corner`. None when `on` is empty.
     fn place_where_the_partners_meet(
         &mut self,
         first: usize,
         second: usize,
+        on: &[usize],
         meet: MeetOfThree,
         folded_into_a_corner: &mut Vec<usize>,
     ) {
+        if on.is_empty() {
+            return;
+        }
         let surfaces = [
             self.surface,
             self.crossings[first].partner,
@@ -2266,8 +2275,12 @@ impl<'f> Arrangement<'f> {
                 self.the_corner_that_is_this_place(first, second, place, boxed_tight, &places)
             {
                 self.nodes[corner].stands_for_too((sorted, which));
-                folded_into_a_corner.extend([first, second]);
+                folded_into_a_corner.extend(on);
                 continue;
+            }
+            if on.len() < 2 {
+                self.kept_where_a_crossing_left_out_meets_it
+                    .push((sorted, which));
             }
             self.nodes.push(Node {
                 point: place,
@@ -2275,7 +2288,7 @@ impl<'f> Arrangement<'f> {
                 made_of: Some((sorted, which)),
                 also: Vec::new(),
                 half_way_round: false,
-                crossings: vec![first, second],
+                crossings: on.to_vec(),
             });
         }
     }
@@ -5935,6 +5948,7 @@ impl<'f> Arrangement<'f> {
         if self.nodes[node].vertex.is_some()
             || self.nodes[node].half_way_round
             || self.a_touch_is_at(node)
+            || self.a_crossing_left_out_meets_one_at(node)
         {
             return None;
         }
@@ -5953,6 +5967,17 @@ impl<'f> Arrangement<'f> {
             && first.against_its_gradients == second.against_its_gradients
             && !self.crossings[first.crossing].order.closes())
         .then_some((lower, higher))
+    }
+
+    /// Whether `node` stands for a meet kept on one crossing because the other
+    /// crossing of its pair was left out
+    /// ([`Arrangement::kept_where_a_crossing_left_out_meets_it`]).
+    fn a_crossing_left_out_meets_one_at(&self, node: usize) -> bool {
+        let Node { made_of, also, .. } = &self.nodes[node];
+        made_of
+            .iter()
+            .chain(also)
+            .any(|name| self.kept_where_a_crossing_left_out_meets_it.contains(name))
     }
 
     /// Whether `node` stands for a place where a surface touching the face
@@ -16085,6 +16110,7 @@ mod tests {
             cells: Vec::new(),
             winding: Vec::new(),
             cuts_reached_by_no_face: Vec::new(),
+            kept_where_a_crossing_left_out_meets_it: Vec::new(),
         };
         let mut log = ProvenanceLog::new();
         arrangement
