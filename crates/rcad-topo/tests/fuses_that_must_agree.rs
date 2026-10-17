@@ -229,8 +229,8 @@ const SOAK_SEED: &str = "RCAD_SOAK_SEED";
 /// is a threshold on a **deterministic** number: [`measured`] runs from a fixed
 /// seed, so the shipped corpus of 429 turned fuses refused 96 of them, 22.38%,
 /// every run on every machine, when it was chosen. Just before Q1288 it was 45
-/// of 447, 10.07%, and since Q1288 it is 39 of 447, 8.72%. There is no sampling
-/// noise for the threshold to
+/// of 447, 10.07%, since Q1288 it was 39 of 447, 8.72%, and since Q2236 it is 27
+/// of 453, 6.0%. There is no sampling noise for the threshold to
 /// have to clear, so what it has to clear instead is ordinary drift — 1.6 points
 /// is seven fuses — and what it has to catch is a regression. The three undeserved
 /// refusals recorded so far are each worth several times that on their own: the
@@ -281,8 +281,8 @@ const TURNED_REFUSALS_MUST_STAY_BELOW: f64 = 0.24;
 /// the threshold was not moved then either. Since Q1357 it was 13 of 447,
 /// 2.91%. Just before Q1034 and Q1606 it was 14 of 450, 3.11%, and since them
 /// it is 8 of 450, 1.78%, and the threshold stays where it is. Since Q1608 and
-/// Q1609 it was 2 of 450, 0.44%. Since Q1528 it is 3 of 450, 0.67%, and it
-/// still stays.
+/// Q1609 it was 2 of 450, 0.44%. Since Q1528 it was 3 of 450, 0.67%, and it
+/// still stays. Since Q2236's seed grew the corpus it is 3 of 453, 0.7%.
 /// There is no sampling noise to clear, so what the gap has to allow is ordinary
 /// drift — 6.1 points is twenty-six fuses, nearly four times the headroom
 /// [`TURNED_REFUSALS_MUST_STAY_BELOW`] now leaves — and what it has to catch is
@@ -633,10 +633,12 @@ const A_PAIR_ELSEWHERE_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.019..=0.084;
 /// the replayed cases' own higher rate explains (§303.2) rather than a moved
 /// kernel: the shipped corpus's own 5 of 450, 1.1%, agrees with it, and the
 /// new band covers every one of the forty seeds and the shipped draw with room
-/// either side. One of the forty, factor 66 seed 1, panics in
+/// either side. One of the forty, factor 66 seed 1, panicked in
 /// `fuse/assemble.rs` on an ell and a frame turned 56 steps — a different
-/// input from Q1426's seed 2 — and is left for its own row rather than fixed
-/// here.
+/// input from Q1426's seed 2 — and was left for its own row rather than fixed
+/// here. That row, Q2236, recorded the ell and frame's seed, and its three
+/// certified fuses are refused for an edge too short now
+/// ([`a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_short`]).
 const A_TURNED_PAIR_IS_NOT_A_SOLID: RangeInclusive<f64> = 0.0058..=0.026;
 
 /// How many of its own spreads a draw may land past an end of a not-a-solid
@@ -1857,6 +1859,16 @@ fn every_certified_fuse_of_a_pair_somewhere_else_in_f64_is_decided() {
 /// fuses that get as far as an answer and find its shortest edge `7.7e15` to
 /// `2.9e16` times shorter than its largest coordinate, a limit
 /// ([`a_flat_refusal`]).
+///
+/// **Since Q2236 it is 27 of 453 refused**: 24 are the edge too short and 3
+/// name the point. The corpus grew by the seed of a turned ell with a frame
+/// flush against its wall
+/// ([`a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_short`]),
+/// whose union was refused for the edge too short and whose intersection and
+/// ell less the frame panicked. All three are refused for the edge too short
+/// now, and Q2236's change answers nothing differently that did not panic, so
+/// the other 450 refuse 24, 21 of them for the edge too short. How the 39 of
+/// 447 above came down to those 24 was not traced here.
 #[test]
 fn how_often_a_certified_fuse_of_a_turned_pair_refuses() {
     let tally = measured(a_turned_pair(), |configuration, tally| {
