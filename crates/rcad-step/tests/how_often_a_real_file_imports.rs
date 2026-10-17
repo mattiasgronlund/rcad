@@ -483,6 +483,7 @@ struct RefusedFile {
 fn how_often_a_real_file_imports() {
     let root = corpus();
 
+    let mut nist_imports: BTreeSet<String> = BTreeSet::new();
     let mut kicad_imports: BTreeSet<String> = BTreeSet::new();
     let mut every_corner_miss: Vec<f64> = Vec::new();
     let mut planes_between_curved_faces = PlanesBetweenCurvedFaces::default();
@@ -580,9 +581,12 @@ fn how_often_a_real_file_imports() {
         every_corner_miss.extend(&tally.corner_misses_in_spacings);
         if source == "kicad" {
             kicad_imports = tally.imported_names;
+        } else if source == "nist" {
+            nist_imports = tally.imported_names;
         }
     }
     assert_a_corner_off_its_surface_is_two_problems(&every_corner_miss);
+    assert_pinned_nist_imports(&nist_imports);
     assert_pinned_kicad_imports(&kicad_imports);
     planes_between_curved_faces.assert_every_one_was_checked();
 }
@@ -829,6 +833,31 @@ fn assert_a_corner_off_its_surface_is_two_problems(misses: &[f64]) {
         worst > 1000.0,
         "a worst corner of {worst} spacings means no file anywhere here carries a modelling \
          tolerance, and they do"
+    );
+}
+
+/// The one NIST file that imports today, out of 44.
+///
+/// **Pinned by name, not by rate** (§44.10), the same reason
+/// [`KICAD_FILES_THAT_IMPORT`] is. The crate doc's table at
+/// `crates/rcad-step/src/lib.rs` used to say 0 of 44; this is the file that
+/// moved it.
+const NIST_FILES_THAT_IMPORT: &[&str] = &["nist_ctc_03_asme1_ap242-e2.stp"];
+
+/// Every NIST file that imports must be [`NIST_FILES_THAT_IMPORT`], and every
+/// one of those must import — checked as a set for the same reason
+/// [`assert_pinned_kicad_imports`] is.
+fn assert_pinned_nist_imports(imported: &BTreeSet<String>) {
+    let pinned: BTreeSet<&str> = NIST_FILES_THAT_IMPORT.iter().copied().collect();
+    let got: BTreeSet<&str> = imported.iter().map(String::as_str).collect();
+    let newly_importing: Vec<&str> = got.difference(&pinned).copied().collect();
+    let stopped_importing: Vec<&str> = pinned.difference(&got).copied().collect();
+    assert!(
+        newly_importing.is_empty() && stopped_importing.is_empty(),
+        "the nist files that import moved: {} file(s) now import and are not pinned: \
+         {newly_importing:?}; {} pinned file(s) stopped importing: {stopped_importing:?}",
+        newly_importing.len(),
+        stopped_importing.len()
     );
 }
 

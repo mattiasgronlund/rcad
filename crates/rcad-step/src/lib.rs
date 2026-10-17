@@ -52,8 +52,8 @@
 //! | | files | imported |
 //! |---|---:|---:|
 //! | files this kernel wrote itself (the control) | 88 | **88** |
-//! | `kicad/`, KiCad's own footprint library | 323 | **46** |
-//! | `nist/`, ASME Y14.5 GD&T certification parts | 44 | **0** |
+//! | `kicad/`, KiCad's own footprint library | 323 | **165** |
+//! | `nist/`, ASME Y14.5 GD&T certification parts | 44 | **1** |
 //!
 //! The two real corpora are different populations and are never added together.
 //! What refuses the rest is grouped and counted in that test's own output, and
