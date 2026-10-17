@@ -783,9 +783,15 @@ fn no_face_of_one_meets_the_other(one: &BakedSolid, other: &BakedSolid) -> bool 
 /// Every point the two share is on both surfaces and inside both faces' boxes,
 /// so any one of these proves there is none: the two boxes miss; one surface
 /// misses the part of space both boxes hold; one surface misses the band round
-/// an axis that the other face lies in ([`band_a_face_is_inside`]); the
-/// surfaces do not meet at all; or they touch at one point outside that part of
-/// space.
+/// an axis that the other face lies in ([`band_a_face_is_inside`]); one is a
+/// ball holding the other, a flat face, strictly inside it
+/// ([`a_ball_holds_a_flat_face`]); the surfaces do not meet at all; or they
+/// touch at one point outside that part of space.
+///
+/// **The corners are what settle a prism inside a ball.** A 12-sided prism of
+/// radius 0.81 and height 1 inside a ball of radius 1: the box round its top
+/// reaches `(0.81, 0.81, 0.5)`, 1.25 out, so the ball's skin runs through that
+/// box although every corner of the top is 0.95 out (Q2247).
 ///
 /// **The band is what settles one round solid inside another about one axis.**
 /// A frustum of radius 1 to 3 inside a bar of radius 4: the box round the
@@ -831,6 +837,8 @@ fn two_faces_provably_apart(face: &BakedFace, against: &BakedFace) -> bool {
     }
     if a_face_misses_a_surface_by_its_band(face, &against.surface)
         || a_face_misses_a_surface_by_its_band(against, &face.surface)
+        || a_ball_holds_a_flat_face(&against.surface, face)
+        || a_ball_holds_a_flat_face(&face.surface, against)
     {
         return true;
     }
@@ -852,6 +860,34 @@ fn two_faces_provably_apart(face: &BakedFace, against: &BakedFace) -> bool {
 /// round an axis the face lies in.
 fn a_face_misses_a_surface_by_its_band(face: &BakedFace, surface: &Surface) -> bool {
     band_a_face_is_inside(face).is_some_and(|band| a_surface_misses_a_band(surface, band))
+}
+
+/// Whether `surface` is a ball holding every point of `face`, a flat face whose
+/// every side is straight, strictly inside it, so that the ball's skin shares
+/// no point with the face.
+///
+/// Such a face lies in the hull of its corners, a straight side lying between
+/// its two, and a ball holds the hull of any points it holds. So each corner's
+/// own box lying strictly inside the ball is enough, where the one box round all
+/// the corners together can reach out of the ball at a corner of that box which
+/// no corner of the face is near. A side on anything but a plane may bulge past
+/// its corners, and a face with such a side is not asked about.
+fn a_ball_holds_a_flat_face(surface: &Surface, face: &BakedFace) -> bool {
+    let Surface::Sphere(ball) = surface else {
+        return false;
+    };
+    if face.surface.as_plane().is_none() {
+        return false;
+    }
+    let mut sides = face.wires.iter().flatten().peekable();
+    sides.peek().is_some()
+        && sides.all(|side| {
+            side.across.as_plane().is_some()
+                && [&side.start, &side.end].into_iter().all(|corner| {
+                    let [_, furthest] = a_box_against_a_balls_skin(ball, corner.point.enclosure());
+                    furthest.sign() == rcad_predicates::Decision::Neg
+                })
+        })
 }
 
 /// A box the face is certainly inside, rounded outward, or `None` where this
@@ -950,6 +986,19 @@ fn a_surface_misses_a_box(surface: &Surface, room: [rcad_predicates::Interval; 3
     let Surface::Sphere(ball) = surface else {
         return false;
     };
+    let [nearest, furthest] = a_box_against_a_balls_skin(ball, room);
+    matches!(nearest.sign(), rcad_predicates::Decision::Pos)
+        || matches!(furthest.sign(), rcad_predicates::Decision::Neg)
+}
+
+/// The squared distance from `ball`'s centre to the nearest and to the furthest
+/// point of `room`, each less the ball's squared radius: the nearest above
+/// nought puts the box wholly outside the ball, the furthest below nought puts
+/// it wholly inside.
+fn a_box_against_a_balls_skin(
+    ball: &rcad_geom::Sphere,
+    room: [rcad_predicates::Interval; 3],
+) -> [rcad_predicates::Interval; 2] {
     let centre = ball.centre().coordinates();
     let mut nearest = rcad_predicates::Interval::exactly(0.0);
     let mut furthest = rcad_predicates::Interval::exactly(0.0);
@@ -970,8 +1019,7 @@ fn a_surface_misses_a_box(surface: &Surface, room: [rcad_predicates::Interval; 3
     }
     let skin = rcad_predicates::Interval::exactly(ball.radius())
         * rcad_predicates::Interval::exactly(ball.radius());
-    matches!((nearest - skin).sign(), rcad_predicates::Decision::Pos)
-        || matches!((furthest - skin).sign(), rcad_predicates::Decision::Neg)
+    [nearest - skin, furthest - skin]
 }
 
 /// Where a face lies round one axis: how far up it and how far out from it.
