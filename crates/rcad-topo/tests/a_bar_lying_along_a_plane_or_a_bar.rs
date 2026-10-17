@@ -1486,12 +1486,19 @@ fn the_plane_the_low_cap_and_the_pipe(
 /// The bar of the test above turned the other way, about `y` by `−π/2`, and
 /// shifted to `(3, 2, 5)`, so it lies on the same line `(x, 2, 4)` from `x = 3`
 /// to 1, its axis along `(−1, 0, 2⁻⁵²)` and its seam along its top (queue row
-/// Q2141). **Pinned as it answers**: every certified fuse, both ways round, is
-/// refused `Undecidable` at the order along a crossing, and every tolerant one
-/// `TwoCurvesTouchWithoutCrossing`.
+/// Q2141). Its low cap is stored `2⁻⁵²` past the axis's end, so the bar dips
+/// `2⁻¹⁰⁵` into the block, and the cap's circle crosses the top in two points
+/// `2⁻⁵¹` apart whose boxes overlap. Every certified fuse, both ways round,
+/// was refused `Undecidable` at the order of those two along a crossing
+/// (Q2160). Every tolerant one is still refused
+/// `TwoCurvesTouchWithoutCrossing` (Q2161).
 #[test]
-fn every_fuse_of_a_bar_turned_back_onto_x_dipping_through_a_blocks_top_is_refused() {
-    every_fuse_of_a_block_and_a_bar_turned_onto_x_is_refused(-PI / 2.0, [3.0, 2.0, 5.0]);
+fn no_certified_fuse_of_a_bar_turned_back_onto_x_dipping_through_a_blocks_top_is_refused_on_the_order_of_two_meets()
+ {
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_gets_past_the_order_of_two_meets(
+        -PI / 2.0,
+        [3.0, 2.0, 5.0],
+    );
 }
 
 /// What every rule gives for the block `[0, 4]³` and a bar of radius one, two
@@ -1527,11 +1534,15 @@ fn a_block_less_a_bar_turned_onto_x_by_a_float_angle_along_its_floor_keeps_the_b
 
 /// The bar turned about `y` by `−π/2` sunk onto the block's floor along
 /// `(x, 2, 0)`, its axis from `(3, 2, 1)` (queue row Q2141), which dips through
-/// the floor as the bar along the top dips through the top. Pinned as it
-/// answers, the refusals of the bar along the top.
+/// the floor as the bar along the top dips through the top, with the same
+/// refusals.
 #[test]
-fn every_fuse_of_a_bar_turned_back_onto_x_dipping_through_a_blocks_floor_is_refused() {
-    every_fuse_of_a_block_and_a_bar_turned_onto_x_is_refused(-PI / 2.0, [3.0, 2.0, 1.0]);
+fn no_certified_fuse_of_a_bar_turned_back_onto_x_dipping_through_a_blocks_floor_is_refused_on_the_order_of_two_meets()
+ {
+    every_fuse_of_a_block_and_a_bar_turned_onto_x_gets_past_the_order_of_two_meets(
+        -PI / 2.0,
+        [3.0, 2.0, 1.0],
+    );
 }
 
 /// What every rule gives for the block `[0, 4]³` and a bar of radius one, two
@@ -1612,10 +1623,13 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
 }
 
 /// Every rule, both ways round, of the block `[0, 4]³` and
-/// [`a_bar_turned_onto_x`] by `turn` from `at`: refused `Undecidable` at the
-/// order along a crossing under `certified`, and refused
+/// [`a_bar_turned_onto_x`] by `turn` from `at`: never refused `Undecidable` at
+/// the order along a crossing under `certified`, and refused
 /// `TwoCurvesTouchWithoutCrossing` under `tolerant`.
-fn every_fuse_of_a_block_and_a_bar_turned_onto_x_is_refused(turn: f64, at: [f64; 3]) {
+fn every_fuse_of_a_block_and_a_bar_turned_onto_x_gets_past_the_order_of_two_meets(
+    turn: f64,
+    at: [f64; 3],
+) {
     let mut wrong: Vec<String> = Vec::new();
     for bar_first in [false, true] {
         for certified in [true, false] {
@@ -1629,7 +1643,7 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_is_refused(turn: f64, at: [f64;
                     &mut ProvenanceLog::new(),
                 );
                 let as_pinned = if certified {
-                    matches!(&fused, Err(Error::Undecidable { records })
+                    !matches!(&fused, Err(Error::Undecidable { records })
                         if records.records().last().map(|record| record.predicate())
                             == Some("order along a crossing"))
                 } else {
