@@ -242,7 +242,8 @@ pub(crate) struct Chosen {
 /// ([`SidesItShares::place_on_a_face_it_shares_a_side_with`]), nor the piece
 /// across a side that starts clear of every face
 /// ([`by_the_piece_across_a_side_clear_of_every_face`]), nor a meridian disk
-/// beside it ([`by_a_meridian_disk_beside_it`]) placed it: under
+/// beside it ([`by_a_meridian_disk_beside_it`]), nor a face plane parallel to
+/// its own ([`by_a_face_plane_parallel_to_its_own`]) placed it: under
 /// [`INSIDE_A_PIECE`] when no point inside it was found, and under
 /// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be
 /// placed, or only a rung of [`rungs_towards_each_crossing`],
@@ -328,7 +329,8 @@ pub(crate) fn choose(
                         model, scratch, &solids, against, index, policy, log,
                     )
                 })
-                .or_else(|| by_a_meridian_disk_beside_it(&solids, against, piece));
+                .or_else(|| by_a_meridian_disk_beside_it(&solids, against, piece))
+                .or_else(|| by_a_face_plane_parallel_to_its_own(&solids, against, piece));
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
@@ -1330,6 +1332,72 @@ fn placed_by_the_planes_of(solid: &BakedSolid, corners: &[[[f64; 4]; 3]]) -> Opt
         inside_every_one &= solid_behind && piece_behind;
     }
     inside_every_one.then_some(true)
+}
+
+/// The rule after every other: a flat piece is outside each solid it is placed
+/// against that has a face plane parallel to the piece's own, number for
+/// number, with all of the solid on or behind that face plane and the piece's
+/// plane strictly in front of it. `None` where some solid of them is not
+/// placed so.
+///
+/// **Every point of a plane is on one side of a plane parallel to it.** Write
+/// the face plane, turned out of the solid, as `n · x = e`, and the piece's
+/// plane with the same normal `n`, number for number, as `n · x = d`. Every
+/// point of the piece is then `d − e` in front of the face plane, which is
+/// one sign for all of them, and two `f64`s compare exactly. The solid is on or
+/// behind the face plane where each of its corners is, read as the meet of
+/// the three planes bake solved it from, as [`placed_by_the_planes_of`] reads
+/// it: a solid with only flat faces lies inside the hull of its corners. So
+/// with `d > e` no point of the piece is in the solid.
+///
+/// [`by_a_plane`] asks the same of a piece's corners, and only of a piece with
+/// straight sides whose corners all meet three planes. A half bar cut flush
+/// along its flat face by a block, the two turned 0.4 about `x` and then
+/// shifted by `(7, −5, 2.5)`, has the block's face one ulp past the flat face,
+/// on the side away from the bar. Every point found inside the flat face is a
+/// box across the block's face, which no ray can place, and the flat face's
+/// sides along the bar's wall are not straight, so every fuse of the two was
+/// refused placing it (Q2043).
+fn by_a_face_plane_parallel_to_its_own(
+    solids: &[&BakedSolid],
+    against: &[usize],
+    piece: &Piece,
+) -> Option<Placement> {
+    let flat = *piece.surface.as_plane()?;
+    against
+        .iter()
+        .all(|&index| is_in_front_of_a_face_plane_parallel_to(solids[index], flat))
+        .then_some(Placement::Outside)
+}
+
+/// Whether every point of `flat` is strictly in front of a face plane of
+/// `solid` parallel to it, with every corner of `solid` on or behind that
+/// plane: [`by_a_face_plane_parallel_to_its_own`]'s rule for one solid.
+fn is_in_front_of_a_face_plane_parallel_to(solid: &BakedSolid, flat: Plane) -> bool {
+    let Some(its_own) = the_planes_meeting_at_each_corner_of_a_solid(solid) else {
+        return false;
+    };
+    solid.faces.iter().any(|face| {
+        let outward = outward_plane_of_face(face)
+            .expect("every face of a solid whose corners all meet three planes is flat");
+        let normal = outward.normal().components();
+        let Some(along) = [flat, flat.reversed()]
+            .into_iter()
+            .find(|one| one.normal().components() == normal)
+        else {
+            return false;
+        };
+        let (piece_at, face_at) = (along.offset(), outward.offset());
+        piece_at.is_finite()
+            && face_at.is_finite()
+            && piece_at > face_at
+            && its_own.iter().all(|three| {
+                matches!(
+                    side_of_a_plane_where_three_planes_meet(*three, outward.coefficients()),
+                    Ok(Decision::Neg | Decision::Zero)
+                )
+            })
+    })
 }
 
 /// The three planes bake solved each corner of every face of `solid` from, as
