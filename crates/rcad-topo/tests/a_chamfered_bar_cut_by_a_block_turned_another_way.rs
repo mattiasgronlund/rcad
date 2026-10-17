@@ -42,7 +42,16 @@
 //! top's own face gives it, so the circle is one edge; the fourth test pins
 //! the difference, the union and the intersection.
 //!
-//! What is left is not measured: the bar alone, before any fuse, is refused
+//! The same pair with the bar placed by the turn and the block by the same
+//! turn comes out with the top square to the bar's axis to the bit, `2e−15`
+//! above the circle; since row Q2181 the fuse reads which side of the top, the
+//! pipe or the cone a point is on off their stored numbers, and the fifth test
+//! pins every rule. With the block placed by two halves of the turn the top is
+//! an ulp off square and crosses the circle, which runs from `4.7e−16` above
+//! it to `1.6e−16` under it. The sixth test pins that every rule is refused,
+//! and the seventh that the answer would need a spread past `10¹⁶`: a limit.
+//!
+//! None of these answers is measured: the bar alone, before any fuse, is refused
 //! `DeflectionBelowWhatAMeshCanReach` with `closest` about `242259` at every
 //! deflection asked. Unplaced, or turned about its own axis, it measures, and a
 //! bar of two pipes split at the same circle is refused the same way: row
@@ -52,6 +61,7 @@ use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, Isometry, MeetOfThree, Orientation, Plane, Point, Scale,
     Surface, Vector, meet_of_three_surfaces,
 };
+use rcad_predicates::expansion::{expansion_sum, two_diff, two_product};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
     DraftEdge, DraftStep, DraftWire, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
@@ -222,6 +232,216 @@ fn a_block_whose_top_holds_the_circle_where_the_cone_meets_the_pipe_cuts_the_bar
     }
 }
 
+/// The same bar and block, both placed by the turn of `1.1`. The block's
+/// placement composes its own offset in and rounds, so its top comes out
+/// square to the bar's axis to the bit and about `2e−15` up it from the
+/// circle the pipe and the cone share. Before row Q2181 every rule was refused
+/// `Undecidable` on the side of the top at the bar's seam corner on that
+/// circle, whose box is about `1e−13` wide, and then on the side of the cone at
+/// a point where the top cuts the pipe. Each side is now read off the stored
+/// numbers of a plane square to the one axis of a pipe and a cone. The
+/// intersection keeps a band of the pipe about `2e−15` high.
+#[test]
+fn a_block_whose_top_holds_the_circle_turned_with_the_bar_cuts_the_bar_just_above_it() {
+    let turn = the_turn();
+    for (rule, wanted) in [
+        (Rule::Difference, (0, 1, 2)),
+        (Rule::Union, (0, 1, 7)),
+        (Rule::Intersection, (1, 1, 2)),
+    ] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = a_chamfered_bar(&mut model);
+        model
+            .place_solid(bar, &turn)
+            .expect("this model made the key");
+        let block = a_block_from_below(&mut model, 60.0, 1.0);
+        model
+            .place_solid(block, &turn)
+            .expect("this model made the key");
+        assert_eq!(
+            what_the_fuse_is_made_of(&mut model, bar, block, rule),
+            wanted,
+            "the cones, pipes and planes {rule:?} has faces on"
+        );
+    }
+}
+
+/// The same block placed by two halves of the turn instead, each rounding:
+/// its top comes out an ulp off square to the bar's axis and crosses the
+/// circle the pipe and the cone share, which the next test measures. Every
+/// rule is refused `Undecidable` on the side of the top at the bar's seam
+/// corner on that circle.
+#[test]
+fn a_block_whose_top_holds_the_circle_turned_in_two_halves_is_refused() {
+    let half = the_half_turn();
+    for rule in [Rule::Difference, Rule::Union, Rule::Intersection] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = a_chamfered_bar(&mut model);
+        model
+            .place_solid(bar, &the_turn())
+            .expect("this model made the key");
+        let block = a_block_from_below(&mut model, 60.0, 1.0);
+        for _ in 0..2 {
+            model
+                .place_solid(block, &half)
+                .expect("this model made the key");
+        }
+        let refused = model.fuse(
+            &[bar],
+            &[block],
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(refused, Err(Error::Undecidable { .. })),
+            "{rule:?}: {refused:?}"
+        );
+    }
+}
+
+/// Why the refusal above is a limit and not a gap (§16.10). Every answer would
+/// keep a crescent of the bar less than `1e−15` high, while the block's sides
+/// run thirty from the bar's axis: a spread past `10¹⁶`. §3.5's ceiling is
+/// `10¹¹`, and a feature written straight into the coordinates is gone by
+/// about `10¹⁶` (§294.23 found the same of its own seam).
+///
+/// Let `n` and `d` be the top's normal and offset, `a` the cone's apex and `w`
+/// its axis, and `e = n − w`, which is exact. The circle is two along the axis
+/// from the apex and two from it, so a point on it is `a + 2ŵ + 2û` for a unit
+/// `û` square to `w`. Its height above the top, `n·p − d`, runs over
+/// `centre ± tilt`, with `centre = n·a − d + 2·n·ŵ` and
+/// `tilt = 2·|n × ŵ| = 2·|e × w|/|w|`. Put `n·w = 1 + α` and `w·w = 1 + β`.
+/// Then `n·ŵ` is `1 + α − β/2` up to about `α·β + β²`, below `10⁻³⁰` here, so
+/// `centre` is `n·a − d + 2·n·w − w·w + 1`, a sum of products of stored numbers
+/// added up exactly and rounded once.
+///
+/// `centre` comes out `1.553181e−16` and `tilt` `3.153804e−16`, as an
+/// 80-digit decimal sum of the same stored numbers gave too, so the circle
+/// runs from `4.7e−16` above the top to `1.6e−16` under it, and the top, the
+/// pipe and the cone meet at two points.
+#[test]
+fn turned_in_two_halves_the_blocks_top_cuts_the_circle_too_close_to_hold() {
+    let half = the_half_turn();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let bar = a_chamfered_bar(&mut model);
+    model
+        .place_solid(bar, &the_turn())
+        .expect("this model made the key");
+    let block = a_block_from_below(&mut model, 60.0, 1.0);
+    for _ in 0..2 {
+        model
+            .place_solid(block, &half)
+            .expect("this model made the key");
+    }
+
+    let up = the_turn().apply_to_vector(Vector::new(0.0, 0.0, 1.0));
+    let [top, pipe, cone] = the_face_facing_the_pipe_and_the_cone(&model, bar, block, up);
+    let (Surface::Plane(flat), Surface::Cylinder(round), Surface::Cone(chamfer)) =
+        (top, pipe, cone)
+    else {
+        panic!("a plane, a pipe and a cone: {top:?}, {pipe:?}, {cone:?}");
+    };
+    assert_eq!((round.radius(), chamfer.slope()), (2.0, 1.0));
+
+    let n = flat.normal().components();
+    let d = flat.offset();
+    let a = chamfer.apex().coordinates();
+    let w = chamfer.axis().direction().components();
+    let e = [0, 1, 2].map(|axis| {
+        let (difference, lost) = two_diff(n[axis], w[axis]);
+        assert_eq!(lost, 0.0, "n − w rounds in {axis}");
+        difference
+    });
+
+    let alpha = exactly(&[(n[0], w[0]), (n[1], w[1]), (n[2], w[2])], &[-1.0]);
+    let beta = exactly(&[(w[0], w[0]), (w[1], w[1]), (w[2], w[2])], &[-1.0]);
+    assert!(
+        alpha.abs() < 1e-15 && beta.abs() < 1e-15,
+        "{alpha:e} {beta:e}"
+    );
+    let centre = exactly(
+        &[
+            (n[0], a[0]),
+            (n[1], a[1]),
+            (n[2], a[2]),
+            (2.0 * n[0], w[0]),
+            (2.0 * n[1], w[1]),
+            (2.0 * n[2], w[2]),
+            (-w[0], w[0]),
+            (-w[1], w[1]),
+            (-w[2], w[2]),
+        ],
+        &[-d, 1.0],
+    );
+    let across = [
+        e[1] * w[2] - e[2] * w[1],
+        e[2] * w[0] - e[0] * w[2],
+        e[0] * w[1] - e[1] * w[0],
+    ];
+    let length = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    let tilt = 2.0 * length(across) / length(w);
+    assert!((centre - 1.553181e-16).abs() < 1e-22, "{centre:e}");
+    assert!((tilt - 3.153804e-16).abs() < 1e-22, "{tilt:e}");
+
+    let (highest, lowest) = (centre + tilt, centre - tilt);
+    assert!(
+        highest > 0.0 && lowest < 0.0,
+        "the top crosses the circle: {highest:e} {lowest:e}"
+    );
+    let crossing = meet_of_three_surfaces(
+        [&top, &pipe, &cone],
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(&crossing, Ok(MeetOfThree::At(points)) if points.len() == 2),
+        "{crossing:?}"
+    );
+
+    let crescent = highest.max(-lowest);
+    assert!(crescent < 1e-15, "{crescent:e}");
+    let spread = 30.0 / crescent;
+    assert!(spread > 1e11, "past §3.5's ceiling of 1e11: {spread:e}");
+    assert!(
+        spread > 1e16,
+        "past the 1e16 a feature is already gone by: {spread:e}"
+    );
+}
+
+/// `Σ left·right + Σ plain`, added up without rounding and rounded at the end.
+fn exactly(products: &[(f64, f64)], plain: &[f64]) -> f64 {
+    let parts = products
+        .iter()
+        .flat_map(|&(left, right)| {
+            let (product, lost) = two_product(left, right);
+            [lost, product]
+        })
+        .chain(plain.iter().copied());
+    let mut sum: Vec<f64> = Vec::new();
+    for part in parts {
+        let mut out = vec![0.0; sum.len() + 1];
+        let used = expansion_sum(&sum, &[part], &mut out);
+        out.truncate(used);
+        sum = out;
+    }
+    sum.iter().sum()
+}
+
+/// The turn of `1.1` about the line through `(1, 0, −1)` along `(1, 2, 3)`.
+fn the_turn() -> Isometry {
+    Isometry::rotation(&the_turns_axis(), 1.1).expect("a finite angle")
+}
+
+/// Half [`the_turn`].
+fn the_half_turn() -> Isometry {
+    Isometry::rotation(&the_turns_axis(), 0.55).expect("a finite angle")
+}
+
+fn the_turns_axis() -> Axis {
+    Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction")
+}
+
 /// The block's side that was `x = 1.5` before the turn, and the bar's pipe and
 /// cone, each where the turn put it.
 fn the_side_the_pipe_and_the_cone(
@@ -230,10 +450,24 @@ fn the_side_the_pipe_and_the_cone(
     block: SolidKey,
     turn: &Isometry,
 ) -> [Surface; 3] {
-    let facing = turn
-        .apply_to_vector(Vector::new(-1.0, 0.0, 0.0))
-        .components();
-    let side = model
+    the_face_facing_the_pipe_and_the_cone(
+        model,
+        bar,
+        block,
+        turn.apply_to_vector(Vector::new(-1.0, 0.0, 0.0)),
+    )
+}
+
+/// The block's face whose normal is about `facing`, and the bar's pipe and
+/// cone, each where its placement put it.
+fn the_face_facing_the_pipe_and_the_cone(
+    model: &Model,
+    bar: SolidKey,
+    block: SolidKey,
+    facing: Vector,
+) -> [Surface; 3] {
+    let facing = facing.components();
+    let face = model
         .solid(block)
         .expect("this model made the key")
         .faces()
@@ -248,7 +482,7 @@ fn the_side_the_pipe_and_the_cone(
                 .sum::<f64>()
                 > 0.999
         })
-        .expect("the block has a side facing the bar");
+        .expect("the block has a face that way");
     let curved = |wanted: fn(&Surface) -> bool| {
         model
             .solid(bar)
@@ -260,7 +494,7 @@ fn the_side_the_pipe_and_the_cone(
     };
     let pipe = curved(|surface| matches!(surface, Surface::Cylinder(_)));
     let cone = curved(|surface| matches!(surface, Surface::Cone(_)));
-    [side, pipe, cone]
+    [face, pipe, cone]
 }
 
 /// The bar less the block, which is one solid: how many cones, pipes and
