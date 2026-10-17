@@ -1534,9 +1534,14 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 /// through both its poles, and one at `x = −15/17` of radius `60/17`. The walk
 /// starts the first at one of the poles, and each fuse was refused
 /// `AClosedEdgeOfTheAnswerWouldStartAtAPole` until Q2171 cut it at the point
-/// across as well, the ball's other pole. Each is refused in `fuse/select.rs`
-/// now: no point was found inside a piece of a face whose corners are the
-/// ball's two poles. The ball at `(−1, 0, 0)` is the same shape mirrored.
+/// across as well, the ball's other pole. Each was then refused for want of a
+/// point inside a piece whose corners were the ball's two poles, because the
+/// four walks of the two circles were left a piece each, on the ring's face and
+/// on the ball's, until Q2212 put the ring's two bands in order round the tube
+/// and read the ball's caps past the picker. Each is refused in
+/// `fuse/select.rs` now: no point was found inside a piece of a face with a
+/// corner on each circle, the ball's two poles and `(−15/17, 0, 60/17)`. The
+/// ball at `(−1, 0, 0)` is the same shape mirrored.
 ///
 /// **The answer exists.** The ring is `8π²` and the ball `256π/3`, and the part
 /// of the ring inside the ball at `(1, 0, 0)` is `π(2π + 4 atan(15/8) − 32/17)`.
@@ -1548,6 +1553,7 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_finds_no_point_inside_a_piece() {
     for x in [1.0, -1.0] {
         let poles = [-4.0, 4.0].map(|z| PredicatePoint::Exact([x, 0.0, z]));
+        let on_the_other_circle = [-15.0 / 17.0 * x, 0.0, 60.0 / 17.0];
         for (rule, ring_first) in every_rule_both_ways() {
             let mut model = a_model();
             let one = a_whole_ring_about_x(&mut model);
@@ -1571,9 +1577,21 @@ fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_finds_no_point_inside_a_
                 "{what}: no point was found at all, so nothing could be measured: {record:#?}"
             );
             let corners = record.inputs();
+            let (on_the_poles, elsewhere): (Vec<_>, Vec<_>) =
+                corners.iter().partition(|corner| poles.contains(corner));
+            assert_eq!(
+                on_the_poles.len(),
+                poles.len(),
+                "{what}: two of the piece's corners are the ball's two poles: {corners:?}"
+            );
+            let [PredicatePoint::Constructed(box_)] = elsewhere[..] else {
+                panic!("{what}: one corner is worked out on the other circle: {corners:?}");
+            };
             assert!(
-                corners.len() == poles.len() && poles.iter().all(|pole| corners.contains(pole)),
-                "{what}: the piece's corners are the ball's two poles: {corners:?}"
+                box_.iter()
+                    .zip(on_the_other_circle)
+                    .all(|(along, at)| along.lo() <= at && at <= along.hi()),
+                "{what}: the corner on the other circle holds {on_the_other_circle:?}: {corners:?}"
             );
         }
     }
