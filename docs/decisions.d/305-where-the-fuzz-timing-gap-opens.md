@@ -492,3 +492,74 @@ script exactly. The use-after-return runs are 305.8's script with one pass
 per pad and `ASAN_OPTIONS=detect_stack_use_after_return=0` after
 `Q236_PAD="$pad_str"`. Each run used the tree's own
 `fuzz/corpus/where_two_surfaces_cross`, copied into a fresh directory.
+
+### 305.10 The counter that parts is in the kernel, in `Exact::minus`
+
+*Queue row Q1525, read-only, 2026-10-17. Its lane rebuilt 305.2's
+compiled-out arm of `where_two_surfaces_cross` at `012d3163`, with 305.8's
+build script, in `clean-up-dead-sessions-worktrees/wf_34a911b1-00b-2`, whose
+path is 99 characters long (sha256 `324a95f6…`). This is written by its
+dispatcher from the lane's report and its logs, which were read again for
+every number here, and the address was mapped to its source line again on the
+lane's binary.*
+
+**The pads part again, the other way round.** 305.8's pads script as printed,
+at pads 0, 16, 32 and 48, two passes each:
+
+| Pads | `INITED` cov / ft / corp | `DONE` cov / ft / corp |
+|---|---|---|
+| 0 and 32 | 3271 / 9204 / 499 | 3273 / 9274 / 517 |
+| 16 and 48 | 3271 / 9203 / 498 | 3275 or 3276 / 9297 / 513 |
+
+These are 305.9's two outcomes with the pads swapped: there, 0 and 32 read
+9203. The source and the path length are the same and the tree is not, which
+is 305.8's finding again: the path moves which pads give which outcome. Every
+pair of passes printed the same `INITED` line. At `DONE`, pad 16's two passes
+read cov 3275 and 3276, the one pair that did not agree.
+
+**`__sancov_cntrs` cannot be diffed at `INITED`.** libFuzzer clears the
+counters before every unit (`TracePC::ResetMaps`), so at the end of the seed
+pass they hold the last unit's run and nothing else. What does add up over
+the seed pass is `InputCorpus::InputSizesPerFeature`: one 32-bit word per
+feature, 2^21 words, each the size of the smallest input that showed that
+feature, or 0 if none did. The lane stopped in gdb at `PrintStats` for
+`INITED`, at pad 0 and at pad 16, dumped that array at each, and diffed the
+two 8 MB dumps.
+
+**gdb moves the run too.** Under gdb both pads read `corp: 498` at `INITED`
+and the same `DONE` line, 3276 / 9298 / 513, which is neither group's. `ft`
+at `INITED` still parted: 9204 at pad 0, 9203 at pad 16. A run under gdb
+writes new units back into its corpus directory, so each one started from a
+fresh copy.
+
+**Two words differ.**
+
+- **Word 46992 is in the kernel.** It is feature 46992 = 5874 × 8, the first
+  hit-count bucket of counter 5874: a unit in which that line ran once. Pad 0
+  holds 56 there and pad 16 holds 0, so it is the one feature pad 16 lacks,
+  9204 against 9203. Counter 5874 is incremented by the `incb` at static
+  address `0x236348` (`__start___sancov_cntrs+0x16f2`, and 0x16f2 is 5874),
+  which `addr2line` places in `Exact::minus`, `crates/rcad-geom/src/exact.rs`
+  line 196: the `map(|entry| -entry).collect()` over `other`'s entries. That
+  line runs once per entry negated, so some seed unit at pad 0 negates one
+  entry in all, and no unit at pad 16 does.
+- **Word 180601 is libFuzzer's.** It is libFuzzer's one stack-depth feature.
+  Both pads have it; only the smallest input that showed it differs, 21 bytes
+  at pad 0 and 1 byte at pad 16. It does not move `ft`.
+
+**What it says.** On the same seed files, the kernel takes a different exact
+path depending on where the stack starts, under ASan's default options. 305.9
+found that with `detect_stack_use_after_return=0` all four pads agree, so
+ASan's fake stack is what lets it part. 305.7's first item asked whether the
+kernel's own *answer* can depend on this. This shows that its *path* can. It
+does not show the answer moving, and it does not name the seed unit.
+
+**What is left.** Find the seed unit that runs that line at one pad and not
+at the other, and say why the kernel's path moves on the same bytes: which
+call, given what values at each pad, and whether the fuzz target's answer
+moves with it. A path in code without `unsafe` moves only if what it reads
+moves. So either something reads an address, a clock or memory never written,
+in the kernel or under it; or state carried from one unit to the next moves;
+or ASan or libFuzzer changes what the target is given. None of these was
+looked at. Filed as Q2245. The lane's tree is removed (§420.4), with its
+logs; the lines that matter are above.
