@@ -3559,6 +3559,25 @@ impl<'f> Arrangement<'f> {
     /// `1e16` long, whose ends turn on a radius near `1e-15`, far under a box
     /// hundreds wide out there, and there the radius is not proved.
     ///
+    /// **Or where both boxes lie on one half of the loop**, either side of its
+    /// long axis. Going along a half moves steadily along that axis, so the
+    /// stretch between two points of one half reaches along the axis no
+    /// further than they do, and a node on the other half, or one whose box
+    /// reads clear of both along the axis, is not on it
+    /// ([`off_the_stretch_along_one_half`]). That needs no radius, and it is
+    /// what counts the leaning plane's loop from the node at its start. Two
+    /// bars of radius `1/4`, the second starting where their axes meet and
+    /// turned about `z` by 90° worked out in radians, have the second bar's near
+    /// cap leaning `2⁻⁵²` off parallel to the first bar's axis
+    /// (`a_bar_starting_where_it_crosses_another_turned_90_degrees_in_radians_answers_every_fuse`,
+    /// Q2015). It cuts the first bar's wall in an ellipse `2r / 2⁻⁵²`, about
+    /// `2.3e15`, long, whose ends turn on a radius of `r · 2⁻⁵²`, about
+    /// `5.6e-17`. The ellipse is walked from the seam's end `(13, −3.25, 0.25)`,
+    /// a rounding off it, and the node where the cap at `x = 13` crosses it is a
+    /// box a few roundings wide that holds that start. The other nodes lie 2 and
+    /// 4 along the same half, or on the half across, and every fuse was refused
+    /// on the order of that node against the one at `x = 9`.
+    ///
     /// It leans on what the other rules already do, and only turns their
     /// order round: the order they give every pair of other nodes is the order
     /// round the loop from the place the start stands for.
@@ -3638,14 +3657,20 @@ impl<'f> Arrangement<'f> {
             return None;
         }
         let near = the_box_round_both(place(held), node);
-        if !turns_on_four_times_the_diagonal_at_least(flat, pipe, near) {
-            return None;
-        }
-        let reach = grown_by_its_widest_side(near);
-        on_it
-            .iter()
-            .all(|&each| each == held || !boxes_overlap(place(each), reach))
-            .then_some(place(held))
+        let others = || {
+            on_it
+                .iter()
+                .filter(move |&&each| each != held)
+                .map(|&each| place(each))
+        };
+        let clear_of_the_grown_box = turns_on_four_times_the_diagonal_at_least(flat, pipe, near)
+            && {
+                let reach = grown_by_its_widest_side(near);
+                others().all(|other| !boxes_overlap(other, reach))
+            };
+        let clear_along_one_half =
+            || others().all(|other| off_the_stretch_along_one_half(flat, pipe, near, other));
+        (clear_of_the_grown_box || clear_along_one_half()).then_some(place(held))
     }
 
     /// The nodes on each crossing, each list in the order the nodes are
@@ -9870,6 +9895,68 @@ fn turns_on_four_times_the_diagonal_at_least(
             * dot_of(normal, normal)
             * dot_of(along, along);
     room.sign() == Decision::Pos
+}
+
+/// Whether `place` is proved off the stretch of the loop `flat` cuts `pipe`
+/// in between any two points of `near`, where `near` lies on one half of the
+/// loop.
+///
+/// **The loop is an ellipse whose long axis runs along the pipe's axis seen
+/// in the plane**, `w(n·n) − n(n·w)` for `n` the plane's normal and `w` the
+/// pipe's axis, and whose short axis runs along `n × w`, through the point the
+/// pipe's axis crosses the plane at. Its long axis cuts it into two halves,
+/// one each side, and going along either half from one end of the long axis
+/// to the other moves steadily along the long axis. So two points on one half
+/// are joined by a stretch of that half that reaches along the long axis from
+/// the one to the other and no further. A point is not on that stretch if it
+/// lies on the other half, or if the step to it from every point of `near`
+/// reads one sign along the long axis.
+///
+/// Which half a point lies on is the sign of the step to it from the axis's
+/// own origin, read along `n × w`: that axis crosses the plane at a point of
+/// the long axis, and the step between the two lies along `w`, which is square
+/// to `n × w`.
+///
+/// **This needs no bound on how sharply the loop turns**, where
+/// [`turns_on_four_times_the_diagonal_at_least`] does. A plane leaning `2⁻⁵²`
+/// off parallel to a pipe of radius `r` cuts an ellipse `2r` wide and about
+/// `2.3e15` long at `r = 1/4`, whose ends turn on a radius of `r · 2⁻⁵²`. Away
+/// from those ends it is two lines a rounding off two of the pipe's rulings,
+/// and the stretch between two places a hair apart on one of them is proved
+/// to miss every node on the other, and every node a whole unit along its own.
+///
+/// `false` where `near` is not proved on one half, which is where it reaches
+/// the long axis: round the loop's two ends, or on a loop that is a circle,
+/// where `n × w` is nought.
+fn off_the_stretch_along_one_half(
+    flat: &Plane,
+    pipe: &Cylinder,
+    near: PredicatePoint,
+    place: PredicatePoint,
+) -> bool {
+    let normal = flat.normal().components().map(Interval::exactly);
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let across = cross_of_intervals(normal, along);
+    let leans = dot_of(normal, along);
+    let squared = dot_of(normal, normal);
+    let lengthwise = [0, 1, 2].map(|axis| along[axis] * squared - normal[axis] * leans);
+    let half_of = |held: PredicatePoint| {
+        let step = [0, 1, 2].map(|axis| held.enclosure()[axis] - origin[axis]);
+        dot_of(step, across).sign()
+    };
+    let (mine, theirs) = (half_of(near), half_of(place));
+    let one_half = mine == Decision::Pos || mine == Decision::Neg;
+    if !one_half {
+        return false;
+    }
+    let on_the_other_half = matches!(
+        (mine, theirs),
+        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
+    );
+    let step = [0, 1, 2].map(|axis| place.enclosure()[axis] - near.enclosure()[axis]);
+    let past_the_stretch = dot_of(step, lengthwise).sign();
+    on_the_other_half || past_the_stretch == Decision::Pos || past_the_stretch == Decision::Neg
 }
 
 /// Whether every point of `place` lies square to the way the crossing of

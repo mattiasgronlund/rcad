@@ -8,8 +8,8 @@
 //! each bar first in turn. Every one answers: through either point at 50°,
 //! 60°, 70°, 100° and 120°, through `(11, −3.25, 0.5)` at each odd angle from
 //! 83° to 97° too and at an exact quarter turn, and through `(11, 0, 0)` at 80°
-//! and at the angles from 105° to 135° tested here. Through `(11, −3.25, 0.5)`
-//! at 90° worked out in radians, every one is still refused.
+//! and at the angles from 105° to 135° tested here, and through `(11, −3.25,
+//! 0.5)` at 90° worked out in radians as well.
 //!
 //! **What they should come to**, with `r = 1/4` and `a` the angle: the first
 //! bar is `A = π/4`. What two pipes of one width share where their axes cross at
@@ -245,6 +245,17 @@ fn a_bar_starting_where_it_crosses_another_a_quarter_turn_round_answers_every_fu
 /// and which comes first is now read off where the line the near cap cuts the
 /// cap's plane in crosses the line from the crossing's start through the
 /// seam's end (`as_a_flat_cut_through_the_loop_says` in `fuse/arrange.rs`).
+///
+/// **Past that, every fuse was refused the same way on the first bar's wall**,
+/// round the ellipse the near cap cuts it in. The cap leans `2⁻⁵²` off parallel
+/// to the first bar's axis, so that ellipse is about `2.3e15` long, and it is
+/// walked from the seam's end, a rounding off it. Where the cap at `x = 13`
+/// crosses it is a node whose box holds that start, and nothing put it in
+/// order against the node at `x = 9`. The node at `x = 13` and the start lie
+/// on one half of the ellipse, the near side of its long axis, and the other
+/// nodes are 2 and 4 along that half or on the half across, so none lies
+/// between the start and that node, and the loop is counted from it
+/// (`off_the_stretch_along_one_half` in `fuse/arrange.rs`).
 #[test]
 fn a_bar_starting_where_it_crosses_another_turned_90_degrees_in_radians_answers_every_fuse() {
     let wrong =
