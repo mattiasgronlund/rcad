@@ -1851,7 +1851,10 @@ impl<'f> Arrangement<'f> {
                         let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
                             .chain(corner.around.iter().copied())
                             .collect();
-                        Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
+                        Self::side_of_a_plane_parallel_to_one_it_is_on(&on, plane)
+                            .or_else(|| {
+                                Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
+                            })
                             .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
                             .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
                             .or_else(|| {
@@ -8578,6 +8581,51 @@ impl<'f> Arrangement<'f> {
         node.crossings
             .iter()
             .any(|&through| self.crossings[through].partner == *partner)
+    }
+
+    /// Which side of `partner` a point lies that is on a plane among the
+    /// surfaces it is `on` whose normal is `partner`'s, or `partner`'s turned
+    /// round, number for number: the side the two offsets say. `None` where no
+    /// plane among them is parallel to `partner` that exactly.
+    ///
+    /// A half bar cut flush along its flat face by a block, the two turned 0.4
+    /// about `x` and then shifted by `(7, −5, 2.5)`, has the block's face on
+    /// the flat face's normal turned round, number for number, and its offset
+    /// one ulp further out: the block's placement is composed with the block's
+    /// own shift, and rounds differently (§294.23). Every corner of the flat
+    /// face is a box `6e−15` wide that both planes run through, and every fuse
+    /// of the pair was refused for it (Q2043).
+    ///
+    /// **Every point of a plane is on one side of a plane parallel to it.** A
+    /// point `p` of the plane `n·p = d` gives `n·p − e = d − e` for `partner`'s
+    /// normal `n` and offset `e`, the same at every point, and `−d − e` for
+    /// the normal `−n`, which [`Plane::reversed`] writes as `n` with the offset
+    /// `−d`. So the side is which of two `f64`s is the larger, decided exactly
+    /// and never divided, and nought only where the two are one plane.
+    fn side_of_a_plane_parallel_to_one_it_is_on(
+        on: &[Surface],
+        partner: &Plane,
+    ) -> Option<Decision> {
+        let normal = partner.normal().components();
+        on.iter().find_map(|flat| {
+            let Surface::Plane(flat) = flat else {
+                return None;
+            };
+            let parallel = [*flat, flat.reversed()]
+                .into_iter()
+                .find(|one| one.normal().components() == normal)?;
+            if !normal.iter().all(|component| component.is_finite())
+                || !parallel.offset().is_finite()
+                || !partner.offset().is_finite()
+            {
+                return None;
+            }
+            Some(match parallel.offset().partial_cmp(&partner.offset())? {
+                Ordering::Greater => Decision::Pos,
+                Ordering::Less => Decision::Neg,
+                Ordering::Equal => Decision::Zero,
+            })
+        })
     }
 
     /// Which side of `partner` a point lies that is on a ring and on a plane

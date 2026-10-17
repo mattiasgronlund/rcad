@@ -1303,3 +1303,35 @@ fn what_a_solid_and_a_block_hold(
 fn overlap(one: [f64; 2], other: [f64; 2]) -> f64 {
     (one[1].min(other[1]) - one[0].max(other[0])).max(0.0)
 }
+
+#[test]
+fn q2043_probe() {
+    let [_, _, _, turn_then_shift] = every_placement();
+    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+        for rule in [Rule::Difference, Rule::Intersection] {
+            let (mut model, solid) =
+                the_half_bar_read_back(turn_then_shift, WHERE_THE_HALF_BAR_PUTS_IT);
+            let block = a_block(&mut model, THE_HALF_PAST_THE_SEAM, &turn_then_shift);
+            for key in [solid, block] {
+                for face in model.solid(key).unwrap().faces() {
+                    if let Surface::Plane(plane) = face.surface() {
+                        let n = plane.normal();
+                        eprintln!(
+                            "solid {key:?} face {:?} plane n={n:?} d={:?} bits {:#x} orient {:?}",
+                            face.key(),
+                            plane.offset(),
+                            plane.offset().to_bits(),
+                            face.orientation()
+                        );
+                    }
+                }
+            }
+            let mut log = ProvenanceLog::new();
+            let result = model.fuse(&[solid], &[block], rule, &policy, &mut log);
+            eprintln!("{policy:?} {rule:?}: {result:?}");
+            for record in log.records() {
+                eprintln!("  log {record:?}");
+            }
+        }
+    }
+}
