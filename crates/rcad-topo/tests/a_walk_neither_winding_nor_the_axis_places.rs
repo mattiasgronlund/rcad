@@ -59,7 +59,7 @@ use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
     Sphere, Surface, Torus, Vector,
 };
-use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
     DraftStep, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
 };
