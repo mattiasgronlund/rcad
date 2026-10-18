@@ -189,11 +189,12 @@ is found by the night's first pass over its corpus, and not by luck later.
   `check-fuzz-triage-selftest`, extended Q1728's prep fact, and showed 434.4's
   first case once. It measured the first fold on copies, not for real (434.7),
   and that measurement is what added 434.3's eighth rule.
-- **The first real fold** is the first morning triage that runs this recipe:
-  the morning after the first night that stands on a `main` holding it. What
-  it folds and how long it takes are read from `journalctl --user -u
-  rcad-fuzz-triage` (the `fold:` lines, the `removed:` line, the wall time
-  against `TimeoutStartSec=14400`) by a row filed for it.
+- **The first real fold** ran on 2026-10-13, the first morning whose
+  `journalctl --user -u rcad-fuzz-triage` holds any `fold:` line at all —
+  the mornings of 10-07 through 10-12 predate the fold code reaching the
+  night tree each of them replayed. 434.7 has what it folded and how long
+  it took, read the same way: the `fold:` lines, the `removed:` line, the
+  wall time against `TimeoutStartSec=14400`.
 - **13 092 timeout files and 6 718 slow-unit files** are carried the same way
   and never replayed (10-11's `artifacts/`). Not this section's: §436 keeps
   them.
@@ -254,3 +255,36 @@ morning triage that runs this recipe (434.6).
   corpus root, with the fold's scratch: the recipe's `EXIT` trap did not
   remove them. A bare `bash` with the same trap, sent the same signal, did run
   it, so what differs under `just` is not traced. A row is filed for it.
+
+**The first real fold, read from journalctl, ran on 2026-10-13.** `journalctl
+--user -u rcad-fuzz-triage` holds a morning for every day from 10-07 to
+today; the mornings of 10-07 through 10-12 end with no `fold:` or `removed:`
+line at all, because the fold code was not yet in the night tree each of
+them replayed, so none of them is a candidate. 10-13 is the first morning
+whose log has a `fold:` line, and so the first real fold. That night was
+`/home/mattias/rcad-fuzz-logs/2026-10-13`, commit `4da1c3ea`, replayed
+against `main` (`bda1bbb2`) — the service itself started at 08:30:34Z.
+
+- `no_model_makes_the_writer_panic`: 68 013 passed, 2000 folded (3 kept by
+  the merge), 66 013 left for the next morning, at 09:22:34Z. The passing
+  count is the same 68 013 Q1731's copy run got on 41d96a4e, but this
+  morning's cap let the merge run to completion and fold 2000 files, where
+  the copy run's uncapped merge was killed by `SIGTERM` with none folded.
+- `two_solids_fused_by_a_stranger`: 142 passed, 142 folded (2 kept by the
+  merge), 0 left, at 09:41:24Z. Close to but not the same as the copy run's
+  137 passed, 135 folded, 1 kept, 2 left on 41d96a4e — both runs replayed
+  against different hours of `main`, so a few files that failed for one
+  passed for the other.
+- `where_a_cone_or_a_torus_crosses`: 2 passed, 2 folded (0 kept), 0 left, at
+  10:08:41Z. The copy run had reached the same 2 passed when it was stopped,
+  but had not folded them yet.
+- `where_two_surfaces_cross`: 8 passed, 8 folded (1 kept), 0 left, at
+  10:28:31Z, the same second as `removed:
+  /home/mattias/rcad-fuzz-logs/removed-crash-files.tsv`. The copy run never
+  reached this target before it was stopped.
+- **The cap held the morning well inside its four hours.** `systemd` shows
+  the service starting at 08:30:34Z and finishing at 10:28:31Z: 1h 57m 57s
+  (7077 s) of wall clock against `TimeoutStartSec=14400` (4 h = 14400 s),
+  about 49% of the cap, with all four targets folded and no `SIGTERM`. The
+  service's own `Consumed 2h 1min 51.974s CPU time` is CPU time across the
+  run's parallel processes, not wall clock, and does not contradict it.
