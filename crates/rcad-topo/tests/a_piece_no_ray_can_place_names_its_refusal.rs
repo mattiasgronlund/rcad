@@ -1955,9 +1955,12 @@ fn each_within_its_error(mut measured: Vec<(f64, f64)>, expected: &[f64], what: 
 /// At step 173 the intersection both ways round answers the sliver, and the
 /// measure holds it against its wedge at every deflection from `0.32` to
 /// `1e-3`. At step 196 the fuse refuses it [`Invalid::VolumeIsNotPositive`]
-/// both ways round, on a sum below zero that a rung of the measure passed
-/// though the sliver's faces point out: a row from Q2265 of its own. Step 58
-/// is refused [`Error::CannotTellWhichWayASolidsFacesPoint`], in
+/// both ways round, on a sum of `−5.2e-16` that a rung passed as below zero,
+/// where the caps' normals read a wedge of `5.9e-19`. Either the rung charged
+/// the sum too little, since a sliver's volume is not below zero, or the caps
+/// truly lie apart and the fuse built a sliver that is not there; which of the
+/// two is a row from Q2265 of its own. Step 58 is refused
+/// [`Error::CannotTellWhichWayASolidsFacesPoint`], in
 /// `two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name`.
 #[test]
 fn two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring() {
