@@ -2937,7 +2937,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     every_side_of_the_skin_is_used_both_ways(&coarsest)?;
     let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&coarsest);
     let leaves_out = how_far_the_sum_can_be_off(view, &coarsest, rounding);
-    if the_sum_answers(&coarsest, enclosed, leaves_out) {
+    if the_sum_answers(enclosed, leaves_out) {
         return Ok(enclosed);
     }
     let mut closest = (enclosed, leaves_out);
@@ -2956,7 +2956,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
             Ok(finer) => {
                 let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(&finer);
                 let leaves_out = how_far_the_sum_can_be_off(view, &finer, rounding);
-                if the_sum_answers(&finer, finer_encloses, leaves_out) {
+                if the_sum_answers(finer_encloses, leaves_out) {
                     this_rung.drain_into(log);
                     return Ok(finer_encloses);
                 }
@@ -2993,7 +2993,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         }
         return Err(Error::CannotTellWhichWayASolidsFacesPoint {
             enclosed,
-            leaves_out,
+            leaves_out: Some(leaves_out),
         });
     }
     Ok(enclosed)
@@ -3129,38 +3129,32 @@ fn what_the_cone_over_this_face_adds(
 
 /// Whether what a mesh of this solid encloses says which way the solid's faces
 /// point: it is not zero, and it is further from zero than `leaves_out`, what
-/// [`how_far_the_sum_can_be_off`] says of it. A solid with a face that space
-/// cannot be charged for answers, as it did before that space was weighed,
-/// whenever the mesh does not lie flat.
-fn the_sum_answers(mesh: &Mesh, enclosed: f64, leaves_out: Option<f64>) -> bool {
-    if enclosed == 0.0 {
-        return false;
-    }
-    match leaves_out {
-        Some(leaves_out) => enclosed.abs() > leaves_out,
-        None => !it_lies_flat(mesh),
-    }
+/// [`how_far_the_sum_can_be_off`] says of it, whether or not the mesh lies
+/// flat.
+fn the_sum_answers(enclosed: f64, leaves_out: f64) -> bool {
+    enclosed != 0.0 && enclosed.abs() > leaves_out
 }
 
 /// How far a mesh's sum can be from the solid's volume: all the space the mesh
 /// can leave out, and `rounding`, how far the sum can be from what the mesh's
-/// triangles enclose exactly. `None` when the solid has a face that space
-/// cannot be charged for.
+/// triangles enclose exactly.
 ///
 /// **The rounding is charged because the size is read, not only the sign.**
 /// [`signed_volume_over_and_how_far_it_rounded`] keeps a rounded sum whenever
 /// it is further from zero than its own slack, so a sum just past that slack
 /// can be off by nearly all of itself, and a mesh whose exact volume is under
 /// the hidden space would then pass.
-fn how_far_the_sum_can_be_off(view: SolidView<'_>, mesh: &Mesh, rounding: f64) -> Option<f64> {
-    how_much_space_hides_under(view, mesh).map(|hidden| (hidden + rounding).next_up())
+fn how_far_the_sum_can_be_off(view: SolidView<'_>, mesh: &Mesh, rounding: f64) -> f64 {
+    (how_much_space_hides_under(view, mesh) + rounding).next_up()
 }
 
 /// What `mesh` encloses with each point that lies on one flat face's plane,
 /// and on no other plane, moved exactly onto that plane, and how far that can
 /// be from the solid's volume. `enclosed` and `rounding` are what
 /// [`signed_volume_over_and_how_far_it_rounded`] reads of the mesh as it is.
-/// `None` where [`how_much_space_hides_under`] is `None`.
+/// `None` for a solid with a face of a cone: what the moved mesh leaves out is
+/// charged here a triangle at a time off the smallest radius its face bends
+/// at, and a cone's runs down to nothing at its apex.
 ///
 /// **Why move the points.** A turned plane's points can rarely be written down
 /// on it, so a flat face's triangles lie a rounding or so off it, and
@@ -3185,11 +3179,12 @@ fn how_far_the_sum_can_be_off(view: SolidView<'_>, mesh: &Mesh, rounding: f64) -
 ///   it has terms, times `ε` times the sum of `|D|·|B|·|C|` over its terms;
 /// - the terms of second and third order the first-order sum leaves out, each
 ///   under the product of its three vectors' lengths;
-/// - what the moved mesh can leave out, charged as
-///   [`how_much_space_hides_under`] charges it, with the deviation grown by
-///   the longest move and each triangle's area by what its corners moved, and
-///   each flat triangle charged how far its moved corners stray off its plane,
-///   worked out exactly the way [`how_far_the_points_stray_off`] works it;
+/// - what the moved mesh can leave out: each curved triangle the shell
+///   [`how_much_space_hides_under`] charges a curved face, with the deviation
+///   grown by the longest move and each triangle's area by what its corners
+///   moved, and each flat triangle how far its moved corners stray off its
+///   plane, every corner of the face included, by
+///   [`how_far_a_moved_point_strays_off`];
 /// - the rounding of the sum itself.
 ///
 /// Lengths are taken as the sum of the sizes of their components, which is
@@ -3328,8 +3323,8 @@ enum PlanesAPointLiesOn {
 }
 
 /// How far `point` moved by `moved` lies off `plane`, rounded up, worked out
-/// exactly the way [`how_far_the_points_stray_off`] works it out for a point
-/// that is not moved.
+/// exactly the way `measure.rs`'s `how_far_the_points_stray_off` works it out
+/// for a point that is not moved.
 fn how_far_a_moved_point_strays_off(plane: &Plane, point: Point, moved: Vector) -> f64 {
     let size = the_sum_of_the_sizes(the_height_over(plane, point, Some(moved)));
     rounded_up(size * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF))
@@ -3342,23 +3337,32 @@ fn size_of(vector: Vector) -> f64 {
 }
 
 /// The most space there can be between a mesh of this solid and the solid,
-/// on either side.
+/// on either side: what [`SolidView::skin_of`] charges the mesh, the charge
+/// [`SolidView::measure`] publishes (row Q1883).
 ///
-/// **Row Q1883: this calls [`SolidView::skin_of`]'s own `volume_error`, not a
-/// second copy of its arithmetic.** The two copies used to agree on a curved
-/// face's shell and a flat face's slab, but not on which corners those slabs
-/// include: `skin_of` leaves out a corner where only straight sides of a face
-/// meet, since the solid really reaches there and the mesh holds it exactly,
-/// and charges one at the end of a curved side, like any other point the
-/// mesher placed along it (Q2316); this copy used to charge every corner
-/// (Q2272). Calling `skin_of` directly also reaches a cone's tip through its
-/// own `what_a_cone_tip_costs` machinery, which this copy's `radius == 0.0`
-/// test used to refuse outright.
+/// **One charge, not two.** This used to be a second copy of `skin_of`'s
+/// arithmetic, and the two drifted apart. The copy charged every corner of a
+/// flat face (Q2272), where `skin_of` leaves out a corner where only straight
+/// sides meet, since the solid really reaches there and the mesh holds it
+/// exactly, and charges one at the end of a curved side like any other point
+/// the mesher placed along it (Q2316).
 ///
-/// Always `Some`, now that `skin_of` charges every face it is given,
-/// including a cone's.
-fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
-    Some(view.skin_of(mesh).volume_error())
+/// **And the copy could not charge a cone**, whose radius runs down to nothing
+/// at its apex, so a solid with a face of a cone was charged nothing, and
+/// [`how_much_space_a_curved_solid_encloses`] took the sign of any mesh of it
+/// that did not lie flat. The ball of radius 3 four up less the frustum of
+/// slope 1 from `z = 1.5` to `z = 8` is a cup of `36π − S = 5.016`, and its
+/// coarsest mesh, nine points `1.91` off, encloses `−2.64`. The fuse's
+/// `nest_the_shells` took that sign, found a shell of negative volume no other
+/// shell holds, and refused the cup [`Invalid::VolumeIsNotPositive`] (row
+/// Q1481). `skin_of` charges a cone face off the smallest radius its mesh
+/// reaches, and a face that reaches near its apex by `what_a_cone_tip_costs`.
+/// It charges that mesh `309`, so the ladder asks again and answers at room
+/// `0.0846`, its mesh enclosing `4.76` against a charge of `4.60`
+/// (`a_frustum_from_below_the_plane_between_the_two_circles_answers_every_rule`
+/// in `a_cone_hollowed_along_its_axis.rs`).
+fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> f64 {
+    view.skin_of(mesh).volume_error()
 }
 
 /// `None` for a plane, which does not bend, and `Some(0.0)` for a surface
