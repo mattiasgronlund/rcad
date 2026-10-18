@@ -3240,10 +3240,10 @@ fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
             continue;
         }
         let Some(radius) = radius_of[&triangle.face()] else {
-            let (plane, held) = flat_faces
+            let (plane, _) = flat_faces
                 .get(&triangle.face())
                 .expect("a face that does not bend lies on a plane");
-            let off = how_far_the_points_stray_off(mesh, triangle.corners(), plane, held);
+            let off = how_far_the_points_stray_off(mesh, triangle.corners(), plane, &[]);
             hidden += off * area;
             furthest_off_a_plane = furthest_off_a_plane.max(off);
             continue;
