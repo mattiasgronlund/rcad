@@ -3628,10 +3628,8 @@ impl BuildingAMesh {
             let cut = match cut_one_piece(surface, &piece, how, deflection) {
                 Ok(cut) => cut,
                 Err(why) => {
-                    // A lobe is refused for what the whole loop it was cut from
-                    // is refused for, so a cut never turns one refusal into
-                    // another that names a corner of the lobe and not of the
-                    // loop: the cut is only for loops whose lobes all mesh.
+                    // A refused lobe is refused for what the whole loop it was
+                    // cut from is refused for (`what_the_triangulator_can_cut`).
                     let Some(whole) = cut_from else {
                         return Err(refusal_for(face, why, &corner_is, &self.points, log));
                     };
@@ -4140,6 +4138,15 @@ struct ThePatchAsCut {
 /// once each way, `FacesDoNotAgreeWhichWayTheyFace`, where the mesh refused
 /// them before
 /// (`a_ball_smaller_than_the_room_on_a_cube_corner_is_placed_and_its_answer_cannot_be_meshed`).
+///
+/// **A lobe the triangulator refuses gives the refusal of the whole loop it
+/// was cut from** ([`ThePatchAsCut::cut_from`]), so a cut never turns one
+/// refusal into another that names a corner of a lobe: the cut is only for a
+/// loop whose lobes all mesh. Without that, the unions of a round bar of
+/// radius 12.8 and a block cornered on its wall were refused
+/// `ASideCutsOffOneCornerOfACurvedPatch` at a lobe's corner, where the whole
+/// cap is refused `CornersCoincide` for the two of its corners stored at one
+/// point (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`).
 fn what_the_triangulator_can_cut(surface: &Surface, patch: Vec<ALoopToCut>) -> ThePatchAsCut {
     let mut drawn_here = Vec::new();
     let mut loops = patch.into_iter();
