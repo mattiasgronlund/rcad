@@ -221,7 +221,7 @@ Counts are runs, each counted once, certified then tolerant. Lines are at
 | `check_under_policy`, `rcad-geom/src/scale.rs:291`, from `check_dynamic_range` | `DynamicRangeTooWide` | Q1867 9, Q1839 5 | 14 | 0 |
 | `where_one_plane_and_two_curved_surfaces_meet`, `three_surfaces.rs:1696` | `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` | Q1909 14 | 14 | 14 |
 | `cut_off_what_goes_too_far_round` from `cut_up`, `mesh.rs:1404` | `ACurvedFaceGoesRightRoundWithNoSeam` | Q1896 9, Q1897 4 | 13 | 13 |
-| not pinned: no breakpoint on its lines was hit | `ACurvedFaceGoesRightRoundWithNoSeam` | Q1929 2, Q1793 1 | 3 | 3 |
+| not pinned at `704063f0`, and not re-pinnable now (below) | `ACurvedFaceGoesRightRoundWithNoSeam` | Q1929 2, Q1793 1 | 3 | 3 |
 | `order_along` (`must_decide`), `fuse/arrange.rs:3606` | `Undecidable`, "order along a crossing" | Q1737 6 | 6 | 0 |
 | `turns_anticlockwise` (`must_decide`), `fuse/arrange.rs:5087` | `Undecidable`, "orient3d" | Q1854 6 | 6 | 0 |
 | `four_half_ellipses_where_two_pipes_of_one_width_meet`, `intersect.rs:1856` | `CannotNameWhichPieceOfACrossingThisIs` | Q1897 6 | 6 | 6 |
@@ -233,9 +233,9 @@ Counts are runs, each counted once, certified then tolerant. Lines are at
 | `what_a_ring_face_between_two_planes_holds`, `holds.rs:1060` | `AFaceMissesPartOfWhereItsSurfacesCross` | Q104 2 | 2 | 2 |
 | `every_side_of_the_skin_is_used_both_ways`, `validate.rs:3080` | `Invalid(FacesDoNotAgreeWhichWayTheyFace)` | Q1896 1 | 1 | 1 |
 | `spread_the_winding` from `count_the_windings`, `fuse/arrange.rs:7612` | `CannotTellTheCellsOfAFaceApart` | Q1765 pi/6 8, Q1737 6 | 0 | 14 |
-| `how_it_runs`, `fuse/assemble.rs:4640` | `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` | Q1867 7 | 0 | 7 |
+| `how_it_runs`, `fuse/assemble.rs:4640`, credited at `704063f0`; not re-checkable now (below) | `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` | Q1867 7 | 0 | 7 |
 | `sorted_anticlockwise`, `fuse/arrange.rs:4921` | `TwoCurvesTouchWithoutCrossing` | Q1842 turned then shifted 2 | 0 | 2 |
-| not pinned: no breakpoint on its lines was hit | `CannotNameWhichPieceOfACrossingThisIs` | Q1867 2 | 0 | 2 |
+| not pinned at `704063f0`, and not re-pinnable now (below) | `CannotNameWhichPieceOfACrossingThisIs` | Q1867 2 | 0 | 2 |
 | answered | | | 63 | 114 |
 | **all runs** | | | **282** | **282** |
 
@@ -245,6 +245,43 @@ not hit. The 3 unpinned seam runs ran in a binary whose breakpoint for
 `mesh.rs:1404` landed on line 1436, and one for `1289` on 1291; both lines are
 in `cut_off_what_goes_too_far_round`, and `1514` (`cut_a_band_right_round_the_ring`)
 landed on 1517. So those runs are in one of those two functions.
+
+**Q1944 tried to pin those three groups, at `d2d5527a` (2026-10-18), newer
+than `704063f0`, and found none of them still raises the refusal this table
+counts.** A refusal that is gone cannot be pinned to a function by rerunning
+it, so each is left as it was traced at `704063f0`, with the fix that removed
+it named here instead.
+
+- **The 3 seam runs** are `two_equal_bars_leaning_at_each_other.rs`'s shapes at
+  120°: Q1929's bar starting where the axes meet, and Q1793's long bar through
+  the other. Both rows were closed by Q1965 (`31ee4dcf`, merged `b982307a`).
+  At `d2d5527a`, `mise exec -- just t
+  a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse` and
+  `mise exec -- just t a_long_bar_through_another_at_a_slant_answers_every_fuse`
+  each pass, and each asserts all six fuses answer at 120° along with the
+  other angles it runs. So neither `cut_off_what_goes_too_far_round` nor
+  `cut_a_band_right_round_the_ring` has anything left to raise on these runs.
+- **Q1867's 9 tolerant runs** (the 7 here and the 2 below) are the nine
+  two-knife wedges `a_narrow_lune_from_a_pole_corner.rs` builds. Q1867's own
+  fix, naming the pole arc by its own chord (`45c2d867`, merged `596a4936`),
+  changed what the tolerant policy refuses them by. At `d2d5527a`, `mise exec
+  -- just t two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`
+  passes, and the nine now refuse `CornersCoincide` (the four 90° cases and
+  45°/1000, 5 runs), `Invalid(FacesDoNotAgreeWhichWayTheyFace)` (45°/0.001,
+  10°/0.001 and 10°/1000, 3 runs) and a loops-touch refusal (10°/1,
+  intersection, 1 run) — neither `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`
+  nor `CannotNameWhichPieceOfACrossingThisIs` any more. So the credit to
+  `how_it_runs`, and the caveat above that its `.ok_or` line cannot tell its
+  two sites apart, is moot here: there is no run of either name left on these
+  nine to re-trace. The certified refusal these nine meet is unchanged
+  (`Invalid(DynamicRangeTooWide)`; `mise exec -- just t
+  two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range`
+  still passes, with the same ratios 446.4 has).
+
+446.4's rows for Q1793, Q1929 and Q1867, and this table, stay a snapshot of
+`704063f0`: they are not corrected to the current code, since a snapshot does
+not become wrong by the code moving past it. 446.8 already carries Q1793's,
+Q1929's and most of Q1896's fix forward; Q1867's own row carries its own.
 
 What this says to question 2: the certified refusals come from a few places.
 Four functions raise 120 of 219. Of the 143 that tolerance leaves as they
