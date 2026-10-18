@@ -44,7 +44,7 @@ use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Measurement, Model, Rule};
+use rcad_topo::{Measurement, Model, Rule};
 
 const BAR_RADIUS: f64 = 5.0;
 
@@ -83,10 +83,41 @@ const SHAPES: [Shape; 4] = [
 #[test]
 fn a_bar_and_a_ball_on_its_axis_unturned_measure_what_every_rule_should() {
     for shape in SHAPES {
-        for (rule, solids, closed_form) in shape.what_each_rule_leaves() {
-            let what = format!("the {rule:?} of {shape:?}, unturned");
-            let measured = shape
-                .fused(&[], &[], rule)
+        shape.measures_what_every_rule_should(&[], &[], "unturned");
+    }
+}
+
+#[test]
+fn a_bar_and_a_ball_on_its_axis_turned_measure_what_every_rule_should() {
+    let axis =
+        Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+    let turn = Isometry::rotation(&axis, 1.1).expect("a finite angle");
+    let half = Isometry::rotation(&axis, 0.55).expect("a finite angle");
+    for shape in SHAPES {
+        for ball_turns in [vec![turn], vec![half, half]] {
+            shape.measures_what_every_rule_should(
+                &[turn],
+                &ball_turns,
+                &format!("the ball turned in {} steps", ball_turns.len()),
+            );
+        }
+    }
+}
+
+impl Shape {
+    /// Every rule fuses the bar placed by `bar_turns` and the ball by
+    /// `ball_turns` into as many solids as it should, of the volume worked out
+    /// by hand within the error the measure declares.
+    fn measures_what_every_rule_should(
+        self,
+        bar_turns: &[Isometry],
+        ball_turns: &[Isometry],
+        placed: &str,
+    ) {
+        for (rule, solids, closed_form) in self.what_each_rule_leaves() {
+            let what = format!("the {rule:?} of {self:?}, {placed}");
+            let measured = self
+                .fused(bar_turns, ball_turns, rule)
                 .unwrap_or_else(|why| panic!("{what} was refused: {why:?}"));
             assert_eq!(measured.len(), solids, "{what}: how many solids");
             let volume: f64 = measured.iter().map(|each| each.volume()).sum();
@@ -97,35 +128,7 @@ fn a_bar_and_a_ball_on_its_axis_unturned_measure_what_every_rule_should() {
             );
         }
     }
-}
 
-#[test]
-fn a_bar_and_a_ball_on_its_axis_turned_are_refused_while_the_seeds_point_along_the_bar() {
-    let axis =
-        Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
-    let turn = Isometry::rotation(&axis, 1.1).expect("a finite angle");
-    let half = Isometry::rotation(&axis, 0.55).expect("a finite angle");
-    for shape in SHAPES {
-        for ball_turns in [vec![turn], vec![half, half]] {
-            for (rule, _, _) in shape.what_each_rule_leaves() {
-                let what = format!(
-                    "the {rule:?} of {shape:?}, the ball turned in {} steps",
-                    ball_turns.len()
-                );
-                let refused = shape
-                    .fused(&[turn], &ball_turns, rule)
-                    .map(|measured| measured.len())
-                    .expect_err(&what);
-                assert!(
-                    matches!(refused, Error::ResultIsNotManifold { count: 1 }),
-                    "{what}: {refused:?}"
-                );
-            }
-        }
-    }
-}
-
-impl Shape {
     /// What each solid of the bar and the ball fused under `rule` measures,
     /// under `Policy::certified()`, once the answer validates.
     fn fused(
