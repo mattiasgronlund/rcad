@@ -541,7 +541,8 @@ pub enum Error {
         enclosed_where_placed: f64,
     },
 
-    /// No mesh of this curved solid says which way its faces point.
+    /// No mesh of this curved solid, and none of its corners, says which way
+    /// its faces point.
     ///
     /// [`Model::validate`](crate::Model::validate) and the fuse read a curved
     /// solid's sign off what a mesh of it encloses, and a sum says it only once
@@ -550,16 +551,28 @@ pub enum Error {
     /// asked of it, and at the finest of them with its flat faces' points moved
     /// onto their planes, has no mesh that answers, and the sum the closest of
     /// them left was zero or below. A solid turned inside out leaves such a
-    /// sum, and so can a sound one. A fin `2⁻⁵¹` thick, whose every mesh point
-    /// rounds onto one plane so that every mesh of it encloses exactly `0`, is
-    /// refused this way (`an_ellipse_start_between_two_places.rs`, Q1938). So
-    /// is a half ball of 5 less a bowl four roundings smaller, which holds
-    /// about `54`, and whose closest mesh encloses `−38.7` and can be off by
-    /// `2384` (`a_piece_grazed_by_a_trimming_nothing_follows.rs`). So is a lens
+    /// sum, and so can a sound one. Such a solid is then asked which way its
+    /// faces point from each of its corners, by the sign of the cone from the
+    /// corner over each face, and is refused this way only when no corner
+    /// tells: every corner is outside one of its pipes or balls, sits where the
+    /// cones disagree, or the solid has a face on a cone or a ring.
+    ///
+    /// A fin `2⁻⁵¹` thick, whose every mesh point rounds onto one plane so that
+    /// every mesh of it encloses exactly `0`, was refused this way from Q1938
+    /// (`an_ellipse_start_between_two_places.rs`), and so was the sliver a bar
+    /// of radius one leaves dipping `2⁻¹⁰⁵` through a block's top
+    /// (`a_bar_lying_along_a_plane_or_a_bar.rs`). Both are told from a corner
+    /// now (Q2291).
+    ///
+    /// A half ball of 5 less a bowl four roundings smaller, which holds about
+    /// `54`, and whose closest mesh encloses `−38.7` and can be off by `2384`,
+    /// is still refused this way
+    /// (`a_piece_grazed_by_a_trimming_nothing_follows.rs`). So is a lens
     /// `9.9e-9` thick where a ball pokes into a pipe, turned `6/40` about `x`,
-    /// which has no flat face to move a point onto (Q2084). Until Q2089 these
-    /// were [`Invalid::VolumeIsNotPositive`], "its faces do not point
-    /// outwards", which nothing had shown.
+    /// which has no flat face to move a point onto, and whose every corner
+    /// rounds outside the ball or the pipe (Q2084). Until Q2089 these were
+    /// [`Invalid::VolumeIsNotPositive`], "its faces do not point outwards",
+    /// which nothing had shown.
     ///
     /// Two quarter bends of ring 4 and tube 1 placed round by `−1.984` and a
     /// quarter turn back overlap in a wedge `4π` times the angle between their

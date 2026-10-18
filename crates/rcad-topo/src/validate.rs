@@ -2623,8 +2623,11 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 ///
 /// A polyhedron's own fan *is* its volume; a curved solid has no such fan — a
 /// round bar's caps fan into no triangles at all and its wall into two with no
-/// area (§35.4) — so it is summed over a mesh instead. The caller reads only
-/// the **sign** of what comes back; the size of a mesh's sum is weighed here,
+/// area (§35.4) — so it is summed over a mesh instead. `Model::validate` reads
+/// only the **sign** of what comes back. `nest_the_shells` in `fuse/assemble.rs`
+/// also compares sizes, to put a hollow in the smallest lump that holds it, and
+/// a sign told from a corner comes back with no size at all (see *A closest
+/// sum of zero or below* below). The size of a mesh's sum is weighed here,
 /// below, and nowhere else.
 ///
 /// # A coarse mesh that lies flat has not answered
@@ -2766,12 +2769,25 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// lie flat is the closest** to the solid's volume this saw, and the coarse
 /// sum, the zero or the rounding it was, when every mesh lay flat (row Q1891).
 ///
-/// **A closest sum of zero or below is refused
+/// **A closest sum of zero or below is asked of a corner before it is
+/// refused** (row Q2291). [`which_way_its_faces_point_told_from_a_corner`]
+/// tells the sign from the cones from one corner over the solid's faces, with
+/// no mesh at all, and a told sign comes back as `f64::MIN_POSITIVE` with that
+/// sign: it carries the sign and nothing of the size. A bar of radius one
+/// dipping `2⁻¹⁰⁵` through the top of a block leaves a sliver that holds no
+/// double in `x`, so every mesh of it lies on one line and encloses exactly
+/// nothing. From its corner `(3, 2, 4)` its faces are told to point out, and
+/// the same sliver used inside out is told they point in
+/// (`a_sliver_whose_every_mesh_encloses_nothing_is_told_which_way_its_faces_point`).
+///
+/// **When no corner tells it either, the solid is refused
 /// [`Error::CannotTellWhichWayASolidsFacesPoint`]**, and not handed on to be
 /// refused [`Invalid::VolumeIsNotPositive`], "its faces do not point
 /// outwards": a sound sliver leaves such a sum as readily as a solid turned
 /// inside out (row Q2089). Before Q2266 the sliver at `−1.984` was refused
-/// that way, its closest sum `−2.6e-16`; the sound lens below still is.
+/// that way, its closest sum `−2.6e-16`. The sound lens below still is: each
+/// of its four corners rounds to a point outside the ball or outside the pipe,
+/// so no corner tells.
 ///
 /// **A closest sum above zero still comes back, and nothing says it has the
 /// solid's sign** (rows Q2047, Q2084). A ball poking `2^-28` into a pipe of
@@ -2874,8 +2890,9 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// side do not, [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] when a
 /// finer mesh is refused that way, and
 /// [`Error::CannotTellWhichWayASolidsFacesPoint`] when no rung answers, the
-/// finest mesh moved onto its planes does not answer either, and the closest
-/// sum is zero or below.
+/// finest mesh moved onto its planes does not answer either, the closest sum
+/// is zero or below, and no corner of the solid tells which way its faces
+/// point.
 pub(crate) fn how_much_space_a_curved_solid_encloses(
     view: SolidView<'_>,
     policy: &Policy,
@@ -2988,10 +3005,16 @@ static RUNGS_THE_SECOND_LADDER_HAS_ASKED: std::sync::atomic::AtomicUsize =
 /// the bar's cap, the two flat cones are nothing, and the corner is inside the
 /// pipe by `2⁻¹⁰⁴` of `|(h − o) × d|² − r²|d|²`, so the pipe's cone counts
 /// the way it points (`a_bar_dipping_through_a_blocks_top_leaves_an_edge_too_short_for_its_coordinates`
-/// in `a_bar_lying_along_a_plane_or_a_bar.rs`).
+/// in `a_bar_lying_along_a_plane_or_a_bar.rs`, and
+/// `a_sliver_whose_every_mesh_encloses_nothing_is_told_which_way_its_faces_point`).
+/// Its other corner, `(3, 2 − 2⁻⁵¹, 4)`, is outside the pipe and tells
+/// nothing.
 ///
 /// A solid whose every corner is outside one of its pipes or balls is not
-/// told, and neither is one with a face on a cone or a ring.
+/// told, and neither is one with a face on a cone or a ring. The lens a ball
+/// makes poking `2⁻²⁸` into a pipe, turned `6/40` or `8/40` about `x`, is not:
+/// each of its corners rounds to a point outside the ball or the pipe
+/// (`a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out`).
 fn which_way_its_faces_point_told_from_a_corner(view: SolidView<'_>) -> Option<Orientation> {
     let faces: Vec<FaceView<'_>> = view.faces().collect();
     faces
@@ -8745,7 +8768,9 @@ mod tests {
     /// `2.76e-16` inside out and `−2.76e-16` sound, where the space it can
     /// leave out is `7.8e-15`. No rung answers and the finer ones fold. The
     /// walk hands back the sum above zero, unchecked, and refuses the one
-    /// below by the name that says no mesh tells. Until Q2089 that was
+    /// below by the name that says no mesh tells, since no corner of the lens
+    /// tells either: each rounds outside the ball or the pipe (Q2291). Until
+    /// Q2089 that was
     /// [`Invalid::VolumeIsNotPositive`], which says the sound lens's faces
     /// point inwards.
     #[test]

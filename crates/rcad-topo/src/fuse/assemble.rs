@@ -4588,7 +4588,8 @@ impl Assembly {
     /// [`Error::Invalid`] when a shell encloses nothing at all, or when a void
     /// has no shell around it. [`Error::CannotTellWhichWayASolidsFacesPoint`],
     /// through [`how_much_space_it_encloses`]'s `?`, when a curved shell no
-    /// mesh signs whose closest sum is not above zero.
+    /// mesh signs whose closest sum is not above zero, and none of whose
+    /// corners tells which way its faces point.
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`]
     /// naming the input face, when no point on a shell could be placed and one
     /// met a face of another shell that nobody can follow.
@@ -6324,8 +6325,11 @@ fn one_unbroken_stretch_of_one_ring(rings: &[Vec<Dart>], darts: &[Dart]) -> Opti
 /// shell has no such fan — a bar's wall fans into two triangles on its seam and
 /// a round cap into none at all (§35.4) — so it goes to
 /// [`how_much_space_a_curved_solid_encloses`], which is the same question
-/// `Model::validate` asks one layer up and now the same code as well. Only the
-/// sign is read here.
+/// `Model::validate` asks one layer up and now the same code as well. The sign
+/// says whether a shell is a lump or a hollow. [`Assembly::nest_the_shells`]
+/// also compares sizes, to put a hollow in the smallest lump that holds it,
+/// and a curved shell whose sign was told from a corner comes back as
+/// `±f64::MIN_POSITIVE`, which says nothing of its size.
 ///
 /// **Both halves of that are asked here rather than left to the sweep, and that
 /// is the difference between a refusal and a corrupt solid.**
