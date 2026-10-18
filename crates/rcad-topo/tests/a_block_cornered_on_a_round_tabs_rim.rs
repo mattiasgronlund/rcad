@@ -29,9 +29,9 @@
 //!   its answer is the plate itself, which has no such face.
 //! - **Each fuse of the block `x 7.6 to 12.4` by `y 8.2 to 11.8`, a gap.** Its
 //!   other corner `(7.6, 11.8)` is on the rim too, and the ray from there meets
-//!   the tab's wall, which `holds.rs` cannot follow (Q2231). Under the plate's
-//!   floor a certified fuse is refused first at a piece of the block's floor a
-//!   unit below the plate, whose corner `(7.6, 8.2)` is on the rim as well.
+//!   the tab's wall, which `holds.rs` cannot follow (Q2231). That is where
+//!   every fuse of it stops, on the plate's top or under its floor, under
+//!   either policy.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
@@ -141,21 +141,23 @@ fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_when_the_corner_
 }
 
 /// The block's other corner `(7.6, 11.8)` is on the rim too, and every fuse of
-/// the block on the plate's top is refused at the sliver of the block's face
-/// there, under either policy. The ray from that corner meets the tab's wall,
-/// a round face whose top and bottom are each three arcs of where the square
-/// and the bar crossed, and `holds.rs` cannot follow it (Q2231).
+/// the block, on the plate's top or under its floor, is refused at the sliver
+/// of the block's face there, under either policy. The ray from that corner
+/// meets the tab's wall, a round face whose top and bottom are each three arcs
+/// of where the square and the bar crossed, and `holds.rs` cannot follow it
+/// (Q2231).
 ///
-/// Under the plate's floor, the certified fuses are refused first at the piece
+/// Under the plate's floor the certified fuses were refused first at the piece
 /// of the block's floor under the square's corner `(10, 10)`, a whole unit
-/// below the plate. Its corner `(7.6, 8.2)` is a third on the rim, so on the
-/// tab's wall's surface, and `by_a_corner` passes a corner on a curved surface
-/// over; its other corners are on the planes of the square's sides.
+/// below the plate. Its corner `(7.6, 8.2)` is cut off by an arc a rounding
+/// long, the turn about that arc's chord cannot be settled, and asked it the
+/// piece held no point. Such a turn now counts nothing, and the piece holds
+/// its own points (Q2297).
 #[test]
 fn a_block_cornered_twice_on_a_round_tabs_rim_is_refused_at_its_second_corner_under_either_policy()
 {
     for (policy, under) in [
-        (Policy::certified(), [10.0, 10.0, -1.0]),
+        (Policy::certified(), [7.6, 11.8, 0.0]),
         (Policy::tolerant(100.0), [7.6, 11.8, 0.0]),
     ] {
         let wrong = what_the_fuses_get_wrong(
