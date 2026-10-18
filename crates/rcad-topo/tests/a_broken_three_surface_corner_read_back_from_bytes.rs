@@ -653,6 +653,54 @@ fn a_sound_pyramid_cut_by_a_wedge_with_a_tilted_side_back_to_its_edge_answers_wh
     }
 }
 
+/// **A tilted wall that a prism and the hole it fills both stand on is one
+/// plane, turned round, from either side.** The prism runs its outline
+/// anticlockwise and the block its hole clockwise, so the two list the wall
+/// from opposite ends. Its two corners, `(11, 7)` and `(1, 13)`, are as far as
+/// each other from the origin, so it is the rule for two corners as near that
+/// picks the one both planes go through, whichever is listed first. Through
+/// `(11, 7)` the offset is `11.6619037896906` and through `(1, 13)` it is
+/// `11.661903789690601`, an ulp apart, which is what each side's own first
+/// corner gave it.
+#[test]
+fn a_tilted_wall_is_one_plane_whether_a_prism_or_the_hole_it_fills_stands_on_it() {
+    let triangle = vec![[11.0, 7.0], [1.0, 13.0], [2.0, 2.0]];
+    let square = vec![[-20.0, -20.0], [20.0, -20.0], [20.0, 20.0], [-20.0, 20.0]];
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let prism = ProfileBuilder::new(triangle.clone())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a triangle");
+    let prism = model
+        .add_extrusion(&prism, HEIGHT, &Isometry::identity())
+        .expect("a prism");
+    let block = ProfileBuilder::new(square)
+        .with_hole(triangle)
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square with a triangle out of it");
+    let block = model
+        .add_extrusion(&block, HEIGHT, &Isometry::identity())
+        .expect("a block with a hole");
+    let the_wall_facing = |solid: SolidKey, sign: f64| {
+        let walls: Vec<[f64; 4]> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter_map(|face| face.surface().as_plane().map(Plane::coefficients))
+            .filter(|&[x, y, _, _]| sign * x > 0.0 && sign * y > 0.0)
+            .collect();
+        let &[wall] = walls.as_slice() else {
+            panic!("one wall faces {sign} in x and y, got {walls:?}");
+        };
+        wall
+    };
+    let from_the_prism = the_wall_facing(prism, 1.0);
+    let from_the_hole = the_wall_facing(block, -1.0);
+    assert_eq!(
+        from_the_hole,
+        from_the_prism.map(|coefficient| -coefficient)
+    );
+}
+
 /// **Placed, the sound pyramid cut by a wedge whose edge runs up through its
 /// apex cannot tell the cells of a face apart**, by every rule and under both
 /// policies, and each refusal leaves the model as it was. Q1937 asked whether
