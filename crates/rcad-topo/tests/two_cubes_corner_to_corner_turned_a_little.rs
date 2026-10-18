@@ -28,33 +28,50 @@
 //! edge, cuts the line, and which side of that face the block's corner lies
 //! on, which exact arithmetic says. The turned `y` face runs `7e−18` past
 //! `(0, 0, 10)`, so the two are two points, and the refusal was a gap.
+//!
+//! **Beyond `t = 0.01`, `p = 0.05` (Q2306).** The same fix answers every fuse,
+//! both orders, closer to the corner still, down to `(t, p) = (0.003,
+//! 7.512112e-5)`, and under `Policy::tolerant(100.0)` as far out as `(0.05,
+//! 0.05)`, which refused `CannotTellTheCellsOfAFaceApart` at `65d5ef12`
+//! (Q2303). At `(0.05, 0.05)` and `(0.02, 0.001)` certified still refuses the
+//! union and the turned-first difference `DynamicRangeTooWide`; only the
+//! intersection, both orders, and the block-first difference answer there,
+//! and Q2305 is for the rest.
 
 use rcad_geom::{Deflection, Isometry, Scale};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, Rule, SolidKey};
 
-/// `p = 0.05` and `t = 0.01`, as `f64::sin` and `f64::cos` give them.
-const A_TWENTIETH_SHORT_LEANING_A_HUNDREDTH: [f64; 4] = [
-    0.024_997_395_914_712_332,
-    0.0,
-    0.009_996_708_549_004_05,
-    0.999_637_532_316_423_9,
-];
+/// `t = 0.01`, `p = 0.05`.
+const LEANING_A_HUNDREDTH_A_TWENTIETH_SHORT: (f64, f64) = (0.01, 0.05);
 
 #[test]
 fn the_union_of_two_cubes_turned_a_little_corner_to_corner_is_both_cubes() {
+    let (t, p) = LEANING_A_HUNDREDTH_A_TWENTIETH_SHORT;
     for order in [Order::BlockFirst, Order::TurnedFirst] {
         let asked = format!("union, {order:?}");
-        assert_about(volume_of_a_fuse(Rule::Union, order, &asked), 2000.0, &asked);
+        assert_about(
+            volume_of_a_fuse(&Policy::certified(), t, p, Rule::Union, order, &asked),
+            2000.0,
+            &asked,
+        );
     }
 }
 
 #[test]
 fn two_cubes_turned_a_little_corner_to_corner_share_no_volume() {
+    let (t, p) = LEANING_A_HUNDREDTH_A_TWENTIETH_SHORT;
     for order in [Order::BlockFirst, Order::TurnedFirst] {
         let asked = format!("intersection, {order:?}");
         assert_about(
-            volume_of_a_fuse(Rule::Intersection, order, &asked),
+            volume_of_a_fuse(
+                &Policy::certified(),
+                t,
+                p,
+                Rule::Intersection,
+                order,
+                &asked,
+            ),
             0.0,
             &asked,
         );
@@ -63,13 +80,105 @@ fn two_cubes_turned_a_little_corner_to_corner_share_no_volume() {
 
 #[test]
 fn either_cube_less_the_other_turned_a_little_corner_to_corner_is_the_whole_cube() {
+    let (t, p) = LEANING_A_HUNDREDTH_A_TWENTIETH_SHORT;
     for order in [Order::BlockFirst, Order::TurnedFirst] {
         let asked = format!("difference, {order:?}");
         assert_about(
-            volume_of_a_fuse(Rule::Difference, order, &asked),
+            volume_of_a_fuse(&Policy::certified(), t, p, Rule::Difference, order, &asked),
             1000.0,
             &asked,
         );
+    }
+}
+
+/// Beyond `t = 0.01`, `p = 0.05`, every fuse of the two cubes, both orders,
+/// still answers under `Policy::certified()` and measures the same two
+/// volumes worked by hand (Q2302's fix reaches these too, not only the one
+/// pair pinned above).
+#[test]
+fn certified_every_fuse_of_two_cubes_turned_a_little_corner_to_corner_answers_at_three_more_turns()
+{
+    for (t, p) in [(0.002, 7.512_112e-5), (0.003, 1e-4), (0.003, 7.512_112e-5)] {
+        for (rule, worked) in [
+            (Rule::Union, 2000.0),
+            (Rule::Intersection, 0.0),
+            (Rule::Difference, 1000.0),
+        ] {
+            for order in [Order::BlockFirst, Order::TurnedFirst] {
+                let asked = format!("certified, t = {t}, p = {p}, {rule:?}, {order:?}");
+                assert_about(
+                    volume_of_a_fuse(&Policy::certified(), t, p, rule, order, &asked),
+                    worked,
+                    &asked,
+                );
+            }
+        }
+    }
+}
+
+/// At `(t, p) = (0.05, 0.05)` and `(0.02, 0.001)`, under `Policy::certified()`,
+/// only the intersection, both orders, and the block-first difference answer;
+/// Q2305 is for the union and the turned-first difference, which still refuse
+/// `DynamicRangeTooWide` there.
+#[test]
+fn certified_the_intersection_and_the_block_first_difference_answer_at_two_more_turns() {
+    for (t, p) in [(0.05, 0.05), (0.02, 0.001)] {
+        for order in [Order::BlockFirst, Order::TurnedFirst] {
+            let asked = format!("certified, t = {t}, p = {p}, intersection, {order:?}");
+            assert_about(
+                volume_of_a_fuse(
+                    &Policy::certified(),
+                    t,
+                    p,
+                    Rule::Intersection,
+                    order,
+                    &asked,
+                ),
+                0.0,
+                &asked,
+            );
+        }
+        let asked = format!("certified, t = {t}, p = {p}, difference, BlockFirst");
+        assert_about(
+            volume_of_a_fuse(
+                &Policy::certified(),
+                t,
+                p,
+                Rule::Difference,
+                Order::BlockFirst,
+                &asked,
+            ),
+            1000.0,
+            &asked,
+        );
+    }
+}
+
+/// Under `Policy::tolerant(100.0)`, every fuse of the two cubes, both orders,
+/// answers at four turns that refused `CannotTellTheCellsOfAFaceApart` on
+/// `65d5ef12` (Q2303).
+#[test]
+fn tolerant_every_fuse_of_two_cubes_turned_a_little_corner_to_corner_answers_at_four_turns() {
+    for (t, p) in [
+        (0.002, 7.512_112e-5),
+        (0.003, 1e-4),
+        (0.01, 0.05),
+        (0.05, 0.05),
+    ] {
+        for (rule, worked) in [
+            (Rule::Union, 2000.0),
+            (Rule::Intersection, 0.0),
+            (Rule::Difference, 1000.0),
+        ] {
+            for order in [Order::BlockFirst, Order::TurnedFirst] {
+                let asked = format!("tolerant, t = {t}, p = {p}, {rule:?}, {order:?}");
+                assert_about(
+                    volume_of_a_fuse(&Policy::tolerant(100.0), t, p, rule, order, &asked),
+                    worked,
+                    &asked,
+                );
+            }
+        }
     }
 }
 
@@ -86,25 +195,36 @@ enum Order {
     TurnedFirst,
 }
 
-/// The volume of the answer under `Policy::certified()`, once the model it is
-/// written into validates.
-fn volume_of_a_fuse(rule: Rule, order: Order, asked: &str) -> f64 {
-    let policy = Policy::certified();
+/// `t` and `p` as a quaternion `[sin(p/2), 0, cos(p/2)·sin(t), cos(p/2)·cos(t)]`:
+/// a turn `p` short of a half turn about the axis `(0, sin t, cos t)`.
+fn leaning_and_turned(t: f64, p: f64) -> [f64; 4] {
+    [
+        (p / 2.0).sin(),
+        0.0,
+        (p / 2.0).cos() * t.sin(),
+        (p / 2.0).cos() * t.cos(),
+    ]
+}
+
+/// The volume of the answer under `policy`, once the model it is written into
+/// validates, for the turned cube leaning `t` off `z` and turned `p` short of
+/// a half turn.
+fn volume_of_a_fuse(policy: &Policy, t: f64, p: f64, rule: Rule, order: Order, asked: &str) -> f64 {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a scale"));
     let block = a_cube(&mut model);
     let turned = a_cube(&mut model);
-    let placement = Isometry::try_from(([0.0, 0.0, 10.0], A_TWENTIETH_SHORT_LEANING_A_HUNDREDTH))
-        .expect("a placement");
+    let placement =
+        Isometry::try_from(([0.0, 0.0, 10.0], leaning_and_turned(t, p))).expect("a placement");
     model.place_solid(turned, &placement).expect("a placement");
     let (arguments, tools): (&[SolidKey], &[SolidKey]) = match order {
         Order::BlockFirst => (&[block], &[turned]),
         Order::TurnedFirst => (&[turned], &[block]),
     };
     let answer = model
-        .fuse(arguments, tools, rule, &policy, &mut ProvenanceLog::new())
+        .fuse(arguments, tools, rule, policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{asked}: {why}"));
     model
-        .validate(&policy, &mut ProvenanceLog::new())
+        .validate(policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{asked}: {why}"));
     answer
         .solids()
