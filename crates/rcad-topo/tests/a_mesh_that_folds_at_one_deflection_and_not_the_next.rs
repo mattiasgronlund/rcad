@@ -214,13 +214,38 @@ fn no_sliver_cut_through_a_balls_pole_folds_at_any_deflection() {
     assert_eq!(
         tally,
         BTreeMap::from([
-            ("meshed", RUNGS * LEANS.len() * TURNS * 2 - 2),
-            ("folded", 2),
-            ("folds a later rung cured", 2),
+            ("meshed", RUNGS * LEANS.len() * TURNS * 2),
+            ("folds a later rung cured", 0),
             ("folds no later rung cured", 0),
         ]),
         "every rung of every sliver's ladder"
     );
+}
+
+/// The two slivers the sweep above last saw fold, at lean `0.2` turned a
+/// quarter and three quarters round by `Difference`, measure at a deflection
+/// of an eighth, the rung where they folded.
+///
+/// Each half of the sliver's curved face runs down its rim to the south pole
+/// `S`, and the flat face across, cut by Delaunay, joins `S` to the third rim
+/// point on. Until Q2178 the curved half joined the same two points from the
+/// far end of its pole side, and measuring was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`.
+#[test]
+fn the_slivers_that_folded_at_an_eighth_measure_there() {
+    let lean = 0.2;
+    for turn in [PI / 2.0, 3.0 * PI / 2.0] {
+        let what = format!("the sliver at lean {lean}, turn {turn}, by Difference");
+        let (model, answer) = sliver(1.0, lean, turn, Rule::Difference);
+        let answer = answer.unwrap_or_else(|why| panic!("{what}: refused {why}"));
+        measures_within_what_it_declares(
+            &model,
+            &answer,
+            0.125,
+            a_caps_volume(1.0, 1.0 - lean.cos()),
+            &what,
+        );
+    }
 }
 
 /// The sliver chopped again by two more planes, which is the family `cut_in_two`
