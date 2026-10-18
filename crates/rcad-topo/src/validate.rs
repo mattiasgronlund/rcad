@@ -1894,6 +1894,15 @@ pub(crate) fn the_narrowest_a_face_is(surface: &Surface, loops: &[Vec<SideOfAFac
 /// meets the top after no length at all, and the true gap is the `5e−16` the
 /// stored corner rounded away. [`DynamicRange::measure`] takes no feature of
 /// zero, and a rounding is the least the gap can be read as.
+///
+/// **A corner on the middle of another loop's side is a touch, and is read
+/// here as a neck.** No fuse writes one: a bar standing on a block's top flush
+/// with its edge gets a top of one loop, cut at the touch and through it
+/// twice. A face written by hand with [`SolidBuilder`](crate::SolidBuilder) as
+/// an outline and a hole whose corner is on the outline's side reads 0 here,
+/// floored at one rounding, and is refused `DynamicRangeTooWide`, where the
+/// same solid written as one loop builds (queue row Q2257,
+/// `a_top_whose_hole_touches_its_outline_at_a_point_is_refused_as_too_thin`).
 fn how_close_a_corner_comes_to_a_side_of_another_loop(
     surface: &Surface,
     loops: &[Vec<SideOfAFace<'_>>],
