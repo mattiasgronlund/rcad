@@ -1722,7 +1722,8 @@ impl Assembly {
     /// [`Error::ResultIsNotManifold`] when an edge is claimed by other than two
     /// faces, [`Error::Undecidable`] when two planes cannot be told apart at
     /// all, [`Error::TheFuseWroteABrokenAnswer`] when two rings of a joined
-    /// flat face both wind as its outline,
+    /// flat face both wind as its outline, or [`Invalid::DynamicRangeTooWide`]
+    /// in its place for a face joined across two parallel planes apart,
     /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] when nothing could say
     /// which of two or more rings whose corners cannot place them is its outline (both
     /// [`Assembly::rings_round`]), and whatever
