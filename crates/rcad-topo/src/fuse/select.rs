@@ -1571,11 +1571,11 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
     Some([*first.as_plane()?, *second.as_plane()?, *third.as_plane()?])
 }
 
-/// The rule before the last: a flat piece that lies on the plane of a flat
-/// face `G` of a solid, with a straight side along an edge `e` of `G`, placed
-/// against that solid by which side of the plane across `e` its material is on
-/// (`docs/decisions.md` §365.8, Q1606). Where it places nothing,
-/// [`by_a_side_from_an_edge_it_starts_on`] is tried.
+/// Comes before [`by_a_side_from_an_edge_it_starts_on`]: a flat piece that
+/// lies on the plane of a flat face `G` of a solid, with a straight side along
+/// an edge `e` of `G`, placed against that solid by which side of the plane
+/// across `e` its material is on (`docs/decisions.md` §365.8, Q1606). Where it
+/// places nothing, [`by_a_side_from_an_edge_it_starts_on`] is tried.
 ///
 /// **Why an edge can place a piece.** `P` is the piece, on `G`'s plane, `S` the
 /// solid, and `H` the flat face across `e`. `s` is a side of `P` carried by
@@ -1950,11 +1950,11 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
     one == other || one == other.reversed()
 }
 
-/// The last rule: a piece, flat or curved, that nothing before placed takes
-/// the placement of the piece of its own face across one of its sides, where
-/// the start of that side is clear of every face of every solid it is placed
-/// against, when the point search places that piece inside or outside
-/// (`docs/decisions.md` §35.6, Q1537).
+/// Comes before [`by_a_meridian_disk_beside_it`]: a piece, flat or curved,
+/// that nothing before placed takes the placement of the piece of its own
+/// face across one of its sides, where the start of that side is clear of
+/// every face of every solid it is placed against, when the point search
+/// places that piece inside or outside (`docs/decisions.md` §35.6, Q1537).
 ///
 /// **Why a neighbour can place a piece here.** `P` and `P′` are pieces of one
 /// face that share a side `s`, and `m` is where `s` starts. Each was cut by

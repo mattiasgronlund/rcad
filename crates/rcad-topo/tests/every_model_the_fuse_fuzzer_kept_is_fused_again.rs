@@ -106,6 +106,14 @@
 //! the_same_both_ways_round: 40`, so the floor is three quarters of 262, and
 //! every other floor is still at most three quarters of its own count.
 //!
+//! **The refusal floor was set again on 2026-10-18**, when
+//! `by_a_step_towards_a_corner_of_the_box_round_it` gave the point search one
+//! more way to place a curved piece (`docs/decisions.md` §35.6, Q2116). That
+//! tree read `ok: 504, refused: 187, solids_made: 521,
+//! ok_that_wrote_something: 484, asked_both_ways_round: 109,
+//! the_same_both_ways_round: 63`, so the floor is three quarters of 187, and
+//! every other floor is still at most three quarters of its own count.
+//!
 //! # The last two counters are the ones that keep the checks honest
 //!
 //! §95.6 added three correctness checks to the harness — a refusal leaves the
@@ -227,10 +235,11 @@ fn every_seed_in_the_checked_in_corpus_is_fused_without_panicking() {
          like it is",
         reached.ok
     );
-    // Three quarters of the 262 refusals left once `bake.rs` grew a face's
-    // box by what writing a corner down costs (`docs/decisions.md` §340.10).
+    // Three quarters of the 187 refusals left once
+    // `by_a_step_towards_a_corner_of_the_box_round_it` gave the point search
+    // one more way to place a curved piece (`docs/decisions.md` §35.6, Q2116).
     assert!(
-        reached.refused >= 195,
+        reached.refused >= 140,
         "only {} fuses refused, so the refusal paths are no longer reached",
         reached.refused
     );
