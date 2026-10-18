@@ -28,7 +28,11 @@
 //! either side of `z = 0`, and it holds `8π²`. Against a bar it touches
 //! nowhere, nothing cuts it, and a fuse has to hand it back whole (row Q1588).
 //! Turned about six axes a fortieth of a turn at a time, it is handed back at
-//! every one of the 234 turns (row Q1632).
+//! every one of the 234 turns (row Q1632). Moved far enough out along a
+//! direction its own axis does not run on, the plane through its middle
+//! overflows writing down its distance from the origin, and every fuse
+//! against the bar is refused `ACurvedFaceGoesRightRoundWithNoSeam` instead
+//! (row Q1636).
 
 use core::f64::consts::{PI, TAU};
 
@@ -36,7 +40,7 @@ use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Model, Rule, SolidBuilder, SolidKey};
 
 mod rings;
 
@@ -331,6 +335,69 @@ fn a_whole_ring_turned_any_way_and_a_bar_far_from_it_fuse_to_the_two_apart() {
         }
     }
     assert!(refused.is_empty(), "{refused:#?}");
+}
+
+/// The whole ring turned off any coordinate axis and moved out along that new
+/// axis until the plane through its middle overflows writing down its
+/// distance from the origin — the gap `split_a_face`'s doc names: a ring is
+/// cut along its equators before reaching `the_whole_surface`, and reaches it
+/// only where that plane cannot be written down. The bar sits twenty out,
+/// clear of the ring, so nothing else cuts it either. Every fuse of the two,
+/// either way round, is refused `ACurvedFaceGoesRightRoundWithNoSeam` (row
+/// Q1636).
+#[test]
+fn a_whole_ring_moved_so_far_the_plane_through_its_middle_overflows_refuses_with_no_seam() {
+    // Sends the ring's own axis, read off as `z`, onto the `(1, 1, 1)`
+    // diagonal exactly: `acos(1/√3)` about an axis square to both `z` and the
+    // diagonal. A centre moved out along a coordinate axis would not overflow
+    // — the offset is one finite coordinate, not a sum of three — so the
+    // ring's axis has to point away from every coordinate axis first.
+    let square_to_z_and_the_diagonal =
+        Axis::new(Point::origin(), Vector::new(-1.0, 1.0, 0.0)).expect("a direction");
+    let onto_the_diagonal =
+        Isometry::rotation(&square_to_z_and_the_diagonal, (1.0 / 3.0_f64.sqrt()).acos())
+            .expect("a finite turn");
+    let out_past_where_the_offset_can_be_written =
+        Isometry::translation(Vector::new(1.5e308, 1.5e308, 1.5e308)).expect("a finite shift");
+    let movement = out_past_where_the_offset_can_be_written.compose(&onto_the_diagonal);
+    every_fuse_of_the_far_ring_and_the_bar_refuses(&movement);
+}
+
+/// Every rule, both ways round, between the whole ring placed at `movement`
+/// and a bar twenty out, clear of it. Each must refuse with
+/// `Error::ACurvedFaceGoesRightRoundWithNoSeam`.
+fn every_fuse_of_the_far_ring_and_the_bar_refuses(movement: &Isometry) {
+    for (rule, ring_first) in [
+        (Rule::Union, true),
+        (Rule::Union, false),
+        (Rule::Intersection, true),
+        (Rule::Intersection, false),
+        (Rule::Difference, true),
+        (Rule::Difference, false),
+    ] {
+        let what = format!("{rule:?}, ring first {ring_first}");
+        let mut model = Model::new(Scale::millimetres(50.0).expect("a positive size"));
+        let ring = a_whole_ring(&mut model);
+        model
+            .place_solid(ring, movement)
+            .expect("this model made the key");
+        let bar = a_bar_standing(&mut model, 20.0, 1.0);
+        let (arguments, tools) = if ring_first {
+            ([ring], [bar])
+        } else {
+            ([bar], [ring])
+        };
+        match model.fuse(
+            &arguments,
+            &tools,
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. }) => {}
+            other => panic!("{what}: expected ACurvedFaceGoesRightRoundWithNoSeam, got {other:?}"),
+        }
+    }
 }
 
 fn a_whole_ring_and_a_bar_clear_of_it_fuse_to_the_two_apart(shape: &str, out: f64) {
