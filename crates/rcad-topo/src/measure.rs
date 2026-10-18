@@ -418,13 +418,11 @@ impl SolidView<'_> {
     /// below zero too, and `validate` is what refuses the inside-out one
     /// (`an_inside_out_solid_meshed_coarse_answers_negative.rs`).
     /// `validate` charges a curved solid's flat faces for how far their points
-    /// stray off their planes, as [`SolidView::skin_of`] does (Q2089), but it
-    /// charges every corner (Q2272), where `skin_of` leaves out a corner where
-    /// only straight sides meet and charges one at the end of a curved side
-    /// (Q2316). So the two agree on the sliver at step 196 of
-    /// `two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring`,
-    /// whose copy's corner lies `6.4e-16` off its cap's plane at the end of
-    /// the cap's circle, and on a turned block `validate` charges more.
+    /// stray off their planes by calling [`SolidView::skin_of`] directly
+    /// (Q1883), so the two agree on every corner: left out where only straight
+    /// sides meet, charged at the end of a curved side (Q2316), and on a
+    /// cone's tip, which `skin_of`'s own [`what_a_cone_tip_costs`] reaches and
+    /// `validate`'s older copy could not (Q1883).
     ///
     /// **This used to be an assert, and §20.1 settled it that way.** The
     /// argument then was that the only route to an inside-out solid was a bug
@@ -639,7 +637,7 @@ impl SolidView<'_> {
     /// `area_error_ignores_a_tilted_triangles_extra_area.rs` leans up to points
     /// `0.3` off its plane and came out `0.138` over, against a rim charge of
     /// `0.012`.
-    fn skin_of(self, mesh: &Mesh) -> Skin {
+    pub(crate) fn skin_of(self, mesh: &Mesh) -> Skin {
         let bends = bend_of_each_face(self, mesh);
         let flat_faces: HashMap<FaceKey, (Plane, Vec<u32>)> = self
             .faces()
@@ -1610,10 +1608,20 @@ fn which_way_its_own_fan_faces(face: FaceView<'_>, across: i32) -> Vector {
 }
 
 /// How much skin a mesh has, and how much of its solid's own it leaves out.
-struct Skin {
+pub(crate) struct Skin {
     area: f64,
     area_error: f64,
     volume_error: f64,
+}
+
+impl Skin {
+    /// How much of the solid's volume the mesh can leave out, for
+    /// `validate::how_much_space_hides_under` to charge the same way
+    /// [`SolidView::measure`] does, cone tip included, rather than a looser
+    /// copy of its own (row Q1883).
+    pub(crate) fn volume_error(&self) -> f64 {
+        self.volume_error
+    }
 }
 
 /// The corner the sums over a mesh hang from, picked exactly as

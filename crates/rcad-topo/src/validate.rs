@@ -2780,11 +2780,11 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// `3e-28` at most, and charging that changed no answer; it is charged because
 /// nothing else bounds a sum kept rounded.
 ///
-/// **A face of a cone cannot be charged yet** (see
-/// [`how_much_space_hides_under`]), so a solid with one keeps the old rule: a
-/// mesh that does not lie flat answers on its sign, and a flat one is asked
-/// again, so a cone sliver walks to the floor as it did before. Row Q1883 gives
-/// cones measure.rs's charge.
+/// **A face of a cone is charged all the way to its tip**, since row Q1883
+/// made [`how_much_space_hides_under`] call `SolidView::skin_of` rather than
+/// keep a second copy that stopped at `radius == 0.0`. A cone sliver now
+/// answers as soon as a rung's charge is under what its mesh encloses, the
+/// same as any other curved face, rather than always walking to the floor.
 ///
 /// **When no rung answers, the finest mesh is read once more with its flat
 /// faces' points moved onto their planes**, by
@@ -3344,89 +3344,26 @@ fn size_of(vector: Vector) -> f64 {
 /// The most space there can be between a mesh of this solid and the solid,
 /// on either side.
 ///
-/// Each curved face is charged `area · (r³ − (r − d)³) / (3(r − d)²)`, with
-/// `area` its triangles' area, `d` the mesh's [`Mesh::deviation`] and `r` the
-/// smallest radius the face bends at. That is the shell
-/// `measure::how_much_space_hides_under_a_flat_stand_in` charges, so
-/// `Measurement::volume_error`'s own argument and not a looser one. The looser
-/// `area · d · (r / (r − d))²` that `Mesh::deviation`'s doc publishes charged a
-/// ball meshed a quarter of its radius out a third more, and every sum that
-/// lands between the two asks for a finer mesh it does not need
-/// (`the_space_a_mesh_can_leave_out_is_no_more_than_measure_charges`).
+/// **Row Q1883: this calls [`SolidView::skin_of`]'s own `volume_error`, not a
+/// second copy of its arithmetic.** The two copies used to agree on a curved
+/// face's shell and a flat face's slab, but not on which corners those slabs
+/// include: `skin_of` leaves out a corner where only straight sides of a face
+/// meet, since the solid really reaches there and the mesh holds it exactly,
+/// and charges one at the end of a curved side, like any other point the
+/// mesher placed along it (Q2316); this copy used to charge every corner
+/// (Q2272). Calling `skin_of` directly also reaches a cone's tip through its
+/// own `what_a_cone_tip_costs` machinery, which this copy's `radius == 0.0`
+/// test used to refuse outright.
 ///
-/// **A flat face is charged too, for how far its points stray off its plane**,
-/// as `SolidView::skin_of` charges it but for the face's own corners, which
-/// are charged here and not there (row Q2272): each triangle its area times
-/// [`how_far_the_points_stray_off`] the plane, and the furthest any strays
-/// times `d` times [`rim_of_the_flat_faces`], for the inscribed outline that
-/// falls short of a curved rim. A turned plane's points can rarely be written
-/// down on it, and the caps of the sliver two quarter bends placed round by
-/// `−2` overlap in are meshed up to `4.3e-16` off their planes, against a
-/// wedge of `5.4e-17`. Charged nothing, that sliver's sum answered on
-/// `3.04e-16` against `2.94e-16` at room `0.25`, right by luck, and the fuse
-/// refused the sliver of the same two bends placed round by `−1.984`
-/// [`Invalid::VolumeIsNotPositive`] on `−5.1e-17` (row Q2089). Charged, no
-/// rung of [`how_much_space_a_curved_solid_encloses`] answers that sliver,
-/// and the finest mesh read by [`what_it_encloses_moved_onto_its_planes`],
-/// its caps' points moved onto their planes, does (row Q2266).
-///
-/// `None` when a triangle with area stands in for a face this cannot charge,
-/// wherever in the mesh it comes, and otherwise `f64::INFINITY` when the mesh
-/// strays a whole radius of a curved face or more, which a finer mesh can
-/// still bring under it
-/// (`a_solid_with_a_cone_face_is_not_charged_even_where_its_bar_strays_a_whole_radius`).
-///
-/// **A cone cannot be charged.** Its radius runs down to nothing at the
-/// apex, and how near a face comes to it takes a walk over the mesh that
-/// `measure::bend_of_each_face` already makes; a second copy of that walk is
-/// not worth what it buys here. So a solid with a cone face is answered by a
-/// mesh that does not lie flat, as before. Row Q1883 puts measure.rs's own
-/// charge here in place of this copy, and that one reaches the tip.
+/// Always `Some`, now that `skin_of` charges every face it is given,
+/// including a cone's.
 fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
-    let deviation = mesh.deviation().magnitude();
-    let radius_of: HashMap<FaceKey, Option<f64>> = view
-        .faces()
-        .map(|face| (face.key(), the_smallest_radius_it_bends_at(&face.surface())))
-        .collect();
-    let flat_faces = the_planes_of_the_flat_faces(view);
-    let mut hidden = 0.0;
-    let mut furthest_off_a_plane = 0.0f64;
-    for triangle in mesh.triangles() {
-        let [a, b, c] = triangle
-            .corners()
-            .map(|corner| mesh.points()[corner as usize]);
-        let area = (b - a).cross(c - a).length() / 2.0;
-        if area == 0.0 {
-            continue;
-        }
-        let Some(radius) = radius_of[&triangle.face()] else {
-            let plane = flat_faces
-                .get(&triangle.face())
-                .expect("a face that does not bend lies on a plane");
-            let off = how_far_the_points_stray_off(mesh, triangle.corners(), plane);
-            hidden += off * area;
-            furthest_off_a_plane = furthest_off_a_plane.max(off);
-            continue;
-        };
-        if radius == 0.0 {
-            return None;
-        }
-        let inner = radius - deviation;
-        hidden += if inner > 0.0 {
-            area * (radius * radius * radius - inner * inner * inner) / (3.0 * inner * inner)
-        } else {
-            f64::INFINITY
-        };
-    }
-    if furthest_off_a_plane > 0.0 {
-        hidden += furthest_off_a_plane * deviation * rim_of_the_flat_faces(mesh, &flat_faces, 0.0);
-    }
-    Some(hidden)
+    Some(view.skin_of(mesh).volume_error())
 }
 
 /// `None` for a plane, which does not bend, and `Some(0.0)` for a surface
 /// whose bend this has not been taught, which
-/// [`how_much_space_hides_under`] cannot charge at all.
+/// [`what_it_encloses_moved_onto_its_planes`] cannot charge at all.
 fn the_smallest_radius_it_bends_at(surface: &Surface) -> Option<f64> {
     match surface {
         Surface::Plane(_) => None,
@@ -3443,35 +3380,6 @@ fn the_planes_of_the_flat_faces(view: SolidView<'_>) -> HashMap<FaceKey, Plane> 
     view.faces()
         .filter_map(|face| Some((face.key(), *face.surface().as_plane()?)))
         .collect()
-}
-
-/// How far the furthest of `corners` lies off `plane`, rounded up.
-///
-/// **A face's own corners are charged too**, where `measure.rs` leaves them
-/// out as where the solid really reaches. What is weighed here is the sign of
-/// the sum, and a corner a rounding off its own plane moves the sum as much as
-/// any other point there. At step 196 of the two quarter bends of
-/// `two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring`,
-/// the copy's corner lies `6.4e-16` off its own cap's plane, in triangles of
-/// area `2.4`, and the mesh at room `0.5` summed `−5.15e-16` against a charge
-/// of `4.89e-16` that left it out: a rung passed a sum below zero for a sliver
-/// of `5.9e-19`, and the fuse refused it [`Invalid::VolumeIsNotPositive`]
-/// (row Q2272).
-///
-/// Worked out exactly, as `measure.rs` works it out and for its reason:
-/// [`Plane::signed_distance_to`]'s own rounding at coordinates of `4` is eight
-/// times the `4.3e-16` the caps of a sliver of ring stray. Each product of the
-/// normal and a coordinate is kept with what rounding it lost, so the sum less
-/// the offset is `n · p − o` exactly, and adding up the sizes of its entries,
-/// rounding up, bounds it. A turned normal is a unit to within
-/// [`Plane::NORMAL_LENGTH_ROUNDOFF`], which the last factor covers.
-fn how_far_the_points_stray_off(mesh: &Mesh, corners: [u32; 3], plane: &Plane) -> f64 {
-    let mut furthest = 0.0f64;
-    for corner in corners {
-        let point = mesh.points()[corner as usize];
-        furthest = furthest.max(the_sum_of_the_sizes(the_height_over(plane, point, None)));
-    }
-    rounded_up(furthest * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF))
 }
 
 /// `n · (point + moved) − o` for `plane`'s normal `n` and offset `o`, exactly,
@@ -9244,18 +9152,19 @@ mod tests {
         }
     }
 
-    /// Row Q1890. A solid with a face of a cone is not charged at all, by any
-    /// mesh, so it answers by a mesh that does not lie flat, as it did before
-    /// its sum was weighed. That holds even where another of its faces is
-    /// meshed a whole radius out: the coarsest mesh of a bar of radius one
-    /// under a cone flaring out to nine strays `8.05`.
-    ///
-    /// Charged a triangle at a time, the bar's wall came first and was charged
-    /// without end before any triangle of the cone was met, so this solid asked
-    /// for a finer mesh where the same solid with its faces in the other order
-    /// answered.
+    /// Row Q1890 made a solid with a face of a cone answer by its mesh's sign
+    /// alone, never charged, because the old copy here met a cone's triangle
+    /// and returned `None` outright — even after it had already charged the
+    /// bar's own wall `f64::INFINITY` for straying a whole radius out, which
+    /// row Q1883's fix no longer discards. The coarsest mesh of a bar of
+    /// radius one under a cone flaring out to nine strays `8.05`, more than
+    /// the bar's radius, so [`how_much_space_hides_under`] now answers
+    /// `Some(f64::INFINITY)` on this solid exactly as
+    /// [`SolidView::skin_of`](crate::measure::SolidView::skin_of) does,
+    /// whichever face order the mesh walks — where the old copy's `None`
+    /// used to send it to the same rule a mesh that does not lie flat gets.
     #[test]
-    fn a_solid_with_a_cone_face_is_not_charged_even_where_its_bar_strays_a_whole_radius() {
+    fn a_cone_tip_no_longer_discards_the_bars_own_infinite_charge() {
         let mut model = an_empty_model();
         let flared = a_bar_under_a_flared_cone(&mut model).expect("a sound solid");
         let mesh = its_coarsest_mesh(&model, flared, "a bar under a flared cone");
@@ -9267,7 +9176,7 @@ mod tests {
         let view = model.solid(flared).expect("this model made the key");
         assert_eq!(
             how_much_space_hides_under(view, &mesh),
-            None,
+            Some(f64::INFINITY),
             "strays {deviation}"
         );
     }
