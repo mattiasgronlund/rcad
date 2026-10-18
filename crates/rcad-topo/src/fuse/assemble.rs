@@ -3956,8 +3956,13 @@ impl Assembly {
             .iter()
             .copied()
             .filter(|&(lump, corner)| {
+                let pieces: Vec<&[EdgeKey]> = leaving[&(lump, corner)]
+                    .iter()
+                    .map(|&edge| self.edges[edge].from.as_slice())
+                    .collect();
                 where_curved_pieces_met[corner]
                     && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
+                    && !is_one_input_edge(&pieces)
             })
             .collect()
     }
