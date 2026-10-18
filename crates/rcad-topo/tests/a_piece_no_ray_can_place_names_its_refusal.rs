@@ -537,9 +537,11 @@ fn every_side_of_a_bend_placed_round_from_another_is_used_once_each_way() {
 /// anywhere from `−4.9e-16` to `3.2e-16` over deflections from `0.01` to
 /// `5e-5` (Q2087). `Model::validate` charged a flat face nothing for that
 /// space, and passed the sliver on a sum that answered by luck. Charged, no
-/// mesh says which way its faces point, and the fuse refuses it
-/// [`Error::CannotTellWhichWayASolidsFacesPoint`]
-/// (`two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name`).
+/// mesh says which way its faces point, and from Q2089 until Q2266 the fuse
+/// refused it [`Error::CannotTellWhichWayASolidsFacesPoint`]. Read again with
+/// its caps' points moved onto their planes, the finest mesh says it, and the
+/// fuse answers the sliver
+/// (`two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_answered`).
 /// The measure charges a flat face that space too (Q2077, Q2078), and a
 /// sliver a mesh can tell is measured against its wedge in
 /// `two_bends_overlapping_in_a_sliver_a_mesh_can_tell_measure_its_wedge`.
@@ -566,44 +568,56 @@ fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_
     }
 }
 
-/// The same two bends placed round by `−2`, `−1.984` or `−3.1 + 0.0155 · 58`
-/// and a quarter turn back, where the first bend's start cap and the copy's
-/// end cap overlap in a wedge `4π` times the angle between them (Q2089).
+/// The same two bends placed round by `−2`, `−1.984`, `−2.4645`, `2.7745`,
+/// `−3.1 + 0.0155 · 117` or `−3.1 + 0.0155 · 58` and a quarter turn back, where
+/// the first bend's start cap and the copy's end cap overlap in a wedge `4π`
+/// times the angle between them (Q2089, Q2137).
 ///
-/// The wedge is thinner than the space any mesh of it can leave out, so no
-/// mesh says which way its faces point. The sum the closest mesh leaves is
-/// below zero, `−3.3e-16` and `−2.6e-16`, against wedges of `5.4e-17` and
-/// `7.9e-17`. The fuse refused the intersection at `−1.984`
-/// [`Invalid::VolumeIsNotPositive`] on such a sum, both ways round, which says
-/// the faces point inwards; they point out. At `−2` it passed on a sum that
-/// answered only because the caps' flat faces were charged nothing for the
-/// space their mesh can leave out.
+/// The wedge is thinner than the space any plain mesh of it can leave out, so
+/// no rung of the ladder says which way its faces point: the closest sum is
+/// below zero, `−3.3e-16` at `−2`, against a wedge of `5.4e-17`, and the mesh
+/// can leave out `6.1e-15`. Almost all of that is its caps, whose points lie
+/// up to `4.3e-16` off their planes. The fuse refused the intersection at
+/// `−1.984` [`Invalid::VolumeIsNotPositive`] on such a sum, both ways round,
+/// which says the faces point inwards; they point out. Until Q2266 every start
+/// here was refused [`Error::CannotTellWhichWayASolidsFacesPoint`].
 ///
-/// Step 58 of `two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring`'s
-/// walk was answered a whole ring, its sliver's torus face cut the long way
-/// round, until Q2265, and is refused by this name since. Telling the sign of
-/// such a sliver another way, and answering it, is Q2266's.
+/// `Model::validate` now reads the finest mesh again with each point of a cap
+/// moved onto the cap's plane, and charges only what that moved mesh can leave
+/// out. So the intersection both ways round answers one solid, and
+/// `Model::validate` passes it. `−3.1 + 0.0155 · 117` is pinned as that value
+/// and not as the literal `−1.2865`, which answers no solid.
+///
+/// The measure at a deflection of `0.01` still charges the caps for how far
+/// their points stray off their planes, so its error, `1.4e-15` to `3.1e-15`
+/// over these starts, is wider than the wedge, and the volume it reads is
+/// below zero at every one of them. It holds the wedge, but cannot tell it
+/// from nothing.
 #[test]
-fn two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name() {
-    for start in [-2.0, -1.984, -3.1 + 0.0155 * 58.0] {
+fn two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_answered() {
+    for start in [
+        -2.0,
+        -1.984,
+        -2.4645,
+        2.7745,
+        -3.1 + 0.0155 * 117.0,
+        -3.1 + 0.0155 * 58.0,
+    ] {
         for the_first_first in [true, false] {
             let what = format!("placed round by {start}, the first first {the_first_first}");
             let mut model = a_model();
             let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
             let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
             let wedge = 4.0 * PI * the_angle_where_the_caps_overlap(&model, [first, copy], start);
-            let fused =
-                fused_or_refused(&mut model, first, copy, Rule::Intersection, the_first_first);
-            let Err(Error::CannotTellWhichWayASolidsFacesPoint {
-                enclosed,
-                leaves_out: Some(leaves_out),
-            }) = fused
-            else {
-                panic!("{what}: {fused:?}, a wedge of {wedge}");
+            let measured =
+                fused_and_measured(&mut model, first, copy, Rule::Intersection, the_first_first)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}, a wedge of {wedge}"));
+            let [(volume, error)] = measured[..] else {
+                panic!("{what}: {measured:?}, a wedge of {wedge}");
             };
             assert!(
-                0.0 < wedge && wedge < leaves_out && enclosed <= 0.0 && -enclosed <= leaves_out,
-                "{what}: a wedge of {wedge}, enclosed {enclosed}, off by up to {leaves_out}"
+                0.0 < wedge && (volume - wedge).abs() <= error,
+                "{what}: {volume} ± {error}, a wedge of {wedge}"
             );
         }
     }
@@ -1959,9 +1973,10 @@ fn each_within_its_error(mut measured: Vec<(f64, f64)>, expected: &[f64], what: 
 /// where the caps' normals read a wedge of `5.9e-19`. Either the rung charged
 /// the sum too little, since a sliver's volume is not below zero, or the caps
 /// truly lie apart and the fuse built a sliver that is not there; which of the
-/// two is a row from Q2265 of its own. Step 58 is refused
-/// [`Error::CannotTellWhichWayASolidsFacesPoint`], in
-/// `two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name`.
+/// two is a row from Q2265 of its own. Step 58 was refused
+/// [`Error::CannotTellWhichWayASolidsFacesPoint`] from Q2265 until Q2266, and
+/// is answered in
+/// `two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_answered`.
 #[test]
 fn two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring() {
     let policy = Policy::certified();

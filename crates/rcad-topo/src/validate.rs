@@ -2741,20 +2741,30 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// again, so a cone sliver walks to the floor as it did before. Row Q1883 gives
 /// cones measure.rs's charge.
 ///
-/// **When no rung answers, the finest sum that does not lie flat is the
-/// closest** to the solid's volume this saw, and the coarse sum, the zero or
-/// the rounding it was, when every mesh lay flat (row Q1891).
+/// **When no rung answers, the finest mesh is read once more with its flat
+/// faces' points moved onto their planes**, by
+/// [`what_it_encloses_moved_onto_its_planes`], and that sum comes back when it
+/// answers (row Q2266). Two quarter bends of ring 4 and tube 1 placed round by
+/// `−1.984` and a quarter turn back overlap in a wedge of `7.9e-17`. Every mesh
+/// this walk asks of it can leave out more than that, almost all of it under
+/// its caps, whose points a turned plane cannot hold. Moved onto the planes,
+/// the finest mesh at `−2` encloses `5.3714e-17` of a wedge of `5.3716e-17`,
+/// and can be off by `3.1e-19`, so the fuse answers the intersection
+/// (`two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_answered`
+/// in `a_piece_no_ray_can_place_names_its_refusal.rs`). A solid with no flat
+/// face has nothing to move, and its moved sum is its plain one, charged a
+/// little more, so it answers no more often than the ladder did.
+///
+/// **When the moved sum does not answer either, the finest sum that does not
+/// lie flat is the closest** to the solid's volume this saw, and the coarse
+/// sum, the zero or the rounding it was, when every mesh lay flat (row Q1891).
 ///
 /// **A closest sum of zero or below is refused
 /// [`Error::CannotTellWhichWayASolidsFacesPoint`]**, and not handed on to be
 /// refused [`Invalid::VolumeIsNotPositive`], "its faces do not point
 /// outwards": a sound sliver leaves such a sum as readily as a solid turned
-/// inside out (row Q2089). Two quarter bends of ring 4 and tube 1 placed round
-/// by `−1.984` and a quarter turn back overlap in a wedge of `7.9e-17`. Every
-/// mesh this walk asks of it can leave out more than that, the closest
-/// encloses `−2.6e-16`, and the fuse refuses the intersection by that name
-/// (`two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name`
-/// in `a_piece_no_ray_can_place_names_its_refusal.rs`).
+/// inside out (row Q2089). Before Q2266 the sliver at `−1.984` was refused
+/// that way, its closest sum `−2.6e-16`; the sound lens below still is.
 ///
 /// **A closest sum above zero still comes back, and nothing says it has the
 /// solid's sign** (rows Q2047, Q2084). A ball poking `2^-28` into a pipe of
@@ -2768,7 +2778,8 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// Refusing whenever no rung answers stops passing the inside-out lens, but
 /// fifteen other tests passed on such a sum when Q2047 counted them, and
 /// failed then, so it waits on a way to tell the sign that those solids can
-/// still meet.
+/// still meet. The moved sum is no such way for the lens: a ball and a pipe
+/// have no flat face to move a point onto.
 ///
 /// # A fold is retried; every other refusal but one still stops it
 ///
@@ -2855,8 +2866,9 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one
 /// side do not, [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] when a
 /// finer mesh is refused that way, and
-/// [`Error::CannotTellWhichWayASolidsFacesPoint`] when no rung answers and the
-/// closest sum is zero or below.
+/// [`Error::CannotTellWhichWayASolidsFacesPoint`] when no rung answers, the
+/// finest mesh moved onto its planes does not answer either, and the closest
+/// sum is zero or below.
 pub(crate) fn how_much_space_a_curved_solid_encloses(
     view: SolidView<'_>,
     policy: &Policy,
@@ -2871,6 +2883,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     }
     let mut closest = (enclosed, leaves_out);
     let top = how_far_across(&coarsest) / 2.0;
+    let mut finest = (coarsest, enclosed, rounding, ProvenanceLog::new());
     let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
     let mut room = top;
     while room >= floor {
@@ -2891,6 +2904,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 if finer_encloses != 0.0 && !it_lies_flat(&finer) {
                     closest = (finer_encloses, leaves_out);
                 }
+                finest = (finer, finer_encloses, rounding, this_rung);
             }
             Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
             Err(why) => {
@@ -2903,6 +2917,15 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
             }
         }
         room /= 2.0;
+    }
+    let (mesh, finest_encloses, rounding, mut its_log) = finest;
+    if let Some((on_the_planes, off_by)) =
+        what_it_encloses_moved_onto_its_planes(view, &mesh, finest_encloses, rounding)
+        && on_the_planes != 0.0
+        && on_the_planes.abs() > off_by
+    {
+        its_log.drain_into(log);
+        return Ok(on_the_planes);
     }
     let (enclosed, leaves_out) = closest;
     if enclosed.is_finite() && enclosed <= 0.0 {
@@ -2952,6 +2975,200 @@ fn how_far_the_sum_can_be_off(view: SolidView<'_>, mesh: &Mesh, rounding: f64) -
     how_much_space_hides_under(view, mesh).map(|hidden| (hidden + rounding).next_up())
 }
 
+/// What `mesh` encloses with each point that lies on one flat face's plane,
+/// and on no other plane, moved exactly onto that plane, and how far that can
+/// be from the solid's volume. `enclosed` and `rounding` are what
+/// [`signed_volume_over_and_how_far_it_rounded`] reads of the mesh as it is.
+/// `None` where [`how_much_space_hides_under`] is `None`.
+///
+/// **Why move the points.** A turned plane's points can rarely be written down
+/// on it, so a flat face's triangles lie a rounding or so off it, and
+/// [`how_much_space_hides_under`] charges the face its area times that. A
+/// finer mesh does not bring that down. Two quarter bends of ring 4 and tube 1
+/// placed round by `−2` and a quarter turn back overlap in a sliver, a wedge
+/// of `5.4e-17` between two caps of area `π`, and the caps are meshed up to
+/// `4.3e-16` off their planes, so no rung of the ladder can leave out less
+/// than `6e-15` and none answers (Q2266). Moved onto their planes, the caps
+/// leave out only what is left of each move once it is rounded, and the sum
+/// answers on what the band of ring between the caps leaves out.
+///
+/// **A moved point is never rounded.** Its move `D` is kept beside it, and the
+/// sum is the mesh's own plus what the moves add to first order, for each
+/// triangle `a b c`, `(Dₐ · (B × C) + D_b · (C × A) + D_c · (A × B)) / 6`,
+/// with `A = a − H` and so on. `H` is one point for every triangle: a closed
+/// mesh's sum is the same from any one point, and not from a point of each
+/// triangle's own. What is charged:
+///
+/// - `rounding`, how far `enclosed` is from what the mesh encloses exactly;
+/// - the first-order sum's own rounding, under `16` plus as many roundings as
+///   it has terms, times `ε` times the sum of `|D|·|B|·|C|` over its terms;
+/// - the terms of second and third order the first-order sum leaves out, each
+///   under the product of its three vectors' lengths;
+/// - what the moved mesh can leave out, charged as
+///   [`how_much_space_hides_under`] charges it, with the deviation grown by
+///   the longest move and each triangle's area by what its corners moved, and
+///   each flat triangle charged how far its moved corners stray off its plane,
+///   worked out exactly the way [`how_far_the_points_stray_off`] works it;
+/// - the rounding of the sum itself.
+///
+/// Lengths are taken as the sum of the sizes of their components, which is
+/// never less than the length. A point on two planes or more, where two flat
+/// faces meet, is not moved, and charged where it strays as it is.
+fn what_it_encloses_moved_onto_its_planes(
+    view: SolidView<'_>,
+    mesh: &Mesh,
+    enclosed: f64,
+    rounding: f64,
+) -> Option<(f64, f64)> {
+    const SLACK: f64 = 1.0 + 1.0 / 1_048_576.0;
+    let radius_of: HashMap<FaceKey, Option<f64>> = view
+        .faces()
+        .map(|face| (face.key(), the_smallest_radius_it_bends_at(&face.surface())))
+        .collect();
+    let flat_faces: HashMap<FaceKey, (Plane, Vec<u32>)> = view
+        .faces()
+        .filter_map(|face| {
+            let plane = *face.surface().as_plane()?;
+            Some((face.key(), (plane, the_corners_it_holds(face, mesh))))
+        })
+        .collect();
+    let moves = the_moves_onto_the_planes(mesh, &flat_faces);
+    let how_far_moved: Vec<f64> = moves.iter().map(|&moved| size_of(moved)).collect();
+    let longest_move = how_far_moved.iter().copied().fold(0.0, f64::max);
+    let deviation = rounded_up(mesh.deviation().magnitude() + longest_move);
+    let hub = *mesh.points().first()?;
+    let mut first_order = 0.0;
+    let mut first_order_size = 0.0;
+    let mut higher_orders = 0.0;
+    let mut hidden = 0.0;
+    let mut furthest_off_a_plane = 0.0f64;
+    for triangle in mesh.triangles() {
+        let corners = triangle.corners();
+        let [a, b, c] = corners.map(|corner| mesh.points()[corner as usize]);
+        let [move_a, move_b, move_c] = corners.map(|corner| moves[corner as usize]);
+        let [moved_a, moved_b, moved_c] = corners.map(|corner| how_far_moved[corner as usize]);
+        let [from_a, from_b, from_c] = [a, b, c].map(|point| point - hub);
+        let [far_a, far_b, far_c] = [from_a, from_b, from_c].map(size_of);
+        first_order += move_a.dot(from_b.cross(from_c))
+            + move_b.dot(from_c.cross(from_a))
+            + move_c.dot(from_a.cross(from_b));
+        first_order_size +=
+            moved_a * far_b * far_c + moved_b * far_c * far_a + moved_c * far_a * far_b;
+        higher_orders += moved_a * moved_b * far_c
+            + moved_a * far_b * moved_c
+            + far_a * moved_b * moved_c
+            + moved_a * moved_b * moved_c;
+        let moved = moved_a.max(moved_b).max(moved_c);
+        let area = (b - a).cross(c - a).length() / 2.0
+            + moved * ((b - a).length() + (c - a).length())
+            + 2.0 * moved * moved;
+        if area == 0.0 {
+            continue;
+        }
+        let Some(radius) = radius_of[&triangle.face()] else {
+            let (plane, _) = flat_faces
+                .get(&triangle.face())
+                .expect("a face that does not bend lies on a plane");
+            let off = corners
+                .map(|corner| {
+                    how_far_a_moved_point_strays_off(
+                        plane,
+                        mesh.points()[corner as usize],
+                        moves[corner as usize],
+                    )
+                })
+                .into_iter()
+                .fold(0.0, f64::max);
+            hidden += off * area;
+            furthest_off_a_plane = furthest_off_a_plane.max(off);
+            continue;
+        };
+        if radius == 0.0 {
+            return None;
+        }
+        let inner = radius - deviation;
+        hidden += if inner > 0.0 {
+            area * (radius * radius * radius - inner * inner * inner) / (3.0 * inner * inner)
+        } else {
+            f64::INFINITY
+        };
+    }
+    if furthest_off_a_plane > 0.0 {
+        let rim = rim_of_the_flat_faces(mesh, &flat_faces, 2.0 * longest_move);
+        hidden += furthest_off_a_plane * deviation * rim;
+    }
+    let terms = 3.0 * mesh.triangles().len() as f64;
+    let on_the_planes = enclosed + first_order / 6.0;
+    let off_by = rounding
+        + (16.0 + terms) * f64::EPSILON * first_order_size / 6.0
+        + higher_orders / 6.0
+        + hidden
+        + f64::EPSILON * on_the_planes.abs();
+    Some((on_the_planes, (off_by * SLACK).next_up()))
+}
+
+/// The move that takes each point of `mesh` onto the plane of the flat faces
+/// whose triangles use it, as near as an `f64` can write it: `−h n / (n · n)`,
+/// with `h` how far `n · p` is from the plane's offset, worked out exactly and
+/// rounded once. Zero for a point on no plane, or on two planes or more.
+fn the_moves_onto_the_planes(
+    mesh: &Mesh,
+    flat_faces: &HashMap<FaceKey, (Plane, Vec<u32>)>,
+) -> Vec<Vector> {
+    let mut plane_at: Vec<PlanesAPointLiesOn> = vec![PlanesAPointLiesOn::None; mesh.points().len()];
+    for triangle in mesh.triangles() {
+        let Some((plane, _)) = flat_faces.get(&triangle.face()) else {
+            continue;
+        };
+        for corner in triangle.corners() {
+            let at = &mut plane_at[corner as usize];
+            *at = match *at {
+                PlanesAPointLiesOn::None => PlanesAPointLiesOn::One(*plane),
+                PlanesAPointLiesOn::One(already) if already == *plane => {
+                    PlanesAPointLiesOn::One(already)
+                }
+                PlanesAPointLiesOn::One(_) | PlanesAPointLiesOn::More => PlanesAPointLiesOn::More,
+            };
+        }
+    }
+    plane_at
+        .iter()
+        .zip(mesh.points())
+        .map(|(on, &point)| {
+            let PlanesAPointLiesOn::One(plane) = on else {
+                return Vector::zero();
+            };
+            let normal = plane.normal();
+            let height: f64 = the_height_over(plane, point, None).iter().sum();
+            normal * (-height / normal.dot(normal))
+        })
+        .collect()
+}
+
+/// Which flat faces' planes a point of a mesh lies on, as far as
+/// [`the_moves_onto_the_planes`] needs to know. Exhaustive on purpose: it
+/// is private, and it only ever needs one plane or not.
+#[derive(Clone, Copy)]
+enum PlanesAPointLiesOn {
+    None,
+    One(Plane),
+    More,
+}
+
+/// How far `point` moved by `moved` lies off `plane`, rounded up, worked out
+/// exactly the way [`how_far_the_points_stray_off`] works it out for a point
+/// that is not moved.
+fn how_far_a_moved_point_strays_off(plane: &Plane, point: Point, moved: Vector) -> f64 {
+    let size = the_sum_of_the_sizes(the_height_over(plane, point, Some(moved)));
+    rounded_up(size * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF))
+}
+
+/// The sum of the sizes of a vector's components, rounded up: never less than
+/// its length.
+fn size_of(vector: Vector) -> f64 {
+    the_sum_of_the_sizes(vector.components())
+}
+
 /// The most space there can be between a mesh of this solid and the solid,
 /// on either side.
 ///
@@ -2975,7 +3192,10 @@ fn how_far_the_sum_can_be_off(view: SolidView<'_>, mesh: &Mesh, rounding: f64) -
 /// wedge of `5.4e-17`. Charged nothing, that sliver's sum answered on
 /// `3.04e-16` against `2.94e-16` at room `0.25`, right by luck, and the fuse
 /// refused the sliver of the same two bends placed round by `−1.984`
-/// [`Invalid::VolumeIsNotPositive`] on `−5.1e-17` (row Q2089).
+/// [`Invalid::VolumeIsNotPositive`] on `−5.1e-17` (row Q2089). Charged, no
+/// rung of [`how_much_space_a_curved_solid_encloses`] answers that sliver,
+/// and the finest mesh read by [`what_it_encloses_moved_onto_its_planes`],
+/// its caps' points moved onto their planes, does (row Q2266).
 ///
 /// `None` when a triangle with area stands in for a face this cannot charge,
 /// wherever in the mesh it comes, and otherwise `f64::INFINITY` when the mesh
@@ -3032,7 +3252,7 @@ fn how_much_space_hides_under(view: SolidView<'_>, mesh: &Mesh) -> Option<f64> {
         };
     }
     if furthest_off_a_plane > 0.0 {
-        hidden += furthest_off_a_plane * deviation * rim_of_the_flat_faces(mesh, &flat_faces);
+        hidden += furthest_off_a_plane * deviation * rim_of_the_flat_faces(mesh, &flat_faces, 0.0);
     }
     Some(hidden)
 }
@@ -3080,27 +3300,43 @@ fn how_far_the_points_stray_off(
     plane: &Plane,
     held: &[u32],
 ) -> f64 {
-    let normal = plane.normal().components();
     let mut furthest = 0.0f64;
     for corner in corners {
         if held.contains(&corner) {
             continue;
         }
         let point = mesh.points()[corner as usize];
-        let mut height = vec![-plane.offset()];
-        for (along, at) in normal.into_iter().zip(point.coordinates()) {
-            let (product, lost) = two_product(along, at);
-            let mut sum = vec![0.0; height.len() + 2];
-            let used = expansion_sum(&height, &[lost, product], &mut sum);
-            sum.truncate(used);
-            height = sum;
-        }
-        let size = height
-            .iter()
-            .fold(0.0, |total: f64, entry| rounded_up(total + entry.abs()));
-        furthest = furthest.max(size);
+        furthest = furthest.max(the_sum_of_the_sizes(the_height_over(plane, point, None)));
     }
     rounded_up(furthest * (1.0 + Plane::NORMAL_LENGTH_ROUNDOFF))
+}
+
+/// `n · (point + moved) − o` for `plane`'s normal `n` and offset `o`, exactly,
+/// as an expansion: each product of the normal and a coordinate kept with the
+/// rounding it lost.
+fn the_height_over(plane: &Plane, point: Point, moved: Option<Vector>) -> Vec<f64> {
+    let normal = plane.normal().components();
+    let products = normal.into_iter().zip(point.coordinates()).chain(
+        moved
+            .into_iter()
+            .flat_map(|moved| normal.into_iter().zip(moved.components())),
+    );
+    let mut height = vec![-plane.offset()];
+    for (along, at) in products {
+        let (product, lost) = two_product(along, at);
+        let mut sum = vec![0.0; height.len() + 2];
+        let used = expansion_sum(&height, &[lost, product], &mut sum);
+        sum.truncate(used);
+        height = sum;
+    }
+    height
+}
+
+/// The sum of the sizes of `values`, rounded up at each step.
+fn the_sum_of_the_sizes(values: impl IntoIterator<Item = f64>) -> f64 {
+    values
+        .into_iter()
+        .fold(0.0, |total: f64, value| rounded_up(total + value.abs()))
 }
 
 /// The next `f64` up from a sum of sizes, which may have rounded down; zero
@@ -3112,8 +3348,13 @@ fn rounded_up(sum: f64) -> f64 {
 /// The total length of the mesh sides where a flat face meets another face,
 /// counted once for each flat face along a side, as `measure.rs` counts it:
 /// the inscribed outline of a flat face is short of its curved rim by a
-/// segment per side, each within the deviation of that side.
-fn rim_of_the_flat_faces(mesh: &Mesh, flat_faces: &HashMap<FaceKey, (Plane, Vec<u32>)>) -> f64 {
+/// segment per side, each within the deviation of that side. Each side is
+/// counted `stretch` longer than it is, for a mesh whose points are moved.
+fn rim_of_the_flat_faces(
+    mesh: &Mesh,
+    flat_faces: &HashMap<FaceKey, (Plane, Vec<u32>)>,
+    stretch: f64,
+) -> f64 {
     let mut first_seen: HashMap<(u32, u32), FaceKey> = HashMap::new();
     let mut rim = 0.0;
     for triangle in mesh.triangles() {
@@ -3127,7 +3368,8 @@ fn rim_of_the_flat_faces(mesh: &Mesh, flat_faces: &HashMap<FaceKey, (Plane, Vec<
             if already == triangle.face() {
                 continue;
             }
-            let length = mesh.points()[from as usize].distance_to(mesh.points()[to as usize]);
+            let length =
+                mesh.points()[from as usize].distance_to(mesh.points()[to as usize]) + stretch;
             for face in [already, triangle.face()] {
                 if flat_faces.contains_key(&face) {
                     rim += length;
@@ -5579,7 +5821,7 @@ mod tests {
         how_much_space_a_curved_solid_encloses, how_much_space_hides_under,
         how_wide_an_arc_of_one_branch_is, it_lies_flat, largest_coordinate_of,
         signed_volume_over_and_how_far_it_rounded, the_coarsest_mesh_whose_sides_do_not_cross,
-        the_sum_answers, winding_of, winding_round,
+        the_sum_answers, what_it_encloses_moved_onto_its_planes, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -8579,6 +8821,103 @@ mod tests {
                 "{what}: validate charges {charged} where measure charges {measured}, \
                  straying {deviation}"
             );
+        }
+    }
+
+    /// Row Q2266. A disc of radius one and `2⁻⁵⁴` high, turned about
+    /// `(1, 0.3, 0)`, is two caps of area `π` a sliver apart: the ring sliver's
+    /// caps without its ring. A turned plane cannot hold the caps' points, so
+    /// at a deflection of `2⁻⁷` [`how_far_the_sum_can_be_off`] charges the
+    /// disc's mesh more than its whole volume of `1.74e-16`, and the sum
+    /// wanders from `3.8e-17` to `2.0e-16` over the three turns. Moved onto
+    /// the planes by [`what_it_encloses_moved_onto_its_planes`], the same mesh
+    /// encloses `1.7406e-16` at every turn, within a charge under a tenth of
+    /// the plain one.
+    ///
+    /// [`Model::validate`] refuses the disc [`Invalid::DynamicRangeTooWide`],
+    /// so this drives the arithmetic on its mesh directly.
+    #[test]
+    fn a_disc_a_few_roundings_high_turned_any_way_holds_its_volume_on_its_planes() {
+        let high = f64::powi(2.0, -54);
+        let volume = core::f64::consts::PI * high;
+        let deflection = Deflection::of(f64::powi(2.0, -7)).expect("a positive deflection");
+        let leaning = Axis::new(Point::origin(), Vector::new(1.0, 0.3, 0.0)).expect("an axis");
+        for turn in [0.3, 1.1, 2.9] {
+            let mut model = an_empty_model();
+            let placement = Isometry::rotation(&leaning, turn).expect("a finite turn");
+            let disc = model
+                .add_round_bar(1.0, high, &placement)
+                .expect("a disc of radius one");
+            assert!(
+                matches!(
+                    model.validate(&Policy::certified(), &mut ProvenanceLog::new()),
+                    Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
+                ),
+                "turned {turn}: validate does not refuse the disc for its range"
+            );
+            let view = model.solid(disc).expect("this model made the key");
+            let mesh = view
+                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("turned {turn}: {why:?}"));
+            let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+            let plain =
+                how_far_the_sum_can_be_off(view, &mesh, rounding).expect("a disc can be charged");
+            let (moved, charge) =
+                what_it_encloses_moved_onto_its_planes(view, &mesh, enclosed, rounding)
+                    .expect("a disc can be charged");
+            assert!(
+                (moved - volume).abs() <= charge && moved.abs() > charge && 10.0 * charge < plain,
+                "turned {turn}: encloses {enclosed}, off by {plain}; moved {moved}, off by \
+                 {charge}; holds {volume}"
+            );
+        }
+    }
+
+    /// Row Q2266. A solid whose mesh has no point to move onto a plane is
+    /// summed by [`what_it_encloses_moved_onto_its_planes`] as it is, and
+    /// charged no less than [`how_far_the_sum_can_be_off`] charges it, so the
+    /// moved sum answers no such solid that the ladder did not. A ball has no
+    /// flat face, and an upright bar's caps lie on planes that hold its points
+    /// exactly.
+    #[test]
+    fn a_solid_with_no_point_to_move_is_summed_as_it_is_and_charged_no_less() {
+        let mut model = an_empty_model();
+        let shapes = [
+            (
+                "a ball",
+                model
+                    .add_ball(2.0, &Isometry::identity())
+                    .expect("a ball of radius two"),
+            ),
+            (
+                "an upright bar",
+                model
+                    .add_round_bar(3.0, 5.0, &Isometry::identity())
+                    .expect("a bar of radius three"),
+            ),
+        ];
+        for (what, key) in shapes {
+            let view = model.solid(key).expect("this model made the key");
+            for room in [0.3, 0.05] {
+                let mesh = view
+                    .mesh(
+                        Deflection::of(room).expect("a positive deflection"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{what} at {room}: {why:?}"));
+                let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+                let plain = how_far_the_sum_can_be_off(view, &mesh, rounding)
+                    .unwrap_or_else(|| panic!("{what}: a ball and a bar can be charged"));
+                let (moved, charge) =
+                    what_it_encloses_moved_onto_its_planes(view, &mesh, enclosed, rounding)
+                        .unwrap_or_else(|| panic!("{what}: a ball and a bar can be charged"));
+                assert!(
+                    moved == enclosed && charge >= plain,
+                    "{what} at {room}: encloses {enclosed}, off by {plain}; moved {moved}, \
+                     off by {charge}"
+                );
+            }
         }
     }
 
