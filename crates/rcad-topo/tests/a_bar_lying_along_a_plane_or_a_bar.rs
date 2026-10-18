@@ -133,6 +133,21 @@
 //! `a_bar_standing_on_a_blocks_top_flush_with_its_edge_answers_every_rule` and
 //! `a_top_whose_hole_touches_its_outline_at_a_point_is_refused_as_too_thin`
 //! pin the two.
+//!
+//! **A thousand float turn angles about `z`, swept over the same cube and bar
+//! turned together, land in the same three bins Q1765 found and the same
+//! single limit `Q2237` and `Q2257` already pin** (queue row Q2024). Of 2000
+//! `(angle, wall)` pairs, angle strictly between `0` and a quarter turn and
+//! wall `4.0` or `2.0`, the turned wall's plane misses the bar's pipe on 930,
+//! touches it on none, and crosses it on 1070; every fuse answers right on
+//! every one, and 3745 of the crossing pairs' rule-and-order combinations
+//! refuse `DynamicRangeTooWide`, never `Undecidable`. None of those refusals
+//! go through `Arrangement::passes_through` or `which_side_of_everything`'s
+//! ring-fallback chain (`fuse/arrange.rs`) at all: they are the same
+//! coordinate-spread-past-`2^53` sliver the bar turned twice already pins, at
+//! the same coordinates of 4 to 6, so no new row is filed for them (`docs/decisions.md`
+//! §3.5, §16.10). `a_thousand_turns_of_a_cube_and_a_bar` pins it, with the
+//! fuller argument in its own doc comment.
 
 use core::f64::consts::PI;
 use std::collections::BTreeMap;
