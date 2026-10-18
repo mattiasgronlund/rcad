@@ -2585,6 +2585,7 @@ fn the_piece_holds(
         }
     }
     let mut winding = 0;
+    let mut one_or_nothing = 0;
     for (position, wire) in piece.wires.iter().enumerate() {
         match round_wire_of(wire) {
             Some(partner) => {
@@ -2624,18 +2625,31 @@ fn the_piece_holds(
                 winding +=
                     in_plane.winding_around(core::slice::from_ref(&corners), reaching_the_plane)?;
                 for (index, side) in wire.iter().enumerate() {
-                    winding += in_the_bulge_of(
+                    match in_the_bulge_of(
                         flat,
                         side,
                         meridians[position][index].as_ref(),
                         in_plane,
                         reaching_the_plane,
-                    )?;
+                    )? {
+                        Bulge::Counts(count) => winding += count,
+                        Bulge::OneOrNothing => one_or_nothing += 1,
+                    }
                 }
             }
         }
     }
-    Some(winding == 1)
+    // The wires wind once round each point of the piece and not at all round
+    // any other. Counted with every unsettled bulge as nothing, a one cannot
+    // really be a two, so the point is held; a count the unsettled bulges could
+    // still lift to one says nothing.
+    if winding == 1 {
+        Some(true)
+    } else if (winding..=winding + one_or_nothing).contains(&1) {
+        None
+    } else {
+        Some(false)
+    }
 }
 
 /// Whether a flat piece's material is inside what `wire`, one whole closed
@@ -2848,10 +2862,11 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 
 /// One when `point` is between a curved side of a flat piece and the chord
 /// across it, where the corners alone wind nothing round it; zero when it is
-/// not, and when the turn about the chord cannot be settled; `None` when a
-/// side along a ring cannot say which of the ring's circles it runs round, or
-/// which side of a half-space the point is on. A side along a ring with its
-/// material outside the ring can count minus one ([`across_the_inner_disk`]).
+/// not; one or nothing when the turn about the chord cannot be settled; and
+/// `None` when a side along a ring cannot say which of the ring's circles it
+/// runs round, which side of a half-space the point is on, or what
+/// [`across_the_inner_disk`] counts. A side along a ring with its material
+/// outside the ring can count minus one there.
 ///
 /// **A half disk has two corners**, so the polygon of its corners has no
 /// inside at all and every point of the half disk is between its arc and its
@@ -2873,21 +2888,21 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// out with both corners `1e-8` off the plane it missed points `1e-3` inside it
 /// (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
 ///
-/// **A turn about the chord that cannot be settled counts nothing.** What a
-/// side counts here is one or nothing, and a piece's wires wind once round
-/// each of its points and not at all round any other, so a count one short
-/// can make a point of the piece read as outside it and never a point outside
-/// read as in: [`place_the_piece`] then tries the next candidate. A point on
-/// the other half of a cone counts nothing for the same reason. A block's
-/// floor whose corner is a rounding outside a pipe's rim has that corner cut
-/// off by an arc between where the block's two walls cross the rim, and the
-/// two are boxes a rounding wide that overlap at the corner, so the chord
-/// between them has no direction and the turn about it is undecided for every
-/// point. Asked that turn, the floor of a block cornered twice on a round
-/// tab's rim held no point, a unit clear of the arc included, and every
+/// **A turn about the chord that cannot be settled is one or nothing**, and
+/// [`the_piece_holds`] holds the point where the count is one with it counted
+/// nothing. A piece's wires wind once round each of its points and not at all
+/// round any other, so that one cannot really be a two. A block's floor whose
+/// corner is a rounding outside a pipe's rim has that corner cut off by an arc
+/// between where the block's two walls cross the rim, and the two are boxes a
+/// rounding wide that overlap at the corner, so the chord between them has no
+/// direction and the turn about it is undecided for every point. While that
+/// turn left the whole count undecided, the floor of a block cornered twice on
+/// a round tab's rim held no point, a unit clear of the arc included, and every
 /// certified fuse of the block under the tab was refused [`INSIDE_A_PIECE`]
 /// (`a_rectangle_with_its_corner_cut_off_by_an_arc_a_rounding_long_holds_its_own_points`,
-/// Q2297).
+/// Q2297). Read as nothing, it would make a half disk's points near its chord
+/// read as outside it rather than as undecided
+/// (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
 ///
 /// **A pipe is counted the same way, where the plane crosses it**, which is
 /// [`Cylinder::is_cut_in_a_closed_curve_by`](rcad_geom::Cylinder::is_cut_in_a_closed_curve_by)
@@ -3002,12 +3017,12 @@ fn in_the_bulge_of(
     meridian: Option<&Picker>,
     in_plane: &InPlane,
     point: PredicatePoint,
-) -> Option<i32> {
+) -> Option<Bulge> {
     if let Surface::Torus(ring) = side.carried_by[1]
         && meridian.is_none()
         && side.material_side == Decision::Pos
     {
-        return across_the_inner_disk(flat, &ring, side, in_plane, point);
+        return across_the_inner_disk(flat, &ring, side, in_plane, point).map(Bulge::Counts);
     }
     let one_round_region = match side.carried_by[1] {
         Surface::Sphere(_) => true,
@@ -3024,13 +3039,25 @@ fn in_the_bulge_of(
         Surface::Plane(_) | _ => false,
     };
     if !one_round_region || side.material_side != Decision::Neg {
-        return Some(0);
+        return Some(Bulge::Counts(0));
     }
     if closes_on_itself(side) {
-        return Some(1);
+        return Some(Bulge::Counts(1));
     }
-    let turn = which_side_of_the_chord(flat, side, in_plane, point);
-    Some(i32::from(turn == Some(Decision::Neg)))
+    Some(match which_side_of_the_chord(flat, side, in_plane, point) {
+        Some(turn) => Bulge::Counts(i32::from(turn == Decision::Neg)),
+        None => Bulge::OneOrNothing,
+    })
+}
+
+/// What one side of a flat piece adds to how often the piece's wires wind
+/// round a point, over what its corners alone wind ([`in_the_bulge_of`]).
+enum Bulge {
+    /// One, minus one or nothing.
+    Counts(i32),
+    /// One where the point is between the side and its chord and nothing where
+    /// it is not, and the turn about the chord could not say which.
+    OneOrNothing,
 }
 
 /// What a side along `ring` whose material is outside it counts for `point`,
@@ -5773,7 +5800,11 @@ mod tests {
             Some(true),
             "a unit clear of the arc"
         );
-        assert_eq!(holds([11.0, 9.0, 0.0]), Some(false), "past the east side");
+        assert_ne!(
+            holds([11.0, 9.0, 0.0]),
+            Some(true),
+            "past the east side, inside the pipe"
+        );
         assert_eq!(holds([7.5, 8.1, 0.0]), Some(false), "outside the rim");
     }
 
