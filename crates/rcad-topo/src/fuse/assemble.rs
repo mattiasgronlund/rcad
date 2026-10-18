@@ -11302,6 +11302,86 @@ mod tests {
         }
     }
 
+    /// The two circles a ring crosses a ball, a pipe or a cone on its axis in
+    /// are two names, and each is one name with every axis written either way
+    /// round, in either order (Q2260).
+    ///
+    /// The ring is 4 round a tube of 1 about `z`. The ball of radius 4 at
+    /// `(0, 0, 1)` crosses it in the circle `z = 1` of radius 4, through the
+    /// ball's poles, and the circle `z = −15/17` of radius `60/17`. The pipe of
+    /// radius `4.5` crosses it at `z = ±√3/2`, and the cone leaning one from
+    /// `(0, 0, −4)` at `z = ±1/√2`, of radius `4 ± 1/√2`. Named by the two
+    /// surfaces alone, the two circles of the ball were one curve, and a whole
+    /// ring about `x` against that ball was refused
+    /// `AClosedEdgeOfTheAnswerWouldStartAtAPole` under every rule.
+    #[test]
+    fn each_circle_a_ring_crosses_a_ball_a_pipe_or_a_cone_on_its_axis_in_is_one_name_however_the_two_are_spelled()
+     {
+        let rings = [Axis::z(), Axis::z().reversed()].map(|axis| {
+            Surface::Torus(Torus::new(axis, 4.0, 1.0).expect("a tube narrower than its ring"))
+        });
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(0.0, 0.0, 1.0), 4.0).expect("a ball of radius 4"),
+        );
+        let either_way = |axis: Axis| [axis, axis.reversed()];
+        let below = Axis::new(Point::new(0.0, 0.0, -4.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("a direction with length");
+        let (half_root_three, half_root_two) = (0.75_f64.sqrt(), 0.5_f64.sqrt());
+        let partners = [
+            (
+                "a ball",
+                [ball, ball],
+                [[4.0, 1.0], [60.0 / 17.0, -15.0 / 17.0]],
+            ),
+            (
+                "a pipe",
+                either_way(Axis::z()).map(|axis| {
+                    Surface::Cylinder(Cylinder::new(axis, 4.5).expect("a pipe of radius 4.5"))
+                }),
+                [[4.5, half_root_three], [4.5, -half_root_three]],
+            ),
+            (
+                "a cone",
+                either_way(below)
+                    .map(|axis| Surface::Cone(Cone::new(axis, 1.0).expect("a positive slope"))),
+                [
+                    [4.0 + half_root_two, half_root_two],
+                    [4.0 - half_root_two, -half_root_two],
+                ],
+            ),
+        ];
+        for (partner, spellings, through) in partners {
+            let names_through = |[reach, height]: [f64; 2]| -> BTreeSet<_> {
+                let mut names = BTreeSet::new();
+                for ring in rings {
+                    for other in spellings {
+                        for carried_by in [[ring, other], [other, ring]] {
+                            names.insert(
+                                name_of_the_closed_crossing_through(
+                                    &carried_by,
+                                    PredicatePoint::from([reach, 0.0, height]),
+                                    &Policy::certified(),
+                                    &mut ProvenanceLog::new(),
+                                )
+                                .unwrap_or_else(|why| {
+                                    panic!("the ring and {partner} cross in two circles: {why:?}")
+                                }),
+                            );
+                        }
+                    }
+                }
+                names
+            };
+            let [one, other] = through.map(names_through);
+            assert_eq!(one.len(), 1, "the ring and {partner}: {one:?}");
+            assert_eq!(other.len(), 1, "the ring and {partner}: {other:?}");
+            assert_ne!(
+                one, other,
+                "the ring and {partner}: two circles named as one"
+            );
+        }
+    }
+
     /// The two loops a ball crosses a pipe it swallows whole in are two names,
     /// and so are the two a thin pipe crosses a fat one in; each loop is one
     /// name with every axis written either way round and every pipe's origin
