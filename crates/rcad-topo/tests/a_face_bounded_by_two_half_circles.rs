@@ -13,16 +13,25 @@
 //! with their material inside them and no face is turned round. It encloses
 //! `π(OUTER² + INNER²)·HEIGHT/2`, and every corner sits at `(±R, 0, z)` where
 //! `x² + y² − r²` cancels to nothing.
+//!
+//! The last test writes the same two half-circles as the rim of a round bar and
+//! builds the bar on a turned axis, where the ends no longer land exactly on the
+//! flat surfaces of the half-spaces that pick each arc out.
 
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, Scale, Surface, Vector,
+    Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
+    Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftEdge, DraftStep, DraftWire, Model, Result, SolidBuilder, SolidKey};
+use rcad_topo::{
+    DraftEdge, DraftFace, DraftStep, DraftWire, Model, Result, SolidBuilder, SolidKey,
+};
 
 const OUTER: f64 = 3.0;
 const INNER: f64 = 1.0;
 const HEIGHT: f64 = 5.0;
+
+const BAR_RADIUS: f64 = 1.0;
 
 /// The sentence this lane earns its fix with.
 ///
@@ -176,6 +185,56 @@ fn the_same_plate_a_thousand_times_smaller_and_bigger_is_the_same_answer() {
             .validate(&policy, &mut log)
             .unwrap_or_else(|why| panic!("and still sweeps clean at {scale}: {why:?}"));
     }
+}
+
+/// A bar whose rim is these two half-circles, built straight onto a turned axis.
+///
+/// The bar is `BAR_RADIUS` round and stands `z` 0 to 4 in two bands, one on
+/// each spelling of its pipe, and the circle between the bands at `z = 2` is two
+/// half-circles written as this file writes the plate's: each is the part of
+/// where its band's pipe crosses the plane `z = 2` that lies in front of a
+/// half-space through the origin facing `+y` or `-y`. So each half-space's flat
+/// surface passes exactly through its arc's two ends.
+///
+/// Built turned, every point, surface and run is moved before the builder sees
+/// it, and a turn rounds an end off its half-space's flat surface by an ulp or
+/// so, to either side. Every turn here not about `x` or `y` was refused
+/// `EdgeOutsideWhatPickedIt` — 200 of the 250, in all four ways of laying the
+/// two spellings up and down, 800 builds of 1000.
+#[test]
+fn a_bar_whose_rim_is_two_half_circles_builds_turned_every_way() {
+    let up = Cylinder::new(Axis::z(), BAR_RADIUS).expect("a radius");
+    let down = Cylinder::new(Axis::z().reversed(), BAR_RADIUS).expect("a radius");
+    let policy = Policy::certified();
+    let mut wrong = Vec::new();
+    let mut built = 0;
+    for (turn_name, turn) in the_turns_off_z() {
+        for (lower, upper) in [(up, up), (up, down), (down, up), (down, down)] {
+            let what = format!(
+                "bands on {} and {}, turned {turn_name}",
+                which_way(lower),
+                which_way(upper)
+            );
+            let mut model = Model::new(a_working_size());
+            let mut log = ProvenanceLog::new();
+            match a_bar_whose_rim_is_two_half_circles(
+                &mut model,
+                [lower, upper],
+                &turn,
+                &policy,
+                &mut log,
+            ) {
+                Ok(_) => built += 1,
+                Err(why) => wrong.push(format!("{what}: refused {why:?}")),
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{built} built and {} refused:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }
 
 fn a_working_size() -> Scale {
@@ -372,4 +431,154 @@ fn a_wire(builder: &mut SolidBuilder, steps: &[(DraftEdge, Orientation)]) -> Res
         walked.push(DraftStep::Along(builder.add_coedge(edge, orientation)?));
     }
     builder.add_wire(&walked)
+}
+
+/// Each of ten axes through the origin, turned by `0.25·k` for `k` = 1 to 25.
+fn the_turns_off_z() -> Vec<(String, Isometry)> {
+    let axes = [
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (1.0, 0.0, 1.0),
+        (0.0, 1.0, 1.0),
+        (1.0, 2.0, 3.0),
+        (-1.0, 2.0, 0.5),
+        (3.0, -1.0, 2.0),
+        (1.0, 1.0, 1.0),
+        (2.0, 0.0, -1.0),
+    ];
+    let mut turns = Vec::with_capacity(axes.len() * 25);
+    for (x, y, z) in axes {
+        let axis = Axis::new(Point::origin(), Vector::new(x, y, z)).expect("a direction");
+        for k in 1..=25 {
+            let angle = 0.25 * f64::from(k);
+            turns.push((
+                format!("{angle} about {:?}", (x, y, z)),
+                Isometry::rotation(&axis, angle).expect("a finite turn"),
+            ));
+        }
+    }
+    turns
+}
+
+fn which_way(wall: Cylinder) -> &'static str {
+    if wall.axis().direction().z() > 0.0 {
+        "the pipe pointing up"
+    } else {
+        "the pipe pointing down"
+    }
+}
+
+/// The bar of the test above: `BAR_RADIUS` round from `z = 0` to `z = 4`, the
+/// band below `z = 2` on `walls[0]` and the band above it on `walls[1]`, with
+/// every point, surface and run moved by `built_on` before the builder sees it.
+///
+/// The rim is two arcs between the corners at `(±BAR_RADIUS, 0, 2)`: the one
+/// through `-y` runs from `+x` to `-x` and the one through `+y` back again, so
+/// the lower band walks the rim against its pipe's longitude and the upper band
+/// with it, whichever way round the pipe is written.
+///
+/// # Errors
+///
+/// Whatever [`SolidBuilder::build`] refuses the bar for.
+fn a_bar_whose_rim_is_two_half_circles(
+    model: &mut Model,
+    walls: [Cylinder; 2],
+    built_on: &Isometry,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<SolidKey> {
+    let [lower, upper] = walls;
+    let mut draft = SolidBuilder::new();
+    let corner = |draft: &mut SolidBuilder, x: f64, z: f64| {
+        draft.add_vertex(built_on.apply_to_point(Point::new(x, 0.0, z)))
+    };
+    let at_0 = corner(&mut draft, BAR_RADIUS, 0.0)?;
+    let east = corner(&mut draft, BAR_RADIUS, 2.0)?;
+    let west = corner(&mut draft, -BAR_RADIUS, 2.0)?;
+    let at_4 = corner(&mut draft, BAR_RADIUS, 4.0)?;
+
+    let rim_plane = a_plane_at(2.0, Vector::new(0.0, 0.0, 1.0));
+    let seam_below = draft.add_edge(at_0, east, EdgeRun::Straight)?;
+    let seam_above = draft.add_edge(east, at_4, EdgeRun::Straight)?;
+    let bottom_circle = draft.add_edge(at_0, at_0, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let through_minus_y =
+        draft.add_edge(east, west, an_arc_under(&rim_plane).transformed(built_on))?;
+    let through_plus_y =
+        draft.add_edge(west, east, an_arc_over(&rim_plane).transformed(built_on))?;
+    let top_circle = draft.add_edge(at_4, at_4, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let bottom = a_cap(&mut draft, 0.0, -1.0, bottom_circle, lower, built_on)?;
+    let top = a_cap(&mut draft, 4.0, 1.0, top_circle, upper, built_on)?;
+
+    let below = a_band(
+        &mut draft,
+        lower.transformed(built_on),
+        &[
+            (
+                bottom_circle,
+                the_way_it_is_walked(lower, Orientation::Forward),
+            ),
+            (seam_below, Orientation::Forward),
+            (through_minus_y, Orientation::Forward),
+            (through_plus_y, Orientation::Forward),
+            (seam_below, Orientation::Reversed),
+        ],
+    )?;
+    let above = a_band(
+        &mut draft,
+        upper.transformed(built_on),
+        &[
+            (through_plus_y, Orientation::Reversed),
+            (through_minus_y, Orientation::Reversed),
+            (seam_above, Orientation::Forward),
+            (
+                top_circle,
+                the_way_it_is_walked(upper, Orientation::Reversed),
+            ),
+            (seam_above, Orientation::Reversed),
+        ],
+    )?;
+    draft.add_shell(&[bottom, below, above, top].map(|face| (face, Orientation::Forward)))?;
+    draft.build(model, policy, log)
+}
+
+fn a_band(
+    draft: &mut SolidBuilder,
+    wall: Cylinder,
+    round: &[(DraftEdge, Orientation)],
+) -> Result<DraftFace> {
+    let wire = a_wire(draft, round)?;
+    draft.add_face(Surface::Cylinder(wall), &[wire])
+}
+
+/// A flat cap at height `z` facing `outward` along `z`, moved by `built_on`,
+/// bounded by `circle` walked against the wall's use of it.
+fn a_cap(
+    draft: &mut SolidBuilder,
+    z: f64,
+    outward: f64,
+    circle: DraftEdge,
+    wall: Cylinder,
+    built_on: &Isometry,
+) -> Result<DraftFace> {
+    let plane = a_plane_at(z, Vector::new(0.0, 0.0, outward)).transformed(built_on);
+    let used = if outward < 0.0 {
+        Orientation::Reversed
+    } else {
+        Orientation::Forward
+    };
+    let wire = a_wire(draft, &[(circle, the_way_it_is_walked(wall, used))])?;
+    draft.add_face(Surface::Plane(plane), &[wire])
+}
+
+/// A cap circle between `wall` and a plane is stored running along `ŵ × ∇C`
+/// for the wall's stored direction `ŵ`, so a wall written pointing down walks
+/// both its cap circles the other way round: `turn` is how a wall pointing up
+/// would use the circle.
+fn the_way_it_is_walked(wall: Cylinder, turn: Orientation) -> Orientation {
+    if wall.axis().direction().z() > 0.0 {
+        turn
+    } else {
+        turn.reversed()
+    }
 }
