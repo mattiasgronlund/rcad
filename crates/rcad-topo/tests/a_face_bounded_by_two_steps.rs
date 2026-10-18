@@ -137,12 +137,17 @@ fn a_two_step_face_turned_round_is_still_caught_by_the_mesh() {
 /// a circle and a straight line. A wire is described before the face it trims,
 /// so `SolidBuilder::add_wire` cannot tell the two apart and does not try. Give
 /// the chord the pipe on its far side as well and it really is the arc again:
-/// the flat face is one curve out and back, with no area at all. The sweep's
-/// mesh is what says so, because both edges walk into the same points.
+/// the flat face is one curve out and back, with no area at all.
 ///
-/// The refusal names the bottom face by the position it was described at
-/// (§127), which is `0` here: `below` is the first face handed to the builder,
-/// and it is the first of the two the mesher reaches.
+/// The sweep's mesh is what says so. It walks each copy of the arc into a
+/// point at the arc's middle of its own, two table entries at one place, so
+/// the bottom face's loop is `A`, `M`, `B`, `M′`. The mesh cuts a loop that
+/// names one place twice into two lobes there, and both lobes here are two
+/// corners, so the face is drawn as the two triangles that bridge the cut and
+/// nothing else, and those cover nothing. Before the mesh cut such loops it
+/// refused this one `CornersCoincide`; now the skin it makes does not use
+/// every side once each way, and the plate is refused for that, as the face
+/// turned round above is.
 #[test]
 fn a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh() {
     let policy = Policy::certified();
@@ -160,11 +165,7 @@ fn a_two_step_face_whose_two_edges_are_the_same_curve_is_caught_by_the_mesh() {
     assert!(
         matches!(
             refused,
-            Err(Error::ADraftFaceCouldNotBeMeshed {
-                face: 0,
-                why: rcad_mesh::CannotTriangulate::CornersCoincide { .. },
-                ..
-            })
+            Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
         ),
         "got {refused:?}"
     );
