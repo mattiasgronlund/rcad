@@ -566,9 +566,9 @@ fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_
     }
 }
 
-/// The same two bends placed round by `−2` or `−1.984` and a quarter turn
-/// back, where the first bend's start cap and the copy's end cap overlap in a
-/// wedge `4π` times the angle between them (Q2089).
+/// The same two bends placed round by `−2`, `−1.984` or `−3.1 + 0.0155 · 58`
+/// and a quarter turn back, where the first bend's start cap and the copy's
+/// end cap overlap in a wedge `4π` times the angle between them (Q2089).
 ///
 /// The wedge is thinner than the space any mesh of it can leave out, so no
 /// mesh says which way its faces point. The sum the closest mesh leaves is
@@ -578,9 +578,14 @@ fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_
 /// the faces point inwards; they point out. At `−2` it passed on a sum that
 /// answered only because the caps' flat faces were charged nothing for the
 /// space their mesh can leave out.
+///
+/// Step 58 of `two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring`'s
+/// walk was answered a whole ring, its sliver's torus face cut the long way
+/// round, until Q2265, and is refused by this name since. Telling the sign of
+/// such a sliver another way, and answering it, is Q2266's.
 #[test]
 fn two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name() {
-    for start in [-2.0, -1.984] {
+    for start in [-2.0, -1.984, -3.1 + 0.0155 * 58.0] {
         for the_first_first in [true, false] {
             let what = format!("placed round by {start}, the first first {the_first_first}");
             let mut model = a_model();
@@ -1933,6 +1938,90 @@ fn each_within_its_error(mut measured: Vec<(f64, f64)>, expected: &[f64], what: 
         assert!(
             (volume - closed).abs() <= error,
             "{what}: {volume} ± {error}, against {closed}"
+        );
+    }
+}
+
+/// The same two bends placed round by `−3.1 + 0.0155 · step` and a quarter
+/// turn back overlap in a wedge under `1e-15`. Their intersection's torus face
+/// lies between two meridian circles a rounding apart round the ring. Until
+/// Q2265 the mesher read the circles' middles inverted at some deflections,
+/// moved the second circle a whole turn, and cut the face the long way round:
+/// at steps 58, 173 and 196 the fuse answered, `Model::validate` passed, and
+/// the measure gave about `78.9`, a whole ring, for the wedge (Q2138, Q2149).
+/// The mesher now orders the two circles round the ring by the planes through
+/// the axis they lie on, exactly.
+///
+/// At step 173 the intersection both ways round answers the sliver, and the
+/// measure holds it against its wedge at every deflection from `0.32` to
+/// `1e-3`. At step 196 the fuse refuses it [`Invalid::VolumeIsNotPositive`]
+/// both ways round, on a sum of `−5.2e-16` that a rung passed as below zero,
+/// where the caps' normals read a wedge of `5.9e-19`. Either the rung charged
+/// the sum too little, since a sliver's volume is not below zero, or the caps
+/// truly lie apart and the fuse built a sliver that is not there; which of the
+/// two is a row from Q2265 of its own. Step 58 is refused
+/// [`Error::CannotTellWhichWayASolidsFacesPoint`], in
+/// `two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name`.
+#[test]
+fn two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring() {
+    let policy = Policy::certified();
+    let at = |step: f64| -3.1 + 0.0155 * step;
+    for the_first_first in [true, false] {
+        let what = format!("step 173, the first first {the_first_first}");
+        let start = at(173.0);
+        let mut model = a_model();
+        let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
+        let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
+        let wedge = 4.0 * PI * the_angle_where_the_caps_overlap(&model, [first, copy], start);
+        let (arguments, tools) = if the_first_first {
+            ([first], [copy])
+        } else {
+            ([copy], [first])
+        };
+        let answer = model
+            .fuse(
+                &arguments,
+                &tools,
+                Rule::Intersection,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let [solid] = answer.solids()[..] else {
+            panic!("{what}: one solid, not {:?}", answer.solids());
+        };
+        for size in [
+            0.32, 0.16, 0.08, 0.04, 0.02, 0.01, 5e-3, 2.5e-3, 1.25e-3, 1e-3,
+        ] {
+            let deflection = rcad_geom::Deflection::of(size).expect("a deflection");
+            let (volume, error) = model
+                .solid(solid)
+                .and_then(|solid| solid.measure(deflection, &policy, &mut ProvenanceLog::new()))
+                .map(|measured| (measured.volume(), measured.volume_error()))
+                .unwrap_or_else(|why| panic!("{what}, deflection {size}: {why:?}"));
+            assert!(
+                0.0 < wedge && (volume - wedge).abs() <= error,
+                "{what}, deflection {size}: {volume} ± {error}, a wedge of {wedge}"
+            );
+        }
+    }
+    for the_first_first in [true, false] {
+        let what = format!("step 196, the first first {the_first_first}");
+        let start = at(196.0);
+        let mut model = a_model();
+        let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
+        let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
+        let wedge = 4.0 * PI * the_angle_where_the_caps_overlap(&model, [first, copy], start);
+        let fused = fused_or_refused(&mut model, first, copy, Rule::Intersection, the_first_first);
+        let Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume })) = fused else {
+            panic!("{what}: {fused:?}, a wedge of {wedge}");
+        };
+        assert!(
+            volume < 0.0 && 0.0 < wedge,
+            "{what}: a volume of {volume}, a wedge of {wedge}"
         );
     }
 }
