@@ -64,7 +64,10 @@
 //! meet of three that refused them before. The quarter of a bar placed round
 //! a bend got past the cut at Q1817 and has not been run with the arm made to
 //! print since; none of its fuses is refused `Undecidable`, so every piece of
-//! each was placed.
+//! each was placed. Since Q2331 a wedge whose face is a plane through the axis
+//! a hair below a bend's cap reaches it too, at hairs from `1e-15` down, in
+//! every fuse, and every fuse answers
+//! (`a_wedge_a_hair_below_a_bends_cap_answers_every_rule_with_their_volumes`).
 //!
 //! Q1125's run, of all 1755 tests of this crate's suite with the arm made to
 //! print, printed nine times, all in the placed bends' test, and each piece it
@@ -1045,13 +1048,29 @@ fn a_bend_and_a_copy_moved_a_rounding_off_it_are_refused_when_crossed() {
 /// The wedge itself, the prism less what is outside the bar, validates and
 /// measures `18π − 72 atan(hair / 10)` within the measure's own error for
 /// every hair from `1e-3` down to `1e-20`; until Q1817 it was refused
-/// `Undecidable` at `order along a crossing` from `1e-15` down. The wedge's
-/// face is not stored on a plane through the axis, so the fuse is refused
-/// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` at every hair, at a reach
-/// of ten.
+/// `Undecidable` at `order along a crossing` from `1e-15` down.
+///
+/// Fused with the quarter bend of ring 4 round a tube of 1, `2π²`, which it
+/// does not touch, every rule both ways round answers at every hair and the
+/// model validates: the union is the two of them, the intersection nothing,
+/// and each difference the first named, each within the measure's own error.
+/// Until Q2331 an extrusion wrote the wedge's side back to the origin through
+/// `(10, −hair)`, the corner its profile lists first, so its plane missed the
+/// axis by a rounding and every one of these fuses was refused
+/// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`. The side's plane now goes
+/// through the origin, the corner nearer it, and is a plane through the axis.
+///
+/// **This is the piece the file hunts for, reached.** Run with
+/// `settle_against_each`'s arm made to print, at hairs `1e-15`, `1e-16` and
+/// `1e-20` every one of the six fuses printed three times: three points of
+/// the wedge's face, at `(4, −0.4·hair, 0)` on the ring's circle, a rounding
+/// off the bend's cap, could not be fired at the bend's ring. At `1e-14` and
+/// above nothing printed. Each of those pieces was then placed by some other
+/// point or rule, since each fuse answers.
 #[test]
-fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
+fn a_wedge_a_hair_below_a_bends_cap_answers_every_rule_with_their_volumes() {
     let policy = Policy::certified();
+    let bend = 2.0 * PI * PI;
     for hair in [1e-3, 1e-9, 1e-12, 1e-14, 1e-15, 1e-16, 1e-20] {
         let mut model = a_model();
         let wedge = a_wedge(&mut model, hair)
@@ -1068,10 +1087,10 @@ fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
                 &mut ProvenanceLog::new(),
             )
             .unwrap_or_else(|why| panic!("a hair of {hair:e}: {why:?}"));
-        let expected = 18.0 * PI - 72.0 * (hair / 10.0).atan();
+        let wedge = 18.0 * PI - 72.0 * (hair / 10.0).atan();
         assert!(
-            (measured.volume() - expected).abs() <= measured.volume_error(),
-            "a hair of {hair:e}: {} ± {}, against {expected}",
+            (measured.volume() - wedge).abs() <= measured.volume_error(),
+            "a hair of {hair:e}: {} ± {}, against {wedge}",
             measured.volume(),
             measured.volume_error()
         );
@@ -1079,19 +1098,19 @@ fn a_wedge_a_hair_below_a_bends_cap_is_refused_before_a_ray() {
             for the_bend_first in [true, false] {
                 let what = format!("a hair of {hair:e}, {rule:?}, the bend first {the_bend_first}");
                 let mut model = a_model();
-                let bend = a_quarter_bend(&mut model, 4.0, 1.0);
-                let wedge = a_wedge(&mut model, hair)
+                let quarter = a_quarter_bend(&mut model, 4.0, 1.0);
+                let cut = a_wedge(&mut model, hair)
                     .unwrap_or_else(|why| panic!("{what}: the wedge {why:?}"));
-                let refused = fused_or_refused(&mut model, bend, wedge, rule, the_bend_first);
-                assert!(
-                    matches!(
-                        refused,
-                        Err(Error::Geometry(
-                            rcad_geom::Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic
-                        ))
-                    ),
-                    "{what}: {refused:?}"
-                );
+                let measured = fused_and_measured(&mut model, quarter, cut, rule, the_bend_first)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                let expected = match (rule, the_bend_first) {
+                    (Rule::Union, _) => vec![bend, wedge],
+                    (Rule::Intersection, _) => vec![],
+                    (Rule::Difference, true) => vec![bend],
+                    (Rule::Difference, false) => vec![wedge],
+                    (other, _) => panic!("not a rule this tries: {other:?}"),
+                };
+                each_within_its_error(measured, &expected, &what);
             }
         }
     }
