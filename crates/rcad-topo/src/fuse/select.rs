@@ -5650,6 +5650,115 @@ mod tests {
         );
     }
 
+    /// A piece of a block's floor under a plate with a round tab, a pipe of 3
+    /// about `(10, 10)`: the rectangle from `(7.6, 8.2)` to `(10, 10)`, whose
+    /// corner `(7.6, 8.2)` is a rounding outside the pipe, so the pipe cuts
+    /// that corner off by an arc between where the block's two walls cross
+    /// the rim. Those two places are boxes a rounding wide, and they overlap at
+    /// the corner, so the chord between them has no direction and the turn
+    /// about it was undecided for every point. No point was held, a unit clear
+    /// of the arc included, and every certified fuse of the block under the
+    /// plate was refused "a point inside a piece of a face"
+    /// (`tests/a_block_cornered_on_a_round_tabs_rim.rs`, Q2297).
+    #[test]
+    fn a_rectangle_with_its_corner_cut_off_by_an_arc_a_rounding_long_holds_its_own_points() {
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::from([10.0, 10.0, 0.0]), Vector::new(0.0, 0.0, 1.0))
+                    .expect("an axis"),
+                3.0,
+            )
+            .expect("a positive radius"),
+        );
+        let wall = |coefficients: [f64; 4]| {
+            Surface::Plane(Plane::from_coefficients(coefficients).expect("a normal"))
+        };
+        let west = wall([-1.0, 0.0, 0.0, 7.6]);
+        let south = wall([0.0, -1.0, 0.0, 8.2]);
+        let east = wall([1.0, 0.0, 0.0, -10.0]);
+        let north = wall([0.0, 1.0, 0.0, -10.0]);
+        let corner =
+            |one: Surface, other: Surface, [x, y]: [Interval; 2]| MeetPoint::OfThreeSurfaces {
+                surfaces: [Surface::Plane(flat), one, other],
+                which: 0,
+                point: PredicatePoint::Constructed([x, y, Interval::exactly(0.0)]),
+            };
+        let at = |x: f64, y: f64| [Interval::exactly(x), Interval::exactly(y)];
+        let on_the_south_wall = corner(
+            south,
+            pipe,
+            [
+                Interval::new(7.6, 7.600000000000001).expect("an interval"),
+                Interval::exactly(8.2),
+            ],
+        );
+        let on_the_west_wall = corner(
+            west,
+            pipe,
+            [
+                Interval::exactly(7.6),
+                Interval::new(8.2, 8.200000000000001).expect("an interval"),
+            ],
+        );
+        let sides = [
+            (
+                south,
+                on_the_south_wall.clone(),
+                corner(south, east, at(10.0, 8.2)),
+            ),
+            (
+                east,
+                corner(south, east, at(10.0, 8.2)),
+                corner(east, north, at(10.0, 10.0)),
+            ),
+            (
+                north,
+                corner(east, north, at(10.0, 10.0)),
+                corner(north, west, at(7.6, 10.0)),
+            ),
+            (
+                west,
+                corner(north, west, at(7.6, 10.0)),
+                on_the_west_wall.clone(),
+            ),
+            (pipe, on_the_west_wall, on_the_south_wall),
+        ];
+        let piece = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires: vec![
+                sides
+                    .into_iter()
+                    .map(|(partner, from, to)| FaceMeet {
+                        carried_by: [Surface::Plane(flat), partner],
+                        ends: [from, to],
+                        material_side: Decision::Neg,
+                        along: SmallVec::new(),
+                        approximation: None,
+                    })
+                    .collect(),
+            ],
+            is_the_whole_surface: false,
+        };
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from(at))
+        };
+        assert_eq!(
+            holds([8.2, 9.55, 0.0]),
+            Some(true),
+            "a unit clear of the arc"
+        );
+        assert_eq!(
+            holds([9.4, 8.65, 0.0]),
+            Some(true),
+            "a unit clear of the arc"
+        );
+        assert_eq!(holds([11.0, 9.0, 0.0]), Some(false), "past the east side");
+        assert_eq!(holds([7.5, 8.1, 0.0]), Some(false), "outside the rim");
+    }
+
     /// The half of the plate `z = 0` with `x ≥ 0` beyond the ring of four
     /// round a tube of one: between the circle of 5 the ring cuts it in and a
     /// pipe of 10, its four corners on the line `x = 0`, so they wind round
