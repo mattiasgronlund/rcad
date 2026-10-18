@@ -41,6 +41,18 @@
 //! (§294.21). Cut where it was built and placed after, it answers half of
 //! itself at every placement (§448.7).
 //!
+//! A wedge whose edge runs up through the apex answers too, where the pyramid
+//! stands and cut there and placed after. **Placed first, it is refused
+//! `CannotTellTheCellsOfAFaceApart` by every rule under both policies** at 50
+//! of the 112 wedges and placements Q1937's lane swept. At 8 of the 50 the
+//! order along a side face's edge goes round in a loop by the apex, which is a
+//! rounding off that edge: the apex is put in order against each of the two
+//! places the wedge's faces cross the edge by that face alone, and the two
+//! places against each other by the boxes or the planes round them. Ending
+//! the loop in the 5 where `as_the_planes_say` makes it changed none of the
+//! 672 fuses swept, and the other 42 refuse with no loop, so the loop is not
+//! what refuses.
+//!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
 //! the wall's cylinder and the cut's plane `y = 0` round it, and those three
@@ -236,6 +248,38 @@ const EVERY_PARTNER: [(Block, Rule); 11] = [
     (A_NOTCH_A_QUARTER_TURN_ROUND, Rule::Difference),
     (THE_HALF_PAST_THE_SEAM, Rule::Difference),
     (THE_HALF_PAST_THE_SEAM, Rule::Intersection),
+];
+
+/// A wedge from `z = −1` to `z = 11` whose edge runs up the `z` axis, through
+/// the pyramid's apex: the slice `low·x ≤ y ≤ high·x` out to `x = 5`.
+#[derive(Clone, Copy, Debug)]
+struct Wedge {
+    low: f64,
+    high: f64,
+}
+
+/// Either side of the `x` axis, so both its faces cut the `+x` side face.
+const A_WEDGE_ROUND_THE_X_AXIS: Wedge = Wedge {
+    low: -0.5,
+    high: 0.5,
+};
+
+/// From the `+x` side face over the edge to the `+y` one.
+const A_WEDGE_OVER_THE_PLUS_Y_EDGE: Wedge = Wedge {
+    low: 0.5,
+    high: 2.0,
+};
+
+/// From the `+x` side face over the edge to the `−y` one.
+const A_WEDGE_OVER_THE_MINUS_Y_EDGE: Wedge = Wedge {
+    low: -2.0,
+    high: -0.5,
+};
+
+const EVERY_WEDGE: [Wedge; 3] = [
+    A_WEDGE_ROUND_THE_X_AXIS,
+    A_WEDGE_OVER_THE_PLUS_Y_EDGE,
+    A_WEDGE_OVER_THE_MINUS_Y_EDGE,
 ];
 
 /// What a fuse of the half bar refused with, as much of it as the pins below
@@ -520,6 +564,81 @@ fn a_cut_made_where_the_solids_were_built_and_then_placed_answers_at_every_place
     }
 }
 
+/// **Where the pyramid stands, a wedge whose edge runs up through its apex
+/// cuts it cleanly, and so does one cut there and placed after.** Every wedge
+/// holds an eighth of the pyramid, 15, and every rule answers what the two
+/// hold, under both policies where it stands and under `certified` with
+/// nothing in the log cut first and placed after, at the eight placements
+/// where the fuse refuses below. These are the controls for that refusal:
+/// what refuses there is the placement, not the wedge or the rule.
+#[test]
+fn a_sound_pyramid_cut_by_a_wedge_through_its_apex_answers_where_it_stands_and_placed_after() {
+    let every_rule = [Rule::Difference, Rule::Intersection, Rule::Union];
+    for wedge in EVERY_WEDGE {
+        for rule in every_rule {
+            for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+                let case = format!("{policy:?}, {wedge:?} {rule:?}, where it stands");
+                if let Err(refused) =
+                    the_wedge_through_the_apex(wedge, Isometry::identity(), rule, &policy)
+                {
+                    panic!("{case} refused: {refused:?}");
+                }
+            }
+        }
+    }
+    for (wedge, placement) in where_the_orders_loop_by_the_apex() {
+        for rule in every_rule {
+            let case = format!("{placement:?}, {wedge:?} {rule:?}, cut first");
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let pyramid = a_pyramid(&mut model);
+            let cut = a_wedge(&mut model, wedge, &Isometry::identity());
+            let answer = fused_then_placed(&mut model, (pyramid, cut), rule, placement, &case);
+            the_answer_holds(
+                &model,
+                &answer,
+                what_the_pyramid_and_a_wedge_hold(wedge, rule),
+                &Policy::certified(),
+                &case,
+            );
+        }
+    }
+}
+
+/// **Placed, the sound pyramid cut by a wedge whose edge runs up through its
+/// apex cannot tell the cells of a face apart**, by every rule and under both
+/// policies, and each refusal leaves the model as it was. Q1937 asked whether
+/// `as_the_planes_say` in `fuse/arrange.rs` orders two cuts against a corner a
+/// rounding off a crossing's line the way it orders the cuts against each
+/// other. These are the eight placements, of the 112 the lane swept, where it
+/// does not. The crossing is a side face's edge, the corner off it is the
+/// apex, and the two cuts are where the wedge's two faces cross that edge. The
+/// apex is put in order against each cut by that cut's own wedge face, the
+/// boxes or the planes order the two cuts against each other, and the three
+/// answers go round in a loop.
+///
+/// The loop does not make the refusal. A change to `as_the_planes_say` that
+/// let the apex order the two cuts it falls between, which ends the loop in
+/// the five of the eight where the planes ordered the cuts, changed none of the
+/// 672 fuses the lane swept, these 48 among them. The other three are ordered
+/// by the boxes, which `as_the_planes_say` is never asked. And 42 more
+/// placements with no loop refuse the same way. So no change to `fuse/` comes
+/// with this pin, and the refusal has a row of its own.
+#[test]
+fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_cannot_tell_its_cells_apart() {
+    for (wedge, placement) in where_the_orders_loop_by_the_apex() {
+        for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+            for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+                let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
+                match the_wedge_through_the_apex(wedge, placement, rule, &policy) {
+                    Err(Error::CannotTellTheCellsOfAFaceApart { .. }) => {}
+                    other => panic!("{case} came back {other:?}"),
+                }
+            }
+        }
+    }
+}
+
 /// **Every partner, every rule, every placement and both policies give the
 /// box's refusal** for every move of the apex, the cut through the apex among
 /// them. Each three of the four side planes cross at the apex alone, so no
@@ -747,11 +866,28 @@ fn the_answer_holds_what_the_two_hold(
     what_the_two_hold: fn(Block, Rule) -> (usize, f64),
     case: &str,
 ) {
+    the_answer_holds(
+        model,
+        answer,
+        what_the_two_hold(partner, rule),
+        policy,
+        case,
+    );
+}
+
+/// `answer`, in `model`, validates and holds `solids` solids and `volume`, to
+/// `1e-12` relative and the bound the measure publishes.
+fn the_answer_holds(
+    model: &Model,
+    answer: &Fused,
+    (solids, volume): (usize, f64),
+    policy: &Policy,
+    case: &str,
+) {
     model
         .validate(policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|error| panic!("{case}: the answer does not validate: {error:?}"));
 
-    let (solids, volume) = what_the_two_hold(partner, rule);
     assert_eq!(answer.solids().len(), solids, "{case}: how many solids");
     let (measured, bound) = the_volume_of(model, answer, policy, case);
     assert!(
@@ -801,6 +937,80 @@ fn the_cut_through_the_apex(
             Err(refused)
         }
     }
+}
+
+/// The sound pyramid built where it stands and moved by `placement`, fused
+/// under `rule` with `wedge` built at `placement`. An answer has to validate
+/// and hold what the pyramid and the wedge hold. A refusal has to leave the
+/// model byte for byte as it was, and comes back as it is.
+fn the_wedge_through_the_apex(
+    wedge: Wedge,
+    placement: Isometry,
+    rule: Rule,
+    policy: &Policy,
+) -> Result<(), Error> {
+    let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let pyramid = a_pyramid(&mut model);
+    model
+        .place_solid(pyramid, &placement)
+        .expect("this model made the key");
+    let cut = a_wedge(&mut model, wedge, &placement);
+    let before = postcard::to_allocvec(&model).expect("a model writes out");
+    match model.fuse(&[pyramid], &[cut], rule, policy, &mut ProvenanceLog::new()) {
+        Ok(answer) => {
+            the_answer_holds(
+                &model,
+                &answer,
+                what_the_pyramid_and_a_wedge_hold(wedge, rule),
+                policy,
+                &case,
+            );
+            Ok(())
+        }
+        Err(refused) => {
+            assert_eq!(
+                postcard::to_allocvec(&model).expect("a model writes out"),
+                before,
+                "{case}: a refused fuse leaves the model as it was"
+            );
+            Err(refused)
+        }
+    }
+}
+
+/// The eight placements where Q1937 found the order along one crossing go
+/// round in a loop by the apex, with the wedge each was found with. Each is a
+/// turn about an axis through the origin, and four are shifted after it by
+/// `every_placement`'s shift.
+fn where_the_orders_loop_by_the_apex() -> [(Wedge, Isometry); 8] {
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
+    let turn = |[x, y, z]: [f64; 3], angle: f64| {
+        let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(x, y, z)).expect("an axis");
+        Isometry::rotation(&axis, angle).expect("a turn")
+    };
+    [
+        (
+            A_WEDGE_ROUND_THE_X_AXIS,
+            shift.compose(&turn([1.0, 2.0, 3.0], 0.1)),
+        ),
+        (A_WEDGE_ROUND_THE_X_AXIS, turn([1.0, 2.0, 3.0], 0.7)),
+        (A_WEDGE_ROUND_THE_X_AXIS, turn([-2.0, 1.0, 0.5], 2.9)),
+        (
+            A_WEDGE_OVER_THE_MINUS_Y_EDGE,
+            shift.compose(&turn([1.0, 2.0, 3.0], 0.1)),
+        ),
+        (
+            A_WEDGE_OVER_THE_MINUS_Y_EDGE,
+            shift.compose(&turn([0.3, -1.0, 2.0], 0.7)),
+        ),
+        (A_WEDGE_OVER_THE_PLUS_Y_EDGE, turn([1.0, 2.0, 3.0], 0.7)),
+        (A_WEDGE_OVER_THE_PLUS_Y_EDGE, turn([-2.0, 1.0, 0.5], 0.7)),
+        (
+            A_WEDGE_OVER_THE_PLUS_Y_EDGE,
+            shift.compose(&turn([-2.0, 1.0, 0.5], 1.3)),
+        ),
+    ]
 }
 
 /// `solid` and `partner` fused under `rule` where they were built, which has
@@ -1078,6 +1288,20 @@ fn a_block(model: &mut Model, block: Block, placement: &Isometry) -> SolidKey {
         .expect("a block")
 }
 
+fn a_wedge(model: &mut Model, wedge: Wedge, placement: &Isometry) -> SolidKey {
+    let footprint = ProfileBuilder::new(vec![
+        [0.0, 0.0],
+        [5.0, 5.0 * wedge.low],
+        [5.0, 5.0 * wedge.high],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a triangle");
+    let own = Isometry::translation(Vector::new(0.0, 0.0, -1.0)).expect("a plain translation");
+    model
+        .add_extrusion(&footprint, 12.0, &placement.compose(&own))
+        .expect("a wedge")
+}
+
 /// How many solids and how much volume the sound box and `partner` give under
 /// `rule`, from where the two overlap along each axis.
 fn what_the_two_boxes_hold(partner: Block, rule: Rule) -> (usize, f64) {
@@ -1195,6 +1419,36 @@ fn what_the_pyramid_shares_with(block: Block) -> f64 {
         .sum()
 }
 
+/// How many solids and how much volume the sound pyramid and `wedge` give
+/// under `rule`. They always overlap, so every rule gives one solid.
+///
+/// At height `z` the pyramid is the square `|x|, |y| ≤ s` with `s = SIDE·(1 −
+/// z/HEIGHT)`, and the wedge takes the part of it between two lines through
+/// its middle, `s²` times what it takes of the square `|x|, |y| ≤ 1`. Of that
+/// square the line `y = m·x`, `x ≥ 0`, leaves `m/2` between it and `y = 0`
+/// for `|m| ≤ 1`, and `±(1 − 1/(2|m|))` past a corner. The pyramid's `s²`
+/// over its height is `SIDE²·HEIGHT/3`.
+fn what_the_pyramid_and_a_wedge_hold(wedge: Wedge, rule: Rule) -> (usize, f64) {
+    let up_to = |m: f64| {
+        if m.abs() <= 1.0 {
+            m / 2.0
+        } else {
+            m.signum() * (1.0 - 1.0 / (2.0 * m.abs()))
+        }
+    };
+    let shared = (up_to(wedge.high) - up_to(wedge.low)) * SIDE * SIDE * HEIGHT / 3.0;
+    let the_pyramid = (2.0 * SIDE) * (2.0 * SIDE) * HEIGHT / 3.0;
+    let the_wedge = 5.0 * 5.0 * (wedge.high - wedge.low) / 2.0 * 12.0;
+    if rule == Rule::Difference {
+        (1, the_pyramid - shared)
+    } else if rule == Rule::Intersection {
+        (1, shared)
+    } else {
+        assert_eq!(rule, Rule::Union, "no wedge here is fused under {rule:?}");
+        (1, the_pyramid + the_wedge - shared)
+    }
+}
+
 /// How many solids and how much volume the sound half bar and `partner` give
 /// under `rule`.
 fn what_the_half_bar_and_a_block_hold(partner: Block, rule: Rule) -> (usize, f64) {
@@ -1257,114 +1511,4 @@ fn what_a_solid_and_a_block_hold(
 
 fn overlap(one: [f64; 2], other: [f64; 2]) -> f64 {
     (one[1].min(other[1]) - one[0].max(other[0])).max(0.0)
-}
-
-#[test]
-fn probe_q1937_a_pyramid_cut_by_a_wedge_whose_edge_runs_through_its_apex() {
-    let mut lines = Vec::new();
-    for (low, high) in [(-0.5, 0.5), (0.5, 2.0), (-2.0, -0.5), (0.25, 0.75)] {
-        // The slice `low·x ≤ y ≤ high·x`, `x ≥ 0`, of the pyramid: at height
-        // `z`, with `s = 0.3 (10 − z)`, the square cut by the two lines.
-        let shared = probe_slice_volume(low, high);
-        let mut placements = every_placement().to_vec();
-        let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a translation");
-        for direction in [
-            Vector::new(1.0, 2.0, 3.0),
-            Vector::new(-2.0, 1.0, 0.5),
-            Vector::new(0.3, -1.0, 2.0),
-        ] {
-            let axis = Axis::new(Point::new(0.0, 0.0, 0.0), direction).expect("an axis");
-            for angle in [0.1, 0.7, 1.3, 2.9] {
-                let turn = Isometry::rotation(&axis, angle).expect("a turn");
-                placements.push(turn);
-                placements.push(shift.compose(&turn));
-            }
-        }
-        for (index, placement) in placements.into_iter().enumerate() {
-            for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
-                for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-                    let mut model =
-                        Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-                    let pyramid = a_pyramid(&mut model);
-                    model
-                        .place_solid(pyramid, &placement)
-                        .expect("this model made the key");
-                    let footprint =
-                        ProfileBuilder::new(vec![[0.0, 0.0], [5.0, 5.0 * low], [5.0, 5.0 * high]])
-                            .build(&Policy::certified(), &mut ProvenanceLog::new())
-                            .expect("a triangle");
-                    let own = Isometry::translation(Vector::new(0.0, 0.0, -1.0))
-                        .expect("a plain translation");
-                    let wedge = model
-                        .add_extrusion(&footprint, 12.0, &placement.compose(&own))
-                        .expect("a wedge");
-                    let the_wedge = 5.0 * 5.0 * (high - low) / 2.0 * 12.0;
-                    let expected = match rule {
-                        Rule::Difference => 120.0 - shared,
-                        Rule::Intersection => shared,
-                        _ => 120.0 + the_wedge - shared,
-                    };
-                    let mut log = ProvenanceLog::new();
-                    eprintln!(
-                        "Q1937 CASE wedge ({low}, {high}) placement {index} {rule:?} {policy:?}"
-                    );
-                    let fused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        model.fuse(&[pyramid], &[wedge], rule, &policy, &mut log)
-                    }));
-                    let Ok(fused) = fused else {
-                        lines.push(format!(
-                            "wedge ({low}, {high}) placement {index} {rule:?} {policy:?}: PANICKED"
-                        ));
-                        continue;
-                    };
-                    let outcome = match fused {
-                        Ok(answer) => {
-                            let valid = model.validate(&policy, &mut ProvenanceLog::new());
-                            let case = "probe";
-                            let (volume, bound) = if valid.is_ok() {
-                                the_volume_of(&model, &answer, &policy, case)
-                            } else {
-                                (f64::NAN, f64::NAN)
-                            };
-                            let named: Vec<&str> =
-                                log.records().iter().map(|r| r.predicate()).collect();
-                            format!(
-                                "Ok solids {} volume {volume} (expected {expected}, off {:e}, bound {bound}) valid {:?} {:?} log {named:?}",
-                                answer.solids().len(),
-                                (volume - expected).abs(),
-                                valid.err(),
-                                the_faces_and_sides_of(&model, &answer),
-                            )
-                        }
-                        Err(Error::Undecidable { records }) => {
-                            let named: Vec<&str> =
-                                records.records().iter().map(|r| r.predicate()).collect();
-                            format!("Undecidable {named:?}")
-                        }
-                        Err(other) => format!("Err {other:?}"),
-                    };
-                    lines.push(format!(
-                        "wedge ({low}, {high}) placement {index} {rule:?} {policy:?}: {outcome}"
-                    ));
-                }
-            }
-        }
-    }
-    for line in &lines {
-        println!("PROBE {line}");
-    }
-}
-
-fn probe_slice_volume(low: f64, high: f64) -> f64 {
-    // The square `|x|, |y| ≤ s` cut to `x ≥ 0`, `low·x ≤ y ≤ high·x`, has area
-    // `s²·A` for the unit square's `A`; the pyramid's `∫ s² dz` is `30`.
-    let steps = 2_000_000;
-    let mut area = 0.0;
-    for i in 0..steps {
-        let x = (f64::from(i) + 0.5) / f64::from(steps);
-        let y_low = (low * x).max(-1.0);
-        let y_high = (high * x).min(1.0);
-        area += (y_high - y_low).max(0.0) / f64::from(steps);
-    }
-    area * 30.0
 }
