@@ -14,9 +14,11 @@
 //! `π(OUTER² + INNER²)·HEIGHT/2`, and every corner sits at `(±R, 0, z)` where
 //! `x² + y² − r²` cancels to nothing.
 //!
-//! The last test writes the same two half-circles as the rim of a round bar and
-//! builds the bar on a turned axis, where the ends no longer land exactly on the
-//! flat surfaces of the half-spaces that pick each arc out.
+//! The last two tests write the same two half-circles as the rim of a round bar
+//! and build the bar on a turned axis, where the ends no longer land exactly on
+//! the flat surfaces of the half-spaces that pick each arc out: once with those
+//! half-spaces through the ends, which must build, and once with them moved a
+//! hair past the ends, which must still be refused.
 
 use rcad_geom::{
     Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
@@ -197,10 +199,13 @@ fn the_same_plate_a_thousand_times_smaller_and_bigger_is_the_same_answer() {
 /// surface passes exactly through its arc's two ends.
 ///
 /// Built turned, every point, surface and run is moved before the builder sees
-/// it, and a turn rounds an end off its half-space's flat surface by an ulp or
-/// so, to either side. Every turn here not about `x` or `y` was refused
-/// `EdgeOutsideWhatPickedIt` — 200 of the 250, in all four ways of laying the
-/// two spellings up and down, 800 builds of 1000.
+/// it, and the turn rounds an end off its half-space's flat surface to one side
+/// or the other. `Model::check_edge` asked that side exactly, and every turn
+/// here not about `x` or `y` was refused `EdgeOutsideWhatPickedIt`: 200 of the
+/// 250, in all four ways of laying the two spellings up and down, 800 builds of
+/// 1000. It now asks the box round the end that writing a point down costs, as
+/// it already asked the same end against the arc's plane, and each bar builds
+/// and holds `4π`.
 #[test]
 fn a_bar_whose_rim_is_two_half_circles_builds_turned_every_way() {
     let up = Cylinder::new(Axis::z(), BAR_RADIUS).expect("a radius");
@@ -217,21 +222,93 @@ fn a_bar_whose_rim_is_two_half_circles_builds_turned_every_way() {
             );
             let mut model = Model::new(a_working_size());
             let mut log = ProvenanceLog::new();
-            match a_bar_whose_rim_is_two_half_circles(
+            let bar = match a_bar_whose_rim_is_two_half_circles(
                 &mut model,
                 [lower, upper],
+                0.0,
                 &turn,
                 &policy,
                 &mut log,
             ) {
-                Ok(_) => built += 1,
-                Err(why) => wrong.push(format!("{what}: refused {why:?}")),
+                Ok(bar) => bar,
+                Err(why) => {
+                    wrong.push(format!("{what}: refused {why:?}"));
+                    continue;
+                }
+            };
+            built += 1;
+            let measured = model
+                .solid(bar)
+                .expect("this model made the key")
+                .measure(
+                    rcad_geom::Deflection::of(0.01).expect("a positive length"),
+                    &policy,
+                    &mut log,
+                )
+                .unwrap_or_else(|why| panic!("{what}: the bar measures: {why:?}"));
+            let space = core::f64::consts::PI * BAR_RADIUS * BAR_RADIUS * 4.0;
+            if (measured.volume() - space).abs() > measured.volume_error() {
+                wrong.push(format!(
+                    "{what}: measured {} give or take {}, and the bar holds {space}",
+                    measured.volume(),
+                    measured.volume_error()
+                ));
             }
         }
     }
     assert!(
         wrong.is_empty(),
-        "{built} built and {} refused:\n{}",
+        "{built} built and {} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// The half of that fix that must not have been given away: the same bar with
+/// each half-space moved `1e-13` toward its own arc's middle, which leaves both
+/// ends of every arc outside what picked it, is still refused at every turn and
+/// unturned.
+///
+/// What an end is let off by is the width of a written-down number, sixteen
+/// `f64::EPSILON` times the largest coordinate, about `1.4e-14` at a bar four
+/// long. Measured over these 1004 builds, half-spaces moved in by `1e-14` built
+/// all of them and moved in by `3e-14` were refused at all of them, so `1e-13`
+/// is a name for a piece the edge is not, turned or not.
+#[test]
+fn a_bar_whose_pickers_miss_its_ends_by_a_hair_is_still_refused() {
+    let up = Cylinder::new(Axis::z(), BAR_RADIUS).expect("a radius");
+    let down = Cylinder::new(Axis::z().reversed(), BAR_RADIUS).expect("a radius");
+    let policy = Policy::certified();
+    let mut turns = vec![("not at all".to_owned(), Isometry::identity())];
+    turns.extend(the_turns_off_z());
+    let mut wrong = Vec::new();
+    for (turn_name, turn) in turns {
+        for (lower, upper) in [(up, up), (up, down), (down, up), (down, down)] {
+            let refused = a_bar_whose_rim_is_two_half_circles(
+                &mut Model::new(a_working_size()),
+                [lower, upper],
+                1e-13,
+                &turn,
+                &policy,
+                &mut ProvenanceLog::new(),
+            );
+            if !matches!(
+                refused,
+                Err(rcad_topo::Error::Invalid(
+                    rcad_topo::Invalid::EdgeOutsideWhatPickedIt
+                ))
+            ) {
+                wrong.push(format!(
+                    "bands on {} and {}, turned {turn_name}: {refused:?}",
+                    which_way(lower),
+                    which_way(upper)
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} not refused:\n{}",
         wrong.len(),
         wrong.join("\n")
     );
@@ -412,10 +489,16 @@ fn an_arc_under(plane: &Plane) -> EdgeRun {
 }
 
 fn an_arc_on(plane: &Plane, side: f64) -> EdgeRun {
+    an_arc_picked_through(plane, side, Point::origin())
+}
+
+/// The part of the circle `plane` cuts in front of the half-space through
+/// `through` facing `side` along `y`.
+fn an_arc_picked_through(plane: &Plane, side: f64, through: Point) -> EdgeRun {
     EdgeRun::PartOfWhereItCrosses {
         and: Surface::Plane(*plane),
         picked_by: smallvec::smallvec![Picker::from(
-            HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, side, 0.0))
+            HalfSpace::through_a_point_facing(through, Vector::new(0.0, side, 0.0))
                 .expect("an axis direction has length")
         )],
     }
@@ -469,14 +552,17 @@ fn which_way(wall: Cylinder) -> &'static str {
     }
 }
 
-/// The bar of the test above: `BAR_RADIUS` round from `z = 0` to `z = 4`, the
+/// The bar of the tests above: `BAR_RADIUS` round from `z = 0` to `z = 4`, the
 /// band below `z = 2` on `walls[0]` and the band above it on `walls[1]`, with
 /// every point, surface and run moved by `built_on` before the builder sees it.
 ///
 /// The rim is two arcs between the corners at `(±BAR_RADIUS, 0, 2)`: the one
 /// through `-y` runs from `+x` to `-x` and the one through `+y` back again, so
-/// the lower band walks the rim against its pipe's longitude and the upper band
-/// with it, whichever way round the pipe is written.
+/// the lower band walks the rim clockwise seen from `+z` and the upper band the
+/// other way, whichever way round the pipe is written. Each arc is picked by
+/// the half-space facing its own middle, whose flat surface is moved
+/// `pickers_moved_in_by` from the origin toward that middle: at `0` it passes
+/// through both ends, and past `0` it leaves them outside.
 ///
 /// # Errors
 ///
@@ -484,6 +570,7 @@ fn which_way(wall: Cylinder) -> &'static str {
 fn a_bar_whose_rim_is_two_half_circles(
     model: &mut Model,
     walls: [Cylinder; 2],
+    pickers_moved_in_by: f64,
     built_on: &Isometry,
     policy: &Policy,
     log: &mut ProvenanceLog,
@@ -502,10 +589,16 @@ fn a_bar_whose_rim_is_two_half_circles(
     let seam_below = draft.add_edge(at_0, east, EdgeRun::Straight)?;
     let seam_above = draft.add_edge(east, at_4, EdgeRun::Straight)?;
     let bottom_circle = draft.add_edge(at_0, at_0, EdgeRun::RightRoundWhereItsFacesCross)?;
-    let through_minus_y =
-        draft.add_edge(east, west, an_arc_under(&rim_plane).transformed(built_on))?;
-    let through_plus_y =
-        draft.add_edge(west, east, an_arc_over(&rim_plane).transformed(built_on))?;
+    let an_arc = |side: f64| {
+        an_arc_picked_through(
+            &rim_plane,
+            side,
+            Point::new(0.0, side * pickers_moved_in_by, 0.0),
+        )
+        .transformed(built_on)
+    };
+    let through_minus_y = draft.add_edge(east, west, an_arc(-1.0))?;
+    let through_plus_y = draft.add_edge(west, east, an_arc(1.0))?;
     let top_circle = draft.add_edge(at_4, at_4, EdgeRun::RightRoundWhereItsFacesCross)?;
     let bottom = a_cap(&mut draft, 0.0, -1.0, bottom_circle, lower, built_on)?;
     let top = a_cap(&mut draft, 4.0, 1.0, top_circle, upper, built_on)?;

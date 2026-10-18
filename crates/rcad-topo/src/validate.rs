@@ -406,7 +406,10 @@ impl Model {
         // which is the same allowance `check_flat_face` gives a corner
         // against the plane its face *sits* on. Asking a stored *name* more
         // strictly than the surface a face is actually carried by had it
-        // backwards: it refused corners for the rounding in the name.
+        // backwards: it refused corners for the rounding in the name. A
+        // half-space that picked the piece is asked with the box
+        // `not_provably_off` asks a curved `and` with, for the same reason:
+        // `provably_outside` says why.
         //
         // **Both kinds of run that name a second surface are asked**, and they
         // are asked the same thing. A closed rim carries an `and` and no
@@ -467,10 +470,15 @@ impl Model {
                         panic!("a corner came back with a decision nothing here knows: {other:?}")
                     }
                 }
-                if picked_by
-                    .iter()
-                    .any(|picker| picker.side_of_point(at) == Decision::Neg)
-                {
+                if picked_by.iter().any(|picker| {
+                    picker.side_of_point(at) == Decision::Neg
+                        && provably_outside(
+                            picker,
+                            corner.point,
+                            corner.approximation,
+                            writing_a_point_down,
+                        )
+                }) {
                     return Err(Invalid::EdgeOutsideWhatPickedIt.into());
                 }
             }
@@ -5118,19 +5126,65 @@ fn not_provably_off(
     slop: Option<Approximation>,
     writing_it_down: f64,
 ) -> bool {
+    the_box_a_corner_may_be_anywhere_in(point, slop, writing_it_down).is_some_and(|within| {
+        matches!(
+            side_of_surface(surface, within),
+            Decision::Zero | Decision::Undecidable { .. }
+        )
+    })
+}
+
+/// Whether a corner that is outside `picker` stays outside it once the slop
+/// recorded on it is taken into account: [`not_provably_off`]'s twin for the
+/// half-spaces that pick an arc out of its crossing.
+///
+/// **A picker's flat surface goes through an end of the arc it picks** whenever
+/// the arc stops where that surface cuts the crossing — a half-circle picked by
+/// the half-space through the circle's centre, which is how
+/// `a_face_bounded_by_two_half_circles.rs` writes its rims. That end is on the
+/// surface exactly only while every number in it is exact. Built turned onto an
+/// axis other than `x` or `y`, the corner and the picker each round, and asked
+/// exactly an end came out outside at all 200 such turns of the 250 that file
+/// builds a bar whose rim is two half-circles at, while the same end against the
+/// arc's second surface was let through by [`not_provably_off`]. So one corner
+/// is now asked one standard, the width of the number and not a tolerance: a
+/// corner whose box straddles a picker's surface is one no `f64` could have
+/// written any nearer to the inside.
+///
+/// Asked only after the exact point has come out outside, so an end placed
+/// exactly is asked exactly what it always was. A picker that misses an end by
+/// more than the box is still caught:
+/// `a_bar_whose_pickers_miss_its_ends_by_a_hair_is_still_refused` moves them
+/// `1e-13` in.
+fn provably_outside(
+    picker: &Picker,
+    point: Point,
+    slop: Option<Approximation>,
+    writing_it_down: f64,
+) -> bool {
+    the_box_a_corner_may_be_anywhere_in(point, slop, writing_it_down)
+        .is_none_or(|within| picker.side_of_point(within) == Decision::Neg)
+}
+
+/// The box round `point` as wide as the wider of the slop recorded on it and
+/// what writing it down costs, or `None` when that is no positive finite length
+/// and there is no box to ask about.
+fn the_box_a_corner_may_be_anywhere_in(
+    point: Point,
+    slop: Option<Approximation>,
+    writing_it_down: f64,
+) -> Option<PredicatePoint> {
     let recorded = slop.map_or(0.0, Approximation::magnitude);
     let reach = recorded.max(writing_it_down);
     if !(reach > 0.0 && reach.is_finite()) {
-        return false;
+        return None;
     }
-    let within = PredicatePoint::Constructed(point.coordinates().map(|coordinate| {
-        Interval::around(coordinate, reach)
-            .expect("a positive finite reach makes a box round a finite corner")
-    }));
-    matches!(
-        side_of_surface(surface, within),
-        Decision::Zero | Decision::Undecidable { .. }
-    )
+    Some(PredicatePoint::Constructed(point.coordinates().map(
+        |coordinate| {
+            Interval::around(coordinate, reach)
+                .expect("a positive finite reach makes a box round a finite corner")
+        },
+    )))
 }
 
 /// Every point where `surface` pinches, each as the box its coordinates round
