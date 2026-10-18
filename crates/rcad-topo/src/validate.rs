@@ -5821,7 +5821,7 @@ mod tests {
         how_much_space_a_curved_solid_encloses, how_much_space_hides_under,
         how_wide_an_arc_of_one_branch_is, it_lies_flat, largest_coordinate_of,
         signed_volume_over_and_how_far_it_rounded, the_coarsest_mesh_whose_sides_do_not_cross,
-        the_sum_answers, winding_of, winding_round,
+        the_sum_answers, what_it_encloses_moved_onto_its_planes, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -8821,6 +8821,103 @@ mod tests {
                 "{what}: validate charges {charged} where measure charges {measured}, \
                  straying {deviation}"
             );
+        }
+    }
+
+    /// Row Q2266. A disc of radius one and `2⁻⁵⁴` high, turned about
+    /// `(1, 0.3, 0)`, is two caps of area `π` a sliver apart: the ring sliver's
+    /// caps without its ring. A turned plane cannot hold the caps' points, so
+    /// at a deflection of `2⁻⁷` [`how_far_the_sum_can_be_off`] charges the
+    /// disc's mesh more than its whole volume of `1.74e-16`, and the sum
+    /// wanders from `3.8e-17` to `2.0e-16` over the three turns. Moved onto
+    /// the planes by [`what_it_encloses_moved_onto_its_planes`], the same mesh
+    /// encloses `1.7406e-16` at every turn, within a charge under a tenth of
+    /// the plain one.
+    ///
+    /// [`Model::validate`] refuses the disc [`Invalid::DynamicRangeTooWide`],
+    /// so this drives the arithmetic on its mesh directly.
+    #[test]
+    fn a_disc_a_few_roundings_high_turned_any_way_holds_its_volume_on_its_planes() {
+        let high = f64::powi(2.0, -54);
+        let volume = core::f64::consts::PI * high;
+        let deflection = Deflection::of(f64::powi(2.0, -7)).expect("a positive deflection");
+        let leaning = Axis::new(Point::origin(), Vector::new(1.0, 0.3, 0.0)).expect("an axis");
+        for turn in [0.3, 1.1, 2.9] {
+            let mut model = an_empty_model();
+            let placement = Isometry::rotation(&leaning, turn).expect("a finite turn");
+            let disc = model
+                .add_round_bar(1.0, high, &placement)
+                .expect("a disc of radius one");
+            assert!(
+                matches!(
+                    model.validate(&Policy::certified(), &mut ProvenanceLog::new()),
+                    Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
+                ),
+                "turned {turn}: validate does not refuse the disc for its range"
+            );
+            let view = model.solid(disc).expect("this model made the key");
+            let mesh = view
+                .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("turned {turn}: {why:?}"));
+            let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+            let plain =
+                how_far_the_sum_can_be_off(view, &mesh, rounding).expect("a disc can be charged");
+            let (moved, charge) =
+                what_it_encloses_moved_onto_its_planes(view, &mesh, enclosed, rounding)
+                    .expect("a disc can be charged");
+            assert!(
+                (moved - volume).abs() <= charge && moved.abs() > charge && 10.0 * charge < plain,
+                "turned {turn}: encloses {enclosed}, off by {plain}; moved {moved}, off by \
+                 {charge}; holds {volume}"
+            );
+        }
+    }
+
+    /// Row Q2266. A solid whose mesh has no point to move onto a plane is
+    /// summed by [`what_it_encloses_moved_onto_its_planes`] as it is, and
+    /// charged no less than [`how_far_the_sum_can_be_off`] charges it, so the
+    /// moved sum answers no such solid that the ladder did not. A ball has no
+    /// flat face, and an upright bar's caps lie on planes that hold its points
+    /// exactly.
+    #[test]
+    fn a_solid_with_no_point_to_move_is_summed_as_it_is_and_charged_no_less() {
+        let mut model = an_empty_model();
+        let shapes = [
+            (
+                "a ball",
+                model
+                    .add_ball(2.0, &Isometry::identity())
+                    .expect("a ball of radius two"),
+            ),
+            (
+                "an upright bar",
+                model
+                    .add_round_bar(3.0, 5.0, &Isometry::identity())
+                    .expect("a bar of radius three"),
+            ),
+        ];
+        for (what, key) in shapes {
+            let view = model.solid(key).expect("this model made the key");
+            for room in [0.3, 0.05] {
+                let mesh = view
+                    .mesh(
+                        Deflection::of(room).expect("a positive deflection"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{what} at {room}: {why:?}"));
+                let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+                let plain = how_far_the_sum_can_be_off(view, &mesh, rounding)
+                    .unwrap_or_else(|| panic!("{what}: a ball and a bar can be charged"));
+                let (moved, charge) =
+                    what_it_encloses_moved_onto_its_planes(view, &mesh, enclosed, rounding)
+                        .unwrap_or_else(|| panic!("{what}: a ball and a bar can be charged"));
+                assert!(
+                    moved == enclosed && charge >= plain,
+                    "{what} at {room}: encloses {enclosed}, off by {plain}; moved {moved}, \
+                     off by {charge}"
+                );
+            }
         }
     }
 
