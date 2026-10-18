@@ -998,6 +998,17 @@ impl Model {
     /// cannot be read, the side must be the side read at every other circle
     /// along the same stored plane, and the corners are read as before.
     ///
+    /// **Except against a ball across, where they are read against the ball**
+    /// ([`a_ring_face_is_read_against_it`]). The plane cuts the ring in a
+    /// second circle round the axis, and a band that runs through it with no
+    /// edge there has its far corners on the plane's other side from the band
+    /// next to the edge. The ring's band outside a ball of 4 at `(1, 0, 0)` is
+    /// that, and the band inside the ball has the same two curves for its edges
+    /// and the same corners, so read against the plane one of the two was
+    /// always refused: the union and the ring less the ball were (row Q2287).
+    /// Every corner of either band is on the ball, so read against it neither
+    /// says, and the circle is passed over.
+    ///
     /// **Both gradients are the ones the solid uses**, which is the clause §36.6
     /// got wrong: it says the face's orientation does not come into it, and for a
     /// curved face a fuse turned round it is the whole of what carries the turn —
@@ -1050,8 +1061,11 @@ impl Model {
     /// is between.
     ///
     /// **That surface is the partner, and it is not always the face across.**
-    /// Where the two faces really do cross in the edge the run names the face
-    /// across and the two are one. Where both faces sit on one surface, or on
+    /// Where the two faces really do cross in the edge the run mostly names the
+    /// face across and the two are one, but a circle between two different
+    /// curved faces can be named by its own plane, as `rcad-step` reads one and
+    /// the fuse's `the_plane_of_a_rim_between_two_curved_faces` writes one
+    /// ([`a_circle_round_the_axis`]). Where both faces sit on one surface, or on
     /// two spellings of it, the run names a third surface, and the face across
     /// says nothing about where the edge goes. §229.4's cone written twice, one
     /// ulp apart, is that: two bands with a closed circle between them, named
@@ -1064,6 +1078,17 @@ impl Model {
     /// A partner that is no face of this solid has no use to turn it round, so
     /// its own gradient goes in and the face's side is read against that same
     /// surface, off the corners of the face that are not on it.
+    ///
+    /// **A ring face at a circle round its axis with a ball across is read
+    /// against the ball**, its gradient turned the way the solid uses it
+    /// ([`AskedAt::against_the_face_across`]), though the run names the plane.
+    /// The run's pair still says which way the edge is stored running, so it
+    /// is still the pair the rule is asked with. Of the 24 fuses of a ring and
+    /// a ball through its poles in `a_walk_neither_winding_nor_the_axis_places.rs`,
+    /// read against the ball the ring's face says nothing at that circle every
+    /// time. For the ball of 4 at `(1, 0, 0)` under the union and the ball less
+    /// the ring, the ball's face says nothing there either, so no face at that
+    /// circle is asked the rule.
     ///
     /// # The rule is read where the faces are stored
     ///
@@ -1139,7 +1164,7 @@ impl Model {
                     }
                 }
                 let against_the_face_across = round_the_axis.is_some()
-                    && crosses_a_ring_in_circles_round_its_axis(across.stored_surface());
+                    && a_ring_face_is_read_against_it(across.stored_surface());
                 let asked = if against_the_face_across {
                     asked.against_the_face_across(across)
                 } else {
@@ -4668,18 +4693,28 @@ fn a_circle_round_the_axis(
     .then_some((ring, flat))
 }
 
-/// Whether the face across a ring's circle round its axis is on a ball, a pipe
-/// or a cone, the surfaces whose circles with a ring the run names by the
-/// circle's own plane, and which really do cross the ring in that circle.
+/// Whether a ring face is read against the face across, and not against the
+/// plane its run names, at one of its circles round the axis: whether that
+/// face is on a ball.
 ///
-/// A ring across is left out: two spellings of one ring, a hair apart, cross
-/// nowhere near the circle, which is why the run names the plane there
-/// (§229.4's cone written twice is the same failure one kind over).
-fn crosses_a_ring_in_circles_round_its_axis(across: Surface) -> bool {
-    matches!(
-        across,
-        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
-    )
+/// The plane cuts the ring in a second circle round the axis, and where that
+/// circle runs through the face with no edge along it, the face's far corners
+/// lie on the plane's other side from the face next to the edge. The ring's
+/// band outside a ball of 4 at `(1, 0, 0)` is that: it runs from the circle at
+/// `x = −15/17` round the tube's outer half to the ball's great circle at
+/// `x = 1`, and was refused under the union and the ring less the ball (row
+/// Q2287). A ball centred on the ring's axis meets the ring in those two
+/// circles and nowhere else, and both are edges of the band, so the band
+/// does not cross the ball between the edge and a corner.
+///
+/// A pipe or a cone is left out, and read against the plane as before. A
+/// pipe's wall stops at its caps, so the second circle its cylinder cuts in
+/// the ring can run through the face with no edge along it, which is the
+/// plane's own failure. A bar of 4.5 or of 3.5 standing on the ring's middle
+/// plane, along its axis, brought no ring face to this reading, so nothing
+/// measured says which of the two is right there.
+fn a_ring_face_is_read_against_it(across: Surface) -> bool {
+    matches!(across, Surface::Sphere(_))
 }
 
 /// What the closed-edge rule is asked with at one closed edge of a face.
