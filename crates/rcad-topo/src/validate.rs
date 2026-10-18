@@ -406,10 +406,9 @@ impl Model {
         // which is the same allowance `check_flat_face` gives a corner
         // against the plane its face *sits* on. Asking a stored *name* more
         // strictly than the surface a face is actually carried by had it
-        // backwards: it refused corners for the rounding in the name. A
-        // half-space that picked the piece is asked with the box
-        // `not_provably_off` asks a curved `and` with, for the same reason:
-        // `provably_outside` says why.
+        // backwards: it refused corners for the rounding in the name. What
+        // picked the piece is asked with the box `not_provably_off` asks a
+        // curved `and` with, for the same reason: `provably_outside` says why.
         //
         // **Both kinds of run that name a second surface are asked**, and they
         // are asked the same thing. A closed rim carries an `and` and no
@@ -5134,28 +5133,28 @@ fn not_provably_off(
     })
 }
 
-/// Whether a corner that is outside `picker` stays outside it once the slop
-/// recorded on it is taken into account: [`not_provably_off`]'s twin for the
-/// half-spaces that pick an arc out of its crossing.
+/// Whether a corner that is outside `picker` is still outside it once the slop
+/// recorded on it is taken into account: [`not_provably_off`]'s twin for what
+/// picks an arc out of its crossing, asked with the same box.
 ///
-/// **A picker's flat surface goes through an end of the arc it picks** whenever
-/// the arc stops where that surface cuts the crossing — a half-circle picked by
-/// the half-space through the circle's centre, which is how
-/// `a_face_bounded_by_two_half_circles.rs` writes its rims. That end is on the
-/// surface exactly only while every number in it is exact. Built turned onto an
-/// axis other than `x` or `y`, the corner and the picker each round, and asked
-/// exactly an end came out outside at all 200 such turns of the 250 that file
-/// builds a bar whose rim is two half-circles at, while the same end against the
-/// arc's second surface was let through by [`not_provably_off`]. So one corner
-/// is now asked one standard, the width of the number and not a tolerance: a
-/// corner whose box straddles a picker's surface is one no `f64` could have
-/// written any nearer to the inside.
+/// **A picker's surface goes through an end of the arc it picks** whenever the
+/// arc stops where that surface cuts the crossing: a half-circle picked by the
+/// half-space through the circle's centre, which is how
+/// `a_face_bounded_by_two_half_circles.rs` writes its rims. That end is exactly
+/// on the picker's surface only while every number in it is exact. That file
+/// builds a bar with such a rim turned 250 ways, and turned about any axis but
+/// `x` or `y` the corners and the pickers both round: asked exactly, an end came
+/// out outside at all 200 of those turns, while the check of the same end
+/// against the arc's plane, just above this one in `Model::check_edge`, let it
+/// through. So both checks now ask a corner one standard, the width of the
+/// number and not a tolerance. A corner whose box straddles a picker's surface
+/// is one no `f64` could have written any nearer to the inside.
 ///
 /// Asked only after the exact point has come out outside, so an end placed
-/// exactly is asked exactly what it always was. A picker that misses an end by
-/// more than the box is still caught:
+/// exactly is asked what it always was. A picker that misses an end by more
+/// than the box is still caught:
 /// `a_bar_whose_pickers_miss_its_ends_by_a_hair_is_still_refused` moves them
-/// `1e-13` in.
+/// `1e-13` in, and every one of its 1004 bars is refused.
 fn provably_outside(
     picker: &Picker,
     point: Point,
