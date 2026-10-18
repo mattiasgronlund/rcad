@@ -7746,6 +7746,22 @@ impl<'f> Arrangement<'f> {
     /// skin crosses the second cone's base in a circle whose only two nodes are
     /// on the line of the base's straight side, past its ends, and that side
     /// is the chord of the base's arc (Q1161).
+    ///
+    /// **On a flat face the chord's ends and the point are read over their
+    /// boxes stretched to the face's plane** ([`stretched_to_the_plane`]), as
+    /// [`how_often_the_rim_winds_round`] reads the corners and for the same
+    /// reason: [`InPlane`] reads a point `1e-8` off a plane `2²⁰` out about
+    /// `1e-2` along it. A turn settled over a stretched box is the turn of the
+    /// point and of a point of the plane beside it, and a point on the plane is
+    /// read as before. The corners' polygon, stretched since Q1108, does not
+    /// keep a misread chord from counting at a point past the chord's end: a
+    /// half-line from it square to the chord passes both the chord's ends, so
+    /// the polygon answers. A curve through the corner of a notch has the face
+    /// go on past its chord's end, and there, with the corner `1e-8` below the
+    /// plane or the point `1e-8` above it, the chord was read across the point
+    /// and two walks that go round nothing there wound round it, one each way
+    /// (`a_walk_wound_round_a_point_past_a_chords_end`, Q1491). Opened out on a
+    /// ball nothing is read along a plane, so nothing is stretched.
     fn how_often_a_side_and_its_chord_wind_round(
         &self,
         picture: Picture,
@@ -7767,7 +7783,13 @@ impl<'f> Arrangement<'f> {
                 Decision::Zero | Decision::Undecidable { .. } | _ => None,
             }
         };
-        let (start, end) = (self.nodes[from].point, self.nodes[to].point);
+        let read = |at: PredicatePoint| match picture {
+            Picture::Flat(_) => stretched_to_the_plane(self.plane_of_the_flat_face(), at),
+            Picture::OpenedOut { .. } => Some(at),
+        };
+        let start = read(self.nodes[from].point)?;
+        let end = read(self.nodes[to].point)?;
+        let point = read(point)?;
         let out = self.way_out_of(from, direction);
         let ahead = PredicatePoint::Constructed(core::array::from_fn(|axis| {
             start.enclosure()[axis] + out[axis]
