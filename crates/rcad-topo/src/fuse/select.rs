@@ -141,7 +141,7 @@
 //! Two quarter bends placed half a turn apart need it. It is tried after
 //! every rule above, so a piece any of them placed is placed as before.
 //!
-//! # And last, by a meridian disk beside it
+//! # Then by a meridian disk beside it
 //!
 //! A flat piece inside a ring, on a plane through the ring's axis, is placed
 //! against a solid made only of that ring and of planes through its axis by a
@@ -153,8 +153,18 @@
 //! round by `0.3` and `0.3 + π/2` need it: the first bend's end cap lies
 //! strictly in front of the copy's start cap plane, an ulp off it, so neither
 //! plane cuts the other bend's wall and the cap shares no side with anything.
-//! It is tried after every other rule, so a piece any of them placed is placed
+//! It is tried after every rule above, so a piece any of them placed is placed
 //! as before.
+//!
+//! # And last, by a step towards a corner of the box round it
+//!
+//! A curved piece is placed by a point one reach from the middle of its
+//! corners towards each corner of the box round that middle, put back onto its
+//! surface ([`by_a_step_towards_a_corner_of_the_box_round_it`], §35.6, Q2116).
+//! The six steps the point search takes from there go along the axes, and a
+//! ball inscribed in a cube touches the cube at all six: no point offered on
+//! the ball's skin was off the cube's. It is tried after every other rule, so
+//! a piece any of them placed is placed as before.
 //!
 //! # Then a piece of a flat shell both groups hold lies on the other group
 //!
@@ -242,7 +252,9 @@ pub(crate) struct Chosen {
 /// ([`SidesItShares::place_on_a_face_it_shares_a_side_with`]), nor the piece
 /// across a side that starts clear of every face
 /// ([`by_the_piece_across_a_side_clear_of_every_face`]), nor a meridian disk
-/// beside it ([`by_a_meridian_disk_beside_it`]) placed it: under
+/// beside it ([`by_a_meridian_disk_beside_it`]), nor a step towards a corner of
+/// the box round it ([`by_a_step_towards_a_corner_of_the_box_round_it`])
+/// placed it: under
 /// [`INSIDE_A_PIECE`] when no point inside it was found, and under
 /// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be
 /// placed, or only a rung of [`rungs_towards_each_crossing`],
@@ -329,7 +341,12 @@ pub(crate) fn choose(
                         model, scratch, &solids, against, index, policy, log,
                     )
                 })
-                .or_else(|| by_a_meridian_disk_beside_it(&solids, against, piece));
+                .or_else(|| by_a_meridian_disk_beside_it(&solids, against, piece))
+                .or_else(|| {
+                    by_a_step_towards_a_corner_of_the_box_round_it(
+                        model, &solids, against, piece, policy, log,
+                    )
+                });
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
@@ -1554,11 +1571,11 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
     Some([*first.as_plane()?, *second.as_plane()?, *third.as_plane()?])
 }
 
-/// The rule before the last: a flat piece that lies on the plane of a flat
-/// face `G` of a solid, with a straight side along an edge `e` of `G`, placed
-/// against that solid by which side of the plane across `e` its material is on
-/// (`docs/decisions.md` §365.8, Q1606). Where it places nothing,
-/// [`by_a_side_from_an_edge_it_starts_on`] is tried.
+/// Comes before [`by_a_side_from_an_edge_it_starts_on`]: a flat piece that
+/// lies on the plane of a flat face `G` of a solid, with a straight side along
+/// an edge `e` of `G`, placed against that solid by which side of the plane
+/// across `e` its material is on (`docs/decisions.md` §365.8, Q1606). Where it
+/// places nothing, [`by_a_side_from_an_edge_it_starts_on`] is tried.
 ///
 /// **Why an edge can place a piece.** `P` is the piece, on `G`'s plane, `S` the
 /// solid, and `H` the flat face across `e`. `s` is a side of `P` carried by
@@ -1933,11 +1950,11 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
     one == other || one == other.reversed()
 }
 
-/// The last rule: a piece, flat or curved, that nothing before placed takes
-/// the placement of the piece of its own face across one of its sides, where
-/// the start of that side is clear of every face of every solid it is placed
-/// against, when the point search places that piece inside or outside
-/// (`docs/decisions.md` §35.6, Q1537).
+/// Comes before [`by_a_meridian_disk_beside_it`]: a piece, flat or curved,
+/// that nothing before placed takes the placement of the piece of its own
+/// face across one of its sides, where the start of that side is clear of
+/// every face of every solid it is placed against, when the point search
+/// places that piece inside or outside (`docs/decisions.md` §35.6, Q1537).
 ///
 /// **Why a neighbour can place a piece here.** `P` and `P′` are pieces of one
 /// face that share a side `s`, and `m` is where `s` starts. Each was cut by
@@ -2319,6 +2336,74 @@ impl HalfOfAPlaneThroughAnAxis {
 fn strictly_positive(sign: Decision) -> Option<bool> {
     (sign == Decision::Pos || sign == Decision::Neg).then_some(sign == Decision::Pos)
 }
+
+/// The last rule: a curved piece placed by a point one reach from the middle
+/// of its corners towards each corner of the box round that middle, put back
+/// onto its surface (`docs/decisions.md` §35.6, Q2116).
+///
+/// **The six steps [`candidate_points`] takes along the axes are where a box
+/// touches the ball inscribed in it.** A cube from `(3, 3, 0)` to `(7, 7, 4)`
+/// and the ball of radius 2 at `(5, 5, 2)` touch at the middle of each of the
+/// cube's six faces. The ball's one face has its two poles for corners, so
+/// their middle is the ball's centre, and each step of one radius from there,
+/// put back onto the ball, is one of those six points: on the cube's skin,
+/// where the ray places nothing about a face that does not lie on it. Its
+/// corners are on that skin too, and it shares no side with any piece, so
+/// every fuse of the two was refused at [`PLACED_AGAINST_EVERY_SOLID`]
+/// (`tests/a_ball_inscribed_in_a_cube.rs`). The step towards `(1, 1, 1)`
+/// comes back as `(5 + 2/√3, 5 + 2/√3, 2 + 2/√3)`, inside the cube.
+///
+/// Nothing is trusted: each point is proved inside the piece and placed by the
+/// ray as a candidate is, and what that asked goes into the log only when the
+/// piece is placed. A point the ray cannot place is dropped whatever the
+/// reason, a face nobody follows included, so a piece none of these places is
+/// refused as it was. Tried after every other rule, so a piece any of them
+/// placed is placed as before.
+fn by_a_step_towards_a_corner_of_the_box_round_it(
+    model: &Model,
+    solids: &[&BakedSolid],
+    against: &[usize],
+    piece: &Piece,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Option<Placement> {
+    if piece.surface.as_plane().is_some() {
+        return None;
+    }
+    let middle = middle_of_the_corners(&corners_of(piece));
+    let reach = how_big_the_surface_is(&piece.surface, middle);
+    TOWARDS_THE_CORNERS_OF_A_BOX
+        .into_iter()
+        .filter_map(|[x, y, z]| {
+            let step = middle + Vector::new(x, y, z) * reach;
+            back_onto_the_surface(&piece.surface, PredicatePoint::from(step.coordinates()))
+        })
+        .find_map(|point| {
+            if the_piece_holds(piece, None, &[], &[], point) != Some(true) {
+                return None;
+            }
+            let mut trial = ProvenanceLog::new();
+            let Ok(Settled::At(placement)) =
+                settle_against_each(model, solids, against, point, piece, policy, &mut trial)
+            else {
+                return None;
+            };
+            trial.drain_into(log);
+            Some(placement)
+        })
+}
+
+/// The ways from the middle of a box to its eight corners, in a fixed order.
+const TOWARDS_THE_CORNERS_OF_A_BOX: [[f64; 3]; 8] = [
+    [1.0, 1.0, 1.0],
+    [1.0, 1.0, -1.0],
+    [1.0, -1.0, 1.0],
+    [1.0, -1.0, -1.0],
+    [-1.0, 1.0, 1.0],
+    [-1.0, 1.0, -1.0],
+    [-1.0, -1.0, 1.0],
+    [-1.0, -1.0, -1.0],
+];
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
 /// nothing here can say.
