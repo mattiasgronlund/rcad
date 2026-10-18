@@ -247,8 +247,9 @@ pub(crate) struct Chosen {
 /// [`PLACED_AGAINST_EVERY_SOLID`] when a point was found and could not be
 /// placed, or only a rung of [`rungs_towards_each_crossing`],
 /// [`shorter_steps_across_a_curved_piece`],
-/// [`between_the_middles_of_a_cone_pieces_sides`] or
-/// [`steps_from_a_reach_into_the_planes_material`] was found.
+/// [`between_the_middles_of_a_cone_pieces_sides`],
+/// [`steps_from_a_reach_into_the_planes_material`] or
+/// [`half_way_round_the_tube_between_two_corners`] was found.
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] instead of the second, when
 /// a point offered before the rungs was found inside the piece and the ray
 /// from a point tried met a face of a solid that nothing here can follow; none
@@ -616,8 +617,9 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// side it shares or a corner could place, and a rung that cannot be
 /// classified must not take that away (`docs/decisions.md` §365.6). A curved
 /// piece's rungs are [`shorter_steps_across_a_curved_piece`],
-/// [`between_the_middles_of_a_cone_pieces_sides`] and then
-/// [`steps_from_a_reach_into_the_planes_material`], offered only where no
+/// [`between_the_middles_of_a_cone_pieces_sides`],
+/// [`steps_from_a_reach_into_the_planes_material`] and then
+/// [`half_way_round_the_tube_between_two_corners`], offered only where no
 /// earlier point was found inside the piece, so a piece one was found in and
 /// not placed is refused or placed as it was.
 ///
@@ -714,6 +716,7 @@ fn place_the_piece(
         rungs.extend(shorter_steps_across_a_curved_piece(piece));
         rungs.extend(between_the_middles_of_a_cone_pieces_sides(piece));
         rungs.extend(steps_from_a_reach_into_the_planes_material(piece));
+        rungs.extend(half_way_round_the_tube_between_two_corners(piece));
     }
     for rung in rungs {
         let Some(settled) = try_one(rung, log)? else {
@@ -744,8 +747,9 @@ enum Search {
     NoPointInside,
     /// Only rungs of [`rungs_towards_each_crossing`],
     /// [`shorter_steps_across_a_curved_piece`],
-    /// [`between_the_middles_of_a_cone_pieces_sides`] or
-    /// [`steps_from_a_reach_into_the_planes_material`] were, and none of them
+    /// [`between_the_middles_of_a_cone_pieces_sides`],
+    /// [`steps_from_a_reach_into_the_planes_material`] or
+    /// [`half_way_round_the_tube_between_two_corners`] were, and none of them
     /// could be classified against every solid in the set.
     OnlyRungsInside {
         /// The first face a rung's ray met whose trimming nothing here
@@ -4297,6 +4301,58 @@ fn steps_from_a_reach_into_the_planes_material(piece: &Piece) -> Vec<PredicatePo
     steps_from_the_middle(piece, middle + towards * reach, reach)
         .into_iter()
         .filter_map(|step| back_onto_the_surface(&piece.surface, step))
+        .collect()
+}
+
+/// For a piece of a ring, the point half way round the tube between each two
+/// corners and the point across the tube from it, at the angle round the ring
+/// half way between them, each put back onto the ring; offered after
+/// [`steps_from_a_reach_into_the_planes_material`], under the same rule.
+///
+/// **Every step from the middle of a band's corners lands on the inner half
+/// of the tube.** A whole ring about `x`, 4 round a tube of 1, against a ball
+/// of radius 4 at `(1, 0, 0)` is cut in two circles round `x`, one at `x = 1`
+/// through the ball's poles `(1, 0, ±4)` and one at `x = −15/17` through
+/// `(−15/17, 0, 60/17)`. The band outside the ball runs from the second circle
+/// round the outside of the tube to the first. The middle of its three corners
+/// is near the axis, and each step from it, put back onto the ring, comes back
+/// as the nearest point of the tube, on its inner half and inside the ball:
+/// no point offered was inside the band, and every rule both ways round was
+/// refused [`INSIDE_A_PIECE`] (row Q2205,
+/// `tests/a_walk_neither_winding_nor_the_axis_places.rs`). So was a ball of 3
+/// at `(0.75, 0, 0)` pressed into a ring 4 round a tube of 1.25.
+///
+/// Half way round the tube between two corners is one of the two places
+/// between them on the circle round the tube, and the point across the tube
+/// from it is the other, so whichever way the band runs one of the two is in
+/// it: from `(1, 0, 4)` and `(−15/17, 0, 60/17)` that is `(−0.24, 0, 4.97)`.
+/// Nothing is trusted: the caller proves each point inside the piece or drops
+/// it.
+fn half_way_round_the_tube_between_two_corners(piece: &Piece) -> Vec<PredicatePoint> {
+    let Surface::Torus(ring) = &piece.surface else {
+        return Vec::new();
+    };
+    let corners: Vec<(f64, f64)> = corners_of(piece)
+        .concat()
+        .into_iter()
+        .map(|corner| ring.coordinates_of(middle_of(corner)))
+        .collect();
+    let mut candidates = Vec::new();
+    for (index, &(over, round)) in corners.iter().enumerate() {
+        for &(other_over, other_round) in &corners[index + 1..] {
+            let half_way_over = (over + other_over) / 2.0;
+            let half_way_round = (round + other_round) / 2.0;
+            for across in [0.0, core::f64::consts::PI] {
+                candidates.push(PredicatePoint::from(
+                    ring.point_at(half_way_over + across, half_way_round)
+                        .coordinates(),
+                ));
+            }
+        }
+    }
+    candidates
+        .into_iter()
+        .filter_map(|candidate| back_onto_the_surface(&piece.surface, candidate))
         .collect()
 }
 
