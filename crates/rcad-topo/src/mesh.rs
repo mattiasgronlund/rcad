@@ -290,8 +290,9 @@ pub struct MeshTriangle {
 impl MeshTriangle {
     /// Its three corners, as entries in [`Mesh::points`], wound anticlockwise
     /// seen from outside the material. A flat face so thin that every point of
-    /// it rounds onto one line has no anticlockwise, and its triangles run the
-    /// way its wires do, which is the way they would turn if it had width.
+    /// it rounds onto one line has no anticlockwise, and its triangles turn the
+    /// way they would if it had width: the way its wires run about the stored
+    /// surface's own normal, and the other way on a face used reversed.
     #[must_use]
     pub fn corners(self) -> [u32; 3] {
         self.corners
@@ -3609,6 +3610,7 @@ impl BuildingAMesh {
             }
             HowToCut::ZipUpABand => false,
         };
+        let against_its_loops = face.orientation().is_reversed();
         let there = back_out_of_the_frame_this_face_is_cut_up_in(face);
         let mut deviation: f64 = 0.0;
         for piece in pieces {
@@ -3682,17 +3684,19 @@ impl BuildingAMesh {
             // `an_ellipse_start_between_two_places.rs`).
             //
             // So each loop is drawn as a fan from its first corner, the way the
-            // wire runs and not flipped. That is the way a face's triangles use
-            // its loops' sides once flipped below, since the face lies on the
-            // left of its wire seen from outside; with no turn in the chart
-            // there is nothing else to go by. A side inside a fan is used once
-            // each way. The triangles cover nothing in the chart, and lie in
-            // the plane as far as the points of the face do.
+            // loop runs, and turned over only on a face used reversed: that is
+            // the way a face's triangles use its loops' sides once flipped
+            // below, since the walk keeps the face's material on its left about
+            // the stored surface's own normal, whichever way the face is used
+            // ([`BuildingAMesh::which_pole_this_cap_reaches`]). With no turn in the
+            // chart there is nothing else to go by. A side inside a fan is used
+            // once each way. The triangles cover nothing in the chart, and lie
+            // in the plane as far as the points of the face do.
             let fan;
             let (triangles, inside_out) =
                 if surface.as_plane().is_some() && cut.triangles().is_empty() {
                     fan = a_fan_round_each_loop(piece.iter().map(|one| one.points.len()));
-                    (fan.as_slice(), false)
+                    (fan.as_slice(), against_its_loops)
                 } else {
                     (cut.triangles(), inside_out)
                 };
@@ -3707,7 +3711,12 @@ impl BuildingAMesh {
             }
             deviation = deviation.max(cut.deviation().magnitude());
         }
-        for corners in drawn_here {
+        for [first, second, third] in drawn_here {
+            let corners = if against_its_loops {
+                [first, third, second]
+            } else {
+                [first, second, third]
+            };
             self.draw(face, corners, &along_a_loop);
         }
         let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
@@ -4070,7 +4079,12 @@ struct ALoopToCut {
 
 /// The pieces of one patch the triangulator is handed, each an outline and its
 /// holes, and the triangles drawn here for what it would refuse, in table
-/// entries and turned the way the patch's loops run.
+/// entries and turned the way the patch's loops run. A loop runs with the
+/// face's material on its left about the stored surface's own normal, so
+/// [`BuildingAMesh::hand_over`] turns these over on a face used reversed: the
+/// groove the dipping bar leaves in the block is such a face, and drawn the
+/// loop's way there its bridges used each side the way the top and the cap
+/// beside them did (`FacesDoNotAgreeWhichWayTheyFace`).
 ///
 /// Both kinds drawn here are where two or more table entries of one patch
 /// round onto one line or one place in the chart, and both were met in one
