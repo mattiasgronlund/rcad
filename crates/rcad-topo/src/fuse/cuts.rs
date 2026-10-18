@@ -1713,6 +1713,47 @@ mod tests {
         bake(&model, &keys, &policy, &mut ProvenanceLog::new()).expect("a chain of cubes bakes")
     }
 
+    /// Two cubes sharing one wall, the way [`chain_of_cubes`] shares its
+    /// walls, with a ball resting flush against that wall whose radius is too
+    /// small to square in `f64` — the same underflow
+    /// `rcad_geom::intersect`'s own
+    /// `a_ball_too_small_for_its_own_squares_cannot_be_crossed_and_the_same_one_scaled_up_can`
+    /// hits, here on an ordinary wall rather than a plane built to match the
+    /// ball's own tiny scale.
+    ///
+    /// The ball's centre sits at `x = 2`, exactly where the shared wall's
+    /// plane does, so the two cancel to a reach of exactly zero and the whole
+    /// discriminant is the ball's own radius squared — nothing else is close
+    /// enough to be in question.
+    fn two_cubes_sharing_a_wall_a_too_small_ball_rests_on(radius: f64) -> Vec<BakedSolid> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let lower = model.add_cube(2.0, &policy, &mut log).expect("a cube");
+        let upper = model
+            .add_cube(2.0, &policy, &mut log)
+            .expect("another cube");
+        model
+            .place_solid(
+                upper,
+                &Isometry::translation(Vector::new(0.0, 0.0, 1.0)).expect("a finite shift"),
+            )
+            .expect("this model made the key");
+        let ball = model
+            .add_ball(
+                radius,
+                &Isometry::translation(Vector::new(2.0, 1.0, 1.5)).expect("a finite shift"),
+            )
+            .expect("a ball");
+        bake(
+            &model,
+            &[lower, upper, ball],
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("two cubes and a ball on their shared wall bake")
+    }
+
     fn facing(solid: &BakedSolid, way: Vector) -> &BakedFace {
         solid
             .faces
@@ -2404,6 +2445,33 @@ mod tests {
             SURFACE_PAIRS_REALLY_ASKED.load(std::sync::atomic::Ordering::Relaxed),
             95,
             "five cubes' worth of shared walls and distinct caps, worked out by hand above"
+        );
+    }
+
+    /// [`HowFacesMeetBySurface`] caches the log, not just the answer.
+    ///
+    /// The wall [`two_cubes_sharing_a_wall_a_too_small_ball_rests_on`] gives
+    /// both cubes is asked against the ball twice, once for each cube. A
+    /// radius too small to square in `f64` cannot be certified either way, so
+    /// under a tolerant policy it is read as touching and that read is
+    /// written to the log the first time — but the second ask is the same
+    /// surface pair again, a cache hit, and writes nothing.
+    #[test]
+    fn a_repeated_surface_pair_logs_its_provenance_once() {
+        let mut solids = two_cubes_sharing_a_wall_a_too_small_ball_rests_on(2f64.powi(-539));
+        let mut log = ProvenanceLog::new();
+
+        gather(&mut solids, &Policy::tolerant(100.0), &mut log)
+            .expect("a tolerant policy reads a radius too small to square as touching");
+
+        assert_eq!(
+            log.len(),
+            1,
+            "the shared wall meets the ball once in the log, however many cubes carry it"
+        );
+        assert!(
+            log.records()[0].approximation().is_some(),
+            "this record exists only because the policy resolved an undecided sign"
         );
     }
 }
