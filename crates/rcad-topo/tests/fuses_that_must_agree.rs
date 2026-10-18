@@ -1277,6 +1277,143 @@ fn a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_s
     }
 }
 
+/// **A turned ell inside a taller one, flush against its long wall, is refused
+/// for an edge too short when united under a certified policy** (queue row
+/// Q2242).
+///
+/// An ell two by five with a one-by-two bite, three high, at the origin, and
+/// an ell two by three with a one-by-two bite, one high, at `(0, 1, 1)`, turned
+/// together by 36/64 of a turn about `(-1, 2, -3)`: the pair a soak of
+/// [`how_often_a_certified_fuse_of_a_turned_pair_refuses`] at
+/// `RCAD_SOAK_FACTOR=66 RCAD_SOAK_SEED=1` shrinks to since Q2236. The small
+/// ell lies inside the big one with its wall `x = 0` on the big one's wall
+/// `x = 0`. Turned, the small one's wall is stored `8.3e-17` out from the big
+/// one's (same normal, offset `8.326672684688674e-17` against `0.0`), so as
+/// stored it pokes out of the big one in a slab that thin over
+/// `1 ≤ y ≤ 4, 1 ≤ z ≤ 2`: the small ell less the big one is refused for an
+/// edge too short, the limit [`a_flat_refusal`] names.
+///
+/// The union was refused instead, both ways round and under either policy, as
+/// [`Error::TheFuseWroteABrokenAnswer`],
+/// [`Invalid::HoleWindsWithTheOuterWire`], by `rings_round` in
+/// `fuse/assemble.rs`. The big ell's wall pieces over the slab are placed
+/// inside the small ell and dropped, the small ell's wall pieces are placed
+/// outside the big ell and kept, and the two parallel planes are one region
+/// to `edges_with_one_face_on_both_sides` (§426). So the joined face is the
+/// big wall's outline and one ring more: the big wall's hole round the small
+/// wall's pieces and their own outline, walked as one across an edge the
+/// joining left between them, which encloses nothing exactly and as stored
+/// winds with the plane. The slab's side walls are still in the answer, with
+/// edges a rounding long, and `rings_round` now asks the range of a face
+/// joined across two planes apart before it refuses a second outline, so the
+/// certified union is refused for the edge too short, both ways round.
+///
+/// A tolerant policy lets that range through, and the union is still refused
+/// as a hole winding with its outline, where the answer is the big ell's 24:
+/// the gap the row Q2242 left.
+#[test]
+fn a_turned_ell_inside_a_taller_one_flush_against_its_wall_unites_or_is_refused_for_an_edge_too_short()
+ {
+    let (model, keys) = Configuration {
+        solids: vec![
+            Placed {
+                shape: Shape::Ell {
+                    width: 2,
+                    depth: 5,
+                    bite_width: 1,
+                    bite_depth: 2,
+                },
+                skew: Skew::none(),
+                height: 3,
+                at: [0, 0, 0],
+            },
+            Placed {
+                shape: Shape::Ell {
+                    width: 2,
+                    depth: 3,
+                    bite_width: 1,
+                    bite_depth: 2,
+                },
+                skew: Skew::none(),
+                height: 1,
+                at: [0, 1, 1],
+            },
+        ],
+        turn: Some(Turn {
+            direction: [-1, 2, -3],
+            steps: 36,
+        }),
+        elsewhere: Elsewhere::here(),
+    }
+    .build();
+    let fused_under = |policy: &Policy, arguments: SolidKey, tools: SolidKey, rule: Rule| {
+        let mut model = model.clone();
+        let solids = model
+            .fuse(
+                &[arguments],
+                &[tools],
+                rule,
+                policy,
+                &mut ProvenanceLog::new(),
+            )
+            .map(|fused| fused.solids().to_vec());
+        (model, solids)
+    };
+    let (big, small) = (keys[0], keys[1]);
+    let volume_under = |policy: &Policy, arguments: SolidKey, tools: SolidKey, rule: Rule| {
+        let (model, solids) = fused_under(policy, arguments, tools, rule);
+        let solids = solids.unwrap_or_else(|why| {
+            panic!("the {rule:?} of {arguments:?} against {tools:?} was refused: {why:?}")
+        });
+        volume_of(&model, &solids)
+    };
+
+    let certified = Policy::certified();
+    for (arguments, tools) in [(big, small), (small, big)] {
+        let volume = volume_under(&certified, arguments, tools, Rule::Intersection);
+        assert!(
+            (volume - 4.0).abs() < 1e-9,
+            "the two share the small ell's 4, not {volume}"
+        );
+    }
+    let volume = volume_under(&certified, big, small, Rule::Difference);
+    assert!(
+        (volume - 20.0).abs() < 1e-9,
+        "the big ell less the small one holds 20, not {volume}"
+    );
+    let (_, slab) = fused_under(&certified, small, big, Rule::Difference);
+    assert!(
+        matches!(
+            slab,
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
+        ),
+        "the small ell less the big one is the slab, refused for an edge too short, not {slab:?}"
+    );
+
+    for (arguments, tools) in [(big, small), (small, big)] {
+        let (_, united) = fused_under(&certified, arguments, tools, Rule::Union);
+        assert!(
+            matches!(
+                united,
+                Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
+            ),
+            "the certified union of {arguments:?} with {tools:?} came back {united:?}, not \
+             refused for an edge too short beside its coordinates"
+        );
+        let (_, united) = fused_under(&Policy::tolerant(100.0), arguments, tools, Rule::Union);
+        assert!(
+            matches!(
+                united,
+                Err(Error::TheFuseWroteABrokenAnswer {
+                    broken: Invalid::HoleWindsWithTheOuterWire
+                })
+            ),
+            "the tolerant union of {arguments:?} with {tools:?} came back {united:?}, not \
+             refused as a hole winding with its outline"
+        );
+    }
+}
+
 /// What one certified fuse of two solids came back with.
 fn what_a_fuse_came_back_with(
     model: &Model,
