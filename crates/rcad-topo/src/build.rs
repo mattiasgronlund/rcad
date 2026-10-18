@@ -905,6 +905,22 @@ impl Model {
     }
 
     /// The wall standing on ring edge `index`, running up and back down.
+    ///
+    /// **Its plane goes through whichever of the side's two corners is nearer
+    /// the origin**, not through the one the ring lists first. A tilted wall's
+    /// normal is rounded, since no `f64` unit vector but an axis's is exact,
+    /// and the offset is that normal times the corner it goes through, so the
+    /// further that corner is from the origin, the more of the normal's
+    /// rounding the offset can carry. A corner at the origin gives offset `0`
+    /// exactly. The wedge `y` from `0.25·x` to `0.75·x` lists `(5, 3.75)`
+    /// before the origin on its tilted side back, and through `(5, 3.75)` that
+    /// side's plane missed the origin by `2.78e-16`, which was enough for its
+    /// edge to miss an apex the planes of a pyramid meet at, and for every fuse
+    /// of the two to be refused (Q2331).
+    ///
+    /// Of two corners as near, the rule still names one, so a wall a prism
+    /// and the hole it fills both stand on is one plane, turned round, from
+    /// either side.
     fn build_side_face(&mut self, ring: &[[f64; 2]], ladder: &Ladder, index: usize) -> FaceSlot {
         let count = ring.len();
         let next = (index + 1) % count;
@@ -912,8 +928,9 @@ impl Model {
             ring[next][0] - ring[index][0],
             ring[next][1] - ring[index][1],
         ];
+        let [x, y] = nearer_the_origin(ring[index], ring[next]);
         let plane = Plane::from_point_and_normal(
-            Point::new(ring[index][0], ring[index][1], 0.0),
+            Point::new(x, y, 0.0),
             Vector::new(along[1], -along[0], 0.0),
         )
         .expect("a profile never repeats a point, so this normal has length");
@@ -965,6 +982,18 @@ impl Model {
                 .expect("the edges were tagged with the same amount just now");
         }
     }
+}
+
+/// Whichever of `one` and `other` is nearer the origin, and of two as near,
+/// the one with the smaller `x`, then the smaller `y`, so that the answer is
+/// the same whichever is named first.
+fn nearer_the_origin(one: [f64; 2], other: [f64; 2]) -> [f64; 2] {
+    let how_far = |[x, y]: [f64; 2]| x * x + y * y;
+    let order = how_far(one)
+        .total_cmp(&how_far(other))
+        .then(one[0].total_cmp(&other[0]))
+        .then(one[1].total_cmp(&other[1]));
+    if order.is_le() { one } else { other }
 }
 
 /// What a cap plane cuts out of a bar's wall, which has to be one closed curve.
