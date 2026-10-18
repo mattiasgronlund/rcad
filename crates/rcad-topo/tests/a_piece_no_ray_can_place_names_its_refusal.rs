@@ -1966,24 +1966,24 @@ fn each_within_its_error(mut measured: Vec<(f64, f64)>, expected: &[f64], what: 
 /// The mesher now orders the two circles round the ring by the planes through
 /// the axis they lie on, exactly.
 ///
-/// At step 173 the intersection both ways round answers the sliver, and the
-/// measure holds it against its wedge at every deflection from `0.32` to
-/// `1e-3`. At step 196 the fuse refuses it [`Invalid::VolumeIsNotPositive`]
-/// both ways round, on a sum of `−5.2e-16` that a rung passed as below zero,
-/// where the caps' normals read a wedge of `5.9e-19`. Either the rung charged
-/// the sum too little, since a sliver's volume is not below zero, or the caps
-/// truly lie apart and the fuse built a sliver that is not there; which of the
-/// two is a row from Q2265 of its own. Step 58 was refused
-/// [`Error::CannotTellWhichWayASolidsFacesPoint`] from Q2265 until Q2266, and
-/// is answered in
+/// At steps 173 and 196 the intersection both ways round answers the sliver,
+/// and the measure holds it against its wedge at every deflection from `0.32`
+/// to `1e-3`. From Q2265 until Q2272 the fuse refused step 196
+/// [`Invalid::VolumeIsNotPositive`] on a sum of `−5.2e-16`, where the caps,
+/// read exactly, overlap in a wedge of `5.9e-19`. The rung that passed that
+/// sum left a flat face's own corners out of what it charged for points off
+/// the face's plane, and the copy's corner lies `6.4e-16` off its own cap's
+/// plane. Charged for it, no rung answers, and the sum moved onto the planes
+/// does. Step 58 was refused [`Error::CannotTellWhichWayASolidsFacesPoint`]
+/// from Q2265 until Q2266, and is answered in
 /// `two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_answered`.
 #[test]
 fn two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring() {
     let policy = Policy::certified();
     let at = |step: f64| -3.1 + 0.0155 * step;
-    for the_first_first in [true, false] {
-        let what = format!("step 173, the first first {the_first_first}");
-        let start = at(173.0);
+    for (step, the_first_first) in [(173.0, true), (173.0, false), (196.0, true), (196.0, false)] {
+        let what = format!("step {step}, the first first {the_first_first}");
+        let start = at(step);
         let mut model = a_model();
         let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
         let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
@@ -2023,21 +2023,59 @@ fn two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring() {
             );
         }
     }
+}
+
+/// The step-196 sliver of
+/// `two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring`
+/// answers and validates both ways round, but `SolidView::measure` refuses it
+/// [`Invalid::VolumeIsNotPositive`] at deflections `0.5`, `0.25` and `0.125`,
+/// on sums of about `−5e-16` against a wedge of `5.9e-19`. The measure's charge
+/// for points off a flat face's plane leaves the face's own corners out, as
+/// `validate`'s did until Q2272, and the copy's corner lies `6.4e-16` off its
+/// own cap's plane; that this is why is not yet run.
+#[test]
+fn the_sliver_at_step_196_is_refused_by_the_measure_at_coarse_deflections() {
+    let policy = Policy::certified();
+    let start = -3.1 + 0.0155 * 196.0;
     for the_first_first in [true, false] {
-        let what = format!("step 196, the first first {the_first_first}");
-        let start = at(196.0);
+        let what = format!("the first first {the_first_first}");
         let mut model = a_model();
         let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
         let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
         let wedge = 4.0 * PI * the_angle_where_the_caps_overlap(&model, [first, copy], start);
-        let fused = fused_or_refused(&mut model, first, copy, Rule::Intersection, the_first_first);
-        let Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume })) = fused else {
-            panic!("{what}: {fused:?}, a wedge of {wedge}");
+        let (arguments, tools) = if the_first_first {
+            ([first], [copy])
+        } else {
+            ([copy], [first])
         };
-        assert!(
-            volume < 0.0 && 0.0 < wedge,
-            "{what}: a volume of {volume}, a wedge of {wedge}"
-        );
+        let answer = model
+            .fuse(
+                &arguments,
+                &tools,
+                Rule::Intersection,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let [solid] = answer.solids()[..] else {
+            panic!("{what}: one solid, not {:?}", answer.solids());
+        };
+        for size in [0.5, 0.25, 0.125] {
+            let deflection = rcad_geom::Deflection::of(size).expect("a deflection");
+            let measured = model
+                .solid(solid)
+                .and_then(|solid| solid.measure(deflection, &policy, &mut ProvenanceLog::new()));
+            let Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume })) = measured else {
+                panic!("{what}, deflection {size}: {measured:?}, a wedge of {wedge}");
+            };
+            assert!(
+                volume < 0.0 && 0.0 < wedge,
+                "{what}, deflection {size}: a volume of {volume}, a wedge of {wedge}"
+            );
+        }
     }
 }
 
