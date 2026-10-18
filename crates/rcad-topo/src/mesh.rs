@@ -24,7 +24,9 @@ use rcad_geom::{
     Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface,
     Vector, which_two_surfaces_a_run_is_between,
 };
-use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate, zip_up_a_band};
+use rcad_mesh::{
+    CannotTriangulate, Loop, NotALoop, Patch, TrimmedDomain, triangulate, zip_up_a_band,
+};
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
     Approximation, Cause, Decision, Level, Measures, NOTHING_IS_KNOWN, Point as PredicatePoint,
@@ -3587,11 +3589,19 @@ impl BuildingAMesh {
             return Err(Invalid::FaceHasNoWires.into());
         }
         let deflection = Deflection::of(room)?;
-        let (pieces, drawn_here) = match how {
+        let ThePatchAsCut {
+            pieces,
+            drawn_here,
+            cut_from,
+        } = match how {
             HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder => {
                 what_the_triangulator_can_cut(surface, loops)
             }
-            HowToCut::ZipUpABand => (vec![loops], Vec::new()),
+            HowToCut::ZipUpABand => ThePatchAsCut {
+                pieces: vec![loops],
+                drawn_here: Vec::new(),
+                cut_from: None,
+            },
         };
 
         // The triangulator draws every triangle anticlockwise in the chart, and
@@ -3614,42 +3624,31 @@ impl BuildingAMesh {
         let there = back_out_of_the_frame_this_face_is_cut_up_in(face);
         let mut deviation: f64 = 0.0;
         for piece in pieces {
-            let (outer, holes) = piece
-                .split_first()
-                .expect("every piece of a patch is an outline and its holes");
-            let mut corner_is: Vec<u32> = piece
-                .iter()
-                .flat_map(|one| one.points.iter().copied())
-                .collect();
-            let cut = match how {
-                HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder => {
-                    let mut domain = TrimmedDomain::new(
-                        *surface,
-                        outer.corners.clone(),
-                        holes.iter().map(|hole| hole.corners.clone()).collect(),
-                        deflection,
-                    )
-                    .with_corners_between_two_edges(
-                        piece
-                            .iter()
-                            .flat_map(|one| one.between_two_edges.iter().copied())
-                            .collect(),
-                    );
-                    if matches!(how, HowToCut::TriangulateByCornerOrder) {
-                        domain = domain.cut_by_corner_order();
-                    }
-                    triangulate(&domain)
-                }
-                HowToCut::ZipUpABand => {
-                    let [hole] = holes else {
-                        unreachable!("a band is handed over whole, as its two rims")
-                    };
-                    zip_up_a_band(surface, &outer.corners, &hole.corners, deflection)
-                }
-            };
-            let cut = match cut {
+            let mut corner_is = the_points_of(&piece);
+            let cut = match cut_one_piece(surface, &piece, how, deflection) {
                 Ok(cut) => cut,
-                Err(why) => return Err(refusal_for(face, why, &corner_is, &self.points, log)),
+                Err(why) => {
+                    // A lobe is refused for what the whole loop it was cut from
+                    // is refused for, so a cut never turns one refusal into
+                    // another that names a corner of the lobe and not of the
+                    // loop: the cut is only for loops whose lobes all mesh.
+                    let Some(whole) = cut_from else {
+                        return Err(refusal_for(face, why, &corner_is, &self.points, log));
+                    };
+                    let whole = [whole];
+                    let Err(why) = cut_one_piece(surface, &whole, how, deflection) else {
+                        unreachable!(
+                            "the triangulator refuses a loop that names one place twice, as CornersCoincide or before it"
+                        )
+                    };
+                    return Err(refusal_for(
+                        face,
+                        why,
+                        &the_points_of(&whole),
+                        &self.points,
+                        log,
+                    ));
+                }
             };
 
             // Everything past the corners this piece handed over is a point the
@@ -4077,6 +4076,17 @@ struct ALoopToCut {
     between_two_edges: Vec<bool>,
 }
 
+/// What [`what_the_triangulator_can_cut`] makes of a patch.
+struct ThePatchAsCut {
+    /// What goes to the triangulator, each an outline and its holes.
+    pieces: Vec<Vec<ALoopToCut>>,
+    /// The triangles drawn here, in table entries, turned the way the patch's
+    /// loops run.
+    drawn_here: Vec<[u32; 3]>,
+    /// The loop as it came, when it was cut into lobes.
+    cut_from: Option<ALoopToCut>,
+}
+
 /// The pieces of one patch the triangulator is handed, each an outline and its
 /// holes, and the triangles drawn here for what it would refuse, in table
 /// entries and turned the way the patch's loops run. A loop runs with the
@@ -4130,10 +4140,7 @@ struct ALoopToCut {
 /// once each way, `FacesDoNotAgreeWhichWayTheyFace`, where the mesh refused
 /// them before
 /// (`a_ball_smaller_than_the_room_on_a_cube_corner_is_placed_and_its_answer_cannot_be_meshed`).
-fn what_the_triangulator_can_cut(
-    surface: &Surface,
-    patch: Vec<ALoopToCut>,
-) -> (Vec<Vec<ALoopToCut>>, Vec<[u32; 3]>) {
+fn what_the_triangulator_can_cut(surface: &Surface, patch: Vec<ALoopToCut>) -> ThePatchAsCut {
     let mut drawn_here = Vec::new();
     let mut loops = patch.into_iter();
     let outline = loops
@@ -4152,9 +4159,14 @@ fn what_the_triangulator_can_cut(
         }
     }
     if kept.len() > 1 {
-        return (vec![kept], drawn_here);
+        return ThePatchAsCut {
+            pieces: vec![kept],
+            drawn_here,
+            cut_from: None,
+        };
     }
     let mut pieces = Vec::new();
+    let mut cut_from = None;
     let mut rest = kept.pop();
     while let Some(one) = rest.take() {
         let Some([first, again]) = the_first_place_a_loop_names_twice(one.corners.corners()) else {
@@ -4177,8 +4189,13 @@ fn what_the_triangulator_can_cut(
             .iter()
             .find(|lobe| lobe.len() >= 3)
             .map(|lobe| one.just(lobe));
+        cut_from.get_or_insert(one);
     }
-    (pieces, drawn_here)
+    ThePatchAsCut {
+        pieces,
+        drawn_here,
+        cut_from,
+    }
 }
 
 impl ALoopToCut {
@@ -4228,6 +4245,54 @@ fn the_first_place_a_loop_names_twice(corners: &[[f64; 2]]) -> Option<[usize; 2]
             .position(|&earlier| earlier == corners[again])
             .map(|earlier| [earlier, again])
     })
+}
+
+/// Hand one piece of a patch, an outline and its holes, to the mesher `how`
+/// names.
+fn cut_one_piece(
+    surface: &Surface,
+    piece: &[ALoopToCut],
+    how: HowToCut,
+    deflection: Deflection,
+) -> core::result::Result<Patch, CannotTriangulate> {
+    let (outer, holes) = piece
+        .split_first()
+        .expect("every piece of a patch is an outline and its holes");
+    match how {
+        HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder => {
+            let mut domain = TrimmedDomain::new(
+                *surface,
+                outer.corners.clone(),
+                holes.iter().map(|hole| hole.corners.clone()).collect(),
+                deflection,
+            )
+            .with_corners_between_two_edges(
+                piece
+                    .iter()
+                    .flat_map(|one| one.between_two_edges.iter().copied())
+                    .collect(),
+            );
+            if matches!(how, HowToCut::TriangulateByCornerOrder) {
+                domain = domain.cut_by_corner_order();
+            }
+            triangulate(&domain)
+        }
+        HowToCut::ZipUpABand => {
+            let [hole] = holes else {
+                unreachable!("a band is handed over whole, as its two rims")
+            };
+            zip_up_a_band(surface, &outer.corners, &hole.corners, deflection)
+        }
+    }
+}
+
+/// The table entry of each corner of `piece`, outline first and then the
+/// holes, the order the triangulator numbers them in.
+fn the_points_of(piece: &[ALoopToCut]) -> Vec<u32> {
+    piece
+        .iter()
+        .flat_map(|one| one.points.iter().copied())
+        .collect()
 }
 
 /// Where a face reads the points round it, in the frame it is cut up in: a
