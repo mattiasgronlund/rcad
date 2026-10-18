@@ -765,6 +765,12 @@ struct Arrangement<'f> {
     /// across that one crossing may split its edge there, so
     /// [`Arrangement::the_two_arcs_to_join_at`] never joins across such a node.
     kept_where_a_crossing_left_out_meets_it: Vec<([Surface; 3], u8)>,
+    /// Each two crossings [`meet_of_three_surfaces`] answered
+    /// [`MeetOfThree::Nowhere`] for in [`Arrangement::place_the_meets`]: the
+    /// face's surface and their two partners share no point, so the two curves
+    /// never meet. [`Arrangement::side_of_a_round_curve_a_cut_misses`] reads
+    /// it.
+    meeting_nowhere: Vec<[usize; 2]>,
 }
 
 /// One curve on the face: one of the curves where the face's surface crosses
@@ -1165,6 +1171,7 @@ impl<'f> Arrangement<'f> {
             winding: Vec::new(),
             cuts_reached_by_no_face: Vec::new(),
             kept_where_a_crossing_left_out_meets_it: Vec::new(),
+            meeting_nowhere: Vec::new(),
         };
         arrangement.draw_the_crossings(cuts, policy, log)?;
         arrangement.place_the_corners(policy, log)?;
@@ -2134,6 +2141,9 @@ impl<'f> Arrangement<'f> {
                         continue;
                     }
                 };
+                if meet == MeetOfThree::Nowhere {
+                    self.meeting_nowhere.push([first, second]);
+                }
                 if self.a_place_of_it_is_on_both(first, second, &meet)
                     && [first, second].into_iter().any(|crossing| {
                         self.no_face_reaches(crossing, &never_left_out, &mut known_unreached, log)
@@ -8109,7 +8119,10 @@ impl<'f> Arrangement<'f> {
     /// Otherwise it is read off the walk's own nodes, passing over one on a
     /// curve the cut draws, which is on the cut. Every node of the half at
     /// `x < 0` in the case [`Arrangement::the_one_on_its_side_of_every_cut`]
-    /// names is on `x = 0`, so it is the arcs that place it.
+    /// names is on `x = 0`, so it is the arcs that place it. Where no node
+    /// says either, a walk along a circle or an ellipse the cut is proved to
+    /// miss is on the side of the curve's centre
+    /// ([`Arrangement::side_of_a_round_curve_a_cut_misses`]).
     ///
     /// Nothing is refused or logged: a side left unread only leaves a
     /// candidate in.
@@ -8128,20 +8141,83 @@ impl<'f> Arrangement<'f> {
                 Decision::Pos
             })
         });
-        along_the_cut.or_else(|| {
-            self.cycles[cycle].iter().find_map(|&half_edge| {
-                let node = &self.nodes[self.from(half_edge)];
-                let on_the_cut = node.crossings.iter().any(|&through| {
-                    self.crossings[through]
-                        .every_surface_that_draws_it()
-                        .any(|drawn_by| drawn_by == cut)
-                });
-                if on_the_cut {
-                    return None;
-                }
-                let side = side_of_surface(cut, node.point);
-                matches!(side, Decision::Pos | Decision::Neg).then_some(side)
+        along_the_cut
+            .or_else(|| {
+                self.cycles[cycle].iter().find_map(|&half_edge| {
+                    let node = &self.nodes[self.from(half_edge)];
+                    let on_the_cut = node.crossings.iter().any(|&through| {
+                        self.crossings[through]
+                            .every_surface_that_draws_it()
+                            .any(|drawn_by| drawn_by == cut)
+                    });
+                    if on_the_cut {
+                        return None;
+                    }
+                    let side = side_of_surface(cut, node.point);
+                    matches!(side, Decision::Pos | Decision::Neg).then_some(side)
+                })
             })
+            .or_else(|| self.side_of_a_round_curve_a_cut_misses(cycle, cut))
+    }
+
+    /// On a flat face: which side of `cut` the region `cycle` walks round is
+    /// on, read off a half-edge of it along a circle or an ellipse that `cut`,
+    /// a plane, is proved to meet nowhere; `None` where no half-edge is on
+    /// such a curve.
+    ///
+    /// **The whole curve is on one side of the cut, and so is its centre.** A
+    /// plane cuts a pipe whose axis leans to it in an ellipse centred where the
+    /// axis meets the plane, and a ball in a circle centred at the foot of the
+    /// ball's centre. Either curve bounds a convex region, and the line `cut`
+    /// draws on the face could only get inside that region by crossing the
+    /// curve. So where [`meet_of_three_surfaces`] answered that the face's
+    /// plane, the curve's partner and `cut` share no point
+    /// ([`Arrangement::meeting_nowhere`]), the curve, the region inside it and
+    /// its centre are all on one side of `cut`, and so is the region beside
+    /// the curve that the walk goes round. The centre's side is a sign of
+    /// stored numbers, decided exactly
+    /// ([`Arrangement::the_cap_circles_centre_against`]), and the centre is
+    /// the curve's width from the cut where a node of the curve can be a
+    /// rounding from it.
+    ///
+    /// A plate with a round hole and a block on it whose wall's plane touches
+    /// the hole, both turned about `z`, is the shape: turned, the wall's line
+    /// misses the hole's circle by a rounding, so the hole is a lump of the
+    /// drawing of its own whose one node, the hole's corner, sits a rounding
+    /// from the line. Read off that node alone, the walk round the hole could
+    /// not be told apart from the cells either side of the line, and the
+    /// plate's top was refused under every rule both ways round (Q2351).
+    fn side_of_a_round_curve_a_cut_misses(&self, cycle: usize, cut: &Surface) -> Option<Decision> {
+        let (Surface::Plane(cut_plane), Surface::Plane(face)) = (cut, &self.surface) else {
+            return None;
+        };
+        self.cycles[cycle].iter().find_map(|&half_edge| {
+            let round = self.arcs[half_edge / 2].crossing;
+            let missed = self.meeting_nowhere.iter().any(|&[one, other]| {
+                (one == round && self.crossings[other].partner == *cut)
+                    || (other == round && self.crossings[one].partner == *cut)
+            });
+            if !missed {
+                return None;
+            }
+            let (origin, along) = match self.crossings[round].partner {
+                Surface::Cylinder(pipe) => (
+                    pipe.axis().origin().coordinates(),
+                    pipe.axis().direction().components(),
+                ),
+                Surface::Sphere(ball) => (ball.centre().coordinates(), face.normal().components()),
+                Surface::Plane(_) | Surface::Cone(_) | Surface::Torus(_) | _ => return None,
+            };
+            let [k, a] = Self::the_cap_circles_centre_against(cut_plane, face, origin, along)?;
+            if !matches!(expansion_sign(&k), Decision::Pos | Decision::Neg) {
+                return None;
+            }
+            let side = expansion_sign(&exactly_multiplied(&k, &a)?);
+            assert!(
+                matches!(side, Decision::Pos | Decision::Neg),
+                "a plane proved to miss a circle or an ellipse holds its centre: {a:?} at {k:?}"
+            );
+            Some(side)
         })
     }
 
@@ -9808,11 +9884,13 @@ impl<'f> Arrangement<'f> {
     }
 
     /// `k = n_c·w` and `a = k·(n·c − d)`, exactly, for `partner`'s normal `n`
-    /// and offset `d`, `cap`'s normal `n_c`, and the centre `c` of the circle
-    /// where `cap` meets the pipe along `w = along` from `origin`; `None` where
-    /// a product would round. `a` is worked out without dividing by `k`
-    /// ([`Arrangement::side_of_a_plane_clear_of_a_cap_circle`] says how), and
-    /// `k·a` has the sign of `n·c − d`.
+    /// and offset `d`, `cap`'s normal `n_c`, and the point `c` where the line
+    /// from `origin` along `w = along` meets `cap`; `None` where a product
+    /// would round. That is the centre of the circle or ellipse where `cap`
+    /// meets a pipe along that line, and with `w = n_c` the centre of the
+    /// circle where it meets a ball round `origin`. `a` is worked out without
+    /// dividing by `k` ([`Arrangement::side_of_a_plane_clear_of_a_cap_circle`]
+    /// says how), and `k·a` has the sign of `n·c − d`.
     fn the_cap_circles_centre_against(
         partner: &Plane,
         cap: &Plane,
@@ -16686,6 +16764,7 @@ mod tests {
             winding: Vec::new(),
             cuts_reached_by_no_face: Vec::new(),
             kept_where_a_crossing_left_out_meets_it: Vec::new(),
+            meeting_nowhere: Vec::new(),
         };
         let mut log = ProvenanceLog::new();
         arrangement

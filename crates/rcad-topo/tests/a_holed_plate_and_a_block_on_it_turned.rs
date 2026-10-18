@@ -11,7 +11,9 @@
 //! point the arrangement places it by: a rounding from the line, so neither
 //! the count of how often a walk winds round it nor its side of the line can
 //! be read, and the top face was refused `CannotTellTheCellsOfAFaceApart`
-//! under every rule both ways round (Q2229, Q2351).
+//! under every rule both ways round (Q2229, Q2351). The line is proved to
+//! miss the circle, so the hole's side of it is now read off the circle's
+//! centre, half the hole's width from the line.
 
 use rcad_geom::{Axis, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
