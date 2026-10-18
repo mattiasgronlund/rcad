@@ -4124,7 +4124,12 @@ struct ALoopToCut {
 /// encloses nothing. With three or more in each, either lobe could hold the
 /// other, and the loop is handed over whole and refused as it was. So is a
 /// pinch in a patch with a hole, since which lobe holds the hole is not read
-/// here.
+/// here, and a loop through one table entry twice at one place, since no
+/// rounding put two points there: cut there, the answers of a ball `2⁻⁴⁸`
+/// across on a cube's corner meshed to a skin whose sides were not each used
+/// once each way, `FacesDoNotAgreeWhichWayTheyFace`, where the mesh refused
+/// them before
+/// (`a_ball_smaller_than_the_room_on_a_cube_corner_is_placed_and_its_answer_cannot_be_meshed`).
 fn what_the_triangulator_can_cut(
     surface: &Surface,
     patch: Vec<ALoopToCut>,
@@ -4161,7 +4166,7 @@ fn what_the_triangulator_can_cut(
             (first..again).collect(),
             (again..count).chain(0..first).collect(),
         ];
-        if lobes.iter().all(|lobe| lobe.len() >= 3) {
+        if one.points[first] == one.points[again] || lobes.iter().all(|lobe| lobe.len() >= 3) {
             pieces.push(vec![one]);
             break;
         }
