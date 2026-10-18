@@ -12181,6 +12181,89 @@ mod tests {
         );
     }
 
+    /// An arc whose two ends are a rounding apart round a pipe is counted as
+    /// the sliver between them when it sets off towards its far end, and as
+    /// all the rest of the turn when it sets off away from it (queue row
+    /// Q2296).
+    ///
+    /// The plane `z = 0` cuts the pipe of radius one about `z` in a circle,
+    /// and `(1, 0, 0)` and `(1, ε, 0)` are a rounding apart on it. A ring of
+    /// two arcs between them goes right round once when one is the sliver
+    /// and the other the rest of the circle the same way, and not at all when
+    /// both are the rest of the circle, one each way.
+    #[test]
+    fn an_arc_a_rounding_long_is_told_from_one_a_rounding_short_of_a_whole_turn() {
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a radius"));
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+        let corner = |point: Point| Corner {
+            point,
+            wobble: 0.0,
+            from: None,
+            moved_by_the_policy: false,
+            where_pipes_touch: Vec::new(),
+        };
+        let backwards = Vector::new(0.0, -1.0, 0.0);
+        let arc = |ends: [usize; 2], towards: Vector| Edge {
+            ends,
+            carried_by: [pipe, flat],
+            arc: WhichArc::LeavingACorner {
+                corner: ends[0],
+                towards,
+            },
+            from: Vec::new(),
+        };
+        for (back, goes_round, what) in [
+            (
+                backwards,
+                Some(true),
+                "the rest of the circle backwards, then the sliver backwards",
+            ),
+            (
+                -backwards,
+                Some(false),
+                "the rest of the circle backwards, then forwards",
+            ),
+        ] {
+            let side = |edge: usize| Side {
+                edge,
+                forward: true,
+                read_against: None,
+            };
+            let assembly = Assembly {
+                where_closed_edges_start: Vec::new(),
+                corners: vec![
+                    corner(Point::new(1.0, 0.0, 0.0)),
+                    corner(Point::new(1.0, f64::EPSILON, 0.0)),
+                ],
+                edges: vec![arc([0, 1], backwards), arc([1, 0], back)],
+                runs: Vec::new(),
+                faces: vec![Face {
+                    ancestors: Vec::new(),
+                    pieces: Vec::new(),
+                    surface: pipe,
+                    used: Orientation::Forward,
+                    wires: vec![vec![side(0), side(1)]],
+                    is_a_whole_closed_surface: false,
+                }],
+                shells: Vec::new(),
+                solids: Vec::new(),
+            };
+            let ring = [0, 1].map(|position| Dart {
+                face: 0,
+                wire: 0,
+                position,
+            });
+            assert_eq!(
+                assembly.a_ring_goes_right_round(&ring, &pipe),
+                goes_round,
+                "{what}"
+            );
+        }
+    }
+
     /// The middle [`Assembly::one_shell_is_inside_another`] asks of an open arc
     /// is half way round the arc its edge names, and not round the other one
     /// between the same two ends (queue row Q2101).
