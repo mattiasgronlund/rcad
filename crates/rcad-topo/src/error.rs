@@ -258,11 +258,13 @@ pub enum Error {
     /// [`Invalid::DynamicRangeTooWide`] never arrives wrapped in here, because
     /// the sweep of the throwaway model does not ask the coordinate range —
     /// twelve of `Model::validate`'s thirteen checks, and that is the
-    /// thirteenth. A fuse asks it once, in `Assembly::check_dynamic_range` and
-    /// behind a guard, so that a caller whose own solids sit further apart than
-    /// `f64` can resolve still gets the answer the arithmetic reached; §87.3 has
-    /// the argument. Everything else the sweep refuses is wrapped in here, with
-    /// no list of exceptions to keep honest.
+    /// thirteenth. A fuse asks it behind a guard, in two halves,
+    /// `Assembly::check_dynamic_range` of the corners and edges and
+    /// `Assembly::check_how_thin_each_face_is` of the faces, so that a caller
+    /// whose own solids sit further apart than `f64` can resolve still gets the
+    /// answer the arithmetic reached; §87.3 has the argument. Everything else
+    /// the sweep refuses is wrapped in here, with no list of exceptions to keep
+    /// honest.
     ///
     /// **One arrives before the sweep.** A face joined from coplanar pieces
     /// whose rings include two that both wind as its outline is refused while
@@ -1813,7 +1815,18 @@ pub enum Invalid {
     },
 
     /// The model's coordinates span too wide a range to compute in
-    /// (decisions.md §3.5).
+    /// (decisions.md §3.5): its largest coordinate over its smallest feature
+    /// is past what `f64` resolves.
+    ///
+    /// **The smallest feature need not be an edge.** It is the shortest chord
+    /// of an edge that does not close, the smallest radius of a curved face,
+    /// or how thin a face is where `the_narrowest_a_face_is` in `validate.rs`
+    /// can say: how close a corner of one loop comes to a side of another, and
+    /// how thick a flat face cut off a round bar's circle by a chord is. A
+    /// face thinner than a rounding of its own coordinates is read as one
+    /// rounding thick, since the rounding is the least a measured gap can be,
+    /// so such a face gives a ratio of at least `2⁵²`, and exactly that when
+    /// it sits at the model's largest coordinate (queue rows Q2237 and Q2257).
     #[error("coordinates span a range of {ratio:e}, which is too wide to compute in")]
     DynamicRangeTooWide {
         /// Largest coordinate magnitude divided by smallest feature size.

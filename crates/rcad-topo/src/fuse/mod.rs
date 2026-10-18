@@ -159,12 +159,16 @@ impl Model {
     /// there than that room is placed by nothing: [`Error::Undecidable`], on
     /// "where three surfaces meet", and not this (§294.16). [`Error::Invalid`]
     /// also when a shell of the answer encloses no space, or when the answer's
-    /// own shortest edge is too small to resolve beside its own coordinates —
-    /// which is [`Invalid::DynamicRangeTooWide`] about a feature the inputs did
-    /// not have and the fuse built (see `Assembly::check_dynamic_range`), or
-    /// when cutting a face left a piece bounded by two straight sides, which
-    /// enclose no area and so describe no face — [`Invalid::WireTooShort`], and
-    /// §67 for why that is the input's fault and not the splitter's.
+    /// smallest feature — its shortest chord, the narrowest a cone face of it
+    /// is at a corner, or how thin a face of it is — is too small to resolve
+    /// beside its coordinates and the inputs', under a policy that fails on
+    /// that, which is [`Invalid::DynamicRangeTooWide`] about a feature the
+    /// inputs did not have and the fuse built (see `Assembly::check_dynamic_range`
+    /// and `Assembly::check_how_thin_each_face_is`; a policy that warns instead
+    /// answers with one `dynamic range check` record), or when cutting a face
+    /// left a piece bounded by two straight sides, which enclose no area and so
+    /// describe no face — [`Invalid::WireTooShort`], and §67 for why that is the
+    /// input's fault and not the splitter's.
     ///
     /// [`Error::KeyFromAnotherModel`] when one of `arguments` or `tools` was
     /// made by a different model. It is asked of every key in both lists
@@ -186,10 +190,11 @@ impl Model {
     /// **The answer is swept in every build**, by twelve of [`Model::validate`]'s
     /// thirteen checks: the throwaway holds the answer and nothing else, which
     /// is what makes a whole-model sweep of it local to what this fuse wrote.
-    /// The thirteenth, the model-wide coordinate range, is left out —
-    /// `Assembly::check_dynamic_range` asks that one, in `assemble` and behind
-    /// a guard, and
-    /// asking it again over a model holding only the answer would undo the
+    /// The thirteenth, the model-wide coordinate range, is left out — `assemble`
+    /// asks that one, behind a guard and in two halves,
+    /// `Assembly::check_dynamic_range` of the corners and edges and
+    /// `Assembly::check_how_thin_each_face_is` of the faces, and asking it
+    /// again over a model holding only the answer would undo the
     /// guard (§87.3). Before §66.3 the check was `debug_assertions`-gated *and*
     /// skipped whenever the model did not already validate, so a release fuse
     /// looked at nothing; §66.3 made it run always, and §87 made it a refusal.
@@ -328,13 +333,14 @@ impl Model {
         // The last question the answer itself can be asked, and the only one
         // neither input could have been asked instead: a fuse invents features
         // — the sliver where two nearly-flush faces meet — and a sliver has no
-        // lower size short of zero. `assemble` asks it, once, and only when
-        // this guard says the inputs fit; `Assembly::commit` deliberately
-        // sweeps the throwaway with the twelve checks that are not this one,
-        // so that the guard is what decides whether it is asked at all. Two of
-        // the fuse's own tests are pairs whose inputs do not fit and whose
-        // answer this fuse reaches exactly, and a sweep asking the question
-        // again refuses both (§87.3).
+        // lower size short of zero. `assemble` asks it in two halves, of the
+        // corners and edges and then of the faces, warns once at most, and
+        // asks only when this guard says the inputs fit; `Assembly::commit`
+        // deliberately sweeps the throwaway with the twelve checks that are
+        // not this one, so that the guard is what decides whether it is asked
+        // at all. Two of the fuse's own tests are pairs whose inputs do not
+        // fit and whose answer this fuse reaches exactly, and a sweep asking
+        // the question again refuses both (§87.3).
         //
         // A tolerant policy's warning is held back until the wobble check
         // below has run: that check judges the decisions this fuse could not
@@ -421,16 +427,19 @@ struct Settled<'a> {
 /// operation touched (§4.3) — the same reason [`Assembly::commit`] sweeps a
 /// throwaway model holding only the answer rather than the caller's whole one.
 ///
-/// Chords only, where `Model::validate` also takes the radii of curved faces.
-/// A ball, a pipe or a ring keeps its radius bit for bit in the answer (§17.1),
+/// Chords only, where `Model::validate` also takes the radii of curved faces
+/// and how thin a face is (`the_narrowest_a_face_is` in `validate.rs`). A
+/// ball, a pipe or a ring keeps its radius bit for bit in the answer (§17.1),
 /// so were one of those the smallest thing about the inputs, measuring it here
 /// would report the inputs as not fitting, which only ever makes the check
 /// stand down. Leaving those radii out is therefore the stricter of the two,
 /// not a hole. A cone's radius at a corner is not a number of its surface, and
 /// the fuse makes corners of its own: the check measures the answer's, and
 /// this leaves the inputs' out for the same reason as the others, so the
-/// stricter way round again. A model whose radius is what puts it out of
-/// range fails `Model::validate` going in, and its caller's next
+/// stricter way round again. How thin a face is goes the same way: the check
+/// measures each face of the answer, and an input's thin face measured here
+/// could only make it stand down. A model whose radius or thin face is what
+/// puts it out of range fails `Model::validate` going in, and its caller's next
 /// `Model::validate` says so again on the way out; the sweep of the throwaway
 /// answer does not, because that sweep leaves the range question to the
 /// check.

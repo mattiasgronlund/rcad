@@ -38,11 +38,12 @@
 //! everywhere, but at an end of the short axis it is, and here it is bit for bit.
 
 use rcad_geom::{
-    Axis, Deflection, Isometry, MeetOfThree, Point, Scale, Surface, SurfaceMeet, Vector, intersect,
-    meet_of_three_surfaces, where_a_closed_crossing_starts, which_comes_first_round_a_crossing,
+    Axis, Deflection, DynamicRange, Isometry, MeetOfThree, Point, Scale, Surface, SurfaceMeet,
+    Vector, intersect, meet_of_three_surfaces, where_a_closed_crossing_starts,
+    which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 /// The bar's radius, `1 + 2⁻⁵¹`.
 const RADIUS: f64 = 1.0 + 2.0 * f64::EPSILON;
@@ -158,9 +159,13 @@ fn the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_
 }
 
 /// The pin: under either policy, every rule with either solid first gets past
-/// the order of the two places with nothing recorded at all, and answers one
-/// solid that validates and holds its closed form, all but the bar less the
-/// block, which is refused on a fold of its mesh.
+/// the order of the two places without a record of it. The intersection and
+/// the block less the bar answer one solid that validates and holds its closed
+/// form, with nothing recorded at all. The union and the bar less the block
+/// keep the fin the bar leaves outside `x = −17`, which is too thin to hold
+/// beside coordinates of 17: under `certified` each is refused
+/// `DynamicRangeTooWide`, and under `tolerant` each carries one record, of the
+/// range check.
 ///
 /// **The closed forms.** The block's side `x = −17` is `2⁻⁵¹` inside the bar's
 /// wall, its other three sides are clear of the bar, and its bottom is under
@@ -172,13 +177,24 @@ fn the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_
 /// `8.0361` with `r = 1 + 2⁻⁵¹`. The block holds `4 · 12 · 4 = 192` and the bar
 /// `10 π r²`, so the union is `192 + 10 π r²` less what they share, `215.380`,
 /// and the block less the bar is `192` less it, `183.964`. The fin of the bar
-/// outside `x = −17` holds about `1.7e-22`, which none of them can hold.
+/// outside `x = −17` holds about `1.7e-22`, far under any of their error bars,
+/// so the closed forms leave it out.
+///
+/// **The fin.** The block's side cuts the bar's bottom cap along a chord
+/// `2⁻²⁴` long, `2⁻²⁵` either side of `y = 0`, and the piece of the cap
+/// outside the block, which the union and the bar less the block both keep, is
+/// the short arc beyond that chord: `2⁻⁵¹` thick. That is under a rounding of
+/// coordinates of 17, past §3.5's `10¹⁶`, and `the_narrowest_a_face_is` in
+/// `validate.rs` reads a face thinner than a rounding as one rounding, so the
+/// spread comes out `17 / (17 · 2⁻⁵²)`, `2⁵²` exactly (queue rows Q2237 and
+/// Q2257). The tolerant union validates under `tolerant` alone, and is refused
+/// the same under `certified` (§68).
 ///
 /// **The bar less the block**, `10 π r²` less what they share, `23.380`, and
 /// the fin, is refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`
-/// at the last rung of the fold ladder (Q1869): the fin's wall and the block's
-/// side both draw one side of the mesh. A probe took 0.48 s for it under either
-/// policy. That refusal is Q1972's.
+/// under `tolerant`, at the last rung of the fold ladder (Q1869): the fin's
+/// wall and the block's side both draw one side of the mesh. A probe took
+/// 0.48 s for it. That refusal is Q1972's.
 ///
 /// **Why this says the arm gave an order.** Every fuse here goes through
 /// `the_one_ahead_of_the_start`, and goes there from `the_one_the_start_is`'s
@@ -189,8 +205,9 @@ fn the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_
 /// not a test. The rest is this file: the sweep is a proved zero, neither place
 /// is a rounding off the start, the boxes are apart and neither holds the
 /// start, which is the only way to that arm. Had the arm left the pair
-/// `Undecidable`, a certified fuse would have refused with an `order along a
-/// crossing` record.
+/// `Undecidable`, a certified fuse would have refused `Undecidable` with an
+/// `order along a crossing` record, where the ones that hold the fin are
+/// refused only once their answer is put together.
 ///
 /// Before Q1860's walk fix (`10517374`) every one of the twelve was refused
 /// `CannotNameWhichPieceOfACrossingThisIs` out of `rcad-geom` while its answer
@@ -202,7 +219,7 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
     let shared = std::f64::consts::PI * RADIUS * RADIUS * (4.0 / 0.5_f64.cos() - 2.0);
     let bar = std::f64::consts::PI * RADIUS * RADIUS * 10.0;
     let block = 4.0 * 12.0 * 4.0;
-    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+    for (policy, certified) in [(Policy::certified(), true), (Policy::tolerant(25.0), false)] {
         for rule in EVERY_RULE {
             for bar_first in [true, false] {
                 let case = format!("{policy:?} {rule:?}, bar first {bar_first}");
@@ -216,7 +233,17 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
                     &policy,
                     &mut log,
                 );
-                assert!(log.records().is_empty(), "{case}: {:#?}", log.records());
+                let holds_the_fin = it_holds_the_fin(rule, bar_first);
+                if holds_the_fin && certified {
+                    assert_refused_for_the_fin(&fused, &case);
+                    assert!(log.records().is_empty(), "{case}: {:#?}", log.records());
+                    continue;
+                }
+                if holds_the_fin && fused.is_ok() {
+                    assert_only_the_range_is_recorded(&log, &case);
+                } else {
+                    assert!(log.records().is_empty(), "{case}: {:#?}", log.records());
+                }
                 let closed_form = match (rule, bar_first) {
                     (Rule::Union, _) => block + bar - shared,
                     (Rule::Intersection, _) => shared,
@@ -237,6 +264,12 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
                     _ => unreachable!("{case}: EVERY_RULE names three rules"),
                 };
                 assert_one_solid_holding(&model, fused, closed_form, shared, &policy, &case);
+                if holds_the_fin {
+                    assert_refused_for_the_fin(
+                        &model.validate(&Policy::certified(), &mut ProvenanceLog::new()),
+                        &case,
+                    );
+                }
             }
         }
     }
@@ -244,20 +277,24 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
 
 /// The same bar and a block on the same square standing straight up from
 /// `z = −1` to `z = 11`, so that it holds the whole bar but the fin `2⁻⁵¹`
-/// thick the bar leaves outside `x = −17`. Under either policy, every rule with
-/// either solid first answers one solid that validates and holds its closed
-/// form, with nothing recorded, all but the bar less the block, the fin alone.
+/// thick the bar leaves outside `x = −17`. Under either policy, the
+/// intersection and the block less the bar, with either solid first, answer
+/// one solid that validates and holds its closed form, with nothing recorded.
+/// The union and the bar less the block, the fin alone, keep the fin: under
+/// `certified` each is refused `DynamicRangeTooWide` as in the test above, and
+/// under `tolerant` each carries one record, of the range check, and the union
+/// validates under `tolerant` alone (§68).
 ///
 /// **The closed forms.** The block holds `4 · 12 · 12 = 576` and the bar
 /// `10 π r²`, all of it inside the block but the fin, which holds about
-/// `1.7e-22`. So the union is `576`, the intersection `10 π r²`, and the block
-/// less the bar `576 − 10 π r²`, and none of them can hold the fin.
+/// `1.7e-22`, far under any of their error bars. So the union is `576`, the
+/// intersection `10 π r²`, and the block less the bar `576 − 10 π r²`.
 ///
 /// **The fin alone** is refused `CannotTellWhichWayASolidsFacesPoint` with
-/// `enclosed: 0.0`, since it holds about `1.7e-22`, less than any mesh the
-/// ladder asks for can leave out, so no mesh can tell which way its faces
-/// point. That refusal is Q1980's, which files Q1938's `VolumeIsNotPositive`
-/// again.
+/// `enclosed: 0.0` under `tolerant`, since it holds about `1.7e-22`, less than
+/// any mesh the ladder asks for can leave out, so no mesh can tell which way
+/// its faces point. That refusal is Q1980's, which files Q1938's
+/// `VolumeIsNotPositive` again.
 ///
 /// **The fin's ends.** Its bottom and top faces are each three corners on one
 /// line, `(−17, ±2⁻²⁵)` and the bar's rim corner `(−17, ∓6.1e-17)`. The
@@ -277,7 +314,7 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
 fn every_fuse_with_the_upright_block_answers_its_closed_form_but_the_fin_alone() {
     let bar = std::f64::consts::PI * RADIUS * RADIUS * 10.0;
     let block = 4.0 * 12.0 * 12.0;
-    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+    for (policy, certified) in [(Policy::certified(), true), (Policy::tolerant(25.0), false)] {
         for rule in EVERY_RULE {
             for bar_first in [true, false] {
                 let case = format!("{policy:?} {rule:?}, bar first {bar_first}");
@@ -291,7 +328,17 @@ fn every_fuse_with_the_upright_block_answers_its_closed_form_but_the_fin_alone()
                     &policy,
                     &mut log,
                 );
-                assert!(log.records().is_empty(), "{case}: {:#?}", log.records());
+                let holds_the_fin = it_holds_the_fin(rule, bar_first);
+                if holds_the_fin && certified {
+                    assert_refused_for_the_fin(&fused, &case);
+                    assert!(log.records().is_empty(), "{case}: {:#?}", log.records());
+                    continue;
+                }
+                if holds_the_fin && fused.is_ok() {
+                    assert_only_the_range_is_recorded(&log, &case);
+                } else {
+                    assert!(log.records().is_empty(), "{case}: {:#?}", log.records());
+                }
                 let closed_form = match (rule, bar_first) {
                     (Rule::Union, _) => block,
                     (Rule::Intersection, _) => bar,
@@ -312,9 +359,47 @@ fn every_fuse_with_the_upright_block_answers_its_closed_form_but_the_fin_alone()
                     _ => unreachable!("{case}: EVERY_RULE names three rules"),
                 };
                 assert_one_solid_holding(&model, fused, closed_form, bar, &policy, &case);
+                if holds_the_fin {
+                    assert_refused_for_the_fin(
+                        &model.validate(&Policy::certified(), &mut ProvenanceLog::new()),
+                        &case,
+                    );
+                }
             }
         }
     }
+}
+
+/// Whether the fuse of the bar and a block under `rule` keeps the fin the bar
+/// leaves outside `x = −17`: the union, and the bar less the block.
+fn it_holds_the_fin(rule: Rule, bar_first: bool) -> bool {
+    matches!(
+        (rule, bar_first),
+        (Rule::Union, _) | (Rule::Difference, true)
+    )
+}
+
+/// Checks that `refused` is `DynamicRangeTooWide` for the fin: `17` over one
+/// rounding of `17`, which is what `the_narrowest_a_face_is` reads a face
+/// thinner than a rounding as.
+fn assert_refused_for_the_fin<T: std::fmt::Debug>(refused: &rcad_topo::Result<T>, case: &str) {
+    assert!(
+        matches!(
+            refused,
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) if *ratio == 1.0 / f64::EPSILON
+        ),
+        "{case}: {refused:?}"
+    );
+}
+
+/// Checks that the one record in `log` is the range check's, the warning a
+/// tolerant policy gives for the fin.
+fn assert_only_the_range_is_recorded(log: &ProvenanceLog, case: &str) {
+    assert!(
+        log.records().len() == 1 && log.records()[0].predicate() == "dynamic range check",
+        "{case}: {:#?}",
+        log.records()
+    );
 }
 
 /// Checks that `fused` is one solid holding `closed_form` within the error bar
@@ -372,9 +457,16 @@ fn assert_one_solid_holding(
 /// the fold that mesh draws. That is a cost bound and not a claim that no finer
 /// mesh would clear the fold; `validate.rs` says why under "What stops a fold".
 /// This bounds the wait well under the old one, rather than timing it.
+///
+/// **Only the tolerant fuse reaches the ladder.** The fin's piece of the bar's
+/// bottom cap bows `2⁻⁴⁰` off its chord, a spread of `17 / 2⁻⁴⁰`, `1.87e13`,
+/// past §3.5's `10¹¹`, so under `certified` the fuse is refused
+/// `DynamicRangeTooWide` before any mesh is asked for (queue rows Q2237 and
+/// Q2257). Under `tolerant` that spread is a warning, and the fold is refused
+/// as before.
 #[test]
 fn a_fold_across_a_thin_fin_is_refused_in_seconds_at_the_ladders_last_rung() {
-    for policy in [Policy::certified(), Policy::tolerant(25.0)] {
+    for (policy, certified) in [(Policy::certified(), true), (Policy::tolerant(25.0), false)] {
         let (answer, answered) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let (mut model, bar, block) = the_block_and_a_bar_of_radius(1.0 + f64::powi(2.0, -40));
@@ -385,18 +477,26 @@ fn a_fold_across_a_thin_fin_is_refused_in_seconds_at_the_ladders_last_rung() {
                 &policy,
                 &mut ProvenanceLog::new(),
             );
-            let folded = matches!(
-                fused,
-                Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 })
-            );
+            let as_it_should = if certified {
+                matches!(
+                    fused,
+                    Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
+                        if ratio > DynamicRange::LARGEST_SUPPORTED_RATIO
+                )
+            } else {
+                matches!(
+                    fused,
+                    Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 })
+                )
+            };
             answer
-                .send((folded, format!("{fused:?}")))
+                .send((as_it_should, format!("{fused:?}")))
                 .expect("the test waits for the answer");
         });
-        let (folded, fused) = answered
+        let (as_it_should, fused) = answered
             .recv_timeout(std::time::Duration::from_secs(30))
             .unwrap_or_else(|_| panic!("{policy:?}: still meshing after 30 s"));
-        assert!(folded, "{policy:?}: {fused}");
+        assert!(as_it_should, "{policy:?}: {fused}");
     }
 }
 

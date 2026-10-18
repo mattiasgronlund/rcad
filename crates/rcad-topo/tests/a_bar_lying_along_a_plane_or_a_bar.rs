@@ -101,20 +101,46 @@
 //! `fuse/arrange.rs` now reads the side off which arc of the circle the box is
 //! on, between the two points `meet_of_three_surfaces` proves the circle
 //! crosses the top at, and the near seam corner's off the near cap's circle,
-//! which is clear of the top. Every fuse answers but the union with the block
-//! first.
+//! which is clear of the top.
+//!
+//! **Every answer of that bar holds a feature too small for its coordinates,
+//! so every certified fuse is refused `DynamicRangeTooWide`** (queue row
+//! Q2237). An answer holding the sliver holds the piece of the far cap that
+//! closes it, a segment of the cap's circle `4.4e−16` thick, and one holding
+//! the bar less the sliver holds its pipe, where the arc the top cuts turns
+//! about `5e−16` from the near seam corner, the corner of the pipe's other
+//! loop. Both are §3.5's limit, at coordinates of 4 to 6. Under `tolerant`
+//! every fuse answers with one record of that spread, and the model validates
+//! under `tolerant` alone, but the union with the block first, which is still
+//! refused meshing the pipe (queue row Q2238).
 //! `a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top` and
 //! its twin on the floor pin them.
+//!
+//! **A bar standing on the block's top flush with its edge answers every
+//! rule** (queue row Q2257). Its foot touches the top's outline at one point
+//! that is no corner of it. Q2237's measure reads a corner of one loop on a
+//! side of another as a neck of no width, since it floors the distance at one
+//! rounding, but the fuse never writes such a face: it cuts the top's edge at
+//! the touch and writes the foot into the outline, one loop through the touch
+//! twice. The same top written by hand with `SolidBuilder` as an outline and a
+//! hole is refused `DynamicRangeTooWide`, the wrong name for a touch.
+//! `a_bar_standing_on_a_blocks_top_flush_with_its_edge_answers_every_rule` and
+//! `a_top_whose_hole_touches_its_outline_at_a_point_is_refused_as_too_thin`
+//! pin the two.
 
 use core::f64::consts::PI;
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, DynamicRange, Isometry, MeetOfThree, Plane, Point, Scale, Surface,
-    SurfaceMeet, Vector, intersect, meet_of_three_surfaces,
+    Axis, Cylinder, Deflection, DynamicRange, EdgeRun, Isometry, MeetOfThree, Orientation, Plane,
+    Point, Scale, Surface, SurfaceMeet, Vector, intersect, meet_of_three_surfaces,
 };
 use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{EdgeKey, Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{
+    DraftStep, EdgeKey, Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+};
 
 /// How far under the closed form a bar's meshed volume may be.
 ///
@@ -1389,9 +1415,8 @@ fn a_block_less_a_dome_whose_rim_touches_its_wall_keeps_the_dome_as_a_hollow() {
 /// the plane is proved clear of that circle (Q2102).
 #[test]
 fn a_bar_turned_onto_x_by_a_float_angle_along_a_blocks_top_answers_every_rule() {
-    every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
-        PI / 2.0,
-        [1.0, 2.0, 5.0],
+    every_fuse_of_the_block_and_a_bar(
+        |model| a_bar_turned_onto_x(model, PI / 2.0, [1.0, 2.0, 5.0]),
         a_bar_clear_of_the_block,
     );
 }
@@ -1593,9 +1618,8 @@ fn a_bar_clear_of_the_block(rule: Rule, bar_first: bool) -> Vec<ShellsAndVolume>
 /// over the bar's seam corners, as the bar along the top was.
 #[test]
 fn a_block_less_a_bar_turned_onto_x_by_a_float_angle_along_its_floor_keeps_the_bar_as_a_hollow() {
-    every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
-        PI / 2.0,
-        [1.0, 2.0, 1.0],
+    every_fuse_of_the_block_and_a_bar(
+        |model| a_bar_turned_onto_x(model, PI / 2.0, [1.0, 2.0, 1.0]),
         a_bar_inside_the_block,
     );
 }
@@ -1648,25 +1672,39 @@ fn what_tolerant_gives_for_a_bar_dipping_through_the_floor(
 /// the bar's near end, where its near cap's circle is clear of the top by
 /// about `1e−31`.
 ///
-/// **Every fuse but one answers with that sliver**, under `certified` and
-/// `tolerant`, every decision proved, and the model validates. The union with
-/// the bar first is one shell of the block's six faces and the bar's three,
-/// the intersection the sliver's three, the block less the bar eight faces,
-/// and the bar less the block four. Every fuse used to be refused: under
-/// `certified`, `Undecidable` at the side of the top over the far seam corner,
-/// a box `2.8e−13` wide the top runs through, and under `tolerant`,
-/// `CannotTellTheCellsOfAFaceApart`. `fuse/arrange.rs` now reads that side off
-/// which arc of the far cap's circle the box is on, and the side of the top at
-/// the near seam corner off the near cap's circle, which is clear of it.
+/// **Every certified fuse is refused `DynamicRangeTooWide`, and that is §3.5's
+/// limit, not a gap** (queue row Q2237). The intersection, the sliver, and the
+/// block less the bar, a groove the sliver leaves, each hold the piece of the
+/// far cap the sliver ends in: a segment of the cap's circle between the two
+/// points it crosses the top at, `5.96e−8` apart, and so `4.4e−16` thick. The
+/// union and the bar less the block each hold the bar's pipe less the sliver,
+/// a face of two loops: the near cap's circle, whose one corner is the near
+/// seam corner `(3, 2, 4)`, and the arc the top cuts the pipe in with the far
+/// cap's long arc. That arc turns at its tip about `5e−16` from the near seam
+/// corner, and the corner is stored on the top itself. Either way the spread
+/// is past `1e15` at coordinates of 4 to 6. Until Q2237 the range read only
+/// the edges' chords, `5.96e−8` at the shortest, and every fuse answered.
 ///
-/// The union with the block first is still refused `CannotMeshAFace`, a loop
-/// naming its fourth corner twice, under both policies, though the union the
-/// other way round answers. `mesh.rs` puts one point inside the arc where the
-/// bar's pipe meets the top, at the arc's tip, and with the block first that
-/// point is stored at exactly the near seam corner's numbers `(3, 2, 4)`; with
-/// the bar first it is stored one rounding step off in `y`, and the pipe
-/// meshes. The answers are not measured: the sliver is too thin to mesh to the
-/// deflection `volume_of` asks for.
+/// Under `tolerant` every fuse answers with one record of that spread, every
+/// other decision proved, and the model validates under `tolerant` alone: the
+/// union with the bar first is one shell of the block's six faces and the
+/// bar's three, the intersection the sliver's three, the block less the bar
+/// eight faces, and the bar less the block four. Every fuse used to be
+/// refused: under `certified`, `Undecidable` at the side of the top over the
+/// far seam corner, a box `2.8e−13` wide the top runs through, and under
+/// `tolerant`, `CannotTellTheCellsOfAFaceApart`. `fuse/arrange.rs` now reads
+/// that side off which arc of the far cap's circle the box is on, and the side
+/// of the top at the near seam corner off the near cap's circle, which is
+/// clear of it.
+///
+/// The tolerant union with the block first is still refused
+/// `CannotMeshAFace`, a loop naming its fourth corner twice, though the union
+/// the other way round answers (queue row Q2238). `mesh.rs` puts one point
+/// inside the arc where the bar's pipe meets the top, at the arc's tip, and
+/// with the block first that point is stored at exactly the near seam corner's
+/// numbers `(3, 2, 4)`; with the bar first it is stored one rounding step off
+/// in `y`, and the pipe meshes. The answers are not measured: the sliver is
+/// too thin to mesh to the deflection `volume_of` asks for.
 #[test]
 fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top() {
     every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
@@ -1675,8 +1713,8 @@ fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top() {
     );
 }
 
-/// What each fuse of the block and the bar along its top with its seam
-/// underneath gives, as it stands.
+/// What each tolerant fuse of the block and the bar along its top with its
+/// seam underneath gives, as it stands.
 fn what_a_bar_with_its_seam_underneath_dipping_through_the_top_gives(
     rule: Rule,
     bar_first: bool,
@@ -1693,11 +1731,17 @@ fn what_a_bar_with_its_seam_underneath_dipping_through_the_top_gives(
 
 /// The bar of the test above sunk to `(3, 2, 1)`, along the block's floor,
 /// where its far end drops through the floor in the same sliver (queue row
-/// Q2187). The union is one shell of the block's six faces and the sliver's
-/// pipe and far cap, the intersection the bar less the sliver in four faces,
-/// the block less the bar a hollow open through the floor in nine, and the
-/// bar less the block the sliver's three. Every one used to be refused as the
-/// bar along the top was, round `(1, 2, 0)`.
+/// Q2187). Every certified fuse is refused `DynamicRangeTooWide` as there
+/// (queue row Q2237): the union and the bar less the block hold the sliver's
+/// far cap, and the intersection and the block less the bar the bar's pipe
+/// less the sliver, whose arc along the floor turns about `5e−16` from the
+/// near seam corner `(3, 2, 0)`. Under `tolerant` each answers with one record
+/// of that spread and validates under `tolerant` alone: the union is one shell
+/// of the block's six faces and the sliver's pipe and far cap, the
+/// intersection the bar less the sliver in four faces, the block less the bar
+/// a hollow open through the floor in nine, and the bar less the block the
+/// sliver's three. Every one used to be refused as the bar along the top was,
+/// round `(1, 2, 0)`.
 #[test]
 fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_floor() {
     every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
@@ -1706,8 +1750,8 @@ fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_floor() {
     );
 }
 
-/// What each fuse of the block and the bar along its floor with its seam
-/// underneath gives.
+/// What each tolerant fuse of the block and the bar along its floor with its
+/// seam underneath gives.
 fn what_a_bar_with_its_seam_underneath_dipping_through_the_floor_gives(
     rule: Rule,
     bar_first: bool,
@@ -1721,12 +1765,170 @@ fn what_a_bar_with_its_seam_underneath_dipping_through_the_floor_gives(
     }
 }
 
-/// What a fuse of the block `[0, 4]³` and a bar with its seam underneath,
-/// dipping through one of its faces, gives.
+/// A bar of radius one, two high, standing on the block `[0, 4]³`'s top flush
+/// with its edge `x = 4`, from `(3, 2, 4)`, and the same bar flush with the
+/// edge `x = 0`, from `(1, 2, 4)` (queue row Q2257). Either way the bar's foot
+/// touches the top's outline at one point that is no corner of the outline:
+/// `(4, 2, 4)`, the bar's seam corner, or `(0, 2, 4)`, across the foot from
+/// it.
+///
+/// **Every rule answers, every decision proved, and every face of the union
+/// is one loop.** The union is one solid of eight faces, `64 + 2π`, the
+/// intersection no solid, and each difference the first solid whole. The fuse
+/// cuts the top's edge at the touch and writes the foot's circle into the
+/// top's outline there, one loop through the touch twice, with the circle's
+/// corner moved to the touch. So no face of the answer holds two loops, one's
+/// corner on the other's side, which `the_narrowest_a_face_is` reads as a neck
+/// of no width and refuses `DynamicRangeTooWide`.
+/// [`a_top_whose_hole_touches_its_outline_at_a_point_is_refused_as_too_thin`]
+/// pins the one way such a face is made.
+#[test]
+fn a_bar_standing_on_a_blocks_top_flush_with_its_edge_answers_every_rule() {
+    for at in [[3.0, 2.0, 4.0], [1.0, 2.0, 4.0]] {
+        let the_bar = |model: &mut Model| a_bar(model, 1.0, 2.0, at);
+        every_fuse_of_the_block_and_a_bar(the_bar, a_bar_standing_on_the_block);
+        for bar_first in [false, true] {
+            let (model, union) = fuse_the_block_and_a_bar(
+                the_bar,
+                Rule::Union,
+                bar_first,
+                true,
+                &mut ProvenanceLog::new(),
+            );
+            let union = union.expect("the union of a bar standing on a block answers");
+            let loops_of_each_face: Vec<usize> = union
+                .solids()
+                .iter()
+                .flat_map(|&solid| {
+                    model
+                        .solid(solid)
+                        .expect("this model made the key")
+                        .shells()
+                        .flat_map(|shell| shell.faces())
+                        .map(|face| face.wire_count())
+                })
+                .collect();
+            assert!(
+                loops_of_each_face.iter().all(|&loops| loops == 1),
+                "the bar from {at:?}, bar first {bar_first}: the union's faces have \
+                 {loops_of_each_face:?} loops, and the fuse writes each as one"
+            );
+        }
+    }
+}
+
+/// What every rule gives for the block `[0, 4]³` and a bar of radius one, two
+/// high, standing on its top: the union is one solid, the block's six faces
+/// and the bar's pipe and top, the intersection no solid, and each difference
+/// the first solid whole.
+fn a_bar_standing_on_the_block(rule: Rule, bar_first: bool) -> Vec<ShellsAndVolume> {
+    match (rule, bar_first) {
+        (Rule::Union, _) => vec![(vec![8], 64.0 + 2.0 * PI)],
+        (Rule::Intersection, _) => vec![],
+        (Rule::Difference, false) => vec![(vec![6], 64.0)],
+        (Rule::Difference, true) => vec![(vec![3], 2.0 * PI)],
+        _ => unreachable!("only the three rules are asked"),
+    }
+}
+
+/// The block `[0, 4]³` with a prism two high standing on its top, written
+/// face by face with [`SolidBuilder`] (queue row Q2257). The prism's foot is
+/// the triangle `(4, 2)`, `(3, 3)`, `(3, 1)`, whose corner `(4, 2, 4)` sits on
+/// the middle of the top's edge `x = 4`, so the top round the foot touches its
+/// own outline at one point, as under the bar of
+/// [`a_bar_standing_on_a_blocks_top_flush_with_its_edge_answers_every_rule`].
+///
+/// **Written as the fuse writes it, the top is one loop through the touch
+/// twice, and the solid builds. Written as an outline and a hole, it is
+/// refused `DynamicRangeTooWide`, with a spread of `6 / (4ε)`.** The hole's
+/// corner is no distance from the outline's side, and
+/// `how_close_a_corner_comes_to_a_side_of_another_loop` floors that at one
+/// rounding of the 4 the two are stored at. Under `tolerant` the solid builds
+/// with that one record, every other check passing it, and is then refused the
+/// same under `certified`.
+///
+/// That is the wrong name for it. No feature of this solid is near a rounding:
+/// the two loops touch at a point, as two loops sharing a corner do, which is
+/// a solid touching itself and an answer (§39.4). Whether such a face is a
+/// touch, or a refusal that says what it is, is the row Q2257 leaves. No fuse
+/// writes such a face, and [`ProfileBuilder`] refuses such a hole
+/// `ProfileCrossesItself`, so only a solid written by hand meets it.
+#[test]
+fn a_top_whose_hole_touches_its_outline_at_a_point_is_refused_as_too_thin() {
+    let refused_for_the_touch = |refusal: Option<&Error>| {
+        matches!(
+            refusal,
+            Some(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
+                if *ratio == 6.0 / (4.0 * f64::EPSILON)
+        )
+    };
+
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let mut log = ProvenanceLog::new();
+    let one_loop = a_block_with_a_prism_on_its_top(
+        &mut model,
+        TheTop::OneLoopThroughTheTouchTwice,
+        &Policy::certified(),
+        &mut log,
+    );
+    assert!(
+        one_loop.is_ok() && log.records().is_empty(),
+        "the top as one loop: {one_loop:?}, records {:?}",
+        log.records()
+    );
+
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let certainly = a_block_with_a_prism_on_its_top(
+        &mut model,
+        TheTop::AnOutlineAndAHole,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        refused_for_the_touch(certainly.as_ref().err()),
+        "the top as an outline and a hole, under certified: {certainly:?}"
+    );
+
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let mut log = ProvenanceLog::new();
+    let tolerantly = a_block_with_a_prism_on_its_top(
+        &mut model,
+        TheTop::AnOutlineAndAHole,
+        &Policy::tolerant(100.0),
+        &mut log,
+    );
+    let records: Vec<&str> = log
+        .records()
+        .iter()
+        .map(|record| record.predicate())
+        .collect();
+    assert!(
+        tolerantly.is_ok() && records == ["dynamic range check"],
+        "the top as an outline and a hole, under tolerant: {tolerantly:?}, records {records:?}"
+    );
+    let then = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+    assert!(
+        refused_for_the_touch(then.as_ref().err()),
+        "the tolerant answer validated under certified: {then:?}"
+    );
+
+    let as_a_profile = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+        .with_hole(vec![[4.0, 2.0], [3.0, 1.0], [3.0, 3.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new());
+    assert!(
+        matches!(as_a_profile, Err(Error::ProfileCrossesItself)),
+        "a square with a hole whose corner is on its side: {as_a_profile:?}"
+    );
+}
+
+/// What a tolerant fuse of the block `[0, 4]³` and a bar with its seam
+/// underneath, dipping through one of its faces, gives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum WithTheSeamUnderneath {
     /// The answer's solids, fewest faces first, each as the faces in each of
-    /// its shells.
+    /// its shells, with one record, of the check of the answer's spread the
+    /// tolerant policy lets through. The model validates under `tolerant` and
+    /// is refused `DynamicRangeTooWide` under `certified` (§68).
     Solids(Vec<Vec<usize>>),
     /// Refused `CannotMeshAFace`, a loop naming its fourth corner twice: the
     /// one point `mesh.rs` puts inside the arc where the pipe meets the top is
@@ -1772,13 +1974,12 @@ fn a_bar_inside_the_block(rule: Rule, bar_first: bool) -> Vec<ShellsAndVolume> {
 }
 
 /// Every rule, both ways round, under `certified` and `tolerant`, of the block
-/// `[0, 4]³` and [`a_bar_turned_onto_x`] by `turn` from `at`: never refused,
+/// `[0, 4]³` and the bar `bar` puts in the model after it: never refused,
 /// every decision proved, the model validates, and the answer's solids, fewest
 /// faces first, have the faces in each shell and the volume `should` gives for
 /// the rule and whether the bar came first.
-fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
-    turn: f64,
-    at: [f64; 3],
+fn every_fuse_of_the_block_and_a_bar(
+    bar: impl Fn(&mut Model) -> SolidKey,
     should: fn(Rule, bool) -> Vec<ShellsAndVolume>,
 ) {
     let mut wrong: Vec<String> = Vec::new();
@@ -1787,9 +1988,8 @@ fn every_fuse_of_a_block_and_a_bar_turned_onto_x_at(
             for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
                 let what = format!("{rule:?}, bar first {bar_first}, certified {certified}");
                 let mut log = ProvenanceLog::new();
-                let (model, fused) = fuse_a_block_and_a_bar_turned_onto_x(
-                    turn, at, rule, bar_first, certified, &mut log,
-                );
+                let (model, fused) =
+                    fuse_the_block_and_a_bar(&bar, rule, bar_first, certified, &mut log);
                 let answer = match fused {
                     Ok(answer) => answer,
                     Err(why) => {
@@ -1923,13 +2123,17 @@ fn every_fuse_of_a_block_and_a_bar_dipping_through_it_leaves_an_edge_too_short(
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Every rule, both ways round, under `certified` and `tolerant`, of the block
-/// `[0, 4]³` and [`a_bar_with_its_seam_underneath`] from `at`: what `should`
-/// gives for the rule and whether the bar came first, and where that is an
-/// answer, every decision proved and the model valid.
+/// Every rule, both ways round, of the block `[0, 4]³` and
+/// [`a_bar_with_its_seam_underneath`] from `at`: refused `DynamicRangeTooWide`
+/// past the spread the kernel works to under `certified`, and under `tolerant`
+/// what `tolerant` gives for the rule and whether the bar came first. A
+/// tolerant answer must carry one record, of the range check, validate under
+/// `tolerant`, and be refused `DynamicRangeTooWide` under `certified`: valid
+/// is a property of a model and a policy, and `Model::fuse` promises the
+/// first and not the second (§68).
 fn every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
     at: [f64; 3],
-    should: fn(Rule, bool) -> WithTheSeamUnderneath,
+    tolerant: fn(Rule, bool) -> WithTheSeamUnderneath,
 ) {
     let mut wrong: Vec<String> = Vec::new();
     for bar_first in [false, true] {
@@ -1944,6 +2148,22 @@ fn every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
                     certified,
                     &mut log,
                 );
+                if certified {
+                    if !matches!(
+                        &fused,
+                        Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
+                            if *ratio > DynamicRange::LARGEST_SUPPORTED_RATIO
+                    ) {
+                        let got = match &fused {
+                            Ok(_) => "answered".to_owned(),
+                            Err(why) => format!("refused {why:?}"),
+                        };
+                        wrong.push(format!(
+                            "{what}: {got}, and it should be refused DynamicRangeTooWide"
+                        ));
+                    }
+                    continue;
+                }
                 let found = match &fused {
                     Ok(answer) => {
                         let mut solids: Vec<Vec<usize>> = answer
@@ -1963,21 +2183,33 @@ fn every_fuse_of_a_block_and_a_bar_with_its_seam_underneath_at(
                         continue;
                     }
                 };
-                let expected = should(rule, bar_first);
+                let expected = tolerant(rule, bar_first);
                 if found != expected {
                     wrong.push(format!("{what}: {found:?}, and it should be {expected:?}"));
                 }
                 if fused.is_ok() {
-                    if !log.records().is_empty() {
+                    let only_the_range = log.records().len() == 1
+                        && log.records()[0].predicate() == "dynamic range check";
+                    if !only_the_range {
                         wrong.push(format!(
-                            "{what}: not every decision is proved: {:?}",
+                            "{what}: the records are not the range check's one: {:?}",
                             log.records()
                         ));
                     }
-                    if let Err(why) =
-                        model.validate(&Policy::certified(), &mut ProvenanceLog::new())
-                    {
-                        wrong.push(format!("{what}: the model does not validate: {why:?}"));
+                    let tolerantly =
+                        model.validate(&Policy::tolerant(100.0), &mut ProvenanceLog::new());
+                    let certainly = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                    let valid_only_tolerantly = tolerantly.is_ok()
+                        && matches!(
+                            &certainly,
+                            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
+                                if *ratio > DynamicRange::LARGEST_SUPPORTED_RATIO
+                        );
+                    if !valid_only_tolerantly {
+                        wrong.push(format!(
+                            "{what}: the model validates {tolerantly:?} under tolerant and \
+                             {certainly:?} under certified"
+                        ));
                     }
                 }
             }
@@ -2098,4 +2330,183 @@ fn faces_of_each_shell(model: &Model, solid: SolidKey) -> Vec<usize> {
         .collect();
     faces.sort_unstable();
     faces
+}
+
+/// How the block's top round the foot of the prism standing on it is written.
+#[derive(Debug, Clone, Copy)]
+enum TheTop {
+    /// As the fuse writes it: one loop, round the outline to the touch, round
+    /// the foot, and back through the touch to the rest of the outline.
+    OneLoopThroughTheTouchTwice,
+    /// The outline, and the foot as a hole whose corner is on the outline's
+    /// side.
+    AnOutlineAndAHole,
+}
+
+/// The block `[0, 4]³` and the prism of
+/// [`a_top_whose_hole_touches_its_outline_at_a_point_is_refused_as_too_thin`]
+/// standing on its top, from `z = 4` to `z = 6`, one solid of ten flat faces
+/// built under `policy`, with the top written as `top` says.
+fn a_block_with_a_prism_on_its_top(
+    model: &mut Model,
+    top: TheTop,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> rcad_topo::Result<SolidKey> {
+    let [p, q, r] = [[4.0, 2.0, 4.0], [3.0, 3.0, 4.0], [3.0, 1.0, 4.0]];
+    let [high_p, high_q, high_r] = [p, q, r].map(|[x, y, _]| [x, y, 6.0]);
+    let mut faces: Vec<AFlatFace> = vec![
+        (
+            [0.0, 0.0, -1.0],
+            vec![vec![
+                [0.0, 0.0, 0.0],
+                [0.0, 4.0, 0.0],
+                [4.0, 4.0, 0.0],
+                [4.0, 0.0, 0.0],
+            ]],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            vec![vec![
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 4.0],
+                [0.0, 4.0, 4.0],
+                [0.0, 4.0, 0.0],
+            ]],
+        ),
+        (
+            [0.0, -1.0, 0.0],
+            vec![vec![
+                [0.0, 0.0, 0.0],
+                [4.0, 0.0, 0.0],
+                [4.0, 0.0, 4.0],
+                [0.0, 0.0, 4.0],
+            ]],
+        ),
+        (
+            [0.0, 1.0, 0.0],
+            vec![vec![
+                [0.0, 4.0, 0.0],
+                [0.0, 4.0, 4.0],
+                [4.0, 4.0, 4.0],
+                [4.0, 4.0, 0.0],
+            ]],
+        ),
+        ([0.0, 0.0, 1.0], vec![vec![high_p, high_q, high_r]]),
+        ([1.0, 1.0, 0.0], vec![vec![p, q, high_q, high_p]]),
+        ([-1.0, 0.0, 0.0], vec![vec![q, r, high_r, high_q]]),
+        ([1.0, -1.0, 0.0], vec![vec![r, p, high_p, high_r]]),
+    ];
+    match top {
+        TheTop::OneLoopThroughTheTouchTwice => {
+            faces.push((
+                [1.0, 0.0, 0.0],
+                vec![vec![
+                    [4.0, 0.0, 0.0],
+                    [4.0, 4.0, 0.0],
+                    [4.0, 4.0, 4.0],
+                    p,
+                    [4.0, 0.0, 4.0],
+                ]],
+            ));
+            faces.push((
+                [0.0, 0.0, 1.0],
+                vec![vec![
+                    [0.0, 0.0, 4.0],
+                    [4.0, 0.0, 4.0],
+                    p,
+                    r,
+                    q,
+                    p,
+                    [4.0, 4.0, 4.0],
+                    [0.0, 4.0, 4.0],
+                ]],
+            ));
+        }
+        TheTop::AnOutlineAndAHole => {
+            faces.push((
+                [1.0, 0.0, 0.0],
+                vec![vec![
+                    [4.0, 0.0, 0.0],
+                    [4.0, 4.0, 0.0],
+                    [4.0, 4.0, 4.0],
+                    [4.0, 0.0, 4.0],
+                ]],
+            ));
+            faces.push((
+                [0.0, 0.0, 1.0],
+                vec![
+                    vec![
+                        [0.0, 0.0, 4.0],
+                        [4.0, 0.0, 4.0],
+                        [4.0, 4.0, 4.0],
+                        [0.0, 4.0, 4.0],
+                    ],
+                    vec![p, r, q],
+                ],
+            ));
+        }
+    }
+    a_solid_of_flat_faces(model, &faces, policy, log)
+}
+
+/// A flat face: its outward normal, and its loops, the outline first, each
+/// as its corners in order, turning anticlockwise seen from outside and the
+/// holes clockwise.
+type AFlatFace = ([f64; 3], Vec<Vec<[f64; 3]>>);
+
+/// One solid of one shell of `faces`, written with [`SolidBuilder`] and built
+/// under `policy`. Each point is one corner however many loops name it, and
+/// each pair of corners one straight edge, walked forward by the loop that
+/// names it first and backward by the other.
+fn a_solid_of_flat_faces(
+    model: &mut Model,
+    faces: &[AFlatFace],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> rcad_topo::Result<SolidKey> {
+    let bits = |at: [f64; 3]| at.map(f64::to_bits);
+    let mut builder = SolidBuilder::new();
+    let mut corners = BTreeMap::new();
+    let mut edges = BTreeMap::new();
+    let mut shell = Vec::new();
+    for (normal, loops) in faces {
+        let mut wires = Vec::new();
+        for round in loops {
+            for &at in round {
+                if let Entry::Vacant(slot) = corners.entry(bits(at)) {
+                    slot.insert(builder.add_vertex(Point::new(at[0], at[1], at[2]))?);
+                }
+            }
+            let mut steps = Vec::new();
+            for (position, &from) in round.iter().enumerate() {
+                let to = round[(position + 1) % round.len()];
+                let (edge, way) = if let Some(&edge) = edges.get(&(bits(to), bits(from))) {
+                    (edge, Orientation::Reversed)
+                } else {
+                    let edge = builder.add_edge(
+                        corners[&bits(from)],
+                        corners[&bits(to)],
+                        EdgeRun::Straight,
+                    )?;
+                    edges.insert((bits(from), bits(to)), edge);
+                    (edge, Orientation::Forward)
+                };
+                steps.push(DraftStep::Along(builder.add_coedge(edge, way)?));
+            }
+            wires.push(builder.add_wire(&steps)?);
+        }
+        let [x, y, z] = loops[0][0];
+        let plane = Plane::from_point_and_normal(
+            Point::new(x, y, z),
+            Vector::new(normal[0], normal[1], normal[2]),
+        )
+        .expect("each face's normal is a direction");
+        shell.push((
+            builder.add_face(Surface::Plane(plane), &wires)?,
+            Orientation::Forward,
+        ));
+    }
+    builder.add_shell(&shell)?;
+    builder.build(model, policy, log)
 }

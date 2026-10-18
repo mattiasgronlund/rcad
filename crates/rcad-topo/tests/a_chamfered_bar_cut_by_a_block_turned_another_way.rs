@@ -48,10 +48,13 @@
 //! turn comes out with the top square to the bar's axis to the bit, `2e−15`
 //! above the circle; since row Q2181 the fuse reads which side of the top, the
 //! pipe or the cone a point is on off their stored numbers, and the fifth test
-//! pins every rule. With the block placed by two halves of the turn the top is
-//! an ulp off square and crosses the circle, which runs from `4.7e−16` above
-//! it to `1.6e−16` under it. The sixth test pins that every rule is refused,
-//! and the seventh that the answer would need a spread past `10¹⁶`: a limit.
+//! pins every rule. The intersection keeps a band of the pipe that `2e−15`
+//! high, and since row Q2257 it is refused under `certified` as a spread past
+//! `10¹⁶`, and answered under `tolerant` with a warning. With the block placed
+//! by two halves of the turn the top is an ulp off square and crosses the
+//! circle, which runs from `4.7e−16` above it to `1.6e−16` under it. The sixth
+//! test pins that every rule is refused, and the seventh that the answer would
+//! need a spread past `10¹⁶`: a limit.
 //!
 //! The answers are counted by the faces they have and not measured. The bar
 //! alone, placed by the turn, meshes at `0.01` and at `4.06`. Before row Q2183
@@ -61,13 +64,14 @@
 //! up the axis, and since then the plane its run names bounds it too.
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, EdgeRun, Isometry, MeetOfThree, Orientation, Plane, Point, Scale,
-    Surface, Vector, meet_of_three_surfaces,
+    Axis, Cone, Cylinder, DynamicRange, EdgeRun, Isometry, MeetOfThree, Orientation, Plane, Point,
+    Scale, Surface, Vector, meet_of_three_surfaces,
 };
 use rcad_predicates::expansion::{expansion_sum, two_diff, two_product};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftStep, DraftWire, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+    DraftEdge, DraftStep, DraftWire, Error, Invalid, Model, ProfileBuilder, Rule, SolidBuilder,
+    SolidKey,
 };
 
 #[test]
@@ -275,16 +279,21 @@ fn a_block_whose_top_holds_the_circle_where_the_cone_meets_the_pipe_cuts_the_bar
 /// `Undecidable` on the side of the top at the bar's seam corner on that
 /// circle, whose box is about `1e−13` wide, and then on the side of the cone at
 /// a point where the top cuts the pipe. Each side is now read off the stored
-/// numbers of a plane square to the one axis of a pipe and a cone. The
-/// intersection keeps a band of the pipe about `2e−15` high.
+/// numbers of a plane square to the one axis of a pipe and a cone.
+///
+/// **The intersection keeps a band of the pipe about `2e−15` high**, its two
+/// rings a corner of one `2.2e−15` from the other, beside block corners as far
+/// as `42.9` from the origin: a spread of `1.9e16`, past §3.5's `10¹⁶`. Under
+/// `certified` it is refused `DynamicRangeTooWide`, on how close a corner of
+/// one loop of a face comes to a side of another (`the_narrowest_a_face_is` in
+/// `validate.rs`, queue rows Q2237 and Q2257). Under `tolerant` that spread is
+/// a warning: the answer is the cone, closed below by the bar's bottom and
+/// above by the block's top with the band of pipe between, it carries one
+/// record, of the range check, and it validates under `tolerant` alone (§68).
 #[test]
 fn a_block_whose_top_holds_the_circle_turned_with_the_bar_cuts_the_bar_just_above_it() {
-    let turn = the_turn();
-    for (rule, wanted) in [
-        (Rule::Difference, (0, 1, 2)),
-        (Rule::Union, (0, 1, 7)),
-        (Rule::Intersection, (1, 1, 2)),
-    ] {
+    let both_turned = || {
+        let turn = the_turn();
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let bar = a_chamfered_bar(&mut model);
         model
@@ -294,12 +303,59 @@ fn a_block_whose_top_holds_the_circle_turned_with_the_bar_cuts_the_bar_just_abov
         model
             .place_solid(block, &turn)
             .expect("this model made the key");
+        (model, bar, block)
+    };
+    for (rule, wanted) in [(Rule::Difference, (0, 1, 2)), (Rule::Union, (0, 1, 7))] {
+        let (mut model, bar, block) = both_turned();
         assert_eq!(
             what_the_fuse_is_made_of(&mut model, bar, block, rule),
             wanted,
             "the cones, pipes and planes {rule:?} has faces on"
         );
     }
+
+    let (mut model, bar, block) = both_turned();
+    let certified = model.fuse(
+        &[bar],
+        &[block],
+        Rule::Intersection,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert_refused_for_the_band(&certified);
+
+    let (mut model, bar, block) = both_turned();
+    let tolerant = Policy::tolerant(100.0);
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(&[bar], &[block], Rule::Intersection, &tolerant, &mut log)
+        .unwrap_or_else(|why| panic!("the tolerant intersection was refused: {why:?}"));
+    let [band] = fused.solids()[..] else {
+        panic!("one solid is left: {:?}", fused.solids())
+    };
+    assert_eq!(what_the_solid_is_made_of(&model, band), (1, 1, 2));
+    assert!(
+        log.records().len() == 1 && log.records()[0].predicate() == "dynamic range check",
+        "{:#?}",
+        log.records()
+    );
+    model
+        .validate(&tolerant, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("the tolerant intersection does not validate: {why}"));
+    assert_refused_for_the_band(&model.validate(&Policy::certified(), &mut ProvenanceLog::new()));
+}
+
+/// Checks that `refused` is `DynamicRangeTooWide`, past the `10¹¹` §3.5
+/// supports, for the band of pipe the intersection keeps.
+fn assert_refused_for_the_band<T: std::fmt::Debug>(refused: &rcad_topo::Result<T>) {
+    assert!(
+        matches!(
+            refused,
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
+                if *ratio > DynamicRange::LARGEST_SUPPORTED_RATIO
+        ),
+        "{refused:?}"
+    );
 }
 
 /// The same block placed by two halves of the turn instead, each rounding:
@@ -566,13 +622,13 @@ fn what_the_fuse_is_made_of(
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("the {rule:?} does not validate: {why}"));
     assert_eq!(solids.len(), 1, "one solid is left");
+    what_the_solid_is_made_of(model, solids[0])
+}
 
+/// How many cones, pipes and planes `solid` has faces on.
+fn what_the_solid_is_made_of(model: &Model, solid: SolidKey) -> (usize, usize, usize) {
     let (mut cones, mut pipes, mut planes) = (0, 0, 0);
-    for face in model
-        .solid(solids[0])
-        .expect("this model made the key")
-        .faces()
-    {
+    for face in model.solid(solid).expect("this model made the key").faces() {
         let surface = face.surface();
         if let Surface::Cone(_) = surface {
             cones += 1;
