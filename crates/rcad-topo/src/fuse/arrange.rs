@@ -7749,6 +7749,22 @@ impl<'f> Arrangement<'f> {
     /// skin crosses the second cone's base in a circle whose only two nodes are
     /// on the line of the base's straight side, past its ends, and that side
     /// is the chord of the base's arc (Q1161).
+    ///
+    /// **On a flat face the chord's ends and the point are read over their
+    /// boxes stretched to the face's plane** ([`stretched_to_the_plane`]), as
+    /// [`how_often_the_rim_winds_round`] reads the corners and for the same
+    /// reason: [`InPlane`] reads a point `1e-8` off a plane `2²⁰` out about
+    /// `1e-2` along it. A turn settled over a stretched box is the turn of the
+    /// point and of a point of the plane beside it, and a point on the plane is
+    /// read as before. The corners' polygon, stretched since Q1108, does not
+    /// keep a misread chord from counting at a point past the chord's end: a
+    /// half-line from it square to the chord passes both the chord's ends, so
+    /// the polygon answers. A curve through the corner of a notch has the face
+    /// go on past its chord's end, and there, with the corner `1e-8` below the
+    /// plane or the point `1e-8` above it, the chord was read across the point
+    /// and two walks that go round nothing there wound round it, one each way
+    /// (`a_walk_wound_round_a_point_past_a_chords_end`, Q1491). Opened out on a
+    /// ball nothing is read along a plane, so nothing is stretched.
     fn how_often_a_side_and_its_chord_wind_round(
         &self,
         picture: Picture,
@@ -7770,7 +7786,13 @@ impl<'f> Arrangement<'f> {
                 Decision::Zero | Decision::Undecidable { .. } | _ => None,
             }
         };
-        let (start, end) = (self.nodes[from].point, self.nodes[to].point);
+        let read = |at: PredicatePoint| match picture {
+            Picture::Flat(_) => stretched_to_the_plane(self.plane_of_the_flat_face(), at),
+            Picture::OpenedOut { .. } => Some(at),
+        };
+        let start = read(self.nodes[from].point)?;
+        let end = read(self.nodes[to].point)?;
+        let point = read(point)?;
         let out = self.way_out_of(from, direction);
         let ahead = PredicatePoint::Constructed(core::array::from_fn(|axis| {
             start.enclosure()[axis] + out[axis]
@@ -20838,5 +20860,201 @@ mod a_rim_wound_round_a_point_off_its_plane {
 
     fn the_plane() -> Plane {
         Plane::from_coefficients([1.0, 0.0, 1.0, 0.0]).expect("a normal")
+    }
+}
+
+#[cfg(test)]
+mod a_walk_wound_round_a_point_past_a_chords_end {
+    //! The top of an L-shaped block `2²⁰` out, cut by a ball whose circle runs
+    //! through the corner of its notch, and points just past the end of the
+    //! chord that starts there.
+    //!
+    //! The top is `[2²⁰, 2²⁰ + 2] × [−1, ½]` and `[2²⁰ − 2, 2²⁰ + 2] × [½, 1½]`
+    //! at `z = 1`, so the notch's corner `(2²⁰, ½)` is one the rim turns right
+    //! at. The ball round `(2²⁰ − ⅜, 0, 1)` of radius `⅝` cuts it in a circle
+    //! through that corner, `(2²⁰, −½)` on the notch's side and `(2²⁰ − ¾, ½)`
+    //! on its top, so the face holds two arcs of it: one bulging into `+x`,
+    //! whose chord runs down the notch's side from the corner, and one bulging
+    //! into `+y`, over the notch. The points `(2²⁰ − e, ½ + d)`, `d` under
+    //! `¾·e`, are past that first chord's end, on the side away from its bulge,
+    //! and inside the circle: in the cap over the notch.
+    //!
+    //! [`InPlane`] reads a point `1e-8` off the plane about `1e-2` along `x`, out
+    //! here. The corner and the points are each read so in turn, and every walk
+    //! has to wind round every point as it does with both on the plane, or say
+    //! it cannot (Q1491).
+
+    use rcad_geom::{Isometry, Point, Scale, Sphere, Surface, Vector};
+    use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+
+    use super::{Arrangement, InPlane, Picture, canonical_cut_surfaces};
+    use crate::fuse::bake::{BakedFace, bake};
+    use crate::{Model, ProfileBuilder};
+
+    /// `2²⁰`: how far out along `x` the notch's corner is.
+    const OUT: f64 = 1_048_576.0;
+
+    /// The corner of the notch, which the ball's circle runs through.
+    const NOTCH: [f64; 3] = [OUT, 0.5, 1.0];
+
+    /// With the notch's corner `1e-8` off the plane, either side, every walk
+    /// winds round each point past the chord's end as it does with the corner
+    /// on it, or not at all.
+    ///
+    /// The corner `1e-8` below the plane is read about `1e-2` along `−x`, and
+    /// the chord's line with it, which put the points on the bulge's side of
+    /// the chord and so inside the first arc too: the walk round the rest of
+    /// the face wound round them `−1` times rather than none, and the walk
+    /// round the lens once.
+    #[test]
+    fn a_corner_off_the_plane_moves_no_chord_across_a_point_past_its_end() {
+        let face = the_notched_top();
+        let mut arrangement = arranged(&face);
+        let on_the_plane = counts(&arrangement, 0.0);
+        the_counts_on_the_plane_are_settled(&on_the_plane);
+        let corner = arrangement
+            .nodes
+            .iter()
+            .position(|node| node.point == PredicatePoint::from(NOTCH))
+            .expect("the notch's corner is a node");
+        let mut wrong = Vec::new();
+        for off in [1e-8, -1e-8] {
+            arrangement.nodes[corner].point =
+                PredicatePoint::from([NOTCH[0], NOTCH[1], NOTCH[2] + off]);
+            wrong.extend(differences(&on_the_plane, &counts(&arrangement, 0.0), off));
+        }
+        assert!(wrong.is_empty(), "the corner off the plane: {wrong:#?}");
+    }
+
+    /// Every walk winds round each point past the chord's end `1e-8` off the
+    /// plane, either side, as it does round the point's foot, or not at all.
+    ///
+    /// A point `1e-8` above the plane is read about `1e-2` along `+x`, across
+    /// the chord and onto the bulge's side of it, with the same two wrong
+    /// counts.
+    #[test]
+    fn a_point_off_the_plane_past_a_chords_end_is_wound_round_as_its_foot_is() {
+        let face = the_notched_top();
+        let arrangement = arranged(&face);
+        let on_the_plane = counts(&arrangement, 0.0);
+        the_counts_on_the_plane_are_settled(&on_the_plane);
+        let mut wrong = Vec::new();
+        for off in [1e-8, -1e-8] {
+            wrong.extend(differences(&on_the_plane, &counts(&arrangement, off), off));
+        }
+        assert!(wrong.is_empty(), "the points off the plane: {wrong:#?}");
+    }
+
+    /// Every count settled, and one walk, the cap's over the notch, winding
+    /// once round every point.
+    fn the_counts_on_the_plane_are_settled(on_the_plane: &[Vec<Option<i32>>]) {
+        assert!(
+            on_the_plane.iter().flatten().all(Option::is_some),
+            "{on_the_plane:?}"
+        );
+        assert_eq!(
+            on_the_plane
+                .iter()
+                .filter(|walk| walk.iter().all(|&count| count == Some(1)))
+                .count(),
+            1,
+            "{on_the_plane:?}"
+        );
+    }
+
+    /// Each count in `these` that is settled and is not the count on the
+    /// plane.
+    fn differences(
+        on_the_plane: &[Vec<Option<i32>>],
+        these: &[Vec<Option<i32>>],
+        off: f64,
+    ) -> Vec<String> {
+        let mut wrong = Vec::new();
+        for (walk, (theirs, expected)) in these.iter().zip(on_the_plane).enumerate() {
+            for (point, (&count, &expected)) in theirs.iter().zip(expected).enumerate() {
+                if count.is_some() && count != expected {
+                    wrong.push(format!(
+                        "{off:e} off: walk {walk} round point {point}: {count:?}, not {expected:?}"
+                    ));
+                }
+            }
+        }
+        wrong
+    }
+
+    /// How often each walk winds round each point past the chord's end, with
+    /// every point `lifted` off the plane, by walk and then by point.
+    fn counts(arrangement: &Arrangement<'_>, lifted: f64) -> Vec<Vec<Option<i32>>> {
+        let in_plane =
+            InPlane::of(arrangement.plane_of_the_flat_face()).expect("a plane with a point off it");
+        (0..arrangement.cycles.len())
+            .map(|walk| {
+                past_the_chords_end()
+                    .map(|[x, y, z]| {
+                        arrangement.how_often_a_walk_winds_round(
+                            Picture::Flat(&in_plane),
+                            walk,
+                            PredicatePoint::from([x, y, z + lifted]),
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// `(2²⁰ − e, ½ + d, 1)` for `e` of `1e-3`, `3e-3` and `6e-3`, each short of
+    /// the `1e-2` a point `1e-8` off the plane is read away, and `d` a quarter
+    /// and a half of `e`.
+    fn past_the_chords_end() -> impl Iterator<Item = [f64; 3]> {
+        [1e-3, 3e-3, 6e-3].into_iter().flat_map(|across| {
+            [0.25, 0.5].map(|up| [NOTCH[0] - across, NOTCH[1] + across * up, NOTCH[2]])
+        })
+    }
+
+    fn arranged(face: &BakedFace) -> Arrangement<'_> {
+        Arrangement::of(
+            face,
+            &canonical_cut_surfaces(face),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the notched top cut by a ball on stored numbers")
+    }
+
+    fn the_notched_top() -> BakedFace {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let profile = ProfileBuilder::new(vec![
+            [OUT, -1.0],
+            [OUT + 2.0, -1.0],
+            [OUT + 2.0, 1.5],
+            [OUT - 2.0, 1.5],
+            [OUT - 2.0, 0.5],
+            [OUT, 0.5],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a profile");
+        let solid = model
+            .add_extrusion(&profile, 1.0, &Isometry::identity())
+            .expect("an extrusion");
+        let mut top = bake(
+            &model,
+            &[solid],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("it bakes")
+        .swap_remove(0)
+        .faces
+        .into_iter()
+        .find(|face| {
+            face.surface
+                .as_plane()
+                .is_some_and(|flat| flat.normal() == Vector::new(0.0, 0.0, 1.0))
+        })
+        .expect("an extrusion has a top");
+        top.cuts = vec![Surface::Sphere(
+            Sphere::new(Point::new(OUT - 0.375, 0.0, 1.0), 0.625).expect("a radius"),
+        )];
+        top
     }
 }
