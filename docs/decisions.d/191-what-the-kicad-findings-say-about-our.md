@@ -346,6 +346,21 @@ under `certified`, both ways round, where 30 of them used to refuse
 `Undecidable` on `orient3d`. §294.18's turned, certified half bar flush along
 its flat face closes the same way.
 
+**2026-10-18 note (Q2243): a block cornered on a round tab's rim.** A block
+whose corner sits on a plate's round tab's rim (`a_block_cornered_on_a_round_tabs_rim.rs`)
+was refused `Undecidable` at the sliver of its face between the corner and the
+rim, which holds no `f64` point, under every rule both ways round. The refusal
+was a gap: `by_a_corner` in `fuse/select.rs` passed such a corner over because
+it lies on the plane of the plate's top or floor; it now asks a corner on the
+plane of a flat face with a curved side too, since the ray hands a point on
+that plane to the face's outline. The block less the plate and the two's
+common part now answer. What is still refused: the union holds the sliver
+itself, a face thinner than a rounding of its own coordinates, and that is a
+limit, not a gap — the model's largest coordinate over that is past what
+`f64` resolves (§437.6). The plate less the block is refused the same way,
+`DynamicRangeTooWide`, though its answer is the plate itself, which has no
+such sliver; that one is a gap, left for its own row (§191.5, Q2275).
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which

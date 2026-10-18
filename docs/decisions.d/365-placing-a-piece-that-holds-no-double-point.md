@@ -562,11 +562,14 @@ is not on the skin either. Strictly outside is the same the other way. The
 ray's signs are decided over the corner's whole box, and the true corner is in
 that box.
 **`OnBoundary` is never read**: a piece on either side of a face, or on it, can
-have its corner there. **Nor is a corner on any stored surface of `S`**, which
-`is_off_every_surface_of` asks first: the ray reads a flat face by its stored
-corners, and of a point on the stored plane it can certify a side the plane
-does not have (§316.3, §351). The point search keeps such points off the ray
-with `coincident_face`, which a corner has no face of its own to ask.
+have its corner there. **Nor is a corner on the stored surface of a flat face of `S` whose every
+side is straight**, which `is_off_every_surface_but_a_plane_with_a_curved_side`
+asks first (renamed by Q2243, which let a corner on the plane of a flat face
+with a curved side through instead — this piece's faces have none): the ray
+reads such a face by its stored corners, and of a point on the stored plane it
+can certify a side the plane does not have (§316.3, §351). The point search
+keeps such points off the ray with `coincident_face`, which a corner has no
+face of its own to ask.
 
 **Then the answer panicked, as Q985 found**: `Edges::of`'s "a piece of a flat
 face has a side with no length", on the bottom face `z = 0`, a side along
