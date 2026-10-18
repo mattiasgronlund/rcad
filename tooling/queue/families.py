@@ -13,6 +13,13 @@ rows that no trace names share it, and then the family is those rows alone,
 the ones a new trace would name. A file that has had no trace keeps all its
 rows, whatever a trace on another file named.
 
+A row counts as named on a file when its own `from/` or `was/` link, followed
+back through as many such links as it takes, reaches a trace on that file or a
+row that trace names directly: the trace's own fix rows (`from/<trace>`, by
+450.3 rule 4) and a member the trace re-filed (`was/<member>`), however many
+hops either takes. A chain that reaches a trace on a *different* file is no
+match; the row stays a member of its own file's family.
+
 A row with two entries on one file, `x.rs#a,x.rs#b`, counts once on it. 450.2's
 awk line counted it twice.
 """
@@ -25,21 +32,28 @@ FAMILY = 3
 TEST_FILE = re.compile(r"tests/.*\.rs$")
 TRACE = ["Trace", "the", "family", "on"]
 ROW_ID = re.compile(r"(?<![0-9A-Za-z])[TDQ][0-9]+(?![0-9A-Za-z])")
+# Mirrors queue.py's CAME_FROM (queue.py:492): families.py cannot import it,
+# since queue.py imports families.py. Keep the two in step.
+CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")
 
 
 def families(queue):
     """Each family on `queue` as `(test file, member rows)`, the largest first, then by file.
 
     The members are in id order, and a family that has had a trace lists only
-    the rows no trace has named.
+    the rows whose from/was chain does not reach it.
     """
-    traces = [trace for trace in (trace_of(row) for row in queue.rows) if trace is not None]
-    traced_files = {file for file, _ in traces}
-    named = {row_id for _, row_ids in traces for row_id in row_ids}
+    traces = [(row.id, *trace) for row in queue.rows for trace in [trace_of(row)] if trace is not None]
+    traced_files = {file for _, file, _ in traces}
+    sinks_by_file = {}
+    for trace_id, file, named in traces:
+        sinks_by_file.setdefault(file, set()).update(named)
+        sinks_by_file[file].add(trace_id)
     found = []
     for file, members in members_by_file(queue).items():
         if file in traced_files:
-            members = [row for row in members if row.id not in named]
+            sinks = sinks_by_file.get(file, set())
+            members = [row for row in members if not reaches_a_sink(row, sinks, queue)]
         if len(members) >= FAMILY:
             found.append((file, sorted(members, key=id_order)))
     return sorted(found, key=lambda family: (-len(family[1]), family[0]))
@@ -71,6 +85,48 @@ def trace_of(row):
         return None
     file = words[len(TRACE)].rstrip(":,.;").partition("#")[0]
     return file, set(ROW_ID.findall(" ".join(words[len(TRACE) + 1:])))
+
+
+def reaches_a_sink(row, sinks, queue):
+    """Whether `row`, or a row reached by following its own from/was link back
+    through as many more such links as it takes, has an id in `sinks`.
+
+    A cycle stops the walk rather than looping it; nothing here guarantees the
+    queue has none.
+    """
+    seen = set()
+    current = row
+    while current.id not in seen:
+        seen.add(current.id)
+        if current.id in sinks:
+            return True
+        target_id = own_link(current)
+        if target_id is None:
+            return False
+        target = queue.find(target_id)
+        if target is None:
+            return False
+        current = target
+    return False
+
+
+def own_link(row):
+    """The id `row`'s own `from/` or `was/` word names, or None for `from/-` or a row with no such word.
+
+    Strips a pin and then a class or `small` tag first, the same order
+    `trace_of` strips them, since the link word always comes right after both.
+    """
+    words = row.fields[5:]
+    if words and PIN.match(words[0]):
+        words = words[1:]
+    if words and (CLASS.match(words[0]) or words[0] == SMALL):
+        words = words[1:]
+    if not words:
+        return None
+    link = CAME_FROM.match(words[0])
+    if not link or link.group(2) == "-":
+        return None
+    return link.group(2)
 
 
 def id_order(row):

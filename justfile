@@ -14587,10 +14587,34 @@ check-queue-selftest:
     MD
     drive families-again families
     [ "$got" = "$(printf '%s\n' \
+        '4 crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs Q2001(1) Q2002(1) Q2003(1) Q2004(1)' \
         '3 crates/rcad-topo/tests/a_third_file.rs Q2004(1) Q2005(1) Q2006(1)' \
-        '3 crates/rcad-topo/tests/two_equal_bars_leaning_at_each_other.rs Q2001(1) Q2002(1) Q2003(1)' \
         '2 families with no trace (§450.3)')" ] \
-        || fail "a traced file was not a family again with the three rows no trace names, or a file no trace has been on lost a row a trace on another file named"
+        || fail "a traced file was not a family again with the three rows no trace named, plus the row only a trace on another file named, which a trace on another file does not take out of any file's family"
+
+    # A row's own from/ or was/ link can reach a trace several hops back, not
+    # just directly: the trace's own fix row, a member it re-filed, a chain of
+    # four links, and a chain that lands on a trace on a different file, which
+    # is no match and leaves the row a member (§450.3 rule 4).
+    fence familieslinks <<'MD'
+    Q3001  1  done:abcdef0  opus  -  from/- Trace the family on crates/rcad-topo/tests/a_chain_of_links_reaches_its_trace.rs: Q3002 §450
+    Q3002  1  dropped:§450  opus  -  refuses/B the original member, since re-filed as Q3003 §450
+    Q3003  1  todo  opus  crates/rcad-topo/tests/a_chain_of_links_reaches_its_trace.rs  was/Q3002 the member the trace re-filed §450
+    Q3005  1  todo  opus  crates/rcad-topo/tests/a_chain_of_links_reaches_its_trace.rs  from/Q3001 the trace's own fix row §450
+    Q3009  1  todo  opus  -  from/Q3001 one hop from the trace §450
+    Q3008  1  todo  opus  -  from/Q3009 two hops from the trace §450
+    Q3007  1  todo  opus  -  from/Q3008 three hops from the trace §450
+    Q3006  1  todo  opus  crates/rcad-topo/tests/a_chain_of_links_reaches_its_trace.rs  from/Q3007 four hops from the trace §450
+    Q3010  1  done:bbbbbbb  opus  -  from/- Trace the family on crates/rcad-topo/tests/a_trace_on_a_different_file.rs: Q3011 §450
+    Q3012  1  todo  opus  crates/rcad-topo/tests/a_chain_of_links_reaches_its_trace.rs  from/Q3010 reaches a trace on another file and stays a member §450
+    Q3013  1  todo  opus  crates/rcad-topo/tests/a_chain_of_links_reaches_its_trace.rs  from/- a plain new row on the file §450
+    Q3014  1  todo  opus  crates/rcad-topo/tests/a_chain_of_links_reaches_its_trace.rs  from/- another plain new row on the file §450
+    MD
+    drive familieslinks families
+    [ "$got" = "$(printf '%s\n' \
+        '3 crates/rcad-topo/tests/a_chain_of_links_reaches_its_trace.rs Q3012(1) Q3013(1) Q3014(1)' \
+        '1 family with no trace (§450.3)')" ] \
+        || fail "a from/ or was/ chain did not reach the trace it should, or excluded a row that only reaches a trace on another file"
 
     bundled() {
         got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
