@@ -32,33 +32,44 @@
 //!
 //! # What the fuse does
 //!
-//! None of the shapes that hold the plate and the ring reaches that question,
-//! under any rule either way round:
+//! Every pair here answers under every rule either way round, in solids that
+//! validate, with the volumes below, and the plate against the ring and the
+//! bar reaches that question: its volumes are right, so the piece beyond the
+//! outer circle is not placed inside the bar.
 //!
-//! - the plate and the ring answer one solid that validates, with the volumes
-//!   below, but the ring alone cannot show the wrong answer. They were refused
-//!   *"a point inside a piece of a face"* until Q1861, and the piece refused
-//!   was not the plate top's half annulus, as this file said, but the ring's
-//!   skin above the plate's top: two pieces of the torus with corners
-//!   `(0, ±3.134, 1/2)` and `(0, ±4.866, 1/2)`, which
-//!   `steps_from_a_reach_into_the_planes_material` in `fuse/select.rs` now
-//!   finds a point in;
-//! - the plate against the ring and the bar together is refused by the same
-//!   predicate, on a piece not traced.
+//! - The plate and the ring were refused *"a point inside a piece of a face"*
+//!   until Q1861, on the ring's skin above the plate's top: two pieces of the
+//!   torus with corners `(0, ±3.134, 1/2)` and `(0, ±4.866, 1/2)`, which
+//!   `steps_from_a_reach_into_the_planes_material` in `fuse/select.rs` finds a
+//!   point in.
+//! - The plate against the ring and the bar was refused the same, under every
+//!   rule both ways round, until Q2205, and not on the plate top's half annulus,
+//!   as this file's pin was named. With the bar there, the plane of its top,
+//!   `z = 3/4`, cuts that skin into three pieces of the torus, each with its
+//!   corners on the plane `x = 0`: a band up the inner wall with corners
+//!   `(0, ±3.134, 1/2)` and `(0, ±3.339, 3/4)`, the top of the tube from there
+//!   to `(0, ±4.661, 3/4)`, and a band down the outer wall from there to
+//!   `(0, ±4.866, 1/2)`. No point offered was found in any of them, and the
+//!   refusal named the inner band's four corners.
+//!   `half_way_round_the_tube_between_two_corners` in `fuse/select.rs` offers
+//!   `(3.226, 0, 0.633)`, `(4, 0, 1)` and `(4.774, 0, 0.633)`, one in each,
+//!   and every placement they make is outside.
+//! - The bar and the ring, which never touch, were refused
+//!   `CannotTellTheCellsOfAFaceApart`: the planes of the bar's caps cut each of
+//!   the ring's faces into bands, and nothing told the outer band between them
+//!   from the inner one. Since Q1514 puts those bands in order round the tube,
+//!   they answer.
+//! - The plate and the bar are the control.
 //!
-//! The bar and the ring, which never touch, were refused
-//! `CannotTellTheCellsOfAFaceApart`: the planes of the bar's caps cut each of
-//! the ring's faces into bands, and nothing told the outer band between them
-//! from the inner one. Since Q1514 puts those bands in order round the tube,
-//! they answer. The plate and the bar, the control, answer, and their volumes
-//! are right.
-//! Each refusal is pinned here, so the change that answers one fails its pin
-//! and has to check the answers against the volumes below. For the plate
-//! against the ring and the bar, with `S` the plate and ring plus the plate
-//! and bar: the union is `605π/16 + 8π² + 529π/128 − S`, about 175.72567; the
-//! intersection `S`, about 35.00625; the plate less the others
-//! `605π/16 − S`, about 83.78523; and the others less the plate
-//! `8π² + 529π/128 − S`, about 56.93420.
+//! For the plate against the ring and the bar, with `S` the plate and ring
+//! plus the plate and bar: the union is `605π/16 + 8π² + 529π/128 − S`, about
+//! 175.72567; the intersection `S`, about 35.00625, in two solids, the plate
+//! and ring and the plate and bar; the plate less the others `605π/16 − S`,
+//! about 83.78523; and the others less the plate `8π² + 529π/128 − S`, about
+//! 56.93420, in two solids, the ring less the plate and the bar less the
+//! plate. At the model's own deflection a mesh of the union may be off by
+//! 16.7, nearly a tenth of it, and at 1/200 by 0.78, so these are measured at
+//! 1/200, each solid on its own.
 //!
 //! # The volumes, by hand
 //!
@@ -79,7 +90,7 @@ use rcad_geom::{
     Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 const RING: f64 = 4.0;
 const TUBE: f64 = 1.0;
@@ -91,9 +102,6 @@ const BAR_BOTTOM: f64 = 0.25;
 const BAR_TOP: f64 = 0.75;
 
 const RULES: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
-
-/// The predicate the plate against the ring and the bar is refused by.
-const INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 
 #[test]
 fn a_half_disk_plate_and_a_whole_ring_fuse_to_their_volumes() {
@@ -115,17 +123,30 @@ fn a_half_disk_plate_and_a_whole_ring_fuse_to_their_volumes() {
     });
 }
 
+/// The intersection and the others less the plate are two solids each, one
+/// round the ring and one in the bar, so each solid is measured on its own.
 #[test]
-fn a_half_disk_plate_against_a_ring_and_a_bar_in_its_hole_is_refused_on_the_half_annulus() {
+fn a_half_disk_plate_against_a_ring_and_a_bar_in_its_hole_fuses_to_their_volumes() {
+    let plate = 605.0 * PI / 16.0;
+    let ring = 8.0 * PI * PI;
+    let bar = 529.0 * PI / 128.0;
+    let plate_and_ring = 8.0 * PI * PI / 3.0 + PI * 3.0_f64.sqrt();
+    let plate_and_bar = 529.0 * PI / 512.0;
+    let shared = plate_and_ring + plate_and_bar;
     every_way(
         the_plate,
         the_ring_and_the_bar,
-        |_, rule, plate_first, answer| {
-            assert_eq!(
-                refused_by(answer),
-                INSIDE_A_PIECE,
-                "{rule:?}, plate first: {plate_first}"
-            );
+        |model, rule, plate_first, answer| {
+            let what = format!("{rule:?}, plate first: {plate_first}");
+            let solids = answer.unwrap_or_else(|why| panic!("{what} refused: {why:?}"));
+            let smallest_first = match (rule, plate_first) {
+                (Rule::Union, _) => vec![plate + ring + bar - shared],
+                (Rule::Intersection, _) => vec![plate_and_bar, plate_and_ring],
+                (Rule::Difference, true) => vec![plate - shared],
+                (Rule::Difference, false) => vec![bar - plate_and_bar, ring - plate_and_ring],
+                (other, _) => panic!("a rule this file does not run: {other:?}"),
+            };
+            assert_each_measures(model, &solids, &smallest_first, &what);
         },
     );
 }
@@ -210,40 +231,46 @@ fn every_way(
     }
 }
 
-/// The predicate the last record of an `Undecidable` names.
-fn refused_by(answer: rcad_topo::Result<Vec<SolidKey>>) -> String {
-    match answer {
-        Err(Error::Undecidable { records }) => records
-            .records()
-            .last()
-            .expect("a refusal names why")
-            .predicate()
-            .to_owned(),
-        other => panic!("refused as undecidable, not {other:?}"),
-    }
-}
-
 fn assert_measures(model: &Model, solids: &[SolidKey], volume: f64, what: &str) {
     let (measured, error) = solids
         .iter()
-        .map(|&solid| {
-            model
-                .solid(solid)
-                .expect("this model made the key")
-                .measure(
-                    Deflection::for_scale(model.scale()),
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                )
-                .unwrap_or_else(|why| panic!("{what} does not measure: {why}"))
-        })
-        .fold((0.0, 0.0), |(volume, error), each| {
-            (volume + each.volume(), error + each.volume_error())
+        .map(|&solid| volume_of(model, solid, Deflection::for_scale(model.scale()), what))
+        .fold((0.0, 0.0), |(volume, error), (each, its_error)| {
+            (volume + each, error + its_error)
         });
     assert!(
         (measured - volume).abs() <= error,
         "{what} holds {volume} and this one says {measured} give or take {error}"
     );
+}
+
+/// Measures each of `solids` at a deflection of 1/200 and checks the smallest
+/// against the first of `smallest_first`, the next against the next, and so on.
+fn assert_each_measures(model: &Model, solids: &[SolidKey], smallest_first: &[f64], what: &str) {
+    assert!(smallest_first.is_sorted(), "{what}: {smallest_first:?}");
+    assert_eq!(solids.len(), smallest_first.len(), "{what}: {solids:?}");
+    let fine = Deflection::of(0.005).expect("a positive length");
+    let mut measured: Vec<(f64, f64)> = solids
+        .iter()
+        .map(|&solid| volume_of(model, solid, fine, what))
+        .collect();
+    measured.sort_by(|one, other| one.0.total_cmp(&other.0));
+    for (&(says, error), &holds) in measured.iter().zip(smallest_first) {
+        assert!(
+            (says - holds).abs() <= error,
+            "{what}: a solid holds {holds} and this one says {says} give or take {error}"
+        );
+    }
+}
+
+/// The volume of `solid` and the most a mesh of it at `deflection` may be off.
+fn volume_of(model: &Model, solid: SolidKey, deflection: Deflection, what: &str) -> (f64, f64) {
+    let measured = model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{what} does not measure: {why}"));
+    (measured.volume(), measured.volume_error())
 }
 
 fn the_plate(model: &mut Model) -> Vec<SolidKey> {
