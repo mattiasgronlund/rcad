@@ -1378,7 +1378,7 @@ impl ABandRoundAnAxis {
     fn is_square_to(self, surface: &Surface) -> bool {
         surface.as_plane().is_some_and(|flat| {
             let [a, b, c, _] = flat.coefficients();
-            self.runs_along([a, b, c].map(rcad_predicates::Interval::exactly))
+            self.is_parallel_to([a, b, c])
         })
     }
 
@@ -1386,11 +1386,42 @@ impl ABandRoundAnAxis {
     /// through a point of it.
     fn is_on_the_axis(self, axis: rcad_geom::Axis) -> bool {
         let (origin, along) = axis_numbers(axis);
-        self.runs_along(along.map(rcad_predicates::Interval::exactly))
+        self.is_parallel_to(along)
             && self.runs_along(difference(
                 origin.map(rcad_predicates::Interval::exactly),
                 self.origin,
             ))
+    }
+
+    /// Whether `direction × w` is exactly nought, each of its three parts
+    /// worked out exactly as a difference of two products (Q2256).
+    ///
+    /// [`Self::runs_along`] says nought only where every product it takes
+    /// comes out an `f64`. A round bar turned half a radian about `y` has each
+    /// cap's normal the exact negative of its axis, `(∓0.479…, 0, ∓0.878…)`,
+    /// and there `n_z·w_x − n_x·w_z` came out a range a rounding either side
+    /// of nought: neither cap was square to the pipe, so neither had a band.
+    ///
+    /// A part whose products the exact arithmetic will not take, one that
+    /// overflows or one down among the smallest `f64`s, is asked in interval
+    /// arithmetic as before. So whatever was parallel before still is.
+    fn is_parallel_to(self, direction: [f64; 3]) -> bool {
+        let exactly = rcad_predicates::Interval::exactly;
+        let w = self.along;
+        [(1, 2), (2, 0), (0, 1)].into_iter().all(|(i, j)| {
+            let part = match rcad_predicates::expansion::difference_of_two_products(
+                direction[i],
+                w[j],
+                direction[j],
+                w[i],
+            ) {
+                Some((entries, len)) => rcad_predicates::expansion::expansion_sign(&entries[..len]),
+                None => (exactly(direction[i]) * exactly(w[j])
+                    - exactly(direction[j]) * exactly(w[i]))
+                .sign(),
+            };
+            matches!(part, rcad_predicates::Decision::Zero)
+        })
     }
 
     /// Whether `direction × w` is exactly nought, which interval arithmetic

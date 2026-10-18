@@ -18016,6 +18016,12 @@ mod what_the_curved_arrangement_reaches {
     /// Nothing here is exactly representable and none of it needed a policy —
     /// the corners of a placed curved solid are boxes, and a box is not slop
     /// anybody failed to prove (§17.2).
+    ///
+    /// The block's faces at `y = 0` and `y = 8`, which the bar never reaches,
+    /// are cut by 6 and not by 7. Each cap's normal is exactly parallel to the
+    /// pipe's axis, which interval arithmetic could not show and the exact
+    /// arithmetic does since Q2256, so the pipe has a band round its axis, and
+    /// neither plane comes near it.
     #[test]
     fn a_turned_bar_through_a_block_cuts_ellipses_and_nothing_has_to_be_approximated() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -18036,10 +18042,10 @@ mod what_the_curved_arrangement_reaches {
             what_it_cuts(&model, block, bar),
             [
                 "pipe cut by 8 -> [2, 1, 1, 2, 2]",
+                "plane cut by 6 -> [1]",
+                "plane cut by 6 -> [1]",
                 "plane cut by 7 -> [1, 1]",
                 "plane cut by 7 -> [1, 1]",
-                "plane cut by 7 -> [1]",
-                "plane cut by 7 -> [1]",
                 "plane cut by 7 -> [1]",
                 "plane cut by 7 -> [1]",
                 "plane cut by 7 -> [2, 1]",
