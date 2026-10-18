@@ -4147,6 +4147,17 @@ struct ThePatchAsCut {
 /// `ASideCutsOffOneCornerOfACurvedPatch` at a lobe's corner, where the whole
 /// cap is refused `CornersCoincide` for the two of its corners stored at one
 /// point (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`).
+///
+/// **Two faces that each cut a lobe off at one place can both draw the side
+/// that closes it**, and the mesh is then refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide`. A ball of radius 3 cut to a 90 degree
+/// lune by two knives, less the second knife under a tolerant policy, leaves the
+/// lune and the flat face of `x = 0` meeting at the south pole `P` along `P` to
+/// a second entry `P′` of the pole and `P′` to a corner `C` `4.4e−16` from it.
+/// Each face cuts `P′` off as a lobe, keeps the side `P C` inside its patch,
+/// and so that side is used four times, where uncut the lune was
+/// refused `CornersCoincide`
+/// (`two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`).
 fn what_the_triangulator_can_cut(surface: &Surface, patch: Vec<ALoopToCut>) -> ThePatchAsCut {
     let mut drawn_here = Vec::new();
     let mut loops = patch.into_iter();

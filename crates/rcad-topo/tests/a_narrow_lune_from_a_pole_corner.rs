@@ -264,9 +264,24 @@ fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
 /// radius 0.001 were dumped, the arcs from each pole to the corner beside it
 /// picked as the short ones — and each is refused further on:
 ///
-/// - **the four 90 degree differences and the 45 degree one at radius 1000
-///   for corners that coincide**, by the mesher, which sees the pole and the
-///   corner a rounding from it as one point on the face's own map;
+/// - **the 90 degree differences at radii 1 and 1000 and the 45 degree one at
+///   radius 1000 for corners that coincide**, by the mesher, which sees the
+///   pole and the corner a rounding from it as one point on the face's own map.
+///   Until Q2290 all four 90 degree ones were refused so on the sphere's lune.
+///   Since then `mesh.rs` cuts a loop that names one place twice into lobes
+///   (`what_the_triangulator_can_cut`), so the lune is meshed, and the 90 degree
+///   ones stop further on, at the flat face of `x = 0`: at radii 1 and 1000 for
+///   corners that coincide there;
+/// - **the 90 degree difference at radius 0.001 for loops that touch**, at that
+///   flat face, at `(0, 4.6e−19, 0.001)` beside the north pole;
+/// - **the 90 degree difference at radius 3 for two patches drawing one
+///   side**. The lune and the flat face of `x = 0` meet at the south pole `P`
+///   along two sides, from `P` to a second entry `P′` of the pole and from
+///   `P′` to the corner `C` `4.4e−16` from it, and each face names that place
+///   twice in its loop. Each cuts a lobe off there, and the side `P C` that
+///   closes the lobe it keeps lies inside its patch: drawn by both patches, it
+///   is used four times (`TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4,
+///   used: 4 }`);
 /// - **the 45 degree one at radius 0.001 and the 10 degree ones at radii 0.001
 ///   and 1000 for faces that do not agree which way they face**. The faces are
 ///   right and the name is not. The walk puts a point on the arc of `x = 0`
@@ -285,11 +300,12 @@ fn two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy() {
     const COINCIDE: &str = "CornersCoincide";
     const FACE_APART: &str = "FacesDoNotAgreeWhichWayTheyFace";
     const TOUCH: &str = "LoopsTouch";
+    const ONE_SIDE_TWICE: &str = "TwoPatchesOfTheMeshDrewTheSameSide";
     for (degrees, radius, rule, refused) in [
         (90.0, 1.0, Rule::Difference, COINCIDE),
-        (90.0, 0.001, Rule::Difference, COINCIDE),
+        (90.0, 0.001, Rule::Difference, TOUCH),
         (90.0, 1000.0, Rule::Difference, COINCIDE),
-        (90.0, 3.0, Rule::Difference, COINCIDE),
+        (90.0, 3.0, Rule::Difference, ONE_SIDE_TWICE),
         (45.0, 0.001, Rule::Difference, FACE_APART),
         (45.0, 1000.0, Rule::Difference, COINCIDE),
         (10.0, 1.0, Rule::Intersection, TOUCH),
@@ -336,8 +352,26 @@ fn two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy() {
 /// and the half ball less that intersection.
 #[test]
 fn a_half_ball_cut_by_a_block_a_hair_off_its_polar_axis_is_answered() {
+    a_half_ball_cut_by_a_block_off_its_polar_axis_is_answered(1e-10);
+}
+
+/// The same half ball and block with the block's face at `y = 1e−8·r`, which
+/// answers at every size and under every rule and measures its closed form.
+///
+/// Q2012 found the difference refused `CannotNameWhichPieceOfACrossingThisIs`
+/// under a certified policy at radii 0.001, 1000 and 3, where at `1e−10·r` and
+/// `1e−7·r` it answered.
+#[test]
+fn a_half_ball_cut_by_a_block_a_hundred_hairs_off_its_polar_axis_is_answered() {
+    a_half_ball_cut_by_a_block_off_its_polar_axis_is_answered(1e-8);
+}
+
+/// The half ball `x ≥ 0` of every radius cut by every rule with a block whose
+/// face is `y = off·r`, each answer one solid that validates and measures its
+/// closed form.
+fn a_half_ball_cut_by_a_block_off_its_polar_axis_is_answered(off: f64) {
     for radius in RADII {
-        let t = 1e-10 * radius;
+        let t = off * radius;
         let slab = PI / 2.0 * (radius * radius * t - t * t * t / 3.0);
         let quarter = a_balls_volume(radius) / 4.0;
         for (rule, closed_form) in [
@@ -1001,6 +1035,9 @@ fn which_refusal(why: &Error) -> &str {
     }
     if let Error::CannotMeshAFace { .. } = why {
         return "CannotMeshAFace";
+    }
+    if let Error::TwoPatchesOfTheMeshDrewTheSameSide { .. } = why {
+        return "TwoPatchesOfTheMeshDrewTheSameSide";
     }
     if let Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed = why {
         return "ACurvedEdgeThatIsPartOfACrossingCannotBeNamed";
