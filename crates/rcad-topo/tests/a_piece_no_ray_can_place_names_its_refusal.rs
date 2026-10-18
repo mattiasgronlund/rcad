@@ -2054,3 +2054,46 @@ fn expect(fused: Result<usize, Error>, said: Option<&str>, what: &str) {
         (_, _) => panic!("{what}: expected {said:?}, got {fused:?}"),
     }
 }
+
+/// The same two bends placed round by `−0.3565`, and by the grid value
+/// `−3.1 + 0.0155 · 177`, which is `−0.35650000000000004`, and a quarter turn
+/// back. Their touching caps lie apart: read exactly off the two stored
+/// planes, both through the ring's axis, the copy's end cap is behind the
+/// first bend's start cap, so the bends share no point. Every rule both ways
+/// round was refused `Undecidable` at `side of torus` (Q2090, Q2149, Q2267).
+///
+/// The fuse places every piece. The copy's end cap is placed outside the first
+/// bend by a point a rounding inside its rim, at the ring's inner equator,
+/// whose first ray met the first bend's start cap on that cap's rim, where the
+/// sign of the ring cannot be told. That ray was thrown away and the next
+/// placed the point, but the thrown-away ray's two `side of torus` records
+/// stayed in the fuse's log, and a certified policy refuses any record. The
+/// next point the search offers places the cap the same way and asks nothing
+/// undecided.
+///
+/// So the union answers both bends, the difference the first, and the
+/// intersection nothing, each bend within the measure's own error of
+/// `π² R r² / 2`.
+#[test]
+fn two_bends_whose_caps_lie_apart_answer_every_rule() {
+    let one_bend = PI * PI * 4.0 / 2.0;
+    for start in [-0.3565, -3.1 + 0.0155 * 177.0] {
+        for rule in EVERY_RULE {
+            for the_first_first in [true, false] {
+                let what = format!("{start:?}, {rule:?}, the first first {the_first_first}");
+                let mut model = a_model();
+                let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
+                let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
+                let bends = match rule {
+                    Rule::Union => 2,
+                    Rule::Difference => 1,
+                    Rule::Intersection => 0,
+                    other => panic!("not a rule this tries: {other:?}"),
+                };
+                let measured = fused_and_measured(&mut model, first, copy, rule, the_first_first)
+                    .unwrap_or_else(|why| panic!("{what}: {}", the_refusal(&Err(why))));
+                each_within_its_error(measured, &vec![one_bend; bends], &what);
+            }
+        }
+    }
+}

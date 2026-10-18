@@ -31,6 +31,13 @@
 //! dropped and the next one tried, without a word in the log. Choosing which
 //! point to look at decides nothing (§5).
 //!
+//! **A point placed with a decision the policy would refuse the fuse for is
+//! held back while the next one is tried.** A ray thrown away where it grazed
+//! a face can leave what it could not decide in the point's log, though the
+//! next ray placed the point. The first point that places the piece with
+//! nothing the policy refuses places it, and only where none does is the point
+//! held back taken, and the fuse refused for it as before (§35.6, Q2267).
+//!
 //! The one predicate this needs is which way three points on the face turn about
 //! its normal, and that is [`orient3d_of_points`] against a fourth point off the
 //! plane whose side has been proved — see [`InPlane`]. No new predicate, and
@@ -208,7 +215,10 @@ use super::assemble::{
     the_pieces_of_each_shell_both_hold_taken_as_flat,
 };
 use super::bake::{BakedCorner, BakedEdge, BakedFace, BakedSolid};
-use super::{FaceMeet, MeetPoint, Scratch, as_exact_as_it_is, gave_up, middle_of, the_other_way};
+use super::{
+    FaceMeet, MeetPoint, Scratch, a_fuse_logging_this_is_refused, as_exact_as_it_is, gave_up,
+    middle_of, the_other_way,
+};
 
 /// Which pieces of the two groups a fuse keeps.
 ///
@@ -656,6 +666,25 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// follows (`tests/a_rung_whose_ray_meets_a_face_nobody_follows.rs`); it was
 /// refused under [`PLACED_AGAINST_EVERY_SOLID`].
 ///
+/// **A point placed with a decision the policy would refuse the fuse for
+/// places the piece only where no later point places it without one.** The
+/// piece is all inside or all outside each solid (§17.4), so every point that
+/// places it says the same, and which of them says it decides nothing (§5).
+/// Two quarter bends of ring 4 and tube 1 placed round by `−0.3565` and by
+/// `−0.3565 − π/2` have touching caps that lie apart. The second candidate of
+/// the copy's end cap, a rounding inside its rim at the ring's inner equator,
+/// was placed outside the first bend by its second ray, after the first grazed
+/// that bend's start cap on its rim, where `side of torus` cannot be told. The
+/// graze's two records stayed in the point's log, and every rule both ways
+/// round was refused under a certified policy. The next candidate places the
+/// cap outside and asks nothing undecided
+/// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`, Q2267, §35.6).
+///
+/// The point held back is taken where no later point places the piece, and
+/// where a later point's search fails, before the refusals below: a piece some
+/// point placed before is still placed, and a fuse that was refused for that
+/// point's records is refused for the same ones.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] naming the caller's face,
@@ -685,6 +714,7 @@ fn place_the_piece(
     let also_picked_by = what_else_each_round_wire_asks(piece, policy, log)?;
     let meridians = the_meridian_circle_each_side_runs_round(piece, policy, log)?;
     let mut unfollowed = None;
+    let mut held_back: Option<(Placement, ProvenanceLog)> = None;
     let mut try_one = |candidate: PredicatePoint,
                        log: &mut ProvenanceLog|
      -> Result<Option<Option<Placement>>> {
@@ -693,8 +723,22 @@ fn place_the_piece(
         }
         let mut trial = ProvenanceLog::new();
         let settled =
-            settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)?;
+            match settle_against_each(model, solids, against, candidate, piece, policy, &mut trial)
+            {
+                Ok(settled) => settled,
+                Err(why) => {
+                    let Some((placement, mut kept)) = held_back.take() else {
+                        return Err(why);
+                    };
+                    kept.drain_into(log);
+                    return Ok(Some(Some(placement)));
+                }
+            };
         Ok(Some(match settled {
+            Settled::At(placement) if a_fuse_logging_this_is_refused(model, policy, &trial) => {
+                held_back.get_or_insert((placement, trial));
+                None
+            }
             Settled::At(placement) => {
                 trial.drain_into(log);
                 Some(placement)
@@ -743,6 +787,10 @@ fn place_the_piece(
         if let Some(placement) = settled {
             return Ok(Search::Placed(placement));
         }
+    }
+    if let Some((placement, mut kept)) = held_back {
+        kept.drain_into(log);
+        return Ok(Search::Placed(placement));
     }
     if one_was_inside {
         if let Some(face) = unfollowed {
