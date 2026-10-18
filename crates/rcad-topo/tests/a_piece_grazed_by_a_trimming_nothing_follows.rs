@@ -294,15 +294,16 @@ fn a_bowl_just_off_under_the_half_ball_alone_holds_what_two_half_balls_hold() {
                 (Rule::Difference, false) => Some(half_a_ball(radius)),
                 (other, _) => panic!("no volume for {other:?}"),
             };
-            let what =
-                fused
-                    .map_err(|why| format!("refused {why:?}"))
-                    .and_then(|fused| match rule {
-                        Rule::Union if radius == one_up => {
-                            a_ring_the_mesh_refuses(model, fused.solids())
-                        }
-                        _ => what_it_holds(model, fused.solids(), should_hold),
-                    });
+            let a_ring_one_rounding_wide = matches!(rule, Rule::Union) && radius == one_up;
+            let what = fused
+                .map_err(|why| format!("refused {why:?}"))
+                .and_then(|fused| {
+                    if a_ring_one_rounding_wide {
+                        a_ring_the_mesh_refuses(model, fused.solids())
+                    } else {
+                        what_it_holds(model, fused.solids(), should_hold)
+                    }
+                });
             if let Err(why) = what {
                 wrong.push(format!(
                     "{radius}, {rule:?}, half ball first {half_first}: {why}"
