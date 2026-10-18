@@ -4764,14 +4764,17 @@ impl<'f> Arrangement<'f> {
         }
     }
 
-    /// Whether a corner `bake` solved as the meet of the `three` planes comes
-    /// before or after the point where `cut` crosses the `line` two planes
-    /// meet in, walked along `n₀ × n₁`: [`Decision::Pos`] when the corner
-    /// does, [`Decision::Zero`] when the corner is on `cut`.
+    /// Whether the meet of the `three` planes comes before or after the point
+    /// where `cut` crosses the `line` two planes meet in, walked along
+    /// `n₀ × n₁`: [`Decision::Pos`] when the meet does, [`Decision::Zero`]
+    /// when the meet is on `cut`. `three` is either a corner's own planes, the
+    /// ones `bake` solved it from, or a meet's stored `made_of` three
+    /// (`the_three_planes_a_node_is_the_meet_of`); the point is their meet
+    /// either way, whether or not it is a corner of the face.
     ///
-    /// The corner need not be on the line, so it is put where `cut` says it
+    /// The meet need not be on the line, so it is put where `cut` says it
     /// is: `cut`'s value along the line is `(t − t_cut) · det(n₀, n₁, n_cut)`,
-    /// and the corner comes first when its own value has the sign that puts
+    /// and the meet comes first when its own value has the sign that puts
     /// it at a `t` below `t_cut`. That is the rule
     /// [`which_meet_comes_first_along_a_line`](rcad_predicates::which_meet_comes_first_along_a_line)
     /// follows with a point on the line, and it gives the same answer when
