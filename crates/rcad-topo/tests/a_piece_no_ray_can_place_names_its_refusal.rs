@@ -1252,7 +1252,7 @@ fn a_ball_or_a_cone_joined_to_a_ring_with_a_piece_of_its_own_kind_on_it_is_refus
             a_ball_segment as fn(&mut Model) -> Result<SolidKey, Error>,
             "Undecidable at side of sphere",
             &["up a rounding", "down a rounding", "up 1e-13", "down 1e-13"][..],
-            [(7, 5), (4, 3), (5, 1)],
+            [(3, 1), (4, 3), (4, 1)],
             "ACrossingBetweenATorusAndAnotherCurvedSurface",
         ),
         (
@@ -1261,7 +1261,7 @@ fn a_ball_or_a_cone_joined_to_a_ring_with_a_piece_of_its_own_kind_on_it_is_refus
             a_seamless_frustum,
             "Undecidable at side of cone",
             &["up 1e-13", "down 1e-13"][..],
-            [(3, 3), (3, 3), (3, 1)],
+            [(1, 1), (3, 3), (3, 1)],
             "ACrossingBetweenAConeAndAnotherCurvedSurface",
         ),
     ] {
