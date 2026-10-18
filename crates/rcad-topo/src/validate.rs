@@ -3192,7 +3192,10 @@ fn size_of(vector: Vector) -> f64 {
 /// wedge of `5.4e-17`. Charged nothing, that sliver's sum answered on
 /// `3.04e-16` against `2.94e-16` at room `0.25`, right by luck, and the fuse
 /// refused the sliver of the same two bends placed round by `−1.984`
-/// [`Invalid::VolumeIsNotPositive`] on `−5.1e-17` (row Q2089).
+/// [`Invalid::VolumeIsNotPositive`] on `−5.1e-17` (row Q2089). Charged, no
+/// rung of [`how_much_space_a_curved_solid_encloses`] answers that sliver,
+/// and the finest mesh read by [`what_it_encloses_moved_onto_its_planes`],
+/// its caps' points moved onto their planes, does (row Q2266).
 ///
 /// `None` when a triangle with area stands in for a face this cannot charge,
 /// wherever in the mesh it comes, and otherwise `f64::INFINITY` when the mesh

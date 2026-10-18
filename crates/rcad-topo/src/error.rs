@@ -547,19 +547,26 @@ pub enum Error {
     /// solid's sign off what a mesh of it encloses, and a sum says it only once
     /// it is larger than all the space the mesh can leave out between its
     /// triangles and the solid's faces. A solid thinner than that at every mesh
-    /// asked of it has no mesh that answers, and the sum the closest of them
-    /// left was zero or below. A solid turned inside out leaves such a sum, and
-    /// so can a sound sliver: two quarter bends of ring 4 and tube 1 placed
-    /// round by `−1.984` and a quarter turn back overlap in a wedge `4π` times
-    /// the angle between their caps, and their intersection is refused this way
-    /// (`a_piece_no_ray_can_place_names_its_refusal.rs`, Q2089). Until Q2089
-    /// that was [`Invalid::VolumeIsNotPositive`], "its faces do not point
-    /// outwards", which nothing had shown. So was a fin `2⁻⁵¹` thick whose
-    /// every mesh point rounds onto one plane, so that every mesh of it encloses
-    /// exactly `0` (`an_ellipse_start_between_two_places.rs`, Q1938), and a
-    /// half ball of 5 less a bowl four roundings smaller, which holds about
-    /// `54`, and whose closest mesh encloses `−38.7` and can be off by `2384`
-    /// (`a_piece_grazed_by_a_trimming_nothing_follows.rs`).
+    /// asked of it, and at the finest of them with its flat faces' points moved
+    /// onto their planes, has no mesh that answers, and the sum the closest of
+    /// them left was zero or below. A solid turned inside out leaves such a
+    /// sum, and so can a sound one. A fin `2⁻⁵¹` thick, whose every mesh point
+    /// rounds onto one plane so that every mesh of it encloses exactly `0`, is
+    /// refused this way (`an_ellipse_start_between_two_places.rs`, Q1938). So
+    /// is a half ball of 5 less a bowl four roundings smaller, which holds
+    /// about `54`, and whose closest mesh encloses `−38.7` and can be off by
+    /// `2384` (`a_piece_grazed_by_a_trimming_nothing_follows.rs`). So is a lens
+    /// `9.9e-9` thick where a ball pokes into a pipe, turned `6/40` about `x`,
+    /// which has no flat face to move a point onto (Q2084). Until Q2089 these
+    /// were [`Invalid::VolumeIsNotPositive`], "its faces do not point
+    /// outwards", which nothing had shown.
+    ///
+    /// Two quarter bends of ring 4 and tube 1 placed round by `−1.984` and a
+    /// quarter turn back overlap in a wedge `4π` times the angle between their
+    /// caps. Their intersection was refused this way from Q2089 until Q2266,
+    /// and is answered now that the caps' points are moved onto their planes
+    /// (`two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_answered`
+    /// in `a_piece_no_ray_can_place_names_its_refusal.rs`).
     ///
     /// A sum above zero that no mesh answered is still taken as the volume, so
     /// a solid turned inside out can still pass on one (Q2084).
