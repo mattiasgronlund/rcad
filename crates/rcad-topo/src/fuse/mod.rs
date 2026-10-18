@@ -366,28 +366,7 @@ impl Model {
         // of code and would make a certified fuse refuse every input whose
         // corners are not exactly representable, which is every part that is not
         // axis-aligned on a lattice.
-        //
-        // Read at the working size the policy accepted each record at, which is
-        // the size `resolve_under_policy` read it at. The model's
-        // `Scale::nominal_size` is a second copy of that number and need not
-        // agree with it. Read at a model a hundredth of the policy's size, a
-        // volume comes out ten thousand times wider, and this used to refuse a
-        // solid built only out of decisions the policy had accepted (§15.2,
-        // §17.8).
-        //
-        // Every other strictness carries no working size, and `Certified` is
-        // the only other there is, so the model's stands in. Its budget is
-        // zero, so all this asks there is whether any record's wobble is above
-        // zero. Any positive size gives the same answer to that, unless
-        // dividing by it rounds a record's wobble down to zero, which takes a
-        // wobble smaller than the smallest double.
-        let working_size =
-            if let Strictness::TolerantFallback { working_size } = policy.strictness() {
-                working_size
-            } else {
-                self.scale().nominal_size()
-            };
-        if !policy.wobble_is_acceptable(log.worst_wobble(working_size)) {
+        if a_fuse_logging_this_is_refused(self, policy, log) {
             return Err(Error::Undecidable {
                 records: core::mem::take(log),
             });
@@ -398,6 +377,38 @@ impl Model {
         let written = assembly.commit(self, inherited, policy, log)?;
         Ok(history_of(self, scratch, &assembly, &written))
     }
+}
+
+/// Whether `policy` refuses a fuse of `model` whose log holds `log`'s records,
+/// which it does when one of them could have put a point further out of place
+/// than it accepts.
+///
+/// Asked of a whole fuse's log before the answer is written, and by
+/// `select.rs`'s `place_the_piece` of the log one point's placement would add,
+/// so that a point whose placement would refuse the fuse is not the one a
+/// piece is placed by while another point places it with nothing the policy
+/// refuses. The worst wobble of a log is the worst of any of its parts, so a
+/// part this refuses refuses the whole log it goes into.
+///
+/// Read at the working size the policy accepted each record at, which is the
+/// size `resolve_under_policy` read it at. The model's `Scale::nominal_size`
+/// is a second copy of that number and need not agree with it. Read at a model
+/// a hundredth of the policy's size, a volume comes out ten thousand times
+/// wider, and this used to refuse a solid built only out of decisions the
+/// policy had accepted (§15.2, §17.8).
+///
+/// Every other strictness carries no working size, and `Certified` is the only
+/// other there is, so the model's stands in. Its budget is zero, so all this
+/// asks there is whether any record's wobble is above zero. Any positive size
+/// gives the same answer to that, unless dividing by it rounds a record's
+/// wobble down to zero, which takes a wobble smaller than the smallest double.
+fn a_fuse_logging_this_is_refused(model: &Model, policy: &Policy, log: &ProvenanceLog) -> bool {
+    let working_size = if let Strictness::TolerantFallback { working_size } = policy.strictness() {
+        working_size
+    } else {
+        model.scale().nominal_size()
+    };
+    !policy.wobble_is_acceptable(log.worst_wobble(working_size))
 }
 
 /// What a fuse has settled before it puts its answer together.
