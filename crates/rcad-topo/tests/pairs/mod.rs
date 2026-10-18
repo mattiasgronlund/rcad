@@ -1329,6 +1329,70 @@ pub fn a_ball_and_a_block() -> impl Strategy<Value = BallAndBlock> {
         })
 }
 
+/// Two balls whose skins cross in one circle: whole-number radii, apart along
+/// `z` by a whole number strictly between the difference of the two radii and
+/// their sum, so neither nests inside the other and neither stands clear.
+///
+/// **The only family here with two round faces and no flat one.** Every other
+/// curved pair puts a ball or a bar against a block's flat wall, where the
+/// fuse's selection table takes a Plane/Sphere or Plane/Cylinder row. Here both
+/// faces carry a [`rcad_geom::Surface::Sphere`], so a fuse that reaches the
+/// circle where they cross takes `fuse/assemble.rs`'s `[Sphere, Sphere]` row of
+/// `which_arc_of_a_circle_walked_this_way` instead — the one arm `two_balls_touching_at_a_point`
+/// in `fuses_that_touch.rs` never reaches, because a point is not a circle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TwoBalls {
+    /// The first ball's radius, centred at the origin.
+    pub first: u32,
+    /// The second ball's radius.
+    pub second: u32,
+    /// How far the second ball's centre stands from the first, along `z`.
+    pub apart: u32,
+}
+
+impl TwoBalls {
+    /// Build the first ball at the origin and the second `apart` up `z`.
+    #[must_use]
+    pub fn build(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let first = model
+            .add_ball(f64::from(self.first), &Isometry::identity())
+            .expect("a whole-number ball");
+        let second = model
+            .add_ball(
+                f64::from(self.second),
+                &Isometry::translation(Vector::new(0.0, 0.0, f64::from(self.apart)))
+                    .expect("a whole-number shift"),
+            )
+            .expect("a whole-number ball");
+        (model, vec![first, second])
+    }
+}
+
+/// Two balls of whole-number radii, apart just far enough to cross in one
+/// circle and not far enough to stand clear or to nest one inside the other.
+///
+/// A circle survives between `|first − second|` and `first + second` apart, so
+/// `apart` is drawn strictly inside that range: both ends are excluded because
+/// the near one is where the smaller ball sits entirely inside the larger —
+/// its own fixed degenerate case, not this family's — and the far one is where
+/// the two stand tangent rather than crossing.
+///
+/// Shrinks toward two balls of radius one, their centres one apart.
+pub fn two_balls_crossing_in_a_circle() -> impl Strategy<Value = TwoBalls> {
+    (1u32..=6, 1u32..=6)
+        .prop_flat_map(|(first, second)| {
+            let closest = first.abs_diff(second) + 1;
+            let farthest = first + second - 1;
+            (Just(first), Just(second), closest..=farthest)
+        })
+        .prop_map(|(first, second, apart)| TwoBalls {
+            first,
+            second,
+            apart,
+        })
+}
+
 /// A block with a ball half sunk into its floor and a round bar driven through
 /// it, the ball and the bar well apart from each other.
 ///
