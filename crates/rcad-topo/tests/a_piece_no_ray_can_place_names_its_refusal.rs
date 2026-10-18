@@ -1937,6 +1937,72 @@ fn each_within_its_error(mut measured: Vec<(f64, f64)>, expected: &[f64], what: 
     }
 }
 
+/// The same two bends placed round by `−3.1 + 0.0155 · step` at steps 58, 173
+/// and 196 and a quarter turn back, intersected both ways round, answer one
+/// sliver that `Model::validate` passes. Its torus face lies between two
+/// meridian circles a rounding apart, and the mesher read their middles
+/// inverted at some deflections, moved the second circle a whole turn, and cut
+/// the face the long way round: the measure gave about `78.9`, a whole ring,
+/// for a wedge of under `1e-15` (Q2138, Q2149, Q2265). No measure from `0.32`
+/// to `1e-3` may come out a whole ring.
+#[test]
+fn two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring() {
+    let policy = Policy::certified();
+    let mut long = 0;
+    for step in [58_u32, 173, 196] {
+        let start = -3.1 + 0.0155 * f64::from(step);
+        for the_first_first in [true, false] {
+            let mut model = a_model();
+            let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
+            let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
+            let (arguments, tools) = if the_first_first {
+                ([first], [copy])
+            } else {
+                ([copy], [first])
+            };
+            let answer = model.fuse(
+                &arguments,
+                &tools,
+                Rule::Intersection,
+                &policy,
+                &mut ProvenanceLog::new(),
+            );
+            let Ok(answer) = answer else {
+                eprintln!("Q2265 step {step} start {start} first {the_first_first}: {answer:?}");
+                continue;
+            };
+            let valid = model.validate(&policy, &mut ProvenanceLog::new());
+            eprintln!(
+                "Q2265 step {step} start {start} first {the_first_first}: {} solids, validate {valid:?}",
+                answer.solids().len()
+            );
+            for &solid in answer.solids() {
+                for size in [
+                    0.32, 0.16, 0.08, 0.04, 0.02, 0.01, 5e-3, 2.5e-3, 1.25e-3, 1e-3,
+                ] {
+                    let deflection = rcad_geom::Deflection::of(size).expect("a deflection");
+                    let measured = model
+                        .solid(solid)
+                        .and_then(|solid| {
+                            solid.measure(deflection, &policy, &mut ProvenanceLog::new())
+                        })
+                        .map(|measured| (measured.volume(), measured.volume_error()));
+                    if let Ok((volume, _)) = measured
+                        && volume > 1.0
+                    {
+                        long += 1;
+                    }
+                    eprintln!(
+                        "Q2265 step {step} first {the_first_first} deflection {size}: {measured:?}"
+                    );
+                }
+            }
+        }
+    }
+    eprintln!("Q2265 measures of a whole ring: {long}");
+    assert_eq!(long, 0);
+}
+
 /// That the fuse answered when `said` is `None`, and was refused `Undecidable`
 /// with `said` the last record's predicate otherwise.
 fn expect(fused: Result<usize, Error>, said: Option<&str>, what: &str) {
