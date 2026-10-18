@@ -34,8 +34,11 @@
 //!
 //! Refusing by name where the arrangement starts no node is not the fix
 //! either. Passing on every refusal there but "this crossing is not closed"
-//! breaks three tests in this crate whose loop is a circle two surfaces only
-//! touch along, and which answer because it is left uncut.
+//! fails three other tests in this crate, which answer because the loop is
+//! left uncut: two with a ball a bar holds round the one circle the two only
+//! touch along, refused `CannotFollowACrossingWhereItsSurfacesAreTangent`, and
+//! a turned frustum cut along its seam under a tolerant policy, refused
+//! `CannotNameWhichPieceOfACrossingThisIs`.
 
 use std::f64::consts::PI;
 
