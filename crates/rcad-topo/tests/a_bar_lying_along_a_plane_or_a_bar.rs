@@ -73,21 +73,27 @@
 //! three surfaces turn at them, until queue row Q2160 read both off which of
 //! the two meets of one line a point is.
 //!
-//! **Under `tolerant`, the three fuses whose answer is the bar less the sliver
-//! answer, and the nine whose answer holds the sliver or the hole it leaves
-//! are refused `CannotMeshAFace`** (queue rows Q2161 and Q2195). Every
-//! decision the arrangement takes is proved; the refusals come from the mesh
-//! that checks each answer before it is written. No double lies inside the
-//! sliver: it spans `x` from `3 + 2⁻⁵³` to `3 + 2⁻⁵²`, and the doubles there
-//! are `2⁻⁵¹` apart. So every point drawn on it rounds onto `x = 3`. The cap
-//! circle's two crossings are stored at `y = 2 − 2⁻⁵¹` and `y = 2`, and the
-//! one point `mesh.rs` puts inside each of the sliver's two arcs at
-//! `y = 2 − 2⁻⁵²`, between them. The hole in the block's face is then three
-//! points on one line, `LoopsTouch`, and the sliver's piece of the pipe names
-//! that one point for both its arcs, `CornersCoincide`. Each answer validates
-//! under `tolerant` and is refused `DynamicRangeTooWide` under `certified`,
-//! which is what a tolerant fuse promises, and right: valid is a property of a
-//! model and a policy (`Model::fuse`'s doc, §68).
+//! **Under `tolerant`, every fuse answers but the three whose answer is the
+//! sliver alone, which are refused `CannotTellWhichWayASolidsFacesPoint`**
+//! (queue rows Q2161, Q2195 and Q2238). Every decision the arrangement takes
+//! is proved. No double lies inside the sliver: it spans `x` from `3 + 2⁻⁵³`
+//! to `3 + 2⁻⁵²`, and the doubles there are `2⁻⁵¹` apart. So every point drawn
+//! on it rounds onto `x = 3`. The cap circle's two crossings are stored at
+//! `y = 2 − 2⁻⁵¹` and `y = 2`, and the one point `mesh.rs` puts inside each of
+//! the sliver's two arcs at `y = 2 − 2⁻⁵²`, between them. The hole in the
+//! block's face is then three points on one line, and the sliver's piece of
+//! the pipe names that one point for both its arcs. Until Q2238 the mesh that
+//! checks each answer before it is written refused nine fuses there,
+//! `CannotMeshAFace`, `LoopsTouch` for the hole and `CornersCoincide` for the
+//! pipe; it now draws the hole as a fan and cuts the pipe's loop in two at the
+//! point it names twice. The sliver alone then meshes to points all on one
+//! line, so its mesh encloses exactly nothing, and `validate.rs`, which reads
+//! which way a curved solid's faces point off the sign of what its mesh
+//! encloses, refuses it; the answer is there, so that is a gap, left to a row
+//! of its own. Each other answer validates under `tolerant` and is refused
+//! `DynamicRangeTooWide` under `certified`, which is what a tolerant fuse
+//! promises, and right: valid is a property of a model and a policy
+//! (`Model::fuse`'s doc, §68).
 //! `a_bar_dipping_through_a_blocks_top_leaves_an_edge_too_short_for_its_coordinates`
 //! and its twin on the floor pin all of it.
 //!
@@ -111,8 +117,8 @@
 //! about `5e−16` from the near seam corner, the corner of the pipe's other
 //! loop. Both are §3.5's limit, at coordinates of 4 to 6. Under `tolerant`
 //! every fuse answers with one record of that spread, and the model validates
-//! under `tolerant` alone, but the union with the block first, which is still
-//! refused meshing the pipe (queue row Q2238).
+//! under `tolerant` alone. The union with the block first was refused meshing
+//! the pipe until queue row Q2238.
 //! `a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top` and
 //! its twin on the floor pin them.
 //!
@@ -1559,15 +1565,43 @@ fn the_plane_the_low_cap_and_the_pipe(
 /// the pipe turn at each of them. `fuse/arrange.rs` now reads both off which
 /// of the two meets a point is.
 ///
-/// Every tolerant fuse answers and validates under `tolerant` alone (queue rows
-/// Q2161, Q2195 and Q2238), with the faces
-/// [`what_a_bar_dipping_through_the_top_gives`].
+/// Every tolerant fuse but the intersection answers and validates under
+/// `tolerant` alone (queue rows Q2161, Q2195 and Q2238), with the faces
+/// [`what_a_bar_dipping_through_the_top_gives`]. The intersection, the sliver
+/// alone, is refused both ways round
+/// ([`what_tolerant_gives_for_a_bar_turned_once_dipping_through_the_top`]).
 #[test]
 fn a_bar_dipping_through_a_blocks_top_leaves_an_edge_too_short_for_its_coordinates() {
     every_fuse_of_the_block_and_a_bar_dipping_through_it(
         |model| a_bar_turned_onto_x(model, -PI / 2.0, [3.0, 2.0, 5.0]),
-        what_a_bar_dipping_through_the_top_gives,
+        what_tolerant_gives_for_a_bar_turned_once_dipping_through_the_top,
     );
+}
+
+/// What a tolerant fuse of the block and the bar turned once, dipping through
+/// its top, gives: the faces [`what_a_bar_dipping_through_the_top_gives`], but
+/// for the intersection, the sliver alone, which holds no double in `x`.
+fn what_tolerant_gives_for_a_bar_turned_once_dipping_through_the_top(
+    rule: Rule,
+    bar_first: bool,
+) -> WhatTolerantGives {
+    if matches!(rule, Rule::Intersection) {
+        WhatTolerantGives::TheSliverAloneIsRefused
+    } else {
+        WhatTolerantGives::Faces(what_a_bar_dipping_through_the_top_gives(rule, bar_first))
+    }
+}
+
+/// What one tolerant fuse of the block and a bar dipping through it gives.
+enum WhatTolerantGives {
+    /// An answer, with these faces in each shell of each solid.
+    Faces(Vec<Vec<usize>>),
+    /// The sliver alone, whose every point rounds onto one line, refused
+    /// `CannotTellWhichWayASolidsFacesPoint` with its mesh enclosing exactly
+    /// nothing: `validate.rs` reads which way a curved solid's faces point off
+    /// the sign of what its mesh encloses. The answer is there, so this is a
+    /// gap, left by queue row Q2238 to a row of its own.
+    TheSliverAloneIsRefused,
 }
 
 /// The faces in each shell of each solid a tolerant fuse of the block and a bar
@@ -1621,15 +1655,32 @@ fn a_block_less_a_bar_turned_onto_x_by_a_float_angle_along_its_floor_keeps_the_b
 /// `(x, 2, 0)`, its axis from `(3, 2, 1)` (queue row Q2141), which dips through
 /// the floor as the bar along the top dips through the top. Every certified
 /// fuse is refused `DynamicRangeTooWide` as there, the edge `2⁻⁵¹` long against
-/// the block's corners at 4, a spread of `2⁵³`. Every tolerant one answers and
-/// validates under `tolerant` alone (queue rows Q2161, Q2195 and Q2238), with
-/// the faces [`what_a_bar_dipping_through_the_floor_gives`].
+/// the block's corners at 4, a spread of `2⁵³`. Every tolerant one but the bar
+/// less the block answers and validates under `tolerant` alone (queue rows
+/// Q2161, Q2195 and Q2238), with the faces
+/// [`what_a_bar_dipping_through_the_floor_gives`]. The bar less the block, the
+/// sliver alone, is refused as the intersection on the top is
+/// ([`what_tolerant_gives_for_a_bar_turned_once_dipping_through_the_floor`]).
 #[test]
 fn a_bar_dipping_through_a_blocks_floor_leaves_an_edge_too_short_for_its_coordinates() {
     every_fuse_of_the_block_and_a_bar_dipping_through_it(
         |model| a_bar_turned_onto_x(model, -PI / 2.0, [3.0, 2.0, 1.0]),
-        what_a_bar_dipping_through_the_floor_gives,
+        what_tolerant_gives_for_a_bar_turned_once_dipping_through_the_floor,
     );
+}
+
+/// What a tolerant fuse of the block and the bar turned once, dipping through
+/// its floor, gives: the faces [`what_a_bar_dipping_through_the_floor_gives`],
+/// but for the bar less the block, the sliver alone.
+fn what_tolerant_gives_for_a_bar_turned_once_dipping_through_the_floor(
+    rule: Rule,
+    bar_first: bool,
+) -> WhatTolerantGives {
+    if matches!(rule, Rule::Difference) && bar_first {
+        WhatTolerantGives::TheSliverAloneIsRefused
+    } else {
+        WhatTolerantGives::Faces(what_a_bar_dipping_through_the_floor_gives(rule, bar_first))
+    }
 }
 
 /// The faces in each shell of each solid a tolerant fuse of the block and a bar
@@ -1683,19 +1734,22 @@ fn what_a_bar_dipping_through_the_floor_gives(rule: Rule, bar_first: bool) -> Ve
 /// of the top at the near seam corner off the near cap's circle, which is
 /// clear of it.
 ///
-/// The tolerant union with the block first is still refused
-/// `CannotMeshAFace`, a loop naming its fourth corner twice, though the union
-/// the other way round answers (queue row Q2238). `mesh.rs` puts one point
-/// inside the arc where the bar's pipe meets the top, at the arc's tip, and
-/// with the block first that point is stored at exactly the near seam corner's
-/// numbers `(3, 2, 4)`; with the bar first it is stored one rounding step off
-/// in `y`, and the pipe meshes. The answers are not measured: the sliver is
-/// too thin to mesh to the deflection `volume_of` asks for.
+/// The tolerant union with the block first was refused `CannotMeshAFace`, a
+/// loop naming its fourth corner twice, though the union the other way round
+/// answered, until queue row Q2238. `mesh.rs` puts one point inside the arc
+/// where the bar's pipe meets the top, at the arc's tip, and with the block
+/// first that point is stored at exactly the near seam corner's numbers
+/// `(3, 2, 4)`; with the bar first it is stored one rounding step off in `y`.
+/// The pipe's loop is now cut in two at the place it names twice. The answers
+/// are not measured: the sliver is too thin to mesh to the deflection
+/// `volume_of` asks for.
 #[test]
 fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top() {
     every_fuse_of_the_block_and_a_bar_dipping_through_it(
         |model| a_bar_with_its_seam_underneath(model, [3.0, 2.0, 5.0]),
-        what_a_bar_dipping_through_the_top_gives,
+        |rule, bar_first| {
+            WhatTolerantGives::Faces(what_a_bar_dipping_through_the_top_gives(rule, bar_first))
+        },
     );
 }
 
@@ -1716,7 +1770,9 @@ fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top() {
 fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_floor() {
     every_fuse_of_the_block_and_a_bar_dipping_through_it(
         |model| a_bar_with_its_seam_underneath(model, [3.0, 2.0, 1.0]),
-        what_a_bar_dipping_through_the_floor_gives,
+        |rule, bar_first| {
+            WhatTolerantGives::Faces(what_a_bar_dipping_through_the_floor_gives(rule, bar_first))
+        },
     );
 }
 
@@ -1954,9 +2010,9 @@ fn every_fuse_of_the_block_and_a_bar(
 /// Every rule, both ways round, of the block `[0, 4]³` and the bar `bar` puts
 /// in the model after it, which dips through one of the block's faces in a
 /// sliver too thin for its coordinates: refused `DynamicRangeTooWide` past the
-/// spread the kernel works to under `certified`, and under `tolerant` answered
-/// with the faces in each shell `tolerant` gives for the rule and whether the
-/// bar came first. A tolerant answer must carry one record, of the range
+/// spread the kernel works to under `certified`, and under `tolerant` what
+/// `tolerant` says for the rule and whether the bar came first. A tolerant
+/// answer must have those faces in each shell, carry one record, of the range
 /// check, validate under `tolerant`, and be refused `DynamicRangeTooWide`
 /// under `certified`: valid is a property of a model and a policy, and
 /// `Model::fuse` promises the first and not the second (§68).
@@ -1965,7 +2021,7 @@ fn every_fuse_of_the_block_and_a_bar(
 /// deflection `volume_of` asks for.
 fn every_fuse_of_the_block_and_a_bar_dipping_through_it(
     bar: impl Fn(&mut Model) -> SolidKey,
-    tolerant: fn(Rule, bool) -> Vec<Vec<usize>>,
+    tolerant: fn(Rule, bool) -> WhatTolerantGives,
 ) {
     let mut wrong: Vec<String> = Vec::new();
     for bar_first in [false, true] {
@@ -1991,6 +2047,26 @@ fn every_fuse_of_the_block_and_a_bar_dipping_through_it(
                     }
                     continue;
                 }
+                let expected = match tolerant(rule, bar_first) {
+                    WhatTolerantGives::Faces(expected) => expected,
+                    WhatTolerantGives::TheSliverAloneIsRefused => {
+                        if !matches!(
+                            &fused,
+                            Err(Error::CannotTellWhichWayASolidsFacesPoint { enclosed, .. })
+                                if *enclosed == 0.0
+                        ) {
+                            let got = match &fused {
+                                Ok(_) => "answered".to_owned(),
+                                Err(why) => format!("refused {why:?}"),
+                            };
+                            wrong.push(format!(
+                                "{what}: {got}, and it should be refused \
+                                 CannotTellWhichWayASolidsFacesPoint, enclosing exactly 0"
+                            ));
+                        }
+                        continue;
+                    }
+                };
                 let answer = match &fused {
                     Ok(answer) => answer,
                     Err(why) => {
@@ -2004,7 +2080,6 @@ fn every_fuse_of_the_block_and_a_bar_dipping_through_it(
                     .map(|&solid| faces_of_each_shell(&model, solid))
                     .collect();
                 found.sort();
-                let expected = tolerant(rule, bar_first);
                 if found != expected {
                     wrong.push(format!("{what}: {found:?}, and it should be {expected:?}"));
                 }
