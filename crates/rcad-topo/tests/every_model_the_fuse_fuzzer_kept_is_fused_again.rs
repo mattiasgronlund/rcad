@@ -85,7 +85,7 @@
 //!
 //! ```text
 //! just t -p rcad-topo \
-//!     --test every_model_the_fuse_fuzzer_kept_is_fused_again --no-capture
+//!     every_model_the_fuse_fuzzer_kept_is_fused_again:: --no-capture
 //! ```
 //!
 //! which reported, with all four control seeds in:

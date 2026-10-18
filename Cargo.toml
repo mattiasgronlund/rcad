@@ -45,11 +45,12 @@ many_single_char_names = "allow"
 [profile.bench]
 debug = true
 
-# Full debug info more than doubled every test binary, and a worktree links
-# about two hundred of them that kache cannot share, because it caches compiled
-# crates and not links. Line tables are what a backtrace needs for file and line; variable
-# and type info for a debugger is `CARGO_PROFILE_DEV_DEBUG=true` away when
-# wanted. `profile.test` inherits this. docs/decisions.md §203.
+# Full debug info more than doubled every test binary, and every worktree writes
+# all of its test binaries: kache 0.27 caches a test executable, but restores it
+# into each tree as a private copy, never as one file the trees share
+# (docs/decisions.md §373.2). Line tables are what a backtrace needs for file and
+# line; variable and type info for a debugger is `CARGO_PROFILE_DEV_DEBUG=true`
+# away when wanted. `profile.test` inherits this. docs/decisions.md §203.
 [profile.dev]
 debug = "line-tables-only"
 
