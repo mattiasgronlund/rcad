@@ -1335,11 +1335,22 @@ pub fn a_ball_and_a_block() -> impl Strategy<Value = BallAndBlock> {
 ///
 /// **The only family here with two round faces and no flat one.** Every other
 /// curved pair puts a ball or a bar against a block's flat wall, where the
-/// fuse's selection table takes a Plane/Sphere or Plane/Cylinder row. Here both
-/// faces carry a [`rcad_geom::Surface::Sphere`], so a fuse that reaches the
-/// circle where they cross takes `fuse/assemble.rs`'s `[Sphere, Sphere]` row of
-/// `which_arc_of_a_circle_walked_this_way` instead — the one arm `two_balls_touching_at_a_point`
-/// in `fuses_that_touch.rs` never reaches, because a point is not a circle.
+/// fuse's selection table takes a Plane/Sphere or Plane/Cylinder row; here both
+/// faces carry a [`rcad_geom::Surface::Sphere`] instead.
+///
+/// **This plain a pair does not reach `fuse/assemble.rs`'s `[Sphere, Sphere]`
+/// row of `which_arc_of_a_circle_walked_this_way`, though.** That row is read
+/// off the crossing circle's own two corner names
+/// (`fuse/select.rs`'s `SidesItShares::name_the_sides`, the one caller that can
+/// reach it), and `name_the_sides` only runs once `fuse/select.rs`'s point
+/// search cannot place a piece on its own. For two whole balls every piece —
+/// the lens and the two crescents — is a plain volume a point inside it decides
+/// at once, so the point search places all of them and `name_the_sides` is
+/// never called: an `eprintln!` at its one call site printed nothing across
+/// 213 fuses (71 drawn pairs, union/intersection/difference) that
+/// [`two_balls_crossing_in_a_circle`] drew. Reaching that row needs a third
+/// solid or tool that leaves at least one piece the point search cannot place
+/// on its own — not a plain pair.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TwoBalls {
     /// The first ball's radius, centred at the origin.

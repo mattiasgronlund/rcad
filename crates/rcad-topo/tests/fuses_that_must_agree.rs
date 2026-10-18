@@ -156,6 +156,7 @@ use pairs::{
     a_lattice_pair, a_lattice_trio, a_leaning_bar, a_pair_leaning_the_same_way,
     a_pair_somewhere_else, a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
     a_turned_solid_and_its_copy, a_turned_solid_and_several_copies, room_for_a_leaning_bar, turned,
+    two_balls_crossing_in_a_circle,
 };
 
 /// How many configurations a property that runs two fuses per case sees.
@@ -4767,7 +4768,9 @@ fn fused(
                 | Coordinates::LieOnARoundWallAndMayCoincide
                 | Coordinates::LieOnAConesWall
                 | Coordinates::LieOnATurnedRoundWall => Ok(Fused::Refused),
-                Coordinates::AreExactlyRepresentable | Coordinates::LieOnARoundWall => {
+                Coordinates::AreExactlyRepresentable
+                | Coordinates::LieOnARoundWall
+                | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall => {
                     Err(TestCaseError::fail(format!(
                         "a {rule:?} over a family that has never refused refused, with {} records",
                         records.len()
@@ -4784,10 +4787,12 @@ fn fused(
                 | Coordinates::LieOnARoundWallAndMayCoincide
                 | Coordinates::LieOnAConesWall
                 | Coordinates::LieOnATurnedRoundWall => Ok(Fused::NotASolid),
-                Coordinates::LieOnARoundWall => Err(TestCaseError::fail(format!(
-                    "a {rule:?} over a family that has never handed back four faces along \
-                     one edge did, and that is not something this kernel can hold"
-                ))),
+                Coordinates::LieOnARoundWall | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall => {
+                    Err(TestCaseError::fail(format!(
+                        "a {rule:?} over a family that has never handed back four faces along \
+                         one edge did, and that is not something this kernel can hold"
+                    )))
+                }
             }
         }
         Err(why) => {
@@ -4799,7 +4804,9 @@ fn fused(
                 Coordinates::AreUnderAGeneralRotation | Coordinates::SitOnTiltedWalls => {
                     a_flat_refusal(&why)
                 }
-                Coordinates::AreExactlyRepresentable | Coordinates::LieOnARoundWall => None,
+                Coordinates::AreExactlyRepresentable
+                | Coordinates::LieOnARoundWall
+                | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall => None,
             };
             let Some(named) = allowed else {
                 return Err(TestCaseError::fail(format!("{rule:?} went wrong: {why}")));
@@ -4974,7 +4981,8 @@ fn both_agree_about_whether_there_is_an_answer(
         | Coordinates::LieOnARoundWall
         | Coordinates::LieOnARoundWallAndMayCoincide
         | Coordinates::LieOnAConesWall
-        | Coordinates::LieOnATurnedRoundWall => Err(TestCaseError::fail(format!(
+        | Coordinates::LieOnATurnedRoundWall
+        | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall => Err(TestCaseError::fail(format!(
             "{what_changed} turned a {rule:?} whose answer is a solid into one whose \
              answer no `Model` can hold, which cannot depend on the path taken"
         ))),
@@ -5102,6 +5110,15 @@ enum Coordinates {
     /// a solid is a failure**, as on every curved family: that is a fact about
     /// the answer and not about the arithmetic.
     LieOnATurnedRoundWall,
+    /// Whole-number radii and a whole-number offset, two round skins and no
+    /// flat wall at all ([`pairs::TwoBalls`]).
+    ///
+    /// **A refusal is a failure here too**, on the same footing as
+    /// [`Coordinates::LieOnARoundWall`]: a direct `Model::fuse` over 213 drawn
+    /// pairs (71 configurations, union/intersection/difference) refused none
+    /// and left none not a solid, so a refusal here would be a regression
+    /// rather than a fact about the geometry.
+    LieOnTwoRoundSkinsAndNoFlatWall,
 }
 
 /// What every fuse a property ran came back with.
@@ -6097,6 +6114,102 @@ fn where_two_balls_overlap_and_the_two_balls_together_are_two_answers() {
         answer_of(&model, &[together]).canonical(),
         "the overlap of two balls and the two balls together wrote out as the same answer"
     );
+}
+
+/// §48 control: two whole balls crossing in one circle ([`pairs::TwoBalls`]),
+/// every rule.
+///
+/// The curved family with no flat wall at all. [`pairs::TwoBalls`]'s own doc
+/// comment says why a plain pair like this one never reaches the
+/// Sphere/Sphere row of `which_arc_of_a_circle_walked_this_way` in
+/// `fuse/assemble.rs`, so this row is measured for the same reason
+/// [`every_certified_fuse_of_a_ball_and_a_block_is_decided_and_records_nothing`]
+/// is: to say both sides of the fuse really arrive, not that this particular
+/// internal row of the selection table does.
+#[test]
+fn every_certified_fuse_of_two_balls_crossing_in_a_circle_is_decided_and_records_nothing() {
+    let tally = over(CASES, two_balls_crossing_in_a_circle(), |pair, tally| {
+        let (model, keys) = pair.build();
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            fused(
+                tally,
+                Coordinates::LieOnTwoRoundSkinsAndNoFlatWall,
+                &model,
+                &keys[..1],
+                &keys[1..],
+                rule,
+            )?;
+        }
+        Ok(())
+    });
+    tally.report("§48 control: two whole balls crossing in one circle, every rule");
+    assert_eq!(
+        tally.refused.get(),
+        0,
+        "two whole balls crossing in one circle, apart enough to neither nest nor stand \
+         clear, is decided by proof alone"
+    );
+    assert_eq!(
+        tally.not_a_solid.get(),
+        0,
+        "no arrangement of this family puts four faces along one edge"
+    );
+}
+
+/// Swapping the two balls of a crossing pair, bit for bit.
+///
+/// The round-pair counterpart of
+/// [`swapping_the_two_sides_of_a_block_and_a_ball_changes_not_one_bit`]: no
+/// flat wall sends either side down a different row of the selection table
+/// here, but the two balls are still handed to `Model::fuse` in one order or
+/// the other, and the answer has to come back the same either way.
+#[test]
+fn swapping_the_two_balls_of_a_crossing_pair_changes_not_one_bit() {
+    let tally = over(CASES, two_balls_crossing_in_a_circle(), |pair, tally| {
+        for rule in [Rule::Union, Rule::Intersection] {
+            tally.meaning_to_compare();
+            let (model, keys) = pair.build();
+            let (first, second) = (keys[0], keys[1]);
+
+            let forwards = fused(
+                tally,
+                Coordinates::LieOnTwoRoundSkinsAndNoFlatWall,
+                &model,
+                &[first],
+                &[second],
+                rule,
+            )?;
+            let backwards = fused(
+                tally,
+                Coordinates::LieOnTwoRoundSkinsAndNoFlatWall,
+                &model,
+                &[second],
+                &[first],
+                rule,
+            )?;
+            both_agree_about_whether_there_is_an_answer(
+                tally,
+                Coordinates::LieOnTwoRoundSkinsAndNoFlatWall,
+                &forwards,
+                &backwards,
+                rule,
+                "swapping the two balls",
+            )?;
+            let (Some(forwards), Some(backwards)) = (forwards.answer(), backwards.answer()) else {
+                continue;
+            };
+
+            tally.comparing();
+            same_answer(
+                &answer_of(&forwards.0, &forwards.1),
+                &answer_of(&backwards.0, &backwards.1),
+                rule,
+                "swapping the two balls of a crossing pair",
+            )?;
+        }
+        Ok(())
+    });
+    tally.report_what_it_compared("commutativity, two balls crossing in a circle");
 }
 
 /// The pickers of a run are a set: a piece is on or inside every one of them,
