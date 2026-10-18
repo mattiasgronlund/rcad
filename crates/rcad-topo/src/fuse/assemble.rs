@@ -498,6 +498,11 @@ pub(crate) struct Assembly {
     /// that start past, for a run of its pieces to close up at
     /// ([`Corners::where_each_closed_edge_read_past_starts`]).
     where_closed_edges_start: Vec<(EdgeKey, Corner)>,
+    /// Each input edge some edge here is a piece of that starts and ends at
+    /// one vertex, a cap circle or a round hole, for
+    /// [`Assembly::where_curved_pieces_met_off_a_run_that_closes_up`] to tell
+    /// pieces of a closed curve from pieces of an arc.
+    closed_input_edges: Vec<EdgeKey>,
     edges: Vec<Edge>,
     /// What each edge runs along, worked out once so that the scratch model the
     /// shells are nested in and the caller's model are built the same way.
@@ -947,9 +952,11 @@ impl Assembly {
             policy,
             log,
         )?;
+        let closed_input_edges = the_closed_input_edges_cut_into(&edges.made, model);
         let mut assembly = Self {
             corners: corners.made,
             where_closed_edges_start,
+            closed_input_edges,
             edges: edges.made,
             runs: Vec::new(),
             faces,
@@ -1221,6 +1228,7 @@ impl Assembly {
         Self {
             corners,
             where_closed_edges_start: Vec::new(),
+            closed_input_edges: the_closed_input_edges_cut_into(&edges, model),
             edges,
             runs: Vec::new(),
             faces,
@@ -3956,15 +3964,21 @@ impl Assembly {
             .iter()
             .copied()
             .filter(|&(lump, corner)| {
-                let pieces: Vec<&[EdgeKey]> = leaving[&(lump, corner)]
-                    .iter()
-                    .map(|&edge| self.edges[edge].from.as_slice())
-                    .collect();
                 where_curved_pieces_met[corner]
                     && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
-                    && !is_one_input_edge(&pieces)
+                    && !self.are_pieces_of_one_open_input_edge(&leaving[&(lump, corner)])
             })
             .collect()
+    }
+
+    /// Whether `edges` are all pieces of one input edge that does not close on
+    /// itself, and of nothing else.
+    fn are_pieces_of_one_open_input_edge(&self, edges: &[usize]) -> bool {
+        let pieces: Vec<&[EdgeKey]> = edges
+            .iter()
+            .map(|&edge| self.edges[edge].from.as_slice())
+            .collect();
+        is_one_input_edge(&pieces) && !self.closed_input_edges.contains(&pieces[0][0])
     }
 
     /// The corners to keep on each run of edges that closes on itself with
@@ -6713,6 +6727,21 @@ fn numbered(staying: impl Iterator<Item = bool>) -> Vec<Option<usize>> {
 fn is_one_input_edge(pieces: &[&[EdgeKey]]) -> bool {
     pieces.first().is_some_and(|first| first.len() == 1)
         && pieces.iter().all(|piece| *piece == pieces[0])
+}
+
+/// Each input edge one of `edges` is a piece of that starts and ends at one
+/// vertex, once.
+fn the_closed_input_edges_cut_into(edges: &[Edge], model: &Model) -> Vec<EdgeKey> {
+    let mut closed = Vec::new();
+    for &key in edges.iter().flat_map(|edge| &edge.from) {
+        let input = model
+            .edge(key)
+            .expect("an edge of the answer is a piece of an edge of the model the fuse was given");
+        if input.start().key() == input.end().key() && !closed.contains(&key) {
+            closed.push(key);
+        }
+    }
+    closed
 }
 
 /// Which run of edges each edge is part of, when the edges either side of every
@@ -12170,6 +12199,7 @@ mod tests {
         );
         let assembly = Assembly {
             where_closed_edges_start: Vec::new(),
+            closed_input_edges: Vec::new(),
             corners: vec![Corner {
                 point: Point::new(2.0, 0.0, 4.0),
                 wobble: 0.0,
@@ -12264,6 +12294,7 @@ mod tests {
             };
             let assembly = Assembly {
                 where_closed_edges_start: Vec::new(),
+                closed_input_edges: Vec::new(),
                 corners: vec![
                     corner(Point::new(1.0, 0.0, 0.0)),
                     corner(Point::new(1.0, f64::EPSILON, 0.0)),
@@ -12333,6 +12364,7 @@ mod tests {
             ] {
                 let assembly = Assembly {
                     where_closed_edges_start: Vec::new(),
+                    closed_input_edges: Vec::new(),
                     corners: vec![corner(0.0), corner(stop)],
                     edges: vec![Edge {
                         ends: [0, 1],
@@ -12415,6 +12447,7 @@ mod tests {
             };
             let mut assembly = Assembly {
                 where_closed_edges_start: Vec::new(),
+                closed_input_edges: Vec::new(),
                 corners: vec![Corner {
                     point: Point::new(2.0, 0.0, across_at + 0.5),
                     wobble: 0.0,
@@ -12508,6 +12541,7 @@ mod tests {
 
         Assembly {
             where_closed_edges_start: Vec::new(),
+            closed_input_edges: Vec::new(),
             corners: vec![corner(0.0, 0.0), corner(1.0, 0.0), corner(0.0, 1.0)],
             edges: vec![edge([0, 1]), edge([1, 2]), edge([2, 0])],
             runs: vec![EdgeRun::Straight, EdgeRun::Straight, EdgeRun::Straight],
@@ -12555,6 +12589,7 @@ mod tests {
         };
         let assembly = Assembly {
             where_closed_edges_start: Vec::new(),
+            closed_input_edges: Vec::new(),
             corners: vec![
                 corner(apex),
                 corner(Point::new(-0.0, -0.7, 3.3)),
