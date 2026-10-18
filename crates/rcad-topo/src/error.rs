@@ -456,6 +456,27 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// Two loops of a torus face that each go right round the tube read at one
+    /// angle round the ring, to within what reading an angle can be off, and
+    /// which way round the ring one lies from the other could not be told
+    /// another way, so neither could whether the face between them is a sliver
+    /// or the rest of the ring.
+    ///
+    /// The other way is exact, and reads only a loop on a circle where a plane
+    /// through the torus's axis cuts it: the planes say the order. A loop along
+    /// any other curve, or two circles on one plane, comes back as this.
+    ///
+    /// **A refusal and not a guess.** Rounding the reading one way or the other
+    /// cut the sliver between two quarter bends placed a rounding apart the
+    /// long way round, and the measure gave a whole ring for it (Q2265).
+    #[error(
+        "could not tell which way round the ring one loop of this torus face lies from another"
+    )]
+    CannotTellWhichWayRoundTheRingAFaceGoes {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
     /// Two patches of the mesh drew the same side through their insides, so the
     /// mesh would come back with that side used more than twice.
     ///
@@ -1348,6 +1369,7 @@ impl Error {
             | Self::AWireDoesNotFanIntoALoopToMesh { .. }
             | Self::DeflectionBelowWhatAMeshCanReach { .. }
             | Self::AWireWillNotLieFlatOnItsFace { .. }
+            | Self::CannotTellWhichWayRoundTheRingAFaceGoes { .. }
             | Self::TwoPatchesOfTheMeshDrewTheSameSide { .. }
             | Self::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }
             | Self::CannotTellWhichWayASolidsFacesPoint { .. }

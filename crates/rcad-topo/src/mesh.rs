@@ -25,9 +25,10 @@ use rcad_geom::{
     Vector, which_two_surfaces_a_run_is_between,
 };
 use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate, zip_up_a_band};
+use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
-    Approximation, Cause, Decision, Level, Measures, Point as PredicatePoint, Policy,
-    ProvenanceLog, Record,
+    Approximation, Cause, Decision, Level, Measures, NOTHING_IS_KNOWN, Point as PredicatePoint,
+    Policy, ProvenanceLog, Record, orient3d,
 };
 use smallvec::SmallVec;
 
@@ -1030,8 +1031,16 @@ impl BuildingAMesh {
         if let Some(whole) = how_far_the_second_coordinate_wraps(&surface)
             && let Some((first, later)) = walked.split_first_mut()
         {
-            for chain in later {
-                *chain = with_its_second_coordinate_in_the_turn_of(chain, first, whole);
+            let wires: Vec<WireView<'_>> = face.wires().collect();
+            for (chain, &wire) in later.iter_mut().zip(&wires[1..]) {
+                *chain = with_its_second_coordinate_in_the_turn_of(chain, first, whole, || {
+                    which_way_round_the_ring_one_circle_lies_from_another(
+                        face,
+                        [wires[0], wire],
+                        &self.along_each_edge,
+                    )
+                })
+                .ok_or(Error::CannotTellWhichWayRoundTheRingAFaceGoes { face: face.key() })?;
             }
         }
         // **A wire that sets off from one corner of the model twice is two loops
@@ -5685,11 +5694,23 @@ fn in_the_turn_nearest(island: &WalkedLoop, longitude: f64, whole: f64) -> Walke
 /// and the other loop goes in the nearest turn on that side. A face used the
 /// other way round with every coedge turned over is walked the same way here,
 /// because a view walks a reversed face's wires backwards.
+///
+/// **Two such loops whose middles read a whole number of turns apart, give or
+/// take [`HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF`], are ordered by
+/// `which_way_round`, and never by the reading.** Rounding the reading up or
+/// down is then a coin toss: two meridian circles of a sliver `1e-16` round
+/// the ring read `−7.07e-17` turns apart, inverted, and the face between them
+/// was cut the long way round, a whole ring less the sliver, which measured
+/// `78.9` for a wedge under `1e-15` (Q2265). `which_way_round` says which way
+/// round the ring `chain` truly lies from `frame`, a little way, and `None`
+/// comes back when it cannot tell. A reading further off a whole turn than
+/// that keeps the numbers it always had, bit for bit.
 fn with_its_second_coordinate_in_the_turn_of(
     chain: &WalkedLoop,
     frame: &WalkedLoop,
     whole: f64,
-) -> WalkedLoop {
+    which_way_round: impl FnOnce() -> Decision,
+) -> Option<WalkedLoop> {
     let middle = |around: &WalkedLoop| {
         let (least, most) = around
             .corners
@@ -5701,6 +5722,11 @@ fn with_its_second_coordinate_in_the_turn_of(
     };
     let turns = (middle(chain) - middle(frame)) / whole;
     let by = if chain.goes_right_round && frame.goes_right_round {
+        let turns = turns_apart_with_the_order_asked_where_the_reading_cannot_say(
+            turns,
+            whole,
+            which_way_round,
+        )?;
         if runs_up(frame) {
             turns.ceil() * whole
         } else {
@@ -5709,14 +5735,170 @@ fn with_its_second_coordinate_in_the_turn_of(
     } else {
         whole_turns_between(middle(chain), middle(frame), whole)
     };
-    WalkedLoop {
+    Some(WalkedLoop {
         corners: chain
             .corners
             .iter()
             .map(|corner| [corner[0], corner[1] - by])
             .collect(),
         ..chain.clone()
+    })
+}
+
+/// How many turns round the ring one loop lies from another, as read, or, where
+/// the reading is a whole number of turns give or take what two readings can
+/// be off, that whole number moved half a turn the way `which_way_round` says.
+///
+/// Half a turn and not a rounding, because what the caller does with it is
+/// round up or down, and the true number of turns is the whole one plus a
+/// little the way the order says: both round the same way. Two circles at one
+/// angle read at most two roundings apart, inside the four
+/// [`HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF`] allows, by
+/// [`a_band_the_chart_reads_as_one_line`]'s argument, so a reading outside it
+/// already has the sign of the truth.
+fn turns_apart_with_the_order_asked_where_the_reading_cannot_say(
+    read: f64,
+    whole: f64,
+    which_way_round: impl FnOnce() -> Decision,
+) -> Option<f64> {
+    let nearest = read.round();
+    if ((read - nearest) * whole).abs() > HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF {
+        return Some(read);
     }
+    match which_way_round() {
+        Decision::Pos => Some(nearest + 0.5),
+        Decision::Neg => Some(nearest - 0.5),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    }
+}
+
+/// Which way round a torus's ring the second of two loops of `face` lies from
+/// the first, a little way: [`Decision::Pos`] up the angle round the ring and
+/// [`Decision::Neg`] down it, read exactly.
+///
+/// **Only a loop on a circle where a plane through the axis cuts the torus is
+/// read.** Every edge of it has such a plane on its far side, holding the axis
+/// exactly — `n · w` and `n · c − d` both exactly zero, as
+/// `rcad_geom::along_a_crossing` asks it of the same stored numbers — and the
+/// circle runs where that plane cuts the tube. Its way out from the axis is
+/// then `s (n × w)` for a sign `s` the plane alone does not give, and the angle
+/// round the ring grows anticlockwise about `w` (`Torus::basis`), so the
+/// second circle lies up the ring from the first by the sign of
+///
+/// `s₁ s₂ ((n₁ × w) × (n₂ × w)) · w = s₁ s₂ |w|² det[w, n₁, n₂]`.
+///
+/// Two circles a little way apart point out almost the same way, so `n₁ · n₂`
+/// is almost `±|n₁| |n₂|` and its sign is `s₁ s₂`. The determinant is
+/// `orient3d` of `w`, `n₁`, `n₂` and the origin, exact on stored numbers. Each
+/// pair of planes, one from each loop, has to say the same.
+///
+/// [`NOTHING_IS_KNOWN`] for anything else: a loop with an edge no such plane
+/// runs along, a sum that could not be worked out exactly, or two pairs that
+/// disagree. [`Decision::Zero`] for one circle twice, which no face lies
+/// between.
+///
+/// **Read where the solid sits, or where a placed face is stored**, and not in
+/// the frame the face is meshed in: a face at no placement may be meshed
+/// shifted, and the shift is exact for the face's own numbers but not for a
+/// plane's offset, which would then hold the axis to a rounding and no longer
+/// exactly.
+fn which_way_round_the_ring_one_circle_lies_from_another(
+    face: FaceView<'_>,
+    wires: [WireView<'_>; 2],
+    along_each_edge: &HashMap<EdgeKey, SmallVec<[SurfaceAlongAnEdge; 2]>>,
+) -> Decision {
+    let (ring, back) = if face.location() == Isometry::identity() {
+        (face.surface(), Isometry::identity())
+    } else {
+        (face.stored_surface(), face.location().inverse())
+    };
+    let Surface::Torus(ring) = ring else {
+        return NOTHING_IS_KNOWN;
+    };
+    let along = ring.axis().direction().components();
+    let centre = ring.centre().coordinates();
+    let planes_through_the_axis = |wire: WireView<'_>| -> Option<Vec<[f64; 3]>> {
+        let mut planes = Vec::new();
+        for coedge in wire.coedges() {
+            let before = planes.len();
+            for side in along_each_edge.get(&coedge.edge().key())? {
+                let Surface::Plane(flat) = side.in_the_frame(&back) else {
+                    continue;
+                };
+                let normal = flat.normal().components();
+                let holds_the_axis =
+                    matches!(the_sign_of_a_dot_less(normal, along, 0.0), Decision::Zero)
+                        && matches!(
+                            the_sign_of_a_dot_less(normal, centre, flat.offset()),
+                            Decision::Zero
+                        );
+                if !holds_the_axis {
+                    return None;
+                }
+                planes.push(normal);
+            }
+            if planes.len() == before {
+                return None;
+            }
+        }
+        Some(planes)
+    };
+    let (Some(first), Some(second)) = (
+        planes_through_the_axis(wires[0]),
+        planes_through_the_axis(wires[1]),
+    ) else {
+        return NOTHING_IS_KNOWN;
+    };
+    let mut orders = first.iter().flat_map(|&one| {
+        second.iter().map(move |&other| {
+            which_way_one_plane_through_the_axis_lies_from_another(along, one, other)
+        })
+    });
+    let Some(order) = orders.next() else {
+        return NOTHING_IS_KNOWN;
+    };
+    if orders.all(|another| another == order) {
+        order
+    } else {
+        NOTHING_IS_KNOWN
+    }
+}
+
+/// The sign of `s₁ s₂ det[w, n₁, n₂]` in
+/// [`which_way_round_the_ring_one_circle_lies_from_another`], for one plane
+/// from each loop.
+fn which_way_one_plane_through_the_axis_lies_from_another(
+    along: [f64; 3],
+    one: [f64; 3],
+    other: [f64; 3],
+) -> Decision {
+    let turn = orient3d(along, one, other, [0.0; 3]);
+    match the_sign_of_a_dot_less(one, other, 0.0) {
+        Decision::Pos => turn,
+        Decision::Neg => match turn {
+            Decision::Pos => Decision::Neg,
+            Decision::Neg => Decision::Pos,
+            Decision::Zero | Decision::Undecidable { .. } | _ => turn,
+        },
+        Decision::Zero | Decision::Undecidable { .. } | _ => NOTHING_IS_KNOWN,
+    }
+}
+
+/// The sign of `a · b − less`, worked out exactly, or [`NOTHING_IS_KNOWN`]
+/// where a product would round past what [`two_product`] can keep.
+fn the_sign_of_a_dot_less(a: [f64; 3], b: [f64; 3], less: f64) -> Decision {
+    let mut sum = vec![-less];
+    for (one, other) in a.into_iter().zip(b) {
+        if !product_is_exact(one, other) {
+            return NOTHING_IS_KNOWN;
+        }
+        let (product, lost) = two_product(one, other);
+        let mut more = vec![0.0; sum.len() + 2];
+        let used = expansion_sum(&sum, &[lost, product], &mut more);
+        more.truncate(used);
+        sum = more;
+    }
+    expansion_sign(&sum)
 }
 
 /// One loop that goes right round a torus's ring moved by whole turns of the
