@@ -2496,6 +2496,12 @@ impl Assembly {
     /// (`a_turned_cube_with_its_corner_on_a_face.rs`, Q1287). Written, either
     /// face is one [`Model::validate`] refuses for that `broken`.
     ///
+    /// [`Invalid::DynamicRangeTooWide`] in its place, where the face is joined
+    /// from pieces on two parallel planes apart and the answer as it stands
+    /// has a feature too small beside its coordinates: a turned ell inside a
+    /// taller one, flush against its wall, united (Q2242,
+    /// [`Assembly::a_face_joined_over_a_step_is_refused_for_the_range`]).
+    ///
     /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] where two or more rings
     /// whose corners cannot place them, below, are left and nothing else could:
     /// the ones [`Assembly::holds_the_other_rings`] answers `None` for, with no
@@ -2617,6 +2623,9 @@ impl Assembly {
                     match winding_round(&corners, plane.normal().components())? {
                         Decision::Pos => {
                             if let Some(first) = &outline {
+                                self.a_face_joined_over_a_step_is_refused_for_the_range(
+                                    members, &plane, policy, log,
+                                )?;
                                 return Err(no_one_ring_is_the_outline(
                                     &[corners_of(first), corners],
                                     Invalid::HoleWindsWithTheOuterWire,
@@ -2717,6 +2726,61 @@ impl Assembly {
             }
         };
         Ok(core::iter::once(outline).chain(holes).collect())
+    }
+
+    /// Refuse for the range a joined flat face with pieces on two parallel
+    /// planes apart, where the answer has a feature too small beside its
+    /// coordinates: what [`Assembly::rings_round`] asks before it refuses a
+    /// second ring winding with the plane.
+    ///
+    /// **Joined across two planes apart, the face is walked over a step a
+    /// rounding high**, and the way its rings wind is the rounding's. A turned
+    /// ell inside a taller one, flush against its wall, is stored with its wall
+    /// `8.3e−17` outside the other's, and the union keeps the small ell's wall
+    /// pieces on a slab that thin. The two walls are one flat region (§426), so
+    /// the joined face is the big wall's outline and one ring more: the big
+    /// wall's hole round the small wall's pieces and their own outline, walked
+    /// as one, which encloses nothing exactly and winds with the plane as
+    /// stored. The slab's side walls are still in the answer, with edges a
+    /// rounding long, so what names it is what names any feature that small,
+    /// [`Assembly::check_dynamic_range`]. `assemble` asks that only once every
+    /// face is written, and this one cannot be, so it is asked here of the
+    /// answer as the joining has it, against the answer's own largest
+    /// coordinate: the inputs' reach only widens the range, so a refusal here
+    /// is one `assemble` would give too (`fuses_that_must_agree.rs`,
+    /// `a_turned_ell_inside_a_taller_one_flush_against_its_wall_unites_or_is_refused_for_an_edge_too_short`,
+    /// queue row Q2242).
+    ///
+    /// **A face on one plane is not asked.** Two of its rings winding with the
+    /// plane are a region touching itself at a corner, or a hole a rounding
+    /// across, as a turned cube's tip leaves in a block's face, and those are
+    /// refused as a hole winding with its outline whatever the range
+    /// (`a_turned_cube_with_its_corner_on_a_face.rs`, Q1287).
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::DynamicRangeTooWide`] as [`Assembly::check_dynamic_range`]
+    /// gives it, and [`Error::Undecidable`] where two of the pieces' planes
+    /// cannot be told apart. Under a policy that lets the range through it
+    /// answers `Ok`, and its warning is not kept, since the face is refused
+    /// anyway.
+    fn a_face_joined_over_a_step_is_refused_for_the_range(
+        &self,
+        members: &[usize],
+        plane: &Plane,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let mut over_a_step = false;
+        for &member in members {
+            over_a_step |=
+                agreement_of_two_planes(&self.faces[member].outward_plane(), plane, log)?
+                    == PlaneAgreement::Different;
+        }
+        if over_a_step {
+            self.check_dynamic_range(0.0, policy, &mut ProvenanceLog::new())?;
+        }
+        Ok(())
     }
 
     /// Whether the region `ring` bounds on its plane holds the rings `others`,

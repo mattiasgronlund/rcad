@@ -1277,9 +1277,9 @@ fn a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_s
     }
 }
 
-/// **A turned ell inside a taller one, flush against its long wall, is united
-/// into a face with two rings winding as its outline** (queue row Q2242, not
-/// yet fixed).
+/// **A turned ell inside a taller one, flush against its long wall, is refused
+/// for an edge too short when united under a certified policy** (queue row
+/// Q2242).
 ///
 /// An ell two by five with a one-by-two bite, three high, at the origin, and
 /// an ell two by three with a one-by-two bite, one high, at `(0, 1, 1)`, turned
@@ -1293,18 +1293,24 @@ fn a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_s
 /// `1 ≤ y ≤ 4, 1 ≤ z ≤ 2`: the small ell less the big one is refused for an
 /// edge too short, the limit [`a_flat_refusal`] names.
 ///
-/// The union is refused instead, both ways round and under either policy, as
+/// The union was refused instead, both ways round and under either policy, as
 /// [`Error::TheFuseWroteABrokenAnswer`],
 /// [`Invalid::HoleWindsWithTheOuterWire`], by `rings_round` in
 /// `fuse/assemble.rs`. The big ell's wall pieces over the slab are placed
 /// inside the small ell and dropped, the small ell's wall pieces are placed
 /// outside the big ell and kept, and the two parallel planes are one region
-/// to `edges_with_one_face_on_both_sides` (§426), so the joined face is the
-/// big wall's outline and, as a second ring, the slab's footprint walked with
-/// its corners in pairs a rounding apart, which as stored winds with the
-/// plane. What this asks of the union is this lane's reading of Q2236's
-/// precedent and not yet a measured answer: refused for the edge too short
-/// under a certified policy, and the big ell under a tolerant one.
+/// to `edges_with_one_face_on_both_sides` (§426). So the joined face is the
+/// big wall's outline and one ring more: the big wall's hole round the small
+/// wall's pieces and their own outline, walked as one across an edge the
+/// joining left between them, which encloses nothing exactly and as stored
+/// winds with the plane. The slab's side walls are still in the answer, with
+/// edges a rounding long, and `rings_round` now asks the range of a face
+/// joined across two planes apart before it refuses a second outline, so the
+/// certified union is refused for the edge too short, both ways round.
+///
+/// A tolerant policy lets that range through, and the union is still refused
+/// as a hole winding with its outline, where the answer is the big ell's 24:
+/// the gap the row Q2242 left.
 #[test]
 fn a_turned_ell_inside_a_taller_one_flush_against_its_wall_unites_or_is_refused_for_an_edge_too_short()
  {
@@ -1384,7 +1390,6 @@ fn a_turned_ell_inside_a_taller_one_flush_against_its_wall_unites_or_is_refused_
         "the small ell less the big one is the slab, refused for an edge too short, not {slab:?}"
     );
 
-    let tolerant = Policy::tolerant(100.0);
     for (arguments, tools) in [(big, small), (small, big)] {
         let (_, united) = fused_under(&certified, arguments, tools, Rule::Union);
         assert!(
@@ -1395,10 +1400,16 @@ fn a_turned_ell_inside_a_taller_one_flush_against_its_wall_unites_or_is_refused_
             "the certified union of {arguments:?} with {tools:?} came back {united:?}, not \
              refused for an edge too short beside its coordinates"
         );
-        let volume = volume_under(&tolerant, arguments, tools, Rule::Union);
+        let (_, united) = fused_under(&Policy::tolerant(100.0), arguments, tools, Rule::Union);
         assert!(
-            (volume - 24.0).abs() < 1e-9,
-            "the tolerant union holds {volume}, not the big ell's 24"
+            matches!(
+                united,
+                Err(Error::TheFuseWroteABrokenAnswer {
+                    broken: Invalid::HoleWindsWithTheOuterWire
+                })
+            ),
+            "the tolerant union of {arguments:?} with {tools:?} came back {united:?}, not \
+             refused as a hole winding with its outline"
         );
     }
 }
