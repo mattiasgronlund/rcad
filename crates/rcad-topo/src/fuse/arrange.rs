@@ -11559,16 +11559,39 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// angle. A place whose box straddles the start's angle reads `false` too.
 ///
 /// The window from the start's angle to that of `start + runs` is not a hair
-/// wide: `runs` grows with the square of the shape's size. A probe of the loop's
-/// geometry alone, not of this code, found loop points square to the run from
-/// a start on the loop that lie inside it: a pipe of radius 4 and a ball of
-/// radius 4.4 centred 0.8 off its axis is one such shape. Such a place is read
-/// only where `(place − start) · runs` comes out exactly zero, since an
-/// interval's sign is [`Decision::Zero`] only for `[0, 0]`. A start on the
-/// plane through the pipe's axis and the ball's centre, or on the plane
-/// through the centre square to the axis, has its one other such point half a
-/// turn round, outside the window, and reads `false`. A start on either loop
-/// anywhere else has not been shown to read `false` for every place.
+/// wide: `runs` grows with the square of the shape's size. A place in it is
+/// read only where `(place − start) · runs` comes out exactly zero, since an
+/// interval's sign is [`Decision::Zero`] only for `[0, 0]`, and then it is
+/// zero for every point of the boxes: the place is square to the run.
+///
+/// **On the ball's loop no point but the start is square to the run inside
+/// the window.** [`where_a_closed_crossing_starts`] walks that loop only from
+/// one of the two places the ball reaches furthest along the pipe's axis, on
+/// the plane through the axis and the ball's centre, settled onto the loop a
+/// rounding off that plane at most. The loop is mirrored in that plane and
+/// crosses it square there, so a point's step from the start along the run
+/// has the sign of the side of the plane the point is on. The line `rcad-geom`
+/// orders round goes from the ball's centre square to the axis, in that plane,
+/// so the start's angle lies in it, and every angle strictly between that and
+/// the angle of `start + runs` lies on the run's side, where the step is ahead
+/// of square however long `runs` is. The loop meets the plane only at the two
+/// ends of that reach, since a ball that reached round to the pipe's far side
+/// would swallow its cross-section and cross it in two loops. So a plane a
+/// rounding off it meets the loop only a rounding from those two: the far end
+/// is half a turn round, outside the window, and what is a rounding from the
+/// start is the place it was rounded off. Six shapes, as built and turned off
+/// every axis, with either surface first, have no loop point behind square to
+/// the run in the window; a start on the same loop off that plane has some;
+/// and the far end, whose dot is exactly zero, reads `false`
+/// (`the_walked_start_of_a_balls_one_loop_has_no_point_square_to_its_run_ahead_of_it`).
+///
+/// **On two pipes' loop that has not been shown.** Where their axes lean off
+/// square, the walked start's window does hold loop points behind square to
+/// the run: a pipe of radius 1 whose axis passes 3.5 from that of a pipe of
+/// radius 4, leaning 0.6 off square to it, with the thin pipe first
+/// (`the_walked_start_of_two_pipes_leaning_off_square_has_points_behind_square_in_its_window`).
+/// Whether a place there comes out with a dot of exactly zero has not been
+/// run.
 ///
 /// # Errors
 ///
@@ -17927,12 +17950,12 @@ mod what_the_curved_arrangement_reaches {
         HowItRuns, Split, a_line_one_surface_rests_on_another_along,
         a_pair_that_crosses_in_straight_lines, a_plane_cuts_a_cone_in_rulings,
         a_plane_lies_along_a_pipes_axis, a_plane_rests_along_a_pipe, along_a_bend, cross_of,
-        dominant_axis_of_a_direction, gradient_at, how_a_crossing_runs,
+        dominant_axis_of_a_direction, dot_of, gradient_at, how_a_crossing_runs,
         how_a_plane_leans_against_a_cone, nothing_rules_the_point_out,
         round_a_closed_crossing_and_what_it_measures, side_of_surface, split_a_face,
-        the_pickers_of_each_run, the_turn_where_two_planes_cross_a_quadric,
-        two_pipes_run_along_one_line, where_a_cones_apex_stands_against_a_plane,
-        where_the_crossing_starts,
+        the_pickers_of_each_run, the_start_is_a_rounding_off,
+        the_turn_where_two_planes_cross_a_quadric, two_pipes_run_along_one_line,
+        where_a_cones_apex_stands_against_a_plane, where_the_crossing_starts,
     };
     use crate::{Error, Model, SolidKey};
 
@@ -18436,6 +18459,284 @@ mod what_the_curved_arrangement_reaches {
                 assert_eq!(order(second, first), Decision::Neg, "{named}, swapped");
             }
         }
+    }
+
+    /// The start [`where_a_closed_crossing_starts`] walks the one loop a ball
+    /// off a pipe's axis crosses it in from has no point of the loop square to
+    /// the way the loop runs there, or behind square, inside the window
+    /// [`the_start_is_a_rounding_off`] reads: from the start's own angle to
+    /// that of `start + runs` (Q1875).
+    ///
+    /// **The walk starts on the plane through the pipe's axis and the ball's
+    /// centre**, and the loop, mirrored in that plane, crosses it square there.
+    /// So a point's step from the start along the run has the sign of the side
+    /// of that plane the point is on, and the whole window lies on the run's
+    /// side of it, however long the run is. Six shapes, from a pipe of radius
+    /// `0.04` to one of `400`, are each read as built and turned off every
+    /// axis, with either surface first, at 8002 points of the loop.
+    ///
+    /// **The plane is what does it.** A start on the same loop off that plane,
+    /// nine tenths of the way round to where the loop's two halves meet, has
+    /// points of the loop behind square to its run inside its window. And the
+    /// one other point of the loop square to the run from the walked start, the
+    /// far end of the same reach along the axis, has a dot of exactly zero and
+    /// still reads `false`, being half a turn round.
+    #[test]
+    fn the_walked_start_of_a_balls_one_loop_has_no_point_square_to_its_run_ahead_of_it() {
+        let turn = Isometry::rotation(
+            &Axis::new(Point::new(0.3, -1.1, 0.7), Vector::new(1.0, 2.0, 3.0)).expect("an axis"),
+            0.9,
+        )
+        .expect("a turn");
+        for (named, radius, ball, off) in [
+            ("ball 4.4 at 0.8 in pipe 4", 4.0, 4.4, 0.8),
+            ("ball 0.5 at 0.9 in pipe 1", 1.0, 0.5, 0.9),
+            ("ball 1.8 at 0.9 in pipe 1", 1.0, 1.8, 0.9),
+            ("ball 3.9 at 0.2 in pipe 4", 4.0, 3.9, 0.2),
+            ("ball 440 at 80 in pipe 400", 400.0, 440.0, 80.0),
+            ("ball 0.044 at 0.008 in pipe 0.04", 0.04, 0.044, 0.008),
+        ] {
+            let (ball, pipe, points) = a_ball_off_a_pipes_axis(radius, ball, off);
+            let turned_points = points
+                .iter()
+                .map(|point| turn.apply_to_point(*point))
+                .collect();
+            for (turned, ball, pipe, points) in [
+                (false, ball, pipe, points),
+                (
+                    true,
+                    ball.transformed(&turn),
+                    pipe.transformed(&turn),
+                    turned_points,
+                ),
+            ] {
+                for pair in [[&ball, &pipe], [&pipe, &ball]] {
+                    let start = the_walked_start(pair);
+                    let window =
+                        the_points_in_the_window_and_how_far_along_the_run(pair, start, &points);
+                    assert!(
+                        !window.is_empty(),
+                        "{named}, turned {turned}: the window holds points of the loop"
+                    );
+                    for (point, along) in window {
+                        assert!(
+                            along > 0.0,
+                            "{named}, turned {turned}: {point:?} is {along} along the run from \
+                             {start:?}"
+                        );
+                        assert_eq!(
+                            the_start_is_a_rounding_off(
+                                pair,
+                                PredicatePoint::from(start.coordinates()),
+                                PredicatePoint::from(point.coordinates()),
+                            ),
+                            Ok(false),
+                            "{named}, turned {turned}: {point:?}"
+                        );
+                    }
+                }
+            }
+        }
+
+        let (ball, pipe, points) = a_ball_off_a_pipes_axis(4.0, 4.4, 0.8);
+        // Either surface first runs the loop the other way, so each is read from
+        // the mirror image of the other's start, which is just as far from the
+        // plane.
+        for (pair, off_the_plane) in [
+            ([&ball, &pipe], points[3800]),
+            ([&pipe, &ball], points[200]),
+        ] {
+            let window =
+                the_points_in_the_window_and_how_far_along_the_run(pair, off_the_plane, &points);
+            assert!(
+                window.iter().any(|(_, along)| *along <= 0.0),
+                "from {off_the_plane:?}, off the plane, the window holds points behind square"
+            );
+
+            let [x, y, z] = the_walked_start(pair).coordinates();
+            let from = PredicatePoint::from([x, y, z]);
+            let far_end = PredicatePoint::from([x, y, -z]);
+            let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+            let step = [0, 1, 2].map(|axis| far_end.enclosure()[axis] - from.enclosure()[axis]);
+            assert_eq!(
+                dot_of(step, runs).sign(),
+                Decision::Zero,
+                "the far end is exactly square to the run"
+            );
+            assert_eq!(
+                the_start_is_a_rounding_off(pair, from, far_end),
+                Ok(false),
+                "the far end is half a turn round"
+            );
+        }
+    }
+
+    /// On the one loop two pipes cross in, the window
+    /// [`the_start_is_a_rounding_off`] reads from the walked start does hold
+    /// points of the loop behind square to the run once the axes lean off
+    /// square to each other, and holds none while they are square (Q1875).
+    ///
+    /// Square, the loop is mirrored in the plane through the thin pipe's axis
+    /// square to the fat one's, and this walk starts on that plane, which is
+    /// the ball's argument again. Leaning, that plane mirrors the thin pipe no
+    /// longer. Whether a node there comes out with a dot of exactly zero, and
+    /// reads `true` where it should not, is not shown either way.
+    #[test]
+    fn the_walked_start_of_two_pipes_leaning_off_square_has_points_behind_square_in_its_window() {
+        let (thin, fat, points) = two_pipes_crossing_in_one_loop(4.0, 1.0, 3.5, 0.0);
+        for pair in [[&thin, &fat], [&fat, &thin]] {
+            let window = the_points_in_the_window_and_how_far_along_the_run(
+                pair,
+                the_walked_start(pair),
+                &points,
+            );
+            assert!(!window.is_empty(), "the window holds points of the loop");
+            assert!(
+                window.iter().all(|(_, along)| *along > 0.0),
+                "square, no point of the window is behind square to the run"
+            );
+        }
+        let (thin, fat, points) = two_pipes_crossing_in_one_loop(4.0, 1.0, 3.5, 0.6);
+        let pair = [&thin, &fat];
+        let window = the_points_in_the_window_and_how_far_along_the_run(
+            pair,
+            the_walked_start(pair),
+            &points,
+        );
+        assert!(
+            window.iter().any(|(_, along)| *along <= 0.0),
+            "leaning 0.6, the window holds points behind square to the run"
+        );
+    }
+
+    /// The ball of radius `ball` centred `off` along `x`, the pipe of `radius`
+    /// up `z`, and points of the one loop they cross in: 4001 with `z ≥ 0`, then
+    /// 4001 with `z ≤ 0`, each half from one end of the loop's reach round the
+    /// pipe to the other.
+    fn a_ball_off_a_pipes_axis(radius: f64, ball: f64, off: f64) -> (Surface, Surface, Vec<Point>) {
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a positive radius"));
+        let ball_surface = Surface::Sphere(
+            Sphere::new(Point::new(off, 0.0, 0.0), ball).expect("a positive radius"),
+        );
+        let furthest_round = ((radius * radius + off * off - ball * ball) / (2.0 * radius * off))
+            .max(-1.0)
+            .acos();
+        let mut points = Vec::new();
+        for side in [1.0, -1.0] {
+            for step in 0..=4000 {
+                let round = furthest_round * (2.0 * f64::from(step) / 4000.0 - 1.0);
+                let up = (ball * ball - radius * radius - off * off
+                    + 2.0 * radius * off * round.cos())
+                .max(0.0)
+                .sqrt();
+                points.push(Point::new(
+                    radius * round.cos(),
+                    radius * round.sin(),
+                    side * up,
+                ));
+            }
+        }
+        (ball_surface, pipe, points)
+    }
+
+    /// The thin pipe of radius `thin` along `(cos lean, 0, sin lean)` through
+    /// `(0, apart, 0)`, the fat pipe of radius `fat` up `z`, and points of the
+    /// one loop they cross in: 8001 points round the thin pipe, each carried
+    /// along the thin axis onto the fat pipe's wall where that line meets it,
+    /// on one side and then on the other.
+    fn two_pipes_crossing_in_one_loop(
+        fat: f64,
+        thin: f64,
+        apart: f64,
+        lean: f64,
+    ) -> (Surface, Surface, Vec<Point>) {
+        let way = [lean.cos(), 0.0, lean.sin()];
+        let fat_surface = Surface::Cylinder(Cylinder::new(Axis::z(), fat).expect("a radius"));
+        let thin_surface = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(
+                    Point::new(0.0, apart, 0.0),
+                    Vector::new(way[0], way[1], way[2]),
+                )
+                .expect("an axis"),
+                thin,
+            )
+            .expect("a radius"),
+        );
+        let across = [[0.0, 1.0, 0.0], [-lean.sin(), 0.0, lean.cos()]];
+        let mut points = Vec::new();
+        for side in [1.0, -1.0] {
+            for step in 0..=8000 {
+                let round = core::f64::consts::TAU * f64::from(step) / 8000.0;
+                let on_the_thin_pipe = [0, 1, 2].map(|axis| {
+                    [0.0, apart, 0.0][axis]
+                        + thin * (round.cos() * across[0][axis] + round.sin() * across[1][axis])
+                });
+                // Solve |q + s·way|² = fat² in x and y alone for how far along
+                // the thin axis the fat pipe's wall is.
+                let [x, y, _] = on_the_thin_pipe;
+                let squared = way[0] * way[0] + way[1] * way[1];
+                let linear = 2.0 * (x * way[0] + y * way[1]);
+                let constant = x * x + y * y - fat * fat;
+                let room = linear * linear - 4.0 * squared * constant;
+                if room < 0.0 {
+                    continue;
+                }
+                let along = (-linear + side * room.sqrt()) / (2.0 * squared);
+                points.push(Point::new(
+                    x + along * way[0],
+                    y + along * way[1],
+                    on_the_thin_pipe[2] + along * way[2],
+                ));
+            }
+        }
+        (thin_surface, fat_surface, points)
+    }
+
+    fn the_walked_start(pair: [&Surface; 2]) -> Point {
+        let mut log = ProvenanceLog::new();
+        let SurfaceMeet::Curves(runs) =
+            intersect(pair[0], pair[1], &Policy::certified(), &mut log).expect("they cross")
+        else {
+            panic!("a ball off a pipe's axis crosses it in a curve");
+        };
+        assert_eq!(runs.len(), 1, "one loop");
+        where_a_closed_crossing_starts(&runs[0], pair, &mut log).expect("a start")
+    }
+
+    /// Each of `points` more than a hair from `start` that comes before `start
+    /// + runs` going round from `start`, which is the window
+    /// [`the_start_is_a_rounding_off`] reads, with `(point − start) · runs` at
+    /// the middle of `runs`: above zero ahead of square to the run.
+    fn the_points_in_the_window_and_how_far_along_the_run(
+        pair: [&Surface; 2],
+        start: Point,
+        points: &[Point],
+    ) -> Vec<(Point, f64)> {
+        let from = PredicatePoint::from(start.coordinates());
+        let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+        let at = from.enclosure();
+        let ahead = PredicatePoint::Constructed([0, 1, 2].map(|axis| at[axis] + runs[axis]));
+        let way = runs.map(|side| (side.lo() + side.hi()) / 2.0);
+        let start = start.coordinates();
+        let hair = 1e-6
+            * start
+                .iter()
+                .fold(1.0_f64, |most, side| most.max(side.abs()));
+        points
+            .iter()
+            .filter_map(|point| {
+                let step = [0, 1, 2].map(|axis| point.coordinates()[axis] - start[axis]);
+                let in_the_window = which_comes_first_round_a_crossing(
+                    pair,
+                    from,
+                    ahead,
+                    PredicatePoint::from(point.coordinates()),
+                ) == Ok(Decision::Neg);
+                (in_the_window && step.iter().any(|side| side.abs() > hair))
+                    .then(|| (*point, (0..3).map(|axis| step[axis] * way[axis]).sum()))
+            })
+            .collect()
     }
 
     /// §244.3's shape at `x = 16`: the edge cuts the ball at `16 ± 2⁻⁵¹`, which
