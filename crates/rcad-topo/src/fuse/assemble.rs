@@ -2400,10 +2400,30 @@ impl Assembly {
     /// once, so it goes round once exactly when the open sides' turns and the
     /// closed sides between them add up to an odd number of whole turns.
     ///
+    /// **An arc whose two ends read the same angle to within what `atan2`
+    /// rounds is told by which way along its chord it sets off** and not by
+    /// the sign of that angle, which is rounding there: the sliver between the
+    /// two ends where it sets off towards the far one, and all the rest of the
+    /// turn where it sets off away from it. The chord is one subtraction a
+    /// coordinate, which rounds by a rounding of the chord's own length, where
+    /// the angle's cross product rounds by one of the radius squared. And it
+    /// is the reading the arc is named by when it is written
+    /// ([`Edge::the_way_into_a_closed_arc_by_how_it_sets_off`]),
+    /// so the count and the answer's edge agree on which arc it is. A plate's
+    /// round tab less a block cornered on its rim is cut down its wall by the
+    /// block's two walls a rounding apart, and with that arc not counted the
+    /// wall stayed in pieces and the fuse was refused for the range
+    /// (`a_block_cornered_on_a_round_tabs_rim.rs`, Q2296). **Only there**, and
+    /// not for every arc: on an ellipse the chord of an arc longer than half a
+    /// turn can still lean the way the arc sets off. Where `z = 10x` cuts the
+    /// pipe of radius one about `z`, the arc from 60 degrees round to 290 sets
+    /// off along `(−0.87, 0.5, −8.7)`, and that dotted with its chord is
+    /// `12.9`.
+    ///
     /// `None` for a side whose other surface is not a plane, which may cross the
     /// skin in a curve that turns back on itself; for an end on the axis, which
-    /// has no angle; and for an arc whose two ends read the same angle to within
-    /// what `atan2` rounds, where a sliver and a whole turn look alike.
+    /// has no angle; and for an arc a rounding long that sets off square to its
+    /// chord.
     fn a_ring_goes_right_round(&self, ring: &[Dart], surface: &Surface) -> Option<bool> {
         let axis = match surface {
             Surface::Cone(cone) => cone.axis(),
@@ -2436,20 +2456,25 @@ impl Assembly {
             if start == Vector::zero() || end == Vector::zero() {
                 return None;
             }
-            let apart = axis.direction().dot(start.cross(end)).atan2(start.dot(end));
-            if apart.abs() < f64::EPSILON.sqrt() {
-                return None;
-            }
             let leaving = towards.dot(round(self.corners[corner].point));
             if leaving == 0.0 {
                 return None;
             }
             let upwards = (leaving > 0.0) == (corner == from);
-            turned += match (upwards, apart > 0.0) {
-                (true, true) | (false, false) => apart,
-                (true, false) => apart + core::f64::consts::TAU,
-                (false, true) => apart - core::f64::consts::TAU,
+            let apart = axis.direction().dot(start.cross(end)).atan2(start.dot(end));
+            let the_short_way = if apart.abs() < f64::EPSILON.sqrt() {
+                let far_end = if corner == from { to } else { from };
+                let chord = self.corners[far_end].point - self.corners[corner].point;
+                a_side_of_nought(towards.dot(chord))?.is_gt()
+            } else {
+                upwards == (apart > 0.0)
             };
+            let turn = if the_short_way {
+                apart.abs()
+            } else {
+                core::f64::consts::TAU - apart.abs()
+            };
+            turned += if upwards { turn } else { -turn };
         }
         let turns = turned / core::f64::consts::TAU;
         let whole = turns.round();
