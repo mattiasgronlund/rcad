@@ -1258,3 +1258,113 @@ fn what_a_solid_and_a_block_hold(
 fn overlap(one: [f64; 2], other: [f64; 2]) -> f64 {
     (one[1].min(other[1]) - one[0].max(other[0])).max(0.0)
 }
+
+#[test]
+fn probe_q1937_a_pyramid_cut_by_a_wedge_whose_edge_runs_through_its_apex() {
+    let mut lines = Vec::new();
+    for (low, high) in [(-0.5, 0.5), (0.5, 2.0), (-2.0, -0.5), (0.25, 0.75)] {
+        // The slice `low·x ≤ y ≤ high·x`, `x ≥ 0`, of the pyramid: at height
+        // `z`, with `s = 0.3 (10 − z)`, the square cut by the two lines.
+        let shared = probe_slice_volume(low, high);
+        let mut placements = every_placement().to_vec();
+        let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a translation");
+        for direction in [
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(-2.0, 1.0, 0.5),
+            Vector::new(0.3, -1.0, 2.0),
+        ] {
+            let axis = Axis::new(Point::new(0.0, 0.0, 0.0), direction).expect("an axis");
+            for angle in [0.1, 0.7, 1.3, 2.9] {
+                let turn = Isometry::rotation(&axis, angle).expect("a turn");
+                placements.push(turn);
+                placements.push(shift.compose(&turn));
+            }
+        }
+        for (index, placement) in placements.into_iter().enumerate() {
+            for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+                for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+                    let mut model =
+                        Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                    let pyramid = a_pyramid(&mut model);
+                    model
+                        .place_solid(pyramid, &placement)
+                        .expect("this model made the key");
+                    let footprint =
+                        ProfileBuilder::new(vec![[0.0, 0.0], [5.0, 5.0 * low], [5.0, 5.0 * high]])
+                            .build(&Policy::certified(), &mut ProvenanceLog::new())
+                            .expect("a triangle");
+                    let own = Isometry::translation(Vector::new(0.0, 0.0, -1.0))
+                        .expect("a plain translation");
+                    let wedge = model
+                        .add_extrusion(&footprint, 12.0, &placement.compose(&own))
+                        .expect("a wedge");
+                    let the_wedge = 5.0 * 5.0 * (high - low) / 2.0 * 12.0;
+                    let expected = match rule {
+                        Rule::Difference => 120.0 - shared,
+                        Rule::Intersection => shared,
+                        _ => 120.0 + the_wedge - shared,
+                    };
+                    let mut log = ProvenanceLog::new();
+                    eprintln!(
+                        "Q1937 CASE wedge ({low}, {high}) placement {index} {rule:?} {policy:?}"
+                    );
+                    let fused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        model.fuse(&[pyramid], &[wedge], rule, &policy, &mut log)
+                    }));
+                    let Ok(fused) = fused else {
+                        lines.push(format!(
+                            "wedge ({low}, {high}) placement {index} {rule:?} {policy:?}: PANICKED"
+                        ));
+                        continue;
+                    };
+                    let outcome = match fused {
+                        Ok(answer) => {
+                            let valid = model.validate(&policy, &mut ProvenanceLog::new());
+                            let case = "probe";
+                            let (volume, bound) = if valid.is_ok() {
+                                the_volume_of(&model, &answer, &policy, case)
+                            } else {
+                                (f64::NAN, f64::NAN)
+                            };
+                            let named: Vec<&str> =
+                                log.records().iter().map(|r| r.predicate()).collect();
+                            format!(
+                                "Ok solids {} volume {volume} (expected {expected}, off {:e}, bound {bound}) valid {:?} {:?} log {named:?}",
+                                answer.solids().len(),
+                                (volume - expected).abs(),
+                                valid.err(),
+                                the_faces_and_sides_of(&model, &answer),
+                            )
+                        }
+                        Err(Error::Undecidable { records }) => {
+                            let named: Vec<&str> =
+                                records.records().iter().map(|r| r.predicate()).collect();
+                            format!("Undecidable {named:?}")
+                        }
+                        Err(other) => format!("Err {other:?}"),
+                    };
+                    lines.push(format!(
+                        "wedge ({low}, {high}) placement {index} {rule:?} {policy:?}: {outcome}"
+                    ));
+                }
+            }
+        }
+    }
+    for line in &lines {
+        println!("PROBE {line}");
+    }
+}
+
+fn probe_slice_volume(low: f64, high: f64) -> f64 {
+    // The square `|x|, |y| ≤ s` cut to `x ≥ 0`, `low·x ≤ y ≤ high·x`, has area
+    // `s²·A` for the unit square's `A`; the pyramid's `∫ s² dz` is `30`.
+    let steps = 2_000_000;
+    let mut area = 0.0;
+    for i in 0..steps {
+        let x = (f64::from(i) + 0.5) / f64::from(steps);
+        let y_low = (low * x).max(-1.0);
+        let y_high = (high * x).min(1.0);
+        area += (y_high - y_low).max(0.0) / f64::from(steps);
+    }
+    area * 30.0
+}
