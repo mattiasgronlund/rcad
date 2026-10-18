@@ -9712,8 +9712,9 @@ fn name_of_the_closed_crossing_through(
 
 /// Which of the two closed curves its two surfaces cross in passes through
 /// `point`, for a plane and a ring, for a cone and a second cone, a pipe or a
-/// ball on its axis, and for a ball and a pipe or two pipes: what `intersect`
-/// picks that curve by, as `holds.rs` looks it up
+/// ball on its axis, for a ball and a pipe or two pipes, and which of the
+/// circles round a ring's axis for a ring and a ball, a pipe or a cone on that
+/// axis: what `intersect` picks that curve by, as `holds.rs` looks it up
 /// ([`the_picker_naming_the_circle_through`]), written out by
 /// [`which_curve_of_the_pair`]. A plane through a ring's axis, a cone's pair, a
 /// ball and a pipe it swallows whole, and a thin pipe through a fat one pick
@@ -9783,6 +9784,35 @@ fn name_of_the_closed_crossing_through(
 /// own curve and leaving the other out, or the outside and the inside of one
 /// pipe, which [`which_curve_of_the_pair`] writes with two different numbers
 /// ahead of the pipe's.
+///
+/// **A ring and a ball, a pipe or a cone on its axis name each circle by its
+/// own plane.** `intersect` hands each circle back as
+/// [`EdgeRun::RightRoundWhereItCrosses`] with the plane square to the ring's
+/// axis at its height, and no picker, so there is nothing for `holds.rs` to
+/// look up. `intersect` proves the plane halfway between two neighbours'
+/// planes parts their circles, so the circle that keeps `point` is the one in
+/// front of the halfway plane below it and behind the one above
+/// ([`the_plane_of_the_circle_through`]), and its name is that plane named at
+/// any scale behind [`A_CIRCLE_NAMED_BY_ITS_OWN_PLANE`]. Different circles are
+/// at different heights, so on different planes, and get different names. A
+/// single circle, where a ball or a pipe rests on the tube all the way round,
+/// leaves nothing to tell apart and is `None`. Named by the two surfaces alone,
+/// a ball's two circles were one curve, and a whole ring about `x` against a
+/// ball of 4 at `(1, 0, 0)` was refused `AClosedEdgeOfTheAnswerWouldStartAtAPole`
+/// under every rule: the other circle closed on itself, so the two halves of
+/// the circle through the ball's poles were joined into one closed side
+/// starting at a pole (Q2260,
+/// `tests/a_walk_neither_winding_nor_the_axis_places.rs`).
+///
+/// **Its spelling cannot split the name either.** `intersect` hands a ring and
+/// its partner to one function whichever comes first. The plane's normal is the
+/// ring's stored axis direction, and its offset that direction read at the
+/// ring's centre plus the circle's height read along it, so the ring's axis
+/// turned round turns the plane round, which [`name_of_the_plane_at_any_scale`]
+/// folds. The heights read the partner's radius, centre or apex and slope, and
+/// not which way its axis is written.
+/// `each_circle_a_ring_crosses_a_ball_a_pipe_or_a_cone_on_its_axis_in_is_one_name_however_the_two_are_spelled`
+/// asks every spelling.
 ///
 /// # Errors
 ///
@@ -9985,7 +10015,8 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// cone's rim circle and the ellipse a steeper plane leaves, or one of the two
 /// circles a plane cuts a ring in — together with that curved surface and that
 /// plane, or of the circle two balls cross in, or a cone and a second cone, a
-/// pipe or a ball on its axis, or of a circle or loop a ball and a pipe cross
+/// pipe or a ball on its axis, or a ring and a ball, a pipe or a cone on its
+/// axis where they cross in more than one, or of a circle or loop a ball and a pipe cross
 /// in, or of a loop two pipes on axes that are not parallel cross in, together
 /// with the two; `None` for any other side.
 ///
@@ -10138,6 +10169,42 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// in that test file). A cone and a pipe written with the axis turned round
 /// have the same gradient, so the two are named either way round and nothing
 /// is turned round for how a face spells them.
+///
+/// # A ring and a ball, a pipe or a cone on its axis cross in circles
+///
+/// **And an answer keeps both arcs of one between the same two corners.** The
+/// whole ring about `x`, 4 round a tube of 1, against the ball of 4 at
+/// `(1, 0, 0)`: the circle `x = 1` is the top of the tube and a great circle of
+/// the ball through both its poles, and the ball's seam and the cut at the pole
+/// across put two corners on it, `(1, 0, ±4)`. Each arc runs between them along
+/// the ring and the ball, and the ring's band inside the ball and its band
+/// outside are both bounded by both arcs. Named by their corners alone the two
+/// arcs are one edge, and with this arm answering `None` all six fuses of that
+/// ball, every rule both ways round, were refused `AWireWillNotLieFlatOnItsFace`
+/// (Q2260, `tests/a_walk_neither_winding_nor_the_axis_places.rs`). The ball of 3
+/// pressed into an O-ring 4 round a tube of `5/4` at `(3/4, 0, 0)` is the same
+/// shape on the ring's inner wall.
+///
+/// **The sign rule holds on every circle named here.** `intersect` names a ring
+/// against a ball, a pipe or a cone only where the two share the ring's axis,
+/// and refuses every other such pair, so a side carried by one of these pairs
+/// is on a circle square to that axis and centred on it. At a point of it
+/// `∇ring` points from the tube's core circle and the partner's gradient from
+/// its centre or its axis, so both lie in the plane through the axis and the
+/// point, `∇ring × ∇partner` runs along the circle, and the same turn about the
+/// axis carries it from one point to the next. It never vanishes on a circle
+/// where it does not vanish at one point, and it vanishes everywhere on a
+/// circle where the two touch round instead of crossing. `intersect` gives a
+/// ball or a pipe one circle exactly where it rests on the tube, and then this
+/// answers `None`, so a wall through that circle leaves its two arcs one edge,
+/// which is refused, and never pairs the faces of two arcs wrongly. A cone can
+/// touch the tube with one nappe while the other crosses it or touches it too,
+/// and such a touching circle is not told apart here; whether it can reach
+/// here between two corners has not been run. A ring, a pipe and a cone written with
+/// the axis turned round have the same gradient, and a ball has one spelling,
+/// so the two are named either way round and nothing is turned round for how a
+/// face spells them. Two circles round one ring are at two heights and share no
+/// corner, so the two surfaces and the sign name an arc without the plane.
 ///
 /// # A plane and a ring cross in two circles
 ///
@@ -10359,7 +10426,7 @@ fn which_arc_of_a_circle_walked_this_way(
             other @ Surface::Torus(_),
         ] => {
             if the_planes_of_the_circles_round_a_rings_axis(&meet.carried_by, policy, log)?
-                .is_none()
+                .is_none_or(|levels| levels.len() < 2)
             {
                 return Ok(None);
             }
