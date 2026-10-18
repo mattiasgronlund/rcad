@@ -10,29 +10,25 @@
 //!
 //! Both are placed by the turn of `1.1` about the line through `(1, 0, −1)`
 //! along `(1, 2, 3)`, the ball by that turn or by two halves of it. In the
-//! stored numbers the ball's centre then sits about `1.1e−15` off the pipe's
-//! axis, so the two cross in two loops a rounding off two circles, and every
-//! rule is refused `ResultIsNotManifold { count: 1 }` (row Q2129). That the
-//! ball is on the cap does not matter: the bar it goes through is refused the
-//! same way.
+//! stored numbers the ball's centre then sits a rounding off the pipe's axis,
+//! so the two cross in two loops a rounding off two circles, and turned, every
+//! rule answers what it answers unturned.
 //!
-//! **The first step that goes wrong is in `rcad-geom`, and it is a gap.**
-//! `where_a_ball_reaches_across_a_pipe` takes its way across the pipe from
-//! `out − along·(out·along)`. When the centre is a rounding off the axis that
-//! vector is rounding too: here it is `4.4e−15` long, and its direction points
-//! back down the axis, `−0.99997` of the way. So both seeds it hands the marcher
-//! sit inside the pipe, near neither loop, and `where_a_closed_crossing_starts`
-//! refuses each loop `CannotNameWhichPieceOfACrossingThisIs`. The arrangement
-//! starts no node on a loop it cannot name, so the pipe and the ball are left
-//! uncut, and the answer comes out with an edge that has one face along it.
-//!
-//! The loops are there, and the answer is the unturned one turned. Taking the
+//! **Every rule was refused `ResultIsNotManifold { count: 1 }` until Q2330**,
+//! the bar through the ball as much as the ball on the cap (Q2129). In
+//! `rcad-geom`, `where_a_ball_reaches_across_a_pipe` took its way across the
+//! pipe from `out − along·(out·along)`, and with the centre a rounding off the
+//! axis that is rounding too: `4.4e−15` long, and pointing back down the axis,
+//! `−0.99997` of the way. So both seeds it handed the marcher sat inside the
+//! pipe, near neither loop, and `where_a_closed_crossing_starts` refused each
+//! loop `CannotNameWhichPieceOfACrossingThisIs`. The arrangement starts no
+//! node on a loop it cannot name, so the pipe and the ball were left uncut,
+//! and the answer came out with an edge that had one face along it. Taking the
 //! part along the axis off that vector a second time leaves it square to the
-//! axis, and with that one line every rule here answers, turned, the volume it
-//! answers unturned. That line is outside this row's files, so the turned test
-//! pins the refusal until it lands.
+//! axis, which is the fix; `rcad-geom`'s
+//! `a_ball_a_rounding_off_a_pipes_axis.rs` tests the seeds themselves.
 //!
-//! Refusing by name where the arrangement starts no node is not the fix
+//! Refusing by name where the arrangement starts no node was not the fix
 //! either. Passing on every refusal there but "this crossing is not closed"
 //! fails three other tests in this crate, which answer because the loop is
 //! left uncut: two with a ball a bar holds round the one circle the two only
@@ -44,7 +40,7 @@ use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Measurement, Model, Rule};
+use rcad_topo::{Measurement, Model, Rule};
 
 const BAR_RADIUS: f64 = 5.0;
 
@@ -83,10 +79,41 @@ const SHAPES: [Shape; 4] = [
 #[test]
 fn a_bar_and_a_ball_on_its_axis_unturned_measure_what_every_rule_should() {
     for shape in SHAPES {
-        for (rule, solids, closed_form) in shape.what_each_rule_leaves() {
-            let what = format!("the {rule:?} of {shape:?}, unturned");
-            let measured = shape
-                .fused(&[], &[], rule)
+        shape.measures_what_every_rule_should(&[], &[], "unturned");
+    }
+}
+
+#[test]
+fn a_bar_and_a_ball_on_its_axis_turned_measure_what_every_rule_should() {
+    let axis =
+        Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
+    let turn = Isometry::rotation(&axis, 1.1).expect("a finite angle");
+    let half = Isometry::rotation(&axis, 0.55).expect("a finite angle");
+    for shape in SHAPES {
+        for ball_turns in [vec![turn], vec![half, half]] {
+            shape.measures_what_every_rule_should(
+                &[turn],
+                &ball_turns,
+                &format!("the ball turned in {} steps", ball_turns.len()),
+            );
+        }
+    }
+}
+
+impl Shape {
+    /// Every rule fuses the bar placed by `bar_turns` and the ball by
+    /// `ball_turns` into as many solids as it should, of the volume worked out
+    /// by hand within the error the measure declares.
+    fn measures_what_every_rule_should(
+        self,
+        bar_turns: &[Isometry],
+        ball_turns: &[Isometry],
+        placed: &str,
+    ) {
+        for (rule, solids, closed_form) in self.what_each_rule_leaves() {
+            let what = format!("the {rule:?} of {self:?}, {placed}");
+            let measured = self
+                .fused(bar_turns, ball_turns, rule)
                 .unwrap_or_else(|why| panic!("{what} was refused: {why:?}"));
             assert_eq!(measured.len(), solids, "{what}: how many solids");
             let volume: f64 = measured.iter().map(|each| each.volume()).sum();
@@ -97,35 +124,7 @@ fn a_bar_and_a_ball_on_its_axis_unturned_measure_what_every_rule_should() {
             );
         }
     }
-}
 
-#[test]
-fn a_bar_and_a_ball_on_its_axis_turned_are_refused_while_the_seeds_point_along_the_bar() {
-    let axis =
-        Axis::new(Point::new(1.0, 0.0, -1.0), Vector::new(1.0, 2.0, 3.0)).expect("a direction");
-    let turn = Isometry::rotation(&axis, 1.1).expect("a finite angle");
-    let half = Isometry::rotation(&axis, 0.55).expect("a finite angle");
-    for shape in SHAPES {
-        for ball_turns in [vec![turn], vec![half, half]] {
-            for (rule, _, _) in shape.what_each_rule_leaves() {
-                let what = format!(
-                    "the {rule:?} of {shape:?}, the ball turned in {} steps",
-                    ball_turns.len()
-                );
-                let refused = shape
-                    .fused(&[turn], &ball_turns, rule)
-                    .map(|measured| measured.len())
-                    .expect_err(&what);
-                assert!(
-                    matches!(refused, Error::ResultIsNotManifold { count: 1 }),
-                    "{what}: {refused:?}"
-                );
-            }
-        }
-    }
-}
-
-impl Shape {
     /// What each solid of the bar and the ball fused under `rule` measures,
     /// under `Policy::certified()`, once the answer validates.
     fn fused(
