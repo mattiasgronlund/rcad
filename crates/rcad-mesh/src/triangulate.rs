@@ -222,10 +222,10 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         }
     }
 
-    let corners_inside_one_edge = if matches!(surface, Surface::Plane(_)) {
-        Vec::new()
+    let along_one_edge = if matches!(surface, Surface::Plane(_)) {
+        StretchesAlongOneEdge::default()
     } else {
-        corners_inside_one_edge(domain, &handles)
+        the_stretches_along_one_edge(domain, &handles)
     };
     let deviation = refine_the_inside(
         &mut mesh,
@@ -238,7 +238,7 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
             deflection,
             slop,
             step,
-            corners_inside_one_edge: &corners_inside_one_edge,
+            along_one_edge: &along_one_edge,
         },
     )?;
 
@@ -452,7 +452,8 @@ fn cut_by_corner_order(domain: &TrimmedDomain, corners: &[[f64; 2]]) -> Option<V
 /// with nobody asking, this made 68 of 1440 meshes of a ball cut through its
 /// pole fold, and the fan 96, against the Delaunay cut's 38 then: a lid's
 /// corners are joined by the ball's own triangles too (`docs/decisions.md`
-/// §379.5). The Delaunay cut's are 2 since Q1027 ([`corners_inside_one_edge`]).
+/// §379.5). The Delaunay cut's were 2 after Q1027 and are 0 since Q2178
+/// ([`corners_cut_off_by_one_side`]).
 /// That is what the caller's asking is for.
 ///
 /// **Why it needs an outline that turns one way, once round:** then the patch
@@ -1742,11 +1743,9 @@ struct HowFineToGo<'a> {
     deflection: f64,
     slop: f64,
     step: f64,
-    /// Each corner of the domain that lies inside one edge, with a corner
-    /// before and a corner after it along its own loop, once for each pair
-    /// [`corners_inside_one_edge`] gives. Empty on a plane: see
-    /// [`corners_cut_off_by_one_side`].
-    corners_inside_one_edge: &'a [(usize, [FixedVertexHandle; 2])],
+    /// Each stretch of a loop that runs along one edge of the solid, which no
+    /// side may cut across. Empty on a plane: see [`corners_cut_off_by_one_side`].
+    along_one_edge: &'a StretchesAlongOneEdge,
 }
 
 /// Put points strictly inside the patch until no triangle strays too far, and
@@ -1836,10 +1835,12 @@ fn refine_the_inside(
 
         // **A side cutting off a corner is cut whether or not a point is close
         // by**, because a point close by does not remove the side and this one
-        // does. That leaves the packing argument below intact: the side's
-        // midpoint is the same place every round, so each corner can add at
-        // most one point this way, and a second attempt finds the first one
-        // there and places nothing.
+        // does. That leaves the packing argument below intact: every side an
+        // insertion draws ends at the point it inserts, so a side between two
+        // corners is never drawn again once gone, and its midpoint is the same
+        // place every round. So each side between two corners that the loops'
+        // own triangulation drew adds at most one point this way, and a second
+        // attempt finds the first one there and places nothing.
         let corners_cut_off = corners_cut_off_by_one_side(mesh, &inside, aim);
         let breaking = corners_cut_off.iter().map(|(_, either_side)| {
             let [from, to] = either_side.map(|handle| corners[corner_of[handle.index()] as usize]);
@@ -1973,9 +1974,10 @@ fn the_longest_side_off_the_loops(
 }
 
 /// The corners of a curved patch that one side of the triangulation cuts
-/// straight across, from the corner before to the corner after along the loop,
-/// or from a corner that is the same point in space as either
-/// ([`corners_inside_one_edge`]).
+/// straight across: a side between two corners of one stretch of a loop along
+/// one edge, with a corner inside the edge between them
+/// ([`the_stretches_along_one_edge`]). Each comes with the first corner inside
+/// the edge that it cuts off, and its two ends.
 ///
 /// **Such a side can be a side of the next face too, and then the mesh is
 /// wrong.** Where two faces meet at a sharp edge — a cap leaning steeply across
@@ -1987,6 +1989,21 @@ fn the_longest_side_off_the_loops(
 /// rest of the mesh (`docs/decisions.md` §187.4). This crate is shown one face at
 /// a time and cannot see the other one, so it cannot agree a side with it; what
 /// it can do is never draw one that the other face could also draw.
+///
+/// **A side that skips more than one corner is as bad.** The face across can
+/// cut the same corners off ear by ear, and two ears cut in a row leave a side
+/// from the corner before the first to the corner after the second. Q2178's
+/// shape is where it showed: the sliver of a unit ball past a plane leaning
+/// `0.2` through its south pole `S`, turned a quarter round, at a deflection of
+/// an eighth. The flat disc across, cut by Delaunay, joined `S` to the third
+/// rim point on; a half of the curved face drew the same side, from the far end
+/// of its pole side, and measuring was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`
+/// (`a_mesh_that_folds_at_one_deflection_and_not_the_next.rs` in `rcad-topo`).
+/// So every side between two corners of one stretch is asked about, and not
+/// only the one around each corner. It is asked of the sides out of each corner,
+/// not of every pair of a stretch's corners: a ball's rim of a thousand points
+/// is half a million pairs, every round.
 ///
 /// **Only a curved patch is held to this**, and one is enough. The three
 /// corners of such a triangle all lie on the boundary and so on the edge's own
@@ -2007,28 +2024,37 @@ fn corners_cut_off_by_one_side(
     inside: &[bool],
     aim: &HowFineToGo<'_>,
 ) -> Vec<(usize, [FixedVertexHandle; 2])> {
+    let along = aim.along_one_edge;
     let mut cut_off = Vec::new();
-    for &(position, [before, after]) in aim.corners_inside_one_edge {
-        let Some(side) = mesh.get_edge_from_neighbors(before, after) else {
-            continue;
-        };
-        if side.is_constraint_edge() {
-            continue;
-        }
-        if side
-            .face()
-            .as_inner()
-            .is_some_and(|face| inside[face.index()])
-        {
-            cut_off.push((position, [before, after]));
+    for (which, stretch) in along.stretches.iter().enumerate() {
+        for (here, &(_, from)) in stretch.corners.iter().enumerate() {
+            for side in mesh.vertex(from).out_edges() {
+                if side.is_constraint_edge()
+                    || !side
+                        .face()
+                        .as_inner()
+                        .is_some_and(|face| inside[face.index()])
+                {
+                    continue;
+                }
+                let to = side.to().fix();
+                for there in along.places_of(to, which).filter(|&there| there > here) {
+                    if let Some(corner) = stretch.the_first_corner_inside_the_edge(here, there) {
+                        cut_off.push((corner, [from, to]));
+                    }
+                }
+            }
         }
     }
     cut_off
 }
 
-/// Each corner that lies inside one edge, with the triangulation's handles for
-/// a corner before it and a corner after it along its own loop: the one either
-/// side, and every corner that is the same point in space as one of those.
+/// Each stretch of the domain's loops that runs along one edge of the solid:
+/// corners in a row that lie inside one edge, with the corner before them and
+/// the corner after them, and out along the loop from either of those two
+/// every corner in a row that is the same point in space. A loop with no
+/// corner between two edges is one stretch right round, its first corner again
+/// at the end.
 ///
 /// **Where a surface pinches, one point is several corners in a row**, and the
 /// side that cuts a corner off is a side between two points, whichever of the
@@ -2051,10 +2077,10 @@ fn corners_cut_off_by_one_side(
 /// ([`Surface::where_it_pinches`]), which is where a caller writes a pole
 /// side. One read as a pole but written a rounding off it is not seen as one,
 /// and is asked about as any corner is.
-fn corners_inside_one_edge(
+fn the_stretches_along_one_edge(
     domain: &TrimmedDomain,
     handles: &[FixedVertexHandle],
-) -> Vec<(usize, [FixedVertexHandle; 2])> {
+) -> StretchesAlongOneEdge {
     let corners = every_corner(domain);
     let mut before = vec![0; handles.len()];
     let mut after = vec![0; handles.len()];
@@ -2067,25 +2093,117 @@ fn corners_inside_one_edge(
         pinch.is_some_and(|pinch| corners[at][1].abs() == pinch)
             && corners[next][1] == corners[at][1]
     };
-    let the_corners_at_one_point_from = |first: usize, onwards: &[usize], cut_off: usize| {
-        let mut run = vec![first];
-        let mut at = first;
-        while onwards[at] != cut_off && !run.contains(&onwards[at]) && one_point(at, onwards[at]) {
-            at = onwards[at];
-            run.push(at);
+    let inside_one_edge = |position: usize| !domain.is_between_two_edges(position);
+
+    let mut stretches = Vec::new();
+    let mut first_of_the_loop = 0;
+    for one_loop in core::iter::once(domain.outer()).chain(domain.holes()) {
+        let positions = first_of_the_loop..first_of_the_loop + one_loop.corners().len();
+        first_of_the_loop = positions.end;
+        if positions.clone().all(inside_one_edge) {
+            let mut round: Vec<usize> = positions.collect();
+            round.push(round[0]);
+            let inside = [0, round.len() - 1];
+            stretches.push(Stretch::through(&round, handles, inside));
+            continue;
         }
-        run
-    };
-    let mut inside = Vec::new();
-    for position in (0..handles.len()).filter(|&position| !domain.is_between_two_edges(position)) {
-        let afters = the_corners_at_one_point_from(after[position], &after, position);
-        for one_before in the_corners_at_one_point_from(before[position], &before, position) {
-            for &one_after in &afters {
-                inside.push((position, [handles[one_before], handles[one_after]]));
+        for start in positions.filter(|&at| !inside_one_edge(at) && inside_one_edge(after[at])) {
+            let mut stretch = VecDeque::from([start]);
+            let mut at = after[start];
+            while inside_one_edge(at) {
+                stretch.push_back(at);
+                at = after[at];
             }
+            stretch.push_back(at);
+            let along_the_edge = stretch.len() - 2;
+            loop {
+                let last = stretch[stretch.len() - 1];
+                if !one_point(last, after[last]) || stretch.contains(&after[last]) {
+                    break;
+                }
+                stretch.push_back(after[last]);
+            }
+            let mut ahead = 0;
+            loop {
+                let first = stretch[0];
+                if !one_point(first, before[first]) || stretch.contains(&before[first]) {
+                    break;
+                }
+                stretch.push_front(before[first]);
+                ahead += 1;
+            }
+            let inside = [ahead + 1, ahead + along_the_edge];
+            stretches.push(Stretch::through(stretch.make_contiguous(), handles, inside));
         }
     }
-    inside
+
+    let mut places = Vec::new();
+    for (which, stretch) in stretches.iter().enumerate() {
+        for (place, &(_, handle)) in stretch.corners.iter().enumerate() {
+            places.push((handle.index(), which, place));
+        }
+    }
+    places.sort_unstable();
+    StretchesAlongOneEdge { stretches, places }
+}
+
+/// The stretches of a domain's loops that each run along one edge of the
+/// solid ([`the_stretches_along_one_edge`]), and where each corner's vertex
+/// stands in them.
+#[derive(Default)]
+struct StretchesAlongOneEdge {
+    stretches: Vec<Stretch>,
+    /// `(vertex, stretch, place)` for every place of every stretch, the vertex
+    /// by its index in the triangulation, in that order. A vertex can stand
+    /// in two stretches where one edge ends and the next begins, in two loops
+    /// where they meet, and twice in one stretch that starts and ends at a
+    /// loop's only corner between two edges.
+    places: Vec<(usize, usize, usize)>,
+}
+
+impl StretchesAlongOneEdge {
+    /// Each place `vertex` has in stretch `which`.
+    fn places_of(&self, vertex: FixedVertexHandle, which: usize) -> impl Iterator<Item = usize> {
+        let key = (vertex.index(), which);
+        let first = self
+            .places
+            .partition_point(|&(vertex, stretch, _)| (vertex, stretch) < key);
+        self.places[first..]
+            .iter()
+            .take_while(move |&&(vertex, stretch, _)| (vertex, stretch) == key)
+            .map(|&(_, _, place)| place)
+    }
+}
+
+/// One stretch of a loop along one edge of the solid, in the order its loop
+/// runs.
+struct Stretch {
+    /// Each corner's position in [`every_corner`]'s list and its vertex in the
+    /// triangulation.
+    corners: Vec<(usize, FixedVertexHandle)>,
+    /// The first and the last place in `corners` whose corner lies inside the
+    /// edge.
+    inside: [usize; 2],
+}
+
+impl Stretch {
+    fn through(positions: &[usize], handles: &[FixedVertexHandle], inside: [usize; 2]) -> Self {
+        Self {
+            corners: positions
+                .iter()
+                .map(|&position| (position, handles[position]))
+                .collect(),
+            inside,
+        }
+    }
+
+    /// The position of the first corner inside the edge strictly between the
+    /// places `from` and `to`, where `from` comes first, or `None` when no
+    /// corner between them is.
+    fn the_first_corner_inside_the_edge(&self, from: usize, to: usize) -> Option<usize> {
+        let first = (from + 1).max(self.inside[0]);
+        (first < to && first <= self.inside[1]).then(|| self.corners[first].0)
+    }
 }
 
 /// The points the refinement has put down, bucketed by how far apart they have
@@ -2425,9 +2543,10 @@ pub enum CannotTriangulate {
         deflection: f64,
     },
 
-    /// On a curved surface, a side from the corner before `corner` to the corner
-    /// after it would not go away, and the face on the other side of the
-    /// boundary may draw the same side.
+    /// On a curved surface, a side between two corners along one edge, with
+    /// `corner` the first corner inside the edge between them, would not go
+    /// away, and the face on the other side of the boundary may draw the same
+    /// side.
     ///
     /// The refinement cuts such a side in half at its middle, and this is what
     /// is left when that point cannot be placed: the triangulation would not
@@ -2440,7 +2559,7 @@ pub enum CannotTriangulate {
          and there is nowhere to put the point that would break it"
     )]
     ASideCutsOffOneCornerOfACurvedPatch {
-        /// Which corner is cut off.
+        /// The first corner the side cuts off.
         corner: usize,
     },
 }
