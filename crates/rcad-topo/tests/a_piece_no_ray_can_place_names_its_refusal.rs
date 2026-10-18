@@ -64,7 +64,10 @@
 //! meet of three that refused them before. The quarter of a bar placed round
 //! a bend got past the cut at Q1817 and has not been run with the arm made to
 //! print since; none of its fuses is refused `Undecidable`, so every piece of
-//! each was placed.
+//! each was placed. Since Q2331 a wedge whose face is a plane through the axis
+//! a hair below a bend's cap reaches it too, at hairs from `1e-15` down, in
+//! every fuse, and every fuse answers
+//! (`a_wedge_a_hair_below_a_bends_cap_answers_every_rule_with_their_volumes`).
 //!
 //! Q1125's run, of all 1755 tests of this crate's suite with the arm made to
 //! print, printed nine times, all in the placed bends' test, and each piece it
@@ -1056,6 +1059,14 @@ fn a_bend_and_a_copy_moved_a_rounding_off_it_are_refused_when_crossed() {
 /// axis by a rounding and every one of these fuses was refused
 /// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`. The side's plane now goes
 /// through the origin, the corner nearer it, and is a plane through the axis.
+///
+/// **This is the piece the file hunts for, reached.** Run with
+/// `settle_against_each`'s arm made to print, at hairs `1e-15`, `1e-16` and
+/// `1e-20` every one of the six fuses printed three times: three points of
+/// the wedge's face, at `(4, −0.4·hair, 0)` on the ring's circle, a rounding
+/// off the bend's cap, could not be fired at the bend's ring. At `1e-14` and
+/// above nothing printed. Each of those pieces was then placed by some other
+/// point or rule, since each fuse answers.
 #[test]
 fn a_wedge_a_hair_below_a_bends_cap_answers_every_rule_with_their_volumes() {
     let policy = Policy::certified();
