@@ -46,17 +46,15 @@
 //! gets a mesh tried at `1.2e-3` where it got the malformed-shape refusal; that
 //! run went past seven minutes and was not finished, so it is not pinned.
 //!
-//! # The sliver does not mesh at any deflection
+//! # The sliver meshes over its floor
 //!
-//! A caller-named deflection far above the floor is refused
+//! Until Q2178 a caller-named deflection far above the floor was refused
 //! `TwoPatchesOfTheMeshDrewTheSameSide`, at each of `1`, `10`, `100`, `1e3`
-//! and `1e4` it was asked at (the pin asks two, since `1` takes ten seconds),
-//! and with the
-//! walk's arithmetic nowhere near its limits: the same sliver with a lid
-//! leaning `2⁻⁵` past the ruling meshes at `0.1`, and from `2⁻⁶`, an ellipse
-//! reaching `64` up, it is refused the same way, far below where the walk goes
-//! round the cone. Not traced; the pin is
-//! `a_sliver_leaning_under_a_sixty_fourth_draws_a_side_four_times`.
+//! and `1e4` it was asked at, and so was the same sliver with a lid leaning
+//! `2⁻⁶` past the ruling, at `0.1`, while `2⁻⁵` meshed. Q2178 keeps out of a
+//! curved patch every side between two corners of one edge with a corner of
+//! the edge between them, and each of those meshes now, down to a lean of
+//! `2⁻¹⁶` at `0.1`. The pin is `a_sliver_leaning_a_sixty_fourth_or_less_meshes`.
 //!
 //! # The tip: a floor the mesher picks that the walk will not count to
 //!
@@ -88,46 +86,37 @@ const THE_SLIVERS_LEAN: f64 = 1.0 / 16_777_216.0;
 /// apex four times nearer the lid.
 const THE_TIPS_LEAN: f64 = 1.0 / 67_108_864.0;
 
-/// The sliver is a sound solid, and above its floor it is refused anyway, by
-/// a side drawn four times: so is the same sliver with its lid leaning a
-/// sixty-fourth past the ruling, while a thirty-second meshes. The module doc
-/// says what is known of it.
+/// The sliver is a sound solid, and above its floor it meshes, and so does
+/// the same sliver with its lid leaning a sixty-fourth past the ruling. Until
+/// Q2178 both were refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4,
+/// used: 4 }`, and a thirty-second was the steepest that meshed.
 #[test]
-fn a_sliver_leaning_under_a_sixty_fourth_draws_a_side_four_times() {
+fn a_sliver_leaning_a_sixty_fourth_or_less_meshes() {
     let mut model = a_model();
     let sliver = the_sliver(&mut model);
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the sliver is a sound solid");
-    let meshed = |model: &Model, solid: SolidKey, asked: f64| {
-        model.solid(solid).expect("this model made the key").mesh(
-            Deflection::of(asked).expect("a positive length"),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
+    let meshed = |model: &Model, solid: SolidKey, asked: f64, what: &str| {
+        let mesh = model
+            .solid(solid)
+            .expect("this model made the key")
+            .mesh(
+                Deflection::of(asked).expect("a positive length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what} at {asked:e}: {why:?}"));
+        let strays = mesh.deviation().magnitude();
+        assert!(strays <= asked, "{what} at {asked:e} strays {strays}");
     };
     for asked in [100.0, 1e4] {
-        let refused = meshed(&model, sliver, asked).expect_err("a side drawn four times");
-        assert!(
-            matches!(
-                refused,
-                Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }
-            ),
-            "{asked:e}: {refused:?}"
-        );
+        meshed(&model, sliver, asked, "the sliver");
     }
-
-    let a_thirty_second = a_piece_of_the_cone(&mut model, 1.0 / 32.0, -0.375, 1.0);
-    meshed(&model, a_thirty_second, 0.1).expect("a sliver reaching 32 up meshes");
-    let a_sixty_fourth = a_piece_of_the_cone(&mut model, 1.0 / 64.0, -0.375, 1.0);
-    let refused = meshed(&model, a_sixty_fourth, 0.1).expect_err("a side drawn four times");
-    assert!(
-        matches!(
-            refused,
-            Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }
-        ),
-        "{refused:?}"
-    );
+    for lean in [1.0 / 32.0, 1.0 / 64.0] {
+        let piece = a_piece_of_the_cone(&mut model, lean, -0.375, 1.0);
+        meshed(&model, piece, 0.1, &format!("leaning {lean}"));
+    }
 }
 
 /// **Fails without the change**: a certified caller asking for less than the
