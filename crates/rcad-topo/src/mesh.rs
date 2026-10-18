@@ -28,7 +28,7 @@ use rcad_mesh::{CannotTriangulate, Loop, NotALoop, TrimmedDomain, triangulate, z
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, product_is_exact, two_product};
 use rcad_predicates::{
     Approximation, Cause, Decision, Level, Measures, NOTHING_IS_KNOWN, Point as PredicatePoint,
-    Policy, ProvenanceLog, Record, orient3d,
+    Policy, ProvenanceLog, Record, orient2d, orient3d,
 };
 use smallvec::SmallVec;
 
@@ -3547,15 +3547,14 @@ impl BuildingAMesh {
         how: HowToCut,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
-        let mut corner_is = Vec::new();
         let mut loops = Vec::with_capacity(patch.len());
         let mut along_a_loop = HashSet::new();
-        let mut between_two_edges = Vec::new();
         let mut model_corners: HashSet<u32> = self.at_vertex.values().copied().collect();
         for corner in self.corners_with_one_face_across_the_edges_either_side(face, solid) {
             model_corners.remove(&corner);
         }
         for one in patch {
+            let mut between_two_edges = Vec::with_capacity(one.points.len());
             for (at, &from) in one.points.iter().enumerate() {
                 along_a_loop.insert(a_side(from, one.points[(at + 1) % one.points.len()]));
                 // A loop that is one closed edge passes its own corner and stays
@@ -3571,61 +3570,28 @@ impl BuildingAMesh {
                         && (model_corners.contains(&from) || self.on_a_cut.contains(&from)),
                 );
             }
-            corner_is.extend(one.points);
-            loops.push(Loop::through(one.corners).map_err(|why: NotALoop| {
+            let corners = Loop::through(one.corners).map_err(|why: NotALoop| {
                 Error::AWireDoesNotFanIntoALoopToMesh {
                     face: face.key(),
                     why,
                 }
-            })?);
+            })?;
+            loops.push(ALoopToCut {
+                corners,
+                points: one.points,
+                between_two_edges,
+            });
         }
-        let (outer, holes) = loops.split_first().ok_or(Invalid::FaceHasNoWires)?;
-
-        let cut = match how {
+        if loops.is_empty() {
+            return Err(Invalid::FaceHasNoWires.into());
+        }
+        let deflection = Deflection::of(room)?;
+        let (pieces, drawn_here) = match how {
             HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder => {
-                let mut domain = TrimmedDomain::new(
-                    *surface,
-                    outer.clone(),
-                    holes.to_vec(),
-                    Deflection::of(room)?,
-                )
-                .with_corners_between_two_edges(between_two_edges);
-                if matches!(how, HowToCut::TriangulateByCornerOrder) {
-                    domain = domain.cut_by_corner_order();
-                }
-                triangulate(&domain)
+                what_the_triangulator_can_cut(surface, loops)
             }
-            HowToCut::ZipUpABand => {
-                let [hole] = holes else {
-                    unreachable!("a band is handed over whole, as its two rims")
-                };
-                zip_up_a_band(surface, outer, hole, Deflection::of(room)?)
-            }
+            HowToCut::ZipUpABand => (vec![loops], Vec::new()),
         };
-        let cut = match cut {
-            Ok(cut) => cut,
-            Err(why) => return Err(refusal_for(face, why, &corner_is, &self.points, log)),
-        };
-
-        // Everything past the corners this patch handed over is a point the
-        // refinement put strictly inside it, so it belongs to this patch alone
-        // and nothing else will ever name it (§25.1).
-        //
-        // A flat patch gets none: a flat piece of a plane strays nothing, so the
-        // triangulator has nothing to refine. That is also what keeps
-        // `self.made` in one frame per shell, since a flat face is cut up where
-        // the solid sits and not where it is stored.
-        assert!(
-            surface.as_plane().is_none() || cut.corners().len() == corner_is.len(),
-            "the triangulator put {} points inside flat face {:?}",
-            cut.corners().len() - corner_is.len(),
-            face.key()
-        );
-        let there = back_out_of_the_frame_this_face_is_cut_up_in(face);
-        for corner in &cut.corners()[corner_is.len()..] {
-            let inside = surface.point_at(corner[0], corner[1]);
-            corner_is.push(self.remember_made_on(face, &there, inside));
-        }
 
         // The triangulator draws every triangle anticlockwise in the chart, and
         // for every surface but a torus `∂first × ∂second` points out of it the
@@ -3643,61 +3609,135 @@ impl BuildingAMesh {
             }
             HowToCut::ZipUpABand => false,
         };
-        // **A flat patch handed back with no triangles has every corner on one
-        // line**, the one domain `triangulate` lets through with none
-        // (`refuse_a_side_with_a_corner_on_it` in `rcad-mesh`). It encloses
-        // nothing, but the faces round it still use each of its sides once, so
-        // left undrawn those sides are used one way only. A round bar of radius
-        // `1 + 2⁻⁵¹` beside a block face one radius from its axis leaves a fin
-        // `2⁻⁵¹` thick outside it, every point of the fin rounds onto that
-        // face, and each of its ends came here as three corners on one line:
-        // the union was refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)`
-        // (Q1928, `an_ellipse_start_between_two_places.rs`).
-        //
-        // So each loop is drawn as a fan from its first corner, the way the wire
-        // runs and not flipped. That is the way a face's triangles use its
-        // loops' sides once flipped below, since the face lies on the left of
-        // its wire seen from outside; with no turn in the chart there is nothing
-        // else to go by. A side inside a fan is used once each way. The
-        // triangles cover nothing in the chart, and lie in the plane as far as
-        // the points of the face do.
-        let fan;
-        let (triangles, inside_out) = if surface.as_plane().is_some() && cut.triangles().is_empty()
-        {
-            fan = a_fan_round_each_loop(loops.iter().map(|one| one.corners().len()));
-            (fan.as_slice(), false)
-        } else {
-            (cut.triangles(), inside_out)
-        };
-        for triangle in triangles {
-            let [first, second, third] = triangle.map(|corner| corner_is[corner as usize]);
-            // A pole is a *side* of the patch whose two corners are one point in
-            // space, so the triangle resting on it covers nothing at all.
-            // Dropping it is what turns the top row of a ball's rectangle into
-            // the fan a pole really has, and the two sides left behind are one
-            // and the same pair of points, used opposite ways (§25.6).
-            if first == second || second == third || third == first {
-                continue;
-            }
-            let corners = if inside_out {
-                [first, third, second]
-            } else {
-                [first, second, third]
-            };
-            for (from, to) in [(first, second), (second, third), (third, first)] {
-                let side = a_side(from, to);
-                if !along_a_loop.contains(&side) {
-                    *self.drawn_inside_a_patch.entry(side).or_default() += 1;
+        let there = back_out_of_the_frame_this_face_is_cut_up_in(face);
+        let mut deviation: f64 = 0.0;
+        for piece in pieces {
+            let (outer, holes) = piece
+                .split_first()
+                .expect("every piece of a patch is an outline and its holes");
+            let mut corner_is: Vec<u32> = piece
+                .iter()
+                .flat_map(|one| one.points.iter().copied())
+                .collect();
+            let cut = match how {
+                HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder => {
+                    let mut domain = TrimmedDomain::new(
+                        *surface,
+                        outer.corners.clone(),
+                        holes.iter().map(|hole| hole.corners.clone()).collect(),
+                        deflection,
+                    )
+                    .with_corners_between_two_edges(
+                        piece
+                            .iter()
+                            .flat_map(|one| one.between_two_edges.iter().copied())
+                            .collect(),
+                    );
+                    if matches!(how, HowToCut::TriangulateByCornerOrder) {
+                        domain = domain.cut_by_corner_order();
+                    }
+                    triangulate(&domain)
                 }
+                HowToCut::ZipUpABand => {
+                    let [hole] = holes else {
+                        unreachable!("a band is handed over whole, as its two rims")
+                    };
+                    zip_up_a_band(surface, &outer.corners, &hole.corners, deflection)
+                }
+            };
+            let cut = match cut {
+                Ok(cut) => cut,
+                Err(why) => return Err(refusal_for(face, why, &corner_is, &self.points, log)),
+            };
+
+            // Everything past the corners this piece handed over is a point the
+            // refinement put strictly inside it, so it belongs to this piece
+            // alone and nothing else will ever name it (§25.1).
+            //
+            // A flat piece gets none: a flat piece of a plane strays nothing, so
+            // the triangulator has nothing to refine. That is also what keeps
+            // `self.made` in one frame per shell, since a flat face is cut up
+            // where the solid sits and not where it is stored.
+            assert!(
+                surface.as_plane().is_none() || cut.corners().len() == corner_is.len(),
+                "the triangulator put {} points inside flat face {:?}",
+                cut.corners().len() - corner_is.len(),
+                face.key()
+            );
+            for corner in &cut.corners()[corner_is.len()..] {
+                let inside = surface.point_at(corner[0], corner[1]);
+                corner_is.push(self.remember_made_on(face, &there, inside));
             }
-            self.triangles.push(MeshTriangle {
-                corners,
-                face: face.key(),
-            });
+
+            // **A flat piece handed back with no triangles has every corner on
+            // one line**, the one domain `triangulate` lets through with none
+            // (`refuse_a_side_with_a_corner_on_it` in `rcad-mesh`). It encloses
+            // nothing, but the faces round it still use each of its sides once,
+            // so left undrawn those sides are used one way only. A round bar of
+            // radius `1 + 2⁻⁵¹` beside a block face one radius from its axis
+            // leaves a fin `2⁻⁵¹` thick outside it, every point of the fin
+            // rounds onto that face, and each of its ends came here as three
+            // corners on one line: the union was refused
+            // `Invalid(FacesDoNotAgreeWhichWayTheyFace)` (Q1928,
+            // `an_ellipse_start_between_two_places.rs`).
+            //
+            // So each loop is drawn as a fan from its first corner, the way the
+            // wire runs and not flipped. That is the way a face's triangles use
+            // its loops' sides once flipped below, since the face lies on the
+            // left of its wire seen from outside; with no turn in the chart
+            // there is nothing else to go by. A side inside a fan is used once
+            // each way. The triangles cover nothing in the chart, and lie in
+            // the plane as far as the points of the face do.
+            let fan;
+            let (triangles, inside_out) =
+                if surface.as_plane().is_some() && cut.triangles().is_empty() {
+                    fan = a_fan_round_each_loop(piece.iter().map(|one| one.points.len()));
+                    (fan.as_slice(), false)
+                } else {
+                    (cut.triangles(), inside_out)
+                };
+            for triangle in triangles {
+                let [first, second, third] = triangle.map(|corner| corner_is[corner as usize]);
+                let corners = if inside_out {
+                    [first, third, second]
+                } else {
+                    [first, second, third]
+                };
+                self.draw(face, corners, &along_a_loop);
+            }
+            deviation = deviation.max(cut.deviation().magnitude());
+        }
+        for corners in drawn_here {
+            self.draw(face, corners, &along_a_loop);
         }
         let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
-        self.worst = self.worst.max(cut.deviation().magnitude() + moving);
+        self.worst = self.worst.max(deviation + moving);
         Ok(())
+    }
+
+    /// Put the triangle `corners` of `face` in the mesh, turned the way its
+    /// three table entries run, and count each of its sides that no loop of
+    /// the patch runs along — see [`BuildingAMesh::finish`].
+    fn draw(&mut self, face: FaceView<'_>, corners: [u32; 3], along_a_loop: &HashSet<(u32, u32)>) {
+        let [first, second, third] = corners;
+        // A pole is a *side* of the patch whose two corners are one point in
+        // space, so the triangle resting on it covers nothing at all. Dropping
+        // it is what turns the top row of a ball's rectangle into the fan a
+        // pole really has, and the two sides left behind are one and the same
+        // pair of points, used opposite ways (§25.6).
+        if first == second || second == third || third == first {
+            return;
+        }
+        for (from, to) in [(first, second), (second, third), (third, first)] {
+            let side = a_side(from, to);
+            if !along_a_loop.contains(&side) {
+                *self.drawn_inside_a_patch.entry(side).or_default() += 1;
+            }
+        }
+        self.triangles.push(MeshTriangle {
+            corners,
+            face: face.key(),
+        });
     }
 
     /// The entries in the point table of each corner of the model where a wire
@@ -4017,6 +4057,158 @@ fn a_fan_round_each_loop(lengths: impl Iterator<Item = usize>) -> Vec<[u32; 3]> 
         first += length;
     }
     fan
+}
+
+/// One loop of a patch as the mesher is handed it: where each corner sits in
+/// the chart, which entry of the point table it stands at, and whether it is
+/// where the boundary passes from one edge to another.
+struct ALoopToCut {
+    corners: Loop,
+    points: Vec<u32>,
+    between_two_edges: Vec<bool>,
+}
+
+/// The pieces of one patch the triangulator is handed, each an outline and its
+/// holes, and the triangles drawn here for what it would refuse, in table
+/// entries and turned the way the patch's loops run.
+///
+/// Both kinds drawn here are where two or more table entries of one patch
+/// round onto one line or one place in the chart, and both were met in one
+/// shape: a bar of radius one dipping `2⁻¹⁰⁵` through a block's top, whose
+/// sliver holds no double in `x`, so every point of it rounds onto the line
+/// `x = 3` of the top (Q2238,
+/// `a_bar_dipping_through_a_blocks_top_leaves_an_edge_too_short_for_its_coordinates`).
+///
+/// **A hole of a flat patch with every corner on one line is drawn as a fan
+/// round it, and the outline is cut as if it were not there.** The top round
+/// the sliver came as an outline and the hole `(3, 2 − 2⁻⁵¹, 4)`,
+/// `(3, 2 − 2⁻⁵², 4)`, `(3, 2, 4)`, which the triangulator refuses
+/// `LoopsTouch`, a corner on a side of its own loop. The hole encloses nothing,
+/// and the faces across it use each of its sides once, so a fan the way the
+/// hole runs is what closes the mesh there: it uses them the way the face's
+/// own triangles would. The outline's triangles cover the line, and the hole's
+/// corners stand on their sides or inside them, no further from where they
+/// are than the corners' own roundings.
+///
+/// **A loop that names one place in the chart twice is cut there into two
+/// lobes**: from the first of the two to the corner before the second, and
+/// from the second round to the corner before the first. Two triangles bridge
+/// the cut, `[first, before the second, second]` and `[second, before the
+/// first, first]`. Each uses the side into the place the way the loop runs,
+/// the other's side across the place the other way, and a lobe's closing side
+/// the other way to the lobe's own triangles, so every side is used once each
+/// way. The triangulator refuses such a loop `CornersCoincide`. The sliver's
+/// piece of the pipe is `B`, `P`, `A`, `P′`, where `P` and `P′` are the one
+/// point inside each of the sliver's two arcs, two entries at one double
+/// `(3, 2 − 2⁻⁵², 4)`; both lobes are two corners there, so it is the two
+/// bridges and nothing else. The bar with its seam underneath leaves the
+/// union's pipe a piece whose arc tip and near seam corner are both
+/// `(3, 2, 4)` (`a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top`):
+/// one lobe of three corners, which the triangulator cuts, and one of one.
+///
+/// A lobe of fewer than three corners runs out and back, or stands still, and
+/// encloses nothing. With three or more in each, either lobe could hold the
+/// other, and the loop is handed over whole and refused as it was. So is a
+/// pinch in a patch with a hole, since which lobe holds the hole is not read
+/// here.
+fn what_the_triangulator_can_cut(
+    surface: &Surface,
+    patch: Vec<ALoopToCut>,
+) -> (Vec<Vec<ALoopToCut>>, Vec<[u32; 3]>) {
+    let mut drawn_here = Vec::new();
+    let mut loops = patch.into_iter();
+    let outline = loops
+        .next()
+        .expect("hand_over refuses a patch with no loops");
+    let mut kept = vec![outline];
+    for hole in loops {
+        if surface.as_plane().is_some() && every_corner_is_on_one_line(hole.corners.corners()) {
+            drawn_here.extend(
+                a_fan_round_each_loop(std::iter::once(hole.points.len()))
+                    .into_iter()
+                    .map(|triangle| triangle.map(|corner| hole.points[corner as usize])),
+            );
+        } else {
+            kept.push(hole);
+        }
+    }
+    if kept.len() > 1 {
+        return (vec![kept], drawn_here);
+    }
+    let mut pieces = Vec::new();
+    let mut rest = kept.pop();
+    while let Some(one) = rest.take() {
+        let Some([first, again]) = the_first_place_a_loop_names_twice(one.corners.corners()) else {
+            pieces.push(vec![one]);
+            break;
+        };
+        let count = one.points.len();
+        let lobes: [Vec<usize>; 2] = [
+            (first..again).collect(),
+            (again..count).chain(0..first).collect(),
+        ];
+        if lobes.iter().all(|lobe| lobe.len() >= 3) {
+            pieces.push(vec![one]);
+            break;
+        }
+        let point = |at: usize| one.points[at % count];
+        drawn_here.push([point(first), point(again - 1), point(again)]);
+        drawn_here.push([point(again), point(first + count - 1), point(first)]);
+        rest = lobes
+            .iter()
+            .find(|lobe| lobe.len() >= 3)
+            .map(|lobe| one.just(lobe));
+    }
+    (pieces, drawn_here)
+}
+
+impl ALoopToCut {
+    /// The loop through the corners at `positions` of this one, in that order.
+    ///
+    /// # Panics
+    ///
+    /// For fewer than three positions, which is the caller miscounting: every
+    /// corner here already made a loop.
+    fn just(&self, positions: &[usize]) -> Self {
+        let corners = self.corners.corners();
+        Self {
+            corners: Loop::through(positions.iter().map(|&at| corners[at]).collect())
+                .expect("three corners or more of a loop make a loop"),
+            points: positions.iter().map(|&at| self.points[at]).collect(),
+            between_two_edges: positions
+                .iter()
+                .map(|&at| self.between_two_edges[at])
+                .collect(),
+        }
+    }
+}
+
+/// Whether every corner lies on the line through the first and another,
+/// exactly. Corners all at one place lie on one line too.
+fn every_corner_is_on_one_line(corners: &[[f64; 2]]) -> bool {
+    let first = corners[0];
+    let Some(&other) = corners.iter().find(|&&corner| corner != first) else {
+        return true;
+    };
+    corners
+        .iter()
+        .all(|&corner| match orient2d(first, other, corner) {
+            Decision::Zero => true,
+            Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
+            _ => false,
+        })
+}
+
+/// The first corner of a loop at a place an earlier corner already stands at,
+/// and that earlier corner: `[earlier, again]`, so that the corners before
+/// `again` are each at a place of their own.
+fn the_first_place_a_loop_names_twice(corners: &[[f64; 2]]) -> Option<[usize; 2]> {
+    (1..corners.len()).find_map(|again| {
+        corners[..again]
+            .iter()
+            .position(|&earlier| earlier == corners[again])
+            .map(|earlier| [earlier, again])
+    })
 }
 
 /// Where a face reads the points round it, in the frame it is cut up in: a
