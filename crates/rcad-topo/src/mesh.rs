@@ -8696,11 +8696,14 @@ fn how_far_along_its_axis_this_face_runs(
         // `rcad_geom::which_two_surfaces_a_run_is_between` names `and` as one of
         // the two surfaces it is walked along whatever lies either side, so
         // `and` bounds it. Two bands of one pipe either side of their rim name
-        // the pipe crossed with itself, which bounds nothing in the reals and
-        // in `f64` can come out `2` over a rounding of `5e-16` on a turned axis
-        // (see `how_far_along_an_axis_a_crossing_with_this_surface_runs`): with
-        // nothing else to read, the rim was charged that, and every mesh of the
-        // bar at `0.01` was refused under a floor of a hundred thousand
+        // the pipe crossed with itself, which bounds nothing in the reals and,
+        // since Q2240, reads nothing in `f64` either — the Cylinder arm of
+        // `how_far_along_an_axis_a_crossing_with_this_surface_runs` finds
+        // `straight_on.cross(its_way)` exactly zero for a direction against
+        // itself or its negation, and returns `None` rather than a rounding
+        // artifact. Before that fix, with nothing else to read, the rim was
+        // charged the stray bound instead, and every mesh of the bar at `0.01`
+        // was refused under a floor of a hundred thousand
         // (`two_spellings_of_one_pipe_mesh_each_face_on_its_own_side.rs`).
         //
         // A seam has this face's own surface on both sides of it, and a surface
