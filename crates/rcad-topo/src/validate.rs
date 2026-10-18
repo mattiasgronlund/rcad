@@ -3045,6 +3045,15 @@ static RUNGS_THE_SECOND_LADDER_HAS_ASKED: std::sync::atomic::AtomicUsize =
 /// Its other corner, `(3, 2 − 2⁻⁵¹, 4)`, is outside the pipe and tells
 /// nothing.
 ///
+/// **So is the fin `2⁻⁵¹` thick** a bar of radius `1 + 2⁻⁵¹` leaves outside
+/// a block's side one radius from its axis, every mesh of which lies on that
+/// side. Each of its four corners, `(−17, ±2⁻²⁵, 0 or 10)`, lies on one of the
+/// bar's caps and on the block's side, so those two cones are nothing; the
+/// other cap's cone counts the way that face points, and the corner is inside
+/// the pipe by `2⁻¹⁰²` of the same sum
+/// (`every_fuse_with_the_upright_block_answers_its_closed_form` in
+/// `an_ellipse_start_between_two_places.rs`).
+///
 /// A solid whose every corner is outside one of its pipes or balls is not
 /// told, and neither is one with a face on a cone or a ring. The lens a ball
 /// makes poking `2⁻²⁸` into a pipe, turned `6/40` or `8/40` about `x`, is not:

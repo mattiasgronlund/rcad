@@ -558,11 +558,12 @@ pub enum Error {
     /// cones disagree, or the solid has a face on a cone or a ring.
     ///
     /// A fin `2⁻⁵¹` thick, whose every mesh point rounds onto one plane so that
-    /// every mesh of it encloses exactly `0`, was refused this way from Q1938
-    /// (`an_ellipse_start_between_two_places.rs`), and so was the sliver a bar
-    /// of radius one leaves dipping `2⁻¹⁰⁵` through a block's top
-    /// (`a_bar_lying_along_a_plane_or_a_bar.rs`). Both are told from a corner
-    /// now (Q2291).
+    /// every mesh of it encloses exactly `0`, was refused this way from Q2089
+    /// until Q2291, and so was the sliver a bar of radius one leaves dipping
+    /// `2⁻¹⁰⁵` through a block's top. Both are told from a corner now: the fin
+    /// answers in `every_fuse_with_the_upright_block_answers_its_closed_form`
+    /// (`an_ellipse_start_between_two_places.rs`), the sliver in
+    /// `a_bar_lying_along_a_plane_or_a_bar.rs`.
     ///
     /// A half ball of 5 less a bowl four roundings smaller, which holds about
     /// `54`, and whose closest mesh encloses `−38.7` and can be off by `2384`,
