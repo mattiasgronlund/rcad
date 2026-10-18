@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use rcad_geom::{Cone, Deflection, Plane, Point, Surface, Vector};
+use rcad_geom::{Cone, Deflection, EdgeRun, Plane, Point, Surface, Vector};
 use rcad_predicates::expansion::{compress, expansion_sum, scale_expansion, two_diff, two_product};
 use rcad_predicates::{Policy, ProvenanceLog};
 
 use crate::mesh::{Mesh, MeshTriangle};
-use crate::view::FaceView;
-use crate::{Error, FaceKey, Invalid, Result, SolidView};
+use crate::view::{CoedgeView, FaceView};
+use crate::{Error, FaceKey, Invalid, Result, SolidView, VertexKey};
 
 /// How much space a solid takes up, how much skin it has, where it balances,
 /// and how far each of those three could be out.
@@ -2023,14 +2023,32 @@ fn the_shrink_for_the_sides_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> i32 {
     shift_for(widest)
 }
 
-/// Which entries of the mesh are `face`'s own corners: the point the model
-/// holds for each vertex on its wires, exactly, as [`Mesh::point_at_vertex`]
-/// says.
+/// Which entries of the mesh are corners of `face` where only straight sides of
+/// it meet: the point the model holds for each such vertex on its wires,
+/// exactly, as [`Mesh::point_at_vertex`] says.
+///
+/// **A corner at the end of a curved side is left out**, since the curve is
+/// where the face's plane crosses the surface next to it, so it lies on the
+/// plane, and the corner is a point written down on it like the points the
+/// mesher places along it. The copy's cap of the step-196 sliver in
+/// `the_sliver_at_step_196_is_measured_within_its_error_at_coarse_deflections`
+/// is one circle with one corner on it, `6.4e-16` off the cap's plane, and at
+/// a deflection of `0.5` the triangles that corner tilts summed `−5.2e-16`
+/// against a wedge of `5.9e-19` (row Q2316). A side of any kind this crate
+/// does not know as straight leaves its corners out too, which charges more.
 fn the_corners_it_holds(face: FaceView<'_>, mesh: &Mesh) -> Vec<u32> {
-    face.wires()
-        .flat_map(|wire| wire.coedges())
-        .map(|coedge| {
-            mesh.point_at_vertex(coedge.start().key())
+    let sides: Vec<CoedgeView<'_>> = face.wires().flat_map(|wire| wire.coedges()).collect();
+    let on_a_curve: Vec<VertexKey> = sides
+        .iter()
+        .filter(|side| side.edge().stored_run() != &EdgeRun::Straight)
+        .flat_map(|side| [side.start().key(), side.end().key()])
+        .collect();
+    sides
+        .iter()
+        .map(|side| side.start().key())
+        .filter(|corner| !on_a_curve.contains(corner))
+        .map(|corner| {
+            mesh.point_at_vertex(corner)
                 .expect("every corner of the solid has its point in the mesh")
         })
         .collect()
