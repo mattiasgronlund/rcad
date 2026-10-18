@@ -320,15 +320,25 @@ it moves here.
   stands for it.
 - **Since Q2252, a band whose square plane interval arithmetic cannot show
   square.** The same bar at `(0.4, 0)` turned half a radian about `y` has no
-  band at all, and the answer is 8 faces again: each cap's normal is the
-  pipe's axis exactly, turned round, but `is_square_to` takes the cross
-  product in intervals, and `n_z·w_x − n_x·w_z` comes out a range one
-  rounding either side of nought. Each part worked as an exact difference of
-  two products (`rcad_predicates::expansion::difference_of_two_products`)
-  gives the bar its band and the four faces, and moves the pin of
+  band at all, and the answer is 8 faces again: the far cap's normal is the
+  pipe's axis exactly and the near cap's its exact negative, but
+  `is_square_to` takes the cross product in intervals, and `n_z·w_x −
+  n_x·w_z` comes out a range one rounding either side of nought. Each part
+  worked as an exact difference of two products
+  (`rcad_predicates::expansion::difference_of_two_products`) gives the bar its
+  band and the four faces, and moves the pin of
   `a_turned_bar_through_a_block_cuts_ellipses_and_nothing_has_to_be_approximated`
   in `fuse/arrange.rs`, two block faces cut by 6 surfaces and not 7 with the
   same pieces, which is outside Q2252's files. A row from Q2252 carries it.
+  **Since Q2256, closed.** `ABandRoundAnAxis::is_parallel_to` in `cuts.rs`
+  works each part so, and `is_square_to` and the direction half of
+  `is_on_the_axis` ask it. A part whose product `difference_of_two_products`
+  refuses, one that overflows or one down among the smallest `f64`s, is still
+  asked in intervals, so nothing parallel before is less so now. The leaning
+  bar is four faces by difference and the ball alone by union, both pinned in
+  `a_ball_hollowed_by_an_off_centre_bar_keeps_its_skin_whole.rs`, and the
+  block's faces at `y = 0` and `y = 8` in the `arrange.rs` pin no longer
+  carry the pipe among their cuts.
 - A draw where two solids meet that reaches the §345 fold.
 - Q451 and Q453 wait on this row and were written around Q316's four draws,
   which no longer reach the mesher.

@@ -11,7 +11,8 @@
 //! The same bar at `(0.4, 0)` turned half a radian about `y` came back with 8
 //! faces again, after the band was asked of a ball off the axis: interval
 //! arithmetic could not show either cap square to the pipe, so neither had a
-//! band (Q2256).
+//! band. Each part of the cross product of a cap's normal and the pipe's axis
+//! is now worked exactly (Q2256).
 
 use core::f64::consts::PI;
 
@@ -59,8 +60,9 @@ fn centred() -> Isometry {
 }
 
 /// The bar centred on the ball's own centre, turned half a radian about `y`.
-/// Each cap's normal is then the exact negative of the pipe's axis, and
-/// `n_z·w_x − n_x·w_z` worked in intervals is a range either side of nought.
+/// The far cap's normal is then the pipe's axis `w` exactly and the near cap's
+/// its exact negative, and `n_z·w_x − n_x·w_z` worked in intervals is a range
+/// either side of nought for both.
 fn leaning() -> Isometry {
     Isometry::rotation(&Axis::y(), 0.5)
         .expect("a turn")

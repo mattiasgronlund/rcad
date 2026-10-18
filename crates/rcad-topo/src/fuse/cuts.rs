@@ -1397,10 +1397,11 @@ impl ABandRoundAnAxis {
     /// worked out exactly as a difference of two products (Q2256).
     ///
     /// [`Self::runs_along`] says nought only where every product it takes
-    /// comes out an `f64`. A round bar turned half a radian about `y` has each
-    /// cap's normal the exact negative of its axis, `(∓0.479…, 0, ∓0.878…)`,
-    /// and there `n_z·w_x − n_x·w_z` came out a range a rounding either side
-    /// of nought: neither cap was square to the pipe, so neither had a band.
+    /// comes out an `f64`. A round bar turned half a radian about `y` has its
+    /// axis `(0.479…, 0, 0.878…)`, its far cap's normal that same direction
+    /// and its near cap's the exact negative of it, and there `n_z·w_x −
+    /// n_x·w_z` came out a range a rounding either side of nought: neither cap
+    /// was square to the pipe, so neither the caps nor the pipe had a band.
     ///
     /// A part whose products the exact arithmetic will not take, one that
     /// overflows or one down among the smallest `f64`s, is asked in interval
