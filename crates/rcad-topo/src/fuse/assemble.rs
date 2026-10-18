@@ -178,7 +178,7 @@ pub(crate) fn assemble(
         Some(inputs_reach) => assembly.check_dynamic_range(inputs_reach, policy, range_warning)?,
         None => None,
     };
-    assembly.runs = assembly.how_each_edge_runs()?;
+    assembly.runs = assembly.how_each_edge_runs(policy, log)?;
     if let Some(range) = still_to_measure {
         assembly.check_how_thin_each_face_is(range, policy, range_warning)?;
     }
@@ -5019,9 +5019,10 @@ impl Assembly {
     /// # Errors
     ///
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
-    /// curved crossing.
-    fn how_each_edge_runs(&self) -> Result<Vec<EdgeRun>> {
-        let cut_by = self.the_surface_that_cut_each_edge_its_faces_do_not_name();
+    /// curved crossing, and whatever
+    /// [`Assembly::the_surface_that_cut_each_edge_its_faces_do_not_name`] gives.
+    fn how_each_edge_runs(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<Vec<EdgeRun>> {
+        let cut_by = self.the_surface_that_cut_each_edge_its_faces_do_not_name(policy, log)?;
         self.edges
             .iter()
             .zip(cut_by)
@@ -5067,6 +5068,16 @@ impl Assembly {
     /// [`the_plane_of_a_rim_between_two_curved_faces`] says why the two faces
     /// alone may name nothing to follow.
     ///
+    /// **A rim between a ring and a ball, a pipe or a cone on its axis names
+    /// its own plane**, the one `intersect` names that circle by
+    /// ([`the_plane_of_the_circle_through`]). Named by its two faces alone it is
+    /// refused by `rcad_geom::walk`, which follows such a circle only by its
+    /// plane: a whole ring about `x`, 4 round a tube of 1, against a ball of 4
+    /// at `(1, 0, 0)` keeps the circle at `x = −15/17` between the two in every
+    /// answer, and each was refused
+    /// [`ACrossingBetweenATorusAndAnotherCurvedSurface`](rcad_geom::Error)
+    /// (`tests/a_walk_neither_winding_nor_the_axis_places.rs`, Q2260).
+    ///
     /// `None` everywhere else, which is where [`EdgeRun::RightRoundWhereItsFacesCross`]
     /// stays for a rim, and [`Edge::the_surface_that_names_it_twice`] is asked
     /// for an arc. Three shapes come back `None` for a reason worth naming: an
@@ -5076,45 +5087,95 @@ impl Assembly {
     /// a step later under its own name rather than here; and a crossing whose
     /// pair does not name one surface of the answer and one other, which leaves
     /// nothing to put in `and`.
-    fn the_surface_that_cut_each_edge_its_faces_do_not_name(&self) -> Vec<Option<Surface>> {
+    ///
+    /// # Errors
+    ///
+    /// Whatever `intersect` gives for a ring and its partner.
+    fn the_surface_that_cut_each_edge_its_faces_do_not_name(
+        &self,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Vec<Option<Surface>>> {
         let mut claimants: Vec<Vec<usize>> = vec![Vec::new(); self.edges.len()];
         for (face, walked) in self.faces.iter().enumerate() {
             for side in walked.wires.iter().flatten() {
                 claimants[side.edge].push(face);
             }
         }
-        self.edges
-            .iter()
-            .zip(&claimants)
-            .map(|(edge, by)| {
-                let [one, other] = <[usize; 2]>::try_from(by.as_slice()).ok()?;
-                let either_side = self.faces[one].surface;
-                if !one_surface(&self.faces[other].surface, &either_side) {
-                    if edge.ends[0] != edge.ends[1] {
-                        return None;
-                    }
-                    return the_plane_of_a_rim_between_two_curved_faces(
-                        [either_side, self.faces[other].surface],
-                        &edge.carried_by,
-                    );
+        let mut cut_by = Vec::with_capacity(self.edges.len());
+        for (edge, by) in self.edges.iter().zip(&claimants) {
+            let Ok([one, other]) = <[usize; 2]>::try_from(by.as_slice()) else {
+                cut_by.push(None);
+                continue;
+            };
+            let either_side = self.faces[one].surface;
+            if !one_surface(&self.faces[other].surface, &either_side) {
+                let faces = [either_side, self.faces[other].surface];
+                cut_by.push(if edge.ends[0] != edge.ends[1] {
+                    None
+                } else if let Some(flat) =
+                    the_plane_of_a_rim_between_two_curved_faces(faces, &edge.carried_by)
+                {
+                    Some(flat)
+                } else {
+                    self.the_own_plane_of_a_rim_round_a_rings_axis(edge, faces, policy, log)?
+                });
+                continue;
+            }
+            cut_by.push(match edge.carried_by {
+                [met, across]
+                    if one_surface(&met, &either_side) && !one_surface(&across, &either_side) =>
+                {
+                    Some(across)
                 }
-                match edge.carried_by {
-                    [met, across]
-                        if one_surface(&met, &either_side)
-                            && !one_surface(&across, &either_side) =>
-                    {
-                        Some(across)
-                    }
-                    [across, met]
-                        if one_surface(&met, &either_side)
-                            && !one_surface(&across, &either_side) =>
-                    {
-                        Some(across)
-                    }
-                    _ => None,
+                [across, met]
+                    if one_surface(&met, &either_side) && !one_surface(&across, &either_side) =>
+                {
+                    Some(across)
                 }
-            })
-            .collect()
+                _ => None,
+            });
+        }
+        Ok(cut_by)
+    }
+
+    /// The plane `intersect` names the closed `edge` by, where its two faces
+    /// are a ring and a ball, a pipe or a cone on its axis and its edge was
+    /// named by those two; `None` for any other edge, and where no one circle
+    /// of theirs certainly keeps the edge's corner.
+    ///
+    /// # Errors
+    ///
+    /// Whatever `intersect` gives for the two.
+    fn the_own_plane_of_a_rim_round_a_rings_axis(
+        &self,
+        edge: &Edge,
+        faces: [Surface; 2],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Option<Surface>> {
+        let is_a_ring_and_its_partner = |pair: &[Surface; 2]| {
+            matches!(
+                pair,
+                [
+                    Surface::Torus(_),
+                    Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+                ] | [
+                    Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+                    Surface::Torus(_),
+                ]
+            )
+        };
+        if !is_a_ring_and_its_partner(&faces) || !is_a_ring_and_its_partner(&edge.carried_by) {
+            return Ok(None);
+        }
+        let Some(levels) =
+            the_planes_of_the_circles_round_a_rings_axis(&edge.carried_by, policy, log)?
+        else {
+            return Ok(None);
+        };
+        let corner = PredicatePoint::from(self.corners[edge.ends[0]].point.coordinates());
+        Ok(the_plane_of_the_circle_through(&levels, corner).map(Surface::Plane))
     }
 
     /// Build every entity of the result in `model`, in a fixed order.
@@ -9733,6 +9794,32 @@ fn which_of_the_pairs_closed_crossings_it_is(
     log: &mut ProvenanceLog,
 ) -> Result<WhichCurveOfThePair> {
     match carried_by {
+        [
+            Surface::Torus(_),
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+        ]
+        | [
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+            Surface::Torus(_),
+        ] => {
+            let Some(levels) =
+                the_planes_of_the_circles_round_a_rings_axis(carried_by, policy, log)?
+            else {
+                return Ok(None);
+            };
+            if levels.len() < 2 {
+                return Ok(None);
+            }
+            return Ok(
+                the_plane_of_the_circle_through(&levels, point).map(|level| {
+                    let mut name = [0; 10];
+                    name[0] = A_CIRCLE_NAMED_BY_ITS_OWN_PLANE;
+                    name[1..]
+                        .copy_from_slice(&name_of_the_plane_at_any_scale(&Surface::Plane(level)));
+                    name
+                }),
+            );
+        }
         [Surface::Plane(_), Surface::Torus(_)]
         | [Surface::Torus(_), Surface::Plane(_)]
         | [
@@ -9753,6 +9840,80 @@ fn which_of_the_pairs_closed_crossings_it_is(
         return Ok(None);
     };
     Ok(which_curve_of_the_pair(&[this_circle]))
+}
+
+/// The slot ahead of a ring's circle's plane in its [`WhichCurveOfThePair`],
+/// past the four kinds of picker [`which_curve_of_the_pair`] writes.
+const A_CIRCLE_NAMED_BY_ITS_OWN_PLANE: u64 = 4;
+
+/// The planes `intersect` names each circle a ring and a ball, a pipe or a
+/// cone on its axis cross in by; `None` where the two cross in nothing or in
+/// anything but such circles, as a pipe of the tube's radius along the ring's
+/// core does.
+///
+/// # Errors
+///
+/// Whatever `intersect` gives for the two.
+///
+/// # Panics
+///
+/// If the planes do not all face one way, which every circle `intersect`
+/// names round one ring does.
+fn the_planes_of_the_circles_round_a_rings_axis(
+    carried_by: &[Surface; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Vec<Plane>>> {
+    let SurfaceMeet::Curves(circles) =
+        rcad_geom::intersect(&carried_by[0], &carried_by[1], policy, log)?
+    else {
+        return Ok(None);
+    };
+    let mut levels = Vec::with_capacity(circles.len());
+    for circle in &circles {
+        let EdgeRun::RightRoundWhereItCrosses {
+            and: Surface::Plane(level),
+        } = circle.run()
+        else {
+            return Ok(None);
+        };
+        levels.push(*level);
+    }
+    assert!(
+        levels
+            .iter()
+            .all(|level| level.normal() == levels[0].normal()),
+        "the circles round one ring face one way: {levels:?}"
+    );
+    Ok(Some(levels))
+}
+
+/// The one plane among `levels` whose circle keeps `point`: in front of the
+/// plane halfway to the next circle down and behind the plane halfway to the
+/// next one up, which `intersect` proves part the two, as `arrange.rs` picks
+/// each such circle. `None` where no one circle certainly keeps it.
+///
+/// The circle is on the ring and its partner exactly and off its own plane by
+/// up to sixteen roundings, so whether `point` is on that plane is not asked.
+fn the_plane_of_the_circle_through(levels: &[Plane], point: PredicatePoint) -> Option<Plane> {
+    let mut keeping = levels.iter().filter(|level| {
+        let halfway = |other: &Plane| {
+            HalfSpace::new(level.normal(), level.offset() / 2.0 + other.offset() / 2.0)
+                .expect("a plane's normal has a length and the two offsets are finite")
+        };
+        levels.iter().all(|other| {
+            let side = match other.offset().total_cmp(&level.offset()) {
+                Ordering::Less => halfway(other).side_of_point(point),
+                Ordering::Greater => halfway(other).reversed().side_of_point(point),
+                Ordering::Equal => return true,
+            };
+            side == Decision::Pos
+        })
+    });
+    match (keeping.next(), keeping.next()) {
+        (Some(only), None) => Some(*only),
+        _ => None,
+    }
 }
 
 /// Which curve of its pair a closed crossing's corner is on: what picks the
