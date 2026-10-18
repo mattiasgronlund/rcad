@@ -42,13 +42,15 @@
 //! now faced by which way along its chord it sets off, as for any arc of a
 //! closed curve whose ends' rounding chose its side.
 //!
-//! **What the union comes back as now is a refusal, and a gap**: the answer
-//! exists. The mesher finds two corners of a cap at one stored point,
+//! **What the union came back as then was a refusal, and a gap**: the answer
+//! exists. The mesher found two corners of a cap at one stored point,
 //! `(0.6r, 0.8r)` rounded: the foot of the ruling where `x = 0.6r` cuts the
 //! pipe, and the foot of the block's corner edge, which in exact arithmetic is
 //! `1.78e−15` from it, outside the bar.
-//! Q2079's change, which answers Q2074 and Q2067, leaves both unions and the
-//! bar less the block refused the same way; the row for it is Q2106.
+//! Q2079's change, which answers Q2074 and Q2067, left both unions and the
+//! bar less the block refused the same way (Q2106). Since Q2238 the mesh cuts
+//! a cap's loop at a place it names twice (`what_the_triangulator_can_cut` in
+//! `mesh.rs`), and every fuse at radius `24.32` answers with its volume.
 //!
 //! **Q2080: at working size `1`, every fuse at radii `8`, `12.8`, `16` and
 //! `25.6` was refused `Undecidable` at "order along a crossing".** On each cap
@@ -63,11 +65,12 @@
 //! and `16`. At `12.8` and `25.6` the order is decided, and no fuse logs one,
 //! so they get past it without that change: put back to file the sweep as an
 //! area, the pins at those two radii still pass. Both
-//! intersections and the block less the bar answer with their volumes, and
-//! the union in either order and the bar less the block are refused
-//! `CannotMeshAFace` for two corners of a cap stored at one point, as at
-//! radius `24.32` above. Whether they are the same two feet as there was not
-//! checked.
+//! intersections and both differences answer with their volumes, and the
+//! union in either order is refused `CannotMeshAFace` with `CornersCoincide`
+//! for two corners of a cap stored at one point, as at radius `24.32` above
+//! before Q2238. There the cut leaves a lobe the triangulator refuses, and the
+//! cap is refused for what its whole loop is refused for. Whether they are the
+//! same two feet as at `24.32` was not checked.
 
 #![forbid(unsafe_code)]
 
@@ -192,18 +195,18 @@ fn how_far_apart_the_two_may_be(one: PredicatePoint, other: PredicatePoint) -> f
 
 /// The rest of Q2080's shapes: radii `12.8` and `25.6`, one an image of the
 /// other under a scale by two, at working size `1`. Their fuses get past the
-/// order of the rulings' feet, whichever way it is filed, and three of the six
+/// order of the rulings' feet, whichever way it is filed, and the two unions
 /// then reach a cap that names one corner twice.
 const A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1: [(f64, f64); 2] = [(12.8, 1.0), (25.6, 1.0)];
 
 #[test]
-fn both_intersections_and_the_block_less_the_bar_at_radii_12_8_and_25_6_answer_with_their_volumes()
-{
+fn both_intersections_and_both_differences_at_radii_12_8_and_25_6_answer_with_their_volumes() {
     let mut wrong = Vec::new();
     for (radius, size) in A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1 {
         for (rule, bar_first) in [
             (Rule::Intersection, true),
             (Rule::Intersection, false),
+            (Rule::Difference, true),
             (Rule::Difference, false),
         ] {
             if let Err(why) = the_fuse_answers_with_its_volume(radius, size, rule, bar_first) {
@@ -216,18 +219,14 @@ fn both_intersections_and_the_block_less_the_bar_at_radii_12_8_and_25_6_answer_w
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Both unions and the bar less the block at radii `12.8` and `25.6` are
-/// refused by the mesher, for two corners of a cap stored at one point, as
-/// the unions at radius `24.32` are. This pins the gap, so that the row which
-/// answers it moves this test.
+/// Both unions at radii `12.8` and `25.6` are refused by the mesher, for two
+/// corners of a cap stored at one point, as the unions at radius `24.32` were
+/// until Q2238. This pins the gap, so that the row which answers it moves this
+/// test.
 #[test]
-fn both_unions_and_the_bar_less_the_block_at_radii_12_8_and_25_6_name_one_cap_corner_twice() {
+fn both_unions_at_radii_12_8_and_25_6_name_one_cap_corner_twice() {
     for (radius, size) in A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1 {
-        for (rule, bar_first) in [
-            (Rule::Union, true),
-            (Rule::Union, false),
-            (Rule::Difference, true),
-        ] {
+        for (rule, bar_first) in [(Rule::Union, true), (Rule::Union, false)] {
             let answer = the_fuse_of_the_bar_and_the_block(radius, size, rule, bar_first);
             let Err(Error::CannotMeshAFace {
                 why: CannotTriangulate::CornersCoincide { .. },
@@ -260,21 +259,13 @@ fn the_union_at_radius_0_38_comes_back_within_ten_seconds() {
     );
 }
 
-/// Both unions are refused by the mesher, for two corners of a cap that are
-/// stored at one point. This pins the gap the module's doc describes, so that
-/// the row which answers it moves this test.
+/// Q2081's shapes, radius `24.32` at working size `6.4` and its image under a
+/// scale by `2⁻⁶`: every fuse, though a cap holds two corners stored at one
+/// point, as the module's doc describes.
 #[test]
-fn both_unions_are_refused_for_two_corners_of_a_cap_stored_at_one_point() {
-    for (radius, size) in [(24.32, 6.4), (0.38, 0.1)] {
-        let answer = the_union_within_ten_seconds(radius, size);
-        let Some(Err(Error::CannotMeshAFace {
-            why: CannotTriangulate::CornersCoincide { .. },
-            ..
-        })) = answer
-        else {
-            panic!("radius {radius}, working size {size}: {answer:?}");
-        };
-    }
+fn every_fuse_at_radius_24_32_and_its_image_answers_with_its_volume() {
+    let wrong = what_each_fuse_gets_wrong(&[(24.32, 6.4), (0.38, 0.1)]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// Each of the six fuses of each shape, every rule both ways round, that does
