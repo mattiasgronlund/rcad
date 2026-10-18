@@ -25,12 +25,7 @@ use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 #[test]
 fn a_block_cornered_on_a_round_tabs_rim_is_never_refused_on_which_rim_crossing_comes_first() {
     let mut refused = Vec::new();
-    for [x0, y0, y1] in [
-        [11.4, 8.2, 9.2],
-        [7.6, 8.2, 11.8],
-        [11.9, 8.2, 8.7],
-        [11.2, 8.2, 9.4],
-    ] {
+    for [x0, y0, y1] in BLOCKS {
         for [z0, z1] in [[2.0, 3.0], [-1.0, 0.0]] {
             for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
                 for plate_first in [true, false] {
@@ -67,20 +62,45 @@ fn a_block_cornered_on_a_round_tabs_rim_is_never_refused_on_which_rim_crossing_c
     );
 }
 
+/// Under a certified policy each block answers with its volume, by every rule
+/// both ways round, 48 fuses. The block touches the plate along a face, so
+/// the union holds both, the difference the first, and the intersection
+/// nothing.
+#[test]
+fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_under_a_certified_policy() {
+    let wrong = what_the_fuses_get_wrong(&BLOCKS, &Policy::certified());
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// Under a tolerant policy the two rim crossings a rounding apart are one
 /// point, the corner is on the rim, and each block that has no other corner
-/// on it answers with its volume. The block touches the plate along a face,
-/// so the union holds both, the difference the first, and the intersection
-/// nothing.
+/// on it answers with its volume.
 ///
 /// The block `x 7.6 to 12.4` by `y 8.2 to 11.8` is left out: its corner
 /// `(7.6, 11.8)` is on the rim too, and is refused at a point inside a piece of
 /// a face under either policy.
 #[test]
 fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_when_the_corner_is_read_as_on_it() {
-    let policy = Policy::tolerant(100.0);
+    let wrong =
+        what_the_fuses_get_wrong(&[BLOCKS[0], BLOCKS[2], BLOCKS[3]], &Policy::tolerant(100.0));
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Each block `[x0, y0, y1]` runs from `(x0, y0)` to `(12.4, y1)`, and its
+/// corner `(12.4, 8.2)` is on the rim.
+const BLOCKS: [[f64; 3]; 4] = [
+    [11.4, 8.2, 9.2],
+    [7.6, 8.2, 11.8],
+    [11.9, 8.2, 8.7],
+    [11.2, 8.2, 9.4],
+];
+
+/// Each of `blocks`, set on the plate's top or under its floor, fused with the
+/// plate by every rule, plate first and second, under `policy`: one line for
+/// each fuse that was refused or does not hold what it should.
+fn what_the_fuses_get_wrong(blocks: &[[f64; 3]], policy: &Policy) -> Vec<String> {
     let mut wrong = Vec::new();
-    for [x0, y0, y1] in [[11.4, 8.2, 9.2], [11.9, 8.2, 8.7], [11.2, 8.2, 9.4]] {
+    for &[x0, y0, y1] in blocks {
         for [z0, z1] in [[2.0, 3.0], [-1.0, 0.0]] {
             for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
                 for plate_first in [true, false] {
@@ -103,10 +123,10 @@ fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_when_the_corner_
                         (other, _) => panic!("no volume for {other:?}"),
                     };
                     let what = model
-                        .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+                        .fuse(&arguments, &tools, rule, policy, &mut ProvenanceLog::new())
                         .map_err(|why| format!("refused {why:?}"))
                         .and_then(|fused| {
-                            what_it_holds(&model, fused.solids(), should_hold, &policy)
+                            what_it_holds(&model, fused.solids(), should_hold, policy)
                         });
                     if let Err(why) = what {
                         wrong.push(format!(
@@ -118,7 +138,7 @@ fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_when_the_corner_
             }
         }
     }
-    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    wrong
 }
 
 /// Whether `solids` is one solid that validates and measures `should_hold`
