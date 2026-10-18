@@ -601,13 +601,16 @@ fn two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_answered()
             let first = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start);
             let copy = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, start - FRAC_PI_2);
             let wedge = 4.0 * PI * the_angle_where_the_caps_overlap(&model, [first, copy], start);
-            let solids =
-                fused_or_refused(&mut model, first, copy, Rule::Intersection, the_first_first)
+            let measured =
+                fused_and_measured(&mut model, first, copy, Rule::Intersection, the_first_first)
                     .unwrap_or_else(|why| panic!("{what}: {why:?}, a wedge of {wedge}"));
-            assert_eq!(solids, 1, "{what}: a wedge of {wedge}");
-            model
-                .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                .unwrap_or_else(|why| panic!("{what}: {why:?}, a wedge of {wedge}"));
+            let [(volume, error)] = measured[..] else {
+                panic!("{what}: {measured:?}, a wedge of {wedge}");
+            };
+            assert!(
+                0.0 < wedge && (volume - wedge).abs() <= error,
+                "{what}: {volume} ± {error}, a wedge of {wedge}"
+            );
         }
     }
 }
