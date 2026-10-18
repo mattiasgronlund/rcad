@@ -86,19 +86,20 @@ from 98 to 99, which is what §40 asks.
 §215.3 marked one step as inference and it was right about the *site*: probed,
 `cut.kept` reads **`Pos`** on the floor answers. In the `Union` answer of the
 side-6 corner-up cube centred on the pointed cone's apex and turned 0.7, the
-`Surface::Cone` arm of `is_a_family_this_follows` was reached **13 187** times
+`Surface::Cone` arm of `is_a_family_this_follows` was reached **39 642** times
 with `kept == Pos` and 15 930 times with `Neg`, and the family gate then refused
-a plane face whose cuts include a cone exactly 13 187 times (10 070 + 3 117) —
-the two counts match to the call. The same function's closing `Err` printed
-**zero** times over the whole run.
+a plane face whose cuts include a cone exactly 39 642 times — the two counts
+match to the call. The same function's closing `Err` printed **zero** times
+over the whole run.
 
 **And it makes no difference.** Deleting the `cut.kept == Decision::Neg`
-conjunct: **9 326 → 9 326**. Deleting it *and* letting a straight side read
-`Beside(Pos)` against a cone: 9 326 again, with all 13 187 refusals relocating to
-`where_a_side_lies`'s `Lies::Across` — a plane face, an arc side running along
-the cone, against a plane cut, the "an arc with neither end on the plane" arm.
-The ellipse such a face is ringed by is closed, so it has no end on any straight
-cut, and there is a third blocker behind that one.
+conjunct: **30 101 → 30 101**. Deleting it *and* letting a straight side read
+`Beside(Pos)` against a cone: 30 101 again, with all 39 642 refusals relocating
+to `where_a_side_lies` — not to its arc arm's `Lies::Across`, which is never
+reached for a cone in this run, since the face the ellipse rings now takes
+`what_a_flat_face_of_chords_and_arcs_holds` first, but to its **straight**-side
+fallback instead, every one with both ends read `Pos`. There is a third blocker
+behind that one.
 
 The convexity argument does not survive either. An ellipse's inside is convex and
 its outside is not, so *"any number of convex pieces meet in one"* says nothing
