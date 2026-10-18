@@ -78,8 +78,9 @@ impl Measurement {
     /// — and [`how_much_space_hides_under_a_flat_stand_in`] bounds it.
     ///
     /// A flat face of a curved solid has no shell, but the points the mesher
-    /// places along its curved edges lie on its plane only as nearly as their
-    /// coordinates can be written down, and a turned plane's rarely can. So it
+    /// places along its curved edges, and the corners those edges end at, lie
+    /// on its plane only as nearly as their coordinates can be written down,
+    /// and a turned plane's rarely can. So it
     /// is charged the slab its triangles can
     /// stray through: [`how_far_the_points_stray_off`] its plane times its
     /// area, and the furthest any flat face strays times the slivers along its
@@ -290,8 +291,9 @@ impl FaceMeasurement {
     ///   the triangles' share of it, twice over — once as area that pairs with
     ///   nothing and once in the net difference above the split.
     /// - **A flat face of a curved solid**: each point moves straight on to the
-    ///   face's plane, except the face's own corners, which stay where the
-    ///   solid holds them, so `moved` is [`how_far_the_points_stray_off`] it —
+    ///   face's plane, except the corners where only straight sides of the
+    ///   face meet, which stay where the solid holds them, so `moved` is
+    ///   [`how_far_the_points_stray_off`] it —
     ///   `0` where every other point lies on the plane exactly, and a rounding
     ///   or so on a turned plane, whose points rarely can; and what is
     ///   unpaired is the slivers between the inscribed outline and the curve,
@@ -415,8 +417,14 @@ impl SolidView<'_> {
     /// `0.5`, `1` and `2`: at `2` a sound ball with a cube taken out of it sums
     /// below zero too, and `validate` is what refuses the inside-out one
     /// (`an_inside_out_solid_meshed_coarse_answers_negative.rs`).
-    /// `validate` charges a curved solid's flat faces the same way
-    /// [`SolidView::skin_of`] does (Q2089), so the two agree on a sliver.
+    /// `validate` charges a curved solid's flat faces for how far their points
+    /// stray off their planes, as [`SolidView::skin_of`] does (Q2089), but it
+    /// charges every corner (Q2272), where `skin_of` leaves out a corner where
+    /// only straight sides meet and charges one at the end of a curved side
+    /// (Q2316). So the two agree on the sliver at step 196 of
+    /// `two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring`,
+    /// whose copy's corner lies `6.4e-16` off its cap's plane at the end of
+    /// the cap's circle, and on a turned block `validate` charges more.
     ///
     /// **This used to be an assert, and §20.1 settled it that way.** The
     /// argument then was that the only route to an inside-out solid was a bug
@@ -596,13 +604,25 @@ impl SolidView<'_> {
     /// [`how_far_the_points_stray_off`] its plane times its area, the slab its
     /// triangles can stray through.
     ///
-    /// **The face's own corners are not charged**, because a corner is where
-    /// the solid really reaches and the mesh holds it exactly, as a wholly flat
-    /// solid's measure takes its corners (§338). Charged too, the block less
-    /// the cone in `a_flat_solid_publishes_the_rounding_of_its_measure.rs`,
-    /// whose turned block's corners sit up to `1.2e-15` off its planes and
-    /// whose flat faces carry no other point, owed `3.5e-13` for space its
-    /// mesh does not leave out, four times the rounding it really owes.
+    /// **A corner where only straight sides of the face meet is not charged**,
+    /// because such a corner is where the solid really reaches and the mesh
+    /// holds it exactly, as a wholly flat solid's measure takes its corners
+    /// (§338). Charged too, the block less the cone in
+    /// `a_flat_solid_publishes_the_rounding_of_its_measure.rs`, whose turned
+    /// block's corners sit up to `1.2e-15` off its planes and whose flat faces
+    /// carry no other point, owed `3.5e-13` for space its mesh does not leave
+    /// out, four times the rounding it really owes.
+    ///
+    /// **A corner at the end of a curved side is charged**, like the points
+    /// the mesher places along that side, since the curve lies in the plane
+    /// and the corner is one more point written down on it. The copy's cap of
+    /// the sliver in
+    /// `the_sliver_at_step_196_is_measured_within_its_error_at_coarse_deflections`
+    /// is one circle with one corner on it, `6.4e-16` off the cap's plane, and
+    /// at a deflection of `0.5` the triangles that corner tilts summed
+    /// `−5.2e-16` against a wedge of `5.9e-19`. Left out, the cap was charged
+    /// `1.4e-16`, and the sum was refused [`Invalid::VolumeIsNotPositive`]
+    /// (Q2316).
     ///
     /// The slivers between a flat face's
     /// inscribed outline and its curve are inside the neighbouring curved
@@ -1911,12 +1931,14 @@ fn how_much_space_hides_under_a_flat_stand_in(area: f64, radius: f64, deviation:
 /// How far the furthest point of `triangles` lies off `plane`, leaving out the
 /// points `held`, rounded up: a length, in the model's own unit.
 ///
-/// `held` is the face's own corners, from [`the_corners_it_holds`]. A corner is
-/// where the solid really reaches, wherever the plane is — the truth a flat
-/// solid is measured against too (`docs/decisions.md` §338) — and the mesh
-/// holds it exactly, so nothing lies between a triangle and the truth there.
-/// The points the mesher placed along a face's curved edges stand for points
-/// on curves that lie in the plane, and those are what can stray.
+/// `held` is the face's corners where only straight sides meet, from
+/// [`the_corners_it_holds`]. Such a corner is where the solid really reaches,
+/// wherever the plane is — the truth a flat solid is measured against too
+/// (`docs/decisions.md` §338) — and the mesh holds it exactly, so nothing lies
+/// between a triangle and the truth there. The points the mesher placed along
+/// a face's curved edges stand for points on curves that lie in the plane, and
+/// those are what can stray, and so can a corner at the end of such an edge,
+/// which is one more of them (Q2316).
 ///
 /// **Worked out exactly and not read off [`Plane::signed_distance_to`]**,
 /// whose [`Plane::SIGNED_DISTANCE_ROUNDOFF`] at coordinates of `4` is about
@@ -1927,7 +1949,7 @@ fn how_much_space_hides_under_a_flat_stand_in(area: f64, radius: f64, deviation:
 /// one only to within [`Plane::NORMAL_LENGTH_ROUNDOFF`] of its square, so
 /// dividing by the length is at most multiplying by `1 + 64ε`.
 ///
-/// `0.0` exactly when every point but the corners sits on the plane exactly,
+/// `0.0` exactly when every point but those `held` sits on the plane exactly,
 /// and when there are no such points at all.
 fn how_far_the_points_stray_off(
     mesh: &Mesh,
@@ -2027,14 +2049,11 @@ fn the_shrink_for_the_sides_of(mesh: &Mesh, triangles: &[MeshTriangle]) -> i32 {
 /// it meet: the point the model holds for each such vertex on its wires,
 /// exactly, as [`Mesh::point_at_vertex`] says.
 ///
-/// **A corner at the end of a curved side is left out**, since the curve is
-/// where the face's plane crosses the surface next to it, so it lies on the
-/// plane, and the corner is a point written down on it like the points the
-/// mesher places along it. The copy's cap of the step-196 sliver in
-/// `the_sliver_at_step_196_is_measured_within_its_error_at_coarse_deflections`
-/// is one circle with one corner on it, `6.4e-16` off the cap's plane, and at
-/// a deflection of `0.5` the triangles that corner tilts summed `−5.2e-16`
-/// against a wedge of `5.9e-19` (row Q2316). A side of any kind this crate
+/// **A corner at the end of a curved side is left out, and so charged**, since
+/// the curve is where the face's plane crosses the surface next to it, so it
+/// lies on the plane, and the corner is a point written down on it like the
+/// points the mesher places along it. [`SolidView::skin_of`] says what leaving
+/// it in cost the step-196 sliver (row Q2316). A side of any kind this crate
 /// does not know as straight leaves its corners out too, which charges more.
 fn the_corners_it_holds(face: FaceView<'_>, mesh: &Mesh) -> Vec<u32> {
     let sides: Vec<CoedgeView<'_>> = face.wires().flat_map(|wire| wire.coedges()).collect();
