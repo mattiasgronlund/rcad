@@ -42,8 +42,8 @@
 //! height of the band across it.
 
 use rcad_geom::{
-    Axis, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface,
-    Vector,
+    Axis, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point,
+    Scale, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
@@ -420,6 +420,99 @@ fn a_bar_in_two_bands_turned_off_z_meshes_each_band_on_its_own_side() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The bar in two bands of the tests above, with the rim at `z = 2` written
+/// as two half-circles sharing the pipe's own two ends rather than one whole
+/// circle: `EdgeRun::PartOfWhereItCrosses`, cut either side of `y = 0` by a
+/// half-space, in place of `EdgeRun::RightRoundWhereItCrosses`. No test here
+/// built the rim this way before this one — Q2200 filed a
+/// `DeflectionBelowWhatAMeshCanReach` refusal at `0.01` on it, and none of
+/// the four up/down layouts, built turned or placed by `place_solid`, over
+/// ten axes and twenty-five turns each, shows it (`docs/decisions.md`
+/// §16.10).
+#[test]
+fn a_bar_in_two_bands_with_its_rim_as_two_arcs_meshes_each_band_on_its_own_side() {
+    let up = Cylinder::new(Axis::z(), RADIUS).expect("a radius");
+    let down = Cylinder::new(Axis::z().reversed(), RADIUS).expect("a radius");
+    let facing_up =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 2.0), Vector::new(0.0, 0.0, 1.0))
+            .expect("the z axis is a unit normal");
+    let axes = [
+        ("x", Vector::new(1.0, 0.0, 0.0)),
+        ("y", Vector::new(0.0, 1.0, 0.0)),
+        ("(1,1,0)", Vector::new(1.0, 1.0, 0.0)),
+        ("(1,0,1)", Vector::new(1.0, 0.0, 1.0)),
+        ("(0,1,1)", Vector::new(0.0, 1.0, 1.0)),
+        ("(1,2,3)", Vector::new(1.0, 2.0, 3.0)),
+        ("(-1,2,0.5)", Vector::new(-1.0, 2.0, 0.5)),
+        ("(3,-1,2)", Vector::new(3.0, -1.0, 2.0)),
+        ("(1,1,1)", Vector::new(1.0, 1.0, 1.0)),
+        ("(2,0,-1)", Vector::new(2.0, 0.0, -1.0)),
+    ];
+    let mut wrong = Vec::new();
+    for (axis_name, direction) in axes {
+        let turning = Axis::new(Point::origin(), direction).expect("a direction");
+        for k in 1..=25 {
+            let angle = 0.25 * f64::from(k);
+            let turn = Isometry::rotation(&turning, angle).expect("a finite turn");
+            for (lower, upper) in [(up, up), (up, down), (down, up), (down, down)] {
+                for built_turned in [true, false] {
+                    let what = format!(
+                        "bands on {} and {}, turned {angle} about {axis_name}, {}",
+                        which_way(lower),
+                        which_way(upper),
+                        if built_turned {
+                            "built turned"
+                        } else {
+                            "placed"
+                        }
+                    );
+                    let built_on = if built_turned {
+                        turn
+                    } else {
+                        Isometry::identity()
+                    };
+                    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+                    let built: Vec<SolidKey> = [Orientation::Forward, Orientation::Reversed]
+                        .into_iter()
+                        .filter_map(|lower_walks_the_rim| {
+                            match a_bar_in_two_bands_with_the_rim_as_two_arcs(
+                                &mut model,
+                                [lower, upper],
+                                facing_up,
+                                lower_walks_the_rim,
+                                true,
+                                &built_on,
+                            ) {
+                                Ok(bar) => Some(bar),
+                                Err(Error::AWireWillNotLieFlatOnItsFace { .. }) => None,
+                                Err(why) => panic!("{what}: refused {why:?}"),
+                            }
+                        })
+                        .collect();
+                    let [bar] = built[..] else {
+                        panic!(
+                            "{what}: one way round the rim builds, and {} did",
+                            built.len()
+                        );
+                    };
+                    if !built_turned {
+                        model
+                            .place_solid(bar, &turn)
+                            .expect("this model made the key");
+                    }
+                    model
+                        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                        .unwrap_or_else(|why| panic!("{what}: the bar validates: {why:?}"));
+                    wrong.extend(what_is_wrong_with_each_face(
+                        &model, bar, &turn, RADIUS, &what,
+                    ));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// No turn, turns about `z` by each of `about_z`, and each of `others`.
 fn the_turns(about_z: &[f64], others: &[(&Axis, f64)]) -> Vec<(String, Isometry)> {
     let mut turns = vec![("not at all".to_owned(), Isometry::identity())];
@@ -650,11 +743,11 @@ fn a_bar_in_two_bands(
     ];
     let (lower_wall, upper_wall) = (lower.transformed(built_on), upper.transformed(built_on));
     let (low, high) = if lower_first {
-        let low = a_band(&mut draft, lower_wall, below)?;
-        (low, a_band(&mut draft, upper_wall, above)?)
+        let low = a_band(&mut draft, lower_wall, &below)?;
+        (low, a_band(&mut draft, upper_wall, &above)?)
     } else {
-        let high = a_band(&mut draft, upper_wall, above)?;
-        (a_band(&mut draft, lower_wall, below)?, high)
+        let high = a_band(&mut draft, upper_wall, &above)?;
+        (a_band(&mut draft, lower_wall, &below)?, high)
     };
     let faces = if lower_first {
         [bottom, low, high, top]
@@ -668,14 +761,124 @@ fn a_bar_in_two_bands(
 fn a_band(
     draft: &mut SolidBuilder,
     wall: Cylinder,
-    round: [(DraftEdge, Orientation); 4],
+    round: &[(DraftEdge, Orientation)],
 ) -> rcad_topo::Result<DraftFace> {
     let mut steps = Vec::new();
-    for (edge, way) in round {
+    for &(edge, way) in round {
         steps.push(DraftStep::Along(draft.add_coedge(edge, way)?));
     }
     let wire = draft.add_wire(&steps)?;
     draft.add_face(Surface::Cylinder(wall), &[wire])
+}
+
+/// `a_bar_in_two_bands`, with the rim at `z = 2` written as two half-circles
+/// — [`EdgeRun::PartOfWhereItCrosses`] cut either side of `y = 0` — instead
+/// of one whole circle.
+///
+/// The two arcs share the pipe's own two corners on the `x` axis, `(RADIUS,
+/// 0, 2)` and `(-RADIUS, 0, 2)`: `near` is the half with `y ≥ 0`, picked by a
+/// half-space facing `+y` through `(0, -0.5, 0)`, and `far` is the half with
+/// `y ≤ 0`, picked facing `-y` through `(0, 0.5, 0)` — half a unit either
+/// side of `y = 0`, off the arcs' own ends, so neither picker's boundary
+/// meets a point either arc runs through.
+///
+/// # Errors
+///
+/// Whatever [`SolidBuilder::build`] refuses the bar for.
+fn a_bar_in_two_bands_with_the_rim_as_two_arcs(
+    model: &mut Model,
+    walls: [Cylinder; 2],
+    rim_plane: Plane,
+    lower_walks_the_rim: Orientation,
+    lower_first: bool,
+    built_on: &Isometry,
+) -> rcad_topo::Result<SolidKey> {
+    let [lower, upper] = walls;
+    let mut draft = SolidBuilder::new();
+    let [at_0, at_2, at_2_opposite, at_4] = [
+        Point::new(RADIUS, 0.0, 0.0),
+        Point::new(RADIUS, 0.0, 2.0),
+        Point::new(-RADIUS, 0.0, 2.0),
+        Point::new(RADIUS, 0.0, 4.0),
+    ]
+    .map(|at| {
+        draft
+            .add_vertex(built_on.apply_to_point(at))
+            .expect("a corner")
+    });
+    let seam_below = draft.add_edge(at_0, at_2, EdgeRun::Straight)?;
+    let seam_above = draft.add_edge(at_2, at_4, EdgeRun::Straight)?;
+    let bottom_circle = draft.add_edge(at_0, at_0, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let top_circle = draft.add_edge(at_4, at_4, EdgeRun::RightRoundWhereItsFacesCross)?;
+    let and = Surface::Plane(rim_plane.transformed(built_on));
+    let facing_y = |y: f64| {
+        Picker::from(
+            HalfSpace::through_a_point_facing(
+                Point::new(0.0, -0.5 * y, 0.0),
+                Vector::new(0.0, y, 0.0),
+            )
+            .expect("the y axis has length"),
+        )
+        .transformed(built_on)
+    };
+    let near = draft.add_edge(
+        at_2,
+        at_2_opposite,
+        EdgeRun::PartOfWhereItCrosses {
+            and,
+            picked_by: smallvec::smallvec![facing_y(1.0)],
+        },
+    )?;
+    let far = draft.add_edge(
+        at_2_opposite,
+        at_2,
+        EdgeRun::PartOfWhereItCrosses {
+            and,
+            picked_by: smallvec::smallvec![facing_y(-1.0)],
+        },
+    )?;
+    let bottom = a_cap(&mut draft, 0.0, -1.0, bottom_circle, lower, built_on);
+    let top = a_cap(&mut draft, 4.0, 1.0, top_circle, upper, built_on);
+
+    let round_the_rim = match lower_walks_the_rim {
+        Orientation::Forward => [(near, Orientation::Forward), (far, Orientation::Forward)],
+        Orientation::Reversed => [(far, Orientation::Reversed), (near, Orientation::Reversed)],
+    };
+    let below = [
+        (
+            bottom_circle,
+            the_way_it_is_walked(lower, Orientation::Forward),
+        ),
+        (seam_below, Orientation::Forward),
+        round_the_rim[0],
+        round_the_rim[1],
+        (seam_below, Orientation::Reversed),
+    ];
+    let above = [
+        (round_the_rim[1].0, round_the_rim[1].1.reversed()),
+        (round_the_rim[0].0, round_the_rim[0].1.reversed()),
+        (seam_above, Orientation::Forward),
+        (
+            top_circle,
+            the_way_it_is_walked(upper, Orientation::Reversed),
+        ),
+        (seam_above, Orientation::Reversed),
+    ];
+    let (lower_wall, upper_wall) = (lower.transformed(built_on), upper.transformed(built_on));
+    let (low, high) = if lower_first {
+        let low = a_band(&mut draft, lower_wall, &below)?;
+        (low, a_band(&mut draft, upper_wall, &above)?)
+    } else {
+        let high = a_band(&mut draft, upper_wall, &above)?;
+        (a_band(&mut draft, lower_wall, &below)?, high)
+    };
+    let faces = if lower_first {
+        [bottom, low, high, top]
+    } else {
+        [top, high, low, bottom]
+    };
+    draft.add_shell(&faces.map(|face| (face, Orientation::Forward)))?;
+    draft.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
 
 /// A flat cap at height `z` facing `outward` along `z`, moved by `built_on`,

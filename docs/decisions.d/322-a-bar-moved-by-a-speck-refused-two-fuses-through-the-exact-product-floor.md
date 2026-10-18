@@ -238,7 +238,7 @@ off either:
 | `Undecidable` out of `meet_of_three_surfaces` | gap, 10.83% | **answered**, 0 of 2051 | it does not: the slide moved it, as above |
 | *order along a crossing*, a turned notched bar | gap | refused, certified and tolerant | its corner boxes come from `meet_of_three_surfaces`, but the refusal is §34.5's winding sum over them |
 | `Undecidable` out of `intersect`, a direction with a subnormal part | gap | refused, and decided slid by `2^300` | the lean `n·w` is `Exact::dot_of` and is asked first; the room the keep serves is asked only after a `Zero` lean |
-| `TheseTwoSurfacesDoNotCrossInAConic`, a dot that cancels in `f64` | gap | refused | `along_a_crossing.rs` has no `Nearly`, and `intersect`'s side is the same exact lean |
+| `TheseTwoSurfacesDoNotCrossInAConic`, a dot that cancels in `f64` | gap | **answered** (Q2244) | `along_a_crossing.rs` has no `Nearly`, and `intersect`'s side is the same exact lean |
 | `Undecidable` from `meet_of_three_planes`, past the top of the range | limit | refused | the keep still refuses a product that overflows |
 | `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` | gap | refused | settled by the kinds of the three surfaces, before any product |
 | `CannotWorkOutHowBigACrossingIs`, a bar too thin for its squares | gap | refused | the `f64` angle in `walk.rs`, with no `Nearly` |
@@ -252,8 +252,18 @@ test(a_direction_with_a_subnormal_component_cannot_be_told_from_square_to_a_plan
 test(three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere)
 | test(a_bar_too_thin_for_its_own_squares_is_refused_rather_than_asserted_against)
 |
-test(a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently)
+test(a_conic_the_intersector_names_is_ordered_here_too_because_the_two_ask_it_alike)
 | test(three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved)'`.
+
+> **2026-10-18 note (Q2244): the conic whose dot cancels in `f64` is now
+> ordered, not refused.** Q2189 made `walk.rs` ask the lean exactly, and Q2233
+> made `the_way_this_crossing_winds` in `along_a_crossing.rs` ask
+> `how_a_plane_leans_against_a_pipe`, the same authority `intersect` uses, so
+> the row's gap is closed. Its test is now
+> `a_conic_the_intersector_names_is_ordered_here_too_because_the_two_ask_it_alike`,
+> and that is the name to put in the command above in place of
+> `a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently`;
+> it answers `Ok(Decision::Zero)` rather than refusing.
 
 > **2026-10-10 note (Q1554): the ball one rounding off a bar's axis is now
 > refused meshing a face, not for want of an order.** Q1554 orders a ball's
