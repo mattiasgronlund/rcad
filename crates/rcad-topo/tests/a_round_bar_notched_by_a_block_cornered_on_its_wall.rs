@@ -66,11 +66,10 @@
 //! so they get past it without that change: put back to file the sweep as an
 //! area, the pins at those two radii still pass. Both
 //! intersections and both differences answer with their volumes, and the
-//! union in either order is refused `CannotMeshAFace` with `CornersCoincide`
-//! for two corners of a cap stored at one point, as at radius `24.32` above
-//! before Q2238. There the cut leaves a lobe the triangulator refuses, and the
-//! cap is refused for what its whole loop is refused for. Whether they are the
-//! same two feet as at `24.32` was not checked.
+//! union in either order is refused `CannotMeshAFace` with `CornersCoincide`,
+//! not on a cap but on the piece of the bar's wall between the two rulings,
+//! one rounding of angle wide, whose loop names two places twice (Q2145's
+//! trace, at the pin below).
 
 #![forbid(unsafe_code)]
 
@@ -219,10 +218,21 @@ fn both_intersections_and_both_differences_at_radii_12_8_and_25_6_answer_with_th
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Both unions at radii `12.8` and `25.6` are refused by the mesher, for two
-/// corners of a cap stored at one point, as the unions at radius `24.32` were
-/// until Q2238. This pins the gap, so that the row which answers it moves this
-/// test.
+/// Both unions at radii `12.8` and `25.6` are refused by the mesher. The face
+/// refused is not a cap but a piece of the bar's wall one rounding of angle
+/// wide (Q2145's trace, radius `12.8`, bar first): between the ruling where
+/// `y = 0.8r` crosses the wall, `B`, stored at `(7.679999999999999,
+/// 10.240000000000002)`, and the ruling where `x = 0.6r` does, stored at the
+/// block's corner `K`, `(7.68, 10.240000000000002)`. Each cap's arc from `B`
+/// to `K` is one rounding long, so the mesh point inside it rounds onto an
+/// end: onto `K` at the bottom and onto `B` at the top. The loop names two
+/// places twice; cut there, the lobe left is one rounding wide and refused
+/// `ASideCutsOffOneCornerOfACurvedPatch`, so the piece is refused
+/// `CornersCoincide` for the whole loop. At radius `24.32` the same piece is
+/// two roundings wide and the top arc's mesh point falls between its ends.
+/// The pieces of the wall stay apart because `Assembly::a_ring_goes_right_round`
+/// cannot count a ring with an arc one rounding long. This pins the gap, so
+/// that the row which answers it moves this test.
 #[test]
 fn both_unions_at_radii_12_8_and_25_6_name_one_cap_corner_twice() {
     for (radius, size) in A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1 {
