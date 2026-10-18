@@ -43,7 +43,7 @@ use rcad_geom::{
     which_comes_first_round_a_crossing,
 };
 use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, FaceKey, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 /// The bar's radius, `1 + 2⁻⁵¹`.
 const RADIUS: f64 = 1.0 + 2.0 * f64::EPSILON;
@@ -282,23 +282,32 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
 /// one solid that validates and holds its closed form, with nothing recorded.
 /// The union and the bar less the block, the fin alone, keep the fin: under
 /// `certified` each is refused `DynamicRangeTooWide` as in the test above, and
-/// under `tolerant` each carries one record, of the range check, and the union
-/// validates under `tolerant` alone (§68).
+/// under `tolerant` each carries one record, of the range check, answers one
+/// solid that holds its closed form, and validates under `tolerant` alone
+/// (§68).
 ///
 /// **The closed forms.** The block holds `4 · 12 · 12 = 576` and the bar
-/// `10 π r²`, all of it inside the block but the fin, which holds about
-/// `1.7e-22`, far under any of their error bars. So the union is `576`, the
+/// `10 π r²`, all of it inside the block but the fin. The fin is the piece of
+/// the bar's disc beyond a chord `2⁻²⁴` long, `2⁻⁵¹` thick, two thirds of the
+/// chord times its thickness, over the bar's height of 10: about `1.76e-22`,
+/// far under any of the other error bars. So the union is `576`, the
 /// intersection `10 π r²`, and the block less the bar `576 − 10 π r²`.
 ///
-/// **The fin alone** is refused `CannotTellWhichWayASolidsFacesPoint` with
-/// `enclosed: 0.0` under `tolerant`, since it holds about `1.7e-22`, less than
-/// any mesh the ladder asks for can leave out, so no mesh can tell which way
-/// its faces point. That refusal is Q1980's, which files Q1938's
-/// `VolumeIsNotPositive` again.
+/// **The fin alone** holds no double in `x`, so every point of every mesh of
+/// it lies on `x = −17` and encloses exactly `0`, and `measure` gives it `0`
+/// give or take `4.3e-19`, over two thousand times what it holds. That cannot
+/// tell the fin from any other sliver, so its faces and corners are checked
+/// as well ([`assert_it_is_the_fin`]). From Q2089 until Q2291 it was refused
+/// `CannotTellWhichWayASolidsFacesPoint` with `enclosed: 0.0`, since no mesh
+/// could tell which way its faces point. `validate.rs` now tells it from its
+/// corner `(−17, −2⁻²⁵, 0)`, on its bottom and on the block's side, below its
+/// top and `2⁻¹⁰²` inside the bar's wall in `r²`. The answer was there, so the
+/// refusal was a gap and not a limit (§16.10).
 ///
-/// **The fin's ends.** Its bottom and top faces are each three corners on one
-/// line, `(−17, ±2⁻²⁵)` and the bar's rim corner `(−17, ∓6.1e-17)`. The
-/// triangulator hands such a face back with no triangles, and until the mesher
+/// **The fin's ends.** Its bottom and top faces are each a chord and an arc
+/// between the same two corners, `(−17, ±2⁻²⁵)`, which Q1928 met with the
+/// bar's rim corner `(−17, ∓6.1e-17)` as a third, every corner on one line.
+/// The triangulator hands such a face back with no triangles, and until the mesher
 /// drew them itself (Q1928) the chord and both halves of the arc round each were
 /// used by one triangle only, so the unions and the fin alone were refused
 /// `Invalid(FacesDoNotAgreeWhichWayTheyFace)` by
@@ -311,9 +320,10 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
 /// `Conic::the_stretch_this_run_covers`, while its volume was checked on its
 /// mesh.
 #[test]
-fn every_fuse_with_the_upright_block_answers_its_closed_form_but_the_fin_alone() {
+fn every_fuse_with_the_upright_block_answers_its_closed_form() {
     let bar = std::f64::consts::PI * RADIUS * RADIUS * 10.0;
     let block = 4.0 * 12.0 * 12.0;
+    let fin = 2.0 / 3.0 * f64::powi(2.0, -24) * f64::powi(2.0, -51) * 10.0;
     for (policy, certified) in [(Policy::certified(), true), (Policy::tolerant(25.0), false)] {
         for rule in EVERY_RULE {
             for bar_first in [true, false] {
@@ -344,17 +354,8 @@ fn every_fuse_with_the_upright_block_answers_its_closed_form_but_the_fin_alone()
                     (Rule::Intersection, _) => bar,
                     (Rule::Difference, false) => block - bar,
                     (Rule::Difference, true) => {
-                        assert!(
-                            matches!(
-                                fused,
-                                Err(Error::CannotTellWhichWayASolidsFacesPoint {
-                                    enclosed,
-                                    ..
-                                }) if enclosed == 0.0
-                            ),
-                            "{case}: {fused:?}"
-                        );
-                        continue;
+                        assert_it_is_the_fin(&model, &fused, [the_bar, the_block], &case);
+                        fin
                     }
                     _ => unreachable!("{case}: EVERY_RULE names three rules"),
                 };
@@ -399,6 +400,72 @@ fn assert_only_the_range_is_recorded(log: &ProvenanceLog, case: &str) {
         log.records().len() == 1 && log.records()[0].predicate() == "dynamic range check",
         "{case}: {:#?}",
         log.records()
+    );
+}
+
+/// Checks that `fused` is the fin alone: one solid whose faces are one piece
+/// each of the bar's wall and its two caps and of the block's side `x = −17`,
+/// and none of the block's other faces, with every corner on that side and
+/// within `2⁻²⁵` of `y = 0`. What the fin holds is far under the error bar
+/// `measure` gives it, so its volume cannot say this.
+fn assert_it_is_the_fin(
+    model: &Model,
+    fused: &rcad_topo::Result<Fused>,
+    [bar, block]: [SolidKey; 2],
+    case: &str,
+) {
+    let fused = fused
+        .as_ref()
+        .unwrap_or_else(|why| panic!("{case}: {why:?}"));
+    let [fin] = fused.solids()[..] else {
+        panic!("{case}: {:?}", fused.solids())
+    };
+    let what_each_face_became = |key: SolidKey| -> Vec<(Surface, Vec<FaceKey>)> {
+        model
+            .solid(key)
+            .expect("this model made the key")
+            .faces()
+            .map(|face| {
+                let images = fused
+                    .images_of_face(face.key())
+                    .expect("a face of what was fused");
+                (face.surface(), images.to_vec())
+            })
+            .collect()
+    };
+    let mut wanted: Vec<FaceKey> = Vec::new();
+    for (surface, images) in what_each_face_became(bar) {
+        assert_eq!(images.len(), 1, "{case}: the bar's {surface:?}");
+        wanted.extend(images);
+    }
+    for (surface, images) in what_each_face_became(block) {
+        let the_side = matches!(
+            surface,
+            Surface::Plane(flat) if flat.normal().components() == [-1.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            images.len(),
+            usize::from(the_side),
+            "{case}: the block's {surface:?}"
+        );
+        wanted.extend(images);
+    }
+    let fin = model.solid(fin).expect("the fuse made it");
+    let faces: Vec<FaceKey> = fin.faces().map(|face| face.key()).collect();
+    assert!(
+        faces.len() == wanted.len() && wanted.iter().all(|face| faces.contains(face)),
+        "{case}: {faces:?}, where {wanted:?} are wanted"
+    );
+    let corners: Vec<Point> = fin
+        .faces()
+        .flat_map(|face| face.wires().flat_map(|wire| wire.points()))
+        .collect();
+    let half_the_chord = f64::powi(2.0, -25);
+    assert!(
+        corners
+            .iter()
+            .all(|corner| corner.x() == -17.0 && corner.y().abs() <= half_the_chord),
+        "{case}: {corners:?}"
     );
 }
 
