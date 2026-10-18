@@ -1129,7 +1129,8 @@ impl Model {
                 let asked = what_the_rule_is_asked_at(face, across, edge);
                 let names_it = asked.names_it;
                 let partner = names_it[1];
-                if a_circle_round_the_axis(face.stored_surface(), names_it).is_some() {
+                let round_the_axis = a_circle_round_the_axis(face.stored_surface(), names_it);
+                if round_the_axis.is_some() {
                     if bounds_a_band_of_the_tube {
                         continue;
                     }
@@ -1137,6 +1138,13 @@ impl Model {
                         the_same_side_as_at_its_other_circles(&mut sides_kept, partner, kept)?;
                     }
                 }
+                let against_the_face_across = round_the_axis.is_some()
+                    && crosses_a_ring_in_circles_round_its_axis(across.stored_surface());
+                let asked = if against_the_face_across {
+                    asked.against_the_face_across(across)
+                } else {
+                    asked
+                };
                 let read = match a_circle_round_the_tube(names_it) {
                     Some(RoundTheTube::OnTheRing) => {
                         the_other_circles_round_the_tube_are_walked_the_other_way(
@@ -1149,7 +1157,9 @@ impl Model {
                     {
                         Some(Decision::Neg)
                     }
-                    Some(RoundTheTube::OnThePlane) | None if partner == across.stored_surface() => {
+                    Some(RoundTheTube::OnThePlane) | None
+                        if partner == across.stored_surface() || against_the_face_across =>
+                    {
                         which_side_of_it_this_face_lies_on(
                             solid, face, across, asked.at, policy, log,
                         )?
@@ -4658,6 +4668,20 @@ fn a_circle_round_the_axis(
     .then_some((ring, flat))
 }
 
+/// Whether the face across a ring's circle round its axis is on a ball, a pipe
+/// or a cone, the surfaces whose circles with a ring the run names by the
+/// circle's own plane, and which really do cross the ring in that circle.
+///
+/// A ring across is left out: two spellings of one ring, a hair apart, cross
+/// nowhere near the circle, which is why the run names the plane there
+/// (§229.4's cone written twice is the same failure one kind over).
+fn crosses_a_ring_in_circles_round_its_axis(across: Surface) -> bool {
+    matches!(
+        across,
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+    )
+}
+
 /// What the closed-edge rule is asked with at one closed edge of a face.
 struct AskedAt {
     /// The face's own surface and the partner, as the run names them.
@@ -4695,6 +4719,25 @@ fn what_the_rule_is_asked_at(
         outward: [outward(face), partner_outward],
         partner_turn,
         at,
+    }
+}
+
+impl AskedAt {
+    /// The same rule with the face across in the partner's place, its gradient
+    /// turned the way the solid uses it.
+    ///
+    /// `names_it` stays as the run names it, since its curved one is the
+    /// surface that says which way the edge is stored running, and that is the
+    /// edge's and not the side's.
+    fn against_the_face_across(self, across: FaceView<'_>) -> Self {
+        Self {
+            outward: [
+                self.outward[0],
+                gradient_of(&across.stored_surface(), self.at) * across.orientation().sign(),
+            ],
+            partner_turn: across.orientation(),
+            ..self
+        }
     }
 }
 
