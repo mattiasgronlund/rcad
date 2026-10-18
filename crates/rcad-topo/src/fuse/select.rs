@@ -175,8 +175,8 @@
 //! placed as above.
 
 use rcad_geom::{
-    Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
-    Vector, intersect,
+    Cone, Cylinder, EdgeRun, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet,
+    Torus, Vector, intersect,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -1078,13 +1078,19 @@ impl<'a> SidesItShares<'a> {
 /// **A corner on `S`'s skin says nothing**, since a piece on either side of a
 /// face, or on it, can have its corner there, so
 /// [`Containment::OnBoundary`] is never read as a placement. Nor is a corner on
-/// the stored surface of any face of `S`, wherever on that surface it is: the
-/// ray reads a flat face by its stored corners, which a turned solid keeps a
-/// rounding off the stored plane, and about a point on that plane it can
-/// certify a side the plane does not have (§316.3, §351). The point search
-/// keeps such points from the ray by [`coincident_face`], which a corner has no
-/// face of its own to be asked of, so a corner any face's surface cannot put
-/// strictly on one side is passed over.
+/// the stored plane of a flat face of `S` whose every side is straight,
+/// wherever on that plane it is: the ray reads such a face by triangles fanned
+/// from its stored corners, which a turned solid keeps a rounding off the
+/// stored plane, and about a point on that plane it can certify a side the
+/// plane does not have (§316.3, §351). The point search keeps such points from
+/// the ray by [`coincident_face`], which a corner has no face of its own to be
+/// asked of, so a corner such a plane cannot put strictly on one side is
+/// passed over. Every other face, curved or with a curved side, the ray reads
+/// by where it meets the stored surface, and a point on that surface it hands
+/// to the face's outline, which says whether the face holds it: a corner on
+/// such a surface is asked. The corner of a block that sits on a round tab's
+/// rim, on the plane of the plate's top, is placed so (Q2243,
+/// `tests/a_block_cornered_on_a_round_tabs_rim.rs`).
 ///
 /// The piece this was built for is the strip of a KiCad pin header's wall
 /// between two notch chamfers that meet it at one line by design, and a
@@ -1125,7 +1131,8 @@ fn by_a_corner(
 }
 
 /// Whether the first corner `solid`'s ray places strictly is inside it, or
-/// `None` when no corner off every one of its surfaces was placed strictly.
+/// `None` when no corner off every plane the ray reads by its corners was
+/// placed strictly.
 fn is_inside_by_a_corner(
     solid: SolidView<'_>,
     corners: &[Vec<PredicatePoint>],
@@ -1133,7 +1140,7 @@ fn is_inside_by_a_corner(
     log: &mut ProvenanceLog,
 ) -> Option<bool> {
     corners.iter().flatten().find_map(|&corner| {
-        if !is_off_every_surface_of(solid, corner) {
+        if !is_off_every_plane_the_ray_reads_by_its_corners(solid, corner) {
             return None;
         }
         let mut ray = ProvenanceLog::new();
@@ -1150,17 +1157,28 @@ fn is_inside_by_a_corner(
     })
 }
 
-/// Whether every face of `solid` puts `point` strictly on one side of its
-/// stored surface.
-fn is_off_every_surface_of(solid: SolidView<'_>, point: PredicatePoint) -> bool {
-    solid.faces().all(|face| {
-        let surface = face.surface();
-        let side = surface.as_plane().map_or_else(
-            || side_of_surface(&surface, point),
-            |flat| side_of_a_flat_face(flat, point),
-        );
-        matches!(side, Decision::Pos | Decision::Neg)
-    })
+/// Whether every face of `solid` the ray reads by triangles fanned from its
+/// stored corners puts `point` strictly on one side of its stored plane.
+fn is_off_every_plane_the_ray_reads_by_its_corners(
+    solid: SolidView<'_>,
+    point: PredicatePoint,
+) -> bool {
+    solid
+        .faces()
+        .all(|face| !is_read_by_its_corners(face) || is_strictly_off_the_surface_of(face, point))
+}
+
+/// Whether the ray reads `face` by triangles fanned from its stored corners:
+/// a flat face whose every side is straight, which is the test
+/// `classify.rs`'s `count_crossings` routes a face to `count_a_polygon` by.
+/// Every other face it reads by where the ray meets its stored surface, and a
+/// point on that surface it hands to the face's own outline.
+fn is_read_by_its_corners(face: FaceView<'_>) -> bool {
+    face.surface().as_plane().is_some()
+        && face.wires().all(|wire| {
+            wire.coedges()
+                .all(|coedge| coedge.edge().stored_run() == &EdgeRun::Straight)
+        })
 }
 
 /// A flat piece with straight sides placed outside each solid by a plane of
@@ -1921,8 +1939,8 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// the skin places nothing.
 ///
 /// **`m` is a box, and every point of it has to be off every face.** A face
-/// whose surface puts the whole box strictly on one side is off it, asked as
-/// [`is_off_every_surface_of`] asks it. A flat face whose one wire is a
+/// whose surface puts the whole box strictly on one side is off it
+/// ([`is_strictly_off_the_surface_of`]). A flat face whose one wire is a
 /// meridian circle of the ring across it is off the box when the half-space
 /// naming that circle puts the whole box behind it
 /// ([`is_behind_the_meridian_disk`]). Otherwise the face is asked whether it
@@ -2016,7 +2034,7 @@ fn by_the_piece_across_a_side_clear_of_every_face(
 }
 
 /// Whether no face of `solid` holds any point of `point`'s box, each face
-/// asked first by its surface, as [`is_off_every_surface_of`] asks it, then,
+/// asked first by its surface ([`is_strictly_off_the_surface_of`]), then,
 /// for a meridian disk, by the half-space naming its circle
 /// ([`is_behind_the_meridian_disk`]), and then by its trimming.
 fn is_clear_of_every_face_of(
@@ -2026,18 +2044,24 @@ fn is_clear_of_every_face_of(
     log: &mut ProvenanceLog,
 ) -> bool {
     solid.faces().all(|face| {
-        let surface = face.surface();
-        let side = surface.as_plane().map_or_else(
-            || side_of_surface(&surface, point),
-            |flat| side_of_a_flat_face(flat, point),
-        );
-        matches!(side, Decision::Pos | Decision::Neg)
+        is_strictly_off_the_surface_of(face, point)
             || is_behind_the_meridian_disk(solid, face, point, policy, log)
             || matches!(
                 solid.what_this_face_holds(face, point, policy, log),
                 Ok(OnAFace::NotHeld)
             )
     })
+}
+
+/// Whether `face`'s stored surface puts `point`'s whole box strictly on one
+/// side of it.
+fn is_strictly_off_the_surface_of(face: FaceView<'_>, point: PredicatePoint) -> bool {
+    let surface = face.surface();
+    let side = surface.as_plane().map_or_else(
+        || side_of_surface(&surface, point),
+        |flat| side_of_a_flat_face(flat, point),
+    );
+    matches!(side, Decision::Pos | Decision::Neg)
 }
 
 /// Whether `face` is the disk of one meridian circle of a ring, its only wire
