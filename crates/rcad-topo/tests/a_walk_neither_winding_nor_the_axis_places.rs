@@ -61,8 +61,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftStep, Error, FaceKey, Invalid, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder,
-    SolidKey,
+    DraftStep, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
 };
 
 mod cones;
@@ -1553,23 +1552,20 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 /// (`which_of_the_pairs_closed_crossings_it_is` and
 /// `which_arc_of_a_circle_walked_this_way` in `fuse/assemble.rs`).
 ///
-/// **The part inside the ball and the ball less the ring are answered now.**
-///
-/// **The other three are refused `TheFuseWroteABrokenAnswer {
-/// AClosedEdgeIsWalkedAgainstItsSurface }`**, by the sweep the fuse runs on its
-/// answer, and the answer is sound. Each keeps the ring's whole band outside
-/// the ball as one face, bounded by the circle through the poles in two arcs
-/// and by the other circle, at `x = −15/17` for the ball of 4, stored with its
-/// own plane. The fuse joined the ring's two faces along that band into one,
-/// so `Model::validate` finds one circle of the band round the axis, not two,
-/// and reads which side of that circle's plane the band lies on off the band's
-/// corners. Those are the ball's poles, in front of the plane; next to the
-/// circle the band lies behind it, since the plane cuts the band again round
-/// the tube's outer half, where there is no edge. Worked by hand at
-/// `(−15/17, 0, 60/17)`, `∇ring × ∇plane` and `−(∇ring × ∇ball)` both run along
-/// `−y`, the way the fuse walks the circle. Read against the ball across the
-/// edge instead, as Q2260 probed it, all 24 were answered, sound, and measured
-/// what is written below.
+/// The union both ways round and the ring less the ball were then refused
+/// `TheFuseWroteABrokenAnswer { AClosedEdgeIsWalkedAgainstItsSurface }`, by
+/// the sweep the fuse runs on its answer, and the answer was sound. Each keeps
+/// the ring's whole band outside the ball as one face, bounded by the circle
+/// through the poles in two arcs and by the other circle, at `x = −15/17` for
+/// the ball of 4, stored with its own plane. So `Model::validate` finds one
+/// circle of the band round the axis, not two, and read which side of that
+/// circle's plane the band lies on off the band's corners. Those are the
+/// ball's poles, in front of the plane; next to the circle the band lies
+/// behind it, since the plane cuts the band again round the tube's outer half,
+/// where there is no edge. Worked by hand at `(−15/17, 0, 60/17)`,
+/// `∇ring × ∇plane` and `−(∇ring × ∇ball)` both run along `−y`, the way the
+/// fuse walks the circle. Q2287 has `validate.rs` read a ring face's side of
+/// the ball across such a circle instead.
 ///
 /// The ball at `(−1, 0, 0)` is the same shape mirrored, and so is the ball of 3
 /// at `(−3/4, 0, 0)`.
@@ -1583,8 +1579,7 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 /// O-ring is `25π²/2` and its ball `36π`, and the slice is
 /// `π(8√(25/16 − x²) + 3x/2 − 73/8)`, from `x = −357/1060` to `x = 3/4`.
 #[test]
-fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_answered_inside_it_and_refused_round_its_outer_band()
- {
+fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_answered_under_every_rule() {
     use std::f64::consts::PI;
     let in_the_ball_of_four = PI * (2.0 * PI + 4.0 * (15.0_f64 / 8.0).atan() - 32.0 / 17.0);
     let in_the_ball_of_three = by_simpsons_rule(-357.0 / 1060.0, 0.75, |x| {
@@ -1596,6 +1591,7 @@ fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_answered_inside_it_an
         (1.25, 3.0, 0.75, in_the_ball_of_three),
         (1.25, 3.0, -0.75, in_the_ball_of_three),
     ] {
+        let ring = 2.0 * PI * PI * 4.0 * tube * tube;
         let ball = 4.0 * PI * radius * radius * radius / 3.0;
         for (rule, ring_first) in every_rule_both_ways() {
             let mut model = a_model();
@@ -1605,22 +1601,15 @@ fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_answered_inside_it_an
                 "the ring round a tube of {tube} and the ball of {radius} at x = {x}, {rule:?}, \
                  the ring first {ring_first}"
             );
-            let fused = fuse(&mut model, one, other, rule, ring_first);
+            let answer = fuse(&mut model, one, other, rule, ring_first)
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
             let volumes = match (rule, ring_first) {
+                (Rule::Union, _) => vec![ring + ball - shared],
                 (Rule::Intersection, _) => vec![shared],
+                (Rule::Difference, true) => vec![ring - shared],
                 (Rule::Difference, false) => vec![ball - shared],
-                (Rule::Union | Rule::Difference, _) => {
-                    let Err(Error::TheFuseWroteABrokenAnswer {
-                        broken: Invalid::AClosedEdgeIsWalkedAgainstItsSurface,
-                    }) = fused
-                    else {
-                        panic!("{what}: {fused:?}");
-                    };
-                    continue;
-                }
                 (other, _) => panic!("not a rule this probes: {other:?}"),
             };
-            let answer = fused.unwrap_or_else(|why| panic!("{what}: {why:?}"));
             assert_each_holds(&model, &answer, &volumes, &what);
         }
     }
