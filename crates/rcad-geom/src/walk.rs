@@ -2127,12 +2127,24 @@ impl AnEndlessBend for HyperbolaBranch {
 /// crossing runs furthest from the plane through the centre square to the axis.
 /// A ball centred exactly on the axis has no such ray and any direction across
 /// the pipe will do, so the pipe's own basis stands in.
+///
+/// **The part along the axis is taken off twice**, because once leaves a ball
+/// centred a rounding off the axis with a ray that is all rounding. Its two
+/// loops are then a rounding off two circles, so any direction across the pipe
+/// would do for them too, but `o − w(o·w)` is not across it: for a ball turned
+/// with a bar it stood on, it came out `4.4e−15` long and pointing `0.99997` of
+/// the way back down the axis. Both seeds then sat inside
+/// the pipe near neither loop, and each loop was refused
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] (Q2330). The second time
+/// leaves it square to the axis, and where the first left a true ray it moves
+/// it by a rounding.
 fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point; 2] {
     let along = pipe.axis().direction() * pipe.axis().direction().length().recip();
     let skin = pipe.radius();
     let out = ball.centre() - pipe.axis().origin();
     let up = out.dot(along);
     let sideways = out - along * up;
+    let sideways = sideways - along * sideways.dot(along);
     let (towards, off_the_axis) = match sideways.normalized() {
         Ok(towards) => (towards, sideways.length()),
         Err(_) => (pipe.basis().0, 0.0),
