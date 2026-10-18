@@ -1249,9 +1249,14 @@ impl<'f> Arrangement<'f> {
     /// pinch to a point, so there is nowhere for a seam to end. Only a ball
     /// does. A ring is closed too, but it is cut along its equators before it
     /// gets here ([`split_a_face`]), and gets here only where the plane through
-    /// its middle sits too far out to be written down. A plane and a pipe both
-    /// run on for ever, so a face on one of them with nothing trimming it is
-    /// unbounded and no answer exists. Nothing in the public API builds one — a profile
+    /// its middle sits too far out to be written down — a ring moved far out
+    /// along a direction its own axis does not run on does that, and the
+    /// public API reaches it this way:
+    /// `a_whole_ring_moved_so_far_the_plane_through_its_middle_overflows_refuses_with_no_seam`
+    /// in `rcad-topo`'s `tests/a_half_ring_standing_on_a_round_plate.rs` (row
+    /// Q1636). A plane and a pipe both run on for ever, so a face on one of
+    /// them with nothing trimming it is unbounded and no answer exists, and
+    /// *that* case is the one nothing in the public API builds — a profile
     /// has an outline, a bar has two cap circles, and a face this fuse cuts is
     /// bounded by what cut it — but a model read from a file may, and §16.11
     /// says a caller's bytes may not panic.
