@@ -10,29 +10,25 @@
 //!
 //! Both are placed by the turn of `1.1` about the line through `(1, 0, −1)`
 //! along `(1, 2, 3)`, the ball by that turn or by two halves of it. In the
-//! stored numbers the ball's centre then sits about `1.1e−15` off the pipe's
-//! axis, so the two cross in two loops a rounding off two circles, and every
-//! rule is refused `ResultIsNotManifold { count: 1 }` (row Q2129). That the
-//! ball is on the cap does not matter: the bar it goes through is refused the
-//! same way.
+//! stored numbers the ball's centre then sits a rounding off the pipe's axis,
+//! so the two cross in two loops a rounding off two circles, and turned, every
+//! rule answers what it answers unturned.
 //!
-//! **The first step that goes wrong is in `rcad-geom`, and it is a gap.**
-//! `where_a_ball_reaches_across_a_pipe` takes its way across the pipe from
-//! `out − along·(out·along)`. When the centre is a rounding off the axis that
-//! vector is rounding too: here it is `4.4e−15` long, and its direction points
-//! back down the axis, `−0.99997` of the way. So both seeds it hands the marcher
-//! sit inside the pipe, near neither loop, and `where_a_closed_crossing_starts`
-//! refuses each loop `CannotNameWhichPieceOfACrossingThisIs`. The arrangement
-//! starts no node on a loop it cannot name, so the pipe and the ball are left
-//! uncut, and the answer comes out with an edge that has one face along it.
-//!
-//! The loops are there, and the answer is the unturned one turned. Taking the
+//! **Every rule was refused `ResultIsNotManifold { count: 1 }` until Q2330**,
+//! the bar through the ball as much as the ball on the cap (Q2129). In
+//! `rcad-geom`, `where_a_ball_reaches_across_a_pipe` took its way across the
+//! pipe from `out − along·(out·along)`, and with the centre a rounding off the
+//! axis that is rounding too: `4.4e−15` long, and pointing back down the axis,
+//! `−0.99997` of the way. So both seeds it handed the marcher sat inside the
+//! pipe, near neither loop, and `where_a_closed_crossing_starts` refused each
+//! loop `CannotNameWhichPieceOfACrossingThisIs`. The arrangement starts no
+//! node on a loop it cannot name, so the pipe and the ball were left uncut,
+//! and the answer came out with an edge that had one face along it. Taking the
 //! part along the axis off that vector a second time leaves it square to the
-//! axis, and with that one line every rule here answers, turned, the volume it
-//! answers unturned. That line is outside this row's files, so the turned test
-//! pins the refusal until it lands.
+//! axis, which is the fix; `rcad-geom`'s
+//! `a_ball_a_rounding_off_a_pipes_axis.rs` tests the seeds themselves.
 //!
-//! Refusing by name where the arrangement starts no node is not the fix
+//! Refusing by name where the arrangement starts no node was not the fix
 //! either. Passing on every refusal there but "this crossing is not closed"
 //! fails three other tests in this crate, which answer because the loop is
 //! left uncut: two with a ball a bar holds round the one circle the two only
