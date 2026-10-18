@@ -2585,6 +2585,7 @@ fn the_piece_holds(
         }
     }
     let mut winding = 0;
+    let mut one_or_nothing = 0;
     for (position, wire) in piece.wires.iter().enumerate() {
         match round_wire_of(wire) {
             Some(partner) => {
@@ -2624,18 +2625,31 @@ fn the_piece_holds(
                 winding +=
                     in_plane.winding_around(core::slice::from_ref(&corners), reaching_the_plane)?;
                 for (index, side) in wire.iter().enumerate() {
-                    winding += in_the_bulge_of(
+                    match in_the_bulge_of(
                         flat,
                         side,
                         meridians[position][index].as_ref(),
                         in_plane,
                         reaching_the_plane,
-                    )?;
+                    )? {
+                        Bulge::Counts(count) => winding += count,
+                        Bulge::OneOrNothing => one_or_nothing += 1,
+                    }
                 }
             }
         }
     }
-    Some(winding == 1)
+    // The wires wind once round each point of the piece and not at all round
+    // any other. Counted with every unsettled bulge as nothing, a one cannot
+    // really be a two, so the point is held; a count the unsettled bulges could
+    // still lift to one says nothing.
+    if winding == 1 {
+        Some(true)
+    } else if (winding..=winding + one_or_nothing).contains(&1) {
+        None
+    } else {
+        Some(false)
+    }
 }
 
 /// Whether a flat piece's material is inside what `wire`, one whole closed
@@ -2848,8 +2862,11 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 
 /// One when `point` is between a curved side of a flat piece and the chord
 /// across it, where the corners alone wind nothing round it; zero when it is
-/// not; `None` when the chord cannot say. A side along a ring with its material
-/// outside the ring can count minus one ([`across_the_inner_disk`]).
+/// not; one or nothing when the turn about the chord cannot be settled; and
+/// `None` when a side along a ring cannot say which of the ring's circles it
+/// runs round, which side of a half-space the point is on, or what
+/// [`across_the_inner_disk`] counts. A side along a ring with its material
+/// outside the ring can count minus one there.
 ///
 /// **A half disk has two corners**, so the polygon of its corners has no
 /// inside at all and every point of the half disk is between its arc and its
@@ -2869,6 +2886,22 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// reason: a corner whose box lies off the plane is read far along it. A half
 /// disk's two corners wind round nothing, so its chord decides alone, and `2²⁰`
 /// out with both corners `1e-8` off the plane it missed points `1e-3` inside it
+/// (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
+///
+/// **A turn about the chord that cannot be settled is one or nothing**, and
+/// [`the_piece_holds`] holds the point where the count is one with it counted
+/// nothing. A piece's wires wind once round each of its points and not at all
+/// round any other, so that one cannot really be a two. A block's floor whose
+/// corner is a rounding outside a pipe's rim has that corner cut off by an arc
+/// between where the block's two walls cross the rim, and the two are boxes a
+/// rounding wide that overlap at the corner, so the chord between them has no
+/// direction and the turn about it is undecided for every point. While that
+/// turn left the whole count undecided, the floor of a block cornered twice on
+/// a round tab's rim held no point, a unit clear of the arc included, and every
+/// certified fuse of the block under the tab was refused [`INSIDE_A_PIECE`]
+/// (`a_rectangle_with_its_corner_cut_off_by_an_arc_a_rounding_long_holds_its_own_points`,
+/// Q2297). Read as nothing, it would make a half disk's points near its chord
+/// read as outside it rather than as undecided
 /// (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
 ///
 /// **A pipe is counted the same way, where the plane crosses it**, which is
@@ -2984,12 +3017,12 @@ fn in_the_bulge_of(
     meridian: Option<&Picker>,
     in_plane: &InPlane,
     point: PredicatePoint,
-) -> Option<i32> {
+) -> Option<Bulge> {
     if let Surface::Torus(ring) = side.carried_by[1]
         && meridian.is_none()
         && side.material_side == Decision::Pos
     {
-        return across_the_inner_disk(flat, &ring, side, in_plane, point);
+        return across_the_inner_disk(flat, &ring, side, in_plane, point).map(Bulge::Counts);
     }
     let one_round_region = match side.carried_by[1] {
         Surface::Sphere(_) => true,
@@ -3006,13 +3039,25 @@ fn in_the_bulge_of(
         Surface::Plane(_) | _ => false,
     };
     if !one_round_region || side.material_side != Decision::Neg {
-        return Some(0);
+        return Some(Bulge::Counts(0));
     }
     if closes_on_itself(side) {
-        return Some(1);
+        return Some(Bulge::Counts(1));
     }
-    let turn = which_side_of_the_chord(flat, side, in_plane, point)?;
-    Some(if turn == Decision::Neg { 1 } else { 0 })
+    Some(match which_side_of_the_chord(flat, side, in_plane, point) {
+        Some(turn) => Bulge::Counts(i32::from(turn == Decision::Neg)),
+        None => Bulge::OneOrNothing,
+    })
+}
+
+/// What one side of a flat piece adds to how often the piece's wires wind
+/// round a point, over what its corners alone wind ([`in_the_bulge_of`]).
+enum Bulge {
+    /// One, minus one or nothing.
+    Counts(i32),
+    /// One where the point is between the side and its chord and nothing where
+    /// it is not, and the turn about the chord could not say which.
+    OneOrNothing,
 }
 
 /// What a side along `ring` whose material is outside it counts for `point`,
@@ -5648,6 +5693,119 @@ mod tests {
             Some(false),
             "in the other disk, on the bulge's side of the chord's line"
         );
+    }
+
+    /// A piece of a block's floor under a plate with a round tab, a pipe of 3
+    /// about `(10, 10)`: the rectangle from `(7.6, 8.2)` to `(10, 10)`, whose
+    /// corner `(7.6, 8.2)` is a rounding outside the pipe, so the pipe cuts
+    /// that corner off by an arc between where the block's two walls cross
+    /// the rim. Those two places are boxes a rounding wide, and they overlap at
+    /// the corner, so the chord between them has no direction and the turn
+    /// about it was undecided for every point. No point was held, a unit clear
+    /// of the arc included, and every certified fuse of the block under the
+    /// plate was refused "a point inside a piece of a face"
+    /// (`tests/a_block_cornered_on_a_round_tabs_rim.rs`, Q2297).
+    #[test]
+    fn a_rectangle_with_its_corner_cut_off_by_an_arc_a_rounding_long_holds_its_own_points() {
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::from([10.0, 10.0, 0.0]), Vector::new(0.0, 0.0, 1.0))
+                    .expect("an axis"),
+                3.0,
+            )
+            .expect("a positive radius"),
+        );
+        let wall = |coefficients: [f64; 4]| {
+            Surface::Plane(Plane::from_coefficients(coefficients).expect("a normal"))
+        };
+        let west = wall([-1.0, 0.0, 0.0, 7.6]);
+        let south = wall([0.0, -1.0, 0.0, 8.2]);
+        let east = wall([1.0, 0.0, 0.0, -10.0]);
+        let north = wall([0.0, 1.0, 0.0, -10.0]);
+        let corner =
+            |one: Surface, other: Surface, [x, y]: [Interval; 2]| MeetPoint::OfThreeSurfaces {
+                surfaces: [Surface::Plane(flat), one, other],
+                which: 0,
+                point: PredicatePoint::Constructed([x, y, Interval::exactly(0.0)]),
+            };
+        let at = |x: f64, y: f64| [Interval::exactly(x), Interval::exactly(y)];
+        let on_the_south_wall = corner(
+            south,
+            pipe,
+            [
+                Interval::new(7.6, 7.600000000000001).expect("an interval"),
+                Interval::exactly(8.2),
+            ],
+        );
+        let on_the_west_wall = corner(
+            west,
+            pipe,
+            [
+                Interval::exactly(7.6),
+                Interval::new(8.2, 8.200000000000001).expect("an interval"),
+            ],
+        );
+        let sides = [
+            (
+                south,
+                on_the_south_wall.clone(),
+                corner(south, east, at(10.0, 8.2)),
+            ),
+            (
+                east,
+                corner(south, east, at(10.0, 8.2)),
+                corner(east, north, at(10.0, 10.0)),
+            ),
+            (
+                north,
+                corner(east, north, at(10.0, 10.0)),
+                corner(north, west, at(7.6, 10.0)),
+            ),
+            (
+                west,
+                corner(north, west, at(7.6, 10.0)),
+                on_the_west_wall.clone(),
+            ),
+            (pipe, on_the_west_wall, on_the_south_wall),
+        ];
+        let piece = Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires: vec![
+                sides
+                    .into_iter()
+                    .map(|(partner, from, to)| FaceMeet {
+                        carried_by: [Surface::Plane(flat), partner],
+                        ends: [from, to],
+                        material_side: Decision::Neg,
+                        along: SmallVec::new(),
+                        approximation: None,
+                    })
+                    .collect(),
+            ],
+            is_the_whole_surface: false,
+        };
+        let holds = |at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(&piece, PredicatePoint::from(at))
+        };
+        assert_eq!(
+            holds([8.2, 9.55, 0.0]),
+            Some(true),
+            "a unit clear of the arc"
+        );
+        assert_eq!(
+            holds([9.4, 8.65, 0.0]),
+            Some(true),
+            "a unit clear of the arc"
+        );
+        assert_ne!(
+            holds([11.0, 9.0, 0.0]),
+            Some(true),
+            "past the east side, inside the pipe"
+        );
+        assert_eq!(holds([7.5, 8.1, 0.0]), Some(false), "outside the rim");
     }
 
     /// The half of the plate `z = 0` with `x ≥ 0` beyond the ring of four
