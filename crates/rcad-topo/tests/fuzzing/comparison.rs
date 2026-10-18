@@ -170,12 +170,10 @@ impl Picking {
             Picker::InsideAPipe(pipe) => {
                 Picking::InsideAPipe(WhatItSitsOn::of(&Surface::Cylinder(*pipe)))
             }
-            // Not written down yet: a new `Picking` needs its arm in
-            // `Picking::moved_by` in `fuses_that_must_agree.rs` in the same
-            // change, since that match names every `Picking`.
-            Picker::InFrontOfAFlatThrough(_) => {
-                panic!("this file does not know how to write {picker:?} down yet")
-            }
+            Picker::InFrontOfAFlatThrough(flat) => Picking::InFrontOfAFlatThrough(
+                flat.through().coordinates(),
+                flat.facing().components(),
+            ),
             other => panic!("this file does not know how to write {other:?} down"),
         }
     }
