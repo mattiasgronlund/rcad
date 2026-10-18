@@ -589,7 +589,7 @@ fn a_bend_placed_round_by_minus_two_and_a_copy_a_quarter_turn_back_overlap_in_a_
 /// and not as the literal `−1.2865`, which answers no solid.
 ///
 /// The measure at a deflection of `0.01` still charges the caps for how far
-/// their points stray off their planes, so its error, `1.4e-15` to `3.1e-15`
+/// their points stray off their planes, so its error, `1.4e-15` to `3.7e-15`
 /// over these starts, is wider than the wedge, and the volume it reads is
 /// below zero at every one of them. It holds the wedge, but cannot tell it
 /// from nothing.
@@ -1968,7 +1968,9 @@ fn each_within_its_error(mut measured: Vec<(f64, f64)>, expected: &[f64], what: 
 ///
 /// At steps 173 and 196 the intersection both ways round answers the sliver,
 /// and the measure holds it against its wedge at every deflection from `0.32`
-/// to `1e-3`. From Q2265 until Q2272 the fuse refused step 196
+/// to `1e-3`, and at step 196 from `0.5` to `0.125` too
+/// (`the_sliver_at_step_196_is_measured_within_its_error_at_coarse_deflections`).
+/// From Q2265 until Q2272 the fuse refused step 196
 /// [`Invalid::VolumeIsNotPositive`] on a sum of `−5.2e-16`, where the caps,
 /// read exactly, overlap in a wedge of `5.9e-19`. The rung that passed that
 /// sum left a flat face's own corners out of what it charged for points off
@@ -2027,14 +2029,19 @@ fn two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring() {
 
 /// The step-196 sliver of
 /// `two_bends_overlapping_in_a_sliver_are_never_meshed_right_round_the_ring`
-/// answers and validates both ways round, but `SolidView::measure` refuses it
-/// [`Invalid::VolumeIsNotPositive`] at deflections `0.5`, `0.25` and `0.125`,
-/// on sums of about `−5e-16` against a wedge of `5.9e-19`. The measure's charge
-/// for points off a flat face's plane leaves the face's own corners out, as
-/// `validate`'s did until Q2272, and the copy's corner lies `6.4e-16` off its
-/// own cap's plane; that this is why is not yet run.
+/// answers and validates both ways round, and `SolidView::measure` holds its
+/// wedge of `5.9e-19` at deflections `0.5`, `0.25` and `0.125` too.
+///
+/// Until Q2316 the measure refused it [`Invalid::VolumeIsNotPositive`] there,
+/// on sums of `−5.15e-16`, `−4.81e-16` and `−4.51e-16` against errors of
+/// `5.10e-16`, `2.69e-16` and `3.05e-16`. The copy's cap is one circle with
+/// one corner on it, and that corner lies `6.4e-16` off the cap's plane: the
+/// slab between the cap's triangles and its plane is `−5.6e-16` at `0.5`, and
+/// `−5.2e-16` of it is the triangles that corner tilts. The measure left a
+/// flat face's own corners out of what it charged for points off its plane,
+/// and now leaves out only a corner where straight sides meet.
 #[test]
-fn the_sliver_at_step_196_is_refused_by_the_measure_at_coarse_deflections() {
+fn the_sliver_at_step_196_is_measured_within_its_error_at_coarse_deflections() {
     let policy = Policy::certified();
     let start = -3.1 + 0.0155 * 196.0;
     for the_first_first in [true, false] {
@@ -2065,15 +2072,16 @@ fn the_sliver_at_step_196_is_refused_by_the_measure_at_coarse_deflections() {
         };
         for size in [0.5, 0.25, 0.125] {
             let deflection = rcad_geom::Deflection::of(size).expect("a deflection");
-            let measured = model
+            let (volume, error) = model
                 .solid(solid)
-                .and_then(|solid| solid.measure(deflection, &policy, &mut ProvenanceLog::new()));
-            let Err(Error::Invalid(Invalid::VolumeIsNotPositive { volume })) = measured else {
-                panic!("{what}, deflection {size}: {measured:?}, a wedge of {wedge}");
-            };
+                .and_then(|solid| solid.measure(deflection, &policy, &mut ProvenanceLog::new()))
+                .map(|measured| (measured.volume(), measured.volume_error()))
+                .unwrap_or_else(|why| {
+                    panic!("{what}, deflection {size}: {why:?}, a wedge of {wedge}")
+                });
             assert!(
-                volume < 0.0 && 0.0 < wedge,
-                "{what}, deflection {size}: a volume of {volume}, a wedge of {wedge}"
+                0.0 < wedge && (volume - wedge).abs() <= error,
+                "{what}, deflection {size}: {volume} ± {error}, a wedge of {wedge}"
             );
         }
     }
