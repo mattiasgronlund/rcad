@@ -13,27 +13,29 @@
 //! `AFaceTrimmedByACurveThisCannotFollow` before the rules tried after the
 //! search (a shared side, a corner, a plane) get a go at the piece (Q1760).
 //!
-//! **No fuse found gives a different answer for it.** The arm is reached only
+//! **No fuse found gave a different answer for it.** The arm is reached only
 //! where a point of a piece is a rounding or so off the cap's ball, so its box
 //! straddles the cap's sign: by a ball centred on the half ball's centre with a
 //! radius one or four roundings off 5, and by a bowl, that ball kept below a
-//! plane `z = top`. The 288 fuses pinned here reach it 1428 times, all of them
-//! with the capped half ball: 384 times in the 24 fuses with a ball, 1044 in
-//! the 120 with a bowl. Q1760's lanes turned the arm back to what it was before
-//! Q1740, through a probe edit to `classify.rs` that is not kept, and every
-//! fuse pinned here answered the same with it either way. So did 372 more that
-//! are not pinned: balls of other radii and centres, bowls of radius 5 and
-//! `5(1 ± 2⁻⁴⁰)`, and copies of the half ball, capped or not, moved by up to
-//! `1e-15`. In the 288, with the arm off as with it on, `settle_against_each`
-//! is handed `CannotFollowAFacesTrimming` 210 times and `place_the_piece`
-//! refuses naming the cap 93 times, so the arm's mark is never what makes them
-//! refuse; `fuse/assemble.rs`'s `one_shell_is_inside_another`, which reads the
-//! same refusal, meets it in none of them. Across the rest of `rcad-topo`'s tests the arm was reached only by
+//! plane `z = top`. When Q1760 counted, the 288 fuses pinned here reached it
+//! 1428 times, all of them with the capped half ball: 384 times in the 24
+//! fuses with a ball, 1044 in the 120 with a bowl. Q1760's lanes turned the
+//! arm back to what it was before Q1740, through a probe edit to `classify.rs`
+//! that is not kept, and every fuse pinned here answered the same with it
+//! either way. So did 372 more that are not pinned: balls of other radii and
+//! centres, bowls of radius 5 and `5(1 ± 2⁻⁴⁰)`, and copies of the half ball,
+//! capped or not, moved by up to `1e-15`. In the 288, with the arm off as with
+//! it on, `settle_against_each` was handed `CannotFollowAFacesTrimming` 210
+//! times and `place_the_piece` refused naming the cap 93 times, so the arm's
+//! mark was never what made them refuse; `fuse/assemble.rs`'s
+//! `one_shell_is_inside_another`, which reads the same refusal, met it in none
+//! of them. Across the rest of `rcad-topo`'s tests the arm was reached only by
 //! three tests of `a_point_on_a_face_beside_a_trimming_nothing_follows.rs`,
 //! none of them a fuse, and 25 more shapes fused with the capped half ball
 //! (blocks and balls over the cap and the floor, copies of it turned and placed
-//! apart) never reached it. So the pins below are what each fuse answers
-//! today; they are not a check that the arm is there.
+//! apart) never reached it. Those counts are Q1760's, and were not taken again
+//! when Q2243 changed what 27 of the 288 answer. So the pins below are what
+//! each fuse answers today; they are not a check that the arm is there.
 //!
 //! **The ring was not run.** The row asked for a ring whose wall nothing
 //! follows too, and none was found that can be built: `holds.rs` follows every
@@ -41,16 +43,27 @@
 //! axis among them.
 //!
 //! The half ball with no hole and no cap is beside each pin, to show which of
-//! the refusals are the cap's. Against a ball just bigger the capped one says
-//! `Undecidable` where the half ball alone answers, so that refusal does not
-//! name the face that caused it, though `place_the_piece` refuses naming the
-//! cap 12 times in those 12 fuses. Against a bowl clear of the half ball, `z ≤
-//! -1`, both say `Undecidable`, though the two solids are 1 apart.
+//! the refusals are the cap's. Against a ball just bigger the capped one said
+//! `Undecidable` where the half ball alone answers, a refusal that did not
+//! name the face that caused it. `fuse/select.rs`'s `by_a_corner` passed over
+//! the one corner of the bigger ball's skin, which is on the stored plane of
+//! the half ball's floor. It now asks a corner on the plane of a flat face with
+//! a curved side, as the floor is (Q2243): the corner
+//! `(0, -5.000000000000001, 0)` places the skin outside, and a later piece is
+//! refused naming the cap, as against a ball just smaller. The bowls
+//! a rounding off kept below the floor answer, or name the cap, for the same
+//! reason. Against a bowl clear of the half ball, `z ≤ -1`, both say
+//! `Undecidable`, though the two solids are 1 apart.
 
-use rcad_geom::{EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector};
+use core::f64::consts::PI;
+
+use rcad_geom::{
+    Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere, Surface, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftStep, DraftWire, Error, FaceKey, Model, Rule, SolidBuilder, SolidKey, SolidView,
+    DraftEdge, DraftStep, DraftWire, Error, FaceKey, Fused, Model, Rule, SolidBuilder, SolidKey,
+    SolidView,
 };
 
 use Answer::{CannotMesh, NamesTheCap, NoMeshCanTell, Solids, Undecidable};
@@ -90,15 +103,21 @@ enum Half {
     Alone,
 }
 
-/// The ball one rounding bigger is refused under every rule both ways round,
-/// and so is the one four roundings bigger, where the half ball alone answers
-/// all six. Each shell they leave between the two balls is under `4e-15` thick.
+/// The ball one rounding bigger is refused naming the cap under every rule
+/// both ways round, and so is the one four roundings bigger, where the half
+/// ball alone answers all six. Each shell they leave between the two balls is
+/// under `4e-15` thick.
+///
+/// All twelve were `Undecidable` until `by_a_corner` asked a corner on the
+/// plane of a flat face with a curved side (Q2243): it now places the bigger
+/// ball's skin by its corner on the half ball's floor plane, and a later piece
+/// is refused naming the cap.
 #[test]
-fn a_ball_just_bigger_is_undecidable_against_the_capped_half_ball() {
+fn a_ball_just_bigger_names_the_cap() {
     for radius in roundings_up() {
         assert_eq!(
             six_answers(Other::Ball(radius), Half::Capped),
-            [Undecidable; 6],
+            [NamesTheCap; 6],
             "{radius}"
         );
         assert_eq!(
@@ -144,10 +163,13 @@ fn a_ball_just_smaller_names_the_cap() {
 }
 
 /// A bowl one or four roundings off the cap's ball. Kept below `z = 3` it is
-/// refused naming the cap, and so is it kept below `z = -3`, clear of the half
-/// ball; kept below `z = 1`, or `z = -1`, it is `Undecidable`. Kept below the
-/// floor it names the cap, but the bowl a rounding smaller is `Undecidable`
-/// whenever the half ball is listed first.
+/// refused naming the cap, and so is it kept below the floor or below
+/// `z = -3`, clear of the half ball; kept below `z = 1`, or `z = -1`, it is
+/// `Undecidable`.
+///
+/// The bowl a rounding smaller kept below the floor was `Undecidable` whenever
+/// the half ball was listed first, until `by_a_corner` asked a corner on the
+/// plane of a flat face with a curved side (Q2243).
 #[test]
 fn a_bowl_just_off_the_caps_ball_names_the_cap_or_is_undecidable() {
     let [one_up, four_up] = roundings_up();
@@ -156,6 +178,7 @@ fn a_bowl_just_off_the_caps_ball_names_the_cap_or_is_undecidable() {
         for (top, said) in [
             (3.0, [NamesTheCap; 6]),
             (1.0, [Undecidable; 6]),
+            (0.0, [NamesTheCap; 6]),
             (-1.0, [Undecidable; 6]),
             (-3.0, [NamesTheCap; 6]),
         ] {
@@ -166,40 +189,23 @@ fn a_bowl_just_off_the_caps_ball_names_the_cap_or_is_undecidable() {
             );
         }
     }
-    for radius in [one_up, four_up, four_down] {
-        assert_eq!(
-            six_answers(Other::Bowl { radius, top: 0.0 }, Half::Capped),
-            [NamesTheCap; 6],
-            "{radius}"
-        );
-    }
-    assert_eq!(
-        six_answers(
-            Other::Bowl {
-                radius: one_down,
-                top: 0.0
-            },
-            Half::Capped
-        ),
-        [
-            Undecidable,
-            NamesTheCap,
-            Undecidable,
-            NamesTheCap,
-            Undecidable,
-            NamesTheCap
-        ]
-    );
 }
 
 /// The same bowls against the half ball alone. Kept below `z = 1` or
 /// `z = -1` they are still `Undecidable`, the second though the bowl is 1
 /// clear of the half ball and is two solids with it. Kept below `z = -3` they
-/// answer. Kept below the floor, the bowls a rounding off are `Undecidable`
-/// and those four off answer. Kept below `z = 3`, the bowls bigger answer, the
-/// half ball less the bowl four roundings smaller holds about `54` but is
-/// refused because no mesh can tell which way its faces point, and the union
-/// with the bowl a rounding smaller cannot be meshed.
+/// answer, and so do they kept below the floor, where the two are the halves
+/// of one ball and hold what
+/// `a_bowl_just_off_under_the_half_ball_alone_holds_what_two_half_balls_hold`
+/// says, but for the union with the bowl a rounding bigger, whose mesh is
+/// refused. Kept below `z = 3`, the bowls bigger answer, the half ball less the
+/// bowl four roundings smaller holds about `54` but is refused because no mesh
+/// can tell which way its faces point, and the union with the bowl a rounding
+/// smaller cannot be meshed.
+///
+/// The bowls a rounding off kept below the floor were `Undecidable` until
+/// `by_a_corner` asked a corner on the plane of a flat face with a curved side
+/// (Q2243).
 #[test]
 fn a_bowl_just_off_the_half_ball_alone_answers_or_is_undecidable() {
     let [one_up, four_up] = roundings_up();
@@ -220,11 +226,6 @@ fn a_bowl_just_off_the_half_ball_alone_answers_or_is_undecidable() {
             ],
             "{radius}"
         );
-    }
-    for radius in [one_up, one_down] {
-        assert_eq!(against(radius, 0.0), [Undecidable; 6], "{radius}");
-    }
-    for radius in [four_up, four_down] {
         assert_eq!(
             against(radius, 0.0),
             [
@@ -265,6 +266,54 @@ fn a_bowl_just_off_the_half_ball_alone_answers_or_is_undecidable() {
     );
 }
 
+/// The half ball alone and a bowl one or four roundings off kept below its
+/// floor are the two halves of one ball. Their union holds both halves, they
+/// have nothing in common, and each less the other is itself.
+///
+/// The union with the bowl a rounding bigger, either way round, is the one
+/// not measured. It is one solid that validates, and its one flat face is the
+/// ring of the bowl's lid outside the half ball's floor, which the true union
+/// has too. That ring is one rounding wide, `8.9e-16` at radius 5, and the
+/// mesh refuses it `BoundaryCrossesItself`. The ring four roundings wide meshes
+/// and the union measures what it should, as does the ring a rounding wide the
+/// other way, the floor outside the bowl a rounding smaller; so did rings
+/// `1e-14` to `1` wide in a probe that is not kept.
+#[test]
+fn a_bowl_just_off_under_the_half_ball_alone_holds_what_two_half_balls_hold() {
+    let half_a_ball = |radius: f64| 2.0 * PI * radius.powi(3) / 3.0;
+    let mut wrong = Vec::new();
+    let [one_up, four_up] = roundings_up();
+    let [one_down, four_down] = roundings_down();
+    for radius in [one_up, four_up, one_down, four_down] {
+        let bowl = Other::Bowl { radius, top: 0.0 };
+        each_fuse(bowl, Half::Alone, |rule, half_first, model, _, fused| {
+            let should_hold = match (rule, half_first) {
+                (Rule::Union, _) => Some(half_a_ball(RADIUS) + half_a_ball(radius)),
+                (Rule::Intersection, _) => None,
+                (Rule::Difference, true) => Some(half_a_ball(RADIUS)),
+                (Rule::Difference, false) => Some(half_a_ball(radius)),
+                (other, _) => panic!("no volume for {other:?}"),
+            };
+            let a_ring_one_rounding_wide = matches!(rule, Rule::Union) && radius == one_up;
+            let what = fused
+                .map_err(|why| format!("refused {why:?}"))
+                .and_then(|fused| {
+                    if a_ring_one_rounding_wide {
+                        a_ring_the_mesh_refuses(model, fused.solids())
+                    } else {
+                        what_it_holds(model, fused.solids(), should_hold)
+                    }
+                });
+            if let Err(why) = what {
+                wrong.push(format!(
+                    "{radius}, {rule:?}, half ball first {half_first}: {why}"
+                ));
+            }
+        });
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// 5 one rounding up and four roundings up.
 fn roundings_up() -> [f64; 2] {
     let one = RADIUS.next_up();
@@ -282,6 +331,29 @@ fn roundings_down() -> [f64; 2] {
 fn six_answers(other: Other, half: Half) -> [Answer; 6] {
     let mut said = [Undecidable; 6];
     let mut at = said.iter_mut();
+    each_fuse(other, half, |rule, half_first, _, cap, fused| {
+        *at.next().expect("six answers") = match fused {
+            Ok(answer) => Solids(answer.solids().len()),
+            Err(Error::Undecidable { .. }) => Undecidable,
+            Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if Some(face) == cap => {
+                NamesTheCap
+            }
+            Err(Error::CannotMeshAFace { .. }) => CannotMesh,
+            Err(Error::CannotTellWhichWayASolidsFacesPoint { .. }) => NoMeshCanTell,
+            Err(other) => panic!("{rule:?}, half ball first {half_first}: {other:?}"),
+        };
+    });
+    said
+}
+
+/// Each of the six fuses [`six_answers`] makes, handed to `look` with its
+/// rule, whether the half ball was first, the model it was made in, the half
+/// ball's cap if it has one, and what the fuse came to.
+fn each_fuse(
+    other: Other,
+    half: Half,
+    mut look: impl FnMut(Rule, bool, &Model, Option<FaceKey>, rcad_topo::Result<Fused>),
+) {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for half_first in [true, false] {
             let mut model = Model::new(Scale::millimetres(125.0).expect("a positive size"));
@@ -306,19 +378,77 @@ fn six_answers(other: Other, half: Half) -> [Answer; 6] {
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             );
-            *at.next().expect("six answers") = match fused {
-                Ok(answer) => Solids(answer.solids().len()),
-                Err(Error::Undecidable { .. }) => Undecidable,
-                Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) if Some(face) == cap => {
-                    NamesTheCap
-                }
-                Err(Error::CannotMeshAFace { .. }) => CannotMesh,
-                Err(Error::CannotTellWhichWayASolidsFacesPoint { .. }) => NoMeshCanTell,
-                Err(other) => panic!("{rule:?}, half ball first {half_first}: {other:?}"),
-            };
+            look(rule, half_first, &model, cap, fused);
         }
     }
-    said
+}
+
+/// Whether `solids` is one solid that validates and measures `should_hold`
+/// within the error its mesh declares, or none where `should_hold` is `None`.
+fn what_it_holds(
+    model: &Model,
+    solids: &[SolidKey],
+    should_hold: Option<f64>,
+) -> Result<(), String> {
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .map_err(|why| format!("does not validate: {why:?}"))?;
+    let (&[solid], Some(should_hold)) = (solids, should_hold) else {
+        return match (solids.len(), should_hold) {
+            (0, None) => Ok(()),
+            (count, _) => Err(format!("{count} solids")),
+        };
+    };
+    let measured = model
+        .solid(solid)
+        .expect("the fuse made the key")
+        .measure(
+            Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map_err(|why| format!("does not measure: {why:?}"))?;
+    if (measured.volume() - should_hold).abs() > measured.volume_error() {
+        return Err(format!(
+            "measured {} ± {}, and it should hold {should_hold}",
+            measured.volume(),
+            measured.volume_error()
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `solids` is one solid that validates, whose one flat face is a
+/// ring, and which the mesh refuses `BoundaryCrossesItself` at that ring.
+fn a_ring_the_mesh_refuses(model: &Model, solids: &[SolidKey]) -> Result<(), String> {
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .map_err(|why| format!("does not validate: {why:?}"))?;
+    let &[solid] = solids else {
+        return Err(format!("{} solids", solids.len()));
+    };
+    let solid = model.solid(solid).expect("the fuse made the key");
+    let mut flat = solid
+        .faces()
+        .filter(|face| face.surface().as_plane().is_some());
+    let (Some(ring), None) = (flat.next(), flat.next()) else {
+        return Err("not one flat face".to_owned());
+    };
+    if ring.wire_count() != 2 {
+        return Err(format!("the flat face has {} wires", ring.wire_count()));
+    }
+    match solid.measure(
+        Deflection::of(0.01).expect("a length"),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) {
+        Err(Error::CannotMeshAFace {
+            face,
+            why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
+        }) if face == ring.key() => Ok(()),
+        Ok(measured) => Err(format!("measured {}", measured.volume())),
+        Err(why) => Err(format!("does not measure: {why:?}")),
+    }
 }
 
 /// The half ball `z ≥ 0` of radius 5, its skin holed and capped or not.
