@@ -13,9 +13,9 @@
 //! Under a certified policy every fuse was then refused at the sliver of the
 //! block's face between the corner and the rim, which holds no `f64` point:
 //! `fuse/select.rs`'s `by_a_corner` passed the corner over because it lies on
-//! the plane of the plate's top or floor. It now passes a corner over only on
-//! the plane of a flat face with straight sides, which the ray reads by its
-//! corners, and asks it on every other face (Q2243). So the block less the
+//! the plane of the plate's top or floor. It now asks a corner on the plane of
+//! a flat face with a curved side, as those two faces are, since the ray hands
+//! a point on that plane to the face's outline (Q2243). So the block less the
 //! plate and the two's common part answer, and the rest are refused as below.
 //! A tolerant policy reads the two crossings as one point, and there every
 //! fuse of a block cornered on the rim once answers.
@@ -29,7 +29,9 @@
 //!   its answer is the plate itself, which has no such face.
 //! - **Each fuse of the block `x 7.6 to 12.4` by `y 8.2 to 11.8`, a gap.** Its
 //!   other corner `(7.6, 11.8)` is on the rim too, and the ray from there meets
-//!   the tab's wall, which `holds.rs` cannot follow (Q2231).
+//!   the tab's wall, which `holds.rs` cannot follow (Q2231). Under the plate's
+//!   floor a certified fuse is refused first at a piece of the block's floor a
+//!   unit below the plate, whose corner `(7.6, 8.2)` is on the rim as well.
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
@@ -138,21 +140,32 @@ fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_when_the_corner_
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The block's other corner `(7.6, 11.8)` is on the rim too, and every fuse is
-/// refused at the sliver of the block's face there, under either policy. The
-/// ray from that corner meets the tab's wall, a round face whose top and
-/// bottom are each three arcs of where the square and the bar crossed, and
-/// `holds.rs` cannot follow it (Q2231). When Q2231 lands, these fuses should
-/// answer as the other blocks do.
+/// The block's other corner `(7.6, 11.8)` is on the rim too, and every fuse of
+/// the block on the plate's top is refused at the sliver of the block's face
+/// there, under either policy. The ray from that corner meets the tab's wall,
+/// a round face whose top and bottom are each three arcs of where the square
+/// and the bar crossed, and `holds.rs` cannot follow it (Q2231).
+///
+/// Under the plate's floor, the certified fuses are refused first at the piece
+/// of the block's floor under the square's corner `(10, 10)`, a whole unit
+/// below the plate. Its corner `(7.6, 8.2)` is a third on the rim, so on the
+/// tab's wall's surface, and `by_a_corner` passes a corner on a curved surface
+/// over; its other corners are on the planes of the square's sides.
 #[test]
 fn a_block_cornered_twice_on_a_round_tabs_rim_is_refused_at_its_second_corner_under_either_policy()
 {
-    for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+    for (policy, under) in [
+        (Policy::certified(), [10.0, 10.0, -1.0]),
+        (Policy::tolerant(100.0), [7.6, 11.8, 0.0]),
+    ] {
         let wrong = what_the_fuses_get_wrong(
             &[A_BLOCK_CORNERED_TWICE],
             &EVERY_FUSE,
             &policy,
-            Should::BeRefusedAtTheSliverAtItsSecondCorner,
+            Should::BeRefusedAtAPieceWith {
+                on_top: [7.6, 11.8, 2.0],
+                under,
+            },
         );
         assert!(wrong.is_empty(), "{policy:?}:\n{}", wrong.join("\n"));
     }
@@ -167,9 +180,10 @@ enum Should {
     Answer,
     /// `DynamicRangeTooWide`.
     BeRefusedAsTooWideARangeToComputeIn,
-    /// `Undecidable` at a point inside a piece of a face with a corner at
-    /// `(7.6, 11.8)` on the face of the plate the block touches.
-    BeRefusedAtTheSliverAtItsSecondCorner,
+    /// `Undecidable` at a point inside a piece of a face with the corner
+    /// `on_top` for the block on the plate's top, and `under` for the block
+    /// under its floor.
+    BeRefusedAtAPieceWith { on_top: [f64; 3], under: [f64; 3] },
 }
 
 /// Each of `blocks`, set on the plate's top or under its floor, fused with the
@@ -218,11 +232,11 @@ fn what_the_fuses_get_wrong(
                     Should::BeRefusedAsTooWideARangeToComputeIn => {
                         is_refused_as_too_wide_a_range(&fused)
                     }
-                    Should::BeRefusedAtTheSliverAtItsSecondCorner => {
-                        let touching = if z0 < 0.0 { z1 } else { z0 };
+                    Should::BeRefusedAtAPieceWith { on_top, under } => {
+                        let corner = if z0 < 0.0 { under } else { on_top };
                         is_refused_at_a_piece_with_this_corner(
                             &fused,
-                            PredicatePoint::Exact([7.6, 11.8, touching]),
+                            PredicatePoint::Exact(corner),
                         )
                     }
                 };

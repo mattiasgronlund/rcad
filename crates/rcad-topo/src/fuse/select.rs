@@ -1078,19 +1078,28 @@ impl<'a> SidesItShares<'a> {
 /// **A corner on `S`'s skin says nothing**, since a piece on either side of a
 /// face, or on it, can have its corner there, so
 /// [`Containment::OnBoundary`] is never read as a placement. Nor is a corner on
-/// the stored plane of a flat face of `S` whose every side is straight,
-/// wherever on that plane it is: the ray reads such a face by triangles fanned
-/// from its stored corners, which a turned solid keeps a rounding off the
-/// stored plane, and about a point on that plane it can certify a side the
-/// plane does not have (§316.3, §351). The point search keeps such points from
-/// the ray by [`coincident_face`], which a corner has no face of its own to be
-/// asked of, so a corner such a plane cannot put strictly on one side is
-/// passed over. Every other face, curved or with a curved side, the ray reads
-/// by where it meets the stored surface, and a point on that surface it hands
-/// to the face's outline, which says whether the face holds it: a corner on
-/// such a surface is asked. The corner of a block that sits on a round tab's
-/// rim, on the plane of the plate's top, is placed so (Q2243,
-/// `tests/a_block_cornered_on_a_round_tabs_rim.rs`).
+/// the stored surface of a face of `S`, wherever on that surface it is, unless
+/// the face is flat with a curved side:
+///
+/// - The ray reads a flat face whose every side is straight by triangles
+///   fanned from its stored corners, which a turned solid keeps a rounding off
+///   the stored plane, and about a point on that plane it can certify a side
+///   the plane does not have (§316.3, §351). The point search keeps such
+///   points from the ray by [`coincident_face`], which a corner has no face of
+///   its own to be asked of.
+/// - From a corner on a curved surface the ray can place the corner and still
+///   log a side of that surface it could not decide, and that record refuses
+///   the whole fuse under a certified policy. Q2243 asked such corners too,
+///   and the bend placed half a turn round from another, which answers, was
+///   refused so: the ray from `(0, 3, 0)`, on the other bend's ring, placed it
+///   outside and logged an undecided side of the ring beside it
+///   (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`).
+///
+/// A flat face with a curved side the ray reads by where it meets the stored
+/// plane, and a point on that plane it hands to the face's outline, which says
+/// whether the face holds it, so a corner on such a plane is asked. The corner
+/// of a block that sits on a round tab's rim, on the plane of the plate's top
+/// or floor, is placed so (Q2243, `tests/a_block_cornered_on_a_round_tabs_rim.rs`).
 ///
 /// The piece this was built for is the strip of a KiCad pin header's wall
 /// between two notch chamfers that meet it at one line by design, and a
@@ -1131,7 +1140,7 @@ fn by_a_corner(
 }
 
 /// Whether the first corner `solid`'s ray places strictly is inside it, or
-/// `None` when no corner off every plane the ray reads by its corners was
+/// `None` when no corner off every surface but a plane with a curved side was
 /// placed strictly.
 fn is_inside_by_a_corner(
     solid: SolidView<'_>,
@@ -1140,7 +1149,7 @@ fn is_inside_by_a_corner(
     log: &mut ProvenanceLog,
 ) -> Option<bool> {
     corners.iter().flatten().find_map(|&corner| {
-        if !is_off_every_plane_the_ray_reads_by_its_corners(solid, corner) {
+        if !is_off_every_surface_but_a_plane_with_a_curved_side(solid, corner) {
             return None;
         }
         let mut ray = ProvenanceLog::new();
@@ -1157,27 +1166,28 @@ fn is_inside_by_a_corner(
     })
 }
 
-/// Whether every face of `solid` the ray reads by triangles fanned from its
-/// stored corners puts `point` strictly on one side of its stored plane.
-fn is_off_every_plane_the_ray_reads_by_its_corners(
+/// Whether every face of `solid` puts `point` strictly on one side of its
+/// stored surface, but a flat face with a curved side, whose plane `point` may
+/// lie on.
+fn is_off_every_surface_but_a_plane_with_a_curved_side(
     solid: SolidView<'_>,
     point: PredicatePoint,
 ) -> bool {
     solid
         .faces()
-        .all(|face| !is_read_by_its_corners(face) || is_strictly_off_the_surface_of(face, point))
+        .all(|face| is_flat_with_a_curved_side(face) || is_strictly_off_the_surface_of(face, point))
 }
 
-/// Whether the ray reads `face` by triangles fanned from its stored corners:
-/// a flat face whose every side is straight, which is the test
+/// Whether `face` is flat and has a side that is not straight. The ray reads
+/// such a face by where it meets the stored plane, and a point on that plane
+/// it hands to the face's own outline; a flat face whose every side is
+/// straight it reads by triangles fanned from its stored corners, the test
 /// `classify.rs`'s `count_crossings` routes a face to `count_a_polygon` by.
-/// Every other face it reads by where the ray meets its stored surface, and a
-/// point on that surface it hands to the face's own outline.
-fn is_read_by_its_corners(face: FaceView<'_>) -> bool {
+fn is_flat_with_a_curved_side(face: FaceView<'_>) -> bool {
     face.surface().as_plane().is_some()
-        && face.wires().all(|wire| {
+        && face.wires().any(|wire| {
             wire.coedges()
-                .all(|coedge| coedge.edge().stored_run() == &EdgeRun::Straight)
+                .any(|coedge| coedge.edge().stored_run() != &EdgeRun::Straight)
         })
 }
 
