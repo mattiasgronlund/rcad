@@ -2741,20 +2741,30 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// again, so a cone sliver walks to the floor as it did before. Row Q1883 gives
 /// cones measure.rs's charge.
 ///
-/// **When no rung answers, the finest sum that does not lie flat is the
-/// closest** to the solid's volume this saw, and the coarse sum, the zero or
-/// the rounding it was, when every mesh lay flat (row Q1891).
+/// **When no rung answers, the finest mesh is read once more with its flat
+/// faces' points moved onto their planes**, by
+/// [`what_it_encloses_moved_onto_its_planes`], and that sum comes back when it
+/// answers (row Q2266). Two quarter bends of ring 4 and tube 1 placed round by
+/// `−1.984` and a quarter turn back overlap in a wedge of `7.9e-17`. Every mesh
+/// this walk asks of it can leave out more than that, almost all of it under
+/// its caps, whose points a turned plane cannot hold. Moved onto the planes,
+/// the finest mesh at `−2` encloses `5.3714e-17` of a wedge of `5.3716e-17`,
+/// and can be off by `3.1e-19`, so the fuse answers the intersection
+/// (`two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_answered`
+/// in `a_piece_no_ray_can_place_names_its_refusal.rs`). A solid with no flat
+/// face has nothing to move, and its moved sum is its plain one, charged a
+/// little more, so it answers no more often than the ladder did.
+///
+/// **When the moved sum does not answer either, the finest sum that does not
+/// lie flat is the closest** to the solid's volume this saw, and the coarse
+/// sum, the zero or the rounding it was, when every mesh lay flat (row Q1891).
 ///
 /// **A closest sum of zero or below is refused
 /// [`Error::CannotTellWhichWayASolidsFacesPoint`]**, and not handed on to be
 /// refused [`Invalid::VolumeIsNotPositive`], "its faces do not point
 /// outwards": a sound sliver leaves such a sum as readily as a solid turned
-/// inside out (row Q2089). Two quarter bends of ring 4 and tube 1 placed round
-/// by `−1.984` and a quarter turn back overlap in a wedge of `7.9e-17`. Every
-/// mesh this walk asks of it can leave out more than that, the closest
-/// encloses `−2.6e-16`, and the fuse refuses the intersection by that name
-/// (`two_bends_overlapping_in_a_sliver_thinner_than_a_mesh_can_tell_are_refused_by_that_name`
-/// in `a_piece_no_ray_can_place_names_its_refusal.rs`).
+/// inside out (row Q2089). Before Q2266 the sliver at `−1.984` was refused
+/// that way, its closest sum `−2.6e-16`; the sound lens below still is.
 ///
 /// **A closest sum above zero still comes back, and nothing says it has the
 /// solid's sign** (rows Q2047, Q2084). A ball poking `2^-28` into a pipe of
@@ -2768,7 +2778,8 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// Refusing whenever no rung answers stops passing the inside-out lens, but
 /// fifteen other tests passed on such a sum when Q2047 counted them, and
 /// failed then, so it waits on a way to tell the sign that those solids can
-/// still meet.
+/// still meet. The moved sum is no such way for the lens: a ball and a pipe
+/// have no flat face to move a point onto.
 ///
 /// # A fold is retried; every other refusal but one still stops it
 ///
@@ -2855,8 +2866,9 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] when two faces along one
 /// side do not, [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] when a
 /// finer mesh is refused that way, and
-/// [`Error::CannotTellWhichWayASolidsFacesPoint`] when no rung answers and the
-/// closest sum is zero or below.
+/// [`Error::CannotTellWhichWayASolidsFacesPoint`] when no rung answers, the
+/// finest mesh moved onto its planes does not answer either, and the closest
+/// sum is zero or below.
 pub(crate) fn how_much_space_a_curved_solid_encloses(
     view: SolidView<'_>,
     policy: &Policy,
