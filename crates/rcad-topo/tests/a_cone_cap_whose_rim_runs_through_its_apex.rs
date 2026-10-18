@@ -493,6 +493,71 @@ fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
 }
 
+/// The pointed cone's own two faces, with both of their coedges on the shared
+/// circle swapped: the lid's `Reversed` instead of `Forward`, the skin's
+/// `Forward` instead of `Reversed`. Neither the circle nor either surface
+/// changes, only which way each face walks it, so the walk round the skin's
+/// rim now keeps the material on the side away from the apex instead of
+/// towards it. `which_pole_this_cap_reaches` (`mesh.rs`) finds neither pole
+/// strictly beyond every corner, answers `None`, and `SolidBuilder::build`
+/// refuses the solid as `ACurvedFaceGoesRightRoundWithNoSeam`
+/// (`docs/decisions.md` §199.4) — the first of the function's two documented
+/// `None` cases, which until now no test reached. The lid's own plane can
+/// face either way without changing that.
+#[test]
+fn a_cone_walked_the_wrong_way_round_its_rim_is_refused_by_name() {
+    for lid_normal_z in [1.0, -1.0] {
+        let mut builder = SolidBuilder::new();
+        let rim = builder
+            .add_vertex(Point::new(SLOPE * HEIGHT, 0.0, HEIGHT))
+            .expect("a finite point");
+        let circle = builder
+            .add_edge(rim, rim, EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("the cap plane cuts the cone in one closed curve");
+
+        let plane = Plane::from_point_and_normal(
+            Point::new(0.0, 0.0, HEIGHT),
+            Vector::new(0.0, 0.0, lid_normal_z),
+        )
+        .expect("a normal that is not zero");
+        let lid_coedge = builder
+            .add_coedge(circle, Orientation::Reversed)
+            .expect("an edge of this build");
+        let lid_wire = builder
+            .add_wire(&[DraftStep::Along(lid_coedge)])
+            .expect("one closed edge is a wire");
+        let lid = builder
+            .add_face(Surface::Plane(plane), &[lid_wire])
+            .expect("a cap is a plane trimmed by its circle");
+
+        let skin_coedge = builder
+            .add_coedge(circle, Orientation::Forward)
+            .expect("an edge of this build");
+        let skin_wire = builder
+            .add_wire(&[DraftStep::Along(skin_coedge)])
+            .expect("one closed edge is a wire");
+        let skin = builder
+            .add_face(
+                Surface::Cone(Cone::new(Axis::z(), SLOPE).expect("a positive slope")),
+                &[skin_wire],
+            )
+            .expect("a face on the cone");
+
+        builder
+            .add_shell(&[(lid, Orientation::Forward), (skin, Orientation::Forward)])
+            .expect("two faces close");
+        let mut model = a_model();
+        let built = builder.build(&mut model, &Policy::certified(), &mut ProvenanceLog::new());
+        assert!(
+            matches!(
+                built,
+                Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
+            ),
+            "lid normal z {lid_normal_z}: {built:?}"
+        );
+    }
+}
+
 /// The cone of slope one half and height eight whose skin's one wire goes
 /// round the cap circle, down the ruling to `(4, 0, 8)`, and back up it.
 fn a_pointed_cone_seamed_up_a_ruling(

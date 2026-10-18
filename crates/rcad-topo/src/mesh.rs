@@ -2430,14 +2430,29 @@ impl BuildingAMesh {
     /// `None` when no pinch is strictly beyond every corner the way the walk
     /// keeps the material. On a cone that is the apex on the side away from
     /// the material: the rim bounds the endless rest of the nappe, which is no
-    /// face, and the caller refuses it. A rim with a corner at the pinch it
-    /// would reach gets `None` too, and nothing Q578 built gets there. A
-    /// corner on a pinch opens the pole side across the material
-    /// ([`WalkingAWire::turn_at_a_corner_on_a_pole`]), so a rim through a
-    /// pinch either climbs nothing and is no cap, or goes right round with
-    /// that pinch on its far side (`a_cone_cap_whose_rim_runs_through_its_apex.rs`,
-    /// `docs/decisions.md` §199.4). It stays a refusal and not an assert,
-    /// since a wire this kernel never wrote can still arrive here (§67.2).
+    /// face, and the caller refuses it
+    /// (`a_cone_walked_the_wrong_way_round_its_rim_is_refused_by_name` in
+    /// `a_cone_cap_whose_rim_runs_through_its_apex.rs`, `docs/decisions.md`
+    /// §199.4).
+    ///
+    /// **A rim with a real corner at the pinch never reaches this function at
+    /// all, so there is no second `None` to give it.** The one caller that
+    /// hands this function a loop ([`BuildingAMesh::cut_off_what_goes_too_far_round`])
+    /// only does so for a rim that is one closed curve going right round with
+    /// no corner of its own — `walked[0].goes_right_round`, checked right
+    /// before the call — so every corner `cap.corners` holds sits at that
+    /// one curve's own latitude, never at the pinch's. Every way this kernel
+    /// has to put a real corner on a cone's apex (a seam up one ruling, two
+    /// planes through it, a plane along one ruling, or a closed edge
+    /// cornered there) is built in `a_cone_cap_whose_rim_runs_through_its_apex.rs`,
+    /// and each one either leaves `goes_right_round` false — caught earlier
+    /// in `cut_off_what_goes_too_far_round` and handed back as the loop
+    /// stands, never reaching here — or is refused by name before the mesher
+    /// ever sees it. A corner on a pinch does open the pole side across the
+    /// material there ([`WalkingAWire::turn_at_a_corner_on_a_pole`]), which is
+    /// why a rim through one never keeps `goes_right_round` on its own. It
+    /// stays a refusal and not an assert, since a wire this kernel never
+    /// wrote can still arrive here (§67.2).
     fn which_pole_this_cap_reaches(
         &self,
         _: FaceView<'_>,
