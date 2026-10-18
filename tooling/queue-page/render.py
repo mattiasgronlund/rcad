@@ -14,17 +14,18 @@ the tier each was taken from and the agent it runs under, a table of the open
 rows Mattias pinned and what holds each back, a table of why a fill would not
 take an open row now and which rows each reason holds back, a table of the
 families of §450.3 that no trace has covered (`tooling/queue/families.py`
-finds them, as `just queue families` does), then the current
-ready, running and lately-closed rows, and what the overnight fuzz job did
+finds them, as `just queue families` does), then each tier's open rows that
+do not run, ready or blocked, beside the running rows, then the lately-closed
+rows, and what the overnight fuzz job did
 night by night — that last section is `fuzz_section.py`'s, read from the fuzz log root the caller
 names.
 `docs/decisions.md` §230, §263.
 
 Every row of main's copy also gets a page of its own, `<out>/rows/<id>.html`:
-its tier, its class, the rows it came from as `just lineage` reads them, the
-files it expects to change, and the row itself. The front page names a row by
-its id alone, and every Q id on either kind of page links to that row's page
-(§444).
+its tier, its class, the rows it came from and the rows that came from it as
+`just lineage` reads them, the files it expects to change, and the row itself.
+The front page names a row by its id alone, and every Q id on either kind of
+page links to that row's page (§444).
 
 The state this keeps across runs is `<out>/.history-cache.json`, one entry
 per commit sha already tallied, `<out>/.fuzz-cache.json`, one entry per
@@ -52,8 +53,9 @@ import re
 import subprocess
 import sys
 import tempfile
-from collections import namedtuple
+from collections import Counter, namedtuple
 from datetime import datetime, timezone
+from itertools import groupby
 
 sys.dont_write_bytecode = True
 QUEUE_TOOLING = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "queue"))
@@ -202,11 +204,13 @@ def tally(text):
 def current_state(tip, tip_text):
     verbs = load_queue_verbs()
     here = verbs.Here(QUEUE_PATH)
+    running = running_rows(verbs, here, tip)
+    not_taken = rows_not_taken(tip, tip_text, here.trees())
     return {
-        "ready": ready_rows(tip),
-        "running": running_rows(verbs, here, tip),
+        "queued": queued_rows(tip, running, not_taken),
+        "running": running,
         "pinned": pinned_rows(tip),
-        "not_taken": rows_not_taken(tip, tip_text, here.trees()),
+        "not_taken": not_taken,
         "families": family_rows.families(tip),
         "closed": closed_rows(tip),
     }
@@ -221,12 +225,30 @@ def load_queue_verbs():
     return module
 
 
-def ready_rows(tip):
+Queued = namedtuple("Queued", "row status")
+READY = "ready"
+BLOCKED = "blocked"
+
+
+def queued_rows(tip, running, not_taken):
+    """Every open row that does not run, by tier in the order main's copy lists them, each ready or blocked.
+
+    A row is blocked when the table of rows the fill will not take files it
+    under any reason, the reasons the pinned table's "Blocked by" names too,
+    and ready otherwise. A row runs when the claims file holds it or main's
+    copy says `lane:`, as `just queue` counts both, and the Running list beside
+    this one names it, so it is left out here.
+    """
+    held = {row["id"] for row in running}
+    blocked = {row.id for row, _ in not_taken["waiting"]} | {row.id for row in not_taken["parked"]}
+    if not_taken["meeting"] is not None:
+        blocked |= {line["id"] for line in not_taken["meeting"]}
     by_tier = {tier: [] for tier in TIERS_IN_ORDER}
     for row in tip.rows:
-        ready = row.state == "todo" or (row.state.startswith("after:") and not not_yet_done(tip, row))
-        if ready and row.tier in by_tier:
-            by_tier[row.tier].append(row)
+        if row.is_closed() or row.state.startswith("lane:") or row.id in held:
+            continue
+        assert row.tier in by_tier, f"{row.id} is open in tier {row.tier!r}, which is no tier, and check-queue refuses that"
+        by_tier[row.tier].append(Queued(row, BLOCKED if row.id in blocked else READY))
     return by_tier
 
 
@@ -482,7 +504,7 @@ def render_page(points, state, fuzz, rendered_at, links):
         pinned_table=pinned_table(state["pinned"], state["running"], state["not_taken"], links),
         not_taken_table=not_taken_table(state["not_taken"], links),
         families_table=families_table(state["families"], links),
-        ready_section=ready_section(state["ready"], links),
+        queue_section=queue_section(state["queued"], state["not_taken"]["meeting"] is not None, links),
         running_section=running_section(state["running"], links),
         closed_section=closed_section(state["closed"], links),
         fuzz_section=fuzz,
@@ -775,14 +797,56 @@ def families_table(found, links):
 </table>"""
 
 
-def ready_section(by_tier, links):
-    items = []
-    for tier in TIERS_IN_ORDER:
-        rows = by_tier[tier]
-        if not rows:
-            continue
-        items.append(f"<h3>Tier {html.escape(tier)}</h3><p>{' '.join(links.ref(row.id) for row in rows)}</p>")
-    return "".join(items) if items else "<p>none ready</p>"
+def queue_section(by_tier, meeting_worked_out, links):
+    """Each tier's open rows that do not run: how many are ready and how many blocked under each model, then the rows.
+
+    The rows come in the order main's copy lists them, each run of rows next to
+    each other that share a status and a model on one line, so the lines read
+    down the tier the way its rows do.
+    """
+    tiers = [
+        f"<h3>Tier {html.escape(tier)}</h3>\n{counts_table(by_tier[tier])}\n{runs_table(by_tier[tier], links)}"
+        for tier in TIERS_IN_ORDER
+        if by_tier[tier]
+    ]
+    if not tiers:
+        return "<p>nothing queued</p>"
+    if meeting_worked_out:
+        return "\n".join(tiers)
+    note = ("<p class=\"qp-sub\">whether a ready row meets a running lane's write set is not worked out, "
+            "so ready here says only that it waits on nothing and is not parked</p>")
+    return "\n".join([note, *tiers])
+
+
+def counts_table(rows):
+    counts = Counter((queued.status, queued.row.model) for queued in rows)
+    lines = [
+        f'<tr><td>{status}</td><td>{html.escape(model)}</td><td class="n">{counts[status, model]}</td></tr>'
+        for status in (READY, BLOCKED)
+        for model in sorted(model for counted, model in counts if counted == status)
+    ]
+    body = "\n".join(lines)
+    return f"""<table class="qp-stats">
+<thead><tr><th>Ready / blocked</th><th>Model</th><th class="n">Count</th></tr></thead>
+<tbody>
+{body}
+</tbody>
+</table>"""
+
+
+def runs_table(rows, links):
+    lines = [
+        f"<tr><td>{status}</td><td>{html.escape(model)}</td>"
+        f"<td>{', '.join(links.ref(queued.row.id) for queued in run)}</td></tr>"
+        for (status, model), run in groupby(rows, key=lambda queued: (queued.status, queued.row.model))
+    ]
+    body = "\n".join(lines)
+    return f"""<table class="qp-stats">
+<thead><tr><th>Ready / blocked</th><th>Model</th><th>Rows</th></tr></thead>
+<tbody>
+{body}
+</tbody>
+</table>"""
 
 
 def running_section(rows, links):
@@ -869,6 +933,7 @@ def row_page(row, graph, links):
         tier=html.escape(row.tier),
         row_class=class_html(row.tag),
         provenance=provenance_html(row.id, graph, links),
+        results=results_html(row.id, graph, links),
         write_set=write_set_html(row.write_set),
         text=links.text(row.text),
     )
@@ -934,6 +999,32 @@ def step_html(node, info, graph, links):
     return f"{links.ref(node)}, added in <code>{commit.sha[:8]}</code> on {day}, <q>{links.text(commit.subject)}</q>: {came}"
 
 
+def results_html(row_id, graph, links):
+    """Every row that came from this one, and every row that came from those, as `just lineage main` reads each.
+
+    The tree below the row, read the way `provenance_html` reads the chain
+    above it, with the sources §433.6 reads from row text: so a row is here
+    exactly when this one is on that row's own Came from. A branch that comes
+    back to a row above it stops there and says so.
+    """
+    if not graph.with_text.children.get(row_id):
+        return "nothing: no row came from it"
+    return descendants_html(row_id, [row_id], graph, links)
+
+
+def descendants_html(node, above, graph, links):
+    items = []
+    for child in sorted(graph.with_text.children[node], key=lineage.row_sort_key):
+        if child in above:
+            items.append(f"{links.ref(child)} again, so the tree goes round, and stops here")
+            continue
+        step = step_html(child, graph.with_text.parent_of[child], graph, links)
+        if graph.with_text.children.get(child):
+            step += descendants_html(child, [*above, child], graph, links)
+        items.append(step)
+    return "<ul>" + "".join(f"<li>{item}</li>" for item in items) + "</ul>"
+
+
 FOUND_BY = {
     lineage.WORD_LABEL: "as its own word says",
     lineage.COMMIT_LABEL: "read from the commit that added it",
@@ -981,6 +1072,7 @@ dl.qp-row {{ display: grid; grid-template-columns: max-content 1fr; gap: 8px 16p
 dl.qp-row dt {{ color: var(--qp-ink-2); font-weight: 600; }}
 dl.qp-row dd {{ margin: 0; }}
 dl.qp-row ol {{ margin: 0; padding-left: 20px; }}
+dl.qp-row ul ul {{ margin: 0; }}
 pre.qp-row-text {{
   white-space: pre-wrap;
   font-size: 12px;
@@ -999,6 +1091,7 @@ pre.qp-row-text {{
 <dt>Tier</dt><dd>{tier}</dd>
 <dt>Class</dt><dd>{row_class}</dd>
 <dt>Came from</dt><dd><ol>{provenance}</ol></dd>
+<dt>Resulted in</dt><dd>{results}</dd>
 <dt>Expects to change</dt><dd>{write_set}</dd>
 </dl>
 <h2>The row</h2>
@@ -1139,8 +1232,8 @@ table.qp-stats .n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 
 <div class="qp-grid2">
 <div>
-<h2>Ready</h2>
-{ready_section}
+<h2>Queue</h2>
+{queue_section}
 </div>
 <div>
 <h2>Running</h2>

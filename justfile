@@ -13358,8 +13358,22 @@ queue-page:
 # out, the ready pin that met a lane must say so, not "nothing". A fifth commit
 # takes every pin off, and the table must then say nothing is pinned.
 #
+# The Queue section (§455) is checked tier by tier on the fourth commit: how
+# many rows are ready and how many blocked under each model, then the rows, one
+# line per run of neighbours that share both. Its rows are blocked by each
+# reason the table above names, and the rows that run, by the claims file or by
+# main's copy, must not show. Two blocked rows with two running rows between them
+# share a line; a blocked sonnet row beside a blocked opus row starts its own;
+# two blocked opus rows with a ready row between them get a line each. The
+# claims file holds tier 2.2's and tier 5's first rows, so each of those tiers
+# has a second row that is ready. With the third group not worked out, the rows
+# it held back must show as ready, under a note that says so.
+#
 # Every row of main's copy gets a page (§444), checked for its tier, class,
-# write set and text, and for where it came from. The fourth commit's subject
+# write set and text, for where it came from, and for the rows that came from
+# it (§455), which must be the chain above each of them turned round: Q30
+# hangs on Q5 only without the source its text names, so it is not below Q5,
+# and the two rows that name each other stop. The fourth commit's subject
 # names Q5's lane, so lineage hangs the rows it adds on Q5, and Q5 on Q3 and Q3
 # on Q1, each closed by the commit that added the next; its rows also take a
 # parent from their own word, from a crash file their text names (§433.6), and
@@ -13370,7 +13384,7 @@ queue-page:
 # planted word one step up; then the cache is marked with another shape, and
 # the page must work every summary out again. The second render must also
 # remove a page planted for a row main's copy does not hold, and leave a page
-# whose row did not change unwritten.
+# that did not change unwritten.
 #
 # The Families section (§450.3) says there is none at the fourth commit, whose
 # rows name no `tests/*.rs` file. The fifth commit adds three open rows on one
@@ -13544,7 +13558,7 @@ check-queue-page-selftest:
 
     ```
     Q19  1  after:Q13,Q12  opus  docs/i.md  pinned/1 a pin waiting on two rows not yet done §430
-    Q20  1  todo  opus  docs/g.md  pinned/2 a pin that meets Q10's lane §430
+    Q20  1  todo  sonnet  docs/g.md  pinned/2 a pin that meets Q10's lane §430
     Q2  1  todo  opus  docs/b.md  pinned/3 the second row §230
     Q18  1  lane:lane-q18  opus  docs/j.md  pinned/4 a pin running in main's copy, with no take in the claims file §430
     Q21  1  todo  opus  docs/k.md  pinned/5 from/Q2 a pin nothing holds back §430
@@ -13562,6 +13576,7 @@ check-queue-page-selftest:
 
     ```
     Q5  2.2  todo  opus  docs/e.md  a tier 2.2 row §307
+    Q32  2.2  todo  opus  docs/p.md  a tier 2.2 row nothing holds §455
     ```
 
     ## Tier 2.5
@@ -13591,6 +13606,7 @@ check-queue-page-selftest:
 
     ```
     Q6  5  todo  opus  docs/f.md  wrong/C a tier 5 row §403
+    Q33  5  todo  opus  docs/q.md  wrong/C a tier 5 row nothing holds §455
     ```
 
     ## Closed
@@ -13694,13 +13710,9 @@ check-queue-page-selftest:
     grep -q 'id="qp-by-tier"' "$out/index.html" || fail "the by-tier chart is missing from the page"
     grep -q 'id="qp-progress"' "$out/index.html" || fail "the progress chart is missing from the page"
     has() { grep -qF -- "$1" "$out/index.html" || fail "$2"; }
-    has '<h3>Tier 2.2</h3><p><code><a href="rows/Q5.html">Q5</a></code></p>' "the ready list leaves out tier 2.2's Q5"
-    has '<h3>Tier 5</h3><p><code><a href="rows/Q6.html">Q6</a></code></p>' "the ready list leaves out tier 5's Q6"
-    has '<h3>Tier 3</h3><p><code><a href="rows/Q12.html">Q12</a></code> <code><a href="rows/Q13.html">Q13</a></code> <code><a href="rows/Q26.html">Q26</a></code></p>' \
-        "tier 3's ready rows are Q12, Q13 and Q26, each linked, and not Q24 or Q25, which run"
-    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Pinned|Rows the fill will not take now|Families|Ready)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
-    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Families</h2> <h2>Ready</h2> ' ] \
-        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Pinned, Rows the fill will not take now, Families, then Ready: $order"
+    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Pinned|Rows the fill will not take now|Families|Queue)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
+    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Families</h2> <h2>Queue</h2> ' ] \
+        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Pinned, Rows the fill will not take now, Families, then Queue: $order"
     # Each line: the row, the tier its take was taken from, the agent whose tree it runs in, the dispatcher's tree.
     # A row main's copy holds is linked to its page; Q8, Q9 and Q17 are in no copy of main, so they have none.
     has '<tr><th><code><a href="rows/Q2.html">Q2</a></code></th><td>2</td><td><code>wf_page-1</code></td><td><code>dispatch-a</code></td></tr>' \
@@ -13740,8 +13752,6 @@ check-queue-page-selftest:
         "Q14 waits on Q99, which is no row and so has no page to link"
     has '<tr><td>waits on <code><a href="rows/D1.html">D1</a></code> (dropped:§230)</td><td><code><a href="rows/Q15.html">Q15</a></code></td></tr>' \
         "Q15 waits on D1, which was dropped, and a dropped row is not done; D1 is named where the grammar puts an id, so it is linked"
-    ready=$(between 'Ready' 'Running')
-    ! grep -qF 'rows/Q15.html' <<<"$ready" || fail "the ready list counts Q15 ready, as if its dropped D1 were done"
     has '<tr><th colspan="2">Parked (2)</th></tr>' "two rows are parked: Q4 and Q16"
     has '<tr><td>parked for §230</td><td><code><a href="rows/Q4.html">Q4</a></code></td></tr>' "Q4 is parked for §230"
     has "<tr><th colspan=\"2\">Meets a running lane's write set (4)</th></tr>" "four ready rows meet a running lane: Q20, Q11, Q12 and Q26"
@@ -13754,8 +13764,28 @@ check-queue-page-selftest:
     # Every id the table names, in reading order: each reason by the first row it holds back, in the order a fill walks them.
     [ "$(between 'Rows the fill will not take now' 'Families' | grep -oE '>[TDQ][0-9]+<' | tr -d '<>' | tr '\n' ' ')" = 'Q13 Q19 Q12 Q19 Q10 Q14 Q99 Q14 D1 Q15 Q4 Q16 Q10 Q20 Q11 Q2 Q12 Q24 Q25 Q26 ' ] \
         || fail "the table should hold Q19, Q14 and Q15 waiting, Q4 and Q16 parked, then Q20 and Q11, Q12 and Q26 meeting a lane, each reason in the order a fill reaches the first row it holds back, and not Q13 or Q21 as rows held back, which meet nothing"
-    [ "$(between 'Families' 'Ready' | grep -c '<p>no family</p>')" -eq 1 ] \
+    [ "$(between 'Families' 'Queue' | grep -c '<p>no family</p>')" -eq 1 ] \
         || fail "no row names a tests/*.rs file at commit D, so the Families section should say there is no family"
+    # Each tier's lines, `status|model|count|` and then `status|model|rows|`, one table line each.
+    queue_tier() {
+        between 'Queue' 'Running' | sed -n "/<h3>Tier $1<\/h3>/,/<h3>/p" | grep '^<tr><td>' \
+            | sed -E 's/<\/td>/|/g; s/<[^>]+>//g' | tr '\n' ';'
+    }
+    [ "$(between 'Queue' 'Running' | grep -oE '<h3>Tier [0-9.]+</h3>' | tr '\n' ' ')" = '<h3>Tier 1</h3> <h3>Tier 2</h3> <h3>Tier 2.2</h3> <h3>Tier 2.5</h3> <h3>Tier 3</h3> <h3>Tier 4</h3> <h3>Tier 5</h3> ' ] \
+        || fail "every tier holds an open row that does not run, so the Queue section should head all seven, in order"
+    [ "$(queue_tier 1)" = 'ready|opus|1|;blocked|opus|2|;blocked|sonnet|1|;blocked|opus|Q19|;blocked|sonnet|Q20|;ready|opus|Q21|;blocked|opus|Q4|;' ] \
+        || fail "tier 1: Q19 waits, sonnet's Q20 meets a lane and so starts a line of its own, Q21 is ready, Q4 is parked apart from Q19, and Q2 and Q18 run: $(queue_tier 1)"
+    [ "$(queue_tier 2)" = 'blocked|opus|1|;blocked|opus|Q11|;' ] || fail "tier 2: Q11 meets Q10's lane, and Q10 runs: $(queue_tier 2)"
+    [ "$(queue_tier 2.2)" = 'ready|opus|1|;ready|opus|Q32|;' ] || fail "tier 2.2: Q32 is ready, and the claims file holds Q5: $(queue_tier 2.2)"
+    [ "$(queue_tier 2.5)" = 'blocked|opus|1|;blocked|opus|Q16|;' ] || fail "tier 2.5: Q16 is parked: $(queue_tier 2.5)"
+    [ "$(queue_tier 3)" = 'ready|opus|1|;blocked|opus|3|;blocked|opus|Q12|;ready|opus|Q13|;blocked|opus|Q14, Q26|;' ] \
+        || fail "tier 3: Q12 meets Q2, Q13 is ready, and Q14 and Q26 are one line, since the Q24 and Q25 between them run: $(queue_tier 3)"
+    [ "$(queue_tier 4)" = 'blocked|opus|1|;blocked|opus|Q15|;' ] || fail "tier 4: Q15 waits on D1, which was dropped and is not done: $(queue_tier 4)"
+    [ "$(queue_tier 5)" = 'ready|opus|1|;ready|opus|Q33|;' ] || fail "tier 5: Q33 is ready, and the claims file holds Q6: $(queue_tier 5)"
+    has '<tr><td>blocked</td><td>opus</td><td><code><a href="rows/Q14.html">Q14</a></code>, <code><a href="rows/Q26.html">Q26</a></code></td></tr>' \
+        "tier 3's last line should link Q14 and Q26, a comma between them"
+    queue=$(between 'Queue' 'Running')
+    ! grep -qF 'not worked out' <<<"$queue" || fail "the Queue section says the third group is not worked out, and it is"
     grep -qE '<p class="qp-sub">as of [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z, when this page was last rendered</p>' "$out/index.html" \
         || fail "the running table does not say when the page was rendered"
     # Each row: added and closed that day, open by tier 1 2 2.2 2.5 3 4 5, parked, all open, closed so far.
@@ -13795,8 +13825,13 @@ check-queue-page-selftest:
 
     # Each row of main's copy has a page of its own, which links a row without the rows/ the front page puts first.
     on_page() { grep -qF -- "$2" "$out/rows/$1.html" || fail "$1's page: $3"; }
-    chain() { grep -oE '<li><code>(<a href="[TDQ][0-9]+\.html">)?[TDQ][0-9]+<' "$out/rows/$1.html" | grep -oE '[TDQ][0-9]+<$' | tr -d '<' | tr '\n' ' '; }
-    [ "$(ls "$out/rows" | wc -l)" -eq 27 ] || fail "main's copy holds 27 rows, so there should be 27 row pages: $(ls "$out/rows" | tr '\n' ' ')"
+    chain() { grep '^<dt>Came from</dt>' "$out/rows/$1.html" | grep -oE '<li><code>(<a href="[TDQ][0-9]+\.html">)?[TDQ][0-9]+<' | grep -oE '[TDQ][0-9]+<$' | tr -d '<' | tr '\n' ' '; }
+    # The tree below a row, each list as ( and ) around the rows in it.
+    results() {
+        grep '^<dt>Resulted in</dt>' "$out/rows/$1.html" | grep -oE '<ul>|</ul>|<li><code>(<a href="[TDQ][0-9]+\.html">)?[TDQ][0-9]+<' \
+            | sed -E 's/^<ul>$/(/; s/^<\/ul>$/)/; s/.*>([TDQ][0-9]+)<$/\1/' | tr '\n' ' '
+    }
+    [ "$(ls "$out/rows" | wc -l)" -eq 29 ] || fail "main's copy holds 29 rows, so there should be 29 row pages: $(ls "$out/rows" | tr '\n' ' ')"
     on_page Q6 '<dt>Tier</dt><dd>5</dd>' "its tier is 5"
     on_page Q6 '<dt>Class</dt><dd><b>C</b>, possible: only a probe builds it. Its tag is <code>wrong/C</code>: a wrong answer (§352.3)</dd>' \
         "its class is C, from its tag wrong/C"
@@ -13829,13 +13864,22 @@ check-queue-page-selftest:
         "its text names a crash file of the demo target, which stands over the lane merge that added it (§433.6), and the chain ends at the target"
     on_page Q31 '</q>: came from the STEP file <code>demo.stp</code>, as its own word says</li></ol>' \
         "its word names a STEP file, and the chain ends there"
+    on_page Q2 "<dt>Resulted in</dt><dd><ul><li><code><a href=\"Q21.html\">Q21</a></code>, added in <code>${sha_d:0:8}</code> on 2026-09-04, <q>Merge lane-q5-the-tables: rows waiting, parked, pinned and meeting a running lane</q>: came from <code><a href=\"Q2.html\">Q2</a></code>, as its own word says</li></ul></dd>" \
+        "Q21 came from Q2, as its word says, and each row below gets the step its own Came from gives it"
+    on_page Q20 '<dt>Resulted in</dt><dd>nothing: no row came from it</dd>' "no row came from Q20"
+    [ "$(results Q3)" = '( Q4 Q5 ( Q10 Q11 Q12 Q13 Q14 Q15 Q16 Q18 Q19 Q20 Q22 Q24 Q25 Q26 Q32 Q33 ) Q6 ) ' ] \
+        || fail "Q3's page should hold Q4, Q5 and Q6, which commit C added as it closed Q3, and under Q5 every row its lane's merge added that names no other source, and not Q30, which came from the fuzz target its text names: $(results Q3)"
+    on_page Q28 '<li><code><a href="Q28.html">Q28</a></code> again, so the tree goes round, and stops here</li>' \
+        "Q28 and Q29 name each other, and the tree below Q28 should stop when it comes back"
+    [ "$(results Q28)" = '( Q29 ( Q28 ) ) ' ] || fail "the tree below Q28 should go Q29 and stop on Q28: $(results Q28)"
 
     # The caches. A fuzz log whose size and mtime are unchanged is not read
     # again, so a value planted in its entry shows on the page; a log that grew
     # is. A commit's lineage summary is never worked out again once kept, so a
-    # word planted in commit D's shows on Q21's page. A page whose row main's
-    # copy does not hold is removed, and a page that did not change is not
-    # written again, so it keeps its inode.
+    # word planted in commit D's shows on Q21's page, and moves Q21 below Q4 on
+    # Q4's. A page whose row main's copy does not hold is removed, and a page
+    # that did not change is not written again, so it keeps its inode: Q6's,
+    # since the plant moves Q21 into Q1's tree and so changes Q1's page.
     jq --arg log "$fuzz/2026-09-10/fuzz-demo.log" '.logs[$log].summary[7] = 4242' "$out/.fuzz-cache.json" \
         > "$out/planted.json" && mv "$out/planted.json" "$out/.fuzz-cache.json" || fail "could not plant a value in the fuzz cache"
     run_line 1300000 1050 3700 >> "$fuzz/2026-09-13/fuzz-demo.log"
@@ -13844,14 +13888,15 @@ check-queue-page-selftest:
     jq --arg sha "$sha_d" '.commits[$sha].added.Q21 |= sub(" from/Q2 "; " from/Q4 ")' "$out/.lineage-cache.json" \
         > "$out/planted.json" && mv "$out/planted.json" "$out/.lineage-cache.json" || fail "could not plant a word in the lineage cache"
     printf x > "$out/rows/Q98.html"
-    q1_inode=$(stat -c %i "$out/rows/Q1.html")
+    q6_inode=$(stat -c %i "$out/rows/Q6.html")
     render || fail "queue-page failed to render a second time"
     has '<title>2026-09-10: 4242 at the end of the night</title>' "an unchanged log was read again rather than served from the cache"
     has '<title>2026-09-13: 1050 at the end of the night</title>' "a log that grew was served stale from the cache"
     [ "$(chain Q21)" = 'Q21 Q4 Q3 Q1 ' ] \
         || fail "Q21's page should trace the word planted in the lineage cache, Q4, or commit D's summary was worked out again: $(chain Q21)"
+    [ "$(results Q4)" = '( Q21 ) ' ] || fail "Q4's page should hold Q21, which the word planted in the lineage cache hangs on it: $(results Q4)"
     [ ! -e "$out/rows/Q98.html" ] || fail "a page for Q98, which main's copy does not hold, was left standing"
-    [ "$(stat -c %i "$out/rows/Q1.html")" = "$q1_inode" ] || fail "Q1's page did not change, and was written again"
+    [ "$(stat -c %i "$out/rows/Q6.html")" = "$q6_inode" ] || fail "Q6's page did not change, and was written again"
 
     printf '\n' >> "$hub/docs/queue.md"
     render || fail "queue-page failed to render with the copy in the tree holding main not main's commit"
@@ -13864,6 +13909,11 @@ check-queue-page-selftest:
         "with the third group not worked out, Q20's pinned line should say so rather than call it held back by nothing"
     has '<tr><th><code><a href="rows/Q19.html">Q19</a></code></th><td class="n">1</td><td>waits on <code><a href="rows/Q13.html">Q13</a></code> (todo); waits on <code><a href="rows/Q12.html">Q12</a></code> (todo)</td></tr>' \
         "Q19's waits come from main's commit, and its pinned line should still say them"
+    queue=$(between 'Queue' 'Running')
+    grep -qF "whether a ready row meets a running lane's write set is not worked out" <<<"$queue" \
+        || fail "with the third group not worked out, the Queue section should say its ready rows may meet a running lane"
+    [ "$(queue_tier 3)" = 'ready|opus|3|;blocked|opus|1|;ready|opus|Q12, Q13|;blocked|opus|Q14|;ready|opus|Q26|;' ] \
+        || fail "tier 3 with the third group not worked out: Q12 and Q26 met a lane and are ready now, Q14 still waits: $(queue_tier 3)"
 
     sed -i -E 's/  pinned\/[0-9]+ /  /' "$hub/docs/queue.md"
     sed -i '/^Q21  /a Q23  1  todo  opus  docs/n.md  from/Q21 a row filed from Q21 §432' "$hub/docs/queue.md"
@@ -13884,7 +13934,7 @@ check-queue-page-selftest:
     render || fail "queue-page failed to render with no row pinned"
     [ "$(between 'Pinned' 'Rows the fill will not take now' | grep -c '<p>nothing pinned</p>')" -eq 1 ] \
         || fail "with no row pinned, the pinned table should say nothing is"
-    families=$(between 'Families' 'Ready')
+    families=$(between 'Families' 'Queue')
     grep -qF '<tr><td class="n">3</td><td><code>crates/rcad-topo/tests/a_family.rs</code></td><td><code><a href="rows/Q40.html">Q40</a></code> (1) <code><a href="rows/Q41.html">Q41</a></code> (1) <code><a href="rows/Q42.html">Q42</a></code> (5)</td></tr>' <<<"$families" \
         || fail "the Families section should hold a_family.rs with its three open rows, each linked with its tier, and not the parked Q43: $families"
     ! grep -qF 'a_traced_family.rs' <<<"$families" || fail "the Families section holds a_traced_family.rs, whose three rows a closed trace named"
@@ -13898,7 +13948,8 @@ check-queue-page-selftest:
     render || fail "queue-page failed to render with the lineage cache kept under another shape"
     [ "$(chain Q23)" = 'Q23 Q21 Q2 ' ] \
         || fail "a lineage cache kept under another shape should be worked out again from git, which gives Q21's own word, Q2, not the planted Q4: $(chain Q23)"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the ready list holds every tier, every Q id that is a row links to that row's page, which gives its tier, class, write set, text and where it came from, the lineage cache serves a kept commit and works out a new one, and the fuzzing section matches its fixture nights"
+    [ "$(results Q2)" = '( Q21 ( Q23 ) ) ' ] || fail "the tree below Q2 should hold Q21, and Q23 below Q21, which commit E filed from it: $(results Q2)"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, the lineage cache serves a kept commit and works out a new one, and the fuzzing section matches its fixture nights"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
