@@ -2592,7 +2592,14 @@ check-fuzz-builds:
 # `Cylinder` and `Torus` beside the ball and the plane it already named, so a
 # circle through a ball's pole gets its second node against a pipe or a ring
 # too, and only `Cone` is left to `_`.
-wildcard_arms := "99"
+#
+#     Q2024's lane  99 -> 100
+#
+# One more, composite, in `a_bar_lying_along_a_plane_or_a_bar.rs`'s
+# `a_thousand_turns_of_a_cube_and_a_bar`: its match on `SurfaceMeet` names
+# `Nothing` and `Curves` of one run or two, and `other => panic!` takes the
+# rest, since a plane holding a pipe's axis direction meets it in nothing else.
+wildcard_arms := "100"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:

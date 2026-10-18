@@ -133,6 +133,21 @@
 //! `a_bar_standing_on_a_blocks_top_flush_with_its_edge_answers_every_rule` and
 //! `a_top_whose_hole_touches_its_outline_at_a_point_is_refused_as_too_thin`
 //! pin the two.
+//!
+//! **A thousand float turn angles about `z`, swept over the same cube and bar
+//! turned together, land in the same three bins Q1765 found and the same
+//! single limit `Q2237` and `Q2257` already pin** (queue row Q2024). Of 2000
+//! `(angle, wall)` pairs, angle strictly between `0` and a quarter turn and
+//! wall `4.0` or `2.0`, the turned wall's plane misses the bar's pipe on 930,
+//! touches it on none, and crosses it on 1070; every fuse answers right on
+//! every one, and 3745 of the crossing pairs' rule-and-order combinations
+//! refuse `DynamicRangeTooWide`, never `Undecidable`. None of those refusals
+//! go through `Arrangement::passes_through` or `which_side_of_everything`'s
+//! ring-fallback chain (`fuse/arrange.rs`) at all: they are the same
+//! coordinate-spread-past-`2^53` sliver the bar turned twice already pins, at
+//! the same coordinates of 4 to 6, so no new row is filed for them (`docs/decisions.md`
+//! §3.5, §16.10). `a_thousand_turns_of_a_cube_and_a_bar` pins it, with the
+//! fuller argument in its own doc comment.
 
 use core::f64::consts::PI;
 use std::collections::BTreeMap;
@@ -379,6 +394,263 @@ fn a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// A thousand float turn angles about `z`, strictly between `0` and a quarter
+/// turn, over the same pair as
+/// [`a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule`]: the cube
+/// `4 × 4 × 4` or `4 × 4 × 2` and the bar of radius one, two high, at
+/// `(−1, 2, 1)`, the cube placed by `Isometry::rotation` and the bar by that
+/// turn composed with its shift (queue row Q2024).
+///
+/// **The two solids turn together, so only rounding moves them apart.** `turn`
+/// places both, so the configuration *between* them never changes — the bar
+/// sits exactly where it always does relative to the wall — and the only thing
+/// a generic angle changes is how `Isometry::rotation`'s own rounding lands.
+/// `intersect` sorts every angle into one of three bins: the wall's plane
+/// misses the bar's pipe, as at `π/6` and one radian
+/// (queue row Q1765, a miss by `5.3e−17` or `2.1e−16`), crosses it in two
+/// straight lines a rounding apart, or runs along it touching in one.
+///
+/// **Every refusal found is the same too-thin-to-compute limit
+/// [`a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top`]
+/// already pins** (queue rows Q2237 and Q2257): a coordinate spread past
+/// `2^53`, the point past which a feature written straight into the
+/// coordinates is gone (`docs/decisions.md` §3.5). None of the 3745 refusals
+/// below are `Undecidable`; every one is `DynamicRangeTooWide`, the model's
+/// own check of how wide its coordinates spread over its smallest feature,
+/// which a fuse asks behind a guard separate from the sweep that
+/// `Undecidable` would come from. A wrong answer, caught by
+/// inclusion-exclusion rather than by name, would be a different kind of
+/// fault and always fails the test; a refusal of this one kind is pinned by
+/// count instead, since §16.10 says a limit like this is deferred, not fixed.
+#[test]
+fn a_thousand_turns_of_a_cube_and_a_bar() {
+    const HOW_MANY: usize = 1000;
+    let mut miss = 0usize;
+    let mut touch = 0usize;
+    let mut cross = 0usize;
+    let mut refusals: Vec<String> = Vec::new();
+    let mut wrong: Vec<String> = Vec::new();
+    for step in 0..HOW_MANY {
+        let angle = (step as f64 + 0.5) / HOW_MANY as f64 * (PI / 2.0);
+        let turn = Isometry::rotation(&Axis::z(), angle).expect("a finite angle");
+        for wall in [4.0, 2.0] {
+            match how_a_turned_wall_meets_the_pipe(&turn, wall) {
+                SurfaceMeet::Nothing => {
+                    miss += 1;
+                    continue;
+                }
+                SurfaceMeet::Curves(runs) if runs.len() == 1 => touch += 1,
+                SurfaceMeet::Curves(runs) if runs.len() == 2 => cross += 1,
+                other => panic!(
+                    "a plane that holds a pipe's own axis direction only ever misses it, \
+                     touches it in one line, or crosses it in two: angle {angle}, wall \
+                     {wall}, got {other:?}"
+                ),
+            }
+            let answers = how_every_fuse_of_a_turned_bar_against_a_wall_answers(&turn, wall, angle);
+            refusals.extend(answers.refusals);
+            wrong.extend(answers.wrong);
+        }
+    }
+    println!(
+        "miss {miss} touch {touch} cross {cross} of {} angles",
+        HOW_MANY * 2
+    );
+    assert_eq!(
+        miss, 930,
+        "how many of the 2000 angle-and-wall pairs the wall's plane misses the pipe on"
+    );
+    assert_eq!(
+        cross, 1070,
+        "how many of the 2000 pairs the wall's plane crosses the pipe on (touch is measure zero and was not seen once in 1000 angles)"
+    );
+    assert_eq!(
+        miss + touch + cross,
+        HOW_MANY * 2,
+        "every angle lands in exactly one bin"
+    );
+    println!("{} refusals, {} wrong", refusals.len(), wrong.len());
+    assert!(
+        wrong.is_empty(),
+        "a wrong answer is always a regression:\n{}",
+        wrong.join("\n")
+    );
+    let not_the_known_limit: Vec<&String> = refusals
+        .iter()
+        .filter(|refusal| {
+            !refusal.contains("refused the model is broken: coordinates span a range of")
+        })
+        .collect();
+    assert!(
+        not_the_known_limit.is_empty(),
+        "every refusal here should be DynamicRangeTooWide, and these are not:\n{not_the_known_limit:#?}"
+    );
+    assert_eq!(
+        refusals.len(),
+        3745,
+        "every refusal here is the known DynamicRangeTooWide sliver limit (see the doc \
+         comment above); a count that moves is either that limit's shape changing or a new \
+         kind of refusal, and either needs a look:\n{}",
+        refusals.join("\n")
+    );
+}
+
+/// Where `intersect` places the wall of
+/// [`a_thousand_turns_of_a_cube_and_a_bar`]'s cube, turned by `turn` and
+/// `wall` high, against the bar's own skin.
+fn how_a_turned_wall_meets_the_pipe(turn: &Isometry, wall: f64) -> SurfaceMeet {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+    let cube = model
+        .add_extrusion(&rectangle, wall, turn)
+        .expect("building a box needs no decision");
+    let shift = Isometry::translation(Vector::new(-1.0, 2.0, 1.0)).expect("a short shift");
+    let bar = model
+        .add_round_bar(1.0, 2.0, &turn.compose(&shift))
+        .expect("a bar");
+    the_wall_and_the_pipe_meet(&model, cube, bar)
+}
+
+/// What [`how_every_fuse_of_a_turned_bar_against_a_wall_answers`] found: a
+/// refusal, named directly, and a wrong answer, caught by inclusion-exclusion
+/// instead — kept apart because only the second is ever a regression that
+/// should fail the test on its own (`docs/decisions.md` §16.10).
+struct AnswerFaults {
+    refusals: Vec<String>,
+    wrong: Vec<String>,
+}
+
+/// Every rule both ways round, under `certified`, for the cube and the bar of
+/// [`a_thousand_turns_of_a_cube_and_a_bar`] at one angle and one wall height,
+/// whatever `intersect` says of the wall and the pipe. A refusal is named
+/// directly; a wrong answer is caught by inclusion-exclusion — the union, and
+/// each difference, measured against the intersection's own volume, however
+/// that volume was reached — without needing a closed form for the overlap
+/// itself.
+fn how_every_fuse_of_a_turned_bar_against_a_wall_answers(
+    turn: &Isometry,
+    wall: f64,
+    angle: f64,
+) -> AnswerFaults {
+    let bar_at = [-1.0, 2.0, 1.0];
+    let union_unswapped =
+        how_a_turned_bar_against_a_wall_fuses(turn, bar_at, wall, false, Rule::Union);
+    let union_swapped =
+        how_a_turned_bar_against_a_wall_fuses(turn, bar_at, wall, true, Rule::Union);
+    let meet_unswapped =
+        how_a_turned_bar_against_a_wall_fuses(turn, bar_at, wall, false, Rule::Intersection);
+    let meet_swapped =
+        how_a_turned_bar_against_a_wall_fuses(turn, bar_at, wall, true, Rule::Intersection);
+    let cube_less_bar =
+        how_a_turned_bar_against_a_wall_fuses(turn, bar_at, wall, false, Rule::Difference);
+    let bar_less_cube =
+        how_a_turned_bar_against_a_wall_fuses(turn, bar_at, wall, true, Rule::Difference);
+
+    let mut refusals = Vec::new();
+    for (what, got) in [
+        ("Union, cube first", &union_unswapped),
+        ("Union, bar first", &union_swapped),
+        ("Intersection, cube first", &meet_unswapped),
+        ("Intersection, bar first", &meet_swapped),
+        ("cube less the bar", &cube_less_bar),
+        ("bar less the cube", &bar_less_cube),
+    ] {
+        if let Err(why) = got {
+            refusals.push(format!("angle {angle}, wall {wall}, {what}: {why}"));
+        }
+    }
+
+    let mut wrong = Vec::new();
+    let cube_volume = 16.0 * wall;
+    let bar_volume = 2.0 * PI;
+    let the_overlap: Vec<(&str, f64)> = [
+        (
+            "Intersection, cube first",
+            meet_unswapped.as_ref().ok().copied(),
+        ),
+        (
+            "Intersection, bar first",
+            meet_swapped.as_ref().ok().copied(),
+        ),
+        (
+            "the cube's volume less what cube less the bar left",
+            cube_less_bar.as_ref().ok().map(|found| cube_volume - found),
+        ),
+        (
+            "the bar's volume less what bar less the cube left",
+            bar_less_cube.as_ref().ok().map(|found| bar_volume - found),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(what, found)| found.map(|found| (what, found)))
+    .collect();
+    if let [(_, first), rest @ ..] = the_overlap.as_slice() {
+        for (what, found) in rest {
+            if (found - first).abs() > HOW_FAR_A_MESH_MAY_BE * first.abs().max(found.abs()).max(1.0)
+            {
+                wrong.push(format!(
+                    "angle {angle}, wall {wall}: {what} puts the overlap at {found}, and \
+                     Intersection, cube first puts it at {first}"
+                ));
+            }
+        }
+        if let Ok(found) = &union_unswapped {
+            let expected = cube_volume + bar_volume - first;
+            if (found - expected).abs() > HOW_FAR_A_MESH_MAY_BE * expected {
+                wrong.push(format!(
+                    "angle {angle}, wall {wall}: Union, cube first measured {found}, and the \
+                     overlap says {expected}"
+                ));
+            }
+        }
+    }
+    AnswerFaults { refusals, wrong }
+}
+
+/// The total volume [`Model::fuse`] answers for the cube and the bar of
+/// [`a_thousand_turns_of_a_cube_and_a_bar`], whatever `intersect` says of the
+/// wall's plane and the bar's pipe: clear of it, touching it in one line, or
+/// crossing it in two. `Err` says what is wrong with the fuse; a model that
+/// does not validate is one of them.
+fn how_a_turned_bar_against_a_wall_fuses(
+    turn: &Isometry,
+    bar_at: [f64; 3],
+    wall: f64,
+    swapped: bool,
+    rule: Rule,
+) -> Result<f64, String> {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let rectangle = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a square");
+    let cube = model
+        .add_extrusion(&rectangle, wall, turn)
+        .expect("building a box needs no decision");
+    let [x, y, z] = bar_at;
+    let shift = Isometry::translation(Vector::new(x, y, z)).expect("a short shift");
+    let bar = model
+        .add_round_bar(1.0, 2.0, &turn.compose(&shift))
+        .expect("a bar");
+    let [first, second] = if swapped { [bar, cube] } else { [cube, bar] };
+    let mut log = ProvenanceLog::new();
+    let answer = model
+        .fuse(&[first], &[second], rule, &Policy::certified(), &mut log)
+        .map_err(|why| format!("refused {why}"))?;
+    if !log.records().is_empty() {
+        return Err(format!("not every decision is proved: {:?}", log.records()));
+    }
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .map_err(|why| format!("the model does not validate: {why}"))?;
+    Ok(answer
+        .solids()
+        .iter()
+        .map(|&solid| volume_of(&model, solid))
+        .sum())
+}
+
 /// What one fuse of
 /// [`a_bar_on_a_wall_both_turned_by_a_float_angle_answer_every_rule`] keeps of
 /// the bar's seam: how many images the seam has, and how many straight edges
@@ -465,6 +737,15 @@ fn a_bar_against_a_wall(
 /// Whether `intersect` proves that the cube's upright wall nearest the bar, as
 /// the model holds it placed, and the bar's skin meet in nothing.
 fn the_wall_misses_the_pipe(model: &Model, cube: SolidKey, bar: SolidKey) -> bool {
+    matches!(
+        the_wall_and_the_pipe_meet(model, cube, bar),
+        SurfaceMeet::Nothing
+    )
+}
+
+/// Where `intersect` places the cube's upright wall nearest the bar, as the
+/// model holds it placed, against the bar's own skin.
+fn the_wall_and_the_pipe_meet(model: &Model, cube: SolidKey, bar: SolidKey) -> SurfaceMeet {
     let skin = model
         .solid(bar)
         .expect("this model made the key")
@@ -487,15 +768,13 @@ fn the_wall_misses_the_pipe(model: &Model, cube: SolidKey, bar: SolidKey) -> boo
             off(one).total_cmp(&off(other))
         })
         .expect("a box has faces");
-    matches!(
-        intersect(
-            &Surface::Plane(wall),
-            &skin,
-            &Policy::certified(),
-            &mut ProvenanceLog::new()
-        ),
-        Ok(SurfaceMeet::Nothing)
+    intersect(
+        &Surface::Plane(wall),
+        &skin,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
     )
+    .expect("a plane against a pipe is always named")
 }
 
 /// The heights of an upright edge's two ends, lower first.
