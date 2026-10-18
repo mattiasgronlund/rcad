@@ -279,7 +279,7 @@ moved them.
 | `Predicate(PlanesDoNotMeetInAPoint)` | three planes meet at a point neither Cramer's rule nor the line route can bound | **gap** | inherited from `meet_of_three_planes` and now reached far less often |
 | `Undecidable` read out of `meet_of_three_planes`'s own `Ok` | three planes meet **past the top of the range**, and Cramer's rule hands back a box with an infinite side | **limit — §34.10 said gap and was wrong** | `three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere`. §34.10 argued it a gap because the same three planes lower down are placed; that is a different triple with a different answer, and *this* triple's answer is a point at about `1e315` that no `f64` triple names. Whose it is: **`rcad-predicates`'**, which returns the box, and `rcad-geom`'s `meet_of_three_surfaces` reads it as the refusal it is. The frozen crate keeps it and §39.7 hands it on |
 | `TheseTwoSurfacesDoNotCrossInAConic` | two planes, or a plane down a pipe's own axis | **limit** | the question is a different one and the arrangement's dominant-axis rule answers it |
-| `TheseTwoSurfacesDoNotCrossInAConic` | a plane whose dot with the axis cancels in `f64` and not exactly | **gap, new at this gate** | `a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently`. The pair is a conic, `intersect` says so, and this refuses it |
+| `TheseTwoSurfacesDoNotCrossInAConic` | a plane whose dot with the axis cancels in `f64` and not exactly | **gap, new at this gate — closed, 2026-10-18 (Q2244)** | `a_conic_the_intersector_names_is_ordered_here_too_because_the_two_ask_it_alike`, renamed from `a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently` once Q2189 and Q2233 made `walk.rs` and `along_a_crossing.rs` ask the same exact lean `intersect` does. The pair is a conic, `intersect` says so, and this now orders round it, `Ok(Decision::Zero)` |
 | `TheseTwoSurfacesDoNotCrossInAConic` | a ball against a pipe, or two pipes | **gap** | the curve is there and ordering points along it takes the marcher. **2026-10-09, Q1483:** closed for two pipes where the fat one swallows the thin one's whole cross-section — each of the two loops runs once round the thin pipe's axis and is ordered round it by the determinant, no marcher. Two pipes of one radius, two crossing in one loop, and a ball off a pipe's axis are still refused. The cross-drilled shaft that needed it is refused later, by the fuse's check (§421) |
 | `TheCrossingOfTheseTwoSurfacesIsNotClosed` | a crossing that runs on for ever | **limit** | the vertex does not exist: such an edge is cut by corners at both ends rather than closing on itself |
 | `Undecidable` out of `intersect` | a direction with a subnormal component underflows its own product | **gap** | `a_direction_with_a_subnormal_component_cannot_be_told_from_square_to_a_plane`, whose second half slides both triples by `2^300` and reads the sign |
@@ -951,6 +951,14 @@ list: an importer's whole job is to turn a stranger's bytes into a `Model`.
    `walk`'s dispatch and therefore the mesher, so it needs its own lane and its
    own re-measurement. **Consumer: any imported solid whose axis and cut plane
    are not both lattice-friendly**, which is most of them.
+
+> **2026-10-18 note (Q2244, from Q2233): the gap is closed.** Q2189 made
+> `walk.rs` ask the lean exactly, and Q2233 made `the_way_this_crossing_winds`
+> in `along_a_crossing.rs` ask `how_a_plane_leans_against_a_pipe`, the same
+> authority `intersect` uses. The pin
+> `a_conic_the_intersector_names_is_refused_here_because_the_two_ask_it_differently`
+> is now `a_conic_the_intersector_names_is_ordered_here_too_because_the_two_ask_it_alike`
+> and answers `Ok(Decision::Zero)`.
 7. **`meet_of_three_planes` hands back `Ok` holding an unbounded box**, and
    refuses three mutually perpendicular planes written at `1e-200`. It is
    `rcad-predicates`', the crate has been frozen for ten lanes, and unfreezing it
