@@ -282,6 +282,14 @@ const EVERY_WEDGE: [Wedge; 3] = [
     A_WEDGE_OVER_THE_MINUS_Y_EDGE,
 ];
 
+/// Both faces on the `+y` half of the `+x` side face, so the side of its
+/// profile that runs back to the origin, from `(5, 3.75)`, is the only one
+/// whose plane is tilted and does not start at the origin.
+const A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS: Wedge = Wedge {
+    low: 0.25,
+    high: 0.75,
+};
+
 /// What a fuse of the half bar refused with, as much of it as the pins below
 /// tell apart.
 #[derive(Debug, PartialEq)]
@@ -602,6 +610,46 @@ fn a_sound_pyramid_cut_by_a_wedge_through_its_apex_answers_where_it_stands_and_p
                 &case,
             );
         }
+    }
+}
+
+/// **A wedge whose profile runs back to the origin along a tilted side cuts
+/// the sound pyramid where it stands under `certified`, with nothing in the
+/// log.** The side from `(5, 3.75)` back to `(0, 0)` stands on the plane `y =
+/// 0.75·x`, and an extrusion writes a side's plane through whichever of the
+/// side's two corners is nearer the origin. Written through `(5, 3.75)`, with
+/// a normal no `f64` holds exactly, its offset came out `-2.78e-16` and not
+/// `0`, the wedge's edge missed the pyramid's apex by that much, and every
+/// rule was refused `DynamicRangeTooWide` (Q2320, Q2331). Through the origin
+/// the offset is `0`, the six planes meet at the apex exactly, and the
+/// answers are the pyramid's 120 less the 7.5 the two share, that 7.5, and
+/// the pyramid's 120 and the wedge's 75 less it.
+#[test]
+fn a_sound_pyramid_cut_by_a_wedge_with_a_tilted_side_back_to_its_edge_answers_where_it_stands() {
+    let wedge = A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS;
+    for (rule, volume) in [
+        (Rule::Difference, 112.5),
+        (Rule::Intersection, 7.5),
+        (Rule::Union, 187.5),
+    ] {
+        let case = format!("{wedge:?} {rule:?}, where it stands");
+        assert_eq!(
+            what_the_pyramid_and_a_wedge_hold(wedge, rule),
+            (1, volume),
+            "{case}"
+        );
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let pyramid = a_pyramid(&mut model);
+        let cut = a_wedge(&mut model, wedge, &Isometry::identity());
+        let mut log = ProvenanceLog::new();
+        let answer = model
+            .fuse(&[pyramid], &[cut], rule, &Policy::certified(), &mut log)
+            .unwrap_or_else(|refused| panic!("{case} refused: {refused:?}"));
+        assert!(
+            log.records().is_empty(),
+            "{case}: a certified answer logs nothing"
+        );
+        the_answer_holds(&model, &answer, (1, volume), &Policy::certified(), &case);
     }
 }
 
