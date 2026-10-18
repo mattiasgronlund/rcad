@@ -4670,8 +4670,8 @@ impl<'f> Arrangement<'f> {
 
     /// Which of two nodes on a crossing comes first along it, from the planes
     /// each is the meet of. `None` unless the crossing is where the face's
-    /// plane meets a partner plane and each node is the meet of those two and
-    /// one plane more.
+    /// plane meets a partner plane, each node is the meet of three planes, and
+    /// one node's three are those two and one plane more.
     ///
     /// **Two nodes on the line two planes cross in are put in order by the
     /// planes when their boxes cannot be.** Two turned cubes a rounding apart
@@ -4696,6 +4696,22 @@ impl<'f> Arrangement<'f> {
     /// meets each side of the pyramid a rounding from the apex, and every
     /// placed certified cut refused on that order while the planes were asked
     /// only about a corner with exactly three round it (§294.20).
+    ///
+    /// **A meet of three planes that do not hold both planes of the line is
+    /// put in order the same way.** Its box is where those three meet, so that
+    /// point is the one put in order, whether it is on the line or a rounding
+    /// off it. A cube set corner to corner on a block's top corner, turned
+    /// `0.05` short of a half turn about an axis leaning `0.01` off `z`, has
+    /// on its bottom face its own corner and the block's top corner, where the
+    /// block's `x = 0` and `y = 0` faces cross that bottom exactly at
+    /// `(0, 0, 10)`. That point is exactly on the bottom's edge along the
+    /// turned `x` face, and the turned `y` face, `R` for the turned corner,
+    /// runs `7e−18` past it. The block's corner is no corner of the turned
+    /// cube's bottom, and while only a corner was asked this way every
+    /// certified fuse of the two refused on that order (Q2302,
+    /// `two_cubes_corner_to_corner_turned_a_little.rs`). Two nodes neither of
+    /// which is the meet of the line's two planes and a third are not asked:
+    /// neither names a plane that cuts the line where it is.
     fn as_the_planes_say(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let partner = self.crossings[crossing].partner;
         let (Some(flat), Some(partner)) = (self.surface.as_plane(), partner.as_plane()) else {
@@ -4715,21 +4731,20 @@ impl<'f> Arrangement<'f> {
             self.the_three_planes_a_node_is_the_meet_of(first)?,
             self.the_three_planes_a_node_is_the_meet_of(second)?,
         );
-        let is_a_corner = |node: usize| self.nodes[node].vertex.is_some();
         let decided = match (the_third_plane(mine), the_third_plane(theirs)) {
             (Some(mine), Some(theirs)) => rcad_predicates::which_meet_comes_first_along_a_line(
                 line,
                 mine.coefficients(),
                 theirs.coefficients(),
             ),
-            (None, Some(theirs)) if is_a_corner(first) => {
+            (None, Some(theirs)) => {
                 Self::where_a_corner_off_a_line_comes_along_it(line, mine, theirs)
             }
-            (Some(mine), None) if is_a_corner(second) => {
+            (Some(mine), None) => {
                 Self::where_a_corner_off_a_line_comes_along_it(line, theirs, mine)
                     .map(the_other_way)
             }
-            (None | Some(_), None | Some(_)) => return None,
+            (None, None) => return None,
         };
         Some(decided.expect("each node was solved as the one point where its three planes meet"))
     }
