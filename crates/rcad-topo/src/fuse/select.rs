@@ -2848,8 +2848,10 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 
 /// One when `point` is between a curved side of a flat piece and the chord
 /// across it, where the corners alone wind nothing round it; zero when it is
-/// not; `None` when the chord cannot say. A side along a ring with its material
-/// outside the ring can count minus one ([`across_the_inner_disk`]).
+/// not, and when the turn about the chord cannot be settled; `None` when a
+/// side along a ring cannot say which of the ring's circles it runs round, or
+/// which side of a half-space the point is on. A side along a ring with its
+/// material outside the ring can count minus one ([`across_the_inner_disk`]).
 ///
 /// **A half disk has two corners**, so the polygon of its corners has no
 /// inside at all and every point of the half disk is between its arc and its
@@ -2870,6 +2872,22 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// disk's two corners wind round nothing, so its chord decides alone, and `2²⁰`
 /// out with both corners `1e-8` off the plane it missed points `1e-3` inside it
 /// (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
+///
+/// **A turn about the chord that cannot be settled counts nothing.** What a
+/// side counts here is one or nothing, and a piece's wires wind once round
+/// each of its points and not at all round any other, so a count one short
+/// can make a point of the piece read as outside it and never a point outside
+/// read as in: [`place_the_piece`] then tries the next candidate. A point on
+/// the other half of a cone counts nothing for the same reason. A block's
+/// floor whose corner is a rounding outside a pipe's rim has that corner cut
+/// off by an arc between where the block's two walls cross the rim, and the
+/// two are boxes a rounding wide that overlap at the corner, so the chord
+/// between them has no direction and the turn about it is undecided for every
+/// point. Asked that turn, the floor of a block cornered twice on a round
+/// tab's rim held no point, a unit clear of the arc included, and every
+/// certified fuse of the block under the tab was refused [`INSIDE_A_PIECE`]
+/// (`a_rectangle_with_its_corner_cut_off_by_an_arc_a_rounding_long_holds_its_own_points`,
+/// Q2297).
 ///
 /// **A pipe is counted the same way, where the plane crosses it**, which is
 /// [`Cylinder::is_cut_in_a_closed_curve_by`](rcad_geom::Cylinder::is_cut_in_a_closed_curve_by)
@@ -3011,8 +3029,8 @@ fn in_the_bulge_of(
     if closes_on_itself(side) {
         return Some(1);
     }
-    let turn = which_side_of_the_chord(flat, side, in_plane, point)?;
-    Some(if turn == Decision::Neg { 1 } else { 0 })
+    let turn = which_side_of_the_chord(flat, side, in_plane, point);
+    Some(i32::from(turn == Some(Decision::Neg)))
 }
 
 /// What a side along `ring` whose material is outside it counts for `point`,
