@@ -52,14 +52,15 @@
 //! ball cut in half by a wall through both its circles answers every rule
 //! against the frustum and the pointed cone all the same. A frustum from
 //! `z = 1.5`, which reaches below the plane that picks the upper circle out,
-//! answers five rules of six, and the ball less it is refused
-//! `VolumeIsNotPositive` after selection placed every piece right. The pointed
-//! cone cut in half against the whole ball is refused not knowing which curve
-//! a face runs along. A thin bar through a fat one has its two loops ordered
-//! and its cells told apart since Q1483, and walked through the fat bar's axis
-//! since Q1493, and answers every rule since `rcad-geom`'s `walk.rs` started
-//! each loop's walk on that loop (Q1262) and kept its corner off the points it
-//! walked (Q1508).
+//! answers every rule since Q1883, which charged the check's mesh of a cone's
+//! face: before, the ball less it was refused `VolumeIsNotPositive` on a
+//! coarse mesh taken on its sign, after selection placed every piece right.
+//! The pointed cone cut in half against the whole ball is refused not knowing
+//! which curve a face runs along. A thin bar through a fat one has its two
+//! loops ordered and its cells told apart since Q1483, and walked through the
+//! fat bar's axis since Q1493, and answers every rule since `rcad-geom`'s
+//! `walk.rs` started each loop's walk on that loop (Q1262) and kept its corner
+//! off the points it walked (Q1508).
 //!
 //! Every cone here is built by `tests/cones`, face by face through
 //! `SolidBuilder` with a power-of-two slope, and every ball by `Model::add_ball`.
@@ -68,7 +69,7 @@ use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
 
@@ -1031,17 +1032,24 @@ fn a_half_pointed_cone_against_a_ball_pushing_out_through_its_side_is_refused_un
 /// union, the intersection and the frustum less the ball answer `F + 36π − S`,
 /// `S` and `F − S`.
 ///
-/// **The ball less the frustum, `36π − S = 5.016`, is refused
-/// `VolumeIsNotPositive { volume: -2.64 }`** after selection placed every one
-/// of the seven pieces right, as prints in `choose` and `place_the_piece`
+/// **The ball less the frustum, `36π − S = 5.016`, answers `5.0112`, give or
+/// take `0.0547`** (Q1883). It is a cup whose wall thins to nothing at `z₂`
+/// and is `√2.75 − 1.5 = 0.158` across at its floor. Selection placed every
+/// one of the seven pieces right, as prints in `choose` and `place_the_piece`
 /// showed (commit `10bfada5`): the ball's cap above `z₂` dropped, its band and
 /// its cap below kept, and the frustum's floor and its band below `z₂` kept
-/// turned round. `fuse/assemble.rs`'s `nest_the_shells` gives that refusal for
-/// a shell of negative volume no other shell holds; which of its sites or
-/// `validate.rs`'s gave it here is not traced. The answer is a cup whose wall
-/// thins to nothing at `z₂` and is `√2.75 − 1.5 = 0.158` across at its floor.
+/// turned round. Until Q1883 the cup was refused
+/// `VolumeIsNotPositive { volume: -2.64 }` all the same (Q1481).
+/// `fuse/assemble.rs`'s `nest_the_shells` weighs each shell by `validate.rs`'s
+/// `how_much_space_a_curved_solid_encloses`, whose coarsest mesh of the cup,
+/// nine points `1.91` off, encloses `−2.64`. A solid with a face of a cone was
+/// charged nothing there, so that sum was taken on its sign, and
+/// `nest_the_shells` refused a shell of negative volume no other shell holds.
+/// Charged as `SolidView::measure` charges it, the same mesh can leave out
+/// `309`, so finer meshes are asked for, and one `0.082` off answers `4.76`
+/// against a charge of `4.60`.
 #[test]
-fn a_frustum_from_below_the_plane_between_the_two_circles_answers_all_but_the_ball_less_it() {
+fn a_frustum_from_below_the_plane_between_the_two_circles_answers_every_rule() {
     let high = 2.0 + 2.0_f64.sqrt() / 2.0;
     let slices = |z: f64| PI * (9.0 * (z - 4.0) - (z - 4.0).powi(3) / 3.0);
     let ball = 36.0 * PI;
@@ -1058,6 +1066,7 @@ fn a_frustum_from_below_the_plane_between_the_two_circles_answers_all_but_the_ba
         Holds(shares),
         Holds(shares),
         Holds(frustum - shares),
+        Holds(ball - shares),
     ];
     println!("{gives:?}");
     assert!(
@@ -1065,11 +1074,7 @@ fn a_frustum_from_below_the_plane_between_the_two_circles_answers_all_but_the_ba
             && gives
                 .iter()
                 .zip(&answered)
-                .all(|(answer, wanted)| wanted.is(answer))
-            && matches!(
-                gives[5],
-                Err(Error::Invalid(Invalid::VolumeIsNotPositive { .. }))
-            ),
+                .all(|(answer, wanted)| wanted.is(answer)),
         "{gives:?}"
     );
 }

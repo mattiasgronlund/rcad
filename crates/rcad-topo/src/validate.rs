@@ -2782,9 +2782,15 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 ///
 /// **A face of a cone is charged all the way to its tip**, since row Q1883
 /// made [`how_much_space_hides_under`] call `SolidView::skin_of` rather than
-/// keep a second copy that stopped at `radius == 0.0`. A cone sliver now
-/// answers as soon as a rung's charge is under what its mesh encloses, the
-/// same as any other curved face, rather than always walking to the floor.
+/// keep a second copy that could not charge a cone. Before, a solid with a
+/// cone face kept the old rule: a mesh that did not lie flat answered on its
+/// sign, however far it strayed. Now it answers like any other curved solid,
+/// when its sum is further from zero than its charge. The ball of radius 3
+/// four up less the frustum of slope 1 from `z = 1.5` to `z = 8` is a cup of
+/// `5.016`, and its coarsest mesh, nine points `1.91` off, encloses `−2.64`:
+/// taken on its sign, the cup was refused (row Q1481). Charged `309`, it is
+/// asked again and answers at room `0.0846`, `4.76` against a charge of
+/// `4.60`.
 ///
 /// **When no rung answers, the finest mesh is read once more with its flat
 /// faces' points moved onto their planes**, by
@@ -8798,7 +8804,7 @@ mod tests {
                     let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
                     let leaves_out = how_far_the_sum_can_be_off(view, &mesh, rounding);
                     assert!(
-                        strays > thick && sum > 0.0 && !the_sum_answers(&mesh, sum, leaves_out),
+                        strays > thick && sum > 0.0 && !the_sum_answers(sum, leaves_out),
                         "room {room}: strays {strays}, encloses {sum}"
                     );
                 }
@@ -8849,7 +8855,7 @@ mod tests {
             let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
             let leaves_out = how_far_the_sum_can_be_off(view, &mesh, rounding);
             assert!(
-                !the_sum_answers(&mesh, sum, leaves_out),
+                !the_sum_answers(sum, leaves_out),
                 "room {room}: {sum} answers"
             );
             sum
@@ -9045,8 +9051,7 @@ mod tests {
                 deviation > 0.1,
                 "{what}: strays {deviation}, too little for the two charges to differ"
             );
-            let charged = how_much_space_hides_under(view, &mesh)
-                .unwrap_or_else(|| panic!("{what}: a ball and a bar can be charged"));
+            let charged = how_much_space_hides_under(view, &mesh);
             let measured = view
                 .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
                 .unwrap_or_else(|why| panic!("{what}: {why:?}"))
@@ -9095,8 +9100,7 @@ mod tests {
                 .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new())
                 .unwrap_or_else(|why| panic!("turned {turn}: {why:?}"));
             let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
-            let plain =
-                how_far_the_sum_can_be_off(view, &mesh, rounding).expect("a disc can be charged");
+            let plain = how_far_the_sum_can_be_off(view, &mesh, rounding);
             let (moved, charge) =
                 what_it_encloses_moved_onto_its_planes(view, &mesh, enclosed, rounding)
                     .expect("a disc can be charged");
@@ -9142,8 +9146,7 @@ mod tests {
                     )
                     .unwrap_or_else(|why| panic!("{what} at {room}: {why:?}"));
                 let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
-                let plain = how_far_the_sum_can_be_off(view, &mesh, rounding)
-                    .unwrap_or_else(|| panic!("{what}: a ball and a bar can be charged"));
+                let plain = how_far_the_sum_can_be_off(view, &mesh, rounding);
                 let (moved, charge) =
                     what_it_encloses_moved_onto_its_planes(view, &mesh, enclosed, rounding)
                         .unwrap_or_else(|| panic!("{what}: a ball and a bar can be charged"));
@@ -9156,19 +9159,14 @@ mod tests {
         }
     }
 
-    /// Row Q1890 made a solid with a face of a cone answer by its mesh's sign
-    /// alone, never charged, because the old copy here met a cone's triangle
-    /// and returned `None` outright — even after it had already charged the
-    /// bar's own wall `f64::INFINITY` for straying a whole radius out, which
-    /// row Q1883's fix no longer discards. The coarsest mesh of a bar of
-    /// radius one under a cone flaring out to nine strays `8.05`, more than
-    /// the bar's radius, so [`how_much_space_hides_under`] now answers
-    /// `Some(f64::INFINITY)` on this solid exactly as
-    /// [`SolidView::skin_of`](crate::measure::SolidView::skin_of) does,
-    /// whichever face order the mesh walks — where the old copy's `None`
-    /// used to send it to the same rule a mesh that does not lie flat gets.
+    /// Row Q1883. The coarsest mesh of a bar of radius one under a cone
+    /// flaring out to nine strays `8.05`, more than the bar's radius, so
+    /// [`how_much_space_hides_under`] charges it without end, as
+    /// [`SolidView::measure`] charges it. Before Q1883 it kept a copy of that
+    /// charge which gave up at the cone's face and charged nothing, and a
+    /// mesh of the solid that did not lie flat was taken on its sign alone.
     #[test]
-    fn a_cone_tip_no_longer_discards_the_bars_own_infinite_charge() {
+    fn a_solid_with_a_cone_face_is_charged_without_end_where_its_bar_strays_a_whole_radius() {
         let mut model = an_empty_model();
         let flared = a_bar_under_a_flared_cone(&mut model).expect("a sound solid");
         let mesh = its_coarsest_mesh(&model, flared, "a bar under a flared cone");
@@ -9180,7 +9178,7 @@ mod tests {
         let view = model.solid(flared).expect("this model made the key");
         assert_eq!(
             how_much_space_hides_under(view, &mesh),
-            Some(f64::INFINITY),
+            f64::INFINITY,
             "strays {deviation}"
         );
     }
