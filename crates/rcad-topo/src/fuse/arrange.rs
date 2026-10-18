@@ -11559,16 +11559,39 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// angle. A place whose box straddles the start's angle reads `false` too.
 ///
 /// The window from the start's angle to that of `start + runs` is not a hair
-/// wide: `runs` grows with the square of the shape's size. A probe of the loop's
-/// geometry alone, not of this code, found loop points square to the run from
-/// a start on the loop that lie inside it: a pipe of radius 4 and a ball of
-/// radius 4.4 centred 0.8 off its axis is one such shape. Such a place is read
-/// only where `(place − start) · runs` comes out exactly zero, since an
-/// interval's sign is [`Decision::Zero`] only for `[0, 0]`. A start on the
-/// plane through the pipe's axis and the ball's centre, or on the plane
-/// through the centre square to the axis, has its one other such point half a
-/// turn round, outside the window, and reads `false`. A start on either loop
-/// anywhere else has not been shown to read `false` for every place.
+/// wide: `runs` grows with the square of the shape's size. A place in it is
+/// read only where `(place − start) · runs` comes out exactly zero, since an
+/// interval's sign is [`Decision::Zero`] only for `[0, 0]`, and then it is
+/// zero for every point of the boxes: the place is square to the run.
+///
+/// **On the ball's loop no point but the start is square to the run inside
+/// the window.** [`where_a_closed_crossing_starts`] walks that loop only from
+/// one of the two places the ball reaches furthest along the pipe's axis, on
+/// the plane through the axis and the ball's centre, settled onto the loop a
+/// rounding off that plane at most. The loop is mirrored in that plane and
+/// crosses it square there, so a point's step from the start along the run
+/// has the sign of the side of the plane the point is on. The line `rcad-geom`
+/// orders round goes from the ball's centre square to the axis, in that plane,
+/// so the start's angle lies in it, and every angle strictly between that and
+/// the angle of `start + runs` lies on the run's side, where the step is ahead
+/// of square however long `runs` is. The loop meets the plane only at the two
+/// ends of that reach, since a ball that reached round to the pipe's far side
+/// would swallow its cross-section and cross it in two loops. So a plane a
+/// rounding off it meets the loop only a rounding from those two: the far end
+/// is half a turn round, outside the window, and what is a rounding from the
+/// start is the place it was rounded off. Six shapes, as built and turned off
+/// every axis, with either surface first, have no loop point behind square to
+/// the run in the window; a start on the same loop off that plane has some;
+/// and the far end, whose dot is exactly zero, reads `false`
+/// (`the_walked_start_of_a_balls_one_loop_has_no_point_square_to_its_run_ahead_of_it`).
+///
+/// **On two pipes' loop that has not been shown.** Where their axes lean off
+/// square, the walked start's window does hold loop points behind square to
+/// the run: a pipe of radius 1 whose axis passes 3.5 from that of a pipe of
+/// radius 4, leaning 0.6 off square to it, with the thin pipe first
+/// (`the_walked_start_of_two_pipes_leaning_off_square_has_points_behind_square_in_its_window`).
+/// Whether a place there comes out with a dot of exactly zero has not been
+/// run.
 ///
 /// # Errors
 ///
@@ -18548,6 +18571,44 @@ mod what_the_curved_arrangement_reaches {
         }
     }
 
+    /// On the one loop two pipes cross in, the window
+    /// [`the_start_is_a_rounding_off`] reads from the walked start does hold
+    /// points of the loop behind square to the run once the axes lean off
+    /// square to each other, and holds none while they are square (Q1875).
+    ///
+    /// Square, the loop is mirrored in the plane through the thin pipe's axis
+    /// square to the fat one's, and this walk starts on that plane, which is
+    /// the ball's argument again. Leaning, that plane mirrors the thin pipe no
+    /// longer. Whether a node there comes out with a dot of exactly zero, and
+    /// reads `true` where it should not, is not shown either way.
+    #[test]
+    fn the_walked_start_of_two_pipes_leaning_off_square_has_points_behind_square_in_its_window() {
+        let (thin, fat, points) = two_pipes_crossing_in_one_loop(4.0, 1.0, 3.5, 0.0);
+        for pair in [[&thin, &fat], [&fat, &thin]] {
+            let window = the_points_in_the_window_and_how_far_along_the_run(
+                pair,
+                the_walked_start(pair),
+                &points,
+            );
+            assert!(!window.is_empty(), "the window holds points of the loop");
+            assert!(
+                window.iter().all(|(_, along)| *along > 0.0),
+                "square, no point of the window is behind square to the run"
+            );
+        }
+        let (thin, fat, points) = two_pipes_crossing_in_one_loop(4.0, 1.0, 3.5, 0.6);
+        let pair = [&thin, &fat];
+        let window = the_points_in_the_window_and_how_far_along_the_run(
+            pair,
+            the_walked_start(pair),
+            &points,
+        );
+        assert!(
+            window.iter().any(|(_, along)| *along <= 0.0),
+            "leaning 0.6, the window holds points behind square to the run"
+        );
+    }
+
     /// The ball of radius `ball` centred `off` along `x`, the pipe of `radius`
     /// up `z`, and points of the one loop they cross in: 4001 with `z ≥ 0`, then
     /// 4001 with `z ≤ 0`, each half from one end of the loop's reach round the
@@ -18576,6 +18637,60 @@ mod what_the_curved_arrangement_reaches {
             }
         }
         (ball_surface, pipe, points)
+    }
+
+    /// The thin pipe of radius `thin` along `(cos lean, 0, sin lean)` through
+    /// `(0, apart, 0)`, the fat pipe of radius `fat` up `z`, and points of the
+    /// one loop they cross in: 8001 points round the thin pipe, each carried
+    /// along the thin axis onto the fat pipe's wall where that line meets it,
+    /// on one side and then on the other.
+    fn two_pipes_crossing_in_one_loop(
+        fat: f64,
+        thin: f64,
+        apart: f64,
+        lean: f64,
+    ) -> (Surface, Surface, Vec<Point>) {
+        let way = [lean.cos(), 0.0, lean.sin()];
+        let fat_surface = Surface::Cylinder(Cylinder::new(Axis::z(), fat).expect("a radius"));
+        let thin_surface = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(
+                    Point::new(0.0, apart, 0.0),
+                    Vector::new(way[0], way[1], way[2]),
+                )
+                .expect("an axis"),
+                thin,
+            )
+            .expect("a radius"),
+        );
+        let across = [[0.0, 1.0, 0.0], [-lean.sin(), 0.0, lean.cos()]];
+        let mut points = Vec::new();
+        for side in [1.0, -1.0] {
+            for step in 0..=8000 {
+                let round = core::f64::consts::TAU * f64::from(step) / 8000.0;
+                let on_the_thin_pipe = [0, 1, 2].map(|axis| {
+                    [0.0, apart, 0.0][axis]
+                        + thin * (round.cos() * across[0][axis] + round.sin() * across[1][axis])
+                });
+                // Solve |q + s·way|² = fat² in x and y alone for how far along
+                // the thin axis the fat pipe's wall is.
+                let [x, y, _] = on_the_thin_pipe;
+                let squared = way[0] * way[0] + way[1] * way[1];
+                let linear = 2.0 * (x * way[0] + y * way[1]);
+                let constant = x * x + y * y - fat * fat;
+                let room = linear * linear - 4.0 * squared * constant;
+                if room < 0.0 {
+                    continue;
+                }
+                let along = (-linear + side * room.sqrt()) / (2.0 * squared);
+                points.push(Point::new(
+                    x + along * way[0],
+                    y + along * way[1],
+                    on_the_thin_pipe[2] + along * way[2],
+                ));
+            }
+        }
+        (thin_surface, fat_surface, points)
     }
 
     fn the_walked_start(pair: [&Surface; 2]) -> Point {
