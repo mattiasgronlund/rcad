@@ -18438,6 +18438,184 @@ mod what_the_curved_arrangement_reaches {
         }
     }
 
+    #[test]
+    fn probe_q1875_window() {
+        let certified = Policy::certified();
+        let ball_shape = |radius: f64, ball: f64, off: f64| {
+            let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), radius).expect("a radius"));
+            let ball_s =
+                Surface::Sphere(Sphere::new(Point::new(off, 0.0, 0.0), ball).expect("a radius"));
+            let lowest = (radius * radius + off * off - ball * ball) / (2.0 * radius * off);
+            let most = lowest.max(-1.0).acos();
+            let mut points = Vec::new();
+            for side in [1.0, -1.0] {
+                for step in 0..=20000 {
+                    let turned = -most + 2.0 * most * f64::from(step) / 20000.0;
+                    let up = (ball * ball - radius * radius - off * off
+                        + 2.0 * radius * off * turned.cos())
+                    .max(0.0)
+                    .sqrt();
+                    points.push(Point::new(
+                        radius * turned.cos(),
+                        radius * turned.sin(),
+                        side * up,
+                    ));
+                }
+            }
+            (ball_s, pipe, points)
+        };
+        let two_pipes = |fat: f64, thin: f64, apart: f64, lean: f64| {
+            let fat_s = Surface::Cylinder(Cylinder::new(Axis::z(), fat).expect("a radius"));
+            let way = [lean.cos(), 0.0, lean.sin()];
+            let thin_s = Surface::Cylinder(
+                Cylinder::new(
+                    Axis::new(
+                        Point::new(0.0, apart, 0.0),
+                        Vector::new(way[0], way[1], way[2]),
+                    )
+                    .expect("an axis"),
+                    thin,
+                )
+                .expect("a radius"),
+            );
+            let a = [0.0, 1.0, 0.0];
+            let b = [-lean.sin(), 0.0, lean.cos()];
+            let mut points = Vec::new();
+            for side in [1.0, -1.0] {
+                for step in 0..=40000 {
+                    let turned = core::f64::consts::TAU * f64::from(step) / 40000.0;
+                    let q = [0, 1, 2].map(|axis| {
+                        [0.0, apart, 0.0][axis]
+                            + thin * (turned.cos() * a[axis] + turned.sin() * b[axis])
+                    });
+                    let qa = way[0] * way[0] + way[1] * way[1];
+                    let qb = 2.0 * (q[0] * way[0] + q[1] * way[1]);
+                    let qc = q[0] * q[0] + q[1] * q[1] - fat * fat;
+                    let room = qb * qb - 4.0 * qa * qc;
+                    if room < 0.0 {
+                        continue;
+                    }
+                    let s = (-qb + side * room.sqrt()) / (2.0 * qa);
+                    points.push(Point::new(
+                        q[0] + s * way[0],
+                        q[1] + s * way[1],
+                        q[2] + s * way[2],
+                    ));
+                }
+            }
+            (thin_s, fat_s, points)
+        };
+        let turn = Isometry::rotation(
+            &Axis::new(Point::new(0.3, -1.1, 0.7), Vector::new(1.0, 2.0, 3.0)).expect("an axis"),
+            0.9,
+        )
+        .expect("a turn");
+        let shapes = [
+            ("ball 4.4 at 0.8 in pipe 4", ball_shape(4.0, 4.4, 0.8)),
+            ("ball 0.5 at 0.9 in pipe 1", ball_shape(1.0, 0.5, 0.9)),
+            ("ball 1.8 at 0.9 in pipe 1", ball_shape(1.0, 1.8, 0.9)),
+            ("ball 3.3 at 0.2 in pipe 4", ball_shape(4.0, 3.9, 0.2)),
+            ("ball 440 at 80 in pipe 400", ball_shape(400.0, 440.0, 80.0)),
+            (
+                "ball 0.044 at 0.008 in pipe 0.04",
+                ball_shape(0.04, 0.044, 0.008),
+            ),
+            ("thin 1 at 3.5 from fat 4", two_pipes(4.0, 1.0, 3.5, 0.0)),
+            ("thin 2 at 3 from fat 4", two_pipes(4.0, 2.0, 3.0, 0.0)),
+            ("one width 4 at 1", two_pipes(4.0, 4.0, 1.0, 0.0)),
+            (
+                "thin 1 at 3.5 from fat 4 leaning 0.6",
+                two_pipes(4.0, 1.0, 3.5, 0.6),
+            ),
+            (
+                "thin 2 at 3 from fat 4 leaning 1.0",
+                two_pipes(4.0, 2.0, 3.0, 1.0),
+            ),
+            (
+                "one width 4 at 1 leaning 0.5",
+                two_pipes(4.0, 4.0, 1.0, 0.5),
+            ),
+            (
+                "thin 3 at 2 from fat 4 leaning 1.2",
+                two_pipes(4.0, 3.0, 2.0, 1.2),
+            ),
+        ];
+        for (named, (one, other, points)) in shapes {
+            for turned in [false, true] {
+                let (one, other, points): (Surface, Surface, Vec<Point>) = if turned {
+                    (
+                        one.transformed(&turn),
+                        other.transformed(&turn),
+                        points.iter().map(|p| turn.apply_to_point(*p)).collect(),
+                    )
+                } else {
+                    (one, other, points.clone())
+                };
+                for pair in [[&one, &other], [&other, &one]] {
+                    let mut log = ProvenanceLog::new();
+                    let SurfaceMeet::Curves(runs) =
+                        intersect(pair[0], pair[1], &certified, &mut log).expect("they cross")
+                    else {
+                        panic!("curves");
+                    };
+                    assert_eq!(runs.len(), 1, "{named}");
+                    let start =
+                        where_a_closed_crossing_starts(&runs[0], pair, &mut log).expect("a start");
+                    let mut starts = vec![("walked".to_owned(), start)];
+                    for index in [500usize, 4000, 19000] {
+                        if index < points.len() {
+                            starts.push((format!("probe {index}"), points[index]));
+                        }
+                    }
+                    for (which, start) in starts {
+                        let from = PredicatePoint::from(start.coordinates());
+                        let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+                        let at = from.enclosure();
+                        let ahead = PredicatePoint::Constructed(
+                            [0, 1, 2].map(|axis| at[axis] + runs[axis]),
+                        );
+                        let way = runs.map(|side| (side.lo() + side.hi()) / 2.0);
+                        let s = start.coordinates();
+                        let size = s.iter().fold(1.0_f64, |so_far, c| so_far.max(c.abs()));
+                        let mut in_window = 0;
+                        let mut square_inside = 0;
+                        let mut last: Option<f64> = None;
+                        let mut crossings = 0;
+                        for p in &points {
+                            let c = p.coordinates();
+                            let step = [0, 1, 2].map(|axis| c[axis] - s[axis]);
+                            let far = step.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+                            let f: f64 = (0..3).map(|axis| step[axis] * way[axis]).sum();
+                            let window = which_comes_first_round_a_crossing(
+                                pair,
+                                from,
+                                ahead,
+                                PredicatePoint::from(c),
+                            ) == Ok(Decision::Neg);
+                            if window && far > 1e-6 * size {
+                                in_window += 1;
+                                if f <= 0.0 {
+                                    square_inside += 1;
+                                }
+                                if let Some(before) = last
+                                    && (before > 0.0) != (f > 0.0)
+                                {
+                                    crossings += 1;
+                                }
+                                last = Some(f);
+                            } else {
+                                last = None;
+                            }
+                        }
+                        eprintln!(
+                            "{named} turned {turned} {which} start {s:?}: {in_window} in window, {square_inside} at or behind square, {crossings} sign changes"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// §244.3's shape at `x = 16`: the edge cuts the ball at `16 ± 2⁻⁵¹`, which
     /// are not `f64`s, so the two places are the boxes
     /// `[15.999999999999998, 16]` and `[16, 16.000000000000004]` along `x`,
