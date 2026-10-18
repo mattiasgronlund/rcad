@@ -194,14 +194,16 @@ fn how_far_apart_the_two_may_be(one: PredicatePoint, other: PredicatePoint) -> f
 
 /// The rest of Q2080's shapes: radii `12.8` and `25.6`, one an image of the
 /// other under a scale by two, at working size `1`. Their fuses get past the
-/// order of the rulings' feet, whichever way it is filed, and the two unions
-/// then reach a cap that names one corner twice.
-const A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1: [(f64, f64); 2] = [(12.8, 1.0), (25.6, 1.0)];
+/// order of the rulings' feet, whichever way it is filed. The two rulings are
+/// one rounding of angle apart, and the two unions then reach the piece of the
+/// wall between them.
+const THE_RULINGS_ONE_ROUNDING_APART_AT_WORKING_SIZE_1: [(f64, f64); 2] =
+    [(12.8, 1.0), (25.6, 1.0)];
 
 #[test]
 fn both_intersections_and_both_differences_at_radii_12_8_and_25_6_answer_with_their_volumes() {
     let mut wrong = Vec::new();
-    for (radius, size) in A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1 {
+    for (radius, size) in THE_RULINGS_ONE_ROUNDING_APART_AT_WORKING_SIZE_1 {
         for (rule, bar_first) in [
             (Rule::Intersection, true),
             (Rule::Intersection, false),
@@ -231,11 +233,14 @@ fn both_intersections_and_both_differences_at_radii_12_8_and_25_6_answer_with_th
 /// `CornersCoincide` for the whole loop. At radius `24.32` the same piece is
 /// two roundings wide and the top arc's mesh point falls between its ends.
 /// The pieces of the wall stay apart because `Assembly::a_ring_goes_right_round`
-/// cannot count a ring with an arc one rounding long. This pins the gap, so
-/// that the row which answers it moves this test.
+/// cannot count a ring with an arc one rounding long. Q2145's probe, which
+/// dropped in `BuildingAMesh::walk` (`mesh.rs`) a point of the walk stored at
+/// one of its edge's ends, let every fuse at both radii answer with its
+/// volume. This pins the gap, so that the row which answers it moves this
+/// test.
 #[test]
-fn both_unions_at_radii_12_8_and_25_6_name_one_cap_corner_twice() {
-    for (radius, size) in A_CAP_CORNER_NAMED_TWICE_AT_WORKING_SIZE_1 {
+fn both_unions_at_radii_12_8_and_25_6_are_refused_on_a_piece_of_the_wall_one_rounding_wide() {
+    for (radius, size) in THE_RULINGS_ONE_ROUNDING_APART_AT_WORKING_SIZE_1 {
         for (rule, bar_first) in [(Rule::Union, true), (Rule::Union, false)] {
             let answer = the_fuse_of_the_bar_and_the_block(radius, size, rule, bar_first);
             let Err(Error::CannotMeshAFace {
