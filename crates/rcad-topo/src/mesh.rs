@@ -5756,6 +5756,9 @@ fn with_its_second_coordinate_in_the_turn_of(
 /// [`HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF`] allows, by
 /// [`a_band_the_chart_reads_as_one_line`]'s argument, so a reading outside it
 /// already has the sign of the truth.
+///
+/// `None` for any order but [`Decision::Pos`] or [`Decision::Neg`], a
+/// variant `Decision` grows later included: an order not known is a refusal.
 fn turns_apart_with_the_order_asked_where_the_reading_cannot_say(
     read: f64,
     whole: f64,
@@ -5765,10 +5768,13 @@ fn turns_apart_with_the_order_asked_where_the_reading_cannot_say(
     if ((read - nearest) * whole).abs() > HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF {
         return Some(read);
     }
-    match which_way_round() {
-        Decision::Pos => Some(nearest + 0.5),
-        Decision::Neg => Some(nearest - 0.5),
-        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    let order = which_way_round();
+    if order == Decision::Pos {
+        Some(nearest + 0.5)
+    } else if order == Decision::Neg {
+        Some(nearest - 0.5)
+    } else {
+        None
     }
 }
 
@@ -5777,10 +5783,15 @@ fn turns_apart_with_the_order_asked_where_the_reading_cannot_say(
 /// [`Decision::Neg`] down it, read exactly.
 ///
 /// **Only a loop on a circle where a plane through the axis cuts the torus is
-/// read.** Every edge of it has such a plane on its far side, holding the axis
-/// exactly — `n · w` and `n · c − d` both exactly zero, as
-/// `rcad_geom::along_a_crossing` asks it of the same stored numbers — and the
-/// circle runs where that plane cuts the tube. Its way out from the axis is
+/// read.** Every edge of it has such a plane on its far side, or runs right
+/// round where its face crosses one — the `and` of
+/// [`EdgeRun::RightRoundWhereItCrosses`], which is what the union of two bends
+/// overlapping in a sliver leaves between two pieces of one torus. Every plane
+/// read holds the axis exactly: `n · w` and `n · c − d` both exactly zero, as
+/// `rcad_geom::along_a_crossing` asks it of the same stored numbers. The `and`
+/// of [`EdgeRun::PartOfWhereItCrosses`] is not read, since beside a different
+/// face it may only pick the edge's piece out and need not hold the edge. The
+/// circle runs where the plane cuts the tube. Its way out from the axis is
 /// then `s (n × w)` for a sign `s` the plane alone does not give, and the angle
 /// round the ring grows anticlockwise about `w` (`Torus::basis`), so the
 /// second circle lies up the ring from the first by the sign of
@@ -5801,7 +5812,8 @@ fn turns_apart_with_the_order_asked_where_the_reading_cannot_say(
 /// the frame the face is meshed in: a face at no placement may be meshed
 /// shifted, and the shift is exact for the face's own numbers but not for a
 /// plane's offset, which would then hold the axis to a rounding and no longer
-/// exactly.
+/// exactly. An edge's `and` is stored in the frame its face is stored in,
+/// which is that frame.
 fn which_way_round_the_ring_one_circle_lies_from_another(
     face: FaceView<'_>,
     wires: [WireView<'_>; 2],
@@ -5820,9 +5832,20 @@ fn which_way_round_the_ring_one_circle_lies_from_another(
     let planes_through_the_axis = |wire: WireView<'_>| -> Option<Vec<[f64; 3]>> {
         let mut planes = Vec::new();
         for coedge in wire.coedges() {
+            let edge = coedge.edge();
+            let named = if let EdgeRun::RightRoundWhereItCrosses { and } = edge.stored_run() {
+                Some(*and)
+            } else {
+                None
+            };
+            let sides = along_each_edge.get(&edge.key())?;
             let before = planes.len();
-            for side in along_each_edge.get(&coedge.edge().key())? {
-                let Surface::Plane(flat) = side.in_the_frame(&back) else {
+            for surface in sides
+                .iter()
+                .map(|side| side.in_the_frame(&back))
+                .chain(named)
+            {
+                let Surface::Plane(flat) = surface else {
                     continue;
                 };
                 let normal = flat.normal().components();
@@ -5867,20 +5890,23 @@ fn which_way_round_the_ring_one_circle_lies_from_another(
 /// The sign of `s₁ s₂ det[w, n₁, n₂]` in
 /// [`which_way_round_the_ring_one_circle_lies_from_another`], for one plane
 /// from each loop.
+///
+/// `s₁ s₂` negative swaps `n₁` and `n₂` in the determinant, which negates it
+/// exactly. [`NOTHING_IS_KNOWN`] where `n₁ · n₂` is not read as
+/// [`Decision::Pos`] or [`Decision::Neg`]: two planes at right angles hold
+/// no two circles a little way apart.
 fn which_way_one_plane_through_the_axis_lies_from_another(
     along: [f64; 3],
     one: [f64; 3],
     other: [f64; 3],
 ) -> Decision {
-    let turn = orient3d(along, one, other, [0.0; 3]);
-    match the_sign_of_a_dot_less(one, other, 0.0) {
-        Decision::Pos => turn,
-        Decision::Neg => match turn {
-            Decision::Pos => Decision::Neg,
-            Decision::Neg => Decision::Pos,
-            Decision::Zero | Decision::Undecidable { .. } | _ => turn,
-        },
-        Decision::Zero | Decision::Undecidable { .. } | _ => NOTHING_IS_KNOWN,
+    let lined_up = the_sign_of_a_dot_less(one, other, 0.0);
+    if lined_up == Decision::Pos {
+        orient3d(along, one, other, [0.0; 3])
+    } else if lined_up == Decision::Neg {
+        orient3d(along, other, one, [0.0; 3])
+    } else {
+        NOTHING_IS_KNOWN
     }
 }
 
