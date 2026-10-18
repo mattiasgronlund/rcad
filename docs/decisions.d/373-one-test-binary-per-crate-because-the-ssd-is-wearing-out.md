@@ -141,3 +141,37 @@ records the numbers and lands nothing else.
 is no longer rcad-topo's before: §374.6 counts 1,460 MB in 173 binaries, and
 the relinks Q729 would save are that much smaller. The lane measures its own
 before.
+
+### 373.6 What rscene found doing the same — 2026-10-18
+
+*rscene, a sibling repo, put each of its crates' integration tests into one
+binary (its §80, at `a1bd0a7`) and sent what it found to this tree's dispatcher.
+Its numbers are rscene's tree, not rcad's. The lane measures every number it
+uses again, here.*
+
+- **Dropping one `mod` line loses tests without a word.** With `autotests =
+  false`, rscene deleted one `mod` line from the root: cargo built with exit 0
+  and no warning, and seven tests left the list, 690 before and 683 after. That
+  is the failure 373.5's check is for, and a lane editing the root can cause it
+  by accident.
+- **rscene put the check in a recipe, not in a test.** `check-test-binaries`,
+  with `check-test-binaries-selftest`, reads `cargo metadata` and fails on a
+  second test target in a crate, on `autotests` left on, on a `[[bin]]` without
+  `test = false`, and on a file in `tests/` that the root does not declare. Only
+  the last is what 373.5 asks for; the other three are what keeps one binary
+  one. The recipe is in node, because rscene's jq is not pinned. Which of the
+  two rcad builds is the lane's call.
+- **`tests/it/main.rs` was turned down, though not for `git blame`.** Blame
+  follows a moved file, so moving the files would not lose their history.
+  rscene kept them where they are anyway, with `autotests = false` and one
+  `[[test]]`, because with `autotests` on, a new file dropped into `tests/`
+  quietly becomes a binary of its own again.
+- **Editing one test file writes the whole suite again.** In rscene that rebuild
+  took between 2.3 and 6 s a crate, and wrote 20–45% more bytes than one old
+  binary had. An edit under `src/` wrote 24 times less. This is the price 373.5's
+  last paragraph weighs.
+- **Build before and after from empty.** rscene's tree measured 727 MB after
+  three incremental rebuilds and 703 MB built fresh, with the same code.
+  Comparing an incremental build with a fresh one moves the answer by that much.
+- **kache 0.27 caches a test binary and restores it as a private copy,** which is
+  what 373.2 says. rscene read the same.
