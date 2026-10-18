@@ -140,8 +140,8 @@ use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestRng, TestRunner,
 };
 use rcad_geom::{
-    Axis, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Sphere,
-    Surface, Vector,
+    Axis, Deflection, EdgeRun, HalfSpace, HalfSpaceThroughAPoint, Isometry, Orientation, Picker,
+    Plane, Point, Sphere, Surface, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Error, Invalid, Model, Rule, SolidBuilder, SolidKey};
@@ -5747,6 +5747,10 @@ impl Picking {
             }
             Picking::Outside(surface) => Picking::Outside(surface.moved_by(movement)),
             Picking::InsideAPipe(surface) => Picking::InsideAPipe(surface.moved_by(movement)),
+            Picking::InFrontOfAFlatThrough(through, facing) => Picking::InFrontOfAFlatThrough(
+                movement.point(*through),
+                movement.direction(*facing),
+            ),
         }
     }
 }
@@ -5814,6 +5818,49 @@ impl Answer {
                 .collect(),
         }
     }
+}
+
+/// `Picking::of`, `written_out` and `moved_by` on a picker built by hand,
+/// since no fuse that answers with a flat through a point is known yet
+/// (`docs/decisions.md` §443.5).
+#[test]
+fn a_flat_through_a_point_writes_itself_down_and_moves() {
+    let through_the_point =
+        HalfSpaceThroughAPoint::new(Point::new(1.0, 2.0, 3.0), Vector::new(1.0, 0.0, 0.0))
+            .expect("a point and a facing with length");
+    let picking = Picking::of(&Picker::InFrontOfAFlatThrough(through_the_point));
+    assert_eq!(
+        picking.written_out(),
+        vec![
+            3,
+            bits(1.0),
+            bits(2.0),
+            bits(3.0),
+            bits(1.0),
+            bits(0.0),
+            bits(0.0)
+        ],
+        "a flat through a point did not write out as tag 3, its point, then its facing"
+    );
+
+    let turned_a_quarter_and_shifted = Movement {
+        quarters: 1,
+        shift: [5.0, 0.0, 0.0],
+    };
+    let moved = picking.moved_by(&turned_a_quarter_and_shifted);
+    assert_eq!(
+        moved.written_out(),
+        vec![
+            3,
+            bits(3.0),
+            bits(1.0),
+            bits(3.0),
+            bits(0.0),
+            bits(1.0),
+            bits(0.0)
+        ],
+        "moving a flat through a point did not move its point and turn its facing"
+    );
 }
 
 /// §151.5's second question: a face whose hole is handed over as its outline is

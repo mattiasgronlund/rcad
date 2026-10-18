@@ -104,6 +104,9 @@ pub enum Picking {
     InFrontOf([f64; 4]),
     Outside(WhatItSitsOn),
     InsideAPipe(WhatItSitsOn),
+    /// Everything on or in front of a flat surface that passes exactly
+    /// through a point: the point, then the way it faces.
+    InFrontOfAFlatThrough([f64; 3], [f64; 3]),
 }
 
 impl Run {
@@ -167,12 +170,10 @@ impl Picking {
             Picker::InsideAPipe(pipe) => {
                 Picking::InsideAPipe(WhatItSitsOn::of(&Surface::Cylinder(*pipe)))
             }
-            // Not written down yet: a new `Picking` needs its arm in
-            // `Picking::moved_by` in `fuses_that_must_agree.rs` in the same
-            // change, since that match names every `Picking`.
-            Picker::InFrontOfAFlatThrough(_) => {
-                panic!("this file does not know how to write {picker:?} down yet")
-            }
+            Picker::InFrontOfAFlatThrough(flat) => Picking::InFrontOfAFlatThrough(
+                flat.through().coordinates(),
+                flat.facing().components(),
+            ),
             other => panic!("this file does not know how to write {other:?} down"),
         }
     }
@@ -187,6 +188,10 @@ impl Picking {
             Picking::InsideAPipe(surface) => {
                 core::iter::once(2).chain(surface.written_out()).collect()
             }
+            Picking::InFrontOfAFlatThrough(through, facing) => core::iter::once(3)
+                .chain(through.map(bits))
+                .chain(facing.map(bits))
+                .collect(),
         }
     }
 }
