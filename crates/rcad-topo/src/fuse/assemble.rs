@@ -10351,6 +10351,29 @@ fn which_arc_of_a_circle_walked_this_way(
             return Ok(None);
         }
         [
+            one @ Surface::Torus(_),
+            other @ (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)),
+        ]
+        | [
+            one @ (Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)),
+            other @ Surface::Torus(_),
+        ] => {
+            if the_planes_of_the_circles_round_a_rings_axis(&meet.carried_by, policy, log)?
+                .is_none()
+            {
+                return Ok(None);
+            }
+            let named = [
+                name_of_the_surface_either_way_round(&one),
+                name_of_the_surface_either_way_round(&other),
+            ];
+            match named[0].cmp(&named[1]) {
+                Ordering::Less => (named, true, false),
+                Ordering::Greater => ([named[1], named[0]], false, false),
+                Ordering::Equal => unreachable!("a ring and a surface of another kind"),
+            }
+        }
+        [
             one @ Surface::Cone(_),
             other @ (Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_)),
         ]
