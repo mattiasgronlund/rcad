@@ -1604,7 +1604,7 @@ const CASES: u32 = 256;
 /// `fuses_that_must_agree.rs` reads it.
 ///
 /// ```text
-/// RCAD_SOAK_FACTOR=50 cargo nextest run -p rcad-topo --test meshing_a_curved_solid
+/// RCAD_SOAK_FACTOR=50 cargo nextest run -p rcad-topo meshing_a_curved_solid::
 /// ```
 const SOAK_FACTOR: &str = "RCAD_SOAK_FACTOR";
 

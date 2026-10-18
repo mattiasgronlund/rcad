@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 repository.workspace = true
+# Most of tests/ is one binary, `tests/merged.rs`; a file there is declared in
+# that root or given a `[[test]]` below. docs/decisions.md §373.
+autotests = false
 
 [dependencies]
 rcad-geom.workspace = true
@@ -20,6 +23,194 @@ thiserror.workspace = true
 [dev-dependencies]
 postcard.workspace = true
 proptest.workspace = true
+
+[[test]]
+name = "merged"
+path = "tests/merged.rs"
+
+# The rest stay binaries of their own, because the justfile or the record names
+# each by binary, as `--test <name>`, `binary(<name>)`, `rcad-topo::<name>/` or an
+# exact `test(=...)` on one of its tests, and those commands must still work.
+
+[[test]]
+name = "a_ball_and_a_cone_crossing_through_its_pole"
+
+[[test]]
+name = "a_ball_cut_through_its_pole"
+
+[[test]]
+name = "a_ball_less_a_wedge"
+
+[[test]]
+name = "a_ball_shaved_by_a_turned_blocks_face"
+
+[[test]]
+name = "a_bend_less_a_turned_copy_of_itself"
+
+[[test]]
+name = "a_block_edge_grazing_a_ball_at_cx_16"
+
+[[test]]
+name = "a_block_face_through_a_cones_apex"
+
+[[test]]
+name = "a_broken_three_surface_corner_read_back_from_bytes"
+
+[[test]]
+name = "a_broken_two_surface_corner_read_back_from_bytes"
+
+[[test]]
+name = "a_cap_whose_rim_runs_through_the_other_pole"
+
+[[test]]
+name = "a_closed_edge_neither_direction_rule_answers"
+
+[[test]]
+name = "a_closed_rim_the_new_way_still_gets_its_poles"
+
+[[test]]
+name = "a_corner_its_own_surfaces_place_somewhere_else"
+
+[[test]]
+name = "a_corner_with_fewer_than_three_surfaces_round_it"
+
+[[test]]
+name = "a_corner_with_four_planes_round_it"
+
+[[test]]
+name = "a_cube_tipped_onto_one_edge_along_another_cubes_floor"
+
+[[test]]
+name = "a_dome_on_a_shaft_of_the_same_radius"
+
+[[test]]
+name = "a_flat_solid_publishes_the_rounding_of_its_measure"
+
+[[test]]
+name = "a_fused_draw_hands_its_provenance_back_through_the_door"
+
+[[test]]
+name = "a_half_ball_on_a_pipe_of_its_own_radius"
+
+[[test]]
+name = "a_half_bend_fused_with_a_quarter_bend_on_one_torus"
+
+[[test]]
+name = "a_leaning_cut_round_one_cone"
+
+[[test]]
+name = "a_meet_that_fills_a_corners_room"
+
+[[test]]
+name = "a_mesh_that_folds_at_one_deflection_and_not_the_next"
+
+[[test]]
+name = "a_narrow_lune_from_a_pole_corner"
+
+[[test]]
+name = "a_piece_of_a_ball_holding_both_poles"
+
+[[test]]
+name = "a_placed_bar_is_meshed_from_the_corners_it_stores"
+
+[[test]]
+name = "a_placed_pipe_is_meshed_from_the_corners_it_stores"
+
+[[test]]
+name = "a_plane_cut_along_a_cones_other_nappe"
+
+[[test]]
+name = "a_plane_leaning_through_a_bars_rim_start"
+
+[[test]]
+name = "a_pointed_cone_knows_its_inside"
+
+[[test]]
+name = "a_ray_from_beside_a_box"
+
+[[test]]
+name = "a_ring_crossed_in_two_closed_curves"
+
+[[test]]
+name = "a_tetrahedron_cut_through_its_apex"
+
+[[test]]
+name = "a_turned_cube_with_its_corner_on_a_face"
+
+[[test]]
+name = "building_a_solid_out_of_faces"
+
+[[test]]
+name = "copying_a_solid"
+
+[[test]]
+name = "fuse_laws_over_a_cone"
+
+[[test]]
+name = "fuses_that_must_agree"
+
+[[test]]
+name = "fuses_that_touch"
+
+[[test]]
+name = "fusing_solids"
+
+[[test]]
+name = "fusing_two_bars_side_by_side"
+
+[[test]]
+name = "how_far_out_a_ball_can_sit_and_still_mesh"
+
+[[test]]
+name = "how_often_a_curved_fuse_refuses"
+
+[[test]]
+name = "how_often_a_fuse_with_a_cone_refuses"
+
+[[test]]
+name = "how_often_a_fuse_with_a_torus_refuses"
+
+[[test]]
+name = "meshing_a_plane_cut_along_a_cones_other_nappe"
+
+[[test]]
+name = "the_three_flat_seeds_and_the_corners_they_move"
+
+[[test]]
+name = "two_curves_of_one_pair_that_meet"
+
+[[test]]
+name = "two_equal_bars_leaning_at_each_other"
+
+[[test]]
+name = "two_flat_faces_on_one_plane_facing_apart_along_an_arc"
+
+[[test]]
+name = "two_frustums_stacked_on_one_cone"
+
+[[test]]
+name = "two_half_bars_stacked_on_one_pipe"
+
+[[test]]
+name = "two_meets_reach_one_corner"
+
+[[test]]
+name = "two_quarter_bends_on_one_torus"
+
+[[test]]
+name = "what_a_deflection_costs_a_measured_volume"
+
+[[test]]
+name = "what_only_a_release_build_does"
+
+[[test]]
+name = "what_the_answered_block_fuses_actually_say"
+
+[[test]]
+name = "whether_a_coarser_deflection_always_meshes"
+
+[[test]]
+name = "whether_the_floor_predicts_the_step_cap"
 
 [lints]
 workspace = true
