@@ -61,7 +61,8 @@ use rcad_geom::{
 };
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftStep, Error, FaceKey, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder, SolidKey,
+    DraftStep, Error, FaceKey, Invalid, Model, OnAFace, ProfileBuilder, Rule, SolidBuilder,
+    SolidKey,
 };
 
 mod cones;
@@ -1544,32 +1545,58 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 /// refused for want of a point inside the ring's band outside the ball, whose
 /// every candidate came back onto the inner half of the tube, inside the ball,
 /// until Q2205 offered the point half way round the tube between two corners.
+/// Each was then refused `AClosedEdgeOfTheAnswerWouldStartAtAPole`, because
+/// the ring and the ball's two circles went by one name, so the other circle
+/// closing on itself had the two halves of the circle through the poles joined
+/// back into one closed side starting at a pole, until Q2260 named each circle
+/// by its own plane and each half of the circle through the poles by its sign
+/// (`which_of_the_pairs_closed_crossings_it_is` and
+/// `which_arc_of_a_circle_walked_this_way` in `fuse/assemble.rs`).
 ///
-/// **Each is refused `AClosedEdgeOfTheAnswerWouldStartAtAPole` again now**, on
-/// a face of whichever solid is named first, by `fuse/assemble.rs`. Its
-/// `with_the_halves_of_each_whole_curve_joined` joins the two halves of the
-/// circle through the poles back into one closed side starting at a pole,
-/// because the other circle closes on itself and the ring and the ball's two
-/// circles go by one name: `which_of_the_pairs_closed_crossings_it_is` tells no
-/// circles of a ring and a ball apart. The ball at `(−1, 0, 0)` is the same
-/// shape mirrored.
+/// **The part inside the ball and the ball less the ring are answered now.**
 ///
-/// **The answer exists.** The ring is `8π²` and the ball `256π/3`, and the part
-/// of the ring inside the ball at `(1, 0, 0)` is `π(2π + 4 atan(15/8) − 32/17)`.
-/// Its slice at `x` is the ring's annulus between radii `4 ± √(1 − x²)` inside
-/// the ball's disc of radius `√(16 − (x − 1)²)`, which never reaches past the
+/// **The other three are refused `TheFuseWroteABrokenAnswer {
+/// AClosedEdgeIsWalkedAgainstItsSurface }`**, by the sweep the fuse runs on its
+/// answer, and the answer is sound. Each keeps the ring's whole band outside
+/// the ball as one face, bounded by the circle through the poles in two arcs
+/// and by the other circle, at `x = −15/17` for the ball of 4, stored with its
+/// own plane. The fuse joined the ring's two faces along that band into one,
+/// so `Model::validate` finds one circle of the band round the axis, not two,
+/// and reads which side of that circle's plane the band lies on off the band's
+/// corners. Those are the ball's poles, in front of the plane; next to the
+/// circle the band lies behind it, since the plane cuts the band again round
+/// the tube's outer half, where there is no edge. Worked by hand at
+/// `(−15/17, 0, 60/17)`, `∇ring × ∇plane` and `−(∇ring × ∇ball)` both run along
+/// `−y`, the way the fuse walks the circle. Read against the ball across the
+/// edge instead, as Q2260 probed it, all 24 were answered, sound, and measured
+/// what is written below.
+///
+/// The ball at `(−1, 0, 0)` is the same shape mirrored, and so is the ball of 3
+/// at `(−3/4, 0, 0)`.
+///
+/// **The answer.** The ring is `8π²` and the ball `256π/3`, and the part of the
+/// ring inside the ball at `(1, 0, 0)` is `π(2π + 4 atan(15/8) − 32/17)`. Its
+/// slice at `x` is the ring's annulus between radii `4 ± √(1 − x²)` inside the
+/// ball's disc of radius `√(16 − (x − 1)²)`, which never reaches past the
 /// annulus, so the slice is `π(8√(1 − x²) + 2x − 2)` wherever that is above
-/// nothing: from `x = −15/17`, where `4√(1 − x²) = 1 − x`, to `x = 1`. For the
-/// O-ring the slice is `π(8√(25/16 − x²) + 3x/2 − 73/8)`, from `x = −357/1060`
-/// to `x = 3/4`.
+/// nothing: from `x = −15/17`, where `4√(1 − x²) = 1 − x`, to `x = 1`. The
+/// O-ring is `25π²/2` and its ball `36π`, and the slice is
+/// `π(8√(25/16 − x²) + 3x/2 − 73/8)`, from `x = −357/1060` to `x = 3/4`.
 #[test]
-fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_refused_a_closed_edge_from_a_pole() {
-    for (tube, radius, x) in [
-        (1.0, 4.0, 1.0),
-        (1.0, 4.0, -1.0),
-        (1.25, 3.0, 0.75),
-        (1.25, 3.0, -0.75),
+fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_answered_inside_it_and_refused_round_its_outer_band()
+ {
+    use std::f64::consts::PI;
+    let in_the_ball_of_four = PI * (2.0 * PI + 4.0 * (15.0_f64 / 8.0).atan() - 32.0 / 17.0);
+    let in_the_ball_of_three = by_simpsons_rule(-357.0 / 1060.0, 0.75, |x| {
+        PI * (8.0 * (25.0 / 16.0 - x * x).sqrt() + 1.5 * x - 73.0 / 8.0)
+    });
+    for (tube, radius, x, shared) in [
+        (1.0, 4.0, 1.0, in_the_ball_of_four),
+        (1.0, 4.0, -1.0, in_the_ball_of_four),
+        (1.25, 3.0, 0.75, in_the_ball_of_three),
+        (1.25, 3.0, -0.75, in_the_ball_of_three),
     ] {
+        let ball = 4.0 * PI * radius * radius * radius / 3.0;
         for (rule, ring_first) in every_rule_both_ways() {
             let mut model = a_model();
             let one = a_whole_ring_about_x(&mut model, tube);
@@ -1578,22 +1605,23 @@ fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_refused_a_closed_edge
                 "the ring round a tube of {tube} and the ball of {radius} at x = {x}, {rule:?}, \
                  the ring first {ring_first}"
             );
-            let refused = fuse(&mut model, one, other, rule, ring_first);
-            let Err(Error::AClosedEdgeOfTheAnswerWouldStartAtAPole { face }) = refused else {
-                panic!("{what}: {refused:?}");
+            let fused = fuse(&mut model, one, other, rule, ring_first);
+            let volumes = match (rule, ring_first) {
+                (Rule::Intersection, _) => vec![shared],
+                (Rule::Difference, false) => vec![ball - shared],
+                (Rule::Union | Rule::Difference, _) => {
+                    let Err(Error::TheFuseWroteABrokenAnswer {
+                        broken: Invalid::AClosedEdgeIsWalkedAgainstItsSurface,
+                    }) = fused
+                    else {
+                        panic!("{what}: {fused:?}");
+                    };
+                    continue;
+                }
+                (other, _) => panic!("not a rule this probes: {other:?}"),
             };
-            let surface = model
-                .face(face)
-                .expect("the refusal names a face of the model")
-                .surface();
-            assert!(
-                if ring_first {
-                    matches!(surface, Surface::Torus(_))
-                } else {
-                    matches!(surface, Surface::Sphere(_))
-                },
-                "{what}: refused on a face of the solid named first, not {surface:?}"
-            );
+            let answer = fused.unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            assert_each_holds(&model, &answer, &volumes, &what);
         }
     }
 }
