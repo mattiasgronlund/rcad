@@ -1527,9 +1527,9 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 }
 
 /// A whole ring about `x`, 4 round a tube of 1, against a ball of radius 4 at
-/// `(1, 0, 0)` or `(−1, 0, 0)`, and a ball of 3 at `(±3/4, 0, 0)` pressed into
-/// an O-ring lying on its side, 4 round a tube of `5/4`, under every rule both
-/// ways round.
+/// `(1, 0, 0)`, under every rule both ways round. The three tests after this
+/// one put the ball at `(−1, 0, 0)`, and a ball of 3 at `(±3/4, 0, 0)` pressed
+/// into an O-ring lying on its side, 4 round a tube of `5/4`.
 ///
 /// For the ball of 4 at `(1, 0, 0)`, the two cross in two circles round `x`:
 /// one at `x = 1` of radius 4, the top of the tube and a great circle of the
@@ -1564,11 +1564,14 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 /// behind it, since the plane cuts the band again round the tube's outer half,
 /// where there is no edge. Worked by hand at `(−15/17, 0, 60/17)`,
 /// `∇ring × ∇plane` and `−(∇ring × ∇ball)` both run along `−y`, the way the
-/// fuse walks the circle. Q2287 has `validate.rs` read a ring face's side of
-/// the ball across such a circle instead.
+/// fuse walks the circle. The band inside the ball has the same two curves for
+/// its edges and the same corners, so read off them one of the two bands was
+/// always going to be refused. Since Q2287, `validate.rs` reads a ring face's
+/// side of the ball across such a circle instead; every corner of either band
+/// is on the ball, so nothing says, and the circle is passed over.
 ///
 /// The ball at `(−1, 0, 0)` is the same shape mirrored, and so is the ball of 3
-/// at `(−3/4, 0, 0)`.
+/// at `(−3/4, 0, 0)`. Each ball is its own test, so the four run side by side.
 ///
 /// **The answer.** The ring is `8π²` and the ball `256π/3`, and the part of the
 /// ring inside the ball at `(1, 0, 0)` is `π(2π + 4 atan(15/8) − 32/17)`. Its
@@ -1579,40 +1582,94 @@ fn two_balls_crossing_in_a_circle_through_the_poles_of_one_are_answered_under_ev
 /// O-ring is `25π²/2` and its ball `36π`, and the slice is
 /// `π(8√(25/16 − x²) + 3x/2 − 73/8)`, from `x = −357/1060` to `x = 3/4`.
 #[test]
-fn a_ball_crossing_a_ring_in_a_circle_through_its_poles_is_answered_under_every_rule() {
+fn a_ball_of_four_crossing_a_ring_through_its_poles_from_plus_x_is_answered_under_every_rule() {
+    a_ball_crossing_a_ring_through_its_poles_is_answered_under_every_rule(
+        1.0,
+        4.0,
+        1.0,
+        the_ring_inside_the_ball_of_four(),
+    );
+}
+
+/// The ball of 4 at `(−1, 0, 0)`: the test above, mirrored.
+#[test]
+fn a_ball_of_four_crossing_a_ring_through_its_poles_from_minus_x_is_answered_under_every_rule() {
+    a_ball_crossing_a_ring_through_its_poles_is_answered_under_every_rule(
+        1.0,
+        4.0,
+        -1.0,
+        the_ring_inside_the_ball_of_four(),
+    );
+}
+
+/// The ball of 3 at `(3/4, 0, 0)` pressed into the O-ring, 4 round a tube of
+/// `5/4`: the ball of 4's shape, its great circle on the ring's inner wall.
+#[test]
+fn a_ball_of_three_pressed_into_an_o_ring_from_plus_x_is_answered_under_every_rule() {
+    a_ball_crossing_a_ring_through_its_poles_is_answered_under_every_rule(
+        1.25,
+        3.0,
+        0.75,
+        the_o_ring_inside_the_ball_of_three(),
+    );
+}
+
+/// The ball of 3 at `(−3/4, 0, 0)`: the test above, mirrored.
+#[test]
+fn a_ball_of_three_pressed_into_an_o_ring_from_minus_x_is_answered_under_every_rule() {
+    a_ball_crossing_a_ring_through_its_poles_is_answered_under_every_rule(
+        1.25,
+        3.0,
+        -0.75,
+        the_o_ring_inside_the_ball_of_three(),
+    );
+}
+
+/// The whole ring about `x`, 4 round a tube of `tube`, and the ball of
+/// `radius` at `(x, 0, 0)`, sharing `shared`, under every rule both ways round.
+fn a_ball_crossing_a_ring_through_its_poles_is_answered_under_every_rule(
+    tube: f64,
+    radius: f64,
+    x: f64,
+    shared: f64,
+) {
     use std::f64::consts::PI;
-    let in_the_ball_of_four = PI * (2.0 * PI + 4.0 * (15.0_f64 / 8.0).atan() - 32.0 / 17.0);
-    let in_the_ball_of_three = by_simpsons_rule(-357.0 / 1060.0, 0.75, |x| {
-        PI * (8.0 * (25.0 / 16.0 - x * x).sqrt() + 1.5 * x - 73.0 / 8.0)
-    });
-    for (tube, radius, x, shared) in [
-        (1.0, 4.0, 1.0, in_the_ball_of_four),
-        (1.0, 4.0, -1.0, in_the_ball_of_four),
-        (1.25, 3.0, 0.75, in_the_ball_of_three),
-        (1.25, 3.0, -0.75, in_the_ball_of_three),
-    ] {
-        let ring = 2.0 * PI * PI * 4.0 * tube * tube;
-        let ball = 4.0 * PI * radius * radius * radius / 3.0;
-        for (rule, ring_first) in every_rule_both_ways() {
-            let mut model = a_model();
-            let one = a_whole_ring_about_x(&mut model, tube);
-            let other = model.add_ball(radius, &shift(x, 0.0, 0.0)).expect("a ball");
-            let what = format!(
-                "the ring round a tube of {tube} and the ball of {radius} at x = {x}, {rule:?}, \
-                 the ring first {ring_first}"
-            );
-            let answer = fuse(&mut model, one, other, rule, ring_first)
-                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            let volumes = match (rule, ring_first) {
-                (Rule::Union, _) => vec![ring + ball - shared],
-                (Rule::Intersection, _) => vec![shared],
-                (Rule::Difference, true) => vec![ring - shared],
-                (Rule::Difference, false) => vec![ball - shared],
-                (other, _) => panic!("not a rule this probes: {other:?}"),
-            };
-            assert_each_holds(&model, &answer, &volumes, &what);
-        }
+    let ring = 2.0 * PI * PI * 4.0 * tube * tube;
+    let ball = 4.0 * PI * radius * radius * radius / 3.0;
+    for (rule, ring_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let one = a_whole_ring_about_x(&mut model, tube);
+        let other = model.add_ball(radius, &shift(x, 0.0, 0.0)).expect("a ball");
+        let what = format!(
+            "the ring round a tube of {tube} and the ball of {radius} at x = {x}, {rule:?}, \
+             the ring first {ring_first}"
+        );
+        let answer = fuse(&mut model, one, other, rule, ring_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volumes = match (rule, ring_first) {
+            (Rule::Union, _) => vec![ring + ball - shared],
+            (Rule::Intersection, _) => vec![shared],
+            (Rule::Difference, true) => vec![ring - shared],
+            (Rule::Difference, false) => vec![ball - shared],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_each_holds(&model, &answer, &volumes, &what);
     }
+}
+
+/// `π(2π + 4 atan(15/8) − 32/17)`, worked out in the ball of 4's test's doc.
+fn the_ring_inside_the_ball_of_four() -> f64 {
+    use std::f64::consts::PI;
+    PI * (2.0 * PI + 4.0 * (15.0_f64 / 8.0).atan() - 32.0 / 17.0)
+}
+
+/// The O-ring's slice inside the ball of 3, from the ball of 4's test's doc,
+/// summed along `x`.
+fn the_o_ring_inside_the_ball_of_three() -> f64 {
+    use std::f64::consts::PI;
+    by_simpsons_rule(-357.0 / 1060.0, 0.75, |x| {
+        PI * (8.0 * (25.0 / 16.0 - x * x).sqrt() + 1.5 * x - 73.0 / 8.0)
+    })
 }
 
 /// Each rule, with `true` for the first solid built named first.
