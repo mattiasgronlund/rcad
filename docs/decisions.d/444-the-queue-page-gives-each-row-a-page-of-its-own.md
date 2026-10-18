@@ -40,6 +40,9 @@ the id and the row's own text it gives:
 A row's children are not shown. The ask was where a row came from, not what it
 led to.
 
+*§455 shows them, as Resulted in, and replaces the ready list with a Queue
+section, 2026-10-18.*
+
 The front page now names a row by its id. The ready and lately-closed lists
 give the id alone, and the running list the id with its branch and tree. All
 three used to carry each row's text, which is on the row's page now.
