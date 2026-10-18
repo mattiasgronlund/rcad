@@ -203,6 +203,8 @@ pub mod a_half_ring_built_face_by_face;
 pub mod a_half_ring_standing_on_a_round_plate;
 #[path = "a_half_rings_flat_face_read_back_from_bytes.rs"]
 pub mod a_half_rings_flat_face_read_back_from_bytes;
+#[path = "a_holed_plate_and_a_block_on_it_turned.rs"]
+pub mod a_holed_plate_and_a_block_on_it_turned;
 #[path = "a_joined_flat_face_whose_rings_enclose_no_area.rs"]
 pub mod a_joined_flat_face_whose_rings_enclose_no_area;
 #[path = "a_key_from_another_model.rs"]
