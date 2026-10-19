@@ -994,10 +994,18 @@ fn a_half_ball_whose_wall_crosses_both_circles_it_meets_a_cone_in_answers_every_
 }
 
 /// **The pointed cone cut down to `x ≥ 0`, against the whole ball, is refused
-/// under every rule both ways**, `CannotTellWhichCurveOfACrossingAFaceRunsAlong`
-/// on one face (Q1248). The block runs from `z = −1` to `z = 10`, so it takes
-/// the whole of the cone's `x ≥ 0` half, `256π/3`, and its wall crosses both
-/// circles on the cone's side as it does on the half ball's above. Not traced.
+/// under every rule both ways**, `TwoCurvesTouchWithoutCrossing` on one face,
+/// the half cone's wall (Q1248). The block runs from `z = −1` to `z = 10`, so
+/// it takes the whole of the cone's `x ≥ 0` half, `256π/3`, and its wall
+/// crosses both circles on the cone's side as it does on the half ball's above.
+///
+/// Until Q2461 that face was refused
+/// `CannotTellWhichCurveOfACrossingAFaceRunsAlong`. One of its edges runs along
+/// `x = 0` from the apex `(0, 0, 0)` to `(0, 8, 8)`, and the plane `x = 0` cuts
+/// two rulings `y = ±z` from the cone, both of which hold the apex, so the edge's
+/// start point could not say which it runs along. `fuse/arrange.rs`'s
+/// `crossing_for` now asks the end corner too, and it picks `y = z`. What then
+/// touches without crossing is not traced.
 ///
 /// The answers it is to reach, with `S` what the whole pointed cone shares with
 /// the ball: `256π/3 + 36π − S/2`, `S/2`, `256π/3 − S/2` and `36π − S/2`.
@@ -1010,10 +1018,9 @@ fn a_half_pointed_cone_against_a_ball_pushing_out_through_its_side_is_refused_un
     });
     println!("{gives:?}");
     assert!(
-        gives.iter().all(|answer| matches!(
-            answer,
-            Err(Error::CannotTellWhichCurveOfACrossingAFaceRunsAlong { .. })
-        )),
+        gives
+            .iter()
+            .all(|answer| matches!(answer, Err(Error::TwoCurvesTouchWithoutCrossing { .. }))),
         "{gives:?}"
     );
 }
