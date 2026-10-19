@@ -192,8 +192,8 @@
 //! placed as above.
 
 use rcad_geom::{
-    Cone, Cylinder, EdgeRun, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet,
-    Torus, Vector, intersect,
+    Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
+    Vector, intersect,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
@@ -201,7 +201,7 @@ use rcad_predicates::{
     which_meet_comes_first_along_a_line,
 };
 
-use crate::classify::{side_of_a_flat_face, stretched_to_the_plane};
+use crate::classify::{every_side_of_it_is_straight, side_of_a_flat_face, stretched_to_the_plane};
 use crate::holds::{
     OnAFace, how_the_axis_lies_on, lie_along_one_line,
     the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
@@ -1249,11 +1249,7 @@ fn is_off_every_surface_but_a_plane_with_a_curved_side(
 /// straight it reads by triangles fanned from its stored corners, the test
 /// `classify.rs`'s `count_crossings` routes a face to `count_a_polygon` by.
 fn is_flat_with_a_curved_side(face: FaceView<'_>) -> bool {
-    face.surface().as_plane().is_some()
-        && face.wires().any(|wire| {
-            wire.coedges()
-                .any(|coedge| coedge.edge().stored_run() != &EdgeRun::Straight)
-        })
+    face.surface().as_plane().is_some() && !every_side_of_it_is_straight(face)
 }
 
 /// A flat piece with straight sides placed outside each solid by a plane of
