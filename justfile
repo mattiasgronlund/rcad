@@ -13277,8 +13277,8 @@ queue mode="" *args:
         # §308: a `cores:<n>` or `cores:all` entry pins hardware threads rather
         # than a file, so it is checked by sum against `threads`, not by
         # meeting a path (`entries_meet` never matches one). The night fuzz
-        # holds every thread for the window `night` already says this row's
-        # slot sits in.
+        # holds every thread for the window `night` already says this slot
+        # sits in.
         function cores_of(ws,    n, part, i, v) {
             n = split(ws, part, ",")
             for (i = 1; i <= n; i++)
