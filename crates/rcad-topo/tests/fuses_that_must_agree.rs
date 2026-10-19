@@ -6623,3 +6623,30 @@ fn a_ring_that_goes_through_one_corner_twice_reads_the_same_from_either_side() {
 fn a_deflection() -> Deflection {
     Deflection::of(0.1).expect("a tenth of a millimetre is a length")
 }
+
+/// Two balls of radius 3 one apart, and a third of 0.3 of their crossing
+/// circle's radius centred on it: the third ball's face inside the first and
+/// outside the second is a thin lune round that ball's south pole.
+///
+/// Its arc on the first ball passes the pole 0.0168 on the `+x` side, but at
+/// the coarse rooms `the_coarsest_mesh_whose_sides_do_not_cross` asks, the
+/// walk puts two points on it, `y = ±0.445`, whose chord passes `0.0034` on
+/// the `−x` side. The face's chart reads that side half a turn the short way,
+/// through longitude π, so the lune no longer winds round the pole and its
+/// other arc's one point crosses the chord: `BoundaryCrossesItself { at: 3 }`
+/// (Q2381, §191).
+#[test]
+fn three_balls_whose_lune_runs_round_the_third_balls_pole_mesh() {
+    let triple = pairs::ThreeBallsThatCrossAtTheSameTwoPoints {
+        first: 3,
+        second: 3,
+        apart: 1,
+        third_radius_tenths: 3,
+    };
+    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+        let (mut model, keys) = triple.build();
+        let mut log = ProvenanceLog::new();
+        let answer = model.fuse(&keys[..1], &keys[1..], rule, &Policy::certified(), &mut log);
+        assert!(answer.is_ok(), "{rule:?} came back {answer:?}");
+    }
+}
