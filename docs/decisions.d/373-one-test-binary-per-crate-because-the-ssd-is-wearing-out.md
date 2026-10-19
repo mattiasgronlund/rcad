@@ -175,3 +175,108 @@ uses again, here.*
   Comparing an incremental build with a fresh one moves the answer by that much.
 - **kache 0.27 caches a test binary and restores it as a private copy,** which is
   what 373.2 says. rscene read the same.
+
+### 373.7 Who declares a new test file — 2026-10-19
+
+*Q2344 asked for one of two roads. Either the lane that adds a file to
+`crates/rcad-topo/tests/` adds its two lines to `tests/merged.rs`, or a build
+script in rcad-topo writes the list of modules and no lane edits `merged.rs`.
+Everything below was measured in Q2344's lane trees, off `ce88b698`.*
+
+In short: the lane that adds a file declares it, in the file's place by name,
+and its write set holds those two lines as one item of `merged.rs`. No build
+script: one would rebuild rcad-topo's library, and every crate that uses it, at
+each edit of a test.
+
+**A build script costs what §373 set out to save.** A script that writes the
+list has to run again when a file appears in `tests/`, so it has to watch the
+directory. Cargo's `rerun-if-changed` on a directory watches every file in it.
+In a scratch crate, editing one test file printed ``Dirty bsprobe ...: the file
+`tests` has changed`` and compiled `src/lib.rs` again. A build script belongs
+to its package, so when it runs again the package's library is built again, and
+so is every crate above it.
+
+In the real tree, `target/q2344-rebuild.sh` ran `/usr/bin/time -f 'elapsed %e
+s, written %O blocks of 512 bytes' cargo nextest run --workspace --no-run`,
+which is the build `just t` does. Each run came warm, after one edit to
+`crates/rcad-topo/tests/a_ball_inscribed_in_a_cube.rs`: a new empty `#[test]`,
+with a new name each time. The probe build script's whole body was
+`println!("cargo::rerun-if-changed=tests");`. It writes nothing, so what it
+costs is the rerun alone.
+
+| | packages compiled | elapsed | written, in blocks of 512 bytes |
+|---|---|---|---|
+| no build script, run 1 | 1 | 31.19 s | 912,760 (0.47 GB) |
+| no build script, run 2 | 1 | 31.55 s | 564,536 (0.29 GB) |
+| probe build script, run 1 | 4 | 50.13 s | 4,409,072 (2.26 GB) |
+| probe build script, run 2 | 4 | 43.20 s | 4,059,120 (2.08 GB) |
+
+The four packages were rcad-topo, rcad-step, rcad and rcad-fuzz-explain. So
+every edit to a test would write about 2.1–2.3 GB instead of 0.3–0.5 GB, the
+writes this section exists to cut. Adding the script cost one build of 120.70 s
+that wrote 8,214,928 blocks; the fresh tree's cold build had taken 64.28 s and
+written 6,264,456.
+
+Two other ways to write the list were not tried, so nothing here says what they
+cost: a proc macro that reads `tests/`, and a helper crate with a build script
+of its own, as a dev-dependency of rcad-topo.
+
+**The row's first road, as written, would be refused.** It had the lane add its
+two lines outside its write set. `files_outside` in
+`tooling/verify-lane/verify_lane.py` lists every changed path that no entry of
+the write set covers, with no exemption, and `unproven()` in
+`.claude/workflows/lanes.js` refuses any branch that has one. Prep never widens
+a write set; it answers `needs` (`.claude/agents/prep.md`, "The write set").
+Nothing exempted `merged.rs` at `ce88b698`.
+
+**So the two lines are inside the write set, as an item.** The lane that adds
+`tests/<file>.rs` writes the two lines the guard prints, `#[path = "<file>.rs"]`
+and `pub mod <module>;`, where the module is the file's name with each `-`
+written `_`. Its write set names them `crates/rcad-topo/tests/merged.rs#<module>`.
+No tool has to change for that:
+
+- `entries_meet` in the `queue` recipe makes two entries on one path meet only
+  when they name the same item or one names the whole file (424.8). Two rows
+  adding different files do not hold each other back.
+- `entry_holds` in `tooling/queue/queue.py` lets a hold on the whole file
+  narrow to one of its items, so a lane taken on `merged.rs` narrows to its own
+  entry at its first edit (424.7).
+- `in_write_set` in `verify_lane.py` matches the part before `#`, so the
+  verifier counts `merged.rs` inside. Whether the diff stays inside the item is
+  the verifier's reading, as for every item entry.
+
+A row that changes `merged.rs` for more than one file, as Q2346's fold does,
+keeps the whole file.
+
+**The list is held in order of name, so the branches seldom meet.**
+`every_file_is_declared_as_a_path_and_a_pub_mod_in_order_of_its_name` holds
+the pairs in byte order of file name, and
+`every_file_in_tests_is_built_into_exactly_one_test_binary` prints the pair a
+file is missing. A branch then adds its two lines between two that stay, so two
+branches adding different files change different lines and git merges them.
+Lines added at the end would make every two such branches meet. Only two files
+that sort next to each other, with nothing declared between them, go in at one
+place. `target/q2344-rows.sh` read the queue at `ce88b698`:
+
+- the 232 declarations were already in byte order;
+- 48 open rows each named a file directly under `crates/rcad-topo/tests/` that
+  did not exist yet, and 3 of them named `merged.rs` too;
+- 16 of the 48 files go in at a place another of them shares, at 6 places, one
+  of which takes 6.
+
+Only those can conflict, only when their lanes run at the same time, and then
+the fix is to keep both pairs.
+
+**What this leaves.**
+
+- 45 of the 48 rows name no `merged.rs` entry. Prep stops each for it, and the
+  dispatcher re-files it with the item (`dispatch-lanes`). A row teaches `queue
+  add` to refuse such a row and prep to answer `needs` with the item, never the
+  whole file.
+- `just queue families` counts `merged.rs` as a shape's test file, so the rows
+  that declare their files in it show as one family. At `ce88b698` it was 6:
+  Q2344, Q2346, Q2353, Q2365, Q2369 and Q2386. Every row re-filed with its item
+  adds one. They share a binary's root, not a shape, and prep's list of a row's
+  family (450.3 rule 4) reads them the same way. A row teaches both to leave
+  `merged.rs` out. Until then, the dispatcher traces no family on `merged.rs`,
+  and a lane runs no row's shapes for sharing `merged.rs` alone.
