@@ -36,6 +36,8 @@
 //! the fuse is asked — the stored numbers differ and `intersect` calls them one
 //! surface.
 
+use core::mem::{Discriminant, discriminant};
+
 use rcad_geom::SurfaceMeet;
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector,
@@ -645,6 +647,124 @@ impl APinnedBar {
     }
 }
 
+/// **A bar across where two bars on one pipe meet unites with them as one
+/// spelling does.**
+///
+/// The lower bar runs up from `z = 0` to the joint at [`CROSSED_JOINT`], the
+/// upper on to `6`, and a bar of the same radius along `x` from `−4` to `4`
+/// crosses the pipe at `z = 3`, so that its wall reaches from `z = 1` up past
+/// the joint to `5`. The cross is united with the upper bar first, and the
+/// lower bar with that, both ways round, with the upper wall naming its axis
+/// where the lower one does and at the joint.
+///
+/// Two walls of one radius whose axes meet cross in four half ellipses, which
+/// meet where the walls touch, at `(0, ±2, 3)` on the lower bar. In the second
+/// union the cross's wall holds them twice: once as its crossings with the
+/// lower wall, and once along its own edges, which the upper wall left it with.
+/// With two spellings, each place the halves meet was named as the half's
+/// partner sorts against the cross's wall: `[lower, cross, cross]` and
+/// `[cross, upper, upper]`, with which of the two places it is flipped between
+/// them. So each place was two nodes, and the union was refused `Undecidable`
+/// in both orders on an `orient3d` asked of one point twice (Q2050).
+#[test]
+fn a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does() {
+    let [written_once, written_twice] =
+        [LOWER_ORIGIN, CROSSED_JOINT].map(the_bars_united_across_their_joint);
+    for (lower_first, (once, twice)) in [true, false]
+        .into_iter()
+        .zip(written_once.into_iter().zip(written_twice))
+    {
+        assert_eq!(
+            once.0, twice.0,
+            "lower bar first {lower_first}: written once, {}; written twice, {}",
+            once.1, twice.1
+        );
+    }
+}
+
+/// Where the lower bar meets the upper, above the axis of the bar across them.
+const CROSSED_JOINT: f64 = 4.0;
+
+/// What one fuse answered: how many faces its one solid has, or which refusal,
+/// and how to say it.
+type Answer = (Result<usize, Discriminant<Error>>, String);
+
+/// The upper bar, from [`CROSSED_JOINT`] to `6` with its wall naming its axis
+/// at `axis_origin`, united with a bar along `x` across the pipe at `z = 3`,
+/// and the lower bar, from `0` to the joint, united with that, both ways round.
+///
+/// An answer is checked as far as it goes before it comes back: it is one
+/// solid, it validates, and its volume is the three bars' less the part the
+/// cross shares with the pipe, worked out by hand: `16 r³/3` for two pipes of
+/// one radius whose axes cross square.
+fn the_bars_united_across_their_joint(axis_origin: f64) -> [Answer; 2] {
+    let policy = Policy::certified();
+    let route = format!("the upper wall at {axis_origin}");
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, CROSSED_JOINT, LOWER_ORIGIN);
+    let upper = a_bar_whose_wall_names_its_axis_at(&mut model, CROSSED_JOINT, 6.0, axis_origin);
+    let across = Cylinder::new(
+        Axis::new(Point::new(0.0, 0.0, 3.0), Vector::new(1.0, 0.0, 0.0))
+            .expect("a direction with a length"),
+        RADIUS,
+    )
+    .expect("a positive radius");
+    let across =
+        a_bar_with_its_seam_towards(&mut model, across, -4.0, 4.0, Vector::new(0.0, 0.0, 1.0));
+    let crossed = model
+        .fuse(
+            &[upper],
+            &[across],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refused| panic!("{route}: the cross and the upper bar: {refused:?}"));
+    let [crossed] = crossed.solids() else {
+        panic!(
+            "{route}: the cross and the upper bar are one solid: {:?}",
+            crossed.solids()
+        );
+    };
+    let crossed = *crossed;
+    let by_hand =
+        std::f64::consts::PI * RADIUS * RADIUS * (6.0 + 8.0) - 16.0 * RADIUS.powi(3) / 3.0;
+
+    [[lower, crossed], [crossed, lower]].map(|[arguments, tools]| {
+        let mut model = model.clone();
+        let fused = match model.fuse(
+            &[arguments],
+            &[tools],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(fused) => fused,
+            Err(why) => return (Err(discriminant(&why)), format!("refused {why:?}")),
+        };
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("{route}: came back broken: {broken:?}"));
+        let [solid] = fused.solids() else {
+            panic!(
+                "{route}: the three bars are one solid: {:?}",
+                fused.solids()
+            );
+        };
+        let (volume, bound) = volume_of(&model, *solid);
+        assert!(
+            (volume - by_hand).abs() <= bound,
+            "{route}: {volume} ± {bound} against {by_hand}"
+        );
+        let faces = model
+            .solid(*solid)
+            .expect("this model made the key")
+            .faces()
+            .count();
+        (Ok(faces), format!("one solid of {faces} faces"))
+    })
+}
+
 /// A round bar on `wall` from `from` to `to` along its axis, with its seam
 /// where the wall meets the plane `y = radius`.
 ///
@@ -654,12 +774,32 @@ impl APinnedBar {
 /// there is exactly zero — as long as `origin + t·direction` is exact
 /// ([`SLANTED_LENGTH`]).
 fn a_bar_along(model: &mut Model, wall: Cylinder, from: f64, to: f64) -> SolidKey {
+    a_bar_with_its_seam_towards(model, wall, from, to, Vector::new(0.0, 1.0, 0.0))
+}
+
+/// A round bar on `wall` from `from` to `to` along its axis, with its seam the
+/// wall's radius off the axis along `towards`, a unit vector square to it.
+fn a_bar_with_its_seam_towards(
+    model: &mut Model,
+    wall: Cylinder,
+    from: f64,
+    to: f64,
+    towards: Vector,
+) -> SolidKey {
     let [ox, oy, oz] = wall.axis().origin().coordinates();
     let along = wall.axis().direction();
     let [dx, dy, dz] = along.components();
-    assert_eq!(dy, 0.0, "the seam is put square to the axis along y");
-    let on_the_axis = |t: f64| Point::new(ox + t * dx, oy, oz + t * dz);
-    let on_the_seam = |t: f64| Point::new(ox + t * dx, oy + wall.radius(), oz + t * dz);
+    assert_eq!(
+        along.dot(towards),
+        0.0,
+        "the seam is put square to the axis"
+    );
+    let off = towards.components().map(|side| wall.radius() * side);
+    let on_the_axis = |t: f64| Point::new(ox + t * dx, oy + t * dy, oz + t * dz);
+    let on_the_seam = |t: f64| {
+        let [x, y, z] = on_the_axis(t).coordinates();
+        Point::new(x + off[0], y + off[1], z + off[2])
+    };
 
     let mut builder = SolidBuilder::new();
     let low = builder
@@ -728,125 +868,6 @@ fn a_bar_along(model: &mut Model, wall: Cylinder, from: f64, to: f64) -> SolidKe
     builder
         .build(model, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a bar described face by face")
-}
-
-fn probe_cross_bar(model: &mut Model, height: f64, from: f64, to: f64) -> SolidKey {
-    let on_the_axis = |t: f64| Point::new(t, 0.0, height);
-    let on_the_seam = |t: f64| Point::new(t, 0.0, height + RADIUS);
-    let wall = Cylinder::new(
-        Axis::new(on_the_axis(0.0), Vector::new(1.0, 0.0, 0.0)).unwrap(),
-        RADIUS,
-    )
-    .unwrap();
-    let along = Vector::new(1.0, 0.0, 0.0);
-    let mut builder = SolidBuilder::new();
-    let low = builder.add_vertex(on_the_seam(from)).unwrap();
-    let high = builder.add_vertex(on_the_seam(to)).unwrap();
-    let seam = builder.add_edge(low, high, EdgeRun::Straight).unwrap();
-    let low_circle = builder
-        .add_edge(low, low, EdgeRun::RightRoundWhereItsFacesCross)
-        .unwrap();
-    let high_circle = builder
-        .add_edge(high, high, EdgeRun::RightRoundWhereItsFacesCross)
-        .unwrap();
-    let cap = |builder: &mut SolidBuilder, t: f64, outward: Vector, edge, turn| {
-        let plane = Plane::from_point_and_normal(on_the_axis(t), outward).unwrap();
-        let coedge = builder.add_coedge(edge, turn).unwrap();
-        let wire = builder.add_wire(&[DraftStep::Along(coedge)]).unwrap();
-        builder.add_face(Surface::Plane(plane), &[wire]).unwrap()
-    };
-    let bottom_cap = cap(
-        &mut builder,
-        from,
-        -along,
-        low_circle,
-        Orientation::Reversed,
-    );
-    let top_cap = cap(&mut builder, to, along, high_circle, Orientation::Forward);
-    let round_the_wall = [
-        (low_circle, Orientation::Forward),
-        (seam, Orientation::Forward),
-        (high_circle, Orientation::Reversed),
-        (seam, Orientation::Reversed),
-    ]
-    .map(|(edge, turn)| DraftStep::Along(builder.add_coedge(edge, turn).unwrap()));
-    let wire = builder.add_wire(&round_the_wall).unwrap();
-    let side = builder.add_face(Surface::Cylinder(wall), &[wire]).unwrap();
-    builder
-        .add_shell(&[
-            (bottom_cap, Orientation::Forward),
-            (top_cap, Orientation::Forward),
-            (side, Orientation::Forward),
-        ])
-        .unwrap();
-    builder
-        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
-        .unwrap()
-}
-
-#[test]
-fn probe_q2050_cross() {
-    let policy = Policy::certified();
-    let height = 3.0;
-    let top = 6.0;
-    let by_hand = std::f64::consts::PI * RADIUS * RADIUS * (top + 8.0) - 16.0 * 8.0 / 3.0;
-    for joint in [4.0] {
-        for upper_origin in [LOWER_ORIGIN, joint] {
-            for lower_first in [false] {
-                for swap in [false] {
-                    let mut model = Model::new(Scale::millimetres(100.0).unwrap());
-                    let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, joint, 0.0);
-                    let upper =
-                        a_bar_whose_wall_names_its_axis_at(&mut model, joint, top, upper_origin);
-                    let cross = probe_cross_bar(&mut model, height, -4.0, 4.0);
-                    let (first, second) = if lower_first {
-                        (lower, upper)
-                    } else {
-                        (upper, lower)
-                    };
-                    let tag = format!(
-                        "joint {joint} upper origin {upper_origin} lower first {lower_first} swap {swap}"
-                    );
-                    eprintln!("PROBE --- {tag}");
-                    let one = match model.fuse(
-                        &[first],
-                        &[cross],
-                        Rule::Union,
-                        &policy,
-                        &mut ProvenanceLog::new(),
-                    ) {
-                        Ok(one) => one,
-                        Err(e) => {
-                            eprintln!("PROBE RESULT {tag}: first fuse {e:?}");
-                            continue;
-                        }
-                    };
-                    let [one] = one.solids() else {
-                        eprintln!("PROBE RESULT {tag}: first fuse solids {:?}", one.solids());
-                        continue;
-                    };
-                    let one = *one;
-                    let (a, b) = if swap { (one, second) } else { (second, one) };
-                    match model.fuse(&[a], &[b], Rule::Union, &policy, &mut ProvenanceLog::new()) {
-                        Ok(two) => {
-                            let valid = model.validate(&policy, &mut ProvenanceLog::new());
-                            let solids = two.solids().to_vec();
-                            let faces = solids
-                                .first()
-                                .map(|s| model.solid(*s).unwrap().faces().count());
-                            let volume = solids.first().map(|s| volume_of(&model, *s));
-                            eprintln!(
-                                "PROBE RESULT {tag}: ok solids {} faces {faces:?} volume {volume:?} by hand {by_hand} valid {:?}",
-                                solids.len(),
-                                valid.err()
-                            );
-                        }
-                        Err(e) => eprintln!("PROBE RESULT {tag}: second fuse {e:?}"),
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// What one bar's measuring says: its volume and the bound on it.
