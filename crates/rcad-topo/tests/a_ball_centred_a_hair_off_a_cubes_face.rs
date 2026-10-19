@@ -68,6 +68,49 @@ fn a_ball_centred_on_a_cubes_face_by_its_edge_unites_with_its_volume() {
     }
 }
 
+/// The ball of radius 1 centred at `(0.5, 0, 1)`, as tall as the cube, so it
+/// touches the floor and the roof at its poles, which lie on the edges of the
+/// face `y = 0` (Q2463). Its skin in the union reaches from the seam the face's
+/// circle runs down, at `x = 1.5`, round through `y < 0` to the cap outside
+/// `x = 0`, and the chart's own seam at the far meridian runs along the two
+/// arcs of that circle between `x = 0` and each pole. It was refused
+/// `CannotMeshAFace` `ASideCutsOffOneCornerOfACurvedPatch` under both
+/// policies, both ways round.
+#[test]
+fn a_ball_as_tall_as_the_cube_half_way_to_its_edge_unites_with_its_volume() {
+    for certified in [false, true] {
+        for ball_first in [false, true] {
+            let what = format!("certified {certified}, ball first {ball_first}");
+            let (mut model, cube, ball) = a_cube_and_a_ball([0.5, 0.0, 1.0], 1.0);
+            let policy = the_policy(certified);
+            let answer = united(&mut model, cube, ball, ball_first, &policy)
+                .unwrap_or_else(|why| panic!("{what}: refused {why:?}"));
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let [solid] = answer[..] else {
+                panic!("{what}: one solid, got {answer:?}");
+            };
+            let measured = model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.01).expect("a positive length"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what}: the union measures: {why:?}"));
+            let truth = the_union_of_the_cube_and_the_ball(0.5, 1.0);
+            assert!(
+                (measured.volume() - truth).abs() <= measured.volume_error(),
+                "{what}: {} measured, {} off, against {truth}",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
+}
+
 /// The seed itself, the ball of radius 1 centred `2⁻⁶⁴` off the face `x = 0`.
 /// Its circle on that face crosses the edge at `z = 2⁻¹²⁹` and `z = 2`, walked
 /// from the corner `(0, 0, 0)`, and its answer has a point `2⁻¹²⁹` from a
