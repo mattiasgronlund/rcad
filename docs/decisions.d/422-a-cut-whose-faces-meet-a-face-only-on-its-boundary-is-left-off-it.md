@@ -109,7 +109,13 @@ either:
   crossings the faces across split there no more than this face will
   (`the_faces_across_split_it_no_more`). Those faces' choices reach this face
   through `BakedEdge::its_neighbour_leaves_out`, which `cuts.rs`'s
-  `tell_each_edge_what_its_neighbour_leaves_out` fills.
+  `tell_each_edge_what_its_neighbour_leaves_out` fills. A face across that
+  lists a surface can still place the node alone on its own crossing, and
+  then splits the edge there whatever its list says. So
+  `the_face_across_places_it_alone` (Q2364, `9e790492`) counts that surface
+  against the drop when the face across's curve with it lies wholly past a
+  side the surface's faces lie in, and this face's curve with it lies past
+  none of those sides.
 
 It runs to a fixed point, since a crossing kept makes its nodes count against
 the others through them.
@@ -201,13 +207,16 @@ which.
   count of fuses answered, which it holds to every fuse it makes, and none on
   a wrong volume. That is evidence from those tests,
   not a proof.
-- **Not run: a third spelling the face never sees.**
-  `its_neighbour_leaves_out` still holds surfaces as the neighbour spelled
-  them, and `the_faces_across_split_it_no_more` compares by spelling. If a
-  neighbour leaves out one spelling of a surface but keeps its run, because
-  another spelling that this face never sees draws the run there too, this
-  face could drop a run the neighbour keeps. By 422.4's measurement that would
-  be a refusal. Nobody has built the shape. Row.
+- **Run by Q2364: a third spelling the face never sees.** Two bars stacked
+  on one pipe, spelled four ways, and a box in seven places answer all 168
+  fuses, every rule both ways round, before the fix as after
+  (`two_spellings_of_one_pipe_and_a_box_answer_every_rule_either_way_round`
+  in `tests/a_third_spelling_of_a_surface_a_face_never_sees.rs`). What was
+  refused instead was a block with a step up beside a bar, 3 of its 6 fuses
+  `ResultIsNotManifold`, and all 6 answer with
+  `the_face_across_places_it_alone` (422.4). `its_neighbour_leaves_out` still
+  says what the face across may leave out, not what it does, and a spelling
+  that only touches this face at the node was never built. Row Q2382.
 - **Row, small**: the doc comment of `where_a_ring_and_a_pipe_along_its_core_cross`
   in `rcad-geom`'s `intersect.rs` still says the fuse does not leave the loop's
   halves off and is refused ordering the one on the bar's pipe face. Since this
