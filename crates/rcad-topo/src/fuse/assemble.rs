@@ -3435,9 +3435,11 @@ impl Assembly {
         (edges, faces)
     }
 
-    /// Leave out each flat face whose one ring of straight sides one other flat
+    /// Leave out each ring of straight sides on a flat face that one other flat
     /// face, on a different plane, walks back the other way, and take that
-    /// stretch out of the other face's ring.
+    /// stretch out of the other face's ring. The ring is the face's one ring,
+    /// and the face goes with it, or a stretch of any ring of the face that
+    /// leaves a corner and comes back to it.
     ///
     /// **The straight sides that two faces on different planes share all lie on
     /// the one line where the two planes cross**, so in exact geometry a ring of them
@@ -3457,13 +3459,28 @@ impl Assembly {
     /// to itself (`a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`,
     /// queue row Q1506).
     ///
+    /// **A ring can be a stretch of a longer one.** Turned a tenth of a radian
+    /// about `(0.3, −1, 2)`, a pyramid and a wedge whose edge runs up through
+    /// its apex keep three corners a rounding apart by the apex, each named
+    /// where the wedge's two planes cross a side of the pyramid. The union
+    /// joins each wedge face's pieces into one face, and the outline of one of
+    /// them goes from the first of the three corners to the other two and back
+    /// along the wedge's edge before it goes on, while the other wedge face
+    /// walks the same three sides back inside its own outline. Left in, the
+    /// three edges folded into one straight edge from the first corner back to
+    /// itself, as the tipped cube's did
+    /// (`a_broken_three_surface_corner_read_back_from_bytes.rs`, queue row
+    /// Q2332).
+    ///
     /// **Leaving both out changes no volume.** The face's ring and the other
     /// face's stretch walk the same corners in opposite directions, so as the
-    /// answer's corners are written they bound no space between them. **And
-    /// every edge left keeps its two faces**: each edge of the ring loses both
-    /// of its uses, the face's and the stretch's, so it is marked dissolved and
-    /// goes, and every other edge keeps its own. A corner with no edge left goes
-    /// with them. The same rule lets the tipped cube less the block answer,
+    /// answer's corners are written they bound no space between them. What is
+    /// left of a ring either of them was cut from still closes, since each
+    /// comes back to the corner it left. **And every edge left keeps its two
+    /// faces**: each edge of the ring loses both of its uses, the face's and
+    /// the stretch's, so it is marked dissolved and goes, and every other edge
+    /// keeps its own. A corner with no edge left goes with them. The same rule
+    /// lets the tipped cube less the block answer,
     /// refused `VolumeIsNotPositive` before, and the unions of three of
     /// Q1208's random turns of a cube with its corner on a block's face, turns
     /// 8, 21 and 49, refused the same way
@@ -3493,18 +3510,23 @@ impl Assembly {
     ) -> Result<bool> {
         let mut left_out = false;
         while let Some(found) = self.a_flat_ring_another_plane_walks_back(joined, along, log)? {
-            for &dart in &joined[found.face].rings[0] {
+            for &dart in &found.own {
                 dissolved[self.edge_of(dart)] = true;
             }
-            let other = &mut joined[found.by];
-            other.rings[found.ring].retain(|dart| !found.stretch.contains(dart));
-            if other.rings[found.ring].is_empty() {
-                other.rings.remove(found.ring);
+            for (index, ring, darts) in [
+                (found.face, found.ring_of_face, &found.own),
+                (found.by, found.ring, &found.stretch),
+            ] {
+                let rings = &mut joined[index].rings;
+                rings[ring].retain(|dart| !darts.contains(dart));
+                if rings[ring].is_empty() {
+                    rings.remove(ring);
+                }
             }
-            let mut gone = vec![found.face];
-            if other.rings.is_empty() {
-                gone.push(found.by);
-            }
+            let mut gone: Vec<usize> = [found.face, found.by]
+                .into_iter()
+                .filter(|&index| joined[index].rings.is_empty())
+                .collect();
             gone.sort_unstable();
             for index in gone.into_iter().rev() {
                 joined.remove(index);
@@ -3514,10 +3536,12 @@ impl Assembly {
         Ok(left_out)
     }
 
-    /// The first flat face with one ring of straight sides that one other flat
+    /// The first ring of straight sides on a flat face that one other flat
     /// face, on a different plane, walks back as one unbroken stretch of one of
     /// its rings — and not the whole outline of a face with holes, which would
-    /// leave the holes with nothing round them.
+    /// leave the holes with nothing round them. The ring is the face's one
+    /// ring, or a stretch of any ring of it that leaves a corner and comes back
+    /// to it.
     ///
     /// # Errors
     ///
@@ -3534,44 +3558,86 @@ impl Assembly {
                 joined_into[member] = Some(index);
             }
         }
+        let by_face = |dart: &Dart| {
+            joined_into[dart.face].expect("an edge that stays has a joined face on each side")
+        };
         for (face, candidate) in joined.iter().enumerate() {
-            let (Some(plane), [ring]) = (candidate.surface.as_plane(), &candidate.rings[..]) else {
+            let Some(plane) = candidate.surface.as_plane() else {
                 continue;
             };
-            let Some(stretch) = self.the_darts_walking_back_along_straight_sides(ring, along)
-            else {
-                continue;
-            };
-            let by_face = |dart: &Dart| {
-                joined_into[dart.face].expect("an edge that stays has a joined face on each side")
-            };
-            let by = by_face(&stretch[0]);
-            if by == face || stretch.iter().any(|dart| by_face(dart) != by) {
-                continue;
+            for (ring_of_face, ring) in candidate.rings.iter().enumerate() {
+                for own in self.the_closed_walks_round(ring, candidate.rings.len() == 1) {
+                    let Some(stretch) =
+                        self.the_darts_walking_back_along_straight_sides(&own, along)
+                    else {
+                        continue;
+                    };
+                    let by = by_face(&stretch[0]);
+                    if by == face || stretch.iter().any(|dart| by_face(dart) != by) {
+                        continue;
+                    }
+                    let Some(other_plane) = joined[by].surface.as_plane() else {
+                        continue;
+                    };
+                    let Some(in_ring) =
+                        one_unbroken_stretch_of_one_ring(&joined[by].rings, &stretch)
+                    else {
+                        continue;
+                    };
+                    let would_leave_holes_alone = in_ring == 0
+                        && joined[by].rings.len() > 1
+                        && joined[by].rings[0].len() == stretch.len();
+                    if would_leave_holes_alone
+                        || agreement_of_two_planes(plane, other_plane, log)?
+                            != PlaneAgreement::Different
+                    {
+                        continue;
+                    }
+                    return Ok(Some(WalkedBack {
+                        face,
+                        ring_of_face,
+                        own,
+                        by,
+                        ring: in_ring,
+                        stretch,
+                    }));
+                }
             }
-            let Some(other_plane) = joined[by].surface.as_plane() else {
-                continue;
-            };
-            let Some(in_ring) = one_unbroken_stretch_of_one_ring(&joined[by].rings, &stretch)
-            else {
-                continue;
-            };
-            let would_leave_holes_alone = in_ring == 0
-                && joined[by].rings.len() > 1
-                && joined[by].rings[0].len() == ring.len();
-            if would_leave_holes_alone
-                || agreement_of_two_planes(plane, other_plane, log)? != PlaneAgreement::Different
-            {
-                continue;
-            }
-            return Ok(Some(WalkedBack {
-                face,
-                by,
-                ring: in_ring,
-                stretch,
-            }));
         }
         Ok(None)
+    }
+
+    /// The walks along `ring` that end at the corner they start from, each as
+    /// its darts in order: the whole ring when `whole` says to try it, and
+    /// then every stretch from one place the ring leaves a corner to another
+    /// place it leaves the same corner. A ring that passes no corner twice has
+    /// no stretch.
+    fn the_closed_walks_round(&self, ring: &[Dart], whole: bool) -> Vec<Vec<Dart>> {
+        let mut leaving: Vec<(usize, usize)> = ring
+            .iter()
+            .enumerate()
+            .map(|(position, &dart)| (self.starts_at(dart), position))
+            .collect();
+        leaving.sort_unstable();
+        let mut walks = Vec::new();
+        if whole {
+            walks.push(ring.to_vec());
+        }
+        for one_corner in leaving.chunk_by(|one, other| one.0 == other.0) {
+            for &(_, from) in one_corner {
+                for &(_, to) in one_corner {
+                    if from != to {
+                        let length = (to + ring.len() - from) % ring.len();
+                        walks.push(
+                            (from..from + length)
+                                .map(|position| ring[position % ring.len()])
+                                .collect(),
+                        );
+                    }
+                }
+            }
+        }
+        walks
     }
 
     /// The other dart along each side of `ring`, or `None` when a side of it is
@@ -4185,7 +4251,8 @@ impl Assembly {
             // `Edge::how_it_runs` reads the pair as `RightRoundWhereItsFacesCross`.
             // What cannot happen is a *straight* side coming back to where it
             // started: two planes cross in a line and a line does not close.
-            // A flat face's ring that another plane walks back made one until
+            // A flat face's ring that another plane walks back, or a stretch
+            // of one that comes back to the corner it left, made one until
             // `leave_out_each_flat_ring_another_plane_walks_back` left it out.
             let flat = self.edges[leader]
                 .carried_by
@@ -6351,11 +6418,15 @@ struct JoinedFace {
     rings: Vec<Vec<Dart>>,
 }
 
-/// A flat joined face whose one ring another flat face walks back
-/// ([`Assembly::leave_out_each_flat_ring_another_plane_walks_back`]).
+/// A ring of straight sides on a flat joined face that another flat face walks
+/// back ([`Assembly::leave_out_each_flat_ring_another_plane_walks_back`]).
 struct WalkedBack {
-    /// The joined face whose one ring it is.
+    /// The joined face the ring is on.
     face: usize,
+    /// Which ring of `face` the ring is, or is a stretch of.
+    ring_of_face: usize,
+    /// The darts of `face` along the ring's sides, in order.
+    own: Vec<Dart>,
     /// The joined face that walks it back.
     by: usize,
     /// Which ring of `by` holds the stretch.

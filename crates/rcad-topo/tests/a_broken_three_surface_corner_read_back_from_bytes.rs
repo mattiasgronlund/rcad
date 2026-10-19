@@ -51,7 +51,13 @@
 //! places against each other by the boxes or the planes round them. Ending
 //! the loop in the 5 where `as_the_planes_say` makes it changed none of the
 //! 672 fuses swept, and the other 42 refuse with no loop, so the loop is not
-//! what refuses.
+//! what refuses. Turned a tenth of a radian about `(0.3, −1, 2)`, the wedge
+//! round the `x` axis keeps an edge a rounding long by the apex, as the cut
+//! through it does: `certified` refuses every rule for it, and
+//! `tolerant(100)` answers the difference and the union and is refused the
+//! intersection for a triangle a rounding across. The union panicked there
+//! until the fuse left out a stretch of a wedge face's outline that the other
+//! wedge face walks back.
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -735,6 +741,77 @@ fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_cannot_tell_its_ce
     }
 }
 
+/// **Turned a tenth of a radian about `(0.3, −1, 2)`, the sound pyramid and
+/// the wedge round the `x` axis built there are refused for an edge too short
+/// by every rule under `certified`**, and leave the model as it was. Turned,
+/// the wedge's two planes and the pyramid's four side planes miss one point by
+/// a rounding, so the answer of those numbers keeps an edge a rounding long by
+/// the apex: the limit §294.21 and §448.7 settled for the cut through the
+/// apex. The difference and the intersection already refused so. The union
+/// panicked in `edges_after_joining`, "a piece of a face has a straight side
+/// with no length" (queue rows Q2317 and Q2332). One wedge face's outline went
+/// out along the wedge's edge through two corners a rounding off the apex and
+/// came back before it went on, and the other wedge face walked those three
+/// sides back inside its own outline, so the three folded into one straight
+/// edge from a corner back to itself. The fuse leaves out such a stretch of an
+/// outline, as it leaves out a whole ring another plane walks back.
+#[test]
+fn a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_is_refused_for_an_edge_too_short() {
+    for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+        let case = format!("{A_WEDGE_ROUND_THE_X_AXIS:?} {rule:?}");
+        match the_wedge_through_the_apex(
+            A_WEDGE_ROUND_THE_X_AXIS,
+            a_tenth_of_a_radian_about_a_tilted_axis(),
+            rule,
+            &Policy::certified(),
+        ) {
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+                assert!(ratio > 1e15, "{case}: a range of {ratio}");
+            }
+            other => panic!("{case} came back {other:?}"),
+        }
+    }
+}
+
+/// **Under `tolerant(100)` the same turned pyramid and wedge answer the
+/// difference and the union**, the pyramid's 120 less the 15 the two share,
+/// and the pyramid's 120 and the wedge's 150 less it, each with the range
+/// check `tolerant` takes in the log. The union panicked here too (queue row
+/// Q2332). **The intersection is refused `TheFuseWroteABrokenAnswer`** with
+/// its outline winding against its normal, and leaves the model as it was. A
+/// print put in `validate::check_flat_face` and taken out found the face: a
+/// triangle on a side of the pyramid whose three corners are within `4e−15`
+/// of one another by the apex, which winds `Neg`. That is the triangle a
+/// rounding across that §294.21 found on the placed cut through the apex,
+/// which no winding of its stored corners can carry: the same limit, one step
+/// on from the range check (§448.7).
+#[test]
+fn a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_tolerant_but_for_the_intersection()
+ {
+    for (rule, answers) in [
+        (Rule::Difference, true),
+        (Rule::Intersection, false),
+        (Rule::Union, true),
+    ] {
+        let case = format!("{A_WEDGE_ROUND_THE_X_AXIS:?} {rule:?}");
+        match (
+            the_wedge_through_the_apex(
+                A_WEDGE_ROUND_THE_X_AXIS,
+                a_tenth_of_a_radian_about_a_tilted_axis(),
+                rule,
+                &Policy::tolerant(100.0),
+            ),
+            answers,
+        ) {
+            (Ok(named), true) => assert_eq!(named, [DYNAMIC_RANGE_CHECK], "{case}"),
+            (Err(Error::TheFuseWroteABrokenAnswer { broken }), false) => {
+                assert_eq!(broken, Invalid::OuterWireWindsAgainstTheNormal, "{case}");
+            }
+            (other, _) => panic!("{case} came back {other:?}"),
+        }
+    }
+}
+
 /// **Every partner, every rule, every placement and both policies give the
 /// box's refusal** for every move of the apex, the cut through the apex among
 /// them. Each three of the four side planes cross at the apex alone, so no
@@ -1037,14 +1114,15 @@ fn the_cut_through_the_apex(
 
 /// The sound pyramid built where it stands and moved by `placement`, fused
 /// under `rule` with `wedge` built at `placement`. An answer has to validate
-/// and hold what the pyramid and the wedge hold. A refusal has to leave the
-/// model byte for byte as it was, and comes back as it is.
+/// and hold what the pyramid and the wedge hold, and comes back as the
+/// predicates the fuse's log names. A refusal has to leave the model byte for
+/// byte as it was, and comes back as it is.
 fn the_wedge_through_the_apex(
     wedge: Wedge,
     placement: Isometry,
     rule: Rule,
     policy: &Policy,
-) -> Result<(), Error> {
+) -> Result<Vec<&'static str>, Error> {
     let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let pyramid = a_pyramid(&mut model);
@@ -1053,7 +1131,8 @@ fn the_wedge_through_the_apex(
         .expect("this model made the key");
     let cut = a_wedge(&mut model, wedge, &placement);
     let before = postcard::to_allocvec(&model).expect("a model writes out");
-    match model.fuse(&[pyramid], &[cut], rule, policy, &mut ProvenanceLog::new()) {
+    let mut log = ProvenanceLog::new();
+    match model.fuse(&[pyramid], &[cut], rule, policy, &mut log) {
         Ok(answer) => {
             the_answer_holds(
                 &model,
@@ -1062,7 +1141,11 @@ fn the_wedge_through_the_apex(
                 policy,
                 &case,
             );
-            Ok(())
+            Ok(log
+                .records()
+                .iter()
+                .map(|record| record.predicate())
+                .collect())
         }
         Err(refused) => {
             assert_eq!(
@@ -1107,6 +1190,13 @@ fn where_the_orders_loop_by_the_apex() -> [(Wedge, Isometry); 8] {
             shift.compose(&turn([-2.0, 1.0, 0.5], 1.3)),
         ),
     ]
+}
+
+/// The turn under which the wedge round the `x` axis keeps three corners a
+/// rounding apart by the apex along its edge (queue rows Q2317 and Q2332).
+fn a_tenth_of_a_radian_about_a_tilted_axis() -> Isometry {
+    let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.3, -1.0, 2.0)).expect("an axis");
+    Isometry::rotation(&axis, 0.1).expect("a turn")
 }
 
 /// `solid` and `partner` fused under `rule` where they were built, which has
