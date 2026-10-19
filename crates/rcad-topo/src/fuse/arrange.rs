@@ -7722,6 +7722,22 @@ impl<'f> Arrangement<'f> {
     /// does plus as often as each of those loops does: the chords cancel
     /// ([`Arrangement::how_often_a_side_and_its_chord_wind_round`]).
     ///
+    /// **Opened out on a ball, the point and every corner are read over their
+    /// boxes stretched to the ball** ([`stretched_to_the_ball`]). A turn there
+    /// is `orient3d` with the point `P` it is opened out from as the fourth
+    /// point, which reads a point off the ball where the line from `P` through
+    /// it meets the ball: about `2rδ/d` from its foot, for a point `δ` off a
+    /// ball of radius `r` and `d` from `P`. Whether it is inside a circle is
+    /// read where it is. A turn settled over a stretched box is the turn of the
+    /// point and of a point of the ball beside it, so the two readings agree,
+    /// and a point on the ball is read as before. With the ball's top as `P`, a
+    /// point two or three `f64`s off the ball within about `2⁻³³` of a corner
+    /// `2e-6` from the top was put in the cell beside its own, and one walk
+    /// wound round it `−2` times. With that corner stored three `f64`s off the
+    /// ball, as an input corner can be, walks wound round points of the ball
+    /// beside it that are not in their region
+    /// (`a_point_rounded_off_a_ball_near_where_it_is_opened_out_from`, Q1940).
+    ///
     /// **A side that is the whole of a closed curve is not answered.** It comes
     /// back to its one corner, so it has no chord. On a flat face it shares that
     /// corner with another side only where a curve touches it there without
@@ -7743,19 +7759,29 @@ impl<'f> Arrangement<'f> {
             .iter()
             .map(|&half_edge| self.nodes[self.from(half_edge)].point)
             .collect();
-        let rim = core::slice::from_ref(&corners);
         let by_the_corners = match picture {
-            Picture::Flat(in_plane) => {
-                how_often_the_rim_winds_round(in_plane, self.plane_of_the_flat_face(), rim, point)?
+            Picture::Flat(in_plane) => how_often_the_rim_winds_round(
+                in_plane,
+                self.plane_of_the_flat_face(),
+                core::slice::from_ref(&corners),
+                point,
+            )?,
+            Picture::OpenedOut { ball, from } => {
+                let point = stretched_to_the_ball(ball, point)?;
+                let corners = corners
+                    .iter()
+                    .map(|&corner| stretched_to_the_ball(ball, corner))
+                    .collect::<Option<Vec<PredicatePoint>>>()?;
+                let rim = core::slice::from_ref(&corners);
+                corners
+                    .iter()
+                    .copied()
+                    .chain(Picture::aims_round_the_middle_of(ball))
+                    .filter(|&aim| not_in_one_line([from, point, aim]))
+                    .find_map(|aim| {
+                        how_often_the_rim_winds_round_aiming_at(picture, rim, point, aim)
+                    })?
             }
-            Picture::OpenedOut { ball, from } => corners
-                .iter()
-                .copied()
-                .chain(Picture::aims_round_the_middle_of(ball))
-                .filter(|&aim| not_in_one_line([from, point, aim]))
-                .find_map(|aim| {
-                    how_often_the_rim_winds_round_aiming_at(picture, rim, point, aim)
-                })?,
         };
         self.cycles[cycle]
             .iter()
@@ -7825,8 +7851,10 @@ impl<'f> Arrangement<'f> {
     /// go on past its chord's end, and there, with the corner `1e-8` below the
     /// plane or the point `1e-8` above it, the chord was read across the point
     /// and two walks that go round nothing there wound round it, one each way
-    /// (`a_walk_wound_round_a_point_past_a_chords_end`, Q1491). Opened out on a
-    /// ball nothing is read along a plane, so nothing is stretched.
+    /// (`a_walk_wound_round_a_point_past_a_chords_end`, Q1491). **Opened out
+    /// on a ball they are read over their boxes stretched to the ball**
+    /// ([`stretched_to_the_ball`]), as the walk's corners are and for the
+    /// reason [`Arrangement::how_often_a_walk_winds_round`] gives.
     fn how_often_a_side_and_its_chord_wind_round(
         &self,
         picture: Picture,
@@ -7850,7 +7878,7 @@ impl<'f> Arrangement<'f> {
         };
         let read = |at: PredicatePoint| match picture {
             Picture::Flat(_) => stretched_to_the_plane(self.plane_of_the_flat_face(), at),
-            Picture::OpenedOut { .. } => Some(at),
+            Picture::OpenedOut { ball, .. } => stretched_to_the_ball(ball, at),
         };
         let start = read(self.nodes[from].point)?;
         let end = read(self.nodes[to].point)?;
@@ -10857,6 +10885,93 @@ impl Picture<'_> {
                 }))
             })
     }
+}
+
+/// `point`'s box stretched along one axis until it holds a point of `ball`
+/// too, or `None` when no stretch could be proved to reach the skin. A point
+/// on the skin comes back as it is, and a box of no width as the `f64` triple
+/// in it, as a stretched box does.
+///
+/// [`stretched_to_the_plane`] for a ball. The axis is the one the line from
+/// the centre through the middle of the box runs most along, and the box keeps
+/// its other two sides. Its end away from the centre along that axis is moved
+/// out until the ball's own sign puts that end's face outside the ball, and the
+/// other end in until it puts its face inside, or either onto the skin. Every
+/// line along the axis through the box then crosses the skin between the two
+/// faces, so the box holds a point of the ball as well as every point it held.
+/// The first try past an end is where the line along the axis through the
+/// middle of the box meets the ball, worked out in `f64`; nothing about it is
+/// trusted, and a try the sign does not prove is passed over.
+fn stretched_to_the_ball(ball: Sphere, point: PredicatePoint) -> Option<PredicatePoint> {
+    let skin = Surface::Sphere(ball);
+    if side_of_surface(&skin, point) == Decision::Zero {
+        return Some(as_exact_as_it_is(point));
+    }
+    let centre = ball.centre().coordinates();
+    let mut boxed = point.enclosure();
+    let middle = boxed.map(|span| span.lo() + (span.hi() - span.lo()) / 2.0);
+    let from_the_centre: [f64; 3] = core::array::from_fn(|axis| middle[axis] - centre[axis]);
+    let along = (0..3)
+        .max_by(|&one, &other| {
+            from_the_centre[one]
+                .abs()
+                .total_cmp(&from_the_centre[other].abs())
+        })
+        .expect("three axes");
+    let outwards = if from_the_centre[along] < 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let square_of_the_rest = (0..3)
+        .filter(|&axis| axis != along)
+        .fold(ball.radius() * ball.radius(), |rest, axis| {
+            rest - from_the_centre[axis] * from_the_centre[axis]
+        });
+    let crossing = centre[along] + outwards * square_of_the_rest.max(0.0).sqrt();
+    let size = boxed.iter().fold(
+        centre.iter().fold(ball.radius(), |largest, &coordinate| {
+            largest.max(coordinate.abs() + ball.radius())
+        }),
+        |largest, side| largest.max(side.lo().abs()).max(side.hi().abs()),
+    );
+    let end_on_its_side = |own_end: f64, way: f64| {
+        let wanted = if way == outwards {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        };
+        let is_on_its_side = |end: f64| {
+            let mut face = boxed;
+            face[along] = Interval::exactly(end);
+            let side = side_of_surface(&skin, as_exact_as_it_is(PredicatePoint::Constructed(face)));
+            side == wanted || side == Decision::Zero
+        };
+        if is_on_its_side(own_end) {
+            return Some(own_end);
+        }
+        let mut step = size.max(f64::MIN_POSITIVE) * f64::EPSILON;
+        let mut end = if (crossing - own_end) * way > 0.0 {
+            crossing
+        } else {
+            own_end + way * step
+        };
+        for _ in 0..64 {
+            if !end.is_finite() {
+                return None;
+            }
+            if is_on_its_side(end) {
+                return Some(end);
+            }
+            end += way * step;
+            step *= 2.0;
+        }
+        None
+    };
+    let low = end_on_its_side(boxed[along].lo(), -1.0)?;
+    let high = end_on_its_side(boxed[along].hi(), 1.0)?;
+    boxed[along] = Interval::new(low, high).expect("each end only ever moves away from the other");
+    Some(as_exact_as_it_is(PredicatePoint::Constructed(boxed)))
 }
 
 /// Whether three points are proved not to lie on one line, so that one plane
@@ -21488,5 +21603,280 @@ mod a_walk_wound_round_a_point_past_a_chords_end {
             Sphere::new(Point::new(OUT - 0.375, 0.0, 1.0), 0.625).expect("a radius"),
         )];
         top
+    }
+}
+
+#[cfg(test)]
+mod a_point_rounded_off_a_ball_near_where_it_is_opened_out_from {
+    //! A unit ball cut by the planes `x = 2e-6`, `z = 1e-6` and `z = −1e-6`,
+    //! opened out flat from its top `(0, 1, 0)`, and points of it near the two
+    //! corners `(2e-6, ·, ±1e-6)` beside the top, each with its `y` rounded
+    //! from the skin and then stepped up to three `f64`s up or down.
+    //!
+    //! Opened out from a point `P`, a turn is `orient3d` with `P` as its fourth
+    //! point, which reads a point off the ball where the line from `P` through
+    //! it meets the ball: about `2δ/d` from its foot, for a point `δ` off the
+    //! ball and `d` from `P`. Whether the point is inside a circle is read where
+    //! it is. Here `d` is about `2e-6`, so a point three steps off is read about
+    //! `3e-10` away. Every walk has to wind round each point as it winds round
+    //! the points of the ball in the point's cell, or say it cannot (Q1940).
+    //! It has to when the two corners are stored that far off the ball too.
+
+    use std::collections::BTreeMap;
+
+    use rcad_geom::{Isometry, Plane, Scale, Surface};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog};
+
+    use super::{Arrangement, Picture, canonical_cut_surfaces, side_of_surface};
+    use crate::Model;
+    use crate::fuse::bake::{BakedFace, bake};
+
+    /// Where the plane across `x` cuts the ball.
+    const ACROSS: f64 = 2e-6;
+
+    /// Where the two planes across `z` cut it, one either side of the top.
+    const ASIDE: f64 = 1e-6;
+
+    /// The two corners beside the top, as `(x, z)`.
+    const CORNERS: [(f64, f64); 2] = [(ACROSS, ASIDE), (ACROSS, -ASIDE)];
+
+    /// Each count settled at a point `2⁻⁴⁰` to `2⁻³⁰` from a corner beside the
+    /// top, with its `y` up to three steps off the skin, is the count in the
+    /// point's cell.
+    ///
+    /// Read along the line from the top, a point two or three steps off the
+    /// ball within about `2⁻³³` of a corner was put in a cell beside its own,
+    /// and one walk wound round such a point `−2` times, which no walk round
+    /// one region can.
+    #[test]
+    fn a_point_rounded_off_the_ball_is_wound_round_as_its_cell_is() {
+        let face = the_ball_cut();
+        let arrangement = arranged(&face);
+        let picture = opened_out_from_the_top(&face);
+        let in_its_cell = the_counts_deep_in_each_cell(&face, &arrangement, picture);
+        each_is_wound_round_as_its_cell_is(
+            &arrangement,
+            picture,
+            &in_its_cell,
+            rounded_off_beside_the_corners(3),
+        );
+    }
+
+    /// The same for points rounded onto the ball, with the two corners beside
+    /// the top stored as an input corner is: on both planes, with `y` rounded
+    /// from the skin and then stepped three `f64`s up at one and down at the
+    /// other.
+    ///
+    /// Read along the line from the top, each corner is about `3e-10` from the
+    /// point of the ball where the planes meet, and the chords that end there
+    /// are read where it is.
+    #[test]
+    fn a_corner_stored_off_the_ball_is_wound_round_as_its_cell_is() {
+        let face = the_ball_cut();
+        let mut arrangement = arranged(&face);
+        let picture = opened_out_from_the_top(&face);
+        let in_its_cell = the_counts_deep_in_each_cell(&face, &arrangement, picture);
+        for ((across, aside), step) in CORNERS.into_iter().zip([f64::next_up, f64::next_down]) {
+            let mut on_the_corner = arrangement
+                .nodes
+                .iter_mut()
+                .filter(|node| {
+                    let [x, y, z] = node.point.enclosure();
+                    let holds =
+                        |span: Interval, value: f64| span.lo() <= value && value <= span.hi();
+                    holds(x, across) && holds(z, aside) && y.lo() > 0.0
+                })
+                .collect::<Vec<_>>();
+            let found = on_the_corner.len();
+            let [node] = on_the_corner.as_mut_slice() else {
+                panic!("{found} nodes on the corner ({across}, ·, {aside})");
+            };
+            let y = step(step(step((1.0 - across * across - aside * aside).sqrt())));
+            node.point = PredicatePoint::from([across, y, aside]);
+        }
+        each_is_wound_round_as_its_cell_is(
+            &arrangement,
+            picture,
+            &in_its_cell,
+            rounded_off_beside_the_corners(0),
+        );
+    }
+
+    /// Each count settled at each of `points` is the count in the point's
+    /// cell, and at least one is settled.
+    fn each_is_wound_round_as_its_cell_is(
+        arrangement: &Arrangement<'_>,
+        picture: Picture<'_>,
+        in_its_cell: &BTreeMap<([bool; 3], usize), i32>,
+        points: impl Iterator<Item = (PredicatePoint, [bool; 3])>,
+    ) {
+        let (mut settled, mut wrong) = (0, Vec::new());
+        for (point, cell) in points {
+            for walk in 0..arrangement.cycles.len() {
+                let Some(count) = arrangement.how_often_a_walk_winds_round(picture, walk, point)
+                else {
+                    continue;
+                };
+                settled += 1;
+                let expected = in_its_cell[&(cell, walk)];
+                if count != expected {
+                    wrong.push(format!(
+                        "walk {walk} round {point:?}: {count}, not {expected}"
+                    ));
+                }
+            }
+        }
+        assert!(settled > 0, "no count settled");
+        assert!(
+            wrong.is_empty(),
+            "{} of {settled} settled counts are not the cell's, the first: {:#?}",
+            wrong.len(),
+            &wrong[..wrong.len().min(6)]
+        );
+    }
+
+    /// How often each walk winds round the points of the ball in each cell,
+    /// by cell and walk, read at boxes round points of the ball a quarter of
+    /// [`ASIDE`] from a corner. Every one is settled, and the same at each box
+    /// of a cell.
+    fn the_counts_deep_in_each_cell(
+        face: &BakedFace,
+        arrangement: &Arrangement<'_>,
+        picture: Picture<'_>,
+    ) -> BTreeMap<([bool; 3], usize), i32> {
+        let mut counts = BTreeMap::new();
+        for (across, aside) in CORNERS {
+            for quarter in 0..4 {
+                let angle = (45.0 + 90.0 * f64::from(quarter)).to_radians();
+                let x = across + ASIDE / 4.0 * angle.cos();
+                let z = aside + ASIDE / 4.0 * angle.sin();
+                let deep = a_box_holding_a_point_of_the_ball(&face.surface, x, z);
+                let cell = cell_of(x, z).expect("a quarter of ASIDE off every plane");
+                for walk in 0..arrangement.cycles.len() {
+                    let count = arrangement
+                        .how_often_a_walk_winds_round(picture, walk, deep)
+                        .expect("settled deep in a cell");
+                    let before = counts.insert((cell, walk), count);
+                    assert!(
+                        before.is_none_or(|before| before == count),
+                        "walk {walk} in {cell:?}: {before:?} and {count}"
+                    );
+                }
+            }
+        }
+        assert_eq!(counts.len(), 6 * arrangement.cycles.len(), "{counts:?}");
+        counts
+    }
+
+    /// Points `2⁻⁴⁰`, `2⁻³⁶`, `2⁻³³` and `2⁻³⁰` from each corner beside the
+    /// top, a degree apart round it and off the three planes, each with its
+    /// cell, and with its `y` rounded from the skin and then stepped as many as
+    /// `steps` `f64`s up and down.
+    fn rounded_off_beside_the_corners(
+        steps: usize,
+    ) -> impl Iterator<Item = (PredicatePoint, [bool; 3])> {
+        CORNERS.into_iter().flat_map(move |(across, aside)| {
+            [-40, -36, -33, -30].into_iter().flat_map(move |power| {
+                let away = 2f64.powi(power);
+                (0..360).flat_map(move |degree| {
+                    let angle = f64::from(degree).to_radians();
+                    let x = across + away * angle.cos();
+                    let z = aside + away * angle.sin();
+                    cell_of(x, z).into_iter().flat_map(move |cell| {
+                        stepped((1.0 - x * x - z * z).sqrt(), steps)
+                            .map(move |y| (PredicatePoint::from([x, y, z]), cell))
+                    })
+                })
+            })
+        })
+    }
+
+    /// `y` and the `steps` `f64`s either side of it.
+    fn stepped(y: f64, steps: usize) -> impl Iterator<Item = f64> {
+        let mut ys = vec![y];
+        let (mut down, mut up) = (y, y);
+        for _ in 0..steps {
+            down = down.next_down();
+            up = up.next_up();
+            ys.extend([down, up]);
+        }
+        ys.into_iter()
+    }
+
+    /// Which side of each of the three planes the point of the ball over
+    /// `(x, z)` is on; `None` when it is on one of them.
+    fn cell_of(x: f64, z: f64) -> Option<[bool; 3]> {
+        if x == ACROSS || z == ASIDE || z == -ASIDE {
+            return None;
+        }
+        Some([x > ACROSS, z > ASIDE, z > -ASIDE])
+    }
+
+    /// A box `2e-15` either way round the point of `ball` over `(x, z)` with
+    /// `y` above the centre. Its corner nearest the centre is proved inside
+    /// and its farthest outside, so the box holds a point of the ball.
+    fn a_box_holding_a_point_of_the_ball(ball: &Surface, x: f64, z: f64) -> PredicatePoint {
+        let point = [x, (1.0 - x * x - z * z).sqrt(), z];
+        let width = 2e-15;
+        let nearest = point.map(|coordinate| coordinate - width * coordinate.signum());
+        let farthest = point.map(|coordinate| coordinate + width * coordinate.signum());
+        assert_eq!(
+            side_of_surface(ball, PredicatePoint::from(nearest)),
+            Decision::Neg
+        );
+        assert_eq!(
+            side_of_surface(ball, PredicatePoint::from(farthest)),
+            Decision::Pos
+        );
+        PredicatePoint::Constructed(point.map(|coordinate| {
+            Interval::new(coordinate - width, coordinate + width).expect("a span")
+        }))
+    }
+
+    fn opened_out_from_the_top(face: &BakedFace) -> Picture<'static> {
+        let Surface::Sphere(ball) = face.surface else {
+            panic!("the face is a ball's skin");
+        };
+        Picture::OpenedOut {
+            ball,
+            from: PredicatePoint::from([0.0, 1.0, 0.0]),
+        }
+    }
+
+    fn arranged(face: &BakedFace) -> Arrangement<'_> {
+        Arrangement::of(
+            face,
+            &canonical_cut_surfaces(face),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a ball cut by three planes")
+    }
+
+    fn the_ball_cut() -> BakedFace {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let ball = model
+            .add_ball(1.0, &Isometry::identity())
+            .expect("a unit ball");
+        let mut skin = bake(
+            &model,
+            &[ball],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("it bakes")
+        .swap_remove(0)
+        .faces
+        .swap_remove(0);
+        skin.cuts = [
+            [1.0, 0.0, 0.0, -ACROSS],
+            [0.0, 0.0, 1.0, -ASIDE],
+            [0.0, 0.0, 1.0, ASIDE],
+        ]
+        .map(|coefficients| {
+            Surface::Plane(Plane::from_coefficients(coefficients).expect("a plane"))
+        })
+        .to_vec();
+        skin
     }
 }
