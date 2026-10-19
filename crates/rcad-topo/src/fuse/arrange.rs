@@ -1326,13 +1326,12 @@ impl<'f> Arrangement<'f> {
         log: &mut ProvenanceLog,
     ) -> Result<()> {
         let mut drawn = CrossingsDrawn::default();
-        for wire in 0..self.face.wires.len() {
+        let face = self.face;
+        for wire in &face.wires {
             let mut along = Vec::new();
-            for position in 0..self.face.wires[wire].len() {
-                let edge = &self.face.wires[wire][position];
-                let (across, at) = (edge.across, edge.start.point);
+            for edge in wire {
                 let crossing = self
-                    .crossing_for(across, false, Some(at), &mut drawn, policy, log)?
+                    .crossing_for(edge.across, false, Some(edge), &mut drawn, policy, log)?
                     .ok_or(Error::AFaceMeetsItsNeighbourNowhere {
                         face: self.face.keys[0],
                     })?;
@@ -1355,16 +1354,27 @@ impl<'f> Arrangement<'f> {
     ///
     /// A pair can name **two** curves: a plane down the inside of a pipe cuts
     /// two straight lines, and a ball crossing a pipe off-axis leaves two loops.
-    /// When it does, `through` is what says which of them is meant: a boundary
-    /// edge runs along the one its own corner lies on. A cut surface means all
-    /// of them, and hands over `None`.
+    /// When it does, `along_an_edge` is what says which of them is meant: a
+    /// boundary edge runs along the one its starting corner lies on. A cut
+    /// surface means all of them, and hands over `None`.
+    ///
+    /// **Where the starting corner lies on more than one, the edge's other
+    /// corner says which**, since both corners of an edge lie on the curve it
+    /// runs along. Two pipes of one width whose axes meet are why: they cross
+    /// in four halves of two ellipses that all meet at the two points where
+    /// the walls touch, so an edge starting at one of them is held by every
+    /// half there. An edge of a bar crossed by another of its radius, cut at
+    /// the cross's seam, runs from `(0, 2, 3)` to `(−2, 0, 5)`, and only one
+    /// half holds its end (Q2461).
     ///
     /// # Errors
     ///
-    /// [`Error::CannotTellWhichCurveOfACrossingAFaceRunsAlong`] when the point
-    /// handed over is picked by more than one of the curves, or by none. A
-    /// picker's [`Decision::Undecidable`] rules out nothing (§33.8), so an
-    /// ambiguous answer is a refusal and never a guess.
+    /// [`Error::CannotTellWhichCurveOfACrossingAFaceRunsAlong`] when the
+    /// edge's starting corner is picked by none of the curves, or when more
+    /// than one of them picks both its corners: a half a face keeps whole,
+    /// from one point where the walls touch to the other. A picker's
+    /// [`Decision::Undecidable`] rules out nothing (§33.8), so an ambiguous
+    /// answer is a refusal and never a guess.
     ///
     /// [`Error::AFaceMeetsItsNeighbourOnItsOwnSurface`] when the two are one
     /// surface. Two faces on one surface with an edge between them carry no
@@ -1386,7 +1396,7 @@ impl<'f> Arrangement<'f> {
         &mut self,
         partner: Surface,
         cuts: bool,
-        through: Option<PredicatePoint>,
+        along_an_edge: Option<&super::bake::BakedEdge>,
         drawn: &mut CrossingsDrawn,
         policy: &Policy,
         log: &mut ProvenanceLog,
@@ -1419,8 +1429,14 @@ impl<'f> Arrangement<'f> {
         let pickers = the_pickers_of_each_run(&runs);
         let mut wanted: Vec<(NamedRun, SmallVec<[Picker; 2]>)> =
             runs.into_iter().zip(pickers).collect();
-        if let Some(at) = through {
-            wanted.retain(|(_, picked_by)| nothing_rules_the_point_out(picked_by, at));
+        if let Some(edge) = along_an_edge {
+            wanted
+                .retain(|(_, picked_by)| nothing_rules_the_point_out(picked_by, edge.start.point));
+            if wanted.len() > 1 {
+                wanted.retain(|(_, picked_by)| {
+                    nothing_rules_the_point_out(picked_by, edge.end.point)
+                });
+            }
             if wanted.len() != 1 {
                 return Err(Error::CannotTellWhichCurveOfACrossingAFaceRunsAlong {
                     face: self.face.keys[0],
