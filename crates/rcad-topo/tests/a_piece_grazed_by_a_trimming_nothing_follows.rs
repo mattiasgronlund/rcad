@@ -136,8 +136,7 @@ fn a_ball_just_bigger_names_the_cap() {
 }
 
 /// A ball just smaller is refused naming the cap. The half ball alone answers
-/// the one four roundings smaller, and cannot mesh what it writes for the one
-/// a rounding smaller in three of the six.
+/// both the one rounding smaller and the one four roundings smaller.
 #[test]
 fn a_ball_just_smaller_names_the_cap() {
     let [one, four] = roundings_down();
@@ -148,17 +147,7 @@ fn a_ball_just_smaller_names_the_cap() {
             "{radius}"
         );
     }
-    assert_eq!(
-        six_answers(Other::Ball(one), Half::Alone),
-        [
-            CannotMesh,
-            CannotMesh,
-            Solids(1),
-            Solids(1),
-            CannotMesh,
-            Solids(1)
-        ]
-    );
+    assert_eq!(six_answers(Other::Ball(one), Half::Alone), [Solids(1); 6]);
     assert_eq!(six_answers(Other::Ball(four), Half::Alone), [Solids(1); 6]);
 }
 
@@ -198,10 +187,10 @@ fn a_bowl_just_off_the_caps_ball_names_the_cap_or_is_undecidable() {
 /// of one ball and hold what
 /// `a_bowl_just_off_under_the_half_ball_alone_holds_what_two_half_balls_hold`
 /// says, but for the union with the bowl a rounding bigger, whose mesh is
-/// refused. Kept below `z = 3`, the bowls bigger answer, the half ball less the
-/// bowl four roundings smaller holds about `54` but is refused because no mesh
-/// can tell which way its faces point, and the union with the bowl a rounding
-/// smaller cannot be meshed.
+/// refused. Kept below `z = 3`, the bowl a rounding smaller and both bowls
+/// bigger answer; the half ball less the bowl four roundings smaller holds
+/// about `54` but is refused on one of the six because no mesh can tell which
+/// way its faces point.
 ///
 /// The bowls a rounding off kept below the floor were `Undecidable` until
 /// `by_a_corner` asked a corner on the plane of a flat face with a curved side
@@ -242,17 +231,7 @@ fn a_bowl_just_off_the_half_ball_alone_answers_or_is_undecidable() {
     for radius in [one_up, four_up] {
         assert_eq!(against(radius, 3.0), [Solids(1); 6], "{radius}");
     }
-    assert_eq!(
-        against(one_down, 3.0),
-        [
-            CannotMesh,
-            CannotMesh,
-            Solids(1),
-            Solids(1),
-            Solids(1),
-            Solids(1)
-        ]
-    );
+    assert_eq!(against(one_down, 3.0), [Solids(1); 6]);
     assert_eq!(
         against(four_down, 3.0),
         [
