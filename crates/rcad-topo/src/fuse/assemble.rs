@@ -186,8 +186,7 @@ pub(crate) fn assemble(
 }
 
 /// The pieces of each shell of `held_by_both` a tolerant policy takes as flat,
-/// one list to a shell, where every piece of the shell is `buried` in the
-/// other group and the shell holds pieces of both groups.
+/// one list to a shell, where the shell holds pieces of both groups.
 ///
 /// `held_by_both` is what the intersection keeps, and is put together as
 /// [`assemble`] would put it together, so a shell here is a shell the
@@ -205,9 +204,27 @@ pub(crate) fn assemble(
 /// the other way, which is what a flat shell's two sides do, so the difference
 /// keeps the comb whole and the intersection keeps nothing, as before.
 ///
-/// **Only a shell every piece of which is buried**, so the pieces it reads
-/// another way are each a piece the rule placed inside the other group, and
-/// of both groups, so there is another group's piece for each to lie on.
+/// **Only a shell of both groups**, so there is another group's piece for
+/// each of its pieces to lie on.
+///
+/// **A piece lying on the other group facing the same way is taken with the
+/// rest.** The intersection keeps a piece buried in the other group, and one
+/// lying on it facing the same way that comes first, and nothing else, so
+/// those are the two a shell here holds. A shell with pieces of the second
+/// kind is a slab whose rim is flush with the other group. A turned ell two
+/// high and a frame one high stood against its wall overlap, as stored, in a
+/// slab along that wall: the frame's wall is stored at offset `5.55e−17`
+/// against the ell's `0.0`. The slab's two big faces are buried, one of each
+/// solid, and its top, in two pieces, and its end at `y = 0` are the ell's,
+/// each on the frame's face of the same plane facing the same way. Read as
+/// lying the other way, each such piece is dropped by the intersection and
+/// kept by a difference when it is an argument's, as the rest of the ell's
+/// top and end are, which lie outside the frame. Held back from this, as
+/// every shell with such a piece was until queue row Q2253, either difference
+/// was refused as a face winding against its normal
+/// (`a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_short`).
+/// A union keeps such a piece as part of its outside, and `select` never asks
+/// this for a union.
 ///
 /// Under a certified policy, or with nothing held by both, nothing is asked.
 /// **A put-together that is refused takes no shell as flat**: the fuse then
@@ -219,7 +236,6 @@ pub(crate) fn the_pieces_of_each_shell_both_hold_taken_as_flat(
     model: &Model,
     scratch: &Scratch,
     held_by_both: &[Chosen],
-    buried: &[bool],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Vec<Vec<usize>> {
@@ -248,8 +264,7 @@ pub(crate) fn the_pieces_of_each_shell_both_hold_taken_as_flat(
             .flat_map(|&face| assembly.faces[face].pieces.iter().copied())
             .collect();
         let of_an_argument = |piece: &usize| scratch.cut_from[*piece] < arguments;
-        if pieces.iter().all(|&piece| buried[piece])
-            && pieces.iter().any(of_an_argument)
+        if pieces.iter().any(of_an_argument)
             && !pieces.iter().all(of_an_argument)
             && assembly.takes_as_flat(shell, policy, &mut mine)
         {
