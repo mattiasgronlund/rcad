@@ -641,6 +641,18 @@ read as before. `mise exec -- just t -p rcad-topo --no-fail-fast`: 1474 run,
   plane before counting, as `select.rs`'s `the_piece_holds` reads them. A
   throwaway probe over `just t -p rcad-topo` saw no fuse pass it a point or
   corner off the plane, in 24557 calls.
+- On a ball opened out from a point `P`, a turn is `orient3d` with `P` as its
+  fourth point, which reads a point `delta` off the ball where the line from
+  `P` through it meets the ball, about `2r·delta/d` from its foot for a point
+  `d` from `P`, while inside the ball it is read where it is. *Q1940
+  (2026-10-19): run.* A point 2 to 3 `f64`s off a unit ball, within `2^-33`
+  of a corner `2e-6` from `P`, got a settled count against its cell, one of
+  them `-2`, and a corner stored 3 `f64`s off put points of the ball beside
+  it in walks that do not go round them (**`wrong/C`**). Fixed by stretching
+  the point, every corner and both chord ends to the ball
+  (`stretched_to_the_ball` in `fuse/arrange.rs`; tests
+  `a_point_rounded_off_the_ball_is_wound_round_as_its_cell_is` and
+  `a_corner_stored_off_the_ball_is_wound_round_as_its_cell_is`).
 
 ### 346.7 A point in one face's sliver whose ray crosses the neighbour — 2026-10-06
 
