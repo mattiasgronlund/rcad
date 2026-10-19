@@ -109,7 +109,7 @@ def main(argv):
     if verb == "families":
         return print_families(queue_file, args)
     here = Here(queue_file)
-    readers = {"show": show, "running": running, "elsewhere": elsewhere, "narrowed": narrowed}
+    readers = {"show": show, "running": running, "elsewhere": elsewhere, "narrowed": narrowed, "held": held}
     if verb in readers:
         readers[verb](here, args)
         return 0
@@ -1408,6 +1408,19 @@ def narrowed(here, args):
     for row_id, hold in sorted(Claims(here.claims).holds().items()):
         if hold["write_set"] != hold["taken"]:
             print(sep.join(["R", "narrowed", "", "6", row_id, "-", "-", "-", hold["write_set"]]))
+
+
+def held(here, args):
+    """Each branch a hold names, once to a line, for `prune-worktrees` to keep (§458).
+
+    A lane that commits nothing leaves its branch at its base, which is on main,
+    and once its tree is detached or removed the branch is checked out nowhere.
+    Its verifier still reads it by name (`branch_at_base`), so the hold is the
+    one record that the branch is in use.
+    """
+    need(args, 0, "held")
+    for branch in sorted({hold["branch"] for hold in Claims(here.claims).holds().values()}):
+        print(branch)
 
 
 def refuse_conflicted(here, queue):

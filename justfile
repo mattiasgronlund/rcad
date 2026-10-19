@@ -12185,7 +12185,8 @@ mark-finished +trees:
         echo "marked: ${tops[$i]}"
     done
 
-# Remove lane worktrees whose work has landed and whose lane is over.
+# Remove lane worktrees whose work has landed and whose lane is over, then the
+# branches `main` already holds.
 #
 # The closing gate runs this, because nothing else reclaims a worktree: the
 # harness sweep keeps any worktree holding a commit (§50.8). A worktree is
@@ -12222,9 +12223,18 @@ mark-finished +trees:
 #
 # Until §205 a detached tree was kept whatever it held, and lanes here mostly
 # end detached: on 2026-09-22 this kept 55 trees and removed 7. The rule is
-# rscene's (`eed893f`) with the three rcad cases added. Branches are never
-# deleted, so a spike that is never merged by design (§50.4) keeps its commits.
-[doc("Remove lane worktrees that are clean, landed on main, unlocked, and idle for an hour or marked finished.")]
+# rscene's (`eed893f`) with the three rcad cases added.
+#
+# **Then it deletes each branch `main` holds that no tree has checked out and
+# no queue row holds** (§458). Such a branch has no commit `main` lacks, so
+# deleting it loses a name and its reflog, and a spike that is never merged by
+# design (§50.4) keeps its commits. The hold is there for a lane that commits
+# nothing: its branch sits at its base, on `main`, and its verifier still reads
+# it by name. The delete is `git branch -d` in the tree holding `main`, so git
+# checks again, at the delete, that each branch is merged into `main` and
+# checked out nowhere. That is why a branch only `origin/main` holds waits for
+# `ff-main`, and why the recipe fails when no tree holds `main`.
+[doc("Remove lane worktrees that are clean, landed on main, unlocked, and idle for an hour or marked finished; then delete the branches main holds that no tree or queue row uses.")]
 prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fuzz.service"):
     #!/usr/bin/env bash
     set -euo pipefail
@@ -12286,7 +12296,19 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
         /^branch /   { branch = $2 }
         /^locked/    { locked = 1 }
         END          { flush() }')
-    echo "$kept worktree(s) kept; their branches are untouched either way"
+    main_tree=$(git -C "$here" worktree list --porcelain \
+        | awk '/^worktree / { tree = substr($0, 10) } $0 == "branch refs/heads/main" { print tree }')
+    [ -n "$main_tree" ] || { echo "no worktree holds main, so no branch was deleted: §60 keeps main in a worktree of its own"; exit 1; }
+    attached=$(git -C "$here" worktree list --porcelain | sed -n 's|^branch refs/heads/||p')
+    held=$(cd "$here" && python3 '{{justfile_directory()}}/tooling/queue/queue.py' held)
+    unused=$(git -C "$here" for-each-ref --merged=main --format='%(refname:lstrip=2)' refs/heads/ \
+        | awk -v keep="$attached"$'\n'"$held" 'BEGIN { split(keep, k, "\n"); for (i in k) kept[k[i]] = 1 } !($0 in kept)')
+    deleted=0
+    if [ -n "$unused" ]; then
+        printf '%s\n' "$unused" | xargs -d '\n' git -C "$main_tree" branch -d >/dev/null
+        deleted=$(printf '%s\n' "$unused" | wc -l)
+    fi
+    echo "$kept worktree(s) kept; $deleted branch(es) main holds deleted"
 
 # `prune-worktrees` against a throwaway repository laid out like this one: a
 # detached hub, `main` in a worktree of its own, one worktree for each reason to
@@ -12301,6 +12323,12 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
 # aged two hours except `just-started`, which is the case the age exists for,
 # and `marked`, which `mark-finished` lets past the age (§315.2). `fakes` holds
 # only what `check-fuzz-overnight-selftest` leaves when it is killed (§315.3).
+#
+# Then the branches (§458). `merged` loses its tree, so its branch goes with
+# `landed` and `released`, which no tree ever had. `runner` is checked out,
+# `held` is held by a queue row, `unlanded` is on no landed ref, and
+# `origin-only` is only on `origin/main`, so all four stay, as does `main`.
+# `released` was held, and its row's release is what lets it go.
 [private]
 check-prune-worktrees-selftest:
     #!/usr/bin/env bash
@@ -12336,6 +12364,13 @@ check-prune-worktrees-selftest:
     git -C "$dir/merged" commit -q --allow-empty -m "landed work"
     git -C "$dir/wave" merge -q merged
     git -C "$dir/unmerged" commit -q --allow-empty -m "on no landed ref"
+    for name in landed held released; do
+        git -C "$dir/hub" branch "$name" main
+    done
+    git -C "$dir/hub" branch unlanded "$(git -C "$dir/unmerged" rev-parse HEAD)"
+    git -C "$dir/hub" branch origin-only origin/main
+    printf 'take\tQ1\t2026-10-19T00:00:00Z\t%s\theld\t-\t2\ntake\tQ2\t2026-10-19T00:00:00Z\t%s\treleased\t-\t2\nrelease\tQ2\t2026-10-19T01:00:00Z\t%s\tdone\n' \
+        "$dir/runner" "$dir/runner" "$dir/runner" >"$dir/hub/.git/rcad-queue-claims"
     echo change >"$dir/dirty/.gitignore"
     echo new >"$dir/untracked/new"
     mkdir -p "$dir/fuzzed/fuzz/artifacts/target"; echo crash >"$dir/fuzzed/fuzz/artifacts/target/crash-1"
@@ -12376,8 +12411,14 @@ check-prune-worktrees-selftest:
         grep -qF "removed: $dir/$name " <<<"$got" || fail "the $name tree was not reported as removed"
     done
     [ "$(grep -c '^removed' <<<"$got")" = 4 ] || fail "more than the four finished trees were removed"
-    grep -qxF "10 worktree(s) kept; their branches are untouched either way" <<<"$got" \
-        || fail "the tally is not the ten kept trees"
+    for branch in main runner held unlanded origin-only; do
+        git -C "$dir/hub" rev-parse -q --verify "refs/heads/$branch" >/dev/null || fail "the $branch branch was deleted"
+    done
+    for branch in merged landed released; do
+        ! git -C "$dir/hub" rev-parse -q --verify "refs/heads/$branch" >/dev/null || fail "the $branch branch was not deleted"
+    done
+    grep -qxF "10 worktree(s) kept; 3 branch(es) main holds deleted" <<<"$got" \
+        || fail "the tally is not the ten kept trees and the three deleted branches"
 
 # Where this repo stands, in one call.
 #

@@ -198,9 +198,10 @@ The args are `{ base, lanes: [ { label, queueId, notes } ] }`, the short form
 - `notes` is text, and only what the row's text does not say: a finding from an
   earlier run, a file another running lane holds. Leave it out when the row
   says it all.
-- The branch defaults to `lane-<label>` and must not exist yet. This repo keeps
-  its finished `lane-*` branches, so check `git branch --list 'lane-*'` first;
-  a reused label stops the lane at its second command (§237). Two lanes with
+- The branch defaults to `lane-<label>` and must not exist yet.
+  `prune-worktrees` deletes only the branches `main` holds (§458), so a lane
+  branch that never landed is still there: check `git branch --list 'lane-*'`
+  first; a reused label stops the lane at its second command (§237). Two lanes with
   one label in a run are refused at its start.
 
 The run sends the row to prep, then builds the lane's brief from the row's
