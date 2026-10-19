@@ -496,18 +496,18 @@ const LEANING_BAR_REFUSALS_MUST_STAY_BELOW: f64 = 0.75;
 /// ([`pairs::ThreeBallsThatCrossAtTheSameTwoPoints`]) a certified fuse may
 /// refuse.
 ///
-/// Measured at **95 of 213, 44.6%**, over the shipped corpus
-/// (`mise exec -- just t every_certified_fuse_of_three_balls_that_cross_at_the_same_two_points_is_decided --no-capture`):
-/// 93 named [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`] (the third
-/// ball's skin crosses each of the other two on its own, so a face of the
+/// Measured at **93 of 213, 43.7%**, over the shipped corpus
+/// (`mise exec -- just t every_certified_fuse_of_three_balls_that_cross_at_the_same_two_points_is_decided --no-capture`),
+/// every one named [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`] (the
+/// third ball's skin crosses each of the other two on its own, so a face of the
 /// first or second ball can end up crossed by two different round surfaces at
-/// once — §31.2 row 8's gap) and 2 named [`A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH`]
-/// (a face the fuse could not mesh, previously seen only once a curved
-/// fixture was turned off the world's own axes, §191 — see
-/// [`a_three_balls_crossing_refusal`] for why this family is the second
-/// upright one to reach it). Sixty-five per cent is twenty points above the
-/// measured rate: room to catch a real jump in either cause without brushing
-/// a family that already refuses close to half of what it draws.
+/// once — §31.2 row 8's gap). It was 95 until Q2388, the other 2 named
+/// [`A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH`] (a face the fuse could not mesh,
+/// previously seen only once a curved fixture was turned off the world's own
+/// axes, §191 — see [`a_three_balls_crossing_refusal`] for why this family
+/// reached it and why it no longer does). Sixty-five per cent is twenty points
+/// above the measured rate: room to catch a real jump without brushing a
+/// family that already refuses close to half of what it draws.
 const THREE_BALLS_CROSSING_REFUSALS_MUST_STAY_BELOW: f64 = 0.65;
 
 /// How often the lattice control comes back as something a `Model` cannot
@@ -4929,9 +4929,9 @@ fn a_turned_curved_refusal(why: &Error) -> Option<&'static str> {
 /// other upright families silently. Q2329's own sweep is what put a second
 /// upright family on this list.
 ///
-/// **The face it cannot mesh is the third ball's lune**, inside the first ball
-/// and outside the second, between the two arcs that meet at the two shared
-/// points. The refusal is always that lune's boundary crossing itself, at the
+/// **The face it could not mesh was the third ball's lune**, inside the first
+/// ball and outside the second, between the two arcs that meet at the two shared
+/// points. The refusal was always that lune's boundary crossing itself, at the
 /// side leaving corner 3 (`BoundaryCrossesItself { at: 3 }`, Q2366), and never
 /// two of its loops touching. The lune is meshed in longitude and latitude,
 /// where each walked step is drawn as a straight line. A step that spans a
@@ -4941,13 +4941,18 @@ fn a_turned_curved_refusal(why: &Error) -> Option<&'static str> {
 /// `third_radius_tenths` at `3, 3, 1, 4`, `3, 3, 1, 8`, `6, 6, 1, 13` and
 /// `6, 6, 2, 8`, it was that arc's one walked point.
 ///
-/// **That is the mesh being too coarse, and not the lune.**
-/// `the_coarsest_mesh_whose_sides_do_not_cross` in `validate.rs` asks for no
-/// mesh finer than half the gap between the solid's two closest corners, and
-/// these lunes are narrower than that: the "wall thinner than half its
-/// nearest corner pair" that its own doc comment names as a cost bound. A
-/// probe of every member of the family at Q2381, 8322 fuses, saw all 46 of
-/// these refusals mesh with that floor at a sixteenth of the gap instead.
+/// **That was the mesh being too coarse, and not the lune**, and it is gone
+/// (Q2388). `the_coarsest_mesh_whose_sides_do_not_cross` in `validate.rs`
+/// halves its room from half the box's width and asked for no mesh finer than
+/// half the gap between the solid's two closest corners, here the two shared
+/// points. Every member of the family, 8322 fuses, was probed: 46 were refused
+/// so, each at a last rung between 0.77 and 0.97 of that gap, and each meshes
+/// at the rung after, between 0.38 and 0.49. That function now asks down to an
+/// eighth of the gap, and the same probe saw all 46 mesh;
+/// [`three_balls_whose_lune_bows_away_from_its_chart_side_mesh`] pins two of
+/// them. So no member is known to reach the arm below any more, and the
+/// shipped corpus meets none; it is kept for a lune that clears only under an
+/// eighth of the gap, which nothing here has shown.
 ///
 /// **A step that went round the third ball's pole the other way from its arc
 /// did the same**, and that one was a misread and not a coarse mesh. `mesh.rs`
@@ -6671,5 +6676,35 @@ fn three_balls_whose_lune_runs_round_the_third_balls_pole_mesh() {
         let mut log = ProvenanceLog::new();
         let answer = model.fuse(&keys[..1], &keys[1..], rule, &Policy::certified(), &mut log);
         assert!(answer.is_ok(), "{rule:?} came back {answer:?}");
+    }
+}
+
+/// Two balls of radius 6 one apart with a third of 1.3 of their crossing
+/// circle's radius on it, and two of radius 3 with a third of 0.4: the third
+/// ball's lune, inside the first ball and outside the second, bows away from
+/// the straight side its chart draws for one step of its arc, and the other
+/// arc's one walked point lands across that side,
+/// `BoundaryCrossesItself { at: 3 }` (Q2388, §191).
+///
+/// A finer mesh clears it, but `the_coarsest_mesh_whose_sides_do_not_cross`
+/// halves from half the box's width and stopped at half the gap between the
+/// two shared points, the solid's only two corners. Its last rung was `0.836`
+/// of that gap for the first and `0.770` for the second, and both mesh at the
+/// rung after, `0.418` and `0.385`.
+#[test]
+fn three_balls_whose_lune_bows_away_from_its_chart_side_mesh() {
+    for (first, third_radius_tenths) in [(6, 13), (3, 4)] {
+        let triple = pairs::ThreeBallsThatCrossAtTheSameTwoPoints {
+            first,
+            second: first,
+            apart: 1,
+            third_radius_tenths,
+        };
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let (mut model, keys) = triple.build();
+            let mut log = ProvenanceLog::new();
+            let answer = model.fuse(&keys[..1], &keys[1..], rule, &Policy::certified(), &mut log);
+            assert!(answer.is_ok(), "{triple:?} {rule:?} came back {answer:?}");
+        }
     }
 }
