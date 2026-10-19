@@ -90,14 +90,15 @@
 //! `a_bend_written_out_at_another_angle_and_a_copy_turned_round_answer_every_rule`.
 //!
 //! The last two tests are not of this family. They pin what became of
-//! Q1951's two bars on one axis, which were looked at here: the mesh refuses
-//! the ledge between them for where its two rims are walked from (Q2153).
+//! Q1951's two bars on one axis, which were looked at here: the mesh refused
+//! the ledge between them for where its two rims are walked from (Q2153),
+//! until it walked them again finer (Q2384).
 
 use core::f64::consts::{FRAC_PI_2, PI};
 use std::collections::BTreeMap;
 
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
+    Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale, Sphere,
     Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -2186,67 +2187,56 @@ fn two_bends_whose_caps_lie_apart_answer_every_rule() {
 
 /// Two round bars on one axis joined, one of radius 4 and 10 tall and one of
 /// radius `4.01` and `9.99` tall, leave a ledge: a flat ring `0.01` wide at
-/// height `9.99`. The mesh refuses that ring at a deflection of `0.1`, either
-/// way round, and meshes it at `0.01`; and at `0.1` too once the wider bar is
-/// turned a quarter turn about the axis (Q2153, `docs/decisions.md` §35.6).
+/// height `9.99`. The ledge meshes at a deflection of `0.1` either way round,
+/// as it does at `0.01` and with the wider bar turned a quarter turn about the
+/// axis, and the solid measures the two bars' union within the measure's own
+/// error (Q2153, Q2384, `docs/decisions.md` §35.6).
 ///
 /// **Not a piece no ray can place.** It is here because Q1951's probe of the
 /// same two bars, `1e-13` apart, was here. That probe took the refused face
 /// for the wall between the two rims; it is the flat ring.
 ///
-/// **The fault is where the ring's two rims are walked from.** Each closed
-/// edge is walked from its own corner: the wider bar's top rim from the bar's
-/// seam, and the circle the join made where that top meets the narrower bar's
-/// wall from where its conic starts. Q2153's first lane printed both loops at
-/// a ledge `0.001` wide and a deflection of `0.01`: 103 corners each, the
-/// outer one's first at angle `−π/2` of the plane's chart and the inner one's
-/// at `0`. So the inner rim's corners sit between the outer rim's. A chord of
-/// the outer rim sags further inside its arc than the ring is wide, the inner
-/// rim's corners poke out through it, and the triangulator refuses the face
-/// `BoundaryCrossesItself`. Turned a quarter turn, the wider bar's seam lands
-/// where the inner rim starts, the two rims' corners line up, and nothing
-/// crosses.
+/// **It was refused at `0.1` for where the ring's two rims are walked from.**
+/// Each closed edge is walked from its own corner: the wider bar's top rim
+/// from the bar's seam, and the circle the join made where that top meets the
+/// narrower bar's wall from where its conic starts. Q2153's first lane printed
+/// both loops at a ledge `0.001` wide and a deflection of `0.01`: 103 corners
+/// each, the outer one's first at angle `−π/2` of the plane's chart and the
+/// inner one's at `0`. So the inner rim's corners sit between the outer rim's.
+/// A chord of the outer rim sagged further inside its arc than the ring is
+/// wide, the inner rim's corners poked out through it, and the triangulator
+/// refused the face `BoundaryCrossesItself`. Turned a quarter turn, the wider
+/// bar's seam lands where the inner rim starts, the two rims' corners line up,
+/// and nothing crosses.
 ///
-/// **A gap, not a limit**: the solid exists, and a finer mesh of it is within
-/// the deflection asked for too. `Model::validate` passes it because its own
-/// sweep meshes finer until the sides clear (§188.3); `SolidView::mesh` at the
-/// caller's deflection does not.
+/// **What meshes it now**: `SolidView::mesh` walks the rims of a flat face
+/// whose boundary crosses itself again, finer, until the outer rim's chords
+/// stay outside the inner rim (Q2384).
 #[test]
-fn a_ledge_between_two_bars_on_one_axis_is_refused_where_its_rims_start_a_quarter_turn_apart() {
-    let coarse = rcad_geom::Deflection::of(0.1).expect("a length");
-    let fine = rcad_geom::Deflection::of(0.01).expect("a length");
+fn a_ledge_between_two_bars_on_one_axis_meshes_where_its_rims_start_a_quarter_turn_apart() {
+    let union = PI * 4.01 * 4.01 * 9.99 + PI * 4.0 * 4.0 * 0.01;
     for the_narrower_first in [true, false] {
-        let what = format!("the narrower first {the_narrower_first}");
-
-        let (model, ledged) = a_ledge_a_hundredth_wide(0.0, the_narrower_first, &what);
-        let solid = model.solid(ledged).expect("the fuse made the key");
-        match solid.mesh(coarse, &Policy::certified(), &mut ProvenanceLog::new()) {
-            Err(Error::CannotMeshAFace {
-                face,
-                why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
-            }) => {
-                let face = model
-                    .face(face)
-                    .expect("the mesh named a face of the model");
+        let which = format!("the narrower first {the_narrower_first}");
+        for turn in [0.0, FRAC_PI_2] {
+            let (model, ledged) = a_ledge_a_hundredth_wide(turn, the_narrower_first, &which);
+            let solid = model.solid(ledged).expect("the fuse made the key");
+            for deflection in [0.1, 0.01] {
+                let what = format!("{which}, turned {turn}, at {deflection}");
+                let deflection = rcad_geom::Deflection::of(deflection).expect("a length");
+                solid
+                    .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                let measured = solid
+                    .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+                    .unwrap_or_else(|why| panic!("{what}, measured: {why:?}"));
                 assert!(
-                    face.surface().as_plane().is_some() && face.wire_count() == 2,
-                    "{what}: refused on {:?}, with {} wires",
-                    face.surface(),
-                    face.wire_count()
+                    (measured.volume() - union).abs() <= measured.volume_error(),
+                    "{what}: {} ± {}, against {union}",
+                    measured.volume(),
+                    measured.volume_error()
                 );
             }
-            other => panic!("{what}: {other:?}"),
         }
-        solid
-            .mesh(fine, &Policy::certified(), &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| panic!("{what}, meshed finer: {why:?}"));
-
-        let (model, turned_ledge) = a_ledge_a_hundredth_wide(FRAC_PI_2, the_narrower_first, &what);
-        model
-            .solid(turned_ledge)
-            .expect("the fuse made the key")
-            .mesh(coarse, &Policy::certified(), &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| panic!("{what}, the wider bar turned: {why:?}"));
     }
 }
 
@@ -2306,4 +2296,119 @@ fn two_bars_on_one_axis_joined(
         &mut ProvenanceLog::new(),
     )?;
     Ok(joined.solids().to_vec())
+}
+
+/// The half ball `z ≥ 0` of radius 5 joined to the ball a rounding smaller
+/// about the same centre is one solid that validates, with one flat face: the
+/// half ball's floor outside the smaller ball, a ring `8.9e-16` wide. At a
+/// deflection of `0.01` the ring's two rims cross however finely the mesh walks
+/// them again, since a chord would have to sag less than the ring is wide, so
+/// the mesh is refused naming the ring.
+///
+/// **What this pins is what running out of finer walks costs.** The crossing
+/// handed back is the eighth walk's, at the side leaving corner 1864 of a
+/// boundary each walk makes about `√2` times longer. When the mesh walked a
+/// crossed face sixteen times it was corner 20766, and the refusal took 126 s
+/// where eight take 0.8 s and the same solid meshes at `0.1` in 8 ms (Q2384).
+#[test]
+fn a_ring_a_rounding_wide_is_refused_before_its_rims_are_walked_into_tens_of_thousands_of_points() {
+    for the_half_ball_first in [true, false] {
+        let what = format!("the half ball first {the_half_ball_first}");
+        let mut model = Model::new(Scale::millimetres(125.0).expect("a working size"));
+        let half_ball = a_half_ball_of_5(&mut model);
+        let ball = model
+            .add_ball(5.0_f64.next_down(), &Isometry::identity())
+            .expect("a ball");
+        let (arguments, tools) = if the_half_ball_first {
+            ([half_ball], [ball])
+        } else {
+            ([ball], [half_ball])
+        };
+        let joined = model
+            .fuse(
+                &arguments,
+                &tools,
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let &[joined] = joined.solids() else {
+            panic!("{what}: {} solids", joined.solids().len());
+        };
+        let solid = model.solid(joined).expect("the fuse made the key");
+
+        let refused = solid.mesh(
+            rcad_geom::Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+
+        let Err(Error::CannotMeshAFace {
+            face,
+            why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { at },
+        }) = refused
+        else {
+            panic!("{what}: {refused:?}");
+        };
+        let ring = solid
+            .faces()
+            .find(|named| named.key() == face)
+            .expect("the refusal names a face of the solid");
+        assert!(
+            ring.surface().as_plane().is_some() && ring.wire_count() == 2,
+            "{what}: the refusal names a face that is not the ring"
+        );
+        assert!(at < 4096, "{what}: corner {at}");
+    }
+}
+
+/// The half ball `z ≥ 0` of radius 5 about the origin: its skin and its floor,
+/// joined along the equator.
+fn a_half_ball_of_5(model: &mut Model) -> SolidKey {
+    let mut builder = SolidBuilder::new();
+    let on_the_equator = builder
+        .add_vertex(Point::new(5.0, 0.0, 0.0))
+        .expect("a point");
+    let equator = builder
+        .add_edge(
+            on_the_equator,
+            on_the_equator,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
+        .expect("a closed edge");
+    let mut walking = |orientation| {
+        let coedge = builder
+            .add_coedge(equator, orientation)
+            .expect("an edge of this builder");
+        builder
+            .add_wire(&[DraftStep::Along(coedge)])
+            .expect("a closed wire")
+    };
+    let on_the_skin = walking(Orientation::Forward);
+    let on_the_floor = walking(Orientation::Reversed);
+    let skin = builder
+        .add_face(
+            Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a ball")),
+            &[on_the_skin],
+        )
+        .expect("a face with one wire");
+    let floor = builder
+        .add_face(
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                    .expect("a plane"),
+            ),
+            &[on_the_floor],
+        )
+        .expect("a face with one wire");
+    builder
+        .add_shell(&[(skin, Orientation::Forward), (floor, Orientation::Forward)])
+        .expect("the faces close up");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a half ball is a solid")
 }

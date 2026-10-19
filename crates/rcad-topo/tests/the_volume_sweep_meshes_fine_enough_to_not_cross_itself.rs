@@ -17,6 +17,10 @@
 //! The square's furthest corner is `1.8·√2 ≈ 2.55` from the axis, well inside
 //! the rim, so the solid itself is sound.
 //!
+//! Since Q2384 the mesh itself walks a crossed flat face's arcs again, finer,
+//! so the coarse mesh of this plate no longer refuses: the control below now
+//! counts the points the arc is walked into, where it once pinned the refusal.
+//!
 //! **Built with the builder rather than read off a file**, so the shape is the
 //! whole of the finding and a file's other trouble cannot stand in for it.
 
@@ -32,35 +36,50 @@ const RADIUS: f64 = 3.0;
 const HEIGHT: f64 = 1.0;
 
 /// The control, and what says the plate reaches its subject: meshed as
-/// coarsely as a mesh gets, the ground face's boundary crosses the hole.
+/// coarsely as a mesh gets, the rim's arc is walked into more points than the
+/// one a coarse walk puts on it, because the chords through that one point cut
+/// across the hole.
 ///
-/// Without this the test below could pass on a plate whose hole had drifted
-/// clear of the chord, and would say nothing about the sweep.
+/// The same plate with its hole near the middle, clear of the chords, gets the
+/// one point, `(0, 3)`. Without this the test below could pass on a plate whose
+/// hole had drifted clear of the chord, and would say nothing about the sweep.
+/// Before `SolidView::mesh` walked a crossed flat face's arcs again finer
+/// (Q2384), the coarse mesh of the plate was refused, `BoundaryCrossesItself`
+/// on the ground, and this pinned that refusal.
 #[test]
-fn at_the_coarsest_deflection_the_rims_chord_cuts_across_the_hole() {
+fn at_the_coarsest_deflection_the_rim_is_walked_finer_where_its_chord_cuts_across_the_hole() {
+    assert_eq!(
+        points_the_coarsest_mesh_puts_on_the_ground_arc(Hole::ClearOfTheChord),
+        1
+    );
+    let through_the_hole = points_the_coarsest_mesh_puts_on_the_ground_arc(Hole::InsideTheRim);
+    assert!(through_the_hole > 1, "{through_the_hole} points");
+}
+
+/// How many points [`SolidView::mesh`](rcad_topo::SolidView::mesh), as coarse
+/// as it gets, puts between the two ends of the arc under the plate.
+fn points_the_coarsest_mesh_puts_on_the_ground_arc(hole: Hole) -> usize {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
     let mut model = Model::new(a_working_size());
-    let plate = a_half_disc_with_a_square_hole(&mut model, &policy, &mut log, Hole::InsideTheRim)
-        .expect("a sound plate");
-
-    let refused = model.solid(plate).expect("this model made the key").mesh(
-        Deflection::of(f64::MAX).expect("a positive length"),
-        &policy,
-        &mut log,
-    );
-
-    assert!(
-        matches!(
-            refused,
-            Err(Error::CannotMeshAFace {
-                why: CannotTriangulate::BoundaryCrossesItself { .. }
-                    | CannotTriangulate::LoopsTouch { .. },
-                ..
-            })
-        ),
-        "got {refused:?}"
-    );
+    let plate =
+        a_half_disc_with_a_square_hole(&mut model, &policy, &mut log, hole).expect("a sound plate");
+    let solid = model.solid(plate).expect("this model made the key");
+    let mesh = solid
+        .mesh(
+            Deflection::of(f64::MAX).expect("a positive length"),
+            &policy,
+            &mut log,
+        )
+        .expect("the plate meshes");
+    let ground = solid.faces().next().expect("the plate has a ground");
+    let arc = ground
+        .wires()
+        .flat_map(|wire| wire.coedges())
+        .map(|coedge| coedge.edge())
+        .find(|edge| edge.run() != EdgeRun::Straight)
+        .expect("the ground's rim has an arc");
+    mesh.points_along_edge(arc.key()).len()
 }
 
 /// The finding: the sweep meshes finer until the chords clear the hole, and
@@ -121,6 +140,9 @@ fn a_working_size() -> Scale {
 
 #[derive(Clone, Copy)]
 enum Hole {
+    /// Near the middle, clear of the coarse chords: its far corner reads `1.2`
+    /// against their `3`.
+    ClearOfTheChord,
     /// Straddling the coarse chord, inside the arc.
     InsideTheRim,
     /// Straddling the arc itself.
@@ -131,6 +153,7 @@ impl Hole {
     /// The square's lowest and highest `x`, which are its `y` as well.
     fn span(self) -> (f64, f64) {
         match self {
+            Hole::ClearOfTheChord => (0.2, 0.6),
             Hole::InsideTheRim => (1.4, 1.8),
             Hole::ThroughTheRim => (1.4, 2.3),
         }
