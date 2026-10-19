@@ -4927,9 +4927,32 @@ fn a_turned_curved_refusal(why: &Error) -> Option<&'static str> {
 /// only once a curved fixture was turned off the world's own axes (§191), and
 /// folding it into the shared function would have let that spread to the
 /// other upright families silently. Q2329's own sweep is what put a second
-/// upright family on this list: the third ball's skin crosses each of the
-/// other two on its own, which can pinch a corner onto its own face's
-/// boundary without any axis ever leaving square.
+/// upright family on this list.
+///
+/// **The face it cannot mesh is the third ball's lune**, inside the first ball
+/// and outside the second, between the two arcs that meet at the two shared
+/// points. The refusal is always that lune's boundary crossing itself, at the
+/// side leaving corner 3 (`BoundaryCrossesItself { at: 3 }`, Q2366), and never
+/// two of its loops touching. The lune is meshed in longitude and latitude,
+/// where each walked step is drawn as a straight line. A step that spans a
+/// wide longitude stays at its ends' latitude there, while its arc bows down
+/// towards the pole, so a point of the lune's other arc lands across it. In
+/// the four members looked at, `first`, `second`, `apart` and
+/// `third_radius_tenths` at `3, 3, 1, 4`, `3, 3, 1, 8`, `6, 6, 1, 13` and
+/// `6, 6, 2, 8`, it was that arc's one walked point.
+///
+/// **That is the mesh being too coarse, and not the lune.**
+/// `the_coarsest_mesh_whose_sides_do_not_cross` in `validate.rs` asks for no
+/// mesh finer than half the gap between the solid's two closest corners, and
+/// these lunes are narrower than that: the "wall thinner than half its
+/// nearest corner pair" that its own doc comment names as a cost bound. A
+/// probe of every member of the family at Q2381, 8322 fuses, saw all 46 of
+/// these refusals mesh with that floor at a sixteenth of the gap instead.
+///
+/// **A step that went round the third ball's pole the other way from its arc
+/// did the same**, and that one was a misread and not a coarse mesh. `mesh.rs`
+/// now walks such an arc again, finer
+/// ([`three_balls_whose_lune_runs_round_the_third_balls_pole_mesh`], Q2381).
 fn a_three_balls_crossing_refusal(why: &Error) -> Option<&'static str> {
     match why {
         Error::CannotMeshAFace { .. } => Some(A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH),
