@@ -16,8 +16,11 @@
 //! with a `[[test]]` in `Cargo.toml`, so that command still works.
 //!
 //! `autotests` is off, so a new file in `tests/` is built by nothing until it is
-//! declared here or given a `[[test]]` of its own, and
-//! `every_file_in_tests_is_built_into_exactly_one_test_binary` fails until then.
+//! declared here, and `every_file_in_tests_is_built_into_exactly_one_test_binary`
+//! fails until then, printing the two lines to add. They go in the file's place
+//! by name, and the lane that adds the file adds them. No build script writes
+//! them, since one would rebuild the kernel and every crate above it at each
+//! edit of a test (`docs/decisions.md` §373.7).
 
 // A helper such as `tests/cones/mod.rs` is a module of every file that declares
 // it, so this binary holds one copy of it per file, as the separate binaries did.
@@ -532,13 +535,51 @@ fn every_file_in_tests_is_built_into_exactly_one_test_binary() {
         .filter(|(_, n)| **n > 1)
         .map(|(f, _)| f)
         .collect();
+    let declarations: String = never
+        .iter()
+        .map(|file| declaration_of(file.strip_prefix("tests/").unwrap()))
+        .collect();
     assert!(
         never.is_empty() && twice.is_empty() && not_in_tests.is_empty(),
-        "built by no binary, so its tests never run (declare it in tests/merged.rs, \
-         or give it a [[test]] in Cargo.toml): {never:?}\n\
+        "built by no binary, so its tests never run: {never:?}\n\
+         declare each in tests/merged.rs, in its place by file name, as\n{declarations}\
          built more than once: {twice:?}\n\
          built but not a file directly under tests/: {not_in_tests:?}"
     );
+}
+
+/// A branch that adds a file puts its two lines between two that stay, so two
+/// branches adding different files change different lines and merge without a
+/// conflict, unless their files sort next to each other. Lines added at the
+/// end would make every two such branches meet. `docs/decisions.md` §373.7.
+#[test]
+fn every_file_is_declared_as_a_path_and_a_pub_mod_in_order_of_its_name() {
+    let lines: Vec<&str> = include_str!("merged.rs").lines().collect();
+    let mut previous: Option<&str> = None;
+    for (at, line) in lines.iter().enumerate() {
+        let Some(file) = line
+            .strip_prefix("#[path = \"")
+            .and_then(|rest| rest.strip_suffix("\"]"))
+        else {
+            continue;
+        };
+        let written = format!("{line}\n{}\n", lines.get(at + 1).unwrap_or(&""));
+        assert_eq!(
+            written,
+            declaration_of(file),
+            "line {} of tests/merged.rs is not followed by its `pub mod`",
+            at + 1
+        );
+        if let Some(previous) = previous {
+            assert!(
+                previous < file,
+                "{file} is declared after {previous}, on line {}; each file goes in its \
+                 place by name",
+                at + 1
+            );
+        }
+        previous = Some(file);
+    }
 }
 
 /// The files cargo would find in `tests/` with `autotests` on: each `*.rs`
@@ -609,4 +650,15 @@ fn files_declared_in(root: &str) -> Vec<String> {
         .filter_map(|line| line.trim().strip_prefix("#[path = \""))
         .map(|rest| format!("tests/{}", rest.strip_suffix("\"]").unwrap()))
         .collect()
+}
+
+/// The two lines that declare `file`, a path from `tests/`. A `-` in the name,
+/// as in `..._1e-300.rs`, cannot be in a module's name, so it is a `_` there.
+fn declaration_of(file: &str) -> String {
+    let stem = file
+        .strip_suffix("/main.rs")
+        .or_else(|| file.strip_suffix(".rs"))
+        .unwrap();
+    let module = stem.replace('-', "_");
+    ["#[path = \"", file, "\"]\npub mod ", &module, ";\n"].concat()
 }

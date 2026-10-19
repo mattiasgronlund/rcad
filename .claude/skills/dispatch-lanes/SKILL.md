@@ -115,7 +115,8 @@ family it lists alone. In the same `queue apply` as your takes, `add` the
 trace with write set `-`, in the tier of the member the fill reached first. Put
 every other member that is not pinned and not in a lane `after` it, keeping
 what each already waits on (`after Q1 Q8,@1`). Then `take @1` in that slot.
-450.3 has the trace's text.
+450.3 has the trace's text. A family on `crates/rcad-topo/tests/merged.rs` is
+no family, and is not traced (§373.7, below).
 
 A line `take Q1,Q2,Q3 (a bundle of 3 small rows, one lane)` is **one
 lane** doing all of those rows (§352.4), with each row's text indented under
@@ -129,6 +130,21 @@ row and per bundle, `sourcePaths`, the marks, and the facts the lane needs. A
 row prep finds wrong comes back not merged before any lane starts, with a
 `needs <file>: <why>` line for each file it is missing. Re-file it with those
 files, drop and add, then `queue next` (§396.4).
+
+**A row that adds a test file directly under `crates/rcad-topo/tests/` holds
+one item of `crates/rcad-topo/tests/merged.rs`, never the whole file**
+(§373.7). The lane
+declares its own file there, in its place by name, and the entry
+`crates/rcad-topo/tests/merged.rs#<module>`, the module being the file's name
+with each `-` written `_`, lets rows adding different files run side by side.
+`merged.rs` whole would make each of them wait on all the others. When prep
+stops such a row with `needs crates/rcad-topo/tests/merged.rs`, re-file it with
+the item entry. At `ce88b698`, 45 open rows named a new rcad-topo test file and
+no `merged.rs` entry. They can be re-filed that way in one `queue apply`, drop
+and add each, rather than one at a time as prep reaches them; so can a row that
+holds `merged.rs` whole only to declare its one file. `just queue families`
+counts `merged.rs` as a test file and so lists these rows as one family on it.
+They share a binary's root, not a shape: trace no family on `merged.rs`.
 
 ## 5. Dispatch: one `lanes` workflow per row
 
