@@ -8213,14 +8213,13 @@ fn how_fine_a_walk_has_to_be_to_go_round_each_ball_its_way(
             continue;
         };
         let inside_by = circle.radius - (through - circle.centre).length();
-        if !(inside_by > closest) {
-            continue;
-        }
-        let a_step_goes_the_other_way = every.windows(2).any(|step| {
-            let middle = step[0] + (step[1] - step[0]) * 0.5;
-            (through - middle).dot(middle - circle.centre) > 0.0
-        });
-        if a_step_goes_the_other_way {
+        let a_step_goes_the_other_way = || {
+            every.windows(2).any(|step| {
+                let middle = step[0] + (step[1] - step[0]) * 0.5;
+                (through - middle).dot(middle - circle.centre) > 0.0
+            })
+        };
+        if inside_by > closest && a_step_goes_the_other_way() {
             let asked = inside_by / 2.0;
             finest = Some(finest.map_or(asked, |finest| finest.min(asked)));
         }
