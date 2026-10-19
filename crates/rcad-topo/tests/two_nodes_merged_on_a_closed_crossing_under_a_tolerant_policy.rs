@@ -289,8 +289,9 @@ fn the_two_places_boxes_are_past_a_length_budget_and_inside_a_volume_one() {
 }
 
 /// The regression: with the ball first, every tolerant fuse refuses on the
-/// order of the two places round a wall's circle, filed as a length, as wide
-/// as the wider box, and with nothing else in its log.
+/// order of the two places round a wall's circle, filed as a length, as far
+/// apart as two points of their boxes may be, rounded up, and with nothing else
+/// in its log. One box holds the other, so that is the wider box's width.
 ///
 /// Filed as a volume, the log held four merges of the two places that the
 /// policy accepted, and then the refusal along the walls' edge.
@@ -304,7 +305,7 @@ fn a_tolerant_fuse_refuses_to_merge_the_two_places_round_a_walls_circle() {
             the_walls_through_the_z_axis(&model, prism),
             the_only_surface_of(&model, ball),
         );
-        let widest = places[0].uncertainty().max(places[1].uncertainty());
+        let apart = how_far_apart_the_two_may_be(&places);
         let fused = model.fuse(
             &[ball],
             &[prism],
@@ -327,7 +328,12 @@ fn a_tolerant_fuse_refuses_to_merge_the_two_places_round_a_walls_circle() {
             "{rule:?}: {refused:#?}"
         );
         assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
-        assert_eq!(refused.enclosure(), widest, "{rule:?}");
+        assert!(
+            apart <= refused.enclosure()
+                && refused.enclosure() <= apart * (1.0 + 8.0 * f64::EPSILON),
+            "{rule:?}: {} against {apart}",
+            refused.enclosure()
+        );
     }
 }
 
@@ -1285,6 +1291,103 @@ fn the_orders_the_area_reading_took_are_lengths_now(log: &ProvenanceLog, size: f
         }),
         "{orders:?}"
     );
+}
+
+/// A round bar whose top corner a file moved a millimetre up its wall, cut by
+/// a block over the half of it past its seam, under a tolerant policy at
+/// 100 mm, refuses on the order of that corner and the one below it, filed as
+/// how far apart the two are.
+///
+/// The block's face along the seam crosses the bar's top circle at a corner of
+/// the fuse's own, `(3, 0, 10)`, straight below the moved one at `(3, 0, 11)`,
+/// and the circle is still walked from the moved one. Both are exact points, a
+/// millimetre apart, and in a line with the start, so nothing orders the two
+/// round the circle and the policy is asked whether they are one point. Until
+/// Q2144 the order was filed as wide as the wider box, which for two points is
+/// `0`, so the policy took the two as one, four times, a merge that moved a
+/// corner a millimetre, and the fuse refused `TwoCurvesTouchWithoutCrossing`
+/// further on. Filed as how far apart the two are it is past the budget,
+/// `64 ε · 100 = 1.4e-12`, and the fuse refuses on the order itself.
+#[test]
+fn a_tolerant_fuse_will_not_take_a_bars_corner_a_file_moved_up_its_wall_as_the_one_below_it() {
+    for rule in [Rule::Difference, Rule::Intersection] {
+        let (mut model, bar) = a_bar_whose_top_corner_a_file_moved_up_its_wall();
+        let block = the_block_over_the_half_of_the_bar_past_its_seam(&mut model);
+        let mut log = ProvenanceLog::new();
+        let fused = model.fuse(&[bar], &[block], rule, &Policy::tolerant(100.0), &mut log);
+        let taken: Vec<(f64, f64)> = log
+            .records()
+            .iter()
+            .filter(|record| record.predicate() == ALONG_A_CROSSING)
+            .map(|record| {
+                (
+                    record.enclosure(),
+                    how_far_apart_the_two_may_be(record.inputs()),
+                )
+            })
+            .filter(|&(enclosure, apart)| enclosure < apart)
+            .collect();
+        assert!(taken.is_empty(), "{rule:?}: {taken:?}");
+        let Err(Error::Undecidable { records }) = fused else {
+            panic!("{rule:?}: {fused:?}");
+        };
+        let [refused] = records.records() else {
+            panic!("{rule:?}: {records:#?}");
+        };
+        let apart = how_far_apart_the_two_may_be(refused.inputs());
+        assert_eq!(refused.predicate(), ALONG_A_CROSSING, "{rule:?}");
+        assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
+        assert_eq!(apart, 1.0, "{rule:?}: {refused:#?}");
+        assert!(
+            apart <= refused.enclosure()
+                && refused.enclosure() <= apart * (1.0 + 8.0 * f64::EPSILON),
+            "{rule:?}: {} against {apart}",
+            refused.enclosure()
+        );
+    }
+}
+
+/// A round bar of radius `3` and height `10`, its top corner on the seam,
+/// `(3, 0, 10)`, moved to `(3, 0, 11)` in the bytes of its file and read back
+/// (`a_broken_two_surface_corner_read_back_from_bytes.rs`'s `OFF_THE_CAP`).
+fn a_bar_whose_top_corner_a_file_moved_up_its_wall() -> (Model, SolidKey) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    model
+        .add_round_bar(3.0, 10.0, &Isometry::identity())
+        .expect("a bar of radius three and height ten");
+    let mut bytes = postcard::to_allocvec(&model).expect("a model writes out");
+    let the_bytes_of =
+        |point: [f64; 3]| -> Vec<u8> { point.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let stored = the_bytes_of([3.0, 0.0, 10.0]);
+    let places: Vec<usize> = bytes
+        .windows(stored.len())
+        .enumerate()
+        .filter(|(_, window)| *window == stored.as_slice())
+        .map(|(at, _)| at)
+        .collect();
+    let [at] = places[..] else {
+        panic!("the corner is written once, and was found at {places:?}");
+    };
+    bytes[at..at + stored.len()].copy_from_slice(&the_bytes_of([3.0, 0.0, 11.0]));
+    let read_back: Model =
+        postcard::from_bytes(&bytes).expect("reading back does not ask where a corner is");
+    let bar = read_back.solids().next().expect("the bar came back").key();
+    (read_back, bar)
+}
+
+/// The block `[−5, 5] × [0, 5] × [−1, 11]`, whose face `y = 0` runs along the
+/// bar's seam.
+fn the_block_over_the_half_of_the_bar_past_its_seam(model: &mut Model) -> SolidKey {
+    let footprint = ProfileBuilder::new(vec![[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+    model
+        .add_extrusion(
+            &footprint,
+            12.0,
+            &Isometry::translation(Vector::new(-5.0, 0.0, -1.0)).expect("a finite shift"),
+        )
+        .expect("a block")
 }
 
 /// How far apart a point of the first box may be from a point of the second.
