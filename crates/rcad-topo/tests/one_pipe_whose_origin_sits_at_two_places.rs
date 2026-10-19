@@ -730,6 +730,125 @@ fn a_bar_along(model: &mut Model, wall: Cylinder, from: f64, to: f64) -> SolidKe
         .expect("a bar described face by face")
 }
 
+fn probe_cross_bar(model: &mut Model, height: f64, from: f64, to: f64) -> SolidKey {
+    let on_the_axis = |t: f64| Point::new(t, 0.0, height);
+    let on_the_seam = |t: f64| Point::new(t, 0.0, height + RADIUS);
+    let wall = Cylinder::new(
+        Axis::new(on_the_axis(0.0), Vector::new(1.0, 0.0, 0.0)).unwrap(),
+        RADIUS,
+    )
+    .unwrap();
+    let along = Vector::new(1.0, 0.0, 0.0);
+    let mut builder = SolidBuilder::new();
+    let low = builder.add_vertex(on_the_seam(from)).unwrap();
+    let high = builder.add_vertex(on_the_seam(to)).unwrap();
+    let seam = builder.add_edge(low, high, EdgeRun::Straight).unwrap();
+    let low_circle = builder
+        .add_edge(low, low, EdgeRun::RightRoundWhereItsFacesCross)
+        .unwrap();
+    let high_circle = builder
+        .add_edge(high, high, EdgeRun::RightRoundWhereItsFacesCross)
+        .unwrap();
+    let cap = |builder: &mut SolidBuilder, t: f64, outward: Vector, edge, turn| {
+        let plane = Plane::from_point_and_normal(on_the_axis(t), outward).unwrap();
+        let coedge = builder.add_coedge(edge, turn).unwrap();
+        let wire = builder.add_wire(&[DraftStep::Along(coedge)]).unwrap();
+        builder.add_face(Surface::Plane(plane), &[wire]).unwrap()
+    };
+    let bottom_cap = cap(
+        &mut builder,
+        from,
+        -along,
+        low_circle,
+        Orientation::Reversed,
+    );
+    let top_cap = cap(&mut builder, to, along, high_circle, Orientation::Forward);
+    let round_the_wall = [
+        (low_circle, Orientation::Forward),
+        (seam, Orientation::Forward),
+        (high_circle, Orientation::Reversed),
+        (seam, Orientation::Reversed),
+    ]
+    .map(|(edge, turn)| DraftStep::Along(builder.add_coedge(edge, turn).unwrap()));
+    let wire = builder.add_wire(&round_the_wall).unwrap();
+    let side = builder.add_face(Surface::Cylinder(wall), &[wire]).unwrap();
+    builder
+        .add_shell(&[
+            (bottom_cap, Orientation::Forward),
+            (top_cap, Orientation::Forward),
+            (side, Orientation::Forward),
+        ])
+        .unwrap();
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap()
+}
+
+#[test]
+fn probe_q2050_cross() {
+    let policy = Policy::certified();
+    let height = 3.0;
+    let top = 6.0;
+    let by_hand = std::f64::consts::PI * RADIUS * RADIUS * (top + 8.0) - 16.0 * 8.0 / 3.0;
+    for joint in [4.0] {
+        for upper_origin in [LOWER_ORIGIN, joint] {
+            for lower_first in [false] {
+                for swap in [false] {
+                    let mut model = Model::new(Scale::millimetres(100.0).unwrap());
+                    let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, joint, 0.0);
+                    let upper =
+                        a_bar_whose_wall_names_its_axis_at(&mut model, joint, top, upper_origin);
+                    let cross = probe_cross_bar(&mut model, height, -4.0, 4.0);
+                    let (first, second) = if lower_first {
+                        (lower, upper)
+                    } else {
+                        (upper, lower)
+                    };
+                    let tag = format!(
+                        "joint {joint} upper origin {upper_origin} lower first {lower_first} swap {swap}"
+                    );
+                    eprintln!("PROBE --- {tag}");
+                    let one = match model.fuse(
+                        &[first],
+                        &[cross],
+                        Rule::Union,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    ) {
+                        Ok(one) => one,
+                        Err(e) => {
+                            eprintln!("PROBE RESULT {tag}: first fuse {e:?}");
+                            continue;
+                        }
+                    };
+                    let [one] = one.solids() else {
+                        eprintln!("PROBE RESULT {tag}: first fuse solids {:?}", one.solids());
+                        continue;
+                    };
+                    let one = *one;
+                    let (a, b) = if swap { (one, second) } else { (second, one) };
+                    match model.fuse(&[a], &[b], Rule::Union, &policy, &mut ProvenanceLog::new()) {
+                        Ok(two) => {
+                            let valid = model.validate(&policy, &mut ProvenanceLog::new());
+                            let solids = two.solids().to_vec();
+                            let faces = solids
+                                .first()
+                                .map(|s| model.solid(*s).unwrap().faces().count());
+                            let volume = solids.first().map(|s| volume_of(&model, *s));
+                            eprintln!(
+                                "PROBE RESULT {tag}: ok solids {} faces {faces:?} volume {volume:?} by hand {by_hand} valid {:?}",
+                                solids.len(),
+                                valid.err()
+                            );
+                        }
+                        Err(e) => eprintln!("PROBE RESULT {tag}: second fuse {e:?}"),
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// What one bar's measuring says: its volume and the bound on it.
 fn volume_of(model: &Model, solid: SolidKey) -> (f64, f64) {
     let measured = model
