@@ -271,6 +271,11 @@ impl Model {
     /// before. A fuse refused with them too is refused as before, with the
     /// first refusal and the log the first try left, so trying them never
     /// renames a refusal.
+    ///
+    /// **Input corners a rounding apart are tried the same way, after the
+    /// ends of edges and without them** (queue row Q2299): each try starts
+    /// from the first try's names and the log before it, so the two never mix,
+    /// and the first that answers gives the answer and its records.
     fn fused_under(
         &mut self,
         arguments: &[SolidKey],
@@ -289,27 +294,36 @@ impl Model {
             tools,
             inputs_reach,
         };
-        let ends_of_edges = &scratch.ends_of_edges;
-        let before = (!ends_of_edges.names.is_empty()).then(|| log.clone());
+        let retries = [&scratch.ends_of_edges, &scratch.input_corners_together];
+        let before = retries
+            .iter()
+            .any(|taken| !taken.names.is_empty())
+            .then(|| log.clone());
         let refused = match self.written_with(&settled, &scratch.names_of_one_point, policy, log) {
             Ok(fused) => return Ok(fused),
             Err(refused) => refused,
         };
-        let Some(mut with_the_ends) = before else {
+        let Some(before) = before else {
             return Err(refused);
         };
-        ends_of_edges.log.clone().drain_into(&mut with_the_ends);
-        let names: Vec<NamesOfOnePoint> = scratch
-            .names_of_one_point
-            .iter()
-            .chain(&ends_of_edges.names)
-            .cloned()
-            .collect();
-        let fused = self
-            .written_with(&settled, &names, policy, &mut with_the_ends)
-            .map_err(|_| refused)?;
-        *log = with_the_ends;
-        Ok(fused)
+        for taken in retries {
+            if taken.names.is_empty() {
+                continue;
+            }
+            let mut with_them = before.clone();
+            taken.log.clone().drain_into(&mut with_them);
+            let names: Vec<NamesOfOnePoint> = scratch
+                .names_of_one_point
+                .iter()
+                .chain(&taken.names)
+                .cloned()
+                .collect();
+            if let Ok(fused) = self.written_with(&settled, &names, policy, &mut with_them) {
+                *log = with_them;
+                return Ok(fused);
+            }
+        }
+        Err(refused)
     }
 
     /// Put the answer together from what `settled` holds, with
@@ -566,6 +580,11 @@ pub(crate) struct Scratch {
     /// an answer refused without them is put together with them, and `select`
     /// never reads them (`Model::fused_under`, `docs/decisions.md` §417.9).
     pub(crate) ends_of_edges: TakenAsOnePoint,
+    /// Every point where input corners a tolerant policy would take as one
+    /// lie a rounding apart, with the meets of their planes there, and the
+    /// records of taking them. Kept apart as [`Scratch::ends_of_edges`] is,
+    /// and tried after them.
+    pub(crate) input_corners_together: TakenAsOnePoint,
 }
 
 /// Names a tolerant policy would take as one point, and the records of taking
@@ -622,6 +641,7 @@ impl Scratch {
             cut_from,
             names_of_one_point,
             ends_of_edges: TakenAsOnePoint::default(),
+            input_corners_together: TakenAsOnePoint::default(),
         };
         let taken_as_input_corners = assemble::fold_each_corner_one_plane_cuts_a_rounding_from_it(
             model, &scratch, policy, log,
@@ -635,8 +655,17 @@ impl Scratch {
                 policy,
                 &mut ends_of_edges.log,
             );
+        let mut input_corners_together = TakenAsOnePoint::default();
+        input_corners_together.names =
+            assemble::fold_each_point_input_corners_meet_at_a_rounding_apart(
+                model,
+                &scratch,
+                policy,
+                &mut input_corners_together.log,
+            );
         scratch.names_of_one_point.extend(taken_as_input_corners);
         scratch.ends_of_edges = ends_of_edges;
+        scratch.input_corners_together = input_corners_together;
         Ok(scratch)
     }
 }
