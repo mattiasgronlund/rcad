@@ -2924,6 +2924,35 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// that would have cleared past the cap is not ruled out either, only not
 /// waited for, exactly as for the first ladder.
 ///
+/// **A room many times as wide as the thinnest bend is not asked once a mesh
+/// has strayed past that bend** (row Q2217). [`SolidView::skin_of`] charges a
+/// mesh without end once it is further off a ball, a pipe or a torus's tube
+/// than that face's radius, since no shell then lies between the two to hold
+/// the difference, and such a sum never answers. A room tens of radii wide is
+/// met by a mesh tens of radii off: the quarter bend of ring 100 tube 1 is
+/// meshed between `0.56` and `1.0` of the room it is asked at, all the way
+/// down. So after a rung whose mesh strayed past the thinnest bend
+/// [`the_thinnest_bend_a_mesh_can_stray_past`] finds and was charged without
+/// end, the ladder skips every room
+/// [`ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED`] radii wide or more. It never
+/// skips the floor, so a ladder that does not answer still ends on the same
+/// rung. That bend asks seven rungs where it asked nine
+/// (`a_thin_bend_asks_no_room_eight_tubes_wide_once_a_mesh_strays_past_its_tube`).
+///
+/// **It is not done from the coarsest mesh**, only after a rung. Done from
+/// the coarsest it would have skipped the first rung, where the ladder
+/// stopped, in nine ladders of
+/// `a_plate_and_a_ring_with_a_bar_in_its_hole_and_a_pin_beside_it_fuse_every_way`
+/// (`a_pin_beside_a_ring_it_never_touches.rs`).
+///
+/// **It buys little where Q2208 found this ladder slow.** A quarter bend of
+/// ring 1000 tube 0.1 is charged without end down to room `0.122` and never
+/// answers, and the rungs that cost are the last three, at `0.244`, `0.122`
+/// and `0.061`, under three tubes wide, the last of them about 200 000
+/// triangles. The skip takes the rungs from `250` down to `0.98` off it, and
+/// those are cheap: Q2217's census put them at `15.3` of that ladder's
+/// `153.5` s, on a loaded machine.
+///
 /// # Errors
 ///
 /// Whatever [`the_coarsest_mesh_whose_sides_do_not_cross`] makes of the solid,
@@ -2950,6 +2979,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let top = how_far_across(&coarsest) / 2.0;
     let mut finest = (coarsest, enclosed, rounding, ProvenanceLog::new());
     let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
+    let thinnest_bend = the_thinnest_bend_a_mesh_can_stray_past(view);
     let mut room = top;
     while room >= floor {
         let Ok(less) = Deflection::of(room) else {
@@ -2958,7 +2988,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         #[cfg(test)]
         RUNGS_THE_SECOND_LADDER_HAS_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut this_rung = ProvenanceLog::new();
-        match view.mesh(less, policy, &mut this_rung) {
+        let strayed_past = match view.mesh(less, policy, &mut this_rung) {
             Ok(finer) => {
                 let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(&finer);
                 let leaves_out = how_far_the_sum_can_be_off(view, &finer, rounding);
@@ -2969,9 +2999,13 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 if finer_encloses != 0.0 && !it_lies_flat(&finer) {
                     closest = (finer_encloses, leaves_out);
                 }
+                let strayed_past = thinnest_bend.filter(|&radius| {
+                    leaves_out.is_infinite() && finer.deviation().magnitude() >= radius
+                });
                 finest = (finer, finer_encloses, rounding, this_rung);
+                strayed_past
             }
-            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
+            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => None,
             Err(why) => {
                 let handed_on = hand_on_a_refusal_that_found_the_space(why);
                 if handed_on.is_err() {
@@ -2980,8 +3014,13 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 handed_on?;
                 break;
             }
-        }
+        };
         room /= 2.0;
+        if let Some(radius) = strayed_past {
+            while room > floor && room >= ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED * radius {
+                room /= 2.0;
+            }
+        }
     }
     let (mesh, finest_encloses, rounding, mut its_log) = finest;
     if let Some((on_the_planes, off_by)) =
@@ -3004,6 +3043,49 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     }
     Ok(enclosed)
 }
+
+/// The smallest radius among the solid's balls, pipes and torus tubes, or
+/// `None` when it has none: the thinnest bend [`SolidView::skin_of`] charges a
+/// mesh without end for straying past, read off each face the way `skin_of`
+/// reads it.
+///
+/// **A cone is left out.** Its radius runs down to nothing at its apex, and
+/// `skin_of` charges the part of a cone face near its tip by what the tip
+/// costs rather than off a radius (`what_a_cone_tip_costs` in `measure.rs`),
+/// so there is no cone radius a mesh strays past. Read as
+/// [`the_smallest_radius_it_bends_at`] reads it, `0`, a cone would skip every
+/// room down to the floor. A surface nobody has taught reads `0` there too,
+/// and never gets this far: `skin_of` panics on one when the coarsest mesh is
+/// charged, before the first rung.
+fn the_thinnest_bend_a_mesh_can_stray_past(view: SolidView<'_>) -> Option<f64> {
+    view.faces()
+        .filter_map(|face| {
+            let surface = face.surface();
+            if let Surface::Cone(_) = surface {
+                return None;
+            }
+            the_smallest_radius_it_bends_at(&surface)
+        })
+        .reduce(f64::min)
+}
+
+/// How many of the thinnest bend's radii wide a room is when
+/// [`how_much_space_a_curved_solid_encloses`]'s ladder skips it, once a rung's
+/// mesh has strayed past that bend and been charged without end (row Q2217).
+///
+/// **A search over the suite, not a proof.** With a probe logging every ladder
+/// that function ran, the whole `rcad-topo` suite ran 109 178 of them. After a
+/// rung charged without end, every later rung charged a finite amount was
+/// asked at a room under 4 radii, and the widest that answered or stopped the
+/// ladder at 3. Skipping from 4 radii up would have changed no ladder there,
+/// and 8 leaves a factor of two over that. Skipping from 2 up would have
+/// passed over the rung that answered in 150 ladders and the rung that
+/// stopped in 24; from 1 up, 1819 and 24.
+///
+/// A skipped room that would have answered costs a finer mesh, or, when no
+/// finer one answers, the closest sum in place of an answer: every rung that
+/// answers has cleared [`the_sum_answers`], and the floor is never skipped.
+const ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED: f64 = 8.0;
 
 /// How many times [`how_much_space_a_curved_solid_encloses`]'s own ladder has
 /// asked a finer mesh, counted only in tests. A clock says a capped call is
@@ -8678,6 +8760,138 @@ mod tests {
             "the ladder asks a finer mesh at the top room and at most \
              HALVINGS_A_FOLD_IS_ASKED_DOWN_TO rungs under it, never more"
         );
+    }
+
+    /// A quarter bend of pipe 1 thick round a ring of 100 is charged without
+    /// end by every mesh further off than its tube is thick, so once one mesh
+    /// strays that far [`how_much_space_a_curved_solid_encloses`]'s own ladder
+    /// skips every room [`super::ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED`]
+    /// tubes wide or more, and asks two rungs fewer (row Q2217).
+    ///
+    /// The ladder starts at half the coarsest mesh's box, `50.5`, and halves
+    /// down to the room that answers, about `0.197`: nine rungs. The first is
+    /// meshed about `30` off, thirty tubes, and charged without end, so the
+    /// rungs at `25.25` and `12.625` are skipped and the ladder asks `6.3125`
+    /// next, then on down to the same answering rung as before. Every rung
+    /// down to `1.58` is charged without end, `0.79` is charged `2297` against
+    /// `427` enclosed, and `0.197` answers, `461` against `243`.
+    /// [`RUNGS_THE_SECOND_LADDER_HAS_ASKED`] counts the rungs, so the pin does
+    /// not hang on a clock.
+    #[test]
+    fn a_thin_bend_asks_no_room_eight_tubes_wide_once_a_mesh_strays_past_its_tube() {
+        let mut model = an_empty_model();
+        let bend = a_quarter_bend(&mut model, 100.0, 1.0);
+        let view = model.solid(bend).expect("this model made the key");
+        RUNGS_THE_SECOND_LADDER_HAS_ASKED.store(0, std::sync::atomic::Ordering::Relaxed);
+        let enclosed = how_much_space_a_curved_solid_encloses(
+            view,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            enclosed.as_ref().is_ok_and(|&space| space > 0.0),
+            "a bend encloses some space: {enclosed:?}"
+        );
+        assert_eq!(
+            RUNGS_THE_SECOND_LADDER_HAS_ASKED.load(std::sync::atomic::Ordering::Relaxed),
+            7,
+            "nine rungs from the top room down to the one that answers, less \
+             the two eight tubes wide or more under a mesh charged without end"
+        );
+    }
+
+    /// A quarter of the ring of radius `ring` about `+z`, its tube `tube`
+    /// wide, from the cap on `y = 0` to the cap on `x = 0`: the bend
+    /// `tests/rings/mod.rs` describes, through the same builder.
+    fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> crate::SolidKey {
+        let skin = Torus::new(Axis::z(), ring, tube).expect("a tube narrower than its ring");
+        let inner = ring - tube;
+        let mut builder = SolidBuilder::new();
+        let start_corner = builder
+            .add_vertex(Point::new(inner, 0.0, 0.0))
+            .expect("a corner");
+        let end_corner = builder
+            .add_vertex(Point::new(0.0, inner, 0.0))
+            .expect("a corner");
+        let flat_through_the_middle =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal");
+        let seam = builder
+            .add_edge(
+                start_corner,
+                end_corner,
+                EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Plane(flat_through_the_middle),
+                    picked_by: smallvec::smallvec![
+                        Picker::InsideAPipe(
+                            Cylinder::new(Axis::z(), ring).expect("the ring's own radius")
+                        ),
+                        Picker::from(
+                            HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.0)
+                                .expect("a normal with a length")
+                        ),
+                    ],
+                },
+            )
+            .expect("the seam along the inner equator");
+        let start_circle = builder
+            .add_edge(
+                start_corner,
+                start_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("the circle of the first cap");
+        let end_circle = builder
+            .add_edge(
+                end_corner,
+                end_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("the circle of the second cap");
+        let mut cap = |facing: Vector, edge, turn| {
+            let plane = Plane::from_point_and_normal(Point::origin(), facing)
+                .expect("a coordinate direction is a unit normal");
+            let coedge = builder.add_coedge(edge, turn).expect("a coedge");
+            let wire = builder
+                .add_wire(&[DraftStep::Along(coedge)])
+                .expect("a wire");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a cap")
+        };
+        let start_cap = cap(
+            Vector::new(0.0, -1.0, 0.0),
+            start_circle,
+            Orientation::Forward,
+        );
+        let end_cap = cap(
+            Vector::new(-1.0, 0.0, 0.0),
+            end_circle,
+            Orientation::Reversed,
+        );
+        let round_the_wall: Vec<DraftStep> = [
+            (start_circle, Orientation::Reversed),
+            (seam, Orientation::Forward),
+            (end_circle, Orientation::Forward),
+            (seam, Orientation::Reversed),
+        ]
+        .into_iter()
+        .map(|(edge, turn)| DraftStep::Along(builder.add_coedge(edge, turn).expect("a coedge")))
+        .collect();
+        let wire = builder.add_wire(&round_the_wall).expect("a wire");
+        let side = builder
+            .add_face(Surface::Torus(skin), &[wire])
+            .expect("the wall");
+        builder
+            .add_shell(&[
+                (start_cap, Orientation::Forward),
+                (end_cap, Orientation::Forward),
+                (side, Orientation::Forward),
+            ])
+            .expect("a shell");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a bend described this way is a solid")
     }
 
     /// Row Q1890. The lens a ball makes poking `1/16` into a pipe of radius 5
