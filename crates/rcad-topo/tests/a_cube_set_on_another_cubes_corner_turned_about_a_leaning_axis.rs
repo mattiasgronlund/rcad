@@ -1,6 +1,6 @@
 //! A cube set corner to corner on another cube's top corner, turned a little
 //! short of a half turn about an axis leaning off `z` (queue rows Q2007, Q2008,
-//! Q2009 and Q2019).
+//! Q2009, Q2019 and Q2299).
 //!
 //! The block is `add_cube(10.0)`, `[0, 10]³`. The turned cube is a second
 //! `add_cube(10.0)` placed by `Isometry::try_from(([0, 0, 10], q))` with
@@ -24,6 +24,16 @@
 //! point, and joining the faces round them panicked. The fold is now left
 //! alone where any other input corner, on whichever planes, is within the
 //! policy's wobble of one of the three meets (`docs/decisions.md` §417.7).
+//!
+//! **At a half turn, or up to `0.01` short of one about an axis leaning
+//! `0.005` or less, the union or the difference was refused
+//! `ResultIsNotManifold`** under `Policy::tolerant(100.0)` (Q2299). The six
+//! planes at the corner then lie nearly in pairs, so `x = 0` cuts the other
+//! cube's planes there in meets a rounding apart that round to different
+//! `f64` triples, and two sides joined the same two corners. Once refused,
+//! the fuse is put together again with the two cubes' corners and the meets of
+//! their planes within the wobble taken as one point,
+//! `fold_each_point_input_corners_meet_at_a_rounding_apart`.
 //!
 //! Under `Policy::certified()` the fuzz crash file's turn answers each of
 //! these too, and the other three turns refuse `DynamicRangeTooWide`.
@@ -91,6 +101,39 @@ const A_HALF_TURN: [[f64; 4]; 2] = [
     [0.0, 0.0, 0.099_833_416_646_828_15, 0.995_004_165_278_025_8],
 ];
 
+/// `(p, t)` = `(0.0005, 0.001)`, `(0.005, 0.002)`, `(0.005, 0.003)` and
+/// `(3.756056e−5, 0.005)`, as `f64::sin` and `f64::cos` give them: turns
+/// `0.001`, `0.01`, `0.01` and `7.5e−5` short of a half turn about axes
+/// leaning `0.001` to `0.005` (Q2299). The turned cube less the block was
+/// refused `ResultIsNotManifold` for each under `Policy::tolerant(100.0)`, and
+/// the union both ways round for all but the third.
+const A_LITTLE_SHORT_OF_A_HALF_TURN: [[f64; 4]; 4] = [
+    [
+        0.000_499_999_979_166_666_9,
+        0.0,
+        0.000_999_999_708_333_365_2,
+        0.999_999_375_000_106_8,
+    ],
+    [
+        0.004_999_979_166_692_708,
+        0.0,
+        0.001_999_973_666_735_683,
+        0.999_985_500_051_708_2,
+    ],
+    [
+        0.004_999_979_166_692_708,
+        0.0,
+        0.002_999_958_000_136_4,
+        0.999_983_000_085_666_5,
+    ],
+    [
+        3.756_055_999_116_828_4e-5,
+        0.0,
+        0.004_999_979_163_165_733,
+        0.999_987_499_320_652_6,
+    ],
+];
+
 #[test]
 fn the_union_of_two_cubes_corner_to_corner_a_half_turn_apart_is_both_cubes_either_way_round() {
     for turn in A_HALF_TURN {
@@ -99,6 +142,26 @@ fn the_union_of_two_cubes_corner_to_corner_a_half_turn_apart_is_both_cubes_eithe
             let volume = volume_of_a_fuse(turn, Rule::Union, order, &asked);
             assert_about(volume, 2000.0, &asked);
         }
+    }
+}
+
+#[test]
+fn the_union_of_two_cubes_corner_to_corner_a_little_short_of_a_half_turn_is_both_cubes() {
+    for turn in A_LITTLE_SHORT_OF_A_HALF_TURN {
+        for order in [Order::BlockFirst, Order::TurnedFirst] {
+            let asked = format!("{turn:?}, union, {order:?}");
+            let volume = volume_of_a_fuse(turn, Rule::Union, order, &asked);
+            assert_about(volume, 2000.0, &asked);
+        }
+    }
+}
+
+#[test]
+fn the_turned_cube_a_little_short_of_a_half_turn_less_the_block_is_the_turned_cube() {
+    for turn in A_LITTLE_SHORT_OF_A_HALF_TURN {
+        let asked = format!("{turn:?}, the turned cube less the block");
+        let volume = volume_of_a_fuse(turn, Rule::Difference, Order::TurnedFirst, &asked);
+        assert_about(volume, 1000.0, &asked);
     }
 }
 
