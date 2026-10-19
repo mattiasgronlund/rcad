@@ -21,8 +21,8 @@ use std::collections::{HashMap, HashSet};
 
 use rcad_geom::{
     Axis, Deflection, DynamicRange, EdgeRun, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun,
-    Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface,
-    Vector, which_two_surfaces_a_run_is_between,
+    Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, PointsAlongACrossing,
+    SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector, which_two_surfaces_a_run_is_between,
 };
 use rcad_mesh::{
     CannotTriangulate, Loop, NotALoop, Patch, TrimmedDomain, triangulate, zip_up_a_band,
@@ -863,16 +863,30 @@ impl BuildingAMesh {
         }
         let along = which_two_surfaces_a_run_is_between(run.run(), [&along[0], &along[1]]);
 
-        let along_it = rcad_geom::walk(
-            &run,
-            [&along[0], &along[1]],
-            Deflection::of(room * WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO)?,
-            policy,
-            log,
-        )
-        .map_err(|why| {
-            walking_along_this_edge_refused(edge.key(), why.with_its_surfaces_moved(&there))
-        })?;
+        // **A walk that steps across a ball's axis the other way from its
+        // circle is walked again, finer**, because the ball's face reads each
+        // step's longitude the short way round, and that step's is wrong — see
+        // [`how_fine_a_walk_has_to_be_to_go_round_each_ball_its_way`]. Only
+        // the walk that is kept says what it decided, so a decision made twice
+        // is logged once.
+        let mut deflection = Deflection::of(room * WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO)?;
+        let along_it = loop {
+            let mut said = ProvenanceLog::new();
+            let walked =
+                rcad_geom::walk(&run, [&along[0], &along[1]], deflection, policy, &mut said);
+            if let Ok(walked) = &walked
+                && let Some(finer) =
+                    how_fine_a_walk_has_to_be_to_go_round_each_ball_its_way(&along, ends, walked)
+                && finer < deflection.length()
+            {
+                deflection = Deflection::of(finer)?;
+                continue;
+            }
+            said.drain_into(log);
+            break walked.map_err(|why| {
+                walking_along_this_edge_refused(edge.key(), why.with_its_surfaces_moved(&there))
+            })?;
+        };
         let mut points = along_it.points().to_vec();
         // **A point of the walk stored at one of the edge's ends is dropped.**
         // The walk leaves both ends out, but on an arc one rounding long a
@@ -8136,6 +8150,135 @@ fn the_way_a_flat_disk_across_a_ball_walks_its_rim(
         }))
 }
 
+/// How fine a walk of the circle the two surfaces `along` cross in has to be
+/// asked for, so that every step of it goes round each ball along it the way
+/// the circle does;
+/// `None` when every step already does, or when no walk can.
+///
+/// **A ball's face reads each step of its rim the short way round**
+/// ([`BuildingAMesh::walk_a_wire_round`]), which is the way the straight piece
+/// between the two points goes round the ball's axis. The circle between the
+/// same two points goes round it the other way exactly when the axis passes
+/// through the sliver between that piece and the circle: in the circle's plane,
+/// when the point where the axis meets the plane is inside the circle and on the
+/// far side of the piece from the circle's centre. Nothing downstream can catch
+/// it, because a step read the wrong way round is still a step of less than
+/// half a turn.
+///
+/// **What it cost**: two balls of radius 3 one apart and a third of radius
+/// `0.887` centred on their circle leave the third ball a thin lune round its
+/// south pole, inside the first ball and outside the second. The lune's arc on
+/// the first ball passes the pole `0.0168` on one side, and walked coarse, two
+/// points on it had their chord pass `0.0034` on the other. The lune then no
+/// longer wound round the pole, and its other arc crossed that chord: the
+/// intersection and the difference were refused `BoundaryCrossesItself`
+/// (`three_balls_whose_lune_runs_round_the_third_balls_pole_mesh`, Q2381).
+///
+/// **Half of how far inside the circle that point is** is what is asked for.
+/// Every piece of a walk asked for that stays nearer the circle than the point
+/// is, so the point is in no sliver, and the walk is asked again at most once a
+/// ball. A point within twice the walk's own deviation of the circle is left
+/// alone, since no walk can step short of it, and so is a pole the crossing
+/// runs through: [`put_in_the_poles_a_crossing_passes`] makes that a point of
+/// the walk, which every step either side of it ends at.
+///
+/// **Only a circle is asked**: a ball against a ball or a plane. A ball against
+/// a pipe or a cone round its own axis crosses it in a line of latitude, whose
+/// centre is on the axis and so in no sliver.
+fn how_fine_a_walk_has_to_be_to_go_round_each_ball_its_way(
+    along: &[Surface; 2],
+    ends: [Point; 2],
+    walked: &PointsAlongACrossing,
+) -> Option<f64> {
+    let circle = the_circle_a_ball_crosses_in(along)?;
+    let closest = 2.0 * walked.deviation().magnitude();
+    let every: Vec<Point> = core::iter::once(ends[0])
+        .chain(walked.points().iter().copied())
+        .chain(core::iter::once(ends[1]))
+        .collect();
+    let mut finest: Option<f64> = None;
+    for (index, ball) in along.iter().enumerate() {
+        let Surface::Sphere(sphere) = ball else {
+            continue;
+        };
+        let other = &along[1 - index];
+        let runs_through_a_pole = [1.0, -1.0].into_iter().any(|up| {
+            let pole = sphere.centre() + Vector::new(0.0, 0.0, up * sphere.radius());
+            how_far_a_crossing_misses_a_pole_it_runs_through([ball, other], pole).is_some()
+        });
+        if runs_through_a_pole {
+            continue;
+        }
+        let Some(through) = circle.where_an_upright_line_meets_its_plane(sphere.centre()) else {
+            continue;
+        };
+        let inside_by = circle.radius - (through - circle.centre).length();
+        let a_step_goes_the_other_way = || {
+            every.windows(2).any(|step| {
+                let middle = step[0] + (step[1] - step[0]) * 0.5;
+                (through - middle).dot(middle - circle.centre) > 0.0
+            })
+        };
+        if inside_by > closest && a_step_goes_the_other_way() {
+            let asked = inside_by / 2.0;
+            finest = Some(finest.map_or(asked, |finest| finest.min(asked)));
+        }
+    }
+    finest
+}
+
+/// A circle in space.
+struct ACircle {
+    centre: Point,
+    /// Square to the circle's plane, of any length.
+    square_to: Vector,
+    radius: f64,
+}
+
+impl ACircle {
+    /// Where the line through `on_it` parallel to `z`, which is a ball's axis,
+    /// meets this circle's plane; `None` when the plane stands upright and
+    /// holds the line or misses it.
+    fn where_an_upright_line_meets_its_plane(&self, on_it: Point) -> Option<Point> {
+        let up = self.square_to.z();
+        if up == 0.0 {
+            return None;
+        }
+        let height = (self.centre - on_it).dot(self.square_to) / up;
+        Some(on_it + Vector::new(0.0, 0.0, height))
+    }
+}
+
+/// The circle a ball crosses a second ball or a plane in, or `None` for any
+/// other pair, or for one that crosses in no circle.
+fn the_circle_a_ball_crosses_in(along: &[Surface; 2]) -> Option<ACircle> {
+    if let [Surface::Sphere(first), Surface::Sphere(second)] = along {
+        let apart = second.centre() - first.centre();
+        let squared = apart.length_squared();
+        let share = (squared + first.radius() * first.radius() - second.radius() * second.radius())
+            / (2.0 * squared);
+        let radius = (first.radius() * first.radius() - share * share * squared).sqrt();
+        return (radius > 0.0).then(|| ACircle {
+            centre: first.centre() + apart * share,
+            square_to: apart,
+            radius,
+        });
+    }
+    let ([Surface::Sphere(ball), Surface::Plane(flat)]
+    | [Surface::Plane(flat), Surface::Sphere(ball)]) = along
+    else {
+        return None;
+    };
+    let centre = flat.project(ball.centre());
+    let down = ball.centre() - centre;
+    let radius = (ball.radius() * ball.radius() - down.length_squared()).sqrt();
+    (radius > 0.0).then_some(ACircle {
+        centre,
+        square_to: flat.normal(),
+        radius,
+    })
+}
+
 /// Make every pole of a ball that a crossing runs through one of the points
 /// walked along it, and say how far a walked point was moved to do it.
 ///
@@ -8243,23 +8386,11 @@ fn put_in_a_pole(
     latitude: f64,
     how_much: HowMuchOfTheCrossing,
 ) -> Option<f64> {
-    let exactly = PredicatePoint::from(pole.coordinates());
-    let holds_it = |surface: &Surface| match side_of_surface(surface, exactly) {
-        Decision::Zero => true,
-        // An exact point is undecidable only past overflow or into the
-        // subnormals; the walk is then left as it was, and checked.
-        Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
-        _ => false,
-    };
     let reads_as_this_pole = |at: Point| {
         ball.coordinates_of(at).1 == latitude
             || the_pole_a_point_sits_within_a_rounding_of(ball, at) == Some(latitude)
     };
-    let missed_by = if holds_it(ball) && holds_it(other) {
-        0.0
-    } else {
-        how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it([ball, other], pole)?
-    };
+    let missed_by = how_far_a_crossing_misses_a_pole_it_runs_through([ball, other], pole)?;
     if ends.into_iter().any(reads_as_this_pole) {
         return None;
     }
@@ -8296,6 +8427,28 @@ fn put_in_a_pole(
     }
     points.insert(gap, pole);
     Some(missed_by)
+}
+
+/// How far the crossing of `ball` and `other` misses `pole`, when it runs
+/// through it: nothing when both surfaces certainly hold the pole, and a
+/// circle a ball and a plane cross in that misses it by one rounding or less
+/// is taken to run through it too; `None` when neither.
+fn how_far_a_crossing_misses_a_pole_it_runs_through(
+    [ball, other]: [&Surface; 2],
+    pole: Point,
+) -> Option<f64> {
+    let exactly = PredicatePoint::from(pole.coordinates());
+    let holds_it = |surface: &Surface| match side_of_surface(surface, exactly) {
+        Decision::Zero => true,
+        // An exact point is undecidable only past overflow or into the
+        // subnormals; the walk is then left as it was, and checked.
+        Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
+        _ => false,
+    };
+    if holds_it(ball) && holds_it(other) {
+        return Some(0.0);
+    }
+    how_far_a_circle_that_passes_within_a_rounding_of_a_pole_misses_it([ball, other], pole)
 }
 
 /// How far a circle a ball and a plane cross in passes from `pole`, when the
