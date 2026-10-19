@@ -16065,6 +16065,124 @@ mod tests {
         }
     }
 
+    /// Q992's plate cut by a cone lying along `y` over its top and by a plane
+    /// `x = c` down the cone's middle, as it is and mirrored, `x` to `8 - x`
+    /// (Q2062).
+    ///
+    /// The cone's apex is `(6.25, 0.75, 1.25)`, its axis `+y` and its slope a
+    /// quarter. The top `z = 1` lies a quarter under the axis, so it cuts the
+    /// cone in a U that opens up `y`, with its bottom at `(6.25, 1.75)`, and
+    /// the plane cuts the U into two arms. The one ray that can place the hole
+    /// runs along `y = 3` out of the hole's corner toward the U and crosses it
+    /// twice, at `x = 6.25 ∓ 0.504`. The near crossing, on the near arm, bounds
+    /// the piece the hole is in; the far one is on the other arm, past the
+    /// plane.
+    ///
+    /// Each crossing is a node on both `y = 3` and the U. Mirrored, the far one
+    /// has the lower index, and read alone it said the ray missed the near arm,
+    /// so the plane, nearer than the far arm, put the hole inside the U.
+    #[test]
+    fn a_ray_that_crosses_the_u_a_cone_cuts_twice_places_the_hole_by_the_near_crossing() {
+        let outline = [
+            [0.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 1.0],
+            [5.0, 1.0],
+            [5.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 5.0],
+            [7.0, 5.0],
+            [7.0, 6.0],
+            [8.0, 6.0],
+            [8.0, 8.0],
+            [5.0, 8.0],
+            [5.0, 7.0],
+            [3.0, 7.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
+            [0.0, 5.0],
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ];
+        for mirrored in [false, true] {
+            let place = move |[x, y]: [f64; 2]| if mirrored { [8.0 - x, y] } else { [x, y] };
+            let mut corners: Vec<[f64; 2]> = outline.map(place).to_vec();
+            if mirrored {
+                corners.reverse();
+            }
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let plate = ProfileBuilder::new(corners)
+                .with_hole(vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0], [3.0, 5.0]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a plate with a square hole");
+            let solid = model
+                .add_extrusion(&plate, 1.0, &Isometry::identity())
+                .expect("an extrusion");
+            let top = bake(
+                &model,
+                &[solid],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the plate bakes")
+            .swap_remove(0)
+            .faces
+            .into_iter()
+            .find(facing_up)
+            .expect("the plate has a top");
+            let [apex_x, apex_y] = place([6.25, 0.75]);
+            let along_y = Axis::new(Point::new(apex_x, apex_y, 1.25), Vector::new(0.0, 1.0, 0.0))
+                .expect("an axis along y");
+
+            for c in [6.0, 6.25, 6.5] {
+                let [x, _] = place([c, 0.0]);
+                let mut cut = cut_by(&top, &[[1.0, 0.0, 0.0, -x]]);
+                cut.cuts
+                    .push(Surface::Cone(Cone::new(along_y, 0.25).expect("a slope")));
+
+                let mut log = ProvenanceLog::new();
+                let pieces = split_a_face(&cut, &Policy::certified(), &mut log)
+                    .unwrap_or_else(|why| panic!("mirrored {mirrored}, x = {x}: {why:?}"))
+                    .pieces;
+
+                assert!(
+                    log.is_empty(),
+                    "mirrored {mirrored}, x = {x}: a ray given up leaves no record"
+                );
+                assert_eq!(
+                    pieces.len(),
+                    5,
+                    "mirrored {mirrored}, x = {x}: the U either side of the plane, the \
+                     plate outside it on the hole's side, and two on the far side, \
+                     where the far arm runs through the notch"
+                );
+                let holed: Vec<&Piece> = pieces
+                    .iter()
+                    .filter(|piece| piece.wires.len() == 2)
+                    .collect();
+                assert_eq!(holed.len(), 1, "mirrored {mirrored}, x = {x}: one hole");
+                assert_eq!(holed[0].wires[1].len(), 4, "the hole is still a square");
+                let corners: Vec<[f64; 3]> = holed[0].wires[0]
+                    .iter()
+                    .filter_map(|side| side.ends[0].point().exact_coordinates())
+                    .collect();
+                assert!(
+                    [[0.0, 0.0], [0.0, 8.0], [c, 0.0]]
+                        .map(place)
+                        .iter()
+                        .all(|&[x, y]| corners.contains(&[x, y, 1.0])),
+                    "mirrored {mirrored}, x = {x}: the hole is outside the U, on the \
+                     hole's side of the plane: {corners:?}"
+                );
+                for piece in &pieces {
+                    every_wire_closes(piece);
+                }
+            }
+        }
+    }
+
     /// Q992's plate again, cut by `x = 5.375` and by a ball at
     /// `(5.375, 2.5, 1)` whose circle on the top passes the hole's corner
     /// `(5, 3)` a rounding outside or inside it (Q2110, Q1484's shapes G and
