@@ -2961,10 +2961,15 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         })
         .fold(f64::INFINITY, f64::min);
     let probe_who = std::thread::current().name().unwrap_or("?").to_string();
-    let probe_call = std::time::Instant::now();
-    let mut probe_above_time = std::time::Duration::ZERO;
-    let mut probe_above_rungs = 0;
-    let mut probe_rungs = 0;
+    let mut probe_line = format!(
+        "SEQ {probe_who} rmin {probe_r_min:e} top {top:e} floor {floor:e} coarse {:e} {}",
+        finest.0.deviation().magnitude(),
+        if leaves_out.is_infinite() {
+            "inf"
+        } else {
+            "fin"
+        }
+    );
     while room >= floor {
         let Ok(less) = Deflection::of(room) else {
             break;
@@ -2973,44 +2978,38 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         RUNGS_THE_SECOND_LADDER_HAS_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut this_rung = ProvenanceLog::new();
         let rung_clock = std::time::Instant::now();
-        let above = room >= probe_r_min;
-        probe_rungs += 1;
-        if above {
-            probe_above_rungs += 1;
-        }
         let meshed = view.mesh(less, policy, &mut this_rung);
-        let outcome = match &meshed {
+        let (outcome, d) = match &meshed {
             Ok(finer) => {
                 let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(finer);
                 let leaves_out = how_far_the_sum_can_be_off(view, finer, rounding);
-                if the_sum_answers(finer_encloses, leaves_out) {
-                    "answers".to_string()
-                } else if leaves_out.is_infinite() {
-                    "inf".to_string()
+                let d = finer.deviation().magnitude();
+                let flat = if finer_encloses == 0.0 || it_lies_flat(finer) {
+                    "F"
                 } else {
-                    "unsure".to_string()
+                    ""
+                };
+                if the_sum_answers(finer_encloses, leaves_out) {
+                    (format!("answers{flat}"), d)
+                } else if leaves_out.is_infinite() {
+                    (format!("inf{flat}"), d)
+                } else {
+                    (format!("unsure{flat}"), d)
                 }
             }
-            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => "fold".to_string(),
-            Err(why) => format!("stop {why:?}").chars().take(80).collect(),
+            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => ("fold".to_string(), -1.0),
+            Err(_) => ("stop".to_string(), -1.0),
         };
-        if above {
-            probe_above_time += rung_clock.elapsed();
-        }
-        if above && outcome != "inf" {
-            probe_census(&format!(
-                "ABOVE {probe_who} room {room:e} r_min {probe_r_min:e} top {top:e} {outcome}"
-            ));
-        }
+        probe_line.push_str(&format!(
+            " {room:e}/{d:e}/{outcome}/{:e}",
+            rung_clock.elapsed().as_secs_f64()
+        ));
         match meshed {
             Ok(finer) => {
                 let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(&finer);
                 let leaves_out = how_far_the_sum_can_be_off(view, &finer, rounding);
                 if the_sum_answers(finer_encloses, leaves_out) {
-                    probe_census(&format!(
-                        "CALL {probe_who} rungs {probe_rungs} above {probe_above_rungs} took {:?} above_took {probe_above_time:?} answered",
-                        probe_call.elapsed()
-                    ));
+                    probe_census(&probe_line);
                     this_rung.drain_into(log);
                     return Ok(finer_encloses);
                 }
@@ -3024,6 +3023,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 let handed_on = hand_on_a_refusal_that_found_the_space(why);
                 if handed_on.is_err() {
                     this_rung.drain_into(log);
+                    probe_census(&format!("{probe_line} HANDED"));
                 }
                 handed_on?;
                 break;
@@ -3031,10 +3031,8 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         }
         room /= 2.0;
     }
-    probe_census(&format!(
-        "CALL {probe_who} rungs {probe_rungs} above {probe_above_rungs} took {:?} above_took {probe_above_time:?} no-answer",
-        probe_call.elapsed()
-    ));
+    probe_line.push_str(" END");
+    probe_census(&probe_line);
     let (mesh, finest_encloses, rounding, mut its_log) = finest;
     if let Some((on_the_planes, off_by)) =
         what_it_encloses_moved_onto_its_planes(view, &mesh, finest_encloses, rounding)
@@ -3062,9 +3060,10 @@ fn probe_census(line: &str) {
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-clean-up-dead-sessions/72105a1f-afbf-4d21-9a32-03063939b145/scratchpad/census.log")
+        .open("/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-clean-up-dead-sessions/72105a1f-afbf-4d21-9a32-03063939b145/scratchpad/census2.log")
         .expect("the census file opens");
-    writeln!(file, "{line}").expect("the census line writes");
+    file.write_all(format!("{line}\n").as_bytes())
+        .expect("the census line writes");
 }
 
 /// How many times [`how_much_space_a_curved_solid_encloses`]'s own ladder has
@@ -8740,6 +8739,122 @@ mod tests {
             "the ladder asks a finer mesh at the top room and at most \
              HALVINGS_A_FOLD_IS_ASKED_DOWN_TO rungs under it, never more"
         );
+    }
+
+    #[test]
+    fn a_thin_bend_asks_no_room_eight_tubes_wide_once_a_mesh_strays_past_its_tube() {
+        let mut model = an_empty_model();
+        let bend = a_quarter_bend(&mut model, 100.0, 1.0);
+        let view = model.solid(bend).expect("this model made the key");
+        RUNGS_THE_SECOND_LADDER_HAS_ASKED.store(0, std::sync::atomic::Ordering::Relaxed);
+        let enclosed = how_much_space_a_curved_solid_encloses(
+            view,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            enclosed.as_ref().is_ok_and(|&space| space > 0.0),
+            "a bend encloses some space: {enclosed:?}"
+        );
+        assert_eq!(
+            RUNGS_THE_SECOND_LADDER_HAS_ASKED.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "probe"
+        );
+    }
+
+    /// A quarter of the ring of radius `ring` about `+z`, its tube `tube`
+    /// wide, from the cap on `y = 0` to the cap on `x = 0`: the bend
+    /// `tests/rings/mod.rs` describes, through the same builder.
+    fn a_quarter_bend(model: &mut Model, ring: f64, tube: f64) -> crate::SolidKey {
+        let skin = Torus::new(Axis::z(), ring, tube).expect("a tube narrower than its ring");
+        let inner = ring - tube;
+        let mut builder = SolidBuilder::new();
+        let start_corner = builder
+            .add_vertex(Point::new(inner, 0.0, 0.0))
+            .expect("a corner");
+        let end_corner = builder
+            .add_vertex(Point::new(0.0, inner, 0.0))
+            .expect("a corner");
+        let flat_through_the_middle =
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal");
+        let seam = builder
+            .add_edge(
+                start_corner,
+                end_corner,
+                EdgeRun::PartOfWhereItCrosses {
+                    and: Surface::Plane(flat_through_the_middle),
+                    picked_by: smallvec::smallvec![
+                        Picker::InsideAPipe(
+                            Cylinder::new(Axis::z(), ring).expect("the ring's own radius")
+                        ),
+                        Picker::from(
+                            HalfSpace::new(Vector::new(1.0, 1.0, 0.0), 0.0)
+                                .expect("a normal with a length")
+                        ),
+                    ],
+                },
+            )
+            .expect("the seam along the inner equator");
+        let start_circle = builder
+            .add_edge(
+                start_corner,
+                start_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("the circle of the first cap");
+        let end_circle = builder
+            .add_edge(
+                end_corner,
+                end_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("the circle of the second cap");
+        let mut cap = |facing: Vector, edge, turn| {
+            let plane = Plane::from_point_and_normal(Point::origin(), facing)
+                .expect("a coordinate direction is a unit normal");
+            let coedge = builder.add_coedge(edge, turn).expect("a coedge");
+            let wire = builder
+                .add_wire(&[DraftStep::Along(coedge)])
+                .expect("a wire");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a cap")
+        };
+        let start_cap = cap(
+            Vector::new(0.0, -1.0, 0.0),
+            start_circle,
+            Orientation::Forward,
+        );
+        let end_cap = cap(
+            Vector::new(-1.0, 0.0, 0.0),
+            end_circle,
+            Orientation::Reversed,
+        );
+        let round_the_wall: Vec<DraftStep> = [
+            (start_circle, Orientation::Reversed),
+            (seam, Orientation::Forward),
+            (end_circle, Orientation::Forward),
+            (seam, Orientation::Reversed),
+        ]
+        .into_iter()
+        .map(|(edge, turn)| DraftStep::Along(builder.add_coedge(edge, turn).expect("a coedge")))
+        .collect();
+        let wire = builder.add_wire(&round_the_wall).expect("a wire");
+        let side = builder
+            .add_face(Surface::Torus(skin), &[wire])
+            .expect("the wall");
+        builder
+            .add_shell(&[
+                (start_cap, Orientation::Forward),
+                (end_cap, Orientation::Forward),
+                (side, Orientation::Forward),
+            ])
+            .expect("a shell");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a bend described this way is a solid")
     }
 
     /// Row Q1890. The lens a ball makes poking `1/16` into a pipe of radius 5
