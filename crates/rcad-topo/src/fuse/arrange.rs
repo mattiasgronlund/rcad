@@ -3725,9 +3725,8 @@ impl<'f> Arrangement<'f> {
     /// comparison does not change between two asks. So it is this file having
     /// lost an order it had, which is the one thing here worth crashing over.
     ///
-    /// **Two clear places round a loop, one where it starts, that nothing
-    /// proves in order are not asked at all**
-    /// ([`Arrangement::either_way_round_cuts_the_same_arcs`]):
+    /// **Two clear places round a loop that nothing proves in order are not
+    /// asked at all** ([`Arrangement::either_way_round_cuts_the_same_arcs`]):
     /// boxes clear of each other hold two points, so there is nothing to fold,
     /// and asking would hand the policy an order nothing needs.
     ///
@@ -4283,10 +4282,9 @@ impl<'f> Arrangement<'f> {
     /// A closed crossing gets no hint: a cyclic order is not a total one until
     /// somewhere is called first, and its nodes are placed one at a time by the
     /// same proved comparison, from the crossing's own start (§34.4). **Two
-    /// clear places on it, one where it starts, that nothing proves in order
-    /// are left in the order they are numbered**, since either order cuts the
-    /// loop into the same two arcs
-    /// ([`Arrangement::either_way_round_cuts_the_same_arcs`]).
+    /// clear places on it that nothing proves in order are left in the order
+    /// they are numbered**, since either order cuts the loop into the same two
+    /// arcs ([`Arrangement::either_way_round_cuts_the_same_arcs`]).
     ///
     /// **The hint used to be the answer.** Every caller then read an order
     /// nothing had proved: [`Arrangement::merge_points_that_are_one_point`]
@@ -4364,9 +4362,8 @@ impl<'f> Arrangement<'f> {
         Ok(order)
     }
 
-    /// Whether the nodes on a crossing are two places round a loop, one of
-    /// them where the loop starts, that nothing asked without a policy puts in
-    /// order, and that need no order.
+    /// Whether the nodes on a crossing are two places round a loop that
+    /// nothing asked without a policy puts in order, and that need no order.
     ///
     /// **Two places on a loop cut it into the same two arcs whichever is
     /// called first.** Going forward from either, the next node is the other,
@@ -4387,30 +4384,36 @@ impl<'f> Arrangement<'f> {
     /// arcs come in the order they always did. A quadric is asked only along
     /// an axis, so not here.
     ///
-    /// **And only where one of the two boxes holds the start**, which is what
-    /// leaves the order open on the shape below: the step from the start to
-    /// a node that may be the start may be nothing, so the sweep straddles
-    /// nought however far round the other node is. A bar of radius 1/4
-    /// starting where its axis meets another's at a slant has its near cap cut
-    /// by the first pipe in a loop with two nodes on it: the cap's seam corner
-    /// and the other point the pipes touch at. The loop starts inside the
-    /// corner's `3.1e−13` box, which reads as far behind the start as ahead of
-    /// it, and all 30 certified fuses at 50° to 120° refused on that order
-    /// (Q1898, `a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`
+    /// **Wherever the loop starts.** The order round a loop is read from its
+    /// start, and two shapes leave it open there. Where one of the two boxes
+    /// holds the start, the step from the start to that node may be nothing,
+    /// so the sweep straddles nought however far round the other node is. A
+    /// bar of radius 1/4 starting where its axis meets another's at a slant
+    /// has its near cap cut by the first pipe in a loop with two nodes on it:
+    /// the cap's seam corner and the other point the pipes touch at. The loop
+    /// starts inside the corner's `3.1e−13` box, and all 30 certified fuses at
+    /// 50° to 120° refused on that order (Q1898,
+    /// `a_bar_starting_where_it_crosses_another_at_a_slant_answers_every_fuse`
     /// pins them answered).
     ///
-    /// Two boxes clear of the start leave the order open where the start lies
-    /// on the line through them, and those are left to the policy as before.
-    /// Seed `0fb776ff` of the `two_solids_fused_by_a_stranger` corpus is one: a
-    /// ball of radius 1 centred `5.4e−20` off a cube's face, at a working size
-    /// of 1. Its circle on that face crosses the face's edge at `z = 1.5e−39`
-    /// and `z = 2`, and is walked from the cube's corner `(0, 0, 0)`, a
-    /// rounding off the first. The tolerant policy folds the two places there,
-    /// 2 apart, and the union is refused `CannotTellTheCellsOfAFaceApart` in
-    /// milliseconds. Not asked, the fuse went on to mesh for 712 s before it
-    /// was refused `TwoPatchesOfTheMeshDrewTheSameSide`, and
-    /// `a_fused_draw_hands_its_provenance_back_through_the_door`, which fuses
-    /// that seed twice, took over 1100 s.
+    /// Where the start is clear of both boxes but on the line through them,
+    /// the sweep to each is nought too. A ball of radius 1 centred on a cube's
+    /// face `y = 0`, `0.1` in from its edge `x = y = 0`, is cut by the face
+    /// `x = 0` in a circle that crosses that edge twice, nearly 2 apart, and
+    /// is walked from its bottom. Asked, the tolerant policy's union was
+    /// refused `CannotTellTheCellsOfAFaceApart` and the certified one refused
+    /// the order `Undecidable` (Q2403,
+    /// `a_ball_centred_on_a_cubes_face_by_its_edge_unites_with_its_volume`
+    /// pins it answered, with the ball `0.1` either side of the edge and
+    /// `0.001` in).
+    ///
+    /// Q1898 had kept the second shape asked, since corpus seed `0fb776ff` of
+    /// `two_solids_fused_by_a_stranger` (the same ball `5.4e−20` off the
+    /// face) then went on to mesh for 712 s. The ladder of meshes is capped
+    /// since Q1869, so that seed is now refused
+    /// `TwoPatchesOfTheMeshDrewTheSameSide` in seconds under the tolerant
+    /// policy, and `Invalid::DynamicRangeTooWide` under the certified one,
+    /// since `5.4e−20` against 2 spans more than a model may.
     fn either_way_round_cuts_the_same_arcs(
         &self,
         crossing: usize,
@@ -4419,13 +4422,9 @@ impl<'f> Arrangement<'f> {
         let &[one, other] = on_it else {
             return Ok(false);
         };
-        let HowItRuns::RoundAClosedCurve { from, .. } = self.crossings[crossing].order else {
-            return Ok(false);
-        };
-        let [one_place, other_place] = [one, other].map(|node| self.nodes[node].point);
-        let one_holds_the_start =
-            boxes_overlap(one_place, from) || boxes_overlap(other_place, from);
-        if boxes_overlap(one_place, other_place) || !one_holds_the_start {
+        if !self.crossings[crossing].order.closes()
+            || boxes_overlap(self.nodes[one].point, self.nodes[other].point)
+        {
             return Ok(false);
         }
         let proved = |decided: Decision| !matches!(decided, Decision::Undecidable { .. });
