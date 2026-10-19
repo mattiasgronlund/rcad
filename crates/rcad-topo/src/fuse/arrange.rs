@@ -1878,6 +1878,11 @@ impl<'f> Arrangement<'f> {
                                 Self::side_of_a_plane_parallel_to_one_it_is_on(&three, plane)
                             })
                             .or_else(|| {
+                                corner.seam_plane.and_then(|seam| {
+                                    Self::side_of_a_plane_parallel_to(&seam, plane)
+                                })
+                            })
+                            .or_else(|| {
                                 Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
                             })
                             .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
@@ -5337,7 +5342,9 @@ impl<'f> Arrangement<'f> {
     ///
     /// A corner is read as the meet of the three `bake` solved it from
     /// ([`BakedCorner::solved_from`]), whose box holds where exactly those
-    /// three meet, and any other node only where it stands for one meet, as in
+    /// three meet, a seam corner as the meet of its two surfaces and its seam
+    /// plane ([`Arrangement::the_cut_through_the_loop_at`]), and any other node
+    /// only where it stands for one meet, as in
     /// [`Arrangement::as_the_quadric_says`].
     ///
     /// A half bar cut flush along its flat face by a block, the two turned 0.4
@@ -5568,9 +5575,50 @@ impl<'f> Arrangement<'f> {
     /// ([`BakedCorner::solved_from`]), whose box holds where exactly those
     /// three meet, and any other node only where it stands for one meet
     /// ([`Arrangement::the_one_meet_it_stands_for`]).
+    ///
+    /// **A seam corner is the meet of the two surfaces round it and its seam
+    /// plane** ([`BakedCorner::seam_plane`]), which crosses the circle the two
+    /// share at the corner by construction (§294.9). A plate and the round tab
+    /// at its corner, turned 0.25 about `z`, have the plate's wall an ulp or so
+    /// off the tab's moved seam plane and parallel to it number for number, so
+    /// the wall crosses the tab's bottom circle a rounding round from the
+    /// seam corner, inside the corner's box. Which of the two comes first round
+    /// the circle is what the two offsets say
+    /// ([`Arrangement::as_two_parallel_cuts_through_the_loop_say`]), and the
+    /// union that builds the plate was refused on it until the seam plane was
+    /// read here (Q2374).
+    ///
+    /// **Only where its box does not rule it off either of the two.** A bar's
+    /// top seam corner moved from `(3, 0, 10)` to `(3, 0, 11)` in a model's
+    /// bytes is still on its seam plane as stored, but a unit off its cap, and
+    /// is not where the plane crosses the top circle. Read as that point, it
+    /// was one point with the corner a block's face along the seam puts
+    /// there, and the bar less the block was refused
+    /// `TwoCurvesTouchWithoutCrossing` where it blames the order of the two
+    /// along the circle (§294.2).
     fn the_cut_through_the_loop_at(&self, at: usize, wound_as: &[Surface; 2]) -> Option<Plane> {
         let three = match self.nodes[at].vertex {
-            Some(_) => self.the_baked_corner_of(&self.nodes[at]).solved_from?,
+            Some(_) => {
+                let corner = self.the_baked_corner_of(&self.nodes[at]);
+                match corner.solved_from {
+                    Some(three) => three,
+                    None => {
+                        let (Some(seam), &[one, other]) =
+                            (corner.seam_plane, corner.around.as_slice())
+                        else {
+                            return None;
+                        };
+                        let ruled_off = |surface: &Surface| {
+                            let side = side_of_surface(surface, corner.point);
+                            side == Decision::Pos || side == Decision::Neg
+                        };
+                        if ruled_off(&one) || ruled_off(&other) {
+                            return None;
+                        }
+                        [one, other, Surface::Plane(seam)]
+                    }
+                }
+            }
             None => self.the_one_meet_it_stands_for(at)?.0,
         };
         if !wound_as.iter().all(|surface| three.contains(surface)) {
@@ -9399,7 +9447,21 @@ impl<'f> Arrangement<'f> {
     /// one ulp further out: the block's placement is composed with the block's
     /// own shift, and rounds differently (§294.23). Every corner of the flat
     /// face is a box `6e−15` wide that both planes run through, and every fuse
-    /// of the pair was refused for it (Q2043).
+    /// of the pair was refused for it (Q2043). Why two offsets are enough is
+    /// [`Arrangement::side_of_a_plane_parallel_to`]'s to say.
+    fn side_of_a_plane_parallel_to_one_it_is_on(
+        three: &[Surface; 3],
+        partner: &Plane,
+    ) -> Option<Decision> {
+        three
+            .iter()
+            .filter_map(Surface::as_plane)
+            .find_map(|flat| Self::side_of_a_plane_parallel_to(flat, partner))
+    }
+
+    /// Which side of `partner` every point of the plane `on` lies, where the
+    /// two have one normal, or one the other's turned round, number for
+    /// number. `None` where they are not parallel that exactly.
     ///
     /// **Every point of a plane is on one side of a plane parallel to it.** A
     /// point `p` of the plane `n·p = d` gives `n·p − e = d − e` for `partner`'s
@@ -9407,29 +9469,34 @@ impl<'f> Arrangement<'f> {
     /// the normal `−n`, which [`Plane::reversed`] writes as `n` with the offset
     /// `−d`. So the side is which of two `f64`s is the larger, decided exactly
     /// and never divided, and nought only where the two are one plane.
-    fn side_of_a_plane_parallel_to_one_it_is_on(
-        three: &[Surface; 3],
-        partner: &Plane,
-    ) -> Option<Decision> {
+    ///
+    /// **A seam corner is asked this of its seam plane too.** A corner read
+    /// out of the model on a pipe's wall is on its moved seam plane by
+    /// construction ([`BakedCorner::seam_plane`], §294.9), as surely as a
+    /// solved corner is on the planes it was solved from. A plate and the round
+    /// tab at its corner, `add_round_bar(3, 2)` at `(10, 10, 0)`, both turned
+    /// 0.25 about `z`, have the tab's bottom seam corner on the line the
+    /// plate's wall `y = 10` stands on. The wall and the tab's moved seam plane
+    /// have one normal bit for bit, and the seam plane's offset is an ulp or
+    /// so off the wall's, since the tab's shift composed with the turn rounds
+    /// differently. The corner's box is `9e−13` wide and the wall runs through
+    /// it, and the union that builds the plate was refused at 40 of 59 turns
+    /// in steps of 0.05 (Q2374).
+    fn side_of_a_plane_parallel_to(on: &Plane, partner: &Plane) -> Option<Decision> {
         let normal = partner.normal().components();
-        three.iter().find_map(|flat| {
-            let Surface::Plane(flat) = flat else {
-                return None;
-            };
-            let parallel = [*flat, flat.reversed()]
-                .into_iter()
-                .find(|one| one.normal().components() == normal)?;
-            if !normal.iter().all(|component| component.is_finite())
-                || !parallel.offset().is_finite()
-                || !partner.offset().is_finite()
-            {
-                return None;
-            }
-            Some(match parallel.offset().partial_cmp(&partner.offset())? {
-                Ordering::Greater => Decision::Pos,
-                Ordering::Less => Decision::Neg,
-                Ordering::Equal => Decision::Zero,
-            })
+        let parallel = [*on, on.reversed()]
+            .into_iter()
+            .find(|one| one.normal().components() == normal)?;
+        if !normal.iter().all(|component| component.is_finite())
+            || !parallel.offset().is_finite()
+            || !partner.offset().is_finite()
+        {
+            return None;
+        }
+        Some(match parallel.offset().partial_cmp(&partner.offset())? {
+            Ordering::Greater => Decision::Pos,
+            Ordering::Less => Decision::Neg,
+            Ordering::Equal => Decision::Zero,
         })
     }
 

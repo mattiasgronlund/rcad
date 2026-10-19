@@ -25,8 +25,9 @@
 //!   is cut away was never more than a cached sample of it.
 //! - **Where a partner's face runs through where the corner should be**, the
 //!   fuse puts a new corner there and cannot tell it from the moved one. It
-//!   refuses, as `Undecidable` or as `CannotTellTheCellsOfAFaceApart`, which
-//!   name the arithmetic and the arrangement and not the file.
+//!   refuses, as `Undecidable`, as `CannotTellTheCellsOfAFaceApart` or as
+//!   `ResultIsNotManifold`, which name the arithmetic and the arrangement and
+//!   not the file.
 //!
 //! # What each family gave
 //!
@@ -41,18 +42,20 @@
 //!   placement gives, with three differences. Turned and shifted, the fuse's
 //!   refusal of the corner moved off the cap carries a distance of
 //!   `0.9999999999999982` where `validate`'s carries `1.0`: the same refusal,
-//!   the distance only to rounding. Turned and shifted, the sound bar cut
-//!   along its seam is `Undecidable` on `side of plane`, so every corner
-//!   moved there is too. The point it asks about is a box `2.8e-13` either
-//!   way round where the bottom seam corner `(3, 0, 0)` lands, on the block's
-//!   face give or take an ulp. That is the sound bar's refusal, not an answer
-//!   about the moved corner. Turned alone, the same cut answers, because the
-//!   block's face is the bar's seam plane turned to the bit and the corner is
-//!   taken as on it by construction (§294.9); the corner moved a quarter turn
-//!   round then gives the sound answer to a rounding rather than to the bit.
-//!   Shifted alone, the sound bar answers, because a corner moved by a shift
-//!   that rounds nothing is handed on exact (Q509). Before Q509 it refused
-//!   `side of plane` there as well.
+//!   the distance only to rounding. Turned, the sound bar cut along its seam
+//!   answers, because the block's face is the bar's seam plane turned to the
+//!   bit and the corner is taken as on it by construction (§294.9); the corner
+//!   moved a quarter turn round then gives the sound answer to a rounding
+//!   rather than to the bit. Turned and shifted, the same cut answers the
+//!   same way, and the corner moved off the wall refuses `ResultIsNotManifold`
+//!   rather than `CannotTellTheCellsOfAFaceApart`. There the block's face is
+//!   an ulp off the bar's seam plane moved, with one normal to the bit, so the
+//!   bottom seam corner `(3, 0, 0)`'s side of it is which offset is the larger
+//!   (Q2374). Until Q2374 the fuse asked a box `2.8e-13` either way round
+//!   where that corner lands instead, and the sound bar and every moved
+//!   corner refused `side of plane`. Shifted alone, the sound bar answers,
+//!   because a corner moved by a shift that rounds nothing is handed on exact
+//!   (Q509). Before Q509 it refused `side of plane` there as well.
 //! - **A tolerant policy**, `Policy::tolerant(100.0)`, on the bar at no
 //!   placement: every fuse as under `certified`, except the corner moved off
 //!   the cap in a cut along the seam. That one refuses with
@@ -108,14 +111,16 @@
 //!   `26π/3`, and the corners moved off the wall and off the cap give their
 //!   unturned outcomes.
 //!
-//!   **Turned and then shifted, it is the bar's case again** (§294.13). Under
-//!   `certified` every corner refuses `side of plane` at the box round where
-//!   the bottom seam corner lands, because the block's face is one ulp off the
-//!   moved seam plane, as the bar's is, though the other way. Under
-//!   `tolerant(100)` it answers, as the bar does: half the frustum, `26π/3`,
-//!   from the sound frustum and the corner moved a quarter turn round, and the
-//!   unturned outcomes from the corners moved off the wall and off the cap.
-//!   Until Q1405 the sound frustum refused `CannotNameWhichPieceOfACrossingThisIs`
+//!   **Turned and then shifted, the block's face is one ulp off the moved
+//!   seam plane, as the bar's is, though the other way** (§294.13). Since
+//!   Q2374 the bottom seam corner's side of it is read off the two offsets, as
+//!   the bar's is, and under `certified` the sound frustum and the corner
+//!   moved a quarter turn round refuse `side of a half-space` at the box round
+//!   where the apex lands instead; until then every corner refused `side of
+//!   plane` at the bottom seam corner. Under `tolerant(100)` it answers, as
+//!   the bar does: half the frustum, `26π/3`, from the sound frustum and the
+//!   corner moved a quarter turn round. Under both policies the corners moved
+//!   off the wall and off the cap refuse `ResultIsNotManifold`. Until Q1405 the sound frustum refused `CannotNameWhichPieceOfACrossingThisIs`
 //!   there: meshing its answer, the walk along the cut asked a hyperbola's
 //!   vertex a rounding from the cone's apex which side of the apex it is on, to
 //!   pick a branch the ends already pick (§294.14). The ends pick it now
@@ -370,6 +375,7 @@ enum Outcome {
     Undecidable(&'static str),
     CannotTellTheCellsOfAFaceApart,
     TwoCurvesTouchWithoutCrossing,
+    ResultIsNotManifold,
 }
 
 #[test]
@@ -638,37 +644,70 @@ fn a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned() {
     }
 }
 
-/// **This is the sound bar's refusal, not an answer about a moved corner.**
-/// Turned and then shifted, the bar's bottom seam corner `(3, 0, 0)` lands on
-/// the block's face give or take a rounding and is handed on as a box
-/// `2.8e-13` either way round where it lands, so which side of that face it is
-/// on comes out `Undecidable`. The face is not the bar's seam plane moved: the
-/// shift rounds the two offsets apart by an ulp, so the face crosses the
-/// bottom circle an ulp from the corner, and nothing says the two are one
-/// point (§294.9). The sound bar refuses that way, and every moved corner with
-/// it. Turned alone it answers
-/// (`a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned`),
-/// and shifted alone, which is Q509's exact corner.
+/// **Turned and then shifted, the bar cut along its seam gives what the turned
+/// bar gives, shifted** (Q2374). The bar's bottom seam corner `(3, 0, 0)`
+/// lands on the block's face give or take a rounding and is handed on as a box
+/// `2.8e-13` either way round where it lands. The face is not the bar's seam
+/// plane moved: the shift rounds the two offsets apart by an ulp. But the two
+/// have one normal to the bit, and the corner is on its seam plane by
+/// construction (§294.9), so which side of the face it is on is which of the
+/// two offsets is the larger. Until Q2374 the fuse asked the box instead, and
+/// the sound bar and every moved corner refused `side of plane`.
+///
+/// The sound bar less the half past its seam, and with it, is half the bar,
+/// `45π`, and so it is less and with the half short of its seam; its corners
+/// are the turned bar's shifted, to a rounding. The corner moved a quarter turn
+/// round is cut away and gives the sound answer to a rounding. Moved off the
+/// cap it refuses the order along a crossing, as turned alone; moved off the
+/// wall it refuses `ResultIsNotManifold`, where turned alone it refuses
+/// `CannotTellTheCellsOfAFaceApart`
+/// (`a_turned_bar_cut_along_its_seam_gives_what_the_unturned_bar_gives_turned`).
 #[test]
-fn a_turned_sound_bar_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is() {
+fn a_turned_and_shifted_bar_cut_along_its_seam_gives_what_the_turned_bar_gives_shifted() {
     let policy = Policy::certified();
+    let half_the_bar = PI * RADIUS * RADIUS * HEIGHT / 2.0;
     let bar = Shape::Bar(the_turn_then_the_shift());
     for rule in [Rule::Difference, Rule::Intersection] {
-        for moved_to in [
-            WHERE_THE_BAR_PUTS_IT,
-            OFF_THE_WALL,
-            OFF_THE_CAP,
-            A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL,
-        ] {
-            check(
-                bar,
-                moved_to,
-                THE_HALF_PAST_THE_SEAM,
-                rule,
-                &policy,
-                Outcome::Undecidable("side of plane"),
-            );
+        let answer_of = |shape: Shape, moved_to, partner| {
+            fuse(shape, moved_to, partner, rule, &policy).unwrap_or_else(|why| {
+                panic!(
+                    "{shape:?} with its corner at {moved_to:?}, {partner:?} {rule:?}, refused: \
+                     {why:?}"
+                )
+            })
+        };
+        for partner in [THE_HALF_PAST_THE_SEAM, THE_HALF_SHORT_OF_THE_SEAM] {
+            let sound = answer_of(bar, WHERE_THE_BAR_PUTS_IT, partner);
+            let turned = answer_of(Shape::Bar(the_turn()), WHERE_THE_BAR_PUTS_IT, partner);
+            holds(&sound, half_the_bar, rule, &policy);
+            the_same_corners_to_a_rounding(&sound, &turned, &the_shift(), rule);
         }
+
+        let sound = answer_of(bar, WHERE_THE_BAR_PUTS_IT, THE_HALF_PAST_THE_SEAM);
+        let cut_away = answer_of(
+            bar,
+            A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL,
+            THE_HALF_PAST_THE_SEAM,
+        );
+        holds(&cut_away, half_the_bar, rule, &policy);
+        the_same_corners_to_a_rounding(&cut_away, &sound, &Isometry::identity(), rule);
+
+        check(
+            bar,
+            OFF_THE_WALL,
+            THE_HALF_PAST_THE_SEAM,
+            rule,
+            &policy,
+            Outcome::ResultIsNotManifold,
+        );
+        check(
+            bar,
+            OFF_THE_CAP,
+            THE_HALF_PAST_THE_SEAM,
+            rule,
+            &policy,
+            Outcome::Undecidable("order along a crossing"),
+        );
     }
 }
 
@@ -989,27 +1028,30 @@ fn a_turned_frustum_cut_along_its_seam_gives_what_the_unturned_frustum_gives_tur
     }
 }
 
-/// **Turned and then shifted, the frustum cut along its seam is the round
-/// bar's case again** (§294.13). Under `certified` the sound frustum and every
-/// moved corner refuse `side of plane`, with one record, on a box `4.6e-13`
-/// across round where the bottom seam corner `(1, 0, 2)` lands, which the
-/// block's face along the seam straddles. The turned and shifted bar refuses
-/// the same way round its own bottom seam corner
-/// (`a_turned_sound_bar_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`).
+/// **Turned and then shifted, the frustum cut along its seam gets past its
+/// bottom seam corner, as the bar does, and refuses at its apex** (§294.13,
+/// Q2374). Under `certified` the sound frustum and the corner moved a quarter
+/// turn round refuse `side of a half-space`, with two records, each on a box
+/// `2e-13` across round where the apex `(0, 0, 0)` lands, which the block's
+/// face along the seam straddles. The corners moved off the wall and off the
+/// cap refuse `ResultIsNotManifold`.
 ///
-/// The cause is the bar's too. The face has the normal of the frustum's seam
-/// plane, moved and turned round, bit for bit, and an offset one ulp further
-/// out along it, because the block's placement is the shift and the turn
-/// composed with the block's own shift to `(-5, 0, 1)`, and that rounds. So
-/// the face is not the seam plane, the corner is not taken as on it unasked
-/// (§294.12), and the box is asked and straddles it. The face runs along the
-/// frustum's axis and misses it: the apex is behind it, so the block reaches a
-/// rounding past the axis, and the face crosses the cone in a hyperbola, whose
-/// two branches `intersect` names. The bar's face is one ulp the other way
-/// (§294.9). Whether an answer holding the corner and the face's crossing with
-/// the bottom circle a rounding apart can be had at all is Q913's to pin.
+/// The face has the normal of the frustum's seam plane, moved and turned
+/// round, bit for bit, and an offset one ulp further out along it, because the
+/// block's placement is the shift and the turn composed with the block's own
+/// shift to `(-5, 0, 1)`, and that rounds. So the face is not the seam plane,
+/// and the corner is not taken as on it unasked (§294.12). Since Q2374 the
+/// bottom seam corner's side of the face is which of the two offsets is the
+/// larger, as the turned and shifted bar's is
+/// (`a_turned_and_shifted_bar_cut_along_its_seam_gives_what_the_turned_bar_gives_shifted`);
+/// until then every corner here refused `side of plane`, on a box `4.6e-13`
+/// across round where the bottom seam corner `(1, 0, 2)` lands. The face runs
+/// along the frustum's axis and misses it: the apex is behind it, so the block
+/// reaches a rounding past the axis, and the face crosses the cone in a
+/// hyperbola, whose two branches `intersect` names. The bar's face is one ulp
+/// the other way (§294.9).
 #[test]
-fn a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is()
+fn a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_a_half_space_its_apex_is()
  {
     let placement = the_turn_then_the_shift();
     let (mut model, frustum) = read_back(Shape::Frustum(placement), WHERE_THE_FRUSTUM_PUTS_IT);
@@ -1053,14 +1095,10 @@ fn a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the
         assert_eq!(branches.len(), 2, "{policy:?}: its two branches");
     }
 
-    let where_the_corner_lands = placement
-        .apply_to_point(Point::new(1.0, 0.0, 2.0))
-        .coordinates();
+    let where_the_apex_lands = placement.apply_to_point(Point::origin()).coordinates();
     for rule in [Rule::Difference, Rule::Intersection] {
         for moved_to in [
             WHERE_THE_FRUSTUM_PUTS_IT,
-            THE_FRUSTUMS_CORNER_OFF_THE_WALL,
-            THE_FRUSTUMS_CORNER_OFF_THE_CAP,
             THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND,
         ] {
             let case = format!("{rule:?} with the top corner at {moved_to:?}");
@@ -1074,42 +1112,56 @@ fn a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the
             let Err(Error::Undecidable { records }) = refused else {
                 panic!("{case}: {:?}", refused.map(|answer| answer.solids.len()));
             };
-            let [record] = records.records() else {
-                panic!("{case}: one record, {records:?}");
+            let [_, _] = records.records() else {
+                panic!("{case}: two records, {records:?}");
             };
-            assert_eq!(record.predicate(), "side of plane", "{case}");
-            let [corner] = record.inputs() else {
-                panic!("{case}: one point asked about, {record:?}");
-            };
-            assert!(corner.uncertainty() < 5e-13, "{case}: {corner:?}");
-            assert!(
-                corner
-                    .enclosure()
-                    .iter()
-                    .zip(where_the_corner_lands)
-                    .all(|(side, at)| side.lo() <= at && at <= side.hi()),
-                "{case}: {corner:?} holds {where_the_corner_lands:?}"
-            );
-            assert!(
-                matches!(face.side_of_point(*corner), Decision::Undecidable { .. }),
-                "{case}: the block's face straddles {corner:?}"
+            for record in records.records() {
+                assert_eq!(record.predicate(), "side of a half-space", "{case}");
+                let [apex] = record.inputs() else {
+                    panic!("{case}: one point asked about, {record:?}");
+                };
+                assert!(apex.uncertainty() < 5e-13, "{case}: {apex:?}");
+                assert!(
+                    apex.enclosure()
+                        .iter()
+                        .zip(where_the_apex_lands)
+                        .all(|(side, at)| side.lo() <= at && at <= side.hi()),
+                    "{case}: {apex:?} holds {where_the_apex_lands:?}"
+                );
+                assert!(
+                    matches!(face.side_of_point(*apex), Decision::Undecidable { .. }),
+                    "{case}: the block's face straddles {apex:?}"
+                );
+            }
+        }
+        for moved_to in [
+            THE_FRUSTUMS_CORNER_OFF_THE_WALL,
+            THE_FRUSTUMS_CORNER_OFF_THE_CAP,
+        ] {
+            check(
+                Shape::Frustum(placement),
+                moved_to,
+                THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
+                rule,
+                &Policy::certified(),
+                Outcome::ResultIsNotManifold,
             );
         }
     }
 }
 
 /// **Under `tolerant(100)` the turned and shifted frustum cut along its seam
-/// answers, as the turned and shifted bar does** (§294.15, Q1405). The policy
-/// takes the box round the bottom seam corner as on the block's face, which
-/// `certified` cannot tell
-/// (`a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_the_plane_its_corner_is`).
+/// answers, as the turned and shifted bar does** (§294.15, Q1405), where
+/// `certified` cannot tell which side of a half-space the apex is
+/// (`a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_a_half_space_its_apex_is`).
 /// The sound frustum answers both rules with half the frustum, `26π/3` on a
 /// fine mesh, its whole model validates, and its corners are the turned
 /// frustum's shifted, to a rounding. The corner moved a quarter turn round is
 /// cut away and gives the sound answer to a rounding. The corners moved off the
-/// wall and off the cap give `CannotTellTheCellsOfAFaceApart`, as at every
-/// placement tried. The bar, placed the same way and cut by the half past its
-/// seam, is half the bar under both rules.
+/// wall and off the cap give `ResultIsNotManifold`, as under `certified`, where
+/// turned alone they give `CannotTellTheCellsOfAFaceApart` (Q2374). The bar,
+/// placed the same way and cut by the half past its seam, is half the bar
+/// under both rules.
 ///
 /// **Until Q1405 the sound frustum and the corner moved a quarter turn round
 /// refused `CannotNameWhichPieceOfACrossingThisIs`** (§294.13, §294.14), when
@@ -1176,7 +1228,7 @@ fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answe
                 THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
                 rule,
                 &policy,
-                Outcome::CannotTellTheCellsOfAFaceApart,
+                Outcome::ResultIsNotManifold,
             );
         }
     }
@@ -1549,7 +1601,8 @@ fn check(
         }
         Outcome::Undecidable(_)
         | Outcome::CannotTellTheCellsOfAFaceApart
-        | Outcome::TwoCurvesTouchWithoutCrossing => {
+        | Outcome::TwoCurvesTouchWithoutCrossing
+        | Outcome::ResultIsNotManifold => {
             refuses_as(shape, moved_to, partner, rule, policy, outcome);
         }
     }
@@ -1583,6 +1636,7 @@ fn refuses_as(
         Outcome::TwoCurvesTouchWithoutCrossing => {
             matches!(refused, Error::TwoCurvesTouchWithoutCrossing { .. })
         }
+        Outcome::ResultIsNotManifold => matches!(refused, Error::ResultIsNotManifold { .. }),
         Outcome::ItBlamesItself | Outcome::TheSoundAnswer => {
             unreachable!("{refusal:?} is not a refusal")
         }

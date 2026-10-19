@@ -241,6 +241,8 @@ pub mod a_plane_across_a_cone;
 pub mod a_plane_face_cut_by_a_cone_it_crosses_in_an_ellipse;
 #[path = "a_plane_is_never_one_surface_with_a_curved_face.rs"]
 pub mod a_plane_is_never_one_surface_with_a_curved_face;
+#[path = "a_plate_and_its_round_corner_tab_unite_at_every_turn.rs"]
+pub mod a_plate_and_its_round_corner_tab_unite_at_every_turn;
 #[path = "a_plate_cut_by_a_whole_bend.rs"]
 pub mod a_plate_cut_by_a_whole_bend;
 #[path = "a_plate_with_a_hole_beside_a_cut.rs"]

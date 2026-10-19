@@ -333,8 +333,13 @@ pub(crate) struct BakedCorner {
     /// **Kept apart from `around`, and never asked.** Every surface in
     /// `around` meets here or was asked about the corner, and the arrangement
     /// reads three planes from it as planes the corner was solved among; this
-    /// one is neither. [`BakedCorner::is_on_by_construction`] is the one
-    /// reader, and says why it may be taken as through the corner.
+    /// one is neither. [`BakedCorner::is_on_by_construction`] says why it may
+    /// be taken as through the corner. The arrangement reads it twice more,
+    /// since the corner is on it: which side of a plane parallel to it the
+    /// corner is, from the two offsets (`Arrangement::side_of_a_plane_parallel_to`),
+    /// and the corner as the meet of its two surfaces and this plane, where its
+    /// box does not rule it off either surface
+    /// (`Arrangement::the_cut_through_the_loop_at`, Q2374).
     pub(crate) seam_plane: Option<Plane>,
 }
 
@@ -395,9 +400,11 @@ impl BakedCorner {
     /// corner until this held for cones too.
     ///
     /// **Bit for bit, or not at all.** A plane an ulp from the seam plane is
-    /// a different plane, crossing the circle an ulp from the corner, and that
-    /// is still asked: the bar turned and then shifted meets a block face whose
-    /// offset is one ulp off the seam plane's, and refuses as it did.
+    /// a different plane, crossing the circle an ulp from the corner, and is
+    /// not taken as through it: the bar turned and then shifted meets a block
+    /// face whose offset is one ulp off the seam plane's. The two have one
+    /// normal, so which side of that face the corner is, the arrangement reads
+    /// from the two offsets (Q2374).
     pub(crate) fn is_on_by_construction(&self, surface: &Surface) -> bool {
         self.around.iter().any(|round| one_surface(round, surface))
             || self.seam_plane.is_some_and(|seam| {
