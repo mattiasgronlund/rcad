@@ -2008,12 +2008,51 @@ fn is_one_circle_cut_in_two(
 ///
 /// [`what_a_face_cut_by_a_ball_and_a_pipe_holds`] is asked before any of the
 /// steps above, and answers only a face with a piece of the loop a ball and a
-/// pipe cross in among its sides (row Q1863). The steps above refuse every such
-/// face: [`the_way_a_side_runs`] reads a piece of a crossing with two ends
-/// through [`the_way_into_an_arc`], which needs one of the two surfaces flat,
-/// or through [`the_way_into_an_arc_that_does_not_close`], which needs a cone,
+/// pipe cross in among its sides (row Q1863).
+/// [`what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds`] is asked next,
+/// and answers only a face on a pipe with a piece of a half ellipse where a
+/// pipe of its width crosses it among its sides (row Q2460), as the next
+/// heading sets out. The steps above refuse every such face of either kind:
+/// [`the_way_a_side_runs`] reads a piece of a crossing with two ends through
+/// [`the_way_into_an_arc`], which needs one of the two surfaces flat, or
+/// through [`the_way_into_an_arc_that_does_not_close`], which needs a cone,
 /// and [`is_a_piece_of_a_ruling`] needs a plane and a cone, so such a side is
 /// refused by name. So no face the steps answered is answered differently now.
+///
+/// # A pipe face crossed by a pipe of its width is counted along a ruling
+///
+/// Two pipes of one width whose axes meet at `c` cross in four half ellipses,
+/// each on one of the two planes through `c` that halve the angle between the
+/// axes. A face on one of them whose sides are pieces of those halves, rulings,
+/// arcs of planes across the axis and whole curves such planes cut is held
+/// where the ruling through `point`, the line of the pipe through it along the
+/// axis, crosses an odd number of its sides above `point`. That count is a true
+/// one because:
+///
+/// - **Every side but a ruling lies on a plane across the axis**, one whose
+///   normal is not square to it. An arc's plane is asked that, and a half's
+///   plane is `(X − c)·(u/a ± e/b) = 0`, with `u` and `e` the axes and `a` and
+///   `b` their lengths, whose normal reads `a·(1 ± k)` against `u`, `k` being
+///   the cosine between the axes, which is never `±1`. So each such side meets
+///   a ruling once at most, where the ruling crosses its plane, and is never
+///   tangent to one: where a ruling meets it, the ruling goes from one side of
+///   the face's boundary to the other.
+/// - **The face is bounded**, so far enough up the ruling is off it, and the
+///   number of sides the ruling crosses above `point` says whether `point` is
+///   on it.
+/// - **A ruling side meets no other ruling, and a seam, where the face meets
+///   itself, is no boundary**, so neither is counted.
+/// - **Which rulings a side meets is read seen down the axis**, where the pipe
+///   is a circle and every side across the axis an arc of it. An arc of a
+///   plane is on the side of its chord its picker says, through
+///   [`the_way_into_an_arc`]. A piece of a half needs no picker: seen down the
+///   axis a half runs from `c + r·n` to `c − r·n`, `n` square to both axes,
+///   which is half a turn round the circle, so a piece is the short arc on the
+///   far side of its chord from the axis. A whole half, whose chord runs
+///   through the axis, could be either, and such a face is left to the steps.
+/// - **A ruling through a corner** is counted a hair either way round the axis
+///   as well, as [`how_often_the_ruling_above_a_point_is_crossed`] sets out,
+///   since a ray the fuse fires lands on one wherever the shape is symmetric.
 ///
 /// # Errors
 ///
@@ -2031,6 +2070,9 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
     if let Some(held) = what_a_face_cut_by_a_ball_and_a_pipe_holds(solid, face, point)? {
+        return Ok(held);
+    }
+    if let Some(held) = what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds(solid, face, point)? {
         return Ok(held);
     }
     let surface = face.stored_surface();
@@ -2106,6 +2148,547 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
         }
     }
+}
+
+/// Whether a face on a pipe, cut by another pipe of its width whose axis meets
+/// its own, holds `point`; `None` for any other face, which the steps of
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`] then take as before.
+///
+/// Two pipes of one width whose axes meet at `c` cross in four half ellipses,
+/// each on one of the two planes through `c` that halve the angle between the
+/// axes (`four_half_ellipses_where_two_pipes_of_one_width_meet` in rcad-geom).
+/// A bar fused across where two bars on one pipe meet leaves faces with pieces
+/// of those halves among their sides (row Q2460), and no picker on such a piece
+/// says which of the two arcs between its ends it is, so every point whose ray
+/// met one was refused before.
+///
+/// The face is read along the **ruling** through `point`, the line on the pipe
+/// along its axis, and counted as
+/// [`what_a_face_cut_by_part_of_a_crossing_holds`] sets out under its heading
+/// for this family. Every side is one of:
+///
+/// - **A ruling**: a straight side, or one on a plane along the axis. It never
+///   crosses another ruling, so it is never counted.
+/// - **An arc on a plane across the axis**, between two corners. Which arc it
+///   is comes from [`the_way_into_an_arc`], as everywhere else.
+/// - **The whole curve such a plane cuts**, from a corner back to it.
+/// - **A piece of a half**, on the other pipe. Seen down this pipe's axis a
+///   half runs from `c + r·n` to `c − r·n`, `n` square to both axes, which is
+///   half a turn round a circle centred on the axis, `c` being on it. So a
+///   piece is the short arc between its ends, on the far side of its chord
+///   from the axis, and needs no picker. A piece whose chord runs through the
+///   axis is a whole half, which could be either, and is left to the steps.
+///
+/// A seam, where the face meets itself, is no side and is passed over. A face
+/// with any other side, with no piece of a half, or placed anywhere but where
+/// it is stored, or beside a face that is, is left to the steps.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when which side of a chord seen down the axis,
+/// which side of a side's plane, or where along a ruling side `point` is could
+/// not be settled, and whatever [`the_face_across`] gives.
+fn what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    point: PredicatePoint,
+) -> Result<Option<OnAFace>> {
+    let mine = face.stored_surface();
+    let Surface::Cylinder(pipe) = mine else {
+        return Ok(None);
+    };
+    if face.location() != rcad_geom::Isometry::identity() {
+        return Ok(None);
+    }
+    let mut rulings = Vec::new();
+    let mut curved = Vec::new();
+    for coedge in face.wires().flat_map(WireView::coedges) {
+        let edge = coedge.edge();
+        let Some(across) = the_face_across(solid, face, edge)? else {
+            continue;
+        };
+        if across.location() != face.location() {
+            return Ok(None);
+        }
+        let [start, end] = [coedge.start().key(), coedge.end().key()];
+        let ends = [start, end].map(|corner| where_it_is_stored(solid, corner));
+        let side = a_side_of_a_pipe_face_crossed_by_a_pipe(
+            &pipe,
+            edge.stored_run(),
+            &across.stored_surface(),
+            start == end,
+            ends,
+        );
+        match side {
+            Some(PipeSide::Ruling) => rulings.push(ends),
+            Some(PipeSide::Curved(side)) => curved.push(side),
+            None => return Ok(None),
+        }
+    }
+    if !curved
+        .iter()
+        .any(|side| matches!(side.lies_on, CrossingOf::AHalf { .. }))
+    {
+        return Ok(None);
+    }
+    how_often_the_ruling_above_a_point_is_crossed(&mine, &pipe, &curved, &rulings, point).map(Some)
+}
+
+/// A side of a face on a pipe crossed by a pipe of its width, as
+/// [`what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds`] reads it.
+enum PipeSide {
+    /// Along the pipe's axis.
+    Ruling,
+    /// Across the pipe's axis, meeting each ruling once at most.
+    Curved(CurvedSide),
+}
+
+/// A side across a pipe's axis: which rulings it meets, and the curve it is on.
+struct CurvedSide {
+    /// The side's two ends, where they are stored, and the sign a point whose
+    /// ruling the side meets reads against the chord between them, seen down
+    /// the axis; `None` for a side right round a closed curve, which meets
+    /// every ruling.
+    reach: Option<([Point; 2], Decision)>,
+    lies_on: CrossingOf,
+}
+
+/// The curve a [`CurvedSide`] is a piece of.
+enum CrossingOf {
+    /// Where `flat` cuts the pipe, `leans` being the sign of its normal against
+    /// the pipe's axis, never zero.
+    APlane { flat: Plane, leans: Decision },
+    /// One half of where `theirs`, a pipe of the same width whose axis meets
+    /// this one's, crosses the pipe, on the plane that `turn`, `1` or `-1`,
+    /// names in [`how_far_above_a_point_a_half_crosses_its_ruling`].
+    AHalf {
+        theirs: rcad_geom::Cylinder,
+        turn: f64,
+    },
+}
+
+/// What `run`, a side of a face on `pipe` with `across` on its other side,
+/// is, as [`PipeSide`] reads it; `None` for a side none of its kinds is, so
+/// that the face is not of this family.
+fn a_side_of_a_pipe_face_crossed_by_a_pipe(
+    pipe: &rcad_geom::Cylinder,
+    run: &EdgeRun,
+    across: &Surface,
+    closes: bool,
+    ends: [Point; 2],
+) -> Option<PipeSide> {
+    if matches!(run, EdgeRun::Straight) {
+        return Some(PipeSide::Ruling);
+    }
+    let mine = Surface::Cylinder(*pipe);
+    let other = match which_two_surfaces_a_run_is_between(run, [&mine, across]) {
+        [one, other] | [other, one] if one == mine && other != mine => other,
+        [_, _] => return None,
+    };
+    let up = exactly(pipe.axis().direction().components());
+    if let Surface::Plane(flat) = other {
+        if lies_along_the_axis(pipe, &flat) {
+            return Some(PipeSide::Ruling);
+        }
+        let leans = dot(exactly(flat.normal().components()), up).sign();
+        if !matches!(leans, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        let lies_on = CrossingOf::APlane { flat, leans };
+        if closes {
+            return Some(PipeSide::Curved(CurvedSide {
+                reach: None,
+                lies_on,
+            }));
+        }
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run else {
+            return None;
+        };
+        let into = the_way_into_an_arc(
+            &mine,
+            &other,
+            ends.map(|at| PredicatePoint::from(at.coordinates())),
+            picked_by,
+        )?;
+        let [from, to] = ends.map(|at| exactly(at.coordinates()));
+        let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
+        let keeps = dot(up, cross(chord, into)).sign();
+        return matches!(keeps, Decision::Pos | Decision::Neg).then_some(PipeSide::Curved(
+            CurvedSide {
+                reach: Some((ends, keeps)),
+                lies_on,
+            },
+        ));
+    }
+    let Surface::Cylinder(theirs) = other else {
+        return None;
+    };
+    if closes
+        || theirs.radius() != pipe.radius()
+        || !matches!(run, EdgeRun::PartOfWhereItCrosses { .. })
+    {
+        return None;
+    }
+    let along = exactly(theirs.axis().direction().components());
+    let square_to_both = cross(up, along);
+    if !square_to_both
+        .iter()
+        .any(|part| matches!(part.sign(), Decision::Pos | Decision::Neg))
+    {
+        return None;
+    }
+    let [my_origin, their_origin] =
+        [pipe.axis().origin(), theirs.axis().origin()].map(|at| exactly(at.coordinates()));
+    let apart = core::array::from_fn(|axis| their_origin[axis] - my_origin[axis]);
+    if dot(apart, square_to_both).sign() != Decision::Zero {
+        return None;
+    }
+    let [from, to] = ends.map(|at| exactly(at.coordinates()));
+    let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
+    let to_the_axis = core::array::from_fn(|axis| my_origin[axis] - from[axis]);
+    let axis_reads = dot(up, cross(chord, to_the_axis)).sign();
+    let keeps = if axis_reads == Decision::Pos {
+        Decision::Neg
+    } else if axis_reads == Decision::Neg {
+        Decision::Pos
+    } else {
+        return None;
+    };
+    let turn = which_plane_a_half_lies_on(pipe, &theirs, ends)?;
+    Some(PipeSide::Curved(CurvedSide {
+        reach: Some((ends, keeps)),
+        lies_on: CrossingOf::AHalf { theirs, turn },
+    }))
+}
+
+/// Which of the two planes a piece of a half between `ends` lies on, as `1` or
+/// `-1`; `None` when the ends cannot tell.
+///
+/// Read without a tolerance. A corner is rounded, so the one plane it is on
+/// reads a tiny number there rather than zero, but the other reads one about as
+/// large as the pipe unless the corner is near where all four halves meet,
+/// `c ± r·n`, which only one end of a piece can be. So a plane is taken when at
+/// some end it reads certainly nearer zero than the other plane, and at no end
+/// certainly further.
+fn which_plane_a_half_lies_on(
+    pipe: &rcad_geom::Cylinder,
+    theirs: &rcad_geom::Cylinder,
+    ends: [Point; 2],
+) -> Option<f64> {
+    let nearer = |turn: f64| {
+        ends.iter().any(|end| {
+            let at = exactly(end.coordinates());
+            let [on, off] = [turn, -turn].map(|turn| {
+                how_far_above_a_point_a_half_crosses_its_ruling(pipe, theirs, turn, at)
+            });
+            at_most(on) < at_least(off)
+        })
+    };
+    match (nearer(1.0), nearer(-1.0)) {
+        (true, false) => Some(1.0),
+        (false, true) => Some(-1.0),
+        (true, true) | (false, false) => None,
+    }
+}
+
+/// The largest size of a number in `range`.
+fn at_most(range: Interval) -> f64 {
+    range.lo().abs().max(range.hi().abs())
+}
+
+/// The smallest size of a number in `range`.
+fn at_least(range: Interval) -> f64 {
+    if range.contains_zero() {
+        0.0
+    } else {
+        range.lo().abs().min(range.hi().abs())
+    }
+}
+
+/// A number with the sign of how far along `pipe`'s axis direction, from `at`,
+/// the ruling through `at` crosses the plane `turn` names, of the two that hold
+/// the halves where `theirs` crosses `pipe`.
+///
+/// With `u` and `e` the two axes' stored directions, `a` and `b` their lengths,
+/// `k = u·e / ab`, and `c` where the axes meet, the plane is
+/// `(X − c)·(u/a + turn·e/b) = 0`, and the ruling `at + t·u/a` crosses it where
+/// `t·(1 + turn·k) = (c − at)·(u/a + turn·e/b)`. `1 + turn·k` is positive, the
+/// axes not being parallel. The number handed back is that right side times
+/// `(1 − turn·k)·(ab)²`, also positive, with `c` written out of it: from
+/// `o_p + μ·u/a = o_q + λ·e/b`, `(1 − turn·k)(μ + turn·λ)` is
+/// `(u·D)/a − turn·(e·D)/b` with `D = o_q − o_p`. So it reads off the stored
+/// numbers with no division:
+///
+/// `(ab − turn·u·e)·(b·u·(o_p − X) + turn·a·e·(o_q − X)) + ab·(b·u·D − turn·a·e·D)`.
+fn how_far_above_a_point_a_half_crosses_its_ruling(
+    pipe: &rcad_geom::Cylinder,
+    theirs: &rcad_geom::Cylinder,
+    turn: f64,
+    at: [Interval; 3],
+) -> Interval {
+    let [u, e] = [pipe, theirs].map(|one| exactly(one.axis().direction().components()));
+    let [o_p, o_q] = [pipe, theirs].map(|one| exactly(one.axis().origin().coordinates()));
+    let [a, b] = [u, e].map(|direction| {
+        dot(direction, direction)
+            .sqrt()
+            .expect("a sum of squares is not below zero")
+    });
+    let turn = Interval::exactly(turn);
+    let ab = a * b;
+    let apart = core::array::from_fn(|axis| o_q[axis] - o_p[axis]);
+    let from_p = core::array::from_fn(|axis| o_p[axis] - at[axis]);
+    let from_q = core::array::from_fn(|axis| o_q[axis] - at[axis]);
+    (ab - turn * dot(u, e)) * (b * dot(u, from_p) + turn * a * dot(e, from_q))
+        + ab * (b * dot(u, apart) - turn * a * dot(e, apart))
+}
+
+/// Whether the face holds `point`, counted along the ruling through it: how
+/// many of the `curved` sides that ruling meets above `point`, odd being
+/// [`OnAFace::Held`].
+///
+/// **A point on the ruling through a corner**, or whose box reaches across it,
+/// cannot be told by the chord of a side ending there whether the side meets its
+/// ruling. Such a point is counted twice: along the ruling a hair
+/// counterclockwise round the axis, and along the one a hair clockwise, each of
+/// which meets a side ending at that corner when the side leaves it that way.
+/// Neither meets a ruling side, so `point` on one, or on the corner, is
+/// [`OnAFace::OnItsBoundary`], found first. Off the boundary the two counts are
+/// the count at `point`: every crossing they meet is a hair from one on
+/// `point`'s own ruling, and none of those is at `point`, or that side's sign
+/// would have read zero. So a point exactly on the corner's ruling takes the
+/// first, the half-open rule; and a box across it is answered when the two
+/// agree, as they do wherever the boundary runs on past the corner with one side
+/// either side of its ruling — where the halves meet, and where a half meets an
+/// arc.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when a sign this reads could not be settled, or the
+/// two counts across a corner's ruling part.
+fn how_often_the_ruling_above_a_point_is_crossed(
+    mine: &Surface,
+    pipe: &rcad_geom::Cylinder,
+    curved: &[CurvedSide],
+    rulings: &[[Point; 2]],
+    point: PredicatePoint,
+) -> Result<OnAFace> {
+    let up = exactly(pipe.axis().direction().components());
+    let at = point.enclosure();
+    let mut near: Option<Point> = None;
+    let mut unsure: Option<f64> = None;
+    let mut meets = Vec::with_capacity(curved.len());
+    for side in curved {
+        let Some((ends, keeps)) = side.reach else {
+            meets.push([true; 2]);
+            continue;
+        };
+        match whether_the_ruling_meets(up, at, ends, keeps) {
+            Meets::Yes => meets.push([true; 2]),
+            Meets::No => meets.push([false; 2]),
+            Meets::AtAnEnd {
+                corner,
+                counterclockwise,
+                enclosure,
+            } => {
+                let on_its_ruling = near.is_none_or(|known| {
+                    let [known, corner] = [known, corner].map(|at| exactly(at.coordinates()));
+                    cross(up, core::array::from_fn(|axis| corner[axis] - known[axis]))
+                        .iter()
+                        .all(|part| part.sign() == Decision::Zero)
+                });
+                if !on_its_ruling {
+                    let enclosure = enclosure.or(unsure).unwrap_or_else(|| how_wide(at));
+                    return Err(gave_up_on_a_side(mine, point, enclosure));
+                }
+                near = Some(corner);
+                unsure = match (unsure, enclosure) {
+                    (Some(known), Some(more)) => Some(known.max(more)),
+                    (known, more) => known.or(more),
+                };
+                meets.push([counterclockwise, !counterclockwise]);
+            }
+            Meets::CannotTell { enclosure } => {
+                return Err(gave_up_on_a_side(mine, point, enclosure));
+            }
+        }
+    }
+    if let Some(corner) = near
+        && (is_exactly(point, corner) || lies_on_a_ruling_side(mine, up, rulings, point)?)
+    {
+        return Ok(OnAFace::OnItsBoundary);
+    }
+    let mut counts = [0_usize; 2];
+    for (side, meets) in curved.iter().zip(meets) {
+        if meets == [false; 2] {
+            continue;
+        }
+        // For a plane `n·X = offset` the ruling `point + t·u` crosses it at
+        // `t = (offset − n·point) / n·u`, above `point` when the sign of
+        // `n·point − offset` is not the sign of `n·u`.
+        let (rises, above) = match side.lies_on {
+            CrossingOf::APlane { flat, leans } => {
+                let beyond = flat.side_of_point(point);
+                (beyond, beyond != leans)
+            }
+            CrossingOf::AHalf { theirs, turn } => {
+                let rises =
+                    how_far_above_a_point_a_half_crosses_its_ruling(pipe, &theirs, turn, at).sign();
+                (rises, rises == Decision::Pos)
+            }
+        };
+        if let Decision::Undecidable { enclosure } = rises {
+            return Err(gave_up_on_a_side(mine, point, enclosure));
+        }
+        if rises == Decision::Zero {
+            return Ok(OnAFace::OnItsBoundary);
+        }
+        for (count, meets) in counts.iter_mut().zip(meets) {
+            if meets && above {
+                *count += 1;
+            }
+        }
+    }
+    let [counterclockwise, clockwise] = counts.map(|count| count % 2 == 1);
+    if counterclockwise != clockwise
+        && let Some(enclosure) = unsure
+    {
+        return Err(gave_up_on_a_side(mine, point, enclosure));
+    }
+    Ok(if counterclockwise {
+        OnAFace::Held
+    } else {
+        OnAFace::NotHeld
+    })
+}
+
+/// Whether the ruling through a point meets a side across the axis, as
+/// [`whether_the_ruling_meets`] reads it.
+enum Meets {
+    Yes,
+    No,
+    /// The point is on, or its box reaches across, the ruling through
+    /// `corner`, one end of the side. The ruling a hair counterclockwise round
+    /// the axis from there meets the side when `counterclockwise`, and the one a
+    /// hair clockwise when not. `enclosure` is how wide the chord's reading was,
+    /// `None` when it read exactly zero.
+    AtAnEnd {
+        corner: Point,
+        counterclockwise: bool,
+        enclosure: Option<f64>,
+    },
+    /// The point's box reaches across the chord's line and neither end is
+    /// certainly the nearer.
+    CannotTell {
+        enclosure: f64,
+    },
+}
+
+/// Whether the ruling through `at` meets the side between `ends`, which
+/// `keeps` the sign that a point it meets reads against the chord seen down
+/// `up`.
+///
+/// Seen down the axis the side is an arc of a circle round it, and `at` is on
+/// that circle, so the side meets `at`'s ruling when `at` is on the arc's side
+/// of the chord. On the chord's line it is at an end, the nearer one. A side
+/// keeping the sign `Neg` is on the right of its chord, so it runs
+/// counterclockwise round `up` from its first end to its second.
+fn whether_the_ruling_meets(
+    up: [Interval; 3],
+    at: [Interval; 3],
+    ends: [Point; 2],
+    keeps: Decision,
+) -> Meets {
+    let [from, to] = ends.map(|end| exactly(end.coordinates()));
+    let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
+    let off_the_start = core::array::from_fn(|axis| at[axis] - from[axis]);
+    let reads = dot(up, cross(chord, off_the_start)).sign();
+    if reads == keeps {
+        return Meets::Yes;
+    }
+    if matches!(reads, Decision::Pos | Decision::Neg) {
+        return Meets::No;
+    }
+    let enclosure = if let Decision::Undecidable { enclosure } = reads {
+        Some(enclosure)
+    } else {
+        None
+    };
+    let [off_the_start, off_the_end] = [from, to].map(|end| {
+        let off = cross(up, core::array::from_fn(|axis| at[axis] - end[axis]));
+        dot(off, off)
+    });
+    if off_the_start.hi() < off_the_end.lo() {
+        Meets::AtAnEnd {
+            corner: ends[0],
+            counterclockwise: keeps == Decision::Neg,
+            enclosure,
+        }
+    } else if off_the_end.hi() < off_the_start.lo() {
+        Meets::AtAnEnd {
+            corner: ends[1],
+            counterclockwise: keeps == Decision::Pos,
+            enclosure,
+        }
+    } else {
+        Meets::CannotTell {
+            enclosure: enclosure.unwrap_or_else(|| how_wide(at)),
+        }
+    }
+}
+
+/// The widest a box is along any axis.
+fn how_wide(at: [Interval; 3]) -> f64 {
+    at.iter().map(|range| range.width()).fold(0.0, f64::max)
+}
+
+/// Whether the box `point` is the one point `corner`.
+fn is_exactly(point: PredicatePoint, corner: Point) -> bool {
+    point
+        .enclosure()
+        .iter()
+        .zip(corner.coordinates())
+        .all(|(range, at)| range.lo() == at && range.hi() == at)
+}
+
+/// Whether `point`, on or across the ruling through a corner, lies on one of
+/// the `rulings` sides between its ends.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when `point`'s box reaches across a side's line
+/// between its ends, or past one of its ends.
+fn lies_on_a_ruling_side(
+    mine: &Surface,
+    up: [Interval; 3],
+    rulings: &[[Point; 2]],
+    point: PredicatePoint,
+) -> Result<bool> {
+    let at = point.enclosure();
+    for &[from, to] in rulings {
+        let start = exactly(from.coordinates());
+        let off = cross(up, core::array::from_fn(|axis| at[axis] - start[axis]));
+        if off
+            .iter()
+            .any(|part| matches!(part.sign(), Decision::Pos | Decision::Neg))
+        {
+            continue;
+        }
+        match lies_between(from, to, point) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(overhang) => return Err(gave_up_ordering_along_a_side(point, overhang)),
+        }
+        if let Some(enclosure) = off.iter().find_map(|part| {
+            let Decision::Undecidable { enclosure } = part.sign() else {
+                return None;
+            };
+            Some(enclosure)
+        }) {
+            return Err(gave_up_on_a_side(mine, point, enclosure));
+        }
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// Whether a face on a ball or on a pipe, cut by the other along part of the
@@ -10124,6 +10707,75 @@ mod tests {
             panic!("one solid: {:?}", fused.solids());
         };
         (model, solid)
+    }
+
+    /// An upright bar of radius 2 up `z` from 4 to 6, united with a bar of
+    /// radius 2 along `x` through `(0, 0, 3)`, keeps an upright wall that holds
+    /// what is outside the bar across: the bar across bites the wall's foot
+    /// along two pieces of the half ellipses where the two pipes meet, through
+    /// `(±2, 0, 5)`, and nothing picks which arc between its ends a piece is.
+    /// [`what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds`] counts the
+    /// sides the ruling through a point crosses above it. Until Q2460 every
+    /// point was refused `AFaceTrimmedByACurveThisCannotFollow`.
+    ///
+    /// Every point asked is exactly on the upright pipe.
+    #[test]
+    fn an_upright_wall_bitten_by_a_bar_of_its_width_holds_what_is_outside_the_bite() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let upright = model
+            .add_round_bar(
+                2.0,
+                2.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, 4.0)).expect("a finite shift"),
+            )
+            .expect("a positive radius and height");
+        let along_x = Isometry::translation(Vector::new(4.0, 0.0, 3.0))
+            .expect("a finite shift")
+            .compose(&Isometry::quarter_turns(&Axis::y(), -1).expect("an axis along y"));
+        let across = model
+            .add_round_bar(2.0, 8.0, &along_x)
+            .expect("a positive radius and height");
+        let fused = model
+            .fuse(
+                &[upright],
+                &[across],
+                crate::Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("an upright bar and a bar across its foot");
+        let [solid] = fused.solids()[..] else {
+            panic!("one solid: {:?}", fused.solids());
+        };
+        let walls: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| {
+                matches!(face.surface(), Surface::Cylinder(pipe)
+                    if pipe.axis().direction().z() != 0.0)
+            })
+            .map(|face| face.key())
+            .collect();
+        let [wall] = walls[..] else {
+            panic!("one face on the upright pipe: {walls:?}");
+        };
+        for (point, expected) in [
+            ([0.0, 2.0, 5.5], OnAFace::Held),
+            ([0.0, -2.0, 4.5], OnAFace::Held),
+            ([-2.0, 0.0, 5.5], OnAFace::Held),
+            ([2.0, 0.0, 4.5], OnAFace::NotHeld),
+            ([-2.0, 0.0, 4.5], OnAFace::NotHeld),
+            ([2.0, 0.0, 6.5], OnAFace::NotHeld),
+            ([0.0, 2.0, 3.5], OnAFace::NotHeld),
+            ([2.0, 0.0, 5.0], OnAFace::OnItsBoundary),
+        ] {
+            assert_eq!(
+                what_it_holds(&model, solid, wall, PredicatePoint::from(point)),
+                expected,
+                "{point:?}"
+            );
+        }
     }
 
     /// What [`is_a_family_this_follows`] refuses a cone face for when the apex is
