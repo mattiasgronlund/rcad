@@ -313,6 +313,8 @@ pub mod a_solid_with_a_curved_face;
 pub mod a_solid_with_a_torus_face;
 #[path = "a_stepped_shaft_cut_in_half_and_turned.rs"]
 pub mod a_stepped_shaft_cut_in_half_and_turned;
+#[path = "a_third_spelling_of_a_surface_a_face_never_sees.rs"]
+pub mod a_third_spelling_of_a_surface_a_face_never_sees;
 #[path = "a_tilted_wall_grazing_a_ball_sums_to_zero.rs"]
 pub mod a_tilted_wall_grazing_a_ball_sums_to_zero;
 #[path = "a_tube_less_a_bar_united_with_a_second_bar.rs"]
