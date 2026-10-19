@@ -73,6 +73,35 @@ const A_THOUSANDTH_SHORT: [[f64; 4]; 2] = [
     ],
 ];
 
+/// `p = 0` and `t = 0.001` and `0.1`, as `f64::sin` and `f64::cos` give them:
+/// a half turn about an axis leaning `0.001` or `0.1` (Q2299). The turned
+/// cube's edge from the shared corner runs along `−x` on the line `y = 0`,
+/// `z = 10` that carries the block's edge on past it, so the four planes of
+/// the two edges all hold that line, and both cubes have a face on `x = 0`.
+/// Stored, the four pass within a rounding of one another there. The union
+/// was refused `ResultIsNotManifold { count: 4 }`, both ways round, under
+/// either policy.
+const A_HALF_TURN: [[f64; 4]; 2] = [
+    [
+        0.0,
+        0.0,
+        0.000_999_999_833_333_341_7,
+        0.999_999_500_000_041_7,
+    ],
+    [0.0, 0.0, 0.099_833_416_646_828_15, 0.995_004_165_278_025_8],
+];
+
+#[test]
+fn the_union_of_two_cubes_corner_to_corner_a_half_turn_apart_is_both_cubes_either_way_round() {
+    for turn in A_HALF_TURN {
+        for order in [Order::BlockFirst, Order::TurnedFirst] {
+            let asked = format!("{turn:?}, union, {order:?}");
+            let volume = volume_of_a_fuse(turn, Rule::Union, order, &asked);
+            assert_about(volume, 2000.0, &asked);
+        }
+    }
+}
+
 #[test]
 fn the_union_of_two_cubes_corner_to_corner_is_both_cubes_either_way_round() {
     for turn in [
