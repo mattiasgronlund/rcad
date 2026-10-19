@@ -78,7 +78,7 @@
 //!
 //! ```text
 //! cargo nextest run -p rcad-geom \
-//!     --test every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly \
+//!     every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly:: \
 //!     --no-capture --no-fail-fast
 //! ```
 //!
