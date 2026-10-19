@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rows import CLASS, SMALL, TIERS_IN_ORDER, Queue, Row, highest_q, tier_of_class  # noqa: E402
+from rows import CLASS, DATE, SMALL, TIERS_IN_ORDER, Queue, Row, highest_q, tier_of_class  # noqa: E402
 from families import families, family_line  # noqa: E402
 
 ID = re.compile(r"^[TDQ][0-9]+$")
@@ -51,6 +51,7 @@ BRANCH = re.compile(r"^[A-Za-z0-9._/-]+$")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
 SECTION = re.compile(r"^§?([0-9]+(\.[0-9]+)?)$")
 AT_ID = re.compile(r"^@([0-9]+)$")
+CORES_ENTRY = re.compile(r"^cores:([1-9][0-9]*|all)$")
 
 USAGE = """\
 just queue                                 ready rows by tier, then running, waiting, parked
@@ -80,10 +81,15 @@ just queue tag <id> <class>|small|-        tag an open row: a class (wrong, cras
 just queue done <id> <merge sha>           state done:<sha>, moved under ## Closed
 just queue drop <id> <§N>                  state dropped:§N, moved under ## Closed
 just queue park <id> <§N>                  state parked:§N, left in its tier
-just queue after <id> <id>[,<id>...]       state after:<ids>; each id must exist in some copy, branch or claim; a row
-                                            with no class moves down to the latest tier among the rows it names (§435)
+just queue after <id> <id|date>[,<id|date>...]   state after:<ids,date>; each id must exist in some copy, branch
+                                            or claim, at most one date (YYYY-MM-DD); ready once every named id is
+                                            done: and that UTC date has come (§308); a row with no class moves down
+                                            to the latest tier among the rows it names (§435)
 just queue after <id> -                    a row that waits goes back to todo: the way out for a row whose wait was
                                             dropped, since only done: ends a wait (§451)
+just queue cores <id> <n>|all              set, replace or remove the write set's cores:<n> or cores:all entry
+                                            (§308); the fill skips a row whose count does not fit the machine's
+                                            free threads, and cores:all fits only when nothing else holds any
 just queue rank <id> before <id>           move <id> to sit just before the other id, within their shared tier
 just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict
 just queue pin <id> [<id>...]              Mattias's alone (§430): pinned/<n> in front of each open row's description,
@@ -394,6 +400,10 @@ def refuse_unless_ready(queue, row):
     if row.state.startswith("after:"):
         waiting = []
         for other in row.state[len("after:"):].split(","):
+            if DATE.match(other):
+                if not date_has_come(other):
+                    waiting.append(f"{other} (not yet come)")
+                continue
             found = queue.find(other)
             if found is None or not found.state.startswith("done:"):
                 waiting.append(f"{other} ({found.state if found else 'not in this copy'})")
@@ -401,6 +411,18 @@ def refuse_unless_ready(queue, row):
             raise Refused(f"{row.id} is not ready: it waits on {', '.join(waiting)}")
         return
     raise Refused(f"{row.id} is not ready: its state is {row.state}")
+
+
+def today():
+    """The UTC date `after:`-date readiness is measured against: `QUEUE_NOW`, a fixture's override, or the real clock."""
+    now_str = os.environ.get("QUEUE_NOW")
+    if now_str:
+        return datetime.strptime(now_str, "%Y-%m-%d").date()
+    return datetime.now(timezone.utc).date()
+
+
+def date_has_come(date):
+    return datetime.strptime(date, "%Y-%m-%d").date() <= today()
 
 
 def main_ref():
@@ -674,7 +696,7 @@ def park_step(queue, claims, here, args, batch):
 
 def after_step(queue, claims, here, args, batch):
     if len(args) < 2:
-        raise Refused("usage: after <id> <id>[,<id>...] | after <id> -")
+        raise Refused("usage: after <id> <id|date>[,<id|date>...] | after <id> -")
     row_id = args[0]
     waits = [w for arg in args[1:] for w in arg.split(",") if w]
     refuse_conflicted(here, queue)
@@ -684,9 +706,15 @@ def after_step(queue, claims, here, args, batch):
     refuse_if_pinned(row, "after")
     if "-" in waits:
         return free_step(queue, row, waits)
+    dates = [w for w in waits if DATE.match(w)]
+    if len(dates) > 1:
+        raise Refused(f"{row_id} cannot wait on two dates: {', '.join(dates)}")
     for other in waits:
+        if DATE.match(other):
+            refuse_unless_a_real_date(other)
+            continue
         if not ID.match(other):
-            raise Refused(f"'{other}' is not an id")
+            raise Refused(f"'{other}' is not an id or a date (YYYY-MM-DD)")
         if other == row_id:
             raise Refused(f"{row_id} cannot wait on itself")
         if queue.find(other) is None and not exists_elsewhere(here, claims, other):
@@ -725,6 +753,13 @@ def free_step(queue, row, waits):
     return queue, f"{row.id}: {row.state} -> todo", None
 
 
+def refuse_unless_a_real_date(date):
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise Refused(f"'{date}' is not a real date: YYYY-MM-DD")
+
+
 def exists_elsewhere(here, claims, row_id):
     if row_id in claims.added():
         return True
@@ -732,6 +767,30 @@ def exists_elsewhere(here, claims, row_id):
     if any(pattern.search(text) for _, text in here.other_copies(lanes_too=True)):
         return True
     return any(pattern.search(text) for text in branch_copies(here.relative))
+
+
+def cores_step(queue, claims, here, args, batch):
+    """Set, replace or remove the `cores:<n>` or `cores:all` entry of an open row's write set (§308).
+
+    A row that pins hardware threads holds them as a write-set entry so the
+    fill can skip a row whose count would not fit the machine's free threads,
+    beside the ordinary path-meets check; `cores:` entries never meet a path,
+    nor each other, as `entry_holds` says.
+    """
+    need(args, 2, "cores <id> <n>|all")
+    row_id, n = args
+    if not CORES_ENTRY.match(f"cores:{n}"):
+        raise Refused(f"'{n}' is not a core count: a positive integer or 'all'")
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    if row.is_closed():
+        raise Refused(f"{row_id} is closed: {row.state}")
+    entries = [entry for entry in entries_of(row.write_set) if not entry.startswith("cores:")]
+    entries.append(f"cores:{n}")
+    write_set = ",".join(entries)
+    queue.replace(row, row.with_write_set(write_set))
+    message = f"{row_id}: write set {row.write_set} -> {write_set}"
+    return queue, message, None
 
 
 def rank_step(queue, claims, here, args, batch):
@@ -1092,8 +1151,8 @@ def ids_of(args, usage):
 
 STEP_FUNCS = {
     "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
-    "after": after_step, "rank": rank_step, "tier": tier_step, "tag": tag_step, "pick": pick_step,
-    "pin": pin_step, "unpin": unpin_step,
+    "after": after_step, "cores": cores_step, "rank": rank_step, "tier": tier_step, "tag": tag_step,
+    "pick": pick_step, "pin": pin_step, "unpin": unpin_step,
 }
 
 
@@ -1142,8 +1201,10 @@ def parsed_write_set(here, write_set):
     for entry in entries:
         if entry == "-":
             raise Refused('"-" stands alone in a write set, and here it has company')
+        if CORES_ENTRY.match(entry):
+            continue
         if not WRITE_SET_ENTRY.match(entry) or entry.startswith("/") or "//" in entry:
-            raise Refused(f'"{entry}" is not a path, a directory ending in /, or path#item')
+            raise Refused(f'"{entry}" is not a path, a directory ending in /, path#item, or cores:<n>|all')
         path, _, item = entry.partition("#")
         if item and not (path.endswith(".rs") or path == "justfile"):
             raise Refused(f'"{entry}" names an item, and only a .rs file or the justfile has items')
@@ -1157,7 +1218,16 @@ def entries_of(write_set):
 
 
 def entry_holds(holder, entry):
-    """Whether one write set entry holds another: the same path with no item or the same item, or a directory over it."""
+    """Whether one write set entry holds another: the same path with no item or the same item, or a directory over it.
+
+    A `cores:` entry pins hardware threads, not a file, and holds only its own
+    exact text, never a path and never a different `cores:` entry: the fill's
+    thread-fit check is numeric, not a meet (§308). Matching itself is what
+    lets `narrow` keep a row's `cores:` entry rather than reading it as outside
+    the set the row was taken with.
+    """
+    if holder.startswith("cores:") or entry.startswith("cores:"):
+        return holder == entry
     holder_path, _, holder_item = holder.partition("#")
     path, _, item = entry.partition("#")
     if holder_path == path:

@@ -78,12 +78,16 @@ them, then the description, which runs to the end of the line.
 - **state** — `todo`; `lane:<branch>` while a lane holds it; `after:<id>[,<id>]`
   while it waits on other rows; `done:<sha>`; `dropped:§N`; or `parked:§N` when
   a section holds it — Mattias parked it, §13 defers it for want of a consumer,
-  or it is a limit and not a gap (§16.10).
+  or it is a limit and not a gap (§16.10). §308 lets an `after:` name a date as
+  well as an id, so a row can wait for a calendar date to come rather than for
+  another row to close.
 - **model** — `opus` or `sonnet`, or `-` on a closed row that never recorded one.
 - **write set** — comma-separated. An entry is a path, a directory ending in
   `/`, or `path#item` naming one function in a `.rs` file or one recipe in the
   `justfile`. `-` means the lane writes no tracked file except a new section of
   its own: `claim-section` numbers sections, so two lanes' sections never collide.
+  §308 adds `cores:<n>` and `cores:all`, an entry that pins hardware threads
+  rather than a file.
 - **what** — one line, ending in at least one `§N` or `§N.M`. On a done row the
   last one is the section that records the result.
 
@@ -112,7 +116,9 @@ differ. `-` meets nothing.
 
 A free slot takes the first ready row of the highest tier whose write set meets
 no `lane:` row's and no row already picked in the same fill. That repeats until
-no slot is free or no ready row fits.
+no slot is free or no ready row fits. §308 adds a second way a row can fail to
+fit: a `cores:` entry whose thread count does not fit beside every other
+row's own `cores:` entry, summed against the machine's threads.
 
 That is what makes the order strict without leaving a slot empty. Tier 3 gets a
 slot only when every ready row of tiers 1 to 2.5 is either running already or
