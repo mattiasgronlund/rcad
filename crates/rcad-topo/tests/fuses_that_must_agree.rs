@@ -1219,9 +1219,11 @@ fn a_lattice_pair_unites_to_the_same_solid_whichever_way_round_it_is_handed_over
 /// Under a tolerant policy, which takes a slab that thin as flat, the union is
 /// the 6 the ell holds and the 12 the frame does, and what the two share is
 /// nothing, where the sharing panicked too. Each less the other is itself whole
-/// (queue row Q2253): both were refused
-/// [`Error::TheFuseWroteABrokenAnswer`], [`Invalid::OuterWireWindsAgainstTheNormal`],
-/// with the slab not taken as flat.
+/// (queue row Q2253). Both were refused
+/// [`Error::TheFuseWroteABrokenAnswer`], [`Invalid::OuterWireWindsAgainstTheNormal`]:
+/// the slab's top and its end at `y = 0` lie on the other solid's faces facing
+/// the same way, not inside it, and a difference took a shell both hold as
+/// flat only when every piece of it was inside the other group.
 #[test]
 fn a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_short() {
     let (model, keys) = Configuration {

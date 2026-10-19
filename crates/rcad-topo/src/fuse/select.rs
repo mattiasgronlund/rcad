@@ -179,17 +179,20 @@
 //! together what the intersection would keep and asks of each of its shells
 //! whether the policy takes it as flat, as the shell fold of `assemble.rs`
 //! does ([`the_pieces_of_each_shell_both_hold_taken_as_flat`], Q1710, §417).
-//! Each piece of such a shell, where every piece is buried in the other group
-//! and both groups have pieces, is read as lying on the other group facing
-//! the other way: a shell with no inside is two sides of one sheet, back to
-//! back. So the intersection keeps none of it, and a difference keeps the
-//! argument's pieces and drops the tool's. Two skewed combs touching along
-//! one line need it: the comb less the other kept the prism of `3.1e−32` their
-//! rounded planes close as a notch in its own shell, which the shell fold
-//! cannot reach, and the notch's floor rounded to a triangle with no winding.
-//! A union drops a buried piece and one lying the other way alike, so it asks
-//! nothing; nor does a certified policy, and a piece of no such shell is
-//! placed as above.
+//! Each piece of such a shell, where both groups have pieces, is read as
+//! lying on the other group facing the other way: a shell with no inside is
+//! two sides of one sheet, back to back. So the intersection keeps none of it,
+//! and a difference keeps the argument's pieces and drops the tool's. Two
+//! skewed combs touching along one line need it: the comb less the other kept
+//! the prism of `3.1e−32` their rounded planes close as a notch in its own
+//! shell, which the shell fold cannot reach, and the notch's floor rounded to
+//! a triangle with no winding. A piece of the shell lying on the other group
+//! facing the same way is read so too (Q2253): the rim of a slab where two
+//! walls stand flush, which a difference keeps when it is the argument's, as
+//! it keeps the rest of the face it is a strip of. A union drops a buried
+//! piece and one lying the other way alike, and keeps that rim as part of its
+//! outside, so it asks nothing; nor does a certified policy, and a piece of no
+//! such shell is placed as above.
 
 use rcad_geom::{
     Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
@@ -389,15 +392,10 @@ pub(crate) fn choose(
     let selection = row_for(rule);
     if selection.keeps_a_buried_piece_apart_from_one_lying_the_other_way() {
         let held_by_both = kept_by(row_for(Rule::Intersection), &placed, scratch);
-        let buried: Vec<bool> = placed
-            .iter()
-            .map(|placement| *placement == Some(Placement::Inside))
-            .collect();
         for shell in the_pieces_of_each_shell_both_hold_taken_as_flat(
             model,
             scratch,
             &held_by_both,
-            &buried,
             policy,
             log,
         ) {
@@ -520,9 +518,12 @@ impl Selection {
     }
 
     /// Whether a piece buried in the other group fares otherwise than one
-    /// lying on it facing the other way, in either group: so whether reading
-    /// the pieces of a shell taken as flat as lying on the other group can
-    /// change what this rule keeps. Not for a union, which drops both.
+    /// lying on it facing the other way, in either group: so whether this rule
+    /// needs the pieces of a shell taken as flat read as lying on the other
+    /// group. Not for a union, which drops both. Nor may a union have them read
+    /// so: a piece of such a shell lying on the other group facing the same
+    /// way is the union's outside where the two stand flush, kept once as it
+    /// lies, and read the other way the union would drop it.
     fn keeps_a_buried_piece_apart_from_one_lying_the_other_way(&'static self) -> bool {
         [&self.arguments, &self.tools]
             .iter()
