@@ -840,7 +840,10 @@ impl Assembly {
     ///
     /// Whatever [`Assembly::from_the_pieces`],
     /// [`Assembly::join_up_what_is_one_face`] and
-    /// [`Assembly::group_into_shells`] give.
+    /// [`Assembly::group_into_shells`] give, but
+    /// [`Invalid::DynamicRangeTooWide`] in place of
+    /// [`Error::ResultIsNotManifold`] where
+    /// [`Assembly::check_the_range_at_each_edge_not_two_faces_claim`] says so.
     fn joined_into_shells(
         model: &Model,
         scratch: &Scratch,
@@ -851,9 +854,79 @@ impl Assembly {
     ) -> Result<Self> {
         let mut assembly =
             Self::from_the_pieces(model, scratch, chosen, names_of_one_point, policy, log)?;
-        assembly.join_up_what_is_one_face(policy, log)?;
-        assembly.shells = assembly.group_into_shells()?;
-        Ok(assembly)
+        let shells = assembly
+            .join_up_what_is_one_face(policy, log)
+            .and_then(|_| assembly.group_into_shells());
+        match shells {
+            Ok(shells) => {
+                assembly.shells = shells;
+                Ok(assembly)
+            }
+            Err(refused @ Error::ResultIsNotManifold { .. }) => {
+                assembly.check_the_range_at_each_edge_not_two_faces_claim(policy)?;
+                Err(refused)
+            }
+            Err(refused) => Err(refused),
+        }
+    }
+
+    /// Refuse an answer with an edge that other than two faces claim, and
+    /// that is too short beside the answer's corners for `f64`, as
+    /// [`Assembly::check_dynamic_range`] refuses it once its edges are each
+    /// claimed by two.
+    ///
+    /// **Asked only of an answer refused as not a manifold**, so a fuse that
+    /// answered before answers as before. Two straight sides on two different
+    /// lines meet at one point at most, so where they join the same two
+    /// corners, one corner stands for two points the rounding put on one `f64`
+    /// triple. Two cubes stood corner to corner, one turned a half turn about
+    /// an axis leaning `0.1` off `z`, union to a side along `x = 0, z = 10`
+    /// and a side along `x = 0` and a plane of the turned cube both joining
+    /// `(0, 0, 10)` and `(0, 1.13e−16, 10)`, two meets of different planes.
+    /// Four faces then claimed that edge, and `Policy::certified()` refused
+    /// the union `ResultIsNotManifold { count: 4 }` (queue row Q2299,
+    /// `a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`).
+    /// Its range, the turned cube's corner at `21.8` over `1.13e−16`, is
+    /// `1.9e17`, past what `f64` resolves, and that is what is refused: the
+    /// answer's corners there cannot be told apart. Two solids that touch
+    /// along an edge longer than that are still refused as not a manifold.
+    ///
+    /// The largest coordinate is the answer's corners' alone, without the
+    /// inputs' reach [`Assembly::check_dynamic_range`] takes besides, so the
+    /// ratio here is never more than that check gives for the same edge. A
+    /// policy that warns of a range rather than failing on it leaves the
+    /// refusal as it was, and its record is not kept, since no answer rests
+    /// on it.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::DynamicRangeTooWide`] when the answer's largest coordinate
+    /// over the shortest chord above zero of an edge other than two faces
+    /// claim is more than `f64` carries, under a policy that fails on that.
+    fn check_the_range_at_each_edge_not_two_faces_claim(&self, policy: &Policy) -> Result<()> {
+        let largest = self
+            .corners
+            .iter()
+            .map(|corner| corner.point.largest_coordinate_magnitude())
+            .fold(0.0, f64::max);
+        let shortest = self
+            .claimants_of_each_edge()
+            .iter()
+            .zip(&self.edges)
+            .filter(|(by, _)| by.len() != 2)
+            .map(|(_, edge)| {
+                how_far_apart(
+                    self.corners[edge.ends[0]].point,
+                    self.corners[edge.ends[1]].point,
+                )
+            })
+            .filter(|&chord| chord > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        if largest == 0.0 || !shortest.is_finite() {
+            return Ok(());
+        }
+        the_range_asked(largest, shortest, policy, &mut ProvenanceLog::new())?;
+        Ok(())
     }
 
     /// One face per kept piece, and the corners and edges they share.
@@ -8074,6 +8147,136 @@ fn the_meets_a_plane_beside_an_edge_cuts(
         Err(rcad_predicates::Error::PlanesDoNotMeetInAPoint { .. })
     );
     (parallel && the_corner_is_off_the_plane(&end.planes, plane)).then_some(tip)
+}
+
+/// Under a tolerant policy, input corners within [`Policy::max_wobble`] of
+/// one another, none two on one edge, and every meet of their planes some
+/// piece runs to within the wobble of them, as one point.
+///
+/// **Taken only for an answer refused without them**, after
+/// [`fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it`]'s
+/// ends and apart from them (`Model::fused_under`), in
+/// [`Scratch::input_corners_together`]. A fuse that answered before answers
+/// as before.
+///
+/// **Two cubes stood corner to corner, one turned a half turn about an axis
+/// leaning off `z`** (queue row Q2299,
+/// `a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`). The
+/// turned cube's edge from the shared corner runs along `−x` on the line that
+/// carries the block's edge on past it, so the two planes of each edge hold
+/// that line, and both cubes have a face on `x = 0`. Stored, the turned
+/// planes pass within a rounding of the line, so `x = 0` cuts the four in six
+/// meets, each `1.2e−14` or less from the corner. Three of them round to the
+/// corner's own `f64` triple and the others do not, so a side along
+/// `x = 0, z = 10` and a side along `x = 0` and a turned plane joined the
+/// same two corners, and the union was refused `ResultIsNotManifold`.
+/// Neither fold before this one takes the meets: at each end there two planes
+/// run beside an edge, not one, and [`another_corner_is_as_near`] holds
+/// besides. Taken as the one corner the two cubes share, they leave the union
+/// both cubes, and so they do for the turns up to `0.01` short of the half
+/// turn that were refused the same way.
+///
+/// **Not two corners on one edge.** Two input corners a rounding apart that
+/// share two planes are an edge shorter than the wobble, which this rule does
+/// not judge, as §417.7's fold does not.
+///
+/// One record for each point, *"input corners and the meets of their planes a
+/// rounding apart taken as one point"*, whose first input is where
+/// [`Corners::of`] puts the kept corner, the one first in vertex order. Under
+/// a certified policy nothing is asked, and nothing folds.
+pub(crate) fn fold_each_point_input_corners_meet_at_a_rounding_apart(
+    model: &Model,
+    scratch: &Scratch,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Vec<NamesOfOnePoint> {
+    let Strictness::TolerantFallback { .. } = policy.strictness() else {
+        return Vec::new();
+    };
+    let corners = input_corners(model, scratch);
+    let meets = every_meet_of_three_planes(scratch);
+    let mut asked: BTreeSet<Vec<usize>> = BTreeSet::new();
+    let mut folded = Vec::new();
+    for corner in &corners {
+        let together: Vec<usize> = (0..corners.len())
+            .filter(|&other| {
+                how_far_apart_two_boxes_may_be(corner.put, corners[other].put)
+                    <= policy.max_wobble()
+            })
+            .collect();
+        if together.len() < 2 || !asked.insert(together.clone()) {
+            continue;
+        }
+        let on_one_edge = together.iter().enumerate().any(|(at, &one)| {
+            together[at + 1..].iter().any(|&other| {
+                corners[one]
+                    .names
+                    .iter()
+                    .filter(|name| corners[other].names.contains(name))
+                    .count()
+                    >= 2
+            })
+        });
+        if on_one_edge {
+            continue;
+        }
+        let kept = &corners[together[0]];
+        let planes: BTreeSet<[u64; 9]> =
+            together.iter().flat_map(|&at| corners[at].names).collect();
+        let own: BTreeSet<[[u64; 9]; 3]> = together.iter().map(|&at| corners[at].names).collect();
+        let mut taken: Vec<([Surface; 3], Vec<PredicatePoint>)> = together[1..]
+            .iter()
+            .map(|&at| {
+                (
+                    corners[at].planes.map(Surface::Plane),
+                    vec![corners[at].put],
+                )
+            })
+            .collect();
+        for (names, meet) in &meets {
+            if own.contains(names) || !names.iter().all(|name| planes.contains(name)) {
+                continue;
+            }
+            let planes = meet
+                .surfaces
+                .map(|surface| *surface.as_plane().expect("a meet of three planes"));
+            let points: Vec<PredicatePoint> = where_three_planes_meet_whichever_face_asks(planes)
+                .into_iter()
+                .chain(meet.points.iter().copied())
+                .collect();
+            let near =
+                furthest_from(kept.put, &points).is_some_and(|far| far <= policy.max_wobble());
+            if near {
+                taken.push((meet.surfaces, points));
+            }
+        }
+        let far = taken
+            .iter()
+            .filter_map(|(_, points)| furthest_from(kept.put, points))
+            .fold(0.0, f64::max);
+        let inputs: Vec<PredicatePoint> = std::iter::once(kept.put)
+            .chain(taken.iter().flat_map(|(_, points)| points.iter().copied()))
+            .collect();
+        let record = Record::new(
+            "input corners and the meets of their planes a rounding apart taken as one point",
+            &inputs,
+            Level::Interval,
+            far,
+            Measures::Length,
+        );
+        if !policy.take_as_one_point(record, log) {
+            continue;
+        }
+        folded.push(NamesOfOnePoint {
+            kept: MeetPoint::Existing {
+                vertex: kept.vertex,
+                point: kept.baked,
+            },
+            folded: taken.iter().map(|(surfaces, _)| (*surfaces, 0)).collect(),
+            moved: Some(Approximation::new(far, Cause::TolerantFallback)),
+        });
+    }
+    folded
 }
 
 /// Each corner of an input solid with exactly three planes round it, and those
