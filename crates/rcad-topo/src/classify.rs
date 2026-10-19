@@ -1603,7 +1603,7 @@ fn look_at_triangle(
 
 /// Whether every side of `face` is a straight line, so that its corners fan into
 /// triangles that cover it.
-fn every_side_of_it_is_straight(face: FaceView<'_>) -> bool {
+pub(crate) fn every_side_of_it_is_straight(face: FaceView<'_>) -> bool {
     face.wires().all(|wire| {
         wire.coedges()
             .all(|coedge| coedge.edge().stored_run() == &EdgeRun::Straight)

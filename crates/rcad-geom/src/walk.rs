@@ -344,6 +344,15 @@ impl PointsAlongACrossing {
     /// nothing else knows where the walk was cut off, so the extreme point of
     /// the stretch comes back with the rest. [`walk`] says which stretch and
     /// why.
+    ///
+    /// **An end can still come back, on an arc a rounding or two long.** A
+    /// point meant to sit inside the run can round onto one of its ends'
+    /// coordinates instead: the round bar of radius `12.8` notched by a block
+    /// cornered on its wall gets one such point on each cap's arc
+    /// (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`). `mesh.rs`'s
+    /// `BuildingAMesh::walk` drops such a point once it is found coincident
+    /// with an end, since Q2352; `validate.rs`'s own walk keeps it, and
+    /// `Model::validate` passes on the bar's shapes either way.
     #[must_use]
     pub fn points(&self) -> &[Point] {
         &self.points

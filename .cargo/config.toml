@@ -5,7 +5,7 @@
 rustflags = ["-C", "target-cpu=x86-64-v3"]
 
 # Most of a test binary is debug info even with line tables only, 84% of
-# `fuses_that_must_agree`, and every worktree writes its own copy of some 330
+# `fuses_that_must_agree`, and every worktree writes its own copy of some 240
 # test binaries. zlib shrinks
 # `fuses_that_must_agree` from 42.7 MB to 14.0 MB, compressed before the file is
 # first written. zlib and not zstd, because the standard library's backtrace
