@@ -678,13 +678,22 @@ fn a_flat_face_whose_bent_sides_crossed<'m>(
 /// (`a_piece_grazed_by_a_trimming_nothing_follows.rs`), both at a deflection
 /// of `2.5`. 21 ran out at 16: the leaning and poking-out holes of the two
 /// half-disc plates, which cross at every deflection, and twelve in
-/// `a_piece_grazed_by_a_trimming_nothing_follows.rs` at `1.25`.
+/// `a_piece_grazed_by_a_trimming_nothing_follows.rs` at `1.25`. None cleared
+/// between seven rungs and sixteen, so eight keeps two over the most any
+/// needed. A rung walks the same points whatever the cap is, so each of those
+/// meshes clears at eight as it did at sixteen, and each that ran out runs out
+/// at eight, handing back its eighth rung's crossing.
 ///
 /// **And what running out costs.** An arc walked to a room `r` takes about
-/// `1/√r` points, so each rung costs about `√2` times the one before. At a cap
-/// of 30 the two half-disc plates' tests, which never clear, took 186 s and
-/// 325 s; at 16 they take 0.06 s and 0.1 s.
-const RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER: u32 = 16;
+/// `1/√r` points, so each rung walks about `√2` times the points of the one
+/// before, and cutting a curved face up along that arc costs more than that.
+/// The half ball of radius 5 joined to the ball a rounding smaller has a ring
+/// `8.9e-16` wide that crosses at `0.01` on every rung: at a cap of 16 its
+/// mesh at `0.01` took 126 s to refuse, at 8 it takes 0.8 s, and the same solid
+/// meshes at `0.1` in 8 ms
+/// (`a_ring_a_rounding_wide_is_refused_before_its_rims_are_walked_into_tens_of_thousands_of_points`).
+/// At a cap of 30 the two half-disc plates' tests took 186 s and 325 s.
+const RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER: u32 = 8;
 
 /// How far above the floor a tolerant mesh is actually cut.
 ///
