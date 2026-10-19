@@ -877,14 +877,19 @@ impl BuildingAMesh {
         // **A point of the walk stored at one of the edge's ends is dropped.**
         // The walk leaves both ends out, but on an arc one rounding long a
         // point one step along it rounds onto an end, and the face's loop then
-        // names that place twice, which the triangulator refuses
-        // `CornersCoincide`. Without the point the sides along the edge run
-        // through the same places, so nothing moves and nothing more is
-        // charged. A round bar of radius `12.8` notched by a block cornered on
-        // its wall has such an arc on each cap, between the ruling where
-        // `y = 0.8r` crosses the wall and the block's corner, and both unions
-        // were refused on the piece of the wall between the two rulings
+        // names that place twice, which `what_the_triangulator_can_cut` cuts
+        // into lobes and the triangulator refuses uncut, `CornersCoincide`.
+        // Without the point the sides along the edge run through the same
+        // places, so nothing moves and nothing more is charged. A round bar of
+        // radius `12.8` notched by a block cornered on its wall has such an arc
+        // on each cap, between the ruling where `y = 0.8r` crosses the wall and
+        // the block's corner, and both unions were refused on the piece of the
+        // wall between the two rulings
         // (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`, Q2352).
+        // The 90 degree lunes of `a_narrow_lune_from_a_pole_corner.rs` have
+        // one on the arc of `x = 0` from the south pole to the corner beside
+        // it, and at radius 3 the lune and that flat face each cut a lobe off
+        // there and drew the side closing it twice.
         points.retain(|point| {
             ends.iter()
                 .all(|end| point.coordinates() != end.coordinates())
@@ -4157,22 +4162,33 @@ struct ThePatchAsCut {
 /// **A lobe the triangulator refuses gives the refusal of the whole loop it
 /// was cut from** ([`ThePatchAsCut::cut_from`]), so a cut never turns one
 /// refusal into another that names a corner of a lobe: the cut is only for a
-/// loop whose lobes all mesh. Without that, the unions of a round bar of
-/// radius 12.8 and a block cornered on its wall were refused
-/// `ASideCutsOffOneCornerOfACurvedPatch` at a lobe's corner, where the whole
-/// cap is refused `CornersCoincide` for the two of its corners stored at one
-/// point (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`).
+/// loop whose lobes all mesh. **No test reaches it since Q2352.** Until then
+/// two shapes did, and in each the loop named one place twice because the one
+/// point the walk put inside an edge a rounding or two long was stored at one
+/// of the edge's ends, which `BuildingAMesh::walk` now drops. The unions of a
+/// round bar of radius 12.8 and a block cornered on its wall had a lobe refused
+/// `ASideCutsOffOneCornerOfACurvedPatch`, where the whole piece of the bar's
+/// wall is refused `CornersCoincide`
+/// (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`). The 90 degree
+/// lune at radius 1 of
+/// `two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`
+/// had a lobe of the flat face of `x = 0` refused `LoopsTouch`, where the whole
+/// face is refused `CornersCoincide`. With the fix, a marker here fired in no
+/// test of the workspace.
 ///
 /// **Two faces that each cut a lobe off at one place can both draw the side
 /// that closes it**, and the mesh is then refused
-/// `TwoPatchesOfTheMeshDrewTheSameSide`. A ball of radius 3 cut to a 90 degree
-/// lune by two knives, less the second knife under a tolerant policy, leaves the
-/// lune and the flat face of `x = 0` meeting at the south pole `P` along `P` to
-/// a second entry `P′` of the pole and `P′` to a corner `C` `4.4e−16` from it.
-/// Each face cuts `P′` off as a lobe, keeps the side `P C` inside its patch,
-/// and so that side is used four times, where uncut the lune was
-/// refused `CornersCoincide`
+/// `TwoPatchesOfTheMeshDrewTheSameSide`. Until Q2352 a ball of radius 3 cut to
+/// a 90 degree lune by two knives, less the second knife under a tolerant
+/// policy, left the lune and the flat face of `x = 0` meeting at the south pole
+/// `P` along `P` to a second entry `P′` of the pole and `P′` to a corner `C`
+/// `4.4e−16` from it. Each face cut `P′` off as a lobe and kept the side `P C`
+/// inside its patch, and so that side was used four times, where uncut the lune
+/// was refused `CornersCoincide`
 /// (`two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`).
+/// `P′` was the walk's one point on the arc from `P` to `C`, stored at `P`.
+/// `BuildingAMesh::walk` now drops it, and that difference is refused
+/// `FacesDoNotAgreeWhichWayTheyFace` instead.
 fn what_the_triangulator_can_cut(surface: &Surface, patch: Vec<ALoopToCut>) -> ThePatchAsCut {
     let mut drawn_here = Vec::new();
     let mut loops = patch.into_iter();
