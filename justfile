@@ -2599,7 +2599,15 @@ check-fuzz-builds:
 # `a_thousand_turns_of_a_cube_and_a_bar`: its match on `SurfaceMeet` names
 # `Nothing` and `Curves` of one run or two, and `other => panic!` takes the
 # rest, since a plane holding a pipe's axis direction meets it in nothing else.
-wildcard_arms := "100"
+#
+#     Q2329's lane  100 -> 101
+#
+# One more, in `fuses_that_must_agree.rs`'s `a_three_balls_crossing_refusal`:
+# it names `Error::CannotMeshAFace` for three balls that cross at the same two
+# points and sends every other `Error` to `a_curved_refusal` with `_`, the
+# same shape `a_turned_curved_refusal` already has, since `a_curved_refusal`
+# itself names the rest.
+wildcard_arms := "101"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:

@@ -1339,18 +1339,21 @@ pub fn a_ball_and_a_block() -> impl Strategy<Value = BallAndBlock> {
 /// faces carry a [`rcad_geom::Surface::Sphere`] instead.
 ///
 /// **This plain a pair does not reach `fuse/assemble.rs`'s `[Sphere, Sphere]`
-/// row of `which_arc_of_a_circle_walked_this_way`, though.** That row is read
-/// off the crossing circle's own two corner names
-/// (`fuse/select.rs`'s `SidesItShares::name_the_sides`, the one caller that can
-/// reach it), and `name_the_sides` only runs once `fuse/select.rs`'s point
-/// search cannot place a piece on its own. For two whole balls every piece —
-/// the lens and the two crescents — is a plain volume a point inside it decides
-/// at once, so the point search places all of them and `name_the_sides` is
-/// never called: an `eprintln!` at its one call site printed nothing across
-/// 213 fuses (71 drawn pairs, union/intersection/difference) that
-/// [`two_balls_crossing_in_a_circle`] drew. Reaching that row needs a third
-/// solid or tool that leaves at least one piece the point search cannot place
-/// on its own — not a plain pair.
+/// row of `which_arc_of_a_circle_walked_this_way`, though.** An earlier version
+/// of this comment blamed `fuse/select.rs`'s point-placement search, and said
+/// reaching that row needed a third solid the search could not place alone.
+/// That is not the mechanism: the row is read off an edge's two named corners,
+/// through the ordinary edge-naming path (`fuse/assemble.rs`'s `sides_of`,
+/// called for every fuse's answer, not only when the point search gives up).
+/// A plain pair's crossing circle has nothing else crossing it, so it carries
+/// only one corner the whole way round, and that function bails out as soon as
+/// an edge's two ends are the same corner — before asking which arc it is.
+/// What is actually missing here is a **second** corner on the circle, not a
+/// failed point search: an `eprintln!` at the row's one match arm printed
+/// nothing across 213 fuses (71 drawn pairs, union/intersection/difference)
+/// that [`two_balls_crossing_in_a_circle`] drew, and
+/// [`ThreeBallsThatCrossAtTheSameTwoPoints`] is the family that gives the
+/// circle that second corner, with no point-search failure anywhere in sight.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TwoBalls {
     /// The first ball's radius, centred at the origin.
@@ -1402,6 +1405,95 @@ pub fn two_balls_crossing_in_a_circle() -> impl Strategy<Value = TwoBalls> {
             second,
             apart,
         })
+}
+
+/// Three balls whose skins all cross at the same two points: [`TwoBalls`]'s
+/// own pair, and a third ball centred on their crossing circle and sized as a
+/// tenth-fraction of that circle's own radius.
+///
+/// A third ball centred at a point on the `first`/`second` circle sits on both
+/// of their skins already. Slicing it through the plane that circle lies in
+/// gives a second circle, concentric with nothing — its centre is `first`'s
+/// and `second`'s own circle's radius away from the axis — so the two circles
+/// cross at two real points whenever the third ball's radius is strictly
+/// between zero and twice the first circle's radius (the two tangent cases
+/// excluded). Those two points lie on all three skins at once.
+///
+/// **This is what actually reaches `fuse/assemble.rs`'s `[Sphere, Sphere]` row
+/// of `which_arc_of_a_circle_walked_this_way`** — see [`TwoBalls`]'s doc
+/// comment for the row [`two_balls_crossing_in_a_circle`] alone never reaches
+/// and why. `third_radius_tenths` is kept inside `1..=19` rather than
+/// `0..=20` so neither tangent case is drawn.
+///
+/// Shrinks toward [`two_balls_crossing_in_a_circle`]'s own shrink, with the
+/// third ball at a tenth of the crossing circle's radius.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThreeBallsThatCrossAtTheSameTwoPoints {
+    /// The first ball's radius, centred at the origin.
+    pub first: u32,
+    /// The second ball's radius.
+    pub second: u32,
+    /// How far the second ball's centre stands from the first, along `z`.
+    pub apart: u32,
+    /// The third ball's radius, in tenths of the first two balls' own
+    /// crossing circle's radius.
+    pub third_radius_tenths: u32,
+}
+
+impl ThreeBallsThatCrossAtTheSameTwoPoints {
+    /// Build the first two balls as [`TwoBalls::build`] would, then a third
+    /// ball centred on their crossing circle.
+    #[must_use]
+    pub fn build(&self) -> (Model, Vec<SolidKey>) {
+        let mut model = Model::new(Scale::millimetres(WORKING_SIZE).expect("a working size"));
+        let r1 = f64::from(self.first);
+        let r2 = f64::from(self.second);
+        let apart = f64::from(self.apart);
+        let first = model
+            .add_ball(r1, &Isometry::identity())
+            .expect("a whole-number ball");
+        let second = model
+            .add_ball(
+                r2,
+                &Isometry::translation(Vector::new(0.0, 0.0, apart)).expect("a whole-number shift"),
+            )
+            .expect("a whole-number ball");
+        let height_of_the_circle = (apart * apart + r1 * r1 - r2 * r2) / (2.0 * apart);
+        let radius_of_the_circle = (r1 * r1 - height_of_the_circle * height_of_the_circle).sqrt();
+        let third_radius = f64::from(self.third_radius_tenths) / 10.0 * radius_of_the_circle;
+        let third = model
+            .add_ball(
+                third_radius,
+                &Isometry::translation(Vector::new(
+                    radius_of_the_circle,
+                    0.0,
+                    height_of_the_circle,
+                ))
+                .expect("a shift onto the crossing circle"),
+            )
+            .expect("a ball sized off the crossing circle");
+        (model, vec![first, second, third])
+    }
+}
+
+/// [`ThreeBallsThatCrossAtTheSameTwoPoints`], drawn from
+/// [`two_balls_crossing_in_a_circle`]'s own pair with a third radius drawn
+/// from the open tenths `1..=19` (`0` and `20` are the two tangent cases,
+/// where the third ball's skin only touches the first circle rather than
+/// crossing it).
+///
+/// Shrinks toward [`two_balls_crossing_in_a_circle`]'s own shrink, with the
+/// third ball at a tenth of the crossing circle's radius.
+pub fn three_balls_that_cross_at_the_same_two_points()
+-> impl Strategy<Value = ThreeBallsThatCrossAtTheSameTwoPoints> {
+    (two_balls_crossing_in_a_circle(), 1u32..=19).prop_map(|(pair, third_radius_tenths)| {
+        ThreeBallsThatCrossAtTheSameTwoPoints {
+            first: pair.first,
+            second: pair.second,
+            apart: pair.apart,
+            third_radius_tenths,
+        }
+    })
 }
 
 /// A block with a ball half sunk into its floor and a round bar driven through
