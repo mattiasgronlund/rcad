@@ -21,6 +21,9 @@ CLASS = re.compile(r"^(wrong|crash|refuses)/[ABCD]$")
 SMALL = "small"
 PIN = re.compile(r"^pinned/([1-9][0-9]*)$")
 WHAT = re.compile(r"^(\s*(?:\S+\s+){5})(\S+)(.*)$")
+# A date in an `after:` state is a token, not a row id (§308): `after:Q148,2026-10-03`
+# is ready once Q148 is done:, and that UTC date has come.
+DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
 
 def heading_key(heading):
@@ -66,8 +69,17 @@ class Row:
         return self.state.startswith(("done:", "dropped:"))
 
     def waits_on(self):
-        """The ids an `after:` state names, and none for any other state."""
-        return self.state[len("after:"):].split(",") if self.state.startswith("after:") else []
+        """The ids an `after:` state names, less any date token, and none for any other state (§308)."""
+        if not self.state.startswith("after:"):
+            return []
+        return [w for w in self.state[len("after:"):].split(",") if not DATE.match(w)]
+
+    def waits_until(self):
+        """The one date token an `after:` state names, or `None` (§308)."""
+        if not self.state.startswith("after:"):
+            return None
+        dates = [w for w in self.state[len("after:"):].split(",") if DATE.match(w)]
+        return dates[0] if dates else None
 
     def has_class(self):
         return self.tag is not None and CLASS.match(self.tag) is not None
@@ -83,6 +95,12 @@ class Row:
         assert match, f"a row of fewer than three fields reached with_tier: {self.text!r}"
         gap = max(1, len(match.group(2)) + len(match.group(3)) - len(tier))
         return match.group(1) + tier + " " * gap + match.group(4)
+
+    def with_write_set(self, write_set):
+        """The row with its write-set field replaced, the columns around it left where they stood."""
+        match = re.match(r"^(\s*(?:\S+\s+){4})(\S+)(\s+)(.*)$", self.text)
+        assert match, f"a row of fewer than five fields reached with_write_set: {self.text!r}"
+        return match.group(1) + write_set + match.group(3) + match.group(4)
 
     def with_tag(self, tag):
         """The row with its tag replaced, added in front of the description, or removed when `tag` is None."""
