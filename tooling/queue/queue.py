@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from rows import CLASS, SMALL, TIERS_IN_ORDER, Queue, highest_q, tier_of_class  # noqa: E402
+from rows import CLASS, SMALL, TIERS_IN_ORDER, Queue, Row, highest_q, tier_of_class  # noqa: E402
 from families import families, family_line  # noqa: E402
 
 ID = re.compile(r"^[TDQ][0-9]+$")
@@ -696,7 +696,7 @@ def after_step(queue, claims, here, args, batch):
     queue.replace(row, row.with_state(state))
     message = f"{row_id}: {row.state} -> {state}"
     waiting = queue.find(row_id)
-    later = [other for other in open_blockers(queue, waiting) if fill_order(other.tier) > fill_order(row.tier)]
+    later = [other for other in open_blockers(queue, waiting, here, claims) if fill_order(other.tier) > fill_order(row.tier)]
     if later:
         if waiting.has_class():
             raise Refused(f"{row_id} carries the class {row.tag}, which keeps it in tier {row.tier}, and it would "
@@ -704,7 +704,7 @@ def after_step(queue, claims, here, args, batch):
                           f"Mattias's to set (§435.4)")
         to = max((other.tier for other in later), key=fill_order)
         beside = " and ".join(other.id for other in later if other.tier == to)
-        taken = move_row(queue, waiting, to)
+        taken = move_row(queue, waiting, to, here, claims)
         message += f", tier {row.tier} -> {to}, beside {beside}, which it waits on{taken}"
     return queue, message, None
 
@@ -785,7 +785,7 @@ def tier_step(queue, claims, here, args, batch):
     if row.tag is not None and CLASS.match(row.tag) and to != tier_of_class(row.tag):
         raise Refused(f"{row_id} carries the class {row.tag}, which puts it in tier {tier_of_class(row.tag)}; "
                       f"remove it first with `tag {row_id} -`")
-    taken = move_row(queue, row, to)
+    taken = move_row(queue, row, to, here, claims)
     message = f"{row_id}: tier {row.tier} -> {to}, at the foot of ## Tier {to}{taken}"
     return queue, message, None
 
@@ -825,12 +825,12 @@ def tag_step(queue, claims, here, args, batch):
     message = f"{row_id}: tag {row.tag or '-'} -> {tag or '-'}"
     if is_class and tier_of_class(tag) != row.tier:
         to = tier_of_class(tag)
-        taken = move_row(queue, queue.find(row_id), to)
+        taken = move_row(queue, queue.find(row_id), to, here, claims)
         message += f", tier {row.tier} -> {to}, at the foot of ## Tier {to}{taken}"
     return queue, message, None
 
 
-def move_row(queue, row, to):
+def move_row(queue, row, to, here, claims):
     """`move_to_tier`, keeping each open row in no tier the fill reaches before a row it waits on (§435.6).
 
     A move to an earlier tier is refused if the row would then sit above a row
@@ -842,29 +842,67 @@ def move_row(queue, row, to):
     """
     was = row.tier
     if fill_order(to) < fill_order(was):
-        refuse_a_move_above_what_it_waits_on(queue, row, to)
+        refuse_a_move_above_what_it_waits_on(queue, row, to, here, claims)
     move_to_tier(queue, row, to)
     if fill_order(to) > fill_order(was):
         return take_down_what_waits_on(queue, row.id, to)
-    return take_up_out_of_tier_5(queue, row.id) if was == "5" else ""
+    return take_up_out_of_tier_5(queue, row.id, here, claims) if was == "5" else ""
 
 
 def fill_order(tier):
     return TIERS_IN_ORDER.index(tier)
 
 
-def open_blockers(queue, row):
-    """The open rows this copy holds that `row` waits on."""
-    found = (queue.find(other) for other in row.waits_on())
-    return [other for other in found if other is not None and not other.is_closed()]
+def open_blockers(queue, row, here, claims):
+    """The open rows `row` waits on: this copy's, and, for one this copy lacks, wherever `blocker_elsewhere` reads its tier (Q2315)."""
+    blockers = []
+    for other_id in row.waits_on():
+        other = queue.find(other_id) or blocker_elsewhere(here, claims, other_id)
+        if other is not None and not other.is_closed():
+            blockers.append(other)
+    return blockers
+
+
+def blocker_elsewhere(here, claims, row_id):
+    """`row_id`, parsed from wherever `exists_elsewhere` would find it, when this copy holds no row by that id.
+
+    `exists_elsewhere` answers only whether the id exists anywhere; `open_blockers`
+    needs the row itself, for its tier, so a wait on a row held only by another
+    worktree or branch still keeps §435.4's refusal and §435.6's move (Q2315). A
+    copy mid-merge-conflict is skipped: a duplicate id on its two sides would make
+    `Queue.find` refuse, and existence alone does not need an unambiguous parse.
+    """
+    added = claims.added().get(row_id)
+    if added is not None:
+        return Row(0, added[4], None)
+    pattern = re.compile(rf"^\s*{re.escape(row_id)}\s", re.M)
+    for _, text in here.other_copies(lanes_too=True):
+        if not pattern.search(text):
+            continue
+        parsed = Queue(text)
+        if parsed.conflicted:
+            continue
+        found = parsed.find(row_id)
+        if found is not None:
+            return found
+    for text in branch_copies(here.relative):
+        if not pattern.search(text):
+            continue
+        parsed = Queue(text)
+        if parsed.conflicted:
+            continue
+        found = parsed.find(row_id)
+        if found is not None:
+            return found
+    return None
 
 
 def waiting_on(queue, row_id):
     return [other for other in queue.rows if not other.is_closed() and row_id in other.waits_on()]
 
 
-def refuse_a_move_above_what_it_waits_on(queue, row, to):
-    for blocker in open_blockers(queue, row):
+def refuse_a_move_above_what_it_waits_on(queue, row, to, here, claims):
+    for blocker in open_blockers(queue, row, here, claims):
         if fill_order(blocker.tier) > fill_order(to):
             mattias = ""
             if row.has_class() or row.pin is not None:
@@ -891,7 +929,7 @@ def take_down_what_waits_on(queue, moved_id, to):
     return taken
 
 
-def take_up_out_of_tier_5(queue, moved_id):
+def take_up_out_of_tier_5(queue, moved_id, here, claims):
     """Each open tier 5 row with no class that waited on no tier 5 row but `moved_id`, moved up after it.
 
     It goes to the latest tier among the rows it still waits on, so it sits
@@ -904,7 +942,7 @@ def take_up_out_of_tier_5(queue, moved_id):
         for waiter in waiting_on(queue, gone):
             if waiter.tier != "5" or waiter.has_class() or still_waits_on_tier_5(queue, waiter):
                 continue
-            to = max((other.tier for other in open_blockers(queue, waiter)), key=fill_order)
+            to = max((other.tier for other in open_blockers(queue, waiter, here, claims)), key=fill_order)
             taken += f", takes {waiter.id} along, tier 5 -> {to}"
             move_to_tier(queue, waiter, to)
             left.append(waiter.id)
@@ -1002,7 +1040,7 @@ def pin_step(queue, claims, here, args, batch):
             raise Refused(f"{row_id} is pinned/{row.pin} already; unpin it first to re-order")
         if row.tag is not None and CLASS.match(row.tag) and tier_of_class(row.tag) != "1":
             raise Refused(f"{row_id} carries the class {row.tag}, which puts it in tier 5, and a pinned row is tier 1")
-        outside = [other for other in open_blockers(queue, row) if other.tier != "1"]
+        outside = [other for other in open_blockers(queue, row, here, claims) if other.tier != "1"]
         if outside:
             raise Refused(f"{row_id} waits on {outside[0].id}, which is tier {outside[0].tier}, and a pinned row "
                           f"is tier 1, which the fill reaches first (§435)")
@@ -1011,7 +1049,7 @@ def pin_step(queue, claims, here, args, batch):
         queue.replace(row, row.with_pin(number))
         moved = ""
         if row.tier != "1":
-            taken = move_row(queue, queue.find(row_id), "1")
+            taken = move_row(queue, queue.find(row_id), "1", here, claims)
             moved = f", tier {row.tier} -> 1{taken}"
         put_after_the_pins(queue, queue.find(row_id))
         messages.append(f"{row_id}: pinned/{number}{moved}, taken ahead of every row not pinned")

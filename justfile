@@ -15092,6 +15092,73 @@ check-queue-selftest:
     grep -q '^Q1  1  lane:lane-new-a ' "$a/docs/queue.md" \
         || fail "take did not write lane:lane-new-a once the only other lane: state left was one main's history held"
 
+    # Q2315: a wait on a row held only by another branch, never merged into
+    # this copy's own history, still gets §435.4's refusal or §435.6's move.
+    # `exists_elsewhere` lets `after` name such a row at all; `open_blockers`
+    # must then read its tier from wherever that found it, not from this
+    # copy alone, or the refusal and the move both go missing.
+    hub2="$dir/q2315-hub"
+    mkdir -p "$hub2/docs/decisions.d"
+    printf '## 230. One queue\n' > "$hub2/docs/decisions.d/sections.md"
+    cat > "$hub2/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    T1  1  todo  opus  docs/a.md  refuses/B from/- a classed row that would wait across tiers §230
+    T2  1  todo  opus  docs/a.md  from/- an unclassed row that would wait across tiers §230
+    ```
+
+    ## Closed
+
+    ```
+    ```
+    MD
+    touch "$hub2/docs/a.md"
+    g "$hub2" init -q -b main
+    g "$hub2" add -A
+    g "$hub2" commit -q -m root
+
+    tier2_wt="$dir/q2315-tier2"
+    g "$hub2" worktree add -q -b q2315-tier2 "$tier2_wt" main
+    cat > "$tier2_wt/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    T1  1  todo  opus  docs/a.md  refuses/B from/- a classed row that would wait across tiers §230
+    T2  1  todo  opus  docs/a.md  from/- an unclassed row that would wait across tiers §230
+    ```
+
+    ## Tier 2
+
+    ```
+    Q1  2  todo  opus  docs/a.md  from/- a tier 2 row held only on another branch §230
+    ```
+
+    ## Closed
+
+    ```
+    ```
+    MD
+    g "$tier2_wt" add -A
+    g "$tier2_wt" commit -q -m "add Q1, never merged into main"
+    g "$hub2" worktree remove --force "$tier2_wt"
+
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$hub2" queue after T1 Q1 2>&1) \
+        && fail "after moved a classed row to wait on a row held only by another branch"
+    grep -qxF "queue after: T1 carries the class refuses/B, which keeps it in tier 1, and it would wait on Q1, which is tier 2: which of the two moves is Mattias's to set (§435.4)" <<<"$got" \
+        || fail "after did not read Q1's tier from the branch that holds it"
+    grep -q '^T1  1  todo ' "$hub2/docs/queue.md" || fail "a refused after wrote hub2's file anyway"
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$hub2" queue after T2 Q1 2>&1) \
+        || fail "after refused an unclassed row waiting on a row held only by another branch"
+    grep -qxF "T2: todo -> after:Q1, tier 1 -> 2, beside Q1, which it waits on" <<<"$got" \
+        || fail "after did not move the unclassed row down to Q1's tier"
+    grep -q '^T2  2  after:Q1 ' "$hub2/docs/queue.md" \
+        || fail "after did not leave T2 at tier 2 in hub2's own file"
+
     # Q817: `queue help` names every mode and verb the recipe's own case
     # dispatches, read from that case itself, so a verb added later with no
     # help line fails here rather than only going undocumented.
@@ -15435,7 +15502,9 @@ check-queue-api-selftest:
     grep -q "^$in_two " "$one/docs/queue.md" && fail "an add from two reached one's copy, so the next case proves nothing"
 
     got=$(q "$one" after Q3 "$in_two" 2>&1) || fail "after refused $in_two, which two handed out and one does not hold yet"
-    grep -q "^Q3  1  after:$in_two " "$one/docs/queue.md" || fail "after did not write after:$in_two"
+    grep -qxF "Q3: todo -> after:$in_two, tier 1 -> 2, beside $in_two, which it waits on" <<<"$got" \
+        || fail "after did not move Q3 down to $in_two's tier, once it could read it from the claims file two wrote"
+    grep -q "^Q3  2  after:$in_two " "$one/docs/queue.md" || fail "after did not write Q3 at tier 2"
     got=$(check "$one") || fail "check-queue refused a wait on a Q row only two holds"
     grep -qF '1 wait on a Q row this copy does not hold yet' <<<"$got" || fail "check-queue did not count the wait on a row it cannot see"
     got=$(q "$one" after Q2 Q99 2>&1) && fail "after accepted Q99, which exists nowhere"
@@ -15505,15 +15574,12 @@ check-queue-api-selftest:
     g "$two" commit -qam "two's queue"
     g "$hub" merge -q --no-edit one || fail "main did not take one"
     got=$(g "$hub" merge --no-edit two 2>&1) || fail "one and two changed different rows and did not merge through the driver"
-    for row in '^Q1  1  done:' '^Q2  1  lane:lane-q2 ' "^Q3  1  after:$in_two " 'added in one, 1 ' 'added in one, 2 ' 'added in two, 1 ' 'added in two, 2 '; do
+    for row in '^Q1  1  done:' '^Q2  1  lane:lane-q2 ' "^Q3  2  after:$in_two " 'added in one, 1 ' 'added in one, 2 ' 'added in two, 1 ' 'added in two, 2 '; do
         grep -q "$row" "$hub/docs/queue.md" || fail "the merge lost the row matching $row"
     done
-    # §435: one copy could not see the tier of the row Q3 waits on; the merge can.
-    got=$(check "$hub") && fail "the merged queue passed with Q3 in tier 1 waiting on $in_two, a tier 2 row"
-    grep -qF "Q3: waits on $in_two, which is tier 2, and sits in tier 1, which the fill reaches first; move it down with just queue tier Q3 2 (§435)" <<<"$got" \
-        || fail "check-queue did not name Q3 and $in_two, and their tiers, once the merge showed both"
-    got=$(q "$hub" tier Q3 2 2>&1) || fail "tier refused to move Q3 down beside the row it waits on"
-    g "$hub" commit -qam "Q3 down to tier 2"
+    # §435 (Q2315): one copy could not see the tier of the row Q3 waits on, but
+    # `after` reads it from the claims file two wrote, and already moved Q3
+    # down to tier 2 beside it, so the merge carries no violation to fix by hand.
     got=$(check "$hub") || fail "the merged queue fails check-queue"
 
     g "$hub" switch -q -c three
