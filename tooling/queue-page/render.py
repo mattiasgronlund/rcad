@@ -61,7 +61,7 @@ sys.dont_write_bytecode = True
 QUEUE_TOOLING = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "queue"))
 sys.path.insert(0, QUEUE_TOOLING)
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lineage")))
-from rows import SMALL, Queue, TIERS_IN_ORDER  # noqa: E402
+from rows import DATE, SMALL, Queue, TIERS_IN_ORDER  # noqa: E402
 import families as family_rows  # noqa: E402
 import fuzz_section  # noqa: E402
 import lineage  # noqa: E402
@@ -356,12 +356,17 @@ def rows_not_taken(tip, tip_text, trees):
 
 
 def not_yet_done(tip, row):
-    """The rows an `after:` row waits on that are not `done:`, each with its state.
+    """The rows and the date an `after:` row waits on that are not yet done or come, each with its state (§308).
 
-    A dropped row is not done, as `just queue` and `take` read it.
+    A dropped row is not done, as `just queue` and `take` read it. A date
+    token is not a row: it is unfinished only while today is earlier than it.
     """
     unfinished = []
     for other in row.state[len("after:"):].split(","):
+        if DATE.match(other):
+            if datetime.now(timezone.utc).date() < datetime.strptime(other, "%Y-%m-%d").date():
+                unfinished.append((other, "date not yet come"))
+            continue
         found = tip.find(other)
         if found is None or not found.state.startswith("done:"):
             unfinished.append((other, found.state if found else "not a row"))
