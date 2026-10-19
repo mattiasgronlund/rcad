@@ -55,8 +55,6 @@
 //! the fuse is asked — the stored numbers differ and `intersect` calls them one
 //! surface.
 
-use core::mem::discriminant;
-
 use rcad_geom::SurfaceMeet;
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector,
@@ -689,24 +687,26 @@ impl APinnedBar {
 /// lower wall's gradient and the upper's, which are one: refused `Undecidable`
 /// in both orders on an `orient3d` that straddled nothing (Q2050).
 ///
-/// One spelling is refused too, `AFaceTrimmedByACurveThisCannotFollow`, which
-/// is the refusal two spellings must match until that is lifted.
+/// One spelling was refused too, `AFaceTrimmedByACurveThisCannotFollow`: every
+/// ray the fuse fired to place a piece met a wall with a half ellipse among
+/// its sides, and `holds.rs` could not tell which side of such a side a point
+/// lies (Q2460). Every answer is now one solid of the volume worked out by
+/// hand.
 #[test]
 fn a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does() {
-    let [written_once, written_twice] = [LOWER_ORIGIN, CROSSED_JOINT]
-        .map(|axis_origin| the_bars_united_across(CROSSED_JOINT, axis_origin));
-    for (lower_first, (once, twice)) in [true, false]
-        .into_iter()
-        .zip(written_once.into_iter().zip(written_twice))
-    {
-        assert_eq!(
-            once.0.as_ref().map_err(discriminant),
-            twice.0.as_ref().map_err(discriminant),
-            "lower bar first {lower_first}: written once, {}; written twice, {}",
-            once.1,
-            twice.1
-        );
+    let mut wrong = Vec::new();
+    for axis_origin in [LOWER_ORIGIN, CROSSED_JOINT] {
+        let answers = the_bars_united_across(CROSSED_JOINT, axis_origin);
+        for (lower_first, answer) in [true, false].into_iter().zip(answers) {
+            if answer.0.is_err() {
+                wrong.push(format!(
+                    "wall at {axis_origin}, lower bar first {lower_first}: {}",
+                    answer.1
+                ));
+            }
+        }
     }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// Where the lower bar meets the upper, above the axis of the bar across them.
