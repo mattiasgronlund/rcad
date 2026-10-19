@@ -856,3 +856,71 @@ answers `false` there.
 - An edge *nearly*, not exactly, parallel to a plane a rounding off it. The
   fold needs the three normals proved to lie in one plane, so it leaves that
   case alone. Not run.
+
+### 417.10 Input corners that meet within the wobble of one another, tried after 417.9's ends — 2026-10-19
+
+*Queue row Q2299, in two lanes: `lane-q2299-a-a-cube-on-a-corner-turned-about-a-leaning-axis`,
+off `3981be24`, built the fold and the range check below, and
+`lane-q2299-b-check-and-land-the-leaning-axis-fold`, off `718cf0c1`, checked and
+landed it. Counts below are quoted from each lane's own commit, not run again.*
+
+**The shape.** `a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`:
+the block `[0, 10]³` and a second cube on its corner `(0, 0, 10)`, turned about
+an axis leaning `t` off `z` by a turn `p` short of a half turn. At `p = 0` the
+turned cube's edge from the shared corner runs along `−x`, on the line that
+carries the block's edge on past it, so both cubes have a face on `x = 0` and
+the line `x = 0` carries four planes. Stored, the turned planes pass within a
+rounding of the line, so `x = 0` cuts the four in six meets, each `1.2e−14` or
+less from the corner. Three round to the corner's own `f64` triple and the
+other three do not, so a side along `x = 0, z = 10` and a side along `x = 0`
+and a turned plane joined the same two corners, and `Policy::tolerant(100.0)`
+refused the union `ResultIsNotManifold { count: 4 }` both ways round.
+
+**The fold.** `fold_each_point_input_corners_meet_at_a_rounding_apart` in
+`fuse/assemble.rs`, under a tolerant policy only. Input corners within
+`Policy::max_wobble` of one another, none two sharing two planes (not an edge
+shorter than the wobble, as §417.7's fold does not take one either), with
+every meet of their planes some piece runs to within the wobble of the kept
+corner, as one point, with one record, *"input corners and the meets of their
+planes a rounding apart taken as one point"*. Neither 417.7's corner fold nor
+417.9's edge-end fold takes these meets: at each end of the shared edge two
+planes run beside it, not one, and another input corner is as near besides.
+
+**The order.** `Model::fused_under` tries this fold the same way it tries
+417.9's ends of edges: only after the first try is refused, after the ends and
+without them, starting from the first try's own names and the log before it,
+so the two retries never mix and the first that answers gives the answer and
+its records. A fuse that answered before answers as before, and one refused
+with the fold too keeps the first refusal and the log it left.
+
+Measured with an uncommitted probe over the file's family (`t` over 9 values,
+`p` over 6, both policies, both orders, three rules), quoted from `b19605e1`:
+before, `total=648 ok=545 wrong=0 refused=103 panicked=0`; after, `ok=559`,
+`refused=89`, every tolerant refusal answered at its worked volume. `cargo
+nextest -p rcad-topo`: 2350 run, 2350 passed.
+
+**The range check.** Under `Policy::certified()` thirteen fuses of the
+half-turn family were still refused `ResultIsNotManifold`: at `t = 0.1`,
+`p = 0` the union's edge from `(0, 0, 10)` to `(0, 1.13e−16, 10)` had four
+faces along it, and two distinct lines meet at most once, so one of those
+corners stands for two points the rounding put on one `f64` triple. The
+answer's range there, `21.8` over `1.13e−16 = 1.9e17`, is past what `f64`
+resolves, and `Assembly::check_dynamic_range` would have refused it were the
+edge claimed by two faces as that check expects.
+
+`Assembly::joined_into_shells` now, on `ResultIsNotManifold` only, asks
+`Assembly::check_the_range_at_each_edge_not_two_faces_claim`: the answer's
+largest corner coordinate over the shortest chord above zero of an edge other
+than two faces claim, through `the_range_asked` with a throwaway log, and
+refuses `Invalid::DynamicRangeTooWide` in its place when that ratio is past
+what `f64` carries, under a policy that fails on it. A fuse that answered
+before answers the same, since nothing runs unless the manifold check already
+refused, and a policy that only warns of a range gets `Ok` and keeps
+`ResultIsNotManifold`, so `fused_under`'s first refusal is not renamed before
+its retries. The largest coordinate here is the answer's corners alone,
+without the inputs' reach `check_dynamic_range` adds, so the ratio is never
+above what that check would give for the same edge.
+
+Measured with the same uncommitted sweep probe, quoted from `72587fc1`:
+`ok=559 wrong=0 refused=89 panicked=0`, before and after; all 89 refusals are
+now `DynamicRangeTooWide`, 76 of which were already.
