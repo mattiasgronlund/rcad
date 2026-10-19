@@ -6673,3 +6673,33 @@ fn three_balls_whose_lune_runs_round_the_third_balls_pole_mesh() {
         assert!(answer.is_ok(), "{rule:?} came back {answer:?}");
     }
 }
+
+/// Two balls of radius 6 one apart with a third of 1.3 of their crossing
+/// circle's radius on it, and two of radius 3 with a third of 0.4: the third
+/// ball's lune, inside the first ball and outside the second, bows away from
+/// the straight side its chart draws for one step of its arc, and the other
+/// arc's one walked point lands across that side,
+/// `BoundaryCrossesItself { at: 3 }` (Q2388, §191).
+///
+/// A finer mesh clears it, but `the_coarsest_mesh_whose_sides_do_not_cross`
+/// halves from half the box's width and stopped at half the gap between the
+/// two shared points, the solid's only two corners. Its last rung was `0.836`
+/// of that gap for the first and `0.770` for the second, and both mesh at the
+/// rung after, `0.418` and `0.385`.
+#[test]
+fn three_balls_whose_lune_bows_away_from_its_chart_side_mesh() {
+    for (first, third_radius_tenths) in [(6, 13), (3, 4)] {
+        let triple = pairs::ThreeBallsThatCrossAtTheSameTwoPoints {
+            first,
+            second: first,
+            apart: 1,
+            third_radius_tenths,
+        };
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let (mut model, keys) = triple.build();
+            let mut log = ProvenanceLog::new();
+            let answer = model.fuse(&keys[..1], &keys[1..], rule, &Policy::certified(), &mut log);
+            assert!(answer.is_ok(), "{triple:?} {rule:?} came back {answer:?}");
+        }
+    }
+}
