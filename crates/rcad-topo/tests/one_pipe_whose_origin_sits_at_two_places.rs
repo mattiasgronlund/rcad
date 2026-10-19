@@ -31,6 +31,16 @@
 //! meet (§231.5). Now both spellings unite, pin or no pin, with the wall one
 //! face (Q1877).
 //!
+//! **A bar across the joint gives what one spelling gives.** A bar of the
+//! wall's radius along `x` through the axis below the joint crosses the wall in
+//! half ellipses that climb past the joint, and the cross's wall, united with
+//! the upper bar first, then held each half twice: once with each spelling,
+//! since the pickers of a half come in the order `intersect` sorts the two
+//! pipes, and it sorts the cross's between the two spellings. Two spellings
+//! were refused `Undecidable` where one is refused
+//! `AFaceTrimmedByACurveThisCannotFollow`; now both are refused alike, and
+//! the half is one curve (Q2050).
+//!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
 //! the fuse is asked — the stored numbers differ and `intersect` calls them one
@@ -659,13 +669,19 @@ impl APinnedBar {
 ///
 /// Two walls of one radius whose axes meet cross in four half ellipses, which
 /// meet where the walls touch, at `(0, ±2, 3)` on the lower bar. In the second
-/// union the cross's wall holds them twice: once as its crossings with the
-/// lower wall, and once along its own edges, which the upper wall left it with.
-/// With two spellings, each place the halves meet was named as the half's
-/// partner sorts against the cross's wall: `[lower, cross, cross]` and
-/// `[cross, upper, upper]`, with which of the two places it is flipped between
-/// them. So each place was two nodes, and the union was refused `Undecidable`
-/// in both orders on an `orient3d` asked of one point twice (Q2050).
+/// union the cross's wall holds the two that climb past the joint twice: once
+/// as its crossings with the lower wall, and once along its own edges, which
+/// the upper wall left it with. A half is picked out by two flat surfaces,
+/// listed with the one leaning towards the pipe `intersect` sorts first ahead,
+/// and it sorts the cross's pipe after the lower wall named at `0` and before
+/// the upper named at the joint. So with two spellings each half came with its
+/// pickers the other way round, was drawn as two curves, and where it crosses
+/// the joint at `(−1, −√3, 4)` the turn between the two was asked of the
+/// lower wall's gradient and the upper's, which are one: refused `Undecidable`
+/// in both orders on an `orient3d` that straddled nothing (Q2050).
+///
+/// One spelling is refused too, `AFaceTrimmedByACurveThisCannotFollow`, which
+/// is the refusal two spellings must match until that is lifted.
 #[test]
 fn a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does() {
     let [written_once, written_twice] =
