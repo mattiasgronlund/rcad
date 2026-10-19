@@ -242,13 +242,40 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         },
     )?;
 
-    if let Some(position) = flushed {
-        let unflushed = |vertex: FixedVertexHandle| {
-            let at = scaled(corners[corner_of[vertex.index()] as usize]);
-            [at.x, at.y]
-        };
-        if !the_flush_moved_nothing_the_patch_rests_on(&mesh, domain, &handles, unflushed) {
-            return Err(the_refusal_the_flush_replaced(position));
+    match flushed {
+        Some(position) => {
+            let unflushed = |vertex: FixedVertexHandle| {
+                let at = scaled(corners[corner_of[vertex.index()] as usize]);
+                [at.x, at.y]
+            };
+            if !the_flush_moved_nothing_the_patch_rests_on(&mesh, domain, &handles, unflushed) {
+                return Err(the_refusal_the_flush_replaced(position));
+            }
+        }
+        // **Only the refinement can have split a side here**, since
+        // `refuse_a_side_with_a_corner_on_it` saw every side whole before it
+        // ran. It promises not to: it puts a point only at the middle of a side
+        // off the loops, which is strictly inside the patch, but worked out in
+        // `f64` that middle is a rounding off. A point rounded onto a side
+        // would split it here while the face across draws it whole, a crack
+        // (`docs/decisions.md` §25.1), and a crash beats a crack.
+        //
+        // **A mesh with no triangle is let through with a side in pieces.** All
+        // its corners are on one line, spade holds them as a line of edges, and
+        // the side running past the middle corner is two of those. No triangle
+        // comes back, so none draws a piece of that side, and `rcad-topo` draws
+        // such a face as a fan of its own sides. Every side Q2221 found not one
+        // edge after the refinement was of this kind, and already in pieces
+        // before it: 292 sides, each of a flat patch of three corners with no
+        // triangle, among 4499449 unflushed patches past the refinement in
+        // every test of `rcad-mesh`, `rcad-topo` and `rcad`.
+        None => {
+            let in_pieces = a_side_the_mesh_holds_in_pieces(&mesh, domain, &handles);
+            assert!(
+                in_pieces.is_none() || mesh.num_inner_faces() == 0,
+                "the refinement put a point on a side: the first side in pieces, by the \
+                 corner it leaves, is {in_pieces:?}"
+            );
         }
     }
 
@@ -821,11 +848,7 @@ fn the_flush_moved_nothing_the_patch_rests_on(
     handles: &[FixedVertexHandle],
     unflushed: impl Fn(FixedVertexHandle) -> [f64; 2],
 ) -> bool {
-    let every_side_is_there = every_side(domain).into_iter().all(|(from, to)| {
-        mesh.get_edge_from_neighbors(handles[from], handles[to])
-            .is_some()
-    });
-    if !every_side_is_there {
+    if a_side_the_mesh_holds_in_pieces(mesh, domain, handles).is_some() {
         return false;
     }
 
@@ -859,6 +882,23 @@ fn the_flush_moved_nothing_the_patch_rests_on(
             || hull.iter().enumerate().all(|(other, &(beside, _))| {
                 other == which || !two_sides_of_an_outline_meet(side, beside)
             })
+    })
+}
+
+/// The corner the first side of the domain leaves from that is not one edge of
+/// `mesh`, or `None` when every side is.
+///
+/// A side with a point of the mesh on it is two edges or more, since spade
+/// splits a side at any point it is given there.
+fn a_side_the_mesh_holds_in_pieces(
+    mesh: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    domain: &TrimmedDomain,
+    handles: &[FixedVertexHandle],
+) -> Option<usize> {
+    every_side(domain).into_iter().find_map(|(from, to)| {
+        mesh.get_edge_from_neighbors(handles[from], handles[to])
+            .is_none()
+            .then_some(from)
     })
 }
 
@@ -1046,7 +1086,8 @@ fn refuse_loops_that_share_a_whole_side(
 ///
 /// **A domain with every corner on one line is let through**, and comes back
 /// with no triangles. It encloses nothing, so no triangles is all of it, and no
-/// triangle draws a piece of a side. `rcad-topo`'s
+/// triangle draws a piece of a side, though the side running past a corner on
+/// it stays two edges of the mesh to the end. `rcad-topo`'s
 /// `a_block_edge_grazing_a_ball.rs` cuts slivers `2⁻⁷⁸` wide, a flat face of
 /// one comes here as three corners on one line, and the solid is refused
 /// later, on its curved face, as it was before this check.
@@ -1763,10 +1804,12 @@ struct HowFineToGo<'a> {
 /// placed point crowds the middle of that side, the cut goes across it to the
 /// next triangle's longest side instead ([`where_to_cut`]).
 ///
-/// A loop is never cut: only an interior side is ever chosen. A triangle made
-/// of nothing but boundary sides therefore has nothing to offer, and it almost
-/// never needs to — its longest chord is a boundary chord, and those were all
-/// measured against the deflection before any of this and passed.
+/// A loop is never cut: only an interior side is ever chosen, and
+/// [`triangulate`] asserts afterwards that every side of every loop is still
+/// one edge. A triangle made of nothing but boundary sides therefore has
+/// nothing to offer, and it almost never needs to — its longest chord is a
+/// boundary chord, and those were all measured against the deflection before
+/// any of this and passed.
 ///
 /// # Why it stops
 ///
@@ -2479,6 +2522,46 @@ mod tests {
         assert_eq!(turns_one_way_once_round(&seven(2)), None);
         assert_eq!(turns_one_way_once_round(&dented), None);
         assert_eq!(turns_one_way_once_round(&straight), None);
+    }
+
+    /// A point on a side splits it, and the check [`triangulate`] asserts once
+    /// the refinement is done sees the split. No refinement has been seen to put
+    /// a point on a side (Q2221), so the point is put there by hand here, the
+    /// way a midpoint rounded onto the side would be.
+    #[test]
+    fn a_point_put_on_a_side_leaves_that_side_in_pieces() {
+        let flat =
+            rcad_geom::Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal");
+        let domain = TrimmedDomain::new(
+            Surface::from(flat),
+            crate::domain::Loop::through(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+                .expect("a square"),
+            Vec::new(),
+            rcad_geom::Deflection::of(1.0).expect("a positive length"),
+        );
+        let mut mesh = ConstrainedDelaunayTriangulation::<Point2<f64>>::new();
+        let handles: Vec<FixedVertexHandle> = every_corner(&domain)
+            .into_iter()
+            .map(|[u, v]| {
+                mesh.insert(Point2::new(u, v))
+                    .expect("a small whole number")
+            })
+            .collect();
+        for (from, to) in every_side(&domain) {
+            mesh.add_constraint(handles[from], handles[to]);
+        }
+        assert_eq!(
+            a_side_the_mesh_holds_in_pieces(&mesh, &domain, &handles),
+            None
+        );
+
+        mesh.insert(Point2::new(4.0, 2.0))
+            .expect("the middle of the side from corner 1");
+        assert_eq!(
+            a_side_the_mesh_holds_in_pieces(&mesh, &domain, &handles),
+            Some(1)
+        );
     }
 
     /// Half a cap of a unit ball with the north pole `N` on its rim, as
