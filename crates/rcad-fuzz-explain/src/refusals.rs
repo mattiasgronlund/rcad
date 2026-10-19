@@ -598,7 +598,7 @@ mod tests {
                      compute in",
                     2,
                     0,
-                    LimitOrGap::Limit
+                    LimitOrGap::NotKnown
                 ),
             ]
         );
