@@ -563,3 +563,45 @@ in the kernel or under it; or state carried from one unit to the next moves;
 or ASan or libFuzzer changes what the target is given. None of these was
 looked at. Filed as Q2245. The lane's tree is removed (§420.4), with its
 logs; the lines that matter are above.
+
+### 305.11 Two days on, no build parts
+
+*Queue rows Q2245, Q2387 and Q2390, read-only, 2026-10-19. Written by their
+dispatcher from the lanes' reports. The last row of the table was run again
+by the dispatcher.*
+
+**Nothing built today parts.** Every row below is an unmodified `012d3163`
+build of `where_two_surfaces_cross`, run as 305.10 ran it (`setarch -R`,
+`-seed=42`, ASan's default options, the 834 seed files of that tree) and read
+at `INITED`:
+
+| Who | Tree | Pads | `INITED` ft / corp |
+|---|---|---|---|
+| Q2387 | a scratch tree under `/tmp` | 0 to 256, steps of 8 | 9203 / 498 at every pad |
+| Q2390 | Q2245's path, `wf_17060d2e-1e0-2`, made again | 0, 16, 32, 48 twice; 0 to 136, steps of 8 | 9203 / 498, 34 runs of 34 |
+| Q2390 | 305.10's path, `wf_34a911b1-00b-2`, made again | 0, 16, 32, 48 twice | 9203 / 498 |
+| dispatcher | the same binary, sha256 `394f49c2…` | 0 and 16 | 9203 / 498 |
+
+**The binary is not 305.10's.** At 305.10's own path, from the same source and
+the same nightly (`rustc 1.100.0-nightly 0dfb098f3 2026-08-31`), today's build
+has sha256 `394f49c2…` where 305.10's had `324a95f6…`. So it is not known
+whether the run changed or the build did. Q2390 built with Q2245's script, not
+305.8's, and nobody compared the two. Its lane said rustc's build ids keep any
+two builds from matching byte for byte; that was not checked.
+
+**Q2245's parting cannot be checked again.** Q2245 reported its pads parting
+on an unmodified build in its own tree, and the parting going away under any
+marker. The binary Q2390 found in that tree was a marker build (sha256
+`9bf544b8…`), so the unmodified one is gone.
+
+**`-runs` does not cut the seed pass short.** At `-runs=5` the main-tip binary
+still ran all 835 seed units before `INITED` (Q2387). A run-length bisection
+cannot name the seed file. A break in gdb once per unit, at
+`Fuzzer::RunOne`, can, once something parts.
+
+**So the row is parked.** Three lanes spent their budget and none reached the
+bisection; the last two found nothing to bisect. 305.10 stands as measured on
+10-17: under ASan's fake stack, the kernel's path through `Exact::minus` moved
+with where the stack started. Nothing built today shows it. Q2390 is parked
+on this section until a build parts again. The first thing to try is a build
+whose sha256 is `324a95f6…`, made with 305.8's script.
