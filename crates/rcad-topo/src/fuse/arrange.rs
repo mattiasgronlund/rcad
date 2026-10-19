@@ -2555,9 +2555,7 @@ impl<'f> Arrangement<'f> {
             (face, pickers[on_the_face]),
             (other, pickers[1 - on_the_face]),
         ];
-        pipes.sort_by_key(|(pipe, _)| {
-            name_of_the_surface_either_way_round(&Surface::Cylinder(*pipe))
-        });
+        pipes.sort_by_key(|(pipe, _)| name_of_surface_bits(&Surface::Cylinder(*pipe)));
         let [(lesser, along_the_lesser), (greater, _)] = pipes;
 
         let middle = where_an_axis_crosses_a_flat_picker(&lesser, &along_the_lesser);
@@ -2701,7 +2699,7 @@ impl<'f> Arrangement<'f> {
             pipes[0].radius(),
         );
         let mut sorted = pipes;
-        sorted.sort_by_key(|pipe| name_of_the_surface_either_way_round(&Surface::Cylinder(*pipe)));
+        sorted.sort_by_key(|pipe| name_of_surface_bits(&Surface::Cylinder(*pipe)));
         let [lesser, greater] = sorted;
         let named = where_two_halves_meet(&one, &other);
         for place in places {
@@ -2720,13 +2718,6 @@ impl<'f> Arrangement<'f> {
     /// at, made a node of crossings `first` and `second` too: the corner of
     /// the face that is the place, if one is, or the node placed under that
     /// name already, or a new one.
-    ///
-    /// **A node placed under another spelling of the pipes is that node**
-    /// ([`the_place_two_halves_meet_at`]), and takes this spelling on as a
-    /// name too. A face can cross one pipe written twice, once against each
-    /// spelling, and then the two halves are two crossings of one pair
-    /// ([`Arrangement::the_two_partners_are_one_pipe`]) that meet at the same
-    /// two places (Q2050).
     fn name_where_two_halves_meet(
         &mut self,
         first: usize,
@@ -2741,14 +2732,11 @@ impl<'f> Arrangement<'f> {
             self.nodes[corner].stands_for_too(name);
             return;
         }
-        let the_place = the_place_two_halves_meet_at(&name);
-        if let Some(placed) = self.nodes.iter_mut().find(|node| {
-            node.vertex.is_none()
-                && node
-                    .made_of
-                    .is_some_and(|made_of| the_place_two_halves_meet_at(&made_of) == the_place)
-        }) {
-            placed.stands_for_too(name);
+        if let Some(placed) = self
+            .nodes
+            .iter_mut()
+            .find(|node| node.vertex.is_none() && node.made_of == Some(name))
+        {
             for crossing in [first, second] {
                 if !placed.crossings.contains(&crossing) {
                     placed.crossings.push(crossing);
@@ -2838,9 +2826,7 @@ impl<'f> Arrangement<'f> {
                     half.facing[1 - on_the_face],
                 ),
             ];
-            pipes.sort_by_key(|(pipe, _, _)| {
-                name_of_the_surface_either_way_round(&Surface::Cylinder(*pipe))
-            });
+            pipes.sort_by_key(|(pipe, _, _)| name_of_surface_bits(&Surface::Cylinder(*pipe)));
             let [
                 (lesser, picking_the_lesser, along_the_lesser),
                 (greater, _, along_the_greater),
@@ -7202,12 +7188,12 @@ impl<'f> Arrangement<'f> {
         let (Surface::Cylinder(_), Surface::Cylinder(_)) = (one, other) else {
             return false;
         };
-        let (the_pair, _) = the_place_two_halves_meet_at(&(where_two_halves_meet(one, other), 0));
+        let name = where_two_halves_meet(one, other);
         let Node { made_of, also, .. } = &self.nodes[node];
-        made_of.iter().chain(also).any(|name| {
-            let (pair, which) = the_place_two_halves_meet_at(name);
-            pair == the_pair && which < 2
-        })
+        made_of
+            .iter()
+            .chain(also)
+            .any(|(surfaces, which)| *surfaces == name && *which < 2)
     }
 
     /// Which cell of the surface each walk bounds.
@@ -13292,37 +13278,15 @@ fn held_as_an_interval(expansion: &[f64]) -> Interval {
 }
 
 /// The three surfaces the two nodes where four half ellipses meet are named
-/// by: the lesser of the two pipes, then the greater twice, so that the face on
-/// either pipe names them alike.
-///
-/// **Lesser by [`name_of_the_surface_either_way_round`]**, so that a pipe
-/// written twice sorts the same way against the other under both spellings,
-/// wherever the fold is exact. By the bits as stored, two bars on one pipe
-/// whose walls name the axis at `z = 0` and at `z = 4`, and a bar along `x`
-/// across them at `z = 3`, sorted `[lower, cross, cross]` and
-/// `[cross, upper, upper]`, and which of the two places a node is turned round
-/// with the order ([`which_place_two_pipes_touch_at`]). The cross's wall, which
-/// held the halves against both spellings, then held each place as two nodes,
-/// and the union was refused `Undecidable` (Q2050).
+/// by: the lesser of the two pipes by [`name_of_surface_bits`], then the
+/// greater twice, so that the face on either pipe names them alike.
 pub(crate) fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface; 3] {
-    let (lesser, greater) = if name_of_the_surface_either_way_round(one)
-        <= name_of_the_surface_either_way_round(other)
-    {
+    let (lesser, greater) = if name_of_surface_bits(one) <= name_of_surface_bits(other) {
         (one, other)
     } else {
         (other, one)
     };
     [*lesser, *greater, *greater]
-}
-
-/// A name [`where_two_halves_meet`] gave, with each pipe in it named either way
-/// round: the one place it names, however the pipes are spelled.
-fn the_place_two_halves_meet_at(name: &([Surface; 3], u8)) -> ([[u64; 9]; 3], u8) {
-    let (surfaces, which) = name;
-    (
-        surfaces.map(|surface| name_of_the_surface_either_way_round(&surface)),
-        *which,
-    )
 }
 
 /// The two places two pipes of one radius touch at, whose axes meet at
