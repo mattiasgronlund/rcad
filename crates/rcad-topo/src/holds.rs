@@ -2008,12 +2008,51 @@ fn is_one_circle_cut_in_two(
 ///
 /// [`what_a_face_cut_by_a_ball_and_a_pipe_holds`] is asked before any of the
 /// steps above, and answers only a face with a piece of the loop a ball and a
-/// pipe cross in among its sides (row Q1863). The steps above refuse every such
-/// face: [`the_way_a_side_runs`] reads a piece of a crossing with two ends
-/// through [`the_way_into_an_arc`], which needs one of the two surfaces flat,
-/// or through [`the_way_into_an_arc_that_does_not_close`], which needs a cone,
+/// pipe cross in among its sides (row Q1863).
+/// [`what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds`] is asked next,
+/// and answers only a face on a pipe with a piece of a half ellipse where a
+/// pipe of its width crosses it among its sides (row Q2460), as the next
+/// heading sets out. The steps above refuse every such face of either kind:
+/// [`the_way_a_side_runs`] reads a piece of a crossing with two ends through
+/// [`the_way_into_an_arc`], which needs one of the two surfaces flat, or
+/// through [`the_way_into_an_arc_that_does_not_close`], which needs a cone,
 /// and [`is_a_piece_of_a_ruling`] needs a plane and a cone, so such a side is
 /// refused by name. So no face the steps answered is answered differently now.
+///
+/// # A pipe face crossed by a pipe of its width is counted along a ruling
+///
+/// Two pipes of one width whose axes meet at `c` cross in four half ellipses,
+/// each on one of the two planes through `c` that halve the angle between the
+/// axes. A face on one of them whose sides are pieces of those halves, rulings,
+/// arcs of planes across the axis and whole curves such planes cut is held
+/// where the ruling through `point`, the line of the pipe through it along the
+/// axis, crosses an odd number of its sides above `point`. That count is a true
+/// one because:
+///
+/// - **Every side but a ruling lies on a plane across the axis**, one whose
+///   normal is not square to it. An arc's plane is asked that, and a half's
+///   plane is `(X − c)·(u/a ± e/b) = 0`, with `u` and `e` the axes and `a` and
+///   `b` their lengths, whose normal reads `a·(1 ± k)` against `u`, `k` being
+///   the cosine between the axes, which is never `±1`. So each such side meets
+///   a ruling once at most, where the ruling crosses its plane, and is never
+///   tangent to one: where a ruling meets it, the ruling goes from one side of
+///   the face's boundary to the other.
+/// - **The face is bounded**, so far enough up the ruling is off it, and the
+///   number of sides the ruling crosses above `point` says whether `point` is
+///   on it.
+/// - **A ruling side meets no other ruling, and a seam, where the face meets
+///   itself, is no boundary**, so neither is counted.
+/// - **Which rulings a side meets is read seen down the axis**, where the pipe
+///   is a circle and every side across the axis an arc of it. An arc of a
+///   plane is on the side of its chord its picker says, through
+///   [`the_way_into_an_arc`]. A piece of a half needs no picker: seen down the
+///   axis a half runs from `c + r·n` to `c − r·n`, `n` square to both axes,
+///   which is half a turn round the circle, so a piece is the short arc on the
+///   far side of its chord from the axis. A whole half, whose chord runs
+///   through the axis, could be either, and such a face is left to the steps.
+/// - **A ruling through a corner** is counted a hair either way round the axis
+///   as well, as [`how_often_the_ruling_above_a_point_is_crossed`] sets out,
+///   since a ray the fuse fires lands on one wherever the shape is symmetric.
 ///
 /// # Errors
 ///
@@ -2139,6 +2178,10 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
 ///   piece is the short arc between its ends, on the far side of its chord
 ///   from the axis, and needs no picker. A piece whose chord runs through the
 ///   axis is a whole half, which could be either, and is left to the steps.
+///
+/// A seam, where the face meets itself, is no side and is passed over. A face
+/// with any other side, with no piece of a half, or placed anywhere but where
+/// it is stored, or beside a face that is, is left to the steps.
 ///
 /// # Errors
 ///
