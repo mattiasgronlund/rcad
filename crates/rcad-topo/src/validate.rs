@@ -3663,20 +3663,49 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// stops decides what it costs and never what it lets through: a solid that
 /// stops early is refused, never passed.
 ///
-/// A crossing stops below half the distance between the two closest corners of
-/// the solid that are not in the same place — the finest feature the sweep can read
-/// without meshing. That is **a cost bound and not a proof that finer would not
-/// help**: a wall thinner than half its nearest corner pair, between two arcs
-/// whose corners sit far apart, would still be refused, as a crossing. The model's own linear tolerance was the first floor tried, and it is
-/// the one with an argument behind it — two pieces of boundary closer than it
-/// are one place — but a solid whose boundary really does cross, which is what
-/// the sweep is for, then walks some thirty halvings down to meshes of millions
-/// of triangles: `builder.rs`'s tube with a hole as wide as its wall took
-/// 16.6 seconds to be refused, and by the triangle cap rather than by its own
-/// crossing. At the corner floor the same test takes 0.010 seconds. `Deflection::of` refusing a length that is not positive,
+/// A crossing stops below an eighth of the distance between the two closest
+/// corners of the solid that are not in the same place — the finest feature the
+/// sweep can read without meshing. That is **a cost bound and not a proof that
+/// finer would not help**: a wall thinner than an eighth of its nearest corner
+/// pair, between two arcs whose corners sit far apart, would still be refused,
+/// as a crossing. The model's own linear tolerance was the first floor tried,
+/// and it is the one with an argument behind it — two pieces of boundary closer
+/// than it are one place — but a solid whose boundary really does cross, which
+/// is what the sweep is for, then walks some thirty halvings down to meshes of
+/// millions of triangles: `builder.rs`'s tube with a hole as wide as its wall
+/// took 16.6 seconds to be refused, and by the triangle cap rather than by its
+/// own crossing. At a corner floor of half the gap the same test took 0.010
+/// seconds. `Deflection::of` refusing a length that is not positive,
 /// [`Error::DeflectionBelowWhatAMeshCanReach`],
 /// [`Error::MoreMeshPointsThanASolidWillHold`] and a patch with more triangles
 /// than the triangulator will hold each end it too.
+///
+/// **An eighth, and not the half a chord's stray gives** (Q2388). The floor was
+/// a half until three balls that cross at the same two points
+/// (`pairs::ThreeBallsThatCrossAtTheSameTwoPoints` in
+/// `fuses_that_must_agree.rs`) showed two things the half leaves out. The
+/// crossing is found in a face's chart, where a walked step is drawn straight:
+/// the third ball's lune, whose only corners are those two points, has a step
+/// of one arc that spans a wide longitude and stays at its ends' latitude while
+/// the arc bows towards the pole, and the other arc's one walked point lands
+/// across it. And the rungs halve from the box's width, not from the gap, so the
+/// finest rung a floor lets through is anywhere from the floor to twice it.
+/// With the floor at a half, 46 of the family's 8322 fuses were refused at a
+/// last rung between 0.77 and 0.97 of the gap, and each meshes at the rung
+/// after, between 0.38 and 0.49. A quarter reached all 46 only where the rungs
+/// happened to fall. An eighth always asks a rung at or under a quarter of the
+/// gap, so a lune that clears anywhere above a quarter is reached however the
+/// rungs fall; a throwaway probe saw all 46 mesh with it.
+///
+/// What the eighth costs is two rungs more than the half on a solid whose
+/// boundary really crosses, each finer than the last. The same probe over every
+/// test in the workspace saw two such ladders, refused as before two rungs
+/// further down, the slower in 1.1 ms, and seven crossings that the half had
+/// refused at the top rung mesh at the second: five in
+/// `a_piece_grazed_by_a_trimming_nothing_follows.rs` and two from the family.
+/// The floor is still set by the gap, so it does not bound the halvings: a solid
+/// whose two closest corners are a rounding apart walks as far as it did, and
+/// two rungs further (Q2107).
 ///
 /// **So does a touch where the rung before touched** (Q1866). Two loops of one
 /// face refused as touching at one place at two rooms in a row, the coarsest
@@ -3706,7 +3735,8 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 ///
 /// **The corner floor is argued for chords that cross, and a fold is not
 /// that.** A chord at deflection `d` strays at most `d`, so a crossing goes once
-/// `d` is under half the gap: linear in the gap. A fold is one side two patches
+/// `d` is under half the gap, or an eighth for the reasons above: linear in the
+/// gap. A fold is one side two patches
 /// both draw through their insides. A point a patch puts inside is its own, so
 /// both ends of that side are points the two faces share, on the edges between
 /// them, and where those are two curves apart the side spans the gap between
@@ -3723,7 +3753,8 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// The ball less a pointed cone in `a_cone_hollowed_along_its_axis.rs` is that
 /// case: a ring of the ball's band and the cone's band between two circles 2
 /// apart, on a ball of radius 3. Both bands drew the same sides from circle to
-/// circle at every deflection down to the corner floor of 1 and were refused;
+/// circle at every deflection down to the corner floor of the time, half the
+/// gap, 1, and were refused;
 /// the ball takes a point inside below `4/9`, and at 0.4375 the ring measures
 /// its closed form.
 ///
@@ -3828,7 +3859,7 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
         let (low, high) = (low.coordinates(), high.coordinates());
         (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0
     };
-    let finest_for_a_crossing = closest / 2.0;
+    let finest_for_a_crossing = closest / 8.0;
     let finest_for_a_fold = match how_flat_a_curved_face_gets(view, [low, high]) {
         Some(flattest) if flattest > 0.0 => {
             finest_for_a_crossing.min(closest * closest / (6.0 * flattest))
