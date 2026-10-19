@@ -550,12 +550,20 @@ impl Assembly {
     /// this is the one thing the fuse writes that its inputs said nothing
     /// about.
     ///
-    /// It is a **limit** and not a gap. The ratio is a length over a length, so
-    /// scaling the whole answer by any power of two leaves it exactly where it
-    /// was: there is no scaled copy in which the sliver and the coordinates fit
-    /// in `f64` together, which is the family of fix §16.10 asks to be ruled out
-    /// by name. Nothing here can make the answer smaller, either — the sliver is
-    /// where the two inputs really are.
+    /// It is a **limit when the sliver is in the true answer, and a gap when it
+    /// is not**. The ratio is a length over a length, so scaling the whole
+    /// answer by any power of two leaves it exactly where it was: there is no
+    /// scaled copy in which the sliver and the coordinates fit in `f64`
+    /// together, which is the family of fix §16.10 asks to be ruled out by
+    /// name. So where the sliver is where the two inputs really are, as for a
+    /// bar dipping `4.4e−16` through a block's top (Q2237), nothing makes the
+    /// answer fit. But the sliver can be the fuse's own, a corner left a
+    /// rounding off one of an input's where the true answer has none: the
+    /// plate less a block cornered on its round tab's rim kept an arc
+    /// `1.78e-15` long there until Q2296, where the answer is the plate, and a
+    /// quarter of a bar placed round from a bend in it kept an edge a few
+    /// roundings long until Q2304. Nothing here tells the two apart, so
+    /// [`Invalid::limit_or_gap`] says it does not know.
     ///
     /// **The smallest feature here is the shortest chord, or the cone's radius
     /// at a corner of a cone face**, two of the three things
@@ -3983,7 +3991,8 @@ impl Assembly {
 
     /// Every corner where pieces of one cone, pipe or ball met, as lump and
     /// corner, that `straight_through` walks on a run that does not close up
-    /// into the one closed input edge it was cut from. Each stays a corner.
+    /// into the one closed input edge it was cut from, between two edges that
+    /// are not both pieces of one open input edge. Each stays a corner.
     ///
     /// **A corner where pieces of one cone, pipe or ball met stays a corner**,
     /// and that departs from §224.2 item 3 on purpose. It has only two surfaces
@@ -4004,6 +4013,20 @@ impl Assembly {
     /// frustum had one circle, and the frustum's own corner on it went, since
     /// nothing kept that one (Q2170). The corners left here are walked as they
     /// were before, so the runs that do not close up are the runs they were.
+    ///
+    /// **And except between two pieces of one open input edge**
+    /// ([`Assembly::are_pieces_of_one_open_input_edge`]): an arc that started
+    /// and ended at two corners of its input, cut at a corner the answer does
+    /// not keep. Folded, the two pieces give back a stretch of that input arc,
+    /// never longer than it, so no picker meets an arc the input did not
+    /// already hand it. Kept, the corner can be a rounding off one of the
+    /// input's own: the plate less a block cornered on its round tab's rim
+    /// came back with an arc `1.78e-15` long there, and was refused
+    /// `DynamicRangeTooWide` though its answer is the plate (Q2296). Pieces of
+    /// a closed input edge are left out, since a whole circle has no end to
+    /// bound the fold: the union of a square and a bar on its corner that
+    /// builds that plate folded the bar's rim into one arc of three quarters
+    /// of a turn.
     fn where_curved_pieces_met_off_a_run_that_closes_up(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
