@@ -155,8 +155,8 @@ use pairs::{
     a_ball_and_a_block, a_chain_of_fuses, a_curved_pair, a_flush_pair, a_frustum_and_a_block,
     a_lattice_pair, a_lattice_trio, a_leaning_bar, a_pair_leaning_the_same_way,
     a_pair_somewhere_else, a_rigid_movement, a_skew_pair, a_solid_and_its_copy, a_turned_pair,
-    a_turned_solid_and_its_copy, a_turned_solid_and_several_copies, room_for_a_leaning_bar, turned,
-    two_balls_crossing_in_a_circle,
+    a_turned_solid_and_its_copy, a_turned_solid_and_several_copies, room_for_a_leaning_bar,
+    three_balls_that_cross_at_the_same_two_points, turned, two_balls_crossing_in_a_circle,
 };
 
 /// How many configurations a property that runs two fuses per case sees.
@@ -491,6 +491,24 @@ const TURNED_ROUND_REFUSALS_MUST_STAY_BELOW: f64 = 0.03;
 /// [`A_LEANING_BAR_STILL_COMPARES_THIS_MUCH`] is the guard that the laws over
 /// it still compare anything.
 const LEANING_BAR_REFUSALS_MUST_STAY_BELOW: f64 = 0.75;
+
+/// How much of three balls that cross at the same two points
+/// ([`pairs::ThreeBallsThatCrossAtTheSameTwoPoints`]) a certified fuse may
+/// refuse.
+///
+/// Measured at **97 of 216, 44.9%**, over the shipped corpus
+/// (`mise exec -- just t every_certified_fuse_of_three_balls_that_cross_at_the_same_two_points_is_decided --no-capture`):
+/// 93 named [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`] (the third
+/// ball's skin crosses each of the other two on its own, so a face of the
+/// first or second ball can end up crossed by two different round surfaces at
+/// once — §31.2 row 8's gap) and 4 named [`A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH`]
+/// (a face the fuse could not mesh, previously seen only once a curved
+/// fixture was turned off the world's own axes, §191 — see
+/// [`a_three_balls_crossing_refusal`] for why this family is the second
+/// upright one to reach it). Sixty-five per cent is twenty points above the
+/// measured rate: room to catch a real jump in either cause without brushing
+/// a family that already refuses close to half of what it draws.
+const THREE_BALLS_CROSSING_REFUSALS_MUST_STAY_BELOW: f64 = 0.65;
 
 /// How often the lattice control comes back as something a `Model` cannot
 /// hold, as a rate: the ends are judged with a draw's own spread, by
@@ -4770,7 +4788,8 @@ fn fused(
                 | Coordinates::LieOnATurnedRoundWall => Ok(Fused::Refused),
                 Coordinates::AreExactlyRepresentable
                 | Coordinates::LieOnARoundWall
-                | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall => {
+                | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall
+                | Coordinates::LieOnThreeRoundSkinsThatCrossAtTheSameTwoPoints => {
                     Err(TestCaseError::fail(format!(
                         "a {rule:?} over a family that has never refused refused, with {} records",
                         records.len()
@@ -4787,7 +4806,9 @@ fn fused(
                 | Coordinates::LieOnARoundWallAndMayCoincide
                 | Coordinates::LieOnAConesWall
                 | Coordinates::LieOnATurnedRoundWall => Ok(Fused::NotASolid),
-                Coordinates::LieOnARoundWall | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall => {
+                Coordinates::LieOnARoundWall
+                | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall
+                | Coordinates::LieOnThreeRoundSkinsThatCrossAtTheSameTwoPoints => {
                     Err(TestCaseError::fail(format!(
                         "a {rule:?} over a family that has never handed back four faces along \
                          one edge did, and that is not something this kernel can hold"
@@ -4800,6 +4821,9 @@ fn fused(
                 Coordinates::LieOnATurnedRoundWall => a_turned_curved_refusal(&why),
                 Coordinates::LieOnARoundWallAndMayCoincide | Coordinates::LieOnAConesWall => {
                     a_curved_refusal(&why)
+                }
+                Coordinates::LieOnThreeRoundSkinsThatCrossAtTheSameTwoPoints => {
+                    a_three_balls_crossing_refusal(&why)
                 }
                 Coordinates::AreUnderAGeneralRotation | Coordinates::SitOnTiltedWalls => {
                     a_flat_refusal(&why)
@@ -4894,6 +4918,25 @@ fn a_turned_curved_refusal(why: &Error) -> Option<&'static str> {
     }
 }
 
+/// The refusals [`Coordinates::LieOnThreeRoundSkinsThatCrossAtTheSameTwoPoints`]
+/// is allowed to hit: [`a_curved_refusal`]'s, and [`Error::CannotMeshAFace`] on
+/// top.
+///
+/// Kept apart from [`a_curved_refusal`] for the same reason
+/// [`a_turned_curved_refusal`] is: a face the fuse cannot mesh used to be seen
+/// only once a curved fixture was turned off the world's own axes (§191), and
+/// folding it into the shared function would have let that spread to the
+/// other upright families silently. Q2329's own sweep is what put a second
+/// upright family on this list: the third ball's skin crosses each of the
+/// other two on its own, which can pinch a corner onto its own face's
+/// boundary without any axis ever leaving square.
+fn a_three_balls_crossing_refusal(why: &Error) -> Option<&'static str> {
+    match why {
+        Error::CannotMeshAFace { .. } => Some(A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH),
+        _ => a_curved_refusal(why),
+    }
+}
+
 /// What one fuse came back with.
 ///
 /// Three outcomes and not two. §48.2 item 5: the arm that catches
@@ -4982,10 +5025,13 @@ fn both_agree_about_whether_there_is_an_answer(
         | Coordinates::LieOnARoundWallAndMayCoincide
         | Coordinates::LieOnAConesWall
         | Coordinates::LieOnATurnedRoundWall
-        | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall => Err(TestCaseError::fail(format!(
-            "{what_changed} turned a {rule:?} whose answer is a solid into one whose \
+        | Coordinates::LieOnTwoRoundSkinsAndNoFlatWall
+        | Coordinates::LieOnThreeRoundSkinsThatCrossAtTheSameTwoPoints => {
+            Err(TestCaseError::fail(format!(
+                "{what_changed} turned a {rule:?} whose answer is a solid into one whose \
              answer no `Model` can hold, which cannot depend on the path taken"
-        ))),
+            )))
+        }
     }
 }
 
@@ -5119,6 +5165,20 @@ enum Coordinates {
     /// and left none not a solid, so a refusal here would be a regression
     /// rather than a fact about the geometry.
     LieOnTwoRoundSkinsAndNoFlatWall,
+    /// [`pairs::TwoBalls`]'s own pair, plus a third ball sized off their
+    /// crossing circle so all three skins cross at the same two points
+    /// ([`pairs::ThreeBallsThatCrossAtTheSameTwoPoints`]).
+    ///
+    /// **A refusal is an outcome to count here**, unlike
+    /// [`Coordinates::LieOnTwoRoundSkinsAndNoFlatWall`]: the third ball's skin
+    /// crosses each of the other two on its own, so a face of the first or
+    /// second ball can end up crossed by two different round surfaces at
+    /// once — [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`]'s own gap
+    /// (§31.2 row 8), the same one a block's floor crossed by a ball and a
+    /// bar reaches. A direct sweep of 2190 fuses (73 configurations, five
+    /// third-ball radii, union/intersection/difference) refused 900 of them,
+    /// every one by that name, and left none not a solid.
+    LieOnThreeRoundSkinsThatCrossAtTheSameTwoPoints,
 }
 
 /// What every fuse a property ran came back with.
@@ -6154,6 +6214,51 @@ fn every_certified_fuse_of_two_balls_crossing_in_a_circle_is_decided_and_records
         0,
         "no arrangement of this family puts four faces along one edge"
     );
+}
+
+/// §48: a third ball sized off [`pairs::TwoBalls`]'s own crossing circle,
+/// every rule.
+///
+/// Q2329: this is the family that reaches `fuse/assemble.rs`'s `[Sphere,
+/// Sphere]` row of `which_arc_of_a_circle_walked_this_way` — see
+/// [`pairs::TwoBalls`]'s own doc comment and
+/// [`Coordinates::LieOnThreeRoundSkinsThatCrossAtTheSameTwoPoints`] for why
+/// and how it was confirmed. **Unlike
+/// [`every_certified_fuse_of_two_balls_crossing_in_a_circle_is_decided_and_records_nothing`],
+/// a refusal here is an outcome to count, not a failure**: the third ball's
+/// skin crosses each of the other two balls' skins on its own, which can put
+/// two different round surfaces across one face at once, and that is a gap
+/// this kernel already has a name for.
+#[test]
+fn every_certified_fuse_of_three_balls_that_cross_at_the_same_two_points_is_decided() {
+    let tally = over(
+        CASES,
+        three_balls_that_cross_at_the_same_two_points(),
+        |triple, tally| {
+            let (model, keys) = triple.build();
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                fused(
+                    tally,
+                    Coordinates::LieOnThreeRoundSkinsThatCrossAtTheSameTwoPoints,
+                    &model,
+                    &keys[..1],
+                    &keys[1..],
+                    rule,
+                )?;
+            }
+            Ok(())
+        },
+    );
+    tally.report("§48: three balls crossing at the same two points, every rule");
+    tally.refuses_no_more_than(THREE_BALLS_CROSSING_REFUSALS_MUST_STAY_BELOW);
+    assert_eq!(
+        tally.not_a_solid.get(),
+        0,
+        "no arrangement of this family puts four faces along one edge"
+    );
+    if tally.refused.get() > 0 {
+        tally.the_cause_named_most_often_is(WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT);
+    }
 }
 
 /// Swapping the two balls of a crossing pair, bit for bit.
