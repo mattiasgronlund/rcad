@@ -12729,6 +12729,17 @@ queue_shared_files := "crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/src
 # happens to run is §173's check that answers for its environment.
 queue_running := ""
 
+# The clock a fixture drives `after:<id>,<date>` and the night-fuzz window
+# against (§308): an ISO-8601 UTC timestamp, `2026-10-19T23:30:00Z`. Empty —
+# always, outside a selftest — means the real clock, `date -u`. The fill reads
+# only the date for a dated `after:`, and the whole timestamp for the night
+# window, since the window is a time of day in Europe/Stockholm, not a date.
+queue_now := ""
+
+# How many hardware threads a `cores:` entry fits against (§308). Empty —
+# always, outside a selftest — means the real machine, `nproc`.
+queue_threads := ""
+
 # Where `queue-page` writes, so a selftest can point it at a scratch directory
 # instead of Mattias's real page (§230, §263). `check-queue-page-selftest` and
 # `check-queue-api-selftest` both set `RCAD_QUEUE_PAGE_DIR`, and the gate must
@@ -12917,8 +12928,11 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|rank|tier|tag|pick|pin|unpin|apply|narrow)
+        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow)
+            now_iso='{{ queue_now }}'
+            [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
+                QUEUE_NOW="${now_iso:0:10}" \
                 python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@"
             status=$?
             {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" queue-page || true
@@ -12943,7 +12957,9 @@ queue mode="" *args:
                 'just queue drop <id> <§N>                    close a row as dropped:§N, moved under Closed' \
                 'just queue park <id> <§N>                    mark a row parked:§N, left in its tier' \
                 'just queue after <id> <id>[,<id>...]         mark a row waiting on others: state after:<ids>' \
+                'just queue after <id> <date>                 mark a row waiting on a UTC date (YYYY-MM-DD) as well as, or instead of, other rows' \
                 'just queue after <id> -                      a row that waits goes back to todo, for a row whose wait was dropped (§451)' \
+                'just queue cores <id> <n>|all                set, in the write set, how many hardware threads the row pins while it runs (§308)' \
                 'just queue rank <id> before <id>             move a row to sit just before another, in their shared tier' \
                 'just queue tier <id> <tier>                  move an open row to the foot of another tier' \
                 'just queue tag <id> <class>|small|-          set, replace or remove a row class or small mark' \
@@ -12995,9 +13011,30 @@ queue mode="" *args:
     if [ -z "$mode" ]; then
         families=$(QUEUE_FILE='{{ queue_file }}' python3 '{{ justfile_directory() }}/tooling/queue/queue.py' families --count) || exit 1
     fi
+    # §308: the fill's own clock and thread count, for a dated `after:` and for
+    # `cores:`. The night window is `tooling/systemd/rcad-fuzz.timer`'s
+    # `OnCalendar=*-*-* 00:10:00`, no zone in the unit so host-local
+    # Europe/Stockholm, for `fuzz-overnight window="28800"`'s eight hours —
+    # the timer's own `[Unit] Description` names the same 00:10 to 08:10.
+    # `date -d "@$epoch - 1 day"` is refused by GNU date; a local date a full
+    # day back is read from an epoch already moved back by exactly one day.
+    now_iso='{{ queue_now }}'
+    [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    now_date="${now_iso:0:10}"
+    threads='{{ queue_threads }}'
+    [ -n "$threads" ] || threads=$(nproc)
+    now_epoch=$(date -u -d "$now_iso" +%s) || exit 1
+    yesterday_epoch=$((now_epoch - 86400))
+    today_local=$(TZ=Europe/Stockholm date -d "@$now_epoch" +%Y-%m-%d)
+    yesterday_local=$(TZ=Europe/Stockholm date -d "@$yesterday_epoch" +%Y-%m-%d)
+    start_today=$(TZ=Europe/Stockholm date -d "$today_local 00:10:00" +%s)
+    start_yesterday=$(TZ=Europe/Stockholm date -d "$yesterday_local 00:10:00" +%s)
+    night=0
+    if [ "$now_epoch" -ge "$start_today" ] && [ "$now_epoch" -lt "$((start_today + 28800))" ]; then night=1; fi
+    if [ "$now_epoch" -ge "$start_yesterday" ] && [ "$now_epoch" -lt "$((start_yesterday + 28800))" ]; then night=1; fi
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; [ -z "$narrowed" ] || printf '%s\n' "$narrowed"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" -v cand_id="${2:-}" -v cand_ws="${3:-}" \
-        -v families="$families" \
+        -v families="$families" -v now_date="$now_date" -v threads="$threads" -v night="$night" \
         -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' \
         -v shared_files='{{ queue_shared_files }}' '
         BEGIN {
@@ -13007,6 +13044,8 @@ queue mode="" *args:
             nc = split("wrong/A wrong/B wrong/C crash/A crash/B crash/C refuses/A refuses/B refuses/C - wrong/D crash/D refuses/D", classes, " ")
             for (k = 1; k <= nc; k++) if (classes[k] != "-") isclass[classes[k]] = 1
             bundle += 0
+            threads += 0
+            night += 0
             if (bundle < 1) { printf "queue: queue_bundle is %d, and a bundle holds at least one row\n", bundle > "/dev/stderr"; bad = 1; exit 1 }
             ns = split(shared_files, sharedlist, ",")
             for (si = 1; si <= ns; si++) if (sharedlist[si] != "") shared[sharedlist[si]] = 1
@@ -13046,8 +13085,11 @@ queue mode="" *args:
                 else if (s ~ /^after:/) {
                     kind[i] = "ready"
                     m = split(substr(s, 7), a, ",")
-                    for (j = 1; j <= m; j++)
-                        if (!(a[j] in at) || st[at[a[j]]] !~ /^done:/) kind[i] = "waiting"
+                    for (j = 1; j <= m; j++) {
+                        if (a[j] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) {
+                            if (a[j] > now_date) kind[i] = "waiting"
+                        } else if (!(a[j] in at) || st[at[a[j]]] !~ /^done:/) kind[i] = "waiting"
+                    }
                 }
                 else if (s ~ /^parked:/) { kind[i] = "parked"; parkedin[tier[i]]++ }
                 else if (s ~ /^(done|dropped):/) kind[i] = "closed"
@@ -13123,8 +13165,12 @@ queue mode="" *args:
                         none = 0
                         m = split(substr(st[i], 7), a, ",")
                         line = ""
-                        for (j = 1; j <= m; j++)
-                            line = line (j > 1 ? ", " : "") a[j] " (" ((a[j] in at) ? st[at[a[j]]] : "not a row") ")"
+                        for (j = 1; j <= m; j++) {
+                            if (a[j] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/)
+                                line = line (j > 1 ? ", " : "") a[j] " (" (a[j] > now_date ? "not yet come" : "come") ")"
+                            else
+                                line = line (j > 1 ? ", " : "") a[j] " (" ((a[j] in at) ? st[at[a[j]]] : "not a row") ")"
+                        }
                         print "      waits on " line
                     }
             if (none) print "    none"
@@ -13228,7 +13274,44 @@ queue mode="" *args:
             }
             return 0
         }
+        # §308: a `cores:<n>` or `cores:all` entry pins hardware threads rather
+        # than a file, so it is checked by sum against `threads`, not by
+        # meeting a path (`entries_meet` never matches one). The night fuzz
+        # holds every thread for the window `night` already says this row's
+        # slot sits in.
+        function cores_of(ws,    n, part, i, v) {
+            n = split(ws, part, ",")
+            for (i = 1; i <= n; i++)
+                if (part[i] ~ /^cores:/) { v = substr(part[i], 7); return v }
+            return ""
+        }
+        function cores_fit_skip(i, say,    need, held, names, j, c) {
+            need = cores_of(ws[i])
+            if (need == "") return 0
+            held = 0; names = ""
+            if (night) { held = threads; names = "the night fuzz" }
+            for (j = 1; j <= r; j++) {
+                if (kind[j] != "running") continue
+                c = cores_of(ws[j]); if (c == "") continue
+                held += (c == "all" ? threads : c + 0)
+                names = names (names == "" ? "" : ", ") id[j] " (held by " st[j] ")"
+            }
+            for (j = 1; j <= e; j++) {
+                c = cores_of(ews[j]); if (c == "") continue
+                held += (c == "all" ? threads : c + 0)
+                names = names (names == "" ? "" : ", ") eid[j] " (held elsewhere by " est[j] ")"
+            }
+            for (j = 1; j <= taken_n; j++) {
+                c = cores_of(ws[taken[j]]); if (c == "") continue
+                held += (c == "all" ? threads : c + 0)
+                names = names (names == "" ? "" : ", ") id[taken[j]] " (taken above)"
+            }
+            if (need == "all" ? held == 0 : held + need + 0 <= threads) return 0
+            if (say) printf "skip %s (tier %s): its cores:%s does not fit the %d threads of the machine: %s holds them\n", id[i], tier[i], need, threads, names
+            return 1
+        }
         function blocked(i, say,    j, sharedcount, h1, h2) {
+            if (cores_fit_skip(i, say)) return 1
             sharedcount = 0
             for (j = 1; j <= r; j++)
                 if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
@@ -13321,6 +13404,7 @@ queue mode="" *args:
         function entries_meet(x, y,    px, py, ix, iy, h, m) {
             shared_match = 0
             if (x == "-" || y == "-") return 0
+            if (x ~ /^cores:/ || y ~ /^cores:/) return 0
             px = x; ix = ""; h = index(x, "#")
             if (h) { px = substr(x, 1, h - 1); ix = substr(x, h + 1) }
             py = y; iy = ""; h = index(y, "#")
@@ -14081,11 +14165,12 @@ _queue-check file decisions:
     rows=$({{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" _queue-rows '{{ file }}') || exit 1
     tracked=$(git ls-files) || exit 1
     [ -f '{{ decisions }}' ] || { echo "_queue-check: {{ decisions }} is not a file" >&2; exit 1; }
+    now_date=$(date -u +%Y-%m-%d)
     {
         printf '%s\n' "$tracked" | awk '{ print "P\037" $0 }'
         awk '/^## [0-9]+\. / || /^### [0-9]+\.[0-9]+ / { print "S\037" $2 }' '{{ decisions }}'
         printf '%s\n' "$rows"
-    } | LC_ALL=C awk -v file='{{ file }}' -v slots='{{ queue_slots }}' '
+    } | LC_ALL=C awk -v file='{{ file }}' -v slots='{{ queue_slots }}' -v now_date="$now_date" '
         BEGIN {
             FS = "\037"
             nt = split("1 2 2.2 2.5 3 4 5", tiers, " ")
