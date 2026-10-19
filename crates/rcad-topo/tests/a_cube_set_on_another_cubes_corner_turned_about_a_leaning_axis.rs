@@ -36,11 +36,14 @@
 //! `fold_each_point_input_corners_meet_at_a_rounding_apart`.
 //!
 //! Under `Policy::certified()` the fuzz crash file's turn answers each of
-//! these too, and the other three turns refuse `DynamicRangeTooWide`.
+//! these too, and the other three turns refuse `DynamicRangeTooWide`. So do
+//! the Q2299 turns, since that policy takes no two points a rounding apart as
+//! one: an edge more than two faces claimed joined two corners less than a
+//! rounding apart (`Assembly::check_the_range_at_each_edge_not_two_faces_claim`).
 
 use rcad_geom::{Deflection, Isometry, Scale};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, Rule, SolidKey};
+use rcad_topo::{Error, Fused, Invalid, Model, Result, Rule, SolidKey};
 
 /// `p = 0.005` and `t = 0.02`, as `f64::sin` and `f64::cos` give them:
 /// a turn `0.01` short of a half turn about an axis leaning `0.02` (Q2008).
@@ -165,6 +168,36 @@ fn the_turned_cube_a_little_short_of_a_half_turn_less_the_block_is_the_turned_cu
     }
 }
 
+/// The same fuses under `Policy::certified()`, which takes no two points a
+/// rounding apart as one. Those at the turn leaning `0.003` were refused
+/// `DynamicRangeTooWide` already. Each other was refused
+/// `ResultIsNotManifold`, for an edge more than two faces claimed whose two
+/// corners were less than a rounding apart. That is a range past what `f64`
+/// resolves, and that is what each is refused for now.
+#[test]
+fn certified_the_same_fuses_are_refused_for_two_corners_less_than_a_rounding_apart() {
+    let unions = A_HALF_TURN
+        .iter()
+        .chain(&A_LITTLE_SHORT_OF_A_HALF_TURN)
+        .flat_map(|&turn| {
+            [Order::BlockFirst, Order::TurnedFirst].map(|order| (turn, Rule::Union, order))
+        });
+    let less_the_block = A_LITTLE_SHORT_OF_A_HALF_TURN
+        .iter()
+        .map(|&turn| (turn, Rule::Difference, Order::TurnedFirst));
+    for (turn, rule, order) in unions.chain(less_the_block) {
+        let asked = format!("{turn:?}, {rule:?}, {order:?}");
+        match fused(turn, rule, order, &Policy::certified()).1 {
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => assert!(
+                ratio > 2f64.powi(52),
+                "{asked}: a range of {ratio:e} is not two corners less than a rounding apart"
+            ),
+            Err(why) => panic!("{asked}: {why}"),
+            Ok(_) => panic!("{asked}: answered"),
+        }
+    }
+}
+
 #[test]
 fn the_union_of_two_cubes_corner_to_corner_is_both_cubes_either_way_round() {
     for turn in [
@@ -222,19 +255,8 @@ enum Order {
 /// is written into validates.
 fn volume_of_a_fuse(turn: [f64; 4], rule: Rule, order: Order, asked: &str) -> f64 {
     let policy = Policy::tolerant(100.0);
-    let mut model = Model::new(Scale::millimetres(100.0).expect("a scale"));
-    let block = a_cube(&mut model);
-    let turned = a_cube(&mut model);
-    let placement = Isometry::try_from(([0.0, 0.0, 10.0], turn)).expect("a placement");
-    model.place_solid(turned, &placement).expect("a placement");
-    let (arguments, tools): (&[SolidKey], &[SolidKey]) = match order {
-        Order::BlockFirst => (&[block], &[turned]),
-        Order::TurnedFirst => (&[turned], &[block]),
-        Order::BothAsArguments => (&[block, turned], &[]),
-    };
-    let answer = model
-        .fuse(arguments, tools, rule, &policy, &mut ProvenanceLog::new())
-        .unwrap_or_else(|why| panic!("{asked}: {why}"));
+    let (model, answer) = fused(turn, rule, order, &policy);
+    let answer = answer.unwrap_or_else(|why| panic!("{asked}: {why}"));
     model
         .validate(&policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{asked}: {why}"));
@@ -254,6 +276,23 @@ fn volume_of_a_fuse(turn: [f64; 4], rule: Rule, order: Order, asked: &str) -> f6
                 .volume()
         })
         .sum()
+}
+
+/// The block and the turned cube fused by `rule` in `order` under `policy`,
+/// and the model the answer is written into.
+fn fused(turn: [f64; 4], rule: Rule, order: Order, policy: &Policy) -> (Model, Result<Fused>) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a scale"));
+    let block = a_cube(&mut model);
+    let turned = a_cube(&mut model);
+    let placement = Isometry::try_from(([0.0, 0.0, 10.0], turn)).expect("a placement");
+    model.place_solid(turned, &placement).expect("a placement");
+    let (arguments, tools): (&[SolidKey], &[SolidKey]) = match order {
+        Order::BlockFirst => (&[block], &[turned]),
+        Order::TurnedFirst => (&[turned], &[block]),
+        Order::BothAsArguments => (&[block, turned], &[]),
+    };
+    let answer = model.fuse(arguments, tools, rule, policy, &mut ProvenanceLog::new());
+    (model, answer)
 }
 
 fn a_cube(model: &mut Model) -> SolidKey {
