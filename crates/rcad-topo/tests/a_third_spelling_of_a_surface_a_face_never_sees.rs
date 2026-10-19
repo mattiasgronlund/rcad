@@ -1,4 +1,28 @@
-//! Probe for Q2364, not committed.
+//! A surface the face across leaves out, and an edge both faces must split
+//! alike (Q2364, `docs/decisions.md` §422).
+//!
+//! A face leaves out a cut whose faces meet it only on its boundary, unless a
+//! node of the cut splits an edge the face across splits there too. The face
+//! across says what it leaves out through `its_neighbour_leaves_out`, which
+//! holds surfaces as that face spelled them. §422.8 feared a third spelling:
+//! the face across leaves out one spelling of a pipe but keeps its run,
+//! because another spelling it sees draws the run there, and this face drops
+//! the run where the face across splits the edge.
+//!
+//! **That does not show here.** Two bars stacked on one pipe, spelled four
+//! ways, and a box in seven places answer every rule both ways round. In this
+//! shape every spelling that draws the face across's run through a node on
+//! the shared edge passes through that node, so it cuts this face there too,
+//! and this face draws it by the same spelling. A spelling that only touches
+//! this face at the node is not built.
+//!
+//! **What did show is a step beside a bar.** The step's lower top crosses the
+//! bar's pipe in a circle wholly above the bar and leaves it out, but still
+//! splits its edge with the riser where the circle meets it, since the riser
+//! crosses the pipe in two lines that run on up. The riser listed the pipe as
+//! reaching it only on its boundary and left its lines out, so the edge was
+//! split on one side alone, and three of the six fuses were refused
+//! `ResultIsNotManifold`.
 
 use core::f64::consts::PI;
 
@@ -12,18 +36,28 @@ use rcad_topo::{DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 const RADIUS: f64 = 2.0;
 const MEETING: f64 = 2.0;
 
+/// How the upper bar's wall writes the pipe both bars stand on.
 #[derive(Clone, Copy, Debug)]
 enum Wall {
+    /// With the lower bar's numbers.
     SpelledOnce,
+    /// With its axis starting at `z = 2` rather than `z = 0`.
     OriginSlidUp,
+    /// With its axis pointing down.
     AxisTurnedRound,
+    /// Both bars made by `add_round_bar`, the upper one moved up.
     TwoRoundBars,
 }
 
 const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference];
 
+/// Two bars of radius 2 stacked on one pipe, the upper one's wall spelled
+/// four ways, and a box over `x ∈ [1, 3]`, `|y| ≤ 0.5` at seven heights,
+/// every rule both ways round, against the closed forms: what the box and the
+/// bars share is the part of the bars' disc with `x ≥ 1` and `|y| ≤ 0.5`, as
+/// tall as their heights overlap.
 #[test]
-fn probe_the_rows_shape_two_spellings_and_a_box() {
+fn two_spellings_of_one_pipe_and_a_box_answer_every_rule_either_way_round() {
     let heights: [[f64; 2]; 7] = [
         [2.5, 5.0],
         [-1.0, 1.5],
@@ -81,8 +115,12 @@ fn probe_the_rows_shape_two_spellings_and_a_box() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// A bar of radius 2 standing on `z ∈ [0, 2]` and the step of [`a_step`],
+/// every rule both ways round, against the closed forms: the step is `76.5`,
+/// the bar `8π`, and what they share is the part of the bar's disc with
+/// `|y| ≤ 1.5`, `2 · 2 · (1.5 · √1.75 + 4 · asin 0.75)`.
 #[test]
-fn probe_a_step_beside_a_bar() {
+fn a_step_beside_a_bar_answers_every_rule_either_way_round() {
     let bar = PI * RADIUS * RADIUS * MEETING;
     let step = 3.0 * (6.0 * 4.0 + 1.5 * 1.0);
     let shared = MEETING
@@ -141,6 +179,9 @@ fn a_step(model: &mut Model) -> SolidKey {
         .expect("a positive height")
 }
 
+/// What is wrong with fusing `arguments` and `tools` by `rule`: a refusal, a
+/// result that does not validate, or a volume further from `by_hand` than the
+/// measure's own bound. `None` when nothing is.
 fn check(
     model: &mut Model,
     arguments: &[SolidKey],
@@ -172,6 +213,8 @@ fn check(
     ((volume - by_hand).abs() > bound).then(|| format!("{volume} ± {bound} against {by_hand}"))
 }
 
+/// Two bars of radius 2 on one pipe, one on `z ∈ [0, 2]` and one on
+/// `z ∈ [2, 4]`, the upper one's wall written as `wall` says.
 fn the_two_bars(model: &mut Model, wall: Wall) -> [SolidKey; 2] {
     let (upper_axis_at, upper_turned_round) = match wall {
         Wall::TwoRoundBars => {
@@ -193,6 +236,9 @@ fn the_two_bars(model: &mut Model, wall: Wall) -> [SolidKey; 2] {
     ]
 }
 
+/// A bar of radius 2 about the `z` axis from `bottom` up `2`, described face by
+/// face, its wall's axis starting at `z = axis_at` and pointing down where
+/// `turned_round`.
 fn a_bar(model: &mut Model, bottom: f64, axis_at: f64, turned_round: bool) -> SolidKey {
     let top = bottom + MEETING;
     let round = |turn: Orientation| if turned_round { turn.reversed() } else { turn };
@@ -278,6 +324,7 @@ fn a_bar(model: &mut Model, bottom: f64, axis_at: f64, turned_round: bool) -> So
         .expect("a bar described face by face")
 }
 
+/// The box over `x`, `y` and `z`, each a low and a high end.
 fn a_box(model: &mut Model, [x, y, z]: [[f64; 2]; 3]) -> SolidKey {
     let rectangle =
         ProfileBuilder::new(vec![[x[0], y[0]], [x[1], y[0]], [x[1], y[1]], [x[0], y[1]]])
