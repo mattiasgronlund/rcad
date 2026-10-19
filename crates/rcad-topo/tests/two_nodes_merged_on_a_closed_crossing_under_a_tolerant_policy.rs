@@ -173,14 +173,15 @@
 //! and `25.6`/`25`, passes `Model::validate`, and measures the slice of the
 //! bar past the block's face to within the measure's published error
 //! (`a_tolerant_intersection_of_a_round_bar_and_a_block_cornered_on_its_wall_is_the_slice_of_the_bar_past_the_blocks_face`).
-//! The union is refused `CannotMeshAFace` with `CornersCoincide`, Q2106's
-//! mechanism
-//! (`a_tolerant_union_of_a_round_bar_and_a_block_cornered_on_its_wall_names_one_cap_corner_twice`).
 //! The block less the bar answers too, now that Q2079 keys the ruling and the
 //! block's corner edge as one edge, and measures the block less that slice
 //! (`a_tolerant_fuse_of_the_block_less_a_round_bar_cornered_on_its_wall_is_the_block_less_the_bars_slice`).
-//! So does the bar less the block, refused as the union is until Q2238
-//! (`a_tolerant_fuse_of_the_bar_less_a_block_cornered_on_its_wall_is_the_bar_less_its_slice`).
+//! So does the bar less the block, refused `CannotMeshAFace` with
+//! `CornersCoincide` until Q2238
+//! (`a_tolerant_fuse_of_the_bar_less_a_block_cornered_on_its_wall_is_the_bar_less_its_slice`),
+//! and the union, refused so until Q2352, which drops a point of a walk stored
+//! at one of its edge's ends
+//! (`a_tolerant_union_of_a_round_bar_and_a_block_cornered_on_its_wall_is_the_two_less_their_slice`).
 //! At other radii, before Q2082, the same bar was refused
 //! `ResultIsNotManifold` or `TheFuseWroteABrokenAnswer`, or ran for minutes;
 //! those are rows of their own.
@@ -243,7 +244,6 @@ use cones::{a_frustum_seamed_towards, a_pointed_cone};
 use rcad_geom::{
     Axis, Deflection, Isometry, MeetOfThree, Point, Scale, Surface, Vector, meet_of_three_surfaces,
 };
-use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Level, Measures, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -939,34 +939,29 @@ fn a_tolerant_intersection_of_a_round_bar_and_a_block_cornered_on_its_wall_is_th
     }
 }
 
-/// The union, in either order, reaches the mesher and is refused there, on
-/// one of the bar's caps: the foot of the ruling where `x = 0.6 r` cuts the
-/// bar's wall and the foot of the block's corner edge are stored at one point,
-/// though they are `1.78e-15` apart, and the cap's ring names that point
-/// twice. Q2106's mechanism, which the mesh answers at Q2106's own radius of
-/// `24.32` by cutting the ring there; here the cut leaves a piece the
-/// triangulator refuses, and the cap is refused for what its whole ring is.
-/// The row that answers it moves this test.
+/// The union, in either order, is the bar, `2π r³`, and the block,
+/// `15.68 r³`, less the slice the intersection measures.
+///
+/// **It was refused `CannotMeshAFace` with `CornersCoincide` until Q2352**, on
+/// the piece of the bar's wall between the ruling where `y = 0.8 r` cuts it
+/// and the one where `x = 0.6 r` does, at the block's corner. On each cap the
+/// arc between the two rulings' feet is one rounding long, and the one point
+/// the walk put inside it was stored at one of its ends, so the piece's loop
+/// named two places twice. `BuildingAMesh::walk` in `mesh.rs` now drops such
+/// a point.
 #[test]
-fn a_tolerant_union_of_a_round_bar_and_a_block_cornered_on_its_wall_names_one_cap_corner_twice() {
+fn a_tolerant_union_of_a_round_bar_and_a_block_cornered_on_its_wall_is_the_two_less_their_slice() {
     for (radius, size) in THE_BARS_RADII_AND_SIZES {
         for bar_first in [true, false] {
-            let (_, fused) = a_round_bar_fused_with_a_block_cornered_on_its_wall(
+            let (model, fused) = a_round_bar_fused_with_a_block_cornered_on_its_wall(
                 radius,
                 size,
                 Rule::Union,
                 bar_first,
             );
-            let Err(Error::CannotMeshAFace {
-                why: CannotTriangulate::CornersCoincide { .. },
-                ..
-            }) = fused
-            else {
-                panic!(
-                    "{radius} {size} bar first {bar_first}: {:?}",
-                    fused.map(|_: Fused| "an answer")
-                );
-            };
+            let exactly = radius.powi(3)
+                * (2.0 * core::f64::consts::PI + 15.68 - 2.0 * (0.6f64.acos() - 0.6 * 0.8));
+            one_solid_that_validates_and_measures(radius, size, &model, fused, exactly);
         }
     }
 }
