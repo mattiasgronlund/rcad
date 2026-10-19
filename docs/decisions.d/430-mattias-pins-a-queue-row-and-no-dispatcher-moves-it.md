@@ -36,7 +36,8 @@ pinned above one that is goes through.
 `queue next` takes the ready pinned rows before anything else, in the order of
 n. That includes the full bundle of small rows, which otherwise takes the first
 slot (§352.4). Then it walks the tiers and classes as before. A pinned row that
-a running lane blocks is skipped with the usual line. A pinned row that waits
+a running lane blocks is skipped with the usual line, and since §430.7 the rows
+below it stay out of its write set. A pinned row that waits
 on another is not ready, so a chain such as Q813 and Q817, then Q818, then Q840
 goes out one row at a time as each lands. `ready` and the plain listing show
 the same order.
@@ -98,3 +99,52 @@ pinned. It goes after the last pinned row instead. The two agree when the file
 is in order. When a row has been ranked above the pins, which §430.2 lets
 through, the first rule would put the new pin above that row and apart from
 the other pins.
+
+### 430.7 A skipped pin keeps the rows below it out of its write set
+
+*Asked for by Q2328, 2026-10-19.* §430.3 skipped a pinned row that a running
+lane blocks and gave the slot to the next row that fit, with no regard for
+what that row held. A pin with a wide write set then waited for ever. Q2328's
+text tells it of Q729, pinned/1 on all of `crates/rcad-topo/tests/`: on
+2026-10-18 it was skipped four fills running, each for a lane on one test file
+there, and each fill took another row on a file there (Q2129, Q2316, Q2198,
+then Q2317). The directory was never clear when a slot came free.
+
+**The rule.** When `queue next` skips a pinned row, every row it reaches after
+that row and whose write set meets the pinned row's is skipped too, with
+`skip <id> (tier <t>): its <entry> meets <pin>'s <entry>, pinned and skipped
+above`. No new lane takes a file the pin needs, so the lanes in its way drain
+and the pin is taken by the first fill after the last of them lands. Rows that
+meet no skipped pin are taken as before. The fixture `pinwait` in
+`check-queue-selftest` is Q729's case in small, and on the base it took a later
+pin, a full bundle, a wrong/A row and a shared-file row, each on a file the pin
+names.
+
+What was decided while building it:
+
+- **Every row after it, a later pin included.** A later pin that meets an
+  earlier skipped one waits for it, since Mattias's n says which goes first. So
+  does each small row of the full bundle, which is chosen after the pins.
+- **A skipped pin counts as a holder of a `queue_shared_files` file** (§424.4).
+  Two holders may share such a file, so one row may still take it beside the
+  pin, which then comes in as the second; the next row on the file is skipped,
+  naming that row and the pin. A row taken above counts the same way, and the
+  line has the same shape.
+- **A pin skipped for any reason holds**, a running lane, a row held elsewhere,
+  a row taken above it or a pin skipped above it. Each of these lasts until a
+  lane lands, so any row taken meanwhile into the pin's files only adds one more
+  lane to wait for.
+- **A pin that waits holds nothing.** It is not ready, so the fill does not
+  reach it, and a chain of pins (§430.3) does not freeze the files of the later
+  links while the first runs.
+- **`blocked` is left as it was**: the rows a running lane holds back, as if
+  nothing were taken or skipped above. The queue page reads its lines and
+  asserts they have one of two shapes (`MEETS_LINE` and `SHARED_LINE` in
+  `tooling/queue-page/render.py`), which lies outside Q2328's write set, so a
+  third shape there would stop the page. The page still lists a row a skipped
+  pin holds back among those that fit, and a row is filed to change both
+  together.
+
+The cost is slots left empty while the lanes in the pin's way drain, where
+before they went to rows the pin then waited behind. That is what a pin asks
+for; `unpin` is the way out when it is not.
