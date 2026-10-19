@@ -55,6 +55,13 @@ why it is gone: your verifier runs the same commands on the base, and on its
 confirm the row closes done at the base. If any of them shows the fault, do
 the row as usual.
 
+**A row whose shape another open row's fault stops before it ever runs is not
+gone; it is unreached.** Report outcome `blocked` instead, naming that row, so
+the dispatcher sets this row after it. Never say the same thing by reporting
+`does_not_reproduce` with an `after` row still in `rows`: `gone()` now refuses
+a does_not_reproduce report that still holds rows, naming them, and hands the
+row back unmerged rather than closing it at the base (§433.8).
+
 **A fix lane runs its family at the end** (§450.3 rule 4). Prep's facts list
 the open rows that share a `tests/*.rs` file with your row. Once your fix is
 committed, run each one's shapes on your branch the same ways as above: a
