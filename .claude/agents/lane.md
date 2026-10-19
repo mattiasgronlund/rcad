@@ -88,6 +88,19 @@ it, since your write set is still the one you were sent with, but name the
 entry and the hold it quotes in `remaining`, since the two branches may meet
 at merge.
 
+**A test file you add directly under `crates/rcad-topo/tests/` is declared in
+`tests/merged.rs`, by you** (§373.7). `autotests` is off there, so nothing
+builds the file until `merged.rs` names it, and
+`every_file_in_tests_is_built_into_exactly_one_test_binary` fails, printing the
+two lines to add. Put them in the file's place by name: the pairs stay in byte
+order, so two branches adding different files touch different lines. Your write
+set holds them as `crates/rcad-topo/tests/merged.rs#<module>`, the module being
+the file's name with each `-` written `_`. A row taken on `merged.rs` whole
+narrows to that entry at your first edit, and one with no `merged.rs` entry at
+all names it in `out_of_write_set_needs`. A row you file whose fix adds such a
+file names that entry, as a refusal row names `error.rs` (§360.6). Rows that
+share only `merged.rs` are no family: run no row's shapes for that alone.
+
 Run `mise exec -- just fmt` before each commit. It reformats the whole tree,
 but staging by explicit path already keeps that harmless — only your own
 files get added. The gate checks formatting but does not fix it: skip
