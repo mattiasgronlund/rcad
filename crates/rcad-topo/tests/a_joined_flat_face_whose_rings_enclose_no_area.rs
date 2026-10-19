@@ -47,7 +47,9 @@
 //! corners that sweep no area and are not on one line is built with corners
 //! that cancel exactly, face by face, and the fuse that would join its cap
 //! puts a corner on its arc wherever one of its own walls would cross it, so
-//! the ring `rings_round` is handed winds (Q641). A closed side that is one of
+//! the ring `rings_round` is handed winds (Q641), though those corners are
+//! folded once it is placed and the cap comes back as written (Q2296). A
+//! closed side that is one of
 //! several, its ring coming back through the side's one corner, is reached on
 //! a bored block's joined top, where the outline winds and places it. The probe
 //! with no ring that winds was refused before `rings_round` (Q802) until Q1748;
@@ -1148,11 +1150,14 @@ fn the_cut_cones_faces_along_the_hyperbola_hold_their_own_points() {
 ///
 /// **The joined wall reaches `rings_round`, and with an outline that winds**,
 /// so `holds_the_other_rings` is not asked (a temporary print in `rings_round`,
-/// Q1224): the second cone's base plane `z = 16` left two corners on the
-/// wall's hyperbola at `(−12, ±√112, 16)`, so its outline has four corners off
-/// one line, and the ring along the second cone's hyperbola, two corners on the
-/// chord `z = 16`, is taken for a hole. The family this file probes, an outline
-/// and a hole that each enclose no area, is not what this pair builds.
+/// Q1224, again for Q2304): the second cone's base plane `z = 16` left two
+/// corners on the wall's hyperbola at `(−12, ±√112, 16)`, so its outline is
+/// handed over with corners off one line, and the ring along the second cone's
+/// hyperbola, two corners on the chord `z = 16`, is taken for a hole. The
+/// family this file probes, an outline and a hole that each enclose no area,
+/// is not what this pair builds. The corners on the hyperbola are folded once
+/// the rings are placed, since they are between two pieces of one input edge
+/// that does not close (Q2296), so the answer's hyperbola is whole.
 ///
 /// Until Q1224, with the cups first every rule was refused `a point inside a
 /// piece of a face` on the band of the second cone's skin between the cups'
@@ -1190,13 +1195,17 @@ fn the_nested_cups_and_a_block_flush_with_their_wall_are_answered_under_every_ru
     }
 }
 
-/// **The cups' skin holds its own points**: the cut cone's skin, its
-/// hyperbola on `x = −12` split at `(−12, ±√112, 16)` where the second cone's
-/// base plane crossed it, so one piece of it runs from there down through
-/// `(−12, 0, 12)` with both ends behind the top `z = 18`. `holds.rs` refused
-/// every point of this skin `AFaceTrimmedByACurveThisCannotFollow` until it
-/// read an arc of a hyperbola against a plane both its ends are behind
-/// (Q1224); the cut cone's skin, unsplit, was read already
+/// **The cups' skin holds its own points, and its hyperbola is whole**: the
+/// second cone's base plane `z = 16` cuts the cut cone's hyperbola on
+/// `x = −12` at `(−12, ±√112, 16)`, and the fuse folds those two corners,
+/// which are between pieces of one input edge that does not close (Q2296), so
+/// the skin has the hyperbola's two ends on the wall and no corner between.
+/// Until then the hyperbola came back split in three, its middle piece running
+/// from `(−12, ±√112, 16)` down through `(−12, 0, 12)` with both ends behind
+/// the top `z = 18`, and `holds.rs` refused every point of the skin
+/// `AFaceTrimmedByACurveThisCannotFollow` until it read an arc of a hyperbola
+/// against a plane both its ends are behind (Q1224); the cut cone's skin,
+/// unsplit, was read already
 /// ([`the_cut_cones_faces_along_the_hyperbola_hold_their_own_points`]).
 #[test]
 fn the_cups_skin_holds_its_own_points() {
@@ -1214,7 +1223,7 @@ fn the_cups_skin_holds_its_own_points() {
         .flat_map(|wire| wire.points().collect::<Vec<_>>())
         .filter(|corner| corner.coordinates()[0] == -12.0)
         .count();
-    assert_eq!(corners_on_the_wall, 4, "the hyperbola is split in three");
+    assert_eq!(corners_on_the_wall, 2, "the hyperbola is whole");
     let asked = |at: [f64; 3]| {
         solid
             .face_holds_the_point(
@@ -2185,7 +2194,8 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_answered_under_every_rule() {
 
 /// **Corners that cancel exactly, written by hand: the fuse cuts the arc
 /// wherever a wall of the cap would cross it, and the ring it hands
-/// `rings_round` winds.** A bar of radius 20 and height 4, cut to the piece
+/// `rings_round` winds, though the cap comes back as written.** A bar of
+/// radius 20 and height 4, cut to the piece
 /// between its arc from `(20, 0)` to `(0, 20)` and a staircase down through
 /// `(0, 18)`, `(8, 18)`, `(8, 14)`, `(12, 14)` and `(12, 0)`, built face by face
 /// ([`a_bar_cut_to`]). The area under the staircase is
@@ -2203,16 +2213,22 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_answered_under_every_rule() {
 /// fuse also cuts the bar's wall along every wall of the staircase that would
 /// cross it, `x = 8` at `(8, √336)`, `x = 12` at `(12, 16)`, `y = 14` at
 /// `(√204, 14)` and `y = 18` at `(√76, 18)`, though none of those walls reaches
-/// the arc. Where pieces of one pipe meet, the corner stays
-/// (`what_is_left` in `fuse/assemble.rs`), so the joined cap comes back with
-/// eleven corners, four of them on the arc. Their sweep is what the corners
-/// on the arc add over its chord, so the ring winds with the plane and is the
-/// outline by that, before any ring enclosing nothing is looked at. Over the
-/// twelve fuses `rings_round` is reached twelve times, twice in each of the six
-/// whose answer keeps the cap, and each time one ring winds with the plane and
+/// the arc. So the joined cap is handed to `rings_round` with eleven corners,
+/// four of them on the arc. Their sweep is what the corners on the arc add
+/// over its chord, so the ring winds with the plane and is the outline by
+/// that, before any ring enclosing nothing is looked at. Over the twelve fuses
+/// `rings_round` is reached twelve times, twice in each of the six whose
+/// answer keeps the cap, and each time one ring winds with the plane and
 /// `holds_the_other_rings` is never asked (breakpoints on `outline =
 /// Some(ring)` and on the closure that asks it, Q641, counted again for
-/// Q1119).
+/// Q1119, and a temporary print in `rings_round` for Q2304).
+///
+/// **The answer's cap is then the seven corners as written**, and their sweep
+/// is exactly 0 again. Each corner on the arc is between two pieces of the
+/// arc, one input edge that does not close on itself, so `what_is_left` in
+/// `fuse/assemble.rs` folds it once the rings are placed, and the arc is the
+/// input's arc again (Q2296). Until then a corner where pieces of one pipe met
+/// stayed, and the cap came back with the eleven.
 ///
 /// **So a ring of one arc and straight sides does not reach `rings_round` with
 /// its corners cancelling**, wherever the fuse cuts the arc along every wall
@@ -2242,7 +2258,7 @@ fn a_holed_bar_cut_to_a_bow_tie_cap_is_answered_under_every_rule() {
 /// second bar lies wholly inside the staircase's circle and past its walls, so
 /// each answer is the staircase, `4(100π − 200)`, the bar, `16π` flush or `8π`
 /// on top, their sum or difference, or nothing. All twelve are answered, and
-/// each answer that keeps the cap has the eleven corners above. Five of them
+/// each answer that keeps the cap has the seven corners as written. Five of them
 /// were refused `ResultIsNotManifold { count: 1 }`: the flush union with the
 /// second bar handed over first, the flush intersection both ways round, the
 /// flush staircase less the bar, and the union with the bar on top both ways
@@ -2264,12 +2280,6 @@ fn a_staircase_cap_whose_corners_cancel_is_cut_on_its_arc_by_its_own_walls() {
         assert_eq!(swept_by(&corners), 0.0, "the staircase's corners cancel");
     }
 
-    let on_the_arc = [
-        [8.0, 336.0_f64.sqrt()],
-        [12.0, 16.0],
-        [204.0_f64.sqrt(), 14.0],
-        [76.0_f64.sqrt(), 18.0],
-    ];
     for on_top in [false, true] {
         for (rule, swapped) in every_rule_both_ways() {
             let mut model =
@@ -2303,22 +2313,8 @@ fn a_staircase_cap_whose_corners_cancel_is_cut_on_its_arc_by_its_own_walls() {
             let with_the_cap = the_only(answer, &what);
             assert_holds(&model, with_the_cap, volume, &what);
             let written = the_outline_of_the_cap(&model, with_the_cap, as_written[0]);
-            for corner in as_written {
-                assert!(
-                    written.contains(&corner),
-                    "{what}: {corner:?} is not in {written:?}"
-                );
-            }
-            for [x, y] in on_the_arc {
-                assert!(
-                    written
-                        .iter()
-                        .any(|at| (at[0] - x).abs() < 1e-12 && (at[1] - y).abs() < 1e-12),
-                    "{what}: no corner at ({x}, {y}) in {written:?}"
-                );
-            }
-            assert_eq!(written.len(), 11, "{what}: {written:?}");
-            assert!(swept_by(&written) > 1.0, "{what}: {written:?}");
+            assert_eq!(written, as_written, "{what}");
+            assert_eq!(swept_by(&written), 0.0, "{what}: the corners still cancel");
         }
     }
 }
