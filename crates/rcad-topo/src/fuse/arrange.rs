@@ -7681,7 +7681,9 @@ impl<'f> Arrangement<'f> {
     /// and a point on the ball is read as before. With the ball's top as `P`, a
     /// point two or three `f64`s off the ball within about `2⁻³³` of a corner
     /// `2e-6` from the top was put in the cell beside its own, and one walk
-    /// wound round it `−2` times
+    /// wound round it `−2` times. With that corner stored three `f64`s off the
+    /// ball, as an input corner can be, walks wound round points of the ball
+    /// beside it that are not in their region
     /// (`a_point_rounded_off_a_ball_near_where_it_is_opened_out_from`, Q1940).
     ///
     /// **A side that is the whole of a closed curve is not answered.** It comes
@@ -21566,6 +21568,7 @@ mod a_point_rounded_off_a_ball_near_where_it_is_opened_out_from {
     //! it is. Here `d` is about `2e-6`, so a point three steps off is read about
     //! `3e-10` away. Every walk has to wind round each point as it winds round
     //! the points of the ball in the point's cell, or say it cannot (Q1940).
+    //! It has to when the two corners are stored that far off the ball too.
 
     use std::collections::BTreeMap;
 
@@ -21599,8 +21602,64 @@ mod a_point_rounded_off_a_ball_near_where_it_is_opened_out_from {
         let arrangement = arranged(&face);
         let picture = opened_out_from_the_top(&face);
         let in_its_cell = the_counts_deep_in_each_cell(&face, &arrangement, picture);
+        each_is_wound_round_as_its_cell_is(
+            &arrangement,
+            picture,
+            &in_its_cell,
+            rounded_off_beside_the_corners(3),
+        );
+    }
+
+    /// The same for points rounded onto the ball, with the two corners beside
+    /// the top stored as an input corner is: on both planes, with `y` rounded
+    /// from the skin and then stepped three `f64`s up at one and down at the
+    /// other.
+    ///
+    /// Read along the line from the top, each corner is about `3e-10` from the
+    /// point of the ball where the planes meet, and the chords that end there
+    /// are read where it is.
+    #[test]
+    fn a_corner_stored_off_the_ball_is_wound_round_as_its_cell_is() {
+        let face = the_ball_cut();
+        let mut arrangement = arranged(&face);
+        let picture = opened_out_from_the_top(&face);
+        let in_its_cell = the_counts_deep_in_each_cell(&face, &arrangement, picture);
+        for ((across, aside), step) in CORNERS.into_iter().zip([f64::next_up, f64::next_down]) {
+            let mut on_the_corner = arrangement
+                .nodes
+                .iter_mut()
+                .filter(|node| {
+                    let [x, y, z] = node.point.enclosure();
+                    let holds =
+                        |span: Interval, value: f64| span.lo() <= value && value <= span.hi();
+                    holds(x, across) && holds(z, aside) && y.lo() > 0.0
+                })
+                .collect::<Vec<_>>();
+            let found = on_the_corner.len();
+            let [node] = on_the_corner.as_mut_slice() else {
+                panic!("{found} nodes on the corner ({across}, ·, {aside})");
+            };
+            let y = step(step(step((1.0 - across * across - aside * aside).sqrt())));
+            node.point = PredicatePoint::from([across, y, aside]);
+        }
+        each_is_wound_round_as_its_cell_is(
+            &arrangement,
+            picture,
+            &in_its_cell,
+            rounded_off_beside_the_corners(0),
+        );
+    }
+
+    /// Each count settled at each of `points` is the count in the point's
+    /// cell, and at least one is settled.
+    fn each_is_wound_round_as_its_cell_is(
+        arrangement: &Arrangement<'_>,
+        picture: Picture<'_>,
+        in_its_cell: &BTreeMap<([bool; 3], usize), i32>,
+        points: impl Iterator<Item = (PredicatePoint, [bool; 3])>,
+    ) {
         let (mut settled, mut wrong) = (0, Vec::new());
-        for (point, cell) in rounded_off_beside_the_corners() {
+        for (point, cell) in points {
             for walk in 0..arrangement.cycles.len() {
                 let Some(count) = arrangement.how_often_a_walk_winds_round(picture, walk, point)
                 else {
@@ -21659,10 +21718,12 @@ mod a_point_rounded_off_a_ball_near_where_it_is_opened_out_from {
 
     /// Points `2⁻⁴⁰`, `2⁻³⁶`, `2⁻³³` and `2⁻³⁰` from each corner beside the
     /// top, a degree apart round it and off the three planes, each with its
-    /// cell, and with its `y` rounded from the skin and then stepped one to
-    /// three `f64`s up and down.
-    fn rounded_off_beside_the_corners() -> impl Iterator<Item = (PredicatePoint, [bool; 3])> {
-        CORNERS.into_iter().flat_map(|(across, aside)| {
+    /// cell, and with its `y` rounded from the skin and then stepped as many as
+    /// `steps` `f64`s up and down.
+    fn rounded_off_beside_the_corners(
+        steps: usize,
+    ) -> impl Iterator<Item = (PredicatePoint, [bool; 3])> {
+        CORNERS.into_iter().flat_map(move |(across, aside)| {
             [-40, -36, -33, -30].into_iter().flat_map(move |power| {
                 let away = 2f64.powi(power);
                 (0..360).flat_map(move |degree| {
@@ -21670,7 +21731,7 @@ mod a_point_rounded_off_a_ball_near_where_it_is_opened_out_from {
                     let x = across + away * angle.cos();
                     let z = aside + away * angle.sin();
                     cell_of(x, z).into_iter().flat_map(move |cell| {
-                        stepped((1.0 - x * x - z * z).sqrt())
+                        stepped((1.0 - x * x - z * z).sqrt(), steps)
                             .map(move |y| (PredicatePoint::from([x, y, z]), cell))
                     })
                 })
@@ -21678,16 +21739,16 @@ mod a_point_rounded_off_a_ball_near_where_it_is_opened_out_from {
         })
     }
 
-    /// `y` and the three `f64`s either side of it.
-    fn stepped(y: f64) -> impl Iterator<Item = f64> {
-        let mut steps = vec![y];
+    /// `y` and the `steps` `f64`s either side of it.
+    fn stepped(y: f64, steps: usize) -> impl Iterator<Item = f64> {
+        let mut ys = vec![y];
         let (mut down, mut up) = (y, y);
-        for _ in 0..3 {
+        for _ in 0..steps {
             down = down.next_down();
             up = up.next_up();
-            steps.extend([down, up]);
+            ys.extend([down, up]);
         }
-        steps.into_iter()
+        ys.into_iter()
     }
 
     /// Which side of each of the three planes the point of the ball over
