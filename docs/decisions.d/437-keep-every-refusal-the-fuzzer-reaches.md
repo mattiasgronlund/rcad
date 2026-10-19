@@ -255,10 +255,19 @@ decided in the crate that owns the error enum, by a match with no wildcard arm,
 so a new variant does not compile until somebody says which it is. There are
 three cases.
 
-1. **A variant that is always one kind.** `Invalid(DynamicRangeTooWide)` from the
-   fuse is a limit: the answer's own shortest edge is too small to resolve beside
-   its coordinates (§43.6). `ACrossingBetweenATorusAndAnotherCurvedSurface` is a
-   gap.
+1. **A variant that is always one kind.** `QuarterTurnsNeedAnAxisAlongXYOrZ` is a
+   limit: only a turn about `x`, `y` or `z` moves each coordinate onto another,
+   and `Isometry::rotation` holds the rest with rounding.
+   `ACrossingBetweenATorusAndAnotherCurvedSurface` is a gap.
+
+   `Invalid(DynamicRangeTooWide)` from the fuse was given here as this case's
+   limit example: the answer's own shortest edge too small to resolve beside its
+   coordinates (§43.6). It is not one. Since Q2304,
+   `rcad_topo::Invalid::limit_or_gap` says not known for it instead (case 3): it
+   is a limit where the sliver is in the true answer (Q2237), and was a gap
+   where the fuse left the sliver itself — the plate less a block cornered on
+   its round tab's rim was refused for an arc `1.78e-15` long that the plate,
+   its answer, does not have, until Q2296 fixed that fuse.
 2. **A variant that decides from its own fields.** §43.5's
    `ACornerIsNotOnTheCurvedFaceTheFileSaysItIsOn` was a gap for 90 files and a
    limit for 76, told apart by how far the corner was off. When the fields do
