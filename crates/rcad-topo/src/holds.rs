@@ -2403,16 +2403,25 @@ fn how_far_above_a_point_a_half_crosses_its_ruling(
 /// many of the `curved` sides that ruling meets above `point`, odd being
 /// [`OnAFace::Held`].
 ///
-/// A point on the ruling through a corner, seen down the axis on the chord
-/// line of a side ending there, is counted half-open: as the ruling a hair
-/// counterclockwise round the axis would be, which meets a side when `point` is
-/// at the end it leaves counterclockwise from, and not at the other. That ruling
-/// meets no ruling side, so `point` on one is [`OnAFace::OnItsBoundary`], found
-/// first.
+/// **A point on the ruling through a corner**, or whose box reaches across it,
+/// cannot be told by the chord of a side ending there whether the side meets its
+/// ruling. Such a point is counted twice: along the ruling a hair
+/// counterclockwise round the axis, and along the one a hair clockwise, each of
+/// which meets a side ending at that corner when the side leaves it that way.
+/// Neither meets a ruling side, so `point` on one, or on the corner, is
+/// [`OnAFace::OnItsBoundary`], found first. Off the boundary the two counts are
+/// the count at `point`: every crossing they meet is a hair from one on
+/// `point`'s own ruling, and none of those is at `point`, or that side's sign
+/// would have read zero. So a point exactly on the corner's ruling takes the
+/// first, the half-open rule; and a box across it is answered when the two
+/// agree, as they do wherever the boundary runs on past the corner with one side
+/// either side of its ruling — where the halves meet, and where a half meets an
+/// arc.
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] when a sign this reads could not be settled.
+/// [`Error::Undecidable`] when a sign this reads could not be settled, or the
+/// two counts across a corner's ruling part.
 fn how_often_the_ruling_above_a_point_is_crossed(
     mine: &Surface,
     pipe: &rcad_geom::Cylinder,
@@ -2422,34 +2431,53 @@ fn how_often_the_ruling_above_a_point_is_crossed(
 ) -> Result<OnAFace> {
     let up = exactly(pipe.axis().direction().components());
     let at = point.enclosure();
-    let mut crossed = 0_usize;
+    let mut near: Option<Point> = None;
+    let mut unsure: Option<f64> = None;
+    let mut meets = Vec::with_capacity(curved.len());
     for side in curved {
-        if let Some((ends, keeps)) = side.reach {
-            let [from, to] = ends.map(|end| exactly(end.coordinates()));
-            let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
-            let off_the_start = core::array::from_fn(|axis| at[axis] - from[axis]);
-            let reads = dot(up, cross(chord, off_the_start)).sign();
-            if let Decision::Undecidable { enclosure } = reads {
-                return Err(gave_up_on_a_side(mine, point, enclosure));
-            }
-            if reads == Decision::Zero {
-                if ends.iter().any(|&end| is_exactly(point, end))
-                    || lies_on_a_ruling_side(mine, up, rulings, point)?
-                {
-                    return Ok(OnAFace::OnItsBoundary);
-                }
-                let past_the_start = dot(cross(up, chord), cross(up, off_the_start)).sign();
-                if let Decision::Undecidable { enclosure } = past_the_start {
+        let Some((ends, keeps)) = side.reach else {
+            meets.push([true; 2]);
+            continue;
+        };
+        match whether_the_ruling_meets(up, at, ends, keeps) {
+            Meets::Yes => meets.push([true; 2]),
+            Meets::No => meets.push([false; 2]),
+            Meets::AtAnEnd {
+                corner,
+                counterclockwise,
+                enclosure,
+            } => {
+                let on_its_ruling = near.is_none_or(|known| {
+                    let [known, corner] = [known, corner].map(|at| exactly(at.coordinates()));
+                    cross(up, core::array::from_fn(|axis| corner[axis] - known[axis]))
+                        .iter()
+                        .all(|part| part.sign() == Decision::Zero)
+                });
+                if !on_its_ruling {
+                    let enclosure = enclosure.or(unsure).unwrap_or_else(|| how_wide(at));
                     return Err(gave_up_on_a_side(mine, point, enclosure));
                 }
-                let at_the_start = past_the_start == Decision::Zero;
-                let leaves_the_start_counterclockwise = keeps == Decision::Neg;
-                if at_the_start != leaves_the_start_counterclockwise {
-                    continue;
-                }
-            } else if reads != keeps {
-                continue;
+                near = Some(corner);
+                unsure = match (unsure, enclosure) {
+                    (Some(known), Some(more)) => Some(known.max(more)),
+                    (known, more) => known.or(more),
+                };
+                meets.push([counterclockwise, !counterclockwise]);
             }
+            Meets::CannotTell { enclosure } => {
+                return Err(gave_up_on_a_side(mine, point, enclosure));
+            }
+        }
+    }
+    if let Some(corner) = near
+        && (is_exactly(point, corner) || lies_on_a_ruling_side(mine, up, rulings, point)?)
+    {
+        return Ok(OnAFace::OnItsBoundary);
+    }
+    let mut counts = [0_usize; 2];
+    for (side, meets) in curved.iter().zip(meets) {
+        if meets == [false; 2] {
+            continue;
         }
         // For a plane `n·X = offset` the ruling `point + t·u` crosses it at
         // `t = (offset − n·point) / n·u`, above `point` when the sign of
@@ -2471,15 +2499,103 @@ fn how_often_the_ruling_above_a_point_is_crossed(
         if rises == Decision::Zero {
             return Ok(OnAFace::OnItsBoundary);
         }
-        if above {
-            crossed += 1;
+        for (count, meets) in counts.iter_mut().zip(meets) {
+            if meets && above {
+                *count += 1;
+            }
         }
     }
-    Ok(if crossed % 2 == 1 {
+    let [counterclockwise, clockwise] = counts.map(|count| count % 2 == 1);
+    if counterclockwise != clockwise
+        && let Some(enclosure) = unsure
+    {
+        return Err(gave_up_on_a_side(mine, point, enclosure));
+    }
+    Ok(if counterclockwise {
         OnAFace::Held
     } else {
         OnAFace::NotHeld
     })
+}
+
+/// Whether the ruling through a point meets a side across the axis, as
+/// [`whether_the_ruling_meets`] reads it.
+enum Meets {
+    Yes,
+    No,
+    /// The point is on, or its box reaches across, the ruling through
+    /// `corner`, one end of the side. The ruling a hair counterclockwise round
+    /// the axis from there meets the side when `counterclockwise`, and the one a
+    /// hair clockwise when not. `enclosure` is how wide the chord's reading was,
+    /// `None` when it read exactly zero.
+    AtAnEnd {
+        corner: Point,
+        counterclockwise: bool,
+        enclosure: Option<f64>,
+    },
+    /// The point's box reaches across the chord's line and neither end is
+    /// certainly the nearer.
+    CannotTell {
+        enclosure: f64,
+    },
+}
+
+/// Whether the ruling through `at` meets the side between `ends`, which
+/// `keeps` the sign that a point it meets reads against the chord seen down
+/// `up`.
+///
+/// Seen down the axis the side is an arc of a circle round it, and `at` is on
+/// that circle, so the side meets `at`'s ruling when `at` is on the arc's side
+/// of the chord. On the chord's line it is at an end, the nearer one. A side
+/// keeping the sign `Neg` is on the right of its chord, so it runs
+/// counterclockwise round `up` from its first end to its second.
+fn whether_the_ruling_meets(
+    up: [Interval; 3],
+    at: [Interval; 3],
+    ends: [Point; 2],
+    keeps: Decision,
+) -> Meets {
+    let [from, to] = ends.map(|end| exactly(end.coordinates()));
+    let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
+    let off_the_start = core::array::from_fn(|axis| at[axis] - from[axis]);
+    let reads = dot(up, cross(chord, off_the_start)).sign();
+    if reads == keeps {
+        return Meets::Yes;
+    }
+    if matches!(reads, Decision::Pos | Decision::Neg) {
+        return Meets::No;
+    }
+    let enclosure = if let Decision::Undecidable { enclosure } = reads {
+        Some(enclosure)
+    } else {
+        None
+    };
+    let [off_the_start, off_the_end] = [from, to].map(|end| {
+        let off = cross(up, core::array::from_fn(|axis| at[axis] - end[axis]));
+        dot(off, off)
+    });
+    if off_the_start.hi() < off_the_end.lo() {
+        Meets::AtAnEnd {
+            corner: ends[0],
+            counterclockwise: keeps == Decision::Neg,
+            enclosure,
+        }
+    } else if off_the_end.hi() < off_the_start.lo() {
+        Meets::AtAnEnd {
+            corner: ends[1],
+            counterclockwise: keeps == Decision::Pos,
+            enclosure,
+        }
+    } else {
+        Meets::CannotTell {
+            enclosure: enclosure.unwrap_or_else(|| how_wide(at)),
+        }
+    }
+}
+
+/// The widest a box is along any axis.
+fn how_wide(at: [Interval; 3]) -> f64 {
+    at.iter().map(|range| range.width()).fold(0.0, f64::max)
 }
 
 /// Whether the box `point` is the one point `corner`.
@@ -2491,13 +2607,13 @@ fn is_exactly(point: PredicatePoint, corner: Point) -> bool {
         .all(|(range, at)| range.lo() == at && range.hi() == at)
 }
 
-/// Whether `point`, on the ruling through a corner, lies on one of the
-/// `rulings` sides between its ends.
+/// Whether `point`, on or across the ruling through a corner, lies on one of
+/// the `rulings` sides between its ends.
 ///
 /// # Errors
 ///
-/// [`Error::Undecidable`] when whether it is on a side's line, or where along
-/// it, could not be settled.
+/// [`Error::Undecidable`] when `point`'s box reaches across a side's line
+/// between its ends, or past one of its ends.
 fn lies_on_a_ruling_side(
     mine: &Surface,
     up: [Interval; 3],
@@ -2514,6 +2630,11 @@ fn lies_on_a_ruling_side(
         {
             continue;
         }
+        match lies_between(from, to, point) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(overhang) => return Err(gave_up_ordering_along_a_side(point, overhang)),
+        }
         if let Some(enclosure) = off.iter().find_map(|part| {
             let Decision::Undecidable { enclosure } = part.sign() else {
                 return None;
@@ -2522,11 +2643,7 @@ fn lies_on_a_ruling_side(
         }) {
             return Err(gave_up_on_a_side(mine, point, enclosure));
         }
-        match lies_between(from, to, point) {
-            Ok(true) => return Ok(true),
-            Ok(false) => {}
-            Err(overhang) => return Err(gave_up_ordering_along_a_side(point, overhang)),
-        }
+        return Ok(true);
     }
     Ok(false)
 }
