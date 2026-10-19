@@ -12777,12 +12777,14 @@ _queue-rows file:
 # running, then what is waiting and on which rows, then how many are parked.
 # `ready` prints the ready rows and nothing else, for `status` to show. `next
 # [N]` is §230.3's fill: each slot takes the first ready row of the highest tier
-# that meets no running lane and no row taken above it, and every row it passes
-# over says which of its entries met which. N defaults to the free slots.
-# `blocked` prints the line `next` passes a row over with, for every ready row
-# whose write set meets a running lane's, as if nothing were taken above it:
-# the rows a fill holds back however many slots are free. The queue page reads
-# it (Q1510), so the rule for when two write sets meet stays here alone.
+# that meets no running lane, no row taken above it and no pinned row skipped
+# above it, and every row it passes over says which of its entries met which.
+# N defaults to the free slots. `blocked` prints the line `next` passes a row
+# over with, for every ready row whose write set meets a running lane's, as if
+# nothing were taken or skipped above it: the rows a fill holds back however
+# many slots are free, less those only a skipped pinned row holds back. The
+# queue page reads it (Q1510), so the rule for when two write sets meet stays
+# here alone.
 #
 # **The order comes from the tier field, not from where a row sits.**
 # `check-queue` makes the two agree, but the fill does not lean on that having
@@ -12818,6 +12820,12 @@ _queue-rows file:
 # line order. A class or `small` after the pin still counts. A pinned row a
 # running lane blocks is skipped with the usual line, and one that waits is not
 # ready, so a chain of pinned rows goes out one row at a time as each lands.
+# Every row the fill reaches after a skipped pinned row, a later pin and the
+# full bundle included, is skipped too where it meets that row's write set,
+# with a line ending `pinned and skipped above` (§430.7): so the lanes in the
+# pin's way drain and no new one takes their place, and the pin is taken once
+# they have. A skipped pin counts as a holder of a `queue_shared_files` file it
+# names, as a row taken above does.
 #
 # **A row says which row it came from** (§432), in the word after the pin and
 # the class: `from/<id>` when running `<id>` is why it exists, `was/<id>` when it
@@ -12835,8 +12843,9 @@ _queue-rows file:
 #
 # **A whole-file entry on a `queue_shared_files` file, or the same item in it,
 # only meets once two holders already have it** (§424.4, §424.8): a running
-# lane, a row held elsewhere, or a row taken above, any two of the three. The
-# third such entry is what meets; the first two do not. A directory that holds
+# lane, a row held elsewhere, a row taken above or a pinned row skipped above
+# (§430.7), any two of the four. The third such entry is what meets; the first
+# two do not. A directory that holds
 # the file is not such an entry, so it still meets everything under it at once,
 # and every path off the list keeps the plain rule above.
 #
@@ -13083,7 +13092,7 @@ queue mode="" *args:
                 for (x = pinned_n + 1; x <= w && lanes_n < n; x++) take_at(x)
                 if (n == 0) printf "took 0 of 0: every one of the %d slots is held\n", slots
                 else if (lanes_n == n) printf "took %d of %d\n", lanes_n, n
-                else if (skipped) printf "took %d of %d: every other ready row meets a running lane or a row taken above\n", lanes_n, n
+                else if (skipped) printf "took %d of %d: every other ready row meets a running lane, a row taken above or a pinned row skipped above\n", lanes_n, n
                 else if (w == 0) printf "took 0 of %d: no row is ready\n", n
                 else printf "took %d of %d: no other row is ready\n", lanes_n, n
                 exit 0
@@ -13151,7 +13160,11 @@ queue mode="" *args:
                 sp = sonnet_slot_pos()
                 if (sp) { take_at(sp); return }
             }
-            if (blocked(i, 1)) { skipped++; return }
+            if (blocked(i, 1)) {
+                skipped++
+                if (pin[i]) pinheld[++pinheld_n] = i
+                return
+            }
             if (!small[i]) {
                 took[i] = 1; taken[++taken_n] = i; lanes_n++
                 if (model[i] == "sonnet") sonnet_taken = 1
@@ -13260,6 +13273,23 @@ queue mode="" *args:
                         continue
                     }
                     if (say) printf "skip %s (tier %s): its %s meets %s\047s %s, taken above\n", id[i], tier[i], mine, id[taken[j]], theirs
+                    return 1
+                }
+            # §430.7: a row taken into the write set of a skipped pinned row
+            # would hold the pin back again once the lanes in its way land.
+            for (j = 1; j <= pinheld_n; j++)
+                if (sets_meet(ws[i], ws[pinheld[j]])) {
+                    if (meet_shared) {
+                        sharedcount++
+                        if (sharedcount == 1) h1 = id[pinheld[j]] " (pinned and skipped above)"
+                        else if (sharedcount == 2) {
+                            h2 = id[pinheld[j]] " (pinned and skipped above)"
+                            if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], mine, h1, h2
+                            return 1
+                        }
+                        continue
+                    }
+                    if (say) printf "skip %s (tier %s): its %s meets %s\047s %s, pinned and skipped above\n", id[i], tier[i], mine, id[pinheld[j]], theirs
                     return 1
                 }
             return 0
