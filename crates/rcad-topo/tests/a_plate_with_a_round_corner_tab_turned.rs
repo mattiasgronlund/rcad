@@ -54,6 +54,35 @@ fn a_turned_plate_with_a_round_corner_tab_and_a_block_on_it_answer_every_rule_bo
     );
 }
 
+/// The plate's own planes cut its own faces in every fuse, so a block nowhere
+/// near it still dices it. The wall `y = 10` crosses the tab's circle again a
+/// rounding round from the seam corner, `7e-16` at a turn of `0.05`, and that
+/// meet stayed a corner of the answer beside the seam corner, so the union came
+/// back `CannotMeshAFace` where it is the plate and the block as they were
+/// (`docs/decisions.md` §38.1).
+#[test]
+fn a_turned_plate_with_a_round_corner_tab_unites_with_a_block_nowhere_near_it() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let turn = Isometry::rotation(&Axis::z(), 0.05).expect("a finite angle");
+    let plate = a_plate_with_a_round_corner_tab(&mut model, &turn);
+    let block = a_block(&mut model, [50.0, 50.0, 0.0], [56.0, 56.0, 3.0]);
+    model
+        .place_solid(block, &turn)
+        .expect("this model made the key");
+    model
+        .fuse(
+            &[plate],
+            &[block],
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the plate and a block nowhere near it unite");
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("the union validates");
+}
+
 /// The plate and the block, turned by `angle` about `axis`, fused under `rule`
 /// and certified; the model validates once it answers.
 fn fused(axis: &Axis, angle: f64, rule: Rule, plate_first: bool) -> rcad_topo::Result<()> {
