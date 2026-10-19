@@ -3687,6 +3687,21 @@ impl BuildingAMesh {
     /// its corners that stays inside and leaves the wider half narrowest
     /// ([`the_most_even_chord_that_stays_inside`]).
     ///
+    /// **So is one the chart cannot tell from a side of the piece.** The middle
+    /// is worked out by halving, and the ball of radius 1 at `(0.5, 0, 1)`
+    /// united with the cube `[0, 2]³` leaves a face that goes `4π/3` round, from
+    /// the circle `x = 0` cuts at `2π/3` to the ball's seam at `2π`. It was cut
+    /// at `4π/3`, and the half from `2π/3` was cut again at its middle, which
+    /// came out an ulp past `π`. Two of the face's edges lie along `π`, from
+    /// the circle at `±π/3` to each pole, so the chord from pole to pole ran an
+    /// ulp beside them and met none. The half it cut off had two slivers an ulp
+    /// wide, and the union was refused `ASideCutsOffOneCornerOfACurvedPatch`
+    /// under both policies, both ways round (Q2463,
+    /// `a_ball_centred_a_hair_off_a_cubes_face.rs`). A corner within the walk's
+    /// rounding of such a chord touches it ([`a_chord_stays_inside`]), and the
+    /// chord taken instead runs between the two corners at `±π/3`, leaving two
+    /// halves a sixth of a turn wide.
+    ///
     /// **Where none does, the piece is left whole**, as one no cut makes any
     /// narrower is above. A ball of radius 4 at `(1, 1, 5)` resting on the
     /// block `[0, 4] × [0, 4] × [0, 1]` leaves a face, the ball's skin past
@@ -3720,10 +3735,15 @@ impl BuildingAMesh {
         let Some((opened, at)) = where_to_cut(piece, (least + most) / 2.0) else {
             return Ok(None);
         };
-        let (opened, at) = if a_chord_stays_inside(&opened, at) {
+        let whole = match chart {
+            Chart::Upright => how_far_the_longitude_wraps(stored),
+            Chart::OnItsSide => how_far_the_second_coordinate_wraps(stored),
+        }
+        .expect("only a piece of a surface that wraps round is cut narrower");
+        let (opened, at) = if a_chord_stays_inside(&opened, at, whole) {
             (opened, at)
         } else {
-            let Some(at) = the_most_even_chord_that_stays_inside(piece, span) else {
+            let Some(at) = the_most_even_chord_that_stays_inside(piece, span, whole) else {
                 return Ok(None);
             };
             (piece.clone(), at)
@@ -6880,9 +6900,26 @@ fn the_nearer_of(middle: f64, here: f64, next: f64) -> bool {
 /// for the triangulator, and a chord along a side draws that side twice. A
 /// chord that meets no side is wholly inside or wholly outside, which the
 /// point half way along tells apart.
-fn a_chord_stays_inside(around: &WalkedLoop, [from, to]: [usize; 2]) -> bool {
+///
+/// **So does a corner the chart cannot tell is off a chord along one
+/// meridian**: one within the walk's rounding of the chord's longitude
+/// ([`the_walks_rounding_of_a_longitude`]), strictly between its two ends'
+/// latitudes. `whole` is how far that first coordinate wraps.
+fn a_chord_stays_inside(around: &WalkedLoop, [from, to]: [usize; 2], whole: f64) -> bool {
     let count = around.corners.len();
     let chord = [around.corners[from], around.corners[to]];
+    let near = the_walks_rounding_of_a_longitude(chord[0][0], whole);
+    let on_its_meridian = |longitude: f64| {
+        (longitude - chord[0][0]).abs() <= near && (longitude - chord[1][0]).abs() <= near
+    };
+    let a_corner_beside_it = on_its_meridian(chord[1][0])
+        && (0..count).any(|corner| {
+            let [longitude, latitude] = around.corners[corner];
+            corner != from
+                && corner != to
+                && on_its_meridian(longitude)
+                && passes_strictly(latitude, chord[0][1], chord[1][1])
+        });
     let meets_a_side = (0..count).any(|at| {
         let next = (at + 1) % count;
         let side = [around.corners[at], around.corners[next]];
@@ -6909,7 +6946,7 @@ fn a_chord_stays_inside(around: &WalkedLoop, [from, to]: [usize; 2]) -> bool {
         }
     });
     let half_way = [0, 1].map(|which| (chord[0][which] + chord[1][which]) / 2.0);
-    !meets_a_side && a_loop_holds(around, half_way)
+    !a_corner_beside_it && !meets_a_side && a_loop_holds(around, half_way)
 }
 
 /// Whether `point` lies on the straight side between `ends`, either end
@@ -6931,8 +6968,12 @@ fn a_point_lies_along(ends: [[f64; 2]; 2], point: [f64; 2]) -> bool {
 /// side, or a seam's — are not a chord. Each half's reach is read off running
 /// least and most longitudes, so finding it costs the square of the corners,
 /// and each chord that might beat the best so far is checked against every
-/// side.
-fn the_most_even_chord_that_stays_inside(piece: &WalkedLoop, span: f64) -> Option<[usize; 2]> {
+/// side. `whole` is how far the first coordinate wraps.
+fn the_most_even_chord_that_stays_inside(
+    piece: &WalkedLoop,
+    span: f64,
+    whole: f64,
+) -> Option<[usize; 2]> {
     let count = piece.corners.len();
     let longitude = |corner: usize| piece.corners[corner][0];
     let mut from_the_end = vec![(f64::MAX, f64::MIN); count + 1];
@@ -6961,7 +7002,7 @@ fn the_most_even_chord_that_stays_inside(piece: &WalkedLoop, span: f64) -> Optio
             if wider >= span || best.is_some_and(|(narrowest, _)| wider >= narrowest) {
                 continue;
             }
-            if a_chord_stays_inside(piece, [from, to]) {
+            if a_chord_stays_inside(piece, [from, to], whole) {
                 best = Some((wider, [from, to]));
             }
         }
