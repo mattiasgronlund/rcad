@@ -308,6 +308,14 @@ pub enum Error {
     /// A `Model` means an edge is used by exactly two coedges everywhere, and
     /// relaxing that changes what a model *is* rather than what one boolean does
     /// (decisions.md §17.4).
+    ///
+    /// **An edge like that too short to resolve beside the answer's corners**
+    /// is refused as [`Invalid::DynamicRangeTooWide`] in place of this, under
+    /// a policy that fails on that: the answer's largest corner coordinate
+    /// over that edge's length is past what `f64` resolves. Two cubes stood
+    /// corner to corner make one where two sides on two different lines join
+    /// the same two corners `1.13e−16` apart, which only two points the
+    /// rounding put on one `f64` triple can do (queue row Q2299).
     #[error("the result would not be a solid: an edge would have {count} faces along it")]
     ResultIsNotManifold {
         /// How many faces would meet along the first bad edge found. The check

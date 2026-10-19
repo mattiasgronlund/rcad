@@ -151,10 +151,13 @@ impl Model {
     /// [`Error::ArgumentIntersectsItself`] when one of the input solids runs
     /// through itself. [`Error::ResultIsNotManifold`] when the answer would have
     /// an edge with other than two faces along it — two cubes meeting along one
-    /// edge united, say. [`Error::Invalid`] when three of the surfaces round an
-    /// input's corner place it and another surface round it is certified off
-    /// that place by more than [`Model::validate`] lets a corner sit off its
-    /// surface, which takes a corner with four or more surfaces round it. A
+    /// edge united, say — and [`Invalid::DynamicRangeTooWide`] in its place
+    /// when that edge is too short to resolve beside the answer's corners,
+    /// under a policy that fails on that. [`Error::Invalid`] when three of the
+    /// surfaces round an input's corner place it and another surface round it
+    /// is certified off that place by more than [`Model::validate`] lets a
+    /// corner sit off its surface, which takes a corner with four or more
+    /// surfaces round it. A
     /// corner with three is placed only where they cross, and one further from
     /// there than that room is placed by nothing: [`Error::Undecidable`], on
     /// "where three surfaces meet", and not this (§294.16). [`Error::Invalid`]

@@ -840,7 +840,10 @@ impl Assembly {
     ///
     /// Whatever [`Assembly::from_the_pieces`],
     /// [`Assembly::join_up_what_is_one_face`] and
-    /// [`Assembly::group_into_shells`] give.
+    /// [`Assembly::group_into_shells`] give, but
+    /// [`Invalid::DynamicRangeTooWide`] in place of
+    /// [`Error::ResultIsNotManifold`] where
+    /// [`Assembly::check_the_range_at_each_edge_not_two_faces_claim`] says so.
     fn joined_into_shells(
         model: &Model,
         scratch: &Scratch,
@@ -851,9 +854,79 @@ impl Assembly {
     ) -> Result<Self> {
         let mut assembly =
             Self::from_the_pieces(model, scratch, chosen, names_of_one_point, policy, log)?;
-        assembly.join_up_what_is_one_face(policy, log)?;
-        assembly.shells = assembly.group_into_shells()?;
-        Ok(assembly)
+        let shells = assembly
+            .join_up_what_is_one_face(policy, log)
+            .and_then(|_| assembly.group_into_shells());
+        match shells {
+            Ok(shells) => {
+                assembly.shells = shells;
+                Ok(assembly)
+            }
+            Err(refused @ Error::ResultIsNotManifold { .. }) => {
+                assembly.check_the_range_at_each_edge_not_two_faces_claim(policy)?;
+                Err(refused)
+            }
+            Err(refused) => Err(refused),
+        }
+    }
+
+    /// Refuse an answer with an edge that other than two faces claim, and
+    /// that is too short beside the answer's corners for `f64`, as
+    /// [`Assembly::check_dynamic_range`] refuses it once its edges are each
+    /// claimed by two.
+    ///
+    /// **Asked only of an answer refused as not a manifold**, so a fuse that
+    /// answered before answers as before. Two straight sides on two different
+    /// lines meet at one point at most, so where they join the same two
+    /// corners, one corner stands for two points the rounding put on one `f64`
+    /// triple. Two cubes stood corner to corner, one turned a half turn about
+    /// an axis leaning `0.1` off `z`, union to a side along `x = 0, z = 10`
+    /// and a side along `x = 0` and a plane of the turned cube both joining
+    /// `(0, 0, 10)` and `(0, 1.13e−16, 10)`, two meets of different planes.
+    /// Four faces then claimed that edge, and `Policy::certified()` refused
+    /// the union `ResultIsNotManifold { count: 4 }` (queue row Q2299,
+    /// `a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`).
+    /// Its range, the turned cube's corner at `21.8` over `1.13e−16`, is
+    /// `1.9e17`, past what `f64` resolves, and that is what is refused: the
+    /// answer's corners there cannot be told apart. Two solids that touch
+    /// along an edge longer than that are still refused as not a manifold.
+    ///
+    /// The largest coordinate is the answer's corners' alone, without the
+    /// inputs' reach [`Assembly::check_dynamic_range`] takes besides, so the
+    /// ratio here is never more than that check gives for the same edge. A
+    /// policy that warns of a range rather than failing on it leaves the
+    /// refusal as it was, and its record is not kept, since no answer rests
+    /// on it.
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::DynamicRangeTooWide`] when the answer's largest coordinate
+    /// over the shortest chord above zero of an edge other than two faces
+    /// claim is more than `f64` carries, under a policy that fails on that.
+    fn check_the_range_at_each_edge_not_two_faces_claim(&self, policy: &Policy) -> Result<()> {
+        let largest = self
+            .corners
+            .iter()
+            .map(|corner| corner.point.largest_coordinate_magnitude())
+            .fold(0.0, f64::max);
+        let shortest = self
+            .claimants_of_each_edge()
+            .iter()
+            .zip(&self.edges)
+            .filter(|(by, _)| by.len() != 2)
+            .map(|(_, edge)| {
+                how_far_apart(
+                    self.corners[edge.ends[0]].point,
+                    self.corners[edge.ends[1]].point,
+                )
+            })
+            .filter(|&chord| chord > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        if largest == 0.0 || !shortest.is_finite() {
+            return Ok(());
+        }
+        the_range_asked(largest, shortest, policy, &mut ProvenanceLog::new())?;
+        Ok(())
     }
 
     /// One face per kept piece, and the corners and edges they share.
