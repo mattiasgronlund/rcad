@@ -129,7 +129,10 @@ impl Mesh {
     /// **The sharing costs nothing.** The room the walk is given is the mesh's
     /// deflection less how far moving that face into place rounds, which is a
     /// fact about where the face sits and not about how tightly it bends — so the
-    /// other face along the edge would have handed the walk the same number.
+    /// other face along the edge would have handed the walk the same number. A
+    /// bent side of a flat face whose sides crossed is walked to a finer room
+    /// than the deflection (see [`SolidView::mesh`]), and that room is kept for
+    /// the edge and not the face, so it too is the same whichever face walks it.
     /// Measured rather than argued: two balls whose radii differ by 20, 200 and
     /// 100 times, meeting in one circle, cut at three deflections each, come out
     /// with the same points, the same triangles and the same
@@ -354,6 +357,50 @@ impl SolidView<'_> {
     /// *Where* those points go is [`rcad_geom::walk`]'s answer and not this
     /// crate's (§27.5).
     ///
+    /// # A flat face whose bent sides cross is walked again, finer
+    ///
+    /// The chords of a flat face's bent sides can cross where the sides do not.
+    /// Two rims of one ring walked from corners a quarter turn apart put their
+    /// points between each other's, and on a ledge `0.01` wide between bars of
+    /// radius four the inner rim's chords poke out through the outer rim's at a
+    /// deflection of `0.1`. A hole between an arc and its chord is cut by the
+    /// chord at the coarsest deflection. That is a refusal of the points this
+    /// function chose, not of the solid.
+    ///
+    /// So when the triangulator refuses a flat face
+    /// [`CannotTriangulate::BoundaryCrossesItself`], each side of that face that
+    /// bends is walked again at half the room it was walked at, and the whole
+    /// solid is cut up again. Each face is given `RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER`
+    /// such rungs, and that constant says what it was set from.
+    ///
+    /// - **Flat faces and `BoundaryCrossesItself` only.** Those are the
+    ///   crossings this was built for and measured on. A curved face's crossing
+    ///   is left to [`Model::validate`](crate::Model::validate)'s own ladder,
+    ///   which halves the whole deflection. `LoopsTouch` is left alone: a corner
+    ///   of the solid on a straight side of another loop touches it however fine
+    ///   the bent sides are walked, since neither is moved, and every rung costs
+    ///   a whole mesh.
+    /// - **The first rung starts under half the face's width.** It halves the
+    ///   smaller of the room the side was walked at and half the widest side of
+    ///   the box round the face's corners and walked points. A walk never steps
+    ///   more than a quarter turn, so halving `f64::MAX` changes no point for
+    ///   about a thousand rungs.
+    /// - **A refusal on a finer rung hands back the finest crossing.** The
+    ///   finer rooms are this function's own numbers, and a refusal at one of
+    ///   them is no answer about the deflection the caller asked for — the same
+    ///   line `room_a_mesh_has_to_work_in`'s two floors draw. So whether the
+    ///   finer walk was refused, its cut-up refused for something else, or the
+    ///   rungs ran out, what comes back is the crossing of the finest rung that
+    ///   crossed. The caller's own deflection was refused for a crossing, and a
+    ///   caller who wants the next blocker can ask for a finer one.
+    /// - **Only the log of the pass handed back is kept.** The passes before it
+    ///   are drained nowhere, so a tolerant walk's records are the ones of the
+    ///   mesh or the refusal the caller gets.
+    /// - **A mesh that met no such crossing is cut exactly as before.** The
+    ///   first pass walks every side at the deflection asked for less how far
+    ///   moving its face rounds, and nothing is walked again unless it is
+    ///   refused.
+    ///
     /// # Errors
     ///
     /// [`Error::DeflectionBelowWhatAMeshCanReach`] when the deflection asks for
@@ -362,7 +409,9 @@ impl SolidView<'_> {
     /// picked one, which is the larger of the two floors. And
     /// [`Error::MoreMeshPointsThanASolidWillHold`] when it asks for more points
     /// than one mesh holds. [`Error::CannotMeshAFace`] when the triangulator
-    /// refuses a face, carrying what it said. [`Error::Undecidable`] when a
+    /// refuses a face, carrying what it said; for a flat face whose bent sides
+    /// cross, that is the crossing of the finest rung above that crossed.
+    /// [`Error::Undecidable`] when a
     /// predicate inside a triangulation could not settle a sign.
     /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] when two patches folded
     /// onto each other and a side would be used more than twice.
@@ -619,7 +668,23 @@ fn a_flat_face_whose_bent_sides_crossed<'m>(
 
 /// How many times [`SolidView::mesh`] walks the bent sides of one crossed flat
 /// face again, each time at half the room, before it hands the crossing back.
-const RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER: u32 = 30;
+/// A cost bound and not a proof.
+///
+/// **Set from what cleared.** With a probe at every pass that walked anything
+/// again, and the cap at 16, `just t -p rcad-topo -p rcad-step --no-fail-fast`
+/// on 5256e45e saw 1643 meshes clear: 1522 after one rung, 87 after two, 4
+/// after four, 12 after five and 18 after six — the most, on the ledge
+/// `0.01` wide between two bars and on a bowl a rounding off a half ball
+/// (`a_piece_grazed_by_a_trimming_nothing_follows.rs`), both at a deflection
+/// of `2.5`. 21 ran out at 16: the leaning and poking-out holes of the two
+/// half-disc plates, which cross at every deflection, and twelve in
+/// `a_piece_grazed_by_a_trimming_nothing_follows.rs` at `1.25`.
+///
+/// **And what running out costs.** An arc walked to a room `r` takes about
+/// `1/√r` points, so each rung costs about `√2` times the one before. At a cap
+/// of 30 the two half-disc plates' tests, which never clear, took 186 s and
+/// 325 s; at 16 they take 0.06 s and 0.1 s.
+const RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER: u32 = 16;
 
 /// How far above the floor a tolerant mesh is actually cut.
 ///
