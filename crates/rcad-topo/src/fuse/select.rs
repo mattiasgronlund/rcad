@@ -3466,9 +3466,13 @@ fn settle_against_each(
             // cut, their fuses reach this arm, but each piece whose point
             // reached it is placed by some other point or rule, and since
             // Q1537 each such fuse answers
-            // (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`). A fuse
-            // refused for want of this ray is what changing this waits for
-            // (§35.6).
+            // (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`). Since
+            // Q2331 a wedge whose face is a plane through the axis a hair below
+            // a bend's cap reaches it too, at hairs from `1e-15` down, in each
+            // of its six fuses, and each answers
+            // (`a_wedge_a_hair_below_a_bends_cap_answers_every_rule_with_their_volumes`).
+            // A fuse refused for want of this ray is what changing this waits
+            // for (§35.6).
             Containment::CannotFireARayAtAFacesSurface { .. } => return Ok(Settled::Abandoned),
             // Coincidence was asked above and found no face the piece lies on.
             Containment::OnBoundary | Containment::Undecidable { .. } => {
