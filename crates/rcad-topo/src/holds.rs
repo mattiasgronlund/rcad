@@ -7978,10 +7978,16 @@ fn off_the_axis_against_the_radius(pipe: &rcad_geom::Cylinder, flat: &Plane) -> 
 /// What the curve closing bought was a point to walk from about which the
 /// surface's sign has no linear part, and a cone has that point whatever the
 /// plane: its apex. The cups of
-/// `tests/a_joined_flat_face_whose_rings_enclose_no_area.rs` have their cut
+/// `tests/a_joined_flat_face_whose_rings_enclose_no_area.rs` had their cut
 /// cone's hyperbola on `x = −12` split at `z = 16` by the second cone's base
-/// plane, so the middle piece runs below `z = 18` with both ends behind it, and
-/// the skin was refused for want of this.
+/// plane, so the middle piece ran below `z = 18` with both ends behind it, and
+/// the skin was refused for want of this. Since Q2304 brought in Q2296's fold,
+/// which joins the two corners the split made, between pieces of one open
+/// input edge, the hyperbola comes back whole, 2 corners where 4 were
+/// (`the_cups_skin_holds_its_own_points`), so that test no longer reaches this
+/// reading. `tests/a_cone_skin_beside_a_plane_its_open_curve_never_reaches.rs`
+/// still does: each of its hyperbolas is read whole against another wall's
+/// plane, never split.
 ///
 /// **A line steeper than the cone's side meets each branch of a hyperbola
 /// once** (row Q1235). There `a < 0`: far out either way the line is inside the

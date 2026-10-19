@@ -2773,7 +2773,7 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// walked it down to the floor, minutes for one test, before its sum was
 /// weighed. That is what ends the slivers of
 /// `a_bend_placed_a_quarter_turn_round_from_another_answers_every_rule` and
-/// `a_quarter_of_a_bar_placed_round_from_a_bend_in_it_answers_or_keeps_an_edge_a_rounding_long`,
+/// `a_quarter_of_a_bar_placed_round_from_a_bend_answers_but_the_quarter_less_it_a_quarter_round`,
 /// at rooms `0.5` and `0.25` when the ladder halved from the width alone: a
 /// probe saw one sum `2.51e-15` against `1.67e-15` hidden. The same probe, run
 /// over the whole `rcad-topo` suite, saw every flat mesh summed exactly, off by
