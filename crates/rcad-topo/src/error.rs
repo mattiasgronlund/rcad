@@ -594,16 +594,14 @@ pub enum Error {
     /// a solid turned inside out can still pass on one (Q2084).
     #[error(
         "no mesh of this solid says which way its faces point: the closest encloses {enclosed}, \
-         and can be off by {leaves_out:?}"
+         and can be off by {leaves_out}"
     )]
     CannotTellWhichWayASolidsFacesPoint {
         /// What the mesh closest to the solid encloses: zero or less.
         enclosed: f64,
         /// How far that sum can be from the solid's volume: the space the mesh
-        /// can leave out and the sum's own rounding. `None` when the solid has
-        /// a face that space cannot be charged for yet, a cone's, and then
-        /// every mesh asked of it lay flat.
-        leaves_out: Option<f64>,
+        /// can leave out and the sum's own rounding.
+        leaves_out: f64,
     },
 
     /// A closed edge of the answer would start at a **pole** of the surface it is

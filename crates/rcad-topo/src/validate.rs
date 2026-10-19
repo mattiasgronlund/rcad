@@ -3038,7 +3038,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         }
         return Err(Error::CannotTellWhichWayASolidsFacesPoint {
             enclosed,
-            leaves_out: Some(leaves_out),
+            leaves_out,
         });
     }
     Ok(enclosed)
@@ -9011,7 +9011,7 @@ mod tests {
             a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), poke, &turn, false);
         let Err(Error::CannotTellWhichWayASolidsFacesPoint {
             enclosed,
-            leaves_out: Some(leaves_out),
+            leaves_out,
         }) = sound
         else {
             panic!("sound {sound:?}");
