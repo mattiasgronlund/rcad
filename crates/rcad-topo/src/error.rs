@@ -1881,11 +1881,16 @@ impl Invalid {
     /// Whether the answer the refusal stands in for exists (§16.10), as
     /// [`Error::limit_or_gap`] says it for the refusals that carry this one.
     ///
-    /// A model wider than `f64` resolves is a limit of today's kernel, which
-    /// holds every number as one `f64` (§437.6), and
-    /// `what_a_fuse_refusal_says_about_its_answer.rs` reaches it through a
-    /// fuse. Every other invariant here says not known, since nobody has shown
-    /// which kind any of them is.
+    /// Every invariant here says not known. A model wider than `f64` resolves
+    /// is both kinds, and carries nothing that tells them apart, so it says
+    /// not known by [`Error::limit_or_gap`]'s rule. It is a limit of today's
+    /// kernel, which holds every number as one `f64` (§437.6), where the
+    /// sliver is in the true answer: a bar dipping `4.4e−16` through a block's
+    /// top (Q2237), or the step `what_a_fuse_refusal_says_about_its_answer.rs`
+    /// reaches. It is a gap where the fuse left the sliver itself: the plate
+    /// less a block cornered on its round tab's rim was refused for an arc
+    /// `1.78e-15` long that the plate, its answer, does not have, until Q2296.
+    /// Nobody has shown which kind any other invariant is.
     ///
     /// One match and no wildcard, so a new variant does not compile until it is
     /// given a class.
@@ -1893,8 +1898,8 @@ impl Invalid {
     pub fn limit_or_gap(&self) -> rcad_geom::LimitOrGap {
         use rcad_geom::LimitOrGap;
         match self {
-            Self::DynamicRangeTooWide { .. } => LimitOrGap::Limit,
-            Self::DanglingKey { .. }
+            Self::DynamicRangeTooWide { .. }
+            | Self::DanglingKey { .. }
             | Self::VertexNotFinite
             | Self::EdgeHasNoLength
             | Self::VertexOffItsFaceSurface
