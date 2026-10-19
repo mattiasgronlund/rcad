@@ -874,6 +874,21 @@ impl BuildingAMesh {
             walking_along_this_edge_refused(edge.key(), why.with_its_surfaces_moved(&there))
         })?;
         let mut points = along_it.points().to_vec();
+        // **A point of the walk stored at one of the edge's ends is dropped.**
+        // The walk leaves both ends out, but on an arc one rounding long a
+        // point one step along it rounds onto an end, and the face's loop then
+        // names that place twice, which the triangulator refuses
+        // `CornersCoincide`. Without the point the sides along the edge run
+        // through the same places, so nothing moves and nothing more is
+        // charged. A round bar of radius `12.8` notched by a block cornered on
+        // its wall has such an arc on each cap, between the ruling where
+        // `y = 0.8r` crosses the wall and the block's corner, and both unions
+        // were refused on the piece of the wall between the two rulings
+        // (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`, Q2352).
+        points.retain(|point| {
+            ends.iter()
+                .all(|end| point.coordinates() != end.coordinates())
+        });
         // **A straight edge lying across a flat face of the same solid gets a
         // point in its middle**, or that face draws its side a second time. The
         // wedge less the frustum it rests on keeps its slanted face whole and
