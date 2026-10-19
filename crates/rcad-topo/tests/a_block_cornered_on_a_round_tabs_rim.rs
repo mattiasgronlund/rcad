@@ -16,7 +16,9 @@
 //! the plane of the plate's top or floor. It now asks a corner on the plane of
 //! a flat face with a curved side, as those two faces are, since the ray hands
 //! a point on that plane to the face's outline (Q2243). So the block less the
-//! plate and the two's common part answer, and the rest are refused as below.
+//! plate and the two's common part answer. The plate less the block answers
+//! too, once the tab's wall, cut by the block's walls a rounding apart, is
+//! joined back up across the arc a rounding long between the two cuts (Q2296).
 //! A tolerant policy reads the two crossings as one point, and there every
 //! fuse of a block cornered on the rim once answers.
 //!
@@ -25,8 +27,6 @@
 //! - **The union, a limit.** It holds the sliver of the block's floor or roof
 //!   outside the rim, a face thinner than a rounding of its own coordinates,
 //!   so it is refused `DynamicRangeTooWide`.
-//! - **The plate less the block, a gap.** It is refused the same way, though
-//!   its answer is the plate itself, which has no such face.
 //! - **Each fuse of the block `x 7.6 to 12.4` by `y 8.2 to 11.8`, a gap.** Its
 //!   other corner `(7.6, 11.8)` is on the rim too, and the ray from there meets
 //!   the tab's wall, which `holds.rs` cannot follow (Q2231). That is where
@@ -71,11 +71,17 @@ fn a_block_cornered_on_a_round_tabs_rim_is_never_refused_on_which_rim_crossing_c
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Under a certified policy the block less the plate is the block, and the
-/// two have nothing in common, since they touch along a face.
+/// Under a certified policy the block less the plate is the block, the plate
+/// less the block is the plate, and the two have nothing in common, since they
+/// touch along a face.
 ///
-/// All 18 were refused `Undecidable` at the sliver of the block's face between
-/// the corner and the rim until `by_a_corner` asked the corner (Q2243).
+/// All 18 of the block less the plate and the common part were refused
+/// `Undecidable` at the sliver of the block's face between the corner and the
+/// rim until `by_a_corner` asked the corner (Q2243). The 6 of the plate less
+/// the block were then refused `DynamicRangeTooWide`, since the tab's wall was
+/// left in its 9 pieces: the walls `x = 12.4` and `y = 8.2` cut it a rounding
+/// apart, and the ring of the wall joined back up was not counted round its
+/// axis for the arc a rounding long between them (Q2296).
 #[test]
 fn a_block_cornered_on_a_round_tabs_rim_less_the_plate_and_their_common_part_answer_under_a_certified_policy()
  {
@@ -84,6 +90,7 @@ fn a_block_cornered_on_a_round_tabs_rim_less_the_plate_and_their_common_part_ans
         &[
             (Rule::Intersection, true),
             (Rule::Intersection, false),
+            (Rule::Difference, true),
             (Rule::Difference, false),
         ],
         &Policy::certified(),
@@ -103,23 +110,6 @@ fn a_block_cornered_on_a_round_tabs_rim_united_with_the_plate_is_refused_for_a_s
     let wrong = what_the_fuses_get_wrong(
         &BLOCKS,
         &[(Rule::Union, true), (Rule::Union, false)],
-        &Policy::certified(),
-        Should::BeRefusedAsTooWideARangeToComputeIn,
-    );
-    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
-}
-
-/// Under a certified policy the plate less the block is refused as the union
-/// is, though its answer is the plate itself, which holds no sliver: a gap
-/// (§16.10), filed from Q2243. When it answers, move these fuses into
-/// `a_block_cornered_on_a_round_tabs_rim_less_the_plate_and_their_common_part_answer_under_a_certified_policy`'s
-/// list.
-#[test]
-fn the_plate_less_a_block_cornered_on_its_round_tabs_rim_is_refused_though_its_answer_is_the_plate()
-{
-    let wrong = what_the_fuses_get_wrong(
-        &BLOCKS,
-        &[(Rule::Difference, true)],
         &Policy::certified(),
         Should::BeRefusedAsTooWideARangeToComputeIn,
     );

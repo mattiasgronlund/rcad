@@ -498,6 +498,11 @@ pub(crate) struct Assembly {
     /// that start past, for a run of its pieces to close up at
     /// ([`Corners::where_each_closed_edge_read_past_starts`]).
     where_closed_edges_start: Vec<(EdgeKey, Corner)>,
+    /// Each input edge some edge here is a piece of that starts and ends at
+    /// one vertex, a cap circle or a round hole, for
+    /// [`Assembly::where_curved_pieces_met_off_a_run_that_closes_up`] to tell
+    /// pieces of a closed curve from pieces of an arc.
+    closed_input_edges: Vec<EdgeKey>,
     edges: Vec<Edge>,
     /// What each edge runs along, worked out once so that the scratch model the
     /// shells are nested in and the caller's model are built the same way.
@@ -545,12 +550,20 @@ impl Assembly {
     /// this is the one thing the fuse writes that its inputs said nothing
     /// about.
     ///
-    /// It is a **limit** and not a gap. The ratio is a length over a length, so
-    /// scaling the whole answer by any power of two leaves it exactly where it
-    /// was: there is no scaled copy in which the sliver and the coordinates fit
-    /// in `f64` together, which is the family of fix §16.10 asks to be ruled out
-    /// by name. Nothing here can make the answer smaller, either — the sliver is
-    /// where the two inputs really are.
+    /// It is a **limit when the sliver is in the true answer, and a gap when it
+    /// is not**. The ratio is a length over a length, so scaling the whole
+    /// answer by any power of two leaves it exactly where it was: there is no
+    /// scaled copy in which the sliver and the coordinates fit in `f64`
+    /// together, which is the family of fix §16.10 asks to be ruled out by
+    /// name. So where the sliver is where the two inputs really are, as for a
+    /// bar dipping `4.4e−16` through a block's top (Q2237), nothing makes the
+    /// answer fit. But the sliver can be the fuse's own, a corner left a
+    /// rounding off one of an input's where the true answer has none: the
+    /// plate less a block cornered on its round tab's rim kept an arc
+    /// `1.78e-15` long there until Q2296, where the answer is the plate, and a
+    /// quarter of a bar placed round from a bend in it kept an edge a few
+    /// roundings long until Q2304. Nothing here tells the two apart, so
+    /// [`Invalid::limit_or_gap`] says it does not know.
     ///
     /// **The smallest feature here is the shortest chord, or the cone's radius
     /// at a corner of a cone face**, two of the three things
@@ -947,9 +960,11 @@ impl Assembly {
             policy,
             log,
         )?;
+        let closed_input_edges = the_closed_input_edges_cut_into(&edges.made, model);
         let mut assembly = Self {
             corners: corners.made,
             where_closed_edges_start,
+            closed_input_edges,
             edges: edges.made,
             runs: Vec::new(),
             faces,
@@ -1221,6 +1236,7 @@ impl Assembly {
         Self {
             corners,
             where_closed_edges_start: Vec::new(),
+            closed_input_edges: the_closed_input_edges_cut_into(&edges, model),
             edges,
             runs: Vec::new(),
             faces,
@@ -2400,10 +2416,30 @@ impl Assembly {
     /// once, so it goes round once exactly when the open sides' turns and the
     /// closed sides between them add up to an odd number of whole turns.
     ///
+    /// **An arc whose two ends read the same angle to within what `atan2`
+    /// rounds is told by which way along its chord it sets off** and not by
+    /// the sign of that angle, which is rounding there: the sliver between the
+    /// two ends where it sets off towards the far one, and all the rest of the
+    /// turn where it sets off away from it. The chord is one subtraction a
+    /// coordinate, which rounds by a rounding of the chord's own length, where
+    /// the angle's cross product rounds by one of the radius squared. And it
+    /// is the reading the arc is named by when it is written
+    /// ([`Edge::the_way_into_a_closed_arc_by_how_it_sets_off`]),
+    /// so the count and the answer's edge agree on which arc it is. A plate's
+    /// round tab less a block cornered on its rim is cut down its wall by the
+    /// block's two walls a rounding apart, and with that arc not counted the
+    /// wall stayed in pieces and the fuse was refused for the range
+    /// (`a_block_cornered_on_a_round_tabs_rim.rs`, Q2296). **Only there**, and
+    /// not for every arc: on an ellipse the chord of an arc longer than half a
+    /// turn can still lean the way the arc sets off. Where `z = 10x` cuts the
+    /// pipe of radius one about `z`, the arc from 60 degrees round to 290 sets
+    /// off along `(−0.87, 0.5, −8.7)`, and that dotted with its chord is
+    /// `12.9`.
+    ///
     /// `None` for a side whose other surface is not a plane, which may cross the
     /// skin in a curve that turns back on itself; for an end on the axis, which
-    /// has no angle; and for an arc whose two ends read the same angle to within
-    /// what `atan2` rounds, where a sliver and a whole turn look alike.
+    /// has no angle; and for an arc a rounding long that sets off square to its
+    /// chord.
     fn a_ring_goes_right_round(&self, ring: &[Dart], surface: &Surface) -> Option<bool> {
         let axis = match surface {
             Surface::Cone(cone) => cone.axis(),
@@ -2436,20 +2472,25 @@ impl Assembly {
             if start == Vector::zero() || end == Vector::zero() {
                 return None;
             }
-            let apart = axis.direction().dot(start.cross(end)).atan2(start.dot(end));
-            if apart.abs() < f64::EPSILON.sqrt() {
-                return None;
-            }
             let leaving = towards.dot(round(self.corners[corner].point));
             if leaving == 0.0 {
                 return None;
             }
             let upwards = (leaving > 0.0) == (corner == from);
-            turned += match (upwards, apart > 0.0) {
-                (true, true) | (false, false) => apart,
-                (true, false) => apart + core::f64::consts::TAU,
-                (false, true) => apart - core::f64::consts::TAU,
+            let apart = axis.direction().dot(start.cross(end)).atan2(start.dot(end));
+            let the_short_way = if apart.abs() < f64::EPSILON.sqrt() {
+                let far_end = if corner == from { to } else { from };
+                let chord = self.corners[far_end].point - self.corners[corner].point;
+                a_side_of_nought(towards.dot(chord))?.is_gt()
+            } else {
+                upwards == (apart > 0.0)
             };
+            let turn = if the_short_way {
+                apart.abs()
+            } else {
+                core::f64::consts::TAU - apart.abs()
+            };
+            turned += if upwards { turn } else { -turn };
         }
         let turns = turned / core::f64::consts::TAU;
         let whole = turns.round();
@@ -3950,7 +3991,8 @@ impl Assembly {
 
     /// Every corner where pieces of one cone, pipe or ball met, as lump and
     /// corner, that `straight_through` walks on a run that does not close up
-    /// into the one closed input edge it was cut from. Each stays a corner.
+    /// into the one closed input edge it was cut from, between two edges that
+    /// are not both pieces of one open input edge. Each stays a corner.
     ///
     /// **A corner where pieces of one cone, pipe or ball met stays a corner**,
     /// and that departs from §224.2 item 3 on purpose. It has only two surfaces
@@ -3971,6 +4013,20 @@ impl Assembly {
     /// frustum had one circle, and the frustum's own corner on it went, since
     /// nothing kept that one (Q2170). The corners left here are walked as they
     /// were before, so the runs that do not close up are the runs they were.
+    ///
+    /// **And except between two pieces of one open input edge**
+    /// ([`Assembly::are_pieces_of_one_open_input_edge`]): an arc that started
+    /// and ended at two corners of its input, cut at a corner the answer does
+    /// not keep. Folded, the two pieces give back a stretch of that input arc,
+    /// never longer than it, so no picker meets an arc the input did not
+    /// already hand it. Kept, the corner can be a rounding off one of the
+    /// input's own: the plate less a block cornered on its round tab's rim
+    /// came back with an arc `1.78e-15` long there, and was refused
+    /// `DynamicRangeTooWide` though its answer is the plate (Q2296). Pieces of
+    /// a closed input edge are left out, since a whole circle has no end to
+    /// bound the fold: the union of a square and a bar on its corner that
+    /// builds that plate folded the bar's rim into one arc of three quarters
+    /// of a turn.
     fn where_curved_pieces_met_off_a_run_that_closes_up(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
@@ -3999,8 +4055,19 @@ impl Assembly {
             .filter(|&(lump, corner)| {
                 where_curved_pieces_met[corner]
                     && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
+                    && !self.are_pieces_of_one_open_input_edge(&leaving[&(lump, corner)])
             })
             .collect()
+    }
+
+    /// Whether `edges` are all pieces of one input edge that does not close on
+    /// itself, and of nothing else.
+    fn are_pieces_of_one_open_input_edge(&self, edges: &[usize]) -> bool {
+        let pieces: Vec<&[EdgeKey]> = edges
+            .iter()
+            .map(|&edge| self.edges[edge].from.as_slice())
+            .collect();
+        is_one_input_edge(&pieces) && !self.closed_input_edges.contains(&pieces[0][0])
     }
 
     /// The corners to keep on each run of edges that closes on itself with
@@ -6819,6 +6886,21 @@ fn numbered(staying: impl Iterator<Item = bool>) -> Vec<Option<usize>> {
 fn is_one_input_edge(pieces: &[&[EdgeKey]]) -> bool {
     pieces.first().is_some_and(|first| first.len() == 1)
         && pieces.iter().all(|piece| *piece == pieces[0])
+}
+
+/// Each input edge one of `edges` is a piece of that starts and ends at one
+/// vertex, once.
+fn the_closed_input_edges_cut_into(edges: &[Edge], model: &Model) -> Vec<EdgeKey> {
+    let mut closed = Vec::new();
+    for &key in edges.iter().flat_map(|edge| &edge.from) {
+        let input = model
+            .edge(key)
+            .expect("an edge of the answer is a piece of an edge of the model the fuse was given");
+        if input.start().key() == input.end().key() && !closed.contains(&key) {
+            closed.push(key);
+        }
+    }
+    closed
 }
 
 /// Which run of edges each edge is part of, when the edges either side of every
@@ -12546,6 +12628,7 @@ mod tests {
         );
         let assembly = Assembly {
             where_closed_edges_start: Vec::new(),
+            closed_input_edges: Vec::new(),
             corners: vec![Corner {
                 point: Point::new(2.0, 0.0, 4.0),
                 wobble: 0.0,
@@ -12587,6 +12670,90 @@ mod tests {
         );
     }
 
+    /// An arc whose two ends are a rounding apart round a pipe is counted as
+    /// the sliver between them when it sets off towards its far end, and as
+    /// all the rest of the turn when it sets off away from it (queue row
+    /// Q2296).
+    ///
+    /// The plane `z = 0` cuts the pipe of radius one about `z` in a circle,
+    /// and `(1, 0, 0)` and `(1, ε, 0)` are a rounding apart on it. A ring of
+    /// two arcs between them goes right round once when one is the sliver
+    /// and the other the rest of the circle the same way, and not at all when
+    /// both are the rest of the circle, one each way.
+    #[test]
+    fn an_arc_a_rounding_long_is_told_from_one_a_rounding_short_of_a_whole_turn() {
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a radius"));
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+        let corner = |point: Point| Corner {
+            point,
+            wobble: 0.0,
+            from: None,
+            moved_by_the_policy: false,
+            where_pipes_touch: Vec::new(),
+        };
+        let backwards = Vector::new(0.0, -1.0, 0.0);
+        let arc = |ends: [usize; 2], towards: Vector| Edge {
+            ends,
+            carried_by: [pipe, flat],
+            arc: WhichArc::LeavingACorner {
+                corner: ends[0],
+                towards,
+            },
+            from: Vec::new(),
+        };
+        for (back, goes_round, what) in [
+            (
+                backwards,
+                Some(true),
+                "the rest of the circle backwards, then the sliver backwards",
+            ),
+            (
+                -backwards,
+                Some(false),
+                "the rest of the circle backwards, then forwards",
+            ),
+        ] {
+            let side = |edge: usize| Side {
+                edge,
+                forward: true,
+                read_against: None,
+            };
+            let assembly = Assembly {
+                where_closed_edges_start: Vec::new(),
+                closed_input_edges: Vec::new(),
+                corners: vec![
+                    corner(Point::new(1.0, 0.0, 0.0)),
+                    corner(Point::new(1.0, f64::EPSILON, 0.0)),
+                ],
+                edges: vec![arc([0, 1], backwards), arc([1, 0], back)],
+                runs: Vec::new(),
+                faces: vec![Face {
+                    ancestors: Vec::new(),
+                    pieces: Vec::new(),
+                    surface: pipe,
+                    used: Orientation::Forward,
+                    wires: vec![vec![side(0), side(1)]],
+                    is_a_whole_closed_surface: false,
+                }],
+                shells: Vec::new(),
+                solids: Vec::new(),
+            };
+            let ring = [0, 1].map(|position| Dart {
+                face: 0,
+                wire: 0,
+                position,
+            });
+            assert_eq!(
+                assembly.a_ring_goes_right_round(&ring, &pipe),
+                goes_round,
+                "{what}"
+            );
+        }
+    }
+
     /// The middle [`Assembly::one_shell_is_inside_another`] asks of an open arc
     /// is half way round the arc its edge names, and not round the other one
     /// between the same two ends (queue row Q2101).
@@ -12626,6 +12793,7 @@ mod tests {
             ] {
                 let assembly = Assembly {
                     where_closed_edges_start: Vec::new(),
+                    closed_input_edges: Vec::new(),
                     corners: vec![corner(0.0), corner(stop)],
                     edges: vec![Edge {
                         ends: [0, 1],
@@ -12708,6 +12876,7 @@ mod tests {
             };
             let mut assembly = Assembly {
                 where_closed_edges_start: Vec::new(),
+                closed_input_edges: Vec::new(),
                 corners: vec![Corner {
                     point: Point::new(2.0, 0.0, across_at + 0.5),
                     wobble: 0.0,
@@ -12801,6 +12970,7 @@ mod tests {
 
         Assembly {
             where_closed_edges_start: Vec::new(),
+            closed_input_edges: Vec::new(),
             corners: vec![corner(0.0, 0.0), corner(1.0, 0.0), corner(0.0, 1.0)],
             edges: vec![edge([0, 1]), edge([1, 2]), edge([2, 0])],
             runs: vec![EdgeRun::Straight, EdgeRun::Straight, EdgeRun::Straight],
@@ -12848,6 +13018,7 @@ mod tests {
         };
         let assembly = Assembly {
             where_closed_edges_start: Vec::new(),
+            closed_input_edges: Vec::new(),
             corners: vec![
                 corner(apex),
                 corner(Point::new(-0.0, -0.7, 3.3)),

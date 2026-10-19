@@ -513,10 +513,15 @@ fn what_the_whole_draft_refuses_is_a_limit_of_the_draft() {
 }
 
 /// A model wider than its smallest step by more than `f64` resolves is a limit
-/// of today's kernel, which holds every number as one `f64` (§437.6): two
-/// blocks a thousand apart, one of them fused with a step of `2^-30`.
+/// of today's kernel, which holds every number as one `f64` (§437.6), where
+/// the step is really there: two blocks a thousand apart, one of them fused
+/// with a step of `2^-30`. It was a gap where the fuse left the step itself:
+/// the plate less a block cornered on its round tab's rim was refused for an
+/// arc `1.78e-15` long that its answer, the plate, does not have, until Q2296
+/// folded the corner that made it (`a_block_cornered_on_a_round_tabs_rim.rs`).
+/// The refusal carries nothing that tells the two apart, so it says not known.
 #[test]
-fn a_model_too_wide_for_its_smallest_step_is_a_limit() {
+fn a_model_too_wide_for_its_smallest_step_is_not_known_to_be_a_limit() {
     let tiny = two_to_the(-30);
     let mut model = Model::new(Scale::millimetres(4.0).expect("a working size"));
     let _far = two_millimetre_block_at(&mut model, Vector::new(1024.0, 0.0, 0.0));
@@ -540,7 +545,7 @@ fn a_model_too_wide_for_its_smallest_step_is_a_limit() {
         matches!(refusal, Error::Invalid(Invalid::DynamicRangeTooWide { .. })),
         "{refusal:?}"
     );
-    assert_eq!(refusal.limit_or_gap().to_string(), "limit");
+    assert_eq!(refusal.limit_or_gap().to_string(), "not known");
 }
 
 /// A refusal that carries a refusal of geometry, or of the sweep, says what the

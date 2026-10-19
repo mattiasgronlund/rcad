@@ -720,12 +720,19 @@ fn the_angle_where_the_caps_overlap(model: &Model, bends: [SolidKey; 2], start: 
 /// half a turn it answers nothing. Turned any of the three ways, the bend less
 /// the quarter answers the bend, `π² R r² / 2`, validating; half a turn round it
 /// was refused `CannotMeshAFace` until a band the chart reads as one line was
-/// zipped up rather than cut across (Q1734). The union and the quarter less the bend are refused
+/// zipped up rather than cut across (Q1734). The union answers one solid a
+/// quarter turn round, the bend and the quarter's `36π` together, and the two
+/// apart half a turn round, where the quarter less the bend answers the
+/// quarter. Until Q2304 brought in Q2296's branch, which tells a sliver arc
+/// from the rest of a turn and folds a corner between two pieces of one open
+/// input edge, the union and the quarter less the bend were refused
 /// `DynamicRangeTooWide`: the answer's largest coordinate over its shortest
-/// edge is `3.7e15` a quarter turn round and `8.2e15` half a turn round, an
-/// edge a few roundings long (row Q1865).
+/// edge was `3.7e15` a quarter turn round and `8.2e15` half a turn round, an
+/// edge a few roundings long. A quarter turn round either way, the quarter
+/// less the bend is still refused, now `FacesDoNotAgreeWhichWayTheyFace`
+/// (row Q1865).
 #[test]
-fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_answers_or_keeps_an_edge_a_rounding_long() {
+fn a_quarter_of_a_bar_placed_round_from_a_bend_answers_but_the_quarter_less_it_a_quarter_round() {
     for rule in EVERY_RULE {
         for the_bend_first in [true, false] {
             let what = format!("where it sits, {rule:?}, the bend first {the_bend_first}");
@@ -743,13 +750,9 @@ fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_answers_or_keeps_an_edge_a_
         }
     }
     let one_bend = PI * PI * 4.0 / 2.0;
+    let the_quarter = 36.0 * PI;
     for turn in [FRAC_PI_2, -FRAC_PI_2, PI] {
         let half_a_turn = turn == PI;
-        let too_wide = if half_a_turn {
-            8_165_619_676_597_685.0
-        } else {
-            3_747_221_395_533_424.5
-        };
         for rule in EVERY_RULE {
             for the_bend_first in [true, false] {
                 let what = format!("{turn} round, {rule:?}, the bend first {the_bend_first}");
@@ -785,11 +788,25 @@ fn a_quarter_of_a_bar_placed_round_from_a_bend_in_it_answers_or_keeps_an_edge_a_
                             "{what}: {volume} ± {error}, a bend {one_bend}"
                         );
                     }
-                    (Rule::Union | Rule::Difference, _, _) => assert!(
+                    (Rule::Union, _, false) => each_within_its_error(
+                        measured.unwrap_or_else(|why| panic!("{what}: {why:?}")),
+                        &[one_bend + the_quarter],
+                        &what,
+                    ),
+                    (Rule::Union, _, true) => each_within_its_error(
+                        measured.unwrap_or_else(|why| panic!("{what}: {why:?}")),
+                        &[one_bend, the_quarter],
+                        &what,
+                    ),
+                    (Rule::Difference, false, true) => each_within_its_error(
+                        measured.unwrap_or_else(|why| panic!("{what}: {why:?}")),
+                        &[the_quarter],
+                        &what,
+                    ),
+                    (Rule::Difference, false, false) => assert!(
                         matches!(
                             measured,
-                            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
-                                if ratio == too_wide
+                            Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
                         ),
                         "{what}: {measured:?}"
                     ),
