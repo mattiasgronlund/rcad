@@ -88,6 +88,10 @@
 //! family is not reached either. `0.9` radians answers cleanly for every rule,
 //! both turns and all three rings in `PLACED_RINGS`, and is the one pinned in
 //! `a_bend_written_out_at_another_angle_and_a_copy_turned_round_answer_every_rule`.
+//!
+//! The last two tests are not of this family. They pin what became of
+//! Q1951's two bars on one axis, which were looked at here: the mesh refuses
+//! the ledge between them for where its two rims are walked from (Q2153).
 
 use core::f64::consts::{FRAC_PI_2, PI};
 use std::collections::BTreeMap;
@@ -2180,77 +2184,126 @@ fn two_bends_whose_caps_lie_apart_answer_every_rule() {
     }
 }
 
+/// Two round bars on one axis joined, one of radius 4 and 10 tall and one of
+/// radius `4.01` and `9.99` tall, leave a ledge: a flat ring `0.01` wide at
+/// height `9.99`. The mesh refuses that ring at a deflection of `0.1`, either
+/// way round, and meshes it at `0.01`; and at `0.1` too once the wider bar is
+/// turned a quarter turn about the axis (Q2153, `docs/decisions.md` §35.6).
+///
+/// **Not a piece no ray can place.** It is here because Q1951's probe of the
+/// same two bars, `1e-13` apart, was here. That probe took the refused face
+/// for the wall between the two rims; it is the flat ring.
+///
+/// **The fault is where the ring's two rims are walked from.** Each closed
+/// edge is walked from its own corner: the wider bar's top rim from the bar's
+/// seam, and the circle the join made where that top meets the narrower bar's
+/// wall from where its conic starts. Q2153's first lane printed both loops at
+/// a ledge `0.001` wide and a deflection of `0.01`: 103 corners each, the
+/// outer one's first at angle `−π/2` of the plane's chart and the inner one's
+/// at `0`. So the inner rim's corners sit between the outer rim's. A chord of
+/// the outer rim sags further inside its arc than the ring is wide, the inner
+/// rim's corners poke out through it, and the triangulator refuses the face
+/// `BoundaryCrossesItself`. Turned a quarter turn, the wider bar's seam lands
+/// where the inner rim starts, the two rims' corners line up, and nothing
+/// crosses.
+///
+/// **A gap, not a limit**: the solid exists, and a finer mesh of it is within
+/// the deflection asked for too. `Model::validate` passes it because its own
+/// sweep meshes finer until the sides clear (§188.3); `SolidView::mesh` at the
+/// caller's deflection does not.
 #[test]
-fn probe_q2153_two_coaxial_bars() {
-    for step in [1.0, 1e-3, 1e-6, 1e-9, 1e-11, 1e-12, 1e-13] {
-        for rule in EVERY_RULE {
-            for the_first_first in [true, false] {
-                let mut model = a_model();
-                let narrower = model
-                    .add_round_bar(4.0, 10.0, &Isometry::identity())
-                    .expect("a bar");
-                let wider = model
-                    .add_round_bar(4.0 + step, 10.0 - step, &Isometry::identity())
-                    .expect("a bar");
-                let printed =
-                    match fused_and_measured(&mut model, narrower, wider, rule, the_first_first) {
-                        Ok(measured) => format!("Ok {measured:?}"),
-                        Err(why) => the_refusal(&Err(why)),
-                    };
-                println!("PROBE step {step:e} {rule:?} first {the_first_first}: {printed}");
+fn a_ledge_between_two_bars_on_one_axis_is_refused_where_its_rims_start_a_quarter_turn_apart() {
+    let coarse = rcad_geom::Deflection::of(0.1).expect("a length");
+    let fine = rcad_geom::Deflection::of(0.01).expect("a length");
+    for the_narrower_first in [true, false] {
+        let what = format!("the narrower first {the_narrower_first}");
+
+        let (model, ledged) = a_ledge_a_hundredth_wide(0.0, the_narrower_first, &what);
+        let solid = model.solid(ledged).expect("the fuse made the key");
+        match solid.mesh(coarse, &Policy::certified(), &mut ProvenanceLog::new()) {
+            Err(Error::CannotMeshAFace {
+                face,
+                why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
+            }) => {
+                let face = model
+                    .face(face)
+                    .expect("the mesh named a face of the model");
+                assert!(
+                    face.surface().as_plane().is_some() && face.wire_count() == 2,
+                    "{what}: refused on {:?}, with {} wires",
+                    face.surface(),
+                    face.wire_count()
+                );
             }
+            other => panic!("{what}: {other:?}"),
         }
+        solid
+            .mesh(fine, &Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}, meshed finer: {why:?}"));
+
+        let (model, turned_ledge) = a_ledge_a_hundredth_wide(FRAC_PI_2, the_narrower_first, &what);
+        model
+            .solid(turned_ledge)
+            .expect("the fuse made the key")
+            .mesh(coarse, &Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}, the wider bar turned: {why:?}"));
     }
 }
 
+/// The two bars `1e-13` apart, as Q1951's probe built them: the join is
+/// refused before anything is meshed, since a ledge that narrow on a bar 10
+/// tall asks `f64` for a spread of about `1e14`, past the `1e11` of §3.5.
 #[test]
-fn probe_q2153_sweep() {
-    for (step, turn) in [
-        (1e-2, 0.0),
-        (1e-2, FRAC_PI_2),
-        (1e-2, -FRAC_PI_2),
-        (1e-2, PI),
-    ] {
-        eprintln!("PROBE ===== step {step:e} turn {turn}");
+fn the_same_two_bars_a_ten_trillionth_apart_are_refused_for_the_spread_they_ask_for() {
+    for the_narrower_first in [true, false] {
         let mut model = a_model();
-        let narrower = model
-            .add_round_bar(4.0, 10.0, &Isometry::identity())
-            .expect("a bar");
-        let wider = model
-            .add_round_bar(4.0 + step, 10.0 - step, &turned(turn))
-            .expect("a bar");
-        let answer = model
-            .fuse(
-                &[narrower],
-                &[wider],
-                Rule::Union,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("a union");
-        let [solid] = answer.solids()[..] else {
-            panic!()
-        };
-        let mut line = format!("PROBE step {step:e} turn {turn}:");
-        for size in [0.1, 1e-6] {
-            let mesh = model.solid(solid).expect("a solid").mesh(
-                rcad_geom::Deflection::of(size).expect("a length"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            );
-            match mesh {
-                Ok(mesh) => line += &format!(" {size:e} ok {};", mesh.points().len()),
-                Err(Error::CannotMeshAFace { face, why }) => {
-                    let face = model.face(face).expect("a face");
-                    line += &format!(
-                        " {size:e} {why:?} on {:?} wires {};",
-                        face.surface(),
-                        face.wire_count()
-                    );
-                }
-                Err(other) => line += &format!(" {size:e} {other:?};"),
-            }
-        }
-        println!("{line}");
+        let joined = two_bars_on_one_axis_joined(&mut model, 1e-13, 0.0, the_narrower_first);
+        assert!(
+            matches!(
+                joined,
+                Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
+            ),
+            "the narrower first {the_narrower_first}: {joined:?}"
+        );
     }
+}
+
+/// [`two_bars_on_one_axis_joined`] `0.01` apart, the wider bar turned by
+/// `turn`: one solid, in a model that validates.
+fn a_ledge_a_hundredth_wide(turn: f64, the_narrower_first: bool, what: &str) -> (Model, SolidKey) {
+    let mut model = a_model();
+    let joined = two_bars_on_one_axis_joined(&mut model, 0.01, turn, the_narrower_first)
+        .unwrap_or_else(|why| panic!("{what}, turned {turn}: {}", the_refusal(&Err(why))));
+    let [ledged] = joined[..] else {
+        panic!("{what}, turned {turn}: {} solids", joined.len())
+    };
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{what}, turned {turn}: {why:?}"));
+    (model, ledged)
+}
+
+/// A round bar of radius 4 and 10 tall, and one of radius `4 + step` and
+/// `10 − step` tall turned by `turn` about their common axis, joined.
+fn two_bars_on_one_axis_joined(
+    model: &mut Model,
+    step: f64,
+    turn: f64,
+    the_narrower_first: bool,
+) -> Result<Vec<SolidKey>, Error> {
+    let narrower = model.add_round_bar(4.0, 10.0, &Isometry::identity())?;
+    let wider = model.add_round_bar(4.0 + step, 10.0 - step, &turned(turn))?;
+    let (arguments, tools) = if the_narrower_first {
+        ([narrower], [wider])
+    } else {
+        ([wider], [narrower])
+    };
+    let joined = model.fuse(
+        &arguments,
+        &tools,
+        Rule::Union,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )?;
+    Ok(joined.solids().to_vec())
 }
