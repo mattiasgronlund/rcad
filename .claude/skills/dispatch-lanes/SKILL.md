@@ -99,6 +99,14 @@ Tiers 1 and 5 go in class order, not file order (§352.3, §403.3). While a
 Sonnet row is ready and no running lane holds one, the fill keeps the last
 free slot for it rather than giving every slot to Opus (§447.3).
 
+**`next` already passes over a row waiting for its own date or for free
+threads**, so it needs no second call to skip past one the way a `lane:`-held
+write set does: a row whose `after:` names a date not yet come, or whose
+`cores:` entry does not fit the machine's free threads (summed over the
+running, held-elsewhere and already-taken rows, the night fuzz holding every
+thread in its own window) is `waiting` or skipped like any other blocked row,
+not offered for a second `next` to pass over by hand (§308).
+
 **If `queue next` refuses, naming `just fuzz-triage-row`**, a fuzz night has
 left groups that no open row names and no triage row is open yet (§418.2).
 Run `just fuzz-triage-row` — it files the one triage row §418.3 describes, or

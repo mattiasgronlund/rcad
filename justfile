@@ -12792,6 +12792,17 @@ queue_shared_files := "crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/src
 # happens to run is §173's check that answers for its environment.
 queue_running := ""
 
+# The clock a fixture drives `after:<id>,<date>` and the night-fuzz window
+# against (§308): an ISO-8601 UTC timestamp, `2026-10-19T23:30:00Z`. Empty —
+# always, outside a selftest — means the real clock, `date -u`. The fill reads
+# only the date for a dated `after:`, and the whole timestamp for the night
+# window, since the window is a time of day in Europe/Stockholm, not a date.
+queue_now := ""
+
+# How many hardware threads a `cores:` entry fits against (§308). Empty —
+# always, outside a selftest — means the real machine, `nproc`.
+queue_threads := ""
+
 # Where `queue-page` writes, so a selftest can point it at a scratch directory
 # instead of Mattias's real page (§230, §263). `check-queue-page-selftest` and
 # `check-queue-api-selftest` both set `RCAD_QUEUE_PAGE_DIR`, and the gate must
@@ -12980,8 +12991,11 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|rank|tier|tag|pick|pin|unpin|apply|narrow)
+        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow)
+            now_iso='{{ queue_now }}'
+            [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
+                QUEUE_NOW="${now_iso:0:10}" \
                 python3 '{{ justfile_directory() }}/tooling/queue/queue.py' "$@"
             status=$?
             {{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" queue-page || true
@@ -13006,7 +13020,9 @@ queue mode="" *args:
                 'just queue drop <id> <§N>                    close a row as dropped:§N, moved under Closed' \
                 'just queue park <id> <§N>                    mark a row parked:§N, left in its tier' \
                 'just queue after <id> <id>[,<id>...]         mark a row waiting on others: state after:<ids>' \
+                'just queue after <id> <date>                 mark a row waiting on a UTC date (YYYY-MM-DD) as well as, or instead of, other rows' \
                 'just queue after <id> -                      a row that waits goes back to todo, for a row whose wait was dropped (§451)' \
+                'just queue cores <id> <n>|all                set, in the write set, how many hardware threads the row pins while it runs (§308)' \
                 'just queue rank <id> before <id>             move a row to sit just before another, in their shared tier' \
                 'just queue tier <id> <tier>                  move an open row to the foot of another tier' \
                 'just queue tag <id> <class>|small|-          set, replace or remove a row class or small mark' \
@@ -13058,9 +13074,30 @@ queue mode="" *args:
     if [ -z "$mode" ]; then
         families=$(QUEUE_FILE='{{ queue_file }}' python3 '{{ justfile_directory() }}/tooling/queue/queue.py' families --count) || exit 1
     fi
+    # §308: the fill's own clock and thread count, for a dated `after:` and for
+    # `cores:`. The night window is `tooling/systemd/rcad-fuzz.timer`'s
+    # `OnCalendar=*-*-* 00:10:00`, no zone in the unit so host-local
+    # Europe/Stockholm, for `fuzz-overnight window="28800"`'s eight hours —
+    # the timer's own `[Unit] Description` names the same 00:10 to 08:10.
+    # `date -d "@$epoch - 1 day"` is refused by GNU date; a local date a full
+    # day back is read from an epoch already moved back by exactly one day.
+    now_iso='{{ queue_now }}'
+    [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    now_date="${now_iso:0:10}"
+    threads='{{ queue_threads }}'
+    [ -n "$threads" ] || threads=$(nproc)
+    now_epoch=$(date -u -d "$now_iso" +%s) || exit 1
+    yesterday_epoch=$((now_epoch - 86400))
+    today_local=$(TZ=Europe/Stockholm date -d "@$now_epoch" +%Y-%m-%d)
+    yesterday_local=$(TZ=Europe/Stockholm date -d "@$yesterday_epoch" +%Y-%m-%d)
+    start_today=$(TZ=Europe/Stockholm date -d "$today_local 00:10:00" +%s)
+    start_yesterday=$(TZ=Europe/Stockholm date -d "$yesterday_local 00:10:00" +%s)
+    night=0
+    if [ "$now_epoch" -ge "$start_today" ] && [ "$now_epoch" -lt "$((start_today + 28800))" ]; then night=1; fi
+    if [ "$now_epoch" -ge "$start_yesterday" ] && [ "$now_epoch" -lt "$((start_yesterday + 28800))" ]; then night=1; fi
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; [ -z "$narrowed" ] || printf '%s\n' "$narrowed"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" -v cand_id="${2:-}" -v cand_ws="${3:-}" \
-        -v families="$families" \
+        -v families="$families" -v now_date="$now_date" -v threads="$threads" -v night="$night" \
         -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' \
         -v shared_files='{{ queue_shared_files }}' '
         BEGIN {
@@ -13070,6 +13107,8 @@ queue mode="" *args:
             nc = split("wrong/A wrong/B wrong/C crash/A crash/B crash/C refuses/A refuses/B refuses/C - wrong/D crash/D refuses/D", classes, " ")
             for (k = 1; k <= nc; k++) if (classes[k] != "-") isclass[classes[k]] = 1
             bundle += 0
+            threads += 0
+            night += 0
             if (bundle < 1) { printf "queue: queue_bundle is %d, and a bundle holds at least one row\n", bundle > "/dev/stderr"; bad = 1; exit 1 }
             ns = split(shared_files, sharedlist, ",")
             for (si = 1; si <= ns; si++) if (sharedlist[si] != "") shared[sharedlist[si]] = 1
@@ -13109,8 +13148,11 @@ queue mode="" *args:
                 else if (s ~ /^after:/) {
                     kind[i] = "ready"
                     m = split(substr(s, 7), a, ",")
-                    for (j = 1; j <= m; j++)
-                        if (!(a[j] in at) || st[at[a[j]]] !~ /^done:/) kind[i] = "waiting"
+                    for (j = 1; j <= m; j++) {
+                        if (a[j] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) {
+                            if (a[j] > now_date) kind[i] = "waiting"
+                        } else if (!(a[j] in at) || st[at[a[j]]] !~ /^done:/) kind[i] = "waiting"
+                    }
                 }
                 else if (s ~ /^parked:/) { kind[i] = "parked"; parkedin[tier[i]]++ }
                 else if (s ~ /^(done|dropped):/) kind[i] = "closed"
@@ -13186,8 +13228,12 @@ queue mode="" *args:
                         none = 0
                         m = split(substr(st[i], 7), a, ",")
                         line = ""
-                        for (j = 1; j <= m; j++)
-                            line = line (j > 1 ? ", " : "") a[j] " (" ((a[j] in at) ? st[at[a[j]]] : "not a row") ")"
+                        for (j = 1; j <= m; j++) {
+                            if (a[j] ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/)
+                                line = line (j > 1 ? ", " : "") a[j] " (" (a[j] > now_date ? "not yet come" : "come") ")"
+                            else
+                                line = line (j > 1 ? ", " : "") a[j] " (" ((a[j] in at) ? st[at[a[j]]] : "not a row") ")"
+                        }
                         print "      waits on " line
                     }
             if (none) print "    none"
@@ -13291,7 +13337,44 @@ queue mode="" *args:
             }
             return 0
         }
+        # §308: a `cores:<n>` or `cores:all` entry pins hardware threads rather
+        # than a file, so it is checked by sum against `threads`, not by
+        # meeting a path (`entries_meet` never matches one). The night fuzz
+        # holds every thread for the window `night` already says this slot
+        # sits in.
+        function cores_of(ws,    n, part, i, v) {
+            n = split(ws, part, ",")
+            for (i = 1; i <= n; i++)
+                if (part[i] ~ /^cores:/) { v = substr(part[i], 7); return v }
+            return ""
+        }
+        function cores_fit_skip(i, say,    need, held, names, j, c) {
+            need = cores_of(ws[i])
+            if (need == "") return 0
+            held = 0; names = ""
+            if (night) { held = threads; names = "the night fuzz" }
+            for (j = 1; j <= r; j++) {
+                if (kind[j] != "running") continue
+                c = cores_of(ws[j]); if (c == "") continue
+                held += (c == "all" ? threads : c + 0)
+                names = names (names == "" ? "" : ", ") id[j] " (held by " st[j] ")"
+            }
+            for (j = 1; j <= e; j++) {
+                c = cores_of(ews[j]); if (c == "") continue
+                held += (c == "all" ? threads : c + 0)
+                names = names (names == "" ? "" : ", ") eid[j] " (held elsewhere by " est[j] ")"
+            }
+            for (j = 1; j <= taken_n; j++) {
+                c = cores_of(ws[taken[j]]); if (c == "") continue
+                held += (c == "all" ? threads : c + 0)
+                names = names (names == "" ? "" : ", ") id[taken[j]] " (taken above)"
+            }
+            if (need == "all" ? held == 0 : held + need + 0 <= threads) return 0
+            if (say) printf "skip %s (tier %s): its cores:%s does not fit the %d threads of the machine: %s holds them\n", id[i], tier[i], need, threads, names
+            return 1
+        }
         function blocked(i, say,    j, sharedcount, h1, h2) {
+            if (cores_fit_skip(i, say)) return 1
             sharedcount = 0
             for (j = 1; j <= r; j++)
                 if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
@@ -13384,6 +13467,7 @@ queue mode="" *args:
         function entries_meet(x, y,    px, py, ix, iy, h, m) {
             shared_match = 0
             if (x == "-" || y == "-") return 0
+            if (x ~ /^cores:/ || y ~ /^cores:/) return 0
             px = x; ix = ""; h = index(x, "#")
             if (h) { px = substr(x, 1, h - 1); ix = substr(x, h + 1) }
             py = y; iy = ""; h = index(y, "#")
@@ -14144,11 +14228,12 @@ _queue-check file decisions:
     rows=$({{ just_executable() }} --justfile '{{ justfile() }}' --working-directory "$PWD" _queue-rows '{{ file }}') || exit 1
     tracked=$(git ls-files) || exit 1
     [ -f '{{ decisions }}' ] || { echo "_queue-check: {{ decisions }} is not a file" >&2; exit 1; }
+    now_date=$(date -u +%Y-%m-%d)
     {
         printf '%s\n' "$tracked" | awk '{ print "P\037" $0 }'
         awk '/^## [0-9]+\. / || /^### [0-9]+\.[0-9]+ / { print "S\037" $2 }' '{{ decisions }}'
         printf '%s\n' "$rows"
-    } | LC_ALL=C awk -v file='{{ file }}' -v slots='{{ queue_slots }}' '
+    } | LC_ALL=C awk -v file='{{ file }}' -v slots='{{ queue_slots }}' -v now_date="$now_date" '
         BEGIN {
             FS = "\037"
             nt = split("1 2 2.2 2.5 3 4 5", tiers, " ")
@@ -14194,15 +14279,21 @@ _queue-check file decisions:
             kind = ""
             if (state == "todo") kind = "todo"
             else if (state ~ /^lane:[A-Za-z0-9._\/-]+$/) kind = "lane"
-            else if (state ~ /^after:[TDQ][0-9]+(,[TDQ][0-9]+)*$/) kind = "after"
+            else if (state ~ /^after:([TDQ][0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2})(,([TDQ][0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}))*$/) kind = "after"
             else if (state ~ /^done:[0-9a-f]+$/ && length(state) >= 12 && length(state) <= 45) kind = "done"
             else if (state ~ /^dropped:§[0-9]+(\.[0-9]+)?$/) kind = "dropped"
             else if (state ~ /^parked:§[0-9]+(\.[0-9]+)?$/) kind = "parked"
-            else err(line, id ": state \"" state "\" is not todo, lane:<branch>, after:<id>[,<id>], done:<sha>, dropped:§N or parked:§N")
+            else err(line, id ": state \"" state "\" is not todo, lane:<branch>, after:<id|date>[,<id|date>], done:<sha>, dropped:§N or parked:§N")
             kindof[id] = kind
             closed = (kind == "done" || kind == "dropped")
             if (kind == "dropped" || kind == "parked") cite(line, id, substr(state, index(state, ":") + 1))
-            if (kind == "after") { wid[++nw] = id; waits[id] = substr(state, 7); wline[id] = line }
+            if (kind == "after") {
+                wid[++nw] = id; waits[id] = substr(state, 7); wline[id] = line
+                datecount = 0
+                datesplit = split(waits[id], dateparts, ",")
+                for (datei = 1; datei <= datesplit; datei++) if (dateparts[datei] ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/) datecount++
+                if (datecount > 1) err(line, id ": cannot wait on two dates")
+            }
             if (kind == "todo") ready++
             if (kind == "lane") running++
             if (kind == "parked") parked++
@@ -14256,6 +14347,7 @@ _queue-check file decisions:
                 rest = ""
                 for (j = 1; j <= m; j++) if (!((a[j] in kindof) && kindof[a[j]] == "dropped")) rest = rest (rest == "" ? "" : ",") a[j]
                 for (j = 1; j <= m; j++) {
+                    if (a[j] ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/) { if (a[j] > now_date) ok = 0; continue }
                     if (a[j] == id) err(wline[id], id ": waits on itself")
                     else if (!(a[j] in kindof) && a[j] ~ /^Q/) notheld++
                     else if (!(a[j] in kindof)) err(wline[id], id ": waits on " a[j] ", which is not a row in this file, and a T or D id is never handed out again")
@@ -14310,6 +14402,7 @@ _queue-check file decisions:
         }
         function entry(line, id, x, closed,    p, h) {
             if (x == "-") { err(line, id ": \"-\" stands alone in a write set, and here it has company"); return }
+            if (x ~ /^cores:([1-9][0-9]*|all)$/) return
             if (x !~ /^[A-Za-z0-9._\/-]+(#[A-Za-z0-9_-]+)?$/ || x ~ /^\// || x ~ /\/\//) {
                 err(line, id ": \"" x "\" is not a path, a directory ending in /, or path#item")
                 return
@@ -14386,6 +14479,13 @@ _queue-check file decisions:
 # nobody holds, an entry outside the set the row was taken with and a
 # directory written without its `/`, refused; and a widening back refused
 # while another hold meets the entry it widens to, and passed when none does.
+# §308 adds a dated `after:`, mixed with a row id or alone, counted ready once
+# its date has come and refused with a second date in the same row; a `cores:`
+# entry, refused as `cores:0` and accepted as `cores:all`; and the fill's own
+# clock and thread count: a `cores:` row that fits the machine's free threads
+# and one that does not, `cores:all` beside a row that holds some threads and
+# beside none, and the night-fuzz window holding every thread, moved an hour
+# later in UTC once Stockholm leaves summer time.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -14588,6 +14688,24 @@ check-queue-selftest:
         'a tier 2 row that waits on a tier 1 row was refused'
     passes waits-on-done  "s/^Q3  2  after:T9 /Q3  2  after:D5 /; /^D4 /a D5  5  done:42df376e  opus  -  wrong/C a defect closed in tier 5 §230" \
         'a tier 2 row that waits on a done tier 5 row was refused, though the fill reaches it as soon as it is ready'
+
+    # §308: _queue-check reads a dated after:, mixed with a row id or alone, a
+    # cores: entry in the write set, and the four rules 17c94a99 added for them.
+    sed 's/after:T9/after:T9,2020-01-01/' "$dir/good.md" > "$dir/mixed-come.md"
+    got=$(q _queue-check "$dir/mixed-come.md" "$decisions" 2>&1) \
+        || fail "a row after a done id and a date already come was refused"
+    grep -qF '14 rows; 6 ready, 1 waiting,' <<<"$got" \
+        || fail "a row after a done id and a date already come was not counted ready, as it was before the date was added"
+    sed 's/after:T9/after:T9,2099-01-01/' "$dir/good.md" > "$dir/mixed-wait.md"
+    got=$(q _queue-check "$dir/mixed-wait.md" "$decisions" 2>&1) \
+        || fail "a row after a done id and a date not yet come was refused"
+    grep -qF '14 rows; 5 ready, 2 waiting,' <<<"$got" \
+        || fail "a row after a done id and a date not yet come was still counted ready"
+    refused two-dates  's/after:T9/after:T9,2020-01-01,2099-01-01/' 'cannot wait on two dates'
+    refused cores-zero 's/justfile#queue  pinned/justfile#queue,cores:0  pinned/' \
+        'is not a path, a directory ending in /, or path#item'
+    passes  cores-all   's/justfile#queue  pinned/justfile#queue,cores:all  pinned/' \
+        'a row with a cores:all entry in its write set was refused'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -14987,6 +15105,67 @@ check-queue-selftest:
     drive after
     grep -qxF '      waits on Q1 (lane:lane-y)' <<<"$got" \
         || fail "a waiting row does not say what it waits on and that row's state"
+
+    # §308 (Q281): the fill's own dated after:, and a cores: entry that pins
+    # hardware threads. drive() only sets queue_file and queue_running, so
+    # driveclock() gives it queue_threads and queue_now too.
+    driveclock() {
+        got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 \
+            --set queue_threads "$2" --set queue_now "$3" queue "${@:4}" 2>&1) \
+            || fail "queue ${*:4} failed on the $1 fixture, queue_threads $2, queue_now $3"
+    }
+
+    fence afterdate <<'MD'
+    Q1  1  after:2099-01-01  opus  docs/a.md  waits on a date not yet come §230
+    Q2  1  after:2020-01-01  opus  docs/b.md  waits on a date already come §230
+    MD
+    drive afterdate next 2
+    [ "$(takes)" = "Q2 " ] || fail "a dated after: took the row before its date came, or left behind the row whose date has"
+    drive afterdate
+    grep -qxF '      waits on 2099-01-01 (not yet come)' <<<"$got" \
+        || fail "a waiting row with a dated after: does not say its date has not yet come"
+
+    fence cores <<'MD'
+    Q90  1  lane:lane-q90  opus  cores:3  running, pinning 3 of the machine's threads §230
+    Q91  1  todo  opus  cores:1  needs 1 thread, which fits beside the running row's 3 §230
+    Q92  1  todo  opus  cores:2  needs 2 threads, which does not fit beside the running row's 3 §230
+    MD
+    driveclock cores 4 2026-10-19T12:00:00Z blocked
+    [ "$got" = "skip Q92 (tier 1): its cores:2 does not fit the 4 threads of the machine: Q90 (held by lane:lane-q90) holds them" ] \
+        || fail "a cores: row that does not fit the machine's free threads was not skipped naming the running row that holds them, or one that fits was skipped anyway"
+
+    fence coresall <<'MD'
+    Q90  1  lane:lane-q90  opus  cores:2  running, pinning 2 of the machine's threads §230
+    Q91  1  todo  opus  cores:all  wants every thread, which does not fit beside a row already holding some §230
+    MD
+    driveclock coresall 4 2026-10-19T12:00:00Z blocked
+    [ "$got" = "skip Q91 (tier 1): its cores:all does not fit the 4 threads of the machine: Q90 (held by lane:lane-q90) holds them" ] \
+        || fail "cores:all beside a running row that holds some of the machine's threads was not skipped"
+
+    fence coresallalone <<'MD'
+    Q91  1  todo  opus  cores:all  wants every thread, and nothing else holds any §230
+    MD
+    driveclock coresallalone 4 2026-10-19T12:00:00Z next 1
+    [ "$(takes)" = "Q91 " ] || fail "cores:all was skipped though nothing else holds any of the machine's threads"
+
+    # The night window is derived from tooling/systemd/rcad-fuzz.timer and
+    # fuzz-overnight, not typed in (§308): 00:10-08:10 Europe/Stockholm, which
+    # is 22:10-06:10Z in summer time and 23:10-07:10Z once Stockholm leaves it
+    # on 2026-10-25. 02:00Z on 2026-10-19 sits in the first; 06:30Z on
+    # 2026-10-26 sits in the second only if the code reads the zone rather
+    # than keeping summer time's offset, since 06:30Z was outside the window
+    # before the clocks changed.
+    fence corenight <<'MD'
+    Q1  1  todo  opus  cores:2  a row that pins 2 of the machine's threads §230
+    MD
+    driveclock corenight 4 2026-10-19T02:00:00Z blocked
+    [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them" ] \
+        || fail "a cores: row inside the night-fuzz window, in summer time, was not skipped as the night fuzz holding every thread"
+    driveclock corenight 4 2026-10-19T12:00:00Z next 1
+    [ "$(takes)" = "Q1 " ] || fail "a cores: row outside the night-fuzz window was skipped though nothing holds its threads"
+    driveclock corenight 4 2026-10-26T06:30:00Z blocked
+    [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them" ] \
+        || fail "the night window did not move an hour later in UTC once Stockholm left summer time on 2026-10-25"
 
     fence blocked <<'MD'
     Q1  1  lane:lane-q1  opus  docs/a.md  running §230
