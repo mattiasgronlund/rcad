@@ -1486,7 +1486,9 @@ impl<'f> Arrangement<'f> {
     /// coefficients, which is four exact determinants
     /// ([`relation_of_two_lines`]). Otherwise the question is whether the two
     /// partners are one surface, which [`intersect`] answers (§31.2 row 7),
-    /// and where they are not, whether the face and the two share the curve,
+    /// and the same curve of it is picked by the same pickers in whatever
+    /// order ([`the_same_pickers_in_any_order`]); where they are not one
+    /// surface, it is whether the face and the two share the curve,
     /// with one of the three flat
     /// ([`Arrangement::one_curve_two_partners_cut`]). A fold of that last kind
     /// is written down on the crossing kept ([`Crossing::also_cut_by`]).
@@ -1523,7 +1525,7 @@ impl<'f> Arrangement<'f> {
                         )
                 }
             };
-            if same && self.crossings[index].picked_by() == picked_by {
+            if same && the_same_pickers_in_any_order(self.crossings[index].picked_by(), picked_by) {
                 let also = &mut self.crossings[index].also_drawn_by;
                 if mine != *partner && !also.contains(partner) {
                     also.push(*partner);
@@ -12592,6 +12594,23 @@ fn nothing_rules_the_point_out(picked_by: &[Picker], at: PredicatePoint) -> bool
     picked_by
         .iter()
         .all(|picker| picker.side_of_point(at) != Decision::Neg)
+}
+
+/// Whether two lists of pickers hold the same pickers, bit for bit, whatever
+/// order each lists them in.
+///
+/// **A curve is picked by being on the right side of every one of its
+/// pickers** ([`nothing_rules_the_point_out`]), so the order they come in
+/// picks out nothing, and two curves of one pair whose pickers are the same
+/// pickers are one curve. The order is not the same for two spellings of one
+/// pipe: a half ellipse lists first the picker leaning towards the pipe
+/// [`intersect`] sorts first ([`HalfAnEllipse::facing`]), and it sorts by the
+/// stored numbers, so a pipe whose axis is named at `z = 0` sorts before a bar
+/// along `x` at `z = 3` and the same pipe named at `z = 4` after it (Q2050).
+fn the_same_pickers_in_any_order(one: &[Picker], other: &[Picker]) -> bool {
+    one.len() == other.len()
+        && one.iter().all(|picker| other.contains(picker))
+        && other.iter().all(|picker| one.contains(picker))
 }
 
 /// The gradient of a surface at a point, as a box.

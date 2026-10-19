@@ -31,10 +31,22 @@
 //! meet (§231.5). Now both spellings unite, pin or no pin, with the wall one
 //! face (Q1877).
 //!
+//! **A bar across the joint gives what one spelling gives.** A bar of the
+//! wall's radius along `x` through the axis below the joint crosses the wall in
+//! half ellipses that climb past the joint, and the cross's wall, united with
+//! the upper bar first, then held each half twice: once with each spelling,
+//! since the pickers of a half come in the order `intersect` sorts the two
+//! pipes, and it sorts the cross's between the two spellings. Two spellings
+//! were refused `Undecidable` where one is refused
+//! `AFaceTrimmedByACurveThisCannotFollow`; now both are refused alike, and
+//! the half is one curve (Q2050).
+//!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
 //! the fuse is asked — the stored numbers differ and `intersect` calls them one
 //! surface.
+
+use core::mem::{Discriminant, discriminant};
 
 use rcad_geom::SurfaceMeet;
 use rcad_geom::{
@@ -645,6 +657,130 @@ impl APinnedBar {
     }
 }
 
+/// **A bar across where two bars on one pipe meet unites with them as one
+/// spelling does.**
+///
+/// The lower bar runs up from `z = 0` to the joint at [`CROSSED_JOINT`], the
+/// upper on to `6`, and a bar of the same radius along `x` from `−4` to `4`
+/// crosses the pipe at `z = 3`, so that its wall reaches from `z = 1` up past
+/// the joint to `5`. The cross is united with the upper bar first, and the
+/// lower bar with that, both ways round, with the upper wall naming its axis
+/// where the lower one does and at the joint.
+///
+/// Two walls of one radius whose axes meet cross in four half ellipses, which
+/// meet where the walls touch, at `(0, ±2, 3)` on the lower bar. In the second
+/// union the cross's wall holds the two that climb past the joint twice: once
+/// as its crossings with the lower wall, and once along its own edges, which
+/// the upper wall left it with. A half is picked out by two flat surfaces,
+/// listed with the one leaning towards the pipe `intersect` sorts first ahead,
+/// and it sorts the cross's pipe after the lower wall named at `0` and before
+/// the upper named at the joint. So with two spellings each half came with its
+/// pickers the other way round, was drawn as two curves, and where it crosses
+/// the joint at `(−1, −√3, 4)` the turn between the two was asked of the
+/// lower wall's gradient and the upper's, which are one: refused `Undecidable`
+/// in both orders on an `orient3d` that straddled nothing (Q2050).
+///
+/// One spelling is refused too, `AFaceTrimmedByACurveThisCannotFollow`, which
+/// is the refusal two spellings must match until that is lifted.
+#[test]
+fn a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does() {
+    let [written_once, written_twice] =
+        [LOWER_ORIGIN, CROSSED_JOINT].map(the_bars_united_across_their_joint);
+    for (lower_first, (once, twice)) in [true, false]
+        .into_iter()
+        .zip(written_once.into_iter().zip(written_twice))
+    {
+        assert_eq!(
+            once.0, twice.0,
+            "lower bar first {lower_first}: written once, {}; written twice, {}",
+            once.1, twice.1
+        );
+    }
+}
+
+/// Where the lower bar meets the upper, above the axis of the bar across them.
+const CROSSED_JOINT: f64 = 4.0;
+
+/// What one fuse answered: how many faces its one solid has, or which refusal,
+/// and how to say it.
+type Answer = (Result<usize, Discriminant<Error>>, String);
+
+/// The upper bar, from [`CROSSED_JOINT`] to `6` with its wall naming its axis
+/// at `axis_origin`, united with a bar along `x` across the pipe at `z = 3`,
+/// and the lower bar, from `0` to the joint, united with that, both ways round.
+///
+/// An answer is checked as far as it goes before it comes back: it is one
+/// solid, it validates, and its volume is the three bars' less the part the
+/// cross shares with the pipe, worked out by hand: `16 r³/3` for two pipes of
+/// one radius whose axes cross square.
+fn the_bars_united_across_their_joint(axis_origin: f64) -> [Answer; 2] {
+    let policy = Policy::certified();
+    let route = format!("the upper wall at {axis_origin}");
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, CROSSED_JOINT, LOWER_ORIGIN);
+    let upper = a_bar_whose_wall_names_its_axis_at(&mut model, CROSSED_JOINT, 6.0, axis_origin);
+    let across = Cylinder::new(
+        Axis::new(Point::new(0.0, 0.0, 3.0), Vector::new(1.0, 0.0, 0.0))
+            .expect("a direction with a length"),
+        RADIUS,
+    )
+    .expect("a positive radius");
+    let across =
+        a_bar_with_its_seam_towards(&mut model, across, -4.0, 4.0, Vector::new(0.0, 0.0, 1.0));
+    let crossed = model
+        .fuse(
+            &[upper],
+            &[across],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refused| panic!("{route}: the cross and the upper bar: {refused:?}"));
+    let [crossed] = crossed.solids() else {
+        panic!(
+            "{route}: the cross and the upper bar are one solid: {:?}",
+            crossed.solids()
+        );
+    };
+    let crossed = *crossed;
+    let by_hand =
+        std::f64::consts::PI * RADIUS * RADIUS * (6.0 + 8.0) - 16.0 * RADIUS.powi(3) / 3.0;
+
+    [[lower, crossed], [crossed, lower]].map(|[arguments, tools]| {
+        let mut model = model.clone();
+        let fused = match model.fuse(
+            &[arguments],
+            &[tools],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(fused) => fused,
+            Err(why) => return (Err(discriminant(&why)), format!("refused {why:?}")),
+        };
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("{route}: came back broken: {broken:?}"));
+        let [solid] = fused.solids() else {
+            panic!(
+                "{route}: the three bars are one solid: {:?}",
+                fused.solids()
+            );
+        };
+        let (volume, bound) = volume_of(&model, *solid);
+        assert!(
+            (volume - by_hand).abs() <= bound,
+            "{route}: {volume} ± {bound} against {by_hand}"
+        );
+        let faces = model
+            .solid(*solid)
+            .expect("this model made the key")
+            .faces()
+            .count();
+        (Ok(faces), format!("one solid of {faces} faces"))
+    })
+}
+
 /// A round bar on `wall` from `from` to `to` along its axis, with its seam
 /// where the wall meets the plane `y = radius`.
 ///
@@ -654,12 +790,32 @@ impl APinnedBar {
 /// there is exactly zero — as long as `origin + t·direction` is exact
 /// ([`SLANTED_LENGTH`]).
 fn a_bar_along(model: &mut Model, wall: Cylinder, from: f64, to: f64) -> SolidKey {
+    a_bar_with_its_seam_towards(model, wall, from, to, Vector::new(0.0, 1.0, 0.0))
+}
+
+/// A round bar on `wall` from `from` to `to` along its axis, with its seam the
+/// wall's radius off the axis along `towards`, a unit vector square to it.
+fn a_bar_with_its_seam_towards(
+    model: &mut Model,
+    wall: Cylinder,
+    from: f64,
+    to: f64,
+    towards: Vector,
+) -> SolidKey {
     let [ox, oy, oz] = wall.axis().origin().coordinates();
     let along = wall.axis().direction();
     let [dx, dy, dz] = along.components();
-    assert_eq!(dy, 0.0, "the seam is put square to the axis along y");
-    let on_the_axis = |t: f64| Point::new(ox + t * dx, oy, oz + t * dz);
-    let on_the_seam = |t: f64| Point::new(ox + t * dx, oy + wall.radius(), oz + t * dz);
+    assert_eq!(
+        along.dot(towards),
+        0.0,
+        "the seam is put square to the axis"
+    );
+    let off = towards.components().map(|side| wall.radius() * side);
+    let on_the_axis = |t: f64| Point::new(ox + t * dx, oy + t * dy, oz + t * dz);
+    let on_the_seam = |t: f64| {
+        let [x, y, z] = on_the_axis(t).coordinates();
+        Point::new(x + off[0], y + off[1], z + off[2])
+    };
 
     let mut builder = SolidBuilder::new();
     let low = builder
