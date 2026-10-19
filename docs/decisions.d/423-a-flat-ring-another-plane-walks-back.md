@@ -120,3 +120,79 @@ geometry by a sliver no double can hold — as right rather than as a defect to
 fix; this rule runs under every policy for the same reason the first three
 do, since the dropped ring could never have held a nonzero area or volume to
 begin with.
+
+### 423.5 A ring can be a stretch of a longer one
+
+*Queue row Q2357. The widening itself was built and merged under queue row
+Q2332, in `aba9585e` ("Q2332: leave out a stretch of a flat face's ring that
+another plane walks back"). This subsection writes the argument down;
+nothing here changes the code.*
+
+§423.2's rule, as first built, only ever took a face's **one whole ring** —
+the stretch it matched against the other face had to be that ring's every
+dart. A turned pyramid and wedge needed more.
+
+Turned a tenth of a radian about `(0.3, −1, 2)`, the wedge built round the `x`
+axis has its edge run up through the pyramid's apex. The turn leaves three
+corners a rounding apart by the apex, each one named where the wedge's two
+planes cross a side of the pyramid. Joining the union merges each wedge
+face's pieces into one face, and one of them comes out with an outline that
+leaves the first of the three corners, goes through the other two, and comes
+back along the wedge's edge **before it goes on to the rest of that face's
+outline** — a stretch of the ring, not the whole of it. The other wedge face
+walks the same three corners back the other way, but inside its own whole
+outline. Left in, the two middle corners each had only the two edges either
+side of them, so `Assembly::what_is_left` walked straight through both, and
+the three edges folded into one straight edge from the first corner back to
+itself — the same panic in `edges_after_joining` the tipped cube hit, "a
+piece of a face has a straight side with no length"
+(`a_broken_three_surface_corner_read_back_from_bytes.rs`, queue rows Q2317
+and Q2332).
+
+`leave_out_each_flat_ring_another_plane_walks_back` now tries every stretch
+of any ring of a flat joined face that leaves a corner and comes back to it,
+not only a face's one whole ring, and asks each stretch the same three
+questions §423.2 already asked of a whole ring: that its sides are straight,
+that every other dart along it belongs to one other flat joined face as one
+unbroken stretch of one of that face's rings, and that the two faces' planes
+are different (`agreement_of_two_planes` says `Different`). `WalkedBack` now
+carries the face's own ring alongside the darts of the matched stretch, so
+what gets taken out of each side can be a piece of a ring rather than the
+whole of it. The holes guard, `would_leave_holes_alone`, now measures the
+stretch's own length against the face's outline rather than measuring the
+whole ring, since a stretch this rule removes can be shorter than the ring it
+is cut from.
+
+**§423.2's argument carries over unchanged, read at the stretch rather than
+the whole ring.** The sides a stretch and its match share still lie on the one
+line where their two planes cross, so a stretch that goes out along that line
+and back still encloses nothing in exact arithmetic — only rounding makes it
+look otherwise. The two matched stretches still step through the same
+corners in opposite directions, so removing both still adds no area or
+volume. And every edge a stretch removes still loses both of the faces that
+bordered it — the stretch's own face and the match's — together, so it is
+still marked dissolved rather than left with one side open; an edge outside
+either stretch keeps the faces it already had.
+
+This is not a fifth rule: §423.4 already names this the fourth rule of its
+kind, the one that reaches across two faces rather than shortening one
+face's own ring, and this widening keeps that shape — it only lets what is
+matched and removed be part of a ring instead of requiring the whole of it.
+
+**The tests.** `a_broken_three_surface_corner_read_back_from_bytes.rs`, all 20
+tests (`mise exec -- just t -p rcad-topo --test
+a_broken_three_surface_corner_read_back_from_bytes` → "20 tests run: 20
+passed, 0 skipped"). Two of them are this case by name:
+
+- `a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_is_refused_for_an_edge_too_short`:
+  under `certified`, the union — which panicked before the widening — now
+  joins the difference and the intersection in being refused
+  `DynamicRangeTooWide` (ratio above `1e15`), rather than panicking.
+- `a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_tolerant_but_for_the_intersection`:
+  under `tolerant(100)`, the difference and the union — the union again the
+  one that panicked — now answer: the pyramid's `120` less the `15` it shares
+  with the wedge, and the pyramid's `120` and the wedge's `150` less that same
+  `15`. The intersection is refused `TheFuseWroteABrokenAnswer`, its outline
+  winding against its normal — a triangle on a side of the pyramid whose
+  three corners sit within `4e-15` of one another by the apex, which no
+  winding of its stored corners can carry (the test's own doc comment).
