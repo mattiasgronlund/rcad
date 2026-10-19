@@ -52,7 +52,7 @@
 //! Measured on this tree, 2026-09-13, by
 //!
 //! ```text
-//! just t -p rcad-step --test every_file_the_reader_fuzzer_kept_is_read_again \
+//! just t -p rcad-step every_file_the_reader_fuzzer_kept_is_read_again:: \
 //!     --no-capture
 //! ```
 //!
