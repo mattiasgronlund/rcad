@@ -132,7 +132,8 @@ row prep finds wrong comes back not merged before any lane starts, with a
 files, drop and add, then `queue next` (§396.4).
 
 **A row that adds a test file directly under `crates/rcad-topo/tests/` holds
-one item of `tests/merged.rs`, never the whole file** (§373.7). The lane
+one item of `crates/rcad-topo/tests/merged.rs`, never the whole file**
+(§373.7). The lane
 declares its own file there, in its place by name, and the entry
 `crates/rcad-topo/tests/merged.rs#<module>`, the module being the file's name
 with each `-` written `_`, lets rows adding different files run side by side.
