@@ -98,7 +98,7 @@ use core::f64::consts::{FRAC_PI_2, PI};
 use std::collections::BTreeMap;
 
 use rcad_geom::{
-    Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale,
+    Axis, Cylinder, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane, Point, Scale, Sphere,
     Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -2296,4 +2296,119 @@ fn two_bars_on_one_axis_joined(
         &mut ProvenanceLog::new(),
     )?;
     Ok(joined.solids().to_vec())
+}
+
+/// The half ball `z ≥ 0` of radius 5 joined to the ball a rounding smaller
+/// about the same centre is one solid that validates, with one flat face: the
+/// half ball's floor outside the smaller ball, a ring `8.9e-16` wide. At a
+/// deflection of `0.01` the ring's two rims cross however finely the mesh walks
+/// them again, since a chord would have to sag less than the ring is wide, so
+/// the mesh is refused naming the ring.
+///
+/// **What this pins is what running out of finer walks costs.** The crossing
+/// handed back is the eighth walk's, at the side leaving corner 1864 of a
+/// boundary each walk makes about `√2` times longer. When the mesh walked a
+/// crossed face sixteen times it was corner 20766, and the refusal took 126 s
+/// where eight take 0.8 s and the same solid meshes at `0.1` in 8 ms (Q2384).
+#[test]
+fn a_ring_a_rounding_wide_is_refused_before_its_rims_are_walked_into_tens_of_thousands_of_points() {
+    for the_half_ball_first in [true, false] {
+        let what = format!("the half ball first {the_half_ball_first}");
+        let mut model = Model::new(Scale::millimetres(125.0).expect("a working size"));
+        let half_ball = a_half_ball_of_5(&mut model);
+        let ball = model
+            .add_ball(5.0_f64.next_down(), &Isometry::identity())
+            .expect("a ball");
+        let (arguments, tools) = if the_half_ball_first {
+            ([half_ball], [ball])
+        } else {
+            ([ball], [half_ball])
+        };
+        let joined = model
+            .fuse(
+                &arguments,
+                &tools,
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let &[joined] = joined.solids() else {
+            panic!("{what}: {} solids", joined.solids().len());
+        };
+        let solid = model.solid(joined).expect("the fuse made the key");
+
+        let refused = solid.mesh(
+            rcad_geom::Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+
+        let Err(Error::CannotMeshAFace {
+            face,
+            why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { at },
+        }) = refused
+        else {
+            panic!("{what}: {refused:?}");
+        };
+        let ring = solid
+            .faces()
+            .find(|named| named.key() == face)
+            .expect("the refusal names a face of the solid");
+        assert!(
+            ring.surface().as_plane().is_some() && ring.wire_count() == 2,
+            "{what}: the refusal names a face that is not the ring"
+        );
+        assert!(at < 4096, "{what}: corner {at}");
+    }
+}
+
+/// The half ball `z ≥ 0` of radius 5 about the origin: its skin and its floor,
+/// joined along the equator.
+fn a_half_ball_of_5(model: &mut Model) -> SolidKey {
+    let mut builder = SolidBuilder::new();
+    let on_the_equator = builder
+        .add_vertex(Point::new(5.0, 0.0, 0.0))
+        .expect("a point");
+    let equator = builder
+        .add_edge(
+            on_the_equator,
+            on_the_equator,
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )
+        .expect("a closed edge");
+    let mut walking = |orientation| {
+        let coedge = builder
+            .add_coedge(equator, orientation)
+            .expect("an edge of this builder");
+        builder
+            .add_wire(&[DraftStep::Along(coedge)])
+            .expect("a closed wire")
+    };
+    let on_the_skin = walking(Orientation::Forward);
+    let on_the_floor = walking(Orientation::Reversed);
+    let skin = builder
+        .add_face(
+            Surface::Sphere(Sphere::new(Point::origin(), 5.0).expect("a ball")),
+            &[on_the_skin],
+        )
+        .expect("a face with one wire");
+    let floor = builder
+        .add_face(
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, -1.0))
+                    .expect("a plane"),
+            ),
+            &[on_the_floor],
+        )
+        .expect("a face with one wire");
+    builder
+        .add_shell(&[(skin, Orientation::Forward), (floor, Orientation::Forward)])
+        .expect("the faces close up");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a half ball is a solid")
 }
