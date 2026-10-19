@@ -1218,7 +1218,10 @@ fn a_lattice_pair_unites_to_the_same_solid_whichever_way_round_it_is_handed_over
 ///
 /// Under a tolerant policy, which takes a slab that thin as flat, the union is
 /// the 6 the ell holds and the 12 the frame does, and what the two share is
-/// nothing, where the sharing panicked too.
+/// nothing, where the sharing panicked too. Each less the other is itself whole
+/// (queue row Q2253): both were refused
+/// [`Error::TheFuseWroteABrokenAnswer`], [`Invalid::OuterWireWindsAgainstTheNormal`],
+/// with the slab not taken as flat.
 #[test]
 fn a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_short() {
     let (model, keys) = Configuration {
@@ -1292,6 +1295,26 @@ fn a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_s
             shared.expect("a tolerant intersection takes the slab as flat"),
             Vec::new(),
             "two solids that only touch share nothing"
+        );
+    }
+
+    for (arguments, tools, left) in [(keys[0], keys[1], 6.0), (keys[1], keys[0], 12.0)] {
+        let (cut, solids) = fused_under(&tolerant, arguments, tools, Rule::Difference);
+        let solids = solids.unwrap_or_else(|refused| {
+            panic!(
+                "the tolerant {arguments:?} less {tools:?} was refused {refused:?}, \
+                 where it takes the slab as flat and leaves the first solid whole"
+            )
+        });
+        assert_eq!(
+            solids.len(),
+            1,
+            "{arguments:?} less {tools:?} is the first solid"
+        );
+        let volume = volume_of(&cut, &solids);
+        assert!(
+            (volume - left).abs() < 1e-9,
+            "{arguments:?} less {tools:?} holds {volume}, not the {left} the first solid holds"
         );
     }
 }
