@@ -2179,3 +2179,78 @@ fn two_bends_whose_caps_lie_apart_answer_every_rule() {
         }
     }
 }
+
+#[test]
+fn probe_q2153_two_coaxial_bars() {
+    for step in [1.0, 1e-3, 1e-6, 1e-9, 1e-11, 1e-12, 1e-13] {
+        for rule in EVERY_RULE {
+            for the_first_first in [true, false] {
+                let mut model = a_model();
+                let narrower = model
+                    .add_round_bar(4.0, 10.0, &Isometry::identity())
+                    .expect("a bar");
+                let wider = model
+                    .add_round_bar(4.0 + step, 10.0 - step, &Isometry::identity())
+                    .expect("a bar");
+                let printed =
+                    match fused_and_measured(&mut model, narrower, wider, rule, the_first_first) {
+                        Ok(measured) => format!("Ok {measured:?}"),
+                        Err(why) => the_refusal(&Err(why)),
+                    };
+                println!("PROBE step {step:e} {rule:?} first {the_first_first}: {printed}");
+            }
+        }
+    }
+}
+
+#[test]
+fn probe_q2153_sweep() {
+    for (step, turn) in [
+        (1e-2, 0.0),
+        (1e-2, FRAC_PI_2),
+        (1e-2, -FRAC_PI_2),
+        (1e-2, PI),
+    ] {
+        eprintln!("PROBE ===== step {step:e} turn {turn}");
+        let mut model = a_model();
+        let narrower = model
+            .add_round_bar(4.0, 10.0, &Isometry::identity())
+            .expect("a bar");
+        let wider = model
+            .add_round_bar(4.0 + step, 10.0 - step, &turned(turn))
+            .expect("a bar");
+        let answer = model
+            .fuse(
+                &[narrower],
+                &[wider],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a union");
+        let [solid] = answer.solids()[..] else {
+            panic!()
+        };
+        let mut line = format!("PROBE step {step:e} turn {turn}:");
+        for size in [0.1, 1e-6] {
+            let mesh = model.solid(solid).expect("a solid").mesh(
+                rcad_geom::Deflection::of(size).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            match mesh {
+                Ok(mesh) => line += &format!(" {size:e} ok {};", mesh.points().len()),
+                Err(Error::CannotMeshAFace { face, why }) => {
+                    let face = model.face(face).expect("a face");
+                    line += &format!(
+                        " {size:e} {why:?} on {:?} wires {};",
+                        face.surface(),
+                        face.wire_count()
+                    );
+                }
+                Err(other) => line += &format!(" {size:e} {other:?};"),
+            }
+        }
+        println!("{line}");
+    }
+}
