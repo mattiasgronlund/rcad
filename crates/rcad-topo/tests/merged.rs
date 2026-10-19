@@ -36,6 +36,8 @@ mod cones;
 pub mod a_ball_and_a_bar_in_one_block;
 #[path = "a_ball_at_a_turned_cubes_corner_capped_at_both_poles.rs"]
 pub mod a_ball_at_a_turned_cubes_corner_capped_at_both_poles;
+#[path = "a_ball_centred_a_hair_off_a_cubes_face.rs"]
+pub mod a_ball_centred_a_hair_off_a_cubes_face;
 #[path = "a_ball_clear_of_a_block_comes_back_whole.rs"]
 pub mod a_ball_clear_of_a_block_comes_back_whole;
 #[path = "a_ball_cut_through_both_poles_by_a_linked_blocks_plane.rs"]
