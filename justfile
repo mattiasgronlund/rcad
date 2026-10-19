@@ -3325,6 +3325,17 @@ check-skills-selftest:
 # merger; `prep.md` must list the open rows on the row's test file, `lane.md`
 # tell a fix lane to run them, `verifier.md` hold the Also answers steps, and
 # `merger.md` give each confirmed row a `done` step.
+#
+# **Arm thirty-four checks that `gone()` stops a does_not_reproduce report
+# that still holds rows, naming them, instead of sending it on to the GONE
+# verifier and the close at the base** (§433.8). Q2185's lane reported
+# does_not_reproduce with an `after` row that Q654's refusal had stopped
+# before Q2185's target ever ran; lane.md's rule forbade that add, but nothing
+# in `lanes.js` stopped the report itself, so the merger filed the row by hand
+# as Q2322 and closed Q2185 done, a pin never written. The arm checks the
+# guard in `lanes.js` and that `lane.md` tells a lane that a row whose shape
+# another open row's fault stops first reports `blocked`, naming that row,
+# instead of `does_not_reproduce` with rows.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, refuses to share a run across rows unless asked, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -3456,6 +3467,9 @@ check-lanes-workflow:
     gone_steps='## Does not reproduce'
     gone_refusal="    if (check.verdict !== 'confirm') return stopped(lane, out, "
     gone_done='mise exec -- just queue done <id> <base sha>'
+    gone_rows_guard='  if (Array.isArray(report.rows) && report.rows.length) return stopped(lane, out, `the lane reported does_not_reproduce but still named rows to add:'
+    gone_rows_reason='a fault an open row already blocks is blocked, not gone (§433.8)'
+    gone_blocked_rule='it is unreached.'
     readonly_rows_schema='    core.rows = rowsSchema()'
     readonly_rows_required="    required.push('rows')"
     share_guard='if (LANES.length > 1 && args.shareOneRun !== true) throw new Error('
@@ -3881,6 +3895,10 @@ check-lanes-workflow:
             echo "$1 does not pass the rows a verifier confirmed to just land ('$answers_flag'), give the verifier '$answers_confirmed', ask it to run them ('$answers_asked') or tell the merger ('$answers_told'), or $2 does not say it in lane.md ('$answers_lane'), prep.md ('$answers_prep'), verifier.md ('$answers_verifier') or merger.md ('$answers_merger'); a row a fix lane answers would stay open until someone closed it by hand, as 17532d10 did (§450.3 rule 4)"
             [ "$failed" != 0 ] || failed=33
         fi
+        if ! grep -qF -- "$gone_rows_guard" "$1" || ! grep -qF -- "$gone_rows_reason" "$1" || ! grep -qF -- "$gone_blocked_rule" "$2/lane.md"; then
+            echo "$1 does not refuse a does_not_reproduce report that still names rows ('$gone_rows_guard' ... '$gone_rows_reason'), or $2/lane.md does not tell a lane that a row whose shape another open row's fault stops first reports blocked instead, naming that row ('$gone_blocked_rule'); a does_not_reproduce report holding rows would else close at the base with a pin never written, as Q2185 did (§433.8)"
+            [ "$failed" != 0 ] || failed=34
+        fi
         return "$failed"
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
@@ -4159,7 +4177,11 @@ check-lanes-workflow:
     grep -vxF -- "$answers_verifier" "$agents/verifier.md" > "$dir/answers-verifier-unsaid/agents/verifier.md"
     fresh answers-merger-unsaid
     grep -vF -- "$answers_merger" "$agents/merger.md" > "$dir/answers-merger-unsaid/agents/merger.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33)
+    fresh dnr-rows-ignored
+    grep -vF -- "$gone_rows_guard" "$file" > "$dir/dnr-rows-ignored/lanes.js"
+    fresh dnr-blocked-unsaid
+    grep -vF -- "$gone_blocked_rule" "$agents/lane.md" > "$dir/dnr-blocked-unsaid/agents/lane.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33 dnr-rows-ignored:34 dnr-blocked-unsaid:34)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}

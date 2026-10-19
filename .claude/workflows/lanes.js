@@ -387,6 +387,7 @@ function gone(lane, report, out) {
   out.kind = 'does_not_reproduce'
   if (!sameSha(report.landed_sha, BASE)) return stopped(lane, out, `the lane reported does_not_reproduce and landed ${report.landed_sha}, not the base ${BASE.slice(0, 8)}; a lane whose fault does not show commits nothing (§433.8)`)
   if (!Array.isArray(report.base_runs) || !report.base_runs.length) return stopped(lane, out, 'the lane reported does_not_reproduce with no base_runs, so its verifier has nothing to run again (§433.8)')
+  if (Array.isArray(report.rows) && report.rows.length) return stopped(lane, out, `the lane reported does_not_reproduce but still named rows to add: ${report.rows.map((r) => JSON.stringify(r)).join(', ')}; a fault an open row already blocks is blocked, not gone (§433.8)`)
   return agent(GONE(lane, report), {
     label: `verify:${lane.label}`,
     phase: 'Verify',
