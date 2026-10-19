@@ -65,11 +65,14 @@
 //! and `16`. At `12.8` and `25.6` the order is decided, and no fuse logs one,
 //! so they get past it without that change: put back to file the sweep as an
 //! area, the pins at those two radii still pass. Both
-//! intersections and both differences answer with their volumes, and the
-//! union in either order is refused `CannotMeshAFace` with `CornersCoincide`,
+//! intersections and both differences answered with their volumes, and the
+//! union in either order was refused `CannotMeshAFace` with `CornersCoincide`,
 //! not on a cap but on the piece of the bar's wall between the two rulings,
-//! one rounding of angle wide, whose loop names two places twice (Q2145's
-//! trace, at the pin below).
+//! one rounding of angle wide, whose loop named two places twice (Q2145's
+//! trace). Each cap's arc between the two rulings' feet is one rounding long,
+//! and the one point the walk put inside it was stored at one of its ends.
+//! Since Q2352 `BuildingAMesh::walk` in `mesh.rs` drops such a point, and
+//! every fuse at both radii answers with its volume.
 
 #![forbid(unsafe_code)]
 
@@ -77,9 +80,8 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
-use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Measures, Point as PredicatePoint, Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 /// Q2074's shapes, as `(radius, working size)`: radius `5`, whose corner
 /// `(3, 4)` is exactly on the wall, at four working sizes, and the radii round
@@ -200,60 +202,27 @@ fn how_far_apart_the_two_may_be(one: PredicatePoint, other: PredicatePoint) -> f
 const THE_RULINGS_ONE_ROUNDING_APART_AT_WORKING_SIZE_1: [(f64, f64); 2] =
     [(12.8, 1.0), (25.6, 1.0)];
 
-#[test]
-fn both_intersections_and_both_differences_at_radii_12_8_and_25_6_answer_with_their_volumes() {
-    let mut wrong = Vec::new();
-    for (radius, size) in THE_RULINGS_ONE_ROUNDING_APART_AT_WORKING_SIZE_1 {
-        for (rule, bar_first) in [
-            (Rule::Intersection, true),
-            (Rule::Intersection, false),
-            (Rule::Difference, true),
-            (Rule::Difference, false),
-        ] {
-            if let Err(why) = the_fuse_answers_with_its_volume(radius, size, rule, bar_first) {
-                wrong.push(format!(
-                    "radius {radius}, working size {size}, {rule:?}, bar first {bar_first}: {why}"
-                ));
-            }
-        }
-    }
-    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
-}
-
-/// Both unions at radii `12.8` and `25.6` are refused by the mesher. The face
-/// refused is not a cap but a piece of the bar's wall one rounding of angle
-/// wide (Q2145's trace, radius `12.8`, bar first): between the ruling where
-/// `y = 0.8r` crosses the wall, `B`, stored at `(7.679999999999999,
-/// 10.240000000000002)`, and the ruling where `x = 0.6r` does, stored at the
-/// block's corner `K`, `(7.68, 10.240000000000002)`. Each cap's arc from `B`
-/// to `K` is one rounding long, so the mesh point inside it rounds onto an
-/// end: onto `K` at the bottom and onto `B` at the top. The loop names two
-/// places twice; cut there, the lobe left is one rounding wide and refused
-/// `ASideCutsOffOneCornerOfACurvedPatch`, so the piece is refused
+/// Every fuse at radii `12.8` and `25.6` answers with its volume.
+///
+/// **Both unions were refused by the mesher until Q2352**, on a piece of the
+/// bar's wall one rounding of angle wide (Q2145's trace, radius `12.8`, bar
+/// first): between the ruling where `y = 0.8r` crosses the wall, `B`, stored
+/// at `(7.679999999999999, 10.240000000000002)`, and the ruling where
+/// `x = 0.6r` does, stored at the block's corner `K`,
+/// `(7.68, 10.240000000000002)`. Each cap's arc from `B` to `K` is one
+/// rounding long, so the one point the walk put inside it was stored at an
+/// end: at `K` on the bottom cap and at `B` on the top. The loop named two
+/// places twice; cut there, the lobe left was one rounding wide and refused
+/// `ASideCutsOffOneCornerOfACurvedPatch`, so the piece was refused
 /// `CornersCoincide` for the whole loop. At radius `24.32` the same piece is
-/// two roundings wide and the top arc's mesh point falls between its ends.
-/// The pieces of the wall stay apart because `Assembly::a_ring_goes_right_round`
-/// cannot count a ring with an arc one rounding long. Q2145's probe, which
-/// dropped in `BuildingAMesh::walk` (`mesh.rs`) a point of the walk stored at
-/// one of its edge's ends, let every fuse at both radii answer with its
-/// volume. This pins the gap, so that the row which answers it moves this
-/// test.
+/// two roundings wide and the top arc's point falls between its ends. The
+/// pieces of the wall stay apart because `Assembly::a_ring_goes_right_round`
+/// cannot count a ring with an arc one rounding long. `BuildingAMesh::walk` in
+/// `mesh.rs` now drops a point of the walk stored at one of its edge's ends.
 #[test]
-fn both_unions_at_radii_12_8_and_25_6_are_refused_on_a_piece_of_the_wall_one_rounding_wide() {
-    for (radius, size) in THE_RULINGS_ONE_ROUNDING_APART_AT_WORKING_SIZE_1 {
-        for (rule, bar_first) in [(Rule::Union, true), (Rule::Union, false)] {
-            let answer = the_fuse_of_the_bar_and_the_block(radius, size, rule, bar_first);
-            let Err(Error::CannotMeshAFace {
-                why: CannotTriangulate::CornersCoincide { .. },
-                ..
-            }) = answer
-            else {
-                panic!(
-                    "radius {radius}, working size {size}, {rule:?}, bar first {bar_first}: {answer:?}"
-                );
-            };
-        }
-    }
+fn every_fuse_at_radii_12_8_and_25_6_answers_with_its_volume() {
+    let wrong = what_each_fuse_gets_wrong(&THE_RULINGS_ONE_ROUNDING_APART_AT_WORKING_SIZE_1);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 #[test]
