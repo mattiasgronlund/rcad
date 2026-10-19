@@ -8772,30 +8772,31 @@ impl<'f> Arrangement<'f> {
             if Some(lump_of[self.cycle_of[2 * arc]]) != home {
                 continue;
             }
-            let at = match self.where_the_ray_crosses(direction.crossing, arc) {
-                MetAt::Nowhere => continue,
-                // Touching an arc's end says nothing about which side of it we
-                // are on — but only where the touch is ahead of us. An arc the
-                // ray grazes behind our back is out of the story.
-                MetAt::AnEnd(at) => match self.along_the_ray(direction, from, at) {
+            for met in self.where_the_ray_crosses(direction.crossing, arc) {
+                let at = match met {
+                    // Touching an arc's end says nothing about which side of it
+                    // we are on — but only where the touch is ahead of us. An
+                    // arc the ray grazes behind our back is out of the story.
+                    MetAt::AnEnd(at) => match self.along_the_ray(direction, from, at) {
+                        Some(Decision::Neg) => continue,
+                        _ => return None,
+                    },
+                    MetAt::Between(at) => at,
+                };
+                match self.along_the_ray(direction, from, at) {
+                    Some(Decision::Pos) => (),
                     Some(Decision::Neg) => continue,
                     _ => return None,
-                },
-                MetAt::Between(at) => at,
-            };
-            match self.along_the_ray(direction, from, at) {
-                Some(Decision::Pos) => (),
-                Some(Decision::Neg) => continue,
-                _ => return None,
+                }
+                nearest = match nearest {
+                    None => Some((at, arc)),
+                    Some((best, best_arc)) => match self.along_the_ray(direction, best, at) {
+                        Some(Decision::Neg) => Some((at, arc)),
+                        Some(Decision::Pos) => Some((best, best_arc)),
+                        _ => return None,
+                    },
+                };
             }
-            nearest = match nearest {
-                None => Some((at, arc)),
-                Some((best, best_arc)) => match self.along_the_ray(direction, best, at) {
-                    Some(Decision::Neg) => Some((at, arc)),
-                    Some(Decision::Pos) => Some((best, best_arc)),
-                    _ => return None,
-                },
-            };
         }
         let (_, arc) = nearest?;
         // An arc's forward half-edge has the negative side of its partner on its
@@ -8833,7 +8834,8 @@ impl<'f> Arrangement<'f> {
         wound.next().is_none().then_some(only)
     }
 
-    /// Where the ray's crossing meets an arc.
+    /// Every place the ray's crossing meets an arc. A place on the arc's
+    /// crossing but off the arc is left out.
     ///
     /// Every place two crossings meet already has a node
     /// ([`Arrangement::place_the_meets`]), so nothing is worked out again here.
@@ -8844,22 +8846,35 @@ impl<'f> Arrangement<'f> {
     /// planes, either side of an axis or in different nappes, or `intersect`
     /// refuses the pair where its two curves touch; §347 lists them, and none
     /// was tried here with two curves that meet.
-    fn where_the_ray_crosses(&self, crossing: usize, arc: usize) -> MetAt {
+    ///
+    /// **One curve can meet another more than once**, each place a node of its
+    /// own, so every node on both crossings is read. A flat face against a
+    /// cone whose axis runs alongside it is cut in a U, and a line across the
+    /// U crosses it twice, on two arcs once a cut down the middle splits it.
+    /// Reading only the first node by index, the far crossing's when it had
+    /// the lower index, said the ray missed the near arc, and a cut past that
+    /// arc put a hole in the wrong piece (Q2062).
+    fn where_the_ray_crosses(
+        &self,
+        crossing: usize,
+        arc: usize,
+    ) -> impl Iterator<Item = MetAt> + '_ {
         let other = self.arcs[arc].crossing;
-        let Some(at) = (0..self.nodes.len()).find(|&node| {
-            self.nodes[node].crossings.contains(&crossing)
-                && self.nodes[node].crossings.contains(&other)
-        }) else {
-            return MetAt::Nowhere;
-        };
-        let past = |end: usize| self.which_comes_first(other, at, end);
-        match (past(self.arcs[arc].ends[0]), past(self.arcs[arc].ends[1])) {
-            (Some(Decision::Neg), Some(Decision::Pos))
-            | (Some(Decision::Pos), Some(Decision::Neg)) => MetAt::Between(at),
-            (Some(Decision::Neg), Some(Decision::Neg))
-            | (Some(Decision::Pos), Some(Decision::Pos)) => MetAt::Nowhere,
-            _ => MetAt::AnEnd(at),
-        }
+        (0..self.nodes.len())
+            .filter(move |&node| {
+                self.nodes[node].crossings.contains(&crossing)
+                    && self.nodes[node].crossings.contains(&other)
+            })
+            .filter_map(move |at| {
+                let past = |end: usize| self.which_comes_first(other, at, end);
+                match (past(self.arcs[arc].ends[0]), past(self.arcs[arc].ends[1])) {
+                    (Some(Decision::Neg), Some(Decision::Pos))
+                    | (Some(Decision::Pos), Some(Decision::Neg)) => Some(MetAt::Between(at)),
+                    (Some(Decision::Neg), Some(Decision::Neg))
+                    | (Some(Decision::Pos), Some(Decision::Pos)) => None,
+                    _ => Some(MetAt::AnEnd(at)),
+                }
+            })
     }
 
     /// Whether `to` is ahead of `from` along a ray, without asking a policy.
@@ -15072,10 +15087,8 @@ const HOW_TWO_TANGENT_CURVES_BEND: &str = "which way two tangent curves bend";
 /// records.
 const AROUND_A_HOLE: &str = "which piece of a face a hole is in";
 
-/// Where a ray's own curve meets one arc of the drawing.
+/// One place a ray's own curve meets one arc of the drawing.
 enum MetAt {
-    /// Nowhere along it.
-    Nowhere,
     /// At this node, strictly between the arc's two ends.
     Between(usize),
     /// At one of the arc's ends, or too close to one to say.
@@ -16062,6 +16075,124 @@ mod tests {
         );
         for piece in &pieces {
             every_wire_closes(piece);
+        }
+    }
+
+    /// Q992's plate cut by a cone lying along `y` over its top and by a plane
+    /// `x = c` down the cone's middle, as it is and mirrored, `x` to `8 - x`
+    /// (Q2062).
+    ///
+    /// The cone's apex is `(6.25, 0.75, 1.25)`, its axis `+y` and its slope a
+    /// quarter. The top `z = 1` lies a quarter under the axis, so it cuts the
+    /// cone in a U that opens up `y`, with its bottom at `(6.25, 1.75)`, and
+    /// the plane cuts the U into two arms. The one ray that can place the hole
+    /// runs along `y = 3` out of the hole's corner toward the U and crosses it
+    /// twice, at `x = 6.25 ∓ 0.504`. The near crossing, on the near arm, bounds
+    /// the piece the hole is in; the far one is on the other arm, past the
+    /// plane.
+    ///
+    /// Each crossing is a node on both `y = 3` and the U. Mirrored, the far one
+    /// has the lower index, and read alone it said the ray missed the near arm,
+    /// so the plane, nearer than the far arm, put the hole inside the U.
+    #[test]
+    fn a_ray_that_crosses_the_u_a_cone_cuts_twice_places_the_hole_by_the_near_crossing() {
+        let outline = [
+            [0.0, 0.0],
+            [3.0, 0.0],
+            [3.0, 1.0],
+            [5.0, 1.0],
+            [5.0, 0.0],
+            [8.0, 0.0],
+            [8.0, 5.0],
+            [7.0, 5.0],
+            [7.0, 6.0],
+            [8.0, 6.0],
+            [8.0, 8.0],
+            [5.0, 8.0],
+            [5.0, 7.0],
+            [3.0, 7.0],
+            [3.0, 8.0],
+            [0.0, 8.0],
+            [0.0, 5.0],
+            [1.0, 5.0],
+            [1.0, 3.0],
+            [0.0, 3.0],
+        ];
+        for mirrored in [false, true] {
+            let place = move |[x, y]: [f64; 2]| if mirrored { [8.0 - x, y] } else { [x, y] };
+            let mut corners: Vec<[f64; 2]> = outline.map(place).to_vec();
+            if mirrored {
+                corners.reverse();
+            }
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let plate = ProfileBuilder::new(corners)
+                .with_hole(vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0], [3.0, 5.0]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a plate with a square hole");
+            let solid = model
+                .add_extrusion(&plate, 1.0, &Isometry::identity())
+                .expect("an extrusion");
+            let top = bake(
+                &model,
+                &[solid],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the plate bakes")
+            .swap_remove(0)
+            .faces
+            .into_iter()
+            .find(facing_up)
+            .expect("the plate has a top");
+            let [apex_x, apex_y] = place([6.25, 0.75]);
+            let along_y = Axis::new(Point::new(apex_x, apex_y, 1.25), Vector::new(0.0, 1.0, 0.0))
+                .expect("an axis along y");
+
+            for c in [6.0, 6.25, 6.5] {
+                let [x, _] = place([c, 0.0]);
+                let mut cut = cut_by(&top, &[[1.0, 0.0, 0.0, -x]]);
+                cut.cuts
+                    .push(Surface::Cone(Cone::new(along_y, 0.25).expect("a slope")));
+
+                let mut log = ProvenanceLog::new();
+                let pieces = split_a_face(&cut, &Policy::certified(), &mut log)
+                    .unwrap_or_else(|why| panic!("mirrored {mirrored}, x = {x}: {why:?}"))
+                    .pieces;
+
+                assert!(
+                    log.is_empty(),
+                    "mirrored {mirrored}, x = {x}: a ray given up leaves no record"
+                );
+                assert_eq!(
+                    pieces.len(),
+                    5,
+                    "mirrored {mirrored}, x = {x}: the U either side of the plane, the \
+                     plate outside it on the hole's side, and two on the far side, \
+                     where the far arm runs through the notch"
+                );
+                let holed: Vec<&Piece> = pieces
+                    .iter()
+                    .filter(|piece| piece.wires.len() == 2)
+                    .collect();
+                assert_eq!(holed.len(), 1, "mirrored {mirrored}, x = {x}: one hole");
+                assert_eq!(holed[0].wires[1].len(), 4, "the hole is still a square");
+                let corners: Vec<[f64; 3]> = holed[0].wires[0]
+                    .iter()
+                    .filter_map(|side| side.ends[0].point().exact_coordinates())
+                    .collect();
+                assert!(
+                    [[0.0, 0.0], [0.0, 8.0], [c, 0.0]]
+                        .map(place)
+                        .iter()
+                        .all(|&[x, y]| corners.contains(&[x, y, 1.0])),
+                    "mirrored {mirrored}, x = {x}: the hole is outside the U, on the \
+                     hole's side of the plane: {corners:?}"
+                );
+                for piece in &pieces {
+                    every_wire_closes(piece);
+                }
+            }
         }
     }
 
