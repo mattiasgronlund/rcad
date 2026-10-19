@@ -896,7 +896,7 @@ fn a_bar_across_the_pipe(model: &mut Model) -> SolidKey {
 /// `CannotTellWhichCurveOfACrossingAFaceRunsAlong` in both orders, since every
 /// edge where the two walls meet starts where all four halves do (Q2459's
 /// probe, Q2461). It is the shape of
-/// [`a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_is_refused_on_a_curve_it_cannot_follow`]
+/// [`a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_them`]
 /// with nothing spelled twice and no joint at all. With each such edge's other
 /// corner saying which half it runs along, both orders are refused
 /// `CannotTellTheCellsOfAFaceApart` on the upright wall instead. The halves cut

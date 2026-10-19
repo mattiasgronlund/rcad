@@ -10709,6 +10709,75 @@ mod tests {
         (model, solid)
     }
 
+    /// An upright bar of radius 2 up `z` from 4 to 6, united with a bar of
+    /// radius 2 along `x` through `(0, 0, 3)`, keeps an upright wall that holds
+    /// what is outside the bar across: the bar across bites the wall's foot
+    /// along two pieces of the half ellipses where the two pipes meet, through
+    /// `(±2, 0, 5)`, and nothing picks which arc between its ends a piece is.
+    /// [`what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds`] counts the
+    /// sides the ruling through a point crosses above it. Until Q2460 every
+    /// point was refused `AFaceTrimmedByACurveThisCannotFollow`.
+    ///
+    /// Every point asked is exactly on the upright pipe.
+    #[test]
+    fn an_upright_wall_bitten_by_a_bar_of_its_width_holds_what_is_outside_the_bite() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let upright = model
+            .add_round_bar(
+                2.0,
+                2.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, 4.0)).expect("a finite shift"),
+            )
+            .expect("a positive radius and height");
+        let along_x = Isometry::translation(Vector::new(4.0, 0.0, 3.0))
+            .expect("a finite shift")
+            .compose(&Isometry::quarter_turns(&Axis::y(), -1).expect("an axis along y"));
+        let across = model
+            .add_round_bar(2.0, 8.0, &along_x)
+            .expect("a positive radius and height");
+        let fused = model
+            .fuse(
+                &[upright],
+                &[across],
+                crate::Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("an upright bar and a bar across its foot");
+        let [solid] = fused.solids()[..] else {
+            panic!("one solid: {:?}", fused.solids());
+        };
+        let walls: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter(|face| {
+                matches!(face.surface(), Surface::Cylinder(pipe)
+                    if pipe.axis().direction().z() != 0.0)
+            })
+            .map(|face| face.key())
+            .collect();
+        let [wall] = walls[..] else {
+            panic!("one face on the upright pipe: {walls:?}");
+        };
+        for (point, expected) in [
+            ([0.0, 2.0, 5.5], OnAFace::Held),
+            ([0.0, -2.0, 4.5], OnAFace::Held),
+            ([-2.0, 0.0, 5.5], OnAFace::Held),
+            ([2.0, 0.0, 4.5], OnAFace::NotHeld),
+            ([-2.0, 0.0, 4.5], OnAFace::NotHeld),
+            ([2.0, 0.0, 6.5], OnAFace::NotHeld),
+            ([0.0, 2.0, 3.5], OnAFace::NotHeld),
+            ([2.0, 0.0, 5.0], OnAFace::OnItsBoundary),
+        ] {
+            assert_eq!(
+                what_it_holds(&model, solid, wall, PredicatePoint::from(point)),
+                expected,
+                "{point:?}"
+            );
+        }
+    }
+
     /// What [`is_a_family_this_follows`] refuses a cone face for when the apex is
     /// **behind** one of its cuts, and why that refusal is a limit and not a gap.
     ///
