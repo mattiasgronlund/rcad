@@ -772,18 +772,3 @@ fn one_solid<'a>(model: &'a Model, answer: &[SolidKey], what: &str) -> SolidView
 fn a_caps_volume(radius: f64, h: f64) -> f64 {
     PI * h * h * (3.0 * radius - h) / 3.0
 }
-
-mod rings;
-
-#[test]
-fn probe_q2217_quarter_bend_build_times() {
-    for (ring, tube) in [(1000.0, 1.0), (1000.0, 0.5), (1000.0, 0.1), (100.0, 0.01)] {
-        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-        let started = std::time::Instant::now();
-        let _ = rings::a_quarter_bend(&mut model, ring, tube);
-        eprintln!(
-            "probe ring {ring} tube {tube}: built in {:?}",
-            started.elapsed()
-        );
-    }
-}

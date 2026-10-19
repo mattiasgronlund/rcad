@@ -2951,25 +2951,6 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let mut finest = (coarsest, enclosed, rounding, ProvenanceLog::new());
     let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
     let mut room = top;
-    let probe_r_min = view
-        .faces()
-        .filter_map(|face| match face.surface() {
-            Surface::Sphere(ball) => Some(ball.radius()),
-            Surface::Cylinder(pipe) => Some(pipe.radius()),
-            Surface::Torus(ring) => Some(ring.tube_radius()),
-            _ => None,
-        })
-        .fold(f64::INFINITY, f64::min);
-    let probe_who = std::thread::current().name().unwrap_or("?").to_string();
-    let mut probe_line = format!(
-        "SEQ {probe_who} rmin {probe_r_min:e} top {top:e} floor {floor:e} coarse {:e} {}",
-        finest.0.deviation().magnitude(),
-        if leaves_out.is_infinite() {
-            "inf"
-        } else {
-            "fin"
-        }
-    );
     while room >= floor {
         let Ok(less) = Deflection::of(room) else {
             break;
@@ -2977,39 +2958,11 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         #[cfg(test)]
         RUNGS_THE_SECOND_LADDER_HAS_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut this_rung = ProvenanceLog::new();
-        let rung_clock = std::time::Instant::now();
-        let meshed = view.mesh(less, policy, &mut this_rung);
-        let (outcome, d) = match &meshed {
-            Ok(finer) => {
-                let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(finer);
-                let leaves_out = how_far_the_sum_can_be_off(view, finer, rounding);
-                let d = finer.deviation().magnitude();
-                let flat = if finer_encloses == 0.0 || it_lies_flat(finer) {
-                    "F"
-                } else {
-                    ""
-                };
-                if the_sum_answers(finer_encloses, leaves_out) {
-                    (format!("answers{flat}"), d)
-                } else if leaves_out.is_infinite() {
-                    (format!("inf{flat}"), d)
-                } else {
-                    (format!("unsure{flat}"), d)
-                }
-            }
-            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => ("fold".to_string(), -1.0),
-            Err(_) => ("stop".to_string(), -1.0),
-        };
-        probe_line.push_str(&format!(
-            " {room:e}/{d:e}/{outcome}/{:e}",
-            rung_clock.elapsed().as_secs_f64()
-        ));
-        match meshed {
+        match view.mesh(less, policy, &mut this_rung) {
             Ok(finer) => {
                 let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(&finer);
                 let leaves_out = how_far_the_sum_can_be_off(view, &finer, rounding);
                 if the_sum_answers(finer_encloses, leaves_out) {
-                    probe_census(&probe_line);
                     this_rung.drain_into(log);
                     return Ok(finer_encloses);
                 }
@@ -3023,7 +2976,6 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 let handed_on = hand_on_a_refusal_that_found_the_space(why);
                 if handed_on.is_err() {
                     this_rung.drain_into(log);
-                    probe_census(&format!("{probe_line} HANDED"));
                 }
                 handed_on?;
                 break;
@@ -3031,8 +2983,6 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         }
         room /= 2.0;
     }
-    probe_line.push_str(" END");
-    probe_census(&probe_line);
     let (mesh, finest_encloses, rounding, mut its_log) = finest;
     if let Some((on_the_planes, off_by)) =
         what_it_encloses_moved_onto_its_planes(view, &mesh, finest_encloses, rounding)
@@ -3053,17 +3003,6 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         });
     }
     Ok(enclosed)
-}
-
-fn probe_census(line: &str) {
-    use std::io::Write as _;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-clean-up-dead-sessions/72105a1f-afbf-4d21-9a32-03063939b145/scratchpad/census2.log")
-        .expect("the census file opens");
-    file.write_all(format!("{line}\n").as_bytes())
-        .expect("the census line writes");
 }
 
 /// How many times [`how_much_space_a_curved_solid_encloses`]'s own ladder has
@@ -8741,6 +8680,21 @@ mod tests {
         );
     }
 
+    /// A quarter bend of pipe 1 thick round a ring of 100 is charged without
+    /// end by every mesh further off than its tube is thick, so once one mesh
+    /// strays that far [`how_much_space_a_curved_solid_encloses`]'s own ladder
+    /// skips every room [`super::ROOM_PAST_A_BEND_NO_MESH_COMES_BACK_FROM`]
+    /// tubes wide or more, and asks two rungs fewer (row Q2217).
+    ///
+    /// The ladder starts at half the coarsest mesh's box, `50.5`, and halves
+    /// down to the room that answers, about `0.197`: nine rungs. The first is
+    /// meshed about `30` off, thirty tubes, and charged without end, so the
+    /// rungs at `25.25` and `12.625` are skipped and the ladder asks `6.3125`
+    /// next, then on down to the same answering rung as before. Every rung
+    /// down to `1.58` is charged without end, `0.79` is charged `2297` against
+    /// `427` enclosed, and `0.197` answers, `461` against `243`.
+    /// [`RUNGS_THE_SECOND_LADDER_HAS_ASKED`] counts the rungs, so the pin does
+    /// not hang on a clock.
     #[test]
     fn a_thin_bend_asks_no_room_eight_tubes_wide_once_a_mesh_strays_past_its_tube() {
         let mut model = an_empty_model();
@@ -8758,8 +8712,9 @@ mod tests {
         );
         assert_eq!(
             RUNGS_THE_SECOND_LADDER_HAS_ASKED.load(std::sync::atomic::Ordering::Relaxed),
-            0,
-            "probe"
+            7,
+            "nine rungs from the top room down to the one that answers, less \
+             the two eight tubes wide or more under a mesh charged without end"
         );
     }
 
