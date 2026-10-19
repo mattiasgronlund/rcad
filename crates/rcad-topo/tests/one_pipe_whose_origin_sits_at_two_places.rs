@@ -723,6 +723,7 @@ const CROSSED_JOINT: f64 = 4.0;
 /// are what say which.
 #[test]
 fn a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_them() {
+    let mut wrong = Vec::new();
     for joint in [3.0, 2.0] {
         let [written_once, written_twice] =
             [LOWER_ORIGIN, joint].map(|axis_origin| the_bars_united_across(joint, axis_origin));
@@ -730,15 +731,16 @@ fn a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_th
             .into_iter()
             .zip(written_once.into_iter().zip(written_twice))
         {
-            assert!(
-                once.0.is_ok() && twice.0 == once.0,
-                "joint at {joint}, lower bar first {lower_first}: written once, {}; written \
-                 twice, {}",
-                once.1,
-                twice.1
-            );
+            if !(once.0.is_ok() && twice.0 == once.0) {
+                wrong.push(format!(
+                    "joint at {joint}, lower bar first {lower_first}: written once, {}; \
+                     written twice, {}",
+                    once.1, twice.1
+                ));
+            }
         }
     }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// What one fuse answered: how many faces its one solid has, or which refusal,
@@ -875,18 +877,23 @@ fn a_pin_through_a_cross_of_two_bars_of_one_radius_unites_with_it() {
     let by_hand = std::f64::consts::PI * THIN_PIN_RADIUS * THIN_PIN_RADIUS * 8.0
         - what_a_thin_pin_shares_with_the_upright_bar();
 
+    let mut refused = Vec::new();
     for [arguments, tools] in [[cross, pin], [pin, cross]] {
         let cross_first = arguments == cross;
         let mut model = model.clone();
-        let fused = model
-            .fuse(
-                &[arguments],
-                &[tools],
-                Rule::Union,
-                &policy,
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|refused| panic!("cross first {cross_first}: {refused:?}"));
+        let fused = match model.fuse(
+            &[arguments],
+            &[tools],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(fused) => fused,
+            Err(why) => {
+                refused.push(format!("cross first {cross_first}: {why:?}"));
+                continue;
+            }
+        };
         model
             .validate(&policy, &mut ProvenanceLog::new())
             .unwrap_or_else(|broken| {
@@ -905,6 +912,7 @@ fn a_pin_through_a_cross_of_two_bars_of_one_radius_unites_with_it() {
              {cross_bound} and {by_hand} of the pin"
         );
     }
+    assert!(refused.is_empty(), "{refused:#?}");
 }
 
 const THIN_PIN_RADIUS: f64 = 0.25;
