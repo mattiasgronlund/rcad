@@ -14216,15 +14216,21 @@ _queue-check file decisions:
             kind = ""
             if (state == "todo") kind = "todo"
             else if (state ~ /^lane:[A-Za-z0-9._\/-]+$/) kind = "lane"
-            else if (state ~ /^after:[TDQ][0-9]+(,[TDQ][0-9]+)*$/) kind = "after"
+            else if (state ~ /^after:([TDQ][0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2})(,([TDQ][0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}))*$/) kind = "after"
             else if (state ~ /^done:[0-9a-f]+$/ && length(state) >= 12 && length(state) <= 45) kind = "done"
             else if (state ~ /^dropped:§[0-9]+(\.[0-9]+)?$/) kind = "dropped"
             else if (state ~ /^parked:§[0-9]+(\.[0-9]+)?$/) kind = "parked"
-            else err(line, id ": state \"" state "\" is not todo, lane:<branch>, after:<id>[,<id>], done:<sha>, dropped:§N or parked:§N")
+            else err(line, id ": state \"" state "\" is not todo, lane:<branch>, after:<id|date>[,<id|date>], done:<sha>, dropped:§N or parked:§N")
             kindof[id] = kind
             closed = (kind == "done" || kind == "dropped")
             if (kind == "dropped" || kind == "parked") cite(line, id, substr(state, index(state, ":") + 1))
-            if (kind == "after") { wid[++nw] = id; waits[id] = substr(state, 7); wline[id] = line }
+            if (kind == "after") {
+                wid[++nw] = id; waits[id] = substr(state, 7); wline[id] = line
+                datecount = 0
+                datesplit = split(waits[id], dateparts, ",")
+                for (datei = 1; datei <= datesplit; datei++) if (dateparts[datei] ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/) datecount++
+                if (datecount > 1) err(line, id ": cannot wait on two dates")
+            }
             if (kind == "todo") ready++
             if (kind == "lane") running++
             if (kind == "parked") parked++
@@ -14278,6 +14284,7 @@ _queue-check file decisions:
                 rest = ""
                 for (j = 1; j <= m; j++) if (!((a[j] in kindof) && kindof[a[j]] == "dropped")) rest = rest (rest == "" ? "" : ",") a[j]
                 for (j = 1; j <= m; j++) {
+                    if (a[j] ~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/) { if (a[j] > now_date) ok = 0; continue }
                     if (a[j] == id) err(wline[id], id ": waits on itself")
                     else if (!(a[j] in kindof) && a[j] ~ /^Q/) notheld++
                     else if (!(a[j] in kindof)) err(wline[id], id ": waits on " a[j] ", which is not a row in this file, and a T or D id is never handed out again")
@@ -14332,6 +14339,7 @@ _queue-check file decisions:
         }
         function entry(line, id, x, closed,    p, h) {
             if (x == "-") { err(line, id ": \"-\" stands alone in a write set, and here it has company"); return }
+            if (x ~ /^cores:([1-9][0-9]*|all)$/) return
             if (x !~ /^[A-Za-z0-9._\/-]+(#[A-Za-z0-9_-]+)?$/ || x ~ /^\// || x ~ /\/\//) {
                 err(line, id ": \"" x "\" is not a path, a directory ending in /, or path#item")
                 return
