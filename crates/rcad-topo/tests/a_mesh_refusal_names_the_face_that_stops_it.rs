@@ -13,8 +13,13 @@
 //! straddling the coarse chord `x + y = 3`. At the lid it is `[1.4, 2.3]`, and
 //! its far corner `(2.3, 2.3)` is `3.25` from the axis, out through the rim. So
 //! the ground crosses at the coarsest deflection only, and the lid crosses at
-//! every one. The ground comes first in the shell, so it is the face the coarse
-//! mesh names.
+//! every one. The ground comes first in the shell, so it was the face the
+//! coarse mesh named.
+//!
+//! **Since Q2384 the mesh itself walks a crossed flat face's arcs again,
+//! finer**, so the coarse mesh clears the ground and names the lid on its own.
+//! The finding below still says what the sweep hands back, but it no longer
+//! tells the sweep's finest refusal from its coarse one: both are the lid's.
 //!
 //! **Built with the builder rather than read off a file**, so the shape is the
 //! whole of the finding.
@@ -59,44 +64,43 @@ fn a_hole_leaning_out_through_the_rim_is_refused_by_the_lid() {
     );
 }
 
-/// The control: the plate reaches its subject. Built with the ground's hole
+/// The control: the plate reaches its subject. Built with the lid's hole
 /// straight up, so nothing leans out, the plate is sound; and meshed as
-/// coarsely as a mesh gets, the ground is the face that crosses.
+/// coarsely as a mesh gets, the ground's arc is walked into more than the one
+/// point a coarse walk puts on a half turn, because the ground's sides crossed
+/// at that one point and the mesh walked them again finer.
 ///
 /// Without this the test above could pass on a plate whose ground had drifted
-/// clear of the coarse chord, where the lid would be the only face ever named.
+/// clear of the coarse chord, where the lid would be the only face that ever
+/// crossed. Before `SolidView::mesh` walked a crossed flat face's arcs again
+/// finer (Q2384), the coarse mesh refused the ground, and this pinned that
+/// refusal.
 #[test]
-fn at_the_coarsest_deflection_the_ground_is_the_face_that_crosses() {
+fn at_the_coarsest_deflection_the_grounds_arc_is_walked_finer_where_it_crosses() {
     let policy = Policy::certified();
     let mut log = ProvenanceLog::new();
     let mut model = Model::new(a_working_size());
     let plate = a_half_disc_with_a_hole(&mut model, &policy, &mut log, (1.4, 1.8))
         .expect("a hole inside the rim at the lid too is a sound plate");
     let solid = model.solid(plate).expect("this model made the key");
-    let ground = solid
-        .faces()
-        .nth(GROUND)
-        .expect("the plate has a ground")
-        .key();
 
-    let refused = solid.mesh(
-        Deflection::of(f64::MAX).expect("a positive length"),
-        &policy,
-        &mut log,
-    );
+    let mesh = solid
+        .mesh(
+            Deflection::of(f64::MAX).expect("a positive length"),
+            &policy,
+            &mut log,
+        )
+        .expect("the plate meshes");
 
-    assert!(
-        matches!(
-            refused,
-            Err(Error::CannotMeshAFace {
-                face,
-                why: CannotTriangulate::BoundaryCrossesItself { .. }
-                    | CannotTriangulate::LoopsTouch { .. },
-                ..
-            }) if face == ground
-        ),
-        "got {refused:?}"
-    );
+    let ground = solid.faces().nth(GROUND).expect("the plate has a ground");
+    let arc = ground
+        .wires()
+        .flat_map(|wire| wire.coedges())
+        .map(|coedge| coedge.edge())
+        .find(|edge| edge.run() != EdgeRun::Straight)
+        .expect("the ground's rim has an arc");
+    let walked_into = mesh.points_along_edge(arc.key()).len();
+    assert!(walked_into > 1, "{walked_into} points");
 }
 
 fn a_working_size() -> Scale {

@@ -17,6 +17,10 @@
 //! The square's furthest corner is `1.8·√2 ≈ 2.55` from the axis, well inside
 //! the rim, so the solid itself is sound.
 //!
+//! Since Q2384 the mesh itself walks a crossed flat face's arcs again, finer,
+//! so the coarse mesh of this plate no longer refuses: the control below now
+//! counts the points the arc is walked into, where it once pinned the refusal.
+//!
 //! **Built with the builder rather than read off a file**, so the shape is the
 //! whole of the finding and a file's other trouble cannot stand in for it.
 
