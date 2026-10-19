@@ -41,12 +41,21 @@
 //! `AFaceTrimmedByACurveThisCannotFollow`; now both are refused alike, and
 //! the half is one curve (Q2050).
 //!
+//! **Nor does a bar across where the two meet on its axis or below it.** With
+//! the joint there the upper wall keeps both halves that climb above the
+//! cross's axis, and so does the wall of one bar crossed by another of its
+//! radius. An edge along such a half starts where all four halves meet, and
+//! the fuse took the half it runs along from that corner alone, so the second
+//! union was refused, one spelling and two alike, as was a pin through such a
+//! cross (Q2461). The edge's other corner now says which half, and the two
+//! spellings are then refused alike, as with the joint above the axis.
+//!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
 //! the fuse is asked — the stored numbers differ and `intersect` calls them one
 //! surface.
 
-use core::mem::{Discriminant, discriminant};
+use core::mem::discriminant;
 
 use rcad_geom::SurfaceMeet;
 use rcad_geom::{
@@ -684,16 +693,18 @@ impl APinnedBar {
 /// is the refusal two spellings must match until that is lifted.
 #[test]
 fn a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does() {
-    let [written_once, written_twice] =
-        [LOWER_ORIGIN, CROSSED_JOINT].map(the_bars_united_across_their_joint);
+    let [written_once, written_twice] = [LOWER_ORIGIN, CROSSED_JOINT]
+        .map(|axis_origin| the_bars_united_across(CROSSED_JOINT, axis_origin));
     for (lower_first, (once, twice)) in [true, false]
         .into_iter()
         .zip(written_once.into_iter().zip(written_twice))
     {
         assert_eq!(
-            once.0, twice.0,
+            once.0.as_ref().map_err(discriminant),
+            twice.0.as_ref().map_err(discriminant),
             "lower bar first {lower_first}: written once, {}; written twice, {}",
-            once.1, twice.1
+            once.1,
+            twice.1
         );
     }
 }
@@ -701,32 +712,73 @@ fn a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling
 /// Where the lower bar meets the upper, above the axis of the bar across them.
 const CROSSED_JOINT: f64 = 4.0;
 
-/// What one fuse answered: how many faces its one solid has, or which refusal,
-/// and how to say it.
-type Answer = (Result<usize, Discriminant<Error>>, String);
+/// **A bar across two bars on one pipe that meet on its axis or below it is
+/// refused on a curve it cannot follow, one spelling and two alike.**
+///
+/// The shape of
+/// [`a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does`]
+/// with the joint at `3`, level with the cross's axis, or at `2`, below it.
+/// The upper wall then keeps both halves that climb above the cross's axis,
+/// each from `(0, 2, 3)` to `(0, −2, 3)` over the top of the wall, and the
+/// cross's seam cuts each where it tops the wall, at `(±2, 0, 5)`. So an edge
+/// along such a half runs from a corner where all four halves meet, held by
+/// the pickers of every half, to one only its own half holds. The fuse took
+/// the half an edge runs along from its starting corner alone, and the second
+/// union was refused `CannotTellWhichCurveOfACrossingAFaceRunsAlong` in both
+/// orders, one spelling and two alike (Q2461). The other corner now says
+/// which.
+///
+/// Every answer is then refused `AFaceTrimmedByACurveThisCannotFollow` on the
+/// cross's wall, as with the joint above the axis, which is the refusal both
+/// spellings must keep to until that is lifted (Q2460).
+#[test]
+fn a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_is_refused_on_a_curve_it_cannot_follow()
+ {
+    let mut wrong = Vec::new();
+    for joint in [3.0, 2.0] {
+        let [written_once, written_twice] =
+            [LOWER_ORIGIN, joint].map(|axis_origin| the_bars_united_across(joint, axis_origin));
+        for (lower_first, (once, twice)) in [true, false]
+            .into_iter()
+            .zip(written_once.into_iter().zip(written_twice))
+        {
+            let refused_alike = [&once, &twice].into_iter().all(|answer| {
+                matches!(
+                    answer.0,
+                    Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+                )
+            });
+            if !refused_alike {
+                wrong.push(format!(
+                    "joint at {joint}, lower bar first {lower_first}: written once, {}; \
+                     written twice, {}",
+                    once.1, twice.1
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
 
-/// The upper bar, from [`CROSSED_JOINT`] to `6` with its wall naming its axis
-/// at `axis_origin`, united with a bar along `x` across the pipe at `z = 3`,
-/// and the lower bar, from `0` to the joint, united with that, both ways round.
+/// What one fuse answered: how many faces its one solid has, or the refusal,
+/// and how to say it.
+type Answer = (Result<usize, Error>, String);
+
+/// The upper bar, from `joint` to `6` with its wall naming its axis at
+/// `axis_origin`, united with a bar along `x` across the pipe at `z = 3`, and
+/// the lower bar, from `0` to the joint, united with that, both ways round.
 ///
 /// An answer is checked as far as it goes before it comes back: it is one
 /// solid, it validates, and its volume is the three bars' less the part the
 /// cross shares with the pipe, worked out by hand: `16 r³/3` for two pipes of
 /// one radius whose axes cross square.
-fn the_bars_united_across_their_joint(axis_origin: f64) -> [Answer; 2] {
+fn the_bars_united_across(joint: f64, axis_origin: f64) -> [Answer; 2] {
     let policy = Policy::certified();
-    let route = format!("the upper wall at {axis_origin}");
+    let route = format!("the joint at {joint}, the upper wall at {axis_origin}");
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-    let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, CROSSED_JOINT, LOWER_ORIGIN);
-    let upper = a_bar_whose_wall_names_its_axis_at(&mut model, CROSSED_JOINT, 6.0, axis_origin);
-    let across = Cylinder::new(
-        Axis::new(Point::new(0.0, 0.0, 3.0), Vector::new(1.0, 0.0, 0.0))
-            .expect("a direction with a length"),
-        RADIUS,
-    )
-    .expect("a positive radius");
-    let across =
-        a_bar_with_its_seam_towards(&mut model, across, -4.0, 4.0, Vector::new(0.0, 0.0, 1.0));
+    let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, joint, LOWER_ORIGIN);
+    let upper = a_bar_whose_wall_names_its_axis_at(&mut model, joint, 6.0, axis_origin);
+    let across = a_bar_across_the_pipe(&mut model);
     let crossed = model
         .fuse(
             &[upper],
@@ -756,7 +808,10 @@ fn the_bars_united_across_their_joint(axis_origin: f64) -> [Answer; 2] {
             &mut ProvenanceLog::new(),
         ) {
             Ok(fused) => fused,
-            Err(why) => return (Err(discriminant(&why)), format!("refused {why:?}")),
+            Err(why) => {
+                let said = format!("refused {why:?}");
+                return (Err(why), said);
+            }
         };
         model
             .validate(&policy, &mut ProvenanceLog::new())
@@ -779,6 +834,163 @@ fn the_bars_united_across_their_joint(axis_origin: f64) -> [Answer; 2] {
             .count();
         (Ok(faces), format!("one solid of {faces} faces"))
     })
+}
+
+/// A bar of the pipe's radius along `x` from `−4` to `4`, across the pipe at
+/// `z = 3`, with its seam on top.
+fn a_bar_across_the_pipe(model: &mut Model) -> SolidKey {
+    let wall = Cylinder::new(
+        Axis::new(Point::new(0.0, 0.0, 3.0), Vector::new(1.0, 0.0, 0.0))
+            .expect("a direction with a length"),
+        RADIUS,
+    )
+    .expect("a positive radius");
+    a_bar_with_its_seam_towards(model, wall, -4.0, 4.0, Vector::new(0.0, 0.0, 1.0))
+}
+
+/// **A pin through a cross of two bars of one radius cannot tell the parts of
+/// the upright wall apart.**
+///
+/// A bar up `z` from `0` to `6` united with the bar across it at `z = 3` is a
+/// cross whose two walls meet in four halves of two ellipses, each from
+/// `(0, 2, 3)` to `(0, −2, 3)`. A pin of radius `0.25` along `y` from `−4` to
+/// `4` through `(0, 0, 5.5)` goes right through the upright bar above the
+/// other, and clear of it: the bar across reaches `z = 5` at most.
+///
+/// The cross and the pin were refused
+/// `CannotTellWhichCurveOfACrossingAFaceRunsAlong` in both orders, since every
+/// edge where the two walls meet starts where all four halves do (Q2459's
+/// probe, Q2461). It is the shape of
+/// [`a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_is_refused_on_a_curve_it_cannot_follow`]
+/// with nothing spelled twice and no joint at all. With each such edge's other
+/// corner saying which half it runs along, both orders are refused
+/// `CannotTellTheCellsOfAFaceApart` on the upright wall instead. The halves cut
+/// it into four parts, the two windows into the bar across and the parts above
+/// and below them, and nothing tells which of the four the pin's loop round
+/// `(0, 2, 5.5)` lies in: no half closes on its own, so none has a side to
+/// read.
+#[test]
+fn a_pin_through_a_cross_of_two_bars_of_one_radius_cannot_tell_the_parts_of_the_upright_wall_apart()
+{
+    let mut wrong = Vec::new();
+    for (cross_first, (answer, said)) in [true, false]
+        .into_iter()
+        .zip(the_cross_united_with_a_thin_pin())
+    {
+        if !matches!(answer, Err(Error::CannotTellTheCellsOfAFaceApart { .. })) {
+            wrong.push(format!("cross first {cross_first}: {said}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// The cross of the upright bar and the bar across it, united with a thin pin
+/// through the upright bar above the other, both ways round.
+///
+/// An answer is checked as far as it goes before it comes back: it is one
+/// solid, it validates, and its volume is the cross's as measured and the
+/// pin's own less what it shares with the upright bar,
+/// `∫ 4 √((0.25² − x²)(2² − x²)) dx` over `|x| ≤ 0.25`, which has no closed
+/// form and is summed here finely enough to be far inside the measured bound.
+fn the_cross_united_with_a_thin_pin() -> [Answer; 2] {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let upright = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, 6.0, LOWER_ORIGIN);
+    let across = a_bar_across_the_pipe(&mut model);
+    let cross = model
+        .fuse(
+            &[upright],
+            &[across],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refused| panic!("the cross: {refused:?}"));
+    let [cross] = cross.solids() else {
+        panic!("a cross is one solid: {:?}", cross.solids());
+    };
+    let cross = *cross;
+    let (cross_volume, cross_bound) = volume_of(&model, cross);
+    let pin_wall = Cylinder::new(
+        Axis::new(Point::new(0.0, 0.0, 5.5), Vector::new(0.0, 1.0, 0.0))
+            .expect("a direction with a length"),
+        THIN_PIN_RADIUS,
+    )
+    .expect("a positive radius");
+    let pin =
+        a_bar_with_its_seam_towards(&mut model, pin_wall, -4.0, 4.0, Vector::new(0.0, 0.0, 1.0));
+    let by_hand = std::f64::consts::PI * THIN_PIN_RADIUS * THIN_PIN_RADIUS * 8.0
+        - what_a_thin_pin_shares_with_the_upright_bar();
+
+    [[cross, pin], [pin, cross]].map(|[arguments, tools]| {
+        let cross_first = arguments == cross;
+        let mut model = model.clone();
+        let fused = match model.fuse(
+            &[arguments],
+            &[tools],
+            Rule::Union,
+            &policy,
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(fused) => fused,
+            Err(why) => {
+                let said = format!("refused {why:?}");
+                return (Err(why), said);
+            }
+        };
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| {
+                panic!("cross first {cross_first}: came back broken: {broken:?}")
+            });
+        let [solid] = fused.solids() else {
+            panic!(
+                "cross first {cross_first}: the cross and the pin are one solid: {:?}",
+                fused.solids()
+            );
+        };
+        let (volume, bound) = volume_of(&model, *solid);
+        assert!(
+            (volume - cross_volume - by_hand).abs() <= bound + cross_bound,
+            "cross first {cross_first}: {volume} ± {bound} against {cross_volume} ± \
+             {cross_bound} and {by_hand} of the pin"
+        );
+        let faces = model
+            .solid(*solid)
+            .expect("this model made the key")
+            .faces()
+            .count();
+        (Ok(faces), format!("one solid of {faces} faces"))
+    })
+}
+
+const THIN_PIN_RADIUS: f64 = 0.25;
+
+/// `∫ 4 √((a² − x²)(r² − x²)) dx` over `|x| ≤ a`, for `a` the thin pin's
+/// radius and `r` the upright bar's, by Simpson's rule on the angle
+/// `x = a sin t`, where the integrand is smooth.
+fn what_a_thin_pin_shares_with_the_upright_bar() -> f64 {
+    let steps = 1000;
+    let half_turn = std::f64::consts::PI;
+    let at = |t: f64| {
+        let x = THIN_PIN_RADIUS * t.sin();
+        let across = THIN_PIN_RADIUS * t.cos();
+        4.0 * across * (RADIUS * RADIUS - x * x).sqrt() * across
+    };
+    let width = half_turn / f64::from(steps);
+    let sum: f64 = (0..=steps)
+        .map(|step| {
+            let weight = if step == 0 || step == steps {
+                1.0
+            } else if step % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            weight * at(-half_turn / 2.0 + width * f64::from(step))
+        })
+        .sum();
+    sum * width / 3.0
 }
 
 /// A round bar on `wall` from `from` to `to` along its axis, with its seam
