@@ -2951,6 +2951,20 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let mut finest = (coarsest, enclosed, rounding, ProvenanceLog::new());
     let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
     let mut room = top;
+    let probe_r_min = view
+        .faces()
+        .filter_map(|face| match face.surface() {
+            Surface::Sphere(ball) => Some(ball.radius()),
+            Surface::Cylinder(pipe) => Some(pipe.radius()),
+            Surface::Torus(ring) => Some(ring.tube_radius()),
+            _ => None,
+        })
+        .fold(f64::INFINITY, f64::min);
+    let probe_who = std::thread::current().name().unwrap_or("?").to_string();
+    let probe_call = std::time::Instant::now();
+    let mut probe_above_time = std::time::Duration::ZERO;
+    let mut probe_above_rungs = 0;
+    let mut probe_rungs = 0;
     while room >= floor {
         let Ok(less) = Deflection::of(room) else {
             break;
@@ -2958,11 +2972,45 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         #[cfg(test)]
         RUNGS_THE_SECOND_LADDER_HAS_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut this_rung = ProvenanceLog::new();
-        match view.mesh(less, policy, &mut this_rung) {
+        let rung_clock = std::time::Instant::now();
+        let above = room >= probe_r_min;
+        probe_rungs += 1;
+        if above {
+            probe_above_rungs += 1;
+        }
+        let meshed = view.mesh(less, policy, &mut this_rung);
+        let outcome = match &meshed {
+            Ok(finer) => {
+                let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(finer);
+                let leaves_out = how_far_the_sum_can_be_off(view, finer, rounding);
+                if the_sum_answers(finer_encloses, leaves_out) {
+                    "answers".to_string()
+                } else if leaves_out.is_infinite() {
+                    "inf".to_string()
+                } else {
+                    "unsure".to_string()
+                }
+            }
+            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => "fold".to_string(),
+            Err(why) => format!("stop {why:?}").chars().take(80).collect(),
+        };
+        if above {
+            probe_above_time += rung_clock.elapsed();
+        }
+        if above && outcome != "inf" {
+            probe_census(&format!(
+                "ABOVE {probe_who} room {room:e} r_min {probe_r_min:e} top {top:e} {outcome}"
+            ));
+        }
+        match meshed {
             Ok(finer) => {
                 let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(&finer);
                 let leaves_out = how_far_the_sum_can_be_off(view, &finer, rounding);
                 if the_sum_answers(finer_encloses, leaves_out) {
+                    probe_census(&format!(
+                        "CALL {probe_who} rungs {probe_rungs} above {probe_above_rungs} took {:?} above_took {probe_above_time:?} answered",
+                        probe_call.elapsed()
+                    ));
                     this_rung.drain_into(log);
                     return Ok(finer_encloses);
                 }
@@ -2983,6 +3031,10 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         }
         room /= 2.0;
     }
+    probe_census(&format!(
+        "CALL {probe_who} rungs {probe_rungs} above {probe_above_rungs} took {:?} above_took {probe_above_time:?} no-answer",
+        probe_call.elapsed()
+    ));
     let (mesh, finest_encloses, rounding, mut its_log) = finest;
     if let Some((on_the_planes, off_by)) =
         what_it_encloses_moved_onto_its_planes(view, &mesh, finest_encloses, rounding)
@@ -3003,6 +3055,16 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         });
     }
     Ok(enclosed)
+}
+
+fn probe_census(line: &str) {
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-clean-up-dead-sessions/72105a1f-afbf-4d21-9a32-03063939b145/scratchpad/census.log")
+        .expect("the census file opens");
+    writeln!(file, "{line}").expect("the census line writes");
 }
 
 /// How many times [`how_much_space_a_curved_solid_encloses`]'s own ladder has
