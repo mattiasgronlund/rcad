@@ -496,12 +496,12 @@ const LEANING_BAR_REFUSALS_MUST_STAY_BELOW: f64 = 0.75;
 /// ([`pairs::ThreeBallsThatCrossAtTheSameTwoPoints`]) a certified fuse may
 /// refuse.
 ///
-/// Measured at **97 of 216, 44.9%**, over the shipped corpus
+/// Measured at **95 of 213, 44.6%**, over the shipped corpus
 /// (`mise exec -- just t every_certified_fuse_of_three_balls_that_cross_at_the_same_two_points_is_decided --no-capture`):
 /// 93 named [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`] (the third
 /// ball's skin crosses each of the other two on its own, so a face of the
 /// first or second ball can end up crossed by two different round surfaces at
-/// once — §31.2 row 8's gap) and 4 named [`A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH`]
+/// once — §31.2 row 8's gap) and 2 named [`A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH`]
 /// (a face the fuse could not mesh, previously seen only once a curved
 /// fixture was turned off the world's own axes, §191 — see
 /// [`a_three_balls_crossing_refusal`] for why this family is the second
