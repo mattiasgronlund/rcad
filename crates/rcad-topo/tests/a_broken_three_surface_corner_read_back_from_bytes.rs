@@ -735,6 +735,36 @@ fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_cannot_tell_its_ce
     }
 }
 
+/// **Turned a tenth of a radian about `(0.3, −1, 2)`, the sound pyramid and
+/// the wedge round the `x` axis built there are refused for an edge too short
+/// by every rule under `certified`**, and leave the model as it was. Turned,
+/// the wedge's two planes and the pyramid's four side planes miss one point by
+/// a rounding, so the answer of those numbers keeps an edge a rounding long by
+/// the apex: the limit §294.21 and §448.7 settled for the cut through the
+/// apex. The difference and the intersection already refused so. The union
+/// panicked in `edges_after_joining`, "a piece of a face has a straight side
+/// with no length", on a ring of three straight sides along the wedge's edge
+/// (queue rows Q2317 and Q2332).
+#[test]
+fn a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_is_refused_for_an_edge_too_short() {
+    let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.3, -1.0, 2.0)).expect("an axis");
+    let placement = Isometry::rotation(&axis, 0.1).expect("a turn");
+    for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+        let case = format!("{A_WEDGE_ROUND_THE_X_AXIS:?} {rule:?}");
+        match the_wedge_through_the_apex(
+            A_WEDGE_ROUND_THE_X_AXIS,
+            placement,
+            rule,
+            &Policy::certified(),
+        ) {
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+                assert!(ratio > 1e15, "{case}: a range of {ratio}");
+            }
+            other => panic!("{case} came back {other:?}"),
+        }
+    }
+}
+
 /// **Every partner, every rule, every placement and both policies give the
 /// box's refusal** for every move of the apex, the cut through the apex among
 /// them. Each three of the four side planes cross at the apex alone, so no
