@@ -14479,6 +14479,13 @@ _queue-check file decisions:
 # nobody holds, an entry outside the set the row was taken with and a
 # directory written without its `/`, refused; and a widening back refused
 # while another hold meets the entry it widens to, and passed when none does.
+# §308 adds a dated `after:`, mixed with a row id or alone, counted ready once
+# its date has come and refused with a second date in the same row; a `cores:`
+# entry, refused as `cores:0` and accepted as `cores:all`; and the fill's own
+# clock and thread count: a `cores:` row that fits the machine's free threads
+# and one that does not, `cores:all` beside a row that holds some threads and
+# beside none, and the night-fuzz window holding every thread, moved an hour
+# later in UTC once Stockholm leaves summer time.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -14681,6 +14688,24 @@ check-queue-selftest:
         'a tier 2 row that waits on a tier 1 row was refused'
     passes waits-on-done  "s/^Q3  2  after:T9 /Q3  2  after:D5 /; /^D4 /a D5  5  done:42df376e  opus  -  wrong/C a defect closed in tier 5 §230" \
         'a tier 2 row that waits on a done tier 5 row was refused, though the fill reaches it as soon as it is ready'
+
+    # §308: _queue-check reads a dated after:, mixed with a row id or alone, a
+    # cores: entry in the write set, and the four rules 17c94a99 added for them.
+    sed 's/after:T9/after:T9,2020-01-01/' "$dir/good.md" > "$dir/mixed-come.md"
+    got=$(q _queue-check "$dir/mixed-come.md" "$decisions" 2>&1) \
+        || fail "a row after a done id and a date already come was refused"
+    grep -qF '14 rows; 6 ready, 1 waiting,' <<<"$got" \
+        || fail "a row after a done id and a date already come was not counted ready, as it was before the date was added"
+    sed 's/after:T9/after:T9,2099-01-01/' "$dir/good.md" > "$dir/mixed-wait.md"
+    got=$(q _queue-check "$dir/mixed-wait.md" "$decisions" 2>&1) \
+        || fail "a row after a done id and a date not yet come was refused"
+    grep -qF '14 rows; 5 ready, 2 waiting,' <<<"$got" \
+        || fail "a row after a done id and a date not yet come was still counted ready"
+    refused two-dates  's/after:T9/after:T9,2020-01-01,2099-01-01/' 'cannot wait on two dates'
+    refused cores-zero 's/justfile#queue  pinned/justfile#queue,cores:0  pinned/' \
+        'is not a path, a directory ending in /, or path#item'
+    passes  cores-all   's/justfile#queue  pinned/justfile#queue,cores:all  pinned/' \
+        'a row with a cores:all entry in its write set was refused'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -15080,6 +15105,67 @@ check-queue-selftest:
     drive after
     grep -qxF '      waits on Q1 (lane:lane-y)' <<<"$got" \
         || fail "a waiting row does not say what it waits on and that row's state"
+
+    # §308 (Q281): the fill's own dated after:, and a cores: entry that pins
+    # hardware threads. drive() only sets queue_file and queue_running, so
+    # driveclock() gives it queue_threads and queue_now too.
+    driveclock() {
+        got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 \
+            --set queue_threads "$2" --set queue_now "$3" queue "${@:4}" 2>&1) \
+            || fail "queue ${*:4} failed on the $1 fixture, queue_threads $2, queue_now $3"
+    }
+
+    fence afterdate <<'MD'
+    Q1  1  after:2099-01-01  opus  docs/a.md  waits on a date not yet come §230
+    Q2  1  after:2020-01-01  opus  docs/b.md  waits on a date already come §230
+    MD
+    drive afterdate next 2
+    [ "$(takes)" = "Q2 " ] || fail "a dated after: took the row before its date came, or left behind the row whose date has"
+    drive afterdate
+    grep -qxF '      waits on 2099-01-01 (not yet come)' <<<"$got" \
+        || fail "a waiting row with a dated after: does not say its date has not yet come"
+
+    fence cores <<'MD'
+    Q90  1  lane:lane-q90  opus  cores:3  running, pinning 3 of the machine's threads §230
+    Q91  1  todo  opus  cores:1  needs 1 thread, which fits beside the running row's 3 §230
+    Q92  1  todo  opus  cores:2  needs 2 threads, which does not fit beside the running row's 3 §230
+    MD
+    driveclock cores 4 2026-10-19T12:00:00Z blocked
+    [ "$got" = "skip Q92 (tier 1): its cores:2 does not fit the 4 threads of the machine: Q90 (held by lane:lane-q90) holds them" ] \
+        || fail "a cores: row that does not fit the machine's free threads was not skipped naming the running row that holds them, or one that fits was skipped anyway"
+
+    fence coresall <<'MD'
+    Q90  1  lane:lane-q90  opus  cores:2  running, pinning 2 of the machine's threads §230
+    Q91  1  todo  opus  cores:all  wants every thread, which does not fit beside a row already holding some §230
+    MD
+    driveclock coresall 4 2026-10-19T12:00:00Z blocked
+    [ "$got" = "skip Q91 (tier 1): its cores:all does not fit the 4 threads of the machine: Q90 (held by lane:lane-q90) holds them" ] \
+        || fail "cores:all beside a running row that holds some of the machine's threads was not skipped"
+
+    fence coresallalone <<'MD'
+    Q91  1  todo  opus  cores:all  wants every thread, and nothing else holds any §230
+    MD
+    driveclock coresallalone 4 2026-10-19T12:00:00Z next 1
+    [ "$(takes)" = "Q91 " ] || fail "cores:all was skipped though nothing else holds any of the machine's threads"
+
+    # The night window is derived from tooling/systemd/rcad-fuzz.timer and
+    # fuzz-overnight, not typed in (§308): 00:10-08:10 Europe/Stockholm, which
+    # is 22:10-06:10Z in summer time and 23:10-07:10Z once Stockholm leaves it
+    # on 2026-10-25. 02:00Z on 2026-10-19 sits in the first; 06:30Z on
+    # 2026-10-26 sits in the second only if the code reads the zone rather
+    # than keeping summer time's offset, since 06:30Z was outside the window
+    # before the clocks changed.
+    fence corenight <<'MD'
+    Q1  1  todo  opus  cores:2  a row that pins 2 of the machine's threads §230
+    MD
+    driveclock corenight 4 2026-10-19T02:00:00Z blocked
+    [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them" ] \
+        || fail "a cores: row inside the night-fuzz window, in summer time, was not skipped as the night fuzz holding every thread"
+    driveclock corenight 4 2026-10-19T12:00:00Z next 1
+    [ "$(takes)" = "Q1 " ] || fail "a cores: row outside the night-fuzz window was skipped though nothing holds its threads"
+    driveclock corenight 4 2026-10-26T06:30:00Z blocked
+    [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them" ] \
+        || fail "the night window did not move an hour later in UTC once Stockholm left summer time on 2026-10-25"
 
     fence blocked <<'MD'
     Q1  1  lane:lane-q1  opus  docs/a.md  running §230
