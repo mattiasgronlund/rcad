@@ -3450,7 +3450,8 @@ impl<'f> Arrangement<'f> {
                             other == crossing
                                 || left_out[other]
                                 || !self.crossings[other].reaches_the_face
-                                || self.the_faces_across_split_it_no_more(other, crossing)
+                                || self
+                                    .the_faces_across_split_it_no_more(other, crossing, node.point)
                         }))
             })
     }
@@ -3468,12 +3469,18 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Whether `along` is a crossing boundary edges run along, which the faces
-    /// across those edges split at a node of `crossing` no more than leaving
-    /// `crossing` out splits it here. For each surface `crossing` lies on,
-    /// either `along` lies on it too, so the face across meets it in a curve
-    /// there and places no node; or the face across every edge along `along`
-    /// leaves it out as well.
-    fn the_faces_across_split_it_no_more(&self, along: usize, crossing: usize) -> bool {
+    /// across those edges split at the node of `crossing` at `at` no more than
+    /// leaving `crossing` out splits it here. For each surface `crossing` lies
+    /// on, either `along` lies on it too, so the face across meets it in a
+    /// curve there and places no node; or the face across every edge along
+    /// `along` leaves it out as well, and places no node of it there alone
+    /// ([`Arrangement::the_face_across_places_it_alone`]).
+    fn the_faces_across_split_it_no_more(
+        &self,
+        along: usize,
+        crossing: usize,
+        at: PredicatePoint,
+    ) -> bool {
         let edges: Vec<(usize, usize)> = self
             .crossing_of_edge
             .iter()
@@ -3492,12 +3499,57 @@ impl<'f> Arrangement<'f> {
                     self.crossings[along]
                         .every_surface_that_draws_it()
                         .any(|on| on == surface)
-                        || edges.iter().all(|&(wire, position)| {
+                        || (edges.iter().all(|&(wire, position)| {
                             self.face.wires[wire][position]
                                 .its_neighbour_leaves_out
                                 .contains(surface)
-                        })
+                        }) && !self.the_face_across_places_it_alone(along, *surface, at))
                 })
+    }
+
+    /// Whether the face across `along` may leave out its crossing with `cut`
+    /// because no face carrying `cut` reaches it, and still place the meet at
+    /// `at` alone, on its own crossing along this face's surface
+    /// ([`Arrangement::kept_where_a_crossing_left_out_meets_it`]).
+    ///
+    /// **The curve `cut` crosses the face across in lies wholly past a plane
+    /// every face carrying `cut` lies behind**, so that face may leave it out
+    /// ([`Arrangement::no_face_that_draws_it_reaches_it`]), **and the curve
+    /// `cut` crosses this face in lies past no such plane with it**, so that
+    /// [`Arrangement::the_face_across_leaves_it_out_too`], asked there of the
+    /// same three surfaces, says no. That face then splits its edge with this
+    /// one at `at` whatever this face's own list says, and this face must
+    /// split it there too. A block with a step up beside a bar is the shape
+    /// (Q2364): the lower top crosses the bar's pipe in a circle wholly above
+    /// the bar, but the riser crosses it in two lines no plane of the bar's
+    /// cuts off, so the lower top places a node alone where the circle meets
+    /// the riser. The riser listed the pipe as reaching it only on its
+    /// boundary, left its lines out, and the fuse was refused
+    /// `ResultIsNotManifold`.
+    fn the_face_across_places_it_alone(
+        &self,
+        along: usize,
+        cut: Surface,
+        at: PredicatePoint,
+    ) -> bool {
+        let across = self.crossings[along].partner;
+        let places = [at];
+        let sides = self
+            .face
+            .sides_the_faces_of_each_cut_lie_in
+            .iter()
+            .filter(|(carried, _)| *carried == cut)
+            .flat_map(|(_, sides)| sides);
+        let mut past_across = false;
+        for &side in sides {
+            if a_curve_of_two_lies_wholly_past([across, cut], &places, side) {
+                if a_curve_of_two_lies_wholly_past([self.surface, cut], &places, side) {
+                    return false;
+                }
+                past_across = true;
+            }
+        }
+        past_across
     }
 
     /// A closed crossing with no node on it still needs one.
