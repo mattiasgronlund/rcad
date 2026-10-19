@@ -264,24 +264,28 @@ fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
 /// radius 0.001 were dumped, the arcs from each pole to the corner beside it
 /// picked as the short ones — and each is refused further on:
 ///
-/// - **the 90 degree differences at radii 1 and 1000 and the 45 degree one at
-///   radius 1000 for corners that coincide**, by the mesher, which sees the
-///   pole and the corner a rounding from it as one point on the face's own map.
-///   Until Q2290 all four 90 degree ones were refused so on the sphere's lune.
-///   Since then `mesh.rs` cuts a loop that names one place twice into lobes
-///   (`what_the_triangulator_can_cut`), so the lune is meshed, and the 90 degree
-///   ones stop further on, at the flat face of `x = 0`: at radii 1 and 1000 for
-///   corners that coincide there;
-/// - **the 90 degree difference at radius 0.001 for loops that touch**, at that
-///   flat face, at `(0, 4.6e−19, 0.001)` beside the north pole;
-/// - **the 90 degree difference at radius 3 for two patches drawing one
-///   side**. The lune and the flat face of `x = 0` meet at the south pole `P`
-///   along two sides, from `P` to a second entry `P′` of the pole and from
-///   `P′` to the corner `C` `4.4e−16` from it, and each face names that place
-///   twice in its loop. Each cuts a lobe off there, and the side `P C` that
-///   closes the lobe it keeps lies inside its patch: drawn by both patches, it
-///   is used four times (`TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4,
-///   used: 4 }`);
+/// - **the 45 degree difference at radius 1000 for corners that coincide**, by
+///   the mesher, which sees the pole and the corner a rounding from it as one
+///   point on the face's own map. Until Q2290 all four 90 degree ones were
+///   refused so on the sphere's lune too. Since then `mesh.rs` cuts a loop that
+///   names one place twice into lobes (`what_the_triangulator_can_cut`), so the
+///   lune is meshed, and the 90 degree ones stop further on, at the flat face of
+///   `x = 0`;
+/// - **the 90 degree differences at radii 1, 0.001 and 1000 for loops that
+///   touch**, at that flat face, beside the north pole: at `(0, 4.44e−16, 1)`,
+///   `(0, 4.6e−19, 0.001)` and `(0, 4.23e−13, 1000)`. Until Q2352 radii 1 and
+///   1000 were refused there for corners that coincide, and radius 3 for two
+///   patches drawing one side, on a place the walk named twice. The walk along
+///   the arc of `x = 0` from the south pole `P` to the corner `C` `4.4e−16`
+///   from it put its one point `P′` at `P` itself, so the lune and the flat face
+///   each named `P` twice in its loop, along `P P′` and `P′ C`. At radius 3 each
+///   face cut a lobe off there, and the side `P C` that closes the lobe it kept
+///   lay inside its patch: drawn by both patches, it was used four times
+///   (`TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`). Since Q2352
+///   `mesh.rs` drops a point of a walk stored at one of the edge's ends, so `P′`
+///   is gone;
+/// - **the 90 degree difference at radius 3 for faces that do not agree which
+///   way they face**, since Q2352. Not traced past the name;
 /// - **the 45 degree one at radius 0.001 and the 10 degree ones at radii 0.001
 ///   and 1000 for faces that do not agree which way they face**. The faces are
 ///   right and the name is not. The walk puts a point on the arc of `x = 0`
@@ -300,12 +304,11 @@ fn two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy() {
     const COINCIDE: &str = "CornersCoincide";
     const FACE_APART: &str = "FacesDoNotAgreeWhichWayTheyFace";
     const TOUCH: &str = "LoopsTouch";
-    const ONE_SIDE_TWICE: &str = "TwoPatchesOfTheMeshDrewTheSameSide";
     for (degrees, radius, rule, refused) in [
-        (90.0, 1.0, Rule::Difference, COINCIDE),
+        (90.0, 1.0, Rule::Difference, TOUCH),
         (90.0, 0.001, Rule::Difference, TOUCH),
-        (90.0, 1000.0, Rule::Difference, COINCIDE),
-        (90.0, 3.0, Rule::Difference, ONE_SIDE_TWICE),
+        (90.0, 1000.0, Rule::Difference, TOUCH),
+        (90.0, 3.0, Rule::Difference, FACE_APART),
         (45.0, 0.001, Rule::Difference, FACE_APART),
         (45.0, 1000.0, Rule::Difference, COINCIDE),
         (10.0, 1.0, Rule::Intersection, TOUCH),
