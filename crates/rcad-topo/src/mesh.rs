@@ -411,21 +411,49 @@ impl SolidView<'_> {
         let along_each_edge = self.surfaces_along_each_edge();
         let deflection = self.room_a_mesh_has_to_work_in(deflection, policy, &along_each_edge)?;
         let mut building = BuildingAMesh::new(deflection, along_each_edge);
-        for face in self.faces() {
-            building.walk_the_edges_this_face_can_place(self, face, policy, log)?;
+        let mut walked_again: HashMap<FaceKey, u32> = HashMap::new();
+        let mut finest_crossing: Option<(Error, ProvenanceLog)> = None;
+        loop {
+            let mut said = ProvenanceLog::new();
+            let why = match building.walk_and_cut_up(self, policy, &mut said) {
+                Ok(()) => {
+                    let made = core::mem::take(&mut building.made);
+                    let meshed = building.finish().and_then(|mesh| {
+                        if self
+                            .faces()
+                            .all(|face| face.location() == Isometry::identity())
+                        {
+                            Ok(mesh)
+                        } else {
+                            Self::unless_placing_it_took_away_its_space(mesh, made)
+                        }
+                    });
+                    let (answer, mut said) = match (meshed, finest_crossing) {
+                        (Err(_), Some((crossing, its_log))) => (Err(crossing), its_log),
+                        (meshed, _) => (meshed, said),
+                    };
+                    said.drain_into(log);
+                    return answer;
+                }
+                Err(why) => why,
+            };
+            let crossed = a_flat_face_whose_bent_sides_crossed(self, &why);
+            if let Some(face) = crossed {
+                let rungs = walked_again.entry(face.key()).or_default();
+                if *rungs < RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER {
+                    *rungs += 1;
+                    building = building.again_with_its_bent_sides_walked_finer(face);
+                    finest_crossing = Some((why, said));
+                    continue;
+                }
+            }
+            let (why, mut said) = match (crossed, finest_crossing) {
+                (None, Some(finest)) => finest,
+                _ => (why, said),
+            };
+            said.drain_into(log);
+            return Err(why);
         }
-        for face in self.faces() {
-            building.cut_up(face, self, log)?;
-        }
-        let made = core::mem::take(&mut building.made);
-        let mesh = building.finish()?;
-        if self
-            .faces()
-            .all(|face| face.location() == Isometry::identity())
-        {
-            return Ok(mesh);
-        }
-        Self::unless_placing_it_took_away_its_space(mesh, made)
     }
 
     /// `mesh`, unless it encloses space where its points were made and none
@@ -561,6 +589,38 @@ impl SolidView<'_> {
     }
 }
 
+/// The flat face `why` says the triangulator refused for its boundary crossing
+/// itself, when that face has a side that bends and so a finer walk to try.
+/// `None` for every other refusal.
+fn a_flat_face_whose_bent_sides_crossed<'m>(
+    solid: SolidView<'m>,
+    why: &Error,
+) -> Option<FaceView<'m>> {
+    let Error::CannotMeshAFace {
+        face,
+        why: CannotTriangulate::BoundaryCrossesItself { .. },
+    } = why
+    else {
+        return None;
+    };
+    let face = solid
+        .faces()
+        .find(|used| used.key() == *face)
+        .expect("the mesher names a face of the solid it was meshing");
+    let flat = the_surface_this_face_is_meshed_on(face)
+        .as_plane()
+        .is_some();
+    let bends = face
+        .wires()
+        .flat_map(WireView::coedges)
+        .any(|coedge| *coedge.edge().stored_run() != EdgeRun::Straight);
+    (flat && bends).then_some(face)
+}
+
+/// How many times [`SolidView::mesh`] walks the bent sides of one crossed flat
+/// face again, each time at half the room, before it hands the crossing back.
+const RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER: u32 = 30;
+
 /// How far above the floor a tolerant mesh is actually cut.
 ///
 /// Exactly at the floor there is no room left to put a point: the longest chord
@@ -650,6 +710,9 @@ struct BuildingAMesh {
     /// the mesh encloses on them. The faces of one shell share one placement, so
     /// each shell is closed in one frame here.
     made: Vec<Point>,
+    /// The deflection each edge of a crossed flat face is walked to in place of
+    /// `deflection`, which it is always under — see [`SolidView::mesh`].
+    walked_finer: HashMap<EdgeKey, f64>,
 }
 
 impl BuildingAMesh {
@@ -668,7 +731,77 @@ impl BuildingAMesh {
             worst: 0.0,
             along_each_edge,
             made: Vec::new(),
+            walked_finer: HashMap::new(),
         }
+    }
+
+    /// Walk every edge of `solid` that needs it, then cut up every face.
+    fn walk_and_cut_up(
+        &mut self,
+        solid: SolidView<'_>,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        for face in solid.faces() {
+            self.walk_the_edges_this_face_can_place(solid, face, policy, log)?;
+        }
+        for face in solid.faces() {
+            self.cut_up(face, solid, log)?;
+        }
+        Ok(())
+    }
+
+    /// A building started over, with each side of `face` that bends walked at
+    /// half the room it was walked at this time, and never at more than half
+    /// the widest its walked boundary reaches.
+    ///
+    /// **The second bound is for a deflection far wider than the face.** A walk
+    /// never steps more than a quarter turn, so halving `f64::MAX` changes no
+    /// point for about a thousand rungs; from half the face's width, the first
+    /// rung or two already step under a quarter turn.
+    ///
+    /// An edge one face uses twice, as a seam, is halved once.
+    fn again_with_its_bent_sides_walked_finer(mut self, face: FaceView<'_>) -> Self {
+        let top = self.half_the_widest_its_walked_boundary_reaches(face);
+        let mut walked_finer = core::mem::take(&mut self.walked_finer);
+        let halved: HashMap<EdgeKey, f64> = face
+            .wires()
+            .flat_map(WireView::coedges)
+            .map(|coedge| coedge.edge())
+            .filter(|edge| *edge.stored_run() != EdgeRun::Straight)
+            .map(|edge| {
+                let now = walked_finer
+                    .get(&edge.key())
+                    .copied()
+                    .unwrap_or(self.deflection.length());
+                (edge.key(), now.min(top) / 2.0)
+            })
+            .collect();
+        walked_finer.extend(halved);
+        let mut again = Self::new(self.deflection, core::mem::take(&mut self.along_each_edge));
+        again.walked_finer = walked_finer;
+        again
+    }
+
+    /// Half the widest side of the box round `face`'s corners and the points
+    /// its sides were walked into.
+    fn half_the_widest_its_walked_boundary_reaches(&self, face: FaceView<'_>) -> f64 {
+        let walked = face
+            .wires()
+            .flat_map(WireView::coedges)
+            .filter_map(|coedge| self.along_edge.get(&coedge.edge().key()))
+            .flatten()
+            .map(|&at| self.points[at as usize]);
+        let corners = face.wires().flat_map(WireView::points);
+        let mut low = [f64::INFINITY; 3];
+        let mut high = [f64::NEG_INFINITY; 3];
+        for point in walked.chain(corners) {
+            for (axis, coordinate) in point.coordinates().into_iter().enumerate() {
+                low[axis] = low[axis].min(coordinate);
+                high[axis] = high[axis].max(coordinate);
+            }
+        }
+        (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0
     }
 
     /// Have every edge round `face` that has not been walked yet walked, if this
@@ -697,8 +830,7 @@ impl BuildingAMesh {
         let flat = the_surface_this_face_is_meshed_on(face)
             .as_plane()
             .is_some();
-        let room =
-            self.deflection.length() - how_far_moving_this_face_rounds(face, &self.along_each_edge);
+        let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
         for wire in face.wires() {
             for coedge in wire.coedges() {
                 let edge = coedge.edge();
@@ -708,7 +840,12 @@ impl BuildingAMesh {
                 if flat && !only_a_flat_face_can_place(edge, &self.along_each_edge) {
                     continue;
                 }
-                let walked = self.walk(solid, edge, face, room, policy, log)?;
+                let walked_to = self
+                    .walked_finer
+                    .get(&edge.key())
+                    .copied()
+                    .unwrap_or(self.deflection.length());
+                let walked = self.walk(solid, edge, face, walked_to - moving, policy, log)?;
                 self.along_edge.insert(edge.key(), walked);
             }
         }
