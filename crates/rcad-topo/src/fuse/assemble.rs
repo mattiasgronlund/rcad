@@ -1856,6 +1856,27 @@ impl Assembly {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
+        let met_nowhere_yet = vec![false; self.corners.len()];
+        self.join_up_from(met_nowhere_yet, policy, log)
+    }
+
+    /// [`Assembly::join_up_what_is_one_face`], with each corner where an
+    /// earlier pass met pieces of one cone, pipe or ball marked in
+    /// `curved_pieces_met_before`, by the corners as they are numbered now.
+    ///
+    /// # Errors
+    ///
+    /// As [`Assembly::join_up_what_is_one_face`].
+    ///
+    /// # Panics
+    ///
+    /// As [`Assembly::join_up_what_is_one_face`].
+    fn join_up_from(
+        &mut self,
+        curved_pieces_met_before: Vec<bool>,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<bool> {
         let along = self.darts_along_each_edge()?;
         let mut dissolved = self.edges_with_one_face_on_both_sides(&along, log)?;
         let staying = self.edges_a_curved_face_keeps(&along, &dissolved);
@@ -1870,7 +1891,10 @@ impl Assembly {
             &mut dissolved,
             log,
         )?;
-        let renumbered = self.what_is_left(&joined, &along, &dissolved, policy, log)?;
+        let curved_pieces_met =
+            self.where_curved_pieces_met(&along, &dissolved, curved_pieces_met_before);
+        let renumbered =
+            self.what_is_left(&joined, &along, &dissolved, &curved_pieces_met, policy, log)?;
         // **A closed curve cut where nothing meets it** is joined back up even
         // where no face was: a pointed cone less a block whose walls are tangent
         // to its rim keeps the rim in arcs otherwise, and a ring of arcs right
@@ -1889,9 +1913,17 @@ impl Assembly {
         // under it, once the strip of the block's top between them goes
         // (queue row Q1446). They are one flat region (§426), so the joining
         // runs again. It runs again only after two or more edges were made
-        // one, so there are fewer edges each time and it ends.
+        // one, so there are fewer edges each time and it ends. The corners
+        // where this pass met pieces of one cone, pipe or ball go with it, by
+        // the corners' new numbers, since the edges that met there are gone
+        // and nothing else would keep them (queue row Q2378).
+        let met_now: Vec<bool> = curved_pieces_met
+            .iter()
+            .zip(&renumbered.corner_now)
+            .filter_map(|(&met, now)| now.map(|_| met))
+            .collect();
         if self.rebuild_from(&joined, renumbered)? {
-            self.join_up_what_is_one_face(policy, log)?;
+            self.join_up_from(met_now, policy, log)?;
         }
         Ok(true)
     }
@@ -3801,6 +3833,35 @@ impl Assembly {
             .collect()
     }
 
+    /// `met`, with each end of a dissolved edge between two pieces of one cone,
+    /// pipe or ball marked too: every corner where such pieces met, this pass
+    /// or an earlier one.
+    ///
+    /// **A corner an earlier pass marked stays marked.** That pass kept it a
+    /// corner for the edge it dissolved there, and that edge is gone by the
+    /// next pass, so this pass's edges alone would not keep it. Walked straight
+    /// through, it folds the arcs either side into one, which can be longer
+    /// than half its circle (§224.1): a round bar with a block across its rim,
+    /// united in one call with a turned frame flush on a block, came back with
+    /// its top rim one arc `5.65` long on a circle of radius `1`, as the
+    /// joining ran again for the frame (queue row Q2378,
+    /// `a_turned_frame_and_a_block_flush_beneath_it.rs`).
+    fn where_curved_pieces_met(
+        &self,
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+        mut met: Vec<bool>,
+    ) -> Vec<bool> {
+        for (edge, [one, _]) in along.iter().enumerate() {
+            if dissolved[edge] && self.faces[one.face].surface.as_plane().is_none() {
+                for end in self.edges[edge].ends {
+                    met[end] = true;
+                }
+            }
+        }
+        met
+    }
+
     /// Which corners and edges the joining leaves, and what they are called now.
     ///
     /// Everything is asked one lump of joined faces at a time, and that is not
@@ -3818,6 +3879,7 @@ impl Assembly {
         joined: &[JoinedFace],
         along: &[[Dart; 2]],
         dissolved: &[bool],
+        curved_pieces_met: &[bool],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Renumbered> {
@@ -3869,8 +3931,7 @@ impl Assembly {
         for (lump, corner) in self.where_curved_pieces_met_off_a_run_that_closes_up(
             &leaving,
             &straight_through,
-            along,
-            dissolved,
+            curved_pieces_met,
         ) {
             straight_through.remove(&(lump, corner));
             still_a_corner[corner] = true;
@@ -4091,11 +4152,12 @@ impl Assembly {
             })
     }
 
-    /// Every corner where pieces of one cone, pipe or ball met, as lump and
-    /// corner, that `straight_through` walks on a run that does not close up
-    /// into the one closed input edge it was cut from, between two edges that
-    /// are neither both pieces of one open input edge nor both straight. Each
-    /// stays a corner.
+    /// Every corner where pieces of one cone, pipe or ball met, as
+    /// `curved_pieces_met` marks them ([`Assembly::where_curved_pieces_met`]),
+    /// as lump and corner, that `straight_through` walks on a run that does
+    /// not close up into the one closed input edge it was cut from, between
+    /// two edges that are neither both pieces of one open input edge nor both
+    /// straight. Each stays a corner.
     ///
     /// **A corner where pieces of one cone, pipe or ball met stays a corner**,
     /// and that departs from §224.2 item 3 on purpose. It has only two surfaces
@@ -4154,17 +4216,8 @@ impl Assembly {
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
         straight_through: &BTreeSet<(usize, usize)>,
-        along: &[[Dart; 2]],
-        dissolved: &[bool],
+        curved_pieces_met: &[bool],
     ) -> Vec<(usize, usize)> {
-        let mut where_curved_pieces_met = vec![false; self.corners.len()];
-        for (edge, [one, _]) in along.iter().enumerate() {
-            if dissolved[edge] && self.faces[one.face].surface.as_plane().is_none() {
-                for end in self.edges[edge].ends {
-                    where_curved_pieces_met[end] = true;
-                }
-            }
-        }
         let runs = runs_through(self.edges.len(), leaving, straight_through);
         let closed_up: BTreeSet<usize> = self
             .the_corners_each_closed_run_keeps(leaving, straight_through)
@@ -4176,7 +4229,7 @@ impl Assembly {
             .iter()
             .copied()
             .filter(|&(lump, corner)| {
-                where_curved_pieces_met[corner]
+                curved_pieces_met[corner]
                     && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
                     && !self.are_pieces_of_one_open_input_edge(&leaving[&(lump, corner)])
                     && !leaving[&(lump, corner)]
