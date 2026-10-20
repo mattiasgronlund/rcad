@@ -9109,31 +9109,7 @@ mod tests {
     fn a_sliver_whose_every_mesh_encloses_nothing_is_told_which_way_its_faces_point() {
         let policy = Policy::tolerant(100.0);
         let mut model = an_empty_model();
-        let square = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
-            .build(&Policy::certified(), &mut ProvenanceLog::new())
-            .expect("a square");
-        let block = model
-            .add_extrusion(&square, 4.0, &Isometry::identity())
-            .expect("a block");
-        let onto_x =
-            Isometry::rotation(&Axis::y(), -core::f64::consts::PI / 2.0).expect("a finite angle");
-        let shift =
-            Isometry::translation(Vector::new(3.0, 2.0, 5.0)).expect("a whole-number shift");
-        let bar = model
-            .add_round_bar(1.0, 2.0, &shift.compose(&onto_x))
-            .expect("a bar");
-        let fused = model
-            .fuse(
-                &[block],
-                &[bar],
-                Rule::Intersection,
-                &policy,
-                &mut ProvenanceLog::new(),
-            )
-            .expect("the sliver");
-        let &[sliver] = fused.solids() else {
-            panic!("the sliver alone: {fused:?}");
-        };
+        let sliver = the_sliver_where_a_bar_dips_into_a_block(&mut model, &policy);
 
         let sound = model.solid(sliver).expect("this model made the key");
         let coarsest =
@@ -9162,6 +9138,114 @@ mod tests {
             ),
             "sound and inside out: {told:?}"
         );
+    }
+
+    /// Row Q2314. The sliver of
+    /// [`a_sliver_whose_every_mesh_encloses_nothing_is_told_which_way_its_faces_point`]
+    /// is meshed on the line `x = 3, z = 4`, and the worry was that a mesh on
+    /// one line, turned so that rounding moves its points a little off that
+    /// line, could enclose a rounding with a sign of its own and be charged too
+    /// little to stop that sign from answering.
+    ///
+    /// **It cannot here, because two of its four points are one point.** The
+    /// coarsest mesh is a tetrahedron whose corners land on three places, so
+    /// it encloses exactly nothing wherever the sliver is put, and a sum of
+    /// zero never answers. Placed at 40 turns about each of five axes, either
+    /// way out, it sums `0.0` every time.
+    ///
+    /// **Nor is that mesh charged `1e-323`, as Q2291's refusal printed at an
+    /// older base.** It strays a whole radius off the bar, so
+    /// [`SolidView::skin_of`] charges it without end.
+    ///
+    /// Only this sliver is run here. Any mesh whose points lie on one line
+    /// exactly encloses exactly nothing, and
+    /// [`signed_volume_over_and_how_far_it_rounded`] hands back a rounded sum
+    /// only when it is further from zero than the slack that bounds its
+    /// rounding, and adds it up exactly otherwise, so such a sum is `0.0`
+    /// for as long as that slack holds.
+    #[test]
+    fn a_sliver_meshed_on_one_line_encloses_exactly_nothing_however_it_is_turned() {
+        let policy = Policy::tolerant(100.0);
+        let mut model = an_empty_model();
+        let sliver = the_sliver_where_a_bar_dips_into_a_block(&mut model, &policy);
+        let sound = model.solid(sliver).expect("this model made the key");
+        let coarsest =
+            the_coarsest_mesh_whose_sides_do_not_cross(sound, &policy, &mut ProvenanceLog::new())
+                .expect("the coarsest mesh");
+        let points = coarsest.points();
+        assert!(
+            points.len() == 4 && points[0] == points[1],
+            "four points, two of them one: {points:?}"
+        );
+        let hidden = how_much_space_hides_under(sound, &coarsest);
+        assert!(hidden == f64::INFINITY, "charged {hidden}");
+
+        let axes = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(3.0, -1.0, 2.0),
+        ];
+        for axis in axes {
+            for step in 0..40 {
+                let turn = Isometry::rotation(
+                    &Axis::new(Point::origin(), axis).expect("a direction with a length"),
+                    f64::from(step) * core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn");
+                for way in [Orientation::Forward, Orientation::Reversed] {
+                    let view = SolidView::new(&model, sliver.slot_in(model.id()), turn, way);
+                    let mesh = the_coarsest_mesh_whose_sides_do_not_cross(
+                        view,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{axis:?} at {step}/40, {way:?}: {why:?}"));
+                    let (enclosed, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+                    let leaves_out = how_far_the_sum_can_be_off(view, &mesh, rounding);
+                    assert!(
+                        enclosed == 0.0 && !the_sum_answers(enclosed, leaves_out),
+                        "{axis:?} at {step}/40, {way:?}: encloses {enclosed}, off by up to {leaves_out}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The tolerant intersection of the block `[0, 4]³` and a bar of radius
+    /// one turned onto `x` by `−π/2` from `(3, 2, 5)`, which dips `2⁻¹⁰⁵`
+    /// through the block's top: the sliver alone.
+    fn the_sliver_where_a_bar_dips_into_a_block(
+        model: &mut Model,
+        policy: &Policy,
+    ) -> crate::SolidKey {
+        let square = ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a square");
+        let block = model
+            .add_extrusion(&square, 4.0, &Isometry::identity())
+            .expect("a block");
+        let onto_x =
+            Isometry::rotation(&Axis::y(), -core::f64::consts::PI / 2.0).expect("a finite angle");
+        let shift =
+            Isometry::translation(Vector::new(3.0, 2.0, 5.0)).expect("a whole-number shift");
+        let bar = model
+            .add_round_bar(1.0, 2.0, &shift.compose(&onto_x))
+            .expect("a bar");
+        let fused = model
+            .fuse(
+                &[block],
+                &[bar],
+                Rule::Intersection,
+                policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the sliver");
+        let &[sliver] = fused.solids() else {
+            panic!("the sliver alone: {fused:?}");
+        };
+        sliver
     }
 
     /// The lens of [`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`]
