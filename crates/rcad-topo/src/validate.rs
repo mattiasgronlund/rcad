@@ -2658,11 +2658,15 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 ///
 /// A polyhedron's own fan *is* its volume; a curved solid has no such fan — a
 /// round bar's caps fan into no triangles at all and its wall into two with no
-/// area (§35.4) — so it is summed over a mesh instead. `Model::validate` reads
-/// only the **sign** of what comes back. `nest_the_shells` in `fuse/assemble.rs`
-/// also compares sizes, to put a hollow in the smallest lump that holds it, and
-/// a sign told from a corner comes back with no size at all (see *A closest
-/// sum of zero or below* below). The size of a mesh's sum is weighed here,
+/// area (§35.4) — so it is summed over a mesh instead. `Model::validate` and
+/// `nest_the_shells` in `fuse/assemble.rs` read only the **sign** of what comes
+/// back. The size is only as good as the mesh the sign was read off, which is
+/// no finer than the sign needs: a round bar's sum can answer on a mesh that
+/// draws its circles as octagons, 90% of the bar. A sign told from a corner
+/// comes back with no size at all (see *A closest sum of zero or below*
+/// below). `nest_the_shells` used to compare sizes, to put a hollow in the
+/// smallest lump that held it, and gave a core's hollow to the tube round it
+/// for that (queue row Q2313). The size of a mesh's sum is weighed here,
 /// below, and nowhere else.
 ///
 /// # A coarse mesh that lies flat has not answered
