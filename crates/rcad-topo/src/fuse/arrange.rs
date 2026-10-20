@@ -717,8 +717,15 @@ struct Arrangement<'f> {
     /// outermost node, and two walks either side of that stretch are one cell
     /// with two different signs. Inside the face a surface handed in as a cut
     /// still tells cells apart, drawn in full or not
-    /// ([`Arrangement::the_one_on_its_side_of_every_cut`]).
+    /// ([`Arrangement::the_one_on_its_side_of_every_cut`]). No half of an
+    /// ellipse closes, and two drawn whole are `whole_ellipses`.
     drawn_in_full: Vec<bool>,
+    /// Each two halves of one ellipse two pipes of one width cross in
+    /// ([`HalfAnEllipse`]) that are both drawn from end to end, between the
+    /// same two nodes. So the whole ellipse is drawn, and which side of the
+    /// plane it lies in tells cells apart as a crossing drawn in full does
+    /// ([`Arrangement::which_side_of_everything`]).
+    whole_ellipses: Vec<[usize; 2]>,
     /// Which crossing each cut surface handed in turned into, in the order they
     /// were handed in. `None` when the surface misses the face's own and cuts
     /// nothing.
@@ -1157,6 +1164,7 @@ impl<'f> Arrangement<'f> {
             nodes: Vec::new(),
             arcs: Vec::new(),
             drawn_in_full: Vec::new(),
+            whole_ellipses: Vec::new(),
             cut_crossings: Vec::new(),
             touches: Vec::new(),
             crossing_of_edge: Vec::new(),
@@ -5772,6 +5780,7 @@ impl<'f> Arrangement<'f> {
                 self.crossings[crossing].order.closes() && self.crossings[crossing].reaches_the_face
             })
             .collect();
+        let mut ends_of_a_whole_half: Vec<Option<[usize; 2]>> = vec![None; self.crossings.len()];
         for (crossing, on_it) in self.the_nodes_on_each_crossing().iter().enumerate() {
             if !self.crossings[crossing].reaches_the_face {
                 continue;
@@ -5825,11 +5834,49 @@ impl<'f> Arrangement<'f> {
                     self.drawn_in_full[crossing] = false;
                 }
             }
+            if let (Some(&first), Some(&last)) = (order.first(), order.last())
+                && self.crossings[crossing].half_an_ellipse.is_some()
+                && first != last
+                && present.iter().all(|&drawn| drawn)
+                && self.is_an_end_of_the_halves(first, crossing)
+                && self.is_an_end_of_the_halves(last, crossing)
+            {
+                ends_of_a_whole_half[crossing] = Some([first.min(last), first.max(last)]);
+            }
         }
+        self.whole_ellipses = self.the_halves_that_make_whole_ellipses(&ends_of_a_whole_half);
         self.part_the_two_nappes_at_the_apex()?;
         self.drop_the_lumps_of_straight_cuts_alone();
         self.join_arcs_that_meet_at_nothing();
         Ok(())
+    }
+
+    /// Each two halves of one ellipse ([`Arrangement::are_two_halves_of_one_ellipse`])
+    /// both drawn whole between the same two nodes, given those nodes for each
+    /// crossing drawn whole from one end of a half to the other.
+    ///
+    /// **Neither of the arc passes after the cutting can break such an
+    /// ellipse.** [`Arrangement::drop_the_lumps_of_straight_cuts_alone`]
+    /// keeps every arc of a half, [`Arrangement::join_arcs_that_meet_at_nothing`]
+    /// joins arcs of one crossing alone and keeps the stretch they covered, and
+    /// [`Arrangement::part_the_two_nappes_at_the_apex`] is about a cone's face,
+    /// and a half is drawn on a pipe's.
+    fn the_halves_that_make_whole_ellipses(
+        &self,
+        ends_of_a_whole_half: &[Option<[usize; 2]>],
+    ) -> Vec<[usize; 2]> {
+        let mut whole = Vec::new();
+        for (one, ends) in ends_of_a_whole_half.iter().enumerate() {
+            let Some(ends) = ends else {
+                continue;
+            };
+            for (other, theirs) in ends_of_a_whole_half.iter().enumerate().skip(one + 1) {
+                if *theirs == Some(*ends) && self.are_two_halves_of_one_ellipse(one, other) {
+                    whole.push([one, other]);
+                }
+            }
+        }
+        whole
     }
 
     /// On a face on a cone, make the node at the apex two: one for the arcs
@@ -8919,6 +8966,23 @@ impl<'f> Arrangement<'f> {
     /// the cone's sign turns back: a point below both circles has the sign of a
     /// point above both. So a node past the flat half-space that picks the
     /// crossing out is read by [`Arrangement::whether_past_the_picker`] first.
+    ///
+    /// **Each half of an ellipse drawn whole with its other half says which
+    /// side of the ellipse's plane the walk is on**
+    /// ([`Arrangement::whole_ellipses`]). No half closes, so none is drawn in
+    /// full, and two pipes of one width cross in two ellipses, so the partner's
+    /// sign turns at both and is no side of either. But the pipe crosses the
+    /// plane in that ellipse alone, so a cell that does not cross the ellipse
+    /// stays on one side of the plane, and a node of the walk strictly off it
+    /// says which. It is read off nodes alone: left of a forward half-edge is
+    /// the partner's negative side, which is not a side of the plane. A bar
+    /// standing up `z` and a bar along `x` through `(0, 0, 3)`, both of radius
+    /// two, cut the upright wall above their two upper halves into a window
+    /// either side and the part above, and a pin through the cross along `y`
+    /// at `z = 5.5` draws a loop on that part, whose outside agreed with every
+    /// one of them, and with the part below the lower halves, about every
+    /// closed curve (queue row Q2464). Only the part above is on the loop's
+    /// side of both planes.
     fn which_side_of_everything(
         &self,
         cycle: usize,
@@ -8997,7 +9061,59 @@ impl<'f> Arrangement<'f> {
                     });
             }
         }
+        for &ellipse in &self.whole_ellipses {
+            for half in ellipse {
+                sides[half] = self.cycles[cycle].iter().find_map(|&half_edge| {
+                    let node = &self.nodes[self.from(half_edge)];
+                    if ellipse.iter().any(|on| node.crossings.contains(on)) {
+                        return None;
+                    }
+                    self.side_of_the_plane_a_half_lies_in(half, node.point)
+                });
+            }
+        }
         Ok(sides)
+    }
+
+    /// Which side of the plane the half ellipse `crossing` lies in `at` is:
+    /// `Pos` or `Neg`, or `None` where that cannot be told.
+    ///
+    /// A half in the corner `(s₀, s₁)` lies in the plane through `c`, where
+    /// the axes meet, square to `s₁û − s₀ê` for the two pipes' directions `ê`
+    /// and `û` of length one ([`a_half_of_an_ellipse`]). `facing` is `s₀E`
+    /// and `s₁U` for the stored directions, so that is
+    /// `‖E‖·facing[1] − ‖U‖·facing[0]` scaled by `‖E‖‖U‖`, which turns no
+    /// sign. `c` is where the face's own axis crosses the flat surface that
+    /// picks the half out leaning towards the face's pipe, as
+    /// [`Arrangement::place_where_two_halves_meet`] finds it.
+    ///
+    /// The other half of the same ellipse is in the opposite corner, so its
+    /// sides are this one's turned round. Each half's are read for itself and
+    /// compared only with the same half's.
+    fn side_of_the_plane_a_half_lies_in(
+        &self,
+        crossing: usize,
+        at: PredicatePoint,
+    ) -> Option<Decision> {
+        let half = self.crossings[crossing]
+            .half_an_ellipse
+            .expect("only a half of an ellipse is asked about");
+        let Surface::Cylinder(pipe) = self.surface else {
+            unreachable!("a half ellipse is drawn on a pipe's face and on no other")
+        };
+        let [one, other] = half.facing.map(|normal| normal.map(Interval::exactly));
+        let length = |normal: [Interval; 3]| root_enclosing(dot_of(normal, normal));
+        let square_to_it =
+            [0, 1, 2].map(|axis| other[axis] * length(one) - one[axis] * length(other));
+        let picker =
+            &self.crossings[crossing].picked_by()[usize::from(half.forward_runs_with_the_bend)];
+        let where_the_axes_meet = where_an_axis_crosses_a_flat_picker(&pipe, picker);
+        let point = at.enclosure();
+        let off_it = [0, 1, 2].map(|axis| point[axis] - where_the_axes_meet[axis]);
+        match dot_of(off_it, square_to_it).sign() {
+            side @ (Decision::Pos | Decision::Neg) => Some(side),
+            Decision::Zero | Decision::Undecidable { .. } | _ => None,
+        }
     }
 
     /// Whether a point of a pipe's, a cone's or a ball's face lies past the flat
@@ -17149,6 +17265,7 @@ mod tests {
             nodes: Vec::new(),
             arcs: Vec::new(),
             drawn_in_full: Vec::new(),
+            whole_ellipses: Vec::new(),
             cut_crossings: Vec::new(),
             touches: Vec::new(),
             crossing_of_edge: Vec::new(),
