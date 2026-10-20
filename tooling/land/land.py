@@ -56,6 +56,7 @@ WAIT = float(os.environ.get("LAND_WAIT", "540"))
 STATE = os.path.join("target", "land")
 ROW = re.compile(r"^[TDQ][0-9]+$")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
+JUST_OWN_ERROR = re.compile(r"^error: Recipe `[^`]*` failed(?: on line [0-9]+)? with exit code [0-9]+$")
 STEP_ARGS = {"add": 4, "after": 2, "tag": 2}
 USAGE = ("usage: just land [--steps <file>] [--answers <row>[,<row>...]] <row>[,<row>...] <lane branch> "
          "<lane sha> <merge branch> [<tree to unlock and mark finished>...], then just land wait for as long as "
@@ -429,6 +430,7 @@ def hold_batch(own, report, spool):
         gate_and_push(report)
     except Stop as stop:
         if stop.name != "gate" or not others:
+            detach_past_the_merge_commit()
             raise
         say(f"land: the gate failed with {len(others) + 1} lanes merged, so {own['branch']} lands alone "
             f"and the others are left for their own runs: {stop.why}")
@@ -436,11 +438,31 @@ def hold_batch(own, report, spool):
         command("reset", "git", "reset", "-q", "--hard", "origin/main")
         landing = land_or_reset(own)
         others = []
-        gate_and_push(report)
+        try:
+            gate_and_push(report)
+        except Stop:
+            detach_past_the_merge_commit()
+            raise
     report["rows_closed"] = landing["rows_closed"]
     report["rows_added"] = landing["rows_added"]
     report["needs_judgement"] += landing["needs_judgement"]
     return others
+
+
+def detach_past_the_merge_commit():
+    """Leaves the merge branch holding the merge commit, and the tree detached at `origin/main`.
+
+    `land_or_reset` already resets a stop before the commit, back to
+    `origin/main`. Past the commit, a stop from `gate_and_push` (gate,
+    attempts, push, a conflicting catch-up or `check-queue` on one) would
+    otherwise leave the tree on the merge branch, holding a commit
+    `origin/main` does not have, and `prune-worktrees` keeps a tree like that
+    forever (§384.5). `origin/main` is a landed ref on its own, so a tree
+    sitting there can be pruned once its hour is up, with the merge branch
+    left to the side, neither pushed nor deleted. Best-effort: a failed
+    detach leaves the original stop to say what happened.
+    """
+    run("git", "switch", "--detach", "origin/main")
 
 
 def land_or_reset(entry):
@@ -542,8 +564,16 @@ def apply_queue(rows, answered, tip, steps, landing):
     adds = [step for step in steps if step[0] == "add"]
     if len(ids) != len(adds):
         landing["needs_judgement"].append(f"queue apply printed {len(ids)} new ids for {len(adds)} add steps")
+    # A later `tag` step (§403.10) or an `after` step (§435.6) can move an
+    # added row to a tier other than the one its own `add` step named, so the
+    # tier reported is the row's own, read back from the file the apply just
+    # wrote, and only the `add` step's when the row cannot be found there.
+    queue = Queue(read("docs/queue.md"))
     for row_id, (_, tier, model, _write_set, what) in zip(ids, adds):
-        landing["rows_added"].append(f"{row_id.strip()} tier {tier} {model}: {what[:80]}")
+        row_id = row_id.strip()
+        row = queue.find(row_id)
+        tier = row.tier if row is not None else tier
+        landing["rows_added"].append(f"{row_id} tier {tier} {model}: {what[:80]}")
 
 
 def said_where_from(step, row):
@@ -799,8 +829,20 @@ def write_json(path, data):
 
 
 def last_line(said):
+    """The last non-blank line of `said` that is not `just`'s own wrapper around a failed recipe.
+
+    A recipe run through a real `just` prints its own reason, then `just`
+    appends `error: Recipe ... failed ... with exit code N`: that second line
+    names no reason, only the recipe's own exit code, so a stop that reports
+    it instead loses whatever the recipe itself said (Q1088, §384.3). Falls
+    back to the wrapper line itself when there is nothing else printed, so a
+    stop still names something rather than nothing.
+    """
     lines = [line for line in said.splitlines() if line.strip()]
-    return lines[-1].strip() if lines else "(it printed nothing)"
+    if not lines:
+        return "(it printed nothing)"
+    kept = [line for line in lines if not JUST_OWN_ERROR.match(line.strip())]
+    return (kept or lines)[-1].strip()
 
 
 if __name__ == "__main__":
