@@ -168,6 +168,45 @@ pub(crate) struct Split {
     pub(crate) names_of_one_point: Vec<NamesOfOnePoint>,
 }
 
+/// Each cut of [`BakedFace::cuts_that_reach_only_its_boundary`] that `face`
+/// still draws a crossing of once
+/// [`Arrangement::leave_out_the_cuts_that_reach_only_the_boundary`] has left
+/// out what it can, with its edges told what the faces across leave out as
+/// they stand. A crossing a boundary edge runs along is not counted: it is
+/// the face's rim whatever cuts it, so counting it would take off the list
+/// every cut that is also the surface across one of the face's edges.
+///
+/// What the steps write to the log is thrown away: [`split_a_face`] runs
+/// them again, and writes them to the fuse's log there.
+///
+/// # Errors
+///
+/// The same as [`split_a_face`], from the same steps, so its split refuses
+/// the same way.
+pub(crate) fn the_listed_cuts_it_still_draws(
+    face: &BakedFace,
+    policy: &Policy,
+) -> Result<Vec<Surface>> {
+    let cuts = canonical_cut_surfaces(face);
+    let arrangement = Arrangement::drawn(face, &cuts, policy, &mut ProvenanceLog::new())?;
+    let along_the_rim = arrangement.crossings_a_boundary_edge_runs_along();
+    Ok(face
+        .cuts_that_reach_only_its_boundary
+        .iter()
+        .copied()
+        .filter(|cut| {
+            arrangement
+                .crossings
+                .iter()
+                .zip(&along_the_rim)
+                .any(|(crossing, &rim)| {
+                    !rim && crossing.reaches_the_face
+                        && crossing.every_surface_that_draws_it().any(|on| on == cut)
+                })
+        })
+        .collect())
+}
+
 /// The stretches of the crossing `face.surface ∩ partner` that run through the
 /// inside of `face`.
 ///
@@ -1157,6 +1196,29 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
+        let mut arrangement = Self::drawn(face, cuts, policy, log)?;
+        arrangement.start_every_closed_crossing_that_has_no_node(log)?;
+        arrangement.work_out_how_each_crossing_runs(log)?;
+        arrangement.merge_points_that_are_one_point(policy, log)?;
+        arrangement.fold_the_straight_cuts_along_one_line();
+        arrangement.cut_the_crossings_into_arcs(policy, log)?;
+        arrangement.walk_the_cycles(policy, log)?;
+        arrangement.count_the_windings_inside_each_lump();
+        arrangement.group_the_cycles_into_cells(cuts, policy, log)?;
+        arrangement.count_the_windings()?;
+        Ok(arrangement)
+    }
+
+    /// The crossings and the nodes where they meet, each crossing left out
+    /// where it reaches nothing of the face, as far as
+    /// [`Arrangement::leave_out_the_cuts_that_reach_only_the_boundary`] and no
+    /// further: [`the_listed_cuts_it_still_draws`] stops here.
+    fn drawn(
+        face: &'f BakedFace,
+        cuts: &[Surface],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Self> {
         let mut arrangement = Self {
             face,
             surface: face.surface,
@@ -1187,15 +1249,6 @@ impl<'f> Arrangement<'f> {
         arrangement.place_the_meets(policy, log)?;
         arrangement.place_the_touches();
         arrangement.leave_out_the_cuts_that_reach_only_the_boundary();
-        arrangement.start_every_closed_crossing_that_has_no_node(log)?;
-        arrangement.work_out_how_each_crossing_runs(log)?;
-        arrangement.merge_points_that_are_one_point(policy, log)?;
-        arrangement.fold_the_straight_cuts_along_one_line();
-        arrangement.cut_the_crossings_into_arcs(policy, log)?;
-        arrangement.walk_the_cycles(policy, log)?;
-        arrangement.count_the_windings_inside_each_lump();
-        arrangement.group_the_cycles_into_cells(cuts, policy, log)?;
-        arrangement.count_the_windings()?;
         Ok(arrangement)
     }
 
@@ -3462,7 +3515,10 @@ impl<'f> Arrangement<'f> {
     ///
     /// Run after the meets are placed, since they are what this reads, and
     /// to a fixed point, since a crossing kept makes its nodes count against
-    /// the others through them.
+    /// the others through them. Nothing before it reads what the faces across
+    /// leave out, so `cuts.rs` runs each face this far to learn what it still
+    /// draws ([`the_listed_cuts_it_still_draws`]), and tells its neighbours
+    /// that before the split.
     fn leave_out_the_cuts_that_reach_only_the_boundary(&mut self) {
         let leaves_out = &self.face.cuts_that_reach_only_its_boundary;
         if leaves_out.is_empty() {
@@ -3535,7 +3591,9 @@ impl<'f> Arrangement<'f> {
     /// leaving `crossing` out splits it here. For each surface `crossing` lies
     /// on, either `along` lies on it too, so the face across meets it in a
     /// curve there and places no node; or the face across every edge along
-    /// `along` leaves it out as well, and places no node of it there alone
+    /// `along` leaves it out as well, drawing no crossing of it at all
+    /// ([`BakedEdge::its_neighbour_leaves_out`](super::bake::BakedEdge::its_neighbour_leaves_out)),
+    /// and places no node of it there alone
     /// ([`Arrangement::the_face_across_places_it_alone`]).
     fn the_faces_across_split_it_no_more(
         &self,
