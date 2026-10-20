@@ -64,11 +64,15 @@ fn uniting_them_keeps_the_cube_and_the_ball_as_two_solids() {
             let [ball, cube] = measured.as_slice() else {
                 panic!("{what}: two solids, not {}", measured.len());
             };
-            for (measured, closed_form, which) in
-                [(ball, 4.0 * PI / 3.0, "ball"), (cube, 8.0, "cube")]
-            {
+            // The cube's corners were turned by 3π/4 and rounded, so its own
+            // triangles hold 8 only to that rounding. Its declared error is the
+            // rounding of the sum over them alone, so the corners' is added.
+            for (measured, closed_form, corners, which) in [
+                (ball, 4.0 * PI / 3.0, 0.0, "ball"),
+                (cube, 8.0, 8.0 * 1e-12, "cube"),
+            ] {
                 assert!(
-                    (measured.volume() - closed_form).abs() <= measured.volume_error(),
+                    (measured.volume() - closed_form).abs() <= measured.volume_error() + corners,
                     "{what}: the {which} measures {}, closed form {closed_form}, declared {}",
                     measured.volume(),
                     measured.volume_error()
