@@ -18144,7 +18144,15 @@ check-land-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
     dir=$(realpath "$(mktemp -d)")
-    trap 'rm -rf "$dir"' EXIT
+    stopped_pids=""
+    reap_stopped() {
+        local pid
+        for pid in $stopped_pids; do
+            kill -9 -- "-$pid" 2>/dev/null || true
+        done
+    }
+    export -f reap_stopped
+    trap 'reap_stopped; rm -rf "$dir"' EXIT
     mkdir "$dir/bin"
     cat >"$dir/bin/just" <<'STUB'
     #!/usr/bin/env bash
@@ -18596,6 +18604,7 @@ check-land-selftest:
     start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
     waiter=$(cat "$at/lander2/target/land/pid")
     kill -STOP -- "-$waiter"
+    stopped_pids="$stopped_pids $waiter"
     wait_stopped "$waiter"
     release_lock
     land_in verify 0.5 wait-for lane-y
@@ -18619,6 +18628,21 @@ check-land-selftest:
     [ "$rc" -eq 0 ] || fail "wait-for exited $rc once no run was landing lane-y, not 0"
     grep -qxF 'land: no run is landing lane-y; fetch origin before you read origin/main' <<<"$got" \
         || fail "wait-for does not say that no run is landing lane-y"
+    setsid sleep 300 &
+    demo_pid=$!
+    disown "$demo_pid"
+    sleep 0.1
+    kill -STOP -- "-$demo_pid"
+    wait_stopped "$demo_pid"
+    STOPPED_DEMO_PID="$demo_pid" bash -c '
+        set -euo pipefail
+        stopped_pids="$STOPPED_DEMO_PID"
+        trap reap_stopped EXIT
+        exit 1
+    ' || true
+    sleep 0.2
+    ! kill -0 "$demo_pid" 2>/dev/null \
+        || fail "a fail forced between the two kills left pid $demo_pid stopped instead of reaped (§397.5)"
 
     fixture killed-holder
     second_lane
