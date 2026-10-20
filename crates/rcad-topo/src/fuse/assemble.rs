@@ -6545,10 +6545,21 @@ struct ReadAgainst {
     /// own, or at a ball's pole the ball's and its lid's way out
     /// ([`the_lid_a_circle_from_a_pole_bounds`]).
     frame: [Vector; 2],
-    /// Whether `frame` is the lid a piece of a ball read a circle from its
-    /// pole against: the flat face that would close that piece, which need not
-    /// be a face of the answer at all.
-    a_ball_pieces_own_lid: bool,
+    /// Whose lid `frame` is, where it is one; `None` where it is `surface`'s
+    /// own.
+    lid: Option<WhoseLid>,
+}
+
+/// Whose lid a circle from a ball's pole was read against
+/// ([`the_lid_a_circle_from_a_pole_bounds`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WhoseLid {
+    /// A piece of the ball's: the flat face that would close that piece, which
+    /// need not be a face of the answer at all.
+    ABallPieces,
+    /// A flat piece's: its own plane, which is a face of the answer, and the
+    /// plane the mesh walks the circle round.
+    AFlatPieces,
 }
 
 /// Where one face walks along one edge: the face, the ring, and how far round
@@ -6788,7 +6799,7 @@ pub(super) fn one_surface(one: &Surface, other: &Surface) -> bool {
 ///
 /// **Two pieces of a ball, each read against its own lid, are each read again
 /// against the crossing they share**: the ball and the plane as the plane's
-/// solid stores it ([`ReadAgainst::a_ball_pieces_own_lid`]). A plane through a
+/// solid stores it ([`WhoseLid::ABallPieces`]). A plane through a
 /// ball's pole with no flat face of the answer along its circle leaves a piece
 /// of the ball on both sides, as a ball resting at its pole on a turned cube's
 /// ridge does, united with it or less it. Each piece's lid points out of that
@@ -6797,8 +6808,20 @@ pub(super) fn one_surface(one: &Surface, other: &Surface) -> bool {
 /// `TwoPatchesOfTheMeshDrewTheSameSide`). Read against one frame they differ by
 /// their material side alone and walk it opposite ways. The piece whose lid is
 /// the plane as stored keeps its reading, and each side is read alone, so the
-/// order the two come in does not matter. Where a flat face lies along the
-/// circle, that face is the lid the ball's piece read, and this does not apply.
+/// order the two come in does not matter.
+///
+/// **A piece of a ball across a flat face is read again against that face's
+/// own plane** ([`WhoseLid::AFlatPieces`]), which is the plane the mesh walks
+/// the circle round. The piece's lid is the flat face across only where that
+/// face closes the piece, as a cap kept by intersection or a ball less a block
+/// has it, and there reading again changes nothing. Where the face runs on past
+/// the circle, away from the ball, it points out of its block and away from
+/// the lid: a ball united with a block whose face runs through its pole, either
+/// way round, or the block less the ball. Read as they were, both sides walked
+/// the circle the same way round (Q2495: 315 of 315 refused
+/// `FacesDoNotAgreeWhichWayTheyFace`, in `a_ball_cut_through_its_pole.rs`).
+/// The flat face's side was read against the ball the edge is stored by, and
+/// keeps its reading.
 ///
 /// # Errors
 ///
@@ -6844,9 +6867,10 @@ fn every_closed_edge_read_off_one_spelling(
         let the_reference_itself = |read: &ReadAgainst| {
             name_of_surface_bits(&read.surface) == name_of_surface_bits(&reference)
         };
+        let a_ball_piece = |read: &ReadAgainst| read.lid == Some(WhoseLid::ABallPieces);
         for (index, (face, wire, position)) in [one, other].into_iter().enumerate() {
             let (read, across) = (&reads[index], &reads[1 - index]);
-            let turn = if read.a_ball_pieces_own_lid && across.a_ball_pieces_own_lid {
+            let turn = if a_ball_piece(read) && a_ball_piece(across) {
                 runs_the_other_way_read_against(
                     read,
                     &ReadAgainst {
@@ -6854,6 +6878,8 @@ fn every_closed_edge_read_off_one_spelling(
                         ..*read
                     },
                 )?
+            } else if a_ball_piece(read) && across.lid == Some(WhoseLid::AFlatPieces) {
+                runs_the_other_way_read_against(read, across)?
             } else if the_reference_itself(read) {
                 false
             } else if one_surface(&read.surface, &reference) {
@@ -9550,13 +9576,15 @@ impl Edges {
 /// turns it round afterwards where the answer stores the edge by another
 /// spelling of that surface, or by another surface that runs the other way
 /// round it. The path for a circle from a ball's pole reads against the lid's
-/// normal and not against a winding, and that pass turns it only where a piece
-/// of the ball lies on both sides: the surface it is read against is a ball, a
-/// ball has no second spelling (`name_of_the_surface_either_way_round` folds
-/// nothing for it), and where the ball is what the edge is stored by, the pass
-/// leaves the ball's own side alone and reads the side across again against
-/// the lid. Two pieces of the ball, each read against its own lid, are both
-/// read again against the crossing they share.
+/// normal and not against a winding, and that pass turns it only where the
+/// lids either side point opposite ways: the surface it is read against is a
+/// ball, a ball has no second spelling (`name_of_the_surface_either_way_round`
+/// folds nothing for it), and where the ball is what the edge is stored by and
+/// a curved face lies across, the pass leaves the ball's own side alone and
+/// reads the side across again against the lid. A piece of the ball across a
+/// flat face is read again against that face's plane, and two pieces of the
+/// ball, each read against its own lid, are both read again against the
+/// crossing they share.
 ///
 /// # Errors
 ///
@@ -9585,12 +9613,12 @@ fn which_way_a_closed_edge_is_walked(
         return Ok(Some((true, None)));
     };
     let crossing = [gradient_of(&mine, at), gradient_of(&partner, at)];
-    let read_against = |frame, a_ball_pieces_own_lid| {
+    let read_against = |frame, lid| {
         Some(ReadAgainst {
             surface: curved,
             crossing,
             frame,
-            a_ball_pieces_own_lid,
+            lid,
         })
     };
     match a_closed_crossing_is_walked_the_way_it_is_stored(
@@ -9606,7 +9634,7 @@ fn which_way_a_closed_edge_is_walked(
                     gradient_of(&curved, at),
                     the_way_it_is_parametrised_about(&curved, at),
                 ],
-                false,
+                None,
             ),
         ))),
         None => {
@@ -9629,10 +9657,7 @@ fn which_way_a_closed_edge_is_walked(
                 Decision::Pos => !runs_along_stored,
                 other => panic!("a face with no side to its material: {other:?}"),
             };
-            Ok(Some((
-                forward,
-                read_against(frame, matches!(mine, Surface::Sphere(_))),
-            )))
+            Ok(Some((forward, read_against(frame, Some(lid.whose)))))
         }
     }
 }
@@ -9662,16 +9687,20 @@ fn which_way_a_closed_edge_is_walked(
 /// round with the piece.
 ///
 /// So a ball's piece reads the lid that would close it, which is a face of the
-/// answer only where a flat face lies along the circle. Where a piece of the
-/// ball lies across instead, the two lids point opposite ways, and
-/// [`every_closed_edge_read_off_one_spelling`] reads both pieces again against
-/// one frame.
+/// answer only where the flat face along the circle closes the piece. Where
+/// that face runs on past the circle, away from the ball, it points the other
+/// way, and [`every_closed_edge_read_off_one_spelling`] reads the piece again
+/// against the face's own plane. Where a piece of the ball lies across instead,
+/// the two lids point opposite ways, and that pass reads both pieces again
+/// against one frame.
 fn the_lid_a_circle_from_a_pole_bounds(meet: &FaceMeet, turned_round: bool) -> Option<Lid> {
-    let (ball, outward) = match meet.carried_by {
-        [Surface::Plane(flat), ball @ Surface::Sphere(_)] => (ball, flat.normal()),
+    let (ball, outward, whose) = match meet.carried_by {
+        [Surface::Plane(flat), ball @ Surface::Sphere(_)] => {
+            (ball, flat.normal(), WhoseLid::AFlatPieces)
+        }
         [ball @ Surface::Sphere(_), Surface::Plane(flat)] => match meet.material_side {
-            Decision::Neg => (ball, flat.normal()),
-            Decision::Pos => (ball, -flat.normal()),
+            Decision::Neg => (ball, flat.normal(), WhoseLid::ABallPieces),
+            Decision::Pos => (ball, -flat.normal(), WhoseLid::ABallPieces),
             other => panic!("a face with no side to its material: {other:?}"),
         },
         _ => return None,
@@ -9679,6 +9708,7 @@ fn the_lid_a_circle_from_a_pole_bounds(meet: &FaceMeet, turned_round: bool) -> O
     Some(Lid {
         ball,
         outward: if turned_round { -outward } else { outward },
+        whose,
     })
 }
 
@@ -9686,6 +9716,7 @@ fn the_lid_a_circle_from_a_pole_bounds(meet: &FaceMeet, turned_round: bool) -> O
 struct Lid {
     ball: Surface,
     outward: Vector,
+    whose: WhoseLid,
 }
 
 /// Which of the two arcs between an edge's two corners this face walks, as the
