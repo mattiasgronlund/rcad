@@ -141,12 +141,13 @@ row prep finds wrong comes back not merged before any lane starts, with a
 files, drop and add, then `queue next` (§396.4).
 
 **A row that adds a test file directly under `crates/rcad-topo/tests/`,
-`crates/rcad-geom/tests/` or `crates/rcad-step/tests/` holds one item of that
-crate's `tests/merged.rs`, never the whole file, and the new file itself**
-(§373.7). The lane declares its own file there, in its place by name, and the
-entry `crates/rcad-topo/tests/merged.rs#<module>` (or the `rcad-geom` or
-`rcad-step` equivalent), the module being the file's name with each `-`
-written `_`, lets rows adding different files run side by side. `merged.rs`
+`crates/rcad-geom/tests/` or `crates/rcad-step/tests/` holds one item of
+`crates/rcad-topo/tests/merged.rs`, `crates/rcad-geom/tests/merged.rs` or
+`crates/rcad-step/tests/merged.rs`, never the whole file, and the new file
+itself** (§373.7). The lane declares its own file there, in its place by
+name, and the entry `crates/rcad-topo/tests/merged.rs#<module>` (or the
+`rcad-geom` or `rcad-step` equivalent), the module being the file's name with
+each `-` written `_`, lets rows adding different files run side by side. `merged.rs`
 whole would make each of them wait on all the others. The write set needs the
 new file's own path too — Q2353's row held `merged.rs` whole, its lane
 narrowed to the item alone and dropped the file, and `unproven()` refused the
