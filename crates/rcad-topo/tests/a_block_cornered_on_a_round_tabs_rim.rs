@@ -31,11 +31,13 @@
 //!   the plate, the plate less it, and their common part, a gap.** Its other
 //!   corner `(7.6, 11.8)` is on the rim too. Under a certified policy these are
 //!   refused `Undecidable` on which side of the tab's wall a point a rounding
-//!   from that corner lies (Q2477). Under the floor, and under a tolerant
-//!   policy, the same three answer.
-//! - **That block's union under a tolerant policy, a gap.** The plate with the
-//!   block on it, or under it, is a solid, and the mesh refuses it either way
-//!   (Q2478).
+//!   from that corner lies (Q2477). Each answer is one of the two solids as it
+//!   stands, or nothing, since they touch along a face; under the floor, and
+//!   under a tolerant policy, the same three give it.
+//! - **That block's union under a tolerant policy, not yet traced.** The mesh
+//!   refuses it, a wire that does not fan into a loop with the block on the
+//!   plate's top and two patches drawing the same side with it under the
+//!   floor. Q2478 traces it and says whether it is a gap.
 
 use rcad_geom::{Deflection, Isometry, SIDE_OF_CYLINDER, Scale, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
