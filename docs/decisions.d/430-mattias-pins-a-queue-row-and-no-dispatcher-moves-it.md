@@ -137,13 +137,14 @@ What was decided while building it:
 - **A pin that waits holds nothing.** It is not ready, so the fill does not
   reach it, and a chain of pins (§430.3) does not freeze the files of the later
   links while the first runs.
-- **`blocked` is left as it was**: the rows a running lane holds back, as if
-  nothing were taken or skipped above. The queue page reads its lines and
-  asserts they have one of two shapes (`MEETS_LINE` and `SHARED_LINE` in
-  `tooling/queue-page/render.py`), which lies outside Q2328's write set, so a
-  third shape there would stop the page. The page still lists a row a skipped
-  pin holds back among those that fit, and a row is filed to change both
-  together.
+- **`blocked` records the pin too**, since Q2394. Q2328 left it naming the
+  rows a running lane holds back alone, because the queue page asserts each
+  line it reads has one of the shapes in `tooling/queue-page/render.py`, which
+  lay outside Q2328's write set. Q2394 changed both together: `blocked` takes
+  a pinned row a running lane or a row held elsewhere holds back as a holder,
+  and prints the `pinned and skipped above` line for each later ready row that
+  meets it, in the fill order, and the page reads that line (`PINNED_LINE`)
+  as a row the fill will not take.
 
 The cost is slots left empty while the lanes in the pin's way drain, where
 before they went to rows the pin then waited behind. That is what a pin asks

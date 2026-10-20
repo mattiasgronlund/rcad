@@ -68,12 +68,15 @@ import lineage  # noqa: E402
 
 QUEUE_PATH = "docs/queue.md"
 CLOSED_ROWS_SHOWN = 12
-# The three lines `just queue blocked` prints: a row's path meets one hold, it
-# is one of `queue_shared_files` and two holds already have it (§424.4), or its
-# `cores:` entry does not fit the machine's free threads (§308). The blocked
-# mode takes no row, so none of the three names a row taken above for the
-# first two; only the third can, since a `cores:` hold is a sum, not a path.
+# The four lines `just queue blocked` prints: a row's path meets a running
+# lane's or a row held elsewhere's, or meets a pinned row that one of those
+# already holds back (§430.7), or it is one of `queue_shared_files` and two
+# holds already have it (§424.4), or its `cores:` entry does not fit the
+# machine's free threads (§308). The blocked mode takes no row, so none of the
+# four names a row taken above; only the `cores:` one can, since that hold is
+# a sum, not a path.
 MEETS_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), held (by|elsewhere by) (\S+)$")
+PINNED_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), pinned and skipped above$")
 SHARED_LINE = re.compile(
     r"^skip (\S+) \(tier (\S+)\): its (\S+) is shared, and "
     r"(\S+) \(held (by|elsewhere by) (\S+)\) and (\S+) \(held (by|elsewhere by) (\S+)\) already hold it$")
@@ -417,18 +420,26 @@ def blocked_lines(tree):
 def parse_blocked_line(line):
     """One line of `just queue blocked`'s output, as a dict the rest of this module reads.
 
-    `shared` tells the three shapes apart: `False` for one hold met, `True`
-    for a shared path two holds already have, and the string `"cores"` for a
-    `cores:` entry that does not fit the machine's free threads (§308).
-    `holders` is always a list of `(id-or-"the night fuzz", path-or-None, how,
-    holder)` tuples; `how` is `None` for the night fuzz, `"taken above"` for a
-    row the fill already walked past, and otherwise `"by"` or `"elsewhere by"`
-    as the justfile prints it.
+    `shared` tells the four shapes apart: `False` for one hold met, whether
+    that hold is a running lane, a row held elsewhere or a pinned row already
+    skipped, `True` for a shared path two holds already have, and the string
+    `"cores"` for a `cores:` entry that does not fit the machine's free
+    threads (§308). `holders` is always a list of `(id-or-"the night fuzz",
+    path-or-None, how, holder)` tuples; `how` is `None` for the night fuzz,
+    `"taken above"` for a row the fill already walked past, `"pinned and
+    skipped above"` (with `holder` then `None` too) for a pinned row a running
+    lane or a row held elsewhere already holds back (§430.7), and otherwise
+    `"by"` or `"elsewhere by"` as the justfile prints it.
     """
     meets = MEETS_LINE.match(line)
     if meets:
         row_id, _, mine, other, theirs, how, holder = meets.groups()
         return {"id": row_id, "mine": mine, "shared": False, "holders": [(other, theirs, how, holder)]}
+    pinned = PINNED_LINE.match(line)
+    if pinned:
+        row_id, _, mine, other, theirs = pinned.groups()
+        return {"id": row_id, "mine": mine, "shared": False,
+                "holders": [(other, theirs, "pinned and skipped above", None)]}
     shared = SHARED_LINE.match(line)
     if shared:
         row_id, _, mine, first, first_how, first_holder, second, second_how, second_holder = shared.groups()
@@ -815,6 +826,8 @@ def meeting_reason(line, links):
                                for other, _, how, holder in line["holders"])
         return f"<code>{html.escape(line['mine'])}</code> is shared, and {holders} already hold it"
     ((other, theirs, how, holder),) = line["holders"]
+    if how == "pinned and skipped above":
+        return f"meets {links.ref(other)}'s <code>{html.escape(theirs)}</code>, pinned and skipped above"
     return f"meets {links.ref(other)}'s <code>{html.escape(theirs)}</code>, held {how} <code>{html.escape(holder)}</code>"
 
 

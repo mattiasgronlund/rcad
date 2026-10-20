@@ -12888,11 +12888,11 @@ _queue-rows file:
 # that meets no running lane, no row taken above it and no pinned row skipped
 # above it, and every row it passes over says which of its entries met which.
 # N defaults to the free slots. `blocked` prints the line `next` passes a row
-# over with, for every ready row whose write set meets a running lane's, as if
-# nothing were taken or skipped above it: the rows a fill holds back however
-# many slots are free, less those only a skipped pinned row holds back. The
-# queue page reads it (Q1510), so the rule for when two write sets meet stays
-# here alone.
+# over with, for every ready row whose write set meets a running lane's or a
+# pinned row's a running lane or a row held elsewhere already holds back, as
+# if nothing were taken above it: the rows a fill holds back however many
+# slots are free (§430.7). The queue page reads it (Q1510), so the rule for
+# when two write sets meet stays here alone.
 #
 # **The order comes from the tier field, not from where a row sits.**
 # `check-queue` makes the two agree, but the fill does not lean on that having
@@ -13041,7 +13041,7 @@ queue mode="" *args:
             printf '%s\n' \
                 'just queue                                   ready rows by tier, then running, waiting, parked' \
                 'just queue ready                             the ready rows alone, for status to show' \
-                'just queue blocked                           each ready row a running lane holds back, as next would skip it' \
+                'just queue blocked                           each ready row a running lane, a row held elsewhere or a pin they hold back keeps out, as next would skip it' \
                 'just queue next [N]                          what N free slots take; N defaults to the free slots on this machine' \
                 'just queue show <id>                         one row, its hold, and its state in other worktrees' \
                 'just queue running                           what holds a slot on this machine, one line each' \
@@ -13216,7 +13216,11 @@ queue mode="" *args:
             }
 
             if (mode == "blocked") {
-                for (x = 1; x <= w; x++) blocked(walk[x], 1)
+                for (x = 1; x <= pinned_n; x++) {
+                    i = walk[x]
+                    if (blocked(i, 1)) pinheld[++pinheld_n] = i
+                }
+                for (x = pinned_n + 1; x <= w; x++) blocked(walk[x], 1)
                 exit 0
             }
 
@@ -14225,7 +14229,40 @@ check-queue-page-selftest:
     ) || fail "parse_blocked_line or meeting_reason could not read one of the two cores-skip line forms §308"
     [ "$cores_check" = "ok" ] || fail "the cores-skip checks did not print ok: $cores_check"
 
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, and both forms of a cores-skip line read as a row waiting for threads"
+    # Q2394 (§430.7): `queue blocked` also prints a third shape, for a row
+    # whose write set meets a pinned row that a running lane or a row held
+    # elsewhere already holds back. That line carries no `held by` tail, so
+    # it needs its own regex (PINNED_LINE) and its own branch in
+    # parse_blocked_line and meeting_reason; this drives both directly, the
+    # same way cores_check above drives the cores-skip shapes.
+    pinned_check=$(python3 - '{{ justfile_directory() }}/tooling/queue-page' <<'PY'
+    import sys
+
+    sys.path.insert(0, sys.argv[1])
+    import render
+
+
+    class Links:
+        def ref(self, row_id):
+            return f"<{row_id}>"
+
+
+    pinned = render.parse_blocked_line(
+        "skip Q3 (tier 1): its crates/t/tests/b.rs meets Q2's crates/t/tests/, pinned and skipped above")
+    assert pinned == {
+        "id": "Q3", "mine": "crates/t/tests/b.rs", "shared": False,
+        "holders": [("Q2", "crates/t/tests/", "pinned and skipped above", None)],
+    }, pinned
+    assert render.meeting_reason(pinned, Links()) == (
+        "meets <Q2>'s <code>crates/t/tests/</code>, pinned and skipped above"
+    ), render.meeting_reason(pinned, Links())
+
+    print("ok")
+    PY
+    ) || fail "parse_blocked_line or meeting_reason could not read the pinned-and-skipped-above line §430.7"
+    [ "$pinned_check" = "ok" ] || fail "the pinned-skip check did not print ok: $pinned_check"
+
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, both forms of a cores-skip line read as a row waiting for threads, and a row whose write set meets a pinned row already skipped reads as pinned and skipped above too"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
@@ -14535,7 +14572,8 @@ _queue-check file decisions:
 # write set, skipped with the pinned row named: a later pin, a wrong/A row, a
 # small row that would complete the full bundle, and a third holder of a shared
 # file the pin names; a second holder of that file and the rows that meet no pin
-# are taken, and `blocked` still names the running lane alone. §432 adds the
+# are taken. `blocked` now records the pin too, and each later row that meets
+# it, with a third line shape (Q2394). §432 adds the
 # word that says where a row came from, after a pin and a class, after `small`, and on a closed
 # row; a `from/` naming a Q row this copy does not hold, passed; and a malformed
 # word, `was/-`, a row from itself, a T id that is no row and a class written
@@ -15011,8 +15049,12 @@ check-queue-selftest:
     grep -qx 'took 3 of 4: every other ready row meets a running lane, a row taken above or a pinned row skipped above' <<<"$got" \
         || fail "a fill a skipped pinned row cut short did not say a pinned row is among the reasons"
     drive pinwait blocked
-    [ "$got" = "skip Q2 (tier 1): its crates/t/tests/ meets Q1's crates/t/tests/a.rs, held by lane:lane-q1" ] \
-        || fail "blocked no longer names the running lane alone, the two line shapes the queue page reads"
+    [ "$got" = "$(printf '%s\n' \
+        "skip Q2 (tier 1): its crates/t/tests/ meets Q1's crates/t/tests/a.rs, held by lane:lane-q1" \
+        "skip Q3 (tier 1): its crates/t/tests/b.rs meets Q2's crates/t/tests/, pinned and skipped above" \
+        "skip Q4 (tier 1): its crates/t/tests/c.rs meets Q2's crates/t/tests/, pinned and skipped above" \
+        "skip Q7 (tier 2): its crates/t/tests/d.rs meets Q2's crates/t/tests/, pinned and skipped above")" ] \
+        || fail "blocked did not record the pinned row a running lane holds back, or each later row that meets it (§430.7)"
 
     fence partial <<'MD'
     Q1  1  todo  opus  docs/a.md  tier one §230
