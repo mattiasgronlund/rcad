@@ -60,116 +60,76 @@
 //! (`fuse/select.rs`,
 //! `the_sliver_of_a_ball_between_two_places_one_corner_apart_is_placed_by_its_side_on_the_wall`).
 //!
-//! # What it refuses on next
+//! # What it refuses on
 //!
-//! Every fuse then refuses while it puts the answer together, the same under
-//! either policy (the pin below):
+//! The arc of the ball's circle between the two places would be an edge from
+//! their one corner back to itself, which is the whole circle. Since Q2193
+//! every fuse, with either solid first and under either policy, is refused
+//! there by name before the answer is put together:
+//! `Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` at `(16, 1, −2⁻²⁵)`,
+//! from `Corners::of_both_ends` in `fuse/assemble.rs` (the pin below).
 //!
-//! | rule         | ball first                 | block first                |
-//! |--------------|----------------------------|----------------------------|
-//! | union        | a corner twice in one loop | two faces facing apart     |
-//! | intersection | a corner twice in one loop | a corner twice in one loop |
-//! | difference   | a corner twice in one loop | a corner twice in one loop |
+//! Until then every fuse went on with the two arcs as one closed edge and was
+//! refused while it put the answer together, under names that say nothing of
+//! it: the union with the block first by `Invalid::FacesDoNotAgreeWhichWayTheyFace`,
+//! and the other five by `CannotMeshAFace` with
+//! `CornersCoincide { position: 5 }`, a face's loop running into the one
+//! corner, round the closed edge, and out of it again. Until queue row Q1901
+//! the union either way round and the difference with the ball first were
+//! refused before the mesh, `ResultIsNotManifold { count: 4 }`.
 //!
-//! "A corner twice in one loop" is `CannotMeshAFace` with
-//! `CornersCoincide { position: 5 }`, from the mesh that measures each shell
-//! before the answer is committed: a face's loop runs into the one corner, round
-//! a closed edge, and out of it again, so its sixth corner is an earlier one.
-//! "Two faces facing apart" is `Invalid::FacesDoNotAgreeWhichWayTheyFace`, from
-//! the check of that mesh: two faces along one edge send their triangles round
-//! it the same way. Why they do here was not traced.
-//!
-//! Until queue row Q1901 the union either way round and the difference with the
-//! ball first were refused before the mesh, `ResultIsNotManifold { count: 4 }`:
-//! the answer's own naming makes the two arcs through the one corner one closed
-//! edge again, so the long arc's two faces and the short arc's two faces all
-//! lie along it. Q1901 parts more lines with four faces along them two and two,
-//! since an answer touching itself along a line is an answer
-//! (`docs/decisions.md` §39.4), and these three are parted now and go on to the
-//! mesh.
-//!
-//! This is a limit, refused under the wrong names. The answer needs a corner at
-//! each place, `16 − 2⁻⁵¹` and `16 + 2⁻⁵¹`, and `f64` holds neither: its spacing
-//! at `16` is `2⁻⁴⁸`. The two would be an edge `2⁻⁵⁰` long in a shape whose
-//! coordinates run to `18`, a spread of about `2⁵⁴`, where the kernel supports
-//! `1e11` (`rcad-geom`'s `LARGEST_SUPPORTED_RATIO`), and scaling the whole
-//! shape by a power of two moves both lengths alike. The honest refusal is
-//! `Invalid::DynamicRangeTooWide`, and nothing gives it: the fuse's
-//! `check_dynamic_range` skips an edge whose two ends are one corner, and runs
-//! after both checks that refuse above (§317's Q1073 note). No fuse answers, so
-//! none is held to a volume.
+//! This is a limit. The answer needs a corner at each place, `16 − 2⁻⁵¹` and
+//! `16 + 2⁻⁵¹`, and `f64` holds neither: its spacing at `16` is `2⁻⁴⁸`. The two
+//! would be an edge `2⁻⁵⁰` long in a shape whose coordinates run to `18`, a
+//! spread of about `2⁵⁴`, where the kernel supports `1e11` (`rcad-geom`'s
+//! `LARGEST_SUPPORTED_RATIO`), and scaling the whole shape by a power of two
+//! moves both lengths alike. No fuse answers, so none is held to a volume.
 
 use rcad_geom::{
     Isometry, MeetOfThree, Plane, Point, Scale, Sphere, Surface, Vector, meet_of_three_surfaces,
 };
-use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{
     Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d_of_points,
 };
-use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule};
+use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule};
 
-/// Where each fuse stops, with the ball first or not.
-const WHERE_EACH_FUSE_STOPS: [(bool, Rule, Stop); 6] = [
-    (true, Rule::Union, Stop::ACornerTwiceInOneLoop),
-    (true, Rule::Intersection, Stop::ACornerTwiceInOneLoop),
-    (true, Rule::Difference, Stop::ACornerTwiceInOneLoop),
-    (false, Rule::Union, Stop::TwoFacesFacingApart),
-    (false, Rule::Intersection, Stop::ACornerTwiceInOneLoop),
-    (false, Rule::Difference, Stop::ACornerTwiceInOneLoop),
-];
-
-/// The two refusals the fuses stop on.
-///
-/// Exhaustive on purpose: it is this file's own table, and the pin matches it
-/// whole.
-#[derive(Clone, Copy, Debug)]
-enum Stop {
-    /// `CannotMeshAFace` with `CornersCoincide { position: 5 }`.
-    ACornerTwiceInOneLoop,
-    /// `Invalid::FacesDoNotAgreeWhichWayTheyFace`.
-    TwoFacesFacingApart,
-}
-
-/// The pin: every fuse places the sliver between the two places, and then
-/// refuses while it puts the answer together, as the table in the module doc
-/// has it, under either policy.
+/// The pin: every fuse places the sliver between the two places, and then is
+/// refused on the arc between them, at the one corner `f64` holds them as,
+/// with either solid first and under either policy.
 ///
 /// No fuse answers, so none is validated or held to its volume.
 ///
-/// Until Q1901 the union either way round and the ball less the block were
-/// refused `ResultIsNotManifold { count: 4 }`. Until Q1073 every one refused on a point inside a piece of a face between
-/// the two places, with those two places as the record's inputs. Until Q914 a
-/// certified fuse refused on the turn at the place below `16` with the ball
-/// first, and on the order of the two places along the edge with the block
-/// first; under `Policy::tolerant(25.0)` every one was
-/// `ResultIsNotManifold { count: 3 }`.
+/// Until Q2193 the union with the block first was refused
+/// `Invalid::FacesDoNotAgreeWhichWayTheyFace` and the other five
+/// `CannotMeshAFace` with `CornersCoincide { position: 5 }`. Until Q1901 the
+/// union either way round and the ball less the block were refused
+/// `ResultIsNotManifold { count: 4 }`. Until Q1073 every one refused on a
+/// point inside a piece of a face between the two places, with those two
+/// places as the record's inputs. Until Q914 a certified fuse refused on the
+/// turn at the place below `16` with the ball first, and on the order of the
+/// two places along the edge with the block first; under
+/// `Policy::tolerant(25.0)` every one was `ResultIsNotManifold { count: 3 }`.
 #[test]
 fn every_fuse_refuses_on_the_two_places_f64_holds_as_one_corner() {
+    let one_corner = Point::new(16.0, 1.0, -f64::powi(2.0, -25));
     let mut not_as_pinned = Vec::new();
     for policy in [Policy::certified(), Policy::tolerant(25.0)] {
-        for (ball_first, rule, stop) in WHERE_EACH_FUSE_STOPS {
-            let case = (policy.strictness(), ball_first, rule, stop);
-            let given = fuse_a_block_edge_grazing_a_ball(
-                rule,
-                &policy,
-                ball_first,
-                &mut ProvenanceLog::new(),
-            );
-            let as_pinned = match stop {
-                Stop::ACornerTwiceInOneLoop => matches!(
+        for ball_first in [true, false] {
+            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+                let given = fuse_a_block_edge_grazing_a_ball(
+                    rule,
+                    &policy,
+                    ball_first,
+                    &mut ProvenanceLog::new(),
+                );
+                if !matches!(
                     given,
-                    Err(Error::CannotMeshAFace {
-                        why: CannotTriangulate::CornersCoincide { position: 5 },
-                        ..
-                    })
-                ),
-                Stop::TwoFacesFacingApart => matches!(
-                    given,
-                    Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
-                ),
-            };
-            if !as_pinned {
-                not_as_pinned.push(format!("{case:?}: {given:?}"));
+                    Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { at, .. })
+                        if at == one_corner
+                ) {
+                    let case = (policy.strictness(), ball_first, rule);
+                    not_as_pinned.push(format!("{case:?}: {given:?}"));
+                }
             }
         }
     }

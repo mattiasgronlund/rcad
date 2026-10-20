@@ -285,3 +285,12 @@ asked round the circles, which the shared-end rule does not reach.
 > `group_into_shells` and `nest_the_shells`, where both refusals come from. A
 > row asks for the right name where a kept side's two ends have two names and
 > one corner, and for what a tolerant policy should give there.
+
+> **2026-10-20 note (Q2193): every fuse at `cx = 16` is refused by name before
+> the answer is put together.** `Corners::of_both_ends` (`fuse/assemble.rs`)
+> refuses a side on a curved surface whose two ends of two names land on one
+> corner, `Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` at
+> `(16, 1, −2⁻²⁵)`, all twelve fuses under either policy
+> (`every_fuse_refuses_on_the_two_places_f64_holds_as_one_corner`). The name
+> is not `Invalid::DynamicRangeTooWide`; the variant's doc says why it does not
+> claim a limit, and queue row Q1915 still asks for that name.

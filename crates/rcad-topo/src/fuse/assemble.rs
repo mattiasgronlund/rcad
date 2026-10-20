@@ -362,10 +362,12 @@ pub(crate) struct InputSide {
 /// the places and the sign tell apart sides it called one, and never join
 /// two it called apart, so the rule in `select` can lose a match it had and
 /// never gain one. A side the sign cannot name — a seam, or a pair it names
-/// nothing for — is left out, as the straight side below is. The answer's own
-/// naming stays [`Edges::of`]: an edge it builds from one corner to itself is
-/// meshed as a whole closed curve ([`WhichArc::TheOnlyOne`]), and splitting the
-/// name there would build a 2⁻⁵⁰ arc as a whole circle.
+/// nothing for — is left out, as the straight side below is. **The answer
+/// refuses such a side where a kept piece has it**
+/// ([`Corners::of_both_ends`], Q2193): an edge it builds from one corner to
+/// itself is meshed as a whole closed curve ([`WhichArc::TheOnlyOne`]), so
+/// either arc would be built as the whole circle. Here the split builds
+/// nothing, and refusing here would refuse a fuse over a piece no rule keeps.
 ///
 /// **A straight side whose two ends come out one corner is left out**, as
 /// [`sides_of`] leaves it out of a kept piece (§365.7). Two corners of two
@@ -623,9 +625,11 @@ impl Assembly {
     /// [`Invalid::DynamicRangeTooWide`] when the larger of `inputs_reach` and
     /// the answer's largest coordinate, over the answer's smallest feature, is
     /// more than `f64` carries, under a policy that fails on that.
-    /// [`Error::Geometry`] when two corners of the answer with different names
-    /// landed on the very same `f64` triple, which leaves an edge of no length
-    /// at all.
+    /// [`Error::Geometry`] when an edge runs between two corners of the answer
+    /// that sit on one `f64` triple, which leaves it no length at all. Two
+    /// names that land on one triple are one corner ([`Corners::of`]), so this
+    /// asks of two corners one of which moved onto a triple the other already
+    /// held ([`Corners::settle_on_the_lower_rounding`]).
     fn check_dynamic_range(
         &self,
         inputs_reach: f64,
@@ -639,7 +643,10 @@ impl Assembly {
             .fold(inputs_reach, f64::max);
         // A closed edge has one corner and a chord of zero, and that is not how
         // small it is — the same reasoning, and the same skip, as
-        // `Model::check_dynamic_range`.
+        // `Model::check_dynamic_range`. An edge from one corner to itself is
+        // always a closed one: a side between two names that came out one
+        // corner is left out on a plane and refused on a curved surface
+        // before an edge is built (`sides_of`, `Corners::of_both_ends`).
         let shortest_chord = self
             .edges
             .iter()
@@ -8675,6 +8682,62 @@ impl Corners {
         Ok(())
     }
 
+    /// The corners `meet`'s two ends are, made the first time each is asked
+    /// for, for a side of a piece cut from `face`.
+    ///
+    /// **Two ends of two names that come out one corner bound no side on a
+    /// curved surface.** Two places whose boxes' middles land on one `f64`
+    /// triple are one corner ([`Corners::of`]). A straight side between two
+    /// such has no length as the answer is written, and [`sides_of`] leaves
+    /// it out (§365.7). A side on a curved surface cannot be left out that
+    /// way: [`Edges::of`] builds a side from one corner back to itself as a
+    /// whole closed curve, so the arc between the two places would be written
+    /// as the whole circle through them. A block's edge grazing a ball at
+    /// `16 ∓ 2⁻⁵¹` built both arcs of the ball's circle there as one closed
+    /// edge, and every fuse of the two was refused later, as a face whose loop
+    /// passed one corner twice or two faces facing apart
+    /// (`tests/a_block_edge_grazing_a_ball_at_cx_16.rs`, Q2193).
+    ///
+    /// A side whose two ends are one name is a closed curve, and its one
+    /// corner is what it is meant to have. A name another corner takes over
+    /// ([`Corners::with_each_closed_curve_started_once`]) ends only sides of
+    /// one closed curve: the whole curve, from the name back to it, or a half
+    /// of it whose other end is the point half way round, which is never
+    /// taken over. So no side has two names taken over at its two ends.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`] where two
+    /// ends of two names on a side that some curved surface carries come out
+    /// one corner, and whatever [`Corners::of`] gives.
+    fn of_both_ends(
+        &mut self,
+        model: &Model,
+        meet: &FaceMeet,
+        face: FaceKey,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<[usize; 2]> {
+        let [from, to] = [
+            self.of(model, &meet.ends[0], policy, log)?,
+            self.of(model, &meet.ends[1], policy, log)?,
+        ];
+        if from == to
+            && meet
+                .carried_by
+                .iter()
+                .any(|surface| surface.as_plane().is_none())
+            && self.goes_by(self.name_of(model, &meet.ends[0], policy, log)?)
+                != self.goes_by(self.name_of(model, &meet.ends[1], policy, log)?)
+        {
+            return Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint {
+                face,
+                at: self.made[from].point,
+            });
+        }
+        Ok([from, to])
+    }
+
     /// The corner `end` names, made the first time it is asked for.
     ///
     /// **A corner on three planes is put where the three planes alone put
@@ -9342,7 +9405,11 @@ impl Edges {
     /// [`the_edge_each_side_of_every_piece_is`] both drop it — so one
     /// reaching here means a caller stopped doing that. A *closed* side is not
     /// one, which is why the two ends being the same corner is checked against
-    /// what carries it.
+    /// what carries it. A curved side whose ends are one corner reaches here
+    /// from [`sides_of`] only as one name, a closed curve: one of two names
+    /// that came out one corner is refused first ([`Corners::of_both_ends`]).
+    /// [`the_edge_each_side_of_every_piece_is`] names such a side itself and
+    /// does not ask.
     ///
     /// `turned_round` is whether the rule turns this face's piece round, which
     /// only a closed edge starting at a ball's pole needs to know — see
@@ -11107,6 +11174,12 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// has the side names its two ends through the same [`Corners`], so every one
 /// of them leaves it out, and no edge is left with one face along it.
 ///
+/// **A curved side whose two ends are two names and one corner is refused**,
+/// by [`Corners::of_both_ends`]. It has a length, so it cannot be left out,
+/// and an edge from that corner back to itself would be the whole closed
+/// curve and not the arc between the two places (Q2193). A curved side of one
+/// name at both ends is a closed curve, and is kept.
+///
 /// **A pole of a ball kept whole is named here**, and not by [`Corners::of`].
 /// A pole is not an input corner to the arrangement, so the end arrives with
 /// no input vertex in it, and only the piece knows which input face it is a
@@ -11130,8 +11203,7 @@ fn sides_of(
 ) -> Result<Vec<Side>> {
     let mut sides = Vec::new();
     for meet in wire {
-        let from = corners.of(model, &meet.ends[0], policy, log)?;
-        let to = corners.of(model, &meet.ends[1], policy, log)?;
+        let [from, to] = corners.of_both_ends(model, meet, ancestors[0], policy, log)?;
         if from == to
             && meet
                 .carried_by
@@ -11542,7 +11614,7 @@ mod tests {
     };
     use std::collections::BTreeSet;
 
-    use rcad_predicates::{Decision, Policy, ProvenanceLog};
+    use rcad_predicates::{Decision, Interval, Policy, ProvenanceLog};
 
     use crate::{DraftStep, Invalid, Rule, SolidBuilder};
 
@@ -11611,6 +11683,58 @@ mod tests {
             corners.made.len(),
             2,
             "two names on one place is two corners"
+        );
+    }
+
+    /// **An arc between two places that `f64` writes as one point is refused**
+    /// (Q2193). Two places where the second pipe crosses the cap's circle, a
+    /// hair either side of `x = 4`, have boxes whose middles are both
+    /// `(4, 3, 0)`, so they come out one corner. The arc of the circle between
+    /// them would then be an edge from that corner back to itself, which is
+    /// the whole circle.
+    ///
+    /// The places are where they are only for their boxes: what is asked is
+    /// two names and one middle.
+    #[test]
+    fn an_arc_between_two_places_that_round_to_one_point_is_refused() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(5.0, &Isometry::identity())
+            .expect("a positive radius");
+        let face = model.faces().next().expect("a ball has a face").key();
+        let four = 4.0_f64;
+        let a_hair_from_four = |lo: f64, hi: f64, which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [cap(), pipe(), the_other_pipe()],
+            which,
+            point: PredicatePoint::Constructed([
+                Interval::new(lo, hi).expect("lo is below hi"),
+                Interval::exactly(3.0),
+                Interval::exactly(0.0),
+            ]),
+        };
+        let arc = side(
+            [cap(), pipe()],
+            [
+                a_hair_from_four(four.next_down(), four, 0),
+                a_hair_from_four(four, four.next_up(), 1),
+            ],
+            &[],
+        );
+
+        let given = Corners::default().of_both_ends(
+            &model,
+            &arc,
+            face,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(
+                given,
+                Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
+                    if refused == face && at == Point::new(4.0, 3.0, 0.0)
+            ),
+            "{given:?}"
         );
     }
 

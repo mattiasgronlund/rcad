@@ -647,6 +647,40 @@ pub enum Error {
         face: crate::FaceKey,
     },
 
+    /// An edge of the answer on a curved surface runs between two places that
+    /// `f64` writes as one point.
+    ///
+    /// Each corner of the answer is written as the middle of the box its place
+    /// was solved in, and two places of two names whose middles land on one
+    /// `f64` triple are one corner. A straight side between two such places is
+    /// left out of every face along it, as a side of no length
+    /// (`docs/decisions.md` §365.7). A side on a curved surface cannot be: an
+    /// edge from one corner back to itself is a whole closed curve, so the arc
+    /// between the two places would be written as the whole circle through
+    /// them, and both arcs of that circle as one edge. Until Q2193 the fuse went
+    /// on with that edge and was refused later under names that say nothing of
+    /// it: [`Error::CannotMeshAFace`], [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] and
+    /// [`Error::ResultIsNotManifold`].
+    ///
+    /// **A limit where the two places are closer than `f64` writes apart.** A
+    /// ball of radius `1 + 2⁻⁵¹` grazed by a block's edge at `x = 16` needs
+    /// corners at `16 ∓ 2⁻⁵¹`, where `f64`'s spacing is `2⁻⁴⁸`
+    /// (`tests/a_block_edge_grazing_a_ball_at_cx_16.rs`), and scaling the whole
+    /// shape by a power of two scales the spacing with it. But the middle of a
+    /// box is not the place it holds: two places further apart than that
+    /// spacing can still have their middles on one triple when their boxes are
+    /// wide, and then a tighter solve would part them. Nothing here tells the
+    /// two apart.
+    #[error(
+        "an edge on a curved surface runs between two places that are one point in f64, at {at:?}"
+    )]
+    TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint {
+        /// Which face of the input the piece was cut from.
+        face: crate::FaceKey,
+        /// The one `f64` triple both ends are written at.
+        at: rcad_geom::Point,
+    },
+
     /// A curved face is bounded by one closed curve — **or by nothing at all** —
     /// and there is no way to cut it open into a patch.
     ///
@@ -1401,6 +1435,7 @@ impl Error {
             | Self::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }
             | Self::CannotTellWhichWayASolidsFacesPoint { .. }
             | Self::AClosedEdgeOfTheAnswerWouldStartAtAPole { .. }
+            | Self::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { .. }
             | Self::ACurvedFaceGoesRightRoundWithNoSeam { .. }
             | Self::ACurvedFaceCannotBeCutSmallEnoughToMesh { .. }
             | Self::CurvedFaceWithAHoleGoesTooFarRound { .. }
