@@ -9213,6 +9213,45 @@ mod tests {
         }
     }
 
+    /// Row Q2512. The sliver of
+    /// [`a_sliver_whose_every_mesh_encloses_nothing_is_told_which_way_its_faces_point`],
+    /// moved by [`Model::place_solid`] 40 turns about each of five axes through
+    /// the origin, validates at every one, as it does where it is made.
+    #[test]
+    fn the_sliver_where_a_bar_dips_into_a_block_validates_however_it_is_turned() {
+        let policy = Policy::tolerant(100.0);
+        let axes = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(3.0, -1.0, 2.0),
+        ];
+        let mut refused = Vec::new();
+        for axis in axes {
+            for step in 0..40 {
+                let mut model = an_empty_model();
+                let sliver = the_sliver_where_a_bar_dips_into_a_block(&mut model, &policy);
+                let turn = Isometry::rotation(
+                    &Axis::new(Point::origin(), axis).expect("a direction with a length"),
+                    f64::from(step) * core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn");
+                model
+                    .place_solid(sliver, &turn)
+                    .expect("this model made the key");
+                if let Err(why) = model.validate(&policy, &mut ProvenanceLog::new()) {
+                    refused.push(format!("{axis:?} at {step}/40: {why:?}"));
+                }
+            }
+        }
+        assert!(
+            refused.is_empty(),
+            "{} of 200 refused: {refused:#?}",
+            refused.len()
+        );
+    }
+
     /// The tolerant intersection of the block `[0, 4]³` and a bar of radius
     /// one turned onto `x` by `−π/2` from `(3, 2, 5)`, which dips `2⁻¹⁰⁵`
     /// through the block's top: the sliver alone.
