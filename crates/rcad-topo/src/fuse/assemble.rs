@@ -4080,7 +4080,8 @@ impl Assembly {
     /// Every corner where pieces of one cone, pipe or ball met, as lump and
     /// corner, that `straight_through` walks on a run that does not close up
     /// into the one closed input edge it was cut from, between two edges that
-    /// are not both pieces of one open input edge. Each stays a corner.
+    /// are neither both pieces of one open input edge nor both straight. Each
+    /// stays a corner.
     ///
     /// **A corner where pieces of one cone, pipe or ball met stays a corner**,
     /// and that departs from §224.2 item 3 on purpose. It has only two surfaces
@@ -4115,6 +4116,26 @@ impl Assembly {
     /// bound the fold: the union of a square and a bar on its corner that
     /// builds that plate folded the bar's rim into one arc of three quarters
     /// of a turn.
+    ///
+    /// **And except between two edges that both run straight**
+    /// ([`Edge::runs_straight`]). Folded, they are one straight edge, never an
+    /// arc past half its circle, so the reason above for keeping the corner
+    /// does not arise. Where both bound a face on a pipe or a cone, they are
+    /// two of its rulings through one corner, and that is one line: a pipe's
+    /// rulings are parallel, and a cone's meet only at its apex, which
+    /// [`Assembly::is_the_apex_of_a_cone_along`] keeps out of
+    /// `straight_through`. Kept, a round bar united in one call with two
+    /// blocks stacked on each other, their sides resting along its wall, kept
+    /// the corner where the blocks' meeting cut the wall: the line each side
+    /// rests along the wall on came back as two edges, one from each block,
+    /// and the answer had fourteen edges where the bar and one tall block have
+    /// twelve (Q2473, `a_bar_and_two_stacked_blocks_united_in_one_call.rs`).
+    /// **Both edges, and not the first alone**: exempting on the first edge
+    /// folded a corner where a ruling of a pipe met an ellipse arc a tilted
+    /// plane cuts round the same pipe, and the answer's own check refused it
+    /// `VertexOffItsFaceSurface`
+    /// (`two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`, the box turned
+    /// an eighth of a turn, Q2250).
     fn where_curved_pieces_met_off_a_run_that_closes_up(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
@@ -4144,6 +4165,9 @@ impl Assembly {
                 where_curved_pieces_met[corner]
                     && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
                     && !self.are_pieces_of_one_open_input_edge(&leaving[&(lump, corner)])
+                    && !leaving[&(lump, corner)]
+                        .iter()
+                        .all(|&edge| self.edges[edge].runs_straight())
             })
             .collect()
     }
