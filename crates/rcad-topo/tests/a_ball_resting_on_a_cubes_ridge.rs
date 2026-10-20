@@ -32,8 +32,9 @@
 use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
+use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Fused, Measurement, Model, ProfileBuilder, Rule};
+use rcad_topo::{Error, Fused, Measurement, Model, ProfileBuilder, Rule};
 
 /// The union is the cube and the ball apart: two solids that validate, one
 /// measuring 8 and the other `4π/3`, each within the error its own mesh
@@ -68,6 +69,60 @@ fn the_ball_less_the_cube_is_the_whole_ball() {
             panic!("{what}: one solid, not {}", measured.len());
         };
         assert_holds(ball, 4.0 * PI / 3.0, 0.0, &what);
+    }
+}
+
+/// Pinned as it answers: a ball of radius 5 about `(3, 1, 4)` rests on the
+/// same ridge at `(0, 1, 0)`, which is no pole of it, and the union is refused
+/// at either working size, `CornersCoincide` with the ball first and
+/// `BoundaryCrossesItself` with the cube first; the ball less the cube is
+/// refused as the union with the ball first is. The answer exists, so this is
+/// a gap (Q2492).
+///
+/// The face `x = z` cuts the ball in a circle whose lowest point is the ridge
+/// point, and the walk round that circle starts a rounding below it, at `z =
+/// −4.4e-16`, outside the circle. Seen from there the ridge point lies straight
+/// up, as the far side of the circle at `y = 1` does, so ordered round the
+/// circle by the sweep it sits on the far side, between the corners at `y = 2`
+/// and those at `y = 0`. The ball's edges along that circle then run the wrong
+/// way round it: one from `(0.072, 2, 0.072)` to `(0.072, 0, 0.072)` passes
+/// the ridge point, and the two that end there overlap the whole circle between
+/// them, so the walk round the ball's face beside the cube's small circle
+/// visits the ridge point twice at one place of the chart.
+#[test]
+fn a_ball_resting_on_the_ridge_off_its_poles_is_refused_where_the_mesh_meets_the_ridge_twice() {
+    for size in [100.0, 1.0] {
+        for (rule, ball_first) in [
+            (Rule::Union, true),
+            (Rule::Union, false),
+            (Rule::Difference, true),
+        ] {
+            let fused = fuse_the_ball_off_its_poles(size, rule, ball_first);
+            let what = format!("size {size}, {rule:?}, ball first {ball_first}: {fused:?}");
+            if ball_first {
+                assert!(
+                    matches!(
+                        fused,
+                        Err(Error::CannotMeshAFace {
+                            why: CannotTriangulate::CornersCoincide { position: 9 },
+                            ..
+                        })
+                    ),
+                    "{what}"
+                );
+            } else {
+                assert!(
+                    matches!(
+                        fused,
+                        Err(Error::CannotMeshAFace {
+                            why: CannotTriangulate::BoundaryCrossesItself { at: 19 },
+                            ..
+                        })
+                    ),
+                    "{what}"
+                );
+            }
+        }
     }
 }
 
@@ -110,6 +165,24 @@ fn assert_holds(measured: &Measurement, closed_form: f64, slack: f64, what: &str
 }
 
 fn fuse(size: f64, rule: Rule, ball_first: bool) -> (Model, rcad_topo::Result<Fused>) {
+    fuse_a_ball(1.0, Vector::new(0.0, 1.0, 1.0), size, rule, ball_first)
+}
+
+fn fuse_the_ball_off_its_poles(
+    size: f64,
+    rule: Rule,
+    ball_first: bool,
+) -> rcad_topo::Result<Fused> {
+    fuse_a_ball(5.0, Vector::new(3.0, 1.0, 4.0), size, rule, ball_first).1
+}
+
+fn fuse_a_ball(
+    radius: f64,
+    centre: Vector,
+    size: f64,
+    rule: Rule,
+    ball_first: bool,
+) -> (Model, rcad_topo::Result<Fused>) {
     let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
     let square = ProfileBuilder::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
         .build(&Policy::certified(), &mut ProvenanceLog::new())
@@ -121,8 +194,8 @@ fn fuse(size: f64, rule: Rule, ball_first: bool) -> (Model, rcad_topo::Result<Fu
         .expect("a positive height");
     let ball = model
         .add_ball(
-            1.0,
-            &Isometry::translation(Vector::new(0.0, 1.0, 1.0)).expect("a finite shift"),
+            radius,
+            &Isometry::translation(centre).expect("a finite shift"),
         )
         .expect("a positive radius");
     let (one, other) = if ball_first {
