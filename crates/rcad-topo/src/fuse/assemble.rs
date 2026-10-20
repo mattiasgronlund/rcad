@@ -2661,8 +2661,8 @@ impl Assembly {
     /// hole a half ball pokes through a knife's face, joined across the axis
     /// from the knife's other half, winds round no area at all (§200.1's two
     /// knives at 90 degrees, as a union). With one outline found among the other
-    /// rings it is a hole; with none, and it the only such ring, it is the
-    /// outline.
+    /// rings it is a hole; with none, it may be the outline, beside the rings of
+    /// the next rule.
     ///
     /// **A ring with a side that is not straight is not placed by its corners
     /// alone**, since the polygon through them is not the ring, and where they
@@ -2672,15 +2672,22 @@ impl Assembly {
     /// and three sides back along its chord. Unturned its four corners lie on
     /// one line and enclose nothing; turned about the axis they come off it,
     /// and can wind against the plane (`a_stepped_shaft_cut_in_half_and_turned.rs`,
-    /// Q2228). So with no ring winding with the plane and none enclosing
-    /// nothing, the outline is among those winding against it with a side that
-    /// is not straight, and the straight-sided ones are holes. One such ring is
-    /// the outline. Two bars united and then united with the half bar whose
-    /// corner is their lens's corner leave their cap one ring, round the
-    /// outline and through that corner a second time round the half disk's
-    /// hole, and its corners wind against the plane too, both ways round and
-    /// in the bars less the half bar (`a_lens_whose_hole_is_half_a_disk.rs`,
-    /// Q1290).
+    /// Q2228). So with no ring winding with the plane, the outline is among
+    /// those enclosing nothing and those winding against it with a side that
+    /// is not straight, all together, and the straight-sided ones are holes.
+    /// Neither kind is asked first: the same shaft bored from below beside its
+    /// axis before the cut keeps on its bottom a round hole of one corner,
+    /// which encloses nothing, beside that ring, and taking the hole as the
+    /// outline because it enclosed nothing wrote the bottom with the hole as
+    /// its outline and the arc and chord as a hole in it, with the volume and
+    /// [`Model::validate`] both passing
+    /// (`a_stepped_shaft_cut_in_half_and_turned.rs`, Q2241). One ring of
+    /// either kind, alone, is the outline. Two bars united and then united
+    /// with the half bar whose corner is their lens's corner leave their cap
+    /// one ring, round the outline and through that corner a second time round
+    /// the half disk's hole, and its corners wind against the plane too, both
+    /// ways round and in the bars less the half bar
+    /// (`a_lens_whose_hole_is_half_a_disk.rs`, Q1290).
     ///
     /// **With none of those either, every ring is straight-sided, and the
     /// outline is among all of them**, since the face has one. A ring every
@@ -2786,14 +2793,14 @@ impl Assembly {
                 outline
             }
             None => {
+                let (curved, straight): (Vec<_>, Vec<_>) = holes.into_iter().partition(|ring| {
+                    !ring
+                        .iter()
+                        .all(|&dart| self.edges[self.edge_of(dart)].runs_straight())
+                });
                 let mut may_be_it = enclosing_nothing;
-                if may_be_it.is_empty() {
-                    (may_be_it, holes) = holes.into_iter().partition(|ring| {
-                        !ring
-                            .iter()
-                            .all(|&dart| self.edges[self.edge_of(dart)].runs_straight())
-                    });
-                }
+                may_be_it.extend(curved);
+                holes = straight;
                 if may_be_it.is_empty() {
                     may_be_it = core::mem::take(&mut holes);
                 }
