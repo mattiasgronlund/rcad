@@ -22,6 +22,12 @@
 //! and that holds no pole, was the shape `mesh.rs` could not cut up. What
 //! stopped it was a cut with no point of its own, and
 //! [`the_sliver_that_holds_no_pole_is_answered_or_refused_by_name`] says how.
+//!
+//! The answers that keep the block's face whole but for a round hole — the
+//! union, either way round, and the block less the ball — keep a face that
+//! runs on past the circle, away from the ball. Those are
+//! [`a_ball_united_with_a_block_through_its_south_pole_measures_both`] and
+//! [`a_ball_taken_out_of_a_block_through_its_south_pole_leaves_a_dent_that_measures_right`].
 
 use core::f64::consts::PI;
 use std::collections::BTreeMap;
@@ -40,7 +46,7 @@ const TURNS: [f64; 7] = [0.0, 0.4, 1.3, PI / 2.0, 2.5, PI, -2.0];
 fn a_ball_cut_through_its_south_pole_by_a_block_keeps_a_cap_that_measures_right() {
     for (radius, lean, turn) in every_plane() {
         let what = format!("radius {radius}, leaning {lean}, turned {turn}");
-        let (model, answer) = cut(radius, lean, turn, Rule::Intersection);
+        let (model, answer) = cut(radius, lean, turn, Rule::Intersection, First::TheBall);
         let answer = answer.unwrap_or_else(|why| panic!("{what}: the cap is answered: {why}"));
         measures_under_by_at_most_three_deflections(
             &model,
@@ -59,7 +65,7 @@ fn a_ball_cut_through_its_south_pole_by_a_block_keeps_a_cap_that_measures_right(
 fn a_block_taken_out_of_a_ball_through_its_south_pole_leaves_the_same_cap() {
     for (radius, lean, turn) in every_plane() {
         let what = format!("radius {radius}, leaning {lean}, turned {turn}");
-        let (model, answer) = cut(radius, PI + lean, turn, Rule::Difference);
+        let (model, answer) = cut(radius, PI + lean, turn, Rule::Difference, First::TheBall);
         let answer = answer.unwrap_or_else(|why| panic!("{what}: the cap is answered: {why}"));
         measures_under_by_at_most_three_deflections(
             &model,
@@ -98,7 +104,7 @@ fn the_sliver_that_holds_no_pole_is_answered_or_refused_by_name() {
             (Rule::Difference, lean, &mut by_difference),
         ] {
             let what = format!("{rule:?}, radius {radius}, leaning {lean}, turned {turn}");
-            let (model, answer) = cut(radius, lean_of_the_block, turn, rule);
+            let (model, answer) = cut(radius, lean_of_the_block, turn, rule, First::TheBall);
             let outcome = match answer {
                 Ok(answer) => {
                     measures_within_what_the_mesh_declares(
@@ -131,6 +137,72 @@ fn the_sliver_that_holds_no_pole_is_answered_or_refused_by_name() {
     );
 }
 
+/// The ball united with the block, handed over either way round: the block and
+/// the part of the ball outside it, which is the sliver where the block stands
+/// north of its plane and the cap where it stands south.
+///
+/// **On the base all but 63 of these 252 were refused**
+/// `FacesDoNotAgreeWhichWayTheyFace`, and so was every one of the block less
+/// the ball below. The block's face runs on past the circle, away from the
+/// ball, so it points the other way from the lid that would close the ball's
+/// piece, and the ball's piece read the circle against that lid. Both faces
+/// then walked the circle the same way round.
+#[test]
+fn a_ball_united_with_a_block_through_its_south_pole_measures_both() {
+    for (radius, lean, turn) in every_plane() {
+        let sliver = a_caps_volume(radius, radius - radius * lean.cos());
+        let cap = a_caps_volume(radius, radius + radius * lean.cos());
+        for first in [First::TheBall, First::TheBlock] {
+            for (lean_of_the_block, outside_the_block) in [(lean, sliver), (PI + lean, cap)] {
+                let what = format!(
+                    "{first:?} first, radius {radius}, block leaning {lean_of_the_block}, turned {turn}"
+                );
+                let (model, answer) = cut(radius, lean_of_the_block, turn, Rule::Union, first);
+                let answer =
+                    answer.unwrap_or_else(|why| panic!("{what}: the union is answered: {why}"));
+                measures_the_block_with(
+                    &model,
+                    &answer,
+                    radius,
+                    a_blocks_volume(radius) + outside_the_block,
+                    outside_the_block,
+                    &what,
+                );
+            }
+        }
+    }
+}
+
+/// The block less the ball: the block with a dent the shape of the cap where it
+/// stands north of its plane, and of the sliver where it stands south.
+#[test]
+fn a_ball_taken_out_of_a_block_through_its_south_pole_leaves_a_dent_that_measures_right() {
+    for (radius, lean, turn) in every_plane() {
+        let sliver = a_caps_volume(radius, radius - radius * lean.cos());
+        let cap = a_caps_volume(radius, radius + radius * lean.cos());
+        for (lean_of_the_block, inside_the_block) in [(lean, cap), (PI + lean, sliver)] {
+            let what = format!("radius {radius}, block leaning {lean_of_the_block}, turned {turn}");
+            let (model, answer) = cut(
+                radius,
+                lean_of_the_block,
+                turn,
+                Rule::Difference,
+                First::TheBlock,
+            );
+            let answer = answer
+                .unwrap_or_else(|why| panic!("{what}: the block less the ball is answered: {why}"));
+            measures_the_block_with(
+                &model,
+                &answer,
+                radius,
+                a_blocks_volume(radius) - inside_the_block,
+                inside_the_block,
+                &what,
+            );
+        }
+    }
+}
+
 fn every_plane() -> impl Iterator<Item = (f64, f64, f64)> {
     RADII.into_iter().flat_map(|radius| {
         LEANS
@@ -144,7 +216,17 @@ fn every_plane() -> impl Iterator<Item = (f64, f64, f64)> {
 /// is turned `lean` about the level axis square to the direction `turn` round
 /// from `x`. At `lean` it stands on the north side of the plane leaning `lean`
 /// off the floor, and at `π + lean` on the south side of the same plane.
-fn cut(radius: f64, lean: f64, turn: f64, rule: Rule) -> (Model, Result<Vec<SolidKey>, Error>) {
+///
+/// The block is `6r` square and `3r` tall, and its face is centred on the
+/// pole, so the part of the ball on its side, within `2r` of the pole, lies
+/// wholly inside it.
+fn cut(
+    radius: f64,
+    lean: f64,
+    turn: f64,
+    rule: Rule,
+    first: First,
+) -> (Model, Result<Vec<SolidKey>, Error>) {
     let mut model = Model::new(Scale::millimetres(25.0 * radius).expect("a positive size"));
     let ball = model
         .add_ball(radius, &Isometry::identity())
@@ -170,10 +252,14 @@ fn cut(radius: f64, lean: f64, turn: f64, rule: Rule) -> (Model, Result<Vec<Soli
     let block = model
         .add_extrusion(&square, wide, &on_the_pole)
         .expect("a block");
+    let (one, other) = match first {
+        First::TheBall => (ball, block),
+        First::TheBlock => (block, ball),
+    };
     let answer = model
         .fuse(
-            &[ball],
-            &[block],
+            &[one],
+            &[other],
             rule,
             &Policy::certified(),
             &mut ProvenanceLog::new(),
@@ -185,6 +271,18 @@ fn cut(radius: f64, lean: f64, turn: f64, rule: Rule) -> (Model, Result<Vec<Soli
             .expect("a fuse writes a sound model or writes nothing");
     }
     (model, answer)
+}
+
+/// Which solid `cut` hands the fuse first.
+#[derive(Clone, Copy, Debug)]
+enum First {
+    TheBall,
+    TheBlock,
+}
+
+/// `cut`'s block: `6r` by `6r` by `3r`.
+fn a_blocks_volume(radius: f64) -> f64 {
+    108.0 * radius * radius * radius
 }
 
 /// One solid, under `closed_form` by no more than `3δ/r` of it.
@@ -211,7 +309,8 @@ fn measures_under_by_at_most_three_deflections(
     );
 }
 
-/// One solid, within the volume error its own mesh declares of `closed_form`.
+/// One solid, within the volume error its own mesh declares of `closed_form`;
+/// handed back is what it declares.
 ///
 /// A sliver does not hold the ball's centre, so the bound above says nothing
 /// about it; what the measurement declares does.
@@ -221,13 +320,32 @@ fn measures_within_what_the_mesh_declares(
     radius: f64,
     closed_form: f64,
     what: &str,
-) {
+) -> f64 {
     let measured = volume(model, answer, 0.001 * radius, what);
     assert!(
         (measured.volume() - closed_form).abs() <= measured.volume_error(),
         "{what}: measured {}, closed form {closed_form}, declared {}",
         measured.volume(),
         measured.volume_error()
+    );
+    measured.volume_error()
+}
+
+/// One solid, within what its mesh declares of the block and `part` together,
+/// where what it declares is less than `part`: an answer that left the ball's
+/// part out, or put it in where it was to be taken out, would not pass.
+fn measures_the_block_with(
+    model: &Model,
+    answer: &[SolidKey],
+    radius: f64,
+    closed_form: f64,
+    part: f64,
+    what: &str,
+) {
+    let declared = measures_within_what_the_mesh_declares(model, answer, radius, closed_form, what);
+    assert!(
+        declared < part,
+        "{what}: the mesh declares {declared}, and cannot tell the answer from the block alone, {part} away"
     );
 }
 
