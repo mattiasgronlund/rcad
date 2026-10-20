@@ -3958,14 +3958,32 @@ impl BuildingAMesh {
             // chart there is nothing else to go by. A side inside a fan is used
             // once each way. The triangles cover nothing in the chart, and lie
             // in the plane as far as the points of the face do.
+            //
+            // **A placed flat piece is fanned too when its corners lie on one
+            // line where they were made**, though the triangulator drew it a
+            // triangle. A flat face is cut up where the solid sits
+            // ([`the_surface_this_face_is_cut_up_on`]), and moving corners that
+            // lie on one line rounds each its own way, so they leave the line by
+            // a rounding and the triangulator draws them a triangle turned
+            // whichever way that rounding went. The sliver a bar dipping `2⁻¹⁰⁵`
+            // through a block's top leaves has a top of three corners on the
+            // line `x = 3`. Placed by 14/40 of a turn about `(1, 2, 3)` or 2/40
+            // about `(3, −1, 2)` that triangle came out backwards, its three
+            // sides each used twice the same way, and the sound sliver was
+            // refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)` (Q2512,
+            // `the_sliver_where_a_bar_dips_into_a_block_validates_however_it_is_turned`
+            // in `validate.rs`). Where made, the line is exact, so the fan is the
+            // one the face gets unplaced.
             let fan;
-            let (triangles, inside_out) =
-                if surface.as_plane().is_some() && cut.triangles().is_empty() {
-                    fan = a_fan_round_each_loop(piece.iter().map(|one| one.points.len()));
-                    (fan.as_slice(), against_its_loops)
-                } else {
-                    (cut.triangles(), inside_out)
-                };
+            let (triangles, inside_out) = if surface.as_plane().is_some()
+                && (cut.triangles().is_empty()
+                    || self.every_corner_lies_on_one_line_where_made(face, &corner_is))
+            {
+                fan = a_fan_round_each_loop(piece.iter().map(|one| one.points.len()));
+                (fan.as_slice(), against_its_loops)
+            } else {
+                (cut.triangles(), inside_out)
+            };
             for triangle in triangles {
                 let [first, second, third] = triangle.map(|corner| corner_is[corner as usize]);
                 let corners = if inside_out {
@@ -3988,6 +4006,29 @@ impl BuildingAMesh {
         let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
         self.worst = self.worst.max(deviation + moving);
         Ok(())
+    }
+
+    /// Whether the points at `corners` of the table lie on one line where
+    /// `face` is stored, read in its stored surface's chart off
+    /// [`BuildingAMesh::made`], exactly.
+    ///
+    /// For a face at no placement this reads the very numbers the triangulator
+    /// was handed: each point is where it was made, and moving a plane by
+    /// nothing changes no bit of it.
+    fn every_corner_lies_on_one_line_where_made(
+        &self,
+        face: FaceView<'_>,
+        corners: &[u32],
+    ) -> bool {
+        let stored = face.stored_surface();
+        let in_the_chart: Vec<[f64; 2]> = corners
+            .iter()
+            .map(|&at| {
+                let (first, second) = stored.coordinates_of(self.made[at as usize]);
+                [first, second]
+            })
+            .collect();
+        every_corner_is_on_one_line(&in_the_chart)
     }
 
     /// Put the triangle `corners` of `face` in the mesh, turned the way its
