@@ -1909,6 +1909,11 @@ impl<'f> Arrangement<'f> {
                             .or_else(|| {
                                 Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
                             })
+                            .or_else(|| {
+                                Self::side_of_a_plane_holding_a_cones_or_a_pipes_axis(
+                                    &on, point, plane,
+                                )
+                            })
                             .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
                             .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
                             .or_else(|| {
@@ -9886,63 +9891,135 @@ impl<'f> Arrangement<'f> {
     /// planes hold the axis exactly — `intersect` names two circles for a plane
     /// and a ring only where its normal is square to the axis and it holds the
     /// centre, and [`how_the_axis_lies_on`] asks each plane here the same. So
-    /// a point of the cutting plane `P` is `c + a·u + b·w` for the ring's
-    /// centre `c`, its axis `w` and `u` along `w × n_P`, and `partner`'s sign
-    /// there is the sign of `a·(n_Q·u)` for its normal `n_Q`: `n_Q·w` is nought
-    /// and `n_Q·c` is its offset. `P` cuts the ring in two circles centred at
-    /// `c ± R·u` with radius `r`, so on each `a` is `±R + r·cos φ`, which has
-    /// the sign of `±R`, a ring's tube being narrower than the ring. That puts
-    /// `a` at least `R − r` from nought, so the box tells it.
-    ///
-    /// Each of `a` and `n_Q·u` is `det[v, w, n_P]` for `v` the point less the
-    /// centre or `n_Q`, and `orient3d` with one point at the origin gives that
-    /// sign turned round one way for both, so the product is the side. Where
-    /// `n_Q·u` is nought, `n_Q` is along `n_P` and the two planes are one, so
-    /// the point is on `partner`.
+    /// [`Arrangement::side_of_a_plane_through_an_axis_it_shares`] reads the
+    /// side off `a` for a point `c + a·u + b·w` of the cutting plane `P`, for
+    /// the ring's centre `c`, its axis `w` and `u` along `w × n_P`. `P` cuts
+    /// the ring in two circles centred at `c ± R·u` with radius `r`, so on each
+    /// `a` is `±R + r·cos φ`, which has the sign of `±R`, a ring's tube being
+    /// narrower than the ring. That puts `a` at least `R − r` from nought, so
+    /// the box tells it.
     fn side_of_a_plane_holding_a_rings_axis(
         on: &[Surface],
         at: PredicatePoint,
         partner: &Plane,
     ) -> Option<Decision> {
-        let origin = PredicatePoint::from([0.0; 3]);
         on.iter().find_map(|ring| {
             let Surface::Torus(ring) = ring else {
                 return None;
             };
-            if how_the_axis_lies_on(partner, ring) != Decision::Zero {
-                return None;
-            }
-            let axis = PredicatePoint::from(ring.axis().direction().components());
-            let (centre, box_) = (ring.centre().coordinates(), at.enclosure());
-            let from_the_centre = PredicatePoint::Constructed(core::array::from_fn(|index| {
-                box_[index] - Interval::exactly(centre[index])
-            }));
-            on.iter().find_map(|cut| {
-                let Surface::Plane(cut) = cut else {
+            Self::side_of_a_plane_through_an_axis_it_shares(
+                ring.axis(),
+                |flat| how_the_axis_lies_on(flat, ring) == Decision::Zero,
+                on,
+                at,
+                partner,
+            )
+        })
+    }
+
+    /// Which side of `partner` a point lies that is on a cone or a pipe and on
+    /// a plane through its axis, both among the surfaces it is `on`, where
+    /// `partner` holds that axis too: read off the numbers the planes store,
+    /// and off the point's box only for which side of the axis it is on in
+    /// its own plane. `None` where it is not that shape, or where the box does
+    /// not tell, and the caller keeps the box's answer.
+    ///
+    /// Two quarters of one hollow cone, each cut by a prism standing on the
+    /// cone's axis and turned about it, one by `s` and the other by `s − π/2`,
+    /// lie side by side. They share the plane at `s`, and the side plane of
+    /// one at `s + π/2` and the other's at `s − π/2` are one plane through the
+    /// axis, their normals an ulp apart. So a corner of one on that plane, on
+    /// its cap and on the cone or the bore, sits a rounding off the other's
+    /// side plane, inside its own box, and their intersection was refused at
+    /// eight of nine turns (Q2537).
+    ///
+    /// **A point of a pipe is its radius from the axis, and one of a cone is
+    /// `s·|t|` from it** at `t` along the axis from the apex, so the box tells
+    /// which side of the axis it is on everywhere but near the apex. Both
+    /// planes are asked to hold the axis exactly
+    /// ([`holds_the_whole_of`]), the questions [`how_the_axis_lies_on`] asks
+    /// of a ring's.
+    fn side_of_a_plane_holding_a_cones_or_a_pipes_axis(
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        on.iter().find_map(|round| {
+            let axis = if let Surface::Cone(cone) = round {
+                cone.axis()
+            } else {
+                let Surface::Cylinder(pipe) = round else {
                     return None;
                 };
-                if how_the_axis_lies_on(cut, ring) != Decision::Zero {
-                    return None;
+                pipe.axis()
+            };
+            Self::side_of_a_plane_through_an_axis_it_shares(
+                axis,
+                |flat| holds_the_whole_of(flat, axis),
+                on,
+                at,
+                partner,
+            )
+        })
+    }
+
+    /// Which side of `partner` a point lies that is on a plane `P` among the
+    /// surfaces it is `on`, where `holds` says both `P` and `partner` hold the
+    /// whole of `axis`: the sign of `det[p − o, w, n_P]` times that of
+    /// `det[n_Q, w, n_P]`, for the axis through `o` along `w` and the normals
+    /// `n_P` and `n_Q` of the two planes. `None` where `partner` or no plane
+    /// among them holds it, or where the point's box does not tell the first
+    /// sign.
+    ///
+    /// **The product is the side.** `p − o` is square to `n_P`, both being on
+    /// `P`, so it is `a·u + b·w` for `u` along `w × n_P`. `partner`'s value at
+    /// `p` is `n_Q·(p − o)`, since `n_Q·o` is its offset, and that is
+    /// `a·(n_Q·u)`, since `n_Q·w` is nought. `det[v, w, n_P]` is `v·(w × n_P)`,
+    /// which has the sign of `a` for `v = p − o` and of `n_Q·u` for `v = n_Q`,
+    /// and `orient3d` with one point at the origin gives that sign turned round
+    /// one way for both. Where `n_Q·u` is nought, `n_Q` is along `n_P` and the
+    /// two planes are one, so the point is on `partner`.
+    fn side_of_a_plane_through_an_axis_it_shares(
+        axis: Axis,
+        holds: impl Fn(&Plane) -> bool,
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        if !holds(partner) {
+            return None;
+        }
+        let origin = PredicatePoint::from([0.0; 3]);
+        let along = PredicatePoint::from(axis.direction().components());
+        let (through, box_) = (axis.origin().coordinates(), at.enclosure());
+        let from_the_axis = PredicatePoint::Constructed(core::array::from_fn(|index| {
+            box_[index] - Interval::exactly(through[index])
+        }));
+        on.iter().find_map(|cut| {
+            let Surface::Plane(cut) = cut else {
+                return None;
+            };
+            if !holds(cut) {
+                return None;
+            }
+            let across =
+                |of| orient3d_of_points(origin, of, along, cut.normal().components().into());
+            match (
+                across(from_the_axis),
+                across(partner.normal().components().into()),
+            ) {
+                (_, Decision::Zero) => Some(Decision::Zero),
+                (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => {
+                    Some(Decision::Pos)
                 }
-                let across =
-                    |of| orient3d_of_points(origin, of, axis, cut.normal().components().into());
-                match (
-                    across(from_the_centre),
-                    across(partner.normal().components().into()),
-                ) {
-                    (_, Decision::Zero) => Some(Decision::Zero),
-                    (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => {
-                        Some(Decision::Pos)
-                    }
-                    (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => {
-                        Some(Decision::Neg)
-                    }
-                    (
-                        Decision::Zero | Decision::Undecidable { .. } | _,
-                        Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _,
-                    ) => None,
+                (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => {
+                    Some(Decision::Neg)
                 }
-            })
+                (
+                    Decision::Zero | Decision::Undecidable { .. } | _,
+                    Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _,
+                ) => None,
+            }
         })
     }
 
@@ -13895,6 +13972,16 @@ fn lies_exactly_on_the_axis(point: Point, axis: Axis) -> Option<bool> {
         }
     }
     Some(true)
+}
+
+/// Whether `flat` holds the whole line of `axis`: its normal square to the
+/// axis's direction and the axis's origin on it, both exactly as stored, the
+/// two questions [`how_the_axis_lies_on`] asks of a ring's axis. `false`
+/// where a product would round, which proves nothing either way.
+fn holds_the_whole_of(flat: &Plane, axis: Axis) -> bool {
+    exactly_dotted(flat.normal().components(), axis.direction().components())
+        .is_some_and(|square| expansion_sign(&square) == Decision::Zero)
+        && flat.side_of_point(PredicatePoint::from(axis.origin().coordinates())) == Decision::Zero
 }
 
 /// Whether the curve the two surfaces cross in through `places`, points on
