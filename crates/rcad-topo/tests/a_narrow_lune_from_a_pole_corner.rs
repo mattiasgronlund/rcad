@@ -488,15 +488,20 @@ fn the_quarter_turned_knife_holds_the_axis_by_its_corners_and_places_a_point_by_
 /// that validates and measures its closed form, the same three
 /// [`what_two_knives_leave`] gives the other order.
 ///
-/// **The 90 degree wedge of the ball of radius 0.001 is refused
-/// `ResultIsNotManifold { count: 1 }` under every rule**, where the same wedge
-/// answers at radii 1, 3 and 1000. Not traced.
+/// **The 90 degree wedge of the ball of radius 0.001 now answers under every
+/// rule too** (Q2499): the great circle the knife's plane cuts is walked from
+/// `(−0.001, 6.869504964868156e-19, 0)`, and a node lies `5.2e-30` from it,
+/// square to the run. Every fuse of it was refused `ResultIsNotManifold`
+/// until `arrange.rs`'s `the_start_is_a_rounding_off` read that node first.
 #[test]
 fn a_wedge_cut_with_the_turned_knife_first_is_answered_or_refused_by_name() {
     let answered = [
         (90.0, 1.0, "Intersection"),
         (90.0, 1.0, "Difference"),
         (90.0, 1.0, "Union"),
+        (90.0, 0.001, "Intersection"),
+        (90.0, 0.001, "Difference"),
+        (90.0, 0.001, "Union"),
         (90.0, 1000.0, "Intersection"),
         (90.0, 1000.0, "Difference"),
         (90.0, 1000.0, "Union"),
