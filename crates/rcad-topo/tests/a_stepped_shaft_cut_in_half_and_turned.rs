@@ -1,6 +1,6 @@
 //! A stepped shaft cut in two on a plane beside or through its axis, both
 //! halves turned about that axis, and the halves fused again by every rule
-//! (`docs/decisions.md` §191.5, row Q2228).
+//! (`docs/decisions.md` §191.5, rows Q2228 and Q2241).
 //!
 //! **The shape.** The shaft is a bar of radius 2 from `z = 0` to `z = 1`
 //! united with a bar of radius 1 from `z = 1` to `z = 2`, so `5π` in all. One
@@ -28,12 +28,24 @@
 //! a curved side is not placed by its corners alone: where every ring winds
 //! against the plane, the outline is among those with a curved side, and the
 //! one such ring is it.
+//!
+//! **What was wrong before Q2241.** Bored from below before it is cut, the
+//! kept half's bottom is that D and a hole. A round hole has one corner and
+//! encloses nothing, and `rings_round` took a ring enclosing nothing as the
+//! outline before it looked at a ring winding against the plane with a
+//! curved side. So cut on `x = 0.5` and turned by 0.4, 1 or 2.5, the kept half
+//! less the other was written with the hole as its bottom's outline and the D
+//! as a hole, under both policies. Nothing refused it: the volume is a sum
+//! over every ring, which does not care which is first, and
+//! `Model::validate` does not check which of two rings holds the other where
+//! one has fewer than three corners. Now both kinds of ring are candidates,
+//! and the region each bounds says which is the outline.
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Point, SIDE_OF_PLANE, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 /// The turns about `z` the halves are placed with: unturned, and the three
 /// the row found panicking.
@@ -47,7 +59,7 @@ fn a_stepped_shaft_cut_beside_its_axis_and_turned_fuses_with_its_other_half() {
             &format!("cut at x = 0.5, turned {turn}"),
             0.5,
             CutOffFrom::TheSteppedShaft,
-            &[Isometry::rotation(&Axis::z(), turn).expect("a finite turn")],
+            &turned(turn),
         );
     }
 }
@@ -62,10 +74,7 @@ fn a_stepped_shaft_cut_through_its_axis_shifted_and_turned_fuses_with_its_other_
             &format!("cut at x = 0, shifted, turned {turn}"),
             0.0,
             CutOffFrom::TheSteppedShaft,
-            &[
-                Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a finite shift"),
-                Isometry::rotation(&Axis::z(), turn).expect("a finite turn"),
-            ],
+            &shifted_and_turned(turn),
         );
     }
 }
@@ -79,8 +88,153 @@ fn a_bars_half_and_a_stepped_shafts_half_turned_fuse_by_every_rule() {
             &format!("a bar's half against the shaft's, turned {turn}"),
             0.5,
             CutOffFrom::AWideBar,
-            &[Isometry::rotation(&Axis::z(), turn).expect("a finite turn")],
+            &turned(turn),
         );
+    }
+}
+
+/// The stepped shaft bored from below with a bar of radius 0.3 about
+/// `(−1.5, 0)`, clear of the narrow bar's radius, then cut and turned as above:
+/// the kept half's bottom is the D with a round hole of one corner, and every
+/// fuse keeps the D as that bottom's outline.
+#[test]
+fn a_stepped_shaft_bored_with_a_round_hole_cut_and_turned_keeps_the_d_as_its_bottoms_outline() {
+    let bore = Bore::ARoundHole {
+        centre: [-1.5, 0.0],
+        radius: 0.3,
+    };
+    for turn in TURNS {
+        every_fuse_of_the_bored_halves_answers(
+            &format!("a round hole, cut at x = 0.5, turned {turn}"),
+            0.5,
+            bore,
+            &turned(turn),
+            None,
+        );
+        every_fuse_of_the_bored_halves_answers(
+            &format!("a round hole, cut at x = 0, shifted, turned {turn}"),
+            0.0,
+            bore,
+            &shifted_and_turned(turn),
+            None,
+        );
+    }
+}
+
+/// The stepped shaft bored from below with a block 0.6 on a side about
+/// `(−1.5, 0)`, then cut and turned as above. Under the tolerant policy every
+/// fuse answers with the D as its bottom's outline. Under the certified one
+/// only the halves cut beside the axis and left unturned answer: turned, or
+/// cut through the axis and shifted, every fuse is refused `Undecidable` at
+/// `side of plane`, on a point where the plane of one of the hole's sides
+/// meets the wide bar's pipe on the bottom's plane.
+#[test]
+fn a_stepped_shaft_bored_with_a_square_hole_cut_and_turned_answers_or_is_refused_at_a_side_of_plane()
+ {
+    for turn in TURNS {
+        every_fuse_of_the_bored_halves_answers(
+            &format!("a square hole, cut at x = 0.5, turned {turn}"),
+            0.5,
+            Bore::ASquareHole,
+            &turned(turn),
+            (turn != 0.0).then_some(SIDE_OF_PLANE),
+        );
+        every_fuse_of_the_bored_halves_answers(
+            &format!("a square hole, cut at x = 0, shifted, turned {turn}"),
+            0.0,
+            Bore::ASquareHole,
+            &shifted_and_turned(turn),
+            Some(SIDE_OF_PLANE),
+        );
+    }
+}
+
+/// Bored with a bar of radius 0.3 about `(−1, 0)`, the hole straddles the
+/// circle of radius 1 the narrow bar stands on, and boring splits the
+/// narrow bar's pipe where the bore's pipe would cross it, leaving the hole
+/// two corners on that circle. The cut on either plane is then refused
+/// `Undecidable` at `order along a crossing`, on one of those two corners,
+/// before the halves are ever turned.
+#[test]
+fn a_stepped_shaft_bored_across_the_narrow_bars_radius_is_refused_where_it_is_cut() {
+    let bore = Bore::ARoundHole {
+        centre: [-1.0, 0.0],
+        radius: 0.3,
+    };
+    for cut in [0.5, 0.0] {
+        let mut model = a_model();
+        let shaft = a_stepped_shaft(&mut model);
+        let bored = bore.cut_into(&mut model, shaft);
+        let block = a_box(&mut model, [[-10.0, cut], [-10.0, 10.0], [-10.0, 10.0]]);
+        let refused = model.fuse(
+            &[bored],
+            &[block],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(
+                &refused,
+                Err(Error::Undecidable { records })
+                    if records.records().iter().all(|record| record.predicate() == "order along a crossing")
+            ),
+            "cut at x = {cut}: refused at order along a crossing, not {refused:?}"
+        );
+    }
+}
+
+fn turned(turn: f64) -> [Isometry; 1] {
+    [Isometry::rotation(&Axis::z(), turn).expect("a finite turn")]
+}
+
+fn shifted_and_turned(turn: f64) -> [Isometry; 2] {
+    [
+        Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a finite shift"),
+        Isometry::rotation(&Axis::z(), turn).expect("a finite turn"),
+    ]
+}
+
+/// What is bored up into the stepped shaft from its bottom before it is cut,
+/// from below the shaft to `z = 0.5`, on the kept side of both cuts.
+#[derive(Clone, Copy, Debug)]
+enum Bore {
+    Nothing,
+    /// A bar of `radius` about `centre`.
+    ARoundHole {
+        centre: [f64; 2],
+        radius: f64,
+    },
+    /// A block 0.6 on a side about `(−1.5, 0)`.
+    ASquareHole,
+}
+
+impl Bore {
+    fn cut_into(self, model: &mut Model, shaft: SolidKey) -> SolidKey {
+        let bit = match self {
+            Bore::Nothing => return shaft,
+            Bore::ARoundHole {
+                centre: [x, y],
+                radius,
+            } => model
+                .add_round_bar(
+                    radius,
+                    1.5,
+                    &Isometry::translation(Vector::new(x, y, -1.0)).expect("a finite shift"),
+                )
+                .expect("a bar of positive size"),
+            Bore::ASquareHole => a_box(model, [[-1.8, -1.2], [-0.3, 0.3], [-1.0, 0.5]]),
+        };
+        the_one_solid(model, shaft, bit, Rule::Difference)
+    }
+
+    /// The volume it takes out of the shaft, from `z = 0` to `z = 0.5`.
+    fn volume(self) -> f64 {
+        match self {
+            Bore::Nothing => 0.0,
+            Bore::ARoundHole { radius, .. } => PI * radius * radius * 0.5,
+            Bore::ASquareHole => 0.6 * 0.6 * 0.5,
+        }
     }
 }
 
@@ -120,7 +274,41 @@ fn every_fuse_of_the_halves_answers(
     cut_off_from: CutOffFrom,
     moves: &[Isometry],
 ) {
-    let kept = a_stepped_shafts_part_left_of(cut);
+    every_fuse_answers(route, cut, cut_off_from, Bore::Nothing, moves, None);
+}
+
+/// [`every_fuse_of_the_halves_answers`] with the kept half cut from the
+/// stepped shaft less `bore`, and the half cut off from the stepped shaft.
+fn every_fuse_of_the_bored_halves_answers(
+    route: &str,
+    cut: f64,
+    bore: Bore,
+    moves: &[Isometry],
+    certified_refuses_at: Option<&str>,
+) {
+    every_fuse_answers(
+        route,
+        cut,
+        CutOffFrom::TheSteppedShaft,
+        bore,
+        moves,
+        certified_refuses_at,
+    );
+}
+
+/// Every fuse of the halves answers, and every face of the answer with a hole
+/// has an outline spreading as wide as any hole, but under the certified
+/// policy where `certified_refuses_at` names a predicate: there every fuse is
+/// refused `Undecidable` at it.
+fn every_fuse_answers(
+    route: &str,
+    cut: f64,
+    cut_off_from: CutOffFrom,
+    bore: Bore,
+    moves: &[Isometry],
+    certified_refuses_at: Option<&str>,
+) {
+    let kept = a_stepped_shafts_part_left_of(cut) - bore.volume();
     let cut_off = cut_off_from.volume_right_of(cut);
     for (policy_name, policy) in [
         ("certified", Policy::certified()),
@@ -137,7 +325,7 @@ fn every_fuse_of_the_halves_answers(
             let asked =
                 format!("{route}, {rule:?}, the kept half first {kept_first}, {policy_name}");
             let mut model = a_model();
-            let halves = the_two_halves(&mut model, cut, cut_off_from);
+            let halves = the_two_halves(&mut model, cut, cut_off_from, bore);
             for movement in moves {
                 for half in halves {
                     model
@@ -152,9 +340,21 @@ fn every_fuse_of_the_halves_answers(
                 [cut_off_half, kept_half]
             };
             let mut log = ProvenanceLog::new();
-            let fused = model
-                .fuse(&[one], &[other], rule, &policy, &mut log)
-                .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+            let fused = model.fuse(&[one], &[other], rule, &policy, &mut log);
+            if policy_name == "certified"
+                && let Some(predicate) = certified_refuses_at
+            {
+                assert!(
+                    matches!(
+                        &fused,
+                        Err(Error::Undecidable { records })
+                            if records.records().iter().all(|record| record.predicate() == predicate)
+                    ),
+                    "{asked}: refused at {predicate}, not {fused:?}"
+                );
+                continue;
+            }
+            let fused = fused.unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
             if policy_name == "certified" {
                 assert!(
                     log.is_empty(),
@@ -170,6 +370,7 @@ fn every_fuse_of_the_halves_answers(
                         panic!("{asked}: one solid, not {:?}", fused.solids());
                     };
                     holds(&model, *solid, volume, &asked);
+                    every_outline_spreads_as_wide_as_its_holes(&model, *solid, &asked);
                 }
                 None => assert!(
                     fused.solids().is_empty(),
@@ -192,10 +393,18 @@ fn a_bars_part_left_of(radius: f64, cut: f64) -> f64 {
     radius * radius * (-cut / radius).acos() + cut * (radius * radius - cut * cut).sqrt()
 }
 
-/// The stepped shaft's part on `x < cut`, then `cut_off_from`'s on `x > cut`.
-fn the_two_halves(model: &mut Model, cut: f64, cut_off_from: CutOffFrom) -> [SolidKey; 2] {
+/// The part on `x < cut` of the stepped shaft less `bore`, then
+/// `cut_off_from`'s on `x > cut`.
+fn the_two_halves(
+    model: &mut Model,
+    cut: f64,
+    cut_off_from: CutOffFrom,
+    bore: Bore,
+) -> [SolidKey; 2] {
     let below = [[-10.0, cut], [-10.0, 10.0], [-10.0, 10.0]];
-    let [one, other] = [cut_off_from.build(model), a_stepped_shaft(model)];
+    let one = cut_off_from.build(model);
+    let shaft = a_stepped_shaft(model);
+    let other = bore.cut_into(model, shaft);
     let [block, its_copy] = [a_box(model, below), a_box(model, below)];
     [
         the_one_solid(model, other, its_copy, Rule::Intersection),
@@ -252,6 +461,31 @@ fn the_one_solid(model: &mut Model, one: SolidKey, other: SolidKey, rule: Rule) 
         panic!("{rule:?} is one solid: {:?}", fused.solids());
     };
     *solid
+}
+
+/// Every face of `solid` with a hole has corners on its outline at least as
+/// far apart as those of any hole. The D's chord is near four long and a
+/// bore's corners under one apart, so a bore written as the outline, with the
+/// D a hole, shows; two rings of one corner each, as a whole disk with a
+/// round hole has, pass either way.
+fn every_outline_spreads_as_wide_as_its_holes(model: &Model, solid: SolidKey, asked: &str) {
+    let spread = |points: Vec<Point>| -> f64 {
+        points
+            .iter()
+            .flat_map(|one| points.iter().map(move |other| one.distance_to(*other)))
+            .fold(0.0, f64::max)
+    };
+    for face in model.solid(solid).expect("this model made the key").faces() {
+        let mut wires = face.wires().map(|wire| spread(wire.points().collect()));
+        let outline = wires.next().expect("a face has an outline");
+        for hole in wires {
+            assert!(
+                outline >= hole,
+                "{asked}: face {:?} has an outline spreading {outline} and a hole spreading {hole}",
+                face.key()
+            );
+        }
+    }
 }
 
 fn holds(model: &Model, solid: SolidKey, volume: f64, asked: &str) {
