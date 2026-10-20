@@ -24,6 +24,15 @@
 //! within about a rounding of it. Most cases answer, measure the cap worked
 //! out from the plane's distance to the centre and hold the points their rule
 //! says; the rest are pinned by name.
+//!
+//! **Through the pole exactly, with the square centred on the circle.** The
+//! third test is Q888's shape with the face plane through `N` exactly rather
+//! than a rounding off it, at every tilt direction and both the origin and
+//! `(0, 0, 7)`, all six fuses measured and validated. Q2495's fix is what
+//! answers it. The cap's height `h` is `1 − |n_z|`, the placed face plane's
+//! own normal's `z`, rather than the second test's distance worked out from
+//! the ball's centre: since the plane is pinned to `N = centre + z` by
+//! construction, `h` does not move with the centre, while that distance does.
 
 use core::f64::consts::PI;
 
@@ -234,6 +243,45 @@ fn a_block_whose_face_plane_misses_a_balls_pole_by_a_rounding_cuts_off_a_cap_or_
                         said.map(|(_, solids)| solids)
                     ),
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_turned_blocks_face_through_a_balls_pole_cuts_off_a_cap_and_measures() {
+    let cube = SIDE * SIDE * SIDE;
+    let ball = 4.0 / 3.0 * PI;
+    for centre in [Point::origin(), Point::new(0.0, 0.0, 7.0)] {
+        for direction in [0.0, 30.0, 180.0, 250.0] {
+            let placement =
+                where_the_block_goes(centre, direction, PlaneThrough::ThePole, -SIDE / 2.0);
+            let high = 1.0
+                - the_cubes_face_plane_on_y_zero()
+                    .transformed(&placement)
+                    .normal()
+                    .z()
+                    .abs();
+            let cap = PI * high * high * (3.0 - high) / 3.0;
+            for (name, rule, ball_first, volume) in [
+                ("ball and block", Rule::Union, true, cube + cap),
+                ("block and ball", Rule::Union, false, cube + cap),
+                ("ball less block", Rule::Difference, true, cap),
+                (
+                    "block less ball",
+                    Rule::Difference,
+                    false,
+                    cube - (ball - cap),
+                ),
+                ("ball with block", Rule::Intersection, true, ball - cap),
+                ("block with ball", Rule::Intersection, false, ball - cap),
+            ] {
+                let what = format!(
+                    "{name}, ball at {centre:?}, tilted towards {direction} degrees, plane through the pole"
+                );
+                let (model, solids) = fused(centre, &placement, rule, ball_first)
+                    .unwrap_or_else(|why| panic!("{what}: fuses: {why:?}"));
+                validates_and_measures(&model, &solids, volume, &[0.3, 0.1, 0.05, 0.01], &what);
             }
         }
     }
