@@ -242,5 +242,70 @@
     "expect": "allow",
     "why": "a stderr redirect beside a read",
     "command": "wc -l docs/queue.md 2>&1"
+  },
+  {
+    "expect": "deny",
+    "why": "pkill -9 -f, the exact form that killed Q2240's land gate (§454)",
+    "command": "pkill -9 -f \"cargo-nextest nextest run --workspace.*rcad-topo\""
+  },
+  {
+    "expect": "deny",
+    "why": "killall picks its targets by pattern",
+    "command": "killall -9 rustc"
+  },
+  {
+    "expect": "deny",
+    "why": "kill reads its pids from a pgrep inside a $() command substitution",
+    "command": "kill $(pgrep -f rcad-topo)"
+  },
+  {
+    "expect": "deny",
+    "why": "kill reads its pids from a pgrep inside a backtick substitution",
+    "command": "kill `pgrep -f rcad-topo`"
+  },
+  {
+    "expect": "deny",
+    "why": "pgrep piped to xargs kill picks its targets by pattern",
+    "command": "pgrep -f rcad-topo | xargs kill -9"
+  },
+  {
+    "expect": "deny",
+    "why": "pkill reached through mise exec --, a wrapper guard.py already strips",
+    "command": "mise exec -- pkill -9 -f rcad-topo"
+  },
+  {
+    "expect": "deny",
+    "why": "pkill reached through sudo",
+    "command": "sudo pkill -f rcad-topo"
+  },
+  {
+    "expect": "deny",
+    "why": "pkill reached through bash -c",
+    "command": "bash -c \"pkill -9 -f rcad-topo\""
+  },
+  {
+    "expect": "allow",
+    "why": "kill <pid> is the allowed form",
+    "command": "kill 2698847"
+  },
+  {
+    "expect": "allow",
+    "why": "kill -- -<pgid> for a setsid group is the allowed form",
+    "command": "kill -- -2698847"
+  },
+  {
+    "expect": "allow",
+    "why": "pgrep -af <path> read on its own, before a kill by number",
+    "command": "pgrep -af /home/mattias/git/mattiasgronlund/rcad-worktrees/wf_ba5ca889-895-2"
+  },
+  {
+    "expect": "allow",
+    "why": "the word pkill inside a grep pattern is not the verb",
+    "command": "grep -n 'pkill' docs/decisions.d/454-a-lane-stops-only-the-processes-it-started.md"
+  },
+  {
+    "expect": "allow",
+    "why": "the word pkill inside a quoted echo is not the verb",
+    "command": "echo \"pkill is refused by the hook now\""
   }
 ]

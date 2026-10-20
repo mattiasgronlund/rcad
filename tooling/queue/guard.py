@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""The PreToolUse hook's judgement: does this tool call write docs/queue.md?
+"""The PreToolUse hook's judgement: does this tool call write docs/queue.md, or
+kill a process by matching a pattern instead of a pid?
 
 Reads the hook payload on stdin and prints a deny decision, or nothing. Edit and
 Write are refused on the file itself. A Bash command is refused when it *does*
@@ -16,6 +17,15 @@ A command that runs the `pin` or `unpin` verb is not refused but asked about:
 pinning a row is Mattias's call, and the ask puts it in front of him even in
 auto mode (§430). He can run the verbs himself with a `!` command, which no
 hook sees.
+
+A Bash command that runs `pkill` or `killall`, or a `kill` whose pids come from
+a `pgrep` read at the moment of the kill — a command substitution, or `pgrep`
+piped to `xargs kill` — is refused too, behind any wrapper this module already
+strips: every tree on this machine runs the same recipes with the same command
+lines, so a pattern written for one tree's run matches another's. On
+2026-10-17, Q1626's lane killed Q2240's land gate in another tree this way.
+`kill <pid>`, `kill -- -<pgid>`, and a `pgrep` read on its own before a kill by
+number are left alone. `docs/decisions.md` §454.
 """
 
 import ast
@@ -46,6 +56,18 @@ PIN_REASON = (
     "takes a pinned row, closes it with `done`, or asks Mattias to unpin it."
 )
 PIN_VERBS = ("pin", "unpin")
+KILL_REASON = (
+    "A kill is refused when it picks its targets by matching a pattern, which can hit another tree's "
+    "run, since every tree on this machine runs the same recipes with the same command lines — the way "
+    "Q1626's lane killed Q2240's land gate in another tree (docs/decisions.md §454). Write down a pid "
+    "before you stop a run, then stop it by number: `kill <pid>`, or `kill -- -<pgid>` for a `setsid` "
+    "group. When the pid is lost, `pgrep -af <your tree's absolute path>`, read the list, and kill only "
+    "the pids you read, by number. Never `pkill`, `killall`, or a `kill` whose pids come from a `pgrep` "
+    "read at the moment of the kill. This hook also keeps a hand edit off docs/queue.md the same way: "
+    "`just queue take <id> <branch>` and the other queue verbs there replace it (docs/decisions.md §263). "
+    "This call was refused because {why}."
+)
+PKILL_FORMS = ("pkill", "killall")
 
 
 def main():
@@ -53,15 +75,19 @@ def main():
     tool = payload.get("tool_name") or ""
     given = payload.get("tool_input") or {}
     verb = None
+    kill_why = None
     if "command" in given and tool in ("", "Bash"):
         command = given.get("command") or ""
         why = writes(command, {}, [])
+        kill_why = kills_by_pattern(command, {})
         verb = pin_verb_in(command, {})
     else:
         path = given.get("file_path") or given.get("notebook_path") or ""
         why = f"{tool or 'this tool'} writes {path}" if is_queue(path, []) else None
     if why:
         decide("deny", REASON.format(why=why))
+    elif kill_why:
+        decide("deny", KILL_REASON.format(why=kill_why))
     elif verb:
         decide("ask", PIN_REASON.format(verb=verb))
 
@@ -357,6 +383,63 @@ def other_script_writes(name, script, queue_in_argv):
     }
     if re.search(idioms.get(name, r"$^"), script):
         return f"a {name} script names docs/queue.md and writes a file"
+    return None
+
+
+def kills_by_pattern(command, variables):
+    """Why this shell text kills by matching a pattern instead of a pid, or None (§454)."""
+    code, bodies = split_heredocs(command)
+    commands = list(simple_commands(code, bodies, variables))
+    for index, (words, _redirects, heredocs) in enumerate(commands):
+        words = unwrap(words)
+        if not words:
+            continue
+        name, args = os.path.basename(words[0]), words[1:]
+        if name in PKILL_FORMS:
+            return f"`{name}` picks its targets by pattern"
+        if name == "kill" and kill_reads_pgrep(args, commands, index):
+            return "`kill` reads its targets from a `pgrep` run at the moment of the kill"
+        if name == "pgrep" and piped_to_xargs_kill(commands, index):
+            return "`pgrep` is piped to `xargs kill`, which picks its targets by pattern"
+        if name in ("bash", "sh", "zsh", "dash"):
+            why = kills_in_shell_script(args, heredocs, variables)
+            if why:
+                return why
+    return None
+
+
+def kill_reads_pgrep(args, commands, index):
+    """True when `kill`'s own args carry a backtick or `$(` substitution naming `pgrep`."""
+    if any(arg == "`" for arg in args) and any(os.path.basename(arg) == "pgrep" for arg in args):
+        return True
+    if args and args[-1] == "$" and index + 1 < len(commands):
+        next_words = unwrap(commands[index + 1][0])
+        return bool(next_words) and os.path.basename(next_words[0]) == "pgrep"
+    return False
+
+
+def piped_to_xargs_kill(commands, index):
+    """True when the simple command right after this `pgrep` is `xargs kill`."""
+    if index + 1 >= len(commands):
+        return False
+    next_words = unwrap(commands[index + 1][0])
+    if not next_words or os.path.basename(next_words[0]) != "xargs":
+        return False
+    rest = [word for word in next_words[1:] if not word.startswith("-")]
+    return bool(rest) and os.path.basename(rest[0]) == "kill"
+
+
+def kills_in_shell_script(args, heredocs, variables):
+    """Recurse into a `bash -c`/heredoc script the same way a kill at top level is judged."""
+    scripts = list(heredocs)
+    for position, arg in enumerate(args):
+        if arg == "-c" and position + 1 < len(args):
+            scripts.append(args[position + 1])
+            break
+    for script in scripts:
+        why = kills_by_pattern(script, dict(variables))
+        if why:
+            return why
     return None
 
 

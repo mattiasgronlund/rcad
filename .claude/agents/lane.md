@@ -19,10 +19,22 @@ its report before a backgrounded test run had printed anything, and Q148's
 merger reported three steps into the gate and never pushed. Run the gate as
 one plain Bash call, `timeout` 600000. A job that runs past ten minutes goes
 in chunks of under ten, never in the background. A run that cannot be chunked
-starts detached with `setsid nohup ... &`, and you wait on it with `timeout 540
-tail --pid=<pid> -f /dev/null`, one foreground call at a time, until it returns
-0 rather than 124. The harness refuses a foreground `sleep`, and the background
-wait it offers instead ends your turn and forces your report (§302).
+starts detached with `setsid nohup ... & echo $!`, and you keep the pid it
+prints. You wait on the run with `timeout 540 tail --pid=<pid> -f /dev/null`,
+one foreground call at a time, until it returns 0 rather than 124. The harness
+refuses a foreground `sleep`, and the background wait it offers instead ends
+your turn and forces your report (§302).
+
+**Stop a run you started by its pid, never by a pattern** (§454). `setsid`
+makes that pid the leader of its own process group, so the group id is the
+same number. Stop it with `kill <pid>`, or `kill -- -<pgid>` for the whole
+group, SIGKILL only after SIGTERM. If the pid is lost, run `pgrep -af <your
+tree's absolute path>`, read the list, and kill only the pids you read, by
+number. Never `pkill`, `killall`, `kill $(pgrep …)` or `pgrep … | xargs kill`:
+every tree on this machine runs the same recipes with the same command lines,
+so a pattern written for your own run can match another tree's — that is how
+Q1626's lane killed Q2240's land gate in another tree. The Bash hook refuses
+these forms and names the ones above instead.
 
 **Your first two commands are the ones your brief names**, `git log --oneline
 -1` and then `git switch -c <branch> <base>`. A worktree-isolated lane branches

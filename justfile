@@ -2920,9 +2920,11 @@ test-ignored:
 #
 # The four hooks below it are rcad's own, need no plugin, and run either way —
 # which is why the skip wraps one line and not the recipe. The fourth is the
-# guard that sends a write to `docs/queue.md` through `just queue` (§263.7): its
-# cases hold each writing form refused, each reading form allowed, and each
-# form that runs `pin` or `unpin` asked about, since only Mattias pins (§430).
+# guard that sends a write to `docs/queue.md` through `just queue` (§263.7) and
+# also refuses a kill that picks its targets by pattern (§454): its cases hold
+# each writing form refused, each reading form allowed, each form that runs
+# `pin` or `unpin` asked about, since only Mattias pins (§430), and each kill
+# form refused or allowed.
 [doc("The hooks against their own cases: shell patching, context budget, worktrees.")]
 check-hooks:
     #!/usr/bin/env bash

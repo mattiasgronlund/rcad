@@ -23,6 +23,15 @@ merger reported three steps into the gate and never pushed. Run the gate as
 one plain Bash call, `timeout` 600000. A job that runs past ten minutes goes
 in chunks of under ten, never in the background.
 
+**Stop anything you start by its pid, never by a pattern** (§454). If a job
+runs detached, write down the pid it prints and stop it with `kill <pid>`, or
+`kill -- -<pgid>` for a `setsid` group's whole group. If the pid is lost, run
+`pgrep -af <your tree's absolute path>`, read the list, and kill only the pids
+you read, by number. Never `pkill`, `killall`, `kill $(pgrep …)` or `pgrep …
+| xargs kill`: every tree on this machine runs the same recipes with the same
+command lines, so a pattern written for your own run can match another tree's
+— that is how Q1626's lane killed Q2240's land gate in another tree.
+
 You are checking another lane's claims; do not trust its report. Write no
 tracked file and make no commit.
 
