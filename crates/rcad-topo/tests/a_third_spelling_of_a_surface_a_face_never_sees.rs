@@ -1,5 +1,5 @@
 //! A surface the face across leaves out, and an edge both faces must split
-//! alike (Q2364, `docs/decisions.md` §422).
+//! alike (Q2364, Q2382, `docs/decisions.md` §422).
 //!
 //! A face leaves out a cut whose faces meet it only on its boundary, unless a
 //! node of the cut splits an edge the face across splits there too. The face
@@ -22,6 +22,15 @@
 //! crosses the pipe in two lines that run on up. The riser listed the pipe as
 //! reaching it only on its boundary and left its lines out, so the edge was
 //! split on one side alone, and three of the six fuses were refused
+//! `ResultIsNotManifold`.
+//!
+//! **And a top that climbs past the bar in two leaning faces** (Q2382). Both
+//! are wholly above the bar, so both list its pipe, and neither crosses the
+//! pipe in a curve wholly above it. The lower one keeps its curve, since the
+//! curve runs on into the block's side, which crosses the pipe for real. The
+//! upper one was told that the lower one may leave the pipe out, took that for
+//! what it does, and left its own curve out, so their edge was split on the
+//! lower face's side alone, and three of the six fuses were refused
 //! `ResultIsNotManifold`.
 
 use core::f64::consts::PI;
@@ -115,14 +124,67 @@ fn two_spellings_of_one_pipe_and_a_box_answer_every_rule_either_way_round() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
-/// A bar of radius 2 standing on `z ∈ [0, 2]` and the step of [`a_step`],
-/// every rule both ways round, against the closed forms: the step is `76.5`,
-/// the bar `8π`, and what they share is the part of the bar's disc with
-/// `|y| ≤ 1.5`, `2 · 2 · (1.5 · √1.75 + 4 · asin 0.75)`.
+/// A block over `x ∈ [-3, 3]`, `z ∈ [-1, 3]`, with a step over `x ∈ [1.5, 3]`
+/// up to `z = 4`, drawn in `x` and `z` for [`a_block_across_y`].
+const A_STEP: [[f64; 2]; 6] = [
+    [-3.0, -1.0],
+    [3.0, -1.0],
+    [3.0, 4.0],
+    [1.5, 4.0],
+    [1.5, 3.0],
+    [-3.0, 3.0],
+];
+
+/// A block over `x ∈ [-3, 3]` from `z = -1`, its top flat at `z = 2.2` up to
+/// `x = 0.5`, then leaning up to `z = 3` at `x = 1.5` and on, steeper, to
+/// `z = 5` at `x = 2.1`, and flat again from there, drawn in `x` and `z` for
+/// [`a_block_across_y`].
+const A_TOP_CLIMBING_IN_TWO_LEANING_FACES: [[f64; 2]; 7] = [
+    [-3.0, -1.0],
+    [3.0, -1.0],
+    [3.0, 5.0],
+    [2.1, 5.0],
+    [1.5, 3.0],
+    [0.5, 2.2],
+    [-3.0, 2.2],
+];
+
+/// A bar of radius 2 standing on `z ∈ [0, 2]` and the step of [`A_STEP`],
+/// every rule both ways round, against the closed forms of
+/// [`every_rule_beside_the_bar`].
 #[test]
 fn a_step_beside_a_bar_answers_every_rule_either_way_round() {
+    let failed = every_rule_beside_the_bar(&A_STEP);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A bar of radius 2 standing on `z ∈ [0, 2]` and the block of
+/// [`A_TOP_CLIMBING_IN_TWO_LEANING_FACES`], every rule both ways round,
+/// against the closed forms of [`every_rule_beside_the_bar`].
+///
+/// The two leaning faces are wholly above the bar, so each lists the bar's
+/// pipe as reaching it only on its boundary, and each crosses the pipe in an
+/// ellipse that dips below the bar, so neither leaves it out as reached by no
+/// face. They meet along `x = 1.5`, `z = 3`, which the pipe crosses at
+/// `y = ±√1.75`. The lower one keeps its ellipse, since it runs on into the
+/// block's sides at `y = ±1.5`, which cross the pipe below the bar's top too
+/// and do not list it. So it splits the edge at `y = ±√1.75`, and the upper
+/// one must as well.
+#[test]
+fn a_top_climbing_past_a_bar_in_two_leaning_faces_answers_every_rule_either_way_round() {
+    let failed = every_rule_beside_the_bar(&A_TOP_CLIMBING_IN_TWO_LEANING_FACES);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// What goes wrong fusing a bar of radius 2 on `z ∈ [0, 2]` with the block
+/// of `profile` across `y ∈ [-1.5, 1.5]`, every rule both ways round, as the
+/// fuses' names: the block covers `z ∈ [-1, 2.2]` over `x ∈ [-3, 3]` at
+/// least, so the bar is `8π`, the block `3` times the profile's area, and
+/// what they share is the part of the bar's disc with `|y| ≤ 1.5`,
+/// `2 · 2 · (1.5 · √1.75 + 4 · asin 0.75)`.
+fn every_rule_beside_the_bar(profile: &[[f64; 2]]) -> Vec<String> {
     let bar = PI * RADIUS * RADIUS * MEETING;
-    let step = 3.0 * (6.0 * 4.0 + 1.5 * 1.0);
+    let block = 3.0 * area_inside(profile);
     let shared = MEETING
         * 2.0
         * (1.5 * (RADIUS * RADIUS - 2.25).sqrt() + RADIUS * RADIUS * (0.75f64).asin());
@@ -131,23 +193,23 @@ fn a_step_beside_a_bar_answers_every_rule_either_way_round() {
     for rule in EVERY_RULE {
         for bar_first in [true, false] {
             let by_hand = match (rule, bar_first) {
-                (Rule::Union, _) => bar + step - shared,
+                (Rule::Union, _) => bar + block - shared,
                 (Rule::Intersection, _) => shared,
                 (Rule::Difference, true) => bar - shared,
-                (Rule::Difference, false) => step - shared,
+                (Rule::Difference, false) => block - shared,
                 _ => unreachable!(),
             };
             let mut model = Model::new(Scale::millimetres(100.0).expect("a size"));
             let the_bar = model
                 .add_round_bar(RADIUS, MEETING, &Isometry::identity())
                 .expect("a bar");
-            let the_step = a_step(&mut model);
+            let the_block = a_block_across_y(&mut model, profile);
             let (arguments, tools) = if bar_first {
-                (vec![the_bar], vec![the_step])
+                (vec![the_bar], vec![the_block])
             } else {
-                (vec![the_step], vec![the_bar])
+                (vec![the_block], vec![the_bar])
             };
-            let asked = format!("step {rule:?} bar_first={bar_first}");
+            let asked = format!("{rule:?} bar_first={bar_first}");
             ran += 1;
             if let Some(wrong) = check(&mut model, &arguments, &tools, rule, by_hand) {
                 println!("{asked}: {wrong}");
@@ -156,22 +218,24 @@ fn a_step_beside_a_bar_answers_every_rule_either_way_round() {
         }
     }
     println!("ran {ran}, failed {}", failed.len());
-    assert!(failed.is_empty(), "{failed:#?}");
+    failed
 }
 
-/// A block over `x ∈ [-3, 3]`, `y ∈ [-1.5, 1.5]`, `z ∈ [-1, 3]`, with a step
-/// over `x ∈ [1.5, 3]` up to `z = 4`.
-fn a_step(model: &mut Model) -> SolidKey {
-    let profile = ProfileBuilder::new(vec![
-        [-3.0, -1.0],
-        [3.0, -1.0],
-        [3.0, 4.0],
-        [1.5, 4.0],
-        [1.5, 3.0],
-        [-3.0, 3.0],
-    ])
-    .build(&Policy::certified(), &mut ProvenanceLog::new())
-    .expect("a step");
+/// The area inside `profile`, a polygon going round anticlockwise.
+fn area_inside(profile: &[[f64; 2]]) -> f64 {
+    let mut twice = 0.0;
+    for (at, here) in profile.iter().enumerate() {
+        let next = profile[(at + 1) % profile.len()];
+        twice += here[0] * next[1] - next[0] * here[1];
+    }
+    twice / 2.0
+}
+
+/// `profile`, drawn in `x` and `z`, pushed across `y ∈ [-1.5, 1.5]`.
+fn a_block_across_y(model: &mut Model, profile: &[[f64; 2]]) -> SolidKey {
+    let profile = ProfileBuilder::new(profile.to_vec())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a profile");
     let about_x = Isometry::quarter_turns(&Axis::x(), 1).expect("a quarter turn");
     let out = Isometry::translation(Vector::new(0.0, 1.5, 0.0)).expect("a finite shift");
     model
