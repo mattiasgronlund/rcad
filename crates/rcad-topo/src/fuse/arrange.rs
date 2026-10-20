@@ -2631,7 +2631,10 @@ impl<'f> Arrangement<'f> {
     /// greater `b`, by [`name_of_surface_bits`], so that the face on either
     /// pipe names the two alike; and which of the two it is by its side of
     /// `a`'s axis along `d_a × d_b`, each direction
-    /// [`written_the_one_way`].
+    /// [`written_the_one_way`]. Where a pipe is written twice, the halves
+    /// along each spelling name the same place differently, and each place is
+    /// still one node, carrying both names
+    /// ([`Arrangement::name_where_two_halves_meet`]).
     ///
     /// # Errors
     ///
@@ -2827,8 +2830,16 @@ impl<'f> Arrangement<'f> {
 
     /// The node named `name`, one of the two places four half ellipses meet
     /// at, made a node of crossings `first` and `second` too: the corner of
-    /// the face that is the place, if one is, or the node placed under that
-    /// name already, or a new one.
+    /// the face that is the place, if one is, or the node placed at that place
+    /// already, or a new one.
+    ///
+    /// **The node placed already is found by the place and not by the name**
+    /// ([`the_place_two_halves_meet_at`]), and takes `name` on beside its own
+    /// when the two differ. They differ where one of the pipes is written
+    /// twice, and then the face along each spelling names the place its own
+    /// way, so the node carries both. Found by the name alone, the cross bar's
+    /// wall across two bars on one pipe held two nodes at each place, left for
+    /// [`Arrangement::merge_points_that_are_one_point`] to join (Q2393).
     fn name_where_two_halves_meet(
         &mut self,
         first: usize,
@@ -2843,17 +2854,22 @@ impl<'f> Arrangement<'f> {
             self.nodes[corner].stands_for_too(name);
             return;
         }
-        if let Some(placed) = self
-            .nodes
-            .iter_mut()
-            .find(|node| node.vertex.is_none() && node.made_of == Some(name))
-        {
+        let the_place = the_place_two_halves_meet_at(name).expect(
+            "a place four half ellipses meet at is named [a, b, b] by two pipes, with which 0 or 1",
+        );
+        if let Some(placed) = self.nodes.iter_mut().find(|node| {
+            node.vertex.is_none()
+                && node
+                    .made_of
+                    .is_some_and(|made_of| the_place_two_halves_meet_at(made_of) == Some(the_place))
+        }) {
             for crossing in [first, second] {
                 if !placed.crossings.contains(&crossing) {
                     placed.crossings.push(crossing);
                 }
             }
             placed.crossings.sort_unstable();
+            placed.stands_for_too(name);
             return;
         }
         self.nodes.push(Node {
@@ -13749,7 +13765,9 @@ fn held_as_an_interval(expansion: &[f64]) -> Interval {
 
 /// The three surfaces the two nodes where four half ellipses meet are named
 /// by: the lesser of the two pipes by [`name_of_surface_bits`], then the
-/// greater twice, so that the face on either pipe names them alike.
+/// greater twice, so that the face on either pipe names them alike. A pipe
+/// written twice names them two ways, and [`the_place_two_halves_meet_at`]
+/// is the key that puts the two together.
 pub(crate) fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface; 3] {
     let (lesser, greater) = if name_of_surface_bits(one) <= name_of_surface_bits(other) {
         (one, other)
@@ -13757,6 +13775,46 @@ pub(crate) fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface;
         (other, one)
     };
     [*lesser, *greater, *greater]
+}
+
+/// The place four half ellipses meet at that `name` names, as a key that
+/// does not hang on how either pipe is written: each pipe by
+/// [`name_of_the_surface_either_way_round`], the lesser of the two first, and
+/// `which` counted from that one. `None` for every name that is not
+/// [`where_two_halves_meet`]'s with `which` 0 or 1, which no other node of
+/// two pipes carries ([`Arrangement::is_where_two_pipes_touch`]).
+///
+/// **One pipe can be written twice**, its axis origin at two places along
+/// one line, and a third pipe can sort between the two spellings by
+/// [`name_of_surface_bits`]. Then the halves along one spelling name a place
+/// `[third, pipe, pipe]` and those along the other `[pipe, third, third]`,
+/// and one face held two nodes at one point.
+///
+/// **`which` follows the swap exactly.** It is the side of the lesser axis
+/// the place lies on along `d_lesser × d_greater`
+/// ([`which_place_two_pipes_touch_at`]). The place is `c ± r·n̂` for `c` on
+/// both axes, so the place less the lesser origin is `c − o` along
+/// `d_lesser`, which reads nought across, and `± r·n̂`: the side does not
+/// hang on where along its line the origin sits. Swapping the two pipes
+/// turns `d_lesser × d_greater` round, so the side counted from the other
+/// pipe is the other one, and both were proved, not guessed.
+fn the_place_two_halves_meet_at(
+    (surfaces, which): ([Surface; 3], u8),
+) -> Option<([[u64; 9]; 2], u8)> {
+    let [lesser, greater, again] = surfaces;
+    let two_pipes = matches!(
+        (lesser, greater),
+        (Surface::Cylinder(_), Surface::Cylinder(_))
+    );
+    if !two_pipes || again != greater || which > 1 {
+        return None;
+    }
+    let [one, other] = [lesser, greater].map(|pipe| name_of_the_surface_either_way_round(&pipe));
+    Some(if one <= other {
+        ([one, other], which)
+    } else {
+        ([other, one], 1 - which)
+    })
 }
 
 /// The two places two pipes of one radius touch at, whose axes meet at
