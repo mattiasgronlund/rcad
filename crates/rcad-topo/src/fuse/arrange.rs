@@ -2631,7 +2631,10 @@ impl<'f> Arrangement<'f> {
     /// greater `b`, by [`name_of_surface_bits`], so that the face on either
     /// pipe names the two alike; and which of the two it is by its side of
     /// `a`'s axis along `d_a × d_b`, each direction
-    /// [`written_the_one_way`].
+    /// [`written_the_one_way`]. Where a pipe is written twice, the halves
+    /// along each spelling name the same place differently, and each place is
+    /// still one node, carrying both names
+    /// ([`Arrangement::name_where_two_halves_meet`]).
     ///
     /// # Errors
     ///
@@ -2827,8 +2830,16 @@ impl<'f> Arrangement<'f> {
 
     /// The node named `name`, one of the two places four half ellipses meet
     /// at, made a node of crossings `first` and `second` too: the corner of
-    /// the face that is the place, if one is, or the node placed under that
-    /// name already, or a new one.
+    /// the face that is the place, if one is, or the node placed at that place
+    /// already, or a new one.
+    ///
+    /// **The node placed already is found by the place and not by the name**
+    /// ([`the_place_two_halves_meet_at`]), and takes `name` on beside its own
+    /// when the two differ. They differ where one of the pipes is written
+    /// twice, and then the face along each spelling names the place its own
+    /// way, so the node carries both. Found by the name alone, the cross bar's
+    /// wall across two bars on one pipe held two nodes at each place, left for
+    /// [`Arrangement::merge_points_that_are_one_point`] to join (Q2393).
     fn name_where_two_halves_meet(
         &mut self,
         first: usize,
@@ -2843,17 +2854,22 @@ impl<'f> Arrangement<'f> {
             self.nodes[corner].stands_for_too(name);
             return;
         }
-        if let Some(placed) = self
-            .nodes
-            .iter_mut()
-            .find(|node| node.vertex.is_none() && node.made_of == Some(name))
-        {
+        let the_place = the_place_two_halves_meet_at(name).expect(
+            "a place four half ellipses meet at is named [a, b, b] by two pipes, with which 0 or 1",
+        );
+        if let Some(placed) = self.nodes.iter_mut().find(|node| {
+            node.vertex.is_none()
+                && node
+                    .made_of
+                    .is_some_and(|made_of| the_place_two_halves_meet_at(made_of) == Some(the_place))
+        }) {
             for crossing in [first, second] {
                 if !placed.crossings.contains(&crossing) {
                     placed.crossings.push(crossing);
                 }
             }
             placed.crossings.sort_unstable();
+            placed.stands_for_too(name);
             return;
         }
         self.nodes.push(Node {
@@ -13749,7 +13765,9 @@ fn held_as_an_interval(expansion: &[f64]) -> Interval {
 
 /// The three surfaces the two nodes where four half ellipses meet are named
 /// by: the lesser of the two pipes by [`name_of_surface_bits`], then the
-/// greater twice, so that the face on either pipe names them alike.
+/// greater twice, so that the face on either pipe names them alike. A pipe
+/// written twice names them two ways, and [`the_place_two_halves_meet_at`]
+/// is the key that puts the two together.
 pub(crate) fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface; 3] {
     let (lesser, greater) = if name_of_surface_bits(one) <= name_of_surface_bits(other) {
         (one, other)
@@ -13757,6 +13775,46 @@ pub(crate) fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface;
         (other, one)
     };
     [*lesser, *greater, *greater]
+}
+
+/// The place four half ellipses meet at that `name` names, as a key that
+/// does not hang on how either pipe is written: each pipe by
+/// [`name_of_the_surface_either_way_round`], the lesser of the two first, and
+/// `which` counted from that one. `None` for every name that is not
+/// [`where_two_halves_meet`]'s with `which` 0 or 1, which no other node of
+/// two pipes carries ([`Arrangement::is_where_two_pipes_touch`]).
+///
+/// **One pipe can be written twice**, its axis origin at two places along
+/// one line, and a third pipe can sort between the two spellings by
+/// [`name_of_surface_bits`]. Then the halves along one spelling name a place
+/// `[third, pipe, pipe]` and those along the other `[pipe, third, third]`,
+/// and one face held two nodes at one point.
+///
+/// **`which` follows the swap exactly.** It is the side of the lesser axis
+/// the place lies on along `d_lesser × d_greater`
+/// ([`which_place_two_pipes_touch_at`]). The place is `c ± r·n̂` for `c` on
+/// both axes, so the place less the lesser origin is `c − o` along
+/// `d_lesser`, which reads nought across, and `± r·n̂`: the side does not
+/// hang on where along its line the origin sits. Swapping the two pipes
+/// turns `d_lesser × d_greater` round, so the side counted from the other
+/// pipe is the other one, and both were proved, not guessed.
+fn the_place_two_halves_meet_at(
+    (surfaces, which): ([Surface; 3], u8),
+) -> Option<([[u64; 9]; 2], u8)> {
+    let [lesser, greater, again] = surfaces;
+    let two_pipes = matches!(
+        (lesser, greater),
+        (Surface::Cylinder(_), Surface::Cylinder(_))
+    );
+    if !two_pipes || again != greater || which > 1 {
+        return None;
+    }
+    let [one, other] = [lesser, greater].map(|pipe| name_of_the_surface_either_way_round(&pipe));
+    Some(if one <= other {
+        ([one, other], which)
+    } else {
+        ([other, one], 1 - which)
+    })
 }
 
 /// The two places two pipes of one radius touch at, whose axes meet at
@@ -22704,5 +22762,212 @@ mod a_point_rounded_off_a_ball_near_where_it_is_opened_out_from {
         })
         .to_vec();
         skin
+    }
+}
+
+#[cfg(test)]
+mod four_half_ellipses_named_two_ways {
+    //! A bar up `z` from `0` to `4`, a bar on from `4` to `6` whose wall names
+    //! the same axis at `(0, 0, 4)`, and a bar of the same radius along `x`
+    //! across both at `z = 3`, whose wall names its axis at `(0, 0, 3)`: the
+    //! shape of
+    //! `a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does`
+    //! in `tests/one_pipe_whose_origin_sits_at_two_places.rs`, cut as its
+    //! second union cuts it, with the cross and the upper bar already one.
+    //!
+    //! The cross's wall then holds the two halves that climb past the joint as
+    //! its own edges, along the upper wall, and the two that fall below it as
+    //! its crossings with the lower wall. All four meet at `(0, ±2, 3)`.
+
+    use rcad_geom::{Axis, Cylinder, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector};
+    use rcad_predicates::{Interval, Policy, ProvenanceLog};
+
+    use super::{Arrangement, canonical_cut_surfaces};
+    use crate::fuse::bake::bake;
+    use crate::fuse::cuts;
+    use crate::{DraftStep, Model, Rule, SolidBuilder, SolidKey};
+
+    const RADIUS: f64 = 2.0;
+
+    /// Each place the four halves meet on the cross's wall is one node, though
+    /// two of the halves are drawn along the upper wall and two along the
+    /// lower, which is the same pipe written twice.
+    ///
+    /// Each pair of halves names the place by the lesser of its two pipes and
+    /// the greater twice. The pairs that hold a half along the upper wall named
+    /// it `[cross, upper, upper]`, and the pair of the two along the lower
+    /// wall `[lower, cross, cross]`, since the cross's pipe sorts between the
+    /// two spellings. So each place was two nodes on one face.
+    #[test]
+    fn each_place_four_halves_meet_is_one_node_when_their_pipe_is_written_twice() {
+        let (model, [lower, crossed]) = the_cross_united_with_the_upper_bar();
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut solids = bake(&model, &[lower], &policy, &mut log).expect("the lower bar bakes");
+        solids.extend(bake(&model, &[crossed], &policy, &mut log).expect("the cross bakes"));
+        cuts::gather(&mut solids, &policy, &mut log).expect("the two cut each other");
+
+        let mut wrong = Vec::new();
+        for face in solids.iter().flat_map(|solid| &solid.faces) {
+            let Surface::Cylinder(pipe) = face.surface else {
+                continue;
+            };
+            if pipe.axis().direction() != Vector::new(1.0, 0.0, 0.0) {
+                continue;
+            }
+            let arrangement =
+                Arrangement::drawn(face, &canonical_cut_surfaces(face), &policy, &mut log)
+                    .expect("the cross's wall is drawn on");
+            for side in [RADIUS, -RADIUS] {
+                let at = arrangement
+                    .nodes
+                    .iter()
+                    .filter(|node| holds(node.point.enclosure(), [0.0, side, 3.0]))
+                    .collect::<Vec<_>>();
+                if at.len() != 1 {
+                    wrong.push(format!(
+                        "{} nodes at (0, {side}, 3): {:?}",
+                        at.len(),
+                        at.iter()
+                            .map(|node| (node.made_of, &node.also, &node.crossings))
+                            .collect::<Vec<_>>()
+                    ));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    fn holds(enclosure: [Interval; 3], point: [f64; 3]) -> bool {
+        enclosure
+            .iter()
+            .zip(point)
+            .all(|(span, value)| span.lo() <= value && value <= span.hi())
+    }
+
+    /// The lower bar, and the upper bar united with the cross.
+    fn the_cross_united_with_the_upper_bar() -> (Model, [SolidKey; 2]) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let up = Vector::new(0.0, 0.0, 1.0);
+        let along_x = Vector::new(1.0, 0.0, 0.0);
+        let lower = a_bar(
+            &mut model,
+            a_wall(Point::new(0.0, 0.0, 0.0), up),
+            [0.0, 4.0],
+            along_x,
+        );
+        let upper = a_bar(
+            &mut model,
+            a_wall(Point::new(0.0, 0.0, 4.0), up),
+            [0.0, 2.0],
+            along_x,
+        );
+        let across = a_bar(
+            &mut model,
+            a_wall(Point::new(0.0, 0.0, 3.0), along_x),
+            [-4.0, 4.0],
+            up,
+        );
+        let crossed = model
+            .fuse(
+                &[upper],
+                &[across],
+                Rule::Union,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the cross and the upper bar unite");
+        let [crossed] = crossed.solids() else {
+            panic!("the cross and the upper bar are one solid");
+        };
+        (model, [lower, *crossed])
+    }
+
+    fn a_wall(origin: Point, direction: Vector) -> Cylinder {
+        Cylinder::new(
+            Axis::new(origin, direction).expect("a direction with a length"),
+            RADIUS,
+        )
+        .expect("a positive radius")
+    }
+
+    /// A round bar on `wall` from `from` to `to` along its axis, counted from
+    /// the origin the wall names, with its seam the radius off the axis along
+    /// `towards`: `a_bar_with_its_seam_towards` in that test file.
+    fn a_bar(model: &mut Model, wall: Cylinder, [from, to]: [f64; 2], towards: Vector) -> SolidKey {
+        let origin = wall.axis().origin().coordinates();
+        let along = wall.axis().direction();
+        let ahead = along.components();
+        let off = towards.components().map(|side| RADIUS * side);
+        let on_the_axis = |t: f64| {
+            Point::new(
+                origin[0] + t * ahead[0],
+                origin[1] + t * ahead[1],
+                origin[2] + t * ahead[2],
+            )
+        };
+        let on_the_seam = |t: f64| {
+            let [x, y, z] = on_the_axis(t).coordinates();
+            Point::new(x + off[0], y + off[1], z + off[2])
+        };
+
+        let mut builder = SolidBuilder::new();
+        let low = builder
+            .add_vertex(on_the_seam(from))
+            .expect("a finite corner");
+        let high = builder
+            .add_vertex(on_the_seam(to))
+            .expect("a finite corner");
+        let seam = builder
+            .add_edge(low, high, EdgeRun::Straight)
+            .expect("the seam up the wall");
+        let low_circle = builder
+            .add_edge(low, low, EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("the bottom cap circle");
+        let high_circle = builder
+            .add_edge(high, high, EdgeRun::RightRoundWhereItsFacesCross)
+            .expect("the top cap circle");
+        let mut cap = |t: f64, outward: Vector, edge, turn| {
+            let plane = Plane::from_point_and_normal(on_the_axis(t), outward)
+                .expect("an axis direction is a normal");
+            let coedge = builder.add_coedge(edge, turn).expect("one use of the rim");
+            let wire = builder
+                .add_wire(&[DraftStep::Along(coedge)])
+                .expect("a cap is bounded by one whole circle");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a flat cap")
+        };
+        let bottom_cap = cap(from, -along, low_circle, Orientation::Reversed);
+        let top_cap = cap(to, along, high_circle, Orientation::Forward);
+        let round_the_wall = [
+            (low_circle, Orientation::Forward),
+            (seam, Orientation::Forward),
+            (high_circle, Orientation::Reversed),
+            (seam, Orientation::Reversed),
+        ]
+        .map(|(edge, turn)| {
+            DraftStep::Along(
+                builder
+                    .add_coedge(edge, turn)
+                    .expect("a use of the wall's edge"),
+            )
+        });
+        let wire = builder
+            .add_wire(&round_the_wall)
+            .expect("the wall's one wire");
+        let side = builder
+            .add_face(Surface::Cylinder(wall), &[wire])
+            .expect("the curved wall");
+        builder
+            .add_shell(&[
+                (bottom_cap, Orientation::Forward),
+                (top_cap, Orientation::Forward),
+                (side, Orientation::Forward),
+            ])
+            .expect("a closed skin");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a bar described face by face")
     }
 }
