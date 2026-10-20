@@ -103,8 +103,16 @@ class Row:
         return match.group(1) + write_set + match.group(3) + match.group(4)
 
     def with_tag(self, tag):
-        """The row with its tag replaced, added in front of the description, or removed when `tag` is None."""
-        assert self.pin is None, f"tag reached the pinned row {self.id}, and only pin and unpin change one"
+        """The row with its tag replaced, added in front of the description, or removed when `tag` is None.
+
+        A pinned row keeps its pin in front, and takes or loses `small` alone,
+        since a class is Mattias's to keep while he holds the row (§430.8).
+        """
+        if self.pin is not None:
+            assert not self.has_class() and tag in (None, SMALL), \
+                f"a class reached the pinned row {self.id} through with_tag, and only small leaves a pin as it was"
+            unpinned = Row(self.index, self.with_pin(None), self.block)
+            return Row(self.index, unpinned.with_tag(tag), self.block).with_pin(self.pin)
         match = WHAT.match(self.text)
         assert match, f"a row of fewer than six fields reached with_tag: {self.text!r}"
         head, first, rest = match.groups()

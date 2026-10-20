@@ -57,6 +57,8 @@ the same order.
 - `drop`, `park`, `after`, `rank` of the pinned row itself, `tier` and `tag`
   refuse an open pinned row. The refusal says Mattias placed it and names the
   three ways on: take it, close it with `done`, or ask him to `unpin` it.
+  *§430.8, 2026-10-20: `tag` sets and takes off `small` on a pinned row with no
+  class, which moves it nowhere; a class it still refuses.*
 - `add` refuses a description that starts with `pinned/`.
 
 `check-queue` holds the shape. A pin is `pinned/` and a number from 1, an open
@@ -149,3 +151,48 @@ What was decided while building it:
 The cost is slots left empty while the lanes in the pin's way drain, where
 before they went to rows the pin then waited behind. That is what a pin asks
 for; `unpin` is the way out when it is not.
+
+### 430.8 A pinned row can be tagged small
+
+*Mattias, 2026-10-20: "If I pin a row, that row will always execute in it's
+own lane, even if it is very small. That seems stupid. Many of the tier 2.2
+fixes are small, but if I would like to prioritise some of them they will
+always cost a full lane which they should not."*
+
+**What the fill did already.** A pin whose next word is `small` goes out as a
+bundle. `take_at` in the `queue` recipe takes it with the next ready small
+rows in the walk, up to `queue_bundle`, and the walk puts the later pins
+first. Three pins went out that way, each tagged `small` before it was
+pinned: Q1931 (pinned/2) in one lane with Q1918, Q1925, Q1927 and Q1942
+(taken in 704063f0), Q1946 (pinned/4) with Q1945 (0fb5fb99), and Q2395
+(pinned/5) with Q2467 (fe0319c4). The six other rows pinned beside Q2395 in
+98249cbd had no `small`, and each was taken into a slot of its own.
+
+**What was missing.** `small` had to be on the row before the pin. §430.4 had
+`tag` refuse an open pinned row, so a row found to be small once it was pinned
+kept a lane to itself, whoever found it. And few rows carry the mark: on
+2026-10-20, 1 of the 75 open rows in tier 2.2 did, and 4 of the 69 in tier 2.
+
+**The rule.** `tag <id> small` and `tag <id> -` work on an open pinned row that
+has no class. The word goes after the pin, `pinned/<n> small`, which is where
+the fill and `check-queue` already read it. The pin keeps its number and its
+line, so the row is taken when it would have been; what changes is that up to
+four ready small rows go in its lane. A class is still refused on a pinned row,
+set or replaced: a class says how far up the fill a row goes, and the pin is
+Mattias's answer to that. A defect is never small (§352.2), so a pinned row
+with a class has no reason to take `small` either.
+
+**The cost.** The pin lands with the rows that rode with it, so later than it
+would alone: §352.4 sizes a full bundle at about 45 minutes. Pins come first in
+the walk, so a set of small pins goes out together before any small row that
+is not pinned joins them.
+
+**To use it.** Tag before the pin or after it, in one batch or two: `just queue
+apply pin Q1 Q2 + tag Q1 small + tag Q2 small`. A session that pins at
+Mattias's word, or a dispatcher about to take a pinned row alone, tags it
+`small` when it is small by §352.4: it needs no trace, its place is known, and
+the work takes about ten minutes.
+
+The test is the pin arm of `check-queue-api-selftest`. `tag small` and `tag -`
+on a pinned row go through and leave the pin and its place, and `tag small` on
+a pinned `wrong/A` row is refused. On the base the first of these was refused.

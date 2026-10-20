@@ -129,7 +129,10 @@ no family, and is not traced (§373.7, below).
 
 A line `take Q1,Q2,Q3 (a bundle of 3 small rows, one lane)` is **one
 lane** doing all of those rows (§352.4), with each row's text indented under
-it.
+it. A pinned row the fill takes alone gets a lane to itself. If it is small by
+§352.4 (no trace, its place known, about ten minutes), run `just queue tag <id>
+small` and then `next` again: the row then takes the small rows after it into
+its lane (§430.8).
 
 **Checking a row against the code is not yours.** Its `lanes` run sends the
 row to prep first (`.claude/agents/prep.md`, §396.4). Prep reads the row and

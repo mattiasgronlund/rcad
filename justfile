@@ -12952,7 +12952,8 @@ _queue-rows file:
 # is a row he put at the head of the queue, and the fill takes the ready ones
 # before anything else, the full bundle too, in the order of n. Not in the
 # order of the file, for the reason above: the merge driver keeps one side's
-# line order. A class or `small` after the pin still counts. A pinned row a
+# line order. A class or `small` after the pin still counts, so a pinned small
+# row takes the small rows after it into its lane (§430.8). A pinned row a
 # running lane blocks is skipped with the usual line, and one that waits is not
 # ready, so a chain of pinned rows goes out one row at a time as each lands.
 # Every row the fill reaches after a skipped pinned row, a later pin and the
@@ -13004,7 +13005,8 @@ _queue-rows file:
 # replaces or removes a row's class or `small` (§352.2), and a class moves the
 # row to the tier it names (§403.4). `pin` and `unpin` are Mattias's alone
 # (§430): the queue write guard asks him before any command that runs one, and
-# of the other verbs only `take`, `done` and `pick` touch a pinned row.
+# of the other verbs only `take`, `done` and `pick` touch a pinned row, and
+# `tag` with `small` or `-` on one with no class, which moves it nowhere (§430.8).
 # Only `done` ends a wait, so `after <id> -` sets a waiting row back to `todo`:
 # a drop that leaves rows waiting on it is refused, with the `after` step for
 # each of them, and goes through with those steps in the same `apply` (§451).
@@ -16398,11 +16400,18 @@ check-queue-api-selftest:
     got=$(q "$pin_wt" rank "$classed" before "$first" 2>&1) || fail "rank refused to move a row that is not pinned above a pinned one"
     got=$(q "$pin_wt" ready 2>&1) || fail "ready failed with a row ranked above the pinned ones"
     [ "$(first_three)" = "$first $second $classed " ] || fail "a row ranked above the pinned rows in the file was taken ahead of them"
-    for step in "rank $first before $classed" "tier $first 2" "tag $first small" "park $first §230" "drop $first §230" "after $first Q2"; do
+    for step in "rank $first before $classed" "tier $first 2" "tag $first wrong/A" "park $first §230" "drop $first §230" "after $first Q2"; do
         got=$(q "$pin_wt" $step 2>&1) && fail "$step went through on a row Mattias pinned"
         grep -qF "$first is pinned/1: Mattias placed it, so \`${step%% *}\` leaves it alone. Take it, close it with \`done\`, or ask him to \`unpin\` it (§430)" <<<"$got" \
             || fail "$step did not say the pinned row is Mattias's to move"
     done
+    # §430.8: `small` says how a row is carried, not where it goes.
+    pintag() { awk -v id="$1" '$1 == id { print $6, $7 }' "$pin_wt/docs/queue.md"; }
+    got=$(q "$pin_wt" tag "$first" small 2>&1) || fail "tag refused small on a pinned row: $got"
+    [ "$(pintag "$first")" = "pinned/1 small" ] || fail "tag did not put small after $first's pin"
+    [ "$(tier1)" = "$classed $first $second Q2 " ] || fail "tag small moved the pinned row $first"
+    got=$(q "$pin_wt" tag "$first" - 2>&1) || fail "tag refused to take small off a pinned row: $got"
+    [ "$(pintag "$first")" = "pinned/1 from/-" ] || fail "tag - did not take small off $first and leave its pin"
     got=$(q "$pin_wt" add 1 opus - "pinned/9 a pin add writes §230" 2>&1) && fail "add wrote a row with a pin on it"
     grep -qF 'only Mattias pins a row' <<<"$got" || fail "add did not say a pin is Mattias's to set"
     got=$(q "$pin_wt" pin "$first" 2>&1) && fail "pin numbered a row that is pinned already"
@@ -16431,6 +16440,11 @@ check-queue-api-selftest:
     got=$(q "$pin_wt" done "$first" "$pinned_sha" 2>&1) || fail "done refused a pinned row"
     awk -v id="$first" '/^## Closed/ { c = 1 } c && $1 == id && $6 == "pinned/1" { f = 1 } END { exit !f }' "$pin_wt/docs/queue.md" \
         || fail "done did not move the pinned row under ## Closed with its pin"
+    got=$(q "$pin_wt" pin "$classed" 2>&1) || fail "pin refused the wrong/A row $classed"
+    [ "$(pintag "$classed")" = "pinned/1 wrong/A" ] || fail "pin did not put pinned/1 in front of $classed's class"
+    got=$(q "$pin_wt" tag "$classed" small 2>&1) && fail "tag put small in place of a pinned row's class"
+    grep -qF "$classed is pinned/1: Mattias placed it, so \`tag\` leaves it alone" <<<"$got" \
+        || fail "tag did not say a pinned row's class is Mattias's to keep"
     got=$(check "$pin_wt") || fail "the file the pin verbs wrote fails check-queue"
 
     # §435.6: the verbs keep a row that waits in no tier the fill reaches before

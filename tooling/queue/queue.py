@@ -964,7 +964,8 @@ def tag_step(queue, claims, here, args, batch):
     row's tier, A and B tier 1 and C and D tier 5, so setting one moves the row
     there (§403.4). `small` lets the fill hand a lane several such rows at once.
     A row carries one tag at most, since a defect needs a trace first and so is
-    never small.
+    never small. On a pinned row it sets and takes off `small` alone, which
+    moves the row nowhere; a class there is Mattias's to keep (§430.8).
     """
     need(args, 2, "tag <id> <class>|small|-")
     row_id, tag = args
@@ -976,8 +977,9 @@ def tag_step(queue, claims, here, args, batch):
     row = require_row(queue, here, row_id)
     if row.is_closed():
         raise Refused(f"{row_id} is closed: {row.state}")
-    refuse_if_pinned(row, "tag")
     is_class = tag is not None and CLASS.match(tag) is not None
+    if is_class or row.has_class():
+        refuse_if_pinned(row, "tag")
     if is_class and row.tier not in ("1", "5"):
         raise Refused(f"{row_id} is tier {row.tier}, and a class ranks tier 1 and tier 5 rows only")
     if tag == row.tag:
