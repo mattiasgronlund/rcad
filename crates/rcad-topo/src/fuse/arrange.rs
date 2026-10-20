@@ -1962,6 +1962,11 @@ impl<'f> Arrangement<'f> {
                             .or_else(|| {
                                 Self::side_of_a_plane_holding_a_rings_axis(&on, point, plane)
                             })
+                            .or_else(|| {
+                                Self::side_of_a_plane_holding_a_cones_or_a_pipes_axis(
+                                    &on, point, plane,
+                                )
+                            })
                             .or_else(|| Self::side_of_a_plane_clear_of_a_pipe(&on, plane))
                             .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
                             .or_else(|| {
@@ -4678,6 +4683,9 @@ impl<'f> Arrangement<'f> {
         if let Some(proved) = self.as_two_cuts_through_one_corner_say(crossing, first, second) {
             return Ok(proved);
         }
+        if let Some(proved) = self.as_two_cuts_through_the_axis_say(crossing, first, second) {
+            return Ok(proved);
+        }
         must_decide(decided, ALONG_A_CROSSING, &nodes, measures, policy, log)
     }
 
@@ -5673,6 +5681,173 @@ impl<'f> Arrangement<'f> {
             .filter(|&sign| sign == Decision::Neg)
             .count();
         Some(if behind % 2 == 1 {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
+    }
+
+    /// Which of two nodes on the loop a plane `S` cuts a cone or a pipe in,
+    /// or on a circle two cones or pipes on one axis share, comes first, where
+    /// each is where the loop meets a plane of its own, `P₁` and `P₂`, and both
+    /// hold the whole of the axis: read off the two planes' normals and which
+    /// side of the axis each node is on. `None` everywhere else, and wherever
+    /// a sign it reads is not proved.
+    ///
+    /// **Round the axis the loop turns one way all the way round.** Each half
+    /// of a plane through the axis, cut off by the axis, meets it once, so its
+    /// angle about the axis climbs, or falls, the whole way. For the axis
+    /// through `o` along `w`, `pᵢ − o` is `hᵢ·w + tᵢ·uᵢ` with `uᵢ = w × nᵢ`,
+    /// since the node is on `Pᵢ` and `Pᵢ` holds the axis. So
+    /// `det[w, p₁ − o, p₂ − o]`, which says which way round the axis `p₂` lies
+    /// from `p₁`, is `t₁·t₂·|w|²·det[w, n₁, n₂]`. `det[w, n₁, n₂]` is worked
+    /// out exactly, and `tᵢ` has the sign of `det[pᵢ − o, w, nᵢ]`, which the
+    /// node's box tells, since the node is the loop's radius off the axis. The
+    /// loop winds about `S`'s normal, faced as in
+    /// [`Arrangement::as_two_cuts_through_one_corner_say`], so it turns round
+    /// `w` the way that normal faces along `w`, which is exact too.
+    ///
+    /// **Two cones or pipes on one axis cross in circles round it**, so the
+    /// same holds of such a circle with no plane `S`. It runs along
+    /// `∇W₀ × ∇W₁`, square to `w`, and turns round `w` the way
+    /// `det[w, pᵢ − o, ∇W₀ × ∇W₁]` says, read over each node's box and asked
+    /// to agree at both. Their axes are one line exactly as stored
+    /// ([`the_axis_two_round_surfaces_share`]), or this is not asked. A cone
+    /// and its bore share the circle where the cone is the bore's radius, and
+    /// two hollow quarters of it as above were refused on which of the two
+    /// side planes crosses that circle first, at the same eight turns, once
+    /// the cap circles answered.
+    ///
+    /// **From a start outside the short arc between the two nodes, the loop
+    /// reaches first the one the other lies on from, the way the loop turns**,
+    /// so the answer is the product of those four signs. A start is outside it
+    /// where `det[w, pᵢ − o, s − o]` has one proved sign at both nodes, and
+    /// both starts are asked, as in
+    /// [`Arrangement::as_two_parallel_cuts_through_the_loop_say`]. Where the
+    /// two normals lie along each other the two planes are one, and two nodes
+    /// on one half of it are one point.
+    ///
+    /// Two quarters of one cone, each cut by a prism standing on its axis and
+    /// turned about it, one by `s` and the other by `s − π/2`, have their side
+    /// planes at `s + π/2` and at `s − π/2` one plane, with normals an ulp
+    /// apart. Each crosses the circle the cone cuts in either's cap a rounding
+    /// round from where the other does, and their intersection was refused on
+    /// which of the two comes first at eight of nine turns (Q2537).
+    fn as_two_cuts_through_the_axis_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve {
+            from,
+            node,
+            named_the_start,
+            ref wound_as,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let (axis, winds) = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) => (
+                the_axis_of_a_cone_or_a_pipe(&wound_as[1])?,
+                Some(flat.normal()),
+            ),
+            (None, Some(flat)) => (
+                the_axis_of_a_cone_or_a_pipe(&wound_as[0])?,
+                Some(-flat.normal()),
+            ),
+            (None, None) => (
+                the_axis_two_round_surfaces_share(&wound_as[0], &wound_as[1])?,
+                None,
+            ),
+            (Some(_), Some(_)) => return None,
+        };
+        let (mine, theirs) = (
+            self.the_cut_through_the_loop_at(first, wound_as)?,
+            self.the_cut_through_the_loop_at(second, wound_as)?,
+        );
+        if !(holds_the_whole_of(&mine, axis) && holds_the_whole_of(&theirs, axis)) {
+            return None;
+        }
+        let along = axis.direction().components();
+        let through = axis.origin().coordinates();
+        let origin = PredicatePoint::from([0.0; 3]);
+        let from_the_axis = |at: PredicatePoint| {
+            let at = at.enclosure();
+            PredicatePoint::Constructed(core::array::from_fn(|index| {
+                at[index] - Interval::exactly(through[index])
+            }))
+        };
+        let [one, other] = [first, second].map(|at| from_the_axis(self.nodes[at].point));
+        let side_of_the_axis = |at: PredicatePoint, cut: &Plane| {
+            orient3d_of_points(at, along.into(), cut.normal().components().into(), origin)
+        };
+        let sides = [
+            side_of_the_axis(one, &mine),
+            side_of_the_axis(other, &theirs),
+        ];
+        let apart = orient3d(
+            along,
+            mine.normal().components(),
+            theirs.normal().components(),
+            [0.0; 3],
+        );
+        let turns = match winds {
+            Some(winds) => expansion_sign(&exactly_dotted(winds.components(), along)?),
+            None => {
+                let [here, there] = [(first, one), (second, other)].map(|(at, off_the_axis)| {
+                    let place = self.nodes[at].point;
+                    let forward = cross_of_intervals(
+                        gradient_at(&wound_as[0], place).enclosure(),
+                        gradient_at(&wound_as[1], place).enclosure(),
+                    );
+                    orient3d_of_points(
+                        along.into(),
+                        off_the_axis,
+                        PredicatePoint::Constructed(forward),
+                        origin,
+                    )
+                });
+                if here != there {
+                    return None;
+                }
+                here
+            }
+        };
+        let proved = |sign: &Decision| *sign == Decision::Pos || *sign == Decision::Neg;
+        // Compared rather than matched: only proved signs are read, and every
+        // other answer leaves the pair to the policy (§40).
+        if !sides.iter().all(proved) {
+            return None;
+        }
+        if apart == Decision::Zero {
+            let facing = expansion_sign(&exactly_dotted(
+                mine.normal().components(),
+                theirs.normal().components(),
+            )?);
+            let on_one_half =
+                proved(&facing) && (sides[0] == sides[1]) == (facing == Decision::Pos);
+            return on_one_half.then_some(Decision::Zero);
+        }
+        let clear_of_the_arc = |start: PredicatePoint| {
+            let start = from_the_axis(start);
+            let [past_one, past_other] =
+                [one, other].map(|at| orient3d_of_points(along.into(), at, start, origin));
+            past_one == past_other && proved(&past_one)
+        };
+        if !(clear_of_the_arc(from) && clear_of_the_arc(named_the_start.unwrap_or(node))) {
+            return None;
+        }
+        let signs = [sides[0], sides[1], apart, turns];
+        if !signs.iter().all(proved) {
+            return None;
+        }
+        let behind = signs
+            .into_iter()
+            .filter(|&sign| sign == Decision::Neg)
+            .count();
+        Some(if behind % 2 == 0 {
             Decision::Pos
         } else {
             Decision::Neg
@@ -6927,7 +7102,10 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::are_two_rulings_of_one_plane_holding_the_axis`]), and
     /// that is read as `Zero` without working the turn out: worked out, it is
     /// an interval straddling nothing, as two halves of one ruling are in
-    /// [`Arrangement::turns_anticlockwise`].
+    /// [`Arrangement::turns_anticlockwise`]. **Rulings of two planes that each
+    /// hold the axis** turn as their normals and their sides of the axis say
+    /// ([`Arrangement::as_rulings_of_two_planes_holding_the_axis_say`]), asked
+    /// only where the boxes cannot say.
     ///
     /// **Five lengths**: each way out is two, as a cross product of two
     /// gradients or of two normals, and `N` is one.
@@ -6941,7 +7119,8 @@ impl<'f> Arrangement<'f> {
     ) -> Result<Decision> {
         let at = self.nodes[node].point;
         let (one, other) = (self.way_out_of(node, first), self.way_out_of(node, second));
-        let about = match self.the_cone_whose_apex_the_face_pinches_at(node) {
+        let apex = self.the_cone_whose_apex_the_face_pinches_at(node);
+        let about = match apex {
             Some(cone) => {
                 let about = self.what_a_turn_at_the_apex_is_about(&cone, one, other)?;
                 if self.are_two_rulings_of_one_plane_holding_the_axis(
@@ -6955,8 +7134,20 @@ impl<'f> Arrangement<'f> {
             }
             None => gradient_at(&self.surface, at).enclosure(),
         };
+        let mut turn = dot_of(about, cross_of_intervals(one, other)).sign();
+        if matches!(turn, Decision::Undecidable { .. })
+            && let Some(cone) = apex
+            && let Some(proved) = self.as_rulings_of_two_planes_holding_the_axis_say(
+                &cone,
+                [first.crossing, second.crossing],
+                [one, other],
+                about,
+            )
+        {
+            turn = proved;
+        }
         must_decide(
-            dot_of(about, cross_of_intervals(one, other)).sign(),
+            turn,
             TWO_WAYS_OUT_OF_A_NODE,
             &[
                 at,
@@ -7121,6 +7312,85 @@ impl<'f> Arrangement<'f> {
                 .partner
                 .as_plane()
                 .is_some_and(|flat| a_plane_holds_a_cones_axis(flat, cone))
+    }
+
+    /// The turn `a · (t₁ × t₂)` at the apex between two ways out, for `a` what
+    /// it is about ([`Arrangement::what_a_turn_at_the_apex_is_about`]), where
+    /// each way out `tᵢ` is a ruling a plane `Pᵢ` of its own cuts through the
+    /// apex and both planes hold the whole of the cone's axis: read off the two
+    /// planes' normals and which side of the axis each way out leaves on.
+    /// `None` everywhere else, and wherever a sign it reads is not proved.
+    ///
+    /// **It is the order round a circle of
+    /// [`Arrangement::as_two_cuts_through_the_axis_say`], at the apex.** For
+    /// the axis along `w`, `tᵢ` is `hᵢ·w + rᵢ·uᵢ` with `uᵢ = w × nᵢ`, since
+    /// `Pᵢ` holds the axis, and `a` is `±w`. So `a · (t₁ × t₂)` is
+    /// `±r₁·r₂·|w|²·det[w, n₁, n₂]`: `det[w, n₁, n₂]` worked out exactly, and
+    /// `rᵢ` the sign of `det[tᵢ, w, nᵢ]`, which the way out's box tells, since
+    /// a ruling leaves the apex at the slope off the axis. Where the two
+    /// normals lie along each other the two planes are one, and two rulings of
+    /// one plane holding the axis turn by nothing
+    /// ([`Arrangement::are_two_rulings_of_one_plane_holding_the_axis`]).
+    ///
+    /// Two quarters of one cone, each cut by a prism standing on its axis and
+    /// turned about it, one by `s` and the other by `s − π/2`, have their side
+    /// planes at `s` one plane, with normals an ulp apart. Each cuts the
+    /// cone's face in a ruling through the apex a rounding round from the
+    /// other's, and the boxes of the two ways out turn by nothing to within
+    /// `2.6e-16`. Their intersection was refused there at eight of nine turns,
+    /// both hollow and not (Q2537, Q2543).
+    fn as_rulings_of_two_planes_holding_the_axis_say(
+        &self,
+        cone: &Cone,
+        crossings: [usize; 2],
+        ways: [[Interval; 3]; 2],
+        about: [Interval; 3],
+    ) -> Option<Decision> {
+        let [mine, theirs] = crossings.map(|crossing| {
+            let ruling = &self.crossings[crossing];
+            ruling.through_an_apex.as_ref()?;
+            let flat = ruling.partner.as_plane()?;
+            holds_the_whole_of(flat, cone.axis()).then_some(*flat)
+        });
+        let (mine, theirs) = (mine?, theirs?);
+        let along = cone.axis().direction().components();
+        let apart = orient3d(
+            along,
+            mine.normal().components(),
+            theirs.normal().components(),
+            [0.0; 3],
+        );
+        if apart == Decision::Zero {
+            return Some(Decision::Zero);
+        }
+        let origin = PredicatePoint::from([0.0; 3]);
+        let [here, there] = [(ways[0], mine), (ways[1], theirs)].map(|(way, cut)| {
+            orient3d_of_points(
+                PredicatePoint::Constructed(way),
+                along.into(),
+                cut.normal().components().into(),
+                origin,
+            )
+        });
+        let faces = dot_of(about, along.map(Interval::exactly)).sign();
+        let signs = [here, there, apart, faces];
+        // Compared rather than matched: only proved signs are read, and every
+        // other answer leaves the turn to the policy (§40).
+        if !signs
+            .iter()
+            .all(|&sign| sign == Decision::Pos || sign == Decision::Neg)
+        {
+            return None;
+        }
+        let behind = signs
+            .into_iter()
+            .filter(|&sign| sign == Decision::Neg)
+            .count();
+        Some(if behind % 2 == 0 {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
     }
 
     /// [`Arrangement::turns_anticlockwise`], and where that says the two lie on
@@ -8162,61 +8432,24 @@ impl<'f> Arrangement<'f> {
         walk: usize,
         candidates: &[usize],
     ) -> Option<usize> {
-        let (centre, up) = match self.surface {
-            Surface::Cone(cone) => (cone.apex(), cone.axis().direction()),
-            Surface::Cylinder(pipe) => (pipe.axis().origin(), pipe.axis().direction()),
-            Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) | _ => return None,
-        };
-        let across = half_way_across_the_widest_gap_between(
-            up,
-            core::iter::once(walk)
-                .chain(candidates.iter().copied())
-                .flat_map(|cycle| &self.cycles[cycle])
-                .map(|&half_edge| middle_of(self.nodes[self.from(half_edge)].point) - centre),
-        );
-        let centre = centre.coordinates().map(Interval::exactly);
-        let up = up.components().map(Interval::exactly);
-        let from_the_axis = |node: usize| -> [Interval; 3] {
-            core::array::from_fn(|axis| self.nodes[node].point.enclosure()[axis] - centre[axis])
-        };
-
-        if matches!(self.surface, Surface::Cone(_)) {
+        if let Surface::Cone(cone) = &self.surface {
             let lump_of = self.lump_of_each_cycle();
             let lumps = [lump_of[walk], lump_of[candidates[0]]];
-            let mut heights = (0..self.cycles.len())
+            let nodes: Vec<usize> = (0..self.cycles.len())
                 .filter(|&cycle| lumps.contains(&lump_of[cycle]))
                 .flat_map(|cycle| &self.cycles[cycle])
-                .map(|&half_edge| dot_of(from_the_axis(self.from(half_edge)), up).sign());
-            let first = heights.next()?;
-            if !matches!(first, Decision::Pos | Decision::Neg)
-                || heights.any(|other| other != first)
-            {
-                return None;
-            }
+                .map(|&half_edge| self.from(half_edge))
+                .collect();
+            self.the_nappe_of(cone, &nodes)?;
         }
-
-        let reference = across.map(Interval::exactly);
-        let round = |cycle: usize| -> Option<i32> {
-            self.cycles[cycle].iter().try_fold(0, |so_far, &half_edge| {
-                Some(
-                    so_far
-                        + self.how_often_an_arc_crosses(
-                            half_edge,
-                            &from_the_axis,
-                            up,
-                            reference,
-                        )?,
-                )
-            })
-        };
-        let its_own = round(walk)?;
+        let counted: Vec<usize> = core::iter::once(walk)
+            .chain(candidates.iter().copied())
+            .collect();
+        let round = self.how_often_each_goes_round_the_axis(&counted)?;
+        let (&its_own, theirs) = round.split_first().expect("the walk is counted first");
         if its_own == 0 {
             return None;
         }
-        let theirs = candidates
-            .iter()
-            .map(|&candidate| round(candidate))
-            .collect::<Option<Vec<i32>>>()?;
         let going_round: Vec<usize> = (0..candidates.len())
             .filter(|&index| theirs[index] != 0)
             .collect();
@@ -8231,6 +8464,51 @@ impl<'f> Arrangement<'f> {
             .next()
             .is_none()
             .then_some(candidates[only])
+    }
+
+    /// How often each of `cycles` goes round the axis of the cone or the pipe
+    /// the face is on, anticlockwise about it counting one; `None` on any other
+    /// surface, or where a sign one count needs is not settled.
+    ///
+    /// Counted as how often it crosses one half-plane through the axis, the
+    /// one half way across the widest gap round the axis between the nodes of
+    /// `cycles` ([`Arrangement::the_one_that_goes_round_the_axis_as_well`]
+    /// says why that counts it).
+    fn how_often_each_goes_round_the_axis(&self, cycles: &[usize]) -> Option<Vec<i32>> {
+        let (centre, up) = match self.surface {
+            Surface::Cone(cone) => (cone.apex(), cone.axis().direction()),
+            Surface::Cylinder(pipe) => (pipe.axis().origin(), pipe.axis().direction()),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) | _ => return None,
+        };
+        let across = half_way_across_the_widest_gap_between(
+            up,
+            cycles
+                .iter()
+                .flat_map(|&cycle| &self.cycles[cycle])
+                .map(|&half_edge| middle_of(self.nodes[self.from(half_edge)].point) - centre),
+        );
+        let centre = centre.coordinates().map(Interval::exactly);
+        let up = up.components().map(Interval::exactly);
+        let from_the_axis = |node: usize| -> [Interval; 3] {
+            core::array::from_fn(|axis| self.nodes[node].point.enclosure()[axis] - centre[axis])
+        };
+        let reference = across.map(Interval::exactly);
+        cycles
+            .iter()
+            .map(|&cycle| {
+                self.cycles[cycle].iter().try_fold(0, |so_far, &half_edge| {
+                    Some(
+                        so_far
+                            + self.how_often_an_arc_crosses(
+                                half_edge,
+                                &from_the_axis,
+                                up,
+                                reference,
+                            )?,
+                    )
+                })
+            })
+            .collect()
     }
 
     /// How often one half-edge crosses the half-plane from the axis towards
@@ -8579,6 +8857,13 @@ impl<'f> Arrangement<'f> {
     /// facing alone joined its walk towards the apex to the walk inside the
     /// frustum's top rim, past the notched bottom rim between them, and the
     /// fuse was refused `CannotTellTheCellsOfAFaceApart`.
+    ///
+    /// **A lump with a walk round the axis of the cone or the pipe the face is
+    /// on is outside the face when no lump of its rim goes round that axis**
+    /// ([`Arrangement::goes_round_where_the_rim_never_does`]). A quarter of a
+    /// hollow frustum's wall is the shape: the bore of a quarter beside it cuts
+    /// the wall in a whole circle below the quarter's own rim, inside its box
+    /// and on its nappe, so neither of the two rules before places it.
     fn say_whether_the_face_holds_each_lump_of_closed_cuts(&mut self, lump: &[usize]) {
         let flat = self
             .surface
@@ -8625,7 +8910,8 @@ impl<'f> Arrangement<'f> {
             let outside = nodes
                 .iter()
                 .all(|&node| self.face.bounds.provably_misses(self.nodes[node].point))
-                || self.on_the_nappe_the_rim_never_reaches(&nodes);
+                || self.on_the_nappe_the_rim_never_reaches(&nodes)
+                || self.goes_round_where_the_rim_never_does(&its_walks, lump);
             let held = if outside {
                 Some(0)
             } else {
@@ -8758,12 +9044,113 @@ impl<'f> Arrangement<'f> {
     /// of times. A ring that runs on for ever cannot all be in a face of a
     /// solid, which is bounded, so none of it is.
     ///
-    /// The nappe is read off the sign of `(x − apex)·w` for each node's box, so
-    /// a node at the apex or a box across it says no.
+    /// The nappe is read for each node ([`Arrangement::the_nappe_of`]).
     fn on_the_nappe_the_rim_never_reaches(&self, nodes: &[usize]) -> bool {
-        let Surface::Cone(cone) = self.surface else {
+        let Surface::Cone(cone) = &self.surface else {
             return false;
         };
+        let rim: Vec<usize> = self
+            .node_of_corner
+            .iter()
+            .chain(&self.node_of_the_end)
+            .flatten()
+            .copied()
+            .collect();
+        match (
+            self.the_nappe_of(cone, &rim),
+            self.the_nappe_of(cone, nodes),
+        ) {
+            (Some(the_rims), Some(theirs)) => the_rims != theirs,
+            (Some(_) | None, Some(_) | None) => false,
+        }
+    }
+
+    /// Whether some walk of `its_walks` goes round the axis of the cone or the
+    /// pipe the face is on, and no walk of a lump of the rim does; so that no
+    /// point of the face is in the lump's cells. `lump` names the lump of each
+    /// walk, and a lump of the rim is one that holds a side of it.
+    ///
+    /// **Close a nappe or a pipe with a point at each end, and it is a ball's
+    /// skin.** Each end is a point of it, the apex and the far end on a nappe.
+    /// A walk bounds a cell of the skin less its lump, and it goes round the
+    /// axis exactly when one end is in that cell and the other is not. So a
+    /// lump with a walk that goes round keeps the two ends apart, and a lump
+    /// with no walk that does leaves them in one cell.
+    ///
+    /// **No lump of the rim keeps the ends apart, so all of them together do
+    /// not either.** The lumps share no point, and two closed sets of a ball's
+    /// skin that share none, neither of which keeps two points apart, do not
+    /// keep them apart together (Janiszewski's theorem). The lump misses the
+    /// rim and is connected, so it is in one cell of the skin less the rim,
+    /// and that is the cell holding both ends: any other cell misses that one,
+    /// which joins the ends without meeting the lump, and the lump keeps them
+    /// apart. Every point where the face meets its outside is on its rim, so
+    /// the face is made of whole cells of the skin less the rim. It does not
+    /// hold the one holding the far end, since a face is bounded, so it holds
+    /// none of the lump.
+    ///
+    /// **A face with no rim says no.** With nothing to keep any point apart
+    /// from the far end, it could only be the whole of the surface.
+    ///
+    /// On a cone, every node of the lump and of the rim is on one nappe
+    /// ([`Arrangement::the_nappe_of`]), so no arc of them runs through the apex
+    /// ([`Arrangement::on_the_nappe_the_rim_never_reaches`] says why) and the
+    /// other nappe is left out of it; what reaches it is the same piece of the
+    /// face. The counts are read as
+    /// [`Arrangement::the_one_that_goes_round_the_axis_as_well`] reads them, and
+    /// one not settled says no.
+    ///
+    /// Two quarters of one hollow frustum, flush along a plane, are the shape:
+    /// the second quarter's bore cuts the first's wall in a circle below it,
+    /// inside its box, and the walk round the outside of that circle agreed with
+    /// both walks of the first wall's rim, so its intersection was refused
+    /// `CannotTellTheCellsOfAFaceApart` at every turn and both ways round
+    /// (`two_quarters_of_a_hollow_cone_flush_along_a_plane.rs`, Q2537).
+    fn goes_round_where_the_rim_never_does(&self, its_walks: &[usize], lump: &[usize]) -> bool {
+        let goes_round = self
+            .how_often_each_goes_round_the_axis(its_walks)
+            .is_some_and(|round| round.iter().any(|&times| times != 0));
+        if !goes_round {
+            return false;
+        }
+        let mut lumps_of_the_rim: Vec<usize> = (0..self.cycles.len())
+            .filter(|&cycle| {
+                self.cycles[cycle]
+                    .iter()
+                    .any(|&half_edge| self.arcs[half_edge / 2].boundary.is_some())
+            })
+            .map(|cycle| lump[cycle])
+            .collect();
+        lumps_of_the_rim.sort_unstable();
+        lumps_of_the_rim.dedup();
+        let rim: Vec<usize> = (0..self.cycles.len())
+            .filter(|&cycle| lumps_of_the_rim.binary_search(&lump[cycle]).is_ok())
+            .collect();
+        if rim.is_empty() {
+            return false;
+        }
+        if let Surface::Cone(cone) = &self.surface {
+            let nodes: Vec<usize> = its_walks
+                .iter()
+                .chain(&rim)
+                .flat_map(|&cycle| &self.cycles[cycle])
+                .map(|&half_edge| self.from(half_edge))
+                .collect();
+            if self.the_nappe_of(cone, &nodes).is_none() {
+                return false;
+            }
+        }
+        self.how_often_each_goes_round_the_axis(&rim)
+            .is_some_and(|round| round.iter().all(|&times| times == 0))
+    }
+
+    /// Which nappe of `cone` every one of `nodes` is on, `true` for the one its
+    /// axis points into; `None` when they are not all on one, or there are
+    /// none.
+    ///
+    /// The nappe is read off the sign of `(x − apex)·w` for each node's box, so
+    /// a node at the apex or a box across it says no.
+    fn the_nappe_of(&self, cone: &Cone, nodes: &[usize]) -> Option<bool> {
         let apex = cone.apex().coordinates().map(Interval::exactly);
         let up = cone.axis().direction().components().map(Interval::exactly);
         let above_the_apex = |node: usize| -> Option<bool> {
@@ -8775,24 +9162,11 @@ impl<'f> Arrangement<'f> {
                 Decision::Zero | Decision::Undecidable { .. } | _ => None,
             }
         };
-        let one_nappe = |these: &[usize]| -> Option<bool> {
-            let (&first, rest) = these.split_first()?;
-            let first = above_the_apex(first)?;
-            rest.iter()
-                .all(|&node| above_the_apex(node) == Some(first))
-                .then_some(first)
-        };
-        let rim: Vec<usize> = self
-            .node_of_corner
-            .iter()
-            .chain(&self.node_of_the_end)
-            .flatten()
-            .copied()
-            .collect();
-        match (one_nappe(&rim), one_nappe(nodes)) {
-            (Some(the_rims), Some(theirs)) => the_rims != theirs,
-            (Some(_) | None, Some(_) | None) => false,
-        }
+        let (&first, rest) = nodes.split_first()?;
+        let first = above_the_apex(first)?;
+        rest.iter()
+            .all(|&node| above_the_apex(node) == Some(first))
+            .then_some(first)
     }
 
     /// Which way the face's rim runs along each of its sides, by wire and
@@ -9847,63 +10221,128 @@ impl<'f> Arrangement<'f> {
     /// planes hold the axis exactly — `intersect` names two circles for a plane
     /// and a ring only where its normal is square to the axis and it holds the
     /// centre, and [`how_the_axis_lies_on`] asks each plane here the same. So
-    /// a point of the cutting plane `P` is `c + a·u + b·w` for the ring's
-    /// centre `c`, its axis `w` and `u` along `w × n_P`, and `partner`'s sign
-    /// there is the sign of `a·(n_Q·u)` for its normal `n_Q`: `n_Q·w` is nought
-    /// and `n_Q·c` is its offset. `P` cuts the ring in two circles centred at
-    /// `c ± R·u` with radius `r`, so on each `a` is `±R + r·cos φ`, which has
-    /// the sign of `±R`, a ring's tube being narrower than the ring. That puts
-    /// `a` at least `R − r` from nought, so the box tells it.
-    ///
-    /// Each of `a` and `n_Q·u` is `det[v, w, n_P]` for `v` the point less the
-    /// centre or `n_Q`, and `orient3d` with one point at the origin gives that
-    /// sign turned round one way for both, so the product is the side. Where
-    /// `n_Q·u` is nought, `n_Q` is along `n_P` and the two planes are one, so
-    /// the point is on `partner`.
+    /// [`Arrangement::side_of_a_plane_through_an_axis_it_shares`] reads the
+    /// side off `a` for a point `c + a·u + b·w` of the cutting plane `P`, for
+    /// the ring's centre `c`, its axis `w` and `u` along `w × n_P`. `P` cuts
+    /// the ring in two circles centred at `c ± R·u` with radius `r`, so on each
+    /// `a` is `±R + r·cos φ`, which has the sign of `±R`, a ring's tube being
+    /// narrower than the ring. That puts `a` at least `R − r` from nought, so
+    /// the box tells it.
     fn side_of_a_plane_holding_a_rings_axis(
         on: &[Surface],
         at: PredicatePoint,
         partner: &Plane,
     ) -> Option<Decision> {
-        let origin = PredicatePoint::from([0.0; 3]);
         on.iter().find_map(|ring| {
             let Surface::Torus(ring) = ring else {
                 return None;
             };
-            if how_the_axis_lies_on(partner, ring) != Decision::Zero {
+            Self::side_of_a_plane_through_an_axis_it_shares(
+                ring.axis(),
+                |flat| how_the_axis_lies_on(flat, ring) == Decision::Zero,
+                on,
+                at,
+                partner,
+            )
+        })
+    }
+
+    /// Which side of `partner` a point lies that is on a cone or a pipe and on
+    /// a plane through its axis, both among the surfaces it is `on`, where
+    /// `partner` holds that axis too: read off the numbers the planes store,
+    /// and off the point's box only for which side of the axis it is on in
+    /// its own plane. `None` where it is not that shape, or where the box does
+    /// not tell, and the caller keeps the box's answer.
+    ///
+    /// Two quarters of one hollow cone, each cut by a prism standing on the
+    /// cone's axis and turned about it, one by `s` and the other by `s − π/2`,
+    /// lie side by side. They share the plane at `s`, and the side plane of
+    /// one at `s + π/2` and the other's at `s − π/2` are one plane through the
+    /// axis, their normals an ulp apart. So a corner of one on that plane, on
+    /// its cap and on the cone or the bore, sits a rounding off the other's
+    /// side plane, inside its own box, and their intersection was refused at
+    /// eight of nine turns (Q2537).
+    ///
+    /// **A point of a pipe is its radius from the axis, and one of a cone is
+    /// `s·|t|` from it** at `t` along the axis from the apex, so the box tells
+    /// which side of the axis it is on everywhere but near the apex. Both
+    /// planes are asked to hold the axis exactly
+    /// ([`holds_the_whole_of`]), the questions [`how_the_axis_lies_on`] asks
+    /// of a ring's.
+    fn side_of_a_plane_holding_a_cones_or_a_pipes_axis(
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        on.iter().find_map(|round| {
+            let axis = the_axis_of_a_cone_or_a_pipe(round)?;
+            Self::side_of_a_plane_through_an_axis_it_shares(
+                axis,
+                |flat| holds_the_whole_of(flat, axis),
+                on,
+                at,
+                partner,
+            )
+        })
+    }
+
+    /// Which side of `partner` a point lies that is on a plane `P` among the
+    /// surfaces it is `on`, where `holds` says both `P` and `partner` hold the
+    /// whole of `axis`: the sign of `det[p − o, w, n_P]` times that of
+    /// `det[n_Q, w, n_P]`, for the axis through `o` along `w` and the normals
+    /// `n_P` and `n_Q` of the two planes. `None` where `partner` or no plane
+    /// among them holds it, or where the point's box does not tell the first
+    /// sign.
+    ///
+    /// **The product is the side.** `p − o` is square to `n_P`, both being on
+    /// `P`, so it is `a·u + b·w` for `u` along `w × n_P`. `partner`'s value at
+    /// `p` is `n_Q·(p − o)`, since `n_Q·o` is its offset, and that is
+    /// `a·(n_Q·u)`, since `n_Q·w` is nought. `det[v, w, n_P]` is `v·(w × n_P)`,
+    /// which has the sign of `a` for `v = p − o` and of `n_Q·u` for `v = n_Q`,
+    /// and `orient3d` with one point at the origin gives that sign turned round
+    /// one way for both. Where `n_Q·u` is nought, `n_Q` is along `n_P` and the
+    /// two planes are one, so the point is on `partner`.
+    fn side_of_a_plane_through_an_axis_it_shares(
+        axis: Axis,
+        holds: impl Fn(&Plane) -> bool,
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        if !holds(partner) {
+            return None;
+        }
+        let origin = PredicatePoint::from([0.0; 3]);
+        let along = PredicatePoint::from(axis.direction().components());
+        let (through, box_) = (axis.origin().coordinates(), at.enclosure());
+        let from_the_axis = PredicatePoint::Constructed(core::array::from_fn(|index| {
+            box_[index] - Interval::exactly(through[index])
+        }));
+        on.iter().find_map(|cut| {
+            let Surface::Plane(cut) = cut else {
+                return None;
+            };
+            if !holds(cut) {
                 return None;
             }
-            let axis = PredicatePoint::from(ring.axis().direction().components());
-            let (centre, box_) = (ring.centre().coordinates(), at.enclosure());
-            let from_the_centre = PredicatePoint::Constructed(core::array::from_fn(|index| {
-                box_[index] - Interval::exactly(centre[index])
-            }));
-            on.iter().find_map(|cut| {
-                let Surface::Plane(cut) = cut else {
-                    return None;
-                };
-                if how_the_axis_lies_on(cut, ring) != Decision::Zero {
-                    return None;
+            let across =
+                |of| orient3d_of_points(origin, of, along, cut.normal().components().into());
+            match (
+                across(from_the_axis),
+                across(partner.normal().components().into()),
+            ) {
+                (_, Decision::Zero) => Some(Decision::Zero),
+                (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => {
+                    Some(Decision::Pos)
                 }
-                let across =
-                    |of| orient3d_of_points(origin, of, axis, cut.normal().components().into());
-                match (
-                    across(from_the_centre),
-                    across(partner.normal().components().into()),
-                ) {
-                    (_, Decision::Zero) => Some(Decision::Zero),
-                    (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => {
-                        Some(Decision::Pos)
-                    }
-                    (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => {
-                        Some(Decision::Neg)
-                    }
-                    (
-                        Decision::Zero | Decision::Undecidable { .. } | _,
-                        Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _,
-                    ) => None,
+                (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => {
+                    Some(Decision::Neg)
                 }
-            })
+                (
+                    Decision::Zero | Decision::Undecidable { .. } | _,
+                    Decision::Pos | Decision::Neg | Decision::Undecidable { .. } | _,
+                ) => None,
+            }
         })
     }
 
@@ -13856,6 +14295,41 @@ fn lies_exactly_on_the_axis(point: Point, axis: Axis) -> Option<bool> {
         }
     }
     Some(true)
+}
+
+/// Whether `flat` holds the whole line of `axis`: its normal square to the
+/// axis's direction and the axis's origin on it, both exactly as stored, the
+/// two questions [`how_the_axis_lies_on`] asks of a ring's axis. `false`
+/// where a product would round, which proves nothing either way.
+fn holds_the_whole_of(flat: &Plane, axis: Axis) -> bool {
+    exactly_dotted(flat.normal().components(), axis.direction().components())
+        .is_some_and(|square| expansion_sign(&square) == Decision::Zero)
+        && flat.side_of_point(PredicatePoint::from(axis.origin().coordinates())) == Decision::Zero
+}
+
+/// The one axis two cones or pipes stand on, `one`'s, where the two
+/// directions lie along one line ([`lie_along_one_line`]) and `other`'s origin
+/// is on `one`'s axis ([`lies_exactly_on_the_axis`]), both exactly as stored.
+/// `None` for any other pair, and where a product would round.
+fn the_axis_two_round_surfaces_share(one: &Surface, other: &Surface) -> Option<Axis> {
+    let (axis, its) = (
+        the_axis_of_a_cone_or_a_pipe(one)?,
+        the_axis_of_a_cone_or_a_pipe(other)?,
+    );
+    (lie_along_one_line(axis.direction().components(), its.direction().components())
+        && lies_exactly_on_the_axis(its.origin(), axis) == Some(true))
+    .then_some(axis)
+}
+
+/// The axis of a cone or a pipe, and `None` for every other surface.
+fn the_axis_of_a_cone_or_a_pipe(round: &Surface) -> Option<Axis> {
+    if let Surface::Cone(cone) = round {
+        return Some(cone.axis());
+    }
+    let Surface::Cylinder(pipe) = round else {
+        return None;
+    };
+    Some(pipe.axis())
 }
 
 /// Whether the curve the two surfaces cross in through `places`, points on

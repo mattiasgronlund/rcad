@@ -456,6 +456,8 @@ pub mod two_loops_that_run_the_same_way_round_a_tube;
 pub mod two_meets_in_one_box_on_a_closed_crossing;
 #[path = "two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs"]
 pub mod two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy;
+#[path = "two_quarters_of_a_hollow_cone_flush_along_a_plane.rs"]
+pub mod two_quarters_of_a_hollow_cone_flush_along_a_plane;
 #[path = "two_skewed_combs_touching_along_one_line.rs"]
 pub mod two_skewed_combs_touching_along_one_line;
 #[path = "two_solids_in_the_same_place.rs"]
