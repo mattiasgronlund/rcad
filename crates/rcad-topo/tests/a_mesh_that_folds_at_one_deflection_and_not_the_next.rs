@@ -533,11 +533,16 @@ fn the_crown_of_a_ring_holds_what_pappus_gives_and_no_rung_of_its_ladder_folds()
 /// What this test can check is that the experiment above is still an experiment
 /// about this tree. If the arm moves or goes, the record stops describing what
 /// is there, and that is worth a failure rather than a stale paragraph.
+///
+/// Since Q2217 each rung's `match` hands back how far that rung strayed, so
+/// the arm reads `=> None` where it read `=> {}`: a fold still goes on to the
+/// next rung. Until Q2308 this test looked for the old line and found it
+/// only in a test's copy further down `validate.rs`, which hid the move.
 #[test]
 fn the_arm_removal_experiment() {
     let ladder = include_str!("../src/validate.rs");
     assert!(
-        ladder.contains("Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}"),
+        ladder.contains("Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => None,"),
         "§208.3's arm is what the experiment above was run against"
     );
 }
