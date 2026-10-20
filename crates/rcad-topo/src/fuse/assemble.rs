@@ -4843,6 +4843,21 @@ impl Assembly {
     /// Sort the shells into solids: each one that encloses space, with the ones
     /// that hollow it out.
     ///
+    /// **A hollow goes to the innermost lump round it, and which of two lumps
+    /// is inside the other is asked of their shells**, the same question a
+    /// hollow is asked of a lump. The shells of an answer do not cross, so the
+    /// lumps round one hollow nest, each inside the next, and keeping whichever
+    /// of the lump so far and the next one is inside the other ends on the
+    /// innermost. The space each shell encloses is read for its sign alone.
+    ///
+    /// This used to take the lump round the hollow that enclosed the least
+    /// space, and a curved shell's space is read off a mesh only as fine as its
+    /// sign needs. A tube's outer shell, drawn as an octagon, read smaller than
+    /// a core standing in its bore that a thin pocket had sent down to a fine
+    /// mesh, and the hollow in the core went to the tube (queue row Q2313,
+    /// `tests/a_bar_lying_along_a_plane_or_a_bar.rs`). A curved shell whose
+    /// sign was told from a corner comes back with no size at all.
+    ///
     /// # Errors
     ///
     /// [`Error::Invalid`] when a shell encloses nothing at all, or when a void
@@ -4900,9 +4915,19 @@ impl Assembly {
                 )? {
                     continue;
                 }
-                if holder.is_none_or(|best| volumes[lumps[best].outer] > volumes[lump.outer]) {
-                    holder = Some(index);
+                if let Some(best) = holder
+                    && !self.one_shell_is_inside_another(
+                        &apart,
+                        &written,
+                        lump.outer,
+                        lumps[best].outer,
+                        policy,
+                        log,
+                    )?
+                {
+                    continue;
                 }
+                holder = Some(index);
             }
             let Some(holder) = holder else {
                 return Err(Invalid::VolumeIsNotPositive {
@@ -6655,10 +6680,11 @@ fn one_unbroken_stretch_of_one_ring(rings: &[Vec<Dart>], darts: &[Dart]) -> Opti
 /// a round cap into none at all (§35.4) — so it goes to
 /// [`how_much_space_a_curved_solid_encloses`], which is the same question
 /// `Model::validate` asks one layer up and now the same code as well. The sign
-/// says whether a shell is a lump or a hollow. [`Assembly::nest_the_shells`]
-/// also compares sizes, to put a hollow in the smallest lump that holds it,
-/// and a curved shell whose sign was told from a corner comes back as
-/// `±f64::MIN_POSITIVE`, which says nothing of its size.
+/// says whether a shell is a lump or a hollow, and it is all anything reads: a
+/// curved shell's size is only as good as the mesh its sign was read off, and
+/// one whose sign was told from a corner comes back as `±f64::MIN_POSITIVE`,
+/// which says nothing of its size. [`Assembly::nest_the_shells`] used to
+/// compare sizes and no longer does (queue row Q2313).
 ///
 /// **Both halves of that are asked here rather than left to the sweep, and that
 /// is the difference between a refusal and a corrupt solid.**

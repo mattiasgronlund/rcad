@@ -148,6 +148,12 @@
 //! the same coordinates of 4 to 6, so no new row is filed for them (`docs/decisions.md`
 //! §3.5, §16.10). `a_thousand_turns_of_a_cube_and_a_bar` pins it, with the
 //! fuller argument in its own doc comment.
+//!
+//! **A core standing in a tube's bore keeps the hollow cut out of it** (queue
+//! row Q2313). The hollow went to the tube, which a mesh read as the smaller
+//! lump of the two. `fuse/assemble.rs` now tells which of two lumps round a
+//! hollow is inside the other by asking it, and reads no size.
+//! `a_core_in_a_tubes_bore_keeps_the_ball_hollowed_out_of_it` pins it.
 
 use core::f64::consts::PI;
 use std::collections::BTreeMap;
@@ -2601,4 +2607,99 @@ fn a_solid_of_flat_faces(
     }
     builder.add_shell(&shell)?;
     builder.build(model, policy, log)
+}
+
+/// A tube, a bar of radius one and four high less a bore of radius `0.995`,
+/// with a core of radius `0.99` standing in the bore clear of its wall, and a
+/// ball of radius `0.3` hollowed out of the core's middle. United, the tube and
+/// the core stay apart: two lumps, the tube with its bore as its hollow and the
+/// core with the ball as its own (queue row Q2313).
+///
+/// **The ball used to go to the tube.** `Assembly::nest_the_shells` gave each
+/// hollow to the lump around it whose shell enclosed the least space, and a
+/// curved shell's space is read off a mesh only as fine as it needs to be to
+/// tell the sign. The tube's outer shell has no bend under `0.995`, and its
+/// sum answers on a mesh that draws each circle as an octagon, which encloses
+/// `11.31` of the bar's `12.57`. The core has a pocket in its top, a blind
+/// hole of radius `0.02` and `0.05` deep, and no coarse mesh can be trusted
+/// past so thin a bend, so the core's sum is asked down to a mesh fine enough
+/// for it, and there the core encloses `11.92` of its `12.01`. The core read
+/// as the bigger lump, and the ball went to the tube. The pocket is in the
+/// shape for that alone: without it the core is an octagon too.
+///
+/// Since Q2313 the innermost lump around a hollow is told by asking which of
+/// the two lumps' shells is inside the other, and no size is read.
+#[test]
+fn a_core_in_a_tubes_bore_keeps_the_ball_hollowed_out_of_it() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let outer = a_bar(&mut model, 1.0, 4.0, [0.0, 0.0, 0.0]);
+    let bore = a_bar(&mut model, 0.995, 3.95, [0.0, 0.0, 0.025]);
+    let tube = model
+        .fuse(
+            &[outer],
+            &[bore],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar less a bore wholly inside it is a tube");
+    assert_eq!(
+        shells_of(&model, tube.solids()),
+        [[3, 3]],
+        "the tube is one solid: the bar's two caps and wall round the bore's"
+    );
+    let core = a_bar(&mut model, 0.99, 3.9, [0.0, 0.0, 0.05]);
+    let angle = PI / 8.0;
+    let pocket = a_bar(
+        &mut model,
+        0.02,
+        0.1,
+        [0.5 * angle.cos(), 0.5 * angle.sin(), 3.9],
+    );
+    let ball = model
+        .add_ball(
+            0.3,
+            &Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a shift"),
+        )
+        .expect("a ball");
+    let holed = model
+        .fuse(
+            &[core],
+            &[pocket, ball],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar less a blind hole in its top and a ball inside it");
+    assert_eq!(
+        shells_of(&model, holed.solids()),
+        [[1, 5]],
+        "the core is one solid: its outer shell of five faces with the pocket, \
+         and the ball as its hollow"
+    );
+    let united = model
+        .fuse(
+            tube.solids(),
+            holed.solids(),
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the tube and the core apart");
+    let mut lumps = shells_of(&model, united.solids());
+    lumps.sort_unstable();
+    assert_eq!(
+        lumps,
+        [vec![1, 5], vec![3, 3]],
+        "the core keeps the ball as its hollow, and the tube its bore"
+    );
+}
+
+/// How many faces each shell of each of `solids` has, as
+/// [`faces_of_each_shell`] counts them.
+fn shells_of(model: &Model, solids: &[SolidKey]) -> Vec<Vec<usize>> {
+    solids
+        .iter()
+        .map(|&solid| faces_of_each_shell(model, solid))
+        .collect()
 }
