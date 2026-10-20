@@ -4423,8 +4423,8 @@ impl Assembly {
     /// naming, and a straight one is named by its two ends alone.
     ///
     /// **Straight means [`Edge::runs_straight`], a pipe's ruling included, and
-    /// such a run folds a corner that no second lump has edges at, and whose
-    /// two sides are not both pieces of one input edge.** A plane resting
+    /// such a run folds every corner that no second lump has edges at.** A
+    /// plane resting
     /// along a pipe's wall touches it all along a ruling, so the two are
     /// tangent at both of that run's ends. Asked only whether the run lay on
     /// two planes, the rule kept the corners on the ruling between the two
@@ -4437,17 +4437,17 @@ impl Assembly {
     /// answer's corner `(0, ±1, 2)`, and fold into one.
     ///
     /// A corner where a second lump's edges meet the ruling is where that
-    /// lump starts or stops touching it, and stays: a bar standing against a
-    /// block's wall that stops halfway up the bar's seam keeps the seam cut
+    /// lump starts or stops touching it, and stays: a bar united with a
+    /// block whose wall stops halfway up the bar's seam keeps the seam cut
     /// where the wall's top edge meets it, one piece along the touch and one
     /// above (`a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it` in
     /// `a_bar_lying_along_a_plane_or_a_bar.rs`, Q1761). **Two pieces of one
-    /// input edge stay in pieces too**, as they did before this rule asked
-    /// about straight runs, and that is kept for that pin and not for a reason
-    /// of its own: the bar less the cube there is the bar, one lump, and its
-    /// seam's two pieces either side of `(0, 2, 2)` fold back into the bar's
-    /// one seam. The pin asks for the two, and with the second lump's corners
-    /// alone kept the answer was one edge from `z = 1` to `z = 3` (Q2532).
+    /// input edge fold back into it** where nothing else meets them: the bar
+    /// less that block is the bar, one lump, and nothing of the block is left
+    /// at `(0, 2, 2)`, so the seam's two pieces either side of it are the
+    /// bar's one seam from `z = 1` to `z = 3`, as a wall that stands the whole
+    /// height of the seam leaves it. Q2532 kept them in pieces for that pin
+    /// alone, and Q2545 folds them.
     fn the_corners_of_each_run_between_two_tangent_points(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
@@ -4490,11 +4490,9 @@ impl Assembly {
                     .then_some((edge.runs_straight(), corners))
             })
             .flat_map(|(straight, corners)| {
-                corners.into_iter().filter(move |&(lump, corner)| {
-                    !straight
-                        || in_a_second_lump(corner)
-                        || self.are_pieces_of_one_open_input_edge(&leaving[&(lump, corner)])
-                })
+                corners
+                    .into_iter()
+                    .filter(move |&(_, corner)| !straight || in_a_second_lump(corner))
             })
             .collect()
     }
