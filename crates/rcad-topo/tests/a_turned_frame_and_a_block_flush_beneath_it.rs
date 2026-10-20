@@ -14,6 +14,17 @@
 //! The frame takes up `15 - 3 = 12` and the block 2, and the two share only
 //! the face between them, so their union is one solid of 14, neither takes
 //! anything from the other, and what they share is nothing.
+//!
+//! **The same union with a round bar far off, and a block across its rim**
+//! (queue row Q2378). The union joins what is one face a second time once the
+//! strip between the two fronts is left out, and that second pass runs over
+//! everything the fuse made, so the bar is joined twice too. The bar is one
+//! round and two high at `(20, 0, 0)`, and the block across its rim is
+//! `x ∈ [20.5, 22]`, `y ∈ [-0.25, 0.375]`, `z ∈ [1.5, 2.5]`.
+
+use std::collections::HashSet;
+
+use core::f64::consts::PI;
 
 // `pairs` describes its frustum through `cones::a_frustum`.
 #[path = "fuzzing/comparison.rs"]
@@ -21,9 +32,9 @@ mod comparison;
 mod cones;
 mod pairs;
 
-use rcad_geom::Deflection;
+use rcad_geom::{Deflection, EdgeRun, Isometry, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 use comparison::{Answer, Face, Step, WhatItSitsOn, answer_of, same_answer};
 use pairs::{Configuration, Elsewhere, Placed, Shape, Skew, Turn};
@@ -261,4 +272,126 @@ fn volume_of(model: &Model, solids: &[SolidKey]) -> f64 {
                 .volume()
         })
         .sum()
+}
+
+/// **The bar keeps every arc of its rims shorter than half its circle.** The
+/// block's planes `x = 20.5`, `y = -0.25` and `y = 0.375` cut the bar's wall
+/// right down its far side too, and where those cuts meet the rims the first
+/// pass keeps a corner, since pieces of the wall met there (§224.1). The
+/// second pass, with no cut left there to say why, folded them, and the top
+/// rim came back as one arc `5.646108277541867` long from one side of the
+/// block round to the other, past half its circle.
+#[test]
+fn a_bar_with_a_block_across_its_rim_beside_them_keeps_every_arc_under_half_its_circle() {
+    for (asked, model, bar) in the_bar_united_beside_the_frame_and_the_block() {
+        let mut seen = HashSet::new();
+        let past_half: Vec<f64> = model
+            .solid(bar)
+            .expect("this model made the key")
+            .faces()
+            .flat_map(|face| face.wires().flat_map(|wire| wire.coedges()))
+            .map(|side| side.edge())
+            .filter(|edge| seen.insert(edge.key()))
+            .filter(|edge| matches!(edge.run(), EdgeRun::PartOfWhereItCrosses { .. }))
+            .map(|edge| edge.length().expect("an arc of a circle measures"))
+            .filter(|length| length.length() + length.error() >= PI)
+            .map(|length| length.length())
+            .collect();
+        assert!(
+            past_half.is_empty(),
+            "{asked}: the bar has arcs past half its circle, {past_half:?} long"
+        );
+    }
+}
+
+/// **And it comes back as the bar and the block across its rim united on
+/// their own**, bit for bit, whichever group each is handed over in. The
+/// second pass folded the corners on the bottom rim as well, into one closed
+/// circle, and the bar answered 20 edges and 13 corners where on its own it
+/// has 29 and 22.
+#[test]
+fn a_bar_with_a_block_across_its_rim_beside_them_unites_as_it_does_on_its_own() {
+    let on_its_own = {
+        let mut model =
+            Model::new(Scale::millimetres(pairs::WORKING_SIZE).expect("a working size"));
+        let (bar, across) = a_bar_and_a_block_across_its_rim(&mut model);
+        let united = fuse_and_validate(&mut model, &[bar], &[across], Rule::Union);
+        answer_of(&model, &united)
+    };
+    for (asked, model, bar) in the_bar_united_beside_the_frame_and_the_block() {
+        if let Err(why) = same_answer(&on_its_own, &answer_of(&model, &[bar]), Rule::Union, asked) {
+            panic!("{why}");
+        }
+    }
+}
+
+/// The frame, the block beneath it, the bar and the block across its rim united
+/// in one call, in each of three groupings, with the solid of the answer that
+/// holds the bar.
+///
+/// **Not with the frame and the bar in one group**: that union is refused
+/// "a point inside a piece of a face" before anything is joined, a fault of
+/// its own.
+fn the_bar_united_beside_the_frame_and_the_block() -> Vec<(&'static str, Model, SolidKey)> {
+    let groupings: [(&str, fn([SolidKey; 4]) -> (Vec<SolidKey>, Vec<SolidKey>)); 3] = [
+        (
+            "the frame and the block across against the block and the bar",
+            |[frame, block, bar, across]| (vec![frame, across], vec![block, bar]),
+        ),
+        (
+            "the block and the bar against the frame and the block across",
+            |[frame, block, bar, across]| (vec![block, bar], vec![frame, across]),
+        ),
+        (
+            "the frame against the block, the bar and the block across",
+            |[frame, block, bar, across]| (vec![frame], vec![block, bar, across]),
+        ),
+    ];
+    groupings
+        .into_iter()
+        .map(|(asked, grouped)| {
+            let (mut model, keys) = the_frame_and_the_block().build();
+            let (bar, across) = a_bar_and_a_block_across_its_rim(&mut model);
+            let (arguments, tools) = grouped([keys[FRAME], keys[BLOCK], bar, across]);
+            let united = fuse_and_validate(&mut model, &arguments, &tools, Rule::Union);
+            assert_eq!(united.len(), 2, "{asked}: the union is two solids");
+            let holding_the_bar = *united
+                .iter()
+                .find(|&&solid| {
+                    model
+                        .solid(solid)
+                        .expect("this model made the key")
+                        .faces()
+                        .any(|face| matches!(face.surface(), Surface::Cylinder(_)))
+                })
+                .unwrap_or_else(|| panic!("{asked}: no solid of the union holds the bar"));
+            (asked, model, holding_the_bar)
+        })
+        .collect()
+}
+
+fn a_bar_and_a_block_across_its_rim(model: &mut Model) -> (SolidKey, SolidKey) {
+    let bar = model
+        .add_round_bar(
+            1.0,
+            2.0,
+            &Isometry::translation(Vector::new(20.0, 0.0, 0.0)).expect("a finite shift"),
+        )
+        .expect("a bar");
+    let rectangle = ProfileBuilder::new(vec![
+        [20.5, -0.25],
+        [22.0, -0.25],
+        [22.0, 0.375],
+        [20.5, 0.375],
+    ])
+    .build(&Policy::certified(), &mut ProvenanceLog::new())
+    .expect("a rectangle");
+    let across = model
+        .add_extrusion(
+            &rectangle,
+            1.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, 1.5)).expect("a finite shift"),
+        )
+        .expect("a positive height");
+    (bar, across)
 }
