@@ -2116,6 +2116,11 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             }
         }
         if let Some(why) = refused {
+            if let Some(held) =
+                what_a_pipe_face_of_rulings_and_arcs_across_its_axis_holds(solid, face, point)?
+            {
+                return Ok(held);
+            }
             return Err(why);
         }
     }
