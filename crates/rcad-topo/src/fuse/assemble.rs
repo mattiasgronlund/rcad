@@ -4349,6 +4349,15 @@ impl Assembly {
     /// in pieces exactly where it could not be named whole. A run that closes up
     /// has one corner at both ends and goes right round, which needs no
     /// naming, and a straight one is named by its two ends alone.
+    ///
+    /// **Straight means [`Edge::runs_straight`], a pipe's ruling included.** A
+    /// plane resting along a pipe's wall touches it all along a ruling, so the
+    /// two are tangent at both of that run's ends. Asked only whether the run
+    /// lay on two planes, the rule kept the corners on the ruling between the
+    /// two blocks of a slot end built in two steps, the bar united with one
+    /// block and then with a second stacked on it, and that answer came back
+    /// with 14 edges where the same solid built in one step has 12
+    /// (`a_slot_end_built_from_two_stacked_blocks.rs`, queue row Q2406).
     fn the_corners_of_each_run_between_two_tangent_points(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
@@ -4384,7 +4393,7 @@ impl Assembly {
                     the_way_the_crossing_runs(&edge.carried_by, corner, corner.point)
                         == Vector::zero()
                 };
-                one != other && !edge.lies_on_two_planes() && tangent_at(one) && tangent_at(other)
+                one != other && !edge.runs_straight() && tangent_at(one) && tangent_at(other)
             })
             .flat_map(|(_, corners)| corners)
             .collect()
