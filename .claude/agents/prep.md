@@ -60,6 +60,14 @@ pins that count, must be in its write set too, or the merger has to bump it
 outside the write set on its own (`.claude/agents/merger.md`). When it is not,
 the answer is `needs`.
 
+A row whose write set names a file directly under `crates/rcad-topo/tests/`
+that does not exist yet, with no `crates/rcad-topo/tests/merged.rs` entry in
+the write set, is missing one: `autotests` is off there, so nothing builds
+the file until `merged.rs` declares it (§373.7). Answer `needs` with the item
+`crates/rcad-topo/tests/merged.rs#<module>`, the module being the file's name
+with each `-` written `_` — never the whole file, which would hold every
+other row adding a file there back too (§373.7's "what this leaves").
+
 ## The model
 
 Per row, from its `model` field. A bundle is `opus` if any of its rows says
