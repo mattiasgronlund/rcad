@@ -307,5 +307,25 @@
     "expect": "allow",
     "why": "the word pkill inside a quoted echo is not the verb",
     "command": "echo \"pkill is refused by the hook now\""
+  },
+  {
+    "expect": "ask",
+    "why": "a pin and an unpin after a write-set entry with a mid-word #, in one apply batch (§430)",
+    "command": "mise exec -- just queue apply add 5 sonnet tooling/queue/families.py,justfile#check-queue-selftest 'a fix for the tokenizer §430' + pin Q2310 + unpin Q1"
+  },
+  {
+    "expect": "deny",
+    "why": "an in-place sed after a write-set entry with a mid-word #",
+    "command": "just queue add 2 sonnet x.rs#a 'a fix §230' && sed -i 's/foo/bar/' docs/queue.md"
+  },
+  {
+    "expect": "deny",
+    "why": "pkill, picking its targets by pattern, after a write-set entry with a mid-word # (§454)",
+    "command": "just queue add 2 sonnet x.rs#a 'a fix §230' && pkill -9 -f rcad-topo"
+  },
+  {
+    "expect": "allow",
+    "why": "a # that starts a real comment still hides the redirect text after it, so echo with its comment stays allowed",
+    "command": "echo foo # > docs/queue.md"
   }
 ]
