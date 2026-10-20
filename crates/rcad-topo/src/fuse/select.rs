@@ -206,13 +206,15 @@ use rcad_predicates::{
 
 use crate::classify::{every_side_of_it_is_straight, side_of_a_flat_face, stretched_to_the_plane};
 use crate::holds::{
-    OnAFace, how_the_axis_lies_on, lie_along_one_line,
+    OnAFace, cross, dot, exactly, how_the_axis_lies_on, lie_along_one_line,
     the_half_space_naming_the_meridian_circle_through, the_meridian_half_space_keeps,
 };
 use crate::validate::side_of_surface;
 use crate::{Containment, Error, FaceKey, FaceView, Model, Result, SolidView, VertexKey};
 
-use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
+use super::arrange::{
+    Piece, a_plane_rests_along_a_pipe, agreement_of_two_planes, name_of_surface_bits,
+};
 use super::assemble::{
     NamedSide, the_edge_each_side_of_every_piece_is,
     the_pieces_of_each_shell_both_hold_taken_as_flat,
@@ -2535,6 +2537,15 @@ fn the_piece_holds(
         return Some(true);
     }
     let Some(in_plane) = in_plane else {
+        if let Surface::Cylinder(pipe) = &piece.surface
+            && piece
+                .wires
+                .iter()
+                .flatten()
+                .any(|side| a_plane_rests_along_a_pipe(&piece.surface, &side.carried_by[1]))
+        {
+            return counted_along_the_ruling(piece, pipe, point);
+        }
         if let Surface::Cone(cone) = &piece.surface
             && !is_on_the_nappe_the_piece_is_on(piece, cone, point)?
         {
@@ -2647,6 +2658,74 @@ fn the_piece_holds(
     } else {
         Some(false)
     }
+}
+
+/// Whether a piece of `pipe` whose sides are rulings and arcs of planes across
+/// its axis holds `point`, counted along the ruling through it: how many arcs
+/// that ruling meets above `point`, odd being held. `None` for a piece with a
+/// side of any other kind, and where a sign cannot be settled.
+///
+/// It is `holds.rs`'s count along a ruling for a solid's face
+/// (`how_often_the_ruling_above_a_point_is_crossed`), read off a piece's sides.
+/// The piece is bounded and the ruling runs on up the pipe for ever, so it
+/// leaves the piece for good, and a plane across the axis meets each ruling
+/// once and crosses it there.
+///
+/// **Which rulings an arc meets is read off its chord.** Seen down the axis
+/// the arc is an arc of the pipe's circle, and `point` is on that circle, so
+/// the ruling meets the arc when `point` is on the arc's side of the chord, as
+/// `holds.rs`'s `whether_the_ruling_meets` reads it. Which side that is comes
+/// from which way round the axis the side runs from its first end to its
+/// second, and that is one sign: a side whose material is on its partner `P`'s
+/// negative side runs along `∇S × ∇P` (§36.6). The pipe's gradient `r` is
+/// square to its axis `w`, so `w · (r × (r × n)) = −(w·n)|r|²` for `P`'s normal
+/// `n`, at every point of the arc: the side runs counterclockwise round `w`
+/// where its material is on `P`'s negative side and `w·n` is negative, or on
+/// its positive side and `w·n` positive, and clockwise otherwise. A
+/// counterclockwise side keeps the sign `Neg` against its chord.
+///
+/// **A ruling side is not counted.** The ruling through `point` meets it only
+/// where `point` is on it, and then `point` is on the ruling through a corner
+/// of each arc the side ends at, where that arc's chord reads nothing and this
+/// says nothing; so does `point` on a corner's ruling anywhere else, and on an
+/// arc.
+fn counted_along_the_ruling(piece: &Piece, pipe: &Cylinder, point: PredicatePoint) -> Option<bool> {
+    let up = exactly(pipe.axis().direction().components());
+    let at = point.enclosure();
+    let mut above = 0_usize;
+    for side in piece.wires.iter().flatten() {
+        let flat = side.carried_by[1].as_plane()?;
+        let leans = dot(exactly(flat.normal().components()), up).sign();
+        if leans == Decision::Zero {
+            continue;
+        }
+        if !matches!(leans, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        let keeps = if (side.material_side == Decision::Neg) == (leans == Decision::Neg) {
+            Decision::Neg
+        } else {
+            Decision::Pos
+        };
+        let [from, to] = side.ends.each_ref().map(|end| end.point().enclosure());
+        let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
+        let off_the_start = core::array::from_fn(|axis| at[axis] - from[axis]);
+        let reads = dot(up, cross(chord, off_the_start)).sign();
+        if reads != keeps {
+            if matches!(reads, Decision::Pos | Decision::Neg) {
+                continue;
+            }
+            return None;
+        }
+        let beyond = side_of_a_flat_face(flat, point);
+        if !matches!(beyond, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        if beyond != leans {
+            above += 1;
+        }
+    }
+    Some(above % 2 == 1)
 }
 
 /// Whether a flat piece's material is inside what `wire`, one whole closed

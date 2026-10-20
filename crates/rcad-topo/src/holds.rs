@@ -9207,11 +9207,11 @@ fn gradient_at(surface: &Surface, at: Point) -> Option<[Interval; 3]> {
     }
 }
 
-fn exactly(value: [f64; 3]) -> [Interval; 3] {
+pub(crate) fn exactly(value: [f64; 3]) -> [Interval; 3] {
     value.map(Interval::exactly)
 }
 
-fn cross(u: [Interval; 3], v: [Interval; 3]) -> [Interval; 3] {
+pub(crate) fn cross(u: [Interval; 3], v: [Interval; 3]) -> [Interval; 3] {
     [
         u[1] * v[2] - u[2] * v[1],
         u[2] * v[0] - u[0] * v[2],
@@ -9219,7 +9219,7 @@ fn cross(u: [Interval; 3], v: [Interval; 3]) -> [Interval; 3] {
     ]
 }
 
-fn dot(u: [Interval; 3], v: [Interval; 3]) -> Interval {
+pub(crate) fn dot(u: [Interval; 3], v: [Interval; 3]) -> Interval {
     u[0] * v[0] + u[1] * v[1] + u[2] * v[2]
 }
 

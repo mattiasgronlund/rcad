@@ -14583,7 +14583,12 @@ fn a_plane_rests_along_a_cone(one: &Surface, other: &Surface) -> bool {
 /// [`EdgeRun::Straight`] for the pair only where it proved both nothing, and an
 /// ellipse, two lines a half-space picks apart, nothing or an `Err` otherwise.
 /// Its records are not kept: an answer it cannot prove decides nothing here.
-fn a_plane_rests_along_a_pipe(one: &Surface, other: &Surface) -> bool {
+///
+/// `select.rs` asks it too, of a piece of a pipe and each side's partner: a
+/// piece with a side along such a plane is counted along the ruling through a
+/// point, since every point of the pipe is on the side of the plane the piece
+/// is (`the_piece_holds`, row Q2406).
+pub(super) fn a_plane_rests_along_a_pipe(one: &Surface, other: &Surface) -> bool {
     matches!(
         (one, other),
         (Surface::Plane(_), Surface::Cylinder(_)) | (Surface::Cylinder(_), Surface::Plane(_))
