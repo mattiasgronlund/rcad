@@ -9302,6 +9302,51 @@ mod tests {
         );
     }
 
+    /// Row Q2512. At all 40 turns about each of five axes, the sliver is told
+    /// its faces point out, and the same sliver used inside out is told they
+    /// point in, as where it is made. Until Q2512 the corner was read where
+    /// the turn put it, rounded off the top's and the cap's planes and out of
+    /// the pipe it lies `2⁻¹⁰⁴` inside, so most turns told nothing.
+    #[test]
+    fn the_placed_sliver_is_told_which_way_its_faces_point_either_way_out() {
+        let policy = Policy::tolerant(100.0);
+        let mut model = an_empty_model();
+        let sliver = the_sliver_where_a_bar_dips_into_a_block(&mut model, &policy);
+        let axes = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(3.0, -1.0, 2.0),
+        ];
+        let mut not_told = Vec::new();
+        for axis in axes {
+            for step in 0..40 {
+                let turn = Isometry::rotation(
+                    &Axis::new(Point::origin(), axis).expect("a direction with a length"),
+                    f64::from(step) * core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn");
+                for way in [Orientation::Forward, Orientation::Reversed] {
+                    let view = SolidView::new(&model, sliver.slot_in(model.id()), turn, way);
+                    let told = how_much_space_a_curved_solid_encloses(
+                        view,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    );
+                    if !matches!(told, Ok(sign) if sign == f64::MIN_POSITIVE * way.sign()) {
+                        not_told.push(format!("{axis:?} at {step}/40, {way:?}: {told:?}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            not_told.is_empty(),
+            "{} of 400 not told: {not_told:#?}",
+            not_told.len()
+        );
+    }
+
     /// The tolerant intersection of the block `[0, 4]³` and a bar of radius
     /// one turned onto `x` by `−π/2` from `(3, 2, 5)`, which dips `2⁻¹⁰⁵`
     /// through the block's top: the sliver alone.
