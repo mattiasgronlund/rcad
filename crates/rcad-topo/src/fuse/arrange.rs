@@ -4625,6 +4625,9 @@ impl<'f> Arrangement<'f> {
         if let Some(proved) = self.as_two_cuts_through_one_corner_say(crossing, first, second) {
             return Ok(proved);
         }
+        if let Some(proved) = self.as_two_cuts_through_the_axis_say(crossing, first, second) {
+            return Ok(proved);
+        }
         must_decide(decided, ALONG_A_CROSSING, &nodes, measures, policy, log)
     }
 
@@ -5620,6 +5623,132 @@ impl<'f> Arrangement<'f> {
             .filter(|&sign| sign == Decision::Neg)
             .count();
         Some(if behind % 2 == 1 {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
+    }
+
+    /// Which of two nodes on the loop a plane `S` cuts a cone or a pipe in
+    /// comes first, where each is where the loop meets a plane of its own, `P₁`
+    /// and `P₂`, and both hold the whole of the cone's or the pipe's axis:
+    /// read off the two planes' normals and which side of the axis each node
+    /// is on. `None` everywhere else, and wherever a sign it reads is not
+    /// proved.
+    ///
+    /// **Round the axis the loop turns one way all the way round.** Each half
+    /// of a plane through the axis, cut off by the axis, meets it once, so its
+    /// angle about the axis climbs, or falls, the whole way. For the axis
+    /// through `o` along `w`, `pᵢ − o` is `hᵢ·w + tᵢ·uᵢ` with `uᵢ = w × nᵢ`,
+    /// since the node is on `Pᵢ` and `Pᵢ` holds the axis. So
+    /// `det[w, p₁ − o, p₂ − o]`, which says which way round the axis `p₂` lies
+    /// from `p₁`, is `t₁·t₂·|w|²·det[w, n₁, n₂]`. `det[w, n₁, n₂]` is worked
+    /// out exactly, and `tᵢ` has the sign of `det[pᵢ − o, w, nᵢ]`, which the
+    /// node's box tells, since the node is the cone's or the pipe's radius off
+    /// the axis. The loop winds about `S`'s normal, faced as in
+    /// [`Arrangement::as_two_cuts_through_one_corner_say`], so it turns round
+    /// `w` the way that normal faces along `w`, which is exact too.
+    ///
+    /// **From a start outside the short arc between the two nodes, the loop
+    /// reaches first the one the other lies on from, the way the loop turns**,
+    /// so the answer is the product of those four signs. A start is outside it
+    /// where `det[w, pᵢ − o, s − o]` has one proved sign at both nodes, and
+    /// both starts are asked, as in
+    /// [`Arrangement::as_two_parallel_cuts_through_the_loop_say`]. Where the
+    /// two normals lie along each other the two planes are one, and two nodes
+    /// on one half of it are one point.
+    ///
+    /// Two quarters of one cone, each cut by a prism standing on its axis and
+    /// turned about it, one by `s` and the other by `s − π/2`, have their side
+    /// planes at `s + π/2` and at `s − π/2` one plane, with normals an ulp
+    /// apart. Each crosses the circle the cone cuts in either's cap a rounding
+    /// round from where the other does, and their intersection was refused on
+    /// which of the two comes first at eight of nine turns (Q2537).
+    fn as_two_cuts_through_the_axis_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve {
+            from,
+            node,
+            named_the_start,
+            ref wound_as,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let (round, winds) = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) => (&wound_as[1], flat.normal()),
+            (None, Some(flat)) => (&wound_as[0], -flat.normal()),
+            (Some(_), Some(_)) | (None, None) => return None,
+        };
+        let axis = the_axis_of_a_cone_or_a_pipe(round)?;
+        let (mine, theirs) = (
+            self.the_cut_through_the_loop_at(first, wound_as)?,
+            self.the_cut_through_the_loop_at(second, wound_as)?,
+        );
+        if !(holds_the_whole_of(&mine, axis) && holds_the_whole_of(&theirs, axis)) {
+            return None;
+        }
+        let along = axis.direction().components();
+        let through = axis.origin().coordinates();
+        let origin = PredicatePoint::from([0.0; 3]);
+        let from_the_axis = |at: PredicatePoint| {
+            let at = at.enclosure();
+            PredicatePoint::Constructed(core::array::from_fn(|index| {
+                at[index] - Interval::exactly(through[index])
+            }))
+        };
+        let [one, other] = [first, second].map(|at| from_the_axis(self.nodes[at].point));
+        let side_of_the_axis = |at: PredicatePoint, cut: &Plane| {
+            orient3d_of_points(at, along.into(), cut.normal().components().into(), origin)
+        };
+        let sides = [
+            side_of_the_axis(one, &mine),
+            side_of_the_axis(other, &theirs),
+        ];
+        let apart = orient3d(
+            along,
+            mine.normal().components(),
+            theirs.normal().components(),
+            [0.0; 3],
+        );
+        let turns = expansion_sign(&exactly_dotted(winds.components(), along)?);
+        let proved = |sign: &Decision| *sign == Decision::Pos || *sign == Decision::Neg;
+        // Compared rather than matched: only proved signs are read, and every
+        // other answer leaves the pair to the policy (§40).
+        if !sides.iter().all(proved) {
+            return None;
+        }
+        if apart == Decision::Zero {
+            let facing = expansion_sign(&exactly_dotted(
+                mine.normal().components(),
+                theirs.normal().components(),
+            )?);
+            let on_one_half =
+                proved(&facing) && (sides[0] == sides[1]) == (facing == Decision::Pos);
+            return on_one_half.then_some(Decision::Zero);
+        }
+        let clear_of_the_arc = |start: PredicatePoint| {
+            let start = from_the_axis(start);
+            let [past_one, past_other] =
+                [one, other].map(|at| orient3d_of_points(along.into(), at, start, origin));
+            past_one == past_other && proved(&past_one)
+        };
+        if !(clear_of_the_arc(from) && clear_of_the_arc(named_the_start.unwrap_or(node))) {
+            return None;
+        }
+        let signs = [sides[0], sides[1], apart, turns];
+        if !signs.iter().all(proved) {
+            return None;
+        }
+        let behind = signs
+            .into_iter()
+            .filter(|&sign| sign == Decision::Neg)
+            .count();
+        Some(if behind % 2 == 0 {
             Decision::Pos
         } else {
             Decision::Neg
@@ -9945,14 +10074,7 @@ impl<'f> Arrangement<'f> {
         partner: &Plane,
     ) -> Option<Decision> {
         on.iter().find_map(|round| {
-            let axis = if let Surface::Cone(cone) = round {
-                cone.axis()
-            } else {
-                let Surface::Cylinder(pipe) = round else {
-                    return None;
-                };
-                pipe.axis()
-            };
+            let axis = the_axis_of_a_cone_or_a_pipe(round)?;
             Self::side_of_a_plane_through_an_axis_it_shares(
                 axis,
                 |flat| holds_the_whole_of(flat, axis),
@@ -13982,6 +14104,17 @@ fn holds_the_whole_of(flat: &Plane, axis: Axis) -> bool {
     exactly_dotted(flat.normal().components(), axis.direction().components())
         .is_some_and(|square| expansion_sign(&square) == Decision::Zero)
         && flat.side_of_point(PredicatePoint::from(axis.origin().coordinates())) == Decision::Zero
+}
+
+/// The axis of a cone or a pipe, and `None` for every other surface.
+fn the_axis_of_a_cone_or_a_pipe(round: &Surface) -> Option<Axis> {
+    if let Surface::Cone(cone) = round {
+        return Some(cone.axis());
+    }
+    let Surface::Cylinder(pipe) = round else {
+        return None;
+    };
+    Some(pipe.axis())
 }
 
 /// Whether the curve the two surfaces cross in through `places`, points on
