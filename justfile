@@ -2983,11 +2983,14 @@ _skills-check dir:
         echo "no $dir, so there are no project skills to check"
         exit 0
     fi
-    files=$(find "$dir" -name SKILL.md | sort)
-    if [ -z "$files" ]; then
+    skill_files=$(find "$dir" -name SKILL.md | sort)
+    if [ -z "$skill_files" ]; then
         echo "no SKILL.md under $dir, so there are no project skills to check"
         exit 0
     fi
+    # A skill's claims can live in any .md beside SKILL.md too, such as
+    # reference.md — not just in SKILL.md itself.
+    files=$(find "$dir" -name '*.md' | sort)
     recipes=$({{ just_executable() }} --justfile {{ justfile() }} --summary 2>/dev/null \
         | tr ' ' '\n' | grep . | sort -u)
     if [ -z "$recipes" ]; then
@@ -3072,6 +3075,16 @@ check-skills-selftest:
         echo "a skill naming a path that is not in the tree passed"; exit 1
     fi
     rm -rf "$dir/bad-path"
+
+    # The claim lives in a second .md beside SKILL.md, such as reference.md,
+    # never in SKILL.md itself — the case _skills-check used to never read.
+    mkdir -p "$dir/bad-second-file"
+    printf 'Nothing to see here.\n' > "$dir/bad-second-file/SKILL.md"
+    printf 'Run `just no-such-recipe-either`.\n' > "$dir/bad-second-file/reference.md"
+    if $j _skills-check "$dir" >/dev/null 2>&1; then
+        echo "a bad recipe named only in a second .md file beside SKILL.md passed"; exit 1
+    fi
+    rm -rf "$dir/bad-second-file"
 
     rm -rf "$dir/good"
     mkdir -p "$dir/silent"
