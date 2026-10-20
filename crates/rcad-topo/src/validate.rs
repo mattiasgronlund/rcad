@@ -2828,6 +2828,11 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// nothing. From its corner `(3, 2, 4)` its faces are told to point out, and
 /// the same sliver used inside out is told they point in
 /// (`a_sliver_whose_every_mesh_encloses_nothing_is_told_which_way_its_faces_point`).
+/// Placed by a turn, it is told the same, because the corner is read where
+/// the sliver is stored: read where the turn put it, the corner was off the
+/// planes it lies on and outside the pipe, and most turns told nothing
+/// (row Q2512,
+/// `the_placed_sliver_is_told_which_way_its_faces_point_either_way_out`).
 ///
 /// **When no corner tells it either, the solid is refused
 /// [`Error::CannotTellWhichWayASolidsFacesPoint`]**, and not handed on to be
@@ -3134,6 +3139,16 @@ static RUNGS_THE_SECOND_LADDER_HAS_ASKED: std::sync::atomic::AtomicUsize =
 /// asked of the stored numbers exactly, so this decides nothing it has not
 /// proved, and logs nothing.
 ///
+/// **A placed solid is told where it is stored**, when all its faces share one
+/// placement. A placement is a turn and a shift, never a mirror or a scale
+/// ([`Isometry`]), so it keeps what each cone encloses and which way it counts.
+/// But moved, a corner and the surfaces through it each round their own way,
+/// and the corner is then off planes it lies on and outside a pipe it lies a
+/// hair inside. So the corners and surfaces are read as the arena holds them,
+/// with each face's way kept. A solid whose faces are placed apart is read
+/// where it sits, since the one point the cones start from has to be one
+/// point for every face.
+///
 /// **It is what tells the sliver a bar leaves dipping `2⁻¹⁰⁵` through a
 /// block's top.** That sliver holds no double in `x`, so every point of every
 /// mesh of it lies on the line `x = 3, z = 4`, and every mesh encloses
@@ -3144,7 +3159,11 @@ static RUNGS_THE_SECOND_LADDER_HAS_ASKED: std::sync::atomic::AtomicUsize =
 /// in `a_bar_lying_along_a_plane_or_a_bar.rs`, and
 /// `a_sliver_whose_every_mesh_encloses_nothing_is_told_which_way_its_faces_point`).
 /// Its other corner, `(3, 2 − 2⁻⁵¹, 4)`, is outside the pipe and tells
-/// nothing.
+/// nothing. Read where the turn put it, the same sliver placed at 40 turns
+/// about each of five axes was told at 35 of the 200 either way out, and
+/// refused [`Error::CannotTellWhichWayASolidsFacesPoint`] at the rest; read
+/// where it is stored, it is told at every one (Q2512,
+/// `the_placed_sliver_is_told_which_way_its_faces_point_either_way_out`).
 ///
 /// **So is the fin `2⁻⁵¹` thick** a bar of radius `1 + 2⁻⁵¹` leaves outside
 /// a block's side one radius from its axis, every mesh of which lies on that
@@ -3162,20 +3181,45 @@ static RUNGS_THE_SECOND_LADDER_HAS_ASKED: std::sync::atomic::AtomicUsize =
 /// (`a_ball_poking_a_hair_into_a_pipe_is_passed_sound_and_refused_inside_out`).
 fn which_way_its_faces_point_told_from_a_corner(view: SolidView<'_>) -> Option<Orientation> {
     let faces: Vec<FaceView<'_>> = view.faces().collect();
+    let where_stored = faces
+        .windows(2)
+        .all(|pair| pair[0].location() == pair[1].location());
+    let read: Vec<(Surface, Orientation)> = faces
+        .iter()
+        .map(|face| {
+            let surface = if where_stored {
+                face.stored_surface()
+            } else {
+                face.surface()
+            };
+            (surface, face.orientation())
+        })
+        .collect();
     faces
         .iter()
-        .flat_map(|face| face.wires().flat_map(WireView::points))
-        .find_map(|corner| which_way_the_cones_from_here_count(&faces, corner))
+        .flat_map(|face| face.wires().flat_map(WireView::coedges))
+        .map(|coedge| {
+            let corner = coedge.start();
+            if where_stored {
+                corner.stored_point()
+            } else {
+                corner.point()
+            }
+        })
+        .find_map(|corner| which_way_the_cones_from_here_count(&read, corner))
 }
 
-/// The one way every cone from `here` over `faces` that is not nothing
-/// counts, or `None` when one is not told, when two count different ways, or
-/// when every one is nothing.
-fn which_way_the_cones_from_here_count(faces: &[FaceView<'_>], here: Point) -> Option<Orientation> {
+/// The one way every cone from `here` over `faces`, each a surface and the
+/// way its face is used, that is not nothing counts, or `None` when one is
+/// not told, when two count different ways, or when every one is nothing.
+fn which_way_the_cones_from_here_count(
+    faces: &[(Surface, Orientation)],
+    here: Point,
+) -> Option<Orientation> {
     let at = PredicatePoint::from(here.coordinates());
     let mut way = None;
-    for &face in faces {
-        match what_the_cone_over_this_face_adds(face, at)? {
+    for (surface, used) in faces {
+        match what_the_cone_over_this_face_adds(surface, *used, at)? {
             WhatTheConeAdds::Nothing => {}
             WhatTheConeAdds::Space(this_way) => {
                 if way.is_some_and(|way| way != this_way) {
@@ -3199,15 +3243,15 @@ enum WhatTheConeAdds {
     Space(Orientation),
 }
 
-/// What the cone from `at` over `face` adds, when that can be proved. The
-/// doc comment of [`which_way_its_faces_point_told_from_a_corner`] says why
-/// each answer holds.
+/// What the cone from `at` over a face on `surface`, used `way` round, adds,
+/// when that can be proved. The doc comment of
+/// [`which_way_its_faces_point_told_from_a_corner`] says why each answer
+/// holds.
 fn what_the_cone_over_this_face_adds(
-    face: FaceView<'_>,
+    surface: &Surface,
+    way: Orientation,
     at: PredicatePoint,
 ) -> Option<WhatTheConeAdds> {
-    let surface = face.surface();
-    let way = face.orientation();
     if let Some(flat) = surface.as_plane() {
         let side = flat.side_of_point(at);
         return if matches!(side, Decision::Zero) {
@@ -3221,10 +3265,7 @@ fn what_the_cone_over_this_face_adds(
         };
     }
     let inside_or_on = matches!(surface, Surface::Cylinder(_) | Surface::Sphere(_))
-        && matches!(
-            side_of_surface(&surface, at),
-            Decision::Neg | Decision::Zero
-        );
+        && matches!(side_of_surface(surface, at), Decision::Neg | Decision::Zero);
     inside_or_on.then_some(WhatTheConeAdds::Space(way))
 }
 
@@ -6108,12 +6149,13 @@ mod tests {
     use super::{
         Decision, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO, Mesh, RUNGS_THE_SECOND_LADDER_HAS_ASKED, Scope,
         a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
-        as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space,
-        how_far_across, how_far_it_strays_from_one_plane, how_far_the_sum_can_be_off,
-        how_much_space_a_curved_solid_encloses, how_much_space_hides_under,
-        how_wide_an_arc_of_one_branch_is, it_lies_flat, largest_coordinate_of,
-        signed_volume_over_and_how_far_it_rounded, the_coarsest_mesh_whose_sides_do_not_cross,
-        the_sum_answers, what_it_encloses_moved_onto_its_planes, winding_of, winding_round,
+        as_coarse_as_a_mesh_gets, every_side_of_the_skin_is_used_both_ways, gradient_of,
+        hand_on_a_refusal_that_found_the_space, how_far_across, how_far_it_strays_from_one_plane,
+        how_far_the_sum_can_be_off, how_much_space_a_curved_solid_encloses,
+        how_much_space_hides_under, how_wide_an_arc_of_one_branch_is, it_lies_flat,
+        largest_coordinate_of, signed_volume_over_and_how_far_it_rounded,
+        the_coarsest_mesh_whose_sides_do_not_cross, the_sum_answers,
+        what_it_encloses_moved_onto_its_planes, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -9211,6 +9253,156 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Row Q2512. The sliver of
+    /// [`a_sliver_whose_every_mesh_encloses_nothing_is_told_which_way_its_faces_point`],
+    /// moved by [`Model::place_solid`] 40 turns about each of five axes through
+    /// the origin, validates at every one, as it does where it is made.
+    ///
+    /// **Until Q2512, 168 of the 200 were refused, and that was a gap, not a
+    /// limit.** A turn keeps which way a solid's faces point, and the answer
+    /// was there to be read where the sliver is stored, on the same numbers
+    /// that answer it unplaced. Two readings had been made where it sits:
+    ///
+    /// - Its flat top, three corners on the line `x = 3` where made, was cut
+    ///   up where the turn put it, a rounding off that line, into a triangle
+    ///   wound whichever way the rounding went. Backwards, it used each of its
+    ///   sides twice the same way, and 20 turns were refused
+    ///   [`Invalid::FacesDoNotAgreeWhichWayTheyFace`]
+    ///   ([`the_sliver_placed_anywhere_uses_each_side_of_its_coarsest_mesh_once_each_way`]).
+    /// - Its corner `(3, 2, 4)` was read where the turn put it, off the planes
+    ///   of the top and the cap and outside the pipe it lies `2⁻¹⁰⁴` inside, so
+    ///   148 turns were refused [`Error::CannotTellWhichWayASolidsFacesPoint`],
+    ///   enclosing `0.0` and off by up to `inf`
+    ///   ([`the_placed_sliver_is_told_which_way_its_faces_point_either_way_out`]).
+    #[test]
+    fn the_sliver_where_a_bar_dips_into_a_block_validates_however_it_is_turned() {
+        let policy = Policy::tolerant(100.0);
+        let axes = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(3.0, -1.0, 2.0),
+        ];
+        let mut refused = Vec::new();
+        for axis in axes {
+            for step in 0..40 {
+                let mut model = an_empty_model();
+                let sliver = the_sliver_where_a_bar_dips_into_a_block(&mut model, &policy);
+                let turn = Isometry::rotation(
+                    &Axis::new(Point::origin(), axis).expect("a direction with a length"),
+                    f64::from(step) * core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn");
+                model
+                    .place_solid(sliver, &turn)
+                    .expect("this model made the key");
+                if let Err(why) = model.validate(&policy, &mut ProvenanceLog::new()) {
+                    refused.push(format!("{axis:?} at {step}/40: {why:?}"));
+                }
+            }
+        }
+        assert!(
+            refused.is_empty(),
+            "{} of 200 refused: {refused:#?}",
+            refused.len()
+        );
+    }
+
+    /// Row Q2512. The sliver's top is three corners on the line `x = 3` where
+    /// it is made, and a rounding off that line wherever a turn puts it. Its
+    /// coarsest mesh uses each side once each way at all 40 turns about each
+    /// of five axes, either way out. Until Q2512 the top was cut where the
+    /// sliver sits, into a triangle wound whichever way the rounding went, and
+    /// at 14/40 about `(1, 2, 3)` and 2/40 about `(3, −1, 2)` it came out
+    /// backwards, so the sound sliver was refused
+    /// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`].
+    #[test]
+    fn the_sliver_placed_anywhere_uses_each_side_of_its_coarsest_mesh_once_each_way() {
+        let policy = Policy::tolerant(100.0);
+        let mut model = an_empty_model();
+        let sliver = the_sliver_where_a_bar_dips_into_a_block(&mut model, &policy);
+        let axes = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(3.0, -1.0, 2.0),
+        ];
+        let mut not_both_ways = Vec::new();
+        for axis in axes {
+            for step in 0..40 {
+                let turn = Isometry::rotation(
+                    &Axis::new(Point::origin(), axis).expect("a direction with a length"),
+                    f64::from(step) * core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn");
+                for way in [Orientation::Forward, Orientation::Reversed] {
+                    let view = SolidView::new(&model, sliver.slot_in(model.id()), turn, way);
+                    let mesh = the_coarsest_mesh_whose_sides_do_not_cross(
+                        view,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{axis:?} at {step}/40, {way:?}: {why:?}"));
+                    if let Err(why) = every_side_of_the_skin_is_used_both_ways(&mesh) {
+                        not_both_ways.push(format!("{axis:?} at {step}/40, {way:?}: {why:?}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            not_both_ways.is_empty(),
+            "{} of 400 not both ways: {not_both_ways:#?}",
+            not_both_ways.len()
+        );
+    }
+
+    /// Row Q2512. At all 40 turns about each of five axes, the sliver is told
+    /// its faces point out, and the same sliver used inside out is told they
+    /// point in, as where it is made. Until Q2512 the corner was read where
+    /// the turn put it, rounded off the top's and the cap's planes and out of
+    /// the pipe it lies `2⁻¹⁰⁴` inside, so most turns told nothing.
+    #[test]
+    fn the_placed_sliver_is_told_which_way_its_faces_point_either_way_out() {
+        let policy = Policy::tolerant(100.0);
+        let mut model = an_empty_model();
+        let sliver = the_sliver_where_a_bar_dips_into_a_block(&mut model, &policy);
+        let axes = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(3.0, -1.0, 2.0),
+        ];
+        let mut not_told = Vec::new();
+        for axis in axes {
+            for step in 0..40 {
+                let turn = Isometry::rotation(
+                    &Axis::new(Point::origin(), axis).expect("a direction with a length"),
+                    f64::from(step) * core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn");
+                for way in [Orientation::Forward, Orientation::Reversed] {
+                    let view = SolidView::new(&model, sliver.slot_in(model.id()), turn, way);
+                    let told = how_much_space_a_curved_solid_encloses(
+                        view,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    );
+                    if !matches!(told, Ok(sign) if sign == f64::MIN_POSITIVE * way.sign()) {
+                        not_told.push(format!("{axis:?} at {step}/40, {way:?}: {told:?}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            not_told.is_empty(),
+            "{} of 400 not told: {not_told:#?}",
+            not_told.len()
+        );
     }
 
     /// The tolerant intersection of the block `[0, 4]³` and a bar of radius
