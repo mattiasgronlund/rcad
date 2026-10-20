@@ -67,7 +67,10 @@
 //! meets where the floor cuts those lines at each end of the edge as that
 //! end, and the strip is one edge walked out and back
 //! (`fold_each_end_of_an_edge_one_plane_runs_beside_a_rounding_from_it` in
-//! `fuse/assemble.rs`, `docs/decisions.md` §417.9).
+//! `fuse/assemble.rs`, `docs/decisions.md` §417.9). The union took that same
+//! fold until queue row Q2270: since then it takes the tipped cube's thin
+//! shell below the floor as flat first, the same fold the difference above
+//! uses, so the floor-fold's record now comes from the intersection alone.
 //!
 //! What the two cubes share is the cube's square cross-section, clipped to
 //! the block, along the five of its ten that lie over the block:
@@ -356,14 +359,23 @@ fn the_block_less_the_tipped_cube_is_one_solid_where_the_cubes_edge_rounds_below
 /// answer (`docs/decisions.md` §39.4).
 ///
 /// **The floor is taken as running through the ends of the cube's edge only
-/// where the answer was refused without it** (queue row Q1711,
-/// `docs/decisions.md` §417.9): the union and the intersection at
-/// [`TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`], and the union at
-/// `t = 0.142`, the last of [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`].
-/// Each of those logs two records, one at each end of the edge the cube
-/// stands on, `(−5, 5, 0)` and `(5, 5, 0)`: the floor's plane cuts the cube's
-/// bottom and side the edge's whole length, past the block at `x = −5` too.
-/// Every other answer logs none.
+/// where the intersection was refused without it** (queue row Q1711,
+/// `docs/decisions.md` §417.9): at
+/// [`TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`]. It logs two
+/// records, one at each end of the edge the cube stands on, `(−5, 5, 0)` and
+/// `(5, 5, 0)`: the floor's plane cuts the cube's bottom and side the edge's
+/// whole length, past the block at `x = −5` too. Every other intersection
+/// logs none.
+///
+/// **The union never needs that fold** (queue row Q2270): it takes the
+/// tipped cube's thin shell below the floor as flat before anything is kept,
+/// the same fold
+/// [`the_tipped_cube_less_the_block_is_one_solid_where_its_corner_rounds_below_the_floor_tolerant`]
+/// pins for the difference, and logs one "a shell within the wobble of one of
+/// its planes taken as flat" record at the eight tilts of
+/// [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`] and
+/// [`TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`], both orders, and
+/// none at the rest.
 ///
 /// The allowance is the one `a_turned_cube_with_its_corner_on_a_face.rs`
 /// works out for its own pair of cubes: four roundings at 16 for each corner,
@@ -375,11 +387,11 @@ fn every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_o
     for tilt in every_tilt() {
         let share = what_the_two_share(tilt);
         let refused_without = TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT.contains(&tilt);
-        let the_union_refused_without =
-            refused_without || tilt == TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT[3];
+        let a_shell_was_taken_as_flat =
+            refused_without || TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT.contains(&tilt);
         for order in [Order::BlockFirst, Order::TippedFirst] {
             for (rule, worked, folded) in [
-                (Rule::Union, 2000.0 - share, the_union_refused_without),
+                (Rule::Union, 2000.0 - share, false),
                 (Rule::Intersection, share, refused_without),
                 (Rule::Difference, 1000.0 - share, false),
             ] {
@@ -407,6 +419,11 @@ fn every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_o
                         off <= 1e-12,
                         "{asked}: taken through {end:?}, not {corner:?}"
                     );
+                }
+                if rule == Rule::Union {
+                    let flat = how_many_shells_were_taken_as_flat(&log);
+                    let wanted_flat = usize::from(a_shell_was_taken_as_flat);
+                    assert_eq!(flat, wanted_flat, "{asked}: {flat} shells taken as flat");
                 }
             }
         }
@@ -557,6 +574,17 @@ fn the_ends_the_floor_was_taken_through(log: &ProvenanceLog) -> Vec<[f64; 3]> {
         .collect();
     ends.sort_by(|one, other| one[0].total_cmp(&other[0]));
     ends
+}
+
+/// How many shells `log` took as flat before anything was kept
+/// (`takes_as_flat` in `fuse/assemble.rs`).
+fn how_many_shells_were_taken_as_flat(log: &ProvenanceLog) -> usize {
+    log.records()
+        .iter()
+        .filter(|record| {
+            record.predicate() == "a shell within the wobble of one of its planes taken as flat"
+        })
+        .count()
 }
 
 fn refusal(tilt: [f64; 4], rule: Rule, order: Order, policy: &Policy, asked: &str) -> Error {
