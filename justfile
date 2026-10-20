@@ -3425,6 +3425,7 @@ check-lanes-workflow:
     docs_brief='Push attempts: at most ${MERGE_ATTEMPTS}. A catch-up over docs alone costs no attempt; at most ${DOCS_CATCH_UPS} of those, reported as docs_catch_ups.'
     docs_field="      docs_catch_ups: { type: 'integer', minimum: 0,"
     docs_required="'push_attempts', 'docs_catch_ups',"
+    landed_required="'merged', 'merged_sha', 'gate_pass_line', 'push_attempts', 'docs_catch_ups', 'ff_main', 'rows_closed'"
     pass_rule='Step 3 already proved the tests pass; do not run them again to watch that (§370)'
     runs_awk='^ +\| awk .function show\(line\)'
     runs_diff='    git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 "$1" "$2" \'
@@ -3451,6 +3452,8 @@ check-lanes-workflow:
     many_want=$(seq -f 'crates/k/src/lib.rs: +pub fn f%g() {}' 1 10; echo 'lines that run: 15')
     notes_bound="    notes: { type: 'string', description: 'at most five lines, for the merger:"
     notes_rule='`notes` is at most five lines, for the merger: what it must act on and what no'
+    runs_note_field="    lines_that_run_note: { type: 'string', description: 'your own note about the print above, if any"
+    runs_note_rule='A note of your own about that print -- that you ran it by'
     land_only="  return !!prior.check && prior.check.verdict === 'merge' && stepsProblem(prior.report.rows) === null && gatePassed(prior.check)"
     land_first='  if (!landable(prior)) return byMerger(lane, prior, null)'
     gate_pass_check="  return typeof check.gate_summary === 'string' && check.gate_summary.split('\n').some((line) => line === 'gate: PASS')"
@@ -3484,6 +3487,12 @@ check-lanes-workflow:
     relay_refused='  if (relay.refused) return stopped(lane, out, relay.refused)'
     relay_continuity="    if (report && report.outcome !== 'blocked' && !sameSha(report.continued_from, before.landed_sha)) {"
     relay_switch='  git switch ${branch}'
+    relay_cat_file='  git cat-file -t ${before.landed_sha}'
+    relay_check_field="      core.landed_sha_check = { type: 'string', description: 'what git cat-file -t <before.landed_sha> printed in your tree"
+    relay_check_read="report.landed_sha_check === 'commit'"
+    relay_handoff_fallback="if (typeof report.remaining !== 'string' || !report.remaining.trim()) return 'the lane asked for a relay and wrote no handoff'"
+    relay_handoff_log='left handoff empty, so remaining was taken as the handoff'
+    relay_handoff_set='    report.handoff = report.remaining'
     relay_trees='  return (prior.relayTrees || []).concat([prior.report && prior.report.worktree_path, prior.check && prior.check.worktree_path]).filter(Boolean)'
     relay_outcome="    core.outcome = { type: 'string', enum: ['fixed',"
     relay_last="'relay'] }"
@@ -3730,6 +3739,10 @@ check-lanes-workflow:
             echo "$1 does not make docs_catch_ups a property the merger's schema requires, so a merger need not say how many catch-ups over docs alone it used (§367)"
             return 14
         fi
+        if ! grep -qF -- "$landed_required" "$1"; then
+            echo "$1's mergedSchema does not require merged_sha, gate_pass_line and ff_main; a lander's JSON that left them out would still read as pushed undefined to main with no gate line, as Q1813's did (§384)"
+            return 36
+        fi
         n=$(grep -cF -- "$pass_rule" "$1" || true)
         if [ "$n" -lt 2 ]; then
             echo "$1 does not tell the verifier, in both VERIFY's prompt and the pinsOnly note, that step 3's gate already proves the tests pass; without that a verifier runs the named tests a second time for no new information (§370)"
@@ -3796,6 +3809,10 @@ check-lanes-workflow:
         if ! grep -qF -- "$notes_bound" "$1" || ! grep -qF -- "$notes_rule" "$2/verifier.md"; then
             echo "$1's verdict schema or $2/verifier.md no longer holds a verifier's notes to five lines; unbounded, they were about a third of its report (§382)"
             return 17
+        fi
+        if ! grep -qF -- "$runs_note_field" "$1" || ! grep -qF -- "$runs_note_rule" "$2/verifier.md"; then
+            echo "$1's verdict schema gives a verifier nowhere but $2/verifier.md's lines_that_run_note to put a note on the lines-that-run print; without it, a verifier's own note appended after the print's count makes linesThatRun find no count at the end and unproven refuse a merge that was never in doubt (§375.4)"
+            return 37
         fi
         if ! grep -qxF -- "$land_only" "$1" || ! grep -qxF -- "$land_first" "$1"; then
             echo "$1 does not send the lander only a merge on a lane whose rows just land takes, and everything else to the Opus merger; a fix_first would then merge with its fixes unmade (§383.4)"
@@ -3880,6 +3897,14 @@ check-lanes-workflow:
         if ! grep -qxF -- "$relay_switch" "$1" || ! grep -qxF -- "$relay_continuity" "$1"; then
             echo "$1 does not switch a relay onto the lane's own branch and check that it starts where the lane before it stopped; a relay could carry on from another commit (§416)"
             return 22
+        fi
+        if ! grep -qxF -- "$relay_cat_file" "$1" || ! grep -qF -- "$relay_check_field" "$1" || ! grep -qF -- "$relay_check_read" "$1"; then
+            echo "$1 does not have a relay check the lane before it's landed_sha with git cat-file -t and read the result as landed_sha_check before blaming the relay for a mismatch; a miscopied landed_sha, as Q1444's first lane's was, would then read as the relay starting at the wrong commit, not as the report before it naming no object (§416, Q1448)"
+            return 38
+        fi
+        if ! grep -qF -- "$relay_handoff_fallback" "$1" || ! grep -qF -- "$relay_handoff_log" "$1" || ! grep -qxF -- "$relay_handoff_set" "$1"; then
+            echo "$1 does not fall back to remaining, logging that it did, when a relay's handoff is empty; a lane that wrote its handoff into remaining and left handoff empty, as Q324's first lane did (run wf_a2040a15-ce8, tip cd42d6db), would still be refused outright and the dispatcher would re-take the row by hand (§416, Q1542)"
+            return 39
         fi
         if ! grep -qxF -- "$relay_trees" "$1"; then
             echo "$1 does not count the trees a row was relayed from among its trees, so nothing unlocks them or marks them finished (§416)"
@@ -4048,6 +4073,8 @@ check-lanes-workflow:
     grep -vF -- "$docs_field" "$file" > "$dir/no-docs-field/lanes.js"
     fresh docs-count-optional
     sed "s/, 'docs_catch_ups'//" "$file" > "$dir/docs-count-optional/lanes.js"
+    fresh landed-optional
+    swap "$file" "$landed_required" "'merged', 'push_attempts', 'docs_catch_ups', 'rows_closed'" > "$dir/landed-optional/lanes.js"
     fresh no-pass-rule
     grep -vF -- "$pass_rule" "$file" > "$dir/no-pass-rule/lanes.js"
     fresh no-pass-rule-doc
@@ -4088,6 +4115,10 @@ check-lanes-workflow:
     swap "$file" 'at most five lines, ' '' > "$dir/notes-unbounded/lanes.js"
     fresh notes-unsaid
     grep -vF -- "$notes_rule" "$agents/verifier.md" > "$dir/notes-unsaid/agents/verifier.md"
+    fresh runs-note-unbound
+    grep -vF -- "$runs_note_field" "$file" > "$dir/runs-note-unbound/lanes.js"
+    fresh runs-note-unsaid
+    grep -vF -- "$runs_note_rule" "$agents/verifier.md" > "$dir/runs-note-unsaid/agents/verifier.md"
     fresh untyped-lander
     grep -vF -- "agentType: 'lander'," "$file" > "$dir/untyped-lander/lanes.js"
     fresh no-lander-file
@@ -4162,6 +4193,16 @@ check-lanes-workflow:
     grep -vxF -- "$relay_continuity" "$file" > "$dir/relay-from-anywhere/lanes.js"
     fresh relay-not-switched
     grep -vxF -- "$relay_switch" "$file" > "$dir/relay-not-switched/lanes.js"
+    fresh relay-check-not-run
+    grep -vxF -- "$relay_cat_file" "$file" > "$dir/relay-check-not-run/lanes.js"
+    fresh relay-check-ignored
+    swap "$file" "$relay_check_read" "true" > "$dir/relay-check-ignored/lanes.js"
+    fresh relay-check-untyped
+    grep -vF -- "$relay_check_field" "$file" > "$dir/relay-check-untyped/lanes.js"
+    fresh relay-handoff-no-fallback
+    swap "$file" "$relay_handoff_fallback" "return 'the lane asked for a relay and wrote no handoff'" > "$dir/relay-handoff-no-fallback/lanes.js"
+    fresh relay-handoff-unlogged
+    grep -vF -- "$relay_handoff_log" "$file" > "$dir/relay-handoff-unlogged/lanes.js"
     fresh relay-trees-forgotten
     swap "$file" '(prior.relayTrees || []).concat(' '(' > "$dir/relay-trees-forgotten/lanes.js"
     fresh relay-not-an-outcome
@@ -4262,7 +4303,7 @@ check-lanes-workflow:
     grep -vxF -- "$nothing_flag" "$file" > "$dir/nothing-flag-unset/lanes.js"
     fresh nothing-fn-missing
     grep -vxF -- "$nothing_fn" "$file" > "$dir/nothing-fn-missing/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33 dnr-rows-ignored:34 dnr-blocked-unsaid:34 nothing-after-verify-false:35 nothing-not-shared:35 nothing-not-whole:35 nothing-flag-unset:35 nothing-fn-missing:35)
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33 dnr-rows-ignored:34 dnr-blocked-unsaid:34 nothing-after-verify-false:35 nothing-not-shared:35 nothing-not-whole:35 nothing-flag-unset:35 nothing-fn-missing:35 landed-optional:36 runs-note-unbound:37 runs-note-unsaid:37 relay-check-not-run:38 relay-check-ignored:38 relay-check-untyped:38 relay-handoff-no-fallback:39 relay-handoff-unlogged:39)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -15541,6 +15582,15 @@ check-queue-selftest:
         || fail "add refused a file under crates/rcad-topo/tests/ that already exists, which needs no declaration"
     got=$(qf add 1 opus 'crates/rcad-topo/tests/fuzzing/a-new-shape.rs' 'from/- a new file in a subdirectory, which is not declared in merged.rs §230' 2>&1) \
         || fail "add refused a new file in a subdirectory of crates/rcad-topo/tests/, which §373.7 does not reach"
+
+    # §230.2 (Q1720): a write-set path that names a directory in the tree is
+    # not ambiguous, so `add` writes it with its trailing / rather than
+    # refusing it the way `narrow` still does; `check-queue` would otherwise
+    # have refused the batch, as it did for Q1702's lane.
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/fuzzing' 'from/- a directory written without its trailing slash §230' 2>&1) \
+        || fail "add refused a directory write set given without its trailing slash: $got"
+    grep -q "^$got .*crates/rcad-topo/tests/fuzzing/[[:space:]]\+from/- a directory written without its trailing slash §230\$" "$dir/addfix.md" \
+        || fail "add did not write the directory's write set with its trailing slash added"
 
     # Q1436: `take` lets a stale `lane:` state in another worktree's copy
     # through when main's own history of the queue file already held that

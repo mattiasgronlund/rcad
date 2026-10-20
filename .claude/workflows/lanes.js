@@ -303,7 +303,7 @@ async function worked(lane) {
   let before = null
   let n = 0
   while (report && writes(lane) && report.outcome === 'relay' && n < MAX_RELAYS) {
-    const why = relayRefused(report)
+    const why = relayRefused(lane, report)
     if (why) {
       relayed.set(lane.label, { trees, before, refused: why })
       return report
@@ -314,7 +314,10 @@ async function worked(lane) {
     before = report
     report = await laneAgent(lane, RELAY(lane, before, n), `relay ${n}:${lane.label}`, n)
     if (report && report.outcome !== 'blocked' && !sameSha(report.continued_from, before.landed_sha)) {
-      relayed.set(lane.label, { trees, before, refused: `relay ${n} started at ${report.continued_from}, not at ${before.landed_sha} where the lane before it stopped` })
+      const refused = report.landed_sha_check === 'commit'
+        ? `relay ${n} started at ${report.continued_from}, not at ${before.landed_sha} where the lane before it stopped`
+        : `the lane before it reported landed_sha ${before.landed_sha}, which git cat-file -t in the branch's tree says names no object ('${report.landed_sha_check}'); relay ${n} started at the branch's true tip, ${report.continued_from}, regardless`
+      relayed.set(lane.label, { trees, before, refused })
       return report
     }
   }
@@ -334,8 +337,12 @@ function laneAgent(lane, prompt, label, relay) {
   })
 }
 
-function relayRefused(report) {
-  if (typeof report.handoff !== 'string' || !report.handoff.trim()) return 'the lane asked for a relay and wrote no handoff'
+function relayRefused(lane, report) {
+  if (typeof report.handoff !== 'string' || !report.handoff.trim()) {
+    if (typeof report.remaining !== 'string' || !report.remaining.trim()) return 'the lane asked for a relay and wrote no handoff'
+    log(`${lane.label}: relay wrote its handoff into remaining and left handoff empty, so remaining was taken as the handoff`)
+    report.handoff = report.remaining
+  }
   if (typeof report.worktree_path !== 'string' || !report.worktree_path) return 'the lane asked for a relay and named no worktree to take its branch from'
   return null
 }
@@ -808,9 +815,10 @@ Base of the branch: main at ${BASE}. Your first commands, in this order:
   git log --oneline -1
   git switch ${branch}
   git rev-parse HEAD
+  git cat-file -t ${before.landed_sha}
   git merge-base --is-ancestor ${BASE} HEAD
   git worktree unlock ${before.worktree_path}
-Report what git rev-parse HEAD printed as continued_from, and ${BASE} as base_sha once the ancestor check exits 0. If the switch refuses because ${branch} is checked out in ${before.worktree_path}, run git -C ${before.worktree_path} switch --detach and then the switch again. If it still refuses, if HEAD is not ${before.landed_sha}, or if the ancestor check fails, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`.
+Report what git rev-parse HEAD printed as continued_from, what git cat-file -t ${before.landed_sha} printed as landed_sha_check, and ${BASE} as base_sha once the ancestor check exits 0. If the switch refuses because ${branch} is checked out in ${before.worktree_path}, run git -C ${before.worktree_path} switch --detach and then the switch again. If it still refuses, if HEAD is not ${before.landed_sha}, or if the ancestor check fails, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`.
 
 Your report is the row's report, not only your part of it. Carry into it, beside your own, everything of the lane before you that still holds: each number (run it again if a commit since could move it), each test in tests_that_fail_without_the_change, each step in rows, each file in files_changed, its decisions_section, out_of_write_set_needs and remaining.
 ${handOver()}
@@ -925,7 +933,8 @@ function reportSchema(lane, relay) {
     }
     if (relay > 0) {
       core.continued_from = { type: 'string', description: 'what git rev-parse HEAD printed straight after your git switch onto the branch' }
-      required.push('continued_from')
+      core.landed_sha_check = { type: 'string', description: 'what git cat-file -t <before.landed_sha> printed in your tree -- "commit" if it names one, or its error text if it does not' }
+      required.push('continued_from', 'landed_sha_check')
     }
   } else {
     core.outcome = { type: 'string', enum: ['answered', 'partial', 'blocked'] }
@@ -1261,6 +1270,7 @@ function verdictSchema(kind) {
     fixes: { type: 'array', items: { type: 'string' }, description: 'each fix fix_first asks for: the file, the change, and why' },
     lines_that_run_command: { type: 'string', description: 'the lines-that-run command from your brief, exactly as you ran it' },
     lines_that_run: { type: 'string', description: 'everything that command printed, verbatim, down to its last line, lines that run: N -- never your own reading of the diff' },
+    lines_that_run_note: { type: 'string', description: 'your own note about the print above, if any -- never folded into lines_that_run itself, which stays the command\'s output and nothing more' },
     verdict: { type: 'string', enum: ['merge', 'fix_first', 'reject'] },
     notes: { type: 'string', description: 'at most five lines, for the merger: what it must act on and what no other field says -- never an account of the steps you ran, which the other fields already hold' },
     also_answers_confirmed: { type: 'array', items: { type: 'string' }, description: 'the ids from the lane\'s also_answers you ran again on the branch tip and saw answer, each open on origin/main, held by no lane, and sharing a tests/*.rs file with the lane\'s write set (verifier.md, Also answers); leave it out when the lane named none' },
@@ -1351,7 +1361,7 @@ function numberSchema() {
 function mergedSchema() {
   return {
     type: 'object',
-    required: ['start_sha', 'worktree_path', 'merge_branch', 'merged', 'push_attempts', 'docs_catch_ups', 'rows_closed', 'rows_added', 'unlocked', 'needs_judgement'],
+    required: ['start_sha', 'worktree_path', 'merge_branch', 'merged', 'merged_sha', 'gate_pass_line', 'push_attempts', 'docs_catch_ups', 'ff_main', 'rows_closed', 'rows_added', 'unlocked', 'needs_judgement'],
     properties: {
       start_sha: { type: 'string', description: 'what git log -1 said before your switch' },
       worktree_path: { type: 'string', description: 'the output of git rev-parse --show-toplevel run in your OWN tree' },
