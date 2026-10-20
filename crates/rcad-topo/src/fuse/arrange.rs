@@ -11801,6 +11801,19 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// across before every node on the way back to the start, and those before the
 /// corner at `x = 4`: three nodes in a ring, none of them first.
 ///
+/// The place a start a rounding **outside** the crossing was rounded off comes
+/// first too, though the sweep proves it lies far round. A ball of radius 5 about `(3, 1,
+/// 4)` resting on the ridge of a 2-wide cube turned `3π/4` about `y` has the
+/// circle the face `x = z` cuts it in walked from `(0, 1, −4.4e-16)`, a
+/// rounding outside the ball below the node `(0, 1, 0)` where the ridge
+/// touches it. The circle runs exactly along `y` there, so the node and the
+/// point across, `(7, 1, 7)`, are both square to the run, and the sweep put
+/// the node half a turn round, between the corners where `y = 2` and `y = 0`
+/// cut the far side. Every union of the two, and the ball less the cube, was
+/// refused (Q2499). [`the_start_is_a_rounding_off`] reads the node as the
+/// place the start was rounded off, since the box the start is held as holds
+/// it, and leaves the point across, a chord away, to the sweep.
+///
 /// **A node can be the start without being named it.** A circle a ball and
 /// a plane cross in starts where the walk starts, and a third surface can
 /// cross the circle right there: the half ball `x ≥ 0` cut by `z ≤ 0.5` has the
@@ -12017,9 +12030,11 @@ fn round_a_closed_crossing_and_what_it_measures(
     ))
 }
 
-/// Whether the walked start is a rounding off `place`: the start lies a
-/// rounding inside the crossing, and `place` is the point of the crossing
-/// straight out from it, square to the way the crossing runs there.
+/// Whether the walked start is a rounding off `place`: `place` is the point of
+/// the crossing straight out from the start, square to the way the crossing
+/// runs there, and the start lies a rounding inside the crossing, or a
+/// rounding outside it with `place` inside `node`, the box the start is held
+/// as.
 ///
 /// The crossing runs along `∇S × ∇T` and turns to one side of that line, the
 /// side [`which_comes_first_round_a_crossing`] winds to. From a start on the
@@ -12031,11 +12046,33 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// the counting begins. So the sweep from the start, a step along the run and
 /// `place`, read as [`Decision::Neg`], says `place` is on that stretch, and a
 /// step from the start square to the run says it is the point of the stretch
-/// straight out from the start. A start on a conic, or on either of those
-/// loops, reads `false` for every place.
+/// straight out from the start.
 ///
 /// Every other point of that stretch, a hair ahead of the place or behind it,
 /// reads `false` and is left to the sweep.
+///
+/// **From a start a rounding outside the crossing, the place it was rounded
+/// off lies on the crossing's side, and so does the place across.** Both are
+/// square to the run, straight in from the start, and both read
+/// [`Decision::Pos`]: the place it was rounded off a rounding away, and the
+/// place across a chord of the crossing away. So `place` reads `true` there
+/// only where `node` holds every point of its box. `node` is the box the
+/// crossing's start is held as, a few roundings wide round the walked start
+/// ([`round_a_closed_crossing_and_what_it_measures`]), so it holds the place
+/// the start was rounded off and not the place across. A start on a conic, or
+/// on either of those loops, reads `false` for every place `node` does not
+/// hold. A ball of radius 5 about `(3, 1, 4)` resting on the ridge of a
+/// 2-wide cube turned `3π/4` about `y` is the shape (Q2499,
+/// `uniting_the_ball_off_its_poles_keeps_the_cube_and_the_ball_as_two_solids`).
+/// The circle the face `x = z` cuts the ball in is walked from `(0, 1,
+/// −4.4e-16)`, a rounding outside it, where the run is exactly along `y`. The
+/// ridge's node `(0, 1, 0)` and the place across, `(7, 1, 7)`, both read `[0,
+/// 0]` along it and [`Decision::Pos`] against `start + runs`, and `node` is a
+/// box `±5.7e-14` round the start, which holds the first and not the second.
+/// Nothing here checks that the chord is longer than `node` is wide: a
+/// crossing whose chord square to the run at the start is shorter than
+/// `node`'s diagonal, which would read the place across `true` too, has not
+/// been built.
 ///
 /// **The one loop a ball off a pipe's axis crosses it in, or two pipes cross
 /// in, has no such side.** `rcad-geom` orders each round a line — the ball's
@@ -12045,9 +12082,16 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// going round that line from the start's own angle, with a point at that
 /// angle first. Where the walk rounded the start off the loop, the place it
 /// was rounded off lies a hair to one side of the start's angle or the other:
-/// at that angle or past it, the place reads `true` and comes first; short of
-/// it, it reads `false` and is left to the sweep, which on either loop is the
-/// angle. A place whose box straddles the start's angle reads `false` too.
+/// at that angle or past it, the place reads `true` and comes first. Short of
+/// it, the place reads [`Decision::Pos`], as the place across a conic does, so
+/// it reads `true` and comes first where `node` holds every point of its box,
+/// and `false` otherwise, left to the sweep, which on either loop is the
+/// angle. Until Q2499 every place short of it read `false`, and the angle put
+/// it last. A closed crossing's last node runs on into its first
+/// ([`Arrangement::cut_the_crossings_into_arcs`]), so where no node on it is
+/// the start by name, first and last cut the same arcs. One that is comes
+/// ahead of either, and a loop with both has not been built. A place whose
+/// box straddles the start's angle reads `false`.
 ///
 /// The window from the start's angle to that of `start + runs` is not a hair
 /// wide: `runs` grows with the square of the shape's size. A place in it is
@@ -12073,7 +12117,8 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// start is the place it was rounded off. Six shapes, as built and turned off
 /// every axis, with either surface first, have no loop point behind square to
 /// the run in the window; a start on the same loop off that plane has some;
-/// and the far end, whose dot is exactly zero, reads `false`
+/// and the far end, whose dot is exactly zero, reads `false`, as `node` does
+/// not hold it
 /// (`the_walked_start_of_a_balls_one_loop_has_no_point_square_to_its_run_ahead_of_it`).
 ///
 /// **On two pipes' loop the window can hold points behind square, and where
@@ -19211,7 +19256,8 @@ mod what_the_curved_arrangement_reaches {
     /// points of the loop behind square to its run inside its window. And the
     /// one other point of the loop square to the run from the walked start, the
     /// far end of the same reach along the axis, has a dot of exactly zero and
-    /// still reads `false`, being half a turn round.
+    /// still reads `false`, being half a turn round, outside the box the start
+    /// is held as.
     #[test]
     fn the_walked_start_of_a_balls_one_loop_has_no_point_square_to_its_run_ahead_of_it() {
         let turn = Isometry::rotation(
