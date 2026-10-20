@@ -22,12 +22,13 @@
 //! eight depths square to each of the three axes, and the sliver §206.3
 //! measured, at six leans and twelve turns by both rules — and each of the 168
 //! solids is meshed at ten rungs of the ladder the rescue walks, from half the
-//! ball down. Of those 1 680 meshes **2 fold, every one of them a sliver, and
-//! every one of the 2 gives way to a mesh at a finer rung** (38 until Q1027
-//! moved a cap side between two rim points out of the triangulator's ear
-//! rule). That is what the retry is for, measured: a fold is where the
-//! mesher's own cuts happened to fall and not something about the shape, so
-//! handing it on as the answer throws away a rung that would have answered.
+//! ball down. Of those 1 680 meshes **none folds** (38 until Q1027 moved a cap
+//! side between two rim points out of the triangulator's ear rule, and 2, both
+//! slivers, until Q2178 moved out the side two ear cuts in a row leave; every
+//! one of them gave way to a mesh at a finer rung). That is what the retry is
+//! for, measured: a fold is where the mesher's own cuts happened to fall and
+//! not something about the shape, so handing it on as the answer throws away a
+//! rung that would have answered.
 //!
 //! **No solid reaches the loop to spend those rungs on a fold, though.**
 //! §206.3's own shape is fixed at the source — `cut_in_two` charges at least
@@ -82,8 +83,8 @@
 //! because what closed §206.3 is a cost bound and not a proof — `cut_in_two`'s
 //! own doc comment says nothing shows a bare cut across a piece bounded by
 //! *more than one* closed curve can never meet a neighbour's diagonal. The
-//! family that folds is narrowed, not emptied, and 2 of these 1 680 meshes are
-//! what that looks like from outside (38 until Q1027).
+//! family that folds is narrowed, not emptied, though none of these 1 680
+//! meshes shows it from outside any more (38 until Q1027, 2 until Q2178).
 //!
 //! **The two-closed-curve family is forced to one shape, and that shape now
 //! meshes without coming back flat.** A solid encloses nothing when meshed
@@ -214,13 +215,38 @@ fn no_sliver_cut_through_a_balls_pole_folds_at_any_deflection() {
     assert_eq!(
         tally,
         BTreeMap::from([
-            ("meshed", RUNGS * LEANS.len() * TURNS * 2 - 2),
-            ("folded", 2),
-            ("folds a later rung cured", 2),
+            ("meshed", RUNGS * LEANS.len() * TURNS * 2),
+            ("folds a later rung cured", 0),
             ("folds no later rung cured", 0),
         ]),
         "every rung of every sliver's ladder"
     );
+}
+
+/// The two slivers the sweep above last saw fold, at lean `0.2` turned a
+/// quarter and three quarters round by `Difference`, measure at a deflection
+/// of an eighth, the rung where they folded.
+///
+/// Each half of the sliver's curved face runs down its rim to the south pole
+/// `S`, and the flat face across, cut by Delaunay, joins `S` to the third rim
+/// point on. Until Q2178 the curved half joined the same two points from the
+/// far end of its pole side, and measuring was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`.
+#[test]
+fn the_slivers_that_folded_at_an_eighth_measure_there() {
+    let lean = 0.2;
+    for turn in [PI / 2.0, 3.0 * PI / 2.0] {
+        let what = format!("the sliver at lean {lean}, turn {turn}, by Difference");
+        let (model, answer) = sliver(1.0, lean, turn, Rule::Difference);
+        let answer = answer.unwrap_or_else(|why| panic!("{what}: refused {why}"));
+        measures_within_what_it_declares(
+            &model,
+            &answer,
+            0.125,
+            a_caps_volume(1.0, 1.0 - lean.cos()),
+            &what,
+        );
+    }
 }
 
 /// The sliver chopped again by two more planes, which is the family `cut_in_two`
@@ -507,11 +533,16 @@ fn the_crown_of_a_ring_holds_what_pappus_gives_and_no_rung_of_its_ladder_folds()
 /// What this test can check is that the experiment above is still an experiment
 /// about this tree. If the arm moves or goes, the record stops describing what
 /// is there, and that is worth a failure rather than a stale paragraph.
+///
+/// Since Q2217 each rung's `match` hands back how far that rung strayed, so
+/// the arm reads `=> None` where it read `=> {}`: a fold still goes on to the
+/// next rung. Until Q2308 this test looked for the old line and found it
+/// only in a test's copy further down `validate.rs`, which hid the move.
 #[test]
 fn the_arm_removal_experiment() {
     let ladder = include_str!("../src/validate.rs");
     assert!(
-        ladder.contains("Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}"),
+        ladder.contains("Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => None,"),
         "§208.3's arm is what the experiment above was run against"
     );
 }

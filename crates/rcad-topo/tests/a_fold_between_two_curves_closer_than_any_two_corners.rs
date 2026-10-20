@@ -12,21 +12,25 @@
 //! seam crosses the loop's top. The ball can sit on any side of the bar: put on
 //! the other three, off the seam, the lens still has one corner.
 //!
-//! # Why it is refused
+//! # Why it was refused
 //!
 //! `Model::fuse` asks how much space each curved piece of its answer encloses
 //! before it writes it (`how_much_space_it_encloses` in `fuse/assemble.rs`,
 //! which is `how_much_space_a_curved_solid_encloses` in `validate.rs`). The
-//! first thing that does is `the_coarsest_mesh_whose_sides_do_not_cross`. At
-//! the coarsest mesh both faces of the lens draw the same side across the
-//! loop, and the fuse is refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn:
-//! 4, used: 4 }`.
+//! first thing that does is `the_coarsest_mesh_whose_sides_do_not_cross`.
+//! Until Q2178, at the coarsest mesh both faces of the lens drew the same side
+//! across the loop, and the fuse was refused
+//! `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`. Since Q2178 a
+//! curved patch draws no side between two corners of one edge with a corner of
+//! the edge between them, the coarsest mesh does not fold, and all six fuses
+//! answer.
 //!
 //! A fold is meant to be asked again at half the room, rung by rung, down to a
 //! floor read off the distance between the two closest corners of the solid
 //! (`how_close_two_corners_come`). The lens has one corner, so there is no
 //! distance, that function says `None`, and the arm that reads it hands the
-//! coarsest fold straight back without asking for one finer mesh.
+//! coarsest fold straight back without asking for one finer mesh. That arm is
+//! unchanged; this lens no longer reaches it.
 //!
 //! # A gap, not a limit
 //!
@@ -56,38 +60,38 @@
 //! Thin pieces of the same kind that designers make answer too: a lens of two
 //! balls a quarter or a half thick, and a ball's cap as high past a block's
 //! face, each two faces round one loop, and neither folds at its coarsest
-//! mesh. So no shape designers make on purpose is known to be refused this
-//! way, and the refusal is class C.
+//! mesh. So no shape designers make on purpose was known to be refused this
+//! way, and the refusal was class C.
 //!
 //! The fuses run certified, in a model of 100 mm.
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 use std::f64::consts::PI;
 
-/// The three shallow presses that are refused: a ball of 3 at reach `0.25`
-/// and `0.5`, and a ball of 6 at reach `0.25`.
-const REFUSED: [(f64, f64); 3] = [(3.0, 0.25), (3.0, 0.5), (6.0, 0.25)];
+/// The three shallow presses that were refused until Q2178: a ball of 3 at
+/// reach `0.25` and `0.5`, and a ball of 6 at reach `0.25`.
+const SHALLOW: [(f64, f64); 3] = [(3.0, 0.25), (3.0, 0.5), (6.0, 0.25)];
 
 /// The intersection of the bar and a ball of 3 pressed `0.25` or `0.5` into
-/// it, or of 6 pressed `0.25`, is refused for the fold at its coarsest mesh,
-/// either solid first. The fix row turns this into the answer: two faces and
-/// [`ball_in_the_side_of_the_bar`].
+/// it, or of 6 pressed `0.25`, either solid first, is two faces and
+/// [`ball_in_the_side_of_the_bar`]. Until Q2178 each was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` for the fold at
+/// its coarsest mesh.
 #[test]
-fn what_a_ball_pressed_a_quarter_or_a_half_into_a_bar_shares_with_it_is_refused_for_a_coarse_fold()
-{
-    for (radius, reach) in REFUSED {
+fn what_a_ball_pressed_a_quarter_or_a_half_into_a_bar_shares_with_it_answers() {
+    for (radius, reach) in SHALLOW {
         for bar_first in [true, false] {
             let mut model = a_model();
             let said = fuse(&mut model, radius, reach, Rule::Intersection, bar_first);
-            assert!(
-                matches!(
-                    said,
-                    Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 })
-                ),
-                "ball of {radius} at reach {reach}, bar first: {bar_first}: {said:?}"
+            answers(
+                &mut model,
+                said,
+                ball_in_the_side_of_the_bar(radius, reach, 1000),
+                &[2],
+                &format!("ball of {radius} at reach {reach}, bar first: {bar_first}"),
             );
         }
     }
@@ -112,12 +116,12 @@ fn what_a_ball_pressed_one_into_a_bar_shares_with_it_answers() {
     }
 }
 
-/// The union and both differences of each refused press answer. The bar less
+/// The union and both differences of each shallow press answer. The bar less
 /// the ball keeps its pipe, its two caps and the dent; the ball less the bar
 /// is its skin and the pipe's patch.
 #[test]
 fn the_other_four_fuses_of_a_shallow_press_answer() {
-    for (radius, reach) in REFUSED {
+    for (radius, reach) in SHALLOW {
         let bar = 48.0 * PI;
         let ball = 4.0 * PI / 3.0 * radius.powi(3);
         let shared = ball_in_the_side_of_the_bar(radius, reach, 1000);
