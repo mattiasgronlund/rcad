@@ -734,6 +734,25 @@ open. Nothing else.
 > would now panic in its difference too: not seen in `rcad-topo`'s tests, and
 > not run.
 
+> **2026-10-19 note (Q2253): a shell both groups hold was read as flat only
+> when every one of its pieces was buried in the other group, and that was
+> too narrow.** A turned ell two high stood against a frame one high
+> overlaps, as stored, in a slab along the ell's wall. Under a tolerant
+> policy the intersection's shell over the slab is taken as flat and holds
+> pieces of both groups, but three of the ell's pieces — the slab's top, in
+> two pieces, and its end at `y = 0` — lie on the frame's faces facing the
+> same way, not buried in it, so the shell was not read as flat and both
+> differences were refused `TheFuseWroteABrokenAnswer`,
+> `OuterWireWindsAgainstTheNormal`. Since Q2253, a piece lying on the other
+> group facing the same way — the rim of a slab where two walls stand flush
+> — is taken with the rest, as the intersection already keeps a piece buried
+> in the other group and one lying on it facing the same way that comes
+> first, and nothing else. The doc comment on
+> `the_pieces_of_each_shell_both_hold_taken_as_flat` in `fuse/assemble.rs`
+> says why: those are the two kinds of piece a shell here holds, so reading
+> only one of them left the other refused for want of a fold that had
+> already decided it.
+
 ### 417.9 Two meets beside an edge taken as its end, only for an answer refused without them
 
 *2026-10-13, queue row Q1711, in two lanes: `lane-q1711-a-cube-tipped-onto-an-edge-along-another-cubes-floor`

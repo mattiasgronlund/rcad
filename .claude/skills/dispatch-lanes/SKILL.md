@@ -92,9 +92,10 @@ mise exec -- just queue next        # or: just queue next N
 `just queue help` prints every queue mode and verb with its usage.
 
 It takes the first ready row of the highest tier whose write set meets no
-running `lane:` row and no row taken above it, and names what each skipped row
-met. N defaults to the free slots, counted from the trees agents hold on this
-machine — lanes, verifiers and mergers alike, whoever sent them (§263.4).
+running `lane:` row, no row taken above it, and no pinned row skipped above it
+(§430.7), and names what each skipped row met. N defaults to the free slots,
+counted from the trees agents hold on this machine — lanes, verifiers and
+mergers alike, whoever sent them (§263.4).
 Tiers 1 and 5 go in class order, not file order (§352.3, §403.3). While a
 Sonnet row is ready and no running lane holds one, the fill keeps the last
 free slot for it rather than giving every slot to Opus (§447.3).
