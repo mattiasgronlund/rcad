@@ -37,6 +37,15 @@
 // base; it never goes to the lander, since there is no branch for `just land`
 // to merge. Anything but a `confirm` comes back not merged.
 //
+// A writing lane can also land its branch on the base for a reason that is
+// not "the fault is gone" -- it put a probe in, measured, and took the probe
+// out again, say. `does_not_reproduce` is the wrong box for that (there is no
+// `base_runs` to re-run and no fault to confirm gone), and the ordinary
+// merge road is also the wrong one: there is no diff for `just land` or the
+// merger's gate to work from. Such a lane's report goes back whole instead,
+// the same shape a read-only lane's does, and the row stays open for a
+// dispatcher to read and file by hand (Q1382, Q2222, §399).
+//
 // Since §450.3 rule 4 a fix lane runs the shapes of the open rows that share a
 // `tests/*.rs` file with its row, and names in `also_answers` the ones its
 // branch now answers. Its verifier runs each again, and `just land --answers`,
@@ -184,7 +193,7 @@ const results = await pipeline(
   (prior, item) => {
     const lane = laneOf(item)
     if (prior.stop) return handedBack(lane, prior)
-    if (!writes(lane)) return { lane: lane.label, answer: prior.report }
+    if (!writes(lane) || prior.committedNothing) return { lane: lane.label, answer: prior.report }
     return mergeAfterTheLast(lane, prior).then((merge) => {
       const row = merged(lane, prior, merge)
       return row.merged ? pruned(lane, row, treesOf(prior).concat(merge.worktree_path)) : row
@@ -335,6 +344,14 @@ function sameSha(a, b) {
   return typeof a === 'string' && typeof b === 'string' && a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a))
 }
 
+// A lane's branch is the base when it made no commit at all, whether its
+// row's fault turned out to be gone (`gone`, below) or it simply found
+// nothing worth keeping (`measuredNothing`). Both read this one check so it
+// is never written twice.
+function branchIsBase(report) {
+  return sameSha(report.landed_sha, BASE)
+}
+
 // A row prep stopped started no lane, so there is nothing to verify; it goes
 // straight to `handedBack`, which lists the files prep said it needs.
 function notPrepared(item) {
@@ -356,6 +373,7 @@ function verified(report, lane) {
   if (!writes(lane)) return out
   if (report.outcome === 'blocked') return stopped(lane, out, 'the lane is blocked')
   if (report.outcome === 'does_not_reproduce') return gone(lane, report, out)
+  if (branchIsBase(report)) return measuredNothing(lane, out)
   if (lane.verify === false) return out
   out.kind = lane.sameBehaviour === true ? 'same_behaviour' : namesTests(report) ? 'tests' : 'moved_text'
   if (out.kind === 'same_behaviour') {
@@ -385,7 +403,7 @@ function verified(report, lane) {
 // to the runs it reports, as `unproven` holds a `merge`.
 function gone(lane, report, out) {
   out.kind = 'does_not_reproduce'
-  if (!sameSha(report.landed_sha, BASE)) return stopped(lane, out, `the lane reported does_not_reproduce and landed ${report.landed_sha}, not the base ${BASE.slice(0, 8)}; a lane whose fault does not show commits nothing (§433.8)`)
+  if (!branchIsBase(report)) return stopped(lane, out, `the lane reported does_not_reproduce and landed ${report.landed_sha}, not the base ${BASE.slice(0, 8)}; a lane whose fault does not show commits nothing (§433.8)`)
   if (!Array.isArray(report.base_runs) || !report.base_runs.length) return stopped(lane, out, 'the lane reported does_not_reproduce with no base_runs, so its verifier has nothing to run again (§433.8)')
   if (Array.isArray(report.rows) && report.rows.length) return stopped(lane, out, `the lane reported does_not_reproduce but still named rows to add: ${report.rows.map((r) => JSON.stringify(r)).join(', ')}; a fault an open row already blocks is blocked, not gone (§433.8)`)
   return agent(GONE(lane, report), {
@@ -417,6 +435,17 @@ function unconfirmed(check) {
 function stopped(lane, out, why) {
   log(`${lane.label}: not merged -- ${why}`)
   out.stop = why
+  return out
+}
+
+// A writing lane that committed nothing, for a reason other than its row's
+// fault being gone, has no branch to send to the verifier and no gate to
+// read -- there is nothing to merge, confirm or reject. `out.committedNothing`
+// marks it so the pipeline's merge stage routes it the way a read-only
+// lane's answer goes: back whole, with no merger spent on it.
+function measuredNothing(lane, out) {
+  log(`${lane.label}: its branch is the base, so its report goes back whole, not merged (§399)`)
+  out.committedNothing = true
   return out
 }
 
