@@ -180,7 +180,12 @@ For every row the fill took:
    only. A take left on your branch meets that flip at your next merge of
    `main` as a row changed on both sides, and costs a `just queue pick`. A
    bundle is one `take` step per row, every one onto the same branch, in the
-   same `apply`.
+   same `apply`. A take that never started a lane, or started one that died
+   before it committed, leaves a hold with nothing running under it —
+   `just queue give <id>` releases it and puts the row back to the state
+   `take` replaced (todo, or its `after:` list). It refuses while the
+   branch still has a tree or carries commits `main` does not have, so it
+   never drops a hold a lane might still be running under (§263.3, §263.4).
 2. `Workflow` with `scriptPath: ".claude/workflows/lanes.js"`, one call per
    row or bundle, all of a fill's in one message. **Never `name: "lanes"`**: the
    name runs the copy the registry read earlier in the process, and neither a
