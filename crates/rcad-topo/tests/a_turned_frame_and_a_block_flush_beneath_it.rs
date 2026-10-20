@@ -333,7 +333,7 @@ fn a_bar_with_a_block_across_its_rim_beside_them_unites_as_it_does_on_its_own() 
 /// "a point inside a piece of a face" before anything is joined, a fault of
 /// its own.
 fn the_bar_united_beside_the_frame_and_the_block() -> Vec<(&'static str, Model, SolidKey)> {
-    let groupings: [(&str, fn([SolidKey; 4]) -> (Vec<SolidKey>, Vec<SolidKey>)); 3] = [
+    let groupings: [(&str, Grouping); 3] = [
         (
             "the frame and the block across against the block and the bar",
             |[frame, block, bar, across]| (vec![frame, across], vec![block, bar]),
@@ -369,6 +369,10 @@ fn the_bar_united_beside_the_frame_and_the_block() -> Vec<(&'static str, Model, 
         })
         .collect()
 }
+
+/// The arguments and the tools of one union, out of the frame, the block
+/// beneath it, the bar and the block across its rim, in that order.
+type Grouping = fn([SolidKey; 4]) -> (Vec<SolidKey>, Vec<SolidKey>);
 
 fn a_bar_and_a_block_across_its_rim(model: &mut Model) -> (SolidKey, SolidKey) {
     let bar = model
