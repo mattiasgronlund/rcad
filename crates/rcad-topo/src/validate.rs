@@ -2890,20 +2890,27 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// is the misreport `docs/decisions.md` §333.6 objects to. So it is handed on,
 /// and the caller gets the name [`SolidView::mesh`] gives the same solid.
 ///
-/// **No solid is known to reach that arm, so it is a guard** (§379.5, Q783).
+/// **One solid is known to reach that arm, and it lies far outside §3.5's
+/// scale envelope** (§379.5, Q2538).
+/// [`a_wedge_of_a_cones_wall_turned_off_axis_and_lifted_reaches_the_guard`]
+/// pins it: a sliver of a cone's wall about `1.8e-15` thick, turned off the
+/// world's own axes and lifted to coordinates about `68` — a spread of about
+/// `4e16` against the envelope's `1e11`.
+///
 /// To reach it the coarsest mesh has to lie flat where the solid lands, and a
 /// finer one has to enclose space where it was made and none where it lands.
-/// A cap whose rim is **two** half circles was built to look for that, 0.25
-/// high and put out at `2^52` where the ulp is 1. Its coarsest mesh encloses
-/// `912.6666666666666` where it was made, against `0` where it lands, so it is
-/// refused by name before this loop is reached
+/// A cap whose rim is **two** half circles was built to look for that inside
+/// the envelope, 0.25 high and put out at `2^52` where the ulp is 1. Its
+/// coarsest mesh encloses `912.6666666666666` where it was made, against `0`
+/// where it lands, so it is refused by name before this loop is reached
 /// (`a_thin_cap_placed_where_its_height_rounds_away_is_refused_by_name`). With
 /// a probe logging every ladder this loop started, the whole `rcad-topo` suite
 /// started 59, in 9 tests, before the three-arc sweep was written: the
 /// three-arc cap, the two slivers above, three pieces of a cone, and a model of
 /// the fuzz corpus whose first rung was refused
-/// `DeflectionBelowWhatAMeshCanReach`, its floor at `1.2e217`. None was
-/// refused that way. That is a search, not a proof, so the arm stays.
+/// `DeflectionBelowWhatAMeshCanReach`, its floor at `1.2e217`. None of those,
+/// all inside the envelope, was refused that way. That is a search, not a
+/// proof, so the arm stays a guard for a solid inside §3.5's scale.
 ///
 /// # What stops it
 ///
@@ -9743,6 +9750,128 @@ mod tests {
                 vec![(round_the_bottom, Orientation::Reversed)],
             ),
             (flat(17.0, 1.0), vec![(round_the_top, Orientation::Forward)]),
+        ];
+        let mut drafted = Vec::new();
+        for (surface, walked) in faces {
+            let mut steps = Vec::new();
+            for (edge, way) in walked {
+                steps.push(DraftStep::Along(builder.add_coedge(edge, way)?));
+            }
+            let wire = builder.add_wire(&steps)?;
+            drafted.push((builder.add_face(surface, &[wire])?, Orientation::Forward));
+        }
+        builder.add_shell(&drafted)?;
+        builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
+    }
+
+    /// A wedge of a cone's wall, turned off the world's own axes and lifted
+    /// far up `z`, reaches the arm [`hand_on_a_refusal_that_found_the_space`]
+    /// guards (Q2538, §379.5).
+    ///
+    /// The wedge is the sliver of the cone `r = z/2` between the plane
+    /// `z = 4` and a second plane through the same point, tilted off it by
+    /// `2^-50` about the `x` line: about `1.8e-15` thick across the `4` wide
+    /// span the two planes cross. Turned a twentieth of a turn about
+    /// `(1, 2, 3)` and lifted `64` up `z`, the coarsest mesh still lies flat
+    /// where the sliver was made, so [`Model::validate`] does not catch it
+    /// there; the second ladder's first finer mesh is what finds the sliver's
+    /// volume where it was made and none where it was placed — `68` up
+    /// against `1.8e-15` thick, a spread of about `4e16`, far outside §3.5's
+    /// `1e11`.
+    #[test]
+    fn a_wedge_of_a_cones_wall_turned_off_axis_and_lifted_reaches_the_guard() {
+        let leaning = Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("an axis");
+        let mut model = an_empty_model();
+        let wedge = probe_wedge(&mut model, f64::powi(2.0, -50)).expect("a wedge builds");
+        model
+            .place_solid(
+                wedge,
+                &Isometry::rotation(&leaning, core::f64::consts::TAU / 40.0).expect("a turn"),
+            )
+            .expect("this model made the key");
+        model
+            .place_solid(
+                wedge,
+                &Isometry::translation(Vector::new(0.0, 0.0, 64.0)).expect("a shift"),
+            )
+            .expect("this model made the key");
+        let view = model.solid(wedge).expect("this model made the key");
+        let refusal = how_much_space_a_curved_solid_encloses(
+            view,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Err(Error::PlacingItTookAwayTheSpaceItsMeshEncloses {
+            enclosed_where_made,
+            enclosed_where_placed,
+        }) = refusal
+        else {
+            panic!("expected the guard's own refusal, got {refusal:?}");
+        };
+        assert!(
+            enclosed_where_made > 0.0,
+            "the sliver should enclose space where it was made, got {enclosed_where_made}"
+        );
+        assert!(
+            enclosed_where_placed <= 0.0,
+            "the sliver should enclose none of that space once placed, got {enclosed_where_placed}"
+        );
+    }
+
+    fn probe_wedge(model: &mut Model, tilt: f64) -> crate::Result<crate::SolidKey> {
+        let cone = Surface::Cone(Cone::new(Axis::z(), 0.5)?);
+        let bottom =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, 0.0, -1.0))?;
+        let top =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 4.0), Vector::new(0.0, -tilt, 1.0))?;
+        let mut builder = SolidBuilder::new();
+        let west = builder.add_vertex(Point::new(-2.0, 0.0, 4.0))?;
+        let east = builder.add_vertex(Point::new(2.0, 0.0, 4.0))?;
+        let half = || {
+            smallvec::smallvec![Picker::from(
+                HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                    .expect("y has a length")
+            )]
+        };
+        let across = builder.add_edge(west, east, EdgeRun::Straight)?;
+        let low_arc = builder.add_edge(
+            east,
+            west,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(bottom),
+                picked_by: half(),
+            },
+        )?;
+        let high_arc = builder.add_edge(
+            east,
+            west,
+            EdgeRun::PartOfWhereItCrosses {
+                and: Surface::Plane(top),
+                picked_by: half(),
+            },
+        )?;
+        let faces = [
+            (
+                Surface::Plane(bottom),
+                vec![
+                    (across, Orientation::Reversed),
+                    (low_arc, Orientation::Reversed),
+                ],
+            ),
+            (
+                Surface::Plane(top),
+                vec![
+                    (across, Orientation::Forward),
+                    (high_arc, Orientation::Forward),
+                ],
+            ),
+            (
+                cone,
+                vec![
+                    (low_arc, Orientation::Forward),
+                    (high_arc, Orientation::Reversed),
+                ],
+            ),
         ];
         let mut drafted = Vec::new();
         for (surface, walked) in faces {
