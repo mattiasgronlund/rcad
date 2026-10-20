@@ -185,14 +185,18 @@ pub(crate) fn assemble(
     Ok(assembly)
 }
 
-/// The pieces of each shell of `held_by_both` a tolerant policy takes as flat,
-/// one list to a shell, where the shell holds pieces of both groups.
+/// The pieces of each shell of `kept` a tolerant policy takes as flat, one list
+/// to a shell, where the shell holds pieces of both groups.
 ///
-/// `held_by_both` is what the intersection keeps, and is put together as
-/// [`assemble`] would put it together, so a shell here is a shell the
-/// intersection would answer, and taken as flat when
+/// `kept` is what one rule keeps, and is put together as [`assemble`] would
+/// put it together, so a shell here is a shell that rule would answer, and
+/// taken as flat when
 /// [`Assembly::leave_out_each_shell_thinner_than_the_wobble`] would leave it
-/// out. **A difference needs it asked here, before anything is kept.** Two
+/// out. `select` asks it of what the intersection keeps for a difference, and
+/// of what each group less the other keeps for a union.
+///
+/// **A difference needs it asked of the intersection, before anything is
+/// kept.** Two
 /// skewed combs touching along one line close a prism of `3.1e−32` between
 /// them. Their intersection is that prism alone, a shell of its own, and is
 /// left out whole. The comb less the other kept the prism as a notch in its
@@ -223,51 +227,63 @@ pub(crate) fn assemble(
 /// every shell with such a piece was until queue row Q2253, either difference
 /// was refused as a face winding against its normal
 /// (`a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_short`).
-/// A union keeps such a piece as part of its outside, and `select` never asks
-/// this for a union.
 ///
-/// Under a certified policy, or with nothing held by both, nothing is asked.
-/// **A put-together that is refused takes no shell as flat**: the fuse then
-/// keeps what it kept before Q1710, and its own assembly asks what it asked
-/// before. The records of the put-together go into `log`, ahead of each
-/// shell's record, only when a shell is taken as flat, since only then does
-/// the answer rest on them.
-pub(crate) fn the_pieces_of_each_shell_both_hold_taken_as_flat(
+/// **A union needs it asked of each group less the other** (queue row Q2270).
+/// A turned ell one high inside a taller one, flush against its wall, has its
+/// wall stored `8.3e−17` outside the big ell's, so the small ell less the big
+/// one is a slab that thin: the small ell's wall, in three pieces, and strips
+/// of each of its faces round that wall, all outside the big ell, and the big
+/// ell's wall under them, in three pieces buried in the small ell. The union
+/// kept the small ell's pieces outside the big one and dropped the big ell's
+/// buried ones, and the face joined across the two walls then had two rings
+/// that both wound as its outline. `select` reads each piece listed here as
+/// that difference leaves it out, so the union keeps the big ell's wall whole
+/// and none of the slab
+/// (`a_turned_ell_inside_a_taller_one_flush_against_its_wall_unites_or_is_refused_for_an_edge_too_short`).
+///
+/// Under a certified policy, or with `kept` holding pieces of one group only,
+/// nothing is asked. **A put-together that is refused takes no shell as
+/// flat**: the fuse then keeps what it kept before Q1710, and its own assembly
+/// asks what it asked before. The records of the put-together go into `log`,
+/// ahead of each shell's record, only when a shell is taken as flat, since
+/// only then does the answer rest on them.
+pub(crate) fn the_pieces_of_each_flat_shell_of_both_groups(
     model: &Model,
     scratch: &Scratch,
-    held_by_both: &[Chosen],
+    kept: &[Chosen],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Vec<Vec<usize>> {
     let Strictness::TolerantFallback { .. } = policy.strictness() else {
         return Vec::new();
     };
-    if held_by_both.is_empty() {
+    let arguments = scratch.arguments.len();
+    let of_both_groups = |pieces: &[usize]| {
+        let of_an_argument = |piece: &usize| scratch.cut_from[*piece] < arguments;
+        pieces.iter().any(of_an_argument) && !pieces.iter().all(of_an_argument)
+    };
+    let pieces_kept: Vec<usize> = kept.iter().map(|chosen| chosen.piece).collect();
+    if !of_both_groups(&pieces_kept) {
         return Vec::new();
     }
     let mut mine = ProvenanceLog::new();
     let Ok(assembly) = Assembly::joined_into_shells(
         model,
         scratch,
-        held_by_both,
+        kept,
         &scratch.names_of_one_point,
         policy,
         &mut mine,
     ) else {
         return Vec::new();
     };
-    let arguments = scratch.arguments.len();
     let mut flat = Vec::new();
     for shell in &assembly.shells {
         let pieces: Vec<usize> = shell
             .iter()
             .flat_map(|&face| assembly.faces[face].pieces.iter().copied())
             .collect();
-        let of_an_argument = |piece: &usize| scratch.cut_from[*piece] < arguments;
-        if pieces.iter().any(of_an_argument)
-            && !pieces.iter().all(of_an_argument)
-            && assembly.takes_as_flat(shell, policy, &mut mine)
-        {
+        if of_both_groups(&pieces) && assembly.takes_as_flat(shell, policy, &mut mine) {
             flat.push(pieces);
         }
     }
@@ -855,8 +871,8 @@ impl Assembly {
 
     /// The kept pieces as faces, with what is one face joined, grouped into
     /// shells: the part of [`assemble`] that
-    /// [`the_pieces_of_each_shell_both_hold_taken_as_flat`] asks of the pieces
-    /// both groups hold, so that the two see the same shells.
+    /// [`the_pieces_of_each_flat_shell_of_both_groups`] asks of the pieces one
+    /// rule keeps, so that the two see the same shells.
     ///
     /// # Errors
     ///
@@ -2636,8 +2652,8 @@ impl Assembly {
     /// [`Invalid::DynamicRangeTooWide`] in its place, where the face is joined
     /// from pieces on two parallel planes apart and the answer as it stands
     /// has a feature too small beside its coordinates: a turned ell inside a
-    /// taller one, flush against its wall, united (Q2242,
-    /// [`Assembly::a_face_joined_over_a_step_is_refused_for_the_range`]).
+    /// taller one, flush against its wall, united under a certified policy
+    /// (Q2242, [`Assembly::a_face_joined_over_a_step_is_refused_for_the_range`]).
     ///
     /// [`Error::CannotPlaceTheRingsOfAJoinedFlatFace`] where two or more rings
     /// whose corners cannot place them, below, are left and nothing else could:
@@ -2704,9 +2720,8 @@ impl Assembly {
     /// refuses it is what refuses a face that thin: under a certified policy
     /// [`Assembly::check_dynamic_range`], for the slab's edges a rounding long,
     /// in every rule both ways round. A tolerant policy lets that range
-    /// through, and the ell less the frame and the frame less the ell are then
-    /// refused [`Error::TheFuseWroteABrokenAnswer`],
-    /// [`Invalid::OuterWireWindsAgainstTheNormal`], once written.
+    /// through, and since queue row Q2253 every rule then answers, both ways
+    /// round.
     ///
     /// **Two or more such rings and no outline are placed by the regions they
     /// bound**, since the outline is the one ring that holds the others
@@ -2880,8 +2895,12 @@ impl Assembly {
     /// **Joined across two planes apart, the face is walked over a step a
     /// rounding high**, and the way its rings wind is the rounding's. A turned
     /// ell inside a taller one, flush against its wall, is stored with its wall
-    /// `8.3e−17` outside the other's, and the union keeps the small ell's wall
-    /// pieces on a slab that thin. The two walls are one flat region (§426), so
+    /// `8.3e−17` outside the other's, and the union under a certified policy
+    /// keeps the small ell's wall pieces on a slab that thin. A tolerant one
+    /// takes the slab as flat before anything is kept and keeps the big ell's
+    /// wall whole, so it never comes here (queue row Q2270,
+    /// [`the_pieces_of_each_flat_shell_of_both_groups`]). The two walls are one
+    /// flat region (§426), so
     /// the joined face is the big wall's outline and one ring more: the big
     /// wall's hole round the small wall's pieces and their own outline, walked
     /// as one, which encloses nothing exactly and winds with the plane as
@@ -4683,7 +4702,7 @@ impl Assembly {
     /// intersection: two skewed combs touching along one line share a prism of
     /// `3.1e−32` and no space (`two_skewed_combs_touching_along_one_line.rs`,
     /// queue row Q1615). Since Q1710 that prism is taken as flat before
-    /// anything is kept, by [`the_pieces_of_each_shell_both_hold_taken_as_flat`],
+    /// anything is kept, by [`the_pieces_of_each_flat_shell_of_both_groups`],
     /// which asks [`Assembly::takes_as_flat`] as this does, so the intersection
     /// keeps none of it and this fold no longer meets it.
     ///
@@ -4739,7 +4758,7 @@ impl Assembly {
     /// taken as flat, which logs it once.
     ///
     /// Asked by [`Assembly::leave_out_each_shell_thinner_than_the_wobble`] and
-    /// by [`the_pieces_of_each_shell_both_hold_taken_as_flat`], so the two
+    /// by [`the_pieces_of_each_flat_shell_of_both_groups`], so the two
     /// folds take the same shells as flat and log them alike.
     ///
     /// # Panics
@@ -6506,7 +6525,7 @@ struct Face {
     ancestors: Vec<FaceKey>,
     /// Which of [`Scratch::pieces`] it was made of: one, or more where pieces
     /// on one plane were joined, and none for a face of an input solid. Only
-    /// [`the_pieces_of_each_shell_both_hold_taken_as_flat`] reads it, since
+    /// [`the_pieces_of_each_flat_shell_of_both_groups`] reads it, since
     /// faces are left out as the assembly goes and their places move.
     pieces: Vec<usize>,
     /// The surface it sits on, inherited from the ancestor bit for bit (§17.1).
