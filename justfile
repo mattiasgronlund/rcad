@@ -16786,20 +16786,37 @@ _status-branches dir base:
         echo "for-each-ref printed no branches, so this counted nothing"
         exit 1
     fi
+    others=$(grep -vxF '{{base}}' <<<"$branches")
+    others_count=0
+    [ -n "$others" ] && others_count=$(wc -l <<<"$others")
+
+    # A branch {{base}} already reaches has no commit for `git cherry {{base}}
+    # <branch>` to count: git's own reachability puts that branch's whole history
+    # inside {{base}}'s, so cherry can only answer zero `+` lines for it, the same
+    # answer this loop would have reached by running it. §92.1's objection to
+    # --no-merged is about the branches it calls *unmerged* that in fact carry
+    # nothing — a rework lands its content without its commits, and ancestry
+    # cannot see that, so cherry still has to judge those. It is not an objection
+    # to the branches --no-merged calls merged, which ancestry already answers
+    # for, so only the --no-merged set below is run through cherry at all.
+    unmerged=$(git -C "$repo" for-each-ref --no-merged '{{base}}' --format='%(refname:short)' refs/heads/)
+    unmerged_count=0
+    [ -n "$unmerged" ] && unmerged_count=$(wc -l <<<"$unmerged")
 
     carrying=0
-    quiet=0
-    while IFS= read -r branch; do
-        [ "$branch" != '{{base}}' ] || continue
-        new=$(git -C "$repo" cherry '{{base}}' "$branch" 2>/dev/null | grep -c '^+')
-        if [ "$new" -eq 0 ]; then
-            quiet=$((quiet + 1))
-            continue
-        fi
-        carrying=$((carrying + 1))
-        where=$(awk -F'\t' -v b="$branch" '$1 == b { print $2 }' <<<"$trees")
-        printf '%-46s %2d commit(s)  %s\n' "$branch" "$new" "${where:-no worktree}"
-    done <<<"$branches"
+    quiet=$((others_count - unmerged_count))
+    if [ -n "$unmerged" ]; then
+        while IFS= read -r branch; do
+            new=$(git -C "$repo" cherry '{{base}}' "$branch" 2>/dev/null | grep -c '^+')
+            if [ "$new" -eq 0 ]; then
+                quiet=$((quiet + 1))
+                continue
+            fi
+            carrying=$((carrying + 1))
+            where=$(awk -F'\t' -v b="$branch" '$1 == b { print $2 }' <<<"$trees")
+            printf '%-46s %2d commit(s)  %s\n' "$branch" "$new" "${where:-no worktree}"
+        done <<<"$unmerged"
+    fi
 
     if [ "$carrying" -eq 0 ]; then
         echo "nothing: every branch here is already on {{base}}"
