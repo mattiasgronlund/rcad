@@ -6,7 +6,8 @@
 //! radius 1 centred at `(0, 1, 1)` touches that ridge at `(0, 1, 0)`, which is
 //! the ball's south pole, and shares nothing else with the cube: each face's
 //! plane cuts the ball in a circle through the pole, and both circles lie
-//! outside the faces. The union is the two of them, `8 + 4π/3` between them.
+//! outside the faces. The union is the two of them, `8 + 4π/3` between them,
+//! and the ball less the cube is the ball whole.
 //!
 //! The fuse cuts the ball's skin along both whole circles, into two caps and
 //! the face between them, whose one wire is a figure eight through the pole.
@@ -17,12 +18,14 @@
 //! on the cube's side of the plane and the middle face on the other, so their
 //! lids point opposite ways, and **read each against its own lid, both pieces
 //! walked the circle the same way round.** Meshing the middle face then drew
-//! the side from the pole along the first circle as the cap does, and the union
-//! was refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }` at
-//! either size and either way round (Q2485).
+//! the side from the pole along the first circle as the cap does, and both
+//! fuses that keep the ball were refused `TwoPatchesOfTheMeshDrewTheSameSide {
+//! drawn: 2, used: 4 }` at either size, the union either way round (Q2485).
 //!
-//! Now the middle face is read again against the cap's lid, so the two walk
-//! each circle opposite ways. Where a flat face lies along such a circle, as in
+//! Now `every_closed_edge_read_off_one_spelling` reads each piece again against
+//! the ball and the cube's face as the cube stores it, which is the cap's lid,
+//! so the middle face is turned and the two walk each circle opposite ways.
+//! Where a flat face lies along such a circle, as in
 //! `a_ball_cut_through_its_pole.rs`, the lid each ball piece reads is that flat
 //! face, and nothing is read again.
 
@@ -30,7 +33,7 @@ use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Fused, Model, ProfileBuilder, Rule};
+use rcad_topo::{Fused, Measurement, Model, ProfileBuilder, Rule};
 
 /// The union is the cube and the ball apart: two solids that validate, one
 /// measuring 8 and the other `4π/3`, each within the error its own mesh
@@ -40,49 +43,73 @@ fn uniting_them_keeps_the_cube_and_the_ball_as_two_solids() {
     for size in [100.0, 1.0] {
         for ball_first in [true, false] {
             let what = format!("size {size}, ball first {ball_first}");
-            let (model, fused) = unite(size, ball_first);
-            let fused = fused.unwrap_or_else(|why| panic!("{what}: the union is answered: {why}"));
-            model
-                .validate(&Policy::certified(), &mut ProvenanceLog::new())
-                .unwrap_or_else(|why| panic!("{what}: the union validates: {why}"));
-            let mut measured: Vec<_> = fused
-                .solids()
-                .iter()
-                .map(|&solid| {
-                    model
-                        .solid(solid)
-                        .expect("this model made the key")
-                        .measure(
-                            Deflection::of(0.001).expect("a positive length"),
-                            &Policy::certified(),
-                            &mut ProvenanceLog::new(),
-                        )
-                        .unwrap_or_else(|why| panic!("{what}: a solid measures: {why:?}"))
-                })
-                .collect();
-            measured.sort_by(|one, other| one.volume().total_cmp(&other.volume()));
+            let measured = measure_each(size, Rule::Union, ball_first, &what);
             let [ball, cube] = measured.as_slice() else {
                 panic!("{what}: two solids, not {}", measured.len());
             };
+            assert_holds(ball, 4.0 * PI / 3.0, 0.0, &format!("{what}: the ball"));
             // The cube's corners were turned by 3π/4 and rounded, so its own
             // triangles hold 8 only to that rounding. Its declared error is the
             // rounding of the sum over them alone, so the corners' is added.
-            for (measured, closed_form, corners, which) in [
-                (ball, 4.0 * PI / 3.0, 0.0, "ball"),
-                (cube, 8.0, 8.0 * 1e-12, "cube"),
-            ] {
-                assert!(
-                    (measured.volume() - closed_form).abs() <= measured.volume_error() + corners,
-                    "{what}: the {which} measures {}, closed form {closed_form}, declared {}",
-                    measured.volume(),
-                    measured.volume_error()
-                );
-            }
+            assert_holds(cube, 8.0, 8.0 * 1e-12, &format!("{what}: the cube"));
         }
     }
 }
 
-fn unite(size: f64, ball_first: bool) -> (Model, rcad_topo::Result<Fused>) {
+/// The ball less the cube is the ball, still cut along both circles: one solid
+/// that validates and measures `4π/3` within the error its mesh declares, at
+/// either working size.
+#[test]
+fn the_ball_less_the_cube_is_the_whole_ball() {
+    for size in [100.0, 1.0] {
+        let what = format!("size {size}");
+        let measured = measure_each(size, Rule::Difference, true, &what);
+        let [ball] = measured.as_slice() else {
+            panic!("{what}: one solid, not {}", measured.len());
+        };
+        assert_holds(ball, 4.0 * PI / 3.0, 0.0, &what);
+    }
+}
+
+/// Fuses the ball with the cube by `rule`, checks the model validates, and
+/// measures each solid of the answer, smallest volume first.
+fn measure_each(size: f64, rule: Rule, ball_first: bool, what: &str) -> Vec<Measurement> {
+    let (model, fused) = fuse(size, rule, ball_first);
+    let fused = fused.unwrap_or_else(|why| panic!("{what}: the fuse is answered: {why}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{what}: the answer validates: {why}"));
+    let mut measured: Vec<_> = fused
+        .solids()
+        .iter()
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.001).expect("a positive length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what}: a solid measures: {why:?}"))
+        })
+        .collect();
+    measured.sort_by(|one, other| one.volume().total_cmp(&other.volume()));
+    measured
+}
+
+/// `measured` lands within its own declared error, and `slack` more, of
+/// `closed_form`.
+fn assert_holds(measured: &Measurement, closed_form: f64, slack: f64, what: &str) {
+    assert!(
+        (measured.volume() - closed_form).abs() <= measured.volume_error() + slack,
+        "{what} measures {}, closed form {closed_form}, declared {}",
+        measured.volume(),
+        measured.volume_error()
+    );
+}
+
+fn fuse(size: f64, rule: Rule, ball_first: bool) -> (Model, rcad_topo::Result<Fused>) {
     let mut model = Model::new(Scale::millimetres(size).expect("a working size"));
     let square = ProfileBuilder::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
         .build(&Policy::certified(), &mut ProvenanceLog::new())
@@ -104,12 +131,6 @@ fn unite(size: f64, ball_first: bool) -> (Model, rcad_topo::Result<Fused>) {
         (cube, ball)
     };
     let policy = Policy::tolerant(model.scale().nominal_size());
-    let fused = model.fuse(
-        &[one],
-        &[other],
-        Rule::Union,
-        &policy,
-        &mut ProvenanceLog::new(),
-    );
+    let fused = model.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
     (model, fused)
 }
