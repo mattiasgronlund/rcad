@@ -14924,6 +14924,24 @@ check-queue-selftest:
         '1 family with no trace (§450.3)')" ] \
         || fail "a from/ or was/ chain did not reach the trace it should, or excluded a row that only reaches a trace on another file"
 
+    # §373.7 / Q2401: crates/rcad-topo/tests/merged.rs is the file every new
+    # rcad-topo test file is declared in, whole or by item
+    # (merged.rs#<module>), so it is never a shape's own test file. A row
+    # naming it, with or without another row, forms no family on it.
+    fence mergedrs <<'MD'
+    Q4001  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/tests/a_ball_near_a_corner.rs,crates/rcad-topo/tests/merged.rs  from/- declares a_ball_near_a_corner.rs in merged.rs whole §373
+    Q4002  1  todo  opus  crates/rcad-topo/tests/a_square_tube_in_a_block.rs,crates/rcad-topo/tests/merged.rs#a_square_tube_in_a_block  from/- declares its own file by item §373
+    Q4003  1  todo  opus  crates/rcad-topo/Cargo.toml,crates/rcad-topo/tests/merged.rs,justfile  from/- the fold itself, naming only merged.rs under tests/ §373
+    Q4004  1  todo  opus  crates/rcad-topo/src/fuse/,crates/rcad-topo/tests/a_shared_shape.rs,crates/rcad-topo/tests/merged.rs  from/- on a_shared_shape.rs, which three rows share §373
+    Q4005  1  todo  opus  crates/rcad-topo/tests/a_shared_shape.rs,crates/rcad-topo/tests/merged.rs#a_shared_shape  from/- a second row on a_shared_shape.rs §373
+    Q4006  1  todo  opus  crates/rcad-topo/src/mesh.rs,crates/rcad-topo/tests/a_shared_shape.rs  from/- a third row on a_shared_shape.rs, naming no merged.rs entry §373
+    MD
+    drive mergedrs families
+    [ "$got" = "$(printf '%s\n' \
+        '3 crates/rcad-topo/tests/a_shared_shape.rs Q4004(1) Q4005(1) Q4006(1)' \
+        '1 family with no trace (§450.3)')" ] \
+        || fail "crates/rcad-topo/tests/merged.rs, whole or by item, grouped rows into a family on merged.rs itself"
+
     bundled() {
         got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
             || fail "queue ${*:3} failed on the $1 fixture with bundles of $2"

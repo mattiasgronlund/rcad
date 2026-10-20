@@ -150,9 +150,12 @@ the lane would otherwise spend twenty minutes finding again:
   lane runs each one's shapes on its branch and names those that now answer.
   Find them with `git grep -n -F '<file>' <base> -- docs/queue.md`, and leave
   out the row itself, a closed or parked row, and one a lane holds, which has
-  `lane:` in its third field. `just queue families` lists only families of
-  three or more that no trace has named, so it is not this list. Say so when
-  there are none;
+  `lane:` in its third field. Leave out `crates/rcad-topo/tests/merged.rs`
+  too, whole or as an item (`merged.rs#<module>`): a row names it only to
+  declare a new file there (§373.7), not to say what shape it is on, so it
+  is never the shared file a family is on. `just queue families` lists only
+  families of three or more that no trace has named, so it is not this list.
+  Say so when there are none;
 - nothing about the context hook for a writing row. A lane that sees "Lane
   budget passed" is past 150k of its own context; it commits, hands its branch
   over, and `lanes.js` starts a fresh lane on it, up to three times a row

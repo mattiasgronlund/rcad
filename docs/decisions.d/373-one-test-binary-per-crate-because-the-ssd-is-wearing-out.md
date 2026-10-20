@@ -277,6 +277,8 @@ the fix is to keep both pairs.
   that declare their files in it show as one family. At `ce88b698` it was 6:
   Q2344, Q2346, Q2353, Q2365, Q2369 and Q2386. Every row re-filed with its item
   adds one. They share a binary's root, not a shape, and prep's list of a row's
-  family (450.3 rule 4) reads them the same way. A row teaches both to leave
-  `merged.rs` out. Until then, the dispatcher traces no family on `merged.rs`,
-  and a lane runs no row's shapes for sharing `merged.rs` alone.
+  family (450.3 rule 4) reads them the same way. 2026-10-20: since Q2401
+  (`1ff2f7f6`) both leave `merged.rs` out, whole or as an item, and a
+  `check-queue-selftest` fixture holds `families.py` to it. On the queue of
+  that day the `merged.rs` family had 51 rows, and `just queue families`
+  went from 17 families to 16.

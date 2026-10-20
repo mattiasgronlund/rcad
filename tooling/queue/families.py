@@ -22,6 +22,14 @@ match; the row stays a member of its own file's family.
 
 A row with two entries on one file, `x.rs#a,x.rs#b`, counts once on it. 450.2's
 awk line counted it twice.
+
+`crates/rcad-topo/tests/merged.rs` is never the shared file (§373.7). A lane
+that adds a new file under `crates/rcad-topo/tests/` also writes two lines
+into `merged.rs`, naming the entry as the whole file or as an item,
+`merged.rs#<module>`; that entry says where the file is declared, not what
+shape it is on, so it does not belong in any family. Counting it put six
+unrelated rows into one family at `ce88b698`: Q2344, Q2346, Q2353, Q2365,
+Q2369 and Q2386.
 """
 
 import re
@@ -30,6 +38,7 @@ from rows import CLASS, SMALL, PIN
 
 FAMILY = 3
 TEST_FILE = re.compile(r"tests/.*\.rs$")
+MERGED_RS = "crates/rcad-topo/tests/merged.rs"
 TRACE = ["Trace", "the", "family", "on"]
 ROW_ID = re.compile(r"(?<![0-9A-Za-z])[TDQ][0-9]+(?![0-9A-Za-z])")
 # Mirrors queue.py's CAME_FROM (queue.py:492): families.py cannot import it,
@@ -60,14 +69,18 @@ def families(queue):
 
 
 def members_by_file(queue):
-    """Every open row that is not parked, under each test file its write set names, once per file."""
+    """Every open row that is not parked, under each test file its write set names, once per file.
+
+    `MERGED_RS` is left out: a row names it only to declare a new file there,
+    never as the shape it is on.
+    """
     by_file = {}
     for row in queue.rows:
         if row.is_closed() or row.state.startswith("parked:") or row.write_set == "-":
             continue
         files = {entry.partition("#")[0] for entry in row.write_set.split(",")}
         for file in files:
-            if TEST_FILE.search(file):
+            if file != MERGED_RS and TEST_FILE.search(file):
                 by_file.setdefault(file, []).append(row)
     return by_file
 
