@@ -32,9 +32,8 @@
 use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
-use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Measurement, Model, ProfileBuilder, Rule};
+use rcad_topo::{Fused, Measurement, Model, ProfileBuilder, Rule};
 
 /// The union is the cube and the ball apart: two solids that validate, one
 /// measuring 8 and the other `4π/3`, each within the error its own mesh
@@ -44,7 +43,7 @@ fn uniting_them_keeps_the_cube_and_the_ball_as_two_solids() {
     for size in [100.0, 1.0] {
         for ball_first in [true, false] {
             let what = format!("size {size}, ball first {ball_first}");
-            let measured = measure_each(size, Rule::Union, ball_first, &what);
+            let measured = measure_each(fuse(size, Rule::Union, ball_first), &what);
             let [ball, cube] = measured.as_slice() else {
                 panic!("{what}: two solids, not {}", measured.len());
             };
@@ -64,7 +63,7 @@ fn uniting_them_keeps_the_cube_and_the_ball_as_two_solids() {
 fn the_ball_less_the_cube_is_the_whole_ball() {
     for size in [100.0, 1.0] {
         let what = format!("size {size}");
-        let measured = measure_each(size, Rule::Difference, true, &what);
+        let measured = measure_each(fuse(size, Rule::Difference, true), &what);
         let [ball] = measured.as_slice() else {
             panic!("{what}: one solid, not {}", measured.len());
         };
@@ -72,64 +71,64 @@ fn the_ball_less_the_cube_is_the_whole_ball() {
     }
 }
 
-/// Pinned as it answers: a ball of radius 5 about `(3, 1, 4)` rests on the
-/// same ridge at `(0, 1, 0)`, which is no pole of it, and the union is refused
-/// at either working size, `CornersCoincide` with the ball first and
-/// `BoundaryCrossesItself` with the cube first; the ball less the cube is
-/// refused as the union with the ball first is. The answer exists, so this is
-/// a gap (Q2492).
+/// A ball of radius 5 about `(3, 1, 4)` rests on the same ridge at `(0, 1,
+/// 0)`, which is no pole of it, and the union is the cube and the ball apart:
+/// two solids that validate, measuring 8 and `500π/3`, at either working size
+/// and either way round. It was refused, `CornersCoincide` with the ball first
+/// and `BoundaryCrossesItself` with the cube first (Q2492).
 ///
 /// The face `x = z` cuts the ball in a circle whose lowest point is the ridge
 /// point, and the walk round that circle starts a rounding below it, at `z =
 /// −4.4e-16`, outside the circle. Seen from there the ridge point lies straight
 /// up, as the far side of the circle at `y = 1` does, so ordered round the
-/// circle by the sweep it sits on the far side, between the corners at `y = 2`
-/// and those at `y = 0`. The ball's edges along that circle then run the wrong
-/// way round it: one from `(0.072, 2, 0.072)` to `(0.072, 0, 0.072)` passes
-/// the ridge point, and the two that end there overlap the whole circle between
-/// them, so the walk round the ball's face beside the cube's small circle
-/// visits the ridge point twice at one place of the chart.
+/// circle by the sweep it sat on the far side, between the corners at `y = 2`
+/// and those at `y = 0`. The ball's edges along that circle then ran the wrong
+/// way round it: one from `(0.072, 2, 0.072)` to `(0.072, 0, 0.072)` passed
+/// the ridge point, and the two that ended there overlapped the whole circle
+/// between them, so the walk round the ball's face beside the cube's small
+/// circle visited the ridge point twice at one place of the chart. Now the
+/// ridge point is read as the place the start was rounded off, and comes
+/// first (Q2499).
 #[test]
-fn a_ball_resting_on_the_ridge_off_its_poles_is_refused_where_the_mesh_meets_the_ridge_twice() {
+fn uniting_the_ball_off_its_poles_keeps_the_cube_and_the_ball_as_two_solids() {
     for size in [100.0, 1.0] {
-        for (rule, ball_first) in [
-            (Rule::Union, true),
-            (Rule::Union, false),
-            (Rule::Difference, true),
-        ] {
-            let fused = fuse_the_ball_off_its_poles(size, rule, ball_first);
-            let what = format!("size {size}, {rule:?}, ball first {ball_first}: {fused:?}");
-            if ball_first {
-                assert!(
-                    matches!(
-                        fused,
-                        Err(Error::CannotMeshAFace {
-                            why: CannotTriangulate::CornersCoincide { position: 9 },
-                            ..
-                        })
-                    ),
-                    "{what}"
-                );
-            } else {
-                assert!(
-                    matches!(
-                        fused,
-                        Err(Error::CannotMeshAFace {
-                            why: CannotTriangulate::BoundaryCrossesItself { at: 19 },
-                            ..
-                        })
-                    ),
-                    "{what}"
-                );
-            }
+        for ball_first in [true, false] {
+            let what = format!("size {size}, ball first {ball_first}");
+            let measured = measure_each(
+                fuse_the_ball_off_its_poles(size, Rule::Union, ball_first),
+                &what,
+            );
+            let [cube, ball] = measured.as_slice() else {
+                panic!("{what}: two solids, not {}", measured.len());
+            };
+            assert_holds(cube, 8.0, 8.0 * 1e-12, &format!("{what}: the cube"));
+            assert_holds(ball, 500.0 * PI / 3.0, 0.0, &format!("{what}: the ball"));
         }
     }
 }
 
-/// Fuses the ball with the cube by `rule`, checks the model validates, and
-/// measures each solid of the answer, smallest volume first.
-fn measure_each(size: f64, rule: Rule, ball_first: bool, what: &str) -> Vec<Measurement> {
-    let (model, fused) = fuse(size, rule, ball_first);
+/// The ball of radius 5 less the cube it rests on is the ball: one solid that
+/// validates and measures `500π/3` within the error its mesh declares, at
+/// either working size. It was refused as the union with the ball first was
+/// (Q2492, Q2499).
+#[test]
+fn the_ball_off_its_poles_less_the_cube_is_the_whole_ball() {
+    for size in [100.0, 1.0] {
+        let what = format!("size {size}");
+        let measured = measure_each(
+            fuse_the_ball_off_its_poles(size, Rule::Difference, true),
+            &what,
+        );
+        let [ball] = measured.as_slice() else {
+            panic!("{what}: one solid, not {}", measured.len());
+        };
+        assert_holds(ball, 500.0 * PI / 3.0, 0.0, &what);
+    }
+}
+
+/// Checks the model a fuse answered in validates, and measures each solid of
+/// the answer, smallest volume first.
+fn measure_each((model, fused): (Model, rcad_topo::Result<Fused>), what: &str) -> Vec<Measurement> {
     let fused = fused.unwrap_or_else(|why| panic!("{what}: the fuse is answered: {why}"));
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
@@ -172,8 +171,8 @@ fn fuse_the_ball_off_its_poles(
     size: f64,
     rule: Rule,
     ball_first: bool,
-) -> rcad_topo::Result<Fused> {
-    fuse_a_ball(5.0, Vector::new(3.0, 1.0, 4.0), size, rule, ball_first).1
+) -> (Model, rcad_topo::Result<Fused>) {
+    fuse_a_ball(5.0, Vector::new(3.0, 1.0, 4.0), size, rule, ball_first)
 }
 
 fn fuse_a_ball(
