@@ -14142,7 +14142,56 @@ check-queue-page-selftest:
     [ "$(chain Q23)" = 'Q23 Q21 Q2 ' ] \
         || fail "a lineage cache kept under another shape should be worked out again from git, which gives Q21's own word, Q2, not the planted Q4: $(chain Q23)"
     [ "$(results Q2)" = '( Q21 ( Q23 ) ) ' ] || fail "the tree below Q2 should hold Q21, and Q23 below Q21, which commit E filed from it: $(results Q2)"
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, the lineage cache serves a kept commit and works out a new one, and the fuzzing section matches its fixture nights"
+
+    # §308 (Q2469): a `cores:` skip line comes from the justfile's own
+    # cores_fit_skip, never from queue.py, in two forms: the night fuzz
+    # holding every thread, and a row holding some. blocked_lines must read
+    # both without the assert at render.py's parse_blocked_line firing, and
+    # show such a row as waiting for threads, not crash the page. Neither the
+    # real clock nor the real machine's thread count is ours to set from a
+    # scratch repo, so these drive parse_blocked_line and meeting_reason
+    # directly rather than through a render() that calls `queue blocked`.
+    cores_check=$(python3 - '{{ justfile_directory() }}/tooling/queue-page' <<'PY'
+    import sys
+
+    sys.path.insert(0, sys.argv[1])
+    import render
+
+
+    class Links:
+        def ref(self, row_id):
+            return f"<{row_id}>"
+
+
+    night = render.parse_blocked_line(
+        "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them")
+    assert night == {
+        "id": "Q1", "mine": "cores:2", "shared": "cores", "threads": "4",
+        "holders": [("the night fuzz", None, None, None)],
+    }, night
+    assert render.meeting_reason(night, Links()) == (
+        "waits for threads: <code>cores:2</code> does not fit the 4 threads of the machine, "
+        "held by the night fuzz"
+    ), render.meeting_reason(night, Links())
+
+    held = render.parse_blocked_line(
+        "skip Q92 (tier 1): its cores:2 does not fit the 4 threads of the machine: "
+        "Q90 (held by lane:lane-q90) holds them")
+    assert held == {
+        "id": "Q92", "mine": "cores:2", "shared": "cores", "threads": "4",
+        "holders": [("Q90", None, "by", "lane:lane-q90")],
+    }, held
+    assert render.meeting_reason(held, Links()) == (
+        "waits for threads: <code>cores:2</code> does not fit the 4 threads of the machine, "
+        "held by <Q90> (held by <code>lane:lane-q90</code>)"
+    ), render.meeting_reason(held, Links())
+
+    print("ok")
+    PY
+    ) || fail "parse_blocked_line or meeting_reason could not read one of the two cores-skip line forms §308"
+    [ "$cores_check" = "ok" ] || fail "the cores-skip checks did not print ok: $cores_check"
+
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, and both forms of a cores-skip line read as a row waiting for threads"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
