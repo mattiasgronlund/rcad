@@ -536,6 +536,8 @@ def add_step(queue, claims, here, args, batch):
     refuse_class_with_punctuation(what)
     refuse_a_pin(what)
     refuse_a_new_topo_test_file_with_no_merged_rs_item(write_set, here.top)
+    if write_set != "-":
+        write_set = ",".join(parsed_write_set(here, write_set, fix_directories=True))
     what = where_it_came_from_after_the_tag(what, queue, claims, here)
     refuse_conflicted(here, queue)
     block = queue.block_for_tier(tier)
@@ -1297,15 +1299,24 @@ def narrow(here, args):
 WRITE_SET_ENTRY = re.compile(r"^[A-Za-z0-9._/-]+(#[A-Za-z0-9_-]+)?$")
 
 
-def parsed_write_set(here, write_set):
-    """The entries of a write set given on the command line, held to `check-queue`'s rules for one."""
+def parsed_write_set(here, write_set, fix_directories=False):
+    """The entries of a write set given on the command line, held to `check-queue`'s rules for one.
+
+    A directory path with no trailing `/` is not ambiguous -- `os.path.isdir`
+    already settles it -- so `add_step` passes `fix_directories=True` and gets
+    the slash appended rather than a refusal; every other caller still refuses
+    it, since appending the slash on their behalf would be a silent rewrite of
+    a write set someone else is holding (§230.2).
+    """
     if write_set == "-":
         return []
     entries = write_set.split(",")
+    fixed = []
     for entry in entries:
         if entry == "-":
             raise Refused('"-" stands alone in a write set, and here it has company')
         if CORES_ENTRY.match(entry):
+            fixed.append(entry)
             continue
         if not WRITE_SET_ENTRY.match(entry) or entry.startswith("/") or "//" in entry:
             raise Refused(f'"{entry}" is not a path, a directory ending in /, path#item, or cores:<n>|all')
@@ -1313,8 +1324,11 @@ def parsed_write_set(here, write_set):
         if item and not (path.endswith(".rs") or path == "justfile"):
             raise Refused(f'"{entry}" names an item, and only a .rs file or the justfile has items')
         if not path.endswith("/") and os.path.isdir(os.path.join(here.top, path)):
-            raise Refused(f'"{path}" is a directory; write it as {path}/ so it meets the files under it')
-    return entries
+            if not fix_directories:
+                raise Refused(f'"{path}" is a directory; write it as {path}/ so it meets the files under it')
+            entry = entry + "/"
+        fixed.append(entry)
+    return fixed
 
 
 def entries_of(write_set):

@@ -15480,6 +15480,15 @@ check-queue-selftest:
     got=$(qf add 1 opus 'crates/rcad-topo/tests/fuzzing/a-new-shape.rs' 'from/- a new file in a subdirectory, which is not declared in merged.rs §230' 2>&1) \
         || fail "add refused a new file in a subdirectory of crates/rcad-topo/tests/, which §373.7 does not reach"
 
+    # §230.2 (Q1720): a write-set path that names a directory in the tree is
+    # not ambiguous, so `add` writes it with its trailing / rather than
+    # refusing it the way `narrow` still does; `check-queue` would otherwise
+    # have refused the batch, as it did for Q1702's lane.
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/fuzzing' 'from/- a directory written without its trailing slash §230' 2>&1) \
+        || fail "add refused a directory write set given without its trailing slash: $got"
+    grep -q "^$got .*crates/rcad-topo/tests/fuzzing/[[:space:]]\+from/- a directory written without its trailing slash §230\$" "$dir/addfix.md" \
+        || fail "add did not write the directory's write set with its trailing slash added"
+
     # Q1436: `take` lets a stale `lane:` state in another worktree's copy
     # through when main's own history of the queue file already held that
     # exact state for the row, and refuses one main's history never showed
