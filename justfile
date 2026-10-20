@@ -15379,6 +15379,29 @@ check-queue-selftest:
         && fail "add accepted 'refuses/C:' behind from/fuzz:"
     grep -qF "'refuses/C:' is a class with punctuation after it" <<<"$got" || fail "add did not check the class behind from/fuzz:"
 
+    # §373.7: `add` refuses a write set naming a file directly under
+    # crates/rcad-topo/tests/ that does not exist yet, unless the write set
+    # also names a crates/rcad-topo/tests/merged.rs entry, whole or by item,
+    # since nothing builds such a file until merged.rs declares it.
+    mkdir -p "$repo/crates/rcad-topo/tests/fuzzing"
+    touch "$repo/crates/rcad-topo/tests/merged.rs" "$repo/crates/rcad-topo/tests/an_existing_shape.rs" \
+        "$repo/crates/rcad-topo/tests/fuzzing/an_existing_fuzz_shape.rs"
+    git -C "$repo" add -A
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/a-new-shape.rs' 'from/- a new test file with no merged.rs entry §230' 2>&1) \
+        && fail "add accepted a new file directly under crates/rcad-topo/tests/ with no merged.rs entry in the write set"
+    grep -qF "'crates/rcad-topo/tests/a-new-shape.rs' does not exist yet, and the write set names no crates/rcad-topo/tests/merged.rs entry for it" <<<"$got" \
+        || fail "add did not name the file with no merged.rs entry"
+    grep -qF "add crates/rcad-topo/tests/merged.rs#a_new_shape (§373.7)" <<<"$got" \
+        || fail "add did not name the item entry it needs, with the new file's - written _"
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/a-new-shape.rs,crates/rcad-topo/tests/merged.rs#a_new_shape' 'from/- the same file, declared by item §230' 2>&1) \
+        || fail "add refused a new file with its merged.rs item in the write set"
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/another-new-shape.rs,crates/rcad-topo/tests/merged.rs' 'from/- the same, declared in merged.rs whole §230' 2>&1) \
+        || fail "add refused a new file with merged.rs whole in the write set"
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/an_existing_shape.rs' 'from/- a second row on a file that exists already §230' 2>&1) \
+        || fail "add refused a file under crates/rcad-topo/tests/ that already exists, which needs no declaration"
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/fuzzing/a-new-shape.rs' 'from/- a new file in a subdirectory, which is not declared in merged.rs §230' 2>&1) \
+        || fail "add refused a new file in a subdirectory of crates/rcad-topo/tests/, which §373.7 does not reach"
+
     # Q1436: `take` lets a stale `lane:` state in another worktree's copy
     # through when main's own history of the queue file already held that
     # exact state for the row, and refuses one main's history never showed
