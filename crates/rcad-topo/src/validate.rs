@@ -2724,13 +2724,17 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// in a rim whose corners do not lie in one plane, each can cross the rim by a
 /// different diagonal. Between the two, the mesh is a thin solid of either
 /// sign. The lens a ball makes poking `1/16` into a pipe, built turned `8/40`
-/// of a turn about `x`, has a coarsest mesh of twelve points that does not lie
-/// flat and encloses `−0.041`, with `1.98` of space it can leave out. That sum
-/// was read as the lens's volume: the lens was refused
+/// of a turn about `x`, had a coarsest mesh of twelve points that did not lie
+/// flat and enclosed `−0.041`, with `1.98` of space it could leave out. That
+/// sum was read as the lens's volume: the lens was refused
 /// [`Invalid::VolumeIsNotPositive`], and the same lens turned inside out passed
 /// (`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`, row
-/// Q1890). Weighed, it is asked again, and at room `0.0297` the lens's mesh
-/// encloses `0.188`, which answers.
+/// Q1890). Weighed, it was asked again, and at room `0.0297` the lens's mesh
+/// enclosed `0.188`, which answers. Since Q2178 a curved patch draws no side
+/// between two corners of one edge with another corner of that edge between
+/// them, and the same lens's coarsest mesh is sixteen points and encloses
+/// `5.6e-3`, the right sign, with the same `1.98` it can leave out, so it is
+/// still asked again.
 ///
 /// What that costs is the rungs down to a room where a mesh's charge is under
 /// the solid's volume, for every curved solid. With the looser charge
@@ -2826,20 +2830,24 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// refused [`Invalid::VolumeIsNotPositive`], "its faces do not point
 /// outwards": a sound sliver leaves such a sum as readily as a solid turned
 /// inside out (row Q2089). Before Q2266 the sliver at `−1.984` was refused
-/// that way, its closest sum `−2.6e-16`. The sound lens below still is: each
-/// of its four corners rounds to a point outside the ball or outside the pipe,
-/// so no corner tells.
+/// that way, its closest sum `−2.6e-16`. The lens below built inside out
+/// still is: each of its four corners rounds to a point outside the ball or
+/// outside the pipe, so no corner tells.
 ///
 /// **A closest sum above zero still comes back, and nothing says it has the
 /// solid's sign** (rows Q2047, Q2084). A ball poking `2^-28` into a pipe of
-/// radius 5 makes a lens `9.9e-9` thick. Turned `6/40` about `x`, every mesh
-/// this walk asks of it strays `2.65e-8`, more than the lens is thick, and
-/// encloses about `2.76e-16` of the wrong sign, where the space it can leave
-/// out is `7.8e-15`. No rung answers and the finer ones fold: the sound lens
-/// is refused [`Error::CannotTellWhichWayASolidsFacesPoint`] and the lens
-/// built inside out passes
-/// (`a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out`).
-/// Refusing whenever no rung answers stops passing the inside-out lens, but
+/// radius 5 makes a lens `9.9e-9` thick. Turned `6/40` about `x`, until Q2178
+/// every mesh this walk asked of it strayed `2.65e-8`, more than the lens is
+/// thick, and enclosed about `2.76e-16` of the wrong sign, where the space it
+/// could leave out was `7.8e-15`. No rung answered and the finer ones folded:
+/// the sound lens was refused [`Error::CannotTellWhichWayASolidsFacesPoint`]
+/// and the lens built inside out passed. Since Q2178 every mesh of it strays
+/// `6.6e-9` and encloses about `5.0e-16` of the right sign, against `2.0e-15`
+/// it can leave out. Still no rung answers, so the sound lens passes on a sum
+/// nothing checked, and the inside-out one, whose corners tell nothing, is
+/// refused
+/// (`a_ball_poking_a_hair_into_a_pipe_is_passed_sound_and_refused_inside_out`).
+/// Refusing whenever no rung answers would refuse the sound lens as well, and
 /// fifteen other tests passed on such a sum when Q2047 counted them, and
 /// failed then, so it waits on a way to tell the sign that those solids can
 /// still meet. The moved sum is no such way for the lens: a ball and a pipe
@@ -2914,15 +2922,16 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// Q2060's measurement saw past the thirteenth still answered
 /// `meshed-still-unsure` or folded, so no rung past the cap was where the sum
 /// was going to clear [`the_sum_answers`]. But the closest sum is the finest
-/// that does not lie flat, and a rung past the cap can turn it round. The
-/// inside-out lens above, turned `8/40`, is meshed `2.65e-8` off at the last
-/// rung under the cap and encloses `2.76e-16`, the wrong sign, so it passes;
-/// one rung on it is meshed `9.9e-9` off, the lens's own thickness, and
-/// encloses `−2.81e-16`, the right sign, still not answering, which would have
-/// refused it [`Error::CannotTellWhichWayASolidsFacesPoint`]
-/// (`a_rung_past_the_cap_can_turn_round_the_sum_no_rung_answered`). A sum
-/// that would have cleared past the cap is not ruled out either, only not
-/// waited for, exactly as for the first ladder.
+/// that does not lie flat, and a rung past the cap can turn it round. Until
+/// Q2178 the inside-out lens above, turned `8/40`, was meshed `2.65e-8` off
+/// at the last rung under the cap and enclosed `2.76e-16`, the wrong sign, so
+/// it passed; one rung on it was meshed `9.9e-9` off, the lens's own
+/// thickness, and enclosed `−2.81e-16`, the right sign, still not answering,
+/// which would have refused it [`Error::CannotTellWhichWayASolidsFacesPoint`].
+/// Since Q2178 that lens keeps one sign at every rung down to one past the
+/// cap, at each of 40 turns, and no test pins a solid that turns round there.
+/// A sum that would have cleared past the cap is not ruled out either, only
+/// not waited for, exactly as for the first ladder.
 ///
 /// **A room many times as wide as the thinnest bend is not asked once a mesh
 /// has strayed past that bend** (row Q2217). [`SolidView::skin_of`] charges a
@@ -3146,7 +3155,7 @@ static RUNGS_THE_SECOND_LADDER_HAS_ASKED: std::sync::atomic::AtomicUsize =
 /// told, and neither is one with a face on a cone or a ring. The lens a ball
 /// makes poking `2⁻²⁸` into a pipe, turned `6/40` or `8/40` about `x`, is not:
 /// each of its corners rounds to a point outside the ball or the pipe
-/// (`a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out`).
+/// (`a_ball_poking_a_hair_into_a_pipe_is_passed_sound_and_refused_inside_out`).
 fn which_way_its_faces_point_told_from_a_corner(view: SolidView<'_>) -> Option<Orientation> {
     let faces: Vec<FaceView<'_>> = view.faces().collect();
     faces
@@ -8933,20 +8942,28 @@ mod tests {
     /// **A mesh that does not lie flat can enclose the wrong sign.** At the
     /// coarsest, each face is cut into triangles across the rim on its own, so
     /// where the two faces join other corners the mesh is a thin solid of
-    /// either sign. Built turned `8/40` of a turn about `x`, the sound lens's
-    /// coarsest mesh is twelve points and encloses `−0.041`, where the mesh
-    /// that answers, at room `0.0297`, encloses `0.188`. It did not lie flat,
-    /// so that sum was read as the lens's volume: the lens was refused
-    /// [`Invalid::VolumeIsNotPositive`] and the same lens turned inside out
-    /// passed. The space that mesh can leave out is `1.98`, so its sum says
-    /// nothing about the sign.
+    /// either sign. Until Q2178, built turned `8/40` of a turn about `x`, the
+    /// sound lens's coarsest mesh was twelve points and enclosed `−0.041`,
+    /// where the mesh that answers, at room `0.0297`, enclosed `0.188`. It did
+    /// not lie flat, so that sum was read as the lens's volume: the lens was
+    /// refused [`Invalid::VolumeIsNotPositive`] and the same lens turned
+    /// inside out passed. The space that mesh can leave out is `1.98`, so its
+    /// sum says nothing about the sign.
+    ///
+    /// **Since Q2178 no turn's coarsest mesh encloses below zero.** A curved
+    /// patch draws no side between two corners of one edge with another corner
+    /// of that edge between them, and turned `8/40` the coarsest mesh is
+    /// sixteen points and encloses `5.6e-3`, with the same `1.98` it can leave
+    /// out. So no turn's coarsest sum answers, and each lens is asked a finer
+    /// mesh, which is what this test now holds the walk to. A lens whose
+    /// coarsest mesh had the wrong sign again would hold it to more.
     ///
     /// **It is built where it sits, not placed.** A placed curved face is
     /// meshed where it is stored, so placing the lens moves its mesh with it
     /// and never changes which corners the triangles join.
     #[test]
     fn a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn() {
-        let mut coarsest_below_zero = 0;
+        let mut coarsest_unsure = 0;
         for fortieths in 0..40 {
             let what = format!("turned {fortieths}/40 about x");
             let turn = Isometry::rotation(
@@ -8958,8 +8975,12 @@ mod tests {
             let mut model = an_empty_model();
             let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, 0.0625, &turn, false)
                 .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            if signed_volume_over(&its_coarsest_mesh(&model, lens, &what)) < 0.0 {
-                coarsest_below_zero += 1;
+            let coarsest = its_coarsest_mesh(&model, lens, &what);
+            let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&coarsest);
+            let view = model.solid(lens).expect("this model made the key");
+            let leaves_out = how_far_the_sum_can_be_off(view, &coarsest, rounding);
+            if !the_sum_answers(sum, leaves_out) {
+                coarsest_unsure += 1;
             }
             model
                 .validate(&Policy::certified(), &mut ProvenanceLog::new())
@@ -8975,142 +8996,97 @@ mod tests {
                 "{what}: inside out {inside_out:?}"
             );
         }
-        assert!(
-            coarsest_below_zero > 0,
-            "no turn gave the sound lens a coarsest mesh that encloses below zero"
+        assert_eq!(
+            coarsest_unsure, 40,
+            "the sound lens's coarsest sum answers at some turn"
         );
     }
 
-    /// Row Q2047. **This test asserts a wrong verdict for the inside-out
-    /// build**, so a fix to it turns this test round (Q2084). The lens of
+    /// Row Q2047. The lens of
     /// [`a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn`], with
-    /// the ball poking only `2^-28` in, is `8/3` of that poke thick, `9.9e-9`,
-    /// and turned `6/40` about `x`, `Model::validate` passes it built inside
-    /// out, and the sound build is refused
+    /// the ball poking only `2^-28` in, is `8/3` of that poke thick, `9.9e-9`.
+    /// Turned `6/40` about `x`, `Model::validate` passes it, and the build
+    /// turned inside out is refused
     /// [`Error::CannotTellWhichWayASolidsFacesPoint`].
     ///
-    /// Every mesh [`how_much_space_a_curved_solid_encloses`] asks of it says
-    /// it may be off the lens by `2.65e-8`, `64/9` of the poke. That is more
-    /// than the lens is thick, so nothing keeps the meshes of its two faces
-    /// in their order, and what the mesh encloses has the wrong sign: about
-    /// `2.76e-16` inside out and `−2.76e-16` sound, where the space it can
-    /// leave out is `7.8e-15`. No rung answers and the finer ones fold. The
-    /// walk hands back the sum above zero, unchecked, and refuses the one
-    /// below by the name that says no mesh tells, since no corner of the lens
-    /// tells either: each rounds outside the ball or the pipe (Q2291). Until
-    /// Q2089 that was
-    /// [`Invalid::VolumeIsNotPositive`], which says the sound lens's faces
-    /// point inwards.
+    /// Until Q2178 it was the other way round. Every mesh
+    /// [`how_much_space_a_curved_solid_encloses`] asked of it said it may be
+    /// off the lens by `2.65e-8`, `64/9` of the poke, more than the lens is
+    /// thick, and what it enclosed had the wrong sign: about `2.76e-16` inside
+    /// out and `−2.76e-16` sound, where the space it could leave out was
+    /// `7.8e-15`. The sound lens was refused, until Q2089 as
+    /// [`Invalid::VolumeIsNotPositive`], which says its faces point inwards.
+    ///
+    /// Since Q2178 every rung's mesh strays `6.6e-9`, less than the lens is
+    /// thick, and encloses about `5.0e-16` sound and `−5.0e-16` inside out,
+    /// the right signs. But the space it can leave out is `2.0e-15`, so still
+    /// no rung answers. The walk hands back the last rung's sum under
+    /// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] unchecked when it is above zero:
+    /// the sound lens passes on a sum nothing says has the right sign. Below
+    /// zero it asks a corner (Q2291), and no corner of this lens tells, each
+    /// rounding outside the ball or the pipe, so the inside-out lens is refused
+    /// by the name that says no mesh tells (Q2084).
+    ///
+    /// Until Q2178 the inside-out lens turned `8/40` also showed that one
+    /// rung past the cap could turn that sum round. Since Q2178 the lens keeps
+    /// one sign at every rung down to one past the cap, at each of 40 turns.
     #[test]
-    fn a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out() {
+    fn a_ball_poking_a_hair_into_a_pipe_is_passed_sound_and_refused_inside_out() {
         let poke = f64::powi(2.0, -28);
         let thick = 8.0 * poke / 3.0;
         let turn = Isometry::rotation(&Axis::x(), 6.0 * core::f64::consts::TAU / 40.0)
             .expect("a finite turn");
-        let sound =
-            a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), poke, &turn, false);
+        let inside_out =
+            a_lens_where_a_ball_pokes_into_a_pipe(&mut an_empty_model(), poke, &turn, true);
         let Err(Error::CannotTellWhichWayASolidsFacesPoint {
             enclosed,
             leaves_out,
-        }) = sound
+        }) = inside_out
         else {
-            panic!("sound {sound:?}");
+            panic!("inside out {inside_out:?}");
         };
         assert!(
             enclosed <= 0.0 && -enclosed <= leaves_out,
-            "sound: encloses {enclosed}, off by up to {leaves_out}"
+            "inside out: encloses {enclosed}, off by up to {leaves_out}"
         );
 
         let policy = Policy::certified();
         let mut model = an_empty_model();
-        let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, poke, &turn, true)
-            .expect("the inside-out lens is passed");
+        let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, poke, &turn, false)
+            .expect("the sound lens is passed");
         model
             .validate(&policy, &mut ProvenanceLog::new())
-            .expect("the inside-out lens is passed");
+            .expect("the sound lens is passed");
         let view = model.solid(lens).expect("this model made the key");
         let enclosed =
             how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new())
                 .expect("the walk hands back a sum");
-        assert!(enclosed > 0.0, "inside out, it encloses {enclosed}");
+        assert!(enclosed > 0.0, "sound, it encloses {enclosed}");
 
         let coarsest =
             the_coarsest_mesh_whose_sides_do_not_cross(view, &policy, &mut ProvenanceLog::new())
                 .expect("the coarsest mesh");
         let top = how_far_across(&coarsest) / 2.0;
-        let mut meshed = 0;
+        let mut last_under_the_cap = None;
         for halvings in 0..=HALVINGS_A_FOLD_IS_ASKED_DOWN_TO {
             let room = top / f64::powi(2.0, halvings);
             let less = Deflection::of(room).expect("a room above zero");
-            match view.mesh(less, &policy, &mut ProvenanceLog::new()) {
-                Ok(mesh) => {
-                    meshed += 1;
-                    let strays = mesh.deviation().magnitude();
-                    let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
-                    let leaves_out = how_far_the_sum_can_be_off(view, &mesh, rounding);
-                    assert!(
-                        strays > thick && sum > 0.0 && !the_sum_answers(sum, leaves_out),
-                        "room {room}: strays {strays}, encloses {sum}"
-                    );
-                }
-                Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => {}
-                Err(why) => panic!("room {room}: {why:?}"),
-            }
-        }
-        assert!(meshed > 0, "every rung folded");
-    }
-
-    /// Row Q2047. One rung past [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] can turn
-    /// round the sum [`how_much_space_a_curved_solid_encloses`] hands back
-    /// when no rung answers. The inside-out lens of
-    /// [`a_ball_poking_a_hair_into_a_pipe_is_refused_sound_and_passed_inside_out`],
-    /// turned `8/40`, is meshed at the last rung under the cap `2.65e-8` off
-    /// and encloses `2.76e-16`, the wrong sign. At the next rung it is meshed
-    /// `9.9e-9` off, the lens's own thickness, and encloses `−2.81e-16`, the
-    /// right sign. Neither answers, so the cap decides which of the two
-    /// comes back.
-    #[test]
-    fn a_rung_past_the_cap_can_turn_round_the_sum_no_rung_answered() {
-        let poke = f64::powi(2.0, -28);
-        let turn = Isometry::rotation(&Axis::x(), 8.0 * core::f64::consts::TAU / 40.0)
-            .expect("a finite turn");
-        let policy = Policy::certified();
-        let mut model = an_empty_model();
-        let lens = a_lens_where_a_ball_pokes_into_a_pipe(&mut model, poke, &turn, true)
-            .expect("the inside-out lens is passed");
-        let view = model.solid(lens).expect("this model made the key");
-        let enclosed =
-            how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new())
-                .expect("the walk hands back a sum");
-        assert!(enclosed > 0.0, "inside out, it encloses {enclosed}");
-
-        let coarsest =
-            the_coarsest_mesh_whose_sides_do_not_cross(view, &policy, &mut ProvenanceLog::new())
-                .expect("the coarsest mesh");
-        let top = how_far_across(&coarsest) / 2.0;
-        let sum_at = |halvings: i32| {
-            let room = top / f64::powi(2.0, halvings);
             let mesh = view
-                .mesh(
-                    Deflection::of(room).expect("a room above zero"),
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
+                .mesh(less, &policy, &mut ProvenanceLog::new())
                 .unwrap_or_else(|why| panic!("room {room}: {why:?}"));
+            let strays = mesh.deviation().magnitude();
             let (sum, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
             let leaves_out = how_far_the_sum_can_be_off(view, &mesh, rounding);
             assert!(
-                !the_sum_answers(sum, leaves_out),
-                "room {room}: {sum} answers"
+                strays < thick && sum > 0.0 && !the_sum_answers(sum, leaves_out),
+                "room {room}: strays {strays}, encloses {sum}"
             );
-            sum
-        };
-        let last_under_the_cap = sum_at(HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
-        let past_the_cap = sum_at(HALVINGS_A_FOLD_IS_ASKED_DOWN_TO + 1);
-        assert!(
-            last_under_the_cap == enclosed && past_the_cap < 0.0,
-            "it hands back {enclosed}; the last rung under the cap encloses \
-             {last_under_the_cap} and the next {past_the_cap}"
+            last_under_the_cap = Some(sum);
+        }
+        assert_eq!(
+            last_under_the_cap,
+            Some(enclosed),
+            "the walk hands back the last rung's sum"
         );
     }
 
