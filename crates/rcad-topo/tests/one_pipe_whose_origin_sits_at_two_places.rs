@@ -525,6 +525,82 @@ fn a_slanted_pin_from_a_bars_axis_unites_with_the_bar_wherever_the_bar_ends() {
     }
 }
 
+/// **A thin slanted disc whose seam corner sits on a pin's pipe behind the
+/// pin's start unites with the pin.**
+///
+/// The disc is `8` in radius and `0.25` thick along `(1, 0, 1)`, its axis
+/// through `(0, −8, 0)`, so its wall passes through the origin, and its seam
+/// meets its top end there. The pin is `1` in radius along `(1, −8, 0)` through
+/// `(0, 0, 1)`, from `1` to `8` along its axis, so its pipe passes exactly
+/// through the origin too, `1` behind where the pin starts. The pin's pipe
+/// crosses the disc's wall in a loop through that corner, and the disc's
+/// bottom end in an ellipse, and both lie wholly behind the pin's start.
+///
+/// The bottom end left its ellipse out, since no face of the pin reaches it,
+/// and put no node on its rim where the ellipse meets it, since the wall's loop
+/// lies behind the pin's start too. But the wall drew its loop, because a
+/// corner of the wall is on it, and split the rim at the two places the loop
+/// crosses it. The rim was one edge on the end's side and three on the wall's,
+/// and the union was refused `ResultIsNotManifold` in both orders (Q2246).
+///
+/// The union and the intersection hold each solid once between them, so their
+/// volumes add up to the disc's, `16π`, and the pin's, `7π`.
+#[test]
+fn a_thin_slanted_disc_whose_seam_corner_is_on_a_pins_pipe_behind_its_start_unites_with_it() {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let disc_wall = Cylinder::new(
+        Axis::new(Point::new(0.0, -8.0, 0.0), Vector::new(1.0, 0.0, 1.0)).expect("an axis"),
+        8.0,
+    )
+    .expect("a positive radius");
+    let disc = a_bar_with_its_seam_towards(
+        &mut model,
+        disc_wall,
+        -0.25,
+        0.0,
+        Vector::new(0.0, 1.0, 0.0),
+    );
+    let pin_wall = Cylinder::new(
+        Axis::new(Point::new(0.0, 0.0, 1.0), Vector::new(1.0, -8.0, 0.0)).expect("an axis"),
+        1.0,
+    )
+    .expect("a positive radius");
+    let pin =
+        a_bar_with_its_seam_towards(&mut model, pin_wall, 1.0, 8.0, Vector::new(0.0, 0.0, 1.0));
+    let one_solid = |rule: Rule, what: &str, [arguments, tools]: [SolidKey; 2]| {
+        let route = format!("the {what}, disc first {}", arguments == disc);
+        let mut model = model.clone();
+        let fused = model
+            .fuse(
+                &[arguments],
+                &[tools],
+                rule,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("{route}: {refused:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|broken| panic!("{route} came back broken: {broken:?}"));
+        let [solid] = fused.solids() else {
+            panic!("{route} is one solid: {:?}", fused.solids());
+        };
+        volume_of(&model, *solid)
+    };
+
+    let (common, common_bound) = one_solid(Rule::Intersection, "intersection", [disc, pin]);
+    let both = std::f64::consts::PI * (16.0 + 7.0);
+    for order in [[disc, pin], [pin, disc]] {
+        let (union, bound) = one_solid(Rule::Union, "union", order);
+        assert!(
+            (union + common - both).abs() <= bound + common_bound,
+            "the union, {union} ± {bound}, and the intersection, {common} ± {common_bound}, \
+             against {both}"
+        );
+    }
+}
+
 const PIN_RADIUS: f64 = 0.5;
 
 /// How far the pin along `−x` runs each way from the axis of the bar it is in:

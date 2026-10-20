@@ -2015,18 +2015,27 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Whether each crossing is one a boundary edge runs along or a corner of
-    /// the face is on, which no rule here leaves out.
+    /// the face is on, which the box, the cuts that reach only the boundary
+    /// and a meet that refuses never leave out. A meet that answers may leave
+    /// out one a corner is on ([`Arrangement::place_the_meets`], Q2246).
     fn crossings_never_left_out(&self) -> Vec<bool> {
-        let mut kept = vec![false; self.crossings.len()];
-        for &crossing in self.crossing_of_edge.iter().flatten() {
-            kept[crossing] = true;
-        }
+        let mut kept = self.crossings_a_boundary_edge_runs_along();
         for &corner in self.node_of_corner.iter().flatten() {
             for &crossing in &self.nodes[corner].crossings {
                 kept[crossing] = true;
             }
         }
         kept
+    }
+
+    /// Whether each crossing is one a boundary edge runs along: an edge of the
+    /// face whatever crosses it.
+    fn crossings_a_boundary_edge_runs_along(&self) -> Vec<bool> {
+        let mut along = vec![false; self.crossings.len()];
+        for &crossing in self.crossing_of_edge.iter().flatten() {
+            along[crossing] = true;
+        }
+        along
     }
 
     /// One node per place two crossings meet, unless a corner already is that
@@ -2068,13 +2077,13 @@ impl<'f> Arrangement<'f> {
     ///
     /// When neither proof of nothing answers, a crossing of the pair that lies
     /// wholly past a plane every face carrying its cut lies behind
-    /// ([`Arrangement::no_face_that_draws_it_reaches_it`]) is marked, the
-    /// refusal is held, and the meets of every other pair are still placed
-    /// (Q1909).
+    /// ([`Arrangement::no_face_that_draws_it_reaches_it`]), and that no corner
+    /// of the face is on, is marked, the refusal is held, and the meets of
+    /// every other pair are still placed (Q1909).
     ///
-    /// Once every pair is asked, a node of any kind on a marked crossing, or a
-    /// meet folded into a corner of the face on one, means the crossing meets
-    /// something the fuse has placed, and the held refusal is handed back.
+    /// Once every pair is asked, a node the meets placed on a marked crossing,
+    /// or a meet folded into a corner of the face on one, means the crossing
+    /// meets something the fuse has placed, and the held refusal is handed back.
     /// Otherwise each marked crossing is left undrawn, and its surfaces are
     /// not asked which side a cell is on
     /// ([`Arrangement::cuts_reached_by_no_face`]). Marked then and not where it
@@ -2091,6 +2100,19 @@ impl<'f> Arrangement<'f> {
     /// bar's rim was refused until one wall mirrored the three (Q2196), and
     /// drawn once answered, it put two corners on the rim where nothing of the
     /// pin is.
+    ///
+    /// **Here a corner of the face on the crossing does not keep it** (Q2246).
+    /// The corner is a vertex of the face whether or not the crossing is drawn,
+    /// so it is not something placed on it
+    /// ([`Arrangement::something_placed_is_on`]), and a meet of the pair at the
+    /// corner still folds into it. A thin slanted disc whose seam corner is on
+    /// a pin's pipe behind the pin's cap is the shape: the wall's loop through
+    /// that corner meets the bottom rim twice, and the disc's bottom end, whose
+    /// own crossing with the pipe has no corner on it, leaves that crossing out
+    /// and splits its rim at neither. Kept because of the corner, the loop had
+    /// the wall split the rim there, and the union was refused as not
+    /// manifold. Where the meet refuses, a crossing a corner is on is still
+    /// never marked: no shape run so far has needed it.
     ///
     /// **The meet is a node on the crossing that stays, alone, where the face
     /// across may split that crossing there**
@@ -2112,6 +2134,7 @@ impl<'f> Arrangement<'f> {
     /// places no node of those three; where it answers, the two faces along
     /// the crossing that stays ask the same test of the same three.
     fn place_the_meets(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+        let along_the_rim = self.crossings_a_boundary_edge_runs_along();
         let never_left_out = self.crossings_never_left_out();
         let mut known_unreached: Vec<Option<bool>> = vec![None; self.crossings.len()];
         let mut left_out_where_it_refuses: Vec<usize> = Vec::new();
@@ -2152,12 +2175,13 @@ impl<'f> Arrangement<'f> {
                         let unreached: SmallVec<[usize; 2]> = [first, second]
                             .into_iter()
                             .filter(|&crossing| {
-                                self.no_face_reaches(
-                                    crossing,
-                                    &never_left_out,
-                                    &mut known_unreached,
-                                    log,
-                                )
+                                !never_left_out[crossing]
+                                    && self.no_face_reaches(
+                                        crossing,
+                                        &along_the_rim,
+                                        &mut known_unreached,
+                                        log,
+                                    )
                             })
                             .collect();
                         if unreached.is_empty() {
@@ -2177,7 +2201,7 @@ impl<'f> Arrangement<'f> {
                 }
                 if self.a_place_of_it_is_on_both(first, second, &meet)
                     && [first, second].into_iter().any(|crossing| {
-                        self.no_face_reaches(crossing, &never_left_out, &mut known_unreached, log)
+                        self.no_face_reaches(crossing, &along_the_rim, &mut known_unreached, log)
                     })
                 {
                     set_aside.push((first, second, meet));
@@ -2201,7 +2225,7 @@ impl<'f> Arrangement<'f> {
         for &(first, second, _) in &set_aside {
             for crossing in [first, second] {
                 if !left_out.contains(&crossing)
-                    && self.no_face_reaches(crossing, &never_left_out, &mut known_unreached, log)
+                    && self.no_face_reaches(crossing, &along_the_rim, &mut known_unreached, log)
                     && !self.something_placed_is_on(&[crossing], &folded_into_a_corner)
                 {
                     left_out.push(crossing);
@@ -2259,24 +2283,29 @@ impl<'f> Arrangement<'f> {
     fn no_face_reaches(
         &self,
         crossing: usize,
-        never_left_out: &[bool],
+        along_the_rim: &[bool],
         known: &mut [Option<bool>],
         log: &mut ProvenanceLog,
     ) -> bool {
         *known[crossing].get_or_insert_with(|| {
-            self.no_face_that_draws_it_reaches_it(crossing, never_left_out, log)
+            self.no_face_that_draws_it_reaches_it(crossing, along_the_rim, log)
         })
     }
 
-    /// Whether a node of any kind is on one of `crossings`, or a meet on one
-    /// was folded into a corner of the face.
+    /// Whether a node the meets placed is on one of `crossings`, or a meet on
+    /// one was folded into a corner of the face.
+    ///
+    /// **A corner of the face that is on it is not something placed.** It is a
+    /// vertex of the face whether or not the crossing is drawn, and the face
+    /// across sees that only where it has the same corner, so a crossing no
+    /// face that draws it reaches is left out with the corner on it (Q2246).
     fn something_placed_is_on(&self, crossings: &[usize], folded_into_a_corner: &[usize]) -> bool {
         crossings.iter().any(|crossing| {
             folded_into_a_corner.contains(crossing)
                 || self
                     .nodes
                     .iter()
-                    .any(|node| node.crossings.contains(crossing))
+                    .any(|node| node.vertex.is_none() && node.crossings.contains(crossing))
         })
     }
 
@@ -3042,16 +3071,18 @@ impl<'f> Arrangement<'f> {
     /// pin goes.
     ///
     /// Only a crossing a cut put here, and never one a boundary edge runs
-    /// along or a corner is on ([`Arrangement::crossings_never_left_out`]):
-    /// those are edges of the face whatever crosses them.
+    /// along (`along_the_rim`): that is an edge of the face whatever crosses
+    /// it. One a corner of the face is on is asked like any other, since the
+    /// corner is a vertex of the face whether or not the crossing is drawn
+    /// ([`Arrangement::place_the_meets`], Q2246).
     fn no_face_that_draws_it_reaches_it(
         &self,
         crossing: usize,
-        never_left_out: &[bool],
+        along_the_rim: &[bool],
         log: &mut ProvenanceLog,
     ) -> bool {
         let it = &self.crossings[crossing];
-        if !it.cuts || never_left_out[crossing] {
+        if !it.cuts || along_the_rim[crossing] {
             return false;
         }
         let sides = &self.face.sides_the_faces_of_each_cut_lie_in;
