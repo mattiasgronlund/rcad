@@ -87,6 +87,8 @@ just queue after <id> <id|date>[,<id|date>...]   state after:<ids,date>; each id
                                             to the latest tier among the rows it names (§435)
 just queue after <id> -                    a row that waits goes back to todo: the way out for a row whose wait was
                                             dropped, since only done: ends a wait (§451)
+just queue give <id>                       give a take back: release the hold and restore the state take replaced;
+                                            refuses while the branch has a tree or commits main lacks (§263.3, §263.4)
 just queue cores <id> <n>|all              set, replace or remove the write set's cores:<n> or cores:all entry
                                             (§308); the fill skips a row whose count does not fit the machine's
                                             free threads, and cores:all fits only when nothing else holds any
@@ -454,6 +456,75 @@ def row_states_in_main_history(here, row_id):
             if found:
                 states.add(found.state)
     return states
+
+
+def give_step(queue, claims, here, args, batch):
+    """Give a take back: write a release and put the row back to the state the take replaced (§263.3, §263.4).
+
+    Works whether the row still shows `lane:<branch>` here or was already put
+    back by hand, since 2026-09-26 left six holds stranded in the claims file
+    this way and no verb to clear them. `take`'s own claims event carries no
+    prior state (§263.3), so a row still `lane:<branch>` here has its prior
+    state read back from this worktree's own history of the file; one already
+    put back carries it already, and nothing but the hold needs releasing.
+    Refuses while the branch still has a tree, or commits main does not have,
+    so it can never drop a hold a lane might still be running under.
+    """
+    need(args, 1, "give <id>")
+    row_id = args[0]
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    hold = claims.holds().get(row_id)
+    if hold is None:
+        raise Refused(f"{row_id} is not held, so there is no take to give back")
+    refuse_while_the_branch_could_be_running(hold["branch"], here)
+    if row.state.startswith("lane:"):
+        restored = state_before_the_take(here, row, hold["branch"]) or "todo"
+        queue.replace(row, row.with_state(restored))
+        message = f"{row_id}: {row.state} -> {restored}, the take {hold['branch']} had on it given back"
+    else:
+        message = f"{row_id}: {row.state} kept; the take {hold['branch']} had on it given back"
+    return queue, message, ("release", row_id, now(), here.top, "give")
+
+
+def refuse_while_the_branch_could_be_running(branch, here):
+    """Refuse `give` while `branch` could still be a lane running: a tree checked out on it, or commits main does not have.
+
+    A finished lane's branch either carries nothing past main, because it
+    committed nothing or was already merged, or does not exist at all; `give`
+    lets go of a hold only then (§263.3, §263.4).
+    """
+    for tree in here.trees():
+        if tree.branch == branch:
+            raise Refused(f"{branch} still has a tree at {tree.path}; give refuses it while a lane could be running there")
+    tip = branch_tip(branch)
+    if tip is None:
+        return
+    ref = main_ref()
+    if ref is not None and not is_ancestor(tip, ref):
+        raise Refused(f"{branch} is at {tip}, which {ref} does not have; give refuses it while the branch carries work not yet merged")
+
+
+def state_before_the_take(here, row, branch):
+    """The state `row` held just before it became `lane:<branch>`, read from this worktree's own history of the queue file, or `None` if none can be found.
+
+    A take writes `lane:<branch>` straight into the working tree and is often
+    never committed on its own, so the state it replaced is usually still
+    sitting in `HEAD`'s copy of the row; walking the file's own commits
+    forward finds it even when the take was committed along with other
+    changes.
+    """
+    lane_state = f"lane:{branch}"
+    shas = git("log", "--format=%H", "--reverse", "HEAD", "--", here.relative, cwd=here.top).split()
+    previous = None
+    for sha in shas:
+        text = git("show", f"{sha}:{here.relative}", cwd=here.top, check=False)
+        found = Queue(text).find(row.id) if row.id in text else None
+        state = found.state if found else previous
+        if state == lane_state:
+            return previous
+        previous = state
+    return previous
 
 
 def add_step(queue, claims, here, args, batch):
@@ -1152,7 +1223,7 @@ def ids_of(args, usage):
 STEP_FUNCS = {
     "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
     "after": after_step, "cores": cores_step, "rank": rank_step, "tier": tier_step, "tag": tag_step,
-    "pick": pick_step, "pin": pin_step, "unpin": unpin_step,
+    "pick": pick_step, "pin": pin_step, "unpin": unpin_step, "give": give_step,
 }
 
 

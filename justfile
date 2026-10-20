@@ -12980,7 +12980,7 @@ _queue-rows file:
 # alone.
 #
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`, `narrow` — also runs `queue-page` after it**, so the page
+# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`, `narrow`, `give` — also runs `queue-page` after it**, so the page
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
@@ -12991,7 +12991,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow)
+        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow|give)
             now_iso='{{ queue_now }}'
             [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
@@ -13022,6 +13022,7 @@ queue mode="" *args:
                 'just queue after <id> <id>[,<id>...]         mark a row waiting on others: state after:<ids>' \
                 'just queue after <id> <date>                 mark a row waiting on a UTC date (YYYY-MM-DD) as well as, or instead of, other rows' \
                 'just queue after <id> -                      a row that waits goes back to todo, for a row whose wait was dropped (§451)' \
+                'just queue give <id>                         give a take back: release the hold and restore the state take replaced; refuses while the branch has a tree or commits main lacks (§263.3, §263.4)' \
                 'just queue cores <id> <n>|all                set, in the write set, how many hardware threads the row pins while it runs (§308)' \
                 'just queue rank <id> before <id>             move a row to sit just before another, in their shared tier' \
                 'just queue tier <id> <tier>                  move an open row to the foot of another tier' \
@@ -16251,6 +16252,77 @@ check-queue-api-selftest:
     grep -qF ", narrowed from tooling/queue/)" <<<"$got" || fail "the other copy's listing did not say what the hold was taken with"
     grep -qF "narrowed to <code>tooling/queue/queue.py</code>" "$page_dir/index.html" \
         || fail "the queue page did not say what the hold was narrowed to"
+
+    # Q252 (§263.3, §263.4): `give` releases a hold and restores the state
+    # the take replaced, an after: list included since take's own claims event
+    # never records it (§263.3). The after: case is committed before the take
+    # so the restore can read it back from this worktree's own history; the
+    # other three cases fall back to todo, which is right for them too, since
+    # none of their rows was ever committed in that state either.
+    give_wt="$root/rcad-worktrees/give"
+    g "$hub" worktree add -q -b give "$give_wt" main
+    head_row=$(q "$give_wt" add 2 opus - "from/- a row another row waits on, for give to restore §230") \
+        || fail "add for the head row failed"
+    waiter=$(q "$give_wt" add 2 opus - "from/- a row give restores to its after: list §230") \
+        || fail "add for the waiting row failed"
+    q "$give_wt" after "$waiter" "$head_row" >/dev/null || fail "after refused the row give restores"
+    g "$give_wt" add -A && g "$give_wt" commit -qam "give_wt base rows"
+    head_sha=$(g "$give_wt" rev-parse HEAD)
+    q "$give_wt" done "$head_row" "$head_sha" >/dev/null || fail "done refused to close the head row, to make the waiter ready"
+
+    q "$give_wt" take "$waiter" lane-give-uncommitted >/dev/null || fail "take refused the row give restores"
+    got=$(awk -v id="$waiter" '$1 == id { print $3 }' "$give_wt/docs/queue.md")
+    [ "$got" = lane:lane-give-uncommitted ] || fail "take did not write lane:lane-give-uncommitted"
+    got=$(q "$give_wt" give "$waiter" 2>&1) || fail "give refused an uncommitted take with no tree and no commits past main"
+    grep -qxF "$waiter: lane:lane-give-uncommitted -> after:$head_row, the take lane-give-uncommitted had on it given back" <<<"$got" \
+        || fail "give did not restore the row's exact after: list"
+    got=$(awk -v id="$waiter" '$1 == id { print $3 }' "$give_wt/docs/queue.md")
+    [ "$got" = "after:$head_row" ] || fail "give did not write the row back to after:$head_row"
+    got=$(awk -F '\t' -v id="$waiter" '$1 == "release" && $2 == id { print $5 }' "$claims_file")
+    [ "$got" = give ] || fail "give did not write a release event tagged give"
+    got=$(q "$give_wt" running 2>&1) || fail "running failed after give released the hold"
+    grep -q lane-give-uncommitted <<<"$got" && fail "running still counted a hold give released"
+    got=$(q "$give_wt" give "$waiter" 2>&1) && fail "give released a row with no hold left"
+    grep -qF "$waiter is not held, so there is no take to give back" <<<"$got" || fail "give did not say the row is not held"
+
+    byhand_row=$(q "$give_wt" add 2 opus - "from/- a row give leaves alone, already put back by hand §230") \
+        || fail "add for the by-hand row failed"
+    g "$give_wt" add -A && g "$give_wt" commit -qam "give_wt byhand row"
+    q "$give_wt" take "$byhand_row" lane-give-byhand >/dev/null || fail "take refused byhand_row for the by-hand restore case"
+    got=$(awk -v id="$byhand_row" '$1 == id { print $3 }' "$give_wt/docs/queue.md")
+    [ "$got" = lane:lane-give-byhand ] || fail "take did not write lane:lane-give-byhand"
+    g "$give_wt" checkout -q -- docs/queue.md
+    got=$(awk -v id="$byhand_row" '$1 == id { print $3 }' "$give_wt/docs/queue.md")
+    [ "$got" = todo ] || fail "the manual restore did not put byhand_row back to todo"
+    got=$(q "$give_wt" give "$byhand_row" 2>&1) || fail "give refused a hold whose copy was already put back by hand"
+    grep -qxF "$byhand_row: todo kept; the take lane-give-byhand had on it given back" <<<"$got" \
+        || fail "give did not say it only released the hold, the row already as it was"
+    got=$(awk -v id="$byhand_row" '$1 == id { print $3 }' "$give_wt/docs/queue.md")
+    [ "$got" = todo ] || fail "give changed a row that was already put back by hand"
+
+    treed_row=$(q "$give_wt" add 2 opus - "from/- a row give refuses while its branch has a tree §230") \
+        || fail "add for the treed row failed"
+    q "$give_wt" take "$treed_row" lane-give-treed >/dev/null || fail "take refused the treed row"
+    g "$hub" worktree add -q -b lane-give-treed "$lanes/give-treed" main
+    got=$(q "$give_wt" give "$treed_row" 2>&1) && fail "give released a hold whose branch still has a tree"
+    grep -qF "still has a tree at $lanes/give-treed" <<<"$got" || fail "give did not name the tree still on the branch"
+    g "$hub" worktree remove --force "$lanes/give-treed"
+    got=$(q "$give_wt" give "$treed_row" 2>&1) || fail "give refused once the tree on its branch was gone"
+    grep -qxF "$treed_row: lane:lane-give-treed -> todo, the take lane-give-treed had on it given back" <<<"$got" \
+        || fail "give did not restore $treed_row to todo once its branch's tree was gone"
+
+    with_commits_row=$(q "$give_wt" add 2 opus - "from/- a row give refuses while its branch is ahead of main §230") \
+        || fail "add for the ahead-of-main row failed"
+    q "$give_wt" take "$with_commits_row" lane-give-ahead >/dev/null || fail "take refused the row for the ahead-of-main case"
+    ahead=$(g "$hub" commit-tree -p main -m "lane-give-ahead's own commit" 'main^{tree}') \
+        || fail "commit-tree for the ahead-of-main branch failed"
+    g "$hub" branch lane-give-ahead "$ahead"
+    got=$(q "$give_wt" give "$with_commits_row" 2>&1) && fail "give released a hold whose branch carries commits main does not have"
+    grep -qF "which main does not have" <<<"$got" || fail "give did not say the branch carries commits main lacks"
+    g "$hub" branch -D lane-give-ahead >/dev/null
+    got=$(q "$give_wt" give "$with_commits_row" 2>&1) || fail "give refused once the branch no longer carries commits main lacks"
+    grep -qxF "$with_commits_row: lane:lane-give-ahead -> todo, the take lane-give-ahead had on it given back" <<<"$got" \
+        || fail "give did not restore $with_commits_row to todo once its branch's extra commit was gone"
     exit 0
 
 # The fuzz half of `status`: for the night `latest` names, how many of the
