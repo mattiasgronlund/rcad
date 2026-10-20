@@ -8678,9 +8678,31 @@ impl Corners {
     /// The corners `meet`'s two ends are, made the first time each is asked
     /// for, for a side of a piece cut from `face`.
     ///
+    /// **Two ends of two names that come out one corner bound no side on a
+    /// curved surface.** Two places whose boxes' middles land on one `f64`
+    /// triple are one corner ([`Corners::of`]). A straight side between two
+    /// such has no length as the answer is written, and [`sides_of`] leaves
+    /// it out (§365.7). A side on a curved surface cannot be left out that
+    /// way: [`Edges::of`] builds a side from one corner back to itself as a
+    /// whole closed curve, so the arc between the two places would be written
+    /// as the whole circle through them. A block's edge grazing a ball at
+    /// `16 ∓ 2⁻⁵¹` built both arcs of the ball's circle there as one closed
+    /// edge, and every fuse of the two was refused later, as a face whose loop
+    /// passed one corner twice or two faces facing apart
+    /// (`tests/a_block_edge_grazing_a_ball_at_cx_16.rs`, Q2193).
+    ///
+    /// A side whose two ends are one name is a closed curve, and its one
+    /// corner is what it is meant to have. A name another corner takes over
+    /// ([`Corners::with_each_closed_curve_started_once`]) ends only sides of
+    /// one closed curve: the whole curve, from the name back to it, or a half
+    /// of it whose other end is the point half way round, which is never
+    /// taken over. So no side has two names taken over at its two ends.
+    ///
     /// # Errors
     ///
-    /// Whatever [`Corners::of`] gives.
+    /// [`Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`] where two
+    /// ends of two names on a side that some curved surface carries come out
+    /// one corner, and whatever [`Corners::of`] gives.
     fn of_both_ends(
         &mut self,
         model: &Model,
@@ -8689,11 +8711,24 @@ impl Corners {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<[usize; 2]> {
-        let _ = face;
-        Ok([
+        let [from, to] = [
             self.of(model, &meet.ends[0], policy, log)?,
             self.of(model, &meet.ends[1], policy, log)?,
-        ])
+        ];
+        if from == to
+            && meet
+                .carried_by
+                .iter()
+                .any(|surface| surface.as_plane().is_none())
+            && self.goes_by(self.name_of(model, &meet.ends[0], policy, log)?)
+                != self.goes_by(self.name_of(model, &meet.ends[1], policy, log)?)
+        {
+            return Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint {
+                face,
+                at: self.made[from].point,
+            });
+        }
+        Ok([from, to])
     }
 
     /// The corner `end` names, made the first time it is asked for.
