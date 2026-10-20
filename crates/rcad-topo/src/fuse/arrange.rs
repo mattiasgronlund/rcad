@@ -12076,13 +12076,24 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// and the far end, whose dot is exactly zero, reads `false`
 /// (`the_walked_start_of_a_balls_one_loop_has_no_point_square_to_its_run_ahead_of_it`).
 ///
-/// **On two pipes' loop that has not been shown.** Where their axes lean off
-/// square, the walked start's window does hold loop points behind square to
-/// the run: a pipe of radius 1 whose axis passes 3.5 from that of a pipe of
-/// radius 4, leaning 0.6 off square to it, with the thin pipe first
+/// **On two pipes' loop the window can hold points behind square, and where
+/// it was read none of them, nor the one square to the run, reads a dot of
+/// exactly zero.** Where their axes lean off square, the walked start's window
+/// does hold loop points behind square to the run: a pipe of radius 1 whose
+/// axis passes 3.5 from that of a pipe of radius 4, leaning 0.6 off square to
+/// it, with the thin pipe first
 /// (`the_walked_start_of_two_pipes_leaning_off_square_has_points_behind_square_in_its_window`).
-/// Whether a place there comes out with a dot of exactly zero has not been
-/// run.
+/// So one place of the loop between those and the start is square to the run.
+/// But there the run comes out with width along every axis, and a dot is
+/// `[0, 0]` only where every term is: a term whose step is not exactly nought
+/// has width, and a sum is at least as wide as each of its terms. So only a
+/// box that is the start's own point reads square, and the box round the
+/// place square to the run reads `false`. Read leaning 0.3, 0.6 and 0.9, with
+/// either pipe first, as built and turned off every axis
+/// (`two_pipes_leaning_off_square_have_no_node_but_the_start_exactly_square_to_the_run`).
+/// Square, the run is exact, and the window holds no point behind square, by
+/// the ball's argument. A leaning pair whose run comes out exact along some
+/// axis has not been built.
 ///
 /// # Errors
 ///
@@ -19205,8 +19216,9 @@ mod what_the_curved_arrangement_reaches {
     /// Square, the loop is mirrored in the plane through the thin pipe's axis
     /// square to the fat one's, and this walk starts on that plane, which is
     /// the ball's argument again. Leaning, that plane mirrors the thin pipe no
-    /// longer. Whether a node there comes out with a dot of exactly zero, and
-    /// reads `true` where it should not, is not shown either way.
+    /// longer. No node but one at the start's own point reads a dot of exactly
+    /// zero, since leaning, the run has width along every axis
+    /// (`two_pipes_leaning_off_square_have_no_node_but_the_start_exactly_square_to_the_run`).
     #[test]
     fn the_walked_start_of_two_pipes_leaning_off_square_has_points_behind_square_in_its_window() {
         let (thin, fat, points) = two_pipes_crossing_in_one_loop(4.0, 1.0, 3.5, 0.0);
@@ -19232,6 +19244,124 @@ mod what_the_curved_arrangement_reaches {
         assert!(
             window.iter().any(|(_, along)| *along <= 0.0),
             "leaning 0.6, the window holds points behind square to the run"
+        );
+    }
+
+    /// On the one loop two pipes leaning off square cross in, no node but one
+    /// at the walked start itself is exactly square to the run there, so
+    /// [`the_start_is_a_rounding_off`] reads `false` for every place in its
+    /// window, the places behind square and the one square to the run among
+    /// them (Q2342).
+    ///
+    /// **Leaning, the run has width along every axis.** A dot `Σ stepᵢ·runᵢ`
+    /// is `[0, 0]` only where every term is, since a sum is at least as wide
+    /// as each of its terms, and a term whose step is not exactly nought has
+    /// width. So only a box that is the start's own point reads exactly square
+    /// to the run. Read leaning `0.3`, `0.6` and `0.9`, with either pipe
+    /// first, as built and turned off every axis. Square it is not so: the
+    /// thin pipe's gradient at the start is exactly `(0, −1, 0)`, the run
+    /// exactly `(0, 0, x)`, and every place at the start's height reads `[0,
+    /// 0]`.
+    ///
+    /// **The place square to the run lies between two points of the loop a
+    /// step apart**, one behind square and one ahead, wherever the window
+    /// holds points behind square: leaning `0.6` and `0.9` with the thin pipe
+    /// first. The box round those two holds it.
+    #[test]
+    fn two_pipes_leaning_off_square_have_no_node_but_the_start_exactly_square_to_the_run() {
+        let (thin, fat, _) = two_pipes_crossing_in_one_loop(4.0, 1.0, 3.5, 0.0);
+        for pair in [[&thin, &fat], [&fat, &thin]] {
+            let from = PredicatePoint::from(the_walked_start(pair).coordinates());
+            let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+            assert!(
+                runs.iter().all(|side| side.width() == 0.0),
+                "square, the run is exact: {runs:?}"
+            );
+        }
+
+        let turn = Isometry::rotation(
+            &Axis::new(Point::new(0.3, -1.1, 0.7), Vector::new(1.0, 2.0, 3.0)).expect("an axis"),
+            0.9,
+        )
+        .expect("a turn");
+        let mut squares_read = 0;
+        for lean in [0.3, 0.6, 0.9] {
+            let (thin, fat, points) = two_pipes_crossing_in_one_loop(4.0, 1.0, 3.5, lean);
+            let turned_points = points
+                .iter()
+                .map(|point| turn.apply_to_point(*point))
+                .collect();
+            for (turned, thin, fat, points) in [
+                (false, thin, fat, points),
+                (
+                    true,
+                    thin.transformed(&turn),
+                    fat.transformed(&turn),
+                    turned_points,
+                ),
+            ] {
+                for pair in [[&thin, &fat], [&fat, &thin]] {
+                    let named = format!("leaning {lean}, turned {turned}");
+                    let start = the_walked_start(pair);
+                    let from = PredicatePoint::from(start.coordinates());
+                    let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
+                    assert!(
+                        runs.iter().all(|side| side.width() > 0.0),
+                        "{named}: the run has width along every axis: {runs:?}"
+                    );
+                    let window =
+                        the_points_in_the_window_and_how_far_along_the_run(pair, start, &points);
+                    for (point, _) in &window {
+                        assert_eq!(
+                            the_start_is_a_rounding_off(
+                                pair,
+                                from,
+                                PredicatePoint::from(point.coordinates())
+                            ),
+                            Ok(false),
+                            "{named}: {point:?}"
+                        );
+                    }
+                    let mut read_here = 0;
+                    for neighbours in window.windows(2) {
+                        let [(one, one_along), (other, other_along)] =
+                            [neighbours[0], neighbours[1]];
+                        if (one_along > 0.0) == (other_along > 0.0) || one.distance_to(other) > 0.01
+                        {
+                            continue;
+                        }
+                        let [one, other] = [one.coordinates(), other.coordinates()];
+                        let between = PredicatePoint::Constructed([0, 1, 2].map(|axis| {
+                            Interval::new(one[axis].min(other[axis]), one[axis].max(other[axis]))
+                                .expect("in order")
+                        }));
+                        let step = [0, 1, 2]
+                            .map(|axis| between.enclosure()[axis] - from.enclosure()[axis]);
+                        assert_ne!(
+                            dot_of(step, runs).sign(),
+                            Decision::Zero,
+                            "{named}: {one:?} to {other:?}"
+                        );
+                        assert_eq!(
+                            the_start_is_a_rounding_off(pair, from, between),
+                            Ok(false),
+                            "{named}: {one:?} to {other:?}"
+                        );
+                        read_here += 1;
+                    }
+                    assert_eq!(
+                        read_here > 0,
+                        window.iter().any(|(_, along)| *along <= 0.0),
+                        "{named}: a window holding points behind square crosses square in it"
+                    );
+                    squares_read += read_here;
+                }
+            }
+        }
+        assert_eq!(
+            squares_read, 4,
+            "leaning 0.6 and 0.9 with the thin pipe first, as built and turned, the window \
+             crosses square once each"
         );
     }
 
