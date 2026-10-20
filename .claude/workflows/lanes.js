@@ -1351,7 +1351,7 @@ function numberSchema() {
 function mergedSchema() {
   return {
     type: 'object',
-    required: ['start_sha', 'worktree_path', 'merge_branch', 'merged', 'push_attempts', 'docs_catch_ups', 'rows_closed', 'rows_added', 'unlocked', 'needs_judgement'],
+    required: ['start_sha', 'worktree_path', 'merge_branch', 'merged', 'merged_sha', 'gate_pass_line', 'push_attempts', 'docs_catch_ups', 'ff_main', 'rows_closed', 'rows_added', 'unlocked', 'needs_judgement'],
     properties: {
       start_sha: { type: 'string', description: 'what git log -1 said before your switch' },
       worktree_path: { type: 'string', description: 'the output of git rev-parse --show-toplevel run in your OWN tree' },
