@@ -6545,6 +6545,10 @@ struct ReadAgainst {
     /// own, or at a ball's pole the ball's and its lid's way out
     /// ([`the_lid_a_circle_from_a_pole_bounds`]).
     frame: [Vector; 2],
+    /// Whether `frame` is the lid a piece of a ball read a circle from its
+    /// pole against: the flat face that would close that piece, which need not
+    /// be a face of the answer at all.
+    a_ball_pieces_own_lid: bool,
 }
 
 /// Where one face walks along one edge: the face, the ring, and how far round
@@ -6828,7 +6832,15 @@ fn every_closed_edge_read_off_one_spelling(
         };
         for (index, (face, wire, position)) in [one, other].into_iter().enumerate() {
             let (read, across) = (&reads[index], &reads[1 - index]);
-            let turn = if the_reference_itself(read) {
+            let turn = if read.a_ball_pieces_own_lid && across.a_ball_pieces_own_lid {
+                runs_the_other_way_read_against(
+                    read,
+                    &ReadAgainst {
+                        frame: read.crossing,
+                        ..*read
+                    },
+                )?
+            } else if the_reference_itself(read) {
                 false
             } else if one_surface(&read.surface, &reference) {
                 the_way_it_is_parametrised_about(&read.surface, at).dot(wound) < 0.0
@@ -9557,11 +9569,12 @@ fn which_way_a_closed_edge_is_walked(
         return Ok(Some((true, None)));
     };
     let crossing = [gradient_of(&mine, at), gradient_of(&partner, at)];
-    let read_against = |frame| {
+    let read_against = |frame, a_ball_pieces_own_lid| {
         Some(ReadAgainst {
             surface: curved,
             crossing,
             frame,
+            a_ball_pieces_own_lid,
         })
     };
     match a_closed_crossing_is_walked_the_way_it_is_stored(
@@ -9572,10 +9585,13 @@ fn which_way_a_closed_edge_is_walked(
     )? {
         Some(forward) => Ok(Some((
             forward,
-            read_against([
-                gradient_of(&curved, at),
-                the_way_it_is_parametrised_about(&curved, at),
-            ]),
+            read_against(
+                [
+                    gradient_of(&curved, at),
+                    the_way_it_is_parametrised_about(&curved, at),
+                ],
+                false,
+            ),
         ))),
         None => {
             let Some(lid) = the_lid_a_circle_from_a_pole_bounds(meet, turned_round) else {
@@ -9597,7 +9613,10 @@ fn which_way_a_closed_edge_is_walked(
                 Decision::Pos => !runs_along_stored,
                 other => panic!("a face with no side to its material: {other:?}"),
             };
-            Ok(Some((forward, read_against(frame))))
+            Ok(Some((
+                forward,
+                read_against(frame, matches!(mine, Surface::Sphere(_))),
+            )))
         }
     }
 }
