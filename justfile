@@ -14229,7 +14229,7 @@ check-queue-page-selftest:
     ) || fail "parse_blocked_line or meeting_reason could not read one of the two cores-skip line forms §308"
     [ "$cores_check" = "ok" ] || fail "the cores-skip checks did not print ok: $cores_check"
 
-    # §2394 (§430.7): `queue blocked` also prints a third shape, for a row
+    # Q2394 (§430.7): `queue blocked` also prints a third shape, for a row
     # whose write set meets a pinned row that a running lane or a row held
     # elsewhere already holds back. That line carries no `held by` tail, so
     # it needs its own regex (PINNED_LINE) and its own branch in
