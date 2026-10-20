@@ -8675,6 +8675,27 @@ impl Corners {
         Ok(())
     }
 
+    /// The corners `meet`'s two ends are, made the first time each is asked
+    /// for, for a side of a piece cut from `face`.
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Corners::of`] gives.
+    fn of_both_ends(
+        &mut self,
+        model: &Model,
+        meet: &FaceMeet,
+        face: FaceKey,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<[usize; 2]> {
+        let _ = face;
+        Ok([
+            self.of(model, &meet.ends[0], policy, log)?,
+            self.of(model, &meet.ends[1], policy, log)?,
+        ])
+    }
+
     /// The corner `end` names, made the first time it is asked for.
     ///
     /// **A corner on three planes is put where the three planes alone put
@@ -11130,8 +11151,7 @@ fn sides_of(
 ) -> Result<Vec<Side>> {
     let mut sides = Vec::new();
     for meet in wire {
-        let from = corners.of(model, &meet.ends[0], policy, log)?;
-        let to = corners.of(model, &meet.ends[1], policy, log)?;
+        let [from, to] = corners.of_both_ends(model, meet, ancestors[0], policy, log)?;
         if from == to
             && meet
                 .carried_by
@@ -11542,7 +11562,7 @@ mod tests {
     };
     use std::collections::BTreeSet;
 
-    use rcad_predicates::{Decision, Policy, ProvenanceLog};
+    use rcad_predicates::{Decision, Interval, Policy, ProvenanceLog};
 
     use crate::{DraftStep, Invalid, Rule, SolidBuilder};
 
@@ -11611,6 +11631,58 @@ mod tests {
             corners.made.len(),
             2,
             "two names on one place is two corners"
+        );
+    }
+
+    /// **An arc between two places that `f64` writes as one point is refused**
+    /// (Q2193). Two places where the second pipe crosses the cap's circle, a
+    /// hair either side of `x = 4`, have boxes whose middles are both
+    /// `(4, 3, 0)`, so they come out one corner. The arc of the circle between
+    /// them would then be an edge from that corner back to itself, which is
+    /// the whole circle.
+    ///
+    /// The places are where they are only for their boxes: what is asked is
+    /// two names and one middle.
+    #[test]
+    fn an_arc_between_two_places_that_round_to_one_point_is_refused() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(5.0, &Isometry::identity())
+            .expect("a positive radius");
+        let face = model.faces().next().expect("a ball has a face").key();
+        let four = 4.0_f64;
+        let a_hair_from_four = |lo: f64, hi: f64, which: u8| MeetPoint::OfThreeSurfaces {
+            surfaces: [cap(), pipe(), the_other_pipe()],
+            which,
+            point: PredicatePoint::Constructed([
+                Interval::new(lo, hi).expect("lo is below hi"),
+                Interval::exactly(3.0),
+                Interval::exactly(0.0),
+            ]),
+        };
+        let arc = side(
+            [cap(), pipe()],
+            [
+                a_hair_from_four(four.next_down(), four, 0),
+                a_hair_from_four(four, four.next_up(), 1),
+            ],
+            &[],
+        );
+
+        let given = Corners::default().of_both_ends(
+            &model,
+            &arc,
+            face,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(
+                given,
+                Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
+                    if refused == face && at == Point::new(4.0, 3.0, 0.0)
+            ),
+            "{given:?}"
         );
     }
 
