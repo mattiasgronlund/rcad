@@ -35,7 +35,9 @@
 //! half runs between the seam's own two corners, and until Q1761 neither was
 //! named and the seam read as deleted. `the_seam_a_side_runs_along` now names a
 //! straight side whose two ends are each a corner of the seam or a place known
-//! exactly on it, read where the bar is placed.
+//! exactly on it, read where the bar is placed. The bar less the wall folds the
+//! two back into the bar's one seam (queue row Q2545), since nothing of the
+//! wall is left at the cut.
 //! `a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it` pins it.
 //!
 //! **A bar on a wall, both turned about `z` by a float angle, answers as a bar
@@ -269,14 +271,22 @@ fn a_bar_whose_seam_is_the_line_it_touches_a_wall_along_keeps_its_seam_in_histor
 ///
 /// Every rule both ways round: never refused, and every fuse keeps the bar
 /// whole wherever `a_bar_whose_seam_is_the_line_it_touches_a_wall_along_keeps_its_seam_in_history`
-/// does (union, and the bar less the cube). There the answer's seam is cut in
-/// two at `(0, 2, 2)` — `(0, 2, 1)`–`(0, 2, 2)` along the touch, and
+/// does (union, and the bar less the cube). In the union the answer's seam is
+/// cut in two at `(0, 2, 2)`, where the wall's top edge, which the union keeps,
+/// meets it — `(0, 2, 1)`–`(0, 2, 2)` along the touch, and
 /// `(0, 2, 2)`–`(0, 2, 3)` above it, where the wall is no longer there to touch.
 ///
-/// **The seam's images are both halves** there, and nothing where the answer
-/// keeps none of the bar's skin. Until Q1761 they were empty every time:
-/// neither half's two ends are the seam's own two ends, and only a side
-/// between those was read as running along the seam.
+/// **The bar less the cube is the bar, its seam one edge from `z = 1` to
+/// `z = 3`.** The cube only touches it, and nothing of the cube is left at
+/// `(0, 2, 2)` for the cut to stand for: a corner there has the seam's two
+/// halves and nothing else. Q2532 kept that cut for this pin alone; Q2545
+/// folds it, as a wall four high leaves the seam one edge.
+///
+/// **The seam's images are the answer's edges along it** — both halves in the
+/// union, the one seam in the difference — and nothing where the answer keeps
+/// none of the bar's skin. Until Q1761 they were empty every time: neither
+/// half's two ends are the seam's own two ends, and only a side between those
+/// was read as running along the seam.
 #[test]
 fn a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it() {
     let mut wrong: Vec<String> = Vec::new();
@@ -318,9 +328,10 @@ fn a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it() {
                 .iter()
                 .map(|&edge| heights_of_the_ends_of(&model, edge))
                 .collect();
-            let keeps_the_bar = rule == Rule::Union || (rule == Rule::Difference && swapped);
-            let wanted: &[[f64; 2]] = if keeps_the_bar {
+            let wanted: &[[f64; 2]] = if rule == Rule::Union {
                 &[[1.0, 2.0], [2.0, 3.0]]
+            } else if rule == Rule::Difference && swapped {
+                &[[1.0, 3.0]]
             } else {
                 &[]
             };
@@ -335,8 +346,9 @@ fn a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it() {
     }
     assert!(
         wrong.is_empty(),
-        "the seam's images are its two halves either side of where the wall stops, where the \
-         answer keeps the bar, and nothing where it does not:\n{}",
+        "the seam's images are its two halves either side of where the wall stops in the \
+         union, the bar's one seam in the bar less the cube, and nothing where the answer keeps \
+         no bar:\n{}",
         wrong.join("\n")
     );
 }
