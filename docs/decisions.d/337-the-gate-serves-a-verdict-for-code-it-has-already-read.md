@@ -255,6 +255,18 @@ killed process shows up here too, and the log's tail says so. When the cause
 is found, write it down in this section. Then either add the input to
 `_code-fingerprint`, or take the step off `gate_reusable_steps`.
 
+**2026-10-20, `check-land-selftest`: a race, not a missing input.** Q2395's
+lander gate at `05ba225e` failed the step 38 minutes after `efbbf546`'s gate
+recorded a pass for the same code. The arm `dead-entry` printed `land: still
+running: a holder has the land lock`, so `wait-for does not name the run that
+waits to land lane-y`. That is the race Q1886 measured: the arm sends SIGSTOP
+to the run waiting on the land lock and frees the lock at once, and a waiter
+that has not stopped yet takes the lock first. With every process on one CPU
+the stopped waiter held the lock in 145 of 200 rounds. The step stays on
+`gate_reusable_steps` all the same. Served, it runs only when the code
+changes; taken off, it would run the race in every gate. Q1886 makes the arm
+wait until the waiter has stopped.
+
 ### 337.7 The CI half, deferred
 
 The design's third part would carry a laptop's verdict to CI, so that CI skips
