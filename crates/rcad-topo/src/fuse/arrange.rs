@@ -11956,8 +11956,8 @@ fn round_a_closed_crossing_and_what_it_measures(
     let (decided, sweeps) =
         Surface::which_comes_first_round_a_crossing_and_what_it_measures(pair, from, one, other)?;
     let rounded_off = [
-        the_start_is_a_rounding_off(pair, from, one)?,
-        the_start_is_a_rounding_off(pair, from, other)?,
+        the_start_is_a_rounding_off(pair, [from, node], one)?,
+        the_start_is_a_rounding_off(pair, [from, node], other)?,
     ];
     match rounded_off {
         [true, false] => return Ok((Decision::Pos, Measures::Length)),
@@ -12101,7 +12101,7 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// which it has already been asked about.
 fn the_start_is_a_rounding_off(
     pair: [&Surface; 2],
-    from: PredicatePoint,
+    [from, node]: [PredicatePoint; 2],
     place: PredicatePoint,
 ) -> rcad_geom::Result<bool> {
     let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
@@ -12112,8 +12112,16 @@ fn the_start_is_a_rounding_off(
     }
     let ahead = PredicatePoint::Constructed([0, 1, 2].map(|axis| start[axis] + runs[axis]));
     // Compared rather than matched: only a proved `Neg` puts `place` outside
-    // the line, and every other answer leaves it where the sweep puts it (§40).
-    Ok(which_comes_first_round_a_crossing(pair, from, ahead, place)? == Decision::Neg)
+    // the line, only a proved `Pos` inside it, and every other answer leaves it
+    // where the sweep puts it (§40).
+    let side = which_comes_first_round_a_crossing(pair, from, ahead, place)?;
+    Ok(side == Decision::Neg || (side == Decision::Pos && holds_every_point_of(node, place)))
+}
+
+/// Whether every point of `inner`'s box lies in `outer`'s.
+fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
+    let (outer, inner) = (outer.enclosure(), inner.enclosure());
+    (0..3).all(|axis| outer[axis].lo() <= inner[axis].lo() && inner[axis].hi() <= outer[axis].hi())
 }
 
 /// Which of two points comes first round the loop a plane cuts a pipe in,
@@ -19098,6 +19106,92 @@ mod what_the_curved_arrangement_reaches {
         }
     }
 
+    /// The circle the face `x = z` of a cube turned `3π/4` about `y` cuts the
+    /// ball of radius 5 about `(3, 1, 4)` in is walked from `(0, 1, −4.4e-16)`,
+    /// a rounding outside the ball below the circle's lowest point `(0, 1,
+    /// 0)`, where the cube's ridge touches it (Q2499). Seen from that start
+    /// the lowest point lies straight up, as the point across, `(7, 1, 7)`,
+    /// does, and the sweep puts both half a turn round, between the corners
+    /// where `y = 2` and `y = 0` cut the circle. The lowest point is the place
+    /// the start was rounded off, and comes first; the point across stays
+    /// where the sweep puts it, on both runs round the circle.
+    #[test]
+    fn a_start_a_rounding_outside_a_circle_puts_the_place_it_was_rounded_off_first_and_not_the_place_across()
+     {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(3.0, 1.0, 4.0), 5.0).expect("a positive radius"),
+        );
+        // The bits the turned cube's face comes out with in the fuse.
+        let face = Surface::Plane(
+            Plane::from_point_and_normal_as_written(
+                Point::origin(),
+                Vector::new(-0.707_106_781_186_547_7, 0.0, 0.707_106_781_186_547_5),
+            )
+            .expect("a unit normal"),
+        );
+        let lowest = PredicatePoint::from([0.0, 1.0, 0.0]);
+        let across = PredicatePoint::from([7.0, 1.0, 7.0]);
+        let reach = 11.75_f64.sqrt();
+        let corner = |along: f64, up: f64| PredicatePoint::from([3.5 + along, up, 3.5 + along]);
+        let [near_top, far_top, far_floor, near_floor] = [
+            corner(-reach, 2.0),
+            corner(reach, 2.0),
+            corner(reach, 0.0),
+            corner(-reach, 0.0),
+        ];
+        // The ball first runs the circle up `y` from the start, and the face
+        // first runs it down.
+        for (pair, round) in [
+            (
+                [&ball, &face],
+                [lowest, near_top, far_top, across, far_floor, near_floor],
+            ),
+            (
+                [&face, &ball],
+                [lowest, near_floor, far_floor, across, far_top, near_top],
+            ),
+        ] {
+            let start = the_walked_start(pair);
+            let from = PredicatePoint::from(start.coordinates());
+            assert_eq!(
+                side_of_surface(&ball, from),
+                Decision::Pos,
+                "the walked start {start:?} is outside the ball"
+            );
+            let node = where_the_crossing_starts(pair[0], pair[1], start);
+            let sweep = |one, other| {
+                which_comes_first_round_a_crossing(pair, from, one, other)
+                    .unwrap_or_else(|why| panic!("a circle: {why:?}"))
+            };
+            assert_eq!(
+                [sweep(round[2], lowest), sweep(lowest, round[4])],
+                [Decision::Pos; 2],
+                "the sweep alone puts the lowest point half a turn round"
+            );
+            assert_eq!(
+                the_start_is_a_rounding_off(pair, [from, node], lowest),
+                Ok(true),
+                "the start is a rounding off the lowest point"
+            );
+            assert_eq!(
+                the_start_is_a_rounding_off(pair, [from, node], across),
+                Ok(false),
+                "and not off the point across"
+            );
+            let order = |one, other| {
+                round_a_closed_crossing_and_what_it_measures(pair, [from, node], one, other)
+                    .unwrap_or_else(|why| panic!("a circle: {why:?}"))
+                    .0
+            };
+            for (at, &one) in round.iter().enumerate() {
+                for &other in &round[at + 1..] {
+                    assert_eq!(order(one, other), Decision::Pos, "{one:?} before {other:?}");
+                    assert_eq!(order(other, one), Decision::Neg, "{other:?} after {one:?}");
+                }
+            }
+        }
+    }
+
     /// The start [`where_a_closed_crossing_starts`] walks the one loop a ball
     /// off a pipe's axis crosses it in from has no point of the loop square to
     /// the way the loop runs there, or behind square, inside the window
@@ -19164,7 +19258,10 @@ mod what_the_curved_arrangement_reaches {
                         assert_eq!(
                             the_start_is_a_rounding_off(
                                 pair,
-                                PredicatePoint::from(start.coordinates()),
+                                [
+                                    PredicatePoint::from(start.coordinates()),
+                                    where_the_crossing_starts(pair[0], pair[1], start),
+                                ],
                                 PredicatePoint::from(point.coordinates()),
                             ),
                             Ok(false),
@@ -19190,7 +19287,8 @@ mod what_the_curved_arrangement_reaches {
                 "from {off_the_plane:?}, off the plane, the window holds points behind square"
             );
 
-            let [x, y, z] = the_walked_start(pair).coordinates();
+            let start = the_walked_start(pair);
+            let [x, y, z] = start.coordinates();
             let from = PredicatePoint::from([x, y, z]);
             let far_end = PredicatePoint::from([x, y, -z]);
             let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
@@ -19201,7 +19299,11 @@ mod what_the_curved_arrangement_reaches {
                 "the far end is exactly square to the run"
             );
             assert_eq!(
-                the_start_is_a_rounding_off(pair, from, far_end),
+                the_start_is_a_rounding_off(
+                    pair,
+                    [from, where_the_crossing_starts(pair[0], pair[1], start)],
+                    far_end
+                ),
                 Ok(false),
                 "the far end is half a turn round"
             );
@@ -19304,6 +19406,7 @@ mod what_the_curved_arrangement_reaches {
                     let named = format!("leaning {lean}, turned {turned}");
                     let start = the_walked_start(pair);
                     let from = PredicatePoint::from(start.coordinates());
+                    let read_from = [from, where_the_crossing_starts(pair[0], pair[1], start)];
                     let runs = cross_of(gradient_at(pair[0], from), gradient_at(pair[1], from));
                     assert!(
                         runs.iter().all(|side| side.width() > 0.0),
@@ -19315,7 +19418,7 @@ mod what_the_curved_arrangement_reaches {
                         assert_eq!(
                             the_start_is_a_rounding_off(
                                 pair,
-                                from,
+                                read_from,
                                 PredicatePoint::from(point.coordinates())
                             ),
                             Ok(false),
@@ -19343,7 +19446,7 @@ mod what_the_curved_arrangement_reaches {
                             "{named}: {one:?} to {other:?}"
                         );
                         assert_eq!(
-                            the_start_is_a_rounding_off(pair, from, between),
+                            the_start_is_a_rounding_off(pair, read_from, between),
                             Ok(false),
                             "{named}: {one:?} to {other:?}"
                         );
