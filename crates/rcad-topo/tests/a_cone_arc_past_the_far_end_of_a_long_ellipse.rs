@@ -53,8 +53,14 @@
 //! and `1e4` it was asked at, and so was the same sliver with a lid leaning
 //! `2⁻⁶` past the ruling, at `0.1`, while `2⁻⁵` meshed. Q2178 keeps out of a
 //! curved patch every side between two corners of one edge with a corner of
-//! the edge between them, and each of those meshes now, down to a lean of
-//! `2⁻¹⁶` at `0.1`. The pin is `a_sliver_leaning_a_sixty_fourth_or_less_meshes`.
+//! the edge between them, and each of those meshes now: the sliver at all
+//! five, and at `0.1` every lean that is a power of two from `2⁻⁶` down to
+//! `2⁻¹⁶`, each holding, within the error its measure publishes, the space
+//! the cone holds under its lid less at most what it holds under the ends.
+//! At `1e-3` a lean of `2⁻⁵` sums `50.736` of the `50.766` under its lid. The
+//! pin is
+//! `a_sliver_leaning_a_sixty_fourth_or_less_meshes`, which asks the sliver at
+//! `100` and `1e4`, since at `1` it takes sixteen seconds.
 //!
 //! # The tip: a floor the mesher picks that the walk will not count to
 //!
@@ -87,9 +93,13 @@ const THE_SLIVERS_LEAN: f64 = 1.0 / 16_777_216.0;
 const THE_TIPS_LEAN: f64 = 1.0 / 67_108_864.0;
 
 /// The sliver is a sound solid, and above its floor it meshes, and so does
-/// the same sliver with its lid leaning a sixty-fourth past the ruling. Until
-/// Q2178 both were refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4,
-/// used: 4 }`, and a thirty-second was the steepest that meshed.
+/// the same sliver with its lid leaning any power of two from a thirty-second
+/// down to `2⁻¹⁶` past the ruling. Each mesh strays no further than asked,
+/// and holds the space `how_much_space_the_sliver_holds` says within the
+/// error its measure publishes: leaning a sixty-fourth, `135.3` of the
+/// `138.8` the cone holds under the lid, owing `47.4`, at `0.1`. Until Q2178
+/// the sliver and every lean from a sixty-fourth down were refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`.
 #[test]
 fn a_sliver_leaning_a_sixty_fourth_or_less_meshes() {
     let mut model = a_model();
@@ -97,26 +107,50 @@ fn a_sliver_leaning_a_sixty_fourth_or_less_meshes() {
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the sliver is a sound solid");
-    let meshed = |model: &Model, solid: SolidKey, asked: f64, what: &str| {
-        let mesh = model
-            .solid(solid)
-            .expect("this model made the key")
-            .mesh(
-                Deflection::of(asked).expect("a positive length"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|why| panic!("{what} at {asked:e}: {why:?}"));
+    let meshed = |model: &Model, solid: SolidKey, lean: f64, asked: f64| {
+        let solid = model.solid(solid).expect("this model made the key");
+        let deflection = Deflection::of(asked).expect("a positive length");
+        let what = format!("leaning {lean:e} at {asked:e}");
+        let mesh = solid
+            .mesh(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
         let strays = mesh.deviation().magnitude();
-        assert!(strays <= asked, "{what} at {asked:e} strays {strays}");
+        assert!(strays <= asked, "{what} strays {strays}");
+        let measured = solid
+            .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what} is refused its measure: {why:?}"));
+        let [least, most] = how_much_space_the_sliver_holds(lean);
+        let (volume, owed) = (measured.volume(), measured.volume_error());
+        assert!(
+            volume + owed >= least && volume - owed <= most,
+            "{what} sums {volume} owing {owed}, for a sliver of {least} to {most}"
+        );
     };
     for asked in [100.0, 1e4] {
-        meshed(&model, sliver, asked, "the sliver");
+        meshed(&model, sliver, THE_SLIVERS_LEAN, asked);
     }
-    for lean in [1.0 / 32.0, 1.0 / 64.0] {
+    for halvings in 5..=16 {
+        let lean = 0.5_f64.powi(halvings);
         let piece = a_piece_of_the_cone(&mut model, lean, -0.375, 1.0);
-        meshed(&model, piece, 0.1, &format!("leaning {lean}"));
+        meshed(&model, piece, lean, 0.1);
     }
+}
+
+/// The least and the most space the sliver whose lid leans `lean` past the
+/// ruling holds.
+///
+/// The most is all the cone holds on the apex's side of the lid: a third of
+/// the ellipse's area times the apex's distance from the lid, which for a lid
+/// `−x + (0.5 + lean) z = c`, `c = 1 + 1.25 lean`, comes to
+/// `π c³ / (12 (lean (1 + lean))^{3/2})`. The wall takes away what lies at
+/// `x < −0.375`, where the lid is no higher than the ends, `1.25` up, so it
+/// takes away less than all the cone holds below `1.25`.
+fn how_much_space_the_sliver_holds(lean: f64) -> [f64; 2] {
+    let offset = 1.0 + 1.25 * lean;
+    let under_the_lid =
+        std::f64::consts::PI * offset.powi(3) / (12.0 * (lean * (1.0 + lean)).powf(1.5));
+    let under_the_ends = std::f64::consts::PI * 0.625 * 0.625 * 1.25 / 3.0;
+    [under_the_lid - under_the_ends, under_the_lid]
 }
 
 /// **Fails without the change**: a certified caller asking for less than the
