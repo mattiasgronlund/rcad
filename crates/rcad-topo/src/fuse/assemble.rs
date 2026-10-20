@@ -4144,6 +4144,9 @@ impl Assembly {
                 where_curved_pieces_met[corner]
                     && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
                     && !self.are_pieces_of_one_open_input_edge(&leaving[&(lump, corner)])
+                    && !leaving[&(lump, corner)]
+                        .iter()
+                        .all(|&edge| self.edges[edge].runs_straight())
             })
             .collect()
     }
