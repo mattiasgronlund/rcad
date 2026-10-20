@@ -535,6 +535,7 @@ def add_step(queue, claims, here, args, batch):
     refuse_unless_a_tier(tier)
     refuse_class_with_punctuation(what)
     refuse_a_pin(what)
+    refuse_a_new_topo_test_file_with_no_merged_rs_item(write_set, here.top)
     what = where_it_came_from_after_the_tag(what, queue, claims, here)
     refuse_conflicted(here, queue)
     block = queue.block_for_tier(tier)
@@ -580,6 +581,36 @@ def refuse_class_with_punctuation(what):
 def refuse_a_pin(what):
     if what.split()[:1] and what.split()[0].startswith("pinned/"):
         raise Refused("only Mattias pins a row, with `just queue pin` once it is added (§430); add it without the pin")
+
+
+TOPO_TESTS_DIR = "crates/rcad-topo/tests/"
+MERGED_RS = f"{TOPO_TESTS_DIR}merged.rs"
+
+
+def refuse_a_new_topo_test_file_with_no_merged_rs_item(write_set, top):
+    """Refuse a write set naming a file directly under `crates/rcad-topo/tests/`
+    that does not exist yet, unless the write set also names a `merged.rs`
+    entry, whole or as the item `merged.rs#<module>` (§373.7).
+
+    `autotests` is off there, so nothing builds such a file until `merged.rs`
+    declares it. 45 of 48 rows Q2344 measured named no such entry, and each
+    had to be stopped and re-filed by hand for want of it.
+    """
+    entries = entries_of(write_set)
+    if any(entry.partition("#")[0] == MERGED_RS for entry in entries):
+        return
+    for entry in entries:
+        path = entry.partition("#")[0]
+        if not path.startswith(TOPO_TESTS_DIR) or path == MERGED_RS:
+            continue
+        rest = path[len(TOPO_TESTS_DIR):]
+        if "/" in rest or not rest.endswith(".rs"):
+            continue
+        if os.path.exists(os.path.join(top, path)):
+            continue
+        module = rest[: -len(".rs")].replace("-", "_")
+        raise Refused(f"'{path}' does not exist yet, and the write set names no {MERGED_RS} entry for it: a new "
+                      f"file directly under {TOPO_TESTS_DIR} is declared there, so add {MERGED_RS}#{module} (§373.7)")
 
 
 CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")
