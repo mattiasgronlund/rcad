@@ -19,7 +19,12 @@ use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 /// **The bar and the two stacked blocks unite in one call to the bar and one
 /// block four tall**, whichever group the bar is in and in either order of the
 /// blocks: six faces, twelve edges and eight corners, at the one-block union's
-/// corners and holding what it holds, bit for bit, `16 + 2π`.
+/// corners, and holding `16 + 2π` within the error its measure bounds.
+///
+/// The volume is held to `16 + 2π` and not to the one-block union's bit for
+/// bit. With the blocks as the argument the two differ in their last bits,
+/// `22.28164832516586` against `22.281648325165822` for the one-block union
+/// asked the same way round.
 ///
 /// It answered fourteen edges and ten corners until Q2473, keeping `(0, ±1,
 /// 2)`, where the arc the blocks' meeting `z = 2` cuts round the wall was
@@ -28,6 +33,7 @@ use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 #[test]
 fn a_bar_and_two_stacked_blocks_united_in_one_call_is_the_bar_and_one_tall_block() {
     let policy = Policy::tolerant(10.0);
+    let by_hand = 2.0 * 2.0 * 4.0 + PI * 4.0 / 2.0;
     let tall = {
         let mut model = a_model();
         let bar = a_bar(&mut model);
@@ -45,7 +51,6 @@ fn a_bar_and_two_stacked_blocks_united_in_one_call_is_the_bar_and_one_tall_block
         (6, 12, 8),
         "the bar and one tall block: {tall:?}"
     );
-    let by_hand = 2.0 * 2.0 * 4.0 + PI * 4.0 / 2.0;
     assert!(
         (tall.volume - by_hand).abs() <= tall.volume_error,
         "the bar and one tall block: {tall:?} against {by_hand}"
@@ -71,14 +76,22 @@ fn a_bar_and_two_stacked_blocks_united_in_one_call_is_the_bar_and_one_tall_block
             } else {
                 what_it_is(&mut model, &blocks, &[bar], &policy, &asked)
             };
-            assert_eq!(stacked, tall, "{asked}");
+            assert_eq!(
+                (stacked.faces, stacked.edges, &stacked.corners),
+                (tall.faces, tall.edges, &tall.corners),
+                "{asked}: {stacked:?}"
+            );
+            assert!(
+                (stacked.volume - by_hand).abs() <= stacked.volume_error,
+                "{asked}: {stacked:?} against {by_hand}"
+            );
         }
     }
 }
 
 /// How many faces and edges the one solid a union answers has, where its
 /// corners are, and what it holds.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct WhatItIs {
     faces: usize,
     edges: usize,
