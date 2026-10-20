@@ -1261,6 +1261,7 @@ function verdictSchema(kind) {
     fixes: { type: 'array', items: { type: 'string' }, description: 'each fix fix_first asks for: the file, the change, and why' },
     lines_that_run_command: { type: 'string', description: 'the lines-that-run command from your brief, exactly as you ran it' },
     lines_that_run: { type: 'string', description: 'everything that command printed, verbatim, down to its last line, lines that run: N -- never your own reading of the diff' },
+    lines_that_run_note: { type: 'string', description: 'your own note about the print above, if any -- never folded into lines_that_run itself, which stays the command\'s output and nothing more' },
     verdict: { type: 'string', enum: ['merge', 'fix_first', 'reject'] },
     notes: { type: 'string', description: 'at most five lines, for the merger: what it must act on and what no other field says -- never an account of the steps you ran, which the other fields already hold' },
     also_answers_confirmed: { type: 'array', items: { type: 'string' }, description: 'the ids from the lane\'s also_answers you ran again on the branch tip and saw answer, each open on origin/main, held by no lane, and sharing a tests/*.rs file with the lane\'s write set (verifier.md, Also answers); leave it out when the lane named none' },

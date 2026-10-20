@@ -330,3 +330,9 @@ show it red: `gate-lane` leaves out `test-slow`, and the land gate does not.
 other field says. Never an account of the steps you ran: the other fields
 already hold those, and writing them out again was about a third of a
 verifier's report (§382).
+
+`lines_that_run` holds the command's output and nothing more, verbatim, down
+to its last line. A note of your own about that print -- that you ran it by
+hand in your own tree, that it matches another run -- goes in
+`lines_that_run_note`, never after the count inside `lines_that_run` itself,
+where it would stop that line reading `lines that run: N` (§375.4).
