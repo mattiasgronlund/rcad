@@ -426,7 +426,8 @@ impl SolidView<'_> {
     /// to take that point in, and if no face meets the grown box the point is
     /// classified with an ordinary ray: what it gets, every point of the box
     /// gets. A target whose grown box a face meets, or whose ray grazes
-    /// something, hands over to the next.
+    /// something, hands over to the next, and what it could not tell goes with
+    /// it: only the target that answers puts anything in `log` (Q2407).
     ///
     /// **Except where its ray parts at a flat face** ([`Hit::ReadingsPart`]).
     /// [`SolidView::no_face_meets`] reads such a face by its triangles, so the
@@ -448,11 +449,11 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Option<Containment> {
-        let mut trial = ProvenanceLog::new();
         for target in ray_targets(low, high) {
             let Some(beside) = a_point_an_exact_ray_leaves_for(point, target) else {
                 continue;
             };
+            let mut trial = ProvenanceLog::new();
             if !self.no_face_meets(the_box_round_both(point, beside), policy, &mut trial) {
                 continue;
             }
