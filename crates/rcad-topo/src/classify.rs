@@ -234,8 +234,17 @@ impl SolidView<'_> {
     /// # Errors
     ///
     /// Nothing here fails; not being able to tell is an answer, not a failure.
-    /// Anything the cascade could not certify lands in `log`, and a fully
-    /// certified classification leaves it untouched.
+    /// Anything the cascade could not certify of what the answer rests on lands
+    /// in `log`, and a fully certified classification leaves it untouched.
+    ///
+    /// **No answer rests on a ray thrown away**, so what that ray could not
+    /// tell is kept out of `log` wherever a later ray, an exact point beside
+    /// this one or a face's plane places the point. Where none does, it is why
+    /// none did, and it lands there. A fuse refuses, under a certified policy,
+    /// any placement whose log holds a record, and two quarter bends whose caps
+    /// touch were refused for a point whose first ray could not tell `side of
+    /// torus` on a cap's rim and whose next placed it
+    /// (`tests/a_ray_thrown_away_leaves_no_record.rs`, Q2267, Q2407).
     #[must_use]
     pub fn classify_uncertain_point(
         self,
@@ -259,14 +268,19 @@ impl SolidView<'_> {
 
         let mut worst_enclosure = 0.0f64;
         let mut asked_beside = false;
+        let mut thrown_away = ProvenanceLog::new();
         for target in ray_targets(low, high) {
-            let pass = self.count_crossings(point, target, policy, log);
+            let mut this_ray = ProvenanceLog::new();
+            let pass = self.count_crossings(point, target, policy, &mut this_ray);
             if pass.on_boundary {
+                this_ray.drain_into(log);
                 return Containment::OnBoundary;
             }
             if let Some(face) = pass.unfollowed_at
                 && !pass.is_thrown_away_without_them()
             {
+                thrown_away.drain_into(log);
+                this_ray.drain_into(log);
                 return Containment::CannotFollowAFacesTrimming { face };
             }
             if let Some(face) = pass.unfired_at {
@@ -279,15 +293,21 @@ impl SolidView<'_> {
                     }
                 }
                 if !pass.is_thrown_away_without_them() {
+                    thrown_away.drain_into(log);
+                    this_ray.drain_into(log);
                     return Containment::CannotFireARayAtAFacesSurface { face };
                 }
             }
             if let Some(face) = pass.parted_at {
-                return self
-                    .what_its_plane_says_beside_it(face, point, policy, log)
-                    .unwrap_or(Containment::Undecidable { enclosure: 0.0 });
+                if let Some(placed) = self.what_its_plane_says_beside_it(face, point, policy, log) {
+                    return placed;
+                }
+                thrown_away.drain_into(log);
+                this_ray.drain_into(log);
+                return Containment::Undecidable { enclosure: 0.0 };
             }
             if !pass.grazed_something {
+                this_ray.drain_into(log);
                 return if pass.winding == 0 {
                     Containment::Outside
                 } else {
@@ -295,7 +315,9 @@ impl SolidView<'_> {
                 };
             }
             worst_enclosure = worst_enclosure.max(pass.worst_enclosure);
+            this_ray.drain_into(&mut thrown_away);
         }
+        thrown_away.drain_into(log);
         Containment::Undecidable {
             enclosure: worst_enclosure,
         }
