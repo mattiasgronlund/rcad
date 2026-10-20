@@ -232,7 +232,7 @@ pub(crate) fn assemble(
 /// before. The records of the put-together go into `log`, ahead of each
 /// shell's record, only when a shell is taken as flat, since only then does
 /// the answer rest on them.
-pub(crate) fn the_pieces_of_each_shell_both_hold_taken_as_flat(
+pub(crate) fn the_pieces_of_each_flat_shell_of_both_groups(
     model: &Model,
     scratch: &Scratch,
     held_by_both: &[Chosen],

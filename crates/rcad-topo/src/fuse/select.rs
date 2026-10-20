@@ -178,7 +178,7 @@
 //! Once every piece is placed, under a tolerant policy, [`choose`] puts
 //! together what the intersection would keep and asks of each of its shells
 //! whether the policy takes it as flat, as the shell fold of `assemble.rs`
-//! does ([`the_pieces_of_each_shell_both_hold_taken_as_flat`], Q1710, §417).
+//! does ([`the_pieces_of_each_flat_shell_of_both_groups`], Q1710, §417).
 //! Each piece of such a shell, where both groups have pieces, is read as
 //! lying on the other group facing the other way: a shell with no inside is
 //! two sides of one sheet, back to back. So the intersection keeps none of it,
@@ -191,8 +191,24 @@
 //! walls stand flush, which a difference keeps when it is the argument's, as
 //! it keeps the rest of the face it is a strip of. A union drops a buried
 //! piece and one lying the other way alike, and keeps that rim as part of its
-//! outside, so it asks nothing; nor does a certified policy, and a piece of no
-//! such shell is placed as above.
+//! outside, so it does not ask this; nor does a certified policy, and a piece
+//! of no such shell is placed as above.
+//!
+//! # Or, for a union, a piece of a flat shell one group less the other leaves
+//!
+//! A union of two groups is the second group with the first less the second
+//! added on, so where the first less the second is a shell the policy takes
+//! as flat, the union there is the second group's own outside. So [`choose`]
+//! puts together what each group less the other would keep, and reads each
+//! piece of such a shell, where both groups have pieces, as that difference
+//! would leave it out: a piece of the group the other is taken from as inside
+//! the other, and a piece of the other as outside the first. A turned ell
+//! inside a taller one, flush against its wall, needs it (Q2270): as stored,
+//! the small ell's wall is `8.3e−17` outside the big one's, so the small ell
+//! less the big one is a slab that thin, and the union kept the small ell's
+//! wall pieces on it and dropped the big ell's under it, which the joining of
+//! the two walls then could not tell an outline of. Read this way, the union
+//! keeps the big ell's wall whole and none of the slab.
 
 use rcad_geom::{
     Cone, Cylinder, Picker, Plane, PlaneAgreement, Point, Sphere, Surface, SurfaceMeet, Torus,
@@ -214,8 +230,7 @@ use crate::{Containment, Error, FaceKey, FaceView, Model, Result, SolidView, Ver
 
 use super::arrange::{Piece, agreement_of_two_planes, name_of_surface_bits};
 use super::assemble::{
-    NamedSide, the_edge_each_side_of_every_piece_is,
-    the_pieces_of_each_shell_both_hold_taken_as_flat,
+    NamedSide, the_edge_each_side_of_every_piece_is, the_pieces_of_each_flat_shell_of_both_groups,
 };
 use super::bake::{BakedCorner, BakedEdge, BakedFace, BakedSolid};
 use super::{
@@ -392,13 +407,9 @@ pub(crate) fn choose(
     let selection = row_for(rule);
     if selection.keeps_a_buried_piece_apart_from_one_lying_the_other_way() {
         let held_by_both = kept_by(row_for(Rule::Intersection), &placed, scratch);
-        for shell in the_pieces_of_each_shell_both_hold_taken_as_flat(
-            model,
-            scratch,
-            &held_by_both,
-            policy,
-            log,
-        ) {
+        for shell in
+            the_pieces_of_each_flat_shell_of_both_groups(model, scratch, &held_by_both, policy, log)
+        {
             for &piece in &shell {
                 let of_an_argument = scratch.cut_from[piece] < arguments;
                 let solid = shell
@@ -411,6 +422,28 @@ pub(crate) fn choose(
                     same_way: false,
                 });
             }
+        }
+    }
+    if selection.keeps_the_outside_of_both_groups() {
+        let mut left_out = Vec::new();
+        for (less, of_the_arguments) in [(&DIFFERENCE, true), (&TOOLS_LESS_ARGUMENTS, false)] {
+            let kept = kept_by(less, &placed, scratch);
+            for shell in
+                the_pieces_of_each_flat_shell_of_both_groups(model, scratch, &kept, policy, log)
+            {
+                left_out.extend(shell.into_iter().map(|piece| {
+                    let taken_from = (scratch.cut_from[piece] < arguments) == of_the_arguments;
+                    let placement = if taken_from {
+                        Placement::Inside
+                    } else {
+                        Placement::Outside
+                    };
+                    (piece, placement)
+                }));
+            }
+        }
+        for (piece, placement) in left_out {
+            placed[piece] = Some(placement);
         }
     }
     Ok(kept_by(selection, &placed, scratch))
@@ -490,6 +523,28 @@ const DIFFERENCE: Selection = Selection {
     },
 };
 
+/// What the tools less the arguments keep: [`DIFFERENCE`] with the two groups
+/// the other way round.
+///
+/// No [`Rule`] answers it. A union asks which shells of it a tolerant policy
+/// takes as flat, as it asks of [`DIFFERENCE`] ([`choose`]). Where a tool's
+/// piece lies on an argument's facing the other way, the tool's is the one
+/// kept, as [`DIFFERENCE`] keeps the argument's.
+const TOOLS_LESS_ARGUMENTS: Selection = Selection {
+    arguments: Row {
+        inside: Fate::KeepReversed,
+        outside: Fate::Drop,
+        on_same_way: Fate::Drop,
+        on_opposite_way: Fate::Drop,
+    },
+    tools: Row {
+        inside: Fate::Drop,
+        outside: Fate::Keep,
+        on_same_way: Fate::Drop,
+        on_opposite_way: Fate::Keep,
+    },
+};
+
 /// The one `match` on [`Rule`] in the whole fuse.
 ///
 /// [`Rule`] is `#[non_exhaustive]`, which stops a *caller* matching it
@@ -528,6 +583,17 @@ impl Selection {
         [&self.arguments, &self.tools]
             .iter()
             .any(|row| row.inside != row.on_opposite_way)
+    }
+
+    /// Whether this rule keeps every piece of either group lying outside the
+    /// other, and drops every piece buried in it: so whether it answers one
+    /// group with the other less it added on, and needs the pieces of a shell
+    /// of that difference taken as flat read as the difference leaves them
+    /// out. Only a union.
+    fn keeps_the_outside_of_both_groups(&'static self) -> bool {
+        [&self.arguments, &self.tools]
+            .iter()
+            .all(|row| row.outside == Fate::Keep && row.inside == Fate::Drop)
     }
 }
 
