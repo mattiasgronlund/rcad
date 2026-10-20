@@ -1458,9 +1458,15 @@ def row_on_branch(here, ref, branch):
     where it was added or removed, where walking every commit the file has
     ever carried, the way `state_before_the_take` does for one row it already
     knows, would mean reading thousands of them on every `running` call.
+    `-m` is the part that makes this work across a merge commit: plain `git
+    log -S` shows no diff at all for a merge by default, so a `lane:<branch>`
+    line added only by resolving a conflict, or folded into an unrelated
+    commit that happens to land while a merge is still pending, is invisible
+    to it; `-m` has `log` diff a merge against each parent in turn, which
+    pickaxe then searches like any other commit.
     """
     lane_state = f"lane:{branch}"
-    shas = git("log", "-S", lane_state, "--format=%H", ref, "--", here.relative, cwd=here.top).split()
+    shas = git("log", "-S", lane_state, "-m", "--format=%H", ref, "--", here.relative, cwd=here.top).split()
     for sha in shas:
         text = git("show", f"{sha}:{here.relative}", cwd=here.top, check=False)
         if lane_state in text:

@@ -16193,7 +16193,7 @@ check-queue-api-selftest:
     got=$(q "$hub" done "$q_stale_done" "$sha" 2>&1) || fail "done refused $q_stale_done"
     g "$hub" commit -qam "$q_stale_done done, lane-stale-done left locked"
     after_stale_done=$(q "$hub" running --count) || fail "running --count failed after lane-stale-done's row closed"
-    [ "$after_stale_done" = "$before_stale_done" ] \
+    [ "$after_stale_done" -eq "$((before_stale_done - 1))" ] \
         || fail "a dead lane tree whose row is done: on main still filled a slot ($before_stale_done -> $after_stale_done)"
     got=$(q "$hub" running 2>&1) || fail "running failed with a done row's dead lane tree still locked"
     grep -qxF "lane-stale-done  $stale_done_wt, closed: $q_stale_done is done:$sha, no slot" <<<"$got" \
@@ -16213,7 +16213,7 @@ check-queue-api-selftest:
     got=$(q "$hub" drop "$q_stale_dropped" 230 2>&1) || fail "drop refused $q_stale_dropped"
     g "$hub" commit -qam "$q_stale_dropped dropped, lane-stale-dropped left locked"
     after_stale_dropped=$(q "$hub" running --count) || fail "running --count failed after lane-stale-dropped's row closed"
-    [ "$after_stale_dropped" = "$before_stale_dropped" ] \
+    [ "$after_stale_dropped" -eq "$((before_stale_dropped - 1))" ] \
         || fail "a dead lane tree whose row is dropped: on main still filled a slot ($before_stale_dropped -> $after_stale_dropped)"
     got=$(q "$hub" running 2>&1) || fail "running failed with a dropped row's dead lane tree still locked"
     grep -qxF "lane-stale-dropped  $stale_dropped_wt, closed: $q_stale_dropped is dropped:§230, no slot" <<<"$got" \
@@ -16405,8 +16405,19 @@ check-queue-api-selftest:
     grep -qF 'only Mattias pins a row' <<<"$got" || fail "add did not say a pin is Mattias's to set"
     got=$(q "$pin_wt" pin "$first" 2>&1) && fail "pin numbered a row that is pinned already"
     grep -qF "$first is pinned/1 already; unpin it first to re-order" <<<"$got" || fail "pin did not say to unpin a pinned row first"
-    got=$(q "$pin_wt" pin Q3 2>&1) && fail "pin put a parked row first"
-    grep -qF 'Q3 is parked:§230, and the fill never takes a parked row' <<<"$got" || fail "pin did not say Q3 is parked"
+    # Q2283 (§263.4): the stale-done/stale-dropped cases above are the first
+    # ones in this script to `git commit` on `$hub` since the Q3 conflict
+    # test's `pick` left `four`'s merge pending -- that commit finishes it,
+    # so Q3's own fate past this point rides on that merge's resolution
+    # ("dropped") rather than the pre-conflict "parked" this check used to
+    # find on a fresh checkout of main. A row parked in this section, on
+    # its own, is immune to that.
+    parked=$(q "$pin_wt" add 3 opus - "from/- a row parked for the pin test's own refusal check §230") \
+        || fail "add for the parked row failed"
+    got=$(q "$pin_wt" park "$parked" §230 2>&1) || fail "park refused $parked"
+    got=$(q "$pin_wt" pin "$parked" 2>&1) && fail "pin put a parked row first"
+    grep -qF "$parked is parked:§230, and the fill never takes a parked row" <<<"$got" \
+        || fail "pin did not say $parked is parked"
     fifth=$(q "$pin_wt" add 5 opus - "crash/C from/- a crash only a probe builds §230") || fail "add for the tier 5 row failed"
     got=$(q "$pin_wt" pin "$fifth" 2>&1) && fail "pin moved a C row out of tier 5"
     grep -qF "$fifth carries the class crash/C, which puts it in tier 5" <<<"$got" || fail "pin did not say a C row belongs in tier 5"
