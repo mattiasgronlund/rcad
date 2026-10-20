@@ -55,12 +55,17 @@ below, and settle what the stop line names.
 
 - `merge`: go on.
 - `fix_first`: make each fix yourself when it is small — a few lines — and
-  inside the lane's write set. A pin outside it counts as inside when the lane
-  named it in `out_of_write_set_needs` and the verifier copied the edit into
-  `fixes`: a count, an expected value or a test the lane's change moved, which
-  the gate fails without (`verifier.md`, "The verdict"). Say so in the merge
-  commit. A fix that is not both small and inside is not yours: do not merge,
-  and say which fix and why.
+  inside the lane's write set. That size bound is for a fix you write
+  yourself; it does not bound a re-pin the lane already named in
+  `out_of_write_set_needs` and the verifier already ran green and copied into
+  `fixes` — merge that re-pin whatever its size, as Q2374's merge `bb1d1786`
+  did with a 164/103-line re-pin outside the lane's write set (§414.4). A pin
+  outside the write set counts as inside when the lane named it and the
+  verifier copied the edit into `fixes`: a count, an expected value or a test
+  the lane's change moved, which the gate fails without (`verifier.md`, "The
+  verdict"). Say so in the merge commit. A fix you write yourself that is not
+  both small and inside, or a pin the lane did not name and the verifier did
+  not copy, is not yours: do not merge, and say which fix and why.
 - An unbacked claim or a number that did not reproduce is yours to weigh. If
   the row's result rests on it, do not merge.
 - A row that adds a `check-*` recipe or an `#[ignore]` moves a count the gate
