@@ -2685,8 +2685,19 @@ check-wildcards:
 # rather than a terminal. Stripping is what makes the count the same answer
 # either way; `CARGO_TERM_COLOR=never` above is what keeps the saved log
 # readable when a human opens it.
+#
+# Counted by location, not by line: a merged test build re-emits the same
+# arm's warning once per compilation unit it reaches, and only the first copy
+# in a unit carries rustc's "requested on the command line" note, so cargo's
+# own duplicate-warning suppression (which compares the whole rendered block)
+# misses the rest. `wildcard arms over our own enums` wants each `match` arm
+# counted once, so this dedups by the `--> file:line:col` line that follows
+# every `warning: wildcard match...` line — on `db835549`, that turned 102
+# (9 warnings, 8 duplicates at `writer.rs:2049`) back into 101.
 _wildcard-direct-count log:
-    @sed 's/\x1b\[[0-9;]*m//g' '{{ log }}' | grep -c '^warning: wildcard match' || true
+    @sed 's/\x1b\[[0-9;]*m//g' '{{ log }}' \
+        | awk '/^warning: wildcard match/ { if ((getline loc) > 0) { sub(/^[ \t]*--> */, "", loc); print loc } }' \
+        | sort -u | wc -l
 
 # Pins the composite-wildcard scan against fixtures it does not read off the
 # tree, so it stays proven even on a tree where nothing real trips it.
@@ -2782,12 +2793,17 @@ check-wildcards-selftest:
     done
     echo "composite scan agrees under:$ran"
 
-    # The direct half, against the same line with and without cargo's colours.
-    # The escapes below are the bytes `cargo clippy` actually emitted under
-    # `CARGO_TERM_COLOR=always` on 2026-09-08, not a guess at their shape.
+    # The direct half, against two warnings at two different locations, with
+    # and without cargo's colours. The escapes below are the bytes `cargo
+    # clippy` actually emitted under `CARGO_TERM_COLOR=always` on 2026-09-08,
+    # not a guess at their shape; stripping them is what the recipe does
+    # before it ever looks at a line, so they are only on the warning lines,
+    # not the location lines below them.
     w='wildcard match will also match any future added variants'
-    printf 'warning: %s\n' "$w" "$w" > "$dir/plain.log"
-    printf '\033[1m\033[33mwarning\033[0m\033[1m: %s\033[0m\n' "$w" "$w" > "$dir/coloured.log"
+    printf 'warning: %s\n   --> crates/rcad-step/src/a.rs:10:5\n    |\n' "$w" > "$dir/plain.log"
+    printf 'warning: %s\n   --> crates/rcad-step/src/b.rs:20:9\n    |\n' "$w" >> "$dir/plain.log"
+    printf '\033[1m\033[33mwarning\033[0m\033[1m: %s\033[0m\n   --> crates/rcad-step/src/a.rs:10:5\n    |\n' "$w" > "$dir/coloured.log"
+    printf '\033[1m\033[33mwarning\033[0m\033[1m: %s\033[0m\n   --> crates/rcad-step/src/b.rs:20:9\n    |\n' "$w" >> "$dir/coloured.log"
     # Its clippy keeps a target directory of its own. In `lint`'s, the two
     # recipes' flags take turns in cargo's cache, and each turn re-checks every
     # crate of the workspace whether the edit reached it or not (§381.1).
@@ -2809,6 +2825,24 @@ check-wildcards-selftest:
             exit 1
         fi
     done
+
+    # db835549's arm: the merged test build of rcad-step printed the same
+    # arm's warning twice, back to back, because the second copy was the
+    # first the *test* compilation unit had seen, even though the *lib* unit
+    # had already printed it with rustc's own note. One line matching
+    # `^warning: wildcard match` per copy, both at the same `-->`, and only
+    # the first carries the "requested on the command line" note — the
+    # mismatch that kept cargo from treating them as the one duplicate they
+    # are. This is one arm, not two.
+    printf 'warning: %s\n   --> crates/rcad-step/src/writer.rs:2049:9\n    |\n2049 |         other => unreachable!(),\n    |         ^^^^^ help: try: `other @ Foo::Bar | _`\n    |\n    = note: requested on the command line with `-W clippy::wildcard-enum-match-arm`\n\n' "$w" > "$dir/duplicate.log"
+    printf 'warning: %s\n   --> crates/rcad-step/src/writer.rs:2049:9\n    |\n2049 |         other => unreachable!(),\n    |         ^^^^^ help: try: `other @ Foo::Bar | _`\n    |\n' "$w" >> "$dir/duplicate.log"
+    got=$({{ just_executable() }} _wildcard-direct-count "$dir/duplicate.log")
+    if [ "$got" != "1" ]; then
+        echo "_wildcard-direct-count read $got arms from duplicate.log, expected 1"
+        echo "two warnings at the same --> file:line:col are one arm, whichever"
+        echo "copy cargo happened to keep the note line on — see db835549"
+        exit 1
+    fi
 
 # How many tests are marked `#[ignore]` today. Move it with the commit that
 # moves the tree, the same way `wildcard_arms` above works.
