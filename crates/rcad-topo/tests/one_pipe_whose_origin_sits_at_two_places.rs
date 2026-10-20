@@ -37,9 +37,11 @@
 //! the upper bar first, then held each half twice: once with each spelling,
 //! since the pickers of a half come in the order `intersect` sorts the two
 //! pipes, and it sorts the cross's between the two spellings. Two spellings
-//! were refused `Undecidable` where one is refused
-//! `AFaceTrimmedByACurveThisCannotFollow`; now both are refused alike, and
-//! the half is one curve (Q2050).
+//! were refused `Undecidable` where one was refused
+//! `AFaceTrimmedByACurveThisCannotFollow`, and the half is now one curve
+//! (Q2050). That refusal came from asking which side of a half ellipse a point
+//! lies, and the wall is now counted along a ruling instead, so every one of
+//! the four unions answers (Q2460).
 //!
 //! **Nor does a bar across where the two meet on its axis or below it.** With
 //! the joint there the upper wall keeps both halves that climb above the
@@ -47,15 +49,15 @@
 //! radius. An edge along such a half starts where all four halves meet, and
 //! the fuse took the half it runs along from that corner alone, so the second
 //! union was refused, one spelling and two alike, as was a pin through such a
-//! cross (Q2461). The edge's other corner now says which half, and the two
-//! spellings are then refused alike, as with the joint above the axis.
+//! cross (Q2461). The edge's other corner now says which half, and with the
+//! wall counted along a ruling all eight unions answer (Q2460). One answer
+//! does not measure: an arc of it names the spelling of the pipe that neither
+//! face along it is on.
 //!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
 //! the fuse is asked — the stored numbers differ and `intersect` calls them one
 //! surface.
-
-use core::mem::discriminant;
 
 use rcad_geom::SurfaceMeet;
 use rcad_geom::{
@@ -689,31 +691,35 @@ impl APinnedBar {
 /// lower wall's gradient and the upper's, which are one: refused `Undecidable`
 /// in both orders on an `orient3d` that straddled nothing (Q2050).
 ///
-/// One spelling is refused too, `AFaceTrimmedByACurveThisCannotFollow`, which
-/// is the refusal two spellings must match until that is lifted.
+/// One spelling was refused too, `AFaceTrimmedByACurveThisCannotFollow`: every
+/// ray the fuse fired to place a piece met a wall with a half ellipse among
+/// its sides, and `holds.rs` could not tell which side of such a side a point
+/// lies. It now counts the sides such a wall's ruling through the point
+/// crosses above it, since each half lies on a plane through where the two
+/// axes meet (Q2460). Every answer is one solid of the volume worked out by
+/// hand.
 #[test]
 fn a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does() {
-    let [written_once, written_twice] = [LOWER_ORIGIN, CROSSED_JOINT]
-        .map(|axis_origin| the_bars_united_across(CROSSED_JOINT, axis_origin));
-    for (lower_first, (once, twice)) in [true, false]
-        .into_iter()
-        .zip(written_once.into_iter().zip(written_twice))
-    {
-        assert_eq!(
-            once.0.as_ref().map_err(discriminant),
-            twice.0.as_ref().map_err(discriminant),
-            "lower bar first {lower_first}: written once, {}; written twice, {}",
-            once.1,
-            twice.1
-        );
+    let mut wrong = Vec::new();
+    for axis_origin in [LOWER_ORIGIN, CROSSED_JOINT] {
+        let answers = the_bars_united_across(CROSSED_JOINT, axis_origin);
+        for (lower_first, answer) in [true, false].into_iter().zip(answers) {
+            if answer.0.is_err() {
+                wrong.push(format!(
+                    "wall at {axis_origin}, lower bar first {lower_first}: {}",
+                    answer.1
+                ));
+            }
+        }
     }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// Where the lower bar meets the upper, above the axis of the bar across them.
 const CROSSED_JOINT: f64 = 4.0;
 
-/// **A bar across two bars on one pipe that meet on its axis or below it is
-/// refused on a curve it cannot follow, one spelling and two alike.**
+/// **A bar across two bars on one pipe that meet on its axis or below it
+/// unites with them, one spelling and two.**
 ///
 /// The shape of
 /// [`a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does`]
@@ -728,32 +734,45 @@ const CROSSED_JOINT: f64 = 4.0;
 /// orders, one spelling and two alike (Q2461). The other corner now says
 /// which.
 ///
-/// Every answer is then refused `AFaceTrimmedByACurveThisCannotFollow` on the
-/// cross's wall, as with the joint above the axis, which is the refusal both
-/// spellings must keep to until that is lifted (Q2460).
+/// Every answer was then refused `AFaceTrimmedByACurveThisCannotFollow` on the
+/// cross's wall, as with the joint above the axis (Q2460). Rays fired from the
+/// pieces land on the ruling through a corner of such a wall, since the shape
+/// is symmetric about `y = 0`, and the count along that ruling now answers
+/// there too. Every answer is one solid of the volume worked out by hand.
+///
+/// **But one, which unites and does not measure.** With the joint at `2`, the
+/// upper wall named at the joint, and the cross and the upper bar first, the
+/// arc where the lower wall bites the cross's wall below the joint, through
+/// `(−2, 0, 1)`, is stored naming the upper wall's spelling as the surface it
+/// crosses, though the faces either side of it are the cross's wall and the
+/// lower wall. `rcad_geom::which_two_surfaces_a_run_is_between` takes such a
+/// third name for a surface neither face is on and hands the walk the lower
+/// wall and the upper, which are one pipe, so the walk has no point between
+/// the arc's ends and the mesh draws the arc as its chord: refused
+/// `CannotMeshAFace`, `BoundarySideStraysFurtherThanTheDeflection`, straying
+/// `2.0`. Lower bar first, the arc names the lower wall and measures. This
+/// pins that one answer to that refusal until the fuse names a spelling of a
+/// face the arc lies along.
 #[test]
-fn a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_is_refused_on_a_curve_it_cannot_follow()
- {
+fn a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_them() {
     let mut wrong = Vec::new();
     for joint in [3.0, 2.0] {
-        let [written_once, written_twice] =
-            [LOWER_ORIGIN, joint].map(|axis_origin| the_bars_united_across(joint, axis_origin));
-        for (lower_first, (once, twice)) in [true, false]
-            .into_iter()
-            .zip(written_once.into_iter().zip(written_twice))
-        {
-            let refused_alike = [&once, &twice].into_iter().all(|answer| {
-                matches!(
-                    answer.0,
-                    Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
-                )
-            });
-            if !refused_alike {
-                wrong.push(format!(
-                    "joint at {joint}, lower bar first {lower_first}: written once, {}; \
-                     written twice, {}",
-                    once.1, twice.1
-                ));
+        for axis_origin in [LOWER_ORIGIN, joint] {
+            let answers = the_bars_united_across(joint, axis_origin);
+            for (lower_first, answer) in [true, false].into_iter().zip(answers) {
+                let the_one_that_does_not_measure =
+                    joint == 2.0 && axis_origin == joint && !lower_first;
+                let as_it_should = if the_one_that_does_not_measure {
+                    matches!(answer.0, Err(Error::CannotMeshAFace { .. }))
+                } else {
+                    answer.0.is_ok()
+                };
+                if !as_it_should {
+                    wrong.push(format!(
+                        "joint at {joint}, wall at {axis_origin}, lower bar first {lower_first}: {}",
+                        answer.1
+                    ));
+                }
             }
         }
     }
@@ -771,7 +790,9 @@ type Answer = (Result<usize, Error>, String);
 /// An answer is checked as far as it goes before it comes back: it is one
 /// solid, it validates, and its volume is the three bars' less the part the
 /// cross shares with the pipe, worked out by hand: `16 r³/3` for two pipes of
-/// one radius whose axes cross square.
+/// one radius whose axes cross square. A union that answers and then will not
+/// be measured comes back as that refusal, since measuring is how the volume
+/// is read.
 fn the_bars_united_across(joint: f64, axis_origin: f64) -> [Answer; 2] {
     let policy = Policy::certified();
     let route = format!("the joint at {joint}, the upper wall at {axis_origin}");
@@ -822,7 +843,21 @@ fn the_bars_united_across(joint: f64, axis_origin: f64) -> [Answer; 2] {
                 fused.solids()
             );
         };
-        let (volume, bound) = volume_of(&model, *solid);
+        let measured = model
+            .solid(*solid)
+            .expect("this model made the key")
+            .measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            );
+        let (volume, bound) = match measured {
+            Ok(measured) => (measured.volume(), measured.volume_error()),
+            Err(why) => {
+                let said = format!("united, and measuring that refused {why:?}");
+                return (Err(why), said);
+            }
+        };
         assert!(
             (volume - by_hand).abs() <= bound,
             "{route}: {volume} ± {bound} against {by_hand}"
@@ -861,7 +896,7 @@ fn a_bar_across_the_pipe(model: &mut Model) -> SolidKey {
 /// `CannotTellWhichCurveOfACrossingAFaceRunsAlong` in both orders, since every
 /// edge where the two walls meet starts where all four halves do (Q2459's
 /// probe, Q2461). It is the shape of
-/// [`a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_is_refused_on_a_curve_it_cannot_follow`]
+/// [`a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_them`]
 /// with nothing spelled twice and no joint at all. With each such edge's other
 /// corner saying which half it runs along, both orders are refused
 /// `CannotTellTheCellsOfAFaceApart` on the upright wall instead. The halves cut
