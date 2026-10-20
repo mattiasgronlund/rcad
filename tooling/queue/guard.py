@@ -141,9 +141,11 @@ def split_heredocs(command):
 def simple_commands(code, bodies, variables):
     """Each simple command as (words, redirects, heredoc bodies), variables expanded."""
     code = code.replace("\\\n", " ")
+    code = strip_comments(code)
     lexer = shlex.shlex(code, posix=True, punctuation_chars=True)
     lexer.whitespace = " \t\r"
-    lexer.wordchars += "$:{}@%+,!^[]"
+    lexer.wordchars += "$:{}@%+,!^[]#"
+    lexer.commenters = ""
     try:
         tokens = list(lexer)
     except ValueError:
@@ -184,6 +186,59 @@ def simple_commands(code, bodies, variables):
         words.append(expand(token, variables))
     if words or redirects:
         yield words, redirects, heredocs
+
+
+def strip_comments(code):
+    """Delete a real `#` comment, to the end of its line.
+
+    Bash starts a comment only at the first character of a word — not in the
+    middle of one, and not inside quotes. `shlex`'s own `commenters` does not
+    make that distinction, so a `#` written mid-word, as in a write-set entry
+    like `justfile#check-queue-selftest`, would otherwise cut the rest of the
+    line and everything shlex should still read on it.
+    """
+    out = []
+    quote = None
+    in_word = False
+    boundary = " \t\r\n();<>|&{}"
+    index, length = 0, len(code)
+    while index < length:
+        char = code[index]
+        if quote:
+            out.append(char)
+            if quote == '"' and char == "\\" and index + 1 < length:
+                index += 1
+                out.append(code[index])
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char == "\\" and index + 1 < length:
+            out.append(char)
+            index += 1
+            out.append(code[index])
+            index += 1
+            in_word = True
+            continue
+        if char in "'\"":
+            quote = char
+            out.append(char)
+            in_word = True
+            index += 1
+            continue
+        if char in boundary:
+            in_word = False
+            out.append(char)
+            index += 1
+            continue
+        if char == "#" and not in_word:
+            newline = code.find("\n", index)
+            index = length if newline == -1 else newline
+            continue
+        in_word = True
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 def expand(word, variables):
