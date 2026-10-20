@@ -4421,6 +4421,33 @@ impl Assembly {
     /// in pieces exactly where it could not be named whole. A run that closes up
     /// has one corner at both ends and goes right round, which needs no
     /// naming, and a straight one is named by its two ends alone.
+    ///
+    /// **Straight means [`Edge::runs_straight`], a pipe's ruling included, and
+    /// such a run folds a corner that no second lump has edges at, and whose
+    /// two sides are not both pieces of one input edge.** A plane resting
+    /// along a pipe's wall touches it all along a ruling, so the two are
+    /// tangent at both of that run's ends. Asked only whether the run lay on
+    /// two planes, the rule kept the corners on the ruling between the two
+    /// blocks of a slot end built in two steps, the bar united with one block
+    /// and then with a second stacked on it, and that answer came back with
+    /// 14 edges where the same solid built in one step has 12
+    /// (`a_slot_end_built_from_two_stacked_blocks.rs`, queue rows Q2406 and
+    /// Q2532). There the line the first block's side rests along the wall on
+    /// and the one the second block's side rests along meet at the first
+    /// answer's corner `(0, ±1, 2)`, and fold into one.
+    ///
+    /// A corner where a second lump's edges meet the ruling is where that
+    /// lump starts or stops touching it, and stays: a bar standing against a
+    /// block's wall that stops halfway up the bar's seam keeps the seam cut
+    /// where the wall's top edge meets it, one piece along the touch and one
+    /// above (`a_bar_whose_seam_runs_past_where_a_wall_stops_touching_it` in
+    /// `a_bar_lying_along_a_plane_or_a_bar.rs`, Q1761). **Two pieces of one
+    /// input edge stay in pieces too**, as they did before this rule asked
+    /// about straight runs, and that is kept for that pin and not for a reason
+    /// of its own: the bar less the cube there is the bar, one lump, and its
+    /// seam's two pieces either side of `(0, 2, 2)` fold back into the bar's
+    /// one seam. The pin asks for the two, and with the second lump's corners
+    /// alone kept the answer was one edge from `z = 1` to `z = 3` (Q2532).
     fn the_corners_of_each_run_between_two_tangent_points(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
@@ -4429,7 +4456,9 @@ impl Assembly {
         let runs = runs_through(self.edges.len(), leaving, straight_through);
         let mut corners_of_run: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
         let mut ends_of_run: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut lumps_at: BTreeMap<usize, usize> = BTreeMap::new();
         for (&(lump, corner), by) in leaving {
+            *lumps_at.entry(corner).or_default() += 1;
             if straight_through.contains(&(lump, corner)) {
                 corners_of_run
                     .entry(runs.leader(by[0]))
@@ -4444,21 +4473,29 @@ impl Assembly {
                 }
             }
         }
+        let in_a_second_lump = |corner: usize| lumps_at[&corner] > 1;
         corners_of_run
             .into_iter()
-            .filter(|(run, _)| {
-                let Some(&[one, other]) = ends_of_run.get(run).map(Vec::as_slice) else {
-                    return false;
+            .filter_map(|(run, corners)| {
+                let &[one, other] = ends_of_run.get(&run)?.as_slice() else {
+                    return None;
                 };
-                let edge = &self.edges[*run];
+                let edge = &self.edges[run];
                 let tangent_at = |corner: usize| {
                     let corner = &self.corners[corner];
                     the_way_the_crossing_runs(&edge.carried_by, corner, corner.point)
                         == Vector::zero()
                 };
-                one != other && !edge.lies_on_two_planes() && tangent_at(one) && tangent_at(other)
+                (one != other && !edge.lies_on_two_planes() && tangent_at(one) && tangent_at(other))
+                    .then_some((edge.runs_straight(), corners))
             })
-            .flat_map(|(_, corners)| corners)
+            .flat_map(|(straight, corners)| {
+                corners.into_iter().filter(move |&(lump, corner)| {
+                    !straight
+                        || in_a_second_lump(corner)
+                        || self.are_pieces_of_one_open_input_edge(&leaving[&(lump, corner)])
+                })
+            })
             .collect()
     }
 

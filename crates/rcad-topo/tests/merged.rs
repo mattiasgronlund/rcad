@@ -312,6 +312,8 @@ pub mod a_sliver_along_an_edge_of_a_face_it_lies_on;
 pub mod a_sliver_arc_on_a_joined_flat_face;
 #[path = "a_sliver_on_the_plane_of_a_face_it_misses.rs"]
 pub mod a_sliver_on_the_plane_of_a_face_it_misses;
+#[path = "a_slot_end_built_from_two_stacked_blocks.rs"]
+pub mod a_slot_end_built_from_two_stacked_blocks;
 #[path = "a_small_cap_cut_off_a_ball.rs"]
 pub mod a_small_cap_cut_off_a_ball;
 #[path = "a_solid_a_long_way_from_the_origin.rs"]
