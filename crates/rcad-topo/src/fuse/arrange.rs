@@ -5687,12 +5687,12 @@ impl<'f> Arrangement<'f> {
         })
     }
 
-    /// Which of two nodes on the loop a plane `S` cuts a cone or a pipe in
-    /// comes first, where each is where the loop meets a plane of its own, `P₁`
-    /// and `P₂`, and both hold the whole of the cone's or the pipe's axis:
-    /// read off the two planes' normals and which side of the axis each node
-    /// is on. `None` everywhere else, and wherever a sign it reads is not
-    /// proved.
+    /// Which of two nodes on the loop a plane `S` cuts a cone or a pipe in,
+    /// or on a circle two cones or pipes on one axis share, comes first, where
+    /// each is where the loop meets a plane of its own, `P₁` and `P₂`, and both
+    /// hold the whole of the axis: read off the two planes' normals and which
+    /// side of the axis each node is on. `None` everywhere else, and wherever
+    /// a sign it reads is not proved.
     ///
     /// **Round the axis the loop turns one way all the way round.** Each half
     /// of a plane through the axis, cut off by the axis, meets it once, so its
@@ -5702,10 +5702,21 @@ impl<'f> Arrangement<'f> {
     /// `det[w, p₁ − o, p₂ − o]`, which says which way round the axis `p₂` lies
     /// from `p₁`, is `t₁·t₂·|w|²·det[w, n₁, n₂]`. `det[w, n₁, n₂]` is worked
     /// out exactly, and `tᵢ` has the sign of `det[pᵢ − o, w, nᵢ]`, which the
-    /// node's box tells, since the node is the cone's or the pipe's radius off
-    /// the axis. The loop winds about `S`'s normal, faced as in
+    /// node's box tells, since the node is the loop's radius off the axis. The
+    /// loop winds about `S`'s normal, faced as in
     /// [`Arrangement::as_two_cuts_through_one_corner_say`], so it turns round
     /// `w` the way that normal faces along `w`, which is exact too.
+    ///
+    /// **Two cones or pipes on one axis cross in circles round it**, so the
+    /// same holds of such a circle with no plane `S`. It runs along
+    /// `∇W₀ × ∇W₁`, square to `w`, and turns round `w` the way
+    /// `det[w, pᵢ − o, ∇W₀ × ∇W₁]` says, read over each node's box and asked
+    /// to agree at both. Their axes are one line exactly as stored
+    /// ([`the_axis_two_round_surfaces_share`]), or this is not asked. A cone
+    /// and its bore share the circle where the cone is the bore's radius, and
+    /// two hollow quarters of it as above were refused on which of the two
+    /// side planes crosses that circle first, at the same eight turns, once
+    /// the cap circles answered.
     ///
     /// **From a start outside the short arc between the two nodes, the loop
     /// reaches first the one the other lies on from, the way the loop turns**,
@@ -5737,12 +5748,21 @@ impl<'f> Arrangement<'f> {
         else {
             return None;
         };
-        let (round, winds) = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
-            (Some(flat), None) => (&wound_as[1], flat.normal()),
-            (None, Some(flat)) => (&wound_as[0], -flat.normal()),
-            (Some(_), Some(_)) | (None, None) => return None,
+        let (axis, winds) = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) => (
+                the_axis_of_a_cone_or_a_pipe(&wound_as[1])?,
+                Some(flat.normal()),
+            ),
+            (None, Some(flat)) => (
+                the_axis_of_a_cone_or_a_pipe(&wound_as[0])?,
+                Some(-flat.normal()),
+            ),
+            (None, None) => (
+                the_axis_two_round_surfaces_share(&wound_as[0], &wound_as[1])?,
+                None,
+            ),
+            (Some(_), Some(_)) => return None,
         };
-        let axis = the_axis_of_a_cone_or_a_pipe(round)?;
         let (mine, theirs) = (
             self.the_cut_through_the_loop_at(first, wound_as)?,
             self.the_cut_through_the_loop_at(second, wound_as)?,
@@ -5773,7 +5793,28 @@ impl<'f> Arrangement<'f> {
             theirs.normal().components(),
             [0.0; 3],
         );
-        let turns = expansion_sign(&exactly_dotted(winds.components(), along)?);
+        let turns = match winds {
+            Some(winds) => expansion_sign(&exactly_dotted(winds.components(), along)?),
+            None => {
+                let [here, there] = [(first, one), (second, other)].map(|(at, off_the_axis)| {
+                    let place = self.nodes[at].point;
+                    let forward = cross_of_intervals(
+                        gradient_at(&wound_as[0], place).enclosure(),
+                        gradient_at(&wound_as[1], place).enclosure(),
+                    );
+                    orient3d_of_points(
+                        along.into(),
+                        off_the_axis,
+                        PredicatePoint::Constructed(forward),
+                        origin,
+                    )
+                });
+                if here != there {
+                    return None;
+                }
+                here
+            }
+        };
         let proved = |sign: &Decision| *sign == Decision::Pos || *sign == Decision::Neg;
         // Compared rather than matched: only proved signs are read, and every
         // other answer leaves the pair to the policy (§40).
@@ -14162,6 +14203,20 @@ fn holds_the_whole_of(flat: &Plane, axis: Axis) -> bool {
     exactly_dotted(flat.normal().components(), axis.direction().components())
         .is_some_and(|square| expansion_sign(&square) == Decision::Zero)
         && flat.side_of_point(PredicatePoint::from(axis.origin().coordinates())) == Decision::Zero
+}
+
+/// The one axis two cones or pipes stand on, `one`'s, where the two
+/// directions lie along one line ([`lie_along_one_line`]) and `other`'s origin
+/// is on `one`'s axis ([`lies_exactly_on_the_axis`]), both exactly as stored.
+/// `None` for any other pair, and where a product would round.
+fn the_axis_two_round_surfaces_share(one: &Surface, other: &Surface) -> Option<Axis> {
+    let (axis, its) = (
+        the_axis_of_a_cone_or_a_pipe(one)?,
+        the_axis_of_a_cone_or_a_pipe(other)?,
+    );
+    (lie_along_one_line(axis.direction().components(), its.direction().components())
+        && lies_exactly_on_the_axis(its.origin(), axis) == Some(true))
+    .then_some(axis)
 }
 
 /// The axis of a cone or a pipe, and `None` for every other surface.
