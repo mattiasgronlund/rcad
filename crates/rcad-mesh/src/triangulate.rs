@@ -2613,6 +2613,56 @@ mod tests {
         }
     }
 
+    /// Half the sliver of a unit ball past a plane through its south pole `S`
+    /// leaning `0.2`, turned a quarter round, as `rcad-topo` hands it over at a
+    /// deflection of an eighth: from the top of the rim, down the rim through
+    /// three points to `S`, along the pole side, and back up the cut through
+    /// one point. The rim is one closed edge through `S` that a flat disc holds
+    /// too, and the disc's own cut joins `S` to the third rim point on, two
+    /// ear cuts in a row. Before Q2178 this half drew that side as well, from
+    /// the far end of the pole side, and the sliver was refused
+    /// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`
+    /// (`a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`).
+    #[test]
+    fn no_side_joins_two_points_of_one_edge_that_are_not_next_to_each_other() {
+        let pole = -core::f64::consts::FRAC_PI_2;
+        let corners = vec![
+            [1.799_603_681_392_413_4, -1.180_955_867_379_615_7],
+            [1.341_988_972_197_379_4, -1.180_955_867_379_615_7],
+            [0.887_761_538_295_455_7, -1.258_881_553_552_104_3],
+            [0.440_977_470_274_844_9, -1.398_183_328_783_807],
+            [0.440_977_470_274_844_9, pole],
+            [core::f64::consts::FRAC_PI_2, pole],
+            [1.685_200_004_093_655, -1.375_876_097_087_256_1],
+        ];
+        // Each corner's place along the rim, counted from `S`; the point up
+        // the cut is on no rim.
+        let along_the_rim: [Option<u32>; 7] =
+            [Some(4), Some(3), Some(2), Some(1), Some(0), Some(0), None];
+        let ball = Sphere::new(Point::origin(), 1.0).expect("a unit ball");
+        let domain = TrimmedDomain::new(
+            Surface::from(ball),
+            crate::domain::Loop::through(corners).expect("seven corners"),
+            Vec::new(),
+            rcad_geom::Deflection::of(0.124_999_999_999_996).expect("a positive length"),
+        )
+        .with_corners_between_two_edges(vec![true, false, false, false, true, true, true]);
+        let patch = triangulate(&domain).expect("the half sliver is cut");
+
+        let place = |corner: u32| along_the_rim.get(corner as usize).copied().flatten();
+        for triangle in patch.triangles() {
+            for (from, to) in [(0, 1), (1, 2), (2, 0)] {
+                if let (Some(one), Some(other)) = (place(triangle[from]), place(triangle[to])) {
+                    assert!(
+                        one.abs_diff(other) <= 1,
+                        "triangle {triangle:?} joins rim points {one} and {other}, which have \
+                         rim points between them"
+                    );
+                }
+            }
+        }
+    }
+
     /// [`how_far_a_flat_piece_strays`]'s torus arm is a published bound, so here
     /// is the search that could find something over it (`docs/decisions.md`
     /// §15.6).
