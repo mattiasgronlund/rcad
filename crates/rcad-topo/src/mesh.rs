@@ -3877,13 +3877,16 @@ impl BuildingAMesh {
         // the reader and `validate.rs` read it (`docs/decisions.md` §329.1).
         //
         // A zipped band is not turned in the chart at all: its triangles use
-        // each side of either rim the way the rim runs, which is the face's way
-        // for the reason the fan below gives.
+        // each side of either rim the way the rim runs, which is the stored
+        // surface's way for the reason the fan below gives, so it is turned over
+        // on a face used reversed as the fan is. Unturned, the band a quarter of
+        // a bar placed a quarter turn round keeps in the hollow a bend leaves
+        // faced into the solid (Q2292).
         let inside_out = match how {
             HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder => {
                 face.orientation().is_reversed() != matches!(surface, Surface::Torus(_))
             }
-            HowToCut::ZipUpABand => false,
+            HowToCut::ZipUpABand => face.orientation().is_reversed(),
         };
         let against_its_loops = face.orientation().is_reversed();
         let there = back_out_of_the_frame_this_face_is_cut_up_in(face);
