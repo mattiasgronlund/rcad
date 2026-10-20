@@ -14229,7 +14229,40 @@ check-queue-page-selftest:
     ) || fail "parse_blocked_line or meeting_reason could not read one of the two cores-skip line forms §308"
     [ "$cores_check" = "ok" ] || fail "the cores-skip checks did not print ok: $cores_check"
 
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, and both forms of a cores-skip line read as a row waiting for threads"
+    # §2394 (§430.7): `queue blocked` also prints a third shape, for a row
+    # whose write set meets a pinned row that a running lane or a row held
+    # elsewhere already holds back. That line carries no `held by` tail, so
+    # it needs its own regex (PINNED_LINE) and its own branch in
+    # parse_blocked_line and meeting_reason; this drives both directly, the
+    # same way cores_check above drives the cores-skip shapes.
+    pinned_check=$(python3 - '{{ justfile_directory() }}/tooling/queue-page' <<'PY'
+    import sys
+
+    sys.path.insert(0, sys.argv[1])
+    import render
+
+
+    class Links:
+        def ref(self, row_id):
+            return f"<{row_id}>"
+
+
+    pinned = render.parse_blocked_line(
+        "skip Q3 (tier 1): its crates/t/tests/b.rs meets Q2's crates/t/tests/, pinned and skipped above")
+    assert pinned == {
+        "id": "Q3", "mine": "crates/t/tests/b.rs", "shared": False,
+        "holders": [("Q2", "crates/t/tests/", "pinned and skipped above", None)],
+    }, pinned
+    assert render.meeting_reason(pinned, Links()) == (
+        "meets <Q2>'s <code>crates/t/tests/</code>, pinned and skipped above"
+    ), render.meeting_reason(pinned, Links())
+
+    print("ok")
+    PY
+    ) || fail "parse_blocked_line or meeting_reason could not read the pinned-and-skipped-above line §430.7"
+    [ "$pinned_check" = "ok" ] || fail "the pinned-skip check did not print ok: $pinned_check"
+
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, both forms of a cores-skip line read as a row waiting for threads, and a row whose write set meets a pinned row already skipped reads as pinned and skipped above too"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
