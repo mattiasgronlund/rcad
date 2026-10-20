@@ -362,10 +362,12 @@ pub(crate) struct InputSide {
 /// the places and the sign tell apart sides it called one, and never join
 /// two it called apart, so the rule in `select` can lose a match it had and
 /// never gain one. A side the sign cannot name — a seam, or a pair it names
-/// nothing for — is left out, as the straight side below is. The answer's own
-/// naming stays [`Edges::of`]: an edge it builds from one corner to itself is
-/// meshed as a whole closed curve ([`WhichArc::TheOnlyOne`]), and splitting the
-/// name there would build a 2⁻⁵⁰ arc as a whole circle.
+/// nothing for — is left out, as the straight side below is. **The answer
+/// refuses such a side where a kept piece has it**
+/// ([`Corners::of_both_ends`], Q2193): an edge it builds from one corner to
+/// itself is meshed as a whole closed curve ([`WhichArc::TheOnlyOne`]), so
+/// either arc would be built as the whole circle. Here the split builds
+/// nothing, and refusing here would refuse a fuse over a piece no rule keeps.
 ///
 /// **A straight side whose two ends come out one corner is left out**, as
 /// [`sides_of`] leaves it out of a kept piece (§365.7). Two corners of two
@@ -623,9 +625,11 @@ impl Assembly {
     /// [`Invalid::DynamicRangeTooWide`] when the larger of `inputs_reach` and
     /// the answer's largest coordinate, over the answer's smallest feature, is
     /// more than `f64` carries, under a policy that fails on that.
-    /// [`Error::Geometry`] when two corners of the answer with different names
-    /// landed on the very same `f64` triple, which leaves an edge of no length
-    /// at all.
+    /// [`Error::Geometry`] when an edge runs between two corners of the answer
+    /// that sit on one `f64` triple, which leaves it no length at all. Two
+    /// names that land on one triple are one corner ([`Corners::of`]), so this
+    /// asks of two corners one of which moved onto a triple the other already
+    /// held ([`Corners::settle_on_the_lower_rounding`]).
     fn check_dynamic_range(
         &self,
         inputs_reach: f64,
@@ -639,7 +643,10 @@ impl Assembly {
             .fold(inputs_reach, f64::max);
         // A closed edge has one corner and a chord of zero, and that is not how
         // small it is — the same reasoning, and the same skip, as
-        // `Model::check_dynamic_range`.
+        // `Model::check_dynamic_range`. An edge from one corner to itself is
+        // always a closed one: a side between two names that came out one
+        // corner is left out on a plane and refused on a curved surface
+        // before an edge is built (`sides_of`, `Corners::of_both_ends`).
         let shortest_chord = self
             .edges
             .iter()
@@ -9398,7 +9405,11 @@ impl Edges {
     /// [`the_edge_each_side_of_every_piece_is`] both drop it — so one
     /// reaching here means a caller stopped doing that. A *closed* side is not
     /// one, which is why the two ends being the same corner is checked against
-    /// what carries it.
+    /// what carries it. A curved side whose ends are one corner reaches here
+    /// from [`sides_of`] only as one name, a closed curve: one of two names
+    /// that came out one corner is refused first ([`Corners::of_both_ends`]).
+    /// [`the_edge_each_side_of_every_piece_is`] names such a side itself and
+    /// does not ask.
     ///
     /// `turned_round` is whether the rule turns this face's piece round, which
     /// only a closed edge starting at a ball's pole needs to know — see
@@ -11162,6 +11173,12 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// answer's corners are written (`docs/decisions.md` §365.7). Every face that
 /// has the side names its two ends through the same [`Corners`], so every one
 /// of them leaves it out, and no edge is left with one face along it.
+///
+/// **A curved side whose two ends are two names and one corner is refused**,
+/// by [`Corners::of_both_ends`]. It has a length, so it cannot be left out,
+/// and an edge from that corner back to itself would be the whole closed
+/// curve and not the arc between the two places (Q2193). A curved side of one
+/// name at both ends is a closed curve, and is kept.
 ///
 /// **A pole of a ball kept whole is named here**, and not by [`Corners::of`].
 /// A pole is not an input corner to the arrangement, so the end arrives with
