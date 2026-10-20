@@ -16176,6 +16176,51 @@ check-queue-api-selftest:
     # pages stale. Released here so the checks below still see a fresh page.
     got=$(q "$hub" drop "$q_after_land" 230 2>&1) || fail "drop could not release $q_after_land"
 
+    # Q2283 (§263.4): an agent that dies before `git worktree remove` leaves
+    # its lane-<label> tree locked long past the point its own row closes --
+    # a merger's `done` or `drop`, committed to main while the dead tree still
+    # sits there. The plain `tree.is_lane` scan counted that tree regardless,
+    # on 2026-10-18 making three dispatches in a row count free slots by hand.
+    stale_done_wt="$lanes/stale-done"
+    g "$hub" worktree add -q -b lane-stale-done "$stale_done_wt" main && lock "$stale_done_wt"
+    got=$(q "$hub" add 3 opus - "from/- a row whose dead lane tree outlives its own done §230" 2>&1) \
+        || fail "add for the stale-done row failed"
+    q_stale_done=$got
+    before_stale_done=$(q "$hub" running --count) || fail "running --count failed before lane-stale-done was taken"
+    got=$(q "$hub" take "$q_stale_done" lane-stale-done 2>&1) || fail "take could not hold $q_stale_done on lane-stale-done"
+    g "$hub" commit -qam "$q_stale_done taken onto lane-stale-done"
+    sha=$(g "$hub" rev-parse HEAD)
+    got=$(q "$hub" done "$q_stale_done" "$sha" 2>&1) || fail "done refused $q_stale_done"
+    g "$hub" commit -qam "$q_stale_done done, lane-stale-done left locked"
+    after_stale_done=$(q "$hub" running --count) || fail "running --count failed after lane-stale-done's row closed"
+    [ "$after_stale_done" = "$before_stale_done" ] \
+        || fail "a dead lane tree whose row is done: on main still filled a slot ($before_stale_done -> $after_stale_done)"
+    got=$(q "$hub" running 2>&1) || fail "running failed with a done row's dead lane tree still locked"
+    grep -qxF "lane-stale-done  $stale_done_wt, closed: $q_stale_done is done:$sha, no slot" <<<"$got" \
+        || fail "a lane- tree whose row is done: on main was not marked closed in the listing"
+    grep -q "^lane-stale-done  .*no tree yet" <<<"$got" \
+        && fail "a done row's dead lane tree was also counted as treeless"
+
+    stale_dropped_wt="$lanes/stale-dropped"
+    g "$hub" worktree add -q -b lane-stale-dropped "$stale_dropped_wt" main && lock "$stale_dropped_wt"
+    got=$(q "$hub" add 3 opus - "from/- a row whose dead lane tree outlives its own drop §230" 2>&1) \
+        || fail "add for the stale-dropped row failed"
+    q_stale_dropped=$got
+    before_stale_dropped=$(q "$hub" running --count) || fail "running --count failed before lane-stale-dropped was taken"
+    got=$(q "$hub" take "$q_stale_dropped" lane-stale-dropped 2>&1) \
+        || fail "take could not hold $q_stale_dropped on lane-stale-dropped"
+    g "$hub" commit -qam "$q_stale_dropped taken onto lane-stale-dropped"
+    got=$(q "$hub" drop "$q_stale_dropped" 230 2>&1) || fail "drop refused $q_stale_dropped"
+    g "$hub" commit -qam "$q_stale_dropped dropped, lane-stale-dropped left locked"
+    after_stale_dropped=$(q "$hub" running --count) || fail "running --count failed after lane-stale-dropped's row closed"
+    [ "$after_stale_dropped" = "$before_stale_dropped" ] \
+        || fail "a dead lane tree whose row is dropped: on main still filled a slot ($before_stale_dropped -> $after_stale_dropped)"
+    got=$(q "$hub" running 2>&1) || fail "running failed with a dropped row's dead lane tree still locked"
+    grep -qxF "lane-stale-dropped  $stale_dropped_wt, closed: $q_stale_dropped is dropped:§230, no slot" <<<"$got" \
+        || fail "a lane- tree whose row is dropped: on main was not marked closed in the listing"
+    grep -q "^lane-stale-dropped  .*no tree yet" <<<"$got" \
+        && fail "a dropped row's dead lane tree was also counted as treeless"
+
     # §309.4: `apply`, all or nothing, and its own tests, last and in a fresh
     # worktree off the script's own main -- everything above has already taken,
     # closed or renumbered rows enough that reusing 'one' or 'two' here, or

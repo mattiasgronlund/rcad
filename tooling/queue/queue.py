@@ -1451,6 +1451,48 @@ def has_a_tree(branch, branches, trees, claimed, left):
     return False
 
 
+def row_on_branch(here, ref, branch):
+    """The id of the row `lane:<branch>` was ever written for, read from main's own history, or `None` (§263.4).
+
+    `git log -S` on that exact state text finds only the handful of commits
+    where it was added or removed, where walking every commit the file has
+    ever carried, the way `state_before_the_take` does for one row it already
+    knows, would mean reading thousands of them on every `running` call.
+    """
+    lane_state = f"lane:{branch}"
+    shas = git("log", "-S", lane_state, "--format=%H", ref, "--", here.relative, cwd=here.top).split()
+    for sha in shas:
+        text = git("show", f"{sha}:{here.relative}", cwd=here.top, check=False)
+        if lane_state in text:
+            for row in Queue(text).rows:
+                if row.state == lane_state:
+                    return row.id
+    return None
+
+
+def stale_lane_trees(here, ref, trees):
+    """Lane trees still locked whose own row is already closed on main: `(branch -> (row, path))` (§263.4).
+
+    An agent that dies before `git worktree remove` leaves its tree locked,
+    and the plain `tree.is_lane` scan in `running` still counts it, even once
+    a merger's `done` or `drop` has moved the row under `## Closed` and
+    released the claims hold that named it -- so nothing is left to read the
+    closed state off except the branch itself.
+    """
+    closed = {}
+    if ref is None:
+        return closed
+    current = Queue(git("show", f"{ref}:{here.relative}", cwd=here.top, check=False))
+    for tree in trees:
+        if not (tree.is_lane and tree.branch.startswith("lane-")):
+            continue
+        row_id = row_on_branch(here, ref, tree.branch)
+        row = current.find(row_id) if row_id else None
+        if row is not None and row.is_closed():
+            closed[tree.branch] = (row, tree.path)
+    return closed
+
+
 def running(here, args):
     """What holds a slot on this machine: every lane tree an agent holds, and every hold with no tree yet.
 
@@ -1464,12 +1506,19 @@ def running(here, args):
     A bundle of small rows is several holds on one branch, and one lane (§352),
     so holds are counted per branch: the rows sharing one are named together.
 
+    A lane tree whose own row is already `done:` or `dropped:` on main
+    (`stale_lane_trees`) holds no slot either: the agent that held it died
+    before removing the tree, past the point its row had anything left to run
+    (§263.4). It still gets a line, marked closed, so `running`'s plain
+    listing says why the tree is not in the count.
+
     `--count` prints the number alone, for `queue next`. Otherwise each hold a
     lane has narrowed (§424.7) gets a line of its own before the count.
     """
     trees = here.trees()
-    counted = [(tree.branch, tree.path) for tree in trees if tree.is_lane]
-    branches = {branch for branch, _ in counted}
+    closed = stale_lane_trees(here, main_ref(), trees)
+    counted = [(tree.branch, tree.path) for tree in trees if tree.is_lane and tree.branch not in closed]
+    branches = {tree.branch for tree in trees if tree.is_lane}
     holds = sorted(Claims(here.claims).holds().items())
     by_branch = {}
     for row_id, hold in holds:
@@ -1493,6 +1542,8 @@ def running(here, args):
         return
     for branch, where in counted:
         print(f"{branch}  {where}")
+    for branch, (row, path) in closed.items():
+        print(f"{branch}  {path}, closed: {row.id} is {row.state}, no slot")
     for row_id, hold in holds:
         if hold["write_set"] != hold["taken"]:
             print(f"{row_id} narrowed to {hold['write_set']} (taken with {hold['taken']})")
