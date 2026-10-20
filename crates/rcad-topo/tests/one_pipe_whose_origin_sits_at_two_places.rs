@@ -52,7 +52,9 @@
 //! cross (Q2461). The edge's other corner now says which half, and with the
 //! wall counted along a ruling all eight unions answer (Q2460). One answer
 //! does not measure: an arc of it names the spelling of the pipe that neither
-//! face along it is on.
+//! face along it is on. The pin was then refused telling the parts of the
+//! upright wall the halves cut apart, and the side of the plane each ellipse
+//! lies in now tells them apart, so the pin unites too (Q2464).
 //!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
@@ -903,8 +905,8 @@ fn a_bar_across_the_pipe(model: &mut Model) -> SolidKey {
 /// parts above and below them, and no half closes on its own, so none had a
 /// side to read that tells which of the four the pin's loop round
 /// `(0, 2, 5.5)` lies in. The two halves on one plane make a closed ellipse,
-/// and the side of that plane tells all four apart: only the part above is
-/// past both, as the loop is.
+/// and the side of that plane tells all four apart: only the part above is on
+/// the loop's side of both planes. Read so, both orders unite.
 #[test]
 fn a_pin_through_a_cross_of_two_bars_of_one_radius_unites_with_it() {
     let mut wrong = Vec::new();
