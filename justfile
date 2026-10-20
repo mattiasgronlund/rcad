@@ -18144,7 +18144,15 @@ check-land-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
     dir=$(realpath "$(mktemp -d)")
-    trap 'rm -rf "$dir"' EXIT
+    stopped_pids=""
+    reap_stopped() {
+        local pid
+        for pid in $stopped_pids; do
+            kill -9 -- "-$pid" 2>/dev/null || true
+        done
+    }
+    export -f reap_stopped
+    trap 'reap_stopped; rm -rf "$dir"' EXIT
     mkdir "$dir/bin"
     cat >"$dir/bin/just" <<'STUB'
     #!/usr/bin/env bash
@@ -18170,6 +18178,7 @@ check-land-selftest:
             shift 2
             if [ -e "$STUB_DIR/refuse-apply" ]; then
                 echo "queue apply: step 1 (done Q1) is refused: Q1 is closed already" >&2
+                echo "error: Recipe \`queue\` failed with exit code 1" >&2
                 exit 1
             fi
             printf 'apply %s\n' "$*" >>docs/queue.md
@@ -18178,6 +18187,9 @@ check-land-selftest:
             for word in "$@"; do
                 if [ "$verb" = 1 ] && [ "$word" = add ]; then
                     echo "Q$n"
+                    if [ -e "$STUB_DIR/tier-differs" ]; then
+                        printf '%s\n' '## Tier 5' '' '```' "Q$n   5    done:aaaaaaaa  sonnet  justfile  small a row readback found" '```' >>docs/queue.md
+                    fi
                     n=$((n + 1))
                 elif [ "$verb" = 1 ]; then
                     echo "$word: applied"
@@ -18481,6 +18493,16 @@ check-land-selftest:
     touch "$at/stub/refuse-apply"
     run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped queue-apply
+    [ "$(field not_merged_because)" = "just queue apply refused the batch: queue apply: step 1 (done Q1) is refused: Q1 is closed already" ] \
+        || fail "the queue-apply stop names just's own wrapper line instead of the recipe's reason: $(field not_merged_because)"
+
+    fixture tier-readback
+    touch "$at/stub/tier-differs"
+    printf '%s\n' add 2.2 sonnet justfile 'small a row the lane left, ending in §384' >"$at/lander/target/land-steps.txt"
+    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lane whose added row lands at another tier did not merge"
+    [ "$(field rows_added)" = '["Q900 tier 5 sonnet: from/Q1 small a row the lane left, ending in §384"]' ] \
+        || fail "rows_added is $(field rows_added), not the row's own tier 5 read back from docs/queue.md"
 
     fixture check-queue
     touch "$at/stub/check-queue-fails"
@@ -18492,6 +18514,12 @@ check-land-selftest:
     run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped gate
     [ "$(field not_merged_because)" = "gate: FAIL  first failure: test (exit 100)" ] || fail "the gate stop does not carry the gate's FAIL line"
+    [ -z "$(git -C "$at/lander" branch --show-current)" ] \
+        || fail "the lander tree is still on a branch after a stop past its merge commit, so prune-worktrees would keep it (§384.5)"
+    [ "$(git -C "$at/lander" rev-parse HEAD)" = "$(git -C "$at/origin.git" rev-parse main)" ] \
+        || fail "the lander tree is not detached at origin/main after a stop past its merge commit"
+    [ "$(git -C "$at/lander" rev-parse merge-x^2)" = "$lane_sha" ] \
+        || fail "merge-x no longer holds the merge commit with the lane's tip as its second parent"
 
     fixture attempts-over-code
     echo code >"$at/stub/race"
@@ -18576,6 +18604,7 @@ check-land-selftest:
     start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
     waiter=$(cat "$at/lander2/target/land/pid")
     kill -STOP -- "-$waiter"
+    stopped_pids="$stopped_pids $waiter"
     wait_stopped "$waiter"
     release_lock
     land_in verify 0.5 wait-for lane-y
@@ -18599,6 +18628,21 @@ check-land-selftest:
     [ "$rc" -eq 0 ] || fail "wait-for exited $rc once no run was landing lane-y, not 0"
     grep -qxF 'land: no run is landing lane-y; fetch origin before you read origin/main' <<<"$got" \
         || fail "wait-for does not say that no run is landing lane-y"
+    setsid sleep 300 &
+    demo_pid=$!
+    disown "$demo_pid"
+    sleep 0.1
+    kill -STOP -- "-$demo_pid"
+    wait_stopped "$demo_pid"
+    STOPPED_DEMO_PID="$demo_pid" bash -c '
+        set -euo pipefail
+        stopped_pids="$STOPPED_DEMO_PID"
+        trap reap_stopped EXIT
+        exit 1
+    ' || true
+    sleep 0.2
+    ! kill -0 "$demo_pid" 2>/dev/null \
+        || fail "a fail forced between the two kills left pid $demo_pid stopped instead of reaped (§397.5)"
 
     fixture killed-holder
     second_lane
@@ -18670,7 +18714,7 @@ check-land-selftest:
     wait_for lander2
     [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the second lane did not land beside a spool entry with no answers"
     spool_empty
-    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, outlives a killed follower, wait-for waits on a live entry and on a held lock, closes the open rows a lane answers in its queue apply and names the others, and lands a spool entry an older land.py wrote"
+    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, detaches to origin/main with the merge branch still holding the merge commit on a stop past it, names a stopped recipe's own reason rather than just's wrapper line, reads an added row's own tier back from docs/queue.md, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, outlives a killed follower, wait-for waits on a live entry and on a held lock, closes the open rows a lane answers in its queue apply and names the others, and lands a spool entry an older land.py wrote"
 
 # A verifier's fixed steps for one lane, run for it (§383.4 item 4, §385): unlock
 # the lane's tree, `git log` from the base to the branch, the files outside the

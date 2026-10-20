@@ -261,11 +261,11 @@ pub(crate) struct BakedEdge {
     /// face across, and one along which the two surfaces touch rather than
     /// cross.
     pub(crate) inside_across: Option<bool>,
-    /// The cuts the face on the other side of this edge leaves out as meeting
-    /// it on its boundary alone ([`BakedFace::cuts_that_reach_only_its_boundary`]),
-    /// filled in by the gathering step. A crossing that ends on this edge
-    /// splits it on that side only if it is in here, so it may be left out on
-    /// this side too.
+    /// The cuts the face on the other side of this edge does leave out,
+    /// drawing no crossing of them at all, worked out to a fixed point by
+    /// [`tell_each_edge_what_its_neighbour_leaves_out`](super::cuts::tell_each_edge_what_its_neighbour_leaves_out)
+    /// in `fuse/cuts.rs`. A crossing that ends on this edge splits it on that
+    /// side only if it is in here, so it may be left out on this side too.
     pub(crate) its_neighbour_leaves_out: Vec<Surface>,
 }
 
