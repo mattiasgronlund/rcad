@@ -12888,11 +12888,11 @@ _queue-rows file:
 # that meets no running lane, no row taken above it and no pinned row skipped
 # above it, and every row it passes over says which of its entries met which.
 # N defaults to the free slots. `blocked` prints the line `next` passes a row
-# over with, for every ready row whose write set meets a running lane's, as if
-# nothing were taken or skipped above it: the rows a fill holds back however
-# many slots are free, less those only a skipped pinned row holds back. The
-# queue page reads it (Q1510), so the rule for when two write sets meet stays
-# here alone.
+# over with, for every ready row whose write set meets a running lane's or a
+# pinned row's a running lane or a row held elsewhere already holds back, as
+# if nothing were taken above it: the rows a fill holds back however many
+# slots are free (§430.7). The queue page reads it (Q1510), so the rule for
+# when two write sets meet stays here alone.
 #
 # **The order comes from the tier field, not from where a row sits.**
 # `check-queue` makes the two agree, but the fill does not lean on that having
@@ -13041,7 +13041,7 @@ queue mode="" *args:
             printf '%s\n' \
                 'just queue                                   ready rows by tier, then running, waiting, parked' \
                 'just queue ready                             the ready rows alone, for status to show' \
-                'just queue blocked                           each ready row a running lane holds back, as next would skip it' \
+                'just queue blocked                           each ready row a running lane, a row held elsewhere or a pin they hold back keeps out, as next would skip it' \
                 'just queue next [N]                          what N free slots take; N defaults to the free slots on this machine' \
                 'just queue show <id>                         one row, its hold, and its state in other worktrees' \
                 'just queue running                           what holds a slot on this machine, one line each' \
@@ -13216,7 +13216,11 @@ queue mode="" *args:
             }
 
             if (mode == "blocked") {
-                for (x = 1; x <= w; x++) blocked(walk[x], 1)
+                for (x = 1; x <= pinned_n; x++) {
+                    i = walk[x]
+                    if (blocked(i, 1)) pinheld[++pinheld_n] = i
+                }
+                for (x = pinned_n + 1; x <= w; x++) blocked(walk[x], 1)
                 exit 0
             }
 
@@ -14535,7 +14539,8 @@ _queue-check file decisions:
 # write set, skipped with the pinned row named: a later pin, a wrong/A row, a
 # small row that would complete the full bundle, and a third holder of a shared
 # file the pin names; a second holder of that file and the rows that meet no pin
-# are taken, and `blocked` still names the running lane alone. §432 adds the
+# are taken. `blocked` now records the pin too, and each later row that meets
+# it, with a third line shape (Q2394). §432 adds the
 # word that says where a row came from, after a pin and a class, after `small`, and on a closed
 # row; a `from/` naming a Q row this copy does not hold, passed; and a malformed
 # word, `was/-`, a row from itself, a T id that is no row and a class written
@@ -15011,8 +15016,12 @@ check-queue-selftest:
     grep -qx 'took 3 of 4: every other ready row meets a running lane, a row taken above or a pinned row skipped above' <<<"$got" \
         || fail "a fill a skipped pinned row cut short did not say a pinned row is among the reasons"
     drive pinwait blocked
-    [ "$got" = "skip Q2 (tier 1): its crates/t/tests/ meets Q1's crates/t/tests/a.rs, held by lane:lane-q1" ] \
-        || fail "blocked no longer names the running lane alone, the two line shapes the queue page reads"
+    [ "$got" = "$(printf '%s\n' \
+        "skip Q2 (tier 1): its crates/t/tests/ meets Q1's crates/t/tests/a.rs, held by lane:lane-q1" \
+        "skip Q3 (tier 1): its crates/t/tests/b.rs meets Q2's crates/t/tests/, pinned and skipped above" \
+        "skip Q4 (tier 1): its crates/t/tests/c.rs meets Q2's crates/t/tests/, pinned and skipped above" \
+        "skip Q7 (tier 2): its crates/t/tests/d.rs meets Q2's crates/t/tests/, pinned and skipped above")" ] \
+        || fail "blocked did not record the pinned row a running lane holds back, or each later row that meets it (§430.7)"
 
     fence partial <<'MD'
     Q1  1  todo  opus  docs/a.md  tier one §230
