@@ -19,7 +19,7 @@
 //!
 //! # What this keeps
 //!
-//! Two things, because they answer two different questions.
+//! Three things, because they answer three different questions.
 //!
 //! A **histogram**, sixteen buckets to the octave, so a percentile can be read
 //! off at the end. It is fixed-size and costs one add per run, which is what
@@ -28,6 +28,14 @@
 //! The **slowest runs themselves**, kept in full so they can be handed straight
 //! back to `cargo fuzz run`. A percentile names how slow the slow ones were; it
 //! cannot name *which*, and which is the thing somebody then goes and reads.
+//!
+//! One job's own **start time and the gap its last periodic merge closed**,
+//! one small file per process. `fuzz.log` records only a job's ending, not its
+//! start, and a `-timeout`, a crash or an out-of-memory ends in `_Exit`, which
+//! runs no destructor — so without this, a job lost that way left nothing on
+//! disk at all. Written at every periodic merge rather than only when
+//! [`MergeWhenThisThreadEnds`] runs, so the file still holds the job's last
+//! known tick even where that destructor never does (§269.8).
 //!
 //! # Many processes write here, and that is the hard part
 //!
@@ -81,7 +89,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// How many of the slowest runs are kept, where `RCAD_FUZZ_SLOWEST` says nothing.
 pub const HOW_MANY_SLOW_RUNS_TO_KEEP: usize = 64;
@@ -152,10 +160,9 @@ struct MergeWhenThisThreadEnds;
 impl Drop for MergeWhenThisThreadEnds {
     fn drop(&mut self) {
         if let Some(Some(watch)) = WATCH.get() {
-            watch
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .merge_out();
+            let mut watch = watch.lock().unwrap_or_else(PoisonError::into_inner);
+            watch.merge_out();
+            watch.forget_job_progress();
         }
     }
 }
@@ -229,6 +236,14 @@ struct Watch {
     took: HowLongRunsTook,
     slowest: TheSlowestRuns,
     last_merged: Instant,
+    /// When this process's own watch was made — its job's start, in wall-clock
+    /// time, so it can be lined up against `fuzz.log`'s.
+    started: SystemTime,
+    /// How long the periodic merge that just closed had been waiting since the
+    /// one before it. Set in [`Watch::record`], before `last_merged` is moved
+    /// on, so it is the gap that merge closed and not the (near-zero) one
+    /// still open.
+    last_merge_gap: Duration,
 }
 
 impl Watch {
@@ -249,6 +264,8 @@ impl Watch {
             took: HowLongRunsTook::new(),
             slowest: TheSlowestRuns::keeping(keep),
             last_merged: Instant::now(),
+            started: SystemTime::now(),
+            last_merge_gap: Duration::ZERO,
         }
     }
 
@@ -259,6 +276,7 @@ impl Watch {
         self.took.record(took);
         self.slowest.offer(took, bytes);
         if now.duration_since(self.last_merged) >= HOW_OFTEN_TO_MERGE {
+            self.last_merge_gap = now.duration_since(self.last_merged);
             self.last_merged = now;
             self.merge_out();
         }
@@ -294,6 +312,8 @@ impl Watch {
     /// Everything this allocates is freed before it returns, which is what
     /// lets it run inside a draw ([`HOW_OFTEN_TO_MERGE`]).
     fn merge_out(&mut self) {
+        self.write_job_progress();
+
         if self.took.runs == 0 && self.slowest.all_written() {
             return;
         }
@@ -332,6 +352,58 @@ impl Watch {
 
         let _ = lock.unlock();
     }
+
+    /// This job's own start time and the gap its last periodic merge closed,
+    /// written at every merge rather than only when
+    /// [`MergeWhenThisThreadEnds`] runs — which a `-timeout`, a crash or an
+    /// out-of-memory's `_Exit` skips entirely, destructor and all (§269.8,
+    /// Q2383). `fuzz.log` records only a job's ending; this is what a reader
+    /// lines that ending up against, to ask whether a lost job's runs fit
+    /// inside one periodic-merge gap or not.
+    ///
+    /// One file per process, named for its pid, so no two processes ever
+    /// write the same name and this needs none of
+    /// [`the_shared_report_locked`]'s lock. [`Watch::forget_job_progress`]
+    /// removes it once a process reaches that destructor, since a job that
+    /// got there is already folded into `totals` in full — only a job this
+    /// crate never heard exit again is worth a file.
+    fn write_job_progress(&self) {
+        let jobs = self.into.join("jobs");
+        if std::fs::create_dir_all(&jobs).is_err() {
+            return;
+        }
+        let pid = std::process::id();
+        let text = format!(
+            "started {}\nlast_merged {}\ngap {}\n",
+            nanos_since_epoch(self.started),
+            nanos_since_epoch(SystemTime::now()),
+            self.last_merge_gap.as_nanos(),
+        );
+        let _ = replace_whole(
+            &jobs.join(format!("{pid}-being-written")),
+            &jobs.join(pid.to_string()),
+            text.as_bytes(),
+        );
+    }
+
+    /// Remove this job's own progress file. Called once
+    /// [`Watch::merge_out`] has folded its last runs into `totals` on the one
+    /// path ([`MergeWhenThisThreadEnds`]'s `Drop`) that can still run it: a
+    /// job that reaches its own destructor needs no record of where it was
+    /// mid-run, since `totals` already has all of it.
+    fn forget_job_progress(&self) {
+        let pid = std::process::id();
+        let _ = std::fs::remove_file(self.into.join("jobs").join(pid.to_string()));
+    }
+}
+
+/// Nanoseconds since the Unix epoch, so a job's wall-clock progress lines up
+/// with `fuzz.log`'s own clock (§269.8). A clock set before 1970 reads as the
+/// epoch itself rather than panicking — not a case a fuzzing machine is in.
+fn nanos_since_epoch(when: SystemTime) -> u128 {
+    when.duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
 }
 
 /// Write one slow input's bytes under its real name, so a reader never sees
@@ -930,6 +1002,70 @@ mod tests {
         assert_eq!(
             watch.took.runs, 1,
             "a second merge was made in the same second as the first"
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn a_jobs_start_and_last_merge_are_written_at_every_periodic_merge_not_only_at_exit() {
+        // §269.8, Q2383: a `-timeout`, a crash or an out-of-memory ends in
+        // `_Exit`, which runs no destructor — `MergeWhenThisThreadEnds`
+        // included — so a job lost that way used to leave nothing behind
+        // saying when it started or how recently it had last merged.
+        // `fuzz.log` records only a job's own ending, and Q2220 found that
+        // rebuilding a start from completion order is unreliable. Writing
+        // this at every periodic merge, not only at the destructor, means a
+        // killed job's file still holds its last tick.
+        let into = somewhere_to_write("job-progress");
+        let mut watch = a_process_writing_into(&into, 4);
+        let job_file = into.join("jobs").join(std::process::id().to_string());
+        assert!(
+            !job_file.exists(),
+            "a job's progress was written before its very first periodic merge"
+        );
+
+        let due = watch.last_merged + HOW_OFTEN_TO_MERGE;
+        watch.record(Duration::from_millis(2), b"first tick", due);
+        let first = std::fs::read_to_string(&job_file).expect(
+            "the job's start and last-merge time were not written at its first periodic merge",
+        );
+        assert!(first.starts_with("started "), "{first}");
+        assert!(first.contains("last_merged "), "{first}");
+        assert!(first.contains("gap "), "{first}");
+
+        std::thread::sleep(Duration::from_millis(2));
+        let due_again = due + HOW_OFTEN_TO_MERGE;
+        watch.record(Duration::from_millis(2), b"second tick", due_again);
+        let second = std::fs::read_to_string(&job_file)
+            .expect("a job progress file after a second periodic merge");
+        assert_ne!(
+            first, second,
+            "the job's last-merge time did not move between two periodic merges, \
+             so it was written once rather than continuously"
+        );
+        let _ = std::fs::remove_dir_all(&into);
+    }
+
+    #[test]
+    fn a_jobs_progress_file_is_forgotten_once_its_destructor_merges_it_for_the_last_time() {
+        // A job that reaches `MergeWhenThisThreadEnds`'s `Drop` is already
+        // folded into `totals` in full, so its progress file would do
+        // nothing but accumulate — one for every one of the forty thousand
+        // processes a `-fork` night runs (§1-§78 of this file's own doc
+        // comment) — if nothing ever removed it.
+        let into = somewhere_to_write("job-progress-forgotten");
+        let watch = a_process_writing_into(&into, 4);
+        let job_file = into.join("jobs").join(std::process::id().to_string());
+        watch.write_job_progress();
+        assert!(
+            job_file.exists(),
+            "the progress file should exist right after a periodic merge"
+        );
+
+        watch.forget_job_progress();
+        assert!(
+            !job_file.exists(),
+            "the progress file should be gone once the job's destructor has merged it for the last time"
         );
         let _ = std::fs::remove_dir_all(&into);
     }
