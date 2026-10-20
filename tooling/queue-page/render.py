@@ -68,13 +68,25 @@ import lineage  # noqa: E402
 
 QUEUE_PATH = "docs/queue.md"
 CLOSED_ROWS_SHOWN = 12
-# The two lines `just queue blocked` prints: a row's path meets one hold, or it
-# is one of `queue_shared_files` and two holds already have it (§424.4). The
-# blocked mode takes no row, so neither names a row taken above.
+# The three lines `just queue blocked` prints: a row's path meets one hold, it
+# is one of `queue_shared_files` and two holds already have it (§424.4), or its
+# `cores:` entry does not fit the machine's free threads (§308). The blocked
+# mode takes no row, so none of the three names a row taken above for the
+# first two; only the third can, since a `cores:` hold is a sum, not a path.
 MEETS_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), held (by|elsewhere by) (\S+)$")
 SHARED_LINE = re.compile(
     r"^skip (\S+) \(tier (\S+)\): its (\S+) is shared, and "
     r"(\S+) \(held (by|elsewhere by) (\S+)\) and (\S+) \(held (by|elsewhere by) (\S+)\) already hold it$")
+# `names` (justfile's `cores_fit_skip`) is a comma-joined mix of three kinds of
+# item: the literal "the night fuzz", "<id> (held by <state>)" or "<id> (held
+# elsewhere by <state>)" for a running row, and "<id> (taken above)" for one
+# the fill already walked past. CORES_LINE takes the whole tail as one group,
+# and CORES_HELD_ITEM/CORES_TAKEN_ITEM split it back up after the ", " split,
+# since a state like `lane:lane-q90` cannot itself contain ", ".
+CORES_LINE = re.compile(
+    r"^skip (\S+) \(tier (\S+)\): its cores:(\S+) does not fit the (\d+) threads of the machine: (.+) holds them$")
+CORES_HELD_ITEM = re.compile(r"^(\S+) \(held (by|elsewhere by) (\S+)\)$")
+CORES_TAKEN_ITEM = re.compile(r"^(\S+) \(taken above\)$")
 ANY_ROW_ID = re.compile(r"^[TDQ][0-9]+$")
 ROW_REF = re.compile(r"(?<![0-9A-Za-z])Q[0-9]+(?![0-9A-Za-z])")
 
@@ -399,19 +411,45 @@ def blocked_lines(tree):
          "--working-directory", tree.path, "queue", "blocked"],
         capture_output=True, text=True)
     assert result.returncode == 0, f"`just queue blocked` failed on main's own copy in {tree.path}: {result.stderr.strip()}"
-    lines = []
-    for line in result.stdout.splitlines():
-        meets = MEETS_LINE.match(line)
-        shared = SHARED_LINE.match(line)
-        assert meets or shared, f"`just queue blocked` printed a line this cannot read: {line!r}"
-        if meets:
-            row_id, _, mine, other, theirs, how, holder = meets.groups()
-            lines.append({"id": row_id, "mine": mine, "shared": False, "holders": [(other, theirs, how, holder)]})
-        else:
-            row_id, _, mine, first, first_how, first_holder, second, second_how, second_holder = shared.groups()
-            lines.append({"id": row_id, "mine": mine, "shared": True,
-                          "holders": [(first, None, first_how, first_holder), (second, None, second_how, second_holder)]})
-    return lines
+    return [parse_blocked_line(line) for line in result.stdout.splitlines()]
+
+
+def parse_blocked_line(line):
+    """One line of `just queue blocked`'s output, as a dict the rest of this module reads.
+
+    `shared` tells the three shapes apart: `False` for one hold met, `True`
+    for a shared path two holds already have, and the string `"cores"` for a
+    `cores:` entry that does not fit the machine's free threads (§308).
+    `holders` is always a list of `(id-or-"the night fuzz", path-or-None, how,
+    holder)` tuples; `how` is `None` for the night fuzz, `"taken above"` for a
+    row the fill already walked past, and otherwise `"by"` or `"elsewhere by"`
+    as the justfile prints it.
+    """
+    meets = MEETS_LINE.match(line)
+    if meets:
+        row_id, _, mine, other, theirs, how, holder = meets.groups()
+        return {"id": row_id, "mine": mine, "shared": False, "holders": [(other, theirs, how, holder)]}
+    shared = SHARED_LINE.match(line)
+    if shared:
+        row_id, _, mine, first, first_how, first_holder, second, second_how, second_holder = shared.groups()
+        return {"id": row_id, "mine": mine, "shared": True,
+                "holders": [(first, None, first_how, first_holder), (second, None, second_how, second_holder)]}
+    cores = CORES_LINE.match(line)
+    assert cores, f"`just queue blocked` printed a line this cannot read: {line!r}"
+    row_id, _, need, threads, names = cores.groups()
+    holders = []
+    for item in names.split(", "):
+        if item == "the night fuzz":
+            holders.append(("the night fuzz", None, None, None))
+            continue
+        held = CORES_HELD_ITEM.match(item)
+        if held:
+            holders.append((held.group(1), None, held.group(2), held.group(3)))
+            continue
+        taken = CORES_TAKEN_ITEM.match(item)
+        assert taken, f"`just queue blocked` printed a cores-skip line this cannot read: {line!r}"
+        holders.append((taken.group(1), None, "taken above", None))
+    return {"id": row_id, "mine": f"cores:{need}", "shared": "cores", "threads": threads, "holders": holders}
 
 
 def closed_rows(tip):
@@ -768,12 +806,31 @@ def reasons_not_taken(groups, links):
 
 
 def meeting_reason(line, links):
+    if line["shared"] == "cores":
+        holders = join_and(cores_holder_text(other, how, holder, links) for other, _, how, holder in line["holders"])
+        return (f"waits for threads: <code>{html.escape(line['mine'])}</code> does not fit the "
+                f"{html.escape(line['threads'])} threads of the machine, held by {holders}")
     if line["shared"]:
         holders = " and ".join(f"{links.ref(other)} (held {how} <code>{html.escape(holder)}</code>)"
                                for other, _, how, holder in line["holders"])
         return f"<code>{html.escape(line['mine'])}</code> is shared, and {holders} already hold it"
     ((other, theirs, how, holder),) = line["holders"]
     return f"meets {links.ref(other)}'s <code>{html.escape(theirs)}</code>, held {how} <code>{html.escape(holder)}</code>"
+
+
+def cores_holder_text(other, how, holder, links):
+    if how is None:
+        return "the night fuzz"
+    if how == "taken above":
+        return f"{links.ref(other)} (taken above)"
+    return f"{links.ref(other)} (held {how} <code>{html.escape(holder)}</code>)"
+
+
+def join_and(parts):
+    parts = list(parts)
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
 def not_taken_group(title, reasons, links):
