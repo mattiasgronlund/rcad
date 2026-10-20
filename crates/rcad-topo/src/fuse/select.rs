@@ -2660,10 +2660,11 @@ fn the_piece_holds(
     }
 }
 
-/// Whether a piece of `pipe` whose sides are rulings and arcs of planes across
-/// its axis holds `point`, counted along the ruling through it: how many arcs
-/// that ruling meets above `point`, odd being held. `None` for a piece with a
-/// side of any other kind, and where a sign cannot be settled.
+/// Whether a piece of `pipe` whose sides are rulings, arcs of planes across its
+/// axis and whole curves such planes cut holds `point`, counted along the
+/// ruling through it: how many arcs and whole curves that ruling meets above
+/// `point`, odd being held. `None` for a piece with a side of any other kind,
+/// and where a sign cannot be settled.
 ///
 /// It is `holds.rs`'s count along a ruling for a solid's face
 /// (`how_often_the_ruling_above_a_point_is_crossed`), read off a piece's sides.
@@ -2684,6 +2685,14 @@ fn the_piece_holds(
 /// its positive side and `w·n` positive, and clockwise otherwise. A
 /// counterclockwise side keeps the sign `Neg` against its chord.
 ///
+/// **A whole curve meets every ruling once**, since seen down the axis it goes
+/// right round the circle, and it has no chord to read. A bar standing on a
+/// block's top flush with the block's side has its wall cut along the ruling
+/// where that side's plane rests on it, from the foot's circle to the top's,
+/// and both circles are whole: read off a chord of no length, every point of
+/// the wall was left undecided and every rule refused
+/// (`a_bar_standing_on_a_blocks_top_flush_with_its_edge_answers_every_rule`).
+///
 /// **A ruling side is not counted.** The ruling through `point` meets it only
 /// where `point` is on it, and then `point` is on the ruling through a corner
 /// of each arc the side ends at, where that arc's chord reads nothing and this
@@ -2702,20 +2711,8 @@ fn counted_along_the_ruling(piece: &Piece, pipe: &Cylinder, point: PredicatePoin
         if !matches!(leans, Decision::Pos | Decision::Neg) {
             return None;
         }
-        let keeps = if (side.material_side == Decision::Neg) == (leans == Decision::Neg) {
-            Decision::Neg
-        } else {
-            Decision::Pos
-        };
-        let [from, to] = side.ends.each_ref().map(|end| end.point().enclosure());
-        let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
-        let off_the_start = core::array::from_fn(|axis| at[axis] - from[axis]);
-        let reads = dot(up, cross(chord, off_the_start)).sign();
-        if reads != keeps {
-            if matches!(reads, Decision::Pos | Decision::Neg) {
-                continue;
-            }
-            return None;
+        if !closes_on_itself(side) && !the_ruling_meets_the_arc(side, leans, up, at)? {
+            continue;
         }
         let beyond = side_of_a_flat_face(flat, point);
         if !matches!(beyond, Decision::Pos | Decision::Neg) {
@@ -2726,6 +2723,31 @@ fn counted_along_the_ruling(piece: &Piece, pipe: &Cylinder, point: PredicatePoin
         }
     }
     Some(above % 2 == 1)
+}
+
+/// Whether the ruling through `at` meets the arc `side` runs along, a plane
+/// leaning `leans` against the axis `up` being its partner: whether `at` is on
+/// the arc's side of its chord seen down the axis, as
+/// [`counted_along_the_ruling`] sets out. `None` where that sign cannot be
+/// settled.
+fn the_ruling_meets_the_arc(
+    side: &FaceMeet,
+    leans: Decision,
+    up: [Interval; 3],
+    at: [Interval; 3],
+) -> Option<bool> {
+    let keeps = if (side.material_side == Decision::Neg) == (leans == Decision::Neg) {
+        Decision::Neg
+    } else {
+        Decision::Pos
+    };
+    let [from, to] = side.ends.each_ref().map(|end| end.point().enclosure());
+    let chord = core::array::from_fn(|axis| to[axis] - from[axis]);
+    let off_the_start = core::array::from_fn(|axis| at[axis] - from[axis]);
+    match dot(up, cross(chord, off_the_start)).sign() {
+        reads @ (Decision::Pos | Decision::Neg) => Some(reads == keeps),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    }
 }
 
 /// Whether a flat piece's material is inside what `wire`, one whole closed
