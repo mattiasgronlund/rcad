@@ -8501,7 +8501,10 @@ impl<'f> Arrangement<'f> {
     /// not drawn, so the sign says the same thing on both sides of the face's
     /// own rim: the count is what tells the inside from the outside there.
     /// It follows the rim's curved sides as well as its corners
-    /// ([`Arrangement::how_often_the_faces_rim_winds_round`]).
+    /// ([`Arrangement::how_often_the_faces_rim_winds_round`]). Where it is
+    /// settled at no node of the lump, it is counted inside a circle or an
+    /// ellipse of it instead
+    /// ([`Arrangement::how_often_the_rim_winds_round_inside_a_round_curve`]).
     ///
     /// **The first curved face with an open boundary edge falsifies the first
     /// half of that**, and it is a face this fuse cuts and hands back — so lane
@@ -8569,14 +8572,21 @@ impl<'f> Arrangement<'f> {
                 Some(0)
             } else {
                 flat.as_ref().and_then(|(in_plane, ways)| {
-                    nodes.iter().find_map(|&node| {
-                        self.how_often_the_faces_rim_winds_round(
-                            in_plane,
-                            &rim,
-                            ways,
-                            self.nodes[node].point,
-                        )
-                    })
+                    nodes
+                        .iter()
+                        .find_map(|&node| {
+                            self.how_often_the_faces_rim_winds_round(
+                                in_plane,
+                                &rim,
+                                ways,
+                                self.nodes[node].point,
+                            )
+                        })
+                        .or_else(|| {
+                            self.how_often_the_rim_winds_round_inside_a_round_curve(
+                                in_plane, &rim, ways, &its_walks,
+                            )
+                        })
                 })
             };
             let Some(held) = held else {
@@ -8586,6 +8596,93 @@ impl<'f> Arrangement<'f> {
                 self.winding_of_cycle[cycle] = Some(held);
             }
         }
+    }
+
+    /// On a flat face: how often the face's rim winds round the lump `walks`
+    /// go round, counted at a point inside a circle or an ellipse of the lump;
+    /// `None` where no curve of it is a pipe's or a ball's, or nothing proves
+    /// the rim clear of the inside of the curve, or the count is not settled.
+    ///
+    /// **The rim winds as often round the inside of the curve as round the
+    /// curve.** The lump meets no side of the rim, or the two would share a
+    /// node and be one lump, so neither does the curve, which is drawn whole.
+    /// Each wire of the rim is then wholly inside the curve or wholly outside
+    /// it, and one with a corner proved outside the pipe or the ball is
+    /// outside it. With every wire outside, nothing of the rim is on the curve
+    /// or inside it, so the count is the same everywhere there. The point it
+    /// is counted at is near where the pipe's axis meets the face's plane, or
+    /// the foot of the ball's centre on it, worked out in `f64` and trusted
+    /// for nothing: its box stretched to the plane is proved inside the pipe
+    /// or the ball, and so is every point of the plane in it. A wire with no
+    /// corner proved outside says no, since a bar round a small square hole in
+    /// a plate holds the hole, and the count inside the hole is not the
+    /// plate's.
+    ///
+    /// The centre is the curve's width from every node of it, where the one
+    /// node a closed cut starts at can be a rounding from a side of the rim
+    /// and inside it. A plate with a block on it and a bar standing against
+    /// the block's wall, all turned a quarter turn back about `z`, is the
+    /// shape: the bar's circle on the plate's top starts where it touches the
+    /// foot of the wall, the count could not be read there, and the top was
+    /// refused under every rule both ways round
+    /// (`a_bar_beside_a_blocks_wall_on_a_plate_turned.rs`, Q2353).
+    fn how_often_the_rim_winds_round_inside_a_round_curve(
+        &self,
+        in_plane: &InPlane,
+        rim: &[Vec<PredicatePoint>],
+        ways: &[Vec<Direction>],
+        walks: &[usize],
+    ) -> Option<i32> {
+        let flat = self.plane_of_the_flat_face();
+        walks
+            .iter()
+            .flat_map(|&cycle| &self.cycles[cycle])
+            .find_map(|&half_edge| {
+                let crossing = &self.crossings[self.arcs[half_edge / 2].crossing];
+                if !crossing.order.closes() {
+                    return None;
+                }
+                let partner = &crossing.partner;
+                let inside = stretched_to_the_plane(
+                    flat,
+                    Self::a_point_near_the_centre_of_the_curve(flat, partner)?,
+                )?;
+                let the_rim_is_clear = side_of_surface(partner, inside) == Decision::Neg
+                    && rim.iter().all(|wire| {
+                        wire.iter()
+                            .any(|&corner| side_of_surface(partner, corner) == Decision::Pos)
+                    });
+                if !the_rim_is_clear {
+                    return None;
+                }
+                self.how_often_the_faces_rim_winds_round(in_plane, rim, ways, inside)
+            })
+    }
+
+    /// Where `partner`'s axis meets `flat` when it is a pipe, or the foot on
+    /// `flat` of its centre when it is a ball, in `f64`; `None` for any other
+    /// surface, or where the point is not a finite one.
+    fn a_point_near_the_centre_of_the_curve(
+        flat: &Plane,
+        partner: &Surface,
+    ) -> Option<PredicatePoint> {
+        let normal = flat.normal();
+        let (origin, along) = if let Surface::Cylinder(pipe) = partner {
+            (pipe.axis().origin(), pipe.axis().direction())
+        } else if let Surface::Sphere(ball) = partner {
+            (ball.centre(), normal)
+        } else {
+            return None;
+        };
+        let up = (flat.offset() - normal.dot(origin - Point::origin())) / normal.dot(along);
+        if !up.is_finite() {
+            return None;
+        }
+        let centre = (origin + along * up).coordinates();
+        centre
+            .iter()
+            .all(|coordinate| coordinate.is_finite())
+            .then(|| PredicatePoint::from(centre))
     }
 
     /// Whether the face's surface is a cone, every node of the face's rim is on
