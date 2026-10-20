@@ -10,12 +10,27 @@
 //!
 //! The fuse cuts the ball's skin along both whole circles, into two caps and
 //! the face between them, whose one wire is a figure eight through the pole.
-//! Meshing that face to check which way it faces, its patches take in the
-//! cap side of the first circle as well as its own, and draw the side from the
-//! pole to the next point walked along that circle as the cap does: refused
-//! `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 2, used: 4 }`. The solid has
-//! one corner, so the ladder that would mesh it finer stops at once; forced on
-//! in a probe, every rung from 1 down to `1.2e-4` folds on the same side.
+//! Each circle is a closed edge with a piece of the ball on both sides and no
+//! flat face along it, and **both pieces walk it the same way round.** At the
+//! pole there is no longitude to order the edge by, so each piece reads its way
+//! round against the flat lid that would close it
+//! (`the_lid_a_circle_from_a_pole_bounds` in `fuse/assemble.rs`). The cap lies
+//! on the cube's side of the plane and the middle face on the other, so their
+//! lids point opposite ways, and the two readings agree where they should
+//! differ. Meshing the middle face then draws the side from the pole along the
+//! first circle as the cap does: refused `TwoPatchesOfTheMeshDrewTheSameSide {
+//! drawn: 2, used: 4 }`. The solid has one corner, so the ladder that would
+//! mesh it finer stops at once; forced on in a probe, every rung from 1 down to
+//! `1.2e-4` folds on the same side.
+//!
+//! A probe that read both pieces against the lid the cap would have answers
+//! the union: two solids that validate, measuring 8 and `4.1866` give or take
+//! `0.0126`, at either size and either way round. The same probe fails three
+//! tests that cut a ball with a plane through its pole, in
+//! `a_ball_cut_through_its_pole.rs` and
+//! `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`. There a flat face
+//! lies along the circle, and the lid each ball piece reads now is the right
+//! one for it.
 
 use rcad_geom::{Axis, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
