@@ -127,6 +127,14 @@ Paragraphs are blank-line separated, a fenced block kept whole, numbered over
 `git show cc74200d:CLAUDE.md`. "Skill" is `.claude/skills/dispatch-lanes/SKILL.md`;
 "cut" says which record holds what left.
 
+Q818 later moved four of those sections out of `SKILL.md` into a new
+`.claude/skills/dispatch-lanes/reference.md` beside it: "The plan", "Merging,
+and the tree that holds `main`", "CI and the Actions allowance" and "The
+plugins". Every row below naming one of those four — skill "The plugins"
+(P4–P8, P10–P13), skill "CI" (P9, P49–P51, P53, P58, P60, P62–P64, P66), skill
+"The plan" (P20) and skill "Merging" (P24, P38) — points at `reference.md`
+now, not at `SKILL.md`; the split moved on, this section did not.
+
 | P | lines | begins | where it lives now |
 |---|---|---|---|
 | 1 | 1 | `## Core Principles` | `CLAUDE.md`, same heading |
