@@ -303,7 +303,7 @@ async function worked(lane) {
   let before = null
   let n = 0
   while (report && writes(lane) && report.outcome === 'relay' && n < MAX_RELAYS) {
-    const why = relayRefused(report)
+    const why = relayRefused(lane, report)
     if (why) {
       relayed.set(lane.label, { trees, before, refused: why })
       return report
@@ -337,8 +337,12 @@ function laneAgent(lane, prompt, label, relay) {
   })
 }
 
-function relayRefused(report) {
-  if (typeof report.handoff !== 'string' || !report.handoff.trim()) return 'the lane asked for a relay and wrote no handoff'
+function relayRefused(lane, report) {
+  if (typeof report.handoff !== 'string' || !report.handoff.trim()) {
+    if (typeof report.remaining !== 'string' || !report.remaining.trim()) return 'the lane asked for a relay and wrote no handoff'
+    log(`${lane.label}: relay wrote its handoff into remaining and left handoff empty, so remaining was taken as the handoff`)
+    report.handoff = report.remaining
+  }
   if (typeof report.worktree_path !== 'string' || !report.worktree_path) return 'the lane asked for a relay and named no worktree to take its branch from'
   return null
 }
