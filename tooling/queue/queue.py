@@ -1407,14 +1407,18 @@ def has_a_tree(branch, branches, trees, claimed, left):
 
     A detached tree whose own reflog says it left this branch is this row's,
     whether or not the branch's tip is on main (`left`, §299.6). A verifier's
-    tree is detached (§266.2), so it carries no branch to match; a
-    merger's carries `merge-<label>` instead of `lane-<label>` (§266.3). The
-    verifier's tree is checked out from the lane branch's tip and only ever
-    gains commits on top of it, so that tip stays an ancestor of its HEAD for as
-    long as the verifier runs. A tip already landed on main is excluded: a
-    landed branch still held is a release nobody wrote (a stale claim, §263.4),
-    not a live run, and attributing it to some unrelated detached tree would
-    hide that stale hold instead of counting it.
+    tree is detached (§266.2), so it carries no branch to match; a lander's or
+    a merger's carries `merge-<label>` instead of `lane-<label>` (§266.3), and
+    an Opus merger that follows a lander's stop carries
+    `merge-<label>-after-land` instead, since the lander's own `merge-<label>`
+    tree may still be locked, or may have been unlocked and dropped out of
+    `branches` already (§384.3). The verifier's tree is checked out from the
+    lane branch's tip and only ever gains commits on top of it, so that tip
+    stays an ancestor of its HEAD for as long as the verifier runs. A tip
+    already landed on main is excluded: a landed branch still held is a
+    release nobody wrote (a stale claim, §263.4), not a live run, and
+    attributing it to some unrelated detached tree would hide that stale hold
+    instead of counting it.
 
     `claimed` collects the path of every detached tree an ancestry match has
     already used, so two rows checked in the same `running` call never both
@@ -1428,8 +1432,10 @@ def has_a_tree(branch, branches, trees, claimed, left):
     """
     if branch in branches:
         return True
-    if branch.startswith("lane-") and f"merge-{branch[len('lane-'):]}" in branches:
-        return True
+    if branch.startswith("lane-"):
+        label = branch[len("lane-"):]
+        if f"merge-{label}" in branches or f"merge-{label}-after-land" in branches:
+            return True
     if branch in left:
         return True
     tip = branch_tip(branch)
