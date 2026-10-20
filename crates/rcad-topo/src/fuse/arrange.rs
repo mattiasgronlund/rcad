@@ -5870,10 +5870,8 @@ impl<'f> Arrangement<'f> {
             let Some(ends) = ends else {
                 continue;
             };
-            for other in one + 1..ends_of_a_whole_half.len() {
-                if ends_of_a_whole_half[other] == Some(*ends)
-                    && self.are_two_halves_of_one_ellipse(one, other)
-                {
+            for (other, theirs) in ends_of_a_whole_half.iter().enumerate().skip(one + 1) {
+                if *theirs == Some(*ends) && self.are_two_halves_of_one_ellipse(one, other) {
                     whole.push([one, other]);
                 }
             }
