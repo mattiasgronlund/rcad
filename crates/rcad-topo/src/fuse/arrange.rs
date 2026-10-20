@@ -8857,6 +8857,13 @@ impl<'f> Arrangement<'f> {
     /// facing alone joined its walk towards the apex to the walk inside the
     /// frustum's top rim, past the notched bottom rim between them, and the
     /// fuse was refused `CannotTellTheCellsOfAFaceApart`.
+    ///
+    /// **A lump with a walk round the axis of the cone or the pipe the face is
+    /// on is outside the face when no lump of its rim goes round that axis**
+    /// ([`Arrangement::goes_round_where_the_rim_never_does`]). A quarter of a
+    /// hollow frustum's wall is the shape: the bore of a quarter beside it cuts
+    /// the wall in a whole circle below the quarter's own rim, inside its box
+    /// and on its nappe, so neither of the two rules before places it.
     fn say_whether_the_face_holds_each_lump_of_closed_cuts(&mut self, lump: &[usize]) {
         let flat = self
             .surface

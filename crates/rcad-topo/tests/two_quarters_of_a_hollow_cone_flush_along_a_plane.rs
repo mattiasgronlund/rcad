@@ -26,22 +26,19 @@ const STARTS: [f64; 9] = [
     1.1,
 ];
 
+/// The starts of [`STARTS`] at which the intersection answers, both ways round.
+/// At each of the others it is refused, where
+/// [`at_every_other_start_a_sliver_of_a_cap_the_other_quarter_never_reaches_is_not_placed`]
+/// says.
+const STARTS_THAT_ANSWER: [f64; 1] = [1.1];
+
 #[test]
 fn two_hollow_quarters_of_a_cone_flush_along_a_plane_meet_in_nothing_or_a_sliver() {
-    for start in STARTS {
+    for start in STARTS_THAT_ANSWER {
         for the_first_first in [true, false] {
             let what = format!("start {start}, the first first {the_first_first}");
-            let mut model = a_model();
-            let first = a_hollow_quarter_turned(&mut model, start, 4.0);
-            let other = a_hollow_quarter_turned(&mut model, start - FRAC_PI_2, 4.5);
-            let measured = fused_and_measured(
-                &mut model,
-                first,
-                other,
-                Rule::Intersection,
-                the_first_first,
-            )
-            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let measured = the_two_quarters_intersected(start, the_first_first)
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
             for (volume, error) in measured {
                 assert!(
                     volume.abs() <= error,
@@ -50,6 +47,67 @@ fn two_hollow_quarters_of_a_cone_flush_along_a_plane_meet_in_nothing_or_a_sliver
             }
         }
     }
+}
+
+/// The other quarter's side plane, an ulp off the first quarter's own, cuts a
+/// sliver off the first quarter's bottom cap at `z = 4`, between the two
+/// planes, from the bore to the cone. The other quarter starts at `z = 4.5`,
+/// so the sliver is plainly outside it. But no point inside a sliver an ulp
+/// wide is found, and each of its four corners lies on the cone or the bore
+/// the two quarters share, so no rule places it. With the other quarter first,
+/// the piece refused is one of the other's top cap at `z = 8.5` instead, above
+/// the first quarter's top at `z = 8`, its four corners on that cap.
+///
+/// Before Q2537, a quarter's cone was refused
+/// [`Error::CannotTellTheCellsOfAFaceApart`] at every start instead, in the
+/// arrangement, before any piece was placed.
+#[test]
+fn at_every_other_start_a_sliver_of_a_cap_the_other_quarter_never_reaches_is_not_placed() {
+    for start in STARTS {
+        if STARTS_THAT_ANSWER.contains(&start) {
+            continue;
+        }
+        for the_first_first in [true, false] {
+            let what = format!("start {start}, the first first {the_first_first}");
+            let Err(Error::Undecidable { records }) =
+                the_two_quarters_intersected(start, the_first_first)
+            else {
+                panic!("{what}: not refused where a piece of a face is placed");
+            };
+            let record = records.records().last().expect("a refusal records why");
+            assert_eq!(
+                record.predicate(),
+                "a point inside a piece of a face",
+                "{what}"
+            );
+            let cap = if the_first_first { 4.0 } else { 8.5 };
+            let corners = record.inputs();
+            assert_eq!(corners.len(), 4, "{what}");
+            for corner in corners {
+                let height = corner.enclosure()[2];
+                assert!(
+                    height.lo() <= cap && cap <= height.hi(),
+                    "{what}: a corner at {height:?}, off the cap at {cap}"
+                );
+            }
+        }
+    }
+}
+
+fn the_two_quarters_intersected(
+    start: f64,
+    the_first_first: bool,
+) -> Result<Vec<(f64, f64)>, Error> {
+    let mut model = a_model();
+    let first = a_hollow_quarter_turned(&mut model, start, 4.0);
+    let other = a_hollow_quarter_turned(&mut model, start - FRAC_PI_2, 4.5);
+    fused_and_measured(
+        &mut model,
+        first,
+        other,
+        Rule::Intersection,
+        the_first_first,
+    )
 }
 
 fn a_hollow_quarter_turned(model: &mut Model, turn: f64, near: f64) -> SolidKey {
