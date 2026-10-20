@@ -1041,6 +1041,96 @@ fn a_wall_a_rounding_off_parallel_to_a_bar_meets_it_and_a_ball_beside_it_at_four
     }
 }
 
+/// **A cap square to a wide bar, and a thin pin leaning across the bar's
+/// axis** (Q2480). The bar has no wall of its own, since the cap is square to
+/// it, but the wall through the pin's axis and the cap's normal holds the
+/// bar's axis too, so it is a mirror of all three.
+///
+/// The cap `x + z = 0` through `(0, −8, 0)`, the bar of radius eight along
+/// `(1, 0, 1)` through that point, and the pin of radius one along
+/// `(1, −8, 0)` through `(0, 0, 1)`, whose axis crosses the bar's at
+/// `(1, −8, 1)`. On the cap the bar is the circle of radius eight about
+/// `(0, −8, 0)`. Across the wall and along it the pin is
+/// `a²/2 + 65b² + √258·a + 64 = 0` and the bar `a² + b² = 64`, which differ by
+/// `129a² − 2√258·a − 8448 = 0`, at `a = 66√258/129`, where the bar has no
+/// `b`, and at `a = −64√258/129`, where `b = ±8/√129`. Those are the origin and
+/// `(−128, −16, 128)/129`: `(−128, 1016, 128)/129` from the bar's point is
+/// square to `(1, 0, 1)` and `1065024/16641 = 64` long squared, and
+/// `(−128, −16, −1)/129` from the pin's is square to `(1, −8, 0)` and
+/// `16641/16641 = 1` long squared.
+///
+/// The sign of the pin's chord at those two heights squared a number whose
+/// entries spread over five hundred and fifty binades, and the square ran off
+/// the bottom of the range.
+#[test]
+fn a_cap_square_to_a_wide_bar_meets_it_and_a_pin_leaning_across_its_axis_at_two_corners() {
+    let cap = flat([1.0, 0.0, 1.0], [0.0, -8.0, 0.0]);
+    let bar = pipe([0.0, -8.0, 0.0], [1.0, 0.0, 1.0], 8.0);
+    let leaning = pipe([0.0, 0.0, 1.0], [1.0, -8.0, 0.0], 1.0);
+    for order in [
+        [&cap, &bar, &leaning],
+        [&leaning, &cap, &bar],
+        [&bar, &leaning, &cap],
+    ] {
+        points_near(
+            order,
+            &[
+                [0.0, 0.0, 0.0],
+                [-128.0 / 129.0, -16.0 / 129.0, 128.0 / 129.0],
+            ],
+        );
+    }
+}
+
+/// **The caps of a short bar along a diagonal, and a pin through its middle**
+/// (Q2480, from Q2246). The bar of radius two along `(1, 0, 1)` through the
+/// origin, cut off one along its stored direction either way as a bar is built
+/// from its wall, and the pin of radius one through the origin along
+/// `(0, 1, 1)` or `(1, −1, 0)`. Both axes lie in the wall through the pin's
+/// axis and the cap's normal, so it is a mirror of all three.
+///
+/// With `w` the bar's axis and `d` the pin's, both of length one, `w·d = ½`.
+/// A point of the bottom cap is `−w + r` for `r` square to `w` and two long,
+/// which puts it `√5` from the origin, and it is on the pin where
+/// `(r·d − ½)² = 4`. The part of `d` square to `w` is `√3/2` long, so `r·d`
+/// cannot be `5/2` and is `−3/2`: `r` is at a hundred and fifty degrees to
+/// that part. That is `(0, −√2, −√2) ± (−1, −1, 1)/√3` for `(0, 1, 1)` and
+/// `(−√2, √2, 0) ± (1, 1, −1)/√3` for `(1, −1, 0)`, and the top cap's are the
+/// same through the origin.
+#[test]
+fn the_caps_of_a_bar_along_a_diagonal_meet_it_and_a_pin_through_its_middle_at_two_corners() {
+    let along = [1.0, 0.0, 1.0];
+    let bar = pipe([0.0; 3], along, 2.0);
+    let stored = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(1.0, 0.0, 1.0))
+        .expect("a direction with length")
+        .direction()
+        .components();
+    let root_two = 2.0_f64.sqrt();
+    let third = 1.0 / 3.0_f64.sqrt();
+    for (pin, middle, aside) in [
+        (
+            pipe([0.0; 3], [0.0, 1.0, 1.0], 1.0),
+            [0.0, -root_two, -root_two],
+            [-third, -third, third],
+        ),
+        (
+            pipe([0.0; 3], [1.0, -1.0, 0.0], 1.0),
+            [-root_two, root_two, 0.0],
+            [third, third, -third],
+        ),
+    ] {
+        for up in [-1.0, 1.0] {
+            let end = stored.map(|component| up * component);
+            let cap = flat(end, end);
+            let corners = [-1.0, 1.0]
+                .map(|side| core::array::from_fn(|axis| -up * (middle[axis] + side * aside[axis])));
+            for order in [[&cap, &bar, &pin], [&pin, &cap, &bar], [&bar, &pin, &cap]] {
+                points_near(order, &corners);
+            }
+        }
+    }
+}
+
 /// **Three curved surfaces, two of which bend the same way, are a plane and
 /// two curved surfaces** (Q1284). Two quadrics that square `p` the same way
 /// differ by a plane: every point both hold is on it, and every point on it
