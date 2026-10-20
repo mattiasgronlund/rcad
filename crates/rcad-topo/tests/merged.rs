@@ -76,6 +76,8 @@ pub mod a_ball_touching_the_edge_between_two_tilted_walls;
 pub mod a_ball_whose_seam_is_a_little_past_a_quarter_turn;
 #[path = "a_bar_and_a_ball_on_its_cap_turned.rs"]
 pub mod a_bar_and_a_ball_on_its_cap_turned;
+#[path = "a_bar_and_two_stacked_blocks_united_in_one_call.rs"]
+pub mod a_bar_and_two_stacked_blocks_united_in_one_call;
 #[path = "a_bar_cut_beside_its_axis_and_united_again.rs"]
 pub mod a_bar_cut_beside_its_axis_and_united_again;
 #[path = "a_bar_flush_inside_a_turned_blocks_side.rs"]
