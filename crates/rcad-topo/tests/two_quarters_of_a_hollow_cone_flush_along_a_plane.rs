@@ -69,10 +69,9 @@ fn at_every_other_start_a_sliver_of_a_cap_the_other_quarter_never_reaches_is_not
         }
         for the_first_first in [true, false] {
             let what = format!("start {start}, the first first {the_first_first}");
-            let Err(Error::Undecidable { records }) =
-                the_two_quarters_intersected(start, the_first_first)
-            else {
-                panic!("{what}: not refused where a piece of a face is placed");
+            let intersected = the_two_quarters_intersected(start, the_first_first);
+            let Err(Error::Undecidable { records }) = &intersected else {
+                panic!("{what}: {intersected:?}");
             };
             let record = records.records().last().expect("a refusal records why");
             assert_eq!(
