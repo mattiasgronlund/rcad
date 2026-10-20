@@ -16,8 +16,10 @@
 //!
 //! Round either wall's circle on the ball's face the two places and the start,
 //! `(0, 0, 1024)`, are on one line, so the sweep is exactly zero and the order
-//! goes to the arm of `round_a_closed_crossing` that answers as wide as the
-//! wider box. Q699 does not order them: both boxes hold the start inside them.
+//! goes to the arm of `round_a_closed_crossing` that answers as far apart as a
+//! point of one box may be from a point of the other, which, one box holding
+//! the other, is the wider box's width. Q699 does not order them: both boxes
+//! hold the start inside them.
 //!
 //! # What this pins
 //!
@@ -237,6 +239,20 @@
 //! not hand-picked exact coordinates — the same way the cone's and the
 //! frustum's gaps were found, by a grid search over ordinary shapes rather
 //! than by engineering an exact degeneracy.
+//!
+//! # A corner a file moved up a bar's wall
+//!
+//! Every order along a closed crossing that nothing decides is filed as how
+//! far apart a point of one box may be from a point of the other, rounded up,
+//! since that is how far a merge of the two moves a point (§417.7). Three arms
+//! filed the wider box's width instead until Q2144, and that errs both ways:
+//! two boxes that only touch hold points further apart than either is wide,
+//! and two points hold nothing wide at all. A round bar whose top corner a file
+//! moved a millimetre up its wall, cut along its seam, is a shape where a
+//! policy read it: the moved corner and the fuse's corner below it,
+//! two points a millimetre apart, filed as `0`, and a tolerant policy at 100 mm
+//! took the two as one
+//! (`a_tolerant_fuse_will_not_take_a_bars_corner_a_file_moved_up_its_wall_as_the_one_below_it`).
 
 mod cones;
 
