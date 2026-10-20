@@ -128,9 +128,12 @@
 //! crossings. A bar butted onto a bend's cap is the shape: its pipe meets the
 //! ring in a loop whose halves lie past each other's cap. Such a crossing can
 //! still split an edge where it meets one, so it is not dropped here: each face
-//! carries the list ([`BakedFace::cuts_that_reach_only_its_boundary`]), each
-//! edge learns its neighbour's, and the arrangement leaves the crossing out
-//! only where no node of it splits a crossing that is kept.
+//! carries the list ([`BakedFace::cuts_that_reach_only_its_boundary`]), and
+//! the arrangement leaves the crossing out only where no node of it splits a
+//! crossing that is kept. Each edge learns which of the cuts its neighbour
+//! does leave out, drawing no crossing of them at all, and since that turns
+//! on what the neighbour's own neighbours leave out, it is worked out to a
+//! fixed point (Q2382, [`tell_each_edge_what_its_neighbour_leaves_out`]).
 //!
 //! **Each face is told, too, the sides of planes every face carrying a cut
 //! lies in** (Q1909, [`BakedFace::sides_the_faces_of_each_cut_lie_in`]). A
@@ -182,7 +185,7 @@ use smallvec::SmallVec;
 use crate::{EdgeKey, Error, Result};
 
 use super::Sameness;
-use super::arrange::stretches_of_a_line_inside;
+use super::arrange::{stretches_of_a_line_inside, the_listed_cuts_it_still_draws};
 use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedFace, BakedSolid};
 
 /// Work out every cut line, and hang each on the face it cuts.
@@ -191,10 +194,10 @@ use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedFace, BakedS
 /// other, whichever group each came from. The header says why the solid's own
 /// planes are in there, why a crossing that splits nothing and lies where
 /// its face never reaches is then left off, why each face is told which
-/// cuts meet it only on its boundary, and each edge what the face across it
-/// was told, why each face is told the sides of planes the faces of each cut
-/// lie in, and why each face is told the caps through the start of their
-/// axis that the faces cutting it carry.
+/// cuts meet it only on its boundary, and each edge which of those the face
+/// across it does leave out, why each face is told the sides of planes the
+/// faces of each cut lie in, and why each face is told the caps through the
+/// start of their axis that the faces cutting it carry.
 ///
 /// **No face pair is skipped, but [`how_two_faces_meet`] is only ever asked
 /// once per distinct pair of surfaces** ([`HowFacesMeetBySurface`]). The
@@ -270,7 +273,7 @@ pub(crate) fn gather(
         }
     }
     for solid in solids.iter_mut() {
-        tell_each_edge_what_its_neighbour_leaves_out(solid);
+        tell_each_edge_what_its_neighbour_leaves_out(solid, policy);
     }
     Ok(())
 }
@@ -478,8 +481,29 @@ fn one_closed_side_of_one_plane(one: &ASideOfAPlane, other: &ASideOfAPlane) -> b
 
 /// Fill in [`BakedEdge::its_neighbour_leaves_out`](super::bake::BakedEdge::its_neighbour_leaves_out)
 /// on every edge of `solid`: the cuts every other face of the solid along one
-/// of the edge's input edges leaves out.
-fn tell_each_edge_what_its_neighbour_leaves_out(solid: &mut BakedSolid) {
+/// of the edge's input edges does leave out, drawing no crossing of them at
+/// all.
+///
+/// **What a face does leave out depends on what its neighbours do**, so it
+/// is worked out to a fixed point. Each face starts out leaving out every cut
+/// of [`BakedFace::cuts_that_reach_only_its_boundary`], and each round runs
+/// each face whose edges were told something new up to where it leaves cuts
+/// out, and takes off its list every cut it still draws a crossing of
+/// ([`the_listed_cuts_it_still_draws`]). A list only ever shrinks, and a
+/// shorter list told to a face only makes it keep more, so the rounds end.
+/// Once they do, a face leaves out a cut's crossing at a node on an edge only
+/// where the face across draws no crossing of that cut at all, which is the
+/// same thing said from either side, so the two split the edge alike there.
+///
+/// A top that climbs past a bar in two leaning faces is why (Q2382): both
+/// faces list the bar's pipe, the lower one keeps its curve with the pipe
+/// since that curve runs on into the block's sides, which do not list it, and
+/// the upper one, told only that the lower one may leave the pipe out, left
+/// its own curve out, so the edge between them was split on one side alone.
+///
+/// A face that refuses to be drawn keeps its whole list: its split refuses
+/// the same way later, from the same steps.
+fn tell_each_edge_what_its_neighbour_leaves_out(solid: &mut BakedSolid, policy: &Policy) {
     if solid
         .faces
         .iter()
@@ -495,7 +519,43 @@ fn tell_each_edge_what_its_neighbour_leaves_out(solid: &mut BakedSolid) {
             }
         }
     }
-    for index in 0..solid.faces.len() {
+    let mut leaves_out: Vec<Vec<Surface>> = solid
+        .faces
+        .iter()
+        .map(|face| face.cuts_that_reach_only_its_boundary.clone())
+        .collect();
+    tell_each_edge(solid, &faces_along, &leaves_out);
+    let mut ask: Vec<bool> = leaves_out.iter().map(|list| !list.is_empty()).collect();
+    loop {
+        let mut shrank = false;
+        for face in 0..solid.faces.len() {
+            if !ask[face] || leaves_out[face].is_empty() {
+                continue;
+            }
+            let Ok(still_drawn) = the_listed_cuts_it_still_draws(&solid.faces[face], policy) else {
+                continue;
+            };
+            let before = leaves_out[face].len();
+            leaves_out[face].retain(|cut| !still_drawn.contains(cut));
+            shrank |= leaves_out[face].len() != before;
+        }
+        if !shrank {
+            return;
+        }
+        ask = tell_each_edge(solid, &faces_along, &leaves_out);
+    }
+}
+
+/// Tell each edge of `solid` the cuts every other face along one of its
+/// input edges leaves out by `leaves_out`, and say for each face whether
+/// any of its edges was told something other than it was before.
+fn tell_each_edge(
+    solid: &mut BakedSolid,
+    faces_along: &HashMap<EdgeKey, Vec<usize>>,
+    leaves_out: &[Vec<Surface>],
+) -> Vec<bool> {
+    let mut told_otherwise = vec![false; solid.faces.len()];
+    for (index, told_otherwise) in told_otherwise.iter_mut().enumerate() {
         for wire in 0..solid.faces[index].wires.len() {
             for position in 0..solid.faces[index].wires[wire].len() {
                 let neighbours: Vec<usize> = solid.faces[index].wires[wire][position]
@@ -507,22 +567,20 @@ fn tell_each_edge_what_its_neighbour_leaves_out(solid: &mut BakedSolid) {
                 let Some((&first, rest)) = neighbours.split_first() else {
                     continue;
                 };
-                let left_out: Vec<Surface> = solid.faces[first]
-                    .cuts_that_reach_only_its_boundary
+                let left_out: Vec<Surface> = leaves_out[first]
                     .iter()
                     .copied()
-                    .filter(|cut| {
-                        rest.iter().all(|&other| {
-                            solid.faces[other]
-                                .cuts_that_reach_only_its_boundary
-                                .contains(cut)
-                        })
-                    })
+                    .filter(|cut| rest.iter().all(|&other| leaves_out[other].contains(cut)))
                     .collect();
-                solid.faces[index].wires[wire][position].its_neighbour_leaves_out = left_out;
+                let edge = &mut solid.faces[index].wires[wire][position];
+                if edge.its_neighbour_leaves_out != left_out {
+                    edge.its_neighbour_leaves_out = left_out;
+                    *told_otherwise = true;
+                }
             }
         }
     }
+    told_otherwise
 }
 
 /// The cuts to hang on `face`: every one found, but a crossing that splits
