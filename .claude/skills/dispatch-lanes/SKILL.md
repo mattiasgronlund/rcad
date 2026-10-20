@@ -327,6 +327,17 @@ that its verifier confirmed and its merger did not push (§433.8)`, says the
 fault is gone and only the close is left: a `done <row> <base sha>` step in
 the Not merged bullet's one `just queue apply`.
 
+A writing row's branch can also sit at its own base for a reason other than
+`does_not_reproduce`: the lane put in a probe, measured with it, and took it
+out again before it stopped, so nothing is left to merge even though the row
+is not reporting the fault gone. That comes back exactly as a read-only
+lane's answer does — the report whole, no merger spent, the row still open —
+and `lanes.js` logs `its branch is the base, so its report goes back whole,
+not merged.` There is no verifier run and no `done` to apply: read the
+report yourself, close the row at the base if what it found settles it or
+re-take it if not, and file by hand, in one `just queue apply`, any rows the
+report names.
+
 - **Merged**: `git fetch origin` and `git rev-parse origin/main` — a reported
   sha can be invented — then merge `origin/main` into your branch, so the copy
   of the queue you fill from sees the row closed (§263.9). The slot is free:
