@@ -14,10 +14,13 @@
 //! (queue row Q1053), and every fuse holds the volume its doc works out. **So
 //! is the one on a ball**, since a ball's skin is opened out flat from a point
 //! of the walk and wound round there (queue row Q1242), and so is a second
-//! shape on a ball that reached it, a square rod holed down its own axis. The
-//! one on a cone still reaches it.
+//! shape on a ball that reached it, a square rod holed down its own axis. **The
+//! one on a cone no longer reaches it** either, since a lump with a walk round
+//! the axis is placed outside a face whose rim goes round nothing (queue row
+//! Q2537), but it is refused a step later, placing the other lump's curves that
+//! run on.
 //!
-//! **The one on a cone is the axis rule giving up on a walk that goes round
+//! **The one on a cone was the axis rule giving up on a walk that goes round
 //! nothing** (queue row Q1056): `the_one_that_goes_round_the_axis_as_well`
 //! returns `None` at `its_own == 0`. The face is a chip of a cone bounded by
 //! two arcs of hyperbolas alone, described face by face, and the other lump is
@@ -50,7 +53,7 @@
 //!   axis rule's `its_own == 0` is a face whose own sides are such arcs alone,
 //!   above every closed curve: the chip. Built by fusing a frustum with planes
 //!   it was refused before that, and answers now (two shapes below, queue row
-//!   Q1176); described face by face it reaches it.
+//!   Q1176); described face by face it reached it until Q2537.
 //!
 //! The other shapes built on the way are pinned beside them, with what each
 //! gives instead.
@@ -159,7 +162,9 @@ fn the_lens_two_balls_share(big: f64, small: f64, apart: f64) -> f64 {
 /// only: the one through `(−11/16, 3/4)` dips below the circle and crosses it,
 /// and the other crosses the first twice above the circle. Above the circle that
 /// lump has two walks, the patch between the three and the rest, and the chip's
-/// walk is above the circle like both of them. The printed probe said:
+/// walk is above the circle like both of them. Until Q2537 every fuse was
+/// refused `CannotTellTheCellsOfAFaceApart` on the chip's face there, and the
+/// printed probe said:
 ///
 /// ```text
 /// axis rule: walk 0: its_own == 0, candidates [2, 3]
@@ -167,14 +172,23 @@ fn the_lens_two_balls_share(big: f64, small: f64, apart: f64) -> f64 {
 ///     against [2, 3] of lump 14 on Cone(..)
 /// ```
 ///
+/// **Since Q2537 the tent's lump is placed outside the chip's face** before any
+/// walk is compared: a walk of it, along the floor's circle, goes round the
+/// axis, and no lump of the chip's rim does
+/// (`goes_round_where_the_rim_never_does` in `arrange.rs`). Every fuse is
+/// refused [`Error::Undecidable`] a step later instead, with one record,
+/// `which piece of a face a hole is in`, at the node `(−11/8, −√75/8, 7/4)`
+/// where the tent's ridge meets the cone. `piece_around` is the one place that
+/// refusal is raised: it places a lump holding a curve that runs on by
+/// following one of its curves until it meets the rest of the drawing, and no
+/// ray from any node of the lump did (Q2173).
+///
 /// **The answer exists**: the two do not meet. The tent is `20 · (1/8 · 1)/2 =
 /// 5/4`, and the chip is the integral over `1 ≤ z ≤ 5` of the part of the disc
 /// `r ≤ z` between `x = (1 + z)/2` and `x = (11 − z)/2`, which
 /// [`the_chips_volume`] works out slice by slice. So the union is the two of
-/// them, the intersection nothing, and each less the other is itself. The walk
-/// that goes round nothing bounds a disc, the other lump holds a circle round
-/// the axis and so is in no disc, and the chip's walk faces neither of its
-/// walks: a gap (§16.10).
+/// them, the intersection nothing, and each less the other is itself: a gap
+/// (§16.10).
 #[test]
 fn a_chip_of_a_cone_beside_a_tent_cannot_tell_the_tents_two_walks_apart() {
     let mut model = a_model();
@@ -183,16 +197,31 @@ fn a_chip_of_a_cone_beside_a_tent_cannot_tell_the_tents_two_walks_apart() {
     assert_holds(&model, chip, the_chips_volume(), "the chip");
     assert_holds(&model, tent, 1.25, "the tent");
 
-    every_rule_both_ways_refuses_on_a(
-        "a chip of a cone beside a tent",
-        || {
-            let mut model = a_model();
-            let chip = a_chip_of_a_cone(&mut model);
-            let tent = a_tent(&mut model);
-            (model, chip, tent)
-        },
-        |surface| matches!(surface, Surface::Cone(_)),
-    );
+    let where_the_ridge_meets_the_cone = [-11.0 / 8.0, -(75.0f64.sqrt()) / 8.0, 7.0 / 4.0];
+    for (rule, chip_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let chip = a_chip_of_a_cone(&mut model);
+        let tent = a_tent(&mut model);
+        let refused = fuse(&mut model, chip, tent, rule, chip_first);
+        let what = format!("{rule:?}, the chip first {chip_first}: {refused:?}");
+        let Err(Error::Undecidable { records }) = refused else {
+            panic!("{what}");
+        };
+        let [record] = records.records() else {
+            panic!("one record: {what}");
+        };
+        assert_eq!(
+            record.predicate(),
+            "which piece of a face a hole is in",
+            "{what}"
+        );
+        let [node] = record.inputs() else {
+            panic!("one node: {what}");
+        };
+        for (along, at) in node.enclosure().iter().zip(where_the_ridge_meets_the_cone) {
+            assert!(along.lo() <= at && at <= along.hi(), "{what}");
+        }
+    }
 }
 
 /// A plate `10 × 10 × 2` less a bar of radius 3 standing on its corner
@@ -1678,30 +1707,6 @@ fn every_rule_both_ways() -> Vec<(Rule, bool)> {
         .into_iter()
         .flat_map(|rule| [(rule, true), (rule, false)])
         .collect()
-}
-
-/// Every rule both ways round refuses `CannotTellTheCellsOfAFaceApart`, on a
-/// face of the first solid built whose surface `on` accepts.
-fn every_rule_both_ways_refuses_on_a(
-    what: &str,
-    build: impl Fn() -> (Model, SolidKey, SolidKey),
-    on: impl Fn(Surface) -> bool,
-) {
-    for (rule, first) in every_rule_both_ways() {
-        let (mut model, one, other) = build();
-        let refused = fuse(&mut model, one, other, rule, first);
-        let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = refused else {
-            panic!("{what}, {rule:?}, the first built first {first}: {refused:?}");
-        };
-        let surface = model
-            .face(face)
-            .expect("the refusal names a face of the model")
-            .surface();
-        assert!(
-            on(surface),
-            "{what}, {rule:?}, the first built first {first}: refused on {surface:?}"
-        );
-    }
 }
 
 fn fuse(
