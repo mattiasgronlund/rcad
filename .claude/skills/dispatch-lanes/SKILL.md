@@ -140,15 +140,23 @@ row prep finds wrong comes back not merged before any lane starts, with a
 `needs <file>: <why>` line for each file it is missing. Re-file it with those
 files, drop and add, then `queue next` (§396.4).
 
-**A row that adds a test file directly under `crates/rcad-topo/tests/` holds
-one item of `crates/rcad-topo/tests/merged.rs`, never the whole file**
-(§373.7). The lane
-declares its own file there, in its place by name, and the entry
-`crates/rcad-topo/tests/merged.rs#<module>`, the module being the file's name
-with each `-` written `_`, lets rows adding different files run side by side.
-`merged.rs` whole would make each of them wait on all the others. When prep
-stops such a row with `needs crates/rcad-topo/tests/merged.rs`, re-file it with
-the item entry. At `ce88b698`, 45 open rows named a new rcad-topo test file and
+**A row that adds a test file directly under `crates/rcad-topo/tests/`,
+`crates/rcad-geom/tests/` or `crates/rcad-step/tests/` holds one item of
+`crates/rcad-topo/tests/merged.rs`, `crates/rcad-geom/tests/merged.rs` or
+`crates/rcad-step/tests/merged.rs`, never the whole file, and the new file
+itself** (§373.7). The lane declares its own file there, in its place by
+name, and the entry `crates/rcad-topo/tests/merged.rs#<module>` (or the
+`rcad-geom` or `rcad-step` equivalent), the module being the file's name with
+each `-` written `_`, lets rows adding different files run side by side. `merged.rs`
+whole would make each of them wait on all the others. The write set needs the
+new file's own path too — Q2353's row held `merged.rs` whole, its lane
+narrowed to the item alone and dropped the file, and `unproven()` refused the
+merge for a file outside the write set, so the row had to be re-filed as
+Q2503. `just queue add` already asks for the item whenever the file is named;
+asking for the file whenever the item is named is the other half, and still to
+build. When prep stops such a row with `needs crates/rcad-topo/tests/merged.rs`,
+re-file it with the item entry and the new file's path. At `ce88b698`, 45 open
+rows named a new rcad-topo test file and
 no `merged.rs` entry. They can be re-filed that way in one `queue apply`, drop
 and add each, rather than one at a time as prep reaches them; so can a row that
 holds `merged.rs` whole only to declare its one file. `just queue families`
