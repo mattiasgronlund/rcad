@@ -1322,8 +1322,8 @@ fn a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_s
 }
 
 /// **A turned ell inside a taller one, flush against its long wall, is refused
-/// for an edge too short when united under a certified policy** (queue row
-/// Q2242).
+/// for an edge too short when united under a certified policy, and unites to
+/// the taller one under a tolerant policy** (queue rows Q2242 and Q2270).
 ///
 /// An ell two by five with a one-by-two bite, three high, at the origin, and
 /// an ell two by three with a one-by-two bite, one high, at `(0, 1, 1)`, turned
@@ -1352,9 +1352,15 @@ fn a_turned_ell_with_a_frame_flush_against_its_wall_is_refused_for_an_edge_too_s
 /// joined across two planes apart before it refuses a second outline, so the
 /// certified union is refused for the edge too short, both ways round.
 ///
-/// A tolerant policy lets that range through, and the union is still refused
+/// A tolerant policy lets that range through, and the union was then refused
 /// as a hole winding with its outline, where the answer is the big ell's 24:
-/// the gap the row Q2242 left.
+/// the gap the row Q2242 left. The small ell less the big one is the slab
+/// alone, which a tolerant policy takes as flat and leaves out. So since queue
+/// row Q2270 the union reads the slab's pieces as that difference would leave
+/// them out: the small ell's wall pieces and the slab's side walls as inside
+/// the big ell, and the big ell's wall pieces over the slab as outside the
+/// small one. The union keeps the big ell's own faces, both ways round, with
+/// its wall one face again.
 #[test]
 fn a_turned_ell_inside_a_taller_one_flush_against_its_wall_unites_or_is_refused_for_an_edge_too_short()
  {
@@ -1434,6 +1440,7 @@ fn a_turned_ell_inside_a_taller_one_flush_against_its_wall_unites_or_is_refused_
         "the small ell less the big one is the slab, refused for an edge too short, not {slab:?}"
     );
 
+    let tolerant = Policy::tolerant(100.0);
     for (arguments, tools) in [(big, small), (small, big)] {
         let (_, united) = fused_under(&certified, arguments, tools, Rule::Union);
         assert!(
@@ -1444,16 +1451,32 @@ fn a_turned_ell_inside_a_taller_one_flush_against_its_wall_unites_or_is_refused_
             "the certified union of {arguments:?} with {tools:?} came back {united:?}, not \
              refused for an edge too short beside its coordinates"
         );
-        let (_, united) = fused_under(&Policy::tolerant(100.0), arguments, tools, Rule::Union);
+        let (united, solids) = fused_under(&tolerant, arguments, tools, Rule::Union);
+        let solids = solids.unwrap_or_else(|refused| {
+            panic!(
+                "the tolerant union of {arguments:?} with {tools:?} was refused {refused:?}, \
+                 where it takes the slab as flat and answers the big ell"
+            )
+        });
+        assert_eq!(solids.len(), 1, "the tolerant union is one solid");
+        let volume = volume_of(&united, &solids);
         assert!(
-            matches!(
-                united,
-                Err(Error::TheFuseWroteABrokenAnswer {
-                    broken: Invalid::HoleWindsWithTheOuterWire
-                })
-            ),
-            "the tolerant union of {arguments:?} with {tools:?} came back {united:?}, not \
-             refused as a hole winding with its outline"
+            (volume - 24.0).abs() < 1e-9,
+            "the tolerant union of {arguments:?} with {tools:?} holds {volume}, not the big \
+             ell's 24"
+        );
+        let faces_of = |model: &Model, solid: SolidKey| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .count()
+        };
+        assert_eq!(
+            faces_of(&united, solids[0]),
+            faces_of(&model, big),
+            "the tolerant union of {arguments:?} with {tools:?} has the big ell's faces, its \
+             wall one face again"
         );
     }
 }
