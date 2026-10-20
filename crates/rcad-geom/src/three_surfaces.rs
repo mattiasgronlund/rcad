@@ -609,7 +609,8 @@ fn the_meet_slid_into_range(surfaces: [&Surface; 3]) -> Option<MeetOfThree> {
     .find_map(|up| the_meet_slid_by(surfaces, up))
 }
 
-/// Where the second slide puts the binade of the largest length.
+/// Where the second slide puts the binade of the largest length, and where
+/// [`the_sign_of_two_products_apart`] puts the larger of each pair of factors.
 ///
 /// A length below `2⁵⁰¹` times another is below `2¹⁰⁰²`, which leaves room to
 /// add up a few such products under `2¹⁰²⁴`. Every length below it stays a
@@ -3349,11 +3350,11 @@ fn a_touching_point_could_not_be_placed(
 /// off `κ₂`, `e·W·k` off `κ₁` and `(e·W)²` off `κ₀`, and
 /// [`the_sign_of_the_chord_at`] puts the root into it with nothing rounded: a
 /// root that is a fraction as the fraction, and one that is a square root —
-/// which is where a cone meets a ball — through the one comparison of two
-/// squares that tells a chord from a touch. The plane `x + y = 2` touches both
-/// circles a cone of slope one and a ball of radius two about its apex share,
-/// at `(1, 1, ±√2)`, and the comparison there is of two numbers that are both
-/// exactly zero.
+/// which is where a cone meets a ball — through the one comparison of a whole
+/// part with a rooted one that tells a chord from a touch. The plane
+/// `x + y = 2` touches both circles a cone of slope one and a ball of radius
+/// two about its apex share, at `(1, 1, ±√2)`, and the comparison there is of
+/// two numbers that are both exactly zero.
 ///
 /// **It is asked twice.** With [`BesideTheAxis::Parallel`] it takes a plane
 /// with `k = 0`, after [`what_a_plane_that_grazes_one_of_them_leaves`], which
@@ -3879,11 +3880,28 @@ fn how_wide_the_chord_is(
 /// - **A root that is a fraction `X/Y`** — `−C/(2B)`, or `−B/A` — is put in
 ///   over its denominator squared: `Y²·k(X/Y) = κ₂X² + 2κ₁XY + κ₀Y²`, which has
 ///   the sign of `k` there because `Y²` is above zero.
-/// - **A root `(−B ± √Δ)/A`** is a square root. There `A·k − κ₂·(A t² + 2B t +
-///   C)` has no `t²` left in it, and the quadratic is zero at the root, so
-///   `A·k(t) = L·t + M` for `L = 2(A·κ₁ − κ₂·B)` and `M = A·κ₀ − κ₂·C`. Put the
-///   root in and `A²·k(t) = P ± L·√Δ`, for `P = M·A − L·B`. Its sign is
-///   [`the_sign_with_a_root_in_it`].
+/// - **A root `(−B ± √Δ)/A`** is a square root, and `A` is not zero. There
+///   `A·k − κ₂·(A t² + 2B t + C)` has no `t²` left in it, and the quadratic is
+///   zero at the root, so `A·k(t) = L·t + M` for `L = 2(A·κ₁ − κ₂·B)` and
+///   `M = A·κ₀ − κ₂·C`. Put the root in and `A²·k(t) = P ± L·√Δ`, for
+///   `P = M·A − L·B`. Its sign is [`the_sign_of_a_sum_with_a_root_in_it`]'s.
+///
+/// **Which part of `P ± L·√Δ` is larger is asked of the resultant, not of
+/// `P² − L²·Δ`.** `P² − L²·Δ = A²·(M² − 2L·W)` for `W = B·κ₀ − C·κ₁` — both
+/// are `A⁴` times `k` at one root times `k` at the other — and `A²` is above
+/// zero, so `M² − 2L·W`, the resultant of the two quadratics, has the sign
+/// asked for. It is of degree two in each quadratic where `P² − L²·Δ` is of
+/// degree four in the shared one, and it and the signs of `P` and `Δ` are each
+/// a difference of two products, worked out by
+/// [`the_sign_of_two_products_apart`], which slides the factors along the
+/// range where they stand too far down it. A bar along `(1, 0, 1)` capped
+/// square to its axis, with a pin through its middle along `(0, 1, 1)`, was
+/// refused by `P² − L²·Δ` and is answered so.
+///
+/// # Panics
+///
+/// If `root` is a square root and `A` is not above or below zero: the
+/// quadratic has two roots only where it is a quadratic.
 fn the_sign_of_the_chord_at(
     root: WhichRoot,
     chord: &[Exact; 3],
@@ -3907,36 +3925,113 @@ fn the_sign_of_the_chord_at(
         WhichRoot::OfALine => over_its_denominator(&nothing.minus(c), &b.plus(b))?.sign(),
         WhichRoot::Twice => over_its_denominator(&nothing.minus(b), a)?.sign(),
         WhichRoot::TakingTheRootAway | WhichRoot::AddingTheRoot => {
+            assert!(
+                matches!(a.sign(), Decision::Pos | Decision::Neg),
+                "a quadratic with two roots has a square term: {a:?}"
+            );
             let half_the_lean = a.times(half_linear)?.minus(&squared.times(b)?);
             let lean = half_the_lean.plus(&half_the_lean);
             let level = a.times(constant)?.minus(&squared.times(c)?);
-            let plain = level.times(a)?.minus(&lean.times(b)?);
+            let across = b.times(constant)?.minus(&c.times(half_linear)?);
             let rooted = if root == WhichRoot::AddingTheRoot {
-                lean
+                lean.clone()
             } else {
                 nothing.minus(&lean)
             };
-            let discriminant = b.times(b)?.minus(&a.times(c)?);
-            the_sign_with_a_root_in_it(&plain, &rooted, &discriminant)?
+            let signs = [
+                the_sign_of_two_products_apart([&level, a], [&lean, b])?,
+                rooted.sign(),
+                the_sign_of_two_products_apart([b, b], [a, c])?,
+            ];
+            the_sign_of_a_sum_with_a_root_in_it(signs, || {
+                the_sign_of_two_products_apart([&level, &level], [&lean.plus(&lean), &across])
+            })?
         }
     };
     matches!(sign, Decision::Pos | Decision::Neg | Decision::Zero).then_some(sign)
 }
 
+/// The sign of `one[0]·one[1] − other[0]·other[1]`, exactly, or `None` where
+/// a product falls out of range wherever the four are slid.
+///
+/// Worked out where the four stand first, so a sign that is decided there is
+/// decided through the same arithmetic as before there was a slide. Where that
+/// runs out, the two first factors are slid by one power of two and the two
+/// second factors by another, which multiplies both products by the same
+/// power of two and keeps the sign of their difference. Each slide puts the
+/// larger of its two at [`HIGHEST_BINADE_A_SLIDE_LIFTS_TO`], as high as a
+/// product of two can go without running off the top, so the smallest entries
+/// are lifted as far from the bottom as they can be.
+fn the_sign_of_two_products_apart(one: [&Exact; 2], other: [&Exact; 2]) -> Option<Decision> {
+    let apart = |one: [&Exact; 2], other: [&Exact; 2]| -> Option<Decision> {
+        Some(
+            one[0]
+                .times(one[1])?
+                .minus(&other[0].times(other[1])?)
+                .sign(),
+        )
+    };
+    if let Some(sign) = apart(one, other) {
+        return Some(sign);
+    }
+    let first = the_slide_that_lifts_the_larger_to_the_top(one[0], other[0])?;
+    let second = the_slide_that_lifts_the_larger_to_the_top(one[1], other[1])?;
+    let slid = |pair: [&Exact; 2]| Some([pair[0].slid_by(first)?, pair[1].slid_by(second)?]);
+    let (one, other) = (slid(one)?, slid(other)?);
+    apart([&one[0], &one[1]], [&other[0], &other[1]])
+}
+
+/// How far to slide `one` and `other` together so the larger of the two sits
+/// at [`HIGHEST_BINADE_A_SLIDE_LIFTS_TO`] — nowhere where both are zero, and
+/// `None` where one has no sign to read its size from.
+fn the_slide_that_lifts_the_larger_to_the_top(one: &Exact, other: &Exact) -> Option<i32> {
+    let mut highest: Option<i32> = None;
+    for value in [one, other] {
+        match value.sign() {
+            Decision::Zero => {}
+            Decision::Pos | Decision::Neg => {
+                let binade = binary_exponent(value.nearest_f64());
+                highest = Some(highest.map_or(binade, |so_far| so_far.max(binade)));
+            }
+            Decision::Undecidable { .. } => return None,
+            other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
+        }
+    }
+    Some(highest.map_or(0, |highest| HIGHEST_BINADE_A_SLIDE_LIFTS_TO - highest))
+}
+
 /// The sign of `plain + rooted·√under`, exactly, for `under` not below zero —
 /// or `None` where a sign is not one or a product falls out of range.
 ///
+/// Which part is larger is the sign of `plain² − rooted²·under`, as
+/// [`the_sign_of_a_sum_with_a_root_in_it`] asks it.
+fn the_sign_with_a_root_in_it(plain: &Exact, rooted: &Exact, under: &Exact) -> Option<Decision> {
+    the_sign_of_a_sum_with_a_root_in_it([plain, rooted, under].map(Exact::sign), || {
+        Some(
+            plain
+                .square_minus(&rooted.times(rooted)?.times(under)?)?
+                .sign(),
+        )
+    })
+}
+
+/// The sign of `plain + rooted·√under`, from the three signs `mine`, `theirs`
+/// and `inside` and, where it needs it, `larger`: the sign of a number that has
+/// the sign of `plain² − rooted²·under` — or `None` where a sign is not one or
+/// `larger` has none.
+///
 /// Where `plain` and `rooted` point the same way, or one of the two parts is
 /// nothing, the sum points that way. Where they point opposite ways, the
-/// larger part wins, and which is larger is the sign of `plain² − rooted²·under`;
-/// the two equal is the sum at zero.
+/// larger part wins; the two equal is the sum at zero.
 ///
 /// # Panics
 ///
 /// If `under` is below zero: it is a discriminant the cascade has already
 /// found above zero.
-fn the_sign_with_a_root_in_it(plain: &Exact, rooted: &Exact, under: &Exact) -> Option<Decision> {
-    let [mine, theirs, inside] = [plain, rooted, under].map(Exact::sign);
+fn the_sign_of_a_sum_with_a_root_in_it(
+    [mine, theirs, inside]: [Decision; 3],
+    larger: impl FnOnce() -> Option<Decision>,
+) -> Option<Decision> {
     if ![mine, theirs, inside]
         .iter()
         .all(|sign| matches!(sign, Decision::Pos | Decision::Neg | Decision::Zero))
@@ -3945,7 +4040,7 @@ fn the_sign_with_a_root_in_it(plain: &Exact, rooted: &Exact, under: &Exact) -> O
     }
     assert!(
         inside != Decision::Neg,
-        "a square root is only taken of a discriminant found above zero: {under:?}"
+        "a square root is only taken of a discriminant found above zero"
     );
     if theirs == Decision::Zero || inside == Decision::Zero || mine == theirs {
         return Some(mine);
@@ -3953,10 +4048,7 @@ fn the_sign_with_a_root_in_it(plain: &Exact, rooted: &Exact, under: &Exact) -> O
     if mine == Decision::Zero {
         return Some(theirs);
     }
-    let larger = plain
-        .square_minus(&rooted.times(rooted)?.times(under)?)?
-        .sign();
-    Some(match larger {
+    Some(match larger()? {
         Decision::Pos => mine,
         Decision::Neg => theirs,
         Decision::Zero => Decision::Zero,
