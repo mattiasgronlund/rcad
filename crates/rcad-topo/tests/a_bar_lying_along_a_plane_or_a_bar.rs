@@ -2605,6 +2605,77 @@ fn a_solid_of_flat_faces(
 
 #[test]
 #[ignore = "Q2313 relay probe, not a test: remove before the row lands"]
+fn probe_q2313_flat() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let policy = Policy::certified();
+    let mut log = ProvenanceLog::new();
+    let outer = a_bar(&mut model, 1.0, 4.0, [0.0, 0.0, 0.0]);
+    let bore = a_bar(&mut model, 0.995, 3.95, [0.0, 0.0, 0.025]);
+    let core = a_bar(&mut model, 0.99, 3.9, [0.0, 0.0, 0.05]);
+    let angle = PI / 8.0;
+    let pocket = a_bar(
+        &mut model,
+        0.02,
+        0.1,
+        [0.5 * angle.cos(), 0.5 * angle.sin(), 3.9],
+    );
+    let mut tools = vec![pocket];
+    let ball = model
+        .add_ball(
+            0.3,
+            &Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a shift"),
+        )
+        .expect("a ball");
+    tools.push(ball);
+    let holed = model
+        .fuse(&[core], &tools, Rule::Difference, &policy, &mut log)
+        .expect("holed");
+    eprintln!("holed {:?}", shells_of(&model, holed.solids()));
+    let tube = model
+        .fuse(&[outer], &[bore], Rule::Difference, &policy, &mut log)
+        .expect("tube");
+    eprintln!("tube {:?}", shells_of(&model, tube.solids()));
+    let last = model.fuse(
+        tube.solids(),
+        holed.solids(),
+        Rule::Union,
+        &policy,
+        &mut log,
+    );
+    match &last {
+        Ok(last) => eprintln!("last {:?}", shells_of(&model, last.solids())),
+        Err(why) => eprintln!("last refused {why:?}"),
+    }
+    panic!("probe");
+}
+
+fn a_flat_double_pyramid(model: &mut Model, height: f64) -> SolidKey {
+    let (wide, tall) = (0.5, 1.0 / 128.0);
+    let round = [
+        [wide, 0.0, height],
+        [0.0, wide, height],
+        [-wide, 0.0, height],
+        [0.0, -wide, height],
+    ];
+    let (top, bottom) = ([0.0, 0.0, height + tall], [0.0, 0.0, height - tall]);
+    let mut faces: Vec<AFlatFace> = Vec::new();
+    for side in 0..4 {
+        let (from, to) = (round[side], round[(side + 1) % 4]);
+        let [x, y] = [(from[0] + to[0]).signum(), (from[1] + to[1]).signum()];
+        faces.push(([tall * x, tall * y, wide], vec![vec![from, to, top]]));
+        faces.push(([tall * x, tall * y, -wide], vec![vec![to, from, bottom]]));
+    }
+    a_solid_of_flat_faces(
+        model,
+        &faces,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .expect("a flat double pyramid")
+}
+
+#[test]
+#[ignore = "Q2313 relay probe, not a test: remove before the row lands"]
 fn probe_q2313_bars() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let policy = Policy::certified();
@@ -2615,38 +2686,59 @@ fn probe_q2313_bars() {
     let corners: Vec<[f64; 2]> = (0..sides)
         .map(|i| {
             let angle = 2.0 * PI * f64::from(i) / f64::from(sides);
-            [0.98 * angle.cos(), 0.98 * angle.sin()]
+            [0.5 * angle.cos(), 0.5 * angle.sin()]
         })
         .collect();
     let outline = ProfileBuilder::new(corners)
         .build(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a polygon");
-    let core = model
+    let cutter = model
         .add_extrusion(
             &outline,
-            3.8,
-            &Isometry::translation(Vector::new(0.0, 0.0, 0.1)).expect("a shift"),
+            1.0,
+            &Isometry::translation(Vector::new(0.0, 0.0, 1.5)).expect("a shift"),
         )
         .expect("a prism");
-    let hole = a_box_at(&mut model, [0.5, 0.5, 1.0], [-0.25, -0.25, 1.5]);
+    let core = a_bar(&mut model, 0.98, 3.8, [0.0, 0.0, 0.1]);
+    let cut = model
+        .fuse(&[core], &[cutter], Rule::Difference, &policy, &mut log)
+        .expect("cut");
+    eprintln!("cut {:?}", shells_of(&model, cut.solids()));
+    let filled = model
+        .fuse(cut.solids(), &[cutter], Rule::Union, &policy, &mut log)
+        .expect("filled");
+    eprintln!("filled {:?}", shells_of(&model, filled.solids()));
+    let ball = model
+        .add_ball(
+            0.3,
+            &Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a shift"),
+        )
+        .expect("a ball");
     let holed = model
-        .fuse(&[core], &[hole], Rule::Difference, &policy, &mut log)
-        .expect("holed");
-    eprintln!("holed {:?}", shells_of(&model, holed.solids()));
-    let sleeve = model
-        .fuse(&[bore], holed.solids(), Rule::Difference, &policy, &mut log)
-        .expect("sleeve");
-    eprintln!("sleeve {:?}", shells_of(&model, sleeve.solids()));
-    let last = model
         .fuse(
-            &[outer],
-            sleeve.solids(),
+            filled.solids(),
+            &[ball],
             Rule::Difference,
             &policy,
             &mut log,
         )
-        .expect("last");
-    eprintln!("last {:?}", shells_of(&model, last.solids()));
+        .expect("holed");
+    eprintln!("holed {:?}", shells_of(&model, holed.solids()));
+    let tube = model
+        .fuse(&[outer], &[bore], Rule::Difference, &policy, &mut log)
+        .expect("tube");
+    eprintln!("tube {:?}", shells_of(&model, tube.solids()));
+    let last = model.fuse(
+        tube.solids(),
+        holed.solids(),
+        Rule::Union,
+        &policy,
+        &mut log,
+    );
+    match &last {
+        Ok(last) => eprintln!("last {:?}", shells_of(&model, last.solids())),
+        Err(why) => eprintln!("last refused {why:?}"),
+    }
     panic!("probe");
 }
 
