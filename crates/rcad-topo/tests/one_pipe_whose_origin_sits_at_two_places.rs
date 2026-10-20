@@ -1148,3 +1148,211 @@ fn volume_of(model: &Model, solid: SolidKey) -> (f64, f64) {
         .expect("a bar measures");
     (measured.volume(), measured.volume_error())
 }
+
+#[test]
+fn probe_q2246_meet() {
+    let policy = Policy::certified();
+    for (ra, rt, t, ao, po, pd) in [
+        (
+            8.0,
+            1.0,
+            0.0,
+            [0.0, -8.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, -8.0, 0.0],
+        ),
+        (
+            8.0,
+            1.0,
+            -0.25,
+            [0.0, -8.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, -8.0, 0.0],
+        ),
+        (
+            4.0,
+            1.0,
+            0.0,
+            [0.0, -4.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, -4.0, 0.0],
+        ),
+        (
+            2.0,
+            1.0,
+            1.0,
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ),
+        (
+            2.0,
+            1.0,
+            1.0,
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [1.0, -1.0, 0.0],
+        ),
+        (
+            2.0,
+            1.0,
+            1.0,
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 1.0],
+        ),
+        (
+            2.0,
+            1.0,
+            1.0,
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 2.0, 0.0],
+        ),
+        (
+            2.0,
+            1.0,
+            1.0,
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [1.0, -8.0, 0.0],
+        ),
+    ] {
+        let a = Cylinder::new(
+            Axis::new(Point::new(ao[0], ao[1], ao[2]), Vector::new(1.0, 0.0, 1.0))
+                .expect("an axis"),
+            ra,
+        )
+        .expect("a radius");
+        let pin = Cylinder::new(
+            Axis::new(
+                Point::new(po[0], po[1], po[2]),
+                Vector::new(pd[0], pd[1], pd[2]),
+            )
+            .expect("an axis"),
+            rt,
+        )
+        .expect("a radius");
+        let along = a.axis().direction();
+        let [dx, _, dz] = along.components();
+        let cap =
+            Plane::from_point_and_normal(Point::new(ao[0] + t * dx, ao[1], ao[2] + t * dz), along)
+                .expect("a plane");
+        let mut log = ProvenanceLog::new();
+        let said = rcad_geom::meet_of_three_surfaces(
+            [
+                &Surface::Plane(cap),
+                &Surface::Cylinder(a),
+                &Surface::Cylinder(pin),
+            ],
+            &policy,
+            &mut log,
+        );
+        eprintln!("MEET ra={ra} rt={rt} t={t} ao={ao:?} po={po:?} pd={pd:?}: {said:?}");
+    }
+}
+
+#[test]
+fn probe_q2246_designer() {
+    let policy = Policy::certified();
+    for (half, pd, seam) in [
+        (1.0, [0.0, 1.0, 1.0], [0.0, 1.0, 0.0]),
+        (1.0, [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]),
+        (2.0, [0.0, 1.0, 1.0], [0.0, 1.0, 0.0]),
+        (0.5, [0.0, 1.0, 1.0], [0.0, 1.0, 0.0]),
+    ] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar_wall = Cylinder::new(
+            Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(1.0, 0.0, 1.0)).expect("an axis"),
+            2.0,
+        )
+        .expect("a radius");
+        let bar = a_bar_with_its_seam_towards(
+            &mut model,
+            bar_wall,
+            -half,
+            half,
+            Vector::new(seam[0], seam[1], seam[2]),
+        );
+        let pin_wall = Cylinder::new(
+            Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(pd[0], pd[1], pd[2]))
+                .expect("an axis"),
+            1.0,
+        )
+        .expect("a radius");
+        let pin_seam = if pd[2] == 0.0 {
+            Vector::new(0.0, 0.0, 1.0)
+        } else {
+            Vector::new(1.0, 0.0, 0.0)
+        };
+        let pin = a_bar_with_its_seam_towards(&mut model, pin_wall, -4.0, 4.0, pin_seam);
+        for [a, t] in [[bar, pin], [pin, bar]] {
+            let mut model = model.clone();
+            let said = model.fuse(&[a], &[t], Rule::Union, &policy, &mut ProvenanceLog::new());
+            let said = said.map(|f| {
+                let v = model.validate(&policy, &mut ProvenanceLog::new());
+                (f.solids().len(), v.is_ok())
+            });
+            eprintln!(
+                "DESIGNER half={half} pd={pd:?} bar_first={}: {said:?}",
+                a == bar
+            );
+        }
+    }
+}
+
+#[test]
+fn probe_q2246_slanted_bar() {
+    let policy = Policy::certified();
+    for (ra, length, rt, from, to, seam_z) in [
+        (8.0, 0.25, 1.0, 1.0, 8.0, 1.0),
+        (8.0, 0.25, 1.0, 1.0, 8.0, -1.0),
+        (8.0, 0.25, 1.0, 2.0, 8.0, 1.0),
+        (8.0, 0.25, 1.0, 2.0, 8.0, -1.0),
+        (8.0, 0.25, 1.0, 1.0, 4.0, 1.0),
+        (8.0, 0.25, 1.0, 1.0, 4.0, -1.0),
+        (4.0, 0.25, 1.0, 0.5, 4.0, 1.0),
+        (4.0, 0.25, 1.0, 0.5, 4.0, -1.0),
+        (4.0, 0.25, 1.0, 1.0, 4.0, 1.0),
+        (4.0, 0.25, 1.0, 1.0, 4.0, -1.0),
+    ] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar_wall = Cylinder::new(
+            Axis::new(Point::new(0.0, -ra, 0.0), Vector::new(1.0, 0.0, 1.0)).expect("an axis"),
+            ra,
+        )
+        .expect("a radius");
+        let bar = a_bar_with_its_seam_towards(
+            &mut model,
+            bar_wall,
+            -length,
+            0.0,
+            Vector::new(0.0, 1.0, 0.0),
+        );
+        let pin_wall = Cylinder::new(
+            Axis::new(Point::new(0.0, 0.0, rt), Vector::new(rt, -ra, 0.0)).expect("an axis"),
+            rt,
+        )
+        .expect("a radius");
+        let pin = a_bar_with_its_seam_towards(
+            &mut model,
+            pin_wall,
+            from,
+            to,
+            Vector::new(0.0, 0.0, seam_z),
+        );
+        for [a, t] in [[bar, pin], [pin, bar]] {
+            let mut model = model.clone();
+            let said = model.fuse(&[a], &[t], Rule::Union, &policy, &mut ProvenanceLog::new());
+            let said = said.map(|f| {
+                let v = model.validate(&policy, &mut ProvenanceLog::new());
+                let vol: Vec<_> = f.solids().iter().map(|s| volume_of(&model, *s)).collect();
+                (f.solids().len(), v.is_ok(), vol)
+            });
+            eprintln!(
+                "PROBE ra={ra} length={length} rt={rt} from={from} to={to} seam_z={seam_z} bar_first={}: {said:?}",
+                a == bar
+            );
+        }
+    }
+}
