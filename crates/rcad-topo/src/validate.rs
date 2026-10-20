@@ -6108,12 +6108,13 @@ mod tests {
     use super::{
         Decision, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO, Mesh, RUNGS_THE_SECOND_LADDER_HAS_ASKED, Scope,
         a_circle_round_the_axis, a_closed_crossing_is_walked_the_way_it_is_stored,
-        as_coarse_as_a_mesh_gets, gradient_of, hand_on_a_refusal_that_found_the_space,
-        how_far_across, how_far_it_strays_from_one_plane, how_far_the_sum_can_be_off,
-        how_much_space_a_curved_solid_encloses, how_much_space_hides_under,
-        how_wide_an_arc_of_one_branch_is, it_lies_flat, largest_coordinate_of,
-        signed_volume_over_and_how_far_it_rounded, the_coarsest_mesh_whose_sides_do_not_cross,
-        the_sum_answers, what_it_encloses_moved_onto_its_planes, winding_of, winding_round,
+        as_coarse_as_a_mesh_gets, every_side_of_the_skin_is_used_both_ways, gradient_of,
+        hand_on_a_refusal_that_found_the_space, how_far_across, how_far_it_strays_from_one_plane,
+        how_far_the_sum_can_be_off, how_much_space_a_curved_solid_encloses,
+        how_much_space_hides_under, how_wide_an_arc_of_one_branch_is, it_lies_flat,
+        largest_coordinate_of, signed_volume_over_and_how_far_it_rounded,
+        the_coarsest_mesh_whose_sides_do_not_cross, the_sum_answers,
+        what_it_encloses_moved_onto_its_planes, winding_of, winding_round,
     };
     use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, VertexSlot, WireSlot};
     use crate::measure::signed_volume_over;
@@ -9249,6 +9250,55 @@ mod tests {
             refused.is_empty(),
             "{} of 200 refused: {refused:#?}",
             refused.len()
+        );
+    }
+
+    /// Row Q2512. The sliver's top is three corners on the line `x = 3` where
+    /// it is made, and a rounding off that line wherever a turn puts it. Its
+    /// coarsest mesh uses each side once each way at all 40 turns about each
+    /// of five axes, either way out. Until Q2512 the top was cut where the
+    /// sliver sits, into a triangle wound whichever way the rounding went, and
+    /// at 14/40 about `(1, 2, 3)` and 2/40 about `(3, −1, 2)` it came out
+    /// backwards, so the sound sliver was refused
+    /// [`Invalid::FacesDoNotAgreeWhichWayTheyFace`].
+    #[test]
+    fn the_sliver_placed_anywhere_uses_each_side_of_its_coarsest_mesh_once_each_way() {
+        let policy = Policy::tolerant(100.0);
+        let mut model = an_empty_model();
+        let sliver = the_sliver_where_a_bar_dips_into_a_block(&mut model, &policy);
+        let axes = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(3.0, -1.0, 2.0),
+        ];
+        let mut not_both_ways = Vec::new();
+        for axis in axes {
+            for step in 0..40 {
+                let turn = Isometry::rotation(
+                    &Axis::new(Point::origin(), axis).expect("a direction with a length"),
+                    f64::from(step) * core::f64::consts::TAU / 40.0,
+                )
+                .expect("a finite turn");
+                for way in [Orientation::Forward, Orientation::Reversed] {
+                    let view = SolidView::new(&model, sliver.slot_in(model.id()), turn, way);
+                    let mesh = the_coarsest_mesh_whose_sides_do_not_cross(
+                        view,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| panic!("{axis:?} at {step}/40, {way:?}: {why:?}"));
+                    if let Err(why) = every_side_of_the_skin_is_used_both_ways(&mesh) {
+                        not_both_ways.push(format!("{axis:?} at {step}/40, {way:?}: {why:?}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            not_both_ways.is_empty(),
+            "{} of 400 not both ways: {not_both_ways:#?}",
+            not_both_ways.len()
         );
     }
 
