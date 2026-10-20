@@ -120,6 +120,18 @@ either:
 It runs to a fixed point, since a crossing kept makes its nodes count against
 the others through them.
 
+**Filling `its_neighbour_leaves_out` is itself worked out to a fixed point**
+(Q2382), not read off each face's own list alone. A top that climbs past a
+bar in two leaning faces shows why: both faces list the bar's pipe, the lower
+one keeps its curve since it runs on into the block's sides, which do not
+list it, and the upper one, told only that the lower one may leave the pipe
+out, took that for what it does and left its own curve out too, splitting
+their edge on the lower face's side alone; 3 of the 6 fuses were refused
+`ResultIsNotManifold` before `tell_each_edge_what_its_neighbour_leaves_out`
+(`fuse/cuts.rs`) ran the lists to a fixed point across the whole solid
+(`a_top_climbing_past_a_bar_in_two_leaning_faces_answers_every_rule_either_way_round`
+in `tests/a_third_spelling_of_a_surface_a_face_never_sees.rs`).
+
 **The guard is measured, not argued.** The second run's last lane cut
 `splits_nothing_kept`'s test down to `node.vertex.is_none()` alone, in a probe
 it did not commit, and ran `mise exec -- just t -p rcad-topo --no-fail-fast`:
@@ -214,9 +226,15 @@ which.
   in `tests/a_third_spelling_of_a_surface_a_face_never_sees.rs`). What was
   refused instead was a block with a step up beside a bar, 3 of its 6 fuses
   `ResultIsNotManifold`, and all 6 answer with
-  `the_face_across_places_it_alone` (422.4). `its_neighbour_leaves_out` still
-  says what the face across may leave out, not what it does, and a spelling
-  that only touches this face at the node was never built. Row Q2382.
+  `the_face_across_places_it_alone` (422.4), and a top that climbs past the
+  same bar in two leaning faces, 3 of its 6 fuses `ResultIsNotManifold` the
+  same way, since the upper face took "may leave out" for "does leave out".
+  Row Q2382 fixed that: `its_neighbour_leaves_out` now holds what the face
+  across does leave out, worked out to a fixed point across the whole solid
+  (422.4), and all 6 of the leaning-top's fuses answer too
+  (`a_top_climbing_past_a_bar_in_two_leaning_faces_answers_every_rule_either_way_round`
+  in the same file). A spelling that only touches this face at the node is
+  still never built.
 - **Row, small**: the doc comment of `where_a_ring_and_a_pipe_along_its_core_cross`
   in `rcad-geom`'s `intersect.rs` still says the fuse does not leave the loop's
   halves off and is refused ordering the one on the bar's pipe face. Since this
