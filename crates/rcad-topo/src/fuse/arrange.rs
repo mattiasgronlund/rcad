@@ -12069,6 +12069,13 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// ridge's node `(0, 1, 0)` and the place across, `(7, 1, 7)`, both read `[0,
 /// 0]` along it and [`Decision::Pos`] against `start + runs`, and `node` is a
 /// box `±5.7e-14` round the start, which holds the first and not the second.
+/// The quarter wedge of a ball of radius `0.001` cut with the turned knife
+/// first
+/// (`a_wedge_cut_with_the_turned_knife_first_is_answered_or_refused_by_name`)
+/// has such a node too: the great circle the knife's plane cuts is walked
+/// from `(−0.001, 6.869504964868156e-19, 0)`, and a node lies `5.2e-30` from
+/// it, square to the run. Every fuse of it was refused `ResultIsNotManifold`
+/// until this read the node first, and each now validates and measures.
 /// Nothing here checks that the chord is longer than `node` is wide: a
 /// crossing whose chord square to the run at the start is shorter than
 /// `node`'s diagonal, which would read the place across `true` too, has not
