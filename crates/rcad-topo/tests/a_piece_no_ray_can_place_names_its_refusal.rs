@@ -733,11 +733,19 @@ fn the_angle_where_the_caps_overlap(model: &Model, bends: [SolidKey; 2], start: 
 /// input edge, the union and the quarter less the bend were refused
 /// `DynamicRangeTooWide`: the answer's largest coordinate over its shortest
 /// edge was `3.7e15` a quarter turn round and `8.2e15` half a turn round, an
-/// edge a few roundings long. A quarter turn round either way, the quarter
-/// less the bend is still refused, now `FacesDoNotAgreeWhichWayTheyFace`
-/// (row Q1865).
+/// edge a few roundings long.
+///
+/// A quarter turn round either way, the quarter less the bend answers the
+/// quarter, `36π`, validating. The bend's end cap lies a rounding inside the
+/// quarter, so the hollow it leaves keeps a band of the bend's wall a rounding
+/// wide, between the cap's rim and the quarter's flat face, on the bend's torus
+/// used reversed. The mesh zips such a band up rim to rim, and drew it the way
+/// the rims run about the torus's own normal, so on the hollow it faced into
+/// the quarter. The mesh's sides along its rims did not balance, and the fuse
+/// was refused `FacesDoNotAgreeWhichWayTheyFace` until the band was turned over
+/// on a face used reversed, as a cut face is (Q2292).
 #[test]
-fn a_quarter_of_a_bar_placed_round_from_a_bend_answers_but_the_quarter_less_it_a_quarter_round() {
+fn a_quarter_of_a_bar_placed_round_from_a_bend_answers_every_rule() {
     for rule in EVERY_RULE {
         for the_bend_first in [true, false] {
             let what = format!("where it sits, {rule:?}, the bend first {the_bend_first}");
@@ -803,17 +811,10 @@ fn a_quarter_of_a_bar_placed_round_from_a_bend_answers_but_the_quarter_less_it_a
                         &[one_bend, the_quarter],
                         &what,
                     ),
-                    (Rule::Difference, false, true) => each_within_its_error(
+                    (Rule::Difference, false, _) => each_within_its_error(
                         measured.unwrap_or_else(|why| panic!("{what}: {why:?}")),
                         &[the_quarter],
                         &what,
-                    ),
-                    (Rule::Difference, false, false) => assert!(
-                        matches!(
-                            measured,
-                            Err(Error::Invalid(Invalid::FacesDoNotAgreeWhichWayTheyFace))
-                        ),
-                        "{what}: {measured:?}"
                     ),
                     (other, _, _) => panic!("not a rule this tries: {other:?}"),
                 }
