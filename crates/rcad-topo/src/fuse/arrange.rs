@@ -7102,7 +7102,10 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::are_two_rulings_of_one_plane_holding_the_axis`]), and
     /// that is read as `Zero` without working the turn out: worked out, it is
     /// an interval straddling nothing, as two halves of one ruling are in
-    /// [`Arrangement::turns_anticlockwise`].
+    /// [`Arrangement::turns_anticlockwise`]. **Rulings of two planes that each
+    /// hold the axis** turn as their normals and their sides of the axis say
+    /// ([`Arrangement::as_rulings_of_two_planes_holding_the_axis_say`]), asked
+    /// only where the boxes cannot say.
     ///
     /// **Five lengths**: each way out is two, as a cross product of two
     /// gradients or of two normals, and `N` is one.
@@ -7116,7 +7119,8 @@ impl<'f> Arrangement<'f> {
     ) -> Result<Decision> {
         let at = self.nodes[node].point;
         let (one, other) = (self.way_out_of(node, first), self.way_out_of(node, second));
-        let about = match self.the_cone_whose_apex_the_face_pinches_at(node) {
+        let apex = self.the_cone_whose_apex_the_face_pinches_at(node);
+        let about = match apex {
             Some(cone) => {
                 let about = self.what_a_turn_at_the_apex_is_about(&cone, one, other)?;
                 if self.are_two_rulings_of_one_plane_holding_the_axis(
@@ -7130,8 +7134,20 @@ impl<'f> Arrangement<'f> {
             }
             None => gradient_at(&self.surface, at).enclosure(),
         };
+        let mut turn = dot_of(about, cross_of_intervals(one, other)).sign();
+        if matches!(turn, Decision::Undecidable { .. })
+            && let Some(cone) = apex
+            && let Some(proved) = self.as_rulings_of_two_planes_holding_the_axis_say(
+                &cone,
+                [first.crossing, second.crossing],
+                [one, other],
+                about,
+            )
+        {
+            turn = proved;
+        }
         must_decide(
-            dot_of(about, cross_of_intervals(one, other)).sign(),
+            turn,
             TWO_WAYS_OUT_OF_A_NODE,
             &[
                 at,
@@ -7296,6 +7312,85 @@ impl<'f> Arrangement<'f> {
                 .partner
                 .as_plane()
                 .is_some_and(|flat| a_plane_holds_a_cones_axis(flat, cone))
+    }
+
+    /// The turn `a · (t₁ × t₂)` at the apex between two ways out, for `a` what
+    /// it is about ([`Arrangement::what_a_turn_at_the_apex_is_about`]), where
+    /// each way out `tᵢ` is a ruling a plane `Pᵢ` of its own cuts through the
+    /// apex and both planes hold the whole of the cone's axis: read off the two
+    /// planes' normals and which side of the axis each way out leaves on.
+    /// `None` everywhere else, and wherever a sign it reads is not proved.
+    ///
+    /// **It is the order round a circle of
+    /// [`Arrangement::as_two_cuts_through_the_axis_say`], at the apex.** For
+    /// the axis along `w`, `tᵢ` is `hᵢ·w + rᵢ·uᵢ` with `uᵢ = w × nᵢ`, since
+    /// `Pᵢ` holds the axis, and `a` is `±w`. So `a · (t₁ × t₂)` is
+    /// `±r₁·r₂·|w|²·det[w, n₁, n₂]`: `det[w, n₁, n₂]` worked out exactly, and
+    /// `rᵢ` the sign of `det[tᵢ, w, nᵢ]`, which the way out's box tells, since
+    /// a ruling leaves the apex at the slope off the axis. Where the two
+    /// normals lie along each other the two planes are one, and two rulings of
+    /// one plane holding the axis turn by nothing
+    /// ([`Arrangement::are_two_rulings_of_one_plane_holding_the_axis`]).
+    ///
+    /// Two quarters of one cone, each cut by a prism standing on its axis and
+    /// turned about it, one by `s` and the other by `s − π/2`, have their side
+    /// planes at `s` one plane, with normals an ulp apart. Each cuts the
+    /// cone's face in a ruling through the apex a rounding round from the
+    /// other's, and the boxes of the two ways out turn by nothing to within
+    /// `2.6e-16`. Their intersection was refused there at eight of nine turns,
+    /// both hollow and not (Q2537, Q2543).
+    fn as_rulings_of_two_planes_holding_the_axis_say(
+        &self,
+        cone: &Cone,
+        crossings: [usize; 2],
+        ways: [[Interval; 3]; 2],
+        about: [Interval; 3],
+    ) -> Option<Decision> {
+        let [mine, theirs] = crossings.map(|crossing| {
+            let ruling = &self.crossings[crossing];
+            ruling.through_an_apex.as_ref()?;
+            let flat = ruling.partner.as_plane()?;
+            holds_the_whole_of(flat, cone.axis()).then_some(*flat)
+        });
+        let (mine, theirs) = (mine?, theirs?);
+        let along = cone.axis().direction().components();
+        let apart = orient3d(
+            along,
+            mine.normal().components(),
+            theirs.normal().components(),
+            [0.0; 3],
+        );
+        if apart == Decision::Zero {
+            return Some(Decision::Zero);
+        }
+        let origin = PredicatePoint::from([0.0; 3]);
+        let [here, there] = [(ways[0], mine), (ways[1], theirs)].map(|(way, cut)| {
+            orient3d_of_points(
+                PredicatePoint::Constructed(way),
+                along.into(),
+                cut.normal().components().into(),
+                origin,
+            )
+        });
+        let faces = dot_of(about, along.map(Interval::exactly)).sign();
+        let signs = [here, there, apart, faces];
+        // Compared rather than matched: only proved signs are read, and every
+        // other answer leaves the turn to the policy (§40).
+        if !signs
+            .iter()
+            .all(|&sign| sign == Decision::Pos || sign == Decision::Neg)
+        {
+            return None;
+        }
+        let behind = signs
+            .into_iter()
+            .filter(|&sign| sign == Decision::Neg)
+            .count();
+        Some(if behind % 2 == 0 {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
     }
 
     /// [`Arrangement::turns_anticlockwise`], and where that says the two lie on
