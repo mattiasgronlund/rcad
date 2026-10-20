@@ -12076,15 +12076,15 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// and the far end, whose dot is exactly zero, reads `false`
 /// (`the_walked_start_of_a_balls_one_loop_has_no_point_square_to_its_run_ahead_of_it`).
 ///
-/// **On two pipes' loop the window can hold points behind square, and none
-/// of them, nor the one square to the run, reads a dot of exactly zero.**
-/// Where their axes lean off square, the walked start's window does hold loop
-/// points behind square to the run: a pipe of radius 1 whose axis passes 3.5
-/// from that of a pipe of radius 4, leaning 0.6 off square to it, with the
-/// thin pipe first
+/// **On two pipes' loop the window can hold points behind square, and where
+/// it was read none of them, nor the one square to the run, reads a dot of
+/// exactly zero.** Where their axes lean off square, the walked start's window
+/// does hold loop points behind square to the run: a pipe of radius 1 whose
+/// axis passes 3.5 from that of a pipe of radius 4, leaning 0.6 off square to
+/// it, with the thin pipe first
 /// (`the_walked_start_of_two_pipes_leaning_off_square_has_points_behind_square_in_its_window`).
 /// So one place of the loop between those and the start is square to the run.
-/// But leaning, the run comes out with width along every axis, and a dot is
+/// But there the run comes out with width along every axis, and a dot is
 /// `[0, 0]` only where every term is: a term whose step is not exactly nought
 /// has width, and a sum is at least as wide as each of its terms. So only a
 /// box that is the start's own point reads square, and the box round the
@@ -12092,7 +12092,8 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// either pipe first, as built and turned off every axis
 /// (`two_pipes_leaning_off_square_have_no_node_but_the_start_exactly_square_to_the_run`).
 /// Square, the run is exact, and the window holds no point behind square, by
-/// the ball's argument.
+/// the ball's argument. A leaning pair whose run comes out exact along some
+/// axis has not been built.
 ///
 /// # Errors
 ///
