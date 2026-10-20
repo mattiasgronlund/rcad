@@ -282,3 +282,30 @@ the fix is to keep both pairs.
   `check-queue-selftest` fixture holds `families.py` to it. On the queue of
   that day the `merged.rs` family had 51 rows, and `just queue families`
   went from 17 families to 16.
+
+### 373.8 Q729's numbers, rcad-topo only — 2026-10-20
+
+*Q729 did 373.5's merge, folding rcad-topo's test files into one binary, and
+measured the result: `1a594140` against `b3500e38`, rcad-topo only. Bytes are
+`/usr/bin/time %O` of the build's own processes.*
+
+- Test executables: 290 (3,976 MB) before, 62 (906 MB) after.
+- A cold build with no kache: 283 s and 7.48 GB written before, 116 s and
+  3.06 GB after.
+- A warm restore into an empty `target/`: 4.43 GB before, 1.31 GB after.
+- One test file edited: 1-3 s and 19 MB before, 13-30 s and 298 MB after.
+- `crates/rcad-topo/src/lib.rs` edited: 26-100 s and 5.79 GB before, 13-94 s
+  and 1.84 GB after.
+- `cargo nextest list -p rcad-topo`: 2331 tests before, 2332 after, the one
+  more being 373.5's check that every file in `tests/` is declared.
+
+**The merged edit costs less than the relinks it saves.** Editing one test
+file got slower, from 1-3 s to 13-30 s, because the whole merged binary
+recompiles where one small binary used to. That is 373.5's price, paid once
+per test edit. Everything else fell by about half or more: the cold build's
+283 s and 7.48 GB are 116 s and 3.06 GB, the warm restore's 4.43 GB is
+1.31 GB, and even a `src/lib.rs` edit — which used to relink all 290
+binaries — now takes at most 94 s and 1.84 GB against 100 s and 5.79 GB
+before. rcad-topo's 290 old binaries each cost a relink on most source edits
+and a copy on most warm restores; its 62 new ones cost less on both, and the
+one test file this makes slower to edit is paid back by every one of those.
