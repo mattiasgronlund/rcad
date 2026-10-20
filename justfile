@@ -17963,6 +17963,12 @@ land *args:
 # Which waiting run gets the lock first is not fixed, so those arms hold either
 # order to the same outcome.
 #
+# `SIGSTOP` is not synchronous: `wait_stopped` waits until every process in the
+# stopped run's group reads state `T` in `/proc` before the lock is freed, since
+# a waiter that has not actually stopped yet can still win the race for the
+# lock the instant it is freed and hold it there, which `just decision 337.6`
+# measured at 145 of 200 rounds (§397.5).
+#
 # Three arms pin §450.3 rule 4's `--answers`. A lane named as answering one
 # open row, one that waits, one a lane holds, one parked, one closed and one
 # that is no row closes the two open ones done at its tip in its own `queue
@@ -18216,6 +18222,26 @@ check-land-selftest:
                 }
             }'
     }
+    state_of() {
+        local pid=$1 raw rest
+        raw=$(cat "/proc/$pid/stat" 2>/dev/null) || { echo '?'; return; }
+        rest=${raw##*\)}
+        set -- $rest
+        echo "${1:-?}"
+    }
+    wait_stopped() {
+        local root=$1 pids pid all_stopped
+        for _ in $(seq 400); do
+            pids="$root $(descendants_of "$root")"
+            all_stopped=1
+            for pid in $pids; do
+                [ "$(state_of "$pid")" = T ] || { all_stopped=0; break; }
+            done
+            [ "$all_stopped" = 1 ] && return 0
+            sleep 0.05
+        done
+        fail "waited 20 s for $root and its descendants to read state T after SIGSTOP (§397.5)"
+    }
     stop_like_a_clear() {
         local group=$1 pid before
         before=$(descendants_of "$group")
@@ -18400,6 +18426,7 @@ check-land-selftest:
     start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
     waiter=$(cat "$at/lander2/target/land/pid")
     kill -STOP -- "-$waiter"
+    wait_stopped "$waiter"
     release_lock
     land_in verify 0.5 wait-for lane-y
     [ "$rc" -eq 3 ] || fail "wait-for exited $rc with the lock free and a live run waiting to land lane-y, not 3 for still running"
