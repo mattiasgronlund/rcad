@@ -501,11 +501,12 @@ const LEANING_BAR_REFUSALS_MUST_STAY_BELOW: f64 = 0.75;
 /// every one named [`WHERE_THREE_SURFACES_MEET_NEEDS_TWO_OF_THEM_FLAT`] (the
 /// third ball's skin crosses each of the other two on its own, so a face of the
 /// first or second ball can end up crossed by two different round surfaces at
-/// once — §31.2 row 8's gap). It was 95 until Q2388, the other 2 named
-/// [`A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH`] (a face the fuse could not mesh,
-/// previously seen only once a curved fixture was turned off the world's own
-/// axes, §191 — see [`a_three_balls_crossing_refusal`] for why this family
-/// reached it and why it no longer does). Sixty-five per cent is twenty points
+/// once — §31.2 row 8's gap). It was 95 until Q2388, the other 2 named a face
+/// the fuse could not mesh, previously seen only once a curved fixture was
+/// turned off the world's own axes (§191) — see
+/// [`a_three_balls_crossing_refusal`], which no longer names that outcome at
+/// all (Q2399), since no member of this family is known to reach it any
+/// more. Sixty-five per cent is twenty points
 /// above the measured rate: room to catch a real jump without brushing a
 /// family that already refuses close to half of what it draws.
 const THREE_BALLS_CROSSING_REFUSALS_MUST_STAY_BELOW: f64 = 0.65;
@@ -4999,18 +5000,18 @@ fn a_turned_curved_refusal(why: &Error) -> Option<&'static str> {
 /// eighth of the gap, and the same probe saw all 46 mesh;
 /// [`three_balls_whose_lune_bows_away_from_its_chart_side_mesh`] pins two of
 /// them. So no member is known to reach the arm below any more, and the
-/// shipped corpus meets none; it is kept for a lune that clears only under an
-/// eighth of the gap, which nothing here has shown.
+/// shipped corpus meets none; the arm itself is gone (Q2399), and this
+/// function now just defers to [`a_curved_refusal`]. A face this family
+/// cannot mesh is no longer named here: it would come back as a plain
+/// refusal the same as any other, rather than as the named outcome this
+/// function used to hand back for it.
 ///
 /// **A step that went round the third ball's pole the other way from its arc
 /// did the same**, and that one was a misread and not a coarse mesh. `mesh.rs`
 /// now walks such an arc again, finer
 /// ([`three_balls_whose_lune_runs_round_the_third_balls_pole_mesh`], Q2381).
 fn a_three_balls_crossing_refusal(why: &Error) -> Option<&'static str> {
-    match why {
-        Error::CannotMeshAFace { .. } => Some(A_TURNED_FACE_THE_FUSE_COULD_NOT_MESH),
-        _ => a_curved_refusal(why),
-    }
+    a_curved_refusal(why)
 }
 
 /// What one fuse came back with.

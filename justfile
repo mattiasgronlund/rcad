@@ -2607,7 +2607,14 @@ check-fuzz-builds:
 # points and sends every other `Error` to `a_curved_refusal` with `_`, the
 # same shape `a_turned_curved_refusal` already has, since `a_curved_refusal`
 # itself names the rest.
-wildcard_arms := "101"
+#
+#     Q2399's lane  101 -> 100
+#
+# One fewer: no member of `pairs::ThreeBallsThatCrossAtTheSameTwoPoints` is
+# known to reach `Error::CannotMeshAFace` any more (Q2388), so
+# `a_three_balls_crossing_refusal` dropped that arm along with its wildcard
+# and now just defers to `a_curved_refusal` with no match of its own.
+wildcard_arms := "100"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
