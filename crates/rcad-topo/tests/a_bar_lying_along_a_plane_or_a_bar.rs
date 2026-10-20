@@ -2602,3 +2602,131 @@ fn a_solid_of_flat_faces(
     builder.add_shell(&shell)?;
     builder.build(model, policy, log)
 }
+
+#[test]
+#[ignore = "Q2313 relay probe, not a test: remove before the row lands"]
+fn probe_q2313_bars() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let policy = Policy::certified();
+    let outer = a_bar(&mut model, 1.0, 4.0, [0.0, 0.0, 0.0]);
+    let bore = a_bar(&mut model, 0.99, 3.9, [0.0, 0.0, 0.05]);
+    let mut log = ProvenanceLog::new();
+    let sides = 32;
+    let corners: Vec<[f64; 2]> = (0..sides)
+        .map(|i| {
+            let angle = 2.0 * PI * f64::from(i) / f64::from(sides);
+            [0.98 * angle.cos(), 0.98 * angle.sin()]
+        })
+        .collect();
+    let outline = ProfileBuilder::new(corners)
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a polygon");
+    let core = model
+        .add_extrusion(
+            &outline,
+            3.8,
+            &Isometry::translation(Vector::new(0.0, 0.0, 0.1)).expect("a shift"),
+        )
+        .expect("a prism");
+    let hole = a_box_at(&mut model, [0.5, 0.5, 1.0], [-0.25, -0.25, 1.5]);
+    let holed = model
+        .fuse(&[core], &[hole], Rule::Difference, &policy, &mut log)
+        .expect("holed");
+    eprintln!("holed {:?}", shells_of(&model, holed.solids()));
+    let sleeve = model
+        .fuse(&[bore], holed.solids(), Rule::Difference, &policy, &mut log)
+        .expect("sleeve");
+    eprintln!("sleeve {:?}", shells_of(&model, sleeve.solids()));
+    let last = model
+        .fuse(
+            &[outer],
+            sleeve.solids(),
+            Rule::Difference,
+            &policy,
+            &mut log,
+        )
+        .expect("last");
+    eprintln!("last {:?}", shells_of(&model, last.solids()));
+    panic!("probe");
+}
+
+#[test]
+#[ignore = "Q2313 relay probe, not a test: remove before the row lands"]
+fn probe_q2313() {
+    let h = 1.0 / 32768.0;
+    let radius = 16384.0;
+    let c = radius - h;
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let policy = Policy::certified();
+    let ball = model
+        .add_ball(
+            radius,
+            &Isometry::translation(Vector::new(c, 0.0, 0.0)).expect("a shift"),
+        )
+        .expect("a ball");
+    let slab = a_box_at(&mut model, [1.0, 4.0, 4.0], [-1.0, -2.0, -2.0]);
+    let mut log = ProvenanceLog::new();
+    let told = model
+        .fuse(&[ball], &[slab], Rule::Intersection, &policy, &mut log)
+        .expect("cut");
+    eprintln!("told {:?}", shells_of(&model, told.solids()));
+    let first_hollow = a_box_at(
+        &mut model,
+        [h / 2.0, 0.5, 0.5],
+        [-3.0 * h / 4.0, -0.25, -0.25],
+    );
+    let hollowed = model
+        .fuse(
+            told.solids(),
+            &[first_hollow],
+            Rule::Difference,
+            &policy,
+            &mut log,
+        )
+        .expect("hollowed");
+    eprintln!("hollowed {:?}", shells_of(&model, hollowed.solids()));
+    let lump = a_box_at(
+        &mut model,
+        [h / 4.0, 0.25, 0.25],
+        [-5.0 * h / 8.0, -0.125, -0.125],
+    );
+    let with_lump = model
+        .fuse(hollowed.solids(), &[lump], Rule::Union, &policy, &mut log)
+        .expect("lump");
+    eprintln!("with lump {:?}", shells_of(&model, with_lump.solids()));
+    let inner_hollow = a_box_at(
+        &mut model,
+        [h / 8.0, 0.125, 0.125],
+        [-9.0 * h / 16.0, -0.0625, -0.0625],
+    );
+    let last = model
+        .fuse(
+            with_lump.solids(),
+            &[inner_hollow],
+            Rule::Difference,
+            &policy,
+            &mut log,
+        )
+        .expect("last");
+    eprintln!("last {:?}", shells_of(&model, last.solids()));
+    eprintln!("log {:?}", log.records());
+    panic!("probe");
+}
+
+fn a_box_at(model: &mut Model, size: [f64; 3], [x, y, z]: [f64; 3]) -> SolidKey {
+    let block = a_block(model, size);
+    model
+        .place_solid(
+            block,
+            &Isometry::translation(Vector::new(x, y, z)).expect("a shift"),
+        )
+        .expect("this model made the key");
+    block
+}
+
+fn shells_of(model: &Model, solids: &[SolidKey]) -> Vec<Vec<usize>> {
+    solids
+        .iter()
+        .map(|&solid| faces_of_each_shell(model, solid))
+        .collect()
+}
