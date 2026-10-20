@@ -16130,6 +16130,52 @@ check-queue-api-selftest:
     got=$(q "$hub" running 2>&1) || fail "running failed with a stale hold"
     grep -q "^lane-stale  .*no tree yet" <<<"$got" || fail "a hold on a branch already on main, which no tree left, was not counted"
 
+    # Q2215 (§263.4): a lander's own tree, run for a row held on lane-<label>,
+    # switches to merge-<label> once it holds the land lock, before the lane's
+    # own tree is unlocked. `has_a_tree`'s `merge-<label>` arm already covered
+    # this; this pins it, since nothing did before.
+    merge_lane_wt="$lanes/merge-label-lane"
+    g "$hub" worktree add -q -b lane-merge-label "$merge_lane_wt" main
+    g "$merge_lane_wt" commit -q --allow-empty -m "lane-merge-label's own commit"
+    g "$hub" worktree remove --force "$merge_lane_wt"
+    lander_tree="$lanes/merge-label-lander"
+    g "$hub" worktree add -q -b merge-merge-label "$lander_tree" main && lock "$lander_tree"
+    got=$(q "$hub" add 3 opus - "from/- a row whose lane tree became the lander's merge-<label> tree §230" 2>&1) \
+        || fail "add for the lander's-own-tree row failed"
+    q_merge_label=$got
+    got=$(q "$hub" take "$q_merge_label" lane-merge-label 2>&1) || fail "take could not hold $q_merge_label on lane-merge-label"
+    got=$(q "$hub" running 2>&1) || fail "running failed with the lane tree now the lander's merge-<label> tree"
+    grep -qxF "merge-merge-label  $lander_tree" <<<"$got" || fail "the lander's merge-<label> tree was not counted"
+    grep -q "^lane-merge-label  .*no tree yet" <<<"$got" \
+        && fail "a row the lander's merge-<label> tree already covers was counted again as treeless"
+
+    # Q2215 (§263.4): once that lander stops, `lanes.js` sends an Opus merger
+    # on merge-<label>-after-land instead, since the lander's own merge-<label>
+    # tree may by then be unlocked and gone (land.py's own `unlock(top, ...)`
+    # once `hold_batch` returns or raises). `has_a_tree` matched only
+    # `lane-<label>` and `merge-<label>`, so this tree, on neither, fell through
+    # to `running`'s "no tree yet" fallback and double-counted the row.
+    after_land_lane_wt="$lanes/after-land-lane"
+    g "$hub" worktree add -q -b lane-after-land "$after_land_lane_wt" main
+    g "$after_land_lane_wt" commit -q --allow-empty -m "lane-after-land's own commit"
+    g "$hub" worktree remove --force "$after_land_lane_wt"
+    merger_tree="$lanes/after-land-merger"
+    g "$hub" worktree add -q -b merge-after-land-after-land "$merger_tree" main && lock "$merger_tree"
+    got=$(q "$hub" add 3 opus - "from/- a row whose merger followed a lander's stop §230" 2>&1) \
+        || fail "add for the after-land row failed"
+    q_after_land=$got
+    got=$(q "$hub" take "$q_after_land" lane-after-land 2>&1) || fail "take could not hold $q_after_land on lane-after-land"
+    got=$(q "$hub" running 2>&1) || fail "running failed with the merger on merge-<label>-after-land"
+    grep -qxF "merge-after-land-after-land  $merger_tree" <<<"$got" || fail "the after-land merger's tree was not counted"
+    grep -q "^lane-after-land  .*no tree yet" <<<"$got" \
+        && fail "a row whose merger is on merge-<label>-after-land was also counted as treeless"
+    # `tooling/queue-page/render.py`'s own `tree_for` does not yet know the
+    # `-after-land` pattern (out of this row's write set, filed separately), so
+    # a dangling hold of this shape left past this point throws inside
+    # `queue-page`'s render, swallowed by its own `|| true` but leaving later
+    # pages stale. Released here so the checks below still see a fresh page.
+    got=$(q "$hub" drop "$q_after_land" 230 2>&1) || fail "drop could not release $q_after_land"
+
     # §309.4: `apply`, all or nothing, and its own tests, last and in a fresh
     # worktree off the script's own main -- everything above has already taken,
     # closed or renumbered rows enough that reusing 'one' or 'two' here, or
