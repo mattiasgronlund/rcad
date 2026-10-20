@@ -334,8 +334,8 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
 /// to put a point in. The triangles use each side of either loop the way its
 /// loop runs, and each rung across once each way ([`a_strip_round_a_ring`]).
 /// They are not turned any way in the chart, since a band a rounding wide has
-/// no turn there to go by: a caller drawing them on a solid takes them as they
-/// are, the way its wires run.
+/// no turn there to go by: a caller drawing them on a solid turns them over on
+/// a face used reversed, the way it turns the flat fan.
 ///
 /// # Errors
 ///
