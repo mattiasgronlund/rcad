@@ -2066,6 +2066,17 @@ fn is_one_circle_cut_in_two(
 /// Before, every such face was refused, so no face the steps answered is
 /// answered differently now.
 ///
+/// **A pipe face whose steps refuse is counted too, before the refusal is
+/// handed back** (row Q2406). A reading the steps refuse stops them where they
+/// would have fallen through to the count. The wall of a slot end built in two
+/// steps is one: a round bar united with a block whose sides rest along the
+/// bar's wall, the half of the wall left over `x < 0` with a ruling where each
+/// side touches it, and that answer united with a second block stacked on the
+/// first (`tests/a_slot_end_built_from_two_stacked_blocks.rs`). Every reading of
+/// that wall was refused `AFaceTrimmedByACurveThisCannotFollow`, and the count
+/// answers it. The count is asked only where the steps refused, so no face the
+/// steps answered is answered differently now.
+///
 /// # Errors
 ///
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face on a ring
@@ -2075,7 +2086,9 @@ fn is_one_circle_cut_in_two(
 /// [`what_a_flat_face_of_chords_and_arcs_holds`],
 /// [`what_a_cone_face_seen_down_its_axis_holds`] and
 /// [`what_a_ball_face_seen_from_a_point_of_its_sphere_holds`] refuse, and
-/// [`Error::Undecidable`] when a sign could not be settled.
+/// [`Error::Undecidable`] when a sign could not be settled. A face whose steps
+/// refuse and which a count along a ruling does not answer is handed back the
+/// steps' first refusal, after the count is asked.
 fn what_a_face_cut_by_part_of_a_crossing_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
