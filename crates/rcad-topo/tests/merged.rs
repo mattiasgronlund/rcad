@@ -66,6 +66,8 @@ pub mod a_ball_kept_to_a_corner_of_a_box;
 pub mod a_ball_less_a_cap_whose_rim_runs_through_its_north_pole;
 #[path = "a_ball_poking_through_a_cubes_side.rs"]
 pub mod a_ball_poking_through_a_cubes_side;
+#[path = "a_ball_resting_on_a_cubes_ridge.rs"]
+pub mod a_ball_resting_on_a_cubes_ridge;
 #[path = "a_ball_split_on_itself_united_with_a_block_clear_of_it.rs"]
 pub mod a_ball_split_on_itself_united_with_a_block_clear_of_it;
 #[path = "a_ball_touching_a_prisms_edge_exactly.rs"]
