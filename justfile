@@ -12266,8 +12266,10 @@ check-clean-targets-selftest:
 # `prune-worktrees` still keeps a marked tree that is not on `main`, is dirty,
 # or holds a real fuzz find. A locked tree is refused, because its owner is
 # still at work, so the merger unlocks its own tree first. The hub is refused
-# because it is never a lane's tree. Every tree is checked before any is
-# marked, so a refusal marks nothing.
+# because it is never a lane's tree. Every live tree is checked before any is
+# marked, so a refusal marks nothing — except a tree already gone, which is
+# the one case that is not a refusal: there is nothing left there to mark, so
+# it is skipped and the rest proceed.
 [doc("Mark worktrees as finished, so prune-worktrees removes them without waiting an hour.")]
 mark-finished +trees:
     #!/usr/bin/env bash
@@ -12275,6 +12277,10 @@ mark-finished +trees:
     tops=()
     gitdirs=()
     for tree in "$@"; do
+        if [ ! -e "$tree" ]; then
+            echo "gone: $tree, so there is nothing to mark"
+            continue
+        fi
         top=$(git -C "$tree" rev-parse --show-toplevel)
         gitdir=$(git -C "$top" rev-parse --absolute-git-dir)
         common=$(git -C "$top" rev-parse --path-format=absolute --git-common-dir)
@@ -12520,6 +12526,13 @@ check-prune-worktrees-selftest:
     ! just mark-finished "$dir/hub" >/dev/null 2>&1 \
         || fail "mark-finished marked the hub"
     just mark-finished "$dir/marked" >/dev/null
+    # A gone tree is skipped, not refused: the live tree named beside it still
+    # gets marked.
+    got=$(just mark-finished "$dir/gone" "$dir/marked")
+    grep -qF "gone: $dir/gone, so there is nothing to mark" <<<"$got" \
+        || fail "a gone tree was not reported as gone"
+    grep -qF "marked: $dir/marked" <<<"$got" \
+        || fail "a live tree alongside a gone one was not marked"
     (cd "$dir/busy/" && exec sleep 300) &
     busy=$!
     got=$(just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service")
