@@ -254,6 +254,8 @@ pub mod a_plate_and_its_round_corner_tab_unite_at_every_turn;
 pub mod a_plate_cut_by_a_whole_bend;
 #[path = "a_plate_with_a_hole_beside_a_cut.rs"]
 pub mod a_plate_with_a_hole_beside_a_cut;
+#[path = "a_plate_with_a_round_corner_tab_and_its_copy.rs"]
+pub mod a_plate_with_a_round_corner_tab_and_its_copy;
 #[path = "a_plate_with_an_off_centre_hole.rs"]
 pub mod a_plate_with_an_off_centre_hole;
 #[path = "a_point_a_rounding_past_a_turned_solids_corner.rs"]

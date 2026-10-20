@@ -68,9 +68,14 @@ const STEP: f64 = 0.2;
 ///   outside the pipe, so the part in front of both is two runs of rulings.
 ///   `holds.rs`'s `one_of_two_runs_between_two_cuts_meeting_off_the_pipe`
 ///   (row Q1252) now answers that shape, so none of the four refuse any more.
-/// - **The box through a cap and the wall's `1`** is the wall, which keeps the
-///   outside of the strip `|y| ≤ 2` where one of two flats is read for a strip
-///   kept between them. A gap.
+/// - **The box through a cap and the wall** used to refuse 1 face in the
+///   union each way round and in the bar less the box: the wall, which keeps
+///   the outside of the strip `|y| ≤ 2`, where one of two flats was read for a
+///   strip kept between them. Its sides are rulings and arcs of planes across
+///   the bar's axis, and where nothing else in `holds.rs` answers, a face like
+///   that is now counted along the ruling through the point (row Q2405). So
+///   none of the three refuse, and the wall agrees with the solid at every
+///   point asked.
 const REFUSED: [(&str, Rule, bool, usize); 30] = [
     ("the notch", Rule::Union, true, 0),
     ("the notch", Rule::Union, false, 0),
@@ -96,13 +101,13 @@ const REFUSED: [(&str, Rule, bool, usize); 30] = [
     ("a box through the caps", Rule::Difference, false, 0),
     ("a box through the caps", Rule::Intersection, true, 0),
     ("a box through the caps", Rule::Intersection, false, 0),
-    ("a box through a cap and the wall", Rule::Union, true, 1),
-    ("a box through a cap and the wall", Rule::Union, false, 1),
+    ("a box through a cap and the wall", Rule::Union, true, 0),
+    ("a box through a cap and the wall", Rule::Union, false, 0),
     (
         "a box through a cap and the wall",
         Rule::Difference,
         true,
-        1,
+        0,
     ),
     (
         "a box through a cap and the wall",

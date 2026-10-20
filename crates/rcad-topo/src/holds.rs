@@ -2054,10 +2054,24 @@ fn is_one_circle_cut_in_two(
 ///   as well, as [`how_often_the_ruling_above_a_point_is_crossed`] sets out,
 ///   since a ray the fuse fires lands on one wherever the shape is symmetric.
 ///
+/// **A pipe face with no piece of a half is counted the same way, last** (row
+/// Q2405). None of the four reasons above asks for a half, so a face on a pipe
+/// whose sides are rulings, arcs of planes across the axis and whole curves
+/// such planes cut is counted along its ruling
+/// ([`what_a_pipe_face_of_rulings_and_arcs_across_its_axis_holds`]) wherever
+/// the steps above and [`in_front_of_a_plane_every_side_is_behind`] say
+/// nothing. The wall of a plate's round tab at its corner is one: the band
+/// between the caps, less the part inside the square, which is the part in
+/// front of either of the square's two walls and not the part in front of both.
+/// Before, every such face was refused, so no face the steps answered is
+/// answered differently now.
+///
 /// # Errors
 ///
-/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face on a pipe or a
-/// ring outside that family, and for the shapes
+/// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face on a ring
+/// outside the steps' family, a face on a pipe that neither the steps,
+/// [`in_front_of_a_plane_every_side_is_behind`] nor a count along a ruling
+/// answers, and for the shapes
 /// [`what_a_flat_face_of_chords_and_arcs_holds`],
 /// [`what_a_cone_face_seen_down_its_axis_holds`] and
 /// [`what_a_ball_face_seen_from_a_point_of_its_sphere_holds`] refuse, and
@@ -2127,7 +2141,12 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
             what_a_cone_face_seen_down_its_axis_holds(face, &cone, sides, &whole_curves, point)
         }
         Surface::Cylinder(_) => {
-            in_front_of_a_plane_every_side_is_behind(face, &surface, &readings, point)?
+            if let Some(held) =
+                in_front_of_a_plane_every_side_is_behind(face, &surface, &readings, point)?
+            {
+                return Ok(held);
+            }
+            what_a_pipe_face_of_rulings_and_arcs_across_its_axis_holds(solid, face, point)?
                 .ok_or(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() })
         }
         Surface::Sphere(_) => {
@@ -2180,8 +2199,10 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
 ///   axis is a whole half, which could be either, and is left to the steps.
 ///
 /// A seam, where the face meets itself, is no side and is passed over. A face
-/// with any other side, with no piece of a half, or placed anywhere but where
-/// it is stored, or beside a face that is, is left to the steps.
+/// with any other side, or placed anywhere but where it is stored, or beside a
+/// face that is, is left to the steps. So is a face with no piece of a half,
+/// which [`what_a_pipe_face_of_rulings_and_arcs_across_its_axis_holds`] counts
+/// the same way after them, where they say nothing.
 ///
 /// # Errors
 ///
@@ -2193,8 +2214,58 @@ fn what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds(
     face: FaceView<'_>,
     point: PredicatePoint,
 ) -> Result<Option<OnAFace>> {
-    let mine = face.stored_surface();
-    let Surface::Cylinder(pipe) = mine else {
+    let Some(sides) = the_sides_of_a_pipe_face_along_its_rulings(solid, face)? else {
+        return Ok(None);
+    };
+    if !sides
+        .curved
+        .iter()
+        .any(|side| matches!(side.lies_on, CrossingOf::AHalf { .. }))
+    {
+        return Ok(None);
+    }
+    sides.holds(point).map(Some)
+}
+
+/// Whether a face on a pipe whose sides are rulings and arcs of planes across
+/// its axis holds `point`, counted along the ruling through it; `None` for any
+/// other face.
+///
+/// It is the count of [`what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds`]
+/// with no piece of a half asked for, which the argument for that count never
+/// needed: every side but a ruling is on a plane across the axis and meets a
+/// ruling once at most. The wall of a plate's round tab at its corner is such a
+/// face (`tests/a_plate_with_a_round_corner_tab_and_its_copy.rs`, row Q2405):
+/// the band between the caps less the part inside the square, which is the
+/// part in front of either of the square's two walls and not the part in front
+/// of both, so no step reading a face as the part in front of its cuts takes it.
+///
+/// # Errors
+///
+/// As [`what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds`].
+fn what_a_pipe_face_of_rulings_and_arcs_across_its_axis_holds(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    point: PredicatePoint,
+) -> Result<Option<OnAFace>> {
+    let Some(sides) = the_sides_of_a_pipe_face_along_its_rulings(solid, face)? else {
+        return Ok(None);
+    };
+    sides.holds(point).map(Some)
+}
+
+/// The sides of a face on a pipe, each read as [`PipeSide`] reads it; `None`
+/// for a face on anything but a pipe, with a side none of [`PipeSide`]'s kinds
+/// is, or placed anywhere but where it is stored, or beside a face that is.
+///
+/// # Errors
+///
+/// Whatever [`the_face_across`] gives.
+fn the_sides_of_a_pipe_face_along_its_rulings(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+) -> Result<Option<PipeFace>> {
+    let Surface::Cylinder(pipe) = face.stored_surface() else {
         return Ok(None);
     };
     if face.location() != rcad_geom::Isometry::identity() {
@@ -2225,17 +2296,37 @@ fn what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds(
             None => return Ok(None),
         }
     }
-    if !curved
-        .iter()
-        .any(|side| matches!(side.lies_on, CrossingOf::AHalf { .. }))
-    {
-        return Ok(None);
+    Ok(Some(PipeFace {
+        pipe,
+        curved,
+        rulings,
+    }))
+}
+
+/// A face on a pipe whose every side is a ruling or a [`CurvedSide`].
+struct PipeFace {
+    pipe: rcad_geom::Cylinder,
+    curved: Vec<CurvedSide>,
+    /// Each ruling side's two ends, where they are stored.
+    rulings: Vec<[Point; 2]>,
+}
+
+impl PipeFace {
+    /// Whether the face holds `point`, through
+    /// [`how_often_the_ruling_above_a_point_is_crossed`].
+    fn holds(&self, point: PredicatePoint) -> Result<OnAFace> {
+        how_often_the_ruling_above_a_point_is_crossed(
+            &Surface::Cylinder(self.pipe),
+            &self.pipe,
+            &self.curved,
+            &self.rulings,
+            point,
+        )
     }
-    how_often_the_ruling_above_a_point_is_crossed(&mine, &pipe, &curved, &rulings, point).map(Some)
 }
 
 /// A side of a face on a pipe crossed by a pipe of its width, as
-/// [`what_a_pipe_face_crossed_by_a_pipe_of_its_width_holds`] reads it.
+/// [`the_sides_of_a_pipe_face_along_its_rulings`] reads it.
 enum PipeSide {
     /// Along the pipe's axis.
     Ruling,

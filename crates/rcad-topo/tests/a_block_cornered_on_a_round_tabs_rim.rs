@@ -27,22 +27,37 @@
 //! - **The union, a limit.** It holds the sliver of the block's floor or roof
 //!   outside the rim, a face thinner than a rounding of its own coordinates,
 //!   so it is refused `DynamicRangeTooWide`.
-//! - **Each fuse of the block `x 7.6 to 12.4` by `y 8.2 to 11.8`, a gap.** Its
-//!   other corner `(7.6, 11.8)` is on the rim too, and the ray from there meets
-//!   the tab's wall, which `holds.rs` cannot follow (Q2231). That is where
-//!   every fuse of it stops, on the plate's top or under its floor, under
-//!   either policy.
+//! - **The block `x 7.6 to 12.4` by `y 8.2 to 11.8` on the plate's top, less
+//!   the plate, the plate less it, and their common part, a gap.** Its other
+//!   corner `(7.6, 11.8)` is on the rim too. Under a certified policy these are
+//!   refused `Undecidable` on which side of the tab's wall a point a rounding
+//!   from that corner lies (Q2477). Each answer is one of the two solids as it
+//!   stands, or nothing, since they touch along a face; under the floor, and
+//!   under a tolerant policy, the same three give it.
+//! - **That block's union under a tolerant policy, not yet traced.** The mesh
+//!   refuses it, a wire that does not fan into a loop with the block on the
+//!   plate's top and two patches drawing the same side with it under the
+//!   floor. Q2478 traces it and says whether it is a gap.
 
-use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_geom::{Deflection, Isometry, SIDE_OF_CYLINDER, Scale, Vector};
 use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
-
-const INSIDE_A_PIECE: &str = "a point inside a piece of a face";
 
 /// Every rule, with the plate first and second.
 const EVERY_FUSE: [(Rule, bool); 6] = [
     (Rule::Union, true),
     (Rule::Union, false),
+    (Rule::Intersection, true),
+    (Rule::Intersection, false),
+    (Rule::Difference, true),
+    (Rule::Difference, false),
+];
+
+/// The union, with the plate first and second.
+const THE_UNIONS: [(Rule, bool); 2] = [(Rule::Union, true), (Rule::Union, false)];
+
+/// Every rule but the union, with the plate first and second.
+const BUT_THE_UNIONS: [(Rule, bool); 4] = [
     (Rule::Intersection, true),
     (Rule::Intersection, false),
     (Rule::Difference, true),
@@ -66,7 +81,7 @@ fn a_block_cornered_on_a_round_tabs_rim_is_never_refused_on_which_rim_crossing_c
         &blocks,
         &EVERY_FUSE,
         &Policy::certified(),
-        Should::NotBeRefusedOnTheOrderAlongACrossing,
+        [Should::NotBeRefusedOnTheOrderAlongACrossing; 2],
     );
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
@@ -87,14 +102,9 @@ fn a_block_cornered_on_a_round_tabs_rim_less_the_plate_and_their_common_part_ans
  {
     let wrong = what_the_fuses_get_wrong(
         &BLOCKS,
-        &[
-            (Rule::Intersection, true),
-            (Rule::Intersection, false),
-            (Rule::Difference, true),
-            (Rule::Difference, false),
-        ],
+        &BUT_THE_UNIONS,
         &Policy::certified(),
-        Should::Answer,
+        [Should::Answer; 2],
     );
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
@@ -109,9 +119,9 @@ fn a_block_cornered_on_a_round_tabs_rim_united_with_the_plate_is_refused_for_a_s
  {
     let wrong = what_the_fuses_get_wrong(
         &BLOCKS,
-        &[(Rule::Union, true), (Rule::Union, false)],
+        &THE_UNIONS,
         &Policy::certified(),
-        Should::BeRefusedAsTooWideARangeToComputeIn,
+        [Should::BeRefusedAsTooWideARangeToComputeIn; 2],
     );
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
@@ -125,17 +135,30 @@ fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_when_the_corner_
         &BLOCKS,
         &EVERY_FUSE,
         &Policy::tolerant(100.0),
-        Should::Answer,
+        [Should::Answer; 2],
     );
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The block's other corner `(7.6, 11.8)` is on the rim too, and every fuse of
-/// the block, on the plate's top or under its floor, is refused at the sliver
-/// of the block's face there, under either policy. The ray from that corner
-/// meets the tab's wall, a round face whose top and bottom are each three arcs
-/// of where the square and the bar crossed, and `holds.rs` cannot follow it
-/// (Q2231).
+/// The block's other corner `(7.6, 11.8)` is on the rim too, and its 24 fuses,
+/// on the plate's top or under its floor, under either policy, come to this:
+///
+/// - Under a certified policy the union is refused `DynamicRangeTooWide`, as
+///   each block cornered once is: it has the same corner `(12.4, 8.2)` on the
+///   rim.
+/// - Under a certified policy, on the plate's top, the block less the plate,
+///   the plate less the block and their common part are refused `Undecidable`
+///   on which side of the tab's wall a point a rounding from `(7.6, 11.8, 2)`
+///   lies (Q2477). Under the floor they answer.
+/// - Under a tolerant policy the union is refused by the mesh: a wire that
+///   does not fan into a loop on the plate's top, and two patches drawing the
+///   same side under its floor (Q2478). The rest answer.
+///
+/// Until Q2405 every one of them was refused at the sliver of the block's face
+/// at `(7.6, 11.8)`, under either policy. The ray from that corner meets the
+/// tab's wall, a round face whose top and bottom are each three arcs of where
+/// the square and the bar crossed, and `holds.rs` could not follow it (Q2231).
+/// It now counts that face along the ruling through the point.
 ///
 /// Under the plate's floor the certified fuses were refused first at the piece
 /// of the block's floor under the square's corner `(10, 10)`, a whole unit
@@ -144,23 +167,43 @@ fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_when_the_corner_
 /// piece held no point. Such a turn now counts nothing, and the piece holds
 /// its own points (Q2297).
 #[test]
-fn a_block_cornered_twice_on_a_round_tabs_rim_is_refused_at_its_second_corner_under_either_policy()
-{
-    for (policy, under) in [
-        (Policy::certified(), [7.6, 11.8, 0.0]),
-        (Policy::tolerant(100.0), [7.6, 11.8, 0.0]),
+fn what_each_fuse_of_a_block_cornered_twice_on_a_round_tabs_rim_comes_to() {
+    let certified = Policy::certified();
+    let tolerant = Policy::tolerant(100.0);
+    let mut wrong = Vec::new();
+    for (policy, fuses, on_top, under) in [
+        (
+            &certified,
+            &THE_UNIONS[..],
+            Should::BeRefusedAsTooWideARangeToComputeIn,
+            Should::BeRefusedAsTooWideARangeToComputeIn,
+        ),
+        (
+            &certified,
+            &BUT_THE_UNIONS[..],
+            Should::BeUndecidedOnWhichSideOfTheTabsWallAPointLiesNear([7.6, 11.8, 2.0]),
+            Should::Answer,
+        ),
+        (
+            &tolerant,
+            &THE_UNIONS[..],
+            Should::BeRefusedForAWireThatDoesNotFanIntoALoop,
+            Should::BeRefusedForTwoPatchesOfTheMeshDrawingTheSameSide,
+        ),
+        (
+            &tolerant,
+            &BUT_THE_UNIONS[..],
+            Should::Answer,
+            Should::Answer,
+        ),
     ] {
-        let wrong = what_the_fuses_get_wrong(
-            &[A_BLOCK_CORNERED_TWICE],
-            &EVERY_FUSE,
-            &policy,
-            Should::BeRefusedAtAPieceWith {
-                on_top: [7.6, 11.8, 2.0],
-                under,
-            },
-        );
-        assert!(wrong.is_empty(), "{policy:?}:\n{}", wrong.join("\n"));
+        for line in
+            what_the_fuses_get_wrong(&[A_BLOCK_CORNERED_TWICE], fuses, policy, [on_top, under])
+        {
+            wrong.push(format!("{policy:?}: {line}"));
+        }
     }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// What a fuse of a block with the plate should come to.
@@ -172,24 +215,32 @@ enum Should {
     Answer,
     /// `DynamicRangeTooWide`.
     BeRefusedAsTooWideARangeToComputeIn,
-    /// `Undecidable` at a point inside a piece of a face with the corner
-    /// `on_top` for the block on the plate's top, and `under` for the block
-    /// under its floor.
-    BeRefusedAtAPieceWith { on_top: [f64; 3], under: [f64; 3] },
+    /// `Undecidable` on which side of the tab's wall a point lies, for a point
+    /// within [`A_FEW_ROUNDINGS`] of this one.
+    BeUndecidedOnWhichSideOfTheTabsWallAPointLiesNear([f64; 3]),
+    /// `AWireDoesNotFanIntoALoopToMesh`.
+    BeRefusedForAWireThatDoesNotFanIntoALoop,
+    /// `TwoPatchesOfTheMeshDrewTheSameSide`.
+    BeRefusedForTwoPatchesOfTheMeshDrawingTheSameSide,
 }
+
+/// How far each bound of a point's box may be from the point it is read as
+/// being near: a few roundings of `11.8`.
+const A_FEW_ROUNDINGS: f64 = 1e-14;
 
 /// Each of `blocks`, set on the plate's top or under its floor, fused with the
 /// plate by each of `fuses` (a rule and whether the plate is first) under
-/// `policy`: one line for each fuse that does not come to what it `should`.
+/// `policy`: one line for each fuse that does not come to what it `should`,
+/// on the plate's top and under its floor, in that order.
 fn what_the_fuses_get_wrong(
     blocks: &[[f64; 3]],
     fuses: &[(Rule, bool)],
     policy: &Policy,
-    should: Should,
+    should: [Should; 2],
 ) -> Vec<String> {
     let mut wrong = Vec::new();
     for &[x0, y0, y1] in blocks {
-        for [z0, z1] in [[2.0, 3.0], [-1.0, 0.0]] {
+        for ([z0, z1], should) in [[2.0, 3.0], [-1.0, 0.0]].into_iter().zip(should) {
             for &(rule, plate_first) in fuses {
                 let mut model =
                     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -224,13 +275,17 @@ fn what_the_fuses_get_wrong(
                     Should::BeRefusedAsTooWideARangeToComputeIn => {
                         is_refused_as_too_wide_a_range(&fused)
                     }
-                    Should::BeRefusedAtAPieceWith { on_top, under } => {
-                        let corner = if z0 < 0.0 { under } else { on_top };
-                        is_refused_at_a_piece_with_this_corner(
-                            &fused,
-                            PredicatePoint::Exact(corner),
-                        )
+                    Should::BeUndecidedOnWhichSideOfTheTabsWallAPointLiesNear(near) => {
+                        is_undecided_on_which_side_of_the_tabs_wall_a_point_lies_near(&fused, near)
                     }
+                    Should::BeRefusedForAWireThatDoesNotFanIntoALoop => match &fused {
+                        Err(Error::AWireDoesNotFanIntoALoopToMesh { .. }) => Ok(()),
+                        other => Err(what_it_came_to_instead(other)),
+                    },
+                    Should::BeRefusedForTwoPatchesOfTheMeshDrawingTheSameSide => match &fused {
+                        Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => Ok(()),
+                        other => Err(what_it_came_to_instead(other)),
+                    },
                 };
                 if let Err(why) = what {
                     wrong.push(format!(
@@ -258,25 +313,44 @@ fn is_not_refused_on_the_order_along_a_crossing(
 fn is_refused_as_too_wide_a_range(fused: &rcad_topo::Result<Fused>) -> Result<(), String> {
     match fused {
         Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. })) => Ok(()),
-        Err(why) => Err(format!("refused {why:?}")),
-        Ok(fused) => Err(format!("answered with {} solids", fused.solids().len())),
+        other => Err(what_it_came_to_instead(other)),
     }
 }
 
-fn is_refused_at_a_piece_with_this_corner(
+fn is_undecided_on_which_side_of_the_tabs_wall_a_point_lies_near(
     fused: &rcad_topo::Result<Fused>,
-    corner: PredicatePoint,
+    near: [f64; 3],
 ) -> Result<(), String> {
     match fused {
         Err(Error::Undecidable { records })
             if records.records().iter().any(|record| {
-                record.predicate() == INSIDE_A_PIECE && record.inputs().contains(&corner)
+                record.predicate() == SIDE_OF_CYLINDER
+                    && record
+                        .inputs()
+                        .iter()
+                        .any(|&point| is_within_a_few_roundings(point, near))
             }) =>
         {
             Ok(())
         }
-        Err(why) => Err(format!("refused {why:?}")),
-        Ok(fused) => Err(format!("answered with {} solids", fused.solids().len())),
+        other => Err(what_it_came_to_instead(other)),
+    }
+}
+
+fn is_within_a_few_roundings(point: PredicatePoint, near: [f64; 3]) -> bool {
+    let PredicatePoint::Constructed(range) = point else {
+        return false;
+    };
+    (0..3).all(|axis| {
+        (range[axis].lo() - near[axis]).abs() <= A_FEW_ROUNDINGS
+            && (range[axis].hi() - near[axis]).abs() <= A_FEW_ROUNDINGS
+    })
+}
+
+fn what_it_came_to_instead(fused: &rcad_topo::Result<Fused>) -> String {
+    match fused {
+        Err(why) => format!("refused {why:?}"),
+        Ok(fused) => format!("answered with {} solids", fused.solids().len()),
     }
 }
 
