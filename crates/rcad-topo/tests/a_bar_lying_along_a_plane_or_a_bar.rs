@@ -148,6 +148,12 @@
 //! the same coordinates of 4 to 6, so no new row is filed for them (`docs/decisions.md`
 //! §3.5, §16.10). `a_thousand_turns_of_a_cube_and_a_bar` pins it, with the
 //! fuller argument in its own doc comment.
+//!
+//! **A core standing in a tube's bore keeps the hollow cut out of it** (queue
+//! row Q2313). The hollow went to the tube, which a mesh read as the smaller
+//! lump of the two. `fuse/assemble.rs` now tells which of two lumps round a
+//! hollow is inside the other by asking it, and reads no size.
+//! `a_core_in_a_tubes_bore_keeps_the_ball_hollowed_out_of_it` pins it.
 
 use core::f64::consts::PI;
 use std::collections::BTreeMap;
@@ -2603,14 +2609,45 @@ fn a_solid_of_flat_faces(
     builder.build(model, policy, log)
 }
 
+/// A tube, a bar of radius one and four high less a bore of radius `0.995`,
+/// with a core of radius `0.99` standing in the bore clear of its wall, and a
+/// ball of radius `0.3` hollowed out of the core's middle. United, the tube and
+/// the core stay apart: two lumps, the tube with its bore as its hollow and the
+/// core with the ball as its own (queue row Q2313).
+///
+/// **The ball used to go to the tube.** `Assembly::nest_the_shells` gave each
+/// hollow to the lump around it whose shell enclosed the least space, and a
+/// curved shell's space is read off a mesh only as fine as it needs to be to
+/// tell the sign. The tube's outer shell has no bend under `0.995`, and its
+/// sum answers on a mesh that draws each circle as an octagon, which encloses
+/// `11.31` of the bar's `12.57`. The core has a pocket in its top, a blind
+/// hole of radius `0.02` and `0.05` deep, and no coarse mesh can be trusted
+/// past so thin a bend, so the core's sum is asked down to a mesh fine enough
+/// for it, and there the core encloses `11.92` of its `12.01`. The core read
+/// as the bigger lump, and the ball went to the tube. The pocket is in the
+/// shape for that alone: without it the core is an octagon too.
+///
+/// Since Q2313 the innermost lump around a hollow is told by asking which of
+/// the two lumps' shells is inside the other, and no size is read.
 #[test]
-#[ignore = "Q2313 relay probe, not a test: remove before the row lands"]
-fn probe_q2313_flat() {
+fn a_core_in_a_tubes_bore_keeps_the_ball_hollowed_out_of_it() {
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let policy = Policy::certified();
-    let mut log = ProvenanceLog::new();
     let outer = a_bar(&mut model, 1.0, 4.0, [0.0, 0.0, 0.0]);
     let bore = a_bar(&mut model, 0.995, 3.95, [0.0, 0.0, 0.025]);
+    let tube = model
+        .fuse(
+            &[outer],
+            &[bore],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a bar less a bore wholly inside it is a tube");
+    assert_eq!(
+        shells_of(&model, tube.solids()),
+        [[3, 3]],
+        "the tube is one solid: the bar's two caps and wall round the bore's"
+    );
     let core = a_bar(&mut model, 0.99, 3.9, [0.0, 0.0, 0.05]);
     let angle = PI / 8.0;
     let pocket = a_bar(
@@ -2619,95 +2656,6 @@ fn probe_q2313_flat() {
         0.1,
         [0.5 * angle.cos(), 0.5 * angle.sin(), 3.9],
     );
-    let mut tools = vec![pocket];
-    let ball = model
-        .add_ball(
-            0.3,
-            &Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a shift"),
-        )
-        .expect("a ball");
-    tools.push(ball);
-    let holed = model
-        .fuse(&[core], &tools, Rule::Difference, &policy, &mut log)
-        .expect("holed");
-    eprintln!("holed {:?}", shells_of(&model, holed.solids()));
-    let tube = model
-        .fuse(&[outer], &[bore], Rule::Difference, &policy, &mut log)
-        .expect("tube");
-    eprintln!("tube {:?}", shells_of(&model, tube.solids()));
-    let last = model.fuse(
-        tube.solids(),
-        holed.solids(),
-        Rule::Union,
-        &policy,
-        &mut log,
-    );
-    match &last {
-        Ok(last) => eprintln!("last {:?}", shells_of(&model, last.solids())),
-        Err(why) => eprintln!("last refused {why:?}"),
-    }
-    panic!("probe");
-}
-
-fn a_flat_double_pyramid(model: &mut Model, height: f64) -> SolidKey {
-    let (wide, tall) = (0.5, 1.0 / 128.0);
-    let round = [
-        [wide, 0.0, height],
-        [0.0, wide, height],
-        [-wide, 0.0, height],
-        [0.0, -wide, height],
-    ];
-    let (top, bottom) = ([0.0, 0.0, height + tall], [0.0, 0.0, height - tall]);
-    let mut faces: Vec<AFlatFace> = Vec::new();
-    for side in 0..4 {
-        let (from, to) = (round[side], round[(side + 1) % 4]);
-        let [x, y] = [(from[0] + to[0]).signum(), (from[1] + to[1]).signum()];
-        faces.push(([tall * x, tall * y, wide], vec![vec![from, to, top]]));
-        faces.push(([tall * x, tall * y, -wide], vec![vec![to, from, bottom]]));
-    }
-    a_solid_of_flat_faces(
-        model,
-        &faces,
-        &Policy::certified(),
-        &mut ProvenanceLog::new(),
-    )
-    .expect("a flat double pyramid")
-}
-
-#[test]
-#[ignore = "Q2313 relay probe, not a test: remove before the row lands"]
-fn probe_q2313_bars() {
-    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let policy = Policy::certified();
-    let outer = a_bar(&mut model, 1.0, 4.0, [0.0, 0.0, 0.0]);
-    let bore = a_bar(&mut model, 0.99, 3.9, [0.0, 0.0, 0.05]);
-    let mut log = ProvenanceLog::new();
-    let sides = 32;
-    let corners: Vec<[f64; 2]> = (0..sides)
-        .map(|i| {
-            let angle = 2.0 * PI * f64::from(i) / f64::from(sides);
-            [0.5 * angle.cos(), 0.5 * angle.sin()]
-        })
-        .collect();
-    let outline = ProfileBuilder::new(corners)
-        .build(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a polygon");
-    let cutter = model
-        .add_extrusion(
-            &outline,
-            1.0,
-            &Isometry::translation(Vector::new(0.0, 0.0, 1.5)).expect("a shift"),
-        )
-        .expect("a prism");
-    let core = a_bar(&mut model, 0.98, 3.8, [0.0, 0.0, 0.1]);
-    let cut = model
-        .fuse(&[core], &[cutter], Rule::Difference, &policy, &mut log)
-        .expect("cut");
-    eprintln!("cut {:?}", shells_of(&model, cut.solids()));
-    let filled = model
-        .fuse(cut.solids(), &[cutter], Rule::Union, &policy, &mut log)
-        .expect("filled");
-    eprintln!("filled {:?}", shells_of(&model, filled.solids()));
     let ball = model
         .add_ball(
             0.3,
@@ -2716,106 +2664,39 @@ fn probe_q2313_bars() {
         .expect("a ball");
     let holed = model
         .fuse(
-            filled.solids(),
-            &[ball],
+            &[core],
+            &[pocket, ball],
             Rule::Difference,
-            &policy,
-            &mut log,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
         )
-        .expect("holed");
-    eprintln!("holed {:?}", shells_of(&model, holed.solids()));
-    let tube = model
-        .fuse(&[outer], &[bore], Rule::Difference, &policy, &mut log)
-        .expect("tube");
-    eprintln!("tube {:?}", shells_of(&model, tube.solids()));
-    let last = model.fuse(
-        tube.solids(),
-        holed.solids(),
-        Rule::Union,
-        &policy,
-        &mut log,
+        .expect("a bar less a blind hole in its top and a ball inside it");
+    assert_eq!(
+        shells_of(&model, holed.solids()),
+        [[1, 5]],
+        "the core is one solid: its outer shell of five faces with the pocket, \
+         and the ball as its hollow"
     );
-    match &last {
-        Ok(last) => eprintln!("last {:?}", shells_of(&model, last.solids())),
-        Err(why) => eprintln!("last refused {why:?}"),
-    }
-    panic!("probe");
-}
-
-#[test]
-#[ignore = "Q2313 relay probe, not a test: remove before the row lands"]
-fn probe_q2313() {
-    let h = 1.0 / 32768.0;
-    let radius = 16384.0;
-    let c = radius - h;
-    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let policy = Policy::certified();
-    let ball = model
-        .add_ball(
-            radius,
-            &Isometry::translation(Vector::new(c, 0.0, 0.0)).expect("a shift"),
-        )
-        .expect("a ball");
-    let slab = a_box_at(&mut model, [1.0, 4.0, 4.0], [-1.0, -2.0, -2.0]);
-    let mut log = ProvenanceLog::new();
-    let told = model
-        .fuse(&[ball], &[slab], Rule::Intersection, &policy, &mut log)
-        .expect("cut");
-    eprintln!("told {:?}", shells_of(&model, told.solids()));
-    let first_hollow = a_box_at(
-        &mut model,
-        [h / 2.0, 0.5, 0.5],
-        [-3.0 * h / 4.0, -0.25, -0.25],
-    );
-    let hollowed = model
+    let united = model
         .fuse(
-            told.solids(),
-            &[first_hollow],
-            Rule::Difference,
-            &policy,
-            &mut log,
+            tube.solids(),
+            holed.solids(),
+            Rule::Union,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
         )
-        .expect("hollowed");
-    eprintln!("hollowed {:?}", shells_of(&model, hollowed.solids()));
-    let lump = a_box_at(
-        &mut model,
-        [h / 4.0, 0.25, 0.25],
-        [-5.0 * h / 8.0, -0.125, -0.125],
+        .expect("the tube and the core apart");
+    let mut lumps = shells_of(&model, united.solids());
+    lumps.sort_unstable();
+    assert_eq!(
+        lumps,
+        [vec![1, 5], vec![3, 3]],
+        "the core keeps the ball as its hollow, and the tube its bore"
     );
-    let with_lump = model
-        .fuse(hollowed.solids(), &[lump], Rule::Union, &policy, &mut log)
-        .expect("lump");
-    eprintln!("with lump {:?}", shells_of(&model, with_lump.solids()));
-    let inner_hollow = a_box_at(
-        &mut model,
-        [h / 8.0, 0.125, 0.125],
-        [-9.0 * h / 16.0, -0.0625, -0.0625],
-    );
-    let last = model
-        .fuse(
-            with_lump.solids(),
-            &[inner_hollow],
-            Rule::Difference,
-            &policy,
-            &mut log,
-        )
-        .expect("last");
-    eprintln!("last {:?}", shells_of(&model, last.solids()));
-    eprintln!("log {:?}", log.records());
-    panic!("probe");
 }
 
-fn a_box_at(model: &mut Model, size: [f64; 3], [x, y, z]: [f64; 3]) -> SolidKey {
-    let block = a_block(model, size);
-    model
-        .place_solid(
-            block,
-            &Isometry::translation(Vector::new(x, y, z)).expect("a shift"),
-        )
-        .expect("this model made the key");
-    block
-}
-
+/// How many faces each shell of each of `solids` has, as
+/// [`faces_of_each_shell`] counts them.
 fn shells_of(model: &Model, solids: &[SolidKey]) -> Vec<Vec<usize>> {
     solids
         .iter()
