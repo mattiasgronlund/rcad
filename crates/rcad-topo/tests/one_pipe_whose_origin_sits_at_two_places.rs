@@ -883,8 +883,7 @@ fn a_bar_across_the_pipe(model: &mut Model) -> SolidKey {
     a_bar_with_its_seam_towards(model, wall, -4.0, 4.0, Vector::new(0.0, 0.0, 1.0))
 }
 
-/// **A pin through a cross of two bars of one radius cannot tell the parts of
-/// the upright wall apart.**
+/// **A pin through a cross of two bars of one radius unites with it.**
 ///
 /// A bar up `z` from `0` to `6` united with the bar across it at `z = 3` is a
 /// cross whose two walls meet in four halves of two ellipses, each from
@@ -898,21 +897,22 @@ fn a_bar_across_the_pipe(model: &mut Model) -> SolidKey {
 /// probe, Q2461). It is the shape of
 /// [`a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_them`]
 /// with nothing spelled twice and no joint at all. With each such edge's other
-/// corner saying which half it runs along, both orders are refused
-/// `CannotTellTheCellsOfAFaceApart` on the upright wall instead. The halves cut
-/// it into four parts, the two windows into the bar across and the parts above
-/// and below them, and nothing tells which of the four the pin's loop round
-/// `(0, 2, 5.5)` lies in: no half closes on its own, so none has a side to
-/// read.
+/// corner saying which half it runs along, both orders were refused
+/// `CannotTellTheCellsOfAFaceApart` on the upright wall instead (Q2464). The
+/// halves cut it into four parts, the two windows into the bar across and the
+/// parts above and below them, and no half closes on its own, so none had a
+/// side to read that tells which of the four the pin's loop round
+/// `(0, 2, 5.5)` lies in. The two halves on one plane make a closed ellipse,
+/// and the side of that plane tells all four apart: only the part above is
+/// past both, as the loop is.
 #[test]
-fn a_pin_through_a_cross_of_two_bars_of_one_radius_cannot_tell_the_parts_of_the_upright_wall_apart()
-{
+fn a_pin_through_a_cross_of_two_bars_of_one_radius_unites_with_it() {
     let mut wrong = Vec::new();
     for (cross_first, (answer, said)) in [true, false]
         .into_iter()
         .zip(the_cross_united_with_a_thin_pin())
     {
-        if !matches!(answer, Err(Error::CannotTellTheCellsOfAFaceApart { .. })) {
+        if answer.is_err() {
             wrong.push(format!("cross first {cross_first}: {said}"));
         }
     }
