@@ -42,6 +42,25 @@ mise exec -- just status
 mise exec -- just queue
 ```
 
+**Before trusting any of that, check your own age against `.claude/agents`.**
+A running `claude` process never re-reads `.claude/agents` (§266.6), so a
+dispatcher started before an agent file last changed sends every lane,
+verifier and merger it dispatches the rules that file had before the change,
+without ever seeing the difference (§360.3). In one call:
+
+```
+ps -o lstart= -p $PPID
+git log -1 --format=%cI origin/main -- .claude/agents
+```
+
+The first line is when this session's own process started — `$PPID` from a
+Bash call is the `claude` process itself, not the shell running the command.
+The second is when `.claude/agents` last changed on `origin/main`. If that
+commit is later than the process start, hand off and tell Mattias to start a
+fresh process before dispatching anything: this one is running `lane.md`,
+`verifier.md` and `merger.md` as they were before that change, and nothing
+short of a new process reads the new ones (§360).
+
 `status` prints §0, the queue's ready rows, the board, `lanes`, the branches
 carrying work `main` does not have, and how far the tip is past the last green.
 `queue` adds what is running and what is waiting on which row.

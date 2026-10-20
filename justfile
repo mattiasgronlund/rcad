@@ -2983,11 +2983,14 @@ _skills-check dir:
         echo "no $dir, so there are no project skills to check"
         exit 0
     fi
-    files=$(find "$dir" -name SKILL.md | sort)
-    if [ -z "$files" ]; then
+    skill_files=$(find "$dir" -name SKILL.md | sort)
+    if [ -z "$skill_files" ]; then
         echo "no SKILL.md under $dir, so there are no project skills to check"
         exit 0
     fi
+    # A skill's claims can live in any .md beside SKILL.md too, such as
+    # reference.md — not just in SKILL.md itself.
+    files=$(find "$dir" -name '*.md' | sort)
     recipes=$({{ just_executable() }} --justfile {{ justfile() }} --summary 2>/dev/null \
         | tr ' ' '\n' | grep . | sort -u)
     if [ -z "$recipes" ]; then
@@ -3072,6 +3075,16 @@ check-skills-selftest:
         echo "a skill naming a path that is not in the tree passed"; exit 1
     fi
     rm -rf "$dir/bad-path"
+
+    # The claim lives in a second .md beside SKILL.md, such as reference.md,
+    # never in SKILL.md itself — the case _skills-check used to never read.
+    mkdir -p "$dir/bad-second-file"
+    printf 'Nothing to see here.\n' > "$dir/bad-second-file/SKILL.md"
+    printf 'Run `just no-such-recipe-either`.\n' > "$dir/bad-second-file/reference.md"
+    if $j _skills-check "$dir" >/dev/null 2>&1; then
+        echo "a bad recipe named only in a second .md file beside SKILL.md passed"; exit 1
+    fi
+    rm -rf "$dir/bad-second-file"
 
     rm -rf "$dir/good"
     mkdir -p "$dir/silent"
@@ -12253,8 +12266,10 @@ check-clean-targets-selftest:
 # `prune-worktrees` still keeps a marked tree that is not on `main`, is dirty,
 # or holds a real fuzz find. A locked tree is refused, because its owner is
 # still at work, so the merger unlocks its own tree first. The hub is refused
-# because it is never a lane's tree. Every tree is checked before any is
-# marked, so a refusal marks nothing.
+# because it is never a lane's tree. Every live tree is checked before any is
+# marked, so a refusal marks nothing — except a tree already gone, which is
+# the one case that is not a refusal: there is nothing left there to mark, so
+# it is skipped and the rest proceed.
 [doc("Mark worktrees as finished, so prune-worktrees removes them without waiting an hour.")]
 mark-finished +trees:
     #!/usr/bin/env bash
@@ -12262,6 +12277,10 @@ mark-finished +trees:
     tops=()
     gitdirs=()
     for tree in "$@"; do
+        if [ ! -e "$tree" ]; then
+            echo "gone: $tree, so there is nothing to mark"
+            continue
+        fi
         top=$(git -C "$tree" rev-parse --show-toplevel)
         gitdir=$(git -C "$top" rev-parse --absolute-git-dir)
         common=$(git -C "$top" rev-parse --path-format=absolute --git-common-dir)
@@ -12309,7 +12328,11 @@ mark-finished +trees:
 #   `logs/HEAD` rather than `index`, because `git status` rewrites the index and
 #   this recipe runs it. The mark is how a merged run removes its own trees the
 #   minute it lands rather than an hour later (§315.2);
-# - **no process has its working directory inside it.**
+# - **no process has its working directory inside it;**
+# - **no second worktree's own path sits inside it.** A lane's gitignored
+#   `target/` can hold a detached scratch worktree of its own, and removing
+#   the lane's tree takes that second worktree's directory with it — on
+#   2026-10-07, `target/q1209-probe` (§205).
 #
 # Until §205 a detached tree was kept whatever it held, and lanes here mostly
 # end detached: on 2026-09-22 this kept 55 trees and removed 7. The rule is
@@ -12337,6 +12360,7 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
     now=$(date +%s)
     cwds=$(for p in /proc/[0-9]*; do readlink "$p/cwd" 2>/dev/null || true; done)
     git -C "$here" worktree prune
+    all_trees=$(git -C "$here" worktree list --porcelain | sed -n 's|^worktree ||p')
     kept=0
     keep() {
         echo "kept ($1): $tree"
@@ -12347,6 +12371,22 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
         for ref in "${landed[@]}"; do
             git -C "$here" merge-base --is-ancestor "$head" "$ref" && return 0
         done
+        return 1
+    }
+    # A lane's gitignored `target/` can hold a second git worktree of its own
+    # (a detached, scratch probe tree), and removing the outer tree takes the
+    # inner one's directory, uncommitted changes included, with it (§205).
+    nested_worktree() {
+        local other
+        while IFS= read -r other; do
+            [ -n "$other" ] && [ "$other" != "$tree" ] || continue
+            case "$other" in
+            "$tree"/*)
+                printf '%s\n' "$other"
+                return 0
+                ;;
+            esac
+        done <<<"$all_trees"
         return 1
     }
     # The first entry is the hub, which `git worktree remove` refuses. `branch`
@@ -12371,6 +12411,8 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
             keep "uncommitted changes"
         elif [ -n "$(find "$tree/fuzz/artifacts" -type f -not -name '*-overnight-selftest-*' -print -quit 2>/dev/null)" ]; then
             keep "fuzz/artifacts holds files, and nothing else may have a copy"
+        elif nested=$(nested_worktree); then
+            keep "a second worktree, $nested, sits inside it"
         elif [ "$idle" -lt 60 ] && [ ! -e "$gitdir/rcad-run-over" ]; then
             keep "HEAD moved $idle minutes ago"
         elif printf '%s\n' "$cwds" | awk -v p="$tree" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }'; then
@@ -12411,8 +12453,10 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
 # has, and on a branch merged into `main`. The first also holds an ignored
 # `target/`, which `git worktree remove` must not refuse over. Everything is
 # aged two hours except `just-started`, which is the case the age exists for,
-# and `marked`, which `mark-finished` lets past the age (§315.2). `fakes` holds
-# only what `check-fuzz-overnight-selftest` leaves when it is killed (§315.3).
+# and `marked`, which `mark-finished` lets past the age (§315.2), and `inner`,
+# the scratch worktree inside `nested/target/`, left fresh so `nested` is kept
+# only for holding it (§205). `fakes` holds only what
+# `check-fuzz-overnight-selftest` leaves when it is killed (§315.3).
 #
 # Then the branches (§458). `merged` loses its tree, so its branch goes with
 # `landed` and `released`, which no tree ever had. `runner` is checked out,
@@ -12444,9 +12488,14 @@ check-prune-worktrees-selftest:
     git -C "$dir/hub" worktree add -q "$dir/wave" main
     git -C "$dir/hub" worktree add -q "$dir/runner" -b runner
     git -C "$dir/hub" worktree add -q "$dir/merged" -b merged
-    for name in finished just-started marked fakes unmerged dirty untracked fuzzed locked busy nightly; do
+    for name in finished just-started marked fakes unmerged dirty untracked fuzzed locked busy nightly nested; do
         git -C "$dir/hub" worktree add -q --detach "$dir/$name" main
     done
+    # A second worktree inside a lane's own gitignored target/: a detached
+    # scratch probe tree, left fresh so it is kept on its own merits, so the
+    # test is only about whether its outer tree survives (§205).
+    mkdir -p "$dir/nested/target"
+    git -C "$dir/hub" worktree add -q --detach "$dir/nested/target/inner" main
     printf '[Service]\nWorkingDirectory=%s\n' "$dir/nightly" >"$dir/rcad-fuzz.service"
     git -C "$dir/finished" commit -q --allow-empty -m "landed on origin/main only"
     git -C "$dir/hub" update-ref refs/remotes/origin/main "$(git -C "$dir/finished" rev-parse HEAD)"
@@ -12466,7 +12515,7 @@ check-prune-worktrees-selftest:
     mkdir -p "$dir/fuzzed/fuzz/artifacts/target"; echo crash >"$dir/fuzzed/fuzz/artifacts/target/crash-1"
     mkdir -p "$dir/fakes/fuzz/artifacts/target"; echo "what a target found" >"$dir/fakes/fuzz/artifacts/target/slow-unit-overnight-selftest-1-2"
     git -C "$dir/hub" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/locked"
-    for name in wave runner merged finished fakes unmerged dirty untracked fuzzed locked busy nightly; do
+    for name in wave runner merged finished fakes unmerged dirty untracked fuzzed locked busy nightly nested; do
         gitdir=$(git -C "$dir/$name" rev-parse --absolute-git-dir)
         touch -d '2 hours ago' "$gitdir/HEAD" "$gitdir/logs/HEAD"
     done
@@ -12477,6 +12526,13 @@ check-prune-worktrees-selftest:
     ! just mark-finished "$dir/hub" >/dev/null 2>&1 \
         || fail "mark-finished marked the hub"
     just mark-finished "$dir/marked" >/dev/null
+    # A gone tree is skipped, not refused: the live tree named beside it still
+    # gets marked.
+    got=$(just mark-finished "$dir/gone" "$dir/marked")
+    grep -qF "gone: $dir/gone, so there is nothing to mark" <<<"$got" \
+        || fail "a gone tree was not reported as gone"
+    grep -qF "marked: $dir/marked" <<<"$got" \
+        || fail "a live tree alongside a gone one was not marked"
     (cd "$dir/busy/" && exec sleep 300) &
     busy=$!
     got=$(just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service")
@@ -12496,6 +12552,12 @@ check-prune-worktrees-selftest:
     expect_kept locked "locked, an agent is using it"
     expect_kept busy "a process is running in it"
     expect_kept nightly "the overnight fuzz unit runs in it"
+    [ -d "$dir/nested/target/inner" ] || fail "the inner worktree was removed"
+    grep -F "): $dir/nested/target/inner" <<<"$got" | grep -qF "kept (HEAD moved" \
+        || fail "the inner worktree was not reported as kept for its own age"
+    [ -d "$dir/nested" ] || fail "the nested tree was removed, taking the worktree inside it with it"
+    grep -qF "kept (a second worktree, $dir/nested/target/inner, sits inside it): $dir/nested" <<<"$got" \
+        || fail "the nested tree was not reported as kept for the worktree inside it"
     for name in finished merged marked fakes; do
         [ ! -e "$dir/$name" ] || fail "the $name tree was not removed"
         grep -qF "removed: $dir/$name " <<<"$got" || fail "the $name tree was not reported as removed"
@@ -12507,8 +12569,8 @@ check-prune-worktrees-selftest:
     for branch in merged landed released; do
         ! git -C "$dir/hub" rev-parse -q --verify "refs/heads/$branch" >/dev/null || fail "the $branch branch was not deleted"
     done
-    grep -qxF "10 worktree(s) kept; 3 branch(es) main holds deleted" <<<"$got" \
-        || fail "the tally is not the ten kept trees and the three deleted branches"
+    grep -qxF "12 worktree(s) kept; 3 branch(es) main holds deleted" <<<"$got" \
+        || fail "the tally is not the twelve kept trees and the three deleted branches"
 
 # Where this repo stands, in one call.
 #
