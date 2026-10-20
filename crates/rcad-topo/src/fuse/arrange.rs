@@ -8104,61 +8104,24 @@ impl<'f> Arrangement<'f> {
         walk: usize,
         candidates: &[usize],
     ) -> Option<usize> {
-        let (centre, up) = match self.surface {
-            Surface::Cone(cone) => (cone.apex(), cone.axis().direction()),
-            Surface::Cylinder(pipe) => (pipe.axis().origin(), pipe.axis().direction()),
-            Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) | _ => return None,
-        };
-        let across = half_way_across_the_widest_gap_between(
-            up,
-            core::iter::once(walk)
-                .chain(candidates.iter().copied())
-                .flat_map(|cycle| &self.cycles[cycle])
-                .map(|&half_edge| middle_of(self.nodes[self.from(half_edge)].point) - centre),
-        );
-        let centre = centre.coordinates().map(Interval::exactly);
-        let up = up.components().map(Interval::exactly);
-        let from_the_axis = |node: usize| -> [Interval; 3] {
-            core::array::from_fn(|axis| self.nodes[node].point.enclosure()[axis] - centre[axis])
-        };
-
-        if matches!(self.surface, Surface::Cone(_)) {
+        if let Surface::Cone(cone) = &self.surface {
             let lump_of = self.lump_of_each_cycle();
             let lumps = [lump_of[walk], lump_of[candidates[0]]];
-            let mut heights = (0..self.cycles.len())
+            let nodes: Vec<usize> = (0..self.cycles.len())
                 .filter(|&cycle| lumps.contains(&lump_of[cycle]))
                 .flat_map(|cycle| &self.cycles[cycle])
-                .map(|&half_edge| dot_of(from_the_axis(self.from(half_edge)), up).sign());
-            let first = heights.next()?;
-            if !matches!(first, Decision::Pos | Decision::Neg)
-                || heights.any(|other| other != first)
-            {
-                return None;
-            }
+                .map(|&half_edge| self.from(half_edge))
+                .collect();
+            self.the_nappe_of(cone, &nodes)?;
         }
-
-        let reference = across.map(Interval::exactly);
-        let round = |cycle: usize| -> Option<i32> {
-            self.cycles[cycle].iter().try_fold(0, |so_far, &half_edge| {
-                Some(
-                    so_far
-                        + self.how_often_an_arc_crosses(
-                            half_edge,
-                            &from_the_axis,
-                            up,
-                            reference,
-                        )?,
-                )
-            })
-        };
-        let its_own = round(walk)?;
+        let counted: Vec<usize> = core::iter::once(walk)
+            .chain(candidates.iter().copied())
+            .collect();
+        let round = self.how_often_each_goes_round_the_axis(&counted)?;
+        let (&its_own, theirs) = round.split_first().expect("the walk is counted first");
         if its_own == 0 {
             return None;
         }
-        let theirs = candidates
-            .iter()
-            .map(|&candidate| round(candidate))
-            .collect::<Option<Vec<i32>>>()?;
         let going_round: Vec<usize> = (0..candidates.len())
             .filter(|&index| theirs[index] != 0)
             .collect();
@@ -8173,6 +8136,51 @@ impl<'f> Arrangement<'f> {
             .next()
             .is_none()
             .then_some(candidates[only])
+    }
+
+    /// How often each of `cycles` goes round the axis of the cone or the pipe
+    /// the face is on, anticlockwise about it counting one; `None` on any other
+    /// surface, or where a sign one count needs is not settled.
+    ///
+    /// Counted as how often it crosses one half-plane through the axis, the
+    /// one half way across the widest gap round the axis between the nodes of
+    /// `cycles` ([`Arrangement::the_one_that_goes_round_the_axis_as_well`]
+    /// says why that counts it).
+    fn how_often_each_goes_round_the_axis(&self, cycles: &[usize]) -> Option<Vec<i32>> {
+        let (centre, up) = match self.surface {
+            Surface::Cone(cone) => (cone.apex(), cone.axis().direction()),
+            Surface::Cylinder(pipe) => (pipe.axis().origin(), pipe.axis().direction()),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_) | _ => return None,
+        };
+        let across = half_way_across_the_widest_gap_between(
+            up,
+            cycles
+                .iter()
+                .flat_map(|&cycle| &self.cycles[cycle])
+                .map(|&half_edge| middle_of(self.nodes[self.from(half_edge)].point) - centre),
+        );
+        let centre = centre.coordinates().map(Interval::exactly);
+        let up = up.components().map(Interval::exactly);
+        let from_the_axis = |node: usize| -> [Interval; 3] {
+            core::array::from_fn(|axis| self.nodes[node].point.enclosure()[axis] - centre[axis])
+        };
+        let reference = across.map(Interval::exactly);
+        cycles
+            .iter()
+            .map(|&cycle| {
+                self.cycles[cycle].iter().try_fold(0, |so_far, &half_edge| {
+                    Some(
+                        so_far
+                            + self.how_often_an_arc_crosses(
+                                half_edge,
+                                &from_the_axis,
+                                up,
+                                reference,
+                            )?,
+                    )
+                })
+            })
+            .collect()
     }
 
     /// How often one half-edge crosses the half-plane from the axis towards
@@ -8567,7 +8575,8 @@ impl<'f> Arrangement<'f> {
             let outside = nodes
                 .iter()
                 .all(|&node| self.face.bounds.provably_misses(self.nodes[node].point))
-                || self.on_the_nappe_the_rim_never_reaches(&nodes);
+                || self.on_the_nappe_the_rim_never_reaches(&nodes)
+                || self.goes_round_where_the_rim_never_does(&its_walks, lump);
             let held = if outside {
                 Some(0)
             } else {
@@ -8700,12 +8709,113 @@ impl<'f> Arrangement<'f> {
     /// of times. A ring that runs on for ever cannot all be in a face of a
     /// solid, which is bounded, so none of it is.
     ///
-    /// The nappe is read off the sign of `(x − apex)·w` for each node's box, so
-    /// a node at the apex or a box across it says no.
+    /// The nappe is read for each node ([`Arrangement::the_nappe_of`]).
     fn on_the_nappe_the_rim_never_reaches(&self, nodes: &[usize]) -> bool {
-        let Surface::Cone(cone) = self.surface else {
+        let Surface::Cone(cone) = &self.surface else {
             return false;
         };
+        let rim: Vec<usize> = self
+            .node_of_corner
+            .iter()
+            .chain(&self.node_of_the_end)
+            .flatten()
+            .copied()
+            .collect();
+        match (
+            self.the_nappe_of(cone, &rim),
+            self.the_nappe_of(cone, nodes),
+        ) {
+            (Some(the_rims), Some(theirs)) => the_rims != theirs,
+            (Some(_) | None, Some(_) | None) => false,
+        }
+    }
+
+    /// Whether some walk of `its_walks` goes round the axis of the cone or the
+    /// pipe the face is on, and no walk of a lump of the rim does; so that no
+    /// point of the face is in the lump's cells. `lump` names the lump of each
+    /// walk, and a lump of the rim is one that holds a side of it.
+    ///
+    /// **Close a nappe or a pipe with a point at each end, and it is a ball's
+    /// skin.** Each end is a point of it, the apex and the far end on a nappe.
+    /// A walk bounds a cell of the skin less its lump, and it goes round the
+    /// axis exactly when one end is in that cell and the other is not. So a
+    /// lump with a walk that goes round keeps the two ends apart, and a lump
+    /// with no walk that does leaves them in one cell.
+    ///
+    /// **No lump of the rim keeps the ends apart, so all of them together do
+    /// not either.** The lumps share no point, and two closed sets of a ball's
+    /// skin that share none, neither of which keeps two points apart, do not
+    /// keep them apart together (Janiszewski's theorem). The lump misses the
+    /// rim and is connected, so it is in one cell of the skin less the rim,
+    /// and that is the cell holding both ends: any other cell misses that one,
+    /// which joins the ends without meeting the lump, and the lump keeps them
+    /// apart. Every point where the face meets its outside is on its rim, so
+    /// the face is made of whole cells of the skin less the rim. It does not
+    /// hold the one holding the far end, since a face is bounded, so it holds
+    /// none of the lump.
+    ///
+    /// **A face with no rim says no.** With nothing to keep any point apart
+    /// from the far end, it could only be the whole of the surface.
+    ///
+    /// On a cone, every node of the lump and of the rim is on one nappe
+    /// ([`Arrangement::the_nappe_of`]), so no arc of them runs through the apex
+    /// ([`Arrangement::on_the_nappe_the_rim_never_reaches`] says why) and the
+    /// other nappe is left out of it; what reaches it is the same piece of the
+    /// face. The counts are read as
+    /// [`Arrangement::the_one_that_goes_round_the_axis_as_well`] reads them, and
+    /// one not settled says no.
+    ///
+    /// Two quarters of one hollow frustum, flush along a plane, are the shape:
+    /// the second quarter's bore cuts the first's wall in a circle below it,
+    /// inside its box, and the walk round the outside of that circle agreed with
+    /// both walks of the first wall's rim, so its intersection was refused
+    /// `CannotTellTheCellsOfAFaceApart` at every turn and both ways round
+    /// (`two_quarters_of_a_hollow_cone_flush_along_a_plane.rs`, Q2537).
+    fn goes_round_where_the_rim_never_does(&self, its_walks: &[usize], lump: &[usize]) -> bool {
+        let goes_round = self
+            .how_often_each_goes_round_the_axis(its_walks)
+            .is_some_and(|round| round.iter().any(|&times| times != 0));
+        if !goes_round {
+            return false;
+        }
+        let mut lumps_of_the_rim: Vec<usize> = (0..self.cycles.len())
+            .filter(|&cycle| {
+                self.cycles[cycle]
+                    .iter()
+                    .any(|&half_edge| self.arcs[half_edge / 2].boundary.is_some())
+            })
+            .map(|cycle| lump[cycle])
+            .collect();
+        lumps_of_the_rim.sort_unstable();
+        lumps_of_the_rim.dedup();
+        let rim: Vec<usize> = (0..self.cycles.len())
+            .filter(|&cycle| lumps_of_the_rim.binary_search(&lump[cycle]).is_ok())
+            .collect();
+        if rim.is_empty() {
+            return false;
+        }
+        if let Surface::Cone(cone) = &self.surface {
+            let nodes: Vec<usize> = its_walks
+                .iter()
+                .chain(&rim)
+                .flat_map(|&cycle| &self.cycles[cycle])
+                .map(|&half_edge| self.from(half_edge))
+                .collect();
+            if self.the_nappe_of(cone, &nodes).is_none() {
+                return false;
+            }
+        }
+        self.how_often_each_goes_round_the_axis(&rim)
+            .is_some_and(|round| round.iter().all(|&times| times == 0))
+    }
+
+    /// Which nappe of `cone` every one of `nodes` is on, `true` for the one its
+    /// axis points into; `None` when they are not all on one, or there are
+    /// none.
+    ///
+    /// The nappe is read off the sign of `(x − apex)·w` for each node's box, so
+    /// a node at the apex or a box across it says no.
+    fn the_nappe_of(&self, cone: &Cone, nodes: &[usize]) -> Option<bool> {
         let apex = cone.apex().coordinates().map(Interval::exactly);
         let up = cone.axis().direction().components().map(Interval::exactly);
         let above_the_apex = |node: usize| -> Option<bool> {
@@ -8717,24 +8827,11 @@ impl<'f> Arrangement<'f> {
                 Decision::Zero | Decision::Undecidable { .. } | _ => None,
             }
         };
-        let one_nappe = |these: &[usize]| -> Option<bool> {
-            let (&first, rest) = these.split_first()?;
-            let first = above_the_apex(first)?;
-            rest.iter()
-                .all(|&node| above_the_apex(node) == Some(first))
-                .then_some(first)
-        };
-        let rim: Vec<usize> = self
-            .node_of_corner
-            .iter()
-            .chain(&self.node_of_the_end)
-            .flatten()
-            .copied()
-            .collect();
-        match (one_nappe(&rim), one_nappe(nodes)) {
-            (Some(the_rims), Some(theirs)) => the_rims != theirs,
-            (Some(_) | None, Some(_) | None) => false,
-        }
+        let (&first, rest) = nodes.split_first()?;
+        let first = above_the_apex(first)?;
+        rest.iter()
+            .all(|&node| above_the_apex(node) == Some(first))
+            .then_some(first)
     }
 
     /// Which way the face's rim runs along each of its sides, by wire and
