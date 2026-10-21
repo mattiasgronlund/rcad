@@ -604,3 +604,10 @@ when it started. It ran all four, `check-hooks` in 20.3 s, `check-questions-self
 `check-plugins` in 3.8 s and `deny` in 1.7 s. It recorded each on its own key:
 `f6446181eab2`, `e0bfa98e535a`, `d29584258d1b` and `8cd83bca2b81`. Unlike the
 gate at `33ef2659`, it recorded `check-plugins` too.
+
+Then `aa40b10a` changed only this section, and the same command was served
+all four, each on a line of its own such as `· served: check-plugins from
+a31350d3's gate at 2026-10-21T20:00:27Z`, beside the whole tree's served line.
+None of the four ran. The gate started at 20:01:05Z and wrote its exit at
+20:02:03Z, 58 s. The step that ran longest was `check-lanes-workflow`, at 57.0
+s, so it still decides how long a served gate takes, as it did on the base.
