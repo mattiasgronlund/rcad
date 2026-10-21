@@ -65,7 +65,11 @@ Two things check that the fork gets it right:
   same toolchain and flags (31 of 32 pass), so the fork did not bring it. rcad
   never calls `rad`. It calls only construction, `inf`, `sup`, `wid`,
   `contains`, `is_empty`, `sqrt`, negation and the four arithmetic operators.
-- **rcad's gate** runs every answer the suite pins through the new backend.
+- **rcad's gate** runs every answer the suite pins through the new backend. On
+  `9feb4fc0`, with every step run fresh and none served, it passed. That was
+  4,435 tests in the main tier, 77 in the slow tier, 3 more and 30 doc tests.
+  `deny` accepted the git source, and `check-fuzz-builds` built the fuzz crate
+  against its lockfile.
 
 ### 460.4 How it is pinned
 
