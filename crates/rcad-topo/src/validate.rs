@@ -9014,6 +9014,17 @@ mod tests {
     /// **It is built where it sits, not placed.** A placed curved face is
     /// meshed where it is stored, so placing the lens moves its mesh with it
     /// and never changes which corners the triangles join.
+    ///
+    /// **Row Q2580: the finer-mesh ask is still load-bearing.** On a scratch
+    /// copy, [`how_much_space_a_curved_solid_encloses`] was changed to return
+    /// the coarsest mesh's sum straight away, never asking a finer one. The
+    /// `rcad-topo` suite then failed four tests, not just this one:
+    /// `a_ball_poking_a_hair_into_a_pipe_is_passed_sound_and_refused_inside_out`,
+    /// `a_cap_whose_rim_is_three_arcs_lies_flat_at_every_turn_and_validates`,
+    /// `a_cap_whose_rim_is_three_arcs_validates_turned_off_the_axes`, and
+    /// `a_bar_leaning_hard_asks_no_more_than_the_ladders_cap_lets_it`. So
+    /// skipping the finer-mesh ask is already caught; this test gains no new
+    /// pin for it.
     #[test]
     fn a_lens_where_a_ball_pokes_into_a_pipe_validates_at_every_turn() {
         let mut coarsest_unsure = 0;
