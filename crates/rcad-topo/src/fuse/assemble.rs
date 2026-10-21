@@ -475,15 +475,19 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
         let solid = the_solid_a_piece_was_cut_from(model, scratch, index);
         let mut of_this_piece = Vec::new();
         for (meet, &[from, to]) in wires.iter().flat_map(|wire| wire.iter()).zip(ends) {
-            if is_a_side_with_no_length(meet, [from, to], model) {
-                continue;
-            }
             if from == to {
+                if is_carried_by_two_planes(meet) {
+                    continue;
+                }
                 let ends = [
                     corners.goes_by(corners.name_of(model, &meet.ends[0], policy, log)?),
                     corners.goes_by(corners.name_of(model, &meet.ends[1], policy, log)?),
                 ];
-                if ends[0] != ends[1] {
+                if ends[0] == ends[1] {
+                    if is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model) {
+                        continue;
+                    }
+                } else {
                     let Some(arc) = which_arc_of_a_circle_walked_this_way(
                         meet,
                         ends[0] > ends[1],
@@ -11882,11 +11886,14 @@ fn sides_of(
 /// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]).
 fn is_a_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2], model: &Model) -> bool {
     from == to
-        && (meet
-            .carried_by
-            .iter()
-            .all(|surface| surface.as_plane().is_some())
+        && (is_carried_by_two_planes(meet)
             || is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model))
+}
+
+fn is_carried_by_two_planes(meet: &FaceMeet) -> bool {
+    meet.carried_by
+        .iter()
+        .all(|surface| surface.as_plane().is_some())
 }
 
 /// Whether `meet` runs along one input edge that does not close on itself,
