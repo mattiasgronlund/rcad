@@ -1404,7 +1404,7 @@ fn the_ball_inside_a_hole(radius: f64, off: f64) -> f64 {
 /// `the_one_on_its_side_of_every_cut` told those cells apart.
 ///
 /// **The answer.** The bar is `40π` and the ball `π/6`, and the two share
-/// [`the_small_ball_inside_the_bar`].
+/// [`the_ball_inside_the_bar`].
 ///
 /// Named `a_small_ball_on_a_bars_wall_is_refused_before_any_cell` until Q1766,
 /// `a_small_ball_on_a_bars_seam_is_refused_telling_the_pipes_cells_apart`
@@ -1414,7 +1414,7 @@ fn the_ball_inside_a_hole(radius: f64, off: f64) -> f64 {
 #[test]
 fn a_small_ball_centred_on_a_bars_wall_is_answered_where_its_poles_lie_on_the_wall() {
     use std::f64::consts::PI;
-    let (bar, ball, shared) = (40.0 * PI, PI / 6.0, the_small_ball_inside_the_bar());
+    let (bar, ball, shared) = (40.0 * PI, PI / 6.0, the_ball_inside_the_bar(0.5));
     for (what, [x, y, z]) in [
         ("on its seam", [2.0, 0.0, 5.0]),
         ("a quarter turn from its seam", [0.0, 2.0, 5.0]),
@@ -1440,6 +1440,162 @@ fn a_small_ball_centred_on_a_bars_wall_is_answered_where_its_poles_lie_on_the_wa
     }
 }
 
+/// A ball of `0.5` centred on the wall of the round bar of radius 2 up `z` from
+/// `−1` to `11`, seamed up `(0, 2, z)`, at `(−2 sin a, 2 cos a, 5)` for `a` of
+/// `0.3`, `0.9`, `1`, `2.2`, `4` and `5.3`, under every rule both ways round.
+/// The two tests after this one are the balls of `1.5` and `3` there.
+///
+/// **Each centre is a rounding off the wall**, from `9.1e-17` inside it at
+/// `0.3` to `4.8e-17` outside it at `1`, so each pole is too, and the ball's
+/// loop round the wall runs a rounding past each pole rather than through it.
+/// The walk starts the loop at the pole all the same, and until Q2579 every
+/// fuse was refused `AClosedEdgeOfTheAnswerWouldStartAtAPole`, on the bar's
+/// pipe with the bar first and on the ball with the ball first:
+/// `fuse/arrange.rs`'s `the_other_pole_on_the_one_loop` cut the loop at the
+/// other pole only where the ball and the pipe both certify that pole is on
+/// them, so it stayed one closed edge. It now cuts it in a box round the other
+/// pole wherever a point of the loop is proved inside that box.
+///
+/// **The answer** is the one on the seam, `a` of 0: the bar is `48π`, the ball
+/// `4πR³/3` for `R` its radius, and the two share [`the_ball_inside_the_bar`].
+/// Each is measured as finely as tells the ball's part inside the bar from
+/// its part outside it, `0.001` for this ball, `0.003` for the ball of `1.5`
+/// and `0.01` for the ball of `3`, since a mesh of the ball of 3 at `0.001`
+/// takes three seconds.
+#[test]
+fn a_ball_of_a_half_centred_a_rounding_off_a_bars_wall_is_answered_under_every_rule() {
+    a_ball_centred_on_a_bars_wall_is_answered(
+        0.5,
+        &around_the_bar(),
+        &every_rule_both_ways(),
+        0.001,
+    );
+}
+
+/// The ball of `1.5` at each place round the bar of the test above.
+#[test]
+fn a_ball_of_one_and_a_half_centred_a_rounding_off_a_bars_wall_is_answered_under_every_rule() {
+    a_ball_centred_on_a_bars_wall_is_answered(
+        1.5,
+        &around_the_bar(),
+        &every_rule_both_ways(),
+        0.003,
+    );
+}
+
+/// The ball of `3` at each place round the bar of the test two above.
+#[test]
+fn a_ball_of_three_centred_a_rounding_off_a_bars_wall_is_answered_under_every_rule() {
+    a_ball_centred_on_a_bars_wall_is_answered(
+        3.0,
+        &around_the_bar(),
+        &every_rule_both_ways(),
+        0.01,
+    );
+}
+
+/// The ball of `0.3` on the seam of the bar of the tests above, at height
+/// `5.1`, under every rule both ways round.
+///
+/// **Its centre is exactly on the wall** and so are both its poles across,
+/// but `5.1 − 0.3` rounds, so its lower pole as `f64` is `1.7e-16` above the
+/// ball. The intersection was refused `AClosedEdgeOfTheAnswerWouldStartAtAPole`
+/// until Q2579, for the reason the test of the ball of `0.5` gives.
+#[test]
+fn a_ball_of_three_tenths_on_a_bars_seam_whose_lower_pole_rounds_is_answered_under_every_rule() {
+    a_ball_centred_on_a_bars_wall_is_answered(
+        0.3,
+        &[[0.0, 2.0, 5.1]],
+        &every_rule_both_ways(),
+        0.001,
+    );
+}
+
+/// The ball of `3` of the tests above a quarter, a half and three quarters of
+/// a turn round the bar from its seam, `a` of `π/2`, `π` and `3π/2`, where the
+/// centre is under `1.5e-32` outside the wall: the union both ways round and
+/// the ball less the bar, measured at `0.001`.
+///
+/// Each answered and validated before Q2579, as one closed edge round the
+/// ball's loop starting at its pole, but the mesh of its answer at `0.001` was
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`. Cut at
+/// the other pole as well since Q2579, it meshes.
+#[test]
+fn a_ball_of_three_a_quarter_turn_and_more_round_a_bars_wall_from_its_seam_meshes_at_a_thousandth()
+{
+    use std::f64::consts::PI;
+    let quarters =
+        [PI / 2.0, PI, 3.0 * PI / 2.0].map(|a: f64| [-2.0 * a.sin(), 2.0 * a.cos(), 5.0]);
+    let rules = [
+        (Rule::Union, true),
+        (Rule::Union, false),
+        (Rule::Difference, false),
+    ];
+    a_ball_centred_on_a_bars_wall_is_answered(3.0, &quarters, &rules, 0.001);
+}
+
+/// Where the balls of the tests above sit round the bar, `(−2 sin a, 2 cos a,
+/// 5)` for each `a`.
+fn around_the_bar() -> [[f64; 3]; 6] {
+    [0.3, 0.9, 1.0, 2.2, 4.0, 5.3].map(|a: f64| [-2.0 * a.sin(), 2.0 * a.cos(), 5.0])
+}
+
+/// The ball of `radius` at each of `centres` on the wall of the bar of radius 2
+/// up `z` from `−1` to `11` seamed up `(0, 2, z)`, under each of `rules`, with
+/// `true` for the bar first: each answer is one solid, the model validates,
+/// and a mesh at `deflection` measures what the solid holds.
+fn a_ball_centred_on_a_bars_wall_is_answered(
+    radius: f64,
+    centres: &[[f64; 3]],
+    rules: &[(Rule, bool)],
+    deflection: f64,
+) {
+    use std::f64::consts::PI;
+    let (bar, ball) = (48.0 * PI, 4.0 * PI * radius * radius * radius / 3.0);
+    let shared = the_ball_inside_the_bar(radius);
+    let seam_up_y = shift(0.0, 0.0, -1.0)
+        .compose(&Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z"));
+    for &[x, y, z] in centres {
+        for &(rule, first) in rules {
+            let mut model = a_model();
+            let pipe = model.add_round_bar(2.0, 12.0, &seam_up_y).expect("a bar");
+            let round = model.add_ball(radius, &shift(x, y, z)).expect("a ball");
+            let what =
+                format!("a ball of {radius} at ({x}, {y}, {z}), {rule:?}, the bar first {first}");
+            let answer = fuse(&mut model, pipe, round, rule, first)
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let volume = match (rule, first) {
+                (Rule::Union, _) => bar + ball - shared,
+                (Rule::Intersection, _) => shared,
+                (Rule::Difference, true) => bar - shared,
+                (Rule::Difference, false) => ball - shared,
+                (other, _) => panic!("not a rule this probes: {other:?}"),
+            };
+            let [solid] = answer[..] else {
+                panic!("{what}: one solid, got {answer:?}");
+            };
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what} left a model that does not validate: {why}"));
+            let measured = model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(deflection).expect("a mesh this fine is a mesh"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what} does not measure: {why}"));
+            assert!(
+                (measured.volume() - volume).abs() <= measured.volume_error(),
+                "{what} holds {volume} and this one says {} give or take {}",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
+}
+
 /// The ball and bar of
 /// [`a_small_ball_centred_on_a_bars_wall_is_answered_where_its_poles_lie_on_the_wall`],
 /// the ball on the seam, with the block `|x| < 1`, `|y| < 5`, `−1 < z < 11`
@@ -1456,7 +1612,7 @@ fn a_small_ball_centred_on_a_bars_wall_is_answered_where_its_poles_lie_on_the_wa
 #[test]
 fn a_small_ball_on_a_bars_wall_beside_a_block_through_the_bar_is_answered_under_every_rule() {
     use std::f64::consts::PI;
-    let (bar, ball, shared) = (40.0 * PI, PI / 6.0, the_small_ball_inside_the_bar());
+    let (bar, ball, shared) = (40.0 * PI, PI / 6.0, the_ball_inside_the_bar(0.5));
     let (slab, strip) = (240.0, 10.0 * (2.0 * 3f64.sqrt() + 4.0 * PI / 3.0));
     let side = 10.0 * (4.0 * PI / 3.0 - 3f64.sqrt());
     for (rule, first) in every_rule_both_ways() {
@@ -1499,15 +1655,21 @@ fn a_small_ball_on_a_bars_wall_beside_a_block_through_the_bar_is_answered_under_
     }
 }
 
-/// The part of the ball of radius `0.5` at `(2, 0, 5)` inside the bar of
-/// radius 2 up `z`, by Simpson's rule over its slices.
+/// The part of a ball of `radius` centred on the wall of a bar of radius 2
+/// inside the bar, where the bar runs past the ball both ways, by Simpson's
+/// rule over its slices.
 ///
-/// The slice at height `z` is the lens the ball's disc of radius
-/// `s = √(0.25 − (z − 5)²)` shares with the bar's disc, two centres 2 apart:
-/// `s² acos(s/4) + 4 acos(1 − s²/8) − (s/2)√(16 − s²)`.
-fn the_small_ball_inside_the_bar() -> f64 {
-    by_simpsons_rule(4.5, 5.5, |z| {
-        let s = (0.25 - (z - 5.0) * (z - 5.0)).max(0.0).sqrt();
+/// The slice `t` above the ball's centre is the lens the ball's disc of radius
+/// `s = √(radius² − t²)` shares with the bar's disc, two centres 2 apart:
+/// `s² acos(s/4) + 4 acos(1 − s²/8) − (s/2)√(16 − s²)`, for a disc no wider
+/// than 4.
+fn the_ball_inside_the_bar(radius: f64) -> f64 {
+    assert!(
+        radius <= 4.0,
+        "a lens of two discs 2 apart, one of radius 2"
+    );
+    by_simpsons_rule(-radius, radius, |t| {
+        let s = (radius * radius - t * t).max(0.0).sqrt();
         s * s * (s / 4.0).acos() + 4.0 * (1.0 - s * s / 8.0).acos()
             - s / 2.0 * (16.0 - s * s).sqrt()
     })
