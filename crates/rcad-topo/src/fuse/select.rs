@@ -1368,14 +1368,19 @@ fn is_flat_with_a_curved_side(face: FaceView<'_>) -> bool {
 /// and §294.20, so the `S` it cut the pieces against has its corner at that
 /// meet, and so does the hull above. A corner of `P` that is a corner of the
 /// input is the meet of the surfaces round it when they are exactly three
-/// planes ([`BakedCorner::around`](super::bake::BakedCorner)); a meet the
+/// planes ([`BakedCorner::around`](super::bake::BakedCorner)), and where there
+/// are more, the meet of `P`'s plane and the two planes that cut it along `P`'s
+/// sides there ([`where_the_lines_of_two_sides_meet`]); a meet the
 /// arrangement placed is the meet of the three surfaces it names. A corner of
 /// `S` read out of the model, which nothing solved, any other corner of `P`, a
 /// corner of `P` not on `P`'s own plane, or a curved surface on `P` or on `S`
 /// leaves this rule out. Until Q1936 a corner of `S` was read from the planes
 /// round it too, so a solid with four planes round a corner was never asked,
 /// and the pyramid placed and cut through its apex refused on a speck of the
-/// cut a rounding across (§294.21).
+/// cut a rounding across (§294.21). Until Q2334 a corner of `P` with four
+/// planes round it was left out the same way, and the pyramid turned about `x`
+/// and cut by a wedge whose edge runs up through its apex refused on a speck of
+/// its `−x` face a rounding across by the apex.
 ///
 /// **And inside a solid whose every face plane has all of it on or behind,
 /// with every corner of the piece on or behind every one of them and, for
