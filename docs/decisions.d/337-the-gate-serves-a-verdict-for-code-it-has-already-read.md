@@ -105,6 +105,9 @@ Left off the list, and why:
   `check-plan`, `check-queue`, `check-where-the-work-is`, `check-skills` and
   `check-lanes-workflow`.
 
+Since §337.9, `check-hooks`, `check-questions-selftest`, `check-plugins` and
+`deny` are on the list after all, each served off a key of its own.
+
 `check-gate-verdicts-selftest` fails if the list names anything that is not a
 gate step, and if it names any of thirteen of the steps above.
 
@@ -398,3 +401,213 @@ nothing. Both new checks fail without their fix, as the mutants above show.
    not a fast-forward, which is the case §337.1 counted 117 times. The branch
    merged `main` again as `3c92df7b`, and its gate was **served from
    `e214ddc7` in 47.5 s**. That was pushed to `main`.
+
+### 337.9 The steps that check the machine, served on keys of their own
+
+*Q693, 2026-10-21: stop running on every gate the steps that check the machine
+rather than the tree. Mattias said they "check things that should be validated
+when the main agent starts, or when the test is updated". The row recommended
+serving each green on a key of what it reads, or running them from a
+SessionStart hook. This takes the first.*
+
+**Four of the eight steps are served now**: `check-hooks`,
+`check-questions-selftest`, `check-plugins` and `deny`. Each has a key of its
+own, a sha256 of three things: the step's name, the code's fingerprint from
+§337.3, and what the step reads outside the tree. Its record is
+`<git common dir>/rcad-verdicts-machine/<key>`, beside `rcad-verdicts/` and
+§425.7's `rcad-verdicts-timing-hooked-calls/`. §337.4's rules hold for it as
+they are: served for a day at most, run again under `fresh` and the audit, and
+recorded only by a run that ran it and passed. A failure over a record of the
+same key is §337.6's violation, written down in the same file.
+
+**What they cost.** Each step alone, once, by `target/q693-time-steps.sh`. The
+first column is this lane's tree with the load average at 50. The second is
+the first Q693 lane's run on the base, `bb1f44fe`, on a quieter machine.
+
+| step | ms, load 50 | ms, on the base |
+| --- | --- | --- |
+| `check-hooks` | 32232 | 7969 |
+| `check-questions-selftest` | 15466 | 3719 |
+| `check-plugins` | 4939 | 1282 |
+| `deny` | 2421 | 855 |
+| `check-corpus` | 387 | 148 |
+| `check-hub` | 257 | 69 |
+| `check-systemd-units` | 233 | 66 |
+| `check-queue-merge-driver` | 214 | 49 |
+
+In a served `just gate quiet` on the base, `check-hooks` took 8.2 s. The step
+that ran longest was `check-lanes-workflow`, at 29.5 s, and it still decides
+how long a served gate takes.
+
+**What they read outside the tree.** The first lane ran `strace -f -e
+trace=%file` over each step, and `target/q693-opened2.sh` lists what each
+opened. It leaves out what every recipe opens: the hub's `.git`,
+`~/.gitconfig`, `~/.config/git/ignore`, `~/mise.toml`, `~/mise.lock`,
+`~/.config/mise/config.toml`, and cargo's own caches.
+
+- `check-hooks` and `check-questions-selftest` open the plugins' `bin/` and
+  `hooks/` under `~/git/mattiasgronlund/claude-questions/plugins`.
+- `check-plugins` opens those, and also `~/.claude/settings.json` and
+  `~/.claude/plugins/known_marketplaces.json`. Its `check-declared.sh` names
+  two more files that this trace did not open: `.claude/settings.local.json`,
+  which is ignored and so outside the fingerprint, and
+  `~/.claude/plugins/installed_plugins.json`. The key reads them anyway.
+- `deny` opens the advisory database's checkout under `~/.cargo/advisory-dbs/`
+  and cargo's package-cache locks.
+- All four looked for `~/.claude/plugins/marketplaces/mattiasgronlund-local/plugins`
+  and did not find it. That path is `marketplace_clone`, and where it exists,
+  `plugins_root` points there instead.
+
+So the key adds these to the step's name and the code's fingerprint:
+
+- For the three plugin steps: the path of `claude_config`, and whether it is a
+  directory. Then, for each of the three plugin directories, its path and every
+  file's type, mode, path and sha256, or `absent`. 34 files take 90 ms
+  (`target/q693-keys.sh`).
+- For the three plugin steps too, each of the four config files above, as
+  `jq -c` prints it with every `lastUpdated` dropped, or its sha256 where `jq`
+  cannot read it, or `absent`.
+- For `deny`: the path and HEAD commit of each checkout under
+  `${CARGO_HOME:-~/.cargo}/advisory-dbs/`.
+
+**Every `lastUpdated` is dropped from the config files.** At first the key
+hashed each file whole, and the lane gate at `33ef2659` did not record
+`check-plugins`. It printed `· verdicts: check-plugins not recorded, because
+what it reads changed while the gate ran`. That gate started at
+2026-10-21T19:30:54Z, and during it Claude Code wrote `"lastUpdated":
+"2026-10-21T19:38:13.627Z"` into `~/.claude/plugins/known_marketplaces.json`.
+It stamps that field whenever it refreshes a marketplace, on its own clock.
+`installed_plugins.json` carries a `lastUpdated` in 43 entries. Hashed whole,
+`check-plugins` would seldom be served. `check-declared.sh` never reads
+`lastUpdated`. It reads `has($m)` and `.[$m].source` of
+`known_marketplaces.json`, `.plugins | has($k)` of `installed_plugins.json`,
+and `.enabledPlugins` and `.extraKnownMarketplaces` of the settings files. Any
+other change to these files still moves the key. A projection onto just the
+fields it reads was not taken: when `check-declared.sh` starts to read another
+field, the plugin's digest moves once, but the projection would then miss every
+later change to that field. Dropping `lastUpdated` has the same blind spot for
+that one field. A `check-declared.sh` that starts to read `lastUpdated` needs
+the drop taken out.
+
+**The config files are in all three plugin steps' keys, though only
+`check-plugins` reads them.** The selftest cannot drive the real
+`check-plugins`, since it runs `just question` against the real questions
+parser, which a fixture plugin does not have. It drives
+`check-questions-selftest` instead, so the config files have to be in that
+step's key for the selftest to reach the `lastUpdated` drop. The other way was
+a private recipe for the key, which the selftest could call with a fixture
+config directory. That recipe was outside this row's write set. Having more in
+the key than the step reads is still sound. It costs one more run of
+`check-hooks` and `check-questions-selftest` when a settings file or a plugin
+install changes.
+
+**`deny` fetches the advisory database on every run.** Over one `just deny`,
+`target/q693-deny-fetch.sh` saw `FETCH_HEAD`'s mtime move from 1792610807 to
+1792610815, while HEAD stayed `4b587f00`. The first relay saw it move by 504 s.
+So what `deny` reads can change while it runs. The gate takes each key again
+after its step has ended. A pass whose key moved records nothing, and says
+`· verdicts: <step> not recorded, because what it reads changed while the gate
+ran`. A failure whose key moved is no violation, since no record passed what it
+read. The next gate runs `deny` again, on whatever the fetch left, and records
+it.
+
+**Why only four.** `check-corpus`, `check-hub`, `check-systemd-units` and
+`check-queue-merge-driver` take a fifth to two fifths of a second each, even at
+load 50. A sound key for each would have to read what the step reads: the
+corpus's 119 MiB, the hub's status, the installed units, or git's config. It
+would cost about as much as the step. They stay on the selftest's list of
+steps that are never served, which now names eleven.
+
+**Why the key holds the whole fingerprint, and not the recipe's text.** The
+row suggested a key of each recipe's own text and what it reads outside the
+tree. But each step reads the tree as well. `check-hooks` runs
+`.claude/hooks/*.sh` and `.claude/patching-cases.local.json`, `check-plugins`
+runs this justfile's `question` recipe, and `deny` reads `Cargo.lock` and
+`deny.toml`. The fingerprint already covers the recipe, every tracked file a
+step reads, and the environment variables §337.3 names. A narrower key would
+need a trace of what each step reads in the tree, as §425.7 made for
+`check-timing-hooked-calls`. None of these four costs enough to pay for that.
+The price is that a code commit runs all four again.
+
+**`check-corpus` cannot be keyed on the manifest alone.** The row suggested
+it. But `corpus/manifest.sha256` is tracked, so it is in the fingerprint
+already, and what `check-corpus` checks is that the corpus on disk still
+matches it. A key of the manifest alone would serve a pass over a corpus that
+has been changed. So `check-corpus` still runs on every gate, and §337.3's
+argument for leaving `RCAD_STEP_CORPUS` out of the fingerprint still stands: a
+changed corpus fails the gate, whatever the fingerprint says.
+
+**What CI runs.** `ci.yml` runs `just gate`. A runner's fresh clone has no
+store, so it serves nothing. With no Claude Code config, the three plugin
+steps print `skipped, not passed`. Their key then says `no config`, so a skip
+is never served to a machine that has Claude Code. `ci.yml` has been off since
+2026-09-20 (§337.7).
+
+**Why not a SessionStart hook.** It would need a change to
+`.claude/settings.json`, which this row does not hold. CI has no session
+start. And a hook runs at every session start, whether anything changed or
+not, and does not run when a plugin is pulled in the middle of a session. The
+key covers both of Mattias's cases. When an agent starts on a machine whose
+plugins or config have changed, the next gate's key has moved, and the step
+runs. When the test is updated, in a plugin or in the tree, the key moves too.
+
+**What the key cannot see**, beyond §337.5:
+
+- **A hand edit inside the advisory database's checkout.** The key reads its
+  commit only, since a fetch leaves 67 entries in that checkout's `git status`
+  (`target/q693-db-status.sh`).
+- **The cargo registry index**, which `deny.toml`'s `yanked = "deny"` reads.
+- **An advisory published, or a crate yanked, since the record.** A served
+  `deny` fetches nothing, so it sees one only when its record expires, within
+  a day, or sooner when a code change runs it.
+- **`jq` and `python3`**, which `check-plugins` and the plugins' scripts run.
+  These are §337.5's system tools.
+- **`~/mise.toml`, `~/mise.lock` and `~/.config/mise/config.toml`**, which
+  every step reads, served or not.
+
+**`__pycache__` is left out of the key.** Python writes bytecode beside a
+script it runs, and `questions/bin/__pycache__` is there now. It follows from
+the script, and a step that wrote it would move its own key while it ran.
+`target/q693-keys.sh` ran each plugin step once, and the key's digest of the
+plugins did not move.
+
+**The demonstration.** `check-gate-verdicts-selftest` fails unless the four are
+on `gate_reusable_steps`. It drives the real `check-questions-selftest` against
+a fixture plugin, through these cases:
+
+- the first gate records it under its own key, and not in the whole-tree
+  store;
+- the next gate is served it, and its summary does not say that a whole-tree
+  record is gone;
+- a new `lastUpdated` in the fixture's `known_marketplaces.json` is served it,
+  and a marketplace moved to another repository runs it and moves its key;
+- a commit that touched only `docs/` is served it;
+- `fresh`, an audit, and a record two days old each run it, and say why;
+- a failure over its record is a violation, and the record is deleted;
+- a code commit runs it, and so does a machine with no Claude Code;
+- a pass whose plugin changed while it ran records nothing, and says so;
+- the next gate runs it, and records it under a new key;
+- a failure whose plugin changed while it ran is no violation, and the record
+  of the plugin before is kept.
+
+Three mutants of `gate` were each caught. With the check of whether the key
+moved taken out, the selftest failed on "did not say why it recorded nothing".
+With the four put back into the whole-tree list, it failed on "was recorded in
+the whole-tree store, off the code's fingerprint alone". With the config files
+read by `jq -c '.'`, so that `lastUpdated` stays, it failed on "a new
+lastUpdated stamp in known_marketplaces.json moved check-questions-selftest's
+key".
+
+**The real runs.** `just pre-gate gate-lane` on `a31350d3`, the commit that
+drops `lastUpdated`, passed with 4440 tests of 4440. The load average was 15
+when it started. It ran all four, `check-hooks` in 20.3 s, `check-questions-selftest` in 13.0 s,
+`check-plugins` in 3.8 s and `deny` in 1.7 s. It recorded each on its own key:
+`f6446181eab2`, `e0bfa98e535a`, `d29584258d1b` and `8cd83bca2b81`. Unlike the
+gate at `33ef2659`, it recorded `check-plugins` too.
+
+Then `aa40b10a` changed only this section, and the same command was served
+all four, each on a line of its own such as `· served: check-plugins from
+a31350d3's gate at 2026-10-21T20:00:27Z`, beside the whole tree's served line.
+None of the four ran. The gate started at 20:01:05Z and wrote its exit at
+20:02:03Z, 58 s. The step that ran longest was `check-lanes-workflow`, at 57.0
+s, so it still decides how long a served gate takes, as it did on the base.
