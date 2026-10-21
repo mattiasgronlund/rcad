@@ -431,6 +431,9 @@ def revert(run, lane, kinds, count, tip, report):
         return
     runnable = [name for name, kind in kinds.items() if kind is not None]
     if not runnable:
+        left(report, f"none of {', '.join(kinds)} is a recipe or a bare nextest name (a space, as in "
+                      f"'<binary> <test name>', is never one), so the revert ran nothing against them and "
+                      f"tests_fail_without_fix rests on nothing: revert by hand")
         return
     rc, said = run.git("restore", f"--source={lane['base']}", "--worktree", "--", *sources)
     if rc != 0:
