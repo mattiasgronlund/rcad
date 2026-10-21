@@ -32,10 +32,14 @@ DAY_MS = 86_400_000
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 
 # The label prefix names the role; 229 early agents have no `agentType`, and
-# where both are there they never disagree (measured in §411.10).
-PREFIXES = (("verify:", "verifier"), ("land:", "lander"), ("merge:", "merger"), ("prune:", "pruner"))
+# where both are there they never disagree (measured in §411.10). A relay
+# carries on the lane itself, so it keeps the "lane" role; `prep` and `close`
+# are roles of their own (§411.10).
+PREFIXES = (("verify:", "verifier"), ("land:", "lander"), ("merge:", "merger"), ("prune:", "pruner"),
+            ("prep:", "prep"), ("close:", "close"))
+RELAY = re.compile(r"^relay \d+:")
 RETRY = re.compile(r" \(retry \d+\)$")
-MERGE_STAGE = ("lander", "merger")
+MERGE_STAGE = ("lander", "merger", "close")
 
 HOLD = re.compile(r"^(?:(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) )?land: holding the land lock$", re.M)
 UNLOCK = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?worktree\s+unlock\s+['\"]?([^\s'\";&|]+)")
@@ -164,6 +168,9 @@ def run_of(path, record):
 
 
 def role_of(label):
+    relayed = RELAY.match(label)
+    if relayed:
+        return "lane", RETRY.sub("", label[relayed.end():])
     for prefix, role in PREFIXES:
         if label.startswith(prefix):
             return role, RETRY.sub("", label[len(prefix):])
@@ -411,6 +418,8 @@ def slot_time(attempt, steps, row):
     """§411.6: each tree an attempt's agents held, from its agent's start until it was unlocked.
 
     Plus the slot a row holds from its `take` until its lane starts (§263.4).
+    A prep holds no tree of its own: it works in the dispatcher's own tree,
+    never locked for the row, so it is skipped like the pruner (§411.10).
     """
     held = 0
     if attempt["take"] is not None:
@@ -424,7 +433,7 @@ def slot_time(attempt, steps, row):
     for agent in agents:
         step = steps[(agent["run"], agent["id"])]
         tree = step["tree"]
-        if agent["role"] == "pruner":
+        if agent["role"] in ("pruner", "prep"):
             continue
         if tree is None:
             row["marks"].add("still locked when the run ended")
@@ -443,7 +452,7 @@ def slot_time(attempt, steps, row):
                 moments.append(hold)
         elif agent["role"] == "lander":
             moments = [agent["end"]]
-        elif agent["role"] == "merger":
+        elif agent["role"] in ("merger", "close"):
             moments = [time for time, path in step["unlocks"] if same_tree(path, tree)][-1:] or [agent["end"]]
         moments = [moment for moment in moments if moment >= agent["start"]]
         if moments:

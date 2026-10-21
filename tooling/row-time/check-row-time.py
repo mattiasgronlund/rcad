@@ -16,6 +16,9 @@ every case of §411.9's list:
 - a tool that starts before its response ends;
 - a land wait with timestamps and one without;
 - a tree still locked when the run ended;
+- a lane relayed once, whose relay keeps the lane's own role (§416);
+- a row whose prep refused it, with no lane ever started (§396.4);
+- a row closed at the base, with no lander or merger (§433.8);
 - and a fixture whose parts do not add up, which must make `row-time` fail
   and print nothing.
 
@@ -48,6 +51,9 @@ def main():
         check_a_plain_lane(assembled)
         check_a_bundle_and_a_shared_gate(assembled)
         check_a_retried_row(assembled)
+        check_a_relayed_lane(assembled)
+        check_a_prep_refused_row(assembled)
+        check_a_close_at_base_row(assembled)
         check_every_step_adds_up(assembled)
         check_the_printed_report(world)
     with tempfile.TemporaryDirectory() as scratch:
@@ -88,6 +94,9 @@ def build_the_week(world):
     a_plain_lane(world)
     a_bundle_whose_lander_lands_another_run(world)
     a_retried_row(world)
+    a_relayed_lane(world)
+    a_prep_refused_row(world)
+    a_close_at_base_row(world)
 
 
 def a_plain_lane(world):
@@ -257,6 +266,70 @@ def a_retried_row(world):
     world.claim("release", "Q5", 700_000, "park")
 
 
+def a_relayed_lane(world):
+    """Q6: a lane relayed once; the relay keeps the lane's own role and joins its attempt (§416)."""
+    lane = Talk("/trees/r10-1")
+    lane.prompt(700_000)
+    lane.response((704_000, call("t70", "StructuredOutput")))
+    lane.result(704_100, "t70")
+
+    relay = Talk("/trees/r10-1")
+    relay.prompt(706_000)
+    relay.response((708_000, call("t71", "StructuredOutput")))
+    relay.result(709_100, "t71")
+
+    run = world.run("wf_r10", REPO, "sess-a", [lane_of("q6-relayed", "Q6")])
+    run.agent("q6-relayed", "l6", 700_000, 704_100, lane)
+    run.agent("relay 1:q6-relayed", "l6b", 706_000, 709_100, relay, queued=705_200)
+    world.claim("take", "Q6", 699_000, "lane-q6-relayed")
+    world.claim("release", "Q6", 709_000, "done")
+
+
+def a_prep_refused_row(world):
+    """Q7: prep refused the row; only a `prep` agent ran, in the dispatcher's own tree, no lane (§396.4)."""
+    prep = Talk("/trees/dispatcher")
+    prep.prompt(800_000)
+    prep.response((802_000, call("t80", "StructuredOutput")))
+    prep.result(802_100, "t80")
+
+    run = world.run("wf_r11", REPO, "sess-a", [lane_of("q7-prep-refused", "Q7")])
+    run.agent("prep:q7-prep-refused", "p7", 800_000, 802_100, prep)
+    world.claim("take", "Q7", 799_000, "lane-q7-prep-refused")
+    world.claim("release", "Q7", 802_000, "sent_back")
+
+
+def a_close_at_base_row(world):
+    """Q8: a lane and its verifier, closed at the base with nothing to land; `close` takes the merger's places (§433.8).
+
+    The closer's one `Bash` call unlocks all three trees at once, so its own
+    role is held by its own unlock of its own tree, and the lane's and the
+    verifier's are freed by that same call too.
+    """
+    lane = Talk("/trees/r12-1")
+    lane.prompt(900_000)
+    lane.response((904_000, call("t90", "StructuredOutput")))
+    lane.result(904_100, "t90")
+
+    verifier = Talk("/trees/r12-2")
+    verifier.prompt(904_200)
+    verifier.response((906_000, call("t91", "Bash", command="mise exec -- just verify-lane abc lane-q8-closed-at-base")))
+    verifier.result(909_000, "t91")
+
+    closer = Talk("/trees/r12-3")
+    closer.prompt(911_000)
+    closer.response((913_000, call("t92", "Bash", command="git worktree unlock /trees/r12-1 && "
+                                                          "git worktree unlock /trees/r12-2 && "
+                                                          "git worktree unlock /trees/r12-3")))
+    closer.result(915_000, "t92")
+
+    run = world.run("wf_r12", REPO, "sess-a", [lane_of("q8-closed-at-base", "Q8")])
+    run.agent("q8-closed-at-base", "l8", 900_000, 904_100, lane)
+    run.agent("verify:q8-closed-at-base", "v8", 904_200, 909_000, verifier)
+    run.agent("close:q8-closed-at-base", "c8", 911_000, 915_000, closer, queued=909_500)
+    world.claim("take", "Q8", 899_000, "lane-q8-closed-at-base")
+    world.claim("release", "Q8", 915_000, "closed_at_base")
+
+
 def land_json(merge_branch):
     return json.dumps({"merge_branch": merge_branch, "merged": True, "merged_sha": "def5678", "stop": ""})
 
@@ -274,7 +347,7 @@ def assemble(world):
 def check_a_plain_lane(assembled):
     rows = {row["id"]: row for row in assembled["rows"]}
     steps = assembled["steps"]
-    same("the rows picked", sorted(rows), ["Q1", "Q2", "Q3", "Q4", "Q5"])
+    same("the rows picked", sorted(rows), ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"])
     lane = steps[("wf_r1", "l1")]
     same("Q1's lane: its buckets, from both pieces of its transcript", dict(lane["buckets"]), {
         "before the first record": 0,
@@ -362,6 +435,44 @@ def check_a_retried_row(assembled):
     same("Q5: its slot time", row["slot"], 1_000 + 4_000 + 10_000 + 1_000 + 10_000 + 4_900)
 
 
+def check_a_relayed_lane(assembled):
+    rows = {row["id"]: row for row in assembled["rows"]}
+    row = rows["Q6"]
+    same("Q6: the relay joins the lane's own attempt, both role lane",
+         [agent["role"] for attempt in row["attempts"] for agent in attempt["agents"]], ["lane", "lane"])
+    same("Q6: the parts of its elapsed time", (row["elapsed"], row["parts"]), (10_100, {
+        "waiting to start": 1_000, "agents": 7_200, "handoff": 1_900, "earlier merge in the same run": 0,
+        "between attempts": 0, "after the run": 0}))
+    same("Q6: no tree is ever seen unlocked, so both are held to the run's end",
+         (row["slot"], sorted(row["marks"])), (1_000 + 9_100 + 3_100, ["still locked when the run ended"]))
+
+
+def check_a_prep_refused_row(assembled):
+    rows = {row["id"]: row for row in assembled["rows"]}
+    row = rows["Q7"]
+    same("Q7: only a prep agent ran, no lane", [agent["role"] for attempt in row["attempts"]
+                                               for agent in attempt["agents"]], ["prep"])
+    same("Q7: the parts of its elapsed time", (row["elapsed"], row["parts"]), (3_100, {
+        "waiting to start": 1_000, "agents": 2_100, "handoff": 0, "earlier merge in the same run": 0,
+        "between attempts": 0, "after the run": 0}))
+    same("Q7: prep holds no tree of its own, so its slot is only the wait to start", row["slot"], 1_000)
+
+
+def check_a_close_at_base_row(assembled):
+    rows = {row["id"]: row for row in assembled["rows"]}
+    row = rows["Q8"]
+    same("Q8: lane, verifier and close, close in the merge stage",
+         [agent["role"] for attempt in row["attempts"] for agent in attempt["agents"]],
+         ["lane", "verifier", "close"])
+    same("Q8: the parts of its elapsed time, close's wait split like a lander's or a merger's",
+         (row["elapsed"], row["parts"]), (16_000, {
+             "waiting to start": 1_000, "agents": 12_900, "handoff": 1_600,
+             "earlier merge in the same run": 500, "between attempts": 0, "after the run": 0}))
+    same("Q8: no marks; every tree is freed by the closer's one unlock call", sorted(row["marks"]), [])
+    same("Q8: its slot time: the lane freed by the verifier's call, the verifier by the closer's unlock, "
+         "the closer by its own unlock of its own tree", row["slot"], 1_000 + 6_000 + 8_800 + 2_000)
+
+
 def check_every_step_adds_up(assembled):
     for key, step in assembled["steps"].items():
         same(f"{key}: its buckets add up to its running time", sum(step["buckets"].values()), step["time"])
@@ -373,8 +484,8 @@ def check_the_printed_report(world):
         code = row_time.main([world.root, REPO, world.claims_path, "--since", "2026-10-05", "--until", "2026-10-06"])
     same("the report prints and exits 0", code, 0)
     text = printed.getvalue()
-    same("the report names five rows", text.splitlines()[0], "row-time: 5 rows, started 2026-10-05T00:00:00Z to "
-                                                             "2026-10-06T00:00:00Z")
+    same("the report names eight rows", text.splitlines()[0], "row-time: 8 rows, started 2026-10-05T00:00:00Z to "
+                                                               "2026-10-06T00:00:00Z")
     printed = io.StringIO()
     with contextlib.redirect_stdout(printed):
         row_time.main([world.root, REPO, world.claims_path, "Q4", "--json"])
