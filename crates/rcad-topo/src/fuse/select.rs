@@ -1039,8 +1039,10 @@ impl<'a> SidesItShares<'a> {
                 .flat_map(|(other, (sides, _))| sides.iter().map(move |side| (other, side)))
                 .filter(|(_, side)| {
                     side.edge == shared.edge
-                        && side.side.along.is_empty()
                         && name_of_surface_bits(&side.side.carried_by[1]) == my_surface
+                        && (side.side.along.is_empty()
+                            || self
+                                .its_skin_on_my_surface_stops_at(named, solid, shared, my_surface))
                 });
             for (other, _) in theirs {
                 let cut_from = &self.scratch.pieces[other];
@@ -1073,6 +1075,34 @@ impl<'a> SidesItShares<'a> {
             }
         }
         found
+    }
+
+    /// Whether a piece cut from solid number `solid`, on the surface named
+    /// `surface` bit for bit, has the side `shared` too, with the same partner
+    /// bit for bit and its material on the partner's other side: the face of
+    /// `solid` that piece is cut from ends at the side, and the piece with
+    /// `shared` carries its surface on past it.
+    fn its_skin_on_my_surface_stops_at(
+        &self,
+        named: &[Vec<NamedSide>],
+        solid: usize,
+        shared: &NamedSide,
+        surface: [u64; 9],
+    ) -> bool {
+        let partner = name_of_surface_bits(&shared.side.carried_by[1]);
+        named
+            .iter()
+            .zip(&self.scratch.cut_from)
+            .zip(&self.scratch.pieces)
+            .filter(|((_, from), piece)| {
+                **from == solid && name_of_surface_bits(&piece.surface) == surface
+            })
+            .flat_map(|((sides, _), _)| sides)
+            .any(|side| {
+                side.edge == shared.edge
+                    && side.side.material_side != shared.side.material_side
+                    && name_of_surface_bits(&side.side.carried_by[1]) == partner
+            })
     }
 
     /// The rule after [`by_a_side_from_an_edge_it_starts_on`]: piece number
@@ -2112,12 +2142,16 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 
 /// Comes before [`by_a_meridian_disk_beside_it`]: a piece, flat or curved,
 /// that nothing before placed takes the placement of the piece of its own
-/// face across one of its sides, where the start of that side is clear of
-/// every face of every solid it is placed against, when the point search
-/// places that piece inside or outside (`docs/decisions.md` §35.6, Q1537).
+/// face across one of its sides, where the start of that side, or the middle
+/// of a straight side, is clear of every face of every solid it is placed
+/// against, when the point search places that piece inside or outside
+/// (`docs/decisions.md` §35.6, Q1537, Q2551).
 ///
 /// **Why a neighbour can place a piece here.** `P` and `P′` are pieces of one
-/// face that share a side `s`, and `m` is where `s` starts. Each was cut by
+/// face that share a side `s`, and `m` is where `s` starts, or the middle of
+/// `s` where `s` runs where two planes meet and so is the straight segment
+/// between its ends, whose middle lies in the box halfway between theirs
+/// ([`midway_between`]). Each was cut by
 /// every surface of a solid `S`, so each lies all inside `S`, all outside it
 /// or all on its skin (§17.4). Every neighbourhood of `m` meets the inside of
 /// `P` and of `P′`. When `m` is off every face of `S`, it is off `S`'s skin,
@@ -2169,6 +2203,14 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// rule is no longer asked about it. Switched off, it costs no fuse in
 /// `tests/fuses_that_touch.rs`, but tests elsewhere in this crate still fail
 /// without it, the bends' among them.
+///
+/// The middle is asked for a sliver of a hollow quarter cone's cap at `z = 4`,
+/// between its own side plane and another quarter's an ulp off it, from the
+/// bore to the cone, the other quarter starting at `z = 4.5`. Each end of the
+/// side along the other's plane lies on the line through a side of the other's
+/// face on that plane, and that face cannot say it does not hold it; the
+/// middle is on no such line, and the rest of the cap across that side is
+/// placed outside (`tests/two_quarters_of_a_hollow_cone_flush_along_a_plane.rs`).
 fn by_the_piece_across_a_side_clear_of_every_face(
     model: &Model,
     scratch: &Scratch,
@@ -2188,14 +2230,18 @@ fn by_the_piece_across_a_side_clear_of_every_face(
         .flatten()
         .find_map(|side| {
             let across = &scratch.pieces[the_piece_across(scratch, piece, side)?];
-            let mut trial = ProvenanceLog::new();
             let start = side.ends[0].point();
-            if !theirs
-                .iter()
-                .all(|&solid| is_clear_of_every_face_of(solid, start, policy, &mut trial))
-            {
-                return None;
-            }
+            let middle = is_straight(side).then(|| midway_between(start, side.ends[1].point()));
+            let mut trial = [Some(start), middle]
+                .into_iter()
+                .flatten()
+                .find_map(|on_it| {
+                    let mut asked = ProvenanceLog::new();
+                    theirs
+                        .iter()
+                        .all(|&solid| is_clear_of_every_face_of(solid, on_it, policy, &mut asked))
+                        .then_some(asked)
+                })?;
             let in_plane = match across.surface.as_plane() {
                 Some(flat) => Some(InPlane::of(flat)?),
                 None => None,
