@@ -1206,72 +1206,7 @@ impl<'f> Arrangement<'f> {
         arrangement.count_the_windings_inside_each_lump();
         arrangement.group_the_cycles_into_cells(cuts, policy, log)?;
         arrangement.count_the_windings()?;
-        if std::env::var("RCAD_PROBE_Q2305").is_ok() {
-            arrangement.probe_q2305();
-        }
         Ok(arrangement)
-    }
-
-    fn probe_q2305(&self) {
-        let short = |s: &Surface| match s.as_plane() {
-            Some(p) => {
-                let c = p.coefficients();
-                format!("[{:.4},{:.4},{:.4};{:.4}]", c[0], c[1], c[2], c[3])
-            }
-            None => "curved".to_string(),
-        };
-        let near = |n: &Node| {
-            let e = n.point.enclosure();
-            (e[0].lo().abs() < 1e-6)
-                && (e[1].lo().abs() < 1e-6)
-                && ((e[2].lo() - 10.0).abs() < 1e-6)
-        };
-        if !self.nodes.iter().any(near) {
-            return;
-        }
-        eprintln!(
-            "PROBEA face {} crossings {} nodes {}",
-            short(&self.surface),
-            self.crossings.len(),
-            self.nodes.len()
-        );
-        for (i, c) in self.crossings.iter().enumerate() {
-            eprintln!(
-                "PROBEA   crossing {i} partner {} cuts {} reaches {}",
-                short(&c.partner),
-                c.cuts,
-                c.reaches_the_face
-            );
-        }
-        for (i, n) in self.nodes.iter().enumerate() {
-            if !near(n) {
-                continue;
-            }
-            let made = n
-                .made_of
-                .map(|(m, k)| format!("{} {} {} #{k}", short(&m[0]), short(&m[1]), short(&m[2])));
-            let also: Vec<String> = n
-                .also
-                .iter()
-                .map(|(m, k)| format!("{} {} {} #{k}", short(&m[0]), short(&m[1]), short(&m[2])))
-                .collect();
-            eprintln!(
-                "PROBEA   node {i} vertex {:?} made_of {made:?} also {also:?} crossings {:?} point {:?}",
-                n.vertex,
-                n.crossings,
-                n.point.enclosure()
-            );
-        }
-        for (i, a) in self.arcs.iter().enumerate() {
-            if a.ends.iter().any(|&e| near(&self.nodes[e])) {
-                eprintln!(
-                    "PROBEA   arc {i} crossing {} ends {:?} boundary {}",
-                    a.crossing,
-                    a.ends,
-                    a.boundary.is_some()
-                );
-            }
-        }
     }
 
     /// The crossings and the nodes where they meet, each crossing left out
