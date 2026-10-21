@@ -76,6 +76,8 @@ pub mod a_ball_touching_a_prisms_edge_exactly;
 pub mod a_ball_touching_the_edge_between_two_tilted_walls;
 #[path = "a_ball_whose_seam_is_a_little_past_a_quarter_turn.rs"]
 pub mod a_ball_whose_seam_is_a_little_past_a_quarter_turn;
+#[path = "a_band_of_a_ball_holding_neither_pole.rs"]
+pub mod a_band_of_a_ball_holding_neither_pole;
 #[path = "a_bar_and_a_ball_on_its_cap_turned.rs"]
 pub mod a_bar_and_a_ball_on_its_cap_turned;
 #[path = "a_bar_and_two_stacked_blocks_united_in_one_call.rs"]
