@@ -14034,4 +14034,126 @@ mod tests {
             None
         );
     }
+
+    /// **A point whose box straddles the line of a side, past both its ends,
+    /// is placed by the other sides** (row Q2563). The box says nothing about
+    /// which side of that line the point is on, but both ends of the side are
+    /// strictly on one side of the half-line from the point, so the half-line
+    /// does not cross the side whichever it is, and the point is not on it.
+    /// Until then the walk refused every such point by `orient3d`, an answer it
+    /// had.
+    ///
+    /// The L's two inner sides, `y = 5` from `x = 5` to `10` and `x = 5` from
+    /// `y = 5` to `10`, run on into the L, so a point on either line short of
+    /// `5` is held. The outer sides at `x = 10` and `y = 10` run on past it, so
+    /// a point on their lines past the L is not. On both caps the half-line
+    /// aims at the origin, which none of these lines runs through.
+    #[test]
+    fn a_box_across_the_line_of_a_side_past_its_ends_is_placed_by_the_other_sides() {
+        let (model, solid, caps) = an_l_and_its_caps();
+        let wobbling = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        for cap in caps {
+            for (across, expected) in [
+                ([Interval::exactly(2.0), wobbling(5.0)], OnAFace::Held),
+                ([wobbling(5.0), Interval::exactly(2.0)], OnAFace::Held),
+                ([wobbling(10.0), Interval::exactly(-3.0)], OnAFace::NotHeld),
+                ([Interval::exactly(-3.0), wobbling(10.0)], OnAFace::NotHeld),
+            ] {
+                assert_eq!(
+                    what_a_cap_of_an_l_holds(&model, solid, cap, across),
+                    expected,
+                    "{across:?} on the cap at height {}",
+                    cap.1
+                );
+            }
+        }
+    }
+
+    /// **Where the half-line runs along the side whose line the box straddles,
+    /// the walk aims at another corner** (row Q2563). From a point on the line
+    /// of the L's bottom or left side, past its ends, the half-line towards
+    /// the corner at the origin runs along that side, so the side's other end
+    /// has no sign of it any more than the point has of the side. Aimed at the
+    /// next corner, both of the side's ends are on one side of the half-line,
+    /// and the point is placed as in
+    /// [`a_box_across_the_line_of_a_side_past_its_ends_is_placed_by_the_other_sides`].
+    #[test]
+    fn a_box_across_the_line_of_a_side_through_the_corner_aimed_at_is_placed_from_another() {
+        let (model, solid, caps) = an_l_and_its_caps();
+        let wobbling = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        for cap in caps {
+            for across in [
+                [Interval::exactly(15.0), wobbling(0.0)],
+                [Interval::exactly(-5.0), wobbling(0.0)],
+                [wobbling(0.0), Interval::exactly(15.0)],
+                [wobbling(0.0), Interval::exactly(-5.0)],
+            ] {
+                assert_eq!(
+                    what_a_cap_of_an_l_holds(&model, solid, cap, across),
+                    OnAFace::NotHeld,
+                    "{across:?} on the cap at height {}",
+                    cap.1
+                );
+            }
+        }
+    }
+
+    /// An L ten by ten and ten high, the square five by five at `(10, 10)` cut
+    /// out of it, with its bottom and top caps and the height of each. Both
+    /// caps' outlines start at the origin.
+    fn an_l_and_its_caps() -> (Model, SolidKey, [(FaceKey, f64); 2]) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let l = crate::ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 5.0],
+            [5.0, 5.0],
+            [5.0, 10.0],
+            [0.0, 10.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("an L");
+        let solid = model
+            .add_extrusion(&l, 10.0, &Isometry::identity())
+            .expect("a positive height");
+        let caps = [0.0, 10.0].map(|height| {
+            let cap = model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .find(|face| {
+                    face.wires()
+                        .flat_map(WireView::points)
+                        .all(|corner| corner.coordinates()[2] == height)
+                })
+                .expect("a cap at each end");
+            assert_eq!(
+                cap.wires().flat_map(WireView::points).next(),
+                Some(Point::new(0.0, 0.0, height)),
+                "the half-line aims at the origin"
+            );
+            (cap.key(), height)
+        });
+        (model, solid, caps)
+    }
+
+    fn what_a_cap_of_an_l_holds(
+        model: &Model,
+        solid: SolidKey,
+        (cap, height): (FaceKey, f64),
+        [x, y]: [Interval; 2],
+    ) -> OnAFace {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .face_holds_the_point(
+                cap,
+                PredicatePoint::Constructed([x, y, Interval::exactly(height)]),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| {
+                panic!("({x:?}, {y:?}) on the cap at height {height}: {refused:?}")
+            })
+    }
 }
