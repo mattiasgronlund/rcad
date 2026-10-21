@@ -4648,58 +4648,7 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Decision> {
-        if self.surface.as_plane().is_some_and(|plane| {
-            let c = plane.coefficients();
-            c[1] < -0.9 && c[2] > 0.2
-        }) {
-            let [one, other] = [first, second].map(|node| self.nodes[node].point);
-            let own = self.how_far_apart_along(crossing, one, other);
-            let tight = [first, second].map(|node| self.narrowed_box_of(node));
-            let by_tight = self.how_far_apart_along(crossing, tight[0], tight[1]);
-            let planes = self.as_the_planes_say(crossing, first, second);
-            let three =
-                [first, second].map(|node| self.the_three_planes_a_node_is_the_meet_of(node));
-            eprintln!(
-                "PROBE ORDER crossing {crossing} {first} vs {second}: own {own:?} tight {by_tight:?} planes {planes:?} tight boxes {tight:?} three {three:?}"
-            );
-            for node in [first, second] {
-                if self.nodes[node].vertex.is_some() {
-                    let baked = self.the_baked_corner_of(&self.nodes[node]);
-                    eprintln!(
-                        "PROBE CORNER {node} solved_from {:?} around {:?}",
-                        baked.solved_from, baked.around
-                    );
-                }
-            }
-        }
         let (mut decided, measures) = self.as_the_boxes_say(crossing, first, second)?;
-        if std::env::var("PROBE_PLANES_FIRST").is_ok()
-            && let Some(proved) = self.as_the_planes_say(crossing, first, second)
-        {
-            decided = proved;
-        }
-        if std::env::var("PROBE_SWAP_3_7").is_ok()
-            && self.surface.as_plane().is_some_and(|plane| {
-                let c = plane.coefficients();
-                c[1] < -0.9 && c[2] > 0.2
-            })
-            && crossing == 3
-            && [first, second] == [3, 7]
-        {
-            eprintln!("PROBE SWAPPED 3 7");
-            decided = Decision::Neg;
-        }
-        if std::env::var("PROBE_SWAP_3_7").is_ok()
-            && self.surface.as_plane().is_some_and(|plane| {
-                let c = plane.coefficients();
-                c[1] < -0.9 && c[2] > 0.2
-            })
-            && crossing == 3
-            && [first, second] == [7, 3]
-        {
-            eprintln!("PROBE SWAPPED 7 3");
-            decided = Decision::Pos;
-        }
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_planes_say(crossing, first, second)
         {
@@ -10992,62 +10941,6 @@ impl<'f> Arrangement<'f> {
         Ok(())
     }
 
-    fn probe_dump(&self, why: &str) {
-        eprintln!(
-            "PROBE {why} face {:?} surface {:?}",
-            self.face.keys, self.surface
-        );
-        for (index, crossing) in self.crossings.iter().enumerate() {
-            eprintln!(
-                "PROBE crossing {index} partner {:?} cuts {} reaches {} full {:?}",
-                crossing.partner,
-                crossing.cuts,
-                crossing.reaches_the_face,
-                self.drawn_in_full.get(index)
-            );
-        }
-        for (index, node) in self.nodes.iter().enumerate() {
-            let e = node.point.enclosure();
-            eprintln!(
-                "PROBE node {index} at [{:.17e} {:.17e} {:.17e}] w [{:.1e} {:.1e} {:.1e}] vertex {:?} crossings {:?} also {}",
-                e[0].lo(),
-                e[1].lo(),
-                e[2].lo(),
-                e[0].hi() - e[0].lo(),
-                e[1].hi() - e[1].lo(),
-                e[2].hi() - e[2].lo(),
-                node.vertex,
-                node.crossings,
-                node.also.len()
-            );
-        }
-        for (index, arc) in self.arcs.iter().enumerate() {
-            eprintln!(
-                "PROBE arc {index} crossing {} ends {:?} boundary {:?}",
-                arc.crossing,
-                arc.ends,
-                arc.boundary.map(|b| (b.wire, b.runs_forward, b.position))
-            );
-        }
-        for (index, cycle) in self.cycles.iter().enumerate() {
-            let nodes: Vec<usize> = cycle.iter().map(|&h| self.from(h)).collect();
-            eprintln!(
-                "PROBE cycle {index} half-edges {cycle:?} nodes {nodes:?} cell {:?} wound {:?}",
-                self.cell_of.get(index),
-                self.winding_of_cycle.get(index)
-            );
-        }
-        for (index, cell) in self.cells.iter().enumerate() {
-            eprintln!(
-                "PROBE cell {index} cycles {cell:?} winding {:?}",
-                self.winding.get(index)
-            );
-        }
-        for (node, leaving) in self.leaving.iter().enumerate() {
-            eprintln!("PROBE leaving {node}: {leaving:?}");
-        }
-    }
-
     fn spread_the_winding(&mut self, from: usize) -> Result<()> {
         let mut waiting = vec![from];
         while let Some(cell) = waiting.pop() {
@@ -11058,9 +10951,6 @@ impl<'f> Arrangement<'f> {
                     let across = self.cell_of[self.cycle_of[half_edge ^ 1]];
                     let theirs = known + self.climb_across(half_edge);
                     if !(0..=1).contains(&theirs) {
-                        self.probe_dump(&format!(
-                            "out of range: cell {cell} known {known} half-edge {half_edge} across {across} theirs {theirs}"
-                        ));
                         return Err(Error::CannotTellTheCellsOfAFaceApart {
                             face: self.face.keys[0],
                         });
@@ -11071,10 +10961,7 @@ impl<'f> Arrangement<'f> {
                             waiting.push(across);
                         }
                         Some(already) if already == theirs => (),
-                        Some(already) => {
-                            self.probe_dump(&format!(
-                                "disagree: cell {cell} known {known} half-edge {half_edge} across {across} theirs {theirs} already {already}"
-                            ));
+                        Some(_) => {
                             return Err(Error::CannotTellTheCellsOfAFaceApart {
                                 face: self.face.keys[0],
                             });
