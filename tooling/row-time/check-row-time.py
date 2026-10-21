@@ -490,7 +490,7 @@ def a_response_priced_from_its_usage(world):
     run.agent("q13-known-usage", "l13", 1_200_000, 1_203_200, lane)
     run.agent("verify:q13-known-usage", "v13", 1_204_000, 1_205_200, verifier, queued=1_203_900)
     world.claim("take", "Q13", 1_199_000, "lane-q13-known-usage")
-    world.claim("release", "Q13", 1_205_200, "done")
+    world.claim("release", "Q13", 1_206_000, "done")
 
 
 def land_json(merge_branch):
@@ -510,7 +510,8 @@ def assemble(world):
 def check_a_plain_lane(assembled):
     rows = {row["id"]: row for row in assembled["rows"]}
     steps = assembled["steps"]
-    same("the rows picked", sorted(rows), ["Q1", "Q10", "Q11", "Q12", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"])
+    same("the rows picked", sorted(rows),
+         ["Q1", "Q10", "Q11", "Q12", "Q13", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"])
     lane = steps[("wf_r1", "l1")]
     same("Q1's lane: its buckets, from both pieces of its transcript", dict(lane["buckets"]), {
         "before the first record": 0,
@@ -665,6 +666,38 @@ def check_a_missing_holder_lands_another_run(assembled):
           ["land lock bound", "landed by q-vanished-holder, whose own run is not in the retained transcripts"]))
 
 
+def check_a_response_priced_from_its_usage(assembled):
+    rows = {row["id"]: row for row in assembled["rows"]}
+    steps = assembled["steps"]
+    row = rows["Q13"]
+    lane_cost = steps[("wf_r30", "l13")]["cost"]
+    verifier_cost = steps[("wf_r30", "v13")]["cost"]
+    want_lane = spend.cost_of(COST_MODEL, COST_USAGE_1) + spend.cost_of(COST_MODEL, COST_USAGE_2)
+    want_verifier = spend.cost_of(COST_MODEL, COST_USAGE_3)
+    same("Q13: the lane's cost keeps only the streamed response's largest output_tokens",
+         round(lane_cost, 8), round(want_lane, 8))
+    same("Q13: the verifier's cost", round(verifier_cost, 8), round(want_verifier, 8))
+    same("Q13: the row's cost is the sum of its steps'", round(row["cost"], 8), round(want_lane + want_verifier, 8))
+
+
+def check_cost_in_the_summary(world):
+    options = row_time.parsed([world.root, REPO, world.claims_path, "Q13"])
+    loaded = row_time.load(options["root"], options["repo"], options["claims"])
+    report = row_time.build(loaded, options)
+    row = report["rows"][0]
+    summary = report["summary"]
+    want_lane = spend.cost_of(COST_MODEL, COST_USAGE_1) + spend.cost_of(COST_MODEL, COST_USAGE_2)
+    want_verifier = spend.cost_of(COST_MODEL, COST_USAGE_3)
+    same("Q13: its own row cost in the report", round(row["cost"], 8), round(want_lane + want_verifier, 8))
+    same("Q13: the summary's row cost, the only row picked, so total, median and p90 all equal it",
+         tuple(round(summary["row: cost"][k], 8) for k in ("total share", "median", "p90")),
+         (round(row["cost"], 8),) * 3)
+    same("Q13: the summary's per-role cost",
+         (round(summary["step cost: lane"]["total share"], 8),
+          round(summary["step cost: verifier"]["total share"], 8)),
+         (round(want_lane, 8), round(want_verifier, 8)))
+
+
 def check_every_step_adds_up(assembled):
     for key, step in assembled["steps"].items():
         same(f"{key}: its buckets add up to its running time", sum(step["buckets"].values()), step["time"])
@@ -676,7 +709,7 @@ def check_the_printed_report(world):
         code = row_time.main([world.root, REPO, world.claims_path, "--since", "2026-10-05", "--until", "2026-10-06"])
     same("the report prints and exits 0", code, 0)
     text = printed.getvalue()
-    same("the report names eleven rows", text.splitlines()[0], "row-time: 11 rows, started 2026-10-05T00:00:00Z to "
+    same("the report names twelve rows", text.splitlines()[0], "row-time: 12 rows, started 2026-10-05T00:00:00Z to "
                                                                 "2026-10-06T00:00:00Z")
     printed = io.StringIO()
     with contextlib.redirect_stdout(printed):
@@ -818,12 +851,18 @@ class Talk:
         self.records.append({"type": "attachment", "timestamp": at(ms), "cwd": self.cwd,
                              "attachment": {"type": "hook_success"}})
 
-    def response(self, *blocks):
+    def response(self, *blocks, model=None):
         self.requests += 1
-        for ms, block in blocks:
-            self.records.append({"type": "assistant", "timestamp": at(ms), "cwd": self.cwd,
-                                 "requestId": f"req_{self.requests}",
-                                 "message": {"id": f"msg_{self.requests}", "role": "assistant", "content": [block]}})
+        for item in blocks:
+            ms, block = item[0], item[1]
+            record = {"type": "assistant", "timestamp": at(ms), "cwd": self.cwd,
+                      "requestId": f"req_{self.requests}",
+                      "message": {"id": f"msg_{self.requests}", "role": "assistant", "content": [block]}}
+            if model is not None:
+                record["message"]["model"] = model
+            if len(item) > 2:
+                record["message"]["usage"] = item[2]
+            self.records.append(record)
 
     def result(self, ms, tool_id, text="done"):
         self.records.append({"type": "user", "timestamp": at(ms), "cwd": self.cwd, "message": {
