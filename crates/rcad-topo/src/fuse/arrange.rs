@@ -4648,7 +4648,58 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Decision> {
+        if self.surface.as_plane().is_some_and(|plane| {
+            let c = plane.coefficients();
+            c[1] < -0.9 && c[2] > 0.2
+        }) {
+            let [one, other] = [first, second].map(|node| self.nodes[node].point);
+            let own = self.how_far_apart_along(crossing, one, other);
+            let tight = [first, second].map(|node| self.narrowed_box_of(node));
+            let by_tight = self.how_far_apart_along(crossing, tight[0], tight[1]);
+            let planes = self.as_the_planes_say(crossing, first, second);
+            let three =
+                [first, second].map(|node| self.the_three_planes_a_node_is_the_meet_of(node));
+            eprintln!(
+                "PROBE ORDER crossing {crossing} {first} vs {second}: own {own:?} tight {by_tight:?} planes {planes:?} tight boxes {tight:?} three {three:?}"
+            );
+            for node in [first, second] {
+                if self.nodes[node].vertex.is_some() {
+                    let baked = self.the_baked_corner_of(&self.nodes[node]);
+                    eprintln!(
+                        "PROBE CORNER {node} solved_from {:?} around {:?}",
+                        baked.solved_from, baked.around
+                    );
+                }
+            }
+        }
         let (mut decided, measures) = self.as_the_boxes_say(crossing, first, second)?;
+        if std::env::var("PROBE_PLANES_FIRST").is_ok()
+            && let Some(proved) = self.as_the_planes_say(crossing, first, second)
+        {
+            decided = proved;
+        }
+        if std::env::var("PROBE_SWAP_3_7").is_ok()
+            && self.surface.as_plane().is_some_and(|plane| {
+                let c = plane.coefficients();
+                c[1] < -0.9 && c[2] > 0.2
+            })
+            && crossing == 3
+            && [first, second] == [3, 7]
+        {
+            eprintln!("PROBE SWAPPED 3 7");
+            decided = Decision::Neg;
+        }
+        if std::env::var("PROBE_SWAP_3_7").is_ok()
+            && self.surface.as_plane().is_some_and(|plane| {
+                let c = plane.coefficients();
+                c[1] < -0.9 && c[2] > 0.2
+            })
+            && crossing == 3
+            && [first, second] == [7, 3]
+        {
+            eprintln!("PROBE SWAPPED 7 3");
+            decided = Decision::Pos;
+        }
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_planes_say(crossing, first, second)
         {
