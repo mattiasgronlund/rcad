@@ -6165,9 +6165,7 @@ mod tests {
     /// The loop is the `−x` one of the thin pipe through the fat one above, and
     /// the second corner is the box `1e-9` round where `y = 1/20` on its lower
     /// half: `x = −√(16 − y²)`, `z = 5 − √(1 − y²)`. The run is picked by
-    /// `y ≥ 0` and `z ≤ 4.5`. By `y ≥ 0` alone it is refused, though the rest
-    /// of the loop dips below the wall: the middle point of the rest is the
-    /// seed `(−4, 0, 6)`, on the wall, so `y ≥ 0` holds at both arcs' middles.
+    /// `y ≥ 0` and `z ≤ 4.5`; the test below picks it by `y ≥ 0` alone.
     #[test]
     fn a_run_shorter_than_a_step_of_the_march_is_told_from_the_rest_of_its_loop() {
         let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
@@ -6213,6 +6211,51 @@ mod tests {
         )
         .expect("a short run of a thin pipe through a fat one is walked");
         assert_eq!(walked.points(), &[] as &[Point]);
+    }
+
+    /// The run of the test above picked by `y ≥ 0` alone: the rest of the loop
+    /// has its middle on the wall, at the seed `(−4, 0, 6)`, and dips below
+    /// it, and is ruled out where it does. Refused until Q2570, when the
+    /// half-spaces were asked at each arc's middle alone (Q1680).
+    #[test]
+    fn a_run_shorter_than_a_step_of_the_march_is_told_from_the_rest_of_its_loop_by_the_wall_alone()
+    {
+        let fat = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 4.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(Point::new(-10.0, 0.0, 5.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("a direction"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        let y = 0.05_f64;
+        let near = Point::new(-(16.0 - y * y).sqrt(), y, 5.0 - (1.0 - y * y).sqrt());
+        let ends = [
+            PredicatePoint::from(Point::new(-4.0, 0.0, 4.0).coordinates()),
+            somewhere_within(near, 1e-9).expect("a box round a point"),
+        ];
+        let over = Picker::from(
+            crate::HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("the y axis has length"),
+        );
+        let run = NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and: thin,
+                picked_by: smallvec![over],
+            },
+            ends,
+        )
+        .expect("a run between two corners");
+        let walked = walk(
+            &run,
+            [&fat, &thin],
+            Deflection::of(1.0).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map(|walked| walked.points().to_vec());
+        assert_eq!(walked, Ok(Vec::new()));
     }
 
     /// The quarter of a circle the Fujitsu FTR-F1 relays put where a pin's pipe
