@@ -7165,19 +7165,29 @@ fn where_a_slit_carries_on_to(around: &WalkedLoop, tip: usize) -> Option<(Walked
 /// halved and windowed, are refused without this
 /// (`a_walk_neither_winding_nor_the_axis_places.rs`).
 ///
-/// **A ball is left out, as before.** It pinches at both poles, and no face on
-/// a ball whose outline reaches neither, with a hole, has been measured here.
+/// **So is a ball's patch clear of both poles.** A ball pinches at latitude
+/// `±π/2` and nowhere else, so when every corner of every loop lies strictly
+/// between the two, the patch and its legs do too, by the same argument. A loop
+/// that reaches a pole is walked through it on a pole side at that latitude, so
+/// one of its corners is there. A slab of a block whose two faces cross a ball
+/// off its poles leaves a band of the ball's skin this shape, and so does a
+/// plate bored through by a ball; both were refused
+/// `CurvedFaceWithAHoleGoesTooFarRound` until row Q2556
+/// (`a_band_of_a_ball_holding_neither_pole.rs`).
 fn the_loops_keep_clear_of_where_it_pinches(stored: &Surface, walked: &[WalkedLoop]) -> bool {
-    if stored.where_it_pinches().is_none() {
+    let Some(pinch) = stored.where_it_pinches() else {
         return true;
-    }
-    let Surface::Cone(_) = stored else {
-        return false;
     };
     let mut heights = walked
         .iter()
         .flat_map(|around| &around.corners)
         .map(|corner| corner[1]);
+    if let Surface::Sphere(_) = stored {
+        return heights.all(|latitude| latitude.abs() < pinch);
+    }
+    let Surface::Cone(_) = stored else {
+        return false;
+    };
     let first = heights.next().expect("a walked loop has a corner");
     first != 0.0 && heights.all(|height| height * first.signum() > 0.0)
 }
