@@ -14133,6 +14133,133 @@ mod tests {
         }
     }
 
+    #[test]
+    fn probe_q2563_cone() {
+        let policy = Policy::certified();
+        for rule in [crate::Rule::Intersection, crate::Rule::Difference] {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let frustum = probe_frustum(&mut model, 4.0, 8.0);
+            let triangle = crate::ProfileBuilder::new(vec![[0.0, 0.0], [12.0, 0.0], [0.0, 12.0]])
+                .build(&policy, &mut ProvenanceLog::new())
+                .expect("a triangle");
+            let prism = model
+                .add_extrusion(
+                    &triangle,
+                    6.0,
+                    &Isometry::translation(Vector::new(0.0, 0.0, 3.0)).expect("a shift"),
+                )
+                .expect("a prism");
+            let (arguments, tools) = if rule == crate::Rule::Intersection {
+                ([prism], [frustum])
+            } else {
+                ([frustum], [prism])
+            };
+            let answer = model
+                .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+                .expect("answers");
+            let &[solid] = answer.solids() else {
+                panic!("one solid");
+            };
+            let view = model.solid(solid).expect("key");
+            for face in view.faces() {
+                if !matches!(face.surface(), Surface::Cone(_)) {
+                    continue;
+                }
+                let corners: Vec<Point> = face.wires().flat_map(WireView::points).collect();
+                eprintln!("{rule:?} cone face {:?} corners {corners:?}", face.key());
+                let wobbling = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+                let ex = Interval::exactly;
+                for (name, point) in [
+                    ("angle 0 z 10", [ex(5.0), wobbling(0.0), ex(10.0)]),
+                    ("angle 0 z 2", [ex(1.0), wobbling(0.0), ex(2.0)]),
+                    ("angle pi z 6", [ex(-3.0), wobbling(0.0), ex(6.0)]),
+                    ("angle 3pi/2 z 6", [wobbling(0.0), ex(-3.0), ex(6.0)]),
+                    ("angle pi/2 z 10", [wobbling(0.0), ex(5.0), ex(10.0)]),
+                    ("exact angle pi z 6", [ex(-3.0), ex(0.0), ex(6.0)]),
+                    ("exact angle 0 z 10", [ex(5.0), ex(0.0), ex(10.0)]),
+                ] {
+                    let answer = view.face_holds_the_point(
+                        face.key(),
+                        PredicatePoint::Constructed(point),
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    );
+                    eprintln!("  {name}: {answer:?}");
+                }
+            }
+        }
+    }
+
+    fn probe_frustum(model: &mut Model, near: f64, far: f64) -> SolidKey {
+        use crate::{DraftStep, SolidBuilder};
+        let slope = 0.5;
+        let skin = rcad_geom::Cone::new(Axis::z(), slope).expect("a positive slope");
+        let mut builder = SolidBuilder::new();
+        let at = |height: f64| Point::new(slope * height, 0.0, height);
+        let bottom_corner = builder.add_vertex(at(near)).expect("a finite point");
+        let top_corner = builder.add_vertex(at(far)).expect("a finite point");
+        let seam = builder
+            .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
+            .expect("a ruling");
+        let bottom_circle = builder
+            .add_edge(
+                bottom_corner,
+                bottom_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("a circle");
+        let top_circle = builder
+            .add_edge(
+                top_corner,
+                top_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("a circle");
+        let cap = |builder: &mut SolidBuilder, at: f64, outward: f64, edge, turn| {
+            let plane = Plane::from_point_and_normal(
+                Point::new(0.0, 0.0, at),
+                Vector::new(0.0, 0.0, outward),
+            )
+            .expect("a unit normal");
+            let coedge = builder.add_coedge(edge, turn).expect("an edge");
+            let wire = builder
+                .add_wire(&[DraftStep::Along(coedge)])
+                .expect("a wire");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a cap")
+        };
+        let bottom = cap(
+            &mut builder,
+            near,
+            -1.0,
+            bottom_circle,
+            Orientation::Reversed,
+        );
+        let top = cap(&mut builder, far, 1.0, top_circle, Orientation::Forward);
+        let round_the_wall = [
+            (bottom_circle, Orientation::Forward),
+            (seam, Orientation::Forward),
+            (top_circle, Orientation::Reversed),
+            (seam, Orientation::Reversed),
+        ]
+        .map(|(edge, turn)| DraftStep::Along(builder.add_coedge(edge, turn).expect("an edge")));
+        let wire = builder.add_wire(&round_the_wall).expect("a wire");
+        let side = builder
+            .add_face(Surface::Cone(skin), &[wire])
+            .expect("a face on the cone");
+        builder
+            .add_shell(&[
+                (bottom, Orientation::Forward),
+                (top, Orientation::Forward),
+                (side, Orientation::Forward),
+            ])
+            .expect("three faces close");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a frustum")
+    }
+
     /// An L ten by ten and ten high, the square five by five at `(10, 10)` cut
     /// out of it, with its bottom and top caps and the height of each. Both
     /// caps' outlines start at the origin.
