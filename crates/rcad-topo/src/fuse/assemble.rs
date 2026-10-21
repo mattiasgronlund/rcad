@@ -399,7 +399,11 @@ pub(crate) struct InputSide {
 /// the side leaves it out, and a side is only ever compared by its `edge`
 /// number. A side left out is one no piece can be placed across; the other
 /// sides of its piece are still named. Until Q1034 the whole naming gave up
-/// here, and no piece of the fuse could be placed by a side.
+/// here, and no piece of the fuse could be placed by a side. **So is a curved
+/// stretch of an open input edge off one of its own ends** whose two ends come
+/// out one corner ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]),
+/// which has no length as written either, and which [`sides_of`] leaves out
+/// of a kept piece for the same reason (Q2408).
 ///
 /// **Every corner is made before any side is named**, as
 /// [`Assembly::from_the_pieces`] makes them: [`Edges::of`] reads a closed side
@@ -471,7 +475,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
         let solid = the_solid_a_piece_was_cut_from(model, scratch, index);
         let mut of_this_piece = Vec::new();
         for (meet, &[from, to]) in wires.iter().flat_map(|wire| wire.iter()).zip(ends) {
-            if is_a_straight_side_with_no_length(meet, [from, to]) {
+            if is_a_side_with_no_length(meet, [from, to], model) {
                 continue;
             }
             if from == to {
@@ -681,8 +685,9 @@ impl Assembly {
         // small it is — the same reasoning, and the same skip, as
         // `Model::check_dynamic_range`. An edge from one corner to itself is
         // always a closed one: a side between two names that came out one
-        // corner is left out on a plane and refused on a curved surface
-        // before an edge is built (`sides_of`, `Corners::of_both_ends`).
+        // corner is left out on a plane or as a stretch of an open input edge
+        // off its own end, and refused on any other curved side, before an
+        // edge is built (`sides_of`, `Corners::of_both_ends`).
         let shortest_chord = self
             .edges
             .iter()
@@ -9018,6 +9023,20 @@ impl Corners {
     /// passed one corner twice or two faces facing apart
     /// (`tests/a_block_edge_grazing_a_ball_at_cx_16.rs`, Q2193).
     ///
+    /// **Except a piece of an open input edge cut off at one of that edge's
+    /// own ends** ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]),
+    /// which [`sides_of`] leaves out as it leaves out a straight side. Such a
+    /// piece is the stretch of the input arc between its own end and a cut
+    /// that rounds onto that end, and so has no length as written, where a
+    /// circle a block's edge grazes is a crossing this fuse made, which is no
+    /// input edge, and either of whose arcs could be the long one. A plate
+    /// with a round corner tab, turned `0.05` about `z`, kept a corner where
+    /// its own wall's plane `x = 10` cut the tab's rim; in the next fuse that
+    /// plane cut the rim again, a rounding beside that corner, and the union
+    /// with a block nowhere near was refused here though it is the plate and
+    /// the block as they were (§38.1,
+    /// `tests/a_plate_with_a_round_corner_tab_turned.rs`, Q2408).
+    ///
     /// A side whose two ends are one name is a closed curve, and its one
     /// corner is what it is meant to have. A name another corner takes over
     /// ([`Corners::with_each_closed_curve_started_once`]) ends only sides of
@@ -9029,7 +9048,8 @@ impl Corners {
     ///
     /// [`Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`] where two
     /// ends of two names on a side that some curved surface carries come out
-    /// one corner, and whatever [`Corners::of`] gives.
+    /// one corner, unless the side is a stretch of an open input edge off one
+    /// of its own ends, and whatever [`Corners::of`] gives.
     fn of_both_ends(
         &mut self,
         model: &Model,
@@ -9049,6 +9069,7 @@ impl Corners {
                 .any(|surface| surface.as_plane().is_none())
             && self.goes_by(self.name_of(model, &meet.ends[0], policy, log)?)
                 != self.goes_by(self.name_of(model, &meet.ends[1], policy, log)?)
+            && !is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model)
         {
             return Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint {
                 face,
@@ -9094,8 +9115,9 @@ impl Corners {
     /// planes prove**, where both land on one triple
     /// ([`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`]).
     /// Two corners there are an edge of no length, which no answer can hold.
-    /// One corner, the side is left out on a plane ([`sides_of`], §365.7) and
-    /// refused on a curved surface ([`Corners::of_both_ends`]).
+    /// One corner, the side is left out on a plane ([`sides_of`], §365.7) or
+    /// as a stretch of an open input edge off its own end, and refused on any
+    /// other curved side ([`Corners::of_both_ends`]).
     ///
     /// # Errors
     ///
@@ -11656,8 +11678,11 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// **A curved side whose two ends are two names and one corner is refused**,
 /// by [`Corners::of_both_ends`]. It has a length, so it cannot be left out,
 /// and an edge from that corner back to itself would be the whole closed
-/// curve and not the arc between the two places (Q2193). A curved side of one
-/// name at both ends is a closed curve, and is kept.
+/// curve and not the arc between the two places (Q2193). Except a stretch of
+/// an open input edge off one of its own ends, which has none as the answer
+/// is written and is left out as a straight side is
+/// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`], Q2408). A curved
+/// side of one name at both ends is a closed curve, and is kept.
 ///
 /// **A pole of a ball kept whole is named here**, and not by [`Corners::of`].
 /// A pole is not an input corner to the arrangement, so the end arrives with
@@ -11681,7 +11706,7 @@ fn the_corners_each_side_runs_between(
     let mut ends_of_each_side = Vec::with_capacity(wire.len());
     for meet in wire {
         let ends = corners.of_both_ends(model, meet, ancestors[0], policy, log)?;
-        if !is_a_straight_side_with_no_length(meet, ends) {
+        if !is_a_side_with_no_length(meet, ends, model) {
             for (end, corner) in meet.ends.iter().zip(ends) {
                 if let Some(pole) = the_input_pole_an_end_is(solid, ancestors, end) {
                     let made = &mut corners.made[corner];
@@ -11743,7 +11768,7 @@ fn sides_of(
     );
     let mut sides = Vec::new();
     for (meet, &[from, to]) in wire.iter().zip(ends) {
-        if is_a_straight_side_with_no_length(meet, [from, to]) {
+        if is_a_side_with_no_length(meet, [from, to], model) {
             continue;
         }
         let seam = the_seam_a_side_runs_along(model, solid, ancestors, meet);
@@ -11768,14 +11793,58 @@ fn sides_of(
     Ok(sides)
 }
 
-/// Whether `meet` is a side two planes carry whose two ends came out one
-/// corner, which [`sides_of`] leaves out.
-fn is_a_straight_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2]) -> bool {
+/// Whether `meet` is a side whose two ends came out one corner and that has no
+/// length as the answer is written, which [`sides_of`] leaves out: one two
+/// planes carry, or a stretch of an open input edge off one of its own ends
+/// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]).
+fn is_a_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2], model: &Model) -> bool {
     from == to
-        && meet
+        && (meet
             .carried_by
             .iter()
             .all(|surface| surface.as_plane().is_some())
+            || is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model))
+}
+
+/// Whether `meet` runs along one input edge that does not close on itself,
+/// from one of that edge's own two ends to a place that is neither, and the
+/// edge's two ends are further apart than `meet`'s can be.
+///
+/// **Such a stretch lies as near its end as its other end may be**, the way
+/// a straight side between two ends does. Its other end is somewhere on the
+/// edge within `d` of the edge's own end, where `d` is how far apart the two
+/// ends' boxes may be. On a circle, the edge is an arc of less than a whole
+/// turn, and the gap it leaves has a chord as long as the edge's own, so where
+/// that chord is longer than `d` the gap holds every point of the circle
+/// within `d` of the edge's end on the far side of it. The places on the edge
+/// within `d` of its end are then all on the near side, and so is the whole
+/// stretch. Twice `d`, so that the roundings of the two lengths have no say.
+/// On a curve of another shape the same holds unless the curve comes back
+/// within `d` of the edge's end somewhere else along the edge, which is a face
+/// pinched narrower than a box at that end.
+///
+/// A crossing this fuse made runs along no input edge, so this says nothing
+/// of one, and either arc between two places on it could be the long one
+/// (Q2193). Nor of an input edge whose two ends are nearer than the box of a
+/// place on it is wide: the fuse does not sweep its inputs with
+/// [`Model::validate`] before it runs, so the range check that keeps an open
+/// edge's ends apart has not been asked, and the box could reach round the
+/// edge to its far end.
+fn is_a_stretch_of_an_open_input_edge_off_its_own_end(meet: &FaceMeet, model: &Model) -> bool {
+    let [edge] = meet.along.as_slice() else {
+        return false;
+    };
+    let input = model
+        .edge(*edge)
+        .expect("a side runs along an edge of the model the fuse was given");
+    let own_ends = [input.start().key(), input.end().key()];
+    if own_ends[0] == own_ends[1] {
+        return false;
+    }
+    let is_an_own_end = |end: &MeetPoint| matches!(end, MeetPoint::Existing { vertex, .. } if own_ends.contains(vertex));
+    is_an_own_end(&meet.ends[0]) != is_an_own_end(&meet.ends[1])
+        && input.distance_between_its_ends()
+            > 2.0 * how_far_apart_two_boxes_may_be(meet.ends[0].point(), meet.ends[1].point())
 }
 
 /// Whether a wire of a flat piece of the answer bounds anything: whether some
@@ -12161,7 +12230,7 @@ mod tests {
     use super::{
         Assembly, Bulging, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace,
         Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
-        WireStep, Written, assemble, name_of_the_closed_crossing_through,
+        WireStep, Written, assemble, is_a_side_with_no_length, name_of_the_closed_crossing_through,
         names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
         the_nappe_an_arc_that_does_not_close_is_on, turns_round,
         vertices_that_only_start_a_closed_edge, winding_round,
@@ -12281,6 +12350,93 @@ mod tests {
                 given,
                 Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
                     if refused == face && at == Point::new(4.0, 3.0, 0.0)
+            ),
+            "{given:?}"
+        );
+    }
+
+    /// **A stretch of an open input edge from its own end to a place a
+    /// rounding off that end is left out, and one to a place whose box
+    /// reaches round the edge is refused** (Q2408). The edge runs round the
+    /// cap's circle from `(5, 0, 0)` to `(0, 5, 0)`, and each stretch runs
+    /// along it from `(5, 0, 0)` to a place whose box's middle is that very
+    /// point, so both come out one corner at both ends. A box a rounding wide
+    /// puts the place beside the edge's own end, and the stretch has no length
+    /// as the answer is written. A box `50` wide holds the edge's far end too,
+    /// so the place could be anywhere along the edge and the stretch all of
+    /// it, and leaving that out would drop a quarter of a circle.
+    #[test]
+    fn a_stretch_off_an_open_edges_own_end_is_left_out_only_where_it_ends_beside_that_end() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(5.0, &Isometry::identity())
+            .expect("a positive radius");
+        let face = model.faces().next().expect("a ball has a face").key();
+        let start = model.add_vertex(Point::new(5.0, 0.0, 0.0));
+        let end = model.add_vertex(Point::new(0.0, 5.0, 0.0));
+        let edge = model.add_edge(start, end);
+        let id = model.id();
+        let (start, edge) = (VertexKey::new(start, id), EdgeKey::new(edge, id));
+        let across = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("a normal with length"),
+        );
+        let off_its_own_end = |x: Interval, y: Interval| {
+            side(
+                [cap(), pipe()],
+                [
+                    MeetPoint::Existing {
+                        vertex: start,
+                        point: PredicatePoint::from([5.0, 0.0, 0.0]),
+                    },
+                    MeetPoint::OfThreeSurfaces {
+                        surfaces: [cap(), pipe(), across],
+                        which: 0,
+                        point: PredicatePoint::Constructed([x, y, Interval::exactly(0.0)]),
+                    },
+                ],
+                &[edge],
+            )
+        };
+        let corners_of = |stretch: &FaceMeet| {
+            Corners::with_each_closed_curve_started_once(
+                &model,
+                BTreeMap::new(),
+                &[],
+                std::iter::once(stretch),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("no closed curve to name")
+            .of_both_ends(
+                &model,
+                stretch,
+                face,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+        };
+
+        let beside = off_its_own_end(
+            Interval::new(5.0, 5.0_f64.next_up()).expect("lo is below hi"),
+            Interval::exactly(0.0),
+        );
+        let given = corners_of(&beside);
+        assert!(
+            matches!(given, Ok(ends) if ends[0] == ends[1] && is_a_side_with_no_length(&beside, ends, &model)),
+            "{given:?}"
+        );
+
+        let anywhere = off_its_own_end(
+            Interval::new(-20.0, 30.0).expect("lo is below hi"),
+            Interval::new(-5.0, 5.0).expect("lo is below hi"),
+        );
+        let given = corners_of(&anywhere);
+        assert!(
+            matches!(
+                given,
+                Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
+                    if refused == face && at == Point::new(5.0, 0.0, 0.0)
             ),
             "{given:?}"
         );

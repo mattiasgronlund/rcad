@@ -4620,8 +4620,16 @@ impl<'f> Arrangement<'f> {
     /// enough.
     ///
     /// **Where two planes through one corner cut it
-    /// ([`Arrangement::as_two_cuts_through_one_corner_say`]) is asked only
-    /// where the policy would refuse.** That route answers where the corner is
+    /// ([`Arrangement::as_two_cuts_through_one_corner_say`]), and where a plane
+    /// cuts it beside a corner on it
+    /// ([`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`]),
+    /// is asked only where the policy would refuse.** Asked before the policy,
+    /// the second kept a tolerant fuse of a cube whose edges run through a
+    /// frustum's far rim from answering: it put the corner and the meet a
+    /// rounding apart where the policy reads them as one point, and the fuse
+    /// was refused `CannotTellTheCellsOfAFaceApart`
+    /// (`tests/two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs`,
+    /// Q2408). The first route answers where the corner is
     /// a rounding off the loop's surface, and keeps the two nodes a rounding
     /// apart; a tolerant policy reads them as one point, the corner as on the
     /// surface. Kept apart, they leave a sliver too thin to mesh or to close:
@@ -4700,6 +4708,11 @@ impl<'f> Arrangement<'f> {
             return Ok(proved);
         }
         if let Some(proved) = self.as_two_cuts_through_the_axis_say(crossing, first, second) {
+            return Ok(proved);
+        }
+        if let Some(proved) =
+            self.as_a_corner_beside_a_flat_cut_through_the_loop_says(crossing, first, second)
+        {
             return Ok(proved);
         }
         must_decide(decided, ALONG_A_CROSSING, &nodes, measures, policy, log)
@@ -5561,6 +5574,146 @@ impl<'f> Arrangement<'f> {
             return None;
         }
         Some(if theirs_is_higher == runs {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
+    }
+
+    /// Which of two nodes on the loop a plane cuts a ball, a pipe or a cone in
+    /// comes first, where one is a corner of the face at an exact point `a`
+    /// and the other is where a plane `C` cuts the loop: read off which side of
+    /// `C` the corner is on and which way the loop runs across `C` at each.
+    /// `None` everywhere else, and wherever a sign it reads is not proved.
+    ///
+    /// **It is [`Arrangement::as_two_parallel_cuts_through_the_loop_say`] with
+    /// the corner on the plane through it that faces as `C` does.** Across
+    /// `n_C` the loop is at `n_C · a` at the corner and at `C`'s offset at the
+    /// meet, so where it runs the same way across `n_C` at both, and both
+    /// starts are clear of the strip between the two, the lower comes first on
+    /// the rising half and the higher on the falling one. Which is higher is
+    /// the side of `C` the corner is on, asked of its own coordinates and so
+    /// exact. On `C`, the two are one point, since a half crosses a plane
+    /// across it once.
+    ///
+    /// **The corner is on the loop by the model's word**, as every corner of
+    /// the face a crossing runs through is ([`BakedCorner::around`]), and that
+    /// is the place it stands for. It is off `C` exactly where
+    /// [`Arrangement::passes_through`] reads it off, on the side read here, so
+    /// a face that keeps the corner off `C` and a face that puts it in order
+    /// along the loop cannot disagree. **That word is checked against the
+    /// loop's plane**, since a corner read out of the model with two surfaces
+    /// round it was asked about neither (§286): one that plane proves off by
+    /// more than writing the corner down costs
+    /// ([`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost))
+    /// is not on the loop, and the pair is left to the policy. A bar's top
+    /// corner moved `1` above its cap, cut by a block whose face runs along
+    /// the bar's seam, was read on `C` and so as the meet itself, and the
+    /// fuse refused `TwoCurvesTouchWithoutCrossing` where it is refused
+    /// `Undecidable` (`tests/a_broken_two_surface_corner_read_back_from_bytes.rs`).
+    ///
+    /// A plate of the square `[0, 10]²` and a round tab of radius 3 at
+    /// `(10, 10)`, turned `0.05` about `z`, has the tab's seam corner, at
+    /// `(13, 10, 0)` before the turn, on the line the square's wall `y = 10`
+    /// stands on. Turned, the meet of that wall, the floor and the tab's wall is
+    /// a box round the corner and the corner is no corner of the wall, so the
+    /// two are two nodes a rounding apart on the floor's circle. Their boxes
+    /// overlap and the line through the start and the corner runs through the
+    /// meet's box, and every certified fuse of the plate with a block on it was
+    /// refused on which comes first (Q2359,
+    /// `tests/a_plate_with_a_round_corner_tab_turned.rs`).
+    fn as_a_corner_beside_a_flat_cut_through_the_loop_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve {
+            from,
+            node,
+            named_the_start,
+            ref wound_as,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let round = |surface: &Surface| {
+            matches!(
+                surface,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            )
+        };
+        let flat = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) if round(&wound_as[1]) => flat,
+            (None, Some(flat)) if round(&wound_as[0]) => flat,
+            (Some(_) | None, Some(_) | None) => return None,
+        };
+        let an_exact_corner = |at: usize| {
+            self.nodes[at]
+                .vertex
+                .and(self.nodes[at].point.exact_coordinates())
+        };
+        let (corner, meet, corner_is_first) = match [first, second].map(an_exact_corner) {
+            [Some(corner), None] => (corner, second, true),
+            [None, Some(corner)] => (corner, first, false),
+            [Some(_), Some(_)] | [None, None] => return None,
+        };
+        let as_written = PredicatePoint::Exact(corner);
+        let off_the_loops_plane = flat.side_of_point(super::bake::grown_by(
+            as_written,
+            super::bake::what_writing_the_corner_down_cost(as_written.enclosure()),
+        ));
+        if off_the_loops_plane == Decision::Pos || off_the_loops_plane == Decision::Neg {
+            return None;
+        }
+        let cut = self.the_cut_through_the_loop_at(meet, wound_as)?;
+        let across = cut.normal().components();
+        if !across
+            .iter()
+            .chain([&cut.offset()])
+            .all(|number| number.is_finite())
+        {
+            return None;
+        }
+        let across = across.map(Interval::exactly);
+        let runs_at = |place: PredicatePoint| {
+            let forward = cross_of_intervals(
+                gradient_at(&wound_as[0], place).enclosure(),
+                gradient_at(&wound_as[1], place).enclosure(),
+            );
+            dot_of(across, forward).sign()
+        };
+        let runs = runs_at(self.nodes[meet].point);
+        // Compared rather than matched: only one proved way is read, and every
+        // other answer leaves the pair to the policy (§40).
+        if runs != runs_at(PredicatePoint::Exact(corner))
+            || !(runs == Decision::Pos || runs == Decision::Neg)
+        {
+            return None;
+        }
+        let corner_is_higher = cut.side_of_point(PredicatePoint::Exact(corner));
+        if corner_is_higher == Decision::Zero {
+            return Some(Decision::Zero);
+        }
+        if !(corner_is_higher == Decision::Pos || corner_is_higher == Decision::Neg) {
+            return None;
+        }
+        let clear_of_the_strip = |start: PredicatePoint| {
+            let start = start.enclosure();
+            let past_the_cut = (dot_of(across, start) - Interval::exactly(cut.offset())).sign();
+            let past_the_corner = dot_of(
+                across,
+                [0, 1, 2].map(|axis| start[axis] - Interval::exactly(corner[axis])),
+            )
+            .sign();
+            past_the_cut == past_the_corner
+                && (past_the_cut == Decision::Pos || past_the_cut == Decision::Neg)
+        };
+        if !(clear_of_the_strip(from) && clear_of_the_strip(named_the_start.unwrap_or(node))) {
+            return None;
+        }
+        let corner_comes_first = corner_is_higher != runs;
+        Some(if corner_comes_first == corner_is_first {
             Decision::Pos
         } else {
             Decision::Neg

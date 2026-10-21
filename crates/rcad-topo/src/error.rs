@@ -665,6 +665,15 @@ pub enum Error {
     /// it: [`Error::CannotMeshAFace`], [`Invalid::FacesDoNotAgreeWhichWayTheyFace`] and
     /// [`Error::ResultIsNotManifold`].
     ///
+    /// **Not where the side is a stretch of an open input edge off one of that
+    /// edge's own ends**, and the edge's two ends are further apart than the
+    /// side's can be. That stretch is the short one, so it is left out as a
+    /// straight side is: a plate with a round corner tab, turned `0.05` about
+    /// `z`, cut its own rim a rounding from a corner it kept there, and was
+    /// refused here fused with a block nowhere near it (Q2408,
+    /// `tests/a_plate_with_a_round_corner_tab_turned.rs`). A crossing the fuse
+    /// made runs along no input edge, and either arc of it can be the long one.
+    ///
     /// **A limit where the two places are closer than `f64` writes apart.** A
     /// ball of radius `1 + 2⁻⁵¹` grazed by a block's edge at `x = 16` needs
     /// corners at `16 ∓ 2⁻⁵¹`, where `f64`'s spacing is `2⁻⁴⁸`
