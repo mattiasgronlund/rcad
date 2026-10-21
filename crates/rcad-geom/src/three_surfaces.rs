@@ -4001,17 +4001,40 @@ fn the_slide_that_lifts_the_larger_to_the_top(one: &Exact, other: &Exact) -> Opt
 }
 
 /// The sign of `plain + rooted·√under`, exactly, for `under` not below zero —
-/// or `None` where a sign is not one or a product falls out of range.
+/// or `None` where a sign is not one or a product falls out of range wherever
+/// the three are slid.
 ///
 /// Which part is larger is the sign of `plain² − rooted²·under`, as
-/// [`the_sign_of_a_sum_with_a_root_in_it`] asks it.
+/// [`the_sign_of_a_sum_with_a_root_in_it`] asks it, and it is worked out where
+/// the three stand first, so a sign decided there is decided through the same
+/// arithmetic as before there was a slide. Where that runs out, `plain` and
+/// `rooted` are slid together by one power of two, so the larger of the two
+/// sits at [`HIGHEST_BINADE_A_SLIDE_LIFTS_TO`]. That multiplies `plain²` and
+/// `rooted²·under` by the same square and keeps the sign of their difference,
+/// and [`the_sign_of_two_products_apart`] takes `plain·plain` from
+/// `rooted²·under` from there. A wall along a bar on `(1, 0, 1)`, with a ball
+/// beside the bar, squared a `rooted` whose entries spread over nearly four
+/// hundred binades, and `under` times that square ran off the bottom of the
+/// range where it stood.
+///
+/// Still refused: a `rooted` whose smallest entry stands so far below the
+/// larger of the two parts that its square falls off the bottom after the
+/// slide too.
 fn the_sign_with_a_root_in_it(plain: &Exact, rooted: &Exact, under: &Exact) -> Option<Decision> {
     the_sign_of_a_sum_with_a_root_in_it([plain, rooted, under].map(Exact::sign), || {
-        Some(
-            plain
-                .square_minus(&rooted.times(rooted)?.times(under)?)?
-                .sign(),
-        )
+        let where_they_stand = || {
+            Some(
+                plain
+                    .square_minus(&rooted.times(rooted)?.times(under)?)?
+                    .sign(),
+            )
+        };
+        if let Some(sign) = where_they_stand() {
+            return Some(sign);
+        }
+        let up = the_slide_that_lifts_the_larger_to_the_top(plain, rooted)?;
+        let (plain, rooted) = (plain.slid_by(up)?, rooted.slid_by(up)?);
+        the_sign_of_two_products_apart([&plain, &plain], [&rooted.times(&rooted)?, under])
     })
 }
 
@@ -4331,11 +4354,14 @@ fn the_line_two_circles_differ_by(mine: &ACircle, theirs: &ACircle) -> Option<([
 /// Its discriminant over `E²` is `β² − AΓ`, and with `u²` put back as `K` that
 /// is `plain + lean·u`, for `plain = (β₁² − Aγ₂)K + β₀² − Aγ₀` and
 /// `lean = 2(β₀β₁ − Aγ₁)`. [`the_sign_with_a_root_in_it`] decides its sign at
-/// `u = ±√K` exactly, so whether a line misses the other surface, touches it
-/// at `γ = −β/(EA)` or crosses it at `γ = (−β ∓ √(β² − AΓ))/(EA)` is never
-/// read off a box. The bar of radius two up `z` meets the wall `x = 0` in
-/// `y = ±2`, and the ball of radius three at `(0, 3, 5)` in `y = 2` at
-/// `z = 5 ± 2√2` and in `y = −2` nowhere.
+/// `u = ±√K` exactly, and slides `plain` and `lean` along the range where
+/// `lean² · K` falls out of it, so whether a line misses the other surface,
+/// touches it at `γ = −β/(EA)` or crosses it at `γ = (−β ∓ √(β² − AΓ))/(EA)`
+/// is never read off a box. A wall along a bar on `(1, 0, 1)`, with a ball
+/// beside the bar, spreads `lean` far enough to need the slide. The bar of
+/// radius two up `z` meets the wall `x = 0` in `y = ±2`, and the ball of
+/// radius three at `(0, 3, 5)` in `y = 2` at `z = 5 ± 2√2` and in `y = −2`
+/// nowhere.
 ///
 /// The line `u = −√K` comes first, and the lower `γ` first on each line.
 ///
