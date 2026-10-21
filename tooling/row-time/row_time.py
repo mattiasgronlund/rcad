@@ -286,7 +286,7 @@ def assemble(loaded, options):
             rows.append(row)
     rows.sort(key=lambda row: row["start"])
 
-    landers = [agent for run in loaded["runs"] for agent in run["agents"] if agent["role"] == "lander"]
+    landers = [agent for run in loaded["runs"] for agent in run["agents"] if land_lane_of(agent["label"]) is not None]
     steps = {}
     for row in rows:
         for attempt in row["attempts"]:
@@ -710,10 +710,16 @@ def land_trees(command):
 
 
 def link_shared_gates(steps, landers):
-    """§411.5: a lander whose lane another run's lander landed names that run, and the holder serves its rows too."""
+    """§411.5: a lander whose lane another run's lander landed names that run, and the holder serves its rows too.
+
+    The holder can itself have relayed past its budget mid-`just land` (§416): `role_of` then
+    keeps its role `lane` and keeps the `land:` prefix in the lane field it computes, so neither
+    `agent["role"]` nor `agent["lane"]` names it a lander. `land_lane_of` reads the raw label
+    instead, straight or relayed, and `landers` is built the same way.
+    """
     by_label = collections.defaultdict(list)
     for agent in landers:
-        by_label[agent["lane"]].append(agent)
+        by_label[land_lane_of(agent["label"])].append(agent)
     for (run_id, agent_id), step in list(steps.items()):
         agent = step["agent"]
         said = step["land_json"]
@@ -732,6 +738,18 @@ def link_shared_gates(steps, landers):
         if key in steps:
             steps[key]["served"] += step["served"]
             steps[key].setdefault("landed_for", []).append(agent["lane"])
+
+
+def land_lane_of(label):
+    """The lane a `land:` step names, straight or relayed past its budget mid-run (§411.5, §416).
+
+    `role_of` strips only the relay prefix off a relayed label, so a relayed lander's own
+    "land:" prefix stays in the lane field it returns. This strips both, in whichever order
+    the label carries them, so a straight and a relayed lander for the same lane answer alike.
+    """
+    relayed = RELAY.match(label)
+    rest = label[relayed.end():] if relayed else label
+    return RETRY.sub("", rest[len("land:"):]) if rest.startswith("land:") else None
 
 
 def recharged(step):
