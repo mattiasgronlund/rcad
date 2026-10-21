@@ -12205,7 +12205,7 @@ mod tests {
     use super::{
         Assembly, Bulging, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace,
         Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
-        WireStep, Written, assemble, name_of_the_closed_crossing_through,
+        WireStep, Written, assemble, is_a_side_with_no_length, name_of_the_closed_crossing_through,
         names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
         the_nappe_an_arc_that_does_not_close_is_on, turns_round,
         vertices_that_only_start_a_closed_edge, winding_round,
@@ -12325,6 +12325,93 @@ mod tests {
                 given,
                 Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
                     if refused == face && at == Point::new(4.0, 3.0, 0.0)
+            ),
+            "{given:?}"
+        );
+    }
+
+    /// **A stretch of an open input edge from its own end to a place a
+    /// rounding off that end is left out, and one to a place whose box
+    /// reaches round the edge is refused** (Q2408). The edge runs round the
+    /// cap's circle from `(5, 0, 0)` to `(0, 5, 0)`, and each stretch runs
+    /// along it from `(5, 0, 0)` to a place whose box's middle is that very
+    /// point, so both come out one corner at both ends. A box a rounding wide
+    /// puts the place beside the edge's own end, and the stretch has no length
+    /// as the answer is written. A box `50` wide holds the edge's far end too,
+    /// so the place could be anywhere along the edge and the stretch all of
+    /// it, and leaving that out would drop a quarter of a circle.
+    #[test]
+    fn a_stretch_off_an_open_edges_own_end_is_left_out_only_where_it_ends_beside_that_end() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(5.0, &Isometry::identity())
+            .expect("a positive radius");
+        let face = model.faces().next().expect("a ball has a face").key();
+        let start = model.add_vertex(Point::new(5.0, 0.0, 0.0));
+        let end = model.add_vertex(Point::new(0.0, 5.0, 0.0));
+        let edge = model.add_edge(start, end);
+        let id = model.id();
+        let (start, edge) = (VertexKey::new(start, id), EdgeKey::new(edge, id));
+        let across = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                .expect("a normal with length"),
+        );
+        let off_its_own_end = |x: Interval, y: Interval| {
+            side(
+                [cap(), pipe()],
+                [
+                    MeetPoint::Existing {
+                        vertex: start,
+                        point: PredicatePoint::from([5.0, 0.0, 0.0]),
+                    },
+                    MeetPoint::OfThreeSurfaces {
+                        surfaces: [cap(), pipe(), across],
+                        which: 0,
+                        point: PredicatePoint::Constructed([x, y, Interval::exactly(0.0)]),
+                    },
+                ],
+                &[edge],
+            )
+        };
+        let corners_of = |stretch: &FaceMeet| {
+            Corners::with_each_closed_curve_started_once(
+                &model,
+                BTreeMap::new(),
+                &[],
+                std::iter::once(stretch),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("no closed curve to name")
+            .of_both_ends(
+                &model,
+                stretch,
+                face,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+        };
+
+        let beside = off_its_own_end(
+            Interval::new(5.0, 5.0_f64.next_up()).expect("lo is below hi"),
+            Interval::exactly(0.0),
+        );
+        let given = corners_of(&beside);
+        assert!(
+            matches!(given, Ok(ends) if ends[0] == ends[1] && is_a_side_with_no_length(&beside, ends, &model)),
+            "{given:?}"
+        );
+
+        let anywhere = off_its_own_end(
+            Interval::new(-20.0, 30.0).expect("lo is below hi"),
+            Interval::new(-5.0, 5.0).expect("lo is below hi"),
+        );
+        let given = corners_of(&anywhere);
+        assert!(
+            matches!(
+                given,
+                Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
+                    if refused == face && at == Point::new(5.0, 0.0, 0.0)
             ),
             "{given:?}"
         );
