@@ -18768,7 +18768,10 @@ verify-lane *args:
 # file it cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`;
 # and, pinning §429.5, the agent's own `just verify-lane` stopped mid-gate the
 # way Claude Code kills a command (§429.2), which still leaves the detached run
-# to finish and `just verify-lane wait` to read its verdict back.
+# to finish and `just verify-lane wait` to read its verdict back; and a test
+# name with a space in it, the form nextest's own FAIL line reports one in,
+# which no revert can run and which is left to you by name instead of silently
+# deciding nothing (Q1347).
 #
 # The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
 # file, so a field the schema renames fails here and not in a verifier's report.
@@ -19141,6 +19144,19 @@ check-verify-lane-selftest:
         || fail "a killed follower's run gave tests_pass_on_branch $(field tests_pass_on_branch) and tests_fail_without_fix $(field tests_fail_without_fix)"
     back_at_the_tip
 
+    fixture space-named-test
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/ \
+        + tests 'rcad-x::fake test_name_with_a_space'
+    run
+    [ "$(field tests_fail_without_fix)" = "(absent)" ] \
+        || fail "a test name with a space in it (as nextest's own FAIL line reports one) gave tests_fail_without_fix $(field tests_fail_without_fix)"
+    says left_to_you 'rcad-x::fake test_name_with_a_space'
+    says left_to_you 'tests_fail_without_fix rests on nothing'
+    no_test_ran
+    back_at_the_tip
+
     fixture bad-input
     input base "$base" + colour blue
     call target/verify-lane.txt
@@ -19150,7 +19166,7 @@ check-verify-lane-selftest:
     call target/verify-lane.txt
     [ "$rc" -eq 2 ] && grep -qF 'both pinsOnly and sameBehaviour' <<<"$got" || fail "an input marking the lane both pinsOnly and sameBehaviour did not refuse"
     [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input marking the lane both pinsOnly and sameBehaviour"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 16 arms"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 17 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #
