@@ -15,17 +15,16 @@
 //!
 //! # Why it was refused
 //!
-//! A fuse names each of those arcs by the ball, the pipe and the half-spaces it
-//! lies in, and one of them is the plane through both its corners and the
-//! bar's axis. Walking the arc, `the_arc_between` in `rcad-geom`'s `walk.rs`
+//! A fuse names each of those arcs by the ball, the pipe and one half-space it
+//! lies in, whose plane runs through both its corners and the bar's axis
+//! (Q2557). Walking the arc, `the_arc_between` in `rcad-geom`'s `walk.rs`
 //! marches the whole loop and keeps whichever of the two arcs between the
-//! corners those half-spaces hold. Until Q2570 it asked them at the middle
-//! marched point of each arc only. The long arc, round past both caps, has its
-//! middle at `(−1.44, −1.39, 5.37)`, on the far side of the bar, which is in
+//! corners that half-space holds. Until Q2570 it asked at the middle marched
+//! point of each arc only. The long arc, round past both caps, has its middle
+//! on the far side of the bar, at `(−1.44, −1.39, 5.36)` for one of them, in
 //! front of that plane, though the arc passes `(0, 2, −2.6)` behind it. So both
 //! arcs were held, and every fuse of the pair was refused
-//! `CannotNameWhichPieceOfACrossingThisIs` by the coarsest mesh
-//! `how_much_space_it_encloses` asks for.
+//! `CannotNameWhichPieceOfACrossingThisIs`.
 //!
 //! An arc is now ruled out when any point of it is decided behind one of its
 //! half-spaces, and each fuse here answers. The answer was there, and the walk

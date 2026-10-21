@@ -1373,11 +1373,11 @@ fn begun_beside(
 /// ([`Conic::the_stretch_this_run_covers`]). A ball of 10 at `(0, 8.5, 5)`
 /// across a round bar of 2 up `z` from −1 to 11 crosses its pipe in one loop
 /// that runs past both caps, and each arc between two corners one above the
-/// other is named by the plane through them and the bar's axis, among others.
-/// The long arc round past both caps has its middle `(−1.44, −1.39, 5.37)` on
-/// the far side of the bar, in front of that plane, though it passes
-/// `(0, 2, −2.6)` behind it, so both arcs were held and every fuse of the pair
-/// was refused.
+/// other is named by the plane through them and the bar's axis. The long arc
+/// round past both caps has its middle on the far side of the bar, at
+/// `(−1.44, −1.39, 5.36)` for one of them, in front of that plane, though it
+/// passes `(0, 2, −2.6)` behind it, so both arcs were held and every fuse of the
+/// pair was refused.
 ///
 /// An arc with no marched point on it is asked at the middle of its two
 /// corners, settled onto the crossing. Every point handed back is a point the
