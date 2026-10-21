@@ -422,6 +422,52 @@ What this leaves: the gate measurement above is a 2.2 row, filed with this
 section. Q1310's timestamps make the land lock exact rather than a bound,
 with no change here.
 
+**A relay, a prep and a close counted as no row at all — Q2595, 2026-10-21.**
+`role_of` matched only `verify:`, `land:`, `merge:` and `prune:`. A label
+`relay N:<lane>` (the lane's own continuation past a budget warning, §416), or
+`prep:<lane>` (the row check that runs before a full-form lane, §396.4), or
+`close:<lane>` (closing a row at the base with nothing to land, §433.8) kept
+its prefix and matched no `lanes` run's label, so `assemble` put every one of
+them under "unattributed" instead of any row. Over the `lanes` runs started
+2026-10-14 to 2026-10-22, before the fix, `mise exec -- just row-time --since
+2026-10-14 --until 2026-10-22` printed `unattributed: 840 lanes with no row,
+179h24m of agent time` and `worked outside a workflow: 27 rows`. A probe
+reading `assemble`'s own `unattributed` list by its label's prefix (left in
+the lane's scratchpad) found all 840 of them split three ways: 422 relay
+agents (154h21m), 407 prep agents (24h16m) and 11 close agents (46m32s) — the
+whole of "unattributed", with nothing left over. 19 of the 27 "outside"
+rows were rows whose prep refused the row with no lane ever started, so the
+run held only a `prep:` agent for them, under no lane label `assemble` could
+match either.
+
+`role_of` now strips `relay \d+:` and recognises `prep:` and `close:`. **A
+relay keeps the role `lane`**: it is the same lane carrying on in a new tree,
+so once its stripped label matches, it joins the very same attempt as the
+lane it relays, and its own running time and the handoff before it fall into
+`agents` and `handoff` exactly as the lane's own steps do (§411.2, §411.3).
+**A prep is its own role, `prep`**: unlike every other step it holds no tree
+of its own — it runs in the dispatcher's own tree, never locked for the row
+(§396.4) — so `slot_time` skips it like the pruner, and its time and the
+handoff around it land in the row's `agents`/`handoff`, now as a step that
+runs before the lane rather than as nothing at all. **A close is its own
+role too, `close`**, added to `MERGE_STAGE` beside `lander` and `merger`:
+like them it holds an isolated worktree of its own and can be queued behind
+another merge in the same run (§433.8), so the wait before it splits into
+`earlier merge in the same run` and `handoff` the same way a lander's or a
+merger's does, and `slot_time` holds its tree until its own last unlock or
+its own end, as a merger's is held.
+
+After the fix, the same command over the same week prints `unattributed: 0
+lanes with no row, 0s of agent time`, `worked outside a workflow: 8 rows`
+(the 19 prep-refused rows now counted as rows of their own, each a single
+`prep` step), `step: lane 280h41m` (up from 126h39m, the relays' share
+folded in), a new `step: prep 24h07m`, and a new `step: close 46m32s`.
+`check-row-time-selftest` holds the three new roles with a made-up week of
+its own: a lane relayed once, a row whose prep refused with no lane started,
+and a row closed at the base with no lander or merger. What this still
+leaves: no row yet reads `step: prep` or `step: close` against what each one
+does, the way §411.11 reads the gate.
+
 ### 411.11 Which gate steps the verifier's and the lander's gates spend their time in — Q1326
 
 *Measured 2026-10-08, over the same week as §411.10,* `mise exec -- just
