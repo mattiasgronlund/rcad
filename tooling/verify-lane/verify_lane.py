@@ -719,7 +719,14 @@ def git_quiet(*args):
 
 
 def say(line):
-    print(line, flush=True)
+    """Prints a line to the detached run's log, timestamped so a reader of the log alone can tell when it waited (§411.12).
+
+    The lines `follow` prints directly — `verify-lane: still running ...`, the
+    JSON — go through plain `print`, not `say`, and stay bare: `lanes.js` and
+    `verifier.md` match them as they stand.
+    """
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    print(f"{stamp} {line}", flush=True)
 
 
 def tail(said, lines=SHOWN):

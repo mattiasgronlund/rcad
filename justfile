@@ -19118,7 +19118,7 @@ check-verify-lane-selftest:
     call wait
     [ "$rc" -eq 0 ] || fail "the wait that saw the run end exited $rc"
     held_to_the_schema
-    grep -qxF 'gate: PASS' <<<"$got" || fail "the wait did not print what the run logged after the first call"
+    grep -qF 'gate: PASS' <<<"$got" || fail "the wait did not print what the run logged after the first call"
     [ "$(field tests_fail_without_fix)" = true ] || fail "the run followed to its end gave tests_fail_without_fix $(field tests_fail_without_fix)"
     first=$json
     call wait
