@@ -309,3 +309,30 @@ binaries — now takes at most 94 s and 1.84 GB against 100 s and 5.79 GB
 before. rcad-topo's 290 old binaries each cost a relink on most source edits
 and a copy on most warm restores; its 62 new ones cost less on both, and the
 one test file this makes slower to edit is paid back by every one of those.
+
+### 373.9 Q2348's numbers, rcad-geom and rcad-step — 2026-10-19
+
+*Q2348 did 373.7's declaration for rcad-geom and rcad-step, and measured the
+result: `5d72a0f8` against its branch, by `cargo nextest run --workspace
+--no-run` under `/usr/bin/time %O`, warm, one edit added and then undone.
+`f37afe85`'s commit message holds the numbers.*
+
+- Test executables: rcad-geom 93 (441.0 MB) before, 8 (52.4 MB) after;
+  rcad-step 53 (653.3 MB) before, 11 (161.0 MB) after.
+- One test file edited, in blocks of 512 bytes: rcad-geom 3.2 s and 16432
+  before, 16.0 s and 411488 after (2.5 s and 206456 undone); rcad-step 3.7 s
+  and 36096 before, 7.3 s and 238272 after (1.9 s and 150408 undone).
+- `src/lib.rs` edited: rcad-geom, 6 packages, 10828184 added and 8308560
+  undone before, 7572920 and 6923392 after; rcad-step, 3 packages, 15.1 s
+  and 2744584 before, 3.2 s and 1480416 after.
+- kache chose passthrough for the edited unit, adaptive seed then active,
+  both before and after.
+- `cargo nextest list`: 1235 and 421 before, 1237 and 423 after, the two
+  more in each being the checks.
+
+**The 0.12 to 0.40 million blocks a test edit costs more is below the 1.26
+to 3.26 million one src edit saves.** rcad-geom and rcad-step land the same
+rule 373.8 found for rcad-topo: merging test files into one binary per crate
+makes a single test file slower to touch, but a `src/lib.rs` edit — which
+used to relink every old test binary — now relinks far fewer, and that gain
+is bigger than the loss.
