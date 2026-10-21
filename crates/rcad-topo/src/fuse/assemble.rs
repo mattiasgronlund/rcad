@@ -387,8 +387,9 @@ pub(crate) struct InputSide {
 ///
 /// **A straight side whose two ends come out one corner is left out**, as
 /// [`sides_of`] leaves it out of a kept piece (§365.7). Two corners of two
-/// names that land on one `f64` triple are one corner unless their planes
-/// prove them two points ([`Corners::of`]), and a piece can have a straight
+/// names that land on one `f64` triple are one corner unless they share one
+/// plane or none, their planes prove them two points and no kept side runs
+/// between them ([`Corners::of`]), and a piece can have a straight
 /// side between two such: a seed of the fuse
 /// fuzzer's corpus and the draw of
 /// `a_fused_draw_hands_its_provenance_back_through_the_door.rs` reach one in a
@@ -644,8 +645,9 @@ impl Assembly {
     /// more than `f64` carries, under a policy that fails on that.
     /// [`Error::Geometry`] when an edge runs between two corners of the answer
     /// that sit on one `f64` triple, which leaves it no length at all. Two
-    /// names that land on one triple are one corner unless their planes prove
-    /// them two points ([`Corners::of`]), so this asks of two corners one of
+    /// names that land on one triple are one corner unless they share one
+    /// plane or none, their planes prove them two points and no kept side runs
+    /// between them ([`Corners::of`]), so this asks of two corners one of
     /// which moved onto a triple the other already held
     /// ([`Corners::settle_on_the_lower_rounding`]), and of two proved apart
     /// with an edge between them.
@@ -8887,28 +8889,27 @@ impl Corners {
     /// Make one corner of the two ends of each of `sides` whose two names land
     /// on one `f64` triple.
     ///
-    /// **Two names are one corner by a coordinate only where a side runs
-    /// between them.** Such a side has no length as the answer's corners are
-    /// written, and its two ends must be one corner for [`sides_of`] to leave
-    /// it out on a plane (§365.7), and for [`Corners::of_both_ends`] to refuse
-    /// it on a curved surface. The arrangement keeps two meets apart wherever
-    /// it can order them along a crossing, so its folds alone do not make
-    /// them one.
+    /// **Two names a side runs between are one corner wherever both land on
+    /// one triple, whatever their planes prove.** Such a side has no length
+    /// as the answer's corners are written, and its two ends must be one
+    /// corner for [`sides_of`] to leave it out on a plane (§365.7), and for
+    /// [`Corners::of_both_ends`] to refuse it on a curved surface. The
+    /// arrangement keeps two meets apart wherever it can order them along a
+    /// crossing, so its folds alone do not make them one, and
+    /// [`the_planes_keep_them_apart`] could keep two such ends two corners.
+    /// Two corners there are an edge of no length: with that guard and no
+    /// join here, 36 tests of this crate were refused, nearly all
+    /// `FeatureSizeNotPositive { size: 0.0 }` (§365.7).
     ///
-    /// **Two names on one triple with no side between them stay two
-    /// corners.** Until Q2305 [`Corners::of`] made any two names whose places
-    /// landed on one triple one corner. A cube set corner to corner on a
-    /// block and turned a little has two of its edges cross the block's
-    /// planes `x = 0` and `y = 0` a rounding from the block's top corner,
-    /// outside the block, and at `(t, p) = (0.05, 0.05)` both crossings' boxes
-    /// are centred on that corner's own triple, `(0, 0, 10)`. The arrangements
-    /// had proved both apart from it. Joined to it, they left the turned cube
-    /// four edges at the block's corner, so [`Assembly::what_is_left`] kept it
-    /// as a corner of the turned cube, with two edges `1.8e-15` long from it
-    /// to the turned cube's own corner, and the union was refused
-    /// `DynamicRangeTooWide` (`tests/two_cubes_corner_to_corner_turned_a_little.rs`).
-    /// Two corners, each crossing is a corner of the turned cube's pieces that
-    /// only two of its edges leave, and the two are read through.
+    /// **Two names on one triple with no side between them are one corner
+    /// too, unless they share one plane or none and their planes prove them
+    /// two points** ([`Corners::of`], [`the_planes_keep_them_apart`]). Only
+    /// then do they stay two corners. A cube set corner to corner on a block
+    /// and turned a little short of a half turn has two of its edges cross a
+    /// side of the block a rounding from the block's top corner, outside the
+    /// block, and at `(t, p) = (0.05, 0.05)` both crossings land on that
+    /// corner's own triple, `(0, 0, 10)`, sharing one plane with it
+    /// (`tests/two_cubes_corner_to_corner_turned_a_little.rs`).
     ///
     /// **Where a name lands is where its corner settles**: the lowest of the
     /// places its ends would put it ([`Corners::settle_on_the_lower_rounding`]),
@@ -8955,13 +8956,15 @@ impl Corners {
     /// for, for a side of a piece cut from `face`.
     ///
     /// **Two ends of two names that come out one corner bound no side on a
-    /// curved surface.** Two places whose boxes' middles land on one `f64`
-    /// triple are one corner ([`Corners::of`]). A straight side between two
-    /// such has no length as the answer is written, and [`sides_of`] leaves
-    /// it out (§365.7). A side on a curved surface cannot be left out that
-    /// way: [`Edges::of`] builds a side from one corner back to itself as a
-    /// whole closed curve, so the arc between the two places would be written
-    /// as the whole circle through them. A block's edge grazing a ball at
+    /// curved surface.** The two ends of a side whose boxes' middles land on
+    /// one `f64` triple are one corner, whatever their planes prove
+    /// ([`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`]).
+    /// A straight side between two such has no length as the answer is
+    /// written, and [`sides_of`] leaves it out (§365.7). A side on a curved
+    /// surface cannot be left out that way: [`Edges::of`] builds a side from
+    /// one corner back to itself as a whole closed curve, so the arc between
+    /// the two places would be written as the whole circle through them. A
+    /// block's edge grazing a ball at
     /// `16 ∓ 2⁻⁵¹` built both arcs of the ball's circle there as one closed
     /// edge, and every fuse of the two was refused later, as a face whose loop
     /// passed one corner twice or two faces facing apart
@@ -9028,14 +9031,14 @@ impl Corners {
     /// ([`exactly_at`]), **unless they share one plane or none, their planes
     /// prove them two points** ([`the_planes_keep_them_apart`]), **and no side
     /// runs between them**. A cube set corner to corner on a block and turned a
-    /// little short of a half turn has two of its edges cross the block's
-    /// planes `x = 0` and `y = 0` a rounding from the block's top corner,
-    /// outside the block, and at `(t, p) = (0.05, 0.05)` both crossings land on
-    /// that corner's own triple, `(0, 0, 10)`. Each crossing shares one plane
-    /// with the corner. Joined to it, they left the turned cube four edges at
-    /// the block's corner, so [`Assembly::what_is_left`] kept it as a corner of
-    /// the turned cube, with two edges `1.8e-15` long from it to the turned
-    /// cube's own corner, and the union was refused `DynamicRangeTooWide`
+    /// little short of a half turn has two of its edges cross a side of the
+    /// block a rounding from the block's top corner, outside the block, and at
+    /// `(t, p) = (0.05, 0.05)` both crossings land on that corner's own
+    /// triple, `(0, 0, 10)`. Each crossing shares one plane with the corner.
+    /// Joined to it, they left the turned cube four edges at the block's
+    /// corner, so [`Assembly::what_is_left`] kept it as a corner of the
+    /// turned cube, with two edges `1.8e-15` long from it to the turned cube's
+    /// own corner, and the union was refused `DynamicRangeTooWide`
     /// (Q2305, `tests/two_cubes_corner_to_corner_turned_a_little.rs`). Kept
     /// apart, the union is both cubes.
     ///
@@ -9718,6 +9721,11 @@ fn names_of_the_three_surfaces(surfaces: &[Surface; 3]) -> [[u64; 9]; 3] {
 /// same to within a rounding are not merged, so a pair that touch after a
 /// general rotation still come apart. That is roadmap §7.4's vertex-on-face
 /// entry, and it is the catalogue's to settle.
+///
+/// Nor is every exact match one corner. Under a certified policy two meets of
+/// three planes that share one plane or none, and whose planes prove them two
+/// points, stay two corners on one triple unless a kept side runs between them
+/// ([`Corners::of`], [`the_planes_keep_them_apart`], Q2305).
 fn exactly_at(point: Point) -> [u64; 3] {
     point
         .coordinates()
@@ -11602,9 +11610,11 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// arrangement keeps two meets apart wherever it can order them along a
 /// crossing, and over a KiCad pin header's stored planes it orders three meets
 /// of planes that by design meet at one notch corner, `8e-18` to `1.6e-17`
-/// apart. All three round to the corner's own `f64` triple, so [`Corners::of`]
-/// makes them one corner, and a side between two of them has no length as the
-/// answer's corners are written (`docs/decisions.md` §365.7). Every face that
+/// apart. All three round to the corner's own `f64` triple. A side between two
+/// of them has no length as the answer's corners are written, so its two ends
+/// are one corner whatever their planes prove
+/// ([`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`]), and
+/// it is left out here (`docs/decisions.md` §365.7). Every face that
 /// has the side names its two ends through the same [`Corners`], so every one
 /// of them leaves it out, and no edge is left with one face along it.
 ///
