@@ -13737,8 +13737,9 @@ queue-page:
 # tree and a verifier's detached tree, locked the way the worktree hook locks
 # them (§55). Its takes are one whose tier is not the row's tier now, as after a
 # `tier` move; one that records no tier, so the row's tier in main's copy
-# stands in; one for a row main's copy does not hold; one with neither; and one
-# released, which must not show.
+# stands in; one for a row main's copy does not hold; one with neither; one
+# whose only tree is an Opus merger's on merge-<label>-after-land, as after a
+# lander's stop (§384.3); and one released, which must not show.
 #
 # A fourth commit, on a day of its own, adds the rows the table of rows the fill
 # will not take reads (Q1510), each reason beside the rows it holds back (§444):
@@ -14048,6 +14049,9 @@ check-queue-page-selftest:
     git -C "$left_tree" switch -q -c lane-q17 main
     git -C "$left_tree" switch -q --detach "$(g rev-list --max-parents=0 main)"
     g worktree lock --reason "agent wf_page-3 since 2026-09-03T10:00:00Z" "$left_tree"
+    after_land_tree="$sessions/dispatch-b-worktrees/wf_page-4"
+    g worktree add -q -b merge-q23-after-land "$after_land_tree" main || fail "could not add Q23's merger tree"
+    g worktree lock --reason "agent wf_page-4 since 2026-09-03T10:00:00Z" "$after_land_tree"
     claims="$(g rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims"
     {
         printf 'take\tQ2\t2026-09-03T10:00:00Z\t%s\tlane-q2\tdocs/b.md\t2\n' "$sessions/dispatch-a"
@@ -14058,6 +14062,7 @@ check-queue-page-selftest:
         printf 'take\tQ8\t2026-09-03T10:05:00Z\t%s\tlane-q8\t-\t3\n' "$sessions/dispatch-b"
         printf 'take\tQ9\t2026-09-03T10:06:00Z\t%s\tlane-q9\t-\n' "$sessions/dispatch-b"
         printf 'take\tQ17\t2026-09-03T10:07:00Z\t%s\tlane-q17\t-\t3\n' "$sessions/dispatch-b"
+        printf 'take\tQ23\t2026-09-03T10:08:00Z\t%s\tlane-q23\t-\t3\n' "$sessions/dispatch-b"
     } > "$claims"
 
     fuzz="$root/fuzz-logs"
@@ -14117,7 +14122,7 @@ check-queue-page-selftest:
     [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Families</h2> <h2>Queue</h2> ' ] \
         || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Pinned, Rows the fill will not take now, Families, then Queue: $order"
     # Each line: the row, the tier its take was taken from, the agent whose tree it runs in, the dispatcher's tree.
-    # A row main's copy holds is linked to its page; Q8, Q9 and Q17 are in no copy of main, so they have none.
+    # A row main's copy holds is linked to its page; Q8, Q9, Q17 and Q23 are in no copy of main, so they have none.
     has '<tr><th><code><a href="rows/Q2.html">Q2</a></code></th><td>2</td><td><code>wf_page-1</code></td><td><code>dispatch-a</code></td></tr>' \
         "Q2's running line: taken from tier 2 though main's copy has it in tier 1 now, running in wf_page-1's tree on lane-q2"
     has '<tr><th><code><a href="rows/Q5.html">Q5</a></code></th><td>2.2</td><td>no tree yet</td><td><code>dispatch-b</code></td></tr>' \
@@ -14130,9 +14135,11 @@ check-queue-page-selftest:
         "Q9's running line: in no copy of main and its take records no tier, so the page should say so"
     has '<tr><th><code>Q17</code></th><td>3</td><td><code>wf_page-3</code></td><td><code>dispatch-b</code></td></tr>' \
         "Q17's running line: wf_page-3 left lane-q17, whose tip is on main, for an old commit, and its reflog says so (§299.6)"
+    has '<tr><th><code>Q23</code></th><td>3</td><td><code>wf_page-4</code></td><td><code>dispatch-b</code></td></tr>' \
+        "Q23's running line: its only tree is the Opus merger's wf_page-4, on merge-q23-after-land after a lander's stop (§384.3)"
     between() { sed -n "/<h2>$1<\/h2>/,/<h2>$2<\/h2>/p" "$out/index.html"; }
     row_heads() { grep -oE '<tr><th><code>(<a href="rows/[TDQ][0-9]+\.html">)?[TDQ][0-9]+<' | grep -oE '[TDQ][0-9]+<$' | tr -d '<' | tr '\n' ' '; }
-    [ "$(between 'Running rows' 'Pinned' | row_heads)" = 'Q17 Q2 Q5 Q6 Q8 Q9 ' ] \
+    [ "$(between 'Running rows' 'Pinned' | row_heads)" = 'Q17 Q2 Q23 Q5 Q6 Q8 Q9 ' ] \
         || fail "the running table should hold each held row once, and not Q7, which was released"
     # Each line: the row, its pin, and what holds it back.
     has '<tr><th><code><a href="rows/Q19.html">Q19</a></code></th><td class="n">1</td><td>waits on <code><a href="rows/Q13.html">Q13</a></code> (todo); waits on <code><a href="rows/Q12.html">Q12</a></code> (todo)</td></tr>' \
