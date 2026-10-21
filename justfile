@@ -3513,11 +3513,10 @@ check-lanes-workflow:
     verify_stage='  (report, item) => notPrepared(item) || verified(report, laneOf(item)),'
     prep_needs='  if (answer.answer !== '
     handed_needs='  for (const n of (prior.prep && prior.prep.needs) || []) row.lines.push(`needs ${n.file}: ${n.why}`)'
-    brief_writes='    writeSet: answer.writeSet,'
+    brief_writes='  const writeSet = writeSetOf(Array.isArray(answer.rows) ? answer.rows : [])'
     brief_model='    model: answer.model,'
     brief_pins='    pinsOnly: answer.pinsOnly === true,'
     brief_same='    sameBehaviour: answer.sameBehaviour === true,'
-    prep_union='  if (!sameSet(answer.writeSet, writeSetOf(rows))) return '
     prep_rows_model='  if (answer.model !== modelOf(rows)) return '
     prep_both='  if (answer.pinsOnly === true && answer.sameBehaviour === true) return '
     both_forms='  if (lane.notes !== undefined && full.length) throw new Error(`lanes: ${lane.label} gives fields of both forms'
@@ -3527,7 +3526,7 @@ check-lanes-workflow:
     report_default='Write `none` when every test you added or changed is in a tests/ directory.'
     rows_note_use='${rowsNote()}'
     tests_note_use='${testsNote()}'
-    report_set='  if (answer.writeSet.length) ready.report = forTheVerifier()'
+    report_set='  if (writeSet.length) ready.report = forTheVerifier()'
     gone_outcome="'does_not_reproduce', $relay_last"
     gone_rule='**A row naming the inputs that show its fault runs them on the base first**'
     gone_route="  if (report.outcome === 'does_not_reproduce') return gone(lane, report, out)"
@@ -3939,8 +3938,8 @@ check-lanes-workflow:
             [ "$failed" != 0 ] || failed=24
         fi
         if ! grep -qxF -- "$brief_writes" "$1" || ! grep -qxF -- "$brief_model" "$1" || ! grep -qxF -- "$brief_pins" "$1" || ! grep -qxF -- "$brief_same" "$1" \
-            || ! grep -qF -- "$prep_union" "$1" || ! grep -qF -- "$prep_rows_model" "$1" || ! grep -qF -- "$prep_both" "$1"; then
-            echo "$1 does not start a short-form lane with the write set, model and marks prep answered, or does not refuse an answer whose write set is not its rows', whose model is not theirs, or which gives both marks (§396.4, §352.4, §399)"
+            || ! grep -qF -- "$prep_rows_model" "$1" || ! grep -qF -- "$prep_both" "$1"; then
+            echo "$1 does not build the lane's write set from the rows prep quotes, start it with the model and marks prep answered, or does not refuse an answer whose model is not its rows', or which gives both marks (§396.4, §352.4, §399)"
             [ "$failed" != 0 ] || failed=25
         fi
         if ! grep -qF -- "$both_forms" "$1"; then
@@ -4239,8 +4238,8 @@ check-lanes-workflow:
     grep -vxF -- "$handed_needs" "$file" > "$dir/needs-not-returned/lanes.js"
     fresh model-from-lane
     swap "$file" "$brief_model" '    model: lane.model,' > "$dir/model-from-lane/lanes.js"
-    fresh write-set-widened
-    grep -vF -- "$prep_union" "$file" > "$dir/write-set-widened/lanes.js"
+    fresh write-set-from-prep
+    swap "$file" "$brief_writes" '  const writeSet = answer.writeSet' > "$dir/write-set-from-prep/lanes.js"
     fresh model-unchecked
     grep -vF -- "$prep_rows_model" "$file" > "$dir/model-unchecked/lanes.js"
     fresh both-marks-from-prep
@@ -4307,7 +4306,7 @@ check-lanes-workflow:
     grep -vxF -- "$nothing_flag" "$file" > "$dir/nothing-flag-unset/lanes.js"
     fresh nothing-fn-missing
     grep -vxF -- "$nothing_fn" "$file" > "$dir/nothing-fn-missing/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-widened:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33 dnr-rows-ignored:34 dnr-blocked-unsaid:34 nothing-after-verify-false:35 nothing-not-shared:35 nothing-not-whole:35 nothing-flag-unset:35 nothing-fn-missing:35 landed-optional:36 runs-note-unbound:37 runs-note-unsaid:37 relay-check-not-run:38 relay-check-ignored:38 relay-check-untyped:38 relay-handoff-no-fallback:39 relay-handoff-unlogged:39)
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-from-prep:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33 dnr-rows-ignored:34 dnr-blocked-unsaid:34 nothing-after-verify-false:35 nothing-not-shared:35 nothing-not-whole:35 nothing-flag-unset:35 nothing-fn-missing:35 landed-optional:36 runs-note-unbound:37 runs-note-unsaid:37 relay-check-not-run:38 relay-check-ignored:38 relay-check-untyped:38 relay-handoff-no-fallback:39 relay-handoff-unlogged:39)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -15135,6 +15134,19 @@ check-queue-selftest:
         '1 family with no trace (§450.3)')" ] \
         || fail "a from/ or was/ chain did not reach the trace it should, or excluded a row that only reaches a trace on another file"
 
+    # Q2041: a trace may name more than one file, joined by `and`, as Q2037's
+    # did; each file it names covers the rows it named on it, not only the
+    # first file's.
+    fence tracetwofiles <<'MD'
+    Q5001  1  done:abcdef0  opus  -  from/- Trace the family on crates/rcad-topo/tests/a_first_shape.rs and crates/rcad-topo/tests/a_second_shape.rs: Q5002, Q5003 and Q5004, naming both files it covers §450
+    Q5002  1  todo  opus  crates/rcad-topo/tests/a_second_shape.rs  from/- the trace's first named member, on the second file §450
+    Q5003  1  todo  opus  crates/rcad-topo/tests/a_second_shape.rs  from/- the trace's second named member, on the second file §450
+    Q5004  1  todo  opus  crates/rcad-topo/tests/a_second_shape.rs  from/- the trace's third named member, on the second file §450
+    MD
+    drive tracetwofiles families
+    [ "$got" = '0 families with no trace (§450.3)' ] \
+        || fail "a trace naming two files joined by and did not cover the members it named on the second file too"
+
     # §373.7 / Q2401: crates/rcad-topo/tests/merged.rs is the file every new
     # rcad-topo test file is declared in, whole or by item
     # (merged.rs#<module>), so it is never a shape's own test file. A row
@@ -15152,6 +15164,24 @@ check-queue-selftest:
         '3 crates/rcad-topo/tests/a_shared_shape.rs Q4004(1) Q4005(1) Q4006(1)' \
         '1 family with no trace (§450.3)')" ] \
         || fail "crates/rcad-topo/tests/merged.rs, whole or by item, grouped rows into a family on merged.rs itself"
+
+    # Q2515: the same exclusion for crates/rcad-geom/tests/merged.rs and
+    # crates/rcad-step/tests/merged.rs, whose tests/ Q2348 built as one test
+    # binary each too (§373.7). Three unrelated rows per crate, each naming
+    # only that crate's merged.rs and no shared shape file -- the same shape
+    # as the mergedrs fixture's Q4001-Q4003 above, which would otherwise read
+    # as a family of 3 on merged.rs itself.
+    fence mergedrsgeomstep <<'MD'
+    Q4011  1  todo  opus  crates/rcad-geom/src/mesh.rs,crates/rcad-geom/tests/a_ball_near_a_corner.rs,crates/rcad-geom/tests/merged.rs  from/- declares a_ball_near_a_corner.rs in merged.rs whole §373
+    Q4012  1  todo  opus  crates/rcad-geom/tests/a_square_tube_in_a_block.rs,crates/rcad-geom/tests/merged.rs#a_square_tube_in_a_block  from/- declares its own file by item §373
+    Q4013  1  todo  opus  crates/rcad-geom/Cargo.toml,crates/rcad-geom/tests/merged.rs,justfile  from/- the fold itself, naming only merged.rs under tests/ §373
+    Q4021  1  todo  opus  crates/rcad-step/src/import.rs,crates/rcad-step/tests/a_ball_near_a_corner.rs,crates/rcad-step/tests/merged.rs  from/- declares a_ball_near_a_corner.rs in merged.rs whole §373
+    Q4022  1  todo  opus  crates/rcad-step/tests/a_square_tube_in_a_block.rs,crates/rcad-step/tests/merged.rs#a_square_tube_in_a_block  from/- declares its own file by item §373
+    Q4023  1  todo  opus  crates/rcad-step/Cargo.toml,crates/rcad-step/tests/merged.rs,justfile  from/- the fold itself, naming only merged.rs under tests/ §373
+    MD
+    drive mergedrsgeomstep families
+    [ "$got" = '0 families with no trace (§450.3)' ] \
+        || fail "crates/rcad-geom/tests/merged.rs or crates/rcad-step/tests/merged.rs, whole or by item, grouped rows into a family on merged.rs itself"
 
     bundled() {
         got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
@@ -15616,6 +15646,38 @@ check-queue-selftest:
         || fail "add refused a file under crates/rcad-topo/tests/ that already exists, which needs no declaration"
     got=$(qf add 1 opus 'crates/rcad-topo/tests/fuzzing/a-new-shape.rs' 'from/- a new file in a subdirectory, which is not declared in merged.rs §230' 2>&1) \
         || fail "add refused a new file in a subdirectory of crates/rcad-topo/tests/, which §373.7 does not reach"
+
+    # §373.7 (Q2514): the symmetric check -- `add` refuses a write set naming
+    # an item of crates/rcad-topo/tests/merged.rs, crates/rcad-geom/tests/merged.rs
+    # or crates/rcad-step/tests/merged.rs for a file that does not exist yet and
+    # is not itself named in the write set, since that item alone, with its
+    # file dropped, is not enough for a merge either (Q2353, re-filed as Q2503).
+    mkdir -p "$repo/crates/rcad-geom/tests" "$repo/crates/rcad-step/tests"
+    touch "$repo/crates/rcad-geom/tests/merged.rs" "$repo/crates/rcad-step/tests/merged.rs" \
+        "$repo/crates/rcad-geom/tests/an-existing-shape.rs"
+    git -C "$repo" add -A
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/merged.rs#a_missing_shape' 'from/- an item with no file for it §230' 2>&1) \
+        && fail "add accepted a merged.rs item naming no file, in the write set or on disk"
+    grep -qF "'crates/rcad-topo/tests/merged.rs#a_missing_shape' names a file the write set does not itself name and that does not exist yet" <<<"$got" \
+        || fail "add did not name the item with no file"
+    grep -qF "add crates/rcad-topo/tests/a-missing-shape.rs" <<<"$got" \
+        || fail "add did not name the file the item needs, with the module's _ written -"
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/merged.rs#a_missing_shape,crates/rcad-topo/tests/a-missing-shape.rs' 'from/- the same item, with its file in the write set too §230' 2>&1) \
+        || fail "add refused a merged.rs item whose file is also in the write set"
+    touch "$repo/crates/rcad-topo/tests/an-existing-item-shape.rs"
+    git -C "$repo" add -A
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/merged.rs#an_existing_item_shape' 'from/- an item whose file exists already §230' 2>&1) \
+        || fail "add refused a merged.rs item whose file exists on disk already"
+    got=$(qf add 1 opus 'crates/rcad-geom/tests/merged.rs#a_missing_geom_shape' 'from/- the same check, for rcad-geom §230' 2>&1) \
+        && fail "add accepted a rcad-geom merged.rs item naming no file"
+    grep -qF "'crates/rcad-geom/tests/merged.rs#a_missing_geom_shape' names a file the write set does not itself name and that does not exist yet" <<<"$got" \
+        || fail "add did not name the rcad-geom item with no file"
+    got=$(qf add 1 opus 'crates/rcad-geom/tests/merged.rs#an_existing_shape' 'from/- an rcad-geom item whose file exists already §230' 2>&1) \
+        || fail "add refused an rcad-geom merged.rs item whose file exists on disk already"
+    got=$(qf add 1 opus 'crates/rcad-step/tests/merged.rs#a_missing_step_shape' 'from/- the same check, for rcad-step §230' 2>&1) \
+        && fail "add accepted a rcad-step merged.rs item naming no file"
+    grep -qF "'crates/rcad-step/tests/merged.rs#a_missing_step_shape' names a file the write set does not itself name and that does not exist yet" <<<"$got" \
+        || fail "add did not name the rcad-step item with no file"
 
     # §230.2 (Q1720): a write-set path that names a directory in the tree is
     # not ambiguous, so `add` writes it with its trailing / rather than

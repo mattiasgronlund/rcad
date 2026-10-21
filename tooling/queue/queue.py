@@ -536,6 +536,7 @@ def add_step(queue, claims, here, args, batch):
     refuse_class_with_punctuation(what)
     refuse_a_pin(what)
     refuse_a_new_topo_test_file_with_no_merged_rs_item(write_set, here.top)
+    refuse_a_merged_rs_item_with_no_file(write_set, here.top)
     if write_set != "-":
         write_set = ",".join(parsed_write_set(here, write_set, fix_directories=True))
     what = where_it_came_from_after_the_tag(what, queue, claims, here)
@@ -613,6 +614,37 @@ def refuse_a_new_topo_test_file_with_no_merged_rs_item(write_set, top):
         module = rest[: -len(".rs")].replace("-", "_")
         raise Refused(f"'{path}' does not exist yet, and the write set names no {MERGED_RS} entry for it: a new "
                       f"file directly under {TOPO_TESTS_DIR} is declared there, so add {MERGED_RS}#{module} (§373.7)")
+
+
+MERGED_RS_DIRS = {
+    MERGED_RS: TOPO_TESTS_DIR,
+    "crates/rcad-geom/tests/merged.rs": "crates/rcad-geom/tests/",
+    "crates/rcad-step/tests/merged.rs": "crates/rcad-step/tests/",
+}
+
+
+def refuse_a_merged_rs_item_with_no_file(write_set, top):
+    """Refuse a write set naming an item of `crates/rcad-topo/tests/merged.rs`,
+    `crates/rcad-geom/tests/merged.rs` or `crates/rcad-step/tests/merged.rs`
+    for a file that does not exist yet and is not itself named in the write
+    set -- the symmetric check to the one above (§373.7).
+
+    Q2353's row held `merged.rs#<module>` alone; its lane's narrow dropped the
+    new file's own path, and the merge was refused for a file outside the
+    write set it was taken with. Re-filed as Q2503.
+    """
+    entries = entries_of(write_set)
+    named_paths = {entry.partition("#")[0] for entry in entries}
+    for entry in entries:
+        path, sep, module = entry.partition("#")
+        tests_dir = MERGED_RS_DIRS.get(path)
+        if not sep or tests_dir is None:
+            continue
+        candidate = f"{tests_dir}{module.replace('_', '-')}.rs"
+        if candidate in named_paths or os.path.exists(os.path.join(top, candidate)):
+            continue
+        raise Refused(f"'{entry}' names a file the write set does not itself name and that does not exist yet: "
+                      f"add {candidate}, or whichever path the item is really for, to the write set too (§373.7)")
 
 
 CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")

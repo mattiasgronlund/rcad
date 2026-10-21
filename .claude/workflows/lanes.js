@@ -63,11 +63,13 @@
 // queueId, notes }`, is the usual one. The run first sends the row to `prep`,
 // a read-only Sonnet agent (`.claude/agents/prep.md`) that reads it with `just
 // queue show` and the code at the base, and answers `ok` or `needs`. On `ok`,
-// and only once its write set and model are checked against the rows it
-// copied, the lane's brief is built from the rows' text, prep's facts, the
+// and only once its reported rows and model are checked against the row it was
+// sent, the lane's write set is built from those rows itself -- the union of
+// their write-set columns, never prep's restated copy of it (§396.4) -- and
+// the lane's brief is built from the rows' text, prep's facts, the
 // dispatcher's `notes` (optional: only what the row's text does not say) and
-// the two notes every brief carries, and the lane starts with the write set,
-// model, `sourcePaths` and marks prep answered and the `for_the_verifier`
+// the two notes every brief carries, and the lane starts with that write set,
+// the model, `sourcePaths` and marks prep answered and the `for_the_verifier`
 // field a writing lane gets by default. On anything else -- `needs`, an answer
 // that does not check, a prep that threw -- no lane starts, and the row comes
 // back not merged with prep's answer in its lines. The full form below is for
@@ -237,9 +239,10 @@ function kept(lane, prep) {
 
 // lanes.js cannot read docs/queue.md, so prep copies each row's id, model and
 // write set as `just queue show` prints them, and its answer is held to that
-// copy: the ids to the ones sent, the write set to the union of the rows' and
-// the model to theirs. Prep never widens a write set, because only `queue
-// next` checks one against the rows already running (§396.4).
+// copy: the ids to the ones sent, the model to theirs. The write set is never
+// prep's to restate: lanes.js builds it itself, with writeSetOf below, as the
+// union of the rows' write-set columns, so a slip in prep's own copy of that
+// union cannot stop a run (§396.4).
 function prepRefused(lane, answer) {
   if (!answer) return 'prep returned nothing'
   if (answer.answer !== 'ok') return `prep answered ${answer.answer}, so no lane starts`
@@ -248,7 +251,6 @@ function prepRefused(lane, answer) {
   const rows = Array.isArray(answer.rows) ? answer.rows : []
   const ids = rows.map((r) => r && r.id)
   if (!sameSet(ids, lane.queueId.split(','))) return `prep reported the rows ${ids.join(',') || 'none'}, not ${lane.queueId}`
-  if (!sameSet(answer.writeSet, writeSetOf(rows))) return `prep answered the write set ${JSON.stringify(answer.writeSet)}, not ${JSON.stringify(writeSetOf(rows))}, the union of its rows'; it never widens or narrows one (§396.4)`
   if (answer.model !== modelOf(rows)) return `prep answered the model ${answer.model}, not ${modelOf(rows)}, which its rows' model column gives (§352.4)`
   return null
 }
@@ -276,18 +278,19 @@ function modelOf(rows) {
 }
 
 function briefed(lane, answer) {
+  const writeSet = writeSetOf(Array.isArray(answer.rows) ? answer.rows : [])
   const ready = {
     label: lane.label,
     queueId: lane.queueId,
     brief: SHORT_BRIEF(lane, answer),
-    writeSet: answer.writeSet,
+    writeSet,
     model: answer.model,
     sourcePaths: Array.isArray(answer.sourcePaths) ? answer.sourcePaths : [],
     pinsOnly: answer.pinsOnly === true,
     sameBehaviour: answer.sameBehaviour === true,
   }
   if (lane.branch) ready.branch = lane.branch
-  if (answer.writeSet.length) ready.report = forTheVerifier()
+  if (writeSet.length) ready.report = forTheVerifier()
   return ready
 }
 
@@ -976,7 +979,7 @@ function forTheVerifier() {
 function prepSchema() {
   return {
     type: 'object',
-    required: ['answer', 'rows', 'writeSet', 'model', 'sourcePaths', 'pinsOnly', 'sameBehaviour', 'marks_why', 'facts', 'needs'],
+    required: ['answer', 'rows', 'model', 'sourcePaths', 'pinsOnly', 'sameBehaviour', 'marks_why', 'facts', 'needs'],
     properties: {
       answer: { type: 'string', enum: ['ok', 'needs'], description: 'ok when a lane can start from the rows as they stand; needs when the work touches a file their write sets do not name' },
       rows: {
@@ -993,7 +996,6 @@ function prepSchema() {
           },
         },
       },
-      writeSet: { type: 'array', items: { type: 'string' }, description: 'the union of the rows\' write sets, leaving out -, never widened or narrowed (§396.4)' },
       model: { type: 'string', enum: ['opus', 'sonnet'], description: 'opus if any row\'s model column says opus, else sonnet (§352.4)' },
       sourcePaths: { type: 'array', items: { type: 'string' }, description: 'what the verifier reverts to the base; empty to default to the crates/<c>/src directories in the write set' },
       pinsOnly: { type: 'boolean', description: 'true only for a row that pins a test and writes a decisions section, with no src/ path in its work; said, never inferred (§287)' },

@@ -7,11 +7,13 @@ of its rows is fixed alone.
 
 A trace is a row whose description, after its pin, its tag and the word that
 says where it came from, starts `Trace the family on <file>`, as 450.3 rule 2
-files one. It may be open or closed: a trace that is done still covers the rows
-it named. A file that has had a trace is a family again only once three open
-rows that no trace names share it, and then the family is those rows alone,
-the ones a new trace would name. A file that has had no trace keeps all its
-rows, whatever a trace on another file named.
+files one; `<file>` may be more than one `tests/*.rs` path joined by `and`, as
+Q2037's trace was, and it covers every row named on any of them. It may be
+open or closed: a trace that is done still covers the rows it named. A file
+that has had a trace is a family again only once three open rows that no
+trace names share it, and then the family is those rows alone, the ones a new
+trace would name. A file that has had no trace keeps all its rows, whatever a
+trace on another file named.
 
 A row counts as named on a file when its own `from/` or `was/` link, followed
 back through as many such links as it takes, reaches a trace on that file or a
@@ -23,12 +25,13 @@ match; the row stays a member of its own file's family.
 A row with two entries on one file, `x.rs#a,x.rs#b`, counts once on it. 450.2's
 awk line counted it twice.
 
-`crates/rcad-topo/tests/merged.rs` is never the shared file (§373.7). A lane
-that adds a new file under `crates/rcad-topo/tests/` also writes two lines
-into `merged.rs`, naming the entry as the whole file or as an item,
-`merged.rs#<module>`; that entry says where the file is declared, not what
-shape it is on, so it does not belong in any family. Counting it put six
-unrelated rows into one family at `ce88b698`: Q2344, Q2346, Q2353, Q2365,
+`crates/rcad-topo/tests/merged.rs`, `crates/rcad-geom/tests/merged.rs` and
+`crates/rcad-step/tests/merged.rs` are never the shared file (§373.7). A lane
+that adds a new file under one of those three `tests/` directories also
+writes two lines into its `merged.rs`, naming the entry as the whole file or
+as an item, `merged.rs#<module>`; that entry says where the file is declared,
+not what shape it is on, so it does not belong in any family. Counting it put
+six unrelated rows into one family at `ce88b698`: Q2344, Q2346, Q2353, Q2365,
 Q2369 and Q2386.
 """
 
@@ -38,7 +41,11 @@ from rows import CLASS, SMALL, PIN
 
 FAMILY = 3
 TEST_FILE = re.compile(r"tests/.*\.rs$")
-MERGED_RS = "crates/rcad-topo/tests/merged.rs"
+MERGED_RS_FILES = {
+    "crates/rcad-topo/tests/merged.rs",
+    "crates/rcad-geom/tests/merged.rs",
+    "crates/rcad-step/tests/merged.rs",
+}
 TRACE = ["Trace", "the", "family", "on"]
 ROW_ID = re.compile(r"(?<![0-9A-Za-z])[TDQ][0-9]+(?![0-9A-Za-z])")
 # Mirrors queue.py's CAME_FROM (queue.py:492): families.py cannot import it,
@@ -53,11 +60,12 @@ def families(queue):
     the rows whose from/was chain does not reach it.
     """
     traces = [(row.id, *trace) for row in queue.rows for trace in [trace_of(row)] if trace is not None]
-    traced_files = {file for _, file, _ in traces}
+    traced_files = {file for _, files, _ in traces for file in files}
     sinks_by_file = {}
-    for trace_id, file, named in traces:
-        sinks_by_file.setdefault(file, set()).update(named)
-        sinks_by_file[file].add(trace_id)
+    for trace_id, files, named in traces:
+        for file in files:
+            sinks_by_file.setdefault(file, set()).update(named)
+            sinks_by_file[file].add(trace_id)
     found = []
     for file, members in members_by_file(queue).items():
         if file in traced_files:
@@ -71,8 +79,8 @@ def families(queue):
 def members_by_file(queue):
     """Every open row that is not parked, under each test file its write set names, once per file.
 
-    `MERGED_RS` is left out: a row names it only to declare a new file there,
-    never as the shape it is on.
+    Each file in `MERGED_RS_FILES` is left out: a row names it only to
+    declare a new file there, never as the shape it is on.
     """
     by_file = {}
     for row in queue.rows:
@@ -80,13 +88,19 @@ def members_by_file(queue):
             continue
         files = {entry.partition("#")[0] for entry in row.write_set.split(",")}
         for file in files:
-            if file != MERGED_RS and TEST_FILE.search(file):
+            if file not in MERGED_RS_FILES and TEST_FILE.search(file):
                 by_file.setdefault(file, []).append(row)
     return by_file
 
 
 def trace_of(row):
-    """The file a trace row is on and the ids it names after the file, or None for a row that is no trace."""
+    """The files a trace row is on and the ids it names after them, or None for a row that is no trace.
+
+    A trace may name more than one file, joined by `and`, as Q2037's did:
+    `Trace the family on a.rs and b.rs: Q493, Q861, Q1905`. Every
+    `tests/*.rs`-looking word up to and including the one carrying the colon
+    is a file; a word that is not one, such as `and`, is skipped.
+    """
     words = row.fields[5:]
     if words and PIN.match(words[0]):
         words = words[1:]
@@ -96,8 +110,20 @@ def trace_of(row):
         words = words[1:]
     if words[:len(TRACE)] != TRACE or len(words) == len(TRACE):
         return None
-    file = words[len(TRACE)].rstrip(":,.;").partition("#")[0]
-    return file, set(ROW_ID.findall(" ".join(words[len(TRACE) + 1:])))
+    rest = words[len(TRACE):]
+    files = []
+    i = 0
+    while i < len(rest):
+        word = rest[i]
+        stripped = word.rstrip(":,.;")
+        if TEST_FILE.search(stripped):
+            files.append(stripped.partition("#")[0])
+        i += 1
+        if word.endswith(":"):
+            break
+    if not files:
+        return None
+    return frozenset(files), set(ROW_ID.findall(" ".join(rest[i:])))
 
 
 def reaches_a_sink(row, sinks, queue):
