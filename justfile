@@ -16937,6 +16937,34 @@ check-queue-api-selftest:
         || fail "pick theirs did not keep four's drop under ## Closed"
     got=$(check "$hub") || fail "the file pick settled fails check-queue"
 
+    # §307.3's other gap (Q286): `pick` could keep a row whose tier field
+    # names a tier the file has no heading for, and refuse rather than write
+    # one -- `add` and `tier` already write a missing heading, and now `pick`
+    # does too. Six moves Q4 to tier 2.2 by its field alone, leaving it under
+    # ## Tier 2 physically, so the merge's frame never gains the heading;
+    # seven only changes Q4's model. The two conflict, and picking six's side
+    # asks `pick` to put Q4 somewhere the file has no block for yet.
+    g "$hub" worktree add -q -b six "$lanes/six" main
+    g "$hub" worktree add -q -b seven "$lanes/seven" main
+    sed -i 's/^Q4  2  after:Q1  opus  -  waits on the first §230$/Q4  2.2  after:Q1  opus  -  waits on the first §230/' \
+        "$lanes/six/docs/queue.md"
+    g "$lanes/six" commit -qam "six: Q4's tier field says 2.2"
+    sed -i 's/^Q4  2  after:Q1  opus  -  waits on the first §230$/Q4  2  after:Q1  sonnet  -  waits on the first §230/' \
+        "$lanes/seven/docs/queue.md"
+    g "$lanes/seven" commit -qam "seven: Q4's model changes"
+    g "$hub" worktree add -q -b eight "$lanes/eight" main
+    got=$(g "$lanes/eight" merge --no-edit six 2>&1) || fail "eight could not take six, which only six changed"
+    grep -q '^## Tier 2.2' "$lanes/eight/docs/queue.md" && fail "the tree for pick to write ## Tier 2.2 has it already"
+    got=$(g "$lanes/eight" merge --no-edit seven 2>&1) && fail "six's Q4 and seven's Q4 merged without a conflict"
+    grep -qF 'Q4 changed on both sides' <<<"$got" || fail "the driver did not name Q4 as conflicting between six and seven"
+    got=$(q "$lanes/eight" pick Q4 ours 2>&1) || fail "pick refused to settle Q4 at tier 2.2, whose heading the file does not have yet"
+    got=$(awk '/^## / { h = $0 } /^Q4 / { print h ": " $2 }' "$lanes/eight/docs/queue.md")
+    [ "$got" = "## Tier 2.2: 2.2" ] || fail "pick did not put Q4 under ## Tier 2.2, which it had to write"
+    got=$(awk '/^## / { printf "%s|", $0 }' "$lanes/eight/docs/queue.md")
+    [ "$got" = "## Tier 1|## Tier 2|## Tier 2.2|## Tier 2.5|## Tier 3|## Tier 4|## Closed|" ] \
+        || fail "pick did not write ## Tier 2.2 between ## Tier 2 and ## Tier 2.5"
+    got=$(check "$lanes/eight") || fail "the file pick wrote a missing tier heading into fails check-queue"
+
     # §299: once a lane hands off, its own tree can be gone while its
     # verifier's (detached, no branch) is still held; `running` must count
     # that tree once for the row, not once for the tree and again as "no tree
