@@ -8893,6 +8893,49 @@ mod tests {
         );
     }
 
+    /// A quarter bend of tube `0.1` round a ring of `1000` is answered by
+    /// [`how_much_space_a_curved_solid_encloses`]'s own ladder one rung past
+    /// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] halvings below its top, once a
+    /// mesh has strayed past its tube (row Q2368).
+    ///
+    /// The top is `500.05`, so thirteen halvings under it is `0.061`, 0.61
+    /// tubes. Meshed `0.055` off there, the bend is charged `146` against the
+    /// `43.4` it encloses, and every rung above that is charged without end.
+    /// Until Q2368 that was the floor, and the ladder fell back on `43.4`, a
+    /// sum that said nothing. One rung on, at `0.0305`, the mesh is `0.0305`
+    /// off and charged `44.8` against `47.2`, and Pappus gives `49.3`.
+    #[test]
+    fn a_bend_round_a_ring_ten_thousand_times_its_tube_answers_one_rung_past_the_cap() {
+        let mut model = an_empty_model();
+        let bend = a_quarter_bend(&mut model, 1000.0, 0.1);
+        let view = model.solid(bend).expect("this model made the key");
+        let policy = Policy::certified();
+        let enclosed =
+            how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new())
+                .expect("a bend encloses some space");
+        let coarsest =
+            the_coarsest_mesh_whose_sides_do_not_cross(view, &policy, &mut ProvenanceLog::new())
+                .expect("a bend has a coarsest mesh");
+        let past_the_cap =
+            how_far_across(&coarsest) / 2.0 / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO + 1);
+        let mesh = view
+            .mesh(
+                Deflection::of(past_the_cap).expect("a room above zero"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the bend meshes a third of a tube off");
+        let (there, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+        assert!(
+            the_sum_answers(there, how_far_the_sum_can_be_off(view, &mesh, rounding)),
+            "a mesh {past_the_cap} off, a third of the tube, answers: {there}"
+        );
+        assert_eq!(
+            enclosed, there,
+            "the ladder answers on the rung one past the cap, {past_the_cap} off"
+        );
+    }
+
     /// A quarter of the ring of radius `ring` about `+z`, its tube `tube`
     /// wide, from the cap on `y = 0` to the cap on `x = 0`: the bend
     /// `tests/rings/mod.rs` describes, through the same builder.
