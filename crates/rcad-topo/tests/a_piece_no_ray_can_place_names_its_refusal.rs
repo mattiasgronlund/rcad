@@ -158,61 +158,67 @@ fn two_bends_turned_by_whole_quarter_turns_answer_every_rule() {
 /// wall then runs past the first bend's cap by that hair, and a point of that
 /// sliver is as near the first bend's cap as the hair: once the hair is
 /// thinner than the box round such a point, no point beside it is clear of
-/// the cap, which is the refusal's shape.
+/// the cap. A box round a point of a piece of the wall is about `256 ε · 5`,
+/// `3e-13` across, so the hair is that thin below about `6e-14` of a turn.
 ///
-/// The hair never gets that thin with the fuse still running. At `1e-9` of a
-/// turn every rule answers. At `1e-12` the pieces are not cut,
-/// `Undecidable` at `side of torus`; at `1e-13`, `3e-14` and `1e-14` no
-/// point is found inside a piece at all, `a point inside a piece of a face`.
-/// At `3e-14` and `1e-14` the pieces were not cut, `side of plane`, until a
-/// point on the ring and on a plane through its axis was put on a side of
-/// another such plane by the planes' own numbers (Q1392). A box round a
-/// point of a piece of the wall is about `256 ε · 5`, `3e-13` across, so the
-/// hair would have to be thinner than about `6e-14` of a turn.
+/// At `1e-9`, `1e-13`, `3e-14` and `1e-14` of a turn every rule both ways
+/// round answers one solid that validates: the union and the intersection
+/// `19.706 ± 0.39` against a bend's `π² R r² / 2`, `19.739`, and the
+/// difference the wedge the hair turns, `12.536 ± 0.123` times the hair
+/// against `π R r²`, `12.566`. A whole turn, `2π`, is such a hair: its sine
+/// rounds to `−2.4e-16`, so the copy sits that far back round the ring, and
+/// it answers the same with that for its hair. At `1e-12` the pieces are not
+/// cut, `Undecidable` at `side of torus`; Q2489's fix, which keeps the records
+/// of a ray the fuse threw away out of its log, answers the union there.
 ///
-/// A whole turn, `2π`, is such a hair: its sine rounds to `−2.4e-16`, so the
-/// copy sits that far back round the ring. It is refused the same way, before
-/// a ray.
-///
-/// Run with a print where no rule placed a piece (Q1537), each refused fuse
-/// stops at a band of one bend's wall a hair wide, outside the other bend.
-/// With the first bend named first it is the first bend's wall between its
-/// own start cap rim and the copy's start cap plane; with the copy first, the
-/// copy's wall between the first bend's end cap plane and its own end cap
-/// rim. Neither rule Q1537 added places it:
-///
-/// - Its cut is also a side of a piece of the other bend's wall, with the
-///   same partner, but its material is on the other side of that partner, so
-///   it is not a piece lying on the other bend's skin.
-/// - The piece of its own wall across that cut lies on the other bend's wall,
-///   and the cut runs along the other bend's cap rim, so the cut does not
-///   start clear of that cap.
-/// - Its other side is its own cap rim, and no piece of its own wall lies
-///   across that.
-///
-/// Not tried: placing it by which side of the other bend's cap plane its
-/// material is on, outside in front of the cap's outward plane, as
-/// `by_a_side_from_an_edge_it_starts_on` places a flat piece beyond an edge.
+/// Below `1e-12` no point was found inside one piece, and every rule both ways
+/// round was refused `Undecidable` at `a point inside a piece of a face`. Run
+/// with a print where no rule placed a piece (Q1537), each refused fuse stopped
+/// at a band of one bend's wall a hair wide, outside the other bend: with the
+/// first bend named first, the first bend's wall between its own start cap rim
+/// and the copy's start cap plane; with the copy first, the copy's wall between
+/// the first bend's end cap plane and its own end cap rim. Its cut ran along
+/// the other bend's cap rim, so no rule then in `choose` placed it by that
+/// side. Each such fuse answers since the rule `SidesItShares` follows in
+/// `fuse/select.rs` was widened to sides along an edge of the other solid's
+/// face (Q2551, merged by Q2589). At `3e-14` and `1e-14` the pieces were not
+/// cut, `side of plane`, until a point on the ring and on a plane through its
+/// axis was put on a side of another such plane by the planes' own numbers
+/// (Q1392).
 #[test]
 fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() {
-    for (turn, said) in [
-        (1e-9, None),
-        (1e-12, Some("side of torus")),
-        (1e-13, Some("a point inside a piece of a face")),
-        (3e-14, Some("a point inside a piece of a face")),
-        (1e-14, Some("a point inside a piece of a face")),
-        (2.0 * PI, Some("a point inside a piece of a face")),
-    ] {
+    let (ring, tube) = (4.0, 1.0);
+    let one_bend = PI * PI * ring * tube * tube / 2.0;
+    let a_radian_of_bend = PI * ring * tube * tube;
+    for turn in [1e-9, 1e-13, 3e-14, 1e-14, 2.0 * PI] {
+        let wedge = a_radian_of_bend * turn.sin().abs();
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
                 let what =
                     format!("{turn:e} of a turn, {rule:?}, the first first {the_first_first}");
                 let mut model = a_model();
-                let first = a_quarter_bend(&mut model, 4.0, 1.0);
-                let placed = a_quarter_bend_placed_round_by(&mut model, 4.0, 1.0, turn);
-                let fused = fused_or_refused(&mut model, first, placed, rule, the_first_first);
-                expect(fused, said, &what);
+                let first = a_quarter_bend(&mut model, ring, tube);
+                let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, turn);
+                let measured = fused_and_measured(&mut model, first, placed, rule, the_first_first)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                let expected = match rule {
+                    Rule::Union => one_bend + wedge,
+                    Rule::Intersection => one_bend - wedge,
+                    Rule::Difference => wedge,
+                    other => panic!("not a rule this tries: {other:?}"),
+                };
+                each_within_its_error(measured, &[expected], &what);
             }
+        }
+    }
+    for rule in EVERY_RULE {
+        for the_first_first in [true, false] {
+            let what = format!("1e-12 of a turn, {rule:?}, the first first {the_first_first}");
+            let mut model = a_model();
+            let first = a_quarter_bend(&mut model, ring, tube);
+            let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, 1e-12);
+            let fused = fused_or_refused(&mut model, first, placed, rule, the_first_first);
+            expect(fused, Some("side of torus"), &what);
         }
     }
 }

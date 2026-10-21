@@ -399,11 +399,26 @@ pub(crate) struct InputSide {
 /// the side leaves it out, and a side is only ever compared by its `edge`
 /// number. A side left out is one no piece can be placed across; the other
 /// sides of its piece are still named. Until Q1034 the whole naming gave up
-/// here, and no piece of the fuse could be placed by a side. **So is a curved
-/// stretch of an open input edge off one of its own ends** whose two ends come
-/// out one corner ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]),
-/// which has no length as written either, and which [`sides_of`] leaves out
-/// of a kept piece for the same reason (Q2408).
+/// here, and no piece of the fuse could be placed by a side.
+///
+/// **A curved stretch of an open input edge off one of its own ends** whose
+/// two ends come out one corner
+/// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]) has no length as
+/// written either, and [`sides_of`] leaves it out of a kept piece (Q2408).
+/// Here it is left out only where its two ends are one name, which
+/// [`Edges::of`] would read as a whole closed curve. Where they are two names
+/// it is named by them, as the arc above is, because whether a side is
+/// such a stretch is read off the input edge it runs along, and the same side
+/// of another piece can be a cut that runs along none: left out of the one and
+/// named for the other, it is no longer a side the two share. Two hollow
+/// quarters of one cone side by side, their side planes a rounding into each
+/// other, have the first quarter's cone between the two planes from `z = 4` to
+/// `z = 4.5`, whose top is a cut of the other quarter's bottom cap. The other
+/// quarter's slivers of the cone and of that cap meet it along the cap's rim,
+/// from the rim's own end. That top is the one side the piece shares with the
+/// other quarter, and `select` places the piece by it; with the stretch left
+/// out here the piece was refused
+/// (`tests/two_quarters_of_a_hollow_cone_flush_along_a_plane.rs`, Q2604).
 ///
 /// **Every corner is made before any side is named**, as
 /// [`Assembly::from_the_pieces`] makes them: [`Edges::of`] reads a closed side
@@ -475,15 +490,19 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
         let solid = the_solid_a_piece_was_cut_from(model, scratch, index);
         let mut of_this_piece = Vec::new();
         for (meet, &[from, to]) in wires.iter().flat_map(|wire| wire.iter()).zip(ends) {
-            if is_a_side_with_no_length(meet, [from, to], model) {
-                continue;
-            }
             if from == to {
+                if is_carried_by_two_planes(meet) {
+                    continue;
+                }
                 let ends = [
                     corners.goes_by(corners.name_of(model, &meet.ends[0], policy, log)?),
                     corners.goes_by(corners.name_of(model, &meet.ends[1], policy, log)?),
                 ];
-                if ends[0] != ends[1] {
+                if ends[0] == ends[1] {
+                    if is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model) {
+                        continue;
+                    }
+                } else {
                     let Some(arc) = which_arc_of_a_circle_walked_this_way(
                         meet,
                         ends[0] > ends[1],
@@ -3075,12 +3094,24 @@ impl Assembly {
     /// A corner on an arc's surface is outside that arc's piece: it is not on
     /// this ring, so it is on the rest of the curve, which lies across the
     /// chord. A corner of this ring, one on a chord inside its arc's surface,
-    /// or one the arithmetic cannot place, is passed over. Which side of its
-    /// chord an arc bulges is read off the direction it leaves its named corner
-    /// ([`WhichArc::LeavingACorner`]); every other sign is exact.
-    /// `a_sliver_arc_on_a_joined_flat_face.rs` pins how far from wrong that
-    /// reading stays: on every chord the fuse builds down to a few millionths
-    /// long, the rounding never puts the point on the wrong side.
+    /// or one the arithmetic cannot place, is passed over.
+    ///
+    /// **Which side of its chord an arc bulges is read the way the answer names
+    /// the arc**, by [`Edge::the_way_across_the_chord_into_the_arc`], the
+    /// reading the arc's picker is built from ([`how_each_arc_bulges`]). That
+    /// is a float reading and every other sign here is exact, but it cannot
+    /// disagree with the half-space the arc is written with, so the ring is
+    /// placed against the arc the answer holds. It used to be the exact winding
+    /// of the rounded point at the arc's named corner plus the direction it
+    /// leaves that corner ([`WhichArc::LeavingACorner`]) against the chord
+    /// between the stored corners, which weighs the tangent against a chord
+    /// whose ends are rounded. On a chord a hair long the rounding can lean the
+    /// chord further than the arc turns off it: a bar united `1e-15` out past a
+    /// tube's wall at 180 degrees joins the cap's outline on a chord `1.41e-7`
+    /// long whose ends are two roundings apart in `x`, so it leans `1.26e-8`
+    /// where the radius 7 circle turns `1.01e-8` off it. The tube's arc read the
+    /// wrong way, neither ring held the other, and [`Assembly::rings_round`]
+    /// panicked (`a_sliver_arc_on_a_joined_flat_face.rs`, Q2589).
     ///
     /// **A ring every side of which runs along one torus is the whole of one of
     /// the two circles the plane cuts it in**, because the two circles do not
@@ -3165,7 +3196,7 @@ impl Assembly {
         }
 
         let normal = plane.normal().components();
-        let Some(arcs) = how_each_arc_bulges(self, ring, plane, normal, the_curved_one) else {
+        let Some(arcs) = how_each_arc_bulges(self, ring, plane, the_curved_one) else {
             return Ok(None);
         };
 
@@ -5878,11 +5909,16 @@ struct Bulging {
 /// How each arc of `ring` bulges against its chord, for
 /// [`Assembly::holds_the_other_rings`] to wind a point round; `None` where an
 /// arc's surface, its bulge, or the ring itself cannot be placed.
+///
+/// The side an arc bulges to is the side its edge's picker faces,
+/// [`Edge::the_way_across_the_chord_into_the_arc`], dotted with the dart's
+/// chord turned a quarter turn on the plane. Both are square to the chord, so
+/// they point the same way or opposite ways and the dot only says which. Where
+/// the edge cannot face its arc, the ring is not placed.
 fn how_each_arc_bulges(
     assembly: &Assembly,
     ring: &[Dart],
     plane: &Plane,
-    normal: [f64; 3],
     the_curved_one: impl Fn(Dart) -> Option<Surface>,
 ) -> Option<Vec<Option<Bulging>>> {
     ring.iter()
@@ -5914,16 +5950,16 @@ fn how_each_arc_bulges(
                 // counted.
                 _ => return None,
             };
-            let ends = [from, to].map(|at| assembly.corners[at].point.coordinates());
-            let into_the_arc = (assembly.corners[corner].point + towards).coordinates();
-            let left = match winding_round(&[ends[0], ends[1], into_the_arc], normal).ok()? {
-                Decision::Pos => true,
-                Decision::Neg => false,
-                Decision::Zero | Decision::Undecidable { .. } => return None,
-                other => panic!("which side of its chord an arc bulges came back as {other:?}"),
-            };
+            let into_the_arc = assembly.edges[side.edge].the_way_across_the_chord_into_the_arc(
+                &assembly.corners,
+                corner,
+                towards,
+            )?;
+            let ends = [from, to].map(|at| assembly.corners[at].point);
+            let to_the_left = plane.normal().cross(ends[1] - ends[0]);
+            let left = a_side_of_nought(into_the_arc.dot(to_the_left))?.is_gt();
             Some(Some(Bulging {
-                ends,
+                ends: ends.map(|end| end.coordinates()),
                 surface,
                 left,
                 nappe,
@@ -11863,13 +11899,19 @@ fn sides_of(
 /// length as the answer is written, which [`sides_of`] leaves out: one two
 /// planes carry, or a stretch of an open input edge off one of its own ends
 /// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]).
+/// [`the_edge_each_side_of_every_piece_is`] leaves out the first, and the
+/// second only where its two ends are one name (Q2604).
 fn is_a_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2], model: &Model) -> bool {
     from == to
-        && (meet
-            .carried_by
-            .iter()
-            .all(|surface| surface.as_plane().is_some())
+        && (is_carried_by_two_planes(meet)
             || is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model))
+}
+
+/// Whether both surfaces that carry `meet` are planes: a straight side.
+fn is_carried_by_two_planes(meet: &FaceMeet) -> bool {
+    meet.carried_by
+        .iter()
+        .all(|surface| surface.as_plane().is_some())
 }
 
 /// Whether `meet` runs along one input edge that does not close on itself,

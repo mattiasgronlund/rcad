@@ -15,25 +15,34 @@
 //!
 //! Every ring of both caps encloses no area between its corners, so
 //! `Assembly::holds_the_other_rings` places each one by how its arcs bulge. It
-//! reads which side of its chord an arc bulges by rounding a point, the arc's
-//! corner plus the direction it leaves that corner in, and asking the exact
-//! winding of that point. On an arc a hair off its chord that direction lies a
-//! hair off the chord too, and Q600 asked whether the rounding could put the
-//! point on the wrong side.
+//! reads which side of its chord an arc bulges the way the answer names the
+//! arc, by `Edge::the_way_across_the_chord_into_the_arc`.
 //!
-//! **It cannot, in anything the fuse builds.** On a pipe the direction is as
-//! long as the radius, so the rounded point sits off the chord by half the
-//! chord's length, and the fuse refuses every sliver whose chord is shorter
-//! than a few millionths — mostly because no point can be found inside the
-//! piece of the bar's cap between the two circles. The sweep below walks each
-//! bar down in half-decades until the fuse refuses, and every union it builds
-//! on the way holds both solids.
+//! **It used to read it off one rounded point**, the arc's corner plus the
+//! direction the arc leaves that corner in, by the exact winding of that point
+//! against the chord between the two stored corners. That weighs the tangent
+//! against a chord whose ends are rounded, and on a chord a hair long the
+//! rounding can lean the chord further than the arc turns off it. Q600 found
+//! the point on the right side in everything the fuse built, because the fuse
+//! then refused every sliver whose chord was shorter than a few millionths,
+//! mostly for no point found inside the piece of the bar's cap between the two
+//! circles. Once those pieces were placed (Q2551), the bar out past the wall
+//! at 180 degrees and a hair of `1e-15` was built with its outline's two arcs
+//! on a chord `1.41e-7` long, from `(-6.999999999999998, 7.05e-8)` to
+//! `(-7, -7.05e-8)`. Its ends are two roundings apart in `x`, so the chord
+//! leans `1.26e-8` off `y`, where the tube's circle turns only `1.01e-8` off
+//! the chord over half its length. The tube's arc was read as bulging away
+//! from the centre, neither ring of the cap held the other, and
+//! `Assembly::rings_round` panicked; so it did for the bar at 180 and 300
+//! degrees and a hair of `3.2e-16` (Q2589). The answer's own reading sees that
+//! the rounding of the ends chose the side, and reads which way along the chord
+//! the arc sets off instead.
 
 use std::f64::consts::PI;
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
 /// The bar that bites a hair out of the hole, a hundred-billionth deep.
 #[test]
@@ -51,17 +60,56 @@ fn a_bar_a_hair_out_past_a_tubes_wall_united_with_it_holds_both() {
     assert_holds(&model, answer, [-5.0, 0.0], 2.0 + 1e-11);
 }
 
+/// The bar out past the wall at the three places where the tube's arc was read
+/// as bulging the wrong way and the fuse panicked: 180 degrees round and a
+/// hair of `1e-15`, and 180 and 300 degrees and `10^-15.5`. Each union holds
+/// both solids, on a chord under `1.5e-7`, and at 180 degrees that chord's two
+/// ends are not on one `x`, though the bar's centre is on the `x` axis, so the
+/// rounding leans it.
+#[test]
+fn a_bar_out_past_a_tubes_wall_on_a_chord_the_rounding_leans_holds_both() {
+    for (degrees, hair) in [
+        (180.0, 1e-15),
+        (180.0, 10f64.powf(-15.5)),
+        (300.0, 10f64.powf(-15.5)),
+    ] {
+        let angle = f64::to_radians(degrees);
+        let centre = [5.0 * angle.cos(), 5.0 * angle.sin()];
+        let radius = 7.0 - centre[0].hypot(centre[1]) + hair;
+        let (mut model, tube, bar) = a_tube_and_a_bar(centre, radius);
+        let answer = the_union(&mut model, tube, bar)
+            .unwrap_or_else(|why| panic!("{degrees} degrees, {hair:e}: {why}"));
+        assert_holds(&model, answer, centre, radius);
+        let (chord, [start, end]) = the_shortest_chord(&model, answer)
+            .unwrap_or_else(|| panic!("{degrees} degrees, {hair:e}: no arc has two ends"));
+        assert!(
+            chord < 1.5e-7,
+            "{degrees} degrees, {hair:e}: the shortest chord is {chord:e} long"
+        );
+        if degrees == 180.0 {
+            assert_ne!(
+                start[0], end[0],
+                "{hair:e}: the chord from {start:?} to {end:?} does not lean"
+            );
+        }
+    }
+}
+
 /// Each bar, stood at three angles round the tube, walked in from a hundredth
 /// across the wall to a ten-quadrillionth: every union the fuse builds holds
-/// both solids, and below the thinnest one it builds it returns an error
-/// rather than an answer. Which error is not pinned: a decision it could not
-/// settle, mostly, and a crossing in two pieces no half-space can tell apart.
+/// both solids, on chords down to `2.1e-8`, the bar into the hole at 300
+/// degrees and a ten-quadrillionth. The one it refuses is the bar out past the
+/// wall at 180 degrees and `1e-16`, `DynamicRangeTooWide`: `2 + 1e-16` is `2`,
+/// and the bar's circle all but touches the tube's.
 ///
-/// The last two half-decades are past what `f64` can place: `3.5 + 1e-16` is
-/// `3.5`, and the bar touches the hole rather than crossing it.
+/// The last two half-decades into the hole are past what `f64` can place too:
+/// `3.5 + 1e-16` is `3.5`, and the bar touches the hole rather than crossing
+/// it.
 #[test]
 fn every_sliver_the_union_builds_holds_both_down_to_where_the_fuse_refuses() {
     let hairs: Vec<f64> = (4..=32).map(|k| 10f64.powf(-f64::from(k) / 2.0)).collect();
+    let mut refused = Vec::new();
+    let mut shortest = f64::INFINITY;
     for (what, from_the_axis, radius) in [
         (
             "into the hole",
@@ -70,8 +118,6 @@ fn every_sliver_the_union_builds_holds_both_down_to_where_the_fuse_refuses() {
         ),
         ("out past the wall", 5.0, |apart, hair| 7.0 - apart + hair),
     ] {
-        let mut built = Vec::new();
-        let mut refused = Vec::new();
         for degrees in [180.0, 225.0, 300.0] {
             let angle = f64::to_radians(degrees);
             let centre = [from_the_axis * angle.cos(), from_the_axis * angle.sin()];
@@ -82,27 +128,29 @@ fn every_sliver_the_union_builds_holds_both_down_to_where_the_fuse_refuses() {
                 match the_union(&mut model, tube, bar) {
                     Ok(answer) => {
                         assert_holds(&model, answer, centre, radius);
-                        built.push(hair);
+                        if let Some((chord, _)) = the_shortest_chord(&model, answer) {
+                            shortest = shortest.min(chord);
+                        }
                     }
-                    Err(_) => refused.push(hair),
+                    Err(why) => refused.push((
+                        what,
+                        degrees,
+                        hair,
+                        matches!(why, Error::Invalid(Invalid::DynamicRangeTooWide { .. })),
+                    )),
                 }
             }
         }
-        let thinnest = built
-            .iter()
-            .copied()
-            .filter(|&hair| hair >= 1e-14)
-            .fold(f64::INFINITY, f64::min);
-        assert!(
-            thinnest <= 1e-11,
-            "the bar {what} was built no thinner than {thinnest:e} across"
-        );
-        assert!(
-            refused.iter().any(|&hair| hair < thinnest),
-            "the bar {what} was built at every hair from {thinnest:e} down, so this sweep no \
-             longer shows where the fuse stops, and Q600's margin has to be measured again"
-        );
     }
+    assert_eq!(
+        refused,
+        [("out past the wall", 180.0, 1e-16, true)],
+        "which bars the fuse refuses, and whether for the range"
+    );
+    assert!(
+        shortest < 3e-8,
+        "the shortest chord any union here was built on is {shortest:e} long"
+    );
 }
 
 fn a_tube_and_a_bar(centre: [f64; 2], radius: f64) -> (Model, SolidKey, SolidKey) {
@@ -170,6 +218,26 @@ fn assert_holds(model: &Model, solid: SolidKey, centre: [f64; 2], radius: f64) {
         measured.volume(),
         measured.volume_error()
     );
+}
+
+/// How far apart the two ends of the shortest edge of `solid` with two ends
+/// are, and where those ends are; `None` where every edge closes on itself.
+fn the_shortest_chord(model: &Model, solid: SolidKey) -> Option<(f64, [[f64; 3]; 2])> {
+    model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .flat_map(|face| face.wires().collect::<Vec<_>>())
+        .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+        .map(|coedge| coedge.edge())
+        .map(|edge| {
+            (
+                edge.distance_between_its_ends(),
+                [edge.start(), edge.end()].map(|end| end.point().coordinates()),
+            )
+        })
+        .filter(|&(chord, _)| chord > 0.0)
+        .min_by(|one, other| one.0.total_cmp(&other.0))
 }
 
 /// The area a disk of radius `one` and a disk of radius `other`, their centres
