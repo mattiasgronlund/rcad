@@ -15616,6 +15616,38 @@ check-queue-selftest:
     got=$(qf add 1 opus 'crates/rcad-topo/tests/fuzzing/a-new-shape.rs' 'from/- a new file in a subdirectory, which is not declared in merged.rs §230' 2>&1) \
         || fail "add refused a new file in a subdirectory of crates/rcad-topo/tests/, which §373.7 does not reach"
 
+    # §373.7 (Q2514): the symmetric check -- `add` refuses a write set naming
+    # an item of crates/rcad-topo/tests/merged.rs, crates/rcad-geom/tests/merged.rs
+    # or crates/rcad-step/tests/merged.rs for a file that does not exist yet and
+    # is not itself named in the write set, since that item alone, with its
+    # file dropped, is not enough for a merge either (Q2353, re-filed as Q2503).
+    mkdir -p "$repo/crates/rcad-geom/tests" "$repo/crates/rcad-step/tests"
+    touch "$repo/crates/rcad-geom/tests/merged.rs" "$repo/crates/rcad-step/tests/merged.rs" \
+        "$repo/crates/rcad-geom/tests/an-existing-shape.rs"
+    git -C "$repo" add -A
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/merged.rs#a_missing_shape' 'from/- an item with no file for it §230' 2>&1) \
+        && fail "add accepted a merged.rs item naming no file, in the write set or on disk"
+    grep -qF "'crates/rcad-topo/tests/merged.rs#a_missing_shape' names a file the write set does not itself name and that does not exist yet" <<<"$got" \
+        || fail "add did not name the item with no file"
+    grep -qF "add crates/rcad-topo/tests/a-missing-shape.rs" <<<"$got" \
+        || fail "add did not name the file the item needs, with the module's _ written -"
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/merged.rs#a_missing_shape,crates/rcad-topo/tests/a-missing-shape.rs' 'from/- the same item, with its file in the write set too §230' 2>&1) \
+        || fail "add refused a merged.rs item whose file is also in the write set"
+    touch "$repo/crates/rcad-topo/tests/an-existing-item-shape.rs"
+    git -C "$repo" add -A
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/merged.rs#an_existing_item_shape' 'from/- an item whose file exists already §230' 2>&1) \
+        || fail "add refused a merged.rs item whose file exists on disk already"
+    got=$(qf add 1 opus 'crates/rcad-geom/tests/merged.rs#a_missing_geom_shape' 'from/- the same check, for rcad-geom §230' 2>&1) \
+        && fail "add accepted a rcad-geom merged.rs item naming no file"
+    grep -qF "'crates/rcad-geom/tests/merged.rs#a_missing_geom_shape' names a file the write set does not itself name and that does not exist yet" <<<"$got" \
+        || fail "add did not name the rcad-geom item with no file"
+    got=$(qf add 1 opus 'crates/rcad-geom/tests/merged.rs#an_existing_shape' 'from/- an rcad-geom item whose file exists already §230' 2>&1) \
+        || fail "add refused an rcad-geom merged.rs item whose file exists on disk already"
+    got=$(qf add 1 opus 'crates/rcad-step/tests/merged.rs#a_missing_step_shape' 'from/- the same check, for rcad-step §230' 2>&1) \
+        && fail "add accepted a rcad-step merged.rs item naming no file"
+    grep -qF "'crates/rcad-step/tests/merged.rs#a_missing_step_shape' names a file the write set does not itself name and that does not exist yet" <<<"$got" \
+        || fail "add did not name the rcad-step item with no file"
+
     # §230.2 (Q1720): a write-set path that names a directory in the tree is
     # not ambiguous, so `add` writes it with its trailing / rather than
     # refusing it the way `narrow` still does; `check-queue` would otherwise
