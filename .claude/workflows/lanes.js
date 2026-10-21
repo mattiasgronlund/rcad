@@ -385,6 +385,7 @@ function verified(report, lane) {
   if (report.outcome === 'does_not_reproduce') return gone(lane, report, out)
   if (branchIsBase(report)) return measuredNothing(lane, out)
   if (lane.verify === false) return out
+  if (lane.pinsOnly === true && !namesTests(report)) return stopped(lane, out, 'the lane is marked pinsOnly and names no test it pins in tests_that_fail_without_the_change, so it would be verified as moved text, which refuses every line that runs (Q2546, §287)')
   out.kind = lane.sameBehaviour === true ? 'same_behaviour' : namesTests(report) ? 'tests' : 'moved_text'
   if (out.kind === 'same_behaviour') {
     if (namesTests(report)) return stopped(lane, out, 'the lane is marked sameBehaviour and names a test that fails without its change, which says the behaviour changed')
@@ -787,7 +788,7 @@ function WRITING(lane) {
   return `Queue ${rowsOf(lane)}. You own these files and no others: ${lane.writeSet.join(', ')}.
 Your branch: ${branchOf(lane)}.
 
-${lane.brief}
+${lane.brief}${pinsNote(lane)}
 ${START(lane)}
 ${handOver()}`
 }
@@ -812,7 +813,7 @@ ${before.handoff}
 
 The row's brief, as that lane had it:
 
-${lane.brief}
+${lane.brief}${pinsNote(lane)}
 
 Base of the branch: main at ${BASE}. Your first commands, in this order:
   git log --oneline -1
@@ -833,6 +834,14 @@ The lane before you reported (JSON): ${JSON.stringify(before)}`
 // types it started with through a `/clear`, so a dispatcher cleared after §416
 // sends lanes whose lane.md has no relay, from briefs that no longer tell them
 // to carry on past the warning (Q1422).
+// A pins-only lane's pinned test can pass on its base too, and a lane that
+// named none for that reason was verified as moved text, which refuses every
+// line that runs (Q368's run, Q2546).
+function pinsNote(lane) {
+  if (lane.pinsOnly !== true) return ''
+  return '\n\nThis lane is marked pinsOnly (§287): name each test it pins in tests_that_fail_without_the_change, a check-*-selftest by its recipe name, even when it passes on the base. A pinsOnly report that names none is stopped before its verifier runs.'
+}
+
 function handOver() {
   return 'When "Lane budget passed" comes and your row is not done, hand over (§416), even if this brief says to carry on past it: commit everything by explicit path, run git switch --detach, and report outcome relay, with landed_sha your last commit and a handoff saying what is done by commit, what is next in order, the places as file, function and lines, what you measured with its command, and what you tried that did not work.'
 }
