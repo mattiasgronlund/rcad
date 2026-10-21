@@ -14,7 +14,11 @@
 //! seam at `x = 0`, and there it runs along the level pipe's ruling and round
 //! the upright pipe at one height.
 //!
-//! The fuses run certified, in a model of 100 mm.
+//! The fuses run certified, in a model of 100 mm, and each answer is measured
+//! at a deflection of 0.001. There the intersection at `y = 4.5` measures
+//! `1.82130` one way round and `1.82131` the other, each to within `0.015`, and
+//! the one at `y = 4` measures `6.87666` both ways to within `0.029`. The
+//! midpoint rule puts them at `1.82282` and `6.88005`.
 
 use std::f64::consts::PI;
 
@@ -104,7 +108,7 @@ fn answer(rule: Rule, y: f64, level_first: bool, volume: f64, faces: usize) -> M
         .solid(solid)
         .expect("a solid the fuse made")
         .measure(
-            Deflection::of(0.01).expect("a positive length"),
+            Deflection::of(0.001).expect("a positive length"),
             &policy,
             &mut ProvenanceLog::new(),
         )
@@ -113,6 +117,7 @@ fn answer(rule: Rule, y: f64, level_first: bool, volume: f64, faces: usize) -> M
         volume: measure.volume(),
         error: measure.volume_error(),
     };
+    println!("{what}: measured {measured:?} against {volume}");
     assert_eq!(
         model
             .solid(solid)
