@@ -3160,7 +3160,7 @@ impl Assembly {
         }
 
         let normal = plane.normal().components();
-        let Some(arcs) = how_each_arc_bulges(self, ring, plane, normal, the_curved_one) else {
+        let Some(arcs) = how_each_arc_bulges(self, ring, plane, the_curved_one) else {
             return Ok(None);
         };
 
@@ -5861,7 +5861,6 @@ fn how_each_arc_bulges(
     assembly: &Assembly,
     ring: &[Dart],
     plane: &Plane,
-    normal: [f64; 3],
     the_curved_one: impl Fn(Dart) -> Option<Surface>,
 ) -> Option<Vec<Option<Bulging>>> {
     ring.iter()
@@ -5893,16 +5892,16 @@ fn how_each_arc_bulges(
                 // counted.
                 _ => return None,
             };
-            let ends = [from, to].map(|at| assembly.corners[at].point.coordinates());
-            let into_the_arc = (assembly.corners[corner].point + towards).coordinates();
-            let left = match winding_round(&[ends[0], ends[1], into_the_arc], normal).ok()? {
-                Decision::Pos => true,
-                Decision::Neg => false,
-                Decision::Zero | Decision::Undecidable { .. } => return None,
-                other => panic!("which side of its chord an arc bulges came back as {other:?}"),
-            };
+            let into_the_arc = assembly.edges[side.edge].the_way_across_the_chord_into_the_arc(
+                &assembly.corners,
+                corner,
+                towards,
+            )?;
+            let ends = [from, to].map(|at| assembly.corners[at].point);
+            let to_the_left = plane.normal().cross(ends[1] - ends[0]);
+            let left = a_side_of_nought(into_the_arc.dot(to_the_left))?.is_gt();
             Some(Some(Bulging {
-                ends,
+                ends: ends.map(|end| end.coordinates()),
                 surface,
                 left,
                 nappe,
