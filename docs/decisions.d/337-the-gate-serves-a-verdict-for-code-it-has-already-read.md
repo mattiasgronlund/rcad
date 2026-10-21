@@ -597,3 +597,10 @@ the whole-tree store, off the code's fingerprint alone". With the config files
 read by `jq -c '.'`, so that `lastUpdated` stays, it failed on "a new
 lastUpdated stamp in known_marketplaces.json moved check-questions-selftest's
 key".
+
+**The real runs.** `just pre-gate gate-lane` on `a31350d3`, the commit that
+drops `lastUpdated`, passed with 4440 tests of 4440. The load average was 15
+when it started. It ran all four, `check-hooks` in 20.3 s, `check-questions-selftest` in 13.0 s,
+`check-plugins` in 3.8 s and `deny` in 1.7 s. It recorded each on its own key:
+`f6446181eab2`, `e0bfa98e535a`, `d29584258d1b` and `8cd83bca2b81`. Unlike the
+gate at `33ef2659`, it recorded `check-plugins` too.
