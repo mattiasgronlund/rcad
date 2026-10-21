@@ -1039,8 +1039,10 @@ impl<'a> SidesItShares<'a> {
                 .flat_map(|(other, (sides, _))| sides.iter().map(move |side| (other, side)))
                 .filter(|(_, side)| {
                     side.edge == shared.edge
-                        && side.side.along.is_empty()
                         && name_of_surface_bits(&side.side.carried_by[1]) == my_surface
+                        && (side.side.along.is_empty()
+                            || self
+                                .its_skin_on_my_surface_stops_at(named, solid, shared, my_surface))
                 });
             for (other, _) in theirs {
                 let cut_from = &self.scratch.pieces[other];
@@ -1073,6 +1075,34 @@ impl<'a> SidesItShares<'a> {
             }
         }
         found
+    }
+
+    /// Whether a piece cut from solid number `solid`, on the surface named
+    /// `surface` bit for bit, has the side `shared` too, with the same partner
+    /// bit for bit and its material on the partner's other side: the face of
+    /// `solid` that piece is cut from ends at the side, and the piece with
+    /// `shared` carries its surface on past it.
+    fn its_skin_on_my_surface_stops_at(
+        &self,
+        named: &[Vec<NamedSide>],
+        solid: usize,
+        shared: &NamedSide,
+        surface: [u64; 9],
+    ) -> bool {
+        let partner = name_of_surface_bits(&shared.side.carried_by[1]);
+        named
+            .iter()
+            .zip(&self.scratch.cut_from)
+            .zip(&self.scratch.pieces)
+            .filter(|((_, from), piece)| {
+                **from == solid && name_of_surface_bits(&piece.surface) == surface
+            })
+            .flat_map(|((sides, _), _)| sides)
+            .any(|side| {
+                side.edge == shared.edge
+                    && side.side.material_side != shared.side.material_side
+                    && name_of_surface_bits(&side.side.carried_by[1]) == partner
+            })
     }
 
     /// The rule after [`by_a_side_from_an_edge_it_starts_on`]: piece number
