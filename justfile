@@ -14759,6 +14759,8 @@ _queue-check file decisions:
 # after the word, refused. `add` refuses a row without the word, one naming a
 # row that exists nowhere, and `was/-`; writes the word after the tag whichever
 # came first; and still refuses a class with punctuation or a pin behind it.
+# An `apply` that adds a row whose text starts with its class and then tags it
+# with the same class again passes, the tag step doing nothing (Q2549).
 # §433 adds `from/fuzz:<target>` and `from/step:<file>`: on an open row after a
 # pin and a class, and on a closed row after `small`, passed by their shape
 # alone, a name ending like a row id included; and a kind it does not know, a kind with no name, `was/` with a kind,
@@ -15559,6 +15561,15 @@ check-queue-selftest:
         || fail "add refused a class with nothing stuck after it"
     grep -q "^$got .*wrong/B from/- a tier one row with its class exactly §230\$" "$dir/addfix.md" \
         || fail "add did not write the row with its class still tagging it"
+
+    # Q2549: a lane's rows can add a row whose text starts with its class and
+    # then tag it with that class again; the tag step is nothing to do, not a
+    # refusal that stops just land's apply (Q1047).
+    got=$(qf apply add 1 opus - 'wrong/B from/- a row whose class its text and a tag step both give §230' + tag @1 wrong/B 2>&1) \
+        || fail "apply refused a tag step repeating the class its add's text gave: $got"
+    got=$(head -n 1 <<<"$got")
+    grep -q "^$got .*  wrong/B from/- a row whose class its text and a tag step both give §230\$" "$dir/addfix.md" \
+        || fail "apply did not write the added row with its class tagging it once"
 
     # §432: a new row says where it came from, and the word is written after
     # the tag whichever of the two came first, since just land puts it in front.
