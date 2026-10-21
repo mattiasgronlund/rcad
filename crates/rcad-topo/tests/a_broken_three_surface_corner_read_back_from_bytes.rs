@@ -1695,6 +1695,17 @@ fn what_a_solid_and_a_block_hold(
     }
 }
 
+#[test]
+fn probe_q2333() {
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
+    for wedge in [A_WEDGE_OVER_THE_PLUS_Y_EDGE] {
+        for rule in [Rule::Difference] {
+            let got = the_wedge_through_the_apex(wedge, shift, rule, &Policy::certified());
+            eprintln!("PROBE RESULT {wedge:?} {rule:?}: {got:?}");
+        }
+    }
+}
+
 fn overlap(one: [f64; 2], other: [f64; 2]) -> f64 {
     (one[1].min(other[1]) - one[0].max(other[0])).max(0.0)
 }

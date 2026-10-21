@@ -10941,6 +10941,62 @@ impl<'f> Arrangement<'f> {
         Ok(())
     }
 
+    fn probe_dump(&self, why: &str) {
+        eprintln!(
+            "PROBE {why} face {:?} surface {:?}",
+            self.face.keys, self.surface
+        );
+        for (index, crossing) in self.crossings.iter().enumerate() {
+            eprintln!(
+                "PROBE crossing {index} partner {:?} cuts {} reaches {} full {:?}",
+                crossing.partner,
+                crossing.cuts,
+                crossing.reaches_the_face,
+                self.drawn_in_full.get(index)
+            );
+        }
+        for (index, node) in self.nodes.iter().enumerate() {
+            let e = node.point.enclosure();
+            eprintln!(
+                "PROBE node {index} at [{:.17e} {:.17e} {:.17e}] w [{:.1e} {:.1e} {:.1e}] vertex {:?} crossings {:?} also {}",
+                e[0].lo(),
+                e[1].lo(),
+                e[2].lo(),
+                e[0].hi() - e[0].lo(),
+                e[1].hi() - e[1].lo(),
+                e[2].hi() - e[2].lo(),
+                node.vertex,
+                node.crossings,
+                node.also.len()
+            );
+        }
+        for (index, arc) in self.arcs.iter().enumerate() {
+            eprintln!(
+                "PROBE arc {index} crossing {} ends {:?} boundary {:?}",
+                arc.crossing,
+                arc.ends,
+                arc.boundary.map(|b| (b.wire, b.runs_forward, b.position))
+            );
+        }
+        for (index, cycle) in self.cycles.iter().enumerate() {
+            let nodes: Vec<usize> = cycle.iter().map(|&h| self.from(h)).collect();
+            eprintln!(
+                "PROBE cycle {index} half-edges {cycle:?} nodes {nodes:?} cell {:?} wound {:?}",
+                self.cell_of.get(index),
+                self.winding_of_cycle.get(index)
+            );
+        }
+        for (index, cell) in self.cells.iter().enumerate() {
+            eprintln!(
+                "PROBE cell {index} cycles {cell:?} winding {:?}",
+                self.winding.get(index)
+            );
+        }
+        for (node, leaving) in self.leaving.iter().enumerate() {
+            eprintln!("PROBE leaving {node}: {leaving:?}");
+        }
+    }
+
     fn spread_the_winding(&mut self, from: usize) -> Result<()> {
         let mut waiting = vec![from];
         while let Some(cell) = waiting.pop() {
@@ -10951,6 +11007,9 @@ impl<'f> Arrangement<'f> {
                     let across = self.cell_of[self.cycle_of[half_edge ^ 1]];
                     let theirs = known + self.climb_across(half_edge);
                     if !(0..=1).contains(&theirs) {
+                        self.probe_dump(&format!(
+                            "out of range: cell {cell} known {known} half-edge {half_edge} across {across} theirs {theirs}"
+                        ));
                         return Err(Error::CannotTellTheCellsOfAFaceApart {
                             face: self.face.keys[0],
                         });
@@ -10961,7 +11020,10 @@ impl<'f> Arrangement<'f> {
                             waiting.push(across);
                         }
                         Some(already) if already == theirs => (),
-                        Some(_) => {
+                        Some(already) => {
+                            self.probe_dump(&format!(
+                                "disagree: cell {cell} known {known} half-edge {half_edge} across {across} theirs {theirs} already {already}"
+                            ));
                             return Err(Error::CannotTellTheCellsOfAFaceApart {
                                 face: self.face.keys[0],
                             });
