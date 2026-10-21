@@ -2782,6 +2782,82 @@ mod tests {
         }
     }
 
+    /// The wall of the round bar of radius 3 lying along `x` through
+    /// `(0, 4.5, 5)`, inside the upright bar of radius 2, as `rcad-topo` hands
+    /// it over for Q2572's intersection when it asks for the coarsest mesh
+    /// whose sides do not cross. The loop is the one curve where the two walls
+    /// cross, and its first thirty corners are the march's first steps,
+    /// doubling from a few billionths: in the scaled chart they lie on one line
+    /// to within a rounding, and corner 6 sits within a rounding of the side
+    /// from 5 to 7.
+    ///
+    /// So the triangulation draws that side, cutting corner 6 off, and its
+    /// middle, `(2.555907110132643, 9.99999993348605)`, lands exactly on the
+    /// loop's side from 6 to 7 in the scaled chart. Put there, it split that
+    /// side, and `triangulate` panicked asserting that every side is still one
+    /// edge (Q2577). There is nowhere strictly inside to put a point that
+    /// breaks the side, and refusing is the answer.
+    #[test]
+    fn a_middle_that_rounds_onto_the_loop_is_never_put_there() {
+        let corners = vec![
+            [2.555907110132642, 10.0],
+            [2.555907110132642, 9.999999999158051],
+            [2.555907110132642, 9.999999997474154],
+            [2.555907110132642, 9.999999994106359],
+            [2.555907110132642, 9.999999987370769],
+            [2.5559071101326425, 9.99999997389959],
+            [2.5559071101326425, 9.99999994695723],
+            [2.555907110132644, 9.999999893072511],
+            [2.555907110132649, 9.999999785303075],
+            [2.55590711013267, 9.9999995697642],
+            [2.5559071101327544, 9.999999138686452],
+            [2.55590711013309, 9.999998276530953],
+            [2.5559071101344344, 9.999996552219958],
+            [2.5559071101398123, 9.999993103597966],
+            [2.5559071101613258, 9.999986206353984],
+            [2.555907110247383, 9.999972411866022],
+            [2.55590711059162, 9.999944822890118],
+            [2.555907111968581, 9.999889644938479],
+            [2.555907117476453, 9.999779289036542],
+            [2.555907139507997, 9.99955857724339],
+            [2.5559072276342696, 9.999117153742851],
+            [2.555907580139376, 9.998234307427927],
+            [2.555908990156892, 9.996468620287278],
+            [2.5559146301741165, 9.99293728991899],
+            [2.555937189385079, 9.985874980467472],
+            [2.5560274124796734, 9.971753171235996],
+            [2.5563880850005347, 9.94353201067273],
+            [2.5578272688002777, 9.88726873159805],
+            [2.5635286338250816, 9.776154886314856],
+            [2.585492958579997, 9.564632220067358],
+            [2.6622981877825787, 9.21157466716566],
+            [2.8744363066215386, 8.808612806348581],
+            [3.2970279243692464, 8.719300937696469],
+            [3.706675147107983, 9.634757679690289],
+            [3.606222249606453, 10.833511103653166],
+            [3.0873060389697695, 11.317847510330578],
+            [2.581981973958235, 10.409567633508829],
+        ];
+        let axis = Axis::new(
+            Point::new(-10.0, 4.5, 0.0),
+            Vector::new(1.0, 0.0, 2.220446049250313e-16),
+        )
+        .expect("an axis along x, a rounding off it");
+        let wall = Cylinder::new(axis, 3.0).expect("a pipe of radius 3");
+        let domain = TrimmedDomain::new(
+            Surface::from(wall),
+            crate::domain::Loop::through(corners).expect("thirty-seven corners"),
+            Vec::new(),
+            rcad_geom::Deflection::of(f64::MAX).expect("a positive length"),
+        )
+        .with_corners_between_two_edges(vec![false; 37]);
+
+        assert_eq!(
+            triangulate(&domain),
+            Err(CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch { corner: 6 })
+        );
+    }
+
     /// [`how_far_a_flat_piece_strays`]'s torus arm is a published bound, so here
     /// is the search that could find something over it (`docs/decisions.md`
     /// §15.6).
