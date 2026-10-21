@@ -891,7 +891,12 @@ fn walk_one_outline(
                 if is_wholly_on_one_side_of_the_half_line(sides[index], sides[next]) {
                     continue;
                 }
-                return Err(gave_up_turning_a_corner(point, enclosure));
+                if above_the_line(sides[index]).is_some() && above_the_line(sides[next]).is_some() {
+                    return Err(gave_up_turning_a_corner(point, enclosure));
+                }
+                return Ok(Walked::ACornerOnTheLine {
+                    enclosure: whichever_of_them_was_not_read(sides[index], sides[next]),
+                });
             }
             other => panic!("a corner came back with a decision nothing here knows: {other:?}"),
         }
