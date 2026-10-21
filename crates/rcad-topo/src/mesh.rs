@@ -12393,4 +12393,54 @@ mod tests {
         }]);
         model.key_for_solid(solid)
     }
+
+    /// Row Q2531. A hole whose corners are not on one line in the chart the
+    /// face is handed in — the triangulator would keep it as a hole rather
+    /// than fan it away — is fanned anyway when `on_one_line_where_made` says
+    /// it was on one line where the face was made.
+    ///
+    /// Before this row's fix, `what_the_triangulator_can_cut` ignored that
+    /// flag and re-derived collinearity from the placed chart alone
+    /// (`every_corner_is_on_one_line(hole.corners.corners())`), so this same
+    /// hole was kept rather than fanned: a placed hole on one line where made
+    /// can round off that line once placed, which is exactly backwards from
+    /// what Q2512 already fixed for a flat piece's own outline.
+    #[test]
+    fn a_hole_on_one_line_where_made_is_fanned_however_it_is_placed() {
+        let outline = ALoopToCut {
+            corners: Loop::through(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+                .expect("a square"),
+            points: vec![0, 1, 2, 3],
+            between_two_edges: vec![false; 4],
+        };
+        let hole_corners = [[1.0, 1.0], [2.0, 1.0], [1.5, 1.5]];
+        assert_ne!(
+            orient2d(hole_corners[0], hole_corners[1], hole_corners[2]),
+            Decision::Zero,
+            "the hole's corners must not be on one line in the chart, or the \
+             old code would fan it too and this test would prove nothing"
+        );
+        let hole = ALoopToCut {
+            corners: Loop::through(hole_corners.to_vec()).expect("three finite corners"),
+            points: vec![10, 11, 12],
+            between_two_edges: vec![false; 3],
+        };
+        let surface = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("a normal with a length"),
+        );
+        let cut = what_the_triangulator_can_cut(&surface, vec![(outline, false), (hole, true)]);
+        assert_eq!(
+            cut.drawn_here,
+            vec![[10, 11, 12]],
+            "the hole's fan, {:?}",
+            cut.drawn_here
+        );
+        let piece_lengths: Vec<usize> = cut.pieces.iter().map(Vec::len).collect();
+        assert_eq!(
+            piece_lengths,
+            vec![1],
+            "one piece, the outline alone, the hole gone rather than kept beside it"
+        );
+    }
 }
