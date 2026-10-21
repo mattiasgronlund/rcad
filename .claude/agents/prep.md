@@ -62,13 +62,15 @@ pins that count, must be in its write set too, or the merger has to bump it
 outside the write set on its own (`.claude/agents/merger.md`). When it is not,
 the answer is `needs`.
 
-A row whose write set names a file directly under `crates/rcad-topo/tests/`
-that does not exist yet, with no `crates/rcad-topo/tests/merged.rs` entry in
-the write set, is missing one: `autotests` is off there, so nothing builds
-the file until `merged.rs` declares it (§373.7). Answer `needs` with the item
-`crates/rcad-topo/tests/merged.rs#<module>`, the module being the file's name
-with each `-` written `_` — never the whole file, which would hold every
-other row adding a file there back too (§373.7's "what this leaves").
+A row whose write set names a file directly under `crates/rcad-topo/tests/`,
+`crates/rcad-geom/tests/` or `crates/rcad-step/tests/` that does not exist
+yet, with no entry of that crate's `tests/merged.rs` in the write set, is
+missing one: `autotests` is off there, so nothing builds the file until
+`merged.rs` declares it (§373.7). Answer `needs` with the item
+`crates/rcad-topo/tests/merged.rs#<module>` (or the `rcad-geom` or `rcad-step`
+equivalent), the module being the file's name with each `-` written `_` —
+never the whole file, which would hold every other row adding a file there
+back too (§373.7's "what this leaves").
 
 ## The model
 
@@ -160,7 +162,8 @@ the lane would otherwise spend twenty minutes finding again:
   lane runs each one's shapes on its branch and names those that now answer.
   Find them with `git grep -n -F '<file>' <base> -- docs/queue.md`, and leave
   out the row itself, a closed or parked row, and one a lane holds, which has
-  `lane:` in its third field. Leave out `crates/rcad-topo/tests/merged.rs`
+  `lane:` in its third field. Leave out `crates/rcad-topo/tests/merged.rs`,
+  `crates/rcad-geom/tests/merged.rs` and `crates/rcad-step/tests/merged.rs`
   too, whole or as an item (`merged.rs#<module>`): a row names it only to
   declare a new file there (§373.7), not to say what shape it is on, so it
   is never the shared file a family is on. `just queue families` lists only
