@@ -149,38 +149,57 @@ fn a_stepped_shaft_bored_with_a_square_hole_cut_and_turned_answers_or_is_refused
     }
 }
 
-/// Bored with a bar of radius 0.3 about `(−1, 0)`, the hole straddles the
-/// circle of radius 1 the narrow bar stands on, and boring splits the
-/// narrow bar's pipe where the bore's pipe would cross it, leaving the hole
-/// two corners on that circle. The cut on either plane is then refused
-/// `Undecidable` at `order along a crossing`, on one of those two corners,
-/// before the halves are ever turned.
+/// Bored with a bar whose circle straddles the circle of radius 1 the narrow
+/// bar stands on, boring splits the narrow bar's pipe and the bore's where
+/// the two would cross as whole pipes, leaving the hole two corners on that
+/// circle. The cut on either plane keeps the part of the bored shaft on
+/// `x < cut`, with the whole hole in it, under the certified policy. It was
+/// refused `Undecidable` at `order along a crossing`, on one of those two
+/// corners, for each of these six bores (Q2487).
 #[test]
-fn a_stepped_shaft_bored_across_the_narrow_bars_radius_is_refused_where_it_is_cut() {
-    let bore = Bore::ARoundHole {
-        centre: [-1.0, 0.0],
-        radius: 0.3,
-    };
-    for cut in [0.5, 0.0] {
-        let mut model = a_model();
-        let shaft = a_stepped_shaft(&mut model);
-        let bored = bore.cut_into(&mut model, shaft);
-        let block = a_box(&mut model, [[-10.0, cut], [-10.0, 10.0], [-10.0, 10.0]]);
-        let refused = model.fuse(
-            &[bored],
-            &[block],
-            Rule::Intersection,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        );
-        assert!(
-            matches!(
-                &refused,
-                Err(Error::Undecidable { records })
-                    if records.records().iter().all(|record| record.predicate() == "order along a crossing")
-            ),
-            "cut at x = {cut}: refused at order along a crossing, not {refused:?}"
-        );
+fn a_stepped_shaft_bored_across_the_narrow_bars_radius_is_cut_in_half() {
+    for (centre, radius) in [
+        ([-1.0, 0.0], 0.3),
+        ([-1.0, 0.1], 0.3),
+        ([-1.2, 0.0], 0.3),
+        ([-1.0, 0.0], 0.25),
+        ([-1.0, 0.0], 0.4),
+        ([-0.9, 0.3], 0.3),
+    ] {
+        let bore = Bore::ARoundHole { centre, radius };
+        for cut in [0.5, 0.0] {
+            let asked = format!("a bore of radius {radius} about {centre:?}, cut at x = {cut}");
+            let mut model = a_model();
+            let shaft = a_stepped_shaft(&mut model);
+            let bored = bore.cut_into(&mut model, shaft);
+            let block = a_box(&mut model, [[-10.0, cut], [-10.0, 10.0], [-10.0, 10.0]]);
+            let mut log = ProvenanceLog::new();
+            let kept = model
+                .fuse(
+                    &[bored],
+                    &[block],
+                    Rule::Intersection,
+                    &Policy::certified(),
+                    &mut log,
+                )
+                .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+            assert!(
+                log.is_empty(),
+                "{asked}: a certified fuse logs nothing: {log:?}"
+            );
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{asked}: {broken:?}"));
+            let [solid] = kept.solids() else {
+                panic!("{asked}: one solid, not {:?}", kept.solids());
+            };
+            holds(
+                &model,
+                *solid,
+                a_stepped_shafts_part_left_of(cut) - bore.volume(),
+                &asked,
+            );
+        }
     }
 }
 
