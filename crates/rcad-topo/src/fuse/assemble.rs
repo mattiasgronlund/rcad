@@ -9003,6 +9003,34 @@ impl Corners {
         }
         let index = match self.at.get(&exactly_at(corner.point)) {
             Some(&already) => {
+                if std::env::var("RCAD_PROBE_Q2305").is_ok() {
+                    let short = |s: &Surface| match s.as_plane() {
+                        Some(p) => {
+                            let c = p.coefficients();
+                            format!("[{:.4},{:.4},{:.4};{:.4}]", c[0], c[1], c[2], c[3])
+                        }
+                        None => "curved".to_string(),
+                    };
+                    let what = match end {
+                        MeetPoint::OfThreeSurfaces {
+                            surfaces,
+                            which,
+                            point,
+                        } => format!(
+                            "meet {} {} {} #{which} box {:?}",
+                            short(&surfaces[0]),
+                            short(&surfaces[1]),
+                            short(&surfaces[2]),
+                            point.enclosure()
+                        ),
+                        MeetPoint::Existing { vertex, .. } => format!("vertex {vertex:?}"),
+                        _ => "other".to_string(),
+                    };
+                    eprintln!(
+                        "PROBEC at-join {what} onto corner {already} {:?} from {:?}",
+                        self.made[already].point, self.made[already].from
+                    );
+                }
                 self.made[already].wobble = self.made[already].wobble.max(corner.wobble);
                 self.made[already].from = self.made[already].from.or(corner.from);
                 self.made[already].moved_by_the_policy |= corner.moved_by_the_policy;
