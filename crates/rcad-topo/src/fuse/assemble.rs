@@ -401,6 +401,11 @@ pub(crate) struct InputSide {
 /// sides of its piece are still named. Until Q1034 the whole naming gave up
 /// here, and no piece of the fuse could be placed by a side.
 ///
+/// **Every corner is made before any side is named**, as
+/// [`Assembly::from_the_pieces`] makes them: [`Edges::of`] reads a closed side
+/// at its corner, and [`Corners::of`] moves a corner to a lower rounding when
+/// a later side names it again (Q2571).
+///
 /// # Errors
 ///
 /// Whatever [`Corners::with_each_closed_curve_started_once`],
@@ -442,21 +447,31 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
         policy,
         log,
     )?;
+    let mut ends_of_each_side = Vec::with_capacity(wires.len());
+    for wires in &wires {
+        let mut of_this_piece = Vec::new();
+        for meet in wires.iter().flat_map(|wire| wire.iter()) {
+            of_this_piece.push([
+                corners.of(model, &meet.ends[0], policy, log)?,
+                corners.of(model, &meet.ends[1], policy, log)?,
+            ]);
+        }
+        ends_of_each_side.push(of_this_piece);
+    }
     let mut edges = Edges::default();
     let mut arcs_at_one_corner = BTreeMap::new();
     let mut named = Vec::with_capacity(scratch.pieces.len());
-    for (index, (piece, wires)) in scratch.pieces.iter().zip(&wires).enumerate() {
+    for (index, ((piece, wires), ends)) in scratch
+        .pieces
+        .iter()
+        .zip(&wires)
+        .zip(&ends_of_each_side)
+        .enumerate()
+    {
         let solid = the_solid_a_piece_was_cut_from(model, scratch, index);
         let mut of_this_piece = Vec::new();
-        for meet in wires.iter().flat_map(|wire| wire.iter()) {
-            let from = corners.of(model, &meet.ends[0], policy, log)?;
-            let to = corners.of(model, &meet.ends[1], policy, log)?;
-            if from == to
-                && meet
-                    .carried_by
-                    .iter()
-                    .all(|surface| surface.as_plane().is_some())
-            {
+        for (meet, &[from, to]) in wires.iter().flat_map(|wire| wire.iter()).zip(ends) {
+            if is_a_straight_side_with_no_length(meet, [from, to]) {
                 continue;
             }
             if from == to {
@@ -978,6 +993,19 @@ impl Assembly {
     /// answer, and the two sides either side of it are read as one before any
     /// edge is named. [`vertices_that_only_start_a_closed_edge`] says why.
     ///
+    /// **Every corner is made and settled before any side is read**
+    /// ([`the_corners_each_side_runs_between`]). A closed side is read at its
+    /// one corner ([`Edges::of`]), and [`Corners::of`] moves a corner to the
+    /// lower rounding when another piece's side names it again, so a side
+    /// read before that was read at a point the edge is not written at. A bar
+    /// of radius 3 leaning `0.3` across an upright bar of radius 2, pressed 1
+    /// into its seam, had the upright pipe's side read at `x = 4.7e−16` and
+    /// the edge written at `x = 5.9e−17`; the loop runs along the leaning
+    /// pipe's ruling there, the sign that says which way it is walked is zero
+    /// at the true corner and came out opposite at the two roundings, and the
+    /// two faces walked the one edge the same way (Q2571,
+    /// `tests/a_closed_edge_whose_corner_moved_after_one_face_read_it.rs`).
+    ///
     /// # Errors
     ///
     /// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] when a closed edge's
@@ -1025,17 +1053,37 @@ impl Assembly {
             policy,
             log,
         )?;
+        let mut ends_of_each_side = Vec::with_capacity(chosen.len());
+        for (kept, kept_wires) in chosen.iter().zip(&kept_wires) {
+            let piece = &scratch.pieces[kept.piece];
+            let solid = the_solid_a_piece_was_cut_from(model, scratch, kept.piece);
+            let mut of_this_piece = Vec::with_capacity(kept_wires.len());
+            for wire in kept_wires {
+                of_this_piece.push(the_corners_each_side_runs_between(
+                    wire,
+                    &piece.ancestors,
+                    solid,
+                    model,
+                    &mut corners,
+                    policy,
+                    log,
+                )?);
+            }
+            ends_of_each_side.push(of_this_piece);
+        }
         let mut edges = Edges::default();
         let mut faces = Vec::new();
-        for (kept, kept_wires) in chosen.iter().zip(&kept_wires) {
+        for ((kept, kept_wires), ends) in chosen.iter().zip(&kept_wires).zip(&ends_of_each_side) {
             let piece = &scratch.pieces[kept.piece];
             let solid = the_solid_a_piece_was_cut_from(model, scratch, kept.piece);
             let turned_round = piece.orientation.is_reversed() != kept.reversed;
             let wires: Vec<Vec<Side>> = kept_wires
                 .iter()
-                .map(|wire| {
+                .zip(ends)
+                .map(|(wire, ends)| {
                     sides_of(
                         wire,
+                        ends,
                         turned_round,
                         &piece.ancestors,
                         solid,
@@ -11596,8 +11644,59 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
     }
 }
 
+/// The two corners each side of `wire` runs between, its first end's and its
+/// second's, made by [`Corners::of_both_ends`].
+///
+/// **[`Assembly::from_the_pieces`] asks this of every kept wire before
+/// [`sides_of`] reads any side.** A corner settles on the lowest rounding any
+/// side names it at ([`Corners::of`]), and a closed side is read at its
+/// corner ([`Edges::of`]), so a side read before the last side naming its
+/// corner had arrived could be read where the edge is not written (Q2571).
+///
+/// **A curved side whose two ends are two names and one corner is refused**,
+/// by [`Corners::of_both_ends`]. It has a length, so it cannot be left out,
+/// and an edge from that corner back to itself would be the whole closed
+/// curve and not the arc between the two places (Q2193). A curved side of one
+/// name at both ends is a closed curve, and is kept.
+///
+/// **A pole of a ball kept whole is named here**, and not by [`Corners::of`].
+/// A pole is not an input corner to the arrangement, so the end arrives with
+/// no input vertex in it, and only the piece knows which input face it is a
+/// pole of. [`what_a_whole_ball_was`] says when the input's pole is the
+/// answer's, and the input vertex goes on the corner by [`Corners::of`]'s own
+/// rule: the first one to arrive stays (Q2114).
+///
+/// # Errors
+///
+/// Whatever [`Corners::of_both_ends`] gives.
+fn the_corners_each_side_runs_between(
+    wire: &[FaceMeet],
+    ancestors: &[FaceKey],
+    solid: SolidView<'_>,
+    model: &Model,
+    corners: &mut Corners,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Vec<[usize; 2]>> {
+    let mut ends_of_each_side = Vec::with_capacity(wire.len());
+    for meet in wire {
+        let ends = corners.of_both_ends(model, meet, ancestors[0], policy, log)?;
+        if !is_a_straight_side_with_no_length(meet, ends) {
+            for (end, corner) in meet.ends.iter().zip(ends) {
+                if let Some(pole) = the_input_pole_an_end_is(solid, ancestors, end) {
+                    let made = &mut corners.made[corner];
+                    made.from = made.from.or(Some(pole));
+                }
+            }
+        }
+        ends_of_each_side.push(ends);
+    }
+    Ok(ends_of_each_side)
+}
+
 /// One wire of a piece as sides of the result, turned round when the rule turns
-/// the face round.
+/// the face round. `ends` is the two corners each side of it runs between,
+/// [`the_corners_each_side_runs_between`].
 ///
 /// Reversing a wire reverses which way it winds about the face's plane normal,
 /// and the face's plane is turned round with it, so the two together leave the
@@ -11618,24 +11717,16 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// has the side names its two ends through the same [`Corners`], so every one
 /// of them leaves it out, and no edge is left with one face along it.
 ///
-/// **A curved side whose two ends are two names and one corner is refused**,
-/// by [`Corners::of_both_ends`]. It has a length, so it cannot be left out,
-/// and an edge from that corner back to itself would be the whole closed
-/// curve and not the arc between the two places (Q2193). A curved side of one
-/// name at both ends is a closed curve, and is kept.
+/// # Panics
 ///
-/// **A pole of a ball kept whole is named here**, and not by [`Corners::of`].
-/// A pole is not an input corner to the arrangement, so the end arrives with
-/// no input vertex in it, and only the piece knows which input face it is a
-/// pole of. [`what_a_whole_ball_was`] says when the input's pole is the
-/// answer's, and the input vertex goes on the corner by [`Corners::of`]'s own
-/// rule: the first one to arrive stays (Q2114).
+/// If `ends` does not name the corners of every side of `wire`.
 #[expect(
     clippy::too_many_arguments,
     reason = "the policy and the log travel as arguments, never as fields (CLAUDE.md)"
 )]
 fn sides_of(
     wire: &[FaceMeet],
+    ends: &[[usize; 2]],
     turned_round: bool,
     ancestors: &[FaceKey],
     solid: SolidView<'_>,
@@ -11645,22 +11736,15 @@ fn sides_of(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Vec<Side>> {
+    assert_eq!(
+        wire.len(),
+        ends.len(),
+        "a wire's sides and the corners made for them"
+    );
     let mut sides = Vec::new();
-    for meet in wire {
-        let [from, to] = corners.of_both_ends(model, meet, ancestors[0], policy, log)?;
-        if from == to
-            && meet
-                .carried_by
-                .iter()
-                .all(|surface| surface.as_plane().is_some())
-        {
+    for (meet, &[from, to]) in wire.iter().zip(ends) {
+        if is_a_straight_side_with_no_length(meet, [from, to]) {
             continue;
-        }
-        for (end, corner) in meet.ends.iter().zip([from, to]) {
-            if let Some(pole) = the_input_pole_an_end_is(solid, ancestors, end) {
-                let made = &mut corners.made[corner];
-                made.from = made.from.or(Some(pole));
-            }
         }
         let seam = the_seam_a_side_runs_along(model, solid, ancestors, meet);
         sides.push(edges.of(
@@ -11682,6 +11766,16 @@ fn sides_of(
         }
     }
     Ok(sides)
+}
+
+/// Whether `meet` is a side two planes carry whose two ends came out one
+/// corner, which [`sides_of`] leaves out.
+fn is_a_straight_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2]) -> bool {
+    from == to
+        && meet
+            .carried_by
+            .iter()
+            .all(|surface| surface.as_plane().is_some())
 }
 
 /// Whether a wire of a flat piece of the answer bounds anything: whether some
