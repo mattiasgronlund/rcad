@@ -36,10 +36,17 @@ so a pattern written for your own run can match another tree's — that is how
 Q1626's lane killed Q2240's land gate in another tree. The Bash hook refuses
 these forms and names the ones above instead.
 
-**Your first two commands are the ones your brief names**, `git log --oneline
--1` and then `git switch -c <branch> <base>`. A worktree-isolated lane branches
-from the dispatcher's `HEAD`, not from `origin/main`, so the switch is what puts
-you on the base — never skip it and never assume you are there already. A relay,
+**Your first three commands are the ones your brief names**, `git log
+--oneline -1`, then `git rev-parse --verify '<base>^{commit}'`, and then `git
+switch -c <branch> <base>`. A worktree-isolated lane branches from the
+dispatcher's `HEAD`, not from `origin/main`, so the switch is what puts you on
+the base — never skip it and never assume you are there already. The rev-parse
+goes before it because a base can be written from memory: on 2026-09-29 a base
+starting `5268282c` named no object, and Q660's lane fell back on the prefix
+by itself; on 2026-10-05 a base was sent as `20b35649fd5e...` when the real sha
+is `20b356495804...`. When the rev-parse prints nothing, or a sha that does not
+start with the base your brief names, stop and report `blocked`, naming the
+base. Never substitute a prefix or another sha for it (§237). A relay,
 a lane carrying on a branch another lane handed over (§416), gets other first
 commands in its brief: a plain `git switch` onto that branch and the checks after
 it.

@@ -152,6 +152,8 @@ const fullFields = (lane) => FULL_FORM.filter((k) => lane[k] !== undefined)
 
 if (!args || typeof args !== 'object') throw new Error('lanes: pass args {base, lanes: [...]}')
 const BASE = args.base
+// The workflow has no git to look the base up with; START has each lane
+// resolve it before branching and stop as blocked when it names no commit (Q2548).
 if (typeof BASE !== 'string' || BASE.length < 7) throw new Error('lanes: args.base must be a full sha of the tree the lanes start from')
 const LANES = Array.isArray(args.lanes) ? args.lanes : []
 if (!LANES.length) throw new Error('lanes: args.lanes is empty')
@@ -788,9 +790,11 @@ function treesOf(prior) {
 
 function START(lane) {
   return `
-Base: main at ${BASE}. Your first two commands, in this order, and report both shas back:
+Base: main at ${BASE}. Your first three commands, in this order, and report both shas back:
   git log --oneline -1
+  git rev-parse --verify '${BASE}^{commit}'
   git switch -c ${branchOf(lane)} ${BASE}
+If the rev-parse prints nothing, or a sha that does not start with ${BASE}, stop and report it as blocked, naming the base: never substitute a prefix or another sha for the base (§237).
 If the switch refuses because ${branchOf(lane)} already exists, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`: they reset a branch that another worktree may still have checked out, and that tree then shows a staged revert of everything since its commit.`
 }
 
