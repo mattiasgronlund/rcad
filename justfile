@@ -931,14 +931,17 @@ gate mode="loud" verdicts="reuse" jobs="cores":
 
     # Which of this run's steps an earlier green could stand in for. None is
     # the usual answer inside the selftests, and then there is nothing to look
-    # up and nothing to say. `check-timing-hooked-calls` is left out here even
-    # when it is in `gate_reusable_steps`: it gets a fingerprint of its own,
-    # below, narrower than the whole-tree one this loop builds for everything
-    # else, and mixing it into `$reusable` would serve or record it off the
-    # wrong fingerprint.
+    # up and nothing to say. `check-timing-hooked-calls` and the steps that
+    # check the machine are left out here even when they are in
+    # `gate_reusable_steps`: each gets a key of its own, below, which the
+    # whole-tree fingerprint this loop builds for everything else cannot
+    # stand in for, and mixing them into `$reusable` would serve or record
+    # them off the wrong one.
+    machine_steps="check-hooks check-questions-selftest check-plugins deny"
     reusable=""
     for step in {{ gate_steps }}; do
         [ "$step" != check-timing-hooked-calls ] || continue
+        case " $machine_steps " in *" $step "*) continue ;; esac
         case " {{ gate_reusable_steps }} " in *" $step "*) reusable="$reusable $step" ;; esac
     done
     fingerprint="" record="" served=""
@@ -981,6 +984,9 @@ gate mode="loud" verdicts="reuse" jobs="cores":
             [ -z "$served" ] || note "· served:$served from ${from:0:8}'s gate at $at"
         fi
     fi
+    # The summary reads the counts of the record these came from, and a run
+    # served only steps with keys of their own has no such record.
+    tree_served=$served
 
     # `check-timing-hooked-calls`'s own lookup, off its own narrower
     # fingerprint and its own record directory (docs/decisions.d/425 §425.7).
@@ -1020,6 +1026,93 @@ gate mode="loud" verdicts="reuse" jobs="cores":
             note "· served: check-timing-hooked-calls from ${thc_from:0:8}'s gate at $thc_at"
         fi
     fi
+
+    # The steps that check the machine rather than the tree: two plugins' own
+    # cases, whether Claude Code was told about the plugins, and the advisory
+    # database. Each is served off a key of its own, the code's fingerprint and
+    # what that step reads outside the tree, from a record directory of its own
+    # (docs/decisions.d/337 §337.9). Shaped like the block above, step by step.
+    machine_key() {
+        {
+            echo "step $1"
+            echo "code $2"
+            case "$1" in
+                check-hooks|check-questions-selftest|check-plugins)
+                    if [ -d "{{ claude_config }}" ]; then
+                        echo "config {{ claude_config }}"
+                    else
+                        echo "no config {{ claude_config }}"
+                    fi
+                    # The bytecode Python writes beside a script it runs is left
+                    # out: it follows from the script, and a step that wrote it
+                    # would move its own key while it ran.
+                    for plugin in "{{ questions_plugin }}" "{{ guardrails_plugin }}" "{{ plugins_root }}/practices"; do
+                        echo "plugin $plugin"
+                        if [ -d "$plugin" ]; then
+                            (
+                                cd "$plugin" || exit
+                                find . \( -name .git -o -name __pycache__ \) -prune -o -printf '%y %m %p\n' | LC_ALL=C sort
+                                find . \( -name .git -o -name __pycache__ \) -prune -o -type f -print0 \
+                                    | LC_ALL=C sort -z | xargs -0 -r sha256sum
+                            )
+                        else
+                            echo absent
+                        fi
+                    done
+                    ;;&
+                check-plugins)
+                    for file in "{{ claude_config }}/settings.json" .claude/settings.local.json \
+                        "{{ claude_config }}/plugins/installed_plugins.json" \
+                        "{{ claude_config }}/plugins/known_marketplaces.json"; do
+                        if [ -f "$file" ]; then sha256sum "$file"; else echo "absent $file"; fi
+                    done
+                    ;;
+                deny)
+                    # The commit only: a fetch leaves dozens of entries in the
+                    # checkout's `git status`, so a hand edit inside it is not
+                    # seen.
+                    for db in "${CARGO_HOME:-$HOME/.cargo}"/advisory-dbs/*/; do
+                        [ -d "$db" ] || continue
+                        echo "advisories $db $(git --git-dir="${db%/}/.git" rev-parse HEAD 2>&1)"
+                    done
+                    ;;
+            esac
+        } | sha256sum | cut -d' ' -f1
+    }
+    machine_code="" machine_store=""
+    declare -A machine_keys=()
+    for step in $machine_steps; do
+        case " {{ gate_steps }} " in *" $step "*) ;; *) continue ;; esac
+        case " {{ gate_reusable_steps }} " in *" $step "*) ;; *) continue ;; esac
+        if [ -z "$machine_store" ]; then
+            machine_code=${fingerprint:-$($j _code-fingerprint)}
+            if ! [[ "$machine_code" =~ ^[0-9a-f]{64}$ ]]; then
+                note "· verdicts: ${machine_code:-no fingerprint could be taken} for the steps that check the machine, so none is served or recorded"
+                break
+            fi
+            machine_store="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-verdicts-machine"
+        fi
+        m_key=$(machine_key "$step" "$machine_code")
+        machine_keys[$step]=$m_key
+        m_record="$machine_store/$m_key"
+        [ -f "$m_record" ] || continue
+        m_from=$(sed -n 's/^commit //p' "$m_record")
+        m_at=$(sed -n 's/^date //p' "$m_record")
+        m_at_s=$(date -u -d "${m_at:-unreadable}" +%s 2>/dev/null || echo 0)
+        m_age=$(( $(date +%s) - m_at_s ))
+        if [ -z "$m_from" ] || [ "$m_at_s" -eq 0 ]; then
+            note "· verdicts: the record for $step's inputs cannot be read, so it runs: $m_record"
+        elif [ "$verdicts" = fresh ]; then
+            note "· verdicts: fresh, so ${m_from:0:8}'s green for $step's inputs is run again, not served"
+        elif [ "$m_age" -lt 0 ] || [ "$m_age" -ge 86400 ]; then
+            note "· verdicts: ${m_from:0:8}'s green for $step's inputs is from $m_at, not the last day, so it is run again"
+        elif [[ "$head" == 0* ]]; then
+            note "· verdicts: audit, since this sha starts with 0: ${m_from:0:8}'s green for $step's inputs is run again"
+        else
+            served="$served $step"
+            note "· served: $step from ${m_from:0:8}'s gate at $m_at"
+        fi
+    done
 
     # The steps that build with cargo run one after another, in the order
     # `gate_steps` gives them, beside everything else. Cargo locks the build
@@ -1109,7 +1202,7 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         echo "=== last 60 lines of ${names[$first]} ==="
         tail -60 "$steps_dir/$first-${names[$first]}.log"
     fi
-    summary=$($j _gate-summary "$log" "$status" "$failed" "${served:+$served_copy}")
+    summary=$($j _gate-summary "$log" "$status" "$failed" "${tree_served:+$served_copy}")
 
     # The first failing step that the green on record for this code passed. Not
     # any reusable step: a land gate whose `test-slow` fails over a lane's
