@@ -5601,7 +5601,16 @@ impl<'f> Arrangement<'f> {
     /// is the place it stands for. It is off `C` exactly where
     /// [`Arrangement::passes_through`] reads it off, on the side read here, so
     /// a face that keeps the corner off `C` and a face that puts it in order
-    /// along the loop cannot disagree.
+    /// along the loop cannot disagree. **That word is checked against the
+    /// loop's plane**, since a corner read out of the model with two surfaces
+    /// round it was asked about neither (§286): one that plane proves off by
+    /// more than writing the corner down costs
+    /// ([`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost))
+    /// is not on the loop, and the pair is left to the policy. A bar's top
+    /// corner moved `1` above its cap, cut by a block whose face runs along
+    /// the bar's seam, was read on `C` and so as the meet itself, and the
+    /// fuse refused `TwoCurvesTouchWithoutCrossing` where it is refused
+    /// `Undecidable` (`tests/a_broken_two_surface_corner_read_back_from_bytes.rs`).
     ///
     /// A plate of the square `[0, 10]²` and a round tab of radius 3 at
     /// `(10, 10)`, turned `0.05` about `z`, has the tab's seam corner, at
@@ -5634,11 +5643,11 @@ impl<'f> Arrangement<'f> {
                 Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
             )
         };
-        match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
-            (Some(_), None) if round(&wound_as[1]) => (),
-            (None, Some(_)) if round(&wound_as[0]) => (),
+        let flat = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) if round(&wound_as[1]) => flat,
+            (None, Some(flat)) if round(&wound_as[0]) => flat,
             (Some(_) | None, Some(_) | None) => return None,
-        }
+        };
         let an_exact_corner = |at: usize| {
             self.nodes[at]
                 .vertex
@@ -5649,6 +5658,14 @@ impl<'f> Arrangement<'f> {
             [None, Some(corner)] => (corner, first, false),
             [Some(_), Some(_)] | [None, None] => return None,
         };
+        let as_written = PredicatePoint::Exact(corner);
+        let off_the_loops_plane = flat.side_of_point(super::bake::grown_by(
+            as_written,
+            super::bake::what_writing_the_corner_down_cost(as_written.enclosure()),
+        ));
+        if off_the_loops_plane == Decision::Pos || off_the_loops_plane == Decision::Neg {
+            return None;
+        }
         let cut = self.the_cut_through_the_loop_at(meet, wound_as)?;
         let across = cut.normal().components();
         if !across
