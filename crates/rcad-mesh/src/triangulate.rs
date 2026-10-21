@@ -3,7 +3,10 @@
 use std::collections::{HashMap, VecDeque};
 
 use spade::handles::{FixedDirectedEdgeHandle, FixedFaceHandle, FixedVertexHandle, InnerTag};
-use spade::{ConstrainedDelaunayTriangulation, InsertionError, Point2, Triangulation};
+use spade::{
+    ConstrainedDelaunayTriangulation, InsertionError, Point2, PositionInTriangulation,
+    Triangulation,
+};
 
 use rcad_geom::{Cone, Deflection, Point, Surface, Torus};
 use rcad_predicates::{Approximation, Cause, Decision, orient2d};
@@ -254,11 +257,13 @@ pub fn triangulate(domain: &TrimmedDomain) -> Result<Patch, CannotTriangulate> {
         }
         // **Only the refinement can have split a side here**, since
         // `refuse_a_side_with_a_corner_on_it` saw every side whole before it
-        // ran. It promises not to: it puts a point only at the middle of a side
-        // off the loops, which is strictly inside the patch, but worked out in
-        // `f64` that middle is a rounding off. A point rounded onto a side
-        // would split it here while the face across draws it whole, a crack
-        // (`docs/decisions.md` §25.1), and a crash beats a crack.
+        // ran. It asks the triangulation where each point lands and puts in
+        // only those strictly inside the patch. Asking is what keeps that
+        // promise, since the middle of a side is strictly inside only until it
+        // is rounded: on Q2572's wall the middle of the side from corner 5 to
+        // corner 7 rounded exactly onto the loop's side from 6 to 7 (Q2577). A
+        // point on a side would split it here while the face across draws it
+        // whole, a crack (`docs/decisions.md` §25.1), and a crash beats a crack.
         //
         // **A mesh with no triangle is let through with a side in pieces.** All
         // its corners are on one line, spade holds them as a line of edges, and
@@ -1810,6 +1815,17 @@ struct HowFineToGo<'a> {
 /// boundary chord, and those were all measured against the deflection before
 /// any of this and passed.
 ///
+/// **Strictly inside is asked of each point, not promised by where it was
+/// worked out.** The middle of a side off the loops is strictly inside the
+/// patch, and rounded it need not be. Where a corner sits within a rounding of
+/// the side that cuts it off, the rounded middle can land on the loop's side
+/// beside that corner, as on Q2572's wall, or past it outside the patch, as on
+/// Q2573's (Q2577). So every point is located in this round's triangulation
+/// first ([`lands_strictly_inside_the_patch`]), and one that is not strictly
+/// inside is not put anywhere. What it was for is asked again next round: the
+/// points put in beside it can flip the side it was to break away, as they did
+/// on Q2572's wall, and a round that places nothing refuses.
+///
 /// # Why it stops
 ///
 /// A point is placed only if it is at least an eighth of a `step` from every
@@ -1889,10 +1905,16 @@ fn refine_the_inside(
             let [from, to] = either_side.map(|handle| corners[corner_of[handle.index()] as usize]);
             ([(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0], true)
         });
+        let scaled = |corner: [f64; 2]| Point2::new(corner[0] * aim.across, corner[1] * aim.along);
+        // **Where each point lands is asked before any goes in**, because
+        // `inside` names this round's triangles and an insertion remakes them.
+        // A point strictly inside the patch now is strictly inside it after any
+        // insertion that keeps to the inside, since the loops' sides stay put.
         let wanted: Vec<([f64; 2], bool)> = wanted
             .into_iter()
             .map(|corner| (corner, false))
             .chain(breaking)
+            .filter(|&(corner, _)| lands_strictly_inside_the_patch(mesh, &inside, scaled(corner)))
             .collect();
 
         if !anything_missed && corners_cut_off.is_empty() {
@@ -1901,7 +1923,7 @@ fn refine_the_inside(
 
         let mut anything_placed = false;
         for (corner, breaks_a_side) in wanted {
-            let at = Point2::new(corner[0] * aim.across, corner[1] * aim.along);
+            let at = scaled(corner);
             if !breaks_a_side && !placed.has_room_for(at) {
                 continue;
             }
@@ -1931,6 +1953,34 @@ fn refine_the_inside(
                 deflection: aim.deflection,
             });
         }
+    }
+}
+
+/// Whether `at` lies strictly inside the patch: in a triangle the walk found
+/// inside, or on a side between two of them. Not on a side of a loop, not on a
+/// corner, and not past the loops.
+///
+/// **Asked of the triangulation, which answers exactly**: spade's `locate`
+/// walks with the same exact orientation test its own insertion does, so a
+/// point this passes is one an insertion will not put on a loop's side.
+fn lands_strictly_inside_the_patch(
+    mesh: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    inside: &[bool],
+    at: Point2<f64>,
+) -> bool {
+    match mesh.locate(at) {
+        PositionInTriangulation::OnFace(face) => inside[face.index()],
+        PositionInTriangulation::OnEdge(edge) => {
+            let edge = mesh.directed_edge(edge);
+            !edge.is_constraint_edge()
+                && edge
+                    .face()
+                    .as_inner()
+                    .is_some_and(|face| inside[face.index()])
+        }
+        PositionInTriangulation::OnVertex(_)
+        | PositionInTriangulation::OutsideOfConvexHull(_)
+        | PositionInTriangulation::NoTriangulation => false,
     }
 }
 
@@ -2593,10 +2643,13 @@ pub enum CannotTriangulate {
     ///
     /// The refinement cuts such a side in half at its middle, and this is what
     /// is left when that point cannot be placed: the triangulation would not
-    /// take it, or it went in on an earlier round and the side survived it.
-    /// Neither has been seen in this workspace. Returning the patch instead
-    /// could hand back a mesh with one side used four times
-    /// (`docs/decisions.md` §187.4), which is worse than no mesh.
+    /// take it, it went in on an earlier round and the side survived it, or,
+    /// rounded, it lands on a side of the loop or outside the patch, where the
+    /// refinement puts no point. The last is Q2573's: the middle of the side
+    /// from corner 27 to corner 29 rounds a quarter of a rounding past the side
+    /// from 27 to 28 (Q2577). Returning the patch instead could hand back a
+    /// mesh with one side used four times (`docs/decisions.md` §187.4), which
+    /// is worse than no mesh.
     #[error(
         "on a curved surface, a side cuts straight across corner {corner} of the boundary \
          and there is nowhere to put the point that would break it"
@@ -2644,9 +2697,10 @@ mod tests {
     }
 
     /// A point on a side splits it, and the check [`triangulate`] asserts once
-    /// the refinement is done sees the split. No refinement has been seen to put
-    /// a point on a side (Q2221), so the point is put there by hand here, the
-    /// way a midpoint rounded onto the side would be.
+    /// the refinement is done sees the split. The refinement asks where each
+    /// point lands and puts none on a side (Q2577), so the point is put there by
+    /// hand here, the way the middle rounded onto a side of Q2572's wall was
+    /// before it asked.
     #[test]
     fn a_point_put_on_a_side_leaves_that_side_in_pieces() {
         let flat =
@@ -2787,16 +2841,22 @@ mod tests {
     /// it over for Q2572's intersection when it asks for the coarsest mesh
     /// whose sides do not cross. The loop is the one curve where the two walls
     /// cross, and its first thirty corners are the march's first steps,
-    /// doubling from a few billionths: in the scaled chart they lie on one line
-    /// to within a rounding, and corner 6 sits within a rounding of the side
-    /// from 5 to 7.
+    /// doubling from a few billionths: the first of them lie on one line to
+    /// within a rounding in the scaled chart, and corner 6 sits within a
+    /// rounding of the side from 5 to 7.
     ///
     /// So the triangulation draws that side, cutting corner 6 off, and its
     /// middle, `(2.555907110132643, 9.99999993348605)`, lands exactly on the
     /// loop's side from 6 to 7 in the scaled chart. Put there, it split that
     /// side, and `triangulate` panicked asserting that every side is still one
-    /// edge (Q2577). There is nowhere strictly inside to put a point that
-    /// breaks the side, and refusing is the answer.
+    /// edge (Q2577). Asked first, it is not put anywhere; the points put in the
+    /// same round to break the other sides cutting corners off flip that side
+    /// away too, and the next round finds none left.
+    ///
+    /// So the patch is checked for what the refinement owes it: every point it
+    /// added is a corner of a triangle, and so strictly inside, every side of
+    /// the loop is a side of exactly one triangle, and no triangle joins two
+    /// corners of the loop that are not next to each other.
     #[test]
     fn a_middle_that_rounds_onto_the_loop_is_never_put_there() {
         let corners = vec![
@@ -2851,11 +2911,45 @@ mod tests {
             rcad_geom::Deflection::of(f64::MAX).expect("a positive length"),
         )
         .with_corners_between_two_edges(vec![false; 37]);
+        let patch = triangulate(&domain).expect("the wall is cut");
 
+        let on_the_loop = 37;
+        let mut drawn = vec![0_usize; on_the_loop];
+        for triangle in patch.triangles() {
+            for (from, to) in [(0, 1), (1, 2), (2, 0)] {
+                let [one, other] = [triangle[from], triangle[to]].map(|corner| corner as usize);
+                if one >= on_the_loop || other >= on_the_loop {
+                    continue;
+                }
+                let side = if (one + 1) % on_the_loop == other {
+                    one
+                } else if (other + 1) % on_the_loop == one {
+                    other
+                } else {
+                    panic!(
+                        "triangle {triangle:?} joins corners {one} and {other} of the loop, \
+                         cutting the corners between them off"
+                    );
+                };
+                drawn[side] += 1;
+            }
+        }
         assert_eq!(
-            triangulate(&domain),
-            Err(CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch { corner: 6 })
+            drawn,
+            vec![1; on_the_loop],
+            "how many triangles draw each side of the loop, by the corner it leaves"
         );
+        for added in on_the_loop..patch.corners().len() {
+            let added = u32::try_from(added).expect("a few dozen corners");
+            assert!(
+                patch
+                    .triangles()
+                    .iter()
+                    .any(|triangle| triangle.contains(&added)),
+                "the refinement put corner {added} at {:?}, where no triangle of the patch is",
+                patch.corners()[added as usize]
+            );
+        }
     }
 
     /// [`how_far_a_flat_piece_strays`]'s torus arm is a published bound, so here
