@@ -1355,12 +1355,33 @@ fn begun_beside(
 /// crossing as the corner can be, and not only the corner's own box
 /// ([`where_on_the_loop_this_end_is`], Q1697).
 ///
-/// The half-spaces are asked at the middle point of each arc, of the box the
-/// march says that point is inside, the way a conic's arc is asked at its middle
-/// angle ([`Conic::the_stretch_this_run_covers`]). An arc with no marched point
-/// on it is asked at the middle of its two corners, settled onto the crossing.
-/// Every point handed back is a point the march settled and bounded, so the
-/// march's bound holds of them all.
+/// **An arc is ruled out when any point of it is decided behind one of the
+/// half-spaces**, each point asked of the box the march says it is inside
+/// ([`every_point_is_held`]). Why that cannot pick the wrong arc, reasoned and
+/// not run: a half-space holds the whole of the run, so every point of the
+/// crossing along the run's own arc is on or in front of each, and the box round
+/// a marched point holds a point of the crossing. A box of the run's arc is
+/// wholly behind a half-space only when the point of the crossing in it lies
+/// past a corner, along the other arc, which puts it beside that corner. So the
+/// wrong arc is picked only when that happens and, as well, no point of the
+/// other arc is decided behind any half-space, though they leave that arc out
+/// somewhere. A march too coarse to put a box of the other arc behind one, with
+/// no such corner, leaves both arcs held, which refuses.
+///
+/// **Not at the middle point alone**, as it was until Q2570, the way a conic's
+/// arc is still asked at its middle angle
+/// ([`Conic::the_stretch_this_run_covers`]). A ball of 10 at `(0, 8.5, 5)`
+/// across a round bar of 2 up `z` from −1 to 11 crosses its pipe in one loop
+/// that runs past both caps, and each arc between two corners one above the
+/// other is named by the plane through them and the bar's axis, among others.
+/// The long arc round past both caps has its middle `(−1.44, −1.39, 5.37)` on
+/// the far side of the bar, in front of that plane, though it passes
+/// `(0, 2, −2.6)` behind it, so both arcs were held and every fuse of the pair
+/// was refused.
+///
+/// An arc with no marched point on it is asked at the middle of its two
+/// corners, settled onto the crossing. Every point handed back is a point the
+/// march settled and bounded, so the march's bound holds of them all.
 ///
 /// # Errors
 ///
@@ -1415,15 +1436,13 @@ fn the_arc_between(
 
     let mut held = [false; 2];
     for (arc, holds) in [&onwards, &backwards].into_iter().zip(&mut held) {
-        *holds = match arc.get(arc.len() / 2) {
-            Some(&middle) => every_half_space_holds(picked_by, middle, deviation, policy, log)?,
-            None => {
-                let [one, other] =
-                    [from, to].map(|end| Point::from(end.enclosure().map(middle_of)));
-                let between = one + (other - one) * 0.5;
-                let (middle, off) = settled_with_a_bound(surfaces, between)?;
-                every_half_space_holds(picked_by, middle, off, policy, log)?
-            }
+        *holds = if arc.is_empty() {
+            let [one, other] = [from, to].map(|end| Point::from(end.enclosure().map(middle_of)));
+            let between = one + (other - one) * 0.5;
+            let (middle, off) = settled_with_a_bound(surfaces, between)?;
+            every_half_space_holds(picked_by, middle, off, policy, log)?
+        } else {
+            every_point_is_held(arc, picked_by, deviation, policy, log)?
         };
     }
     match held {
@@ -1431,6 +1450,32 @@ fn the_arc_between(
         [false, true] => Ok(backwards),
         [true, true] | [false, false] => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
     }
+}
+
+/// Whether no point of `arc` is decided behind any of `picked_by`, each asked of
+/// the box `deviation` round it.
+///
+/// **The middle is asked first**, so an arc its middle rules out is asked
+/// nowhere else, and logs no more than it did when only the middle was asked.
+///
+/// # Errors
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a point has no box round it.
+fn every_point_is_held(
+    arc: &[Point],
+    picked_by: &[Picker],
+    deviation: f64,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    let middle = arc.len() / 2;
+    let the_rest = (0..arc.len()).filter(|&at| at != middle);
+    for at in std::iter::once(middle).chain(the_rest) {
+        if !every_half_space_holds(picked_by, arc[at], deviation, policy, log)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Where on the closed loop of points `round` an end of a run sits: the index
