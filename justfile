@@ -15152,6 +15152,24 @@ check-queue-selftest:
         '1 family with no trace (§450.3)')" ] \
         || fail "crates/rcad-topo/tests/merged.rs, whole or by item, grouped rows into a family on merged.rs itself"
 
+    # Q2515: the same exclusion for crates/rcad-geom/tests/merged.rs and
+    # crates/rcad-step/tests/merged.rs, whose tests/ Q2348 built as one test
+    # binary each too (§373.7). Three unrelated rows per crate, each naming
+    # only that crate's merged.rs and no shared shape file -- the same shape
+    # as the mergedrs fixture's Q4001-Q4003 above, which would otherwise read
+    # as a family of 3 on merged.rs itself.
+    fence mergedrsgeomstep <<'MD'
+    Q4011  1  todo  opus  crates/rcad-geom/src/mesh.rs,crates/rcad-geom/tests/a_ball_near_a_corner.rs,crates/rcad-geom/tests/merged.rs  from/- declares a_ball_near_a_corner.rs in merged.rs whole §373
+    Q4012  1  todo  opus  crates/rcad-geom/tests/a_square_tube_in_a_block.rs,crates/rcad-geom/tests/merged.rs#a_square_tube_in_a_block  from/- declares its own file by item §373
+    Q4013  1  todo  opus  crates/rcad-geom/Cargo.toml,crates/rcad-geom/tests/merged.rs,justfile  from/- the fold itself, naming only merged.rs under tests/ §373
+    Q4021  1  todo  opus  crates/rcad-step/src/import.rs,crates/rcad-step/tests/a_ball_near_a_corner.rs,crates/rcad-step/tests/merged.rs  from/- declares a_ball_near_a_corner.rs in merged.rs whole §373
+    Q4022  1  todo  opus  crates/rcad-step/tests/a_square_tube_in_a_block.rs,crates/rcad-step/tests/merged.rs#a_square_tube_in_a_block  from/- declares its own file by item §373
+    Q4023  1  todo  opus  crates/rcad-step/Cargo.toml,crates/rcad-step/tests/merged.rs,justfile  from/- the fold itself, naming only merged.rs under tests/ §373
+    MD
+    drive mergedrsgeomstep families
+    [ "$got" = '0 families with no trace (§450.3)' ] \
+        || fail "crates/rcad-geom/tests/merged.rs or crates/rcad-step/tests/merged.rs, whole or by item, grouped rows into a family on merged.rs itself"
+
     bundled() {
         got=$("$j" --set queue_file "$dir/$1.md" --set queue_running 1 --set queue_bundle "$2" queue "${@:3}" 2>&1) \
             || fail "queue ${*:3} failed on the $1 fixture with bundles of $2"
