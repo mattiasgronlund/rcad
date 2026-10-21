@@ -210,6 +210,36 @@ pub(crate) fn march(
     room: f64,
     most: usize,
 ) -> Result<Marched> {
+    let first = room.min(the_smaller_radius(surfaces));
+    march_with_a_first_ask(surfaces, seed, first, room, most)
+}
+
+/// The smaller of the two surfaces' own radii: a ball's or a pipe's, and a
+/// ring's tube. A plane and a cone have none, and stand for infinity here.
+fn the_smaller_radius(surfaces: [&Surface; 2]) -> f64 {
+    surfaces
+        .map(|surface| match surface {
+            Surface::Plane(_) | Surface::Cone(_) => f64::INFINITY,
+            Surface::Sphere(ball) => ball.radius(),
+            Surface::Cylinder(pipe) => pipe.radius(),
+            Surface::Torus(ring) => ring.tube_radius(),
+        })
+        .into_iter()
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// [`march`], its first trial asked `first`.
+///
+/// # Errors
+///
+/// The same as [`march`]'s.
+fn march_with_a_first_ask(
+    surfaces: [&Surface; 2],
+    seed: Point,
+    first: f64,
+    room: f64,
+    most: usize,
+) -> Result<Marched> {
     let start = settled(surfaces, seed)?;
     if the_settling_did_not_land_on_both(surfaces, start) {
         return Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces);
@@ -217,7 +247,7 @@ pub(crate) fn march(
     let mut deviation = how_far_off_the_crossing(surfaces, start)?;
     let mut points = Vec::new();
     let mut here = start;
-    let mut step = room.max(f64::MIN_POSITIVE);
+    let mut step = first.max(f64::MIN_POSITIVE);
     let mut travelled = 0.0;
 
     loop {
