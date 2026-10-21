@@ -51,8 +51,9 @@
 //! union was refused, one spelling and two alike, as was a pin through such a
 //! cross (Q2461). The edge's other corner now says which half, and with the
 //! wall counted along a ruling all eight unions answer (Q2460). One answer
-//! does not measure: an arc of it names the spelling of the pipe that neither
-//! face along it is on. The pin was then refused telling the parts of the
+//! did not measure, since two arcs of it named the spelling of the pipe that
+//! neither face along them is on, and they now name the face's (Q2470). The
+//! pin was then refused telling the parts of the
 //! upright wall the halves cut apart, and the side of the plane each ellipse
 //! lies in now tells them apart, so the pin unites too (Q2464).
 //!
@@ -818,19 +819,19 @@ const CROSSED_JOINT: f64 = 4.0;
 /// is symmetric about `y = 0`, and the count along that ruling now answers
 /// there too. Every answer is one solid of the volume worked out by hand.
 ///
-/// **But one, which unites and does not measure.** With the joint at `2`, the
+/// **One of them united and did not measure.** With the joint at `2`, the
 /// upper wall named at the joint, and the cross and the upper bar first, the
-/// arc where the lower wall bites the cross's wall below the joint, through
-/// `(−2, 0, 1)`, is stored naming the upper wall's spelling as the surface it
-/// crosses, though the faces either side of it are the cross's wall and the
-/// lower wall. `rcad_geom::which_two_surfaces_a_run_is_between` takes such a
-/// third name for a surface neither face is on and hands the walk the lower
-/// wall and the upper, which are one pipe, so the walk has no point between
-/// the arc's ends and the mesh draws the arc as its chord: refused
-/// `CannotMeshAFace`, `BoundarySideStraysFurtherThanTheDeflection`, straying
-/// `2.0`. Lower bar first, the arc names the lower wall and measures. This
-/// pins that one answer to that refusal until the fuse names a spelling of a
-/// face the arc lies along.
+/// two arcs where the lower wall bites the cross's wall below the joint,
+/// through `(±2, 0, 1)`, were stored naming the upper wall's spelling as the
+/// surface they cross, though the faces either side of each are the cross's
+/// wall and the lower wall. `rcad_geom::which_two_surfaces_a_run_is_between`
+/// took that for a third surface and handed the walk the lower wall and the
+/// upper, which are one pipe, so the walk had no point between an arc's ends
+/// and the mesh drew the arc as its chord: refused `CannotMeshAFace`,
+/// `BoundarySideStraysFurtherThanTheDeflection`, straying `2.0`. Lower bar
+/// first, the arcs named the lower wall and measured. The fuse now names the
+/// spelling of the face along such an arc, and all eight answers measure
+/// (Q2470).
 #[test]
 fn a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_them() {
     let mut wrong = Vec::new();
@@ -838,14 +839,7 @@ fn a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_th
         for axis_origin in [LOWER_ORIGIN, joint] {
             let answers = the_bars_united_across(joint, axis_origin);
             for (lower_first, answer) in [true, false].into_iter().zip(answers) {
-                let the_one_that_does_not_measure =
-                    joint == 2.0 && axis_origin == joint && !lower_first;
-                let as_it_should = if the_one_that_does_not_measure {
-                    matches!(answer.0, Err(Error::CannotMeshAFace { .. }))
-                } else {
-                    answer.0.is_ok()
-                };
-                if !as_it_should {
+                if answer.0.is_err() {
                     wrong.push(format!(
                         "joint at {joint}, wall at {axis_origin}, lower bar first {lower_first}: {}",
                         answer.1

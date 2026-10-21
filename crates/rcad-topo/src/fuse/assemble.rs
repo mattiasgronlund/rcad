@@ -5477,7 +5477,23 @@ impl Assembly {
         self.edges
             .iter()
             .zip(cut_by)
-            .map(|(edge, cut_by)| edge.how_it_runs(&self.corners, cut_by))
+            .zip(self.the_surfaces_of_the_faces_along_each_edge())
+            .map(|((edge, cut_by), either_side)| {
+                edge.how_it_runs(&self.corners, cut_by, &either_side)
+            })
+            .collect()
+    }
+
+    /// The surface each face along each edge is written on, as
+    /// [`Assembly::write_into`] writes it.
+    fn the_surfaces_of_the_faces_along_each_edge(&self) -> Vec<Vec<Surface>> {
+        self.claimants_of_each_edge()
+            .into_iter()
+            .map(|by| {
+                by.into_iter()
+                    .map(|dart| self.faces[dart.face].surface)
+                    .collect()
+            })
             .collect()
     }
 
@@ -6050,13 +6066,20 @@ impl Edge {
     /// [`Assembly::the_surface_that_cut_each_edge_its_faces_do_not_name`] says
     /// why. A rim that comes with one names it rather than its two faces, and an
     /// arc puts it in `and` in place of
-    /// [`Edge::the_surface_that_names_it_twice`].
+    /// [`Edge::the_surface_that_names_it_twice`]. `either_side` is the other:
+    /// the surfaces the faces along it are written on, whose spelling that
+    /// names.
     ///
     /// # Errors
     ///
     /// [`Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed`] for an arc of a
     /// curved crossing that nothing told from its sibling.
-    fn how_it_runs(&self, corners: &[Corner], cut_by: Option<Surface>) -> Result<EdgeRun> {
+    fn how_it_runs(
+        &self,
+        corners: &[Corner],
+        cut_by: Option<Surface>,
+        either_side: &[Surface],
+    ) -> Result<EdgeRun> {
         match (self.lies_on_two_planes(), self.ends[0] == self.ends[1]) {
             (true, false) => Ok(EdgeRun::Straight),
             (_, true) => Ok(match cut_by {
@@ -6066,7 +6089,8 @@ impl Edge {
             (false, false) => match self.arc {
                 WhichArc::TheOnlyOne => Ok(EdgeRun::Straight),
                 WhichArc::LeavingACorner { corner, towards } => {
-                    let and = cut_by.unwrap_or_else(|| self.the_surface_that_names_it_twice());
+                    let and =
+                        cut_by.unwrap_or_else(|| self.the_surface_that_names_it_twice(either_side));
                     let ends = self.ends.map(|end| corners[end].point);
                     if let Some(branch) = self.the_branch_of_a_hyperbola_this_is_on(ends)? {
                         return Ok(EdgeRun::PartOfWhereItCrosses {
@@ -6496,6 +6520,26 @@ impl Edge {
     /// [`Assembly::the_surface_that_cut_each_edge_its_faces_do_not_name`]
     /// hands it the other.
     ///
+    /// **It goes in spelled as a face along the arc is written**, and
+    /// `either_side` is the surfaces those faces are written on.
+    /// [`Edge::carried_by`] is the pair that met, and the face across the arc
+    /// in the answer can be on another spelling of it. Two bars on one pipe,
+    /// the upper naming its axis at the joint `z = 2`, with a bar across both
+    /// at `z = 3`, the cross and the upper bar united first and then the lower
+    /// bar: the two arcs where the lower wall bites the cross's wall below the
+    /// joint met as the cross's wall and the upper spelling, along the lower
+    /// wall's face. Named as they met, each arc's `and` was a surface neither
+    /// face is on, `rcad_geom::which_two_surfaces_a_run_is_between` read that
+    /// third surface with the face that sorts first, the lower wall, and the
+    /// walk, handed one pipe twice, put no point between the arc's ends. The
+    /// mesh drew the chord and was refused `CannotMeshAFace` (Q2470,
+    /// `tests/one_pipe_whose_origin_sits_at_two_places.rs`). A plane is matched
+    /// at any scale ([`name_of_the_plane_at_any_scale`]): a ball cut by two
+    /// blocks spelling one plane an ulp apart in scale had its arc name the
+    /// other block's plane (`tests/a_turned_plane_exactly_proportional_to_another.rs`).
+    /// Where no face along the arc is on the surface that sorts first, that
+    /// surface goes in as it met.
+    ///
     /// **The sentence that used to stand here said the check was an exact
     /// `Zero`, and that a corner this fuse solved for is exactly on a plane it
     /// was solved from.** Both halves were wrong, and the second is why nobody
@@ -6506,16 +6550,38 @@ impl Edge {
     /// `check_curved_face` reads off a solved corner (§36.13), read in
     /// `check_edges` too. §39.
     ///
-    /// A crossing with **two** curved surfaces and two ends is a pair of balls
-    /// cut twice. Two balls united, which cut each other once, are answered
+    /// A pair of balls cut twice is a crossing with **two** curved surfaces and
+    /// two ends. Two balls united, which cut each other once, are answered
     /// since §202.1. `fuse([ballA], [ballB, cube])` is a pair of
     /// balls cut twice and is reachable. What stops *it* is a crate down —
     /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, because a corner of such an arc
     /// has two quadrics round it (§31.2's limit under row 4).
-    fn the_surface_that_names_it_twice(&self) -> Surface {
+    fn the_surface_that_names_it_twice(&self, either_side: &[Surface]) -> Surface {
         let mut either = self.carried_by;
         either.sort_by_key(name_of_surface_bits);
-        either[0]
+        let named = either[0];
+        if either_side.contains(&named) {
+            return named;
+        }
+        either_side
+            .iter()
+            .filter(|face| one_surface_at_any_scale(face, &named))
+            .min_by_key(|face| name_of_surface_bits(face))
+            .copied()
+            .unwrap_or(named)
+    }
+}
+
+/// Whether two surfaces are one point set, a plane at any scale
+/// ([`name_of_the_plane_at_any_scale`]) and anything else as [`one_surface`]
+/// folds it.
+fn one_surface_at_any_scale(one: &Surface, other: &Surface) -> bool {
+    match (one.as_plane(), other.as_plane()) {
+        (Some(_), Some(_)) => {
+            name_of_the_plane_at_any_scale(one) == name_of_the_plane_at_any_scale(other)
+        }
+        (None, None) => one_surface(one, other),
+        (Some(_), None) | (None, Some(_)) => false,
     }
 }
 
@@ -13344,7 +13410,7 @@ mod tests {
                 "leaving corner {from} along {towards:?} is the short arc: {short}"
             );
             assert!(
-                edge.how_it_runs(&corners, None).is_ok(),
+                edge.how_it_runs(&corners, None, &edge.carried_by).is_ok(),
                 "leaving corner {from} along {towards:?} has a half-space"
             );
         }
