@@ -11797,16 +11797,29 @@ fn is_a_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2], model: &Mod
 }
 
 /// Whether `meet` runs along one input edge that does not close on itself,
-/// from one of that edge's own two ends to a place that is neither.
+/// from one of that edge's own two ends to a place that is neither, and the
+/// edge's two ends are further apart than `meet`'s can be.
 ///
-/// **Where both ends come out one corner, such a stretch is the short one.**
-/// The input edge is an arc of less than a whole turn between two corners
-/// that [`Model::validate`]'s range check keeps more than a rounding apart, as
-/// the shortest chord of an edge that does not close. So the places along it
-/// that land on its own end's `f64` triple are near that end along the arc
-/// too, and never round the far side of the circle, where a crossing this
-/// fuse made, which runs along no input edge, can have either arc between two
-/// such places.
+/// **Such a stretch lies as near its end as its other end may be**, the way
+/// a straight side between two ends does. Its other end is somewhere on the
+/// edge within `d` of the edge's own end, where `d` is how far apart the two
+/// ends' boxes may be. On a circle, the edge is an arc of less than a whole
+/// turn, and the gap it leaves has a chord as long as the edge's own, so where
+/// that chord is longer than `d` the gap holds every point of the circle
+/// within `d` of the edge's end on the far side of it. The places on the edge
+/// within `d` of its end are then all on the near side, and so is the whole
+/// stretch. Twice `d`, so that the roundings of the two lengths have no say.
+/// On a curve of another shape the same holds unless the curve comes back
+/// within `d` of the edge's end somewhere else along the edge, which is a face
+/// pinched narrower than a box at that end.
+///
+/// A crossing this fuse made runs along no input edge, so this says nothing
+/// of one, and either arc between two places on it could be the long one
+/// (Q2193). Nor of an input edge whose two ends are nearer than the box of a
+/// place on it is wide: the fuse does not sweep its inputs with
+/// [`Model::validate`] before it runs, so the range check that keeps an open
+/// edge's ends apart has not been asked, and the box could reach round the
+/// edge to its far end.
 fn is_a_stretch_of_an_open_input_edge_off_its_own_end(meet: &FaceMeet, model: &Model) -> bool {
     let [edge] = meet.along.as_slice() else {
         return false;
@@ -11820,6 +11833,8 @@ fn is_a_stretch_of_an_open_input_edge_off_its_own_end(meet: &FaceMeet, model: &M
     }
     let is_an_own_end = |end: &MeetPoint| matches!(end, MeetPoint::Existing { vertex, .. } if own_ends.contains(vertex));
     is_an_own_end(&meet.ends[0]) != is_an_own_end(&meet.ends[1])
+        && input.distance_between_its_ends()
+            > 2.0 * how_far_apart_two_boxes_may_be(meet.ends[0].point(), meet.ends[1].point())
 }
 
 /// Whether a wire of a flat piece of the answer bounds anything: whether some
