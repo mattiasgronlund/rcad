@@ -15,7 +15,9 @@ exact and there is no tolerance to choose.
 
 It keeps a loader of its own rather than `load()` in `spend.py`, which keeps
 only the first record of each response, no tool result times and no run
-record (§411.8).
+record (§411.8). Beside each time it prices the step from that same loader's
+usage data: `cost_of` and its price table are imported from `spend.py`, not
+copied here, so the two tools price one response alike (§411.1).
 """
 
 import collections
@@ -26,6 +28,9 @@ import os
 import re
 import shlex
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "session-spend"))
+from spend import cost_of  # noqa: E402
 
 TOP = 15
 DAY_MS = 86_400_000
@@ -377,6 +382,8 @@ def finish_row(row, steps):
     row["land lock"] = sum(steps[(agent["run"], agent["id"])]["buckets"].get("land lock", 0)
                            for attempt in row["attempts"] for agent in attempt["agents"])
     row["slot"] = sum(slot_time(attempt, steps, row) for attempt in row["attempts"])
+    row["cost"] = sum(steps[(agent["run"], agent["id"])]["cost"]
+                      for attempt in row["attempts"] for agent in attempt["agents"])
 
 
 def attempt_parts(attempt, steps, row):
@@ -477,7 +484,7 @@ def step_of(agent, paths, attempt):
     step = {"agent": agent, "time": agent["end"] - agent["start"], "buckets": collections.Counter(),
             "own": collections.defaultdict(list), "tree": None, "unlocks": [], "verify_lane_start": None,
             "hold": None, "land_trees": [], "land_json": None, "marks": set(),
-            "served": len(attempt["rows"]), "landed_by": None}
+            "served": len(attempt["rows"]), "landed_by": None, "cost": 0.0}
     records, lost = read_transcript(paths) if paths else ([], 0)
     if lost:
         step["marks"].add(f"{lost} records cut off")
@@ -486,9 +493,33 @@ def step_of(agent, paths, attempt):
         step["marks"].add("no transcript")
         return step
     step["tree"] = records[0].get("cwd")
+    step["cost"] = cost_of_step(records)
     sweep(step, records)
     need_sum(step["buckets"], step["time"], f"{agent['label']} ({agent['run']}, agent {agent['id']})")
     return step
+
+
+def cost_of_step(records):
+    """What this agent's own API responses cost, each response priced once (§411.1).
+
+    A response that streamed several records repeats its `usage` with a
+    growing `output_tokens`; the record with the largest count is the one
+    `spend.py`'s `load()` keeps, and this keeps the same one so the two tools
+    price a response alike.
+    """
+    kept = {}
+    for record in records:
+        if record.get("type") != "assistant":
+            continue
+        message = record.get("message") or {}
+        usage = message.get("usage")
+        if not usage:
+            continue
+        key = (record.get("requestId"), message.get("id"))
+        current = kept.get(key)
+        if current is None or usage.get("output_tokens", 0) > current["usage"].get("output_tokens", 0):
+            kept[key] = {"model": message.get("model"), "usage": usage}
+    return sum(cost_of(response["model"], response["usage"]) for response in kept.values())
 
 
 def sweep(step, records):
@@ -910,7 +941,7 @@ def row_report(row, steps):
     return {
         "row": row["id"], "start": fmt_time(row["start"]), "end": fmt_time(row["end"]),
         "elapsed": row["elapsed"], "parts": row["parts"], "land lock": row["land lock"], "slot": row["slot"],
-        "released": row["released_how"], "marks": sorted(row["marks"] | step_marks),
+        "cost": row["cost"], "released": row["released_how"], "marks": sorted(row["marks"] | step_marks),
         "attempts": [{
             "run": attempt["run"], "lane": attempt["lane"], "rows": attempt["rows"],
             "take": fmt_time(attempt["take"]) if attempt["take"] is not None else None,
@@ -923,7 +954,7 @@ def step_report(step):
     agent = step["agent"]
     return {
         "role": agent["role"], "agent": agent["id"], "label": agent["label"], "start": fmt_time(agent["start"]),
-        "time": step["time"], "served": step["served"], "share": step["time"] / step["served"],
+        "time": step["time"], "cost": step["cost"], "served": step["served"], "share": step["time"] / step["served"],
         "buckets": dict(step["buckets"].most_common()),
         "own": {key: sum(times) for key, times in step["own"].items()},
         "tree held": step.get("held"),
@@ -943,10 +974,10 @@ def summary_of(rows, steps):
     for number, row in enumerate(rows):
         bundle = max(len(attempt["rows"]) for attempt in row["attempts"])
         whole = {name: value for name, value in row["parts"].items() if name != "agents"}
-        whole.update({"elapsed": row["elapsed"], "slot": row["slot"],
+        whole.update({"elapsed": row["elapsed"], "slot": row["slot"], "cost": row["cost"],
                       "land lock (in the lander's time)": row["land lock"]})
         for name, value in whole.items():
-            group = "row" if name in ("elapsed", "slot") else "wait"
+            group = "row" if name in ("elapsed", "slot", "cost") else "wait"
             per_row[(group, name)][number] = value
             shares[(group, name)] += value / bundle
         for attempt in row["attempts"]:
@@ -955,14 +986,17 @@ def summary_of(rows, steps):
                 served = step["served"]
                 per_row[("step", agent["role"])][number] += step["time"]
                 shares[("step", agent["role"])] += step["time"] / served
+                per_row[("step cost", agent["role"])][number] += step["cost"]
+                shares[("step cost", agent["role"])] += step["cost"] / served
                 for bucket, value in step["buckets"].items():
                     per_row[("bucket", bucket)][number] += value
                     shares[("bucket", bucket)] += value / served
     out = {}
     for key, values in per_row.items():
         ordered = sorted(values)
-        out[f"{key[0]}: {key[1]}"] = {"total share": round(shares[key]), "median": percentile(ordered, 50),
-                                     "p90": percentile(ordered, 90)}
+        name = f"{key[0]}: {key[1]}"
+        out[name] = {"total share": shares[key] if is_cost(name) else round(shares[key]),
+                    "median": percentile(ordered, 50), "p90": percentile(ordered, 90)}
     return out
 
 
@@ -987,7 +1021,9 @@ def print_report(report, detail):
     print("A model bucket holds the time to write its blocks, and a response's first block holds the wait "
           "for its first token too. A tool holds the time from its response's last block to its result, "
           "split equally with the tools running beside it; `own` is from its call to its result. Totals add "
-          "up shares: a step's time over the rows it served.")
+          "up shares: a step's time over the rows it served. Cost prices each response once, by the model "
+          "and usage its largest streamed record carried, through spend.py's cost_of; a step with no usage "
+          "in its transcript prices at $0.")
     print()
     print(f"unattributed: {report['unattributed']['lanes']} lanes with no row, "
           f"{fmt_span(report['unattributed']['time'])} of agent time")
@@ -1000,16 +1036,17 @@ def print_report(report, detail):
 
 
 def print_rows(rows):
-    header = ("row", "elapsed", "agents", "to start", "handoffs", "merge wait", "land lock", "between", "after",
-              "slot", "tries")
+    header = ("row", "elapsed", "cost", "agents", "to start", "handoffs", "merge wait", "land lock", "between",
+              "after", "slot", "tries")
     print(" ".join(f"{name:>10}" for name in header))
     shown = sorted(rows, key=lambda row: row["elapsed"], reverse=True)
     for row in shown[:TOP]:
         parts = row["parts"]
-        cells = [row["row"], fmt_span(row["elapsed"]), fmt_span(parts["agents"]), fmt_span(parts["waiting to start"]),
-                 fmt_span(parts["handoff"]), fmt_span(parts["earlier merge in the same run"]),
-                 fmt_span(row["land lock"]), fmt_span(parts["between attempts"]), fmt_span(parts["after the run"]),
-                 fmt_span(row["slot"]), str(len(row["attempts"]))]
+        cells = [row["row"], fmt_span(row["elapsed"]), fmt_cost(row["cost"]), fmt_span(parts["agents"]),
+                 fmt_span(parts["waiting to start"]), fmt_span(parts["handoff"]),
+                 fmt_span(parts["earlier merge in the same run"]), fmt_span(row["land lock"]),
+                 fmt_span(parts["between attempts"]), fmt_span(parts["after the run"]), fmt_span(row["slot"]),
+                 str(len(row["attempts"]))]
         print(" ".join(f"{cell:>10}" for cell in cells) + (f"  {'; '.join(row['marks'])}" if row["marks"] else ""))
     rest = shown[TOP:]
     if rest:
@@ -1018,7 +1055,7 @@ def print_rows(rows):
 
 def print_detail(row):
     print()
-    print(f"{row['row']}: {fmt_span(row['elapsed'])} from {row['start']} to {row['end']}, "
+    print(f"{row['row']}: {fmt_span(row['elapsed'])} ({fmt_cost(row['cost'])}) from {row['start']} to {row['end']}, "
           f"released {row['released'] or 'never'}")
     for attempt in row["attempts"]:
         print(f"  attempt in {attempt['run']}, lane {attempt['lane']}, rows {','.join(attempt['rows'])}, "
@@ -1026,8 +1063,8 @@ def print_detail(row):
         for step in attempt["steps"]:
             served = f", serves {step['served']}, share {fmt_span(step['share'])}" if step["served"] > 1 else ""
             held = f", tree held {fmt_span(step['tree held'])}" if step["tree held"] is not None else ""
-            print(f"    {step['role']:<9} {step['start']} {fmt_span(step['time']):>8}{served}{held}"
-                  + (f"  [{'; '.join(step['marks'])}]" if step["marks"] else ""))
+            print(f"    {step['role']:<9} {step['start']} {fmt_span(step['time']):>8} {fmt_cost(step['cost']):>8}"
+                  f"{served}{held}" + (f"  [{'; '.join(step['marks'])}]" if step["marks"] else ""))
             if step["landed by"]:
                 print(f"      landed by {step['landed by']['lane']} in {step['landed by']['run']}")
             if step["landed for"]:
@@ -1042,11 +1079,11 @@ def print_detail(row):
 
 def print_summary(summary):
     print(f"{'over the rows picked':<48} {'total share':>12} {'median':>9} {'p90':>9}")
-    for group in ("row", "wait", "step"):
+    for group in ("row", "wait", "step", "step cost"):
         for name, numbers in sorted(summary.items(), key=lambda item: -item[1]["total share"]):
             if name.startswith(group + ": "):
-                print(f"{name:<48} {fmt_span(numbers['total share']):>12} {fmt_span(numbers['median']):>9} "
-                      f"{fmt_span(numbers['p90']):>9}")
+                print(f"{name:<48} {fmt_number(name, numbers['total share']):>12} "
+                      f"{fmt_number(name, numbers['median']):>9} {fmt_number(name, numbers['p90']):>9}")
     buckets = sorted(((name, numbers) for name, numbers in summary.items() if name.startswith("bucket: ")),
                      key=lambda item: -item[1]["total share"])
     for name, numbers in buckets[:TOP]:
@@ -1054,6 +1091,15 @@ def print_summary(summary):
               f"{fmt_span(numbers['p90']):>9}")
     if len(buckets) > TOP:
         print(f"{'bucket: other':<48} {fmt_span(sum(numbers['total share'] for _, numbers in buckets[TOP:])):>12}")
+
+
+def is_cost(name):
+    """A summary entry priced in dollars rather than milliseconds: the row's own cost, or a role's share of it."""
+    return name == "row: cost" or name.startswith("step cost: ")
+
+
+def fmt_number(name, value):
+    return fmt_cost(value) if is_cost(name) else fmt_span(value)
 
 
 # ---------------------------------------------------------------------------
@@ -1089,6 +1135,10 @@ def fmt_span(ms):
     if seconds < 3600:
         return f"{seconds // 60}m{seconds % 60:02d}s"
     return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
+
+
+def fmt_cost(usd):
+    return f"${usd:.2f}"
 
 
 def text_of(content):
