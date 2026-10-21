@@ -899,6 +899,43 @@ fn a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_tolerant_b
     }
 }
 
+/// **Turned 0.4 about `x`, and that turn shifted, the sound pyramid and the
+/// wedge over the `+y` edge built there reach the range check: `certified`
+/// refuses every rule `DynamicRangeTooWide`, and `tolerant(100)` answers every
+/// rule** with that check in the log, each answer what the two hold. Every one
+/// was refused `Undecidable`, "a point inside a piece of a face" (queue rows
+/// Q2321 and Q2334). Turned, the wedge's face `y = 2x` cuts the pyramid's `−x`
+/// face into a triangle a rounding across by the apex. The fuse solved the
+/// apex from the `−y`, `+x` and `+y` planes, so on the `−x` face it is a
+/// rounding off the face's plane, no point was found inside the triangle, and
+/// `by_a_plane` in `fuse/select.rs` read a corner of the input from the planes
+/// round it only where they are exactly three. It now reads the triangle's
+/// corner there as where the lines of its two sides cross, the `−x` face's own
+/// top corner, and finds all three corners in front of the wedge's other face
+/// `y = 0.5x`, so outside the wedge. The range the answer then spans is the
+/// limit §294.21 and §448.7 settled for the cut through the apex.
+#[test]
+fn a_sound_pyramid_turned_about_x_and_cut_by_a_wedge_over_the_plus_y_edge_reaches_the_range_check()
+{
+    let wedge = A_WEDGE_OVER_THE_PLUS_Y_EDGE;
+    let [_, _, turned, turned_and_shifted] = every_placement();
+    for placement in [turned, turned_and_shifted] {
+        for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+            let case = format!("{placement:?}, {wedge:?} {rule:?}");
+            match the_wedge_through_the_apex(wedge, placement, rule, &Policy::certified()) {
+                Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+                    assert!(ratio > 1e15, "{case}: a range of {ratio}");
+                }
+                other => panic!("{case} came back {other:?} under certified"),
+            }
+            match the_wedge_through_the_apex(wedge, placement, rule, &Policy::tolerant(100.0)) {
+                Ok(named) => assert_eq!(named, [DYNAMIC_RANGE_CHECK], "{case}"),
+                other => panic!("{case} came back {other:?} under tolerant(100)"),
+            }
+        }
+    }
+}
+
 /// **Every partner, every rule, every placement and both policies give the
 /// box's refusal** for every move of the apex, the cut through the apex among
 /// them. Each three of the four side planes cross at the apex alone, so no
