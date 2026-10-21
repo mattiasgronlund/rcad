@@ -304,6 +304,9 @@ def tree_for(hold, trees, found, newly_claimed, left):
     given: a lane's own tree left standing unlocked beside its merger's is not
     where the row runs. A tree that left the hold's branch (§299.6) was
     claimed before any row was matched, so it is never among `newly_claimed`.
+    The branches that carry a `lane-<label>` hold are the ones `has_a_tree`
+    reads: its own, a lander's or merger's `merge-<label>` (§266.3), and an
+    Opus merger's `merge-<label>-after-land` after a lander's stop (§384.3).
     """
     if newly_claimed:
         (path,) = newly_claimed
@@ -312,12 +315,12 @@ def tree_for(hold, trees, found, newly_claimed, left):
         return next(tree for tree in trees if tree.path == left[hold["branch"]])
     if not found:
         return None
+    carriers = {hold["branch"]}
+    if hold["branch"].startswith("lane-"):
+        label = hold["branch"][len("lane-"):]
+        carriers |= {f"merge-{label}", f"merge-{label}-after-land"}
     for tree in trees:
-        if not tree.is_lane:
-            continue
-        if tree.branch == hold["branch"]:
-            return tree
-        if hold["branch"].startswith("lane-") and tree.branch == "merge-" + hold["branch"][len("lane-"):]:
+        if tree.is_lane and tree.branch in carriers:
             return tree
     raise AssertionError(f"has_a_tree found a lane tree for {hold['branch']}, and no lane tree carries it")
 

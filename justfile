@@ -16395,11 +16395,9 @@ check-queue-api-selftest:
     grep -qxF "merge-after-land-after-land  $merger_tree" <<<"$got" || fail "the after-land merger's tree was not counted"
     grep -q "^lane-after-land  .*no tree yet" <<<"$got" \
         && fail "a row whose merger is on merge-<label>-after-land was also counted as treeless"
-    # `tooling/queue-page/render.py`'s own `tree_for` does not yet know the
-    # `-after-land` pattern (out of this row's write set, filed separately), so
-    # a dangling hold of this shape left past this point throws inside
-    # `queue-page`'s render, swallowed by its own `|| true` but leaving later
-    # pages stale. Released here so the checks below still see a fresh page.
+    # Released here, so the checks below see only the holds they set up.
+    # check-queue-page-selftest's Q23 checks that the page's own `tree_for`
+    # finds this merger's tree too (Q2544).
     got=$(q "$hub" drop "$q_after_land" 230 2>&1) || fail "drop could not release $q_after_land"
 
     # Q2283 (§263.4): an agent that dies before `git worktree remove` leaves
