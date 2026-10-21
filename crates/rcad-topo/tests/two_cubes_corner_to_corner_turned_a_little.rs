@@ -33,10 +33,17 @@
 //! both orders, closer to the corner still, down to `(t, p) = (0.003,
 //! 7.512112e-5)`, and under `Policy::tolerant(100.0)` as far out as `(0.05,
 //! 0.05)`, which refused `CannotTellTheCellsOfAFaceApart` at `65d5ef12`
-//! (Q2303). At `(0.05, 0.05)` and `(0.02, 0.001)` certified still refuses the
-//! union and the turned-first difference `DynamicRangeTooWide`; only the
-//! intersection, both orders, and the block-first difference answer there,
-//! and Q2305 is for the rest.
+//! (Q2303).
+//!
+//! **At `(0.05, 0.05)` and `(0.02, 0.001)` under `Policy::certified()`, every
+//! fuse answers too (Q2305).** The union and the turned-first difference
+//! refused `DynamicRangeTooWide` there. Two of the turned cube's edges cross a
+//! side of the block a rounding from its top corner, outside the block, and
+//! both crossings land on that corner's own `f64` triple, `(0, 0, 10)`. The
+//! arrangements had proved them apart from it, but joined to it by their triple
+//! they left two edges `1.8e-15` long. They now stay two corners: each shares
+//! one plane with the block's corner, exact arithmetic proves them apart, and
+//! no kept side runs between them (`docs/decisions.md` §365.7).
 
 use rcad_geom::{Deflection, Isometry, Scale};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -117,9 +124,8 @@ fn certified_every_fuse_of_two_cubes_turned_a_little_corner_to_corner_answers_at
 }
 
 /// At `(t, p) = (0.05, 0.05)` and `(0.02, 0.001)`, under `Policy::certified()`,
-/// only the intersection, both orders, and the block-first difference answer;
-/// Q2305 is for the union and the turned-first difference, which still refuse
-/// `DynamicRangeTooWide` there.
+/// the intersection, both orders, and the block cube less the turned one answer
+/// with the volumes worked by hand; the other three fuses are the next test's.
 #[test]
 fn certified_the_intersection_and_the_block_first_difference_answer_at_two_more_turns() {
     for (t, p) in [(0.05, 0.05), (0.02, 0.001)] {
@@ -151,6 +157,28 @@ fn certified_the_intersection_and_the_block_first_difference_answer_at_two_more_
             1000.0,
             &asked,
         );
+    }
+}
+
+/// At `(t, p) = (0.05, 0.05)` and `(0.02, 0.001)`, under `Policy::certified()`,
+/// the union, both orders, and the turned cube less the block measure the two
+/// volumes worked by hand; they refused `DynamicRangeTooWide` at `626c389a`
+/// (Q2305).
+#[test]
+fn certified_the_union_and_the_turned_first_difference_answer_at_two_more_turns() {
+    for (t, p) in [(0.05, 0.05), (0.02, 0.001)] {
+        for (rule, order, worked) in [
+            (Rule::Union, Order::BlockFirst, 2000.0),
+            (Rule::Union, Order::TurnedFirst, 2000.0),
+            (Rule::Difference, Order::TurnedFirst, 1000.0),
+        ] {
+            let asked = format!("certified, t = {t}, p = {p}, {rule:?}, {order:?}");
+            assert_about(
+                volume_of_a_fuse(&Policy::certified(), t, p, rule, order, &asked),
+                worked,
+                &asked,
+            );
+        }
     }
 }
 

@@ -40,6 +40,8 @@
 //! the Q2299 turns, since that policy takes no two points a rounding apart as
 //! one: an edge more than two faces claimed joined two corners less than a
 //! rounding apart (`Assembly::check_the_range_at_each_edge_not_two_faces_claim`).
+//! One of those answers since Q2555: the union with the block first at the
+//! Q2299 turn leaning `0.002` (`docs/decisions.md` §365.7).
 
 use rcad_geom::{Deflection, Isometry, Scale};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -173,7 +175,9 @@ fn the_turned_cube_a_little_short_of_a_half_turn_less_the_block_is_the_turned_cu
 /// `DynamicRangeTooWide` already. Each other was refused
 /// `ResultIsNotManifold`, for an edge more than two faces claimed whose two
 /// corners were less than a rounding apart. That is a range past what `f64`
-/// resolves, and that is what each is refused for now.
+/// resolves, and that is what each is refused for now. The union with the
+/// block first at the turn leaning `0.002` is left out: it answers since Q2555,
+/// and the next test pins that.
 #[test]
 fn certified_the_same_fuses_are_refused_for_two_corners_less_than_a_rounding_apart() {
     let unions = A_HALF_TURN
@@ -181,6 +185,9 @@ fn certified_the_same_fuses_are_refused_for_two_corners_less_than_a_rounding_apa
         .chain(&A_LITTLE_SHORT_OF_A_HALF_TURN)
         .flat_map(|&turn| {
             [Order::BlockFirst, Order::TurnedFirst].map(|order| (turn, Rule::Union, order))
+        })
+        .filter(|&(turn, _, order)| {
+            !(turn == A_LITTLE_SHORT_OF_A_HALF_TURN[1] && matches!(order, Order::BlockFirst))
         });
     let less_the_block = A_LITTLE_SHORT_OF_A_HALF_TURN
         .iter()
@@ -196,6 +203,22 @@ fn certified_the_same_fuses_are_refused_for_two_corners_less_than_a_rounding_apa
             Ok(_) => panic!("{asked}: answered"),
         }
     }
+}
+
+/// Under `Policy::certified()`, the union with the block first at the turn
+/// leaning `0.002` is both cubes since Q2555: the corners less than a rounding
+/// apart there share one plane, and exact arithmetic proves them apart
+/// (`docs/decisions.md` §365.7). The union with the turned cube first still
+/// refuses, so the two orders disagree.
+#[test]
+fn certified_the_union_with_the_block_first_at_the_turn_leaning_two_thousandths_is_both_cubes() {
+    let turn = A_LITTLE_SHORT_OF_A_HALF_TURN[1];
+    let asked = format!("{turn:?}, union, block first, certified");
+    let policy = Policy::certified();
+    let (model, answer) = fused(turn, Rule::Union, Order::BlockFirst, &policy);
+    let answer = answer.unwrap_or_else(|why| panic!("{asked}: {why}"));
+    assert_eq!(answer.solids().len(), 2, "{asked}: one solid for each cube");
+    assert_about(volume_of(&model, &answer, &policy, &asked), 2000.0, &asked);
 }
 
 #[test]
@@ -257,8 +280,14 @@ fn volume_of_a_fuse(turn: [f64; 4], rule: Rule, order: Order, asked: &str) -> f6
     let policy = Policy::tolerant(100.0);
     let (model, answer) = fused(turn, rule, order, &policy);
     let answer = answer.unwrap_or_else(|why| panic!("{asked}: {why}"));
+    volume_of(&model, &answer, &policy, asked)
+}
+
+/// The volume of `answer`, once `model`, which it is written into, validates
+/// under `policy`.
+fn volume_of(model: &Model, answer: &Fused, policy: &Policy, asked: &str) -> f64 {
     model
-        .validate(&policy, &mut ProvenanceLog::new())
+        .validate(policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{asked}: {why}"));
     answer
         .solids()
