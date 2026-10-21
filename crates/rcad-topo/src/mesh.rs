@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use rcad_geom::{
     Axis, Deflection, DynamicRange, EdgeRun, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun,
     Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, PointsAlongACrossing,
-    SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Vector, which_two_surfaces_a_run_is_between,
+    SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Torus, Vector, which_two_surfaces_a_run_is_between,
 };
 use rcad_mesh::{
     CannotTriangulate, Loop, NotALoop, Patch, TrimmedDomain, triangulate, zip_up_a_band,
@@ -8988,32 +8988,9 @@ fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room:
             round.abs(),
             round.abs(),
         ),
-        // **A torus bends both ways and by two different amounts**, which no
-        // other surface here does: `r` round the tube and up to `R + r` round
-        // the ring. `rcad-mesh`'s `how_far_a_flat_piece_strays` derives
-        // `C²·(1/(3r) + 1/(2S))` for `S = R + r`, which is `C²/ρ` for the one
-        // radius written below, so the share is one and the whole of the
-        // stretching is in `ρ`. `turns_over` is then the arc length divided by
-        // that radius, so that `radius · turns_over` is the arc length the way
-        // it is for every arm above.
-        //
-        // **That length is no turn, so the turn round the tube is charged
-        // apart.** `r / ρ` is under seven twelfths for every ring that does not
-        // run through itself, so half a turn round the tube came back one step:
-        // a ring of four round a tube of one cut across its band from the outer
-        // equator over the top to the inner had nothing between the two, its
-        // coarsest mesh lay flat on the two equators, and enclosing `-6e-17`
-        // it was refused `VolumeIsNotPositive` at seven turns of 234
-        // (`a_half_ring_standing_on_a_round_plate.rs`, row Q1632). Round the
-        // ring the length already overcharges the angle, by `S / ρ`, over
-        // seven sixths.
-        Surface::Torus(ring) => {
-            let widest = ring.ring_radius() + ring.tube_radius();
-            let tube = ring.tube_radius();
-            let effective = 6.0 * tube * widest / (2.0 * widest + 3.0 * tube);
-            let length = (tube * round).hypot(widest * up) / effective;
-            (effective, 1.0, length, length.max(round.abs()))
-        }
+        // A torus bends both ways and by two different amounts, so no one
+        // radius stands for it.
+        Surface::Torus(ring) => return how_many_steps_round_a_torus(ring, round, up, room),
         other => panic!("this crate cannot walk along {other:?}"),
     };
     // A step that stays on a cone's apex covers no distance and bends by
@@ -9025,10 +9002,52 @@ fn how_many_steps(stored: &Surface, leaving: [f64; 2], arriving: [f64; 2], room:
     let longest_chord = (share * radius * room * WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET).sqrt();
     let by_bending = (radius * turns_over / longest_chord).ceil();
     let by_turning = (turned / (core::f64::consts::TAU / 4.0)).ceil();
-    let steps = by_bending.max(by_turning).max(1.0);
-    // One past the cap, which is what refuses it a moment later. Said this way
-    // round rather than cast, because `as` on a number this size — or on one
-    // that is not a number at all — saturates quietly.
+    as_a_count_of_steps(by_bending.max(by_turning).max(1.0))
+}
+
+/// [`how_many_steps`] on a torus, which asks the same two questions of it and
+/// answers each on both of the radii it bends by.
+///
+/// **How far it bends is two terms added, one for each way.** `rcad-mesh`'s
+/// `how_far_a_flat_piece_strays` charges a piece of a torus
+/// `C_v²/(3r) + C_u²/(2S)`: `C_v` the chord round the tube, `C_u` the chord
+/// round the ring and `S = R + r` the furthest the ring reaches. A step `round`
+/// round the tube and `up` round the ring has chords of at most `r · round` and
+/// `S · up`, and cut into `n` pieces both shrink `n` times, so each piece
+/// strays at most `(r · round²/3 + S · up²/2) / n²` and `n` is the fewest that
+/// brings that inside the share of the deflection a boundary side may spend.
+///
+/// **Each way is charged its own radius and not one radius for both.** Folded
+/// into `ρ = 1/(1/(3r) + 1/(2S))`, which is about `3r` on a thin tube, a step
+/// round the ring was charged as though it bent like the tube, and its turn as
+/// its length over `ρ`: a quarter of a ring of a hundred round a tube of one
+/// came back 35 steps at every deflection from `60` up, and its bend meshed to
+/// 218 triangles whether it was asked for `60` or `10³⁰⁰` (row Q2536).
+///
+/// **How far it turns is the angle the step sweeps, both ways at once**, as on
+/// a ball. Round the tube that is what keeps half a turn from coming back one
+/// step: a ring of four round a tube of one cut across its band from the outer
+/// equator over the top to the inner had nothing between the two, its coarsest
+/// mesh lay flat on the two equators, and enclosing `-6e-17` it was refused
+/// `VolumeIsNotPositive` at seven turns of 234
+/// (`a_half_ring_standing_on_a_round_plate.rs`, row Q1632).
+fn how_many_steps_round_a_torus(ring: &Torus, round: f64, up: f64, room: f64) -> usize {
+    let tube = ring.tube_radius();
+    let widest = ring.ring_radius() + tube;
+    let strays = tube * round * round / 3.0 + widest * up * up / 2.0;
+    let by_bending = (strays / (room * WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET))
+        .sqrt()
+        .ceil();
+    let by_turning = (round.hypot(up) / (core::f64::consts::TAU / 4.0)).ceil();
+    as_a_count_of_steps(by_bending.max(by_turning).max(1.0))
+}
+
+/// `steps` as a count, or one past [`MOST_POINTS_A_MESH_WILL_HOLD`] when it is
+/// more than that, which is what refuses it a moment later.
+///
+/// Said this way round rather than cast, because `as` on a number this size —
+/// or on one that is not a number at all — saturates quietly.
+fn as_a_count_of_steps(steps: f64) -> usize {
     if steps > MOST_POINTS_A_MESH_WILL_HOLD as f64 || steps.is_nan() {
         return MOST_POINTS_A_MESH_WILL_HOLD + 1;
     }
@@ -11846,12 +11865,19 @@ mod tests {
     /// are already past the deflection before a triangle is cut. At `0.8` this
     /// test fails with the ball's cell charged `1.4640`.
     ///
-    /// **A ring fits with room to spare, and the reason is not slack in the
-    /// budget.** Its two terms `C_v²/(3r)` and `C_u²/(2S)` are *added*, and the
-    /// one radius `how_many_steps` gives a torus is
-    /// `1/(1/(3r) + 1/(2S))` — so the two directions **split** the half rather
-    /// than each taking it. `0.481` and `0.435` for the outer and inner equators
-    /// of a ring of four and one are that split, not headroom.
+    /// **A ring fits the way a ball does, with nothing left over at its outer
+    /// equator.** Its two terms `C_v²/(3r)` and `C_u²/(2S)` are *added*, and
+    /// [`how_many_steps_round_a_torus`] sizes a step each way against half the
+    /// deflection on its own, so the cell's two sides spend a half each: `0.985`
+    /// at the outer equator of a ring of four and one, and `0.986` on a ring of a
+    /// hundred round a tube of one. At the inner equator the ring of four's cell
+    /// is charged
+    /// `0.786` and not the whole, because the triangulator reads the chord round
+    /// the ring on the circle the cell really reaches, `R − r` there, where the
+    /// step was sized on `R + r`. Before row Q2536 the two ways shared one
+    /// radius, `1/(1/(3r) + 1/(2S))`, and split the half between them — `0.481`
+    /// and `0.435` — and a step round a thin ring was charged as though it bent
+    /// like the tube.
     ///
     /// **The pipe here is coverage and not evidence, and the difference is worth
     /// saying.** A cylinder is flat along its axis, so the step up one comes back
@@ -11916,6 +11942,7 @@ mod tests {
         let ball = Surface::Sphere(Sphere::new(Point::origin(), 1.0).expect("a ball"));
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a pipe"));
         let ring = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a ring"));
+        let wide = Surface::Torus(Torus::new(Axis::z(), 100.0, 1.0).expect("a ring"));
         let cone = Surface::Cone(Cone::new(Axis::z(), 0.5).expect("a cone"));
 
         let a_pipes_cell = what_a_cell_of_two_steps_is_charged(&pipe, [0.0, 0.0], room) / room;
@@ -11932,6 +11959,12 @@ mod tests {
                 ring,
                 [core::f64::consts::PI, 0.0],
             ),
+            ("a ring of a hundred round a tube of one", wide, [0.0, 0.0]),
+            (
+                "the inner equator of that ring",
+                wide,
+                [core::f64::consts::PI, 0.0],
+            ),
         ];
         for (what, stored, at) in fits {
             let share = what_a_cell_of_two_steps_is_charged(&stored, at, room) / room;
@@ -11941,11 +11974,18 @@ mod tests {
             );
         }
 
-        let ball_uses = what_a_cell_of_two_steps_is_charged(&ball, [0.0, 0.0], room) / room;
-        assert!(
-            (0.97..=1.0).contains(&ball_uses),
-            "a ball's cell used {ball_uses} of the deflection, and the whole of it was spent"
-        );
+        let spends_the_whole = [
+            ("a ball", ball),
+            ("a ring of four and one", ring),
+            ("a ring of a hundred round a tube of one", wide),
+        ];
+        for (what, stored) in spends_the_whole {
+            let uses = what_a_cell_of_two_steps_is_charged(&stored, [0.0, 0.0], room) / room;
+            assert!(
+                (0.97..=1.0).contains(&uses),
+                "the cell on {what} used {uses} of the deflection, and the whole of it was spent"
+            );
+        }
 
         let cone_uses = what_a_cell_of_two_steps_is_charged(&cone, [0.0, 2.0], room) / room;
         assert!(
