@@ -471,7 +471,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
         let solid = the_solid_a_piece_was_cut_from(model, scratch, index);
         let mut of_this_piece = Vec::new();
         for (meet, &[from, to]) in wires.iter().flat_map(|wire| wire.iter()).zip(ends) {
-            if is_a_straight_side_with_no_length(meet, [from, to]) {
+            if is_a_side_with_no_length(meet, [from, to], model) {
                 continue;
             }
             if from == to {
