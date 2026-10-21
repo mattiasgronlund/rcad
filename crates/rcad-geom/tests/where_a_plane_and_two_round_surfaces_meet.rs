@@ -1131,6 +1131,31 @@ fn the_caps_of_a_bar_along_a_diagonal_meet_it_and_a_pin_through_its_middle_at_tw
     }
 }
 
+/// **A wall along a bar on a diagonal, and a ball beside the bar** (Q2483).
+/// The wall `x = z` through the origin holds the axis of the bar of radius two
+/// along `(1, 0, 1)`, and cuts the bar in the lines `(t, ±2, t)`. The ball of
+/// radius three about `(1, 3, 1)` is `2(t − 1)² + 1 = 9` along `y = 2`, at
+/// `t = 3` and `t = −1`, and `2(t − 1)² + 25 = 9` along `y = −2`, which has no
+/// `t`. So the corners are `(3, 2, 3)` and `(−1, 2, −1)`.
+///
+/// Whether a line crosses the ball is the sign of a sum with a square root in
+/// it. The number the root is multiplied by spread over nearly four hundred
+/// binades, and its square times the number under the root ran off the bottom
+/// of the range where it stood and off the top where it was slid.
+#[test]
+fn a_wall_along_a_diagonal_bar_meets_it_and_a_ball_beside_it_at_two_corners() {
+    let wall = flat([1.0, 0.0, -1.0], [0.0; 3]);
+    let bar = pipe([0.0; 3], [1.0, 0.0, 1.0], 2.0);
+    let round = ball([1.0, 3.0, 1.0], 3.0);
+    for order in [
+        [&wall, &bar, &round],
+        [&round, &wall, &bar],
+        [&bar, &round, &wall],
+    ] {
+        points_near(order, &[[3.0, 2.0, 3.0], [-1.0, 2.0, -1.0]]);
+    }
+}
+
 /// **Three curved surfaces, two of which bend the same way, are a plane and
 /// two curved surfaces** (Q1284). Two quadrics that square `p` the same way
 /// differ by a plane: every point both hold is on it, and every point on it
