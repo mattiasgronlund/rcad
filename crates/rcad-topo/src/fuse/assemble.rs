@@ -8613,6 +8613,10 @@ struct Corners {
     made: Vec<Corner>,
     named: BTreeMap<CornerName, usize>,
     at: BTreeMap<[u64; 3], usize>,
+    /// The three planes of the name each corner was made for, where that name
+    /// is a meet of three planes: what [`Corners::of`] asks before it joins
+    /// another name to the corner by its `f64` triple.
+    made_on_three_planes: BTreeMap<usize, [Plane; 3]>,
     /// Names that are another corner's, settled before any piece was walked:
     /// the one corner of a closed curve, wherever a piece started it. See
     /// [`Corners::with_each_closed_curve_started_once`].
@@ -8981,6 +8985,21 @@ impl Corners {
     /// ([`Corners::join_the_names_of_each_point`]), and is as wide as the
     /// wider of the corner and what arrived.
     ///
+    /// **Two names whose places land on one `f64` triple are one corner**
+    /// ([`exactly_at`]), **unless their planes prove them two points**
+    /// ([`the_planes_prove_two_points`]). A cube set corner to corner on a
+    /// block and turned a little has two of its edges cross the block's planes
+    /// `x = 0` and `y = 0` a rounding from the block's top corner, outside the
+    /// block, and at `(t, p) = (0.05, 0.05)` both crossings land on that
+    /// corner's own triple, `(0, 0, 10)`. Joined to it, they left the turned
+    /// cube four edges at the block's corner, so [`Assembly::what_is_left`]
+    /// kept it as a corner of the turned cube, with two edges `1.8e-15` long
+    /// from it to the turned cube's own corner, and the union was refused
+    /// `DynamicRangeTooWide` (Q2305,
+    /// `tests/two_cubes_corner_to_corner_turned_a_little.rs`). Kept apart,
+    /// each crossing is a corner only two edges of the turned cube leave, and
+    /// both are read through.
+    ///
     /// # Errors
     ///
     /// Whatever [`Corners::name_of`] gives.
@@ -9001,17 +9020,33 @@ impl Corners {
             self.made[already].moved_by_the_policy |= corner.moved_by_the_policy;
             return Ok(already);
         }
-        let index = match self.at.get(&exactly_at(corner.point)) {
-            Some(&already) => {
+        let planes = self.three_planes_of(model, end);
+        let landed_on = self
+            .at
+            .get(&exactly_at(corner.point))
+            .copied()
+            .filter(|already| {
+                !the_planes_prove_two_points(
+                    self.made_on_three_planes.get(already).copied(),
+                    planes,
+                    policy,
+                )
+            });
+        let index = match landed_on {
+            Some(already) => {
                 self.made[already].wobble = self.made[already].wobble.max(corner.wobble);
                 self.made[already].from = self.made[already].from.or(corner.from);
                 self.made[already].moved_by_the_policy |= corner.moved_by_the_policy;
                 already
             }
             None => {
-                self.at.insert(exactly_at(corner.point), self.made.len());
+                let index = self.made.len();
+                self.at.entry(exactly_at(corner.point)).or_insert(index);
                 self.made.push(corner);
-                self.made.len() - 1
+                if let Some(planes) = planes {
+                    self.made_on_three_planes.insert(index, planes);
+                }
+                index
             }
         };
         self.named.insert(name, index);
@@ -9152,7 +9187,16 @@ impl Corners {
     /// planes alone put it, when it is on three planes, and where it arrived
     /// otherwise.
     fn where_it_goes(&self, model: &Model, end: &MeetPoint) -> PredicatePoint {
-        let three_planes = match end {
+        self.three_planes_of(model, end)
+            .and_then(where_three_planes_meet_whichever_face_asks)
+            .unwrap_or_else(|| end.point())
+    }
+
+    /// The three planes `end` is the meet of: an input corner's own three
+    /// ([`input_corners_on_exactly_three_planes`]), or the three surfaces of a
+    /// meet when all three are flat.
+    fn three_planes_of(&self, model: &Model, end: &MeetPoint) -> Option<[Plane; 3]> {
+        match end {
             MeetPoint::Existing { vertex, .. } => self
                 .on_three_planes
                 .get(&vertex.slot_in(model.id()))
@@ -9166,10 +9210,7 @@ impl Corners {
             MeetPoint::WhereAClosedCurveStarts { .. }
             | MeetPoint::HalfWayRoundAClosedCurve { .. }
             | MeetPoint::APoleOfAClosedSurface { .. } => None,
-        };
-        three_planes
-            .and_then(where_three_planes_meet_whichever_face_asks)
-            .unwrap_or_else(|| end.point())
+        }
     }
 
     /// Keep the lower of two roundings of one corner, so that which face asked
@@ -9217,6 +9258,38 @@ impl Corners {
             self.at.insert(exactly_at(at), corner);
         }
     }
+}
+
+/// Whether a corner made for a meet of the three planes `made_on` and a name
+/// that is a meet of the three planes `arrived` are proved two points: one of
+/// `arrived`'s planes proved off the point where `made_on`'s three meet, in
+/// exact arithmetic ([`side_of_a_plane_where_three_planes_meet`]).
+///
+/// **Asked under a certified policy only.** Under a tolerant one a fold may
+/// put a corner a rounding off where its own three planes meet
+/// ([`fold_each_corner_one_plane_cuts_a_rounding_from_it`]), so the planes of
+/// the name it was made for need not say where it is. Where either is no meet
+/// of three planes, or no plane is proved off, nothing is proved, and the two
+/// are one corner by their `f64` triple as they were before Q2305.
+fn the_planes_prove_two_points(
+    made_on: Option<[Plane; 3]>,
+    arrived: Option<[Plane; 3]>,
+    policy: &Policy,
+) -> bool {
+    let (Some(made_on), Some(arrived), Strictness::Certified) =
+        (made_on, arrived, policy.strictness())
+    else {
+        return false;
+    };
+    arrived.iter().any(|plane| {
+        matches!(
+            side_of_a_plane_where_three_planes_meet(
+                made_on.map(|flat| flat.coefficients()),
+                plane.coefficients(),
+            ),
+            Ok(Decision::Pos | Decision::Neg)
+        )
+    })
 }
 
 /// Where three planes meet, worked out from the three alone: each turned to
