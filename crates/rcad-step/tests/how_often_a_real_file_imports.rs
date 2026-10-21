@@ -788,7 +788,8 @@ fn one_ellipse_on_every_pipe(flat: &Plane, faces: &[Surface]) -> bool {
 /// Measured at 848 on 2026-09-28, with 0 a check could not have passed, by
 ///
 /// ```text
-/// mise exec -- just t -p rcad-step --no-capture -E 'test(=how_often_a_real_file_imports)'
+/// mise exec -- just t -p rcad-step --no-capture \
+///     -E 'binary(merged) & test(=how_often_a_real_file_imports::how_often_a_real_file_imports)'
 /// ```
 ///
 /// and floored at three quarters. Before §220.4 the same files held 848, and 494
@@ -866,10 +867,10 @@ fn assert_pinned_nist_imports(imported: &BTreeSet<String>) {
 /// **Pinned by name, not by rate** (§44.10): a rate cannot tell a reader which
 /// file moved. This list moves only by an edit to this constant, made by
 /// whoever's change moved it. Regenerate it with
-/// `RCAD_STEP_CORPUS=<path> mise exec -- cargo test -p rcad-step --release \
-/// --test how_often_a_real_file_imports -- --nocapture`, which prints the
-/// failing assertion's "now imports" and "stopped importing" sets when this
-/// list is stale.
+/// `RCAD_STEP_CORPUS=<path> mise exec -- just t -p rcad-step --release \
+/// -E 'binary(merged) & test(how_often_a_real_file_imports)' --no-capture`,
+/// which prints the failing assertion's "now imports" and "stopped importing"
+/// sets when this list is stale.
 ///
 /// **It was 46 at `d23c700` and the curved-rounding lane moved it by fifty**,
 /// with nothing dropping out and no file that already imported changing the

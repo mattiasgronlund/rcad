@@ -68,6 +68,8 @@ pub mod a_pipe_moved_by_a_speck_is_still_answered;
 pub mod a_pipe_too_thin_to_square_still_crosses_the_one_it_lies_on;
 #[path = "a_pipe_written_at_another_axis_scale_is_the_same_pipe.rs"]
 pub mod a_pipe_written_at_another_axis_scale_is_the_same_pipe;
+#[path = "a_plane_turned_a_step_at_a_time_keeps_the_normal_its_file_wrote.rs"]
+pub mod a_plane_turned_a_step_at_a_time_keeps_the_normal_its_file_wrote;
 #[path = "a_point_exactly_on_a_circle_is_never_certified_off_it.rs"]
 pub mod a_point_exactly_on_a_circle_is_never_certified_off_it;
 #[path = "a_rotation_written_at_any_scale_is_the_same_rotation.rs"]
@@ -100,6 +102,8 @@ pub mod every_knot_vector_on_a_small_grid_is_judged_correctly;
 pub mod every_pair_of_surfaces_the_fuzzer_draws_is_named_honestly;
 #[path = "every_point_along_a_crossing_is_on_both_surfaces.rs"]
 pub mod every_point_along_a_crossing_is_on_both_surfaces;
+#[path = "every_point_where_three_surfaces_meet_is_on_all_three_of_them.rs"]
+pub mod every_point_where_three_surfaces_meet_is_on_all_three_of_them;
 #[path = "every_spelling_of_one_surface_names_the_same_crossing.rs"]
 pub mod every_spelling_of_one_surface_names_the_same_crossing;
 #[path = "how_a_plane_leans_against_a_pipe.rs"]
@@ -112,6 +116,8 @@ pub mod how_far_the_marcher_strays_from_a_crossing_that_is_a_circle;
 pub mod how_far_two_spellings_of_one_pipe_move_a_corner;
 #[path = "how_finely_a_crossing_is_walked_is_about_its_size_not_its_place.rs"]
 pub mod how_finely_a_crossing_is_walked_is_about_its_size_not_its_place;
+#[path = "how_often_naming_a_crossing_refuses.rs"]
+pub mod how_often_naming_a_crossing_refuses;
 #[path = "how_small_a_crossing_can_be_before_no_point_sits_on_it.rs"]
 pub mod how_small_a_crossing_can_be_before_no_point_sits_on_it;
 #[path = "inserting_a_knot_does_not_move_the_far_end.rs"]
@@ -138,10 +144,14 @@ pub mod the_degeneracies_a_crossing_has_to_answer;
 pub mod the_dome_and_pipe_from_the_led_file_turn_by_a_real_amount;
 #[path = "the_pair_at_1e16_that_answers_one_way_round.rs"]
 pub mod the_pair_at_1e16_that_answers_one_way_round;
+#[path = "the_room_between_two_meridian_circles.rs"]
+pub mod the_room_between_two_meridian_circles;
 #[path = "the_same_pair_turned_names_the_same_kind_of_crossing.rs"]
 pub mod the_same_pair_turned_names_the_same_kind_of_crossing;
 #[path = "the_seven_shapes_a_plane_cuts_a_cone_in.rs"]
 pub mod the_seven_shapes_a_plane_cuts_a_cone_in;
+#[path = "the_shapes_a_plane_cuts_a_torus_in.rs"]
+pub mod the_shapes_a_plane_cuts_a_torus_in;
 #[path = "the_spellings_a_round_surface_still_has.rs"]
 pub mod the_spellings_a_round_surface_still_has;
 #[path = "the_step_between_two_pipe_axes_taken_scaled.rs"]
@@ -166,6 +176,8 @@ pub mod three_surfaces_name_the_pipe_the_caller_wrote;
 pub mod two_loops_either_side_of_a_pipe;
 #[path = "two_pipes_far_from_the_origin_name_their_crossing_the_same_both_ways_round.rs"]
 pub mod two_pipes_far_from_the_origin_name_their_crossing_the_same_both_ways_round;
+#[path = "two_pipes_of_one_width_on_crossing_axes.rs"]
+pub mod two_pipes_of_one_width_on_crossing_axes;
 #[path = "two_pipes_resting_against_each_other_touch_at_one_point.rs"]
 pub mod two_pipes_resting_against_each_other_touch_at_one_point;
 #[path = "two_spheres_a_hair_apart_are_one_sphere_and_a_second_surface.rs"]
@@ -186,6 +198,8 @@ pub mod what_twice_the_room_buys_a_walk_at_its_step_cap;
 pub mod where_a_closed_crossing_starts_is_a_place_or_a_refusal;
 #[path = "where_a_coaxial_cone_and_pipe_cross.rs"]
 pub mod where_a_coaxial_cone_and_pipe_cross;
+#[path = "where_a_line_meets_a_surface.rs"]
+pub mod where_a_line_meets_a_surface;
 #[path = "where_a_line_meets_a_torus.rs"]
 pub mod where_a_line_meets_a_torus;
 #[path = "where_a_plane_and_two_round_surfaces_meet.rs"]
