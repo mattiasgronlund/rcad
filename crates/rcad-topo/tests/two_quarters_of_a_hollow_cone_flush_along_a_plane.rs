@@ -5,13 +5,17 @@
 //! `z`. One is turned by `start` and the other by `start - π/2`, so the two lie
 //! side by side on one cone round one bore and touch along the plane at angle
 //! `start`, apart only by how each turn rounds. Their intersection is that
-//! plane: nothing, or a sliver no thicker than the rounding.
+//! plane: nothing, or a sliver no thicker than the rounding. Nothing is what
+//! one start answers, and a sliver too thin for `f64` is what the others are
+//! refused for (Q2551, Q2562).
 
 use core::f64::consts::FRAC_PI_2;
 
-use rcad_geom::{Axis, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
+use rcad_geom::{
+    Axis, DynamicRange, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector,
+};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Invalid, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 /// The angles Q2355's lane found the refusal at, every one it tried.
 const STARTS: [f64; 9] = [
@@ -26,25 +30,18 @@ const STARTS: [f64; 9] = [
     1.1,
 ];
 
-/// At every start but 1.1 the other quarter's side plane, an ulp off the first
-/// quarter's own, cuts a sliver off the first quarter's bottom cap at `z = 4`,
-/// between the two planes, from the bore to the cone. The other quarter starts
-/// at `z = 4.5`, so the sliver is plainly outside it. But no point inside a
-/// sliver an ulp wide is found, and each of its four corners lies on the cone
-/// or the bore the two quarters share. With the other quarter first, the
-/// sliver is one of the other's top cap at `z = 8.5` instead, above the first
-/// quarter's top at `z = 8`. Each was refused `a point inside a piece of a
-/// face` until Q2551, at every start but 1.1, both ways round.
-///
-/// Before Q2537, a quarter's cone was refused
-/// [`Error::CannotTellTheCellsOfAFaceApart`] at every start instead, in the
-/// arrangement, before any piece was placed.
+/// The starts of [`STARTS`] at which the intersection answers, both ways round.
+/// At each of the others the two quarters overlap in a sliver too thin to
+/// answer, as [`at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64`]
+/// says.
+const STARTS_THAT_ANSWER: [f64; 1] = [1.1];
+
 #[test]
 fn two_hollow_quarters_of_a_cone_flush_along_a_plane_meet_in_nothing_or_a_sliver() {
-    for start in STARTS {
+    for start in STARTS_THAT_ANSWER {
         for the_first_first in [true, false] {
             let what = format!("start {start}, the first first {the_first_first}");
-            let measured = the_two_quarters_intersected(start, the_first_first)
+            let measured = the_two_quarters_intersected(start, the_first_first, 0.0)
                 .unwrap_or_else(|why| panic!("{what}: {why:?}"));
             for (volume, error) in measured {
                 assert!(
@@ -56,13 +53,139 @@ fn two_hollow_quarters_of_a_cone_flush_along_a_plane_meet_in_nothing_or_a_sliver
     }
 }
 
+/// At every other start the two side planes, which should be one, round about
+/// `1e-16` radians into each other, and the two quarters overlap in the sliver
+/// between them, from the bore to the cone and from `z = 4.5` to `z = 8`. That
+/// sliver is too thin for `f64`, and its refusal is a limit, not a gap
+/// (`docs/decisions.md` §16.10).
+///
+/// At six starts it is refused [`Invalid::DynamicRangeTooWide`], at ratios
+/// between `3.4e16` and `1.6e17`, far past
+/// [`DynamicRange::LARGEST_SUPPORTED_RATIO`]: the top at `8.5` over the
+/// sliver's width at the bore, as for the wedge of
+/// [`turned_a_trillionth_of_a_radian_further_the_wedge_is_too_thin_for_f64`].
+/// §87.3 calls the range refusal of a sliver where two nearly flush faces meet
+/// a limit. At [`STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT`] a refusal comes first:
+/// the sliver's arc on `z = 4.5` runs between the places where the two side
+/// planes cross the cone there, and those are one `f64` triple. Worked out to
+/// sixty digits from the two planes' normals as stored, they are `9.6e-18`
+/// apart at `-2` and `4.6e-17` at `0.3`, and each coordinate of the one rounds
+/// to the same `f64` as the other's. So no tighter solve would part them, and
+/// [`Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`] is that variant's
+/// limit.
+///
+/// Until Q2551 each of these was refused `a point inside a piece of a face`
+/// first: a sliver of the first quarter's bottom cap at `z = 4` between the two
+/// planes, or with the other quarter first one of the other's top cap at
+/// `z = 8.5`, which no point inside was found for, and then the first
+/// quarter's cone between the two planes from `z = 4` to `z = 4.5`, which the
+/// other quarter's bottom cap cuts off. Before Q2537, a quarter's cone was
+/// refused [`Error::CannotTellTheCellsOfAFaceApart`] at every start instead, in
+/// the arrangement, before any piece was placed.
+#[test]
+fn at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64() {
+    for start in STARTS {
+        if STARTS_THAT_ANSWER.contains(&start) {
+            continue;
+        }
+        for the_first_first in [true, false] {
+            let what = format!("start {start}, the first first {the_first_first}");
+            let intersected = the_two_quarters_intersected(start, the_first_first, 0.0);
+            if STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT.contains(&start) {
+                let Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { at, .. }) =
+                    intersected
+                else {
+                    panic!("{what}: {intersected:?}");
+                };
+                assert_eq!(at.z(), 4.5, "{what}: {at:?}");
+            } else {
+                let Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) = intersected
+                else {
+                    panic!("{what}: {intersected:?}");
+                };
+                assert!(
+                    (3.4e16..1.6e17).contains(&ratio),
+                    "{what}: a ratio of {ratio}"
+                );
+            }
+        }
+    }
+}
+
+/// The starts of [`STARTS`] where the sliver's arc on `z = 4.5` runs between
+/// two places that are one `f64` triple.
+const STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT: [f64; 2] = [-2.0, 0.3];
+
+/// What refuses [`at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64`]
+/// is the sliver's thinness and nothing else. Turned a billionth of a radian
+/// further into the first quarter, the other overlaps it in a wedge of that
+/// angle, and every start answers it, both ways round, with one solid of the
+/// wedge's volume.
+#[test]
+fn turned_a_billionth_of_a_radian_further_they_overlap_in_a_wedge_of_known_volume() {
+    let further = 1e-9;
+    for start in STARTS {
+        for the_first_first in [true, false] {
+            let what = format!("start {start}, the first first {the_first_first}");
+            let measured = the_two_quarters_intersected(start, the_first_first, further)
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let [(volume, error)] = measured[..] else {
+                panic!("{what}: one wedge, got {measured:?}");
+            };
+            let expected = WEDGE_VOLUME_PER_RADIAN * further;
+            assert!(
+                (volume - expected).abs()
+                    <= error + WEDGE_VOLUME_PER_RADIAN * HOW_FAR_THE_TURNS_ROUND,
+                "{what}: a wedge of {volume}, not {expected}, error {error}"
+            );
+        }
+    }
+}
+
+/// The wedge between the two quarters' side planes, per radian of its angle:
+/// half the turn times the area between the bore, `r = 1`, and the cone,
+/// `r = z / 2`, from where the other quarter starts, `z = 4.5`, to where the
+/// first ends, `z = 8`.
+const WEDGE_VOLUME_PER_RADIAN: f64 = (8.0 * 8.0 * 8.0 - 4.5 * 4.5 * 4.5) / 24.0 - (8.0 - 4.5) / 2.0;
+
+/// How far the wedge's angle can be from the turn asked for. Each quarter's
+/// turn is a number below `4.1` that rounds once or twice, by at most half of
+/// its spacing, `4.4e-16`, and the sine and cosine each rotation is built from
+/// round as well.
+const HOW_FAR_THE_TURNS_ROUND: f64 = 2e-15;
+
+/// Turned a trillionth of a radian further instead, the wedge is `1e-12` wide
+/// at the bore and its top is at `8.5`, so it spans a ratio of about `8.5e12`,
+/// past [`DynamicRange::LARGEST_SUPPORTED_RATIO`], and every start refuses it
+/// for the range, both ways round.
+#[test]
+fn turned_a_trillionth_of_a_radian_further_the_wedge_is_too_thin_for_f64() {
+    let further = 1e-12;
+    for start in STARTS {
+        for the_first_first in [true, false] {
+            let what = format!("start {start}, the first first {the_first_first}");
+            let intersected = the_two_quarters_intersected(start, the_first_first, further);
+            let Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) = intersected else {
+                panic!("{what}: {intersected:?}");
+            };
+            let the_top_over_the_width_at_the_bore = 8.5 / further;
+            assert!(
+                (ratio / the_top_over_the_width_at_the_bore - 1.0).abs() < 0.01,
+                "{what}: a ratio of {ratio}"
+            );
+        }
+    }
+}
+
+/// The two quarters, the other turned `further` into the first, intersected.
 fn the_two_quarters_intersected(
     start: f64,
     the_first_first: bool,
+    further: f64,
 ) -> Result<Vec<(f64, f64)>, Error> {
     let mut model = a_model();
     let first = a_hollow_quarter_turned(&mut model, start, 4.0);
-    let other = a_hollow_quarter_turned(&mut model, start - FRAC_PI_2, 4.5);
+    let other = a_hollow_quarter_turned(&mut model, start - FRAC_PI_2 + further, 4.5);
     fused_and_measured(
         &mut model,
         first,
