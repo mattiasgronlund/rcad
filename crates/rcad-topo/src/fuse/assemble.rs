@@ -399,7 +399,11 @@ pub(crate) struct InputSide {
 /// the side leaves it out, and a side is only ever compared by its `edge`
 /// number. A side left out is one no piece can be placed across; the other
 /// sides of its piece are still named. Until Q1034 the whole naming gave up
-/// here, and no piece of the fuse could be placed by a side.
+/// here, and no piece of the fuse could be placed by a side. **So is a curved
+/// stretch of an open input edge off one of its own ends** whose two ends come
+/// out one corner ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]),
+/// which has no length as written either, and which [`sides_of`] leaves out
+/// of a kept piece for the same reason (Q2408).
 ///
 /// **Every corner is made before any side is named**, as
 /// [`Assembly::from_the_pieces`] makes them: [`Edges::of`] reads a closed side
@@ -681,8 +685,9 @@ impl Assembly {
         // small it is — the same reasoning, and the same skip, as
         // `Model::check_dynamic_range`. An edge from one corner to itself is
         // always a closed one: a side between two names that came out one
-        // corner is left out on a plane and refused on a curved surface
-        // before an edge is built (`sides_of`, `Corners::of_both_ends`).
+        // corner is left out on a plane or as a stretch of an open input edge
+        // off its own end, and refused on any other curved side, before an
+        // edge is built (`sides_of`, `Corners::of_both_ends`).
         let shortest_chord = self
             .edges
             .iter()
@@ -9043,7 +9048,8 @@ impl Corners {
     ///
     /// [`Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`] where two
     /// ends of two names on a side that some curved surface carries come out
-    /// one corner, and whatever [`Corners::of`] gives.
+    /// one corner, unless the side is a stretch of an open input edge off one
+    /// of its own ends, and whatever [`Corners::of`] gives.
     fn of_both_ends(
         &mut self,
         model: &Model,
@@ -9109,8 +9115,9 @@ impl Corners {
     /// planes prove**, where both land on one triple
     /// ([`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`]).
     /// Two corners there are an edge of no length, which no answer can hold.
-    /// One corner, the side is left out on a plane ([`sides_of`], §365.7) and
-    /// refused on a curved surface ([`Corners::of_both_ends`]).
+    /// One corner, the side is left out on a plane ([`sides_of`], §365.7) or
+    /// as a stretch of an open input edge off its own end, and refused on any
+    /// other curved side ([`Corners::of_both_ends`]).
     ///
     /// # Errors
     ///
@@ -11671,8 +11678,11 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// **A curved side whose two ends are two names and one corner is refused**,
 /// by [`Corners::of_both_ends`]. It has a length, so it cannot be left out,
 /// and an edge from that corner back to itself would be the whole closed
-/// curve and not the arc between the two places (Q2193). A curved side of one
-/// name at both ends is a closed curve, and is kept.
+/// curve and not the arc between the two places (Q2193). Except a stretch of
+/// an open input edge off one of its own ends, which has none as the answer
+/// is written and is left out as a straight side is
+/// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`], Q2408). A curved
+/// side of one name at both ends is a closed curve, and is kept.
 ///
 /// **A pole of a ball kept whole is named here**, and not by [`Corners::of`].
 /// A pole is not an input corner to the arrangement, so the end arrives with
