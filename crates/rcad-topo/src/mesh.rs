@@ -11978,6 +11978,32 @@ mod tests {
         );
     }
 
+    /// A quarter of a ring of a hundred round a tube of one is walked in as
+    /// many steps as the deflection asks for, and not in as many as the tube is
+    /// wide.
+    ///
+    /// A step round the ring strays `C²/(2S)` off the torus, `S = R + r`, which
+    /// is the half of `rcad-mesh`'s `how_far_a_flat_piece_strays` that bends
+    /// that way. A quarter of `S = 101` walked as one step strays
+    /// `101 · (π/2)² / 2 = 124.6`, and a step may spend half the deflection
+    /// ([`WHAT_THE_BOUNDARY_TAKES_OF_THE_BUDGET`]), so the quarter takes
+    /// `⌈(π/2) · √(101 / room)⌉` steps and never fewer than the one a quarter
+    /// turn allows: one at `250` and above, three at `60`, sixteen at `1` and
+    /// 158 at `0.01`.
+    ///
+    /// Charged against the tube's `3r` instead, the same quarter came back 35
+    /// steps at every deflection from `60` up and 131 at `1`, and a quarter
+    /// bend of that ring meshed to 218 triangles whatever it was asked for
+    /// (row Q2536).
+    #[test]
+    fn a_quarter_round_a_wide_ring_is_walked_by_the_deflection_and_not_by_the_tube() {
+        let ring = Surface::Torus(rcad_geom::Torus::new(Axis::z(), 100.0, 1.0).expect("a ring"));
+        let quarter = core::f64::consts::TAU / 4.0;
+        let steps = [1e300, 250.0, 60.0, 1.0, 0.01]
+            .map(|room| how_many_steps(&ring, [0.0, 0.0], [0.0, quarter], room));
+        assert_eq!(steps, [1, 1, 3, 16, 158]);
+    }
+
     /// A ball cut by a plane along its own axis is walked one definite way
     /// round, and it is the way `Model::validate` reads the same edge.
     ///
