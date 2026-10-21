@@ -943,6 +943,10 @@ enum Search {
 /// radian further into each other, the same holds of the piece of the first
 /// quarter's bore there
 /// (`tests/two_quarters_of_a_hollow_cone_flush_along_a_plane.rs`, Q2551).
+/// Where the two planes cross the rim at one `f64` triple, the other quarter's
+/// side there is a stretch of the rim off its own end, which the answer
+/// leaves out as having no length, and the naming keeps it for this, by its
+/// two ends (Q2604).
 ///
 /// **None of this asks whether a point was found inside `P`**, so the rule
 /// holds where one was found and the ray could not place it. Nor can `P` lie on

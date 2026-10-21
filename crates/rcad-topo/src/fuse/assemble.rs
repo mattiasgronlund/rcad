@@ -399,11 +399,26 @@ pub(crate) struct InputSide {
 /// the side leaves it out, and a side is only ever compared by its `edge`
 /// number. A side left out is one no piece can be placed across; the other
 /// sides of its piece are still named. Until Q1034 the whole naming gave up
-/// here, and no piece of the fuse could be placed by a side. **So is a curved
-/// stretch of an open input edge off one of its own ends** whose two ends come
-/// out one corner ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]),
-/// which has no length as written either, and which [`sides_of`] leaves out
-/// of a kept piece for the same reason (Q2408).
+/// here, and no piece of the fuse could be placed by a side.
+///
+/// **A curved stretch of an open input edge off one of its own ends** whose
+/// two ends come out one corner
+/// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]) has no length as
+/// written either, and [`sides_of`] leaves it out of a kept piece (Q2408).
+/// Here it is left out only where its two ends are one name, which
+/// [`Edges::of`] would read as a whole closed curve. Where they are two names
+/// it is named by them, as the arc above is, because whether a side is
+/// such a stretch is read off the input edge it runs along, and the same side
+/// of another piece can be a cut that runs along none: left out of the one and
+/// named for the other, it is no longer a side the two share. Two hollow
+/// quarters of one cone side by side, their side planes a rounding into each
+/// other, have the first quarter's cone between the two planes from `z = 4` to
+/// `z = 4.5`, whose top is a cut of the other quarter's bottom cap. The other
+/// quarter's slivers of the cone and of that cap meet it along the cap's rim,
+/// from the rim's own end. That top is the one side the piece shares with the
+/// other quarter, and `select` places the piece by it; with the stretch left
+/// out here the piece was refused
+/// (`tests/two_quarters_of_a_hollow_cone_flush_along_a_plane.rs`, Q2604).
 ///
 /// **Every corner is made before any side is named**, as
 /// [`Assembly::from_the_pieces`] makes them: [`Edges::of`] reads a closed side
@@ -11884,12 +11899,15 @@ fn sides_of(
 /// length as the answer is written, which [`sides_of`] leaves out: one two
 /// planes carry, or a stretch of an open input edge off one of its own ends
 /// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]).
+/// [`the_edge_each_side_of_every_piece_is`] leaves out the first, and the
+/// second only where its two ends are one name (Q2604).
 fn is_a_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2], model: &Model) -> bool {
     from == to
         && (is_carried_by_two_planes(meet)
             || is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model))
 }
 
+/// Whether both surfaces that carry `meet` are planes: a straight side.
 fn is_carried_by_two_planes(meet: &FaceMeet) -> bool {
     meet.carried_by
         .iter()
