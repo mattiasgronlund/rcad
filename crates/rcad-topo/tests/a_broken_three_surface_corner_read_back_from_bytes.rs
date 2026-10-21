@@ -51,7 +51,14 @@
 //! places against each other by the boxes or the planes round them. Ending
 //! the loop in the 5 where `as_the_planes_say` makes it changed none of the
 //! 672 fuses swept, and the other 42 refuse with no loop, so the loop is not
-//! what refuses. Turned a tenth of a radian about `(0.3, −1, 2)`, the wedge
+//! what refuses. The apex is. Placed, each three of the four side planes meet
+//! in an apex of their own, a rounding from the others, and the fuse puts the
+//! one corner it makes of them on every side plane's line across a face. At
+//! each of the 23 fuses of 39 tried here that are refused so, a wedge plane
+//! runs between two of those apexes, and then no drawing of the face with
+//! straight lines keeps the order along each of them. Drawing it takes one
+//! reading of the corner that every face round it shares, a row of its own.
+//! Turned a tenth of a radian about `(0.3, −1, 2)`, the wedge
 //! round the `x` axis keeps an edge a rounding long by the apex, as the cut
 //! through it does: `certified` refuses every rule for it, and
 //! `tolerant(100)` answers the difference and the union and is refused the
@@ -81,7 +88,7 @@ use rcad_geom::{
     Axis, DYNAMIC_RANGE_CHECK, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale,
     Surface, Vector, WHERE_THREE_SURFACES_MEET,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
 use rcad_topo::{
     DraftEdge, DraftStep, Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidBuilder,
     SolidKey,
@@ -724,8 +731,10 @@ fn a_tilted_wall_is_one_plane_whether_a_prism_or_the_hole_it_fills_stands_on_it(
 /// the five of the eight where the planes ordered the cuts, changed none of the
 /// 672 fuses the lane swept, these 48 among them. The other three are ordered
 /// by the boxes, which `as_the_planes_say` is never asked. And 42 more
-/// placements with no loop refuse the same way. So no change to `fuse/` comes
-/// with this pin, and the refusal has a row of its own.
+/// placements with no loop refuse the same way. What does make it is the
+/// apex itself, a rounding off one of the lines it is put on, with a wedge
+/// plane running between it and where that line meets another (the test
+/// below). No change to `fuse/` comes with this pin.
 #[test]
 fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_cannot_tell_its_cells_apart() {
     for (wedge, placement) in where_the_orders_loop_by_the_apex() {
@@ -739,6 +748,84 @@ fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_cannot_tell_its_ce
             }
         }
     }
+}
+
+/// **Placed, the pyramid has four apexes a rounding apart, and it cannot tell
+/// a face's cells apart only where a wedge plane runs between two of them.**
+/// Each three of the four side planes meet in an apex of their own. The fuse
+/// makes one corner of them, worked out from three of the planes, and on each
+/// side face puts that corner on every line where another side plane crosses
+/// the face. So on each face the corner is on two of those lines exactly and
+/// off the third by a rounding.
+///
+/// On the `−y` face at the plain shift, with the wedge over the `+y` edge, a
+/// print put in `order_along` in `fuse/arrange.rs` and taken out found the
+/// corner worked out from the `−y`, `+x` and `+y` planes, on the `+x` and `+y`
+/// lines and off the `−x` one, the face's other edge. The wedge's plane `y =
+/// 2x` runs between that corner and the apex where the `−x` and `+x` lines
+/// meet. Call the lines through the corner `a` and `b`, the one off it `c`,
+/// and the wedge's line `r`, which crosses `a` between the corner and `c`.
+/// Where those four cross one another is put in order along each line as the
+/// real points lie, but for where the corner falls on `c`. The orders along
+/// `a`, `b` and `r` put `r` on one side of the corner. A straight `c` through
+/// the corner then crosses `r` on one side of where `a` does, while the order
+/// along `r` has the real `c` cross it on the other. No drawing of the face
+/// with straight lines and the corner on all three keeps every order, and the
+/// fuse refuses as above. The lane that found this let the planes overrule
+/// the boxes on that face, and then turned round two cuts along `r` as well:
+/// each still refused, the first on two windings that disagree.
+///
+/// Of the 39 fuses here, `Difference` and `certified` with each wedge at each
+/// of 13 placements, 23 are refused so, and each of those has a wedge plane
+/// between two apexes. 4 more have one and are refused otherwise, 1 at the
+/// range check and 3 `Undecidable`; why the orders' quarrel does not show
+/// there is not traced. 12 have none, and none of those is refused so.
+///
+/// So the refusal is the gap `limit_or_gap` names for it: the cells are there,
+/// and it is the fuse's reading of the corner that contradicts itself. What a
+/// face drawn whole would come to under `certified`, the range check §448.7
+/// settled for the cut through the apex or something else, nobody has run.
+/// Drawing it takes one reading of the corner that every face round it
+/// shares, which is a row of its own.
+#[test]
+fn a_placed_pyramid_cannot_tell_its_cells_apart_only_where_a_wedge_plane_runs_between_two_apexes() {
+    let placements = every_placement()
+        .into_iter()
+        .chain(where_the_orders_loop_by_the_apex().map(|(_, placement)| placement))
+        .chain([a_tenth_of_a_radian_about_a_tilted_axis()]);
+    let mut refused_with_a_plane_between = 0;
+    let mut a_plane_between_and_refused_otherwise = 0;
+    let mut no_plane_between = 0;
+    for placement in placements {
+        for wedge in EVERY_WEDGE {
+            let between = a_wedge_plane_runs_between_two_apexes(wedge, placement);
+            let refused = matches!(
+                the_wedge_through_the_apex(
+                    wedge,
+                    placement,
+                    Rule::Difference,
+                    &Policy::certified()
+                ),
+                Err(Error::CannotTellTheCellsOfAFaceApart { .. })
+            );
+            match (between, refused) {
+                (true, true) => refused_with_a_plane_between += 1,
+                (true, false) => a_plane_between_and_refused_otherwise += 1,
+                (false, false) => no_plane_between += 1,
+                (false, true) => panic!(
+                    "{placement:?}, {wedge:?}: refused with no wedge plane between two apexes"
+                ),
+            }
+        }
+    }
+    assert_eq!(
+        (
+            refused_with_a_plane_between,
+            a_plane_between_and_refused_otherwise,
+            no_plane_between
+        ),
+        (23, 4, 12)
+    );
 }
 
 /// **Turned a tenth of a radian about `(0.3, −1, 2)`, the sound pyramid and
@@ -1197,6 +1284,62 @@ fn where_the_orders_loop_by_the_apex() -> [(Wedge, Isometry); 8] {
 fn a_tenth_of_a_radian_about_a_tilted_axis() -> Isometry {
     let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.3, -1.0, 2.0)).expect("an axis");
     Isometry::rotation(&axis, 0.1).expect("a turn")
+}
+
+/// Whether one of the two planes of `wedge` through the apex, built at
+/// `placement`, has two of the sound pyramid's four apexes, moved by
+/// `placement`, on opposite sides of it, each side worked out exactly. The
+/// four apexes are where each three of the four side planes meet. Where the
+/// pyramid stands they are one point and both planes run through it.
+fn a_wedge_plane_runs_between_two_apexes(wedge: Wedge, placement: Isometry) -> bool {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let pyramid = a_pyramid(&mut model);
+    model
+        .place_solid(pyramid, &placement)
+        .expect("this model made the key");
+    let cut = a_wedge(&mut model, wedge, &placement);
+    let [x, y, z] = placement
+        .apply_to_point(Point::new(0.0, 0.0, HEIGHT))
+        .coordinates();
+    // The side planes and the wedge's two faces miss the moved apex by a
+    // rounding; the base, the wedge's caps and its far face by millimetres.
+    let through_the_apex = |solid: SolidKey| -> Vec<[f64; 4]> {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter_map(|face| face.surface().as_plane().map(Plane::coefficients))
+            .filter(|[a, b, c, d]| (a * x + b * y + c * z + d).abs() < 1e-9)
+            .collect()
+    };
+    let &[first, second, third, fourth] = through_the_apex(pyramid).as_slice() else {
+        panic!("{placement:?}: four side planes run through the apex");
+    };
+    let apexes = [
+        [second, third, fourth],
+        [first, third, fourth],
+        [first, second, fourth],
+        [first, second, third],
+    ];
+    let wedge_planes = through_the_apex(cut);
+    assert_eq!(
+        wedge_planes.len(),
+        2,
+        "{placement:?}, {wedge:?}: two wedge planes run through the apex"
+    );
+    wedge_planes.into_iter().any(|plane| {
+        let sides = apexes.map(|three| {
+            side_of_a_plane_where_three_planes_meet(three, plane)
+                .expect("three side planes meet in a point")
+        });
+        assert!(
+            !sides
+                .iter()
+                .any(|side| matches!(side, Decision::Undecidable { .. })),
+            "{placement:?}, {wedge:?}: exact arithmetic decides every side, got {sides:?}"
+        );
+        sides.contains(&Decision::Pos) && sides.contains(&Decision::Neg)
+    })
 }
 
 /// `solid` and `partner` fused under `rule` where they were built, which has
