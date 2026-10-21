@@ -234,7 +234,11 @@ slow_tests := "rcad-topo::a_plane_cut_along_a_cones_other_nappe/a_corner_up_cube
     rcad-topo::whether_a_coarser_deflection_always_meshes/the_floor_refusal_needs_an_absolute_deflection_and_then_it_behaves \
     rcad-topo::how_often_a_curved_fuse_refuses/every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates \
     rcad-topo::fuses_that_must_agree/what_a_block_and_a_ball_take_up_adds_up_inside_a_stated_share_of_what_they_declare \
-    rcad-topo::a_ball_cut_through_its_pole/the_sliver_that_holds_no_pole_is_answered_or_refused_by_name"
+    rcad-topo::a_ball_cut_through_its_pole/the_sliver_that_holds_no_pole_is_answered_or_refused_by_name \
+    rcad-topo::two_equal_bars_leaning_at_each_other/a_long_bar_through_another_at_a_slant_answers_every_fuse \
+    rcad-topo::two_equal_bars_leaning_at_each_other/a_long_bar_through_another_at_122_to_135_degrees_answers_every_fuse \
+    rcad-topo::two_equal_bars_leaning_at_each_other/a_long_bar_through_another_at_80_112_or_116_degrees_answers_every_fuse \
+    rcad-topo::two_equal_bars_leaning_at_each_other/a_long_bar_through_another_a_hair_off_flat_at_105_to_119_degrees_answers_every_fuse"
 
 # The steps `pre-gate` runs at once, in front of a lane's gate: the kind that
 # failed lane gates whose tests all passed (§380.1). In the justfile rather
