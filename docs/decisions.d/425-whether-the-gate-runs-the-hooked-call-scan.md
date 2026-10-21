@@ -147,3 +147,35 @@ pinning the script itself) is untouched and stays in the gate; only the
 step that builds and runs the five fuzz targets on every lane came out.
 `mise exec -- just check-gate-runs-every-check` and `mise exec -- just
 pre-gate gate-lane` both pass on the commit that removes it.
+
+### 425.7 The scan back in the gate, on a key of its own
+
+Q1544 (merged `8691a52c`, its lane's work at `13a4ab18`) put
+`check-timing-hooked-calls` back, keyed on what its answer depends on.
+What follows is taken from the lane's report (run `wf_f08c5309-390`); its
+commands and prints are in that run's journal.
+
+**A kernel change does not move the scan's answer.** The lane planted a
+hooked call in kernel code a fuzz target's closure reaches: a `==` on a
+slice of the target's own input bytes, whose length is known only at run
+time. A first probe compared two fixed `[u8; 8]` arrays, and LLVM turned
+that into an integer compare, with no `bcmp` call for the scan to see. In
+the release fuzz binary, `rcad_fuzz_timing::timed<T>` is inlined into its
+caller whole, so no symbol named for `rcad_fuzz_timing` lies on the path
+from the harness into kernel code, and the scan, which starts from those
+symbols, never reaches the planted call (checked with `nm` and `readelf`).
+So the answer depends on `crates/rcad-fuzz-timing`, `fuzz/Cargo.toml`,
+`fuzz/Cargo.lock`, `fuzz/timing-hooked-calls.py`, and the installed nightly
+`rustc` and `cargo-fuzz` versions, as §425.5 guessed.
+
+**The key.** The step is keyed on a fingerprint of those inputs, with its
+own record store, `.git/rcad-verdicts-timing-hooked-calls/<fingerprint>`,
+apart from the whole-tree cache `gate_reusable_steps` uses. A
+`check-gate-verdicts-selftest` case runs the real recipe end to end, onto
+its own "no `cargo-fuzz` on this PATH" branch through a restricted PATH.
+
+**Shown on a real build.** A `cargo +nightly fuzz` build of `13a4ab18`
+(178.1 s) wrote a record. A second run, on a throwaway branch whose only
+change was a comment in a kernel crate, was served off that record rather
+than rebuilt. The lane's `pre-gate gate-lane` on its last commit served the
+step too.
