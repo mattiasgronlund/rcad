@@ -226,6 +226,247 @@ fn the_ball_in_the_side_of_the_bar_is_within_a_millionth_of_a_rule_a_hundred_tim
     }
 }
 
+#[test]
+fn probe_whole_torus() {
+    use rcad_geom::{EdgeRun, Orientation, Plane, Point, Surface, Torus};
+    use rcad_topo::{DraftStep, SolidBuilder};
+    for (ring, tube) in [(4.0, 1.0), (20.0, 5.0), (3.0, 2.0), (10.0, 1.0), (2.0, 1.0)] {
+        for order in 0..4 {
+            let skin = Torus::new(Axis::z(), ring, tube).expect("a torus");
+            let mut builder = SolidBuilder::new();
+            let corner = builder
+                .add_vertex(Point::new(ring + tube, 0.0, 0.0))
+                .expect("v");
+            let level =
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0)).unwrap();
+            let across =
+                Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 1.0, 0.0)).unwrap();
+            let equator = builder
+                .add_edge(
+                    corner,
+                    corner,
+                    EdgeRun::RightRoundWhereItCrosses {
+                        and: Surface::Plane(level),
+                    },
+                )
+                .expect("equator");
+            let round_the_tube = builder
+                .add_edge(
+                    corner,
+                    corner,
+                    EdgeRun::RightRoundWhereItCrosses {
+                        and: Surface::Plane(across),
+                    },
+                )
+                .expect("tube circle");
+            let (f, r) = (Orientation::Forward, Orientation::Reversed);
+            let walks = match order {
+                0 => [
+                    (round_the_tube, f),
+                    (equator, f),
+                    (round_the_tube, r),
+                    (equator, r),
+                ],
+                1 => [
+                    (round_the_tube, f),
+                    (equator, r),
+                    (round_the_tube, r),
+                    (equator, f),
+                ],
+                2 => [
+                    (equator, f),
+                    (round_the_tube, f),
+                    (equator, r),
+                    (round_the_tube, r),
+                ],
+                _ => [
+                    (equator, f),
+                    (round_the_tube, r),
+                    (equator, r),
+                    (round_the_tube, f),
+                ],
+            };
+            let steps: Vec<DraftStep> = walks
+                .into_iter()
+                .map(|(edge, turn)| DraftStep::Along(builder.add_coedge(edge, turn).unwrap()))
+                .collect();
+            let wire = builder.add_wire(&steps).expect("wire");
+            let face = builder
+                .add_face(Surface::Torus(skin), &[wire])
+                .expect("face");
+            builder
+                .add_shell(&[(face, Orientation::Forward)])
+                .expect("shell");
+            let mut model = a_model();
+            let built = builder.build(&mut model, &Policy::certified(), &mut ProvenanceLog::new());
+            eprintln!(
+                "PROBE torus {ring} {tube} order {order}: build {:?}",
+                built.as_ref().map(|_| ())
+            );
+            let Ok(solid) = built else { continue };
+            let view = model.solid(solid).unwrap();
+            let coarsest = view.mesh(
+                Deflection::of(f64::MAX).unwrap(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            eprintln!(
+                "PROBE   coarsest {:?}",
+                coarsest.as_ref().map(|mesh| mesh.points().len())
+            );
+            let measured = view.measure(
+                Deflection::of(0.01).unwrap(),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            eprintln!(
+                "PROBE   measure {:?} against {}",
+                measured.as_ref().map(|m| m.volume()),
+                2.0 * PI * PI * ring * tube * tube
+            );
+        }
+    }
+}
+
+fn probe_corners(model: &Model, solid: SolidKey) -> usize {
+    let view = model.solid(solid).unwrap();
+    let mut corners: Vec<[f64; 3]> = view
+        .faces()
+        .flat_map(|face| {
+            face.wires()
+                .flat_map(|wire| wire.points())
+                .map(|point| point.coordinates())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    corners.sort_by(|a, b| {
+        (0..3)
+            .map(|i| a[i].total_cmp(&b[i]))
+            .find(|o| o.is_ne())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    corners.dedup();
+    corners.len()
+}
+
+fn probe_run(
+    tally: &mut std::collections::BTreeMap<String, usize>,
+    what: &str,
+    make: impl FnOnce(&mut Model) -> [SolidKey; 2],
+) {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut model = a_model();
+        let [one, other] = make(&mut model);
+        let said = intersect(&mut model, [one, other], true);
+        match said {
+            Ok(solids) => {
+                let corners: Vec<usize> = solids
+                    .iter()
+                    .map(|&solid| probe_corners(&model, solid))
+                    .collect();
+                if corners.iter().any(|&c| c < 2) {
+                    format!("ok, a solid with <2 corners")
+                } else {
+                    format!("ok")
+                }
+            }
+            Err(why) => {
+                let name = format!("{why:?}");
+                let short: String = name.chars().take(60).collect();
+                eprintln!("PROBE {what}: refused {name}");
+                short
+            }
+        }
+    }));
+    let key = outcome.unwrap_or_else(|_| {
+        eprintln!("PROBE {what}: panicked");
+        "panicked".to_owned()
+    });
+    *tally.entry(key).or_insert(0) += 1;
+}
+
+#[test]
+fn probe_sweep() {
+    let mut tally = std::collections::BTreeMap::new();
+    let seam_up_y = moved_to([0.0, 0.0, -1.0])
+        .compose(&Isometry::quarter_turns(&Axis::z(), 1).expect("a turn about z"));
+    for radius in [0.5, 1.0, 1.5, 2.5, 3.0, 4.0, 6.0, 10.0] {
+        for reach in [0.05, 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5] {
+            if reach >= 2.0 * radius {
+                continue;
+            }
+            for around in [0.0, 0.4, 0.9, 1.3, PI / 2.0, 2.2, 2.9, PI, 4.0, 5.3] {
+                let what = format!("ball {radius} reach {reach} around {around}");
+                probe_run(&mut tally, &what, |model| {
+                    let bar = model.add_round_bar(2.0, 12.0, &seam_up_y).expect("a bar");
+                    let out = 2.0 + radius - reach;
+                    let ball = model
+                        .add_ball(
+                            radius,
+                            &moved_to([-out * f64::sin(around), out * f64::cos(around), 5.0]),
+                        )
+                        .expect("a ball");
+                    [bar, ball]
+                });
+            }
+        }
+    }
+    eprintln!("PROBE tally ball in bar {tally:?}");
+    let mut tally = std::collections::BTreeMap::new();
+    for radius in [0.5, 1.0, 1.5, 2.0, 3.0] {
+        for reach in [0.1, 0.3, 0.6, 1.0, 1.5] {
+            for tilt in [0.0, 0.3, 0.7, 1.0] {
+                let what = format!("bar {radius} reach {reach} tilt {tilt}");
+                probe_run(&mut tally, &what, |model| {
+                    let bar = model.add_round_bar(2.0, 12.0, &seam_up_y).expect("a bar");
+                    let out = 2.0 + radius - reach;
+                    let across = moved_to([0.0, out, 5.0])
+                        .compose(
+                            &Isometry::rotation(
+                                &Axis::new(rcad_geom::Point::origin(), Vector::new(0.0, 1.0, 0.0))
+                                    .unwrap(),
+                                PI / 2.0 + tilt,
+                            )
+                            .unwrap(),
+                        )
+                        .compose(&moved_to([0.0, 0.0, -10.0]));
+                    let other = model.add_round_bar(radius, 20.0, &across).expect("a bar");
+                    [bar, other]
+                });
+            }
+        }
+    }
+    eprintln!("PROBE tally bar across bar {tally:?}");
+    let mut tally = std::collections::BTreeMap::new();
+    let directions = [
+        [1.0, 0.0, 0.0],
+        [0.6, 0.8, 0.0],
+        [0.48, 0.6, 0.64],
+        [-0.36, 0.48, 0.8],
+        [0.0, -0.6, 0.8],
+        [-0.8, -0.36, 0.48],
+    ];
+    for other in [1.0_f64, 2.0, 3.0, 5.0, 9.0] {
+        for thick in [0.05, 0.25, 0.5, 1.0, 2.0] {
+            if thick >= 2.0 * other.min(3.0) {
+                continue;
+            }
+            for (which, along) in directions.into_iter().enumerate() {
+                let what = format!("balls 3 and {other} thick {thick} along {which}");
+                probe_run(&mut tally, &what, |model| {
+                    let apart = 3.0 + other - thick;
+                    let one = model.add_ball(3.0, &Isometry::identity()).expect("a ball");
+                    let two = model
+                        .add_ball(other, &moved_to(along.map(|x| x * apart)))
+                        .expect("a ball");
+                    [one, two]
+                });
+            }
+        }
+    }
+    eprintln!("PROBE tally two balls {tally:?}");
+}
+
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
 }
