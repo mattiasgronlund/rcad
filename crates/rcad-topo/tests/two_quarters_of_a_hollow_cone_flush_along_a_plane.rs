@@ -26,15 +26,22 @@ const STARTS: [f64; 9] = [
     1.1,
 ];
 
-/// The starts of [`STARTS`] at which the intersection answers, both ways round.
-/// At each of the others it is refused, where
-/// [`at_every_other_start_a_sliver_of_a_cap_the_other_quarter_never_reaches_is_not_placed`]
-/// says.
-const STARTS_THAT_ANSWER: [f64; 1] = [1.1];
-
+/// At every start but 1.1 the other quarter's side plane, an ulp off the first
+/// quarter's own, cuts a sliver off the first quarter's bottom cap at `z = 4`,
+/// between the two planes, from the bore to the cone. The other quarter starts
+/// at `z = 4.5`, so the sliver is plainly outside it. But no point inside a
+/// sliver an ulp wide is found, and each of its four corners lies on the cone
+/// or the bore the two quarters share. With the other quarter first, the
+/// sliver is one of the other's top cap at `z = 8.5` instead, above the first
+/// quarter's top at `z = 8`. Each was refused `a point inside a piece of a
+/// face` until Q2551, at every start but 1.1, both ways round.
+///
+/// Before Q2537, a quarter's cone was refused
+/// [`Error::CannotTellTheCellsOfAFaceApart`] at every start instead, in the
+/// arrangement, before any piece was placed.
 #[test]
 fn two_hollow_quarters_of_a_cone_flush_along_a_plane_meet_in_nothing_or_a_sliver() {
-    for start in STARTS_THAT_ANSWER {
+    for start in STARTS {
         for the_first_first in [true, false] {
             let what = format!("start {start}, the first first {the_first_first}");
             let measured = the_two_quarters_intersected(start, the_first_first)
@@ -43,50 +50,6 @@ fn two_hollow_quarters_of_a_cone_flush_along_a_plane_meet_in_nothing_or_a_sliver
                 assert!(
                     volume.abs() <= error,
                     "{what}: a sliver of {volume} past its error {error}"
-                );
-            }
-        }
-    }
-}
-
-/// The other quarter's side plane, an ulp off the first quarter's own, cuts a
-/// sliver off the first quarter's bottom cap at `z = 4`, between the two
-/// planes, from the bore to the cone. The other quarter starts at `z = 4.5`,
-/// so the sliver is plainly outside it. But no point inside a sliver an ulp
-/// wide is found, and each of its four corners lies on the cone or the bore
-/// the two quarters share, so no rule places it. With the other quarter first,
-/// the piece refused is one of the other's top cap at `z = 8.5` instead, above
-/// the first quarter's top at `z = 8`, its four corners on that cap.
-///
-/// Before Q2537, a quarter's cone was refused
-/// [`Error::CannotTellTheCellsOfAFaceApart`] at every start instead, in the
-/// arrangement, before any piece was placed.
-#[test]
-fn at_every_other_start_a_sliver_of_a_cap_the_other_quarter_never_reaches_is_not_placed() {
-    for start in STARTS {
-        if STARTS_THAT_ANSWER.contains(&start) {
-            continue;
-        }
-        for the_first_first in [true, false] {
-            let what = format!("start {start}, the first first {the_first_first}");
-            let intersected = the_two_quarters_intersected(start, the_first_first);
-            let Err(Error::Undecidable { records }) = &intersected else {
-                panic!("{what}: {intersected:?}");
-            };
-            let record = records.records().last().expect("a refusal records why");
-            assert_eq!(
-                record.predicate(),
-                "a point inside a piece of a face",
-                "{what}"
-            );
-            let cap = if the_first_first { 4.0 } else { 8.5 };
-            let corners = record.inputs();
-            assert_eq!(corners.len(), 4, "{what}");
-            for corner in corners {
-                let height = corner.enclosure()[2];
-                assert!(
-                    height.lo() <= cap && cap <= height.hi(),
-                    "{what}: a corner at {height:?}, off the cap at {cap}"
                 );
             }
         }
