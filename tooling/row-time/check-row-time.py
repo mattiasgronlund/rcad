@@ -19,6 +19,10 @@ every case of §411.9's list:
 - a lane relayed once, whose relay keeps the lane's own role (§416);
 - a row whose prep refused it, with no lane ever started (§396.4);
 - a row closed at the base, with no lander or merger (§433.8);
+- a shared gate whose holder itself relayed mid-`just land`, found by its raw
+  label rather than by `role_of`'s own lane field (§411.5, §416, Q1935);
+- a shared gate whose holder's own run is gone from the retained transcripts,
+  named rather than crashing the whole read (§411.5, Q1935);
 - and a fixture whose parts do not add up, which must make `row-time` fail
   and print nothing.
 
@@ -54,6 +58,8 @@ def main():
         check_a_relayed_lane(assembled)
         check_a_prep_refused_row(assembled)
         check_a_close_at_base_row(assembled)
+        check_a_relayed_holder_lands_another_run(assembled)
+        check_a_missing_holder_lands_another_run(assembled)
         check_every_step_adds_up(assembled)
         check_the_printed_report(world)
     with tempfile.TemporaryDirectory() as scratch:
@@ -97,6 +103,8 @@ def build_the_week(world):
     a_relayed_lane(world)
     a_prep_refused_row(world)
     a_close_at_base_row(world)
+    a_relayed_holder_lands_another_run(world)
+    a_missing_holder_lands_another_run(world)
 
 
 def a_plain_lane(world):
@@ -330,6 +338,112 @@ def a_close_at_base_row(world):
     world.claim("release", "Q8", 915_000, "closed_at_base")
 
 
+def a_relayed_holder_lands_another_run(world):
+    """Q10 and Q11: Q10's lander relays mid-`just land` (§416); its relay lands Q11's lane under its gate.
+
+    The relay's own label is `relay 1:land:q10-relayed-holder`: `role_of` keeps
+    its role `lane` and keeps the `land:` prefix in the lane field it computes,
+    so it is grouped under neither Q10's own lane (a separate, known gap: its
+    time falls to `unattributed` rather than Q10's row) nor found as a lander
+    by `agent["lane"]`. `land_lane_of` reads the raw label instead, which is
+    what lets Q11's lander still find it as the holder (Q1935).
+    """
+    lane = Talk("/trees/r20-1")
+    lane.prompt(1_000_000)
+    lane.response((1_004_000, call("t200", "StructuredOutput")))
+    lane.result(1_004_100, "t200")
+
+    verifier = Talk("/trees/r20-2")
+    verifier.prompt(1_004_200)
+    verifier.response((1_005_000, call("t201", "Bash", command="mise exec -- just verify-lane abc "
+                                                                "lane-q10-relayed-holder")))
+    verifier.result(1_009_000, "t201")
+
+    lander = Talk("/trees/r20-3")
+    lander.prompt(1_010_000)
+    lander.response((1_010_900, call("t202", "Bash", command="mise exec -- just land Q10 lane-q10-relayed-holder "
+                                                              "abc1234 merge-q10-relayed-holder /trees/r20-1 "
+                                                              "/trees/r20-2")))
+    lander.result(1_049_000, "t202", "land: waiting for the land lock\nland: holding the land lock\n"
+                                     "land: still running (pid 7).")
+
+    relay = Talk("/trees/r20-3")
+    relay.prompt(1_051_000)
+    relay.response((1_051_900, call("t203", "Bash", command="mise exec -- just land wait")))
+    relay.result(1_090_000, "t203", "+ git worktree unlock /trees/r20-1\n+ git worktree unlock /trees/r20-2\n"
+                 + land_json("merge-q10-relayed-holder"))
+
+    run = world.run("wf_r20", REPO, "sess-e", [lane_of("q10-relayed-holder", "Q10")])
+    run.agent("q10-relayed-holder", "l10", 1_000_000, 1_004_100, lane)
+    run.agent("verify:q10-relayed-holder", "v10", 1_004_200, 1_009_000, verifier, queued=1_004_150)
+    run.agent("land:q10-relayed-holder", "d10a", 1_010_000, 1_050_000, lander, queued=1_009_500)
+    run.agent("relay 1:land:q10-relayed-holder", "d10b", 1_051_000, 1_091_000, relay, queued=1_050_500)
+    world.claim("take", "Q10", 999_000, "lane-q10-relayed-holder")
+    world.claim("release", "Q10", 1_091_000, "done")
+
+    lane = Talk("/trees/r21-1")
+    lane.prompt(1_055_000)
+    lane.response((1_059_000, call("t210", "StructuredOutput")))
+    lane.result(1_059_100, "t210")
+
+    verifier = Talk("/trees/r21-2")
+    verifier.prompt(1_059_200)
+    verifier.response((1_060_000, call("t211", "Bash", command="mise exec -- just verify-lane abc "
+                                                                "lane-q11-landed-by-relay")))
+    verifier.result(1_060_900, "t211")
+
+    lander = Talk("/trees/r21-3")
+    lander.prompt(1_061_000)
+    lander.response((1_061_900, call("t212", "Bash", command="mise exec -- just land Q11 lane-q11-landed-by-relay "
+                                                              "abc1234 merge-q11-landed-by-relay /trees/r21-1 "
+                                                              "/trees/r21-2")))
+    lander.result(1_070_900, "t212", "land: waiting for the land lock\nland: holding the land lock\n"
+                                     "land: an earlier run landed lane-q11-landed-by-relay, in def5678\n"
+                  + land_json("merge-q10-relayed-holder"))
+
+    run = world.run("wf_r21", REPO + "-worktrees-other", "sess-f", [lane_of("q11-landed-by-relay", "Q11")])
+    run.agent("q11-landed-by-relay", "l11", 1_055_000, 1_059_100, lane)
+    run.agent("verify:q11-landed-by-relay", "v11", 1_059_200, 1_060_900, verifier, queued=1_059_150)
+    run.agent("land:q11-landed-by-relay", "d11", 1_061_000, 1_071_900, lander, queued=1_060_950)
+    world.claim("take", "Q11", 1_054_000, "lane-q11-landed-by-relay")
+    world.claim("release", "Q11", 1_071_000, "done")
+
+
+def a_missing_holder_lands_another_run(world):
+    """Q12: landed by a holder whose own run is gone from the retained transcripts, not merely mislabeled (Q1935).
+
+    No agent anywhere in the made-up week carries `q-vanished-holder`, straight
+    or relayed, so the search for a candidate comes back empty rather than
+    merely late or early.
+    """
+    lane = Talk("/trees/r22-1")
+    lane.prompt(1_100_000)
+    lane.response((1_104_000, call("t220", "StructuredOutput")))
+    lane.result(1_104_100, "t220")
+
+    verifier = Talk("/trees/r22-2")
+    verifier.prompt(1_104_200)
+    verifier.response((1_105_000, call("t221", "Bash", command="mise exec -- just verify-lane abc "
+                                                                "lane-q12-ghost-holder")))
+    verifier.result(1_109_000, "t221")
+
+    lander = Talk("/trees/r22-3")
+    lander.prompt(1_110_000)
+    lander.response((1_110_900, call("t222", "Bash", command="mise exec -- just land Q12 lane-q12-ghost-holder "
+                                                              "abc1234 merge-q12-ghost-holder /trees/r22-1 "
+                                                              "/trees/r22-2")))
+    lander.result(1_185_900, "t222", "land: waiting for the land lock\nland: holding the land lock\n"
+                                     "land: an earlier run landed lane-q12-ghost-holder, in def5678\n"
+                  + land_json("merge-q-vanished-holder"))
+
+    run = world.run("wf_r22", REPO, "sess-g", [lane_of("q12-ghost-holder", "Q12")])
+    run.agent("q12-ghost-holder", "l12", 1_100_000, 1_104_100, lane)
+    run.agent("verify:q12-ghost-holder", "v12", 1_104_200, 1_109_000, verifier, queued=1_104_150)
+    run.agent("land:q12-ghost-holder", "d12", 1_110_000, 1_186_900, lander, queued=1_109_500)
+    world.claim("take", "Q12", 1_099_000, "lane-q12-ghost-holder")
+    world.claim("release", "Q12", 1_186_000, "done")
+
+
 def land_json(merge_branch):
     return json.dumps({"merge_branch": merge_branch, "merged": True, "merged_sha": "def5678", "stop": ""})
 
@@ -347,7 +461,7 @@ def assemble(world):
 def check_a_plain_lane(assembled):
     rows = {row["id"]: row for row in assembled["rows"]}
     steps = assembled["steps"]
-    same("the rows picked", sorted(rows), ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"])
+    same("the rows picked", sorted(rows), ["Q1", "Q10", "Q11", "Q12", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"])
     lane = steps[("wf_r1", "l1")]
     same("Q1's lane: its buckets, from both pieces of its transcript", dict(lane["buckets"]), {
         "before the first record": 0,
@@ -473,6 +587,35 @@ def check_a_close_at_base_row(assembled):
          "the closer by its own unlock of its own tree", row["slot"], 1_000 + 6_000 + 8_800 + 2_000)
 
 
+def check_a_relayed_holder_lands_another_run(assembled):
+    rows = {row["id"]: row for row in assembled["rows"]}
+    steps = assembled["steps"]
+    same("Q11: landed by a holder lander that itself relayed mid-`just land`, found by its raw label",
+         steps[("wf_r21", "d11")]["landed_by"], {"run": "wf_r20", "lane": "q10-relayed-holder"})
+    same("Q11: all its land time became the wait for the lock", dict(steps[("wf_r21", "d11")]["buckets"]), {
+        "before the first record": 0, "model: writing commands": 900, "land lock": 9_000,
+        "after the last record": 1_000})
+    row = rows["Q10"]
+    same("Q10: its own row holds only the lane, verifier and the lander's pre-relay segment",
+         [agent["role"] for attempt in row["attempts"] for agent in attempt["agents"]],
+         ["lane", "verifier", "lander"])
+    same("Q10: the relay's own time is unattributed, a separate gap from the one this row fixes",
+         [item for item in assembled["unattributed"] if item["lane"] == "land:q10-relayed-holder"],
+         [{"run": "wf_r20", "lane": "land:q10-relayed-holder", "agents": 1, "time": 40_000}])
+
+
+def check_a_missing_holder_lands_another_run(assembled):
+    steps = assembled["steps"]
+    landed = steps[("wf_r22", "d12")]
+    same("Q12: a holder whose own run cannot be found gets a landed_by naming no run",
+         landed["landed_by"], {"run": None, "lane": "q-vanished-holder"})
+    same("Q12: its land time still folds into the land lock, marked rather than resolved",
+         (dict(landed["buckets"]), sorted(landed["marks"])),
+         ({"before the first record": 0, "model: writing commands": 900, "land lock": 75_000,
+           "after the last record": 1_000},
+          ["land lock bound", "landed by q-vanished-holder, whose own run is not in the retained transcripts"]))
+
+
 def check_every_step_adds_up(assembled):
     for key, step in assembled["steps"].items():
         same(f"{key}: its buckets add up to its running time", sum(step["buckets"].values()), step["time"])
@@ -484,8 +627,8 @@ def check_the_printed_report(world):
         code = row_time.main([world.root, REPO, world.claims_path, "--since", "2026-10-05", "--until", "2026-10-06"])
     same("the report prints and exits 0", code, 0)
     text = printed.getvalue()
-    same("the report names eight rows", text.splitlines()[0], "row-time: 8 rows, started 2026-10-05T00:00:00Z to "
-                                                               "2026-10-06T00:00:00Z")
+    same("the report names eleven rows", text.splitlines()[0], "row-time: 11 rows, started 2026-10-05T00:00:00Z to "
+                                                                "2026-10-06T00:00:00Z")
     printed = io.StringIO()
     with contextlib.redirect_stdout(printed):
         row_time.main([world.root, REPO, world.claims_path, "Q4", "--json"])
