@@ -716,6 +716,11 @@ def link_shared_gates(steps, landers):
     keeps its role `lane` and keeps the `land:` prefix in the lane field it computes, so neither
     `agent["role"]` nor `agent["lane"]` names it a lander. `land_lane_of` reads the raw label
     instead, straight or relayed, and `landers` is built the same way.
+
+    A holder's own run can be gone from the retained transcripts entirely -- a dead worktree's
+    session pruned after the lane that named it as `merge_branch` kept its copy (Q1935). There is
+    then no run to point `landed_by` at and no step to credit with `served`: the wait still
+    happened, so it still folds into "land lock", but it is marked rather than resolved.
     """
     by_label = collections.defaultdict(list)
     for agent in landers:
@@ -730,7 +735,11 @@ def link_shared_gates(steps, landers):
             continue
         candidates = [other for other in by_label.get(holder_label, [])
                       if other["start"] <= agent["end"] and other["end"] >= agent["start"]]
-        assert candidates, f"{agent['label']} was landed by {holder_label}, and no lander of that lane ran beside it"
+        if not candidates:
+            step["landed_by"] = {"run": None, "lane": holder_label}
+            step["buckets"] = recharged(step)
+            step["marks"].add(f"landed by {holder_label}, whose own run is not in the retained transcripts")
+            continue
         holder = candidates[0]
         step["landed_by"] = {"run": holder["run"], "lane": holder_label}
         step["buckets"] = recharged(step)
