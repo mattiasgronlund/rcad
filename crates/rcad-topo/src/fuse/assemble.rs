@@ -8612,7 +8612,17 @@ fn input_corners_baked_on_exactly_three_planes(
 struct Corners {
     made: Vec<Corner>,
     named: BTreeMap<CornerName, usize>,
+    /// Which corner first claimed each `f64` triple. It joins nothing: two
+    /// names are one corner by [`Corners::goes_by`] or [`Corners::one_corner`],
+    /// never by landing on one triple.
     at: BTreeMap<[u64; 3], usize>,
+    /// For every name a kept side joins to another name whose corner lands on
+    /// the very same `f64` triple, the least of the names so joined: they are
+    /// one corner, made the first time any of them is asked for. See
+    /// [`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`].
+    one_corner: BTreeMap<CornerName, CornerName>,
+    /// The corner made for each least name of [`Corners::one_corner`].
+    made_for_one_corner: BTreeMap<CornerName, usize>,
     /// Names that are another corner's, settled before any piece was walked:
     /// the one corner of a closed curve, wherever a piece started it. See
     /// [`Corners::with_each_closed_curve_started_once`].
@@ -8764,7 +8774,7 @@ impl Corners {
         };
         let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<CurveName>>> = BTreeMap::new();
         let mut on_curve: BTreeMap<CurveName, OneClosedCurve<'_>> = BTreeMap::new();
-        for (meet, curve) in sides {
+        for &(meet, curve) in &sides {
             let one_name = curve.map(|curve| corners.curve_goes_by(curve));
             if let (Some(curve), Some(one_name)) = (curve, one_name) {
                 on_curve.entry(one_name).or_default().names.insert(curve);
@@ -8790,6 +8800,12 @@ impl Corners {
             }
         }
         corners.join_the_names_of_each_point(model, names_of_one_point, policy, log)?;
+        corners.make_one_corner_of_the_ends_of_each_side_with_no_length(
+            model,
+            sides.iter().map(|&(meet, _)| meet),
+            policy,
+            log,
+        )?;
         for (curve, OneClosedCurve { names, mut starts }) in on_curve {
             if names.len() == 1 && starts.iter().all(|(slot, _, _)| slot.is_none()) {
                 continue;
@@ -8861,30 +8877,17 @@ impl Corners {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
-        let mut leads_to: BTreeMap<CornerName, CornerName> = BTreeMap::new();
-        let leader = |leads_to: &BTreeMap<CornerName, CornerName>, mut name: CornerName| {
-            while let Some(&next) = leads_to.get(&name) {
-                name = next;
-            }
-            name
-        };
+        let mut folds = Vec::new();
         for one_point in names_of_one_point {
             let kept = self.name_of(model, &one_point.kept, policy, log)?;
             for (surfaces, which) in &one_point.folded {
-                let folded = CornerName::Meet(names_of_the_three_surfaces(surfaces), *which);
-                let (one, other) = (leader(&leads_to, kept), leader(&leads_to, folded));
-                match one.cmp(&other) {
-                    Ordering::Less => leads_to.insert(other, one),
-                    Ordering::Greater => leads_to.insert(one, other),
-                    Ordering::Equal => None,
-                };
+                folds.push([
+                    kept,
+                    CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
+                ]);
             }
         }
-        for &name in leads_to.keys() {
-            let least = leader(&leads_to, name);
-            self.goes_by.insert(name, least);
-            self.goes_by.insert(least, least);
-        }
+        self.goes_by.extend(the_least_name_of_each_group(folds));
         for one_point in names_of_one_point {
             let MeetPoint::Existing { vertex, .. } = &one_point.kept else {
                 continue;
@@ -8905,6 +8908,73 @@ impl Corners {
                 *furthest = furthest.max(moved.magnitude());
             }
         }
+        Ok(())
+    }
+
+    /// Make one corner of the two ends of each of `sides` whose two names land
+    /// on one `f64` triple.
+    ///
+    /// **Two names are one corner by a coordinate only where a side runs
+    /// between them.** Such a side has no length as the answer's corners are
+    /// written, and its two ends must be one corner for [`sides_of`] to leave
+    /// it out on a plane (§365.7), and for [`Corners::of_both_ends`] to refuse
+    /// it on a curved surface. The arrangement keeps two meets apart wherever
+    /// it can order them along a crossing, so its folds alone do not make
+    /// them one.
+    ///
+    /// **Two names on one triple with no side between them stay two
+    /// corners.** Until Q2305 [`Corners::of`] made any two names whose places
+    /// landed on one triple one corner. A cube set corner to corner on a
+    /// block and turned a little has two of its edges cross the block's
+    /// planes `x = 0` and `y = 0` a rounding from the block's top corner,
+    /// outside the block, and at `(t, p) = (0.05, 0.05)` both crossings' boxes
+    /// are centred on that corner's own triple, `(0, 0, 10)`. The arrangements
+    /// had proved both apart from it. Joined to it, they left the turned cube
+    /// four edges at the block's corner, so [`Assembly::what_is_left`] kept it
+    /// as a corner of the turned cube, with two edges `1.8e-15` long from it
+    /// to the turned cube's own corner, and the union was refused
+    /// `DynamicRangeTooWide` (`tests/two_cubes_corner_to_corner_turned_a_little.rs`).
+    /// Two corners, each crossing is a corner of the turned cube's pieces that
+    /// only two of its edges leave, and the two are read through.
+    ///
+    /// **Where a name lands is where its corner settles**: the lowest of the
+    /// places its ends would put it ([`Corners::settle_on_the_lower_rounding`]),
+    /// taken over every side before any corner is made, so the order the
+    /// pieces arrive in decides nothing. A chain of such sides joins every
+    /// name along it, and they go by the least of them in
+    /// [`Corners::one_corner`].
+    ///
+    /// # Errors
+    ///
+    /// Whatever [`Corners::name_of`] gives.
+    fn make_one_corner_of_the_ends_of_each_side_with_no_length<'a>(
+        &mut self,
+        model: &Model,
+        sides: impl Iterator<Item = &'a FaceMeet>,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<()> {
+        let mut lands_at: BTreeMap<CornerName, Point> = BTreeMap::new();
+        let mut between = Vec::new();
+        for meet in sides {
+            let from = self.goes_by(self.name_of(model, &meet.ends[0], policy, log)?);
+            let to = self.goes_by(self.name_of(model, &meet.ends[1], policy, log)?);
+            for (name, end) in [(from, &meet.ends[0]), (to, &meet.ends[1])] {
+                let point = self.the_corner_it_would_be(model, name, end).point;
+                let lowest = lands_at.entry(name).or_insert(point);
+                if is_the_lower_rounding(point, *lowest) {
+                    *lowest = point;
+                }
+            }
+            if from != to {
+                between.push([from, to]);
+            }
+        }
+        self.one_corner = the_least_name_of_each_group(
+            between
+                .into_iter()
+                .filter(|[from, to]| exactly_at(lands_at[from]) == exactly_at(lands_at[to])),
+        );
         Ok(())
     }
 
@@ -8981,6 +9051,11 @@ impl Corners {
     /// ([`Corners::join_the_names_of_each_point`]), and is as wide as the
     /// wider of the corner and what arrived.
     ///
+    /// **Two names are one corner where an arrangement folded them, or where
+    /// a side with no length runs between them**
+    /// ([`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`]),
+    /// and never only because their places land on one `f64` triple.
+    ///
     /// # Errors
     ///
     /// Whatever [`Corners::name_of`] gives.
@@ -9001,17 +9076,22 @@ impl Corners {
             self.made[already].moved_by_the_policy |= corner.moved_by_the_policy;
             return Ok(already);
         }
-        let index = match self.at.get(&exactly_at(corner.point)) {
+        let one_corner = self.one_corner.get(&name).copied();
+        let index = match one_corner.and_then(|least| self.made_for_one_corner.get(&least)) {
             Some(&already) => {
-                self.made[already].wobble = self.made[already].wobble.max(corner.wobble);
+                self.settle_on_the_lower_rounding(already, corner.point, corner.wobble);
                 self.made[already].from = self.made[already].from.or(corner.from);
                 self.made[already].moved_by_the_policy |= corner.moved_by_the_policy;
                 already
             }
             None => {
-                self.at.insert(exactly_at(corner.point), self.made.len());
+                let index = self.made.len();
+                self.at.entry(exactly_at(corner.point)).or_insert(index);
                 self.made.push(corner);
-                self.made.len() - 1
+                if let Some(least) = one_corner {
+                    self.made_for_one_corner.insert(least, index);
+                }
+                index
             }
         };
         self.named.insert(name, index);
@@ -9196,27 +9276,62 @@ impl Corners {
     fn settle_on_the_lower_rounding(&mut self, corner: usize, at: Point, uncertainty: f64) {
         let made = &mut self.made[corner];
         made.wobble = made.wobble.max(uncertainty);
-        let lower = at
-            .coordinates()
-            .iter()
-            .zip(made.point.coordinates().iter())
-            .map(|(mine, theirs)| mine.total_cmp(theirs))
-            .find(|order| order.is_ne())
-            .is_some_and(Ordering::is_lt);
-        if lower {
+        if is_the_lower_rounding(at, made.point) {
             let left_behind = exactly_at(made.point);
             made.point = at;
-            // No corner sits on the rounding this one just left, so a later
-            // corner of another name landing there would be joined to this one
-            // over a coordinate neither of them is on (§49.3). Another corner
-            // that has since settled onto that coordinate *is* on it, and keeps
-            // its claim.
+            // No corner sits on the rounding this one just left, so a closed
+            // edge's start read past there would be taken for a corner it is
+            // not ([`Corners::where_each_closed_edge_read_past_starts`], §49.3).
+            // Another corner that has since settled onto that coordinate *is*
+            // on it, and keeps its claim.
             if self.at.get(&left_behind) == Some(&corner) {
                 self.at.remove(&left_behind);
             }
             self.at.insert(exactly_at(at), corner);
         }
     }
+}
+
+/// Whether `one` is the lower of two roundings of one corner, as
+/// [`Corners::settle_on_the_lower_rounding`] picks: by `x`, then `y`, then
+/// `z`, in [`f64::total_cmp`]'s order.
+fn is_the_lower_rounding(one: Point, other: Point) -> bool {
+    one.coordinates()
+        .iter()
+        .zip(other.coordinates().iter())
+        .map(|(mine, theirs)| mine.total_cmp(theirs))
+        .find(|order| order.is_ne())
+        .is_some_and(Ordering::is_lt)
+}
+
+/// For every name `joined` links to another, directly or along a chain of
+/// links, the least name it is so linked to; the least name of each group
+/// maps to itself. A name linked to nothing but itself is left out.
+fn the_least_name_of_each_group(
+    joined: impl IntoIterator<Item = [CornerName; 2]>,
+) -> BTreeMap<CornerName, CornerName> {
+    let mut leads_to: BTreeMap<CornerName, CornerName> = BTreeMap::new();
+    let leader = |leads_to: &BTreeMap<CornerName, CornerName>, mut name: CornerName| {
+        while let Some(&next) = leads_to.get(&name) {
+            name = next;
+        }
+        name
+    };
+    for [one, other] in joined {
+        let (one, other) = (leader(&leads_to, one), leader(&leads_to, other));
+        match one.cmp(&other) {
+            Ordering::Less => leads_to.insert(other, one),
+            Ordering::Greater => leads_to.insert(one, other),
+            Ordering::Equal => None,
+        };
+    }
+    let mut least = BTreeMap::new();
+    for &name in leads_to.keys() {
+        let root = leader(&leads_to, name);
+        least.insert(name, root);
+        least.insert(root, root);
+    }
+    least
 }
 
 /// Where three planes meet, worked out from the three alone: each turned to
@@ -11858,7 +11973,7 @@ mod tests {
         Axis, Cone, Cylinder, EdgeRun, Isometry, Orientation, Plane, Scale, Sphere, Surface,
         SurfaceMeet, Torus, intersect,
     };
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use rcad_predicates::{Decision, Interval, Policy, ProvenanceLog};
 
@@ -11940,7 +12055,8 @@ mod tests {
     /// the whole circle.
     ///
     /// The places are where they are only for their boxes: what is asked is
-    /// two names and one middle.
+    /// two names and one middle, and a kept side between them, which is what
+    /// makes the two one corner (Q2305).
     #[test]
     fn an_arc_between_two_places_that_round_to_one_point_is_refused() {
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -11967,7 +12083,16 @@ mod tests {
             &[],
         );
 
-        let given = Corners::default().of_both_ends(
+        let mut corners = Corners::with_each_closed_curve_started_once(
+            &model,
+            BTreeMap::new(),
+            &[],
+            std::iter::once(&arc),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("no closed curve to name");
+        let given = corners.of_both_ends(
             &model,
             &arc,
             face,
