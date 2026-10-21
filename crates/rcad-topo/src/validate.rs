@@ -3003,7 +3003,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let mut closest = (enclosed, leaves_out);
     let top = how_far_across(&coarsest) / 2.0;
     let mut finest = (coarsest, enclosed, rounding, ProvenanceLog::new());
-    let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
+    let mut floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
     let thinnest_bend = the_thinnest_bend_a_mesh_can_stray_past(view);
     let mut room = top;
     while room >= floor {
@@ -3042,6 +3042,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         };
         room /= 2.0;
         if let Some(radius) = strayed_past {
+            floor = floor.min(radius / TIMES_UNDER_A_BEND_A_MESH_STRAYED_PAST_THE_FLOOR_GOES);
             while room > floor && room >= ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED * radius {
                 room /= 2.0;
             }
@@ -3111,6 +3112,12 @@ fn the_thinnest_bend_a_mesh_can_stray_past(view: SolidView<'_>) -> Option<f64> {
 /// finer one answers, the closest sum in place of an answer: every rung that
 /// answers has cleared [`the_sum_answers`], and the floor is never skipped.
 const ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED: f64 = 8.0;
+
+/// How many times under the thinnest bend's radius
+/// [`how_much_space_a_curved_solid_encloses`]'s ladder goes down to, once a
+/// rung's mesh has strayed past that bend and been charged without end, when
+/// its floor thirteen halvings under its top is higher (row Q2368).
+const TIMES_UNDER_A_BEND_A_MESH_STRAYED_PAST_THE_FLOOR_GOES: f64 = 8.0;
 
 /// How many times [`how_much_space_a_curved_solid_encloses`]'s own ladder has
 /// asked a finer mesh, counted only in tests. A clock says a capped call is
