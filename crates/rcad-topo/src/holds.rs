@@ -14133,64 +14133,99 @@ mod tests {
         }
     }
 
+    /// **A box across the line a ruling side is seen on, past that side's
+    /// ends, is placed by the other sides** (row Q2563). Seen down the axis,
+    /// the skin of a frustum cut to a quarter, or to three quarters, has two
+    /// sides along rulings, each seen as a piece of a line through where the
+    /// apex is seen. A point given as a box 1e-9 wide across one of those lines
+    /// has no sign of it. Past the piece's ends, above the top cap, below the
+    /// bottom one or across the apex, the piece neither holds the point nor
+    /// crosses a half-line aimed at a corner off its line, so the other sides
+    /// place it: held across the apex on the three quarters, and nowhere else.
     #[test]
-    fn probe_q2563_cone() {
-        let policy = Policy::certified();
-        for rule in [crate::Rule::Intersection, crate::Rule::Difference] {
-            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-            let frustum = probe_frustum(&mut model, 4.0, 8.0);
-            let triangle = crate::ProfileBuilder::new(vec![[0.0, 0.0], [12.0, 0.0], [0.0, 12.0]])
-                .build(&policy, &mut ProvenanceLog::new())
-                .expect("a triangle");
-            let prism = model
-                .add_extrusion(
-                    &triangle,
-                    6.0,
-                    &Isometry::translation(Vector::new(0.0, 0.0, 3.0)).expect("a shift"),
-                )
-                .expect("a prism");
-            let (arguments, tools) = if rule == crate::Rule::Intersection {
-                ([prism], [frustum])
-            } else {
-                ([frustum], [prism])
-            };
-            let answer = model
-                .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
-                .expect("answers");
-            let &[solid] = answer.solids() else {
-                panic!("one solid");
-            };
-            let view = model.solid(solid).expect("key");
-            for face in view.faces() {
-                if !matches!(face.surface(), Surface::Cone(_)) {
-                    continue;
-                }
-                let corners: Vec<Point> = face.wires().flat_map(WireView::points).collect();
-                eprintln!("{rule:?} cone face {:?} corners {corners:?}", face.key());
-                let wobbling = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
-                let ex = Interval::exactly;
-                for (name, point) in [
-                    ("angle 0 z 10", [ex(5.0), wobbling(0.0), ex(10.0)]),
-                    ("angle 0 z 2", [ex(1.0), wobbling(0.0), ex(2.0)]),
-                    ("angle pi z 6", [ex(-3.0), wobbling(0.0), ex(6.0)]),
-                    ("angle 3pi/2 z 6", [wobbling(0.0), ex(-3.0), ex(6.0)]),
-                    ("angle pi/2 z 10", [wobbling(0.0), ex(5.0), ex(10.0)]),
-                    ("exact angle pi z 6", [ex(-3.0), ex(0.0), ex(6.0)]),
-                    ("exact angle 0 z 10", [ex(5.0), ex(0.0), ex(10.0)]),
-                ] {
-                    let answer = view.face_holds_the_point(
-                        face.key(),
+    fn a_box_across_the_line_a_ruling_is_seen_on_past_its_ends_is_placed_by_the_other_sides() {
+        let across = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        let on = Interval::exactly;
+        let past_the_caps = [
+            [on(5.0), across(0.0), on(10.0)],
+            [on(1.0), across(0.0), on(2.0)],
+            [across(0.0), on(5.0), on(10.0)],
+        ];
+        let across_the_apex = [
+            [on(-3.0), across(0.0), on(6.0)],
+            [across(0.0), on(-3.0), on(6.0)],
+        ];
+        for (rule, across_the_apex_is) in [
+            (crate::Rule::Intersection, OnAFace::NotHeld),
+            (crate::Rule::Difference, OnAFace::Held),
+        ] {
+            let (model, solid, skin) = the_skin_of_a_frustum_cut_by_a_quarter(rule);
+            let expected = past_the_caps
+                .map(|point| (point, OnAFace::NotHeld))
+                .into_iter()
+                .chain(across_the_apex.map(|point| (point, across_the_apex_is)));
+            for (point, is) in expected {
+                let answer = model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .face_holds_the_point(
+                        skin,
                         PredicatePoint::Constructed(point),
-                        &policy,
+                        &Policy::certified(),
                         &mut ProvenanceLog::new(),
-                    );
-                    eprintln!("  {name}: {answer:?}");
-                }
+                    )
+                    .unwrap_or_else(|refused| panic!("{point:?} after the {rule:?}: {refused:?}"));
+                assert_eq!(answer, is, "{point:?} after the {rule:?}");
             }
         }
     }
 
-    fn probe_frustum(model: &mut Model, near: f64, far: f64) -> SolidKey {
+    /// The frustum of the cone `r = z / 2` between heights 4 and 8, and the
+    /// key of its skin, after `rule` with a prism over the quarter where `x`
+    /// and `y` are both positive: its skin between the angles 0 and π/2 after
+    /// an intersection, and between π/2 and 2π after a difference.
+    fn the_skin_of_a_frustum_cut_by_a_quarter(rule: crate::Rule) -> (Model, SolidKey, FaceKey) {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let frustum = a_frustum(&mut model, 4.0, 8.0);
+        let triangle = crate::ProfileBuilder::new(vec![[0.0, 0.0], [12.0, 0.0], [0.0, 12.0]])
+            .build(&policy, &mut ProvenanceLog::new())
+            .expect("a triangle");
+        let prism = model
+            .add_extrusion(
+                &triangle,
+                6.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, 3.0)).expect("a shift"),
+            )
+            .expect("a prism");
+        let (arguments, tools) = if rule == crate::Rule::Intersection {
+            ([prism], [frustum])
+        } else {
+            ([frustum], [prism])
+        };
+        let answer = model
+            .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+            .expect("a frustum cut by a prism");
+        let &[solid] = answer.solids() else {
+            panic!("one solid, not {:?}", answer.solids());
+        };
+        let skins: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("the fuse made the key")
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface::Cone(_)))
+            .map(|face| face.key())
+            .collect();
+        let &[skin] = skins.as_slice() else {
+            panic!("one face on the cone, not {skins:?}");
+        };
+        (model, solid, skin)
+    }
+
+    /// The frustum of the cone `r = z / 2` between heights `near` and `far`,
+    /// built as `two_quarters_of_a_hollow_cone_flush_along_a_plane.rs` builds
+    /// it: two caps and a skin with its seam along the ruling at angle 0.
+    fn a_frustum(model: &mut Model, near: f64, far: f64) -> SolidKey {
         use crate::{DraftStep, SolidBuilder};
         let slope = 0.5;
         let skin = rcad_geom::Cone::new(Axis::z(), slope).expect("a positive slope");
