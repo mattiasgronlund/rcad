@@ -42,27 +42,28 @@ const LEAN: f64 = 0.3;
 #[test]
 fn the_piece_two_bars_share_is_the_same_either_way_round() {
     let shared = what_the_two_bars_share(1000);
-    let upright_first = answer(Rule::Intersection, true, shared);
-    let leaning_first = answer(Rule::Intersection, false, shared);
+    let upright_first = answer(Rule::Intersection, true, shared, 2);
+    let leaning_first = answer(Rule::Intersection, false, shared, 2);
     the_same_volume(upright_first, leaning_first, "the intersection");
 }
 
-/// The two bars unite to the same solid whichever is handed in first.
+/// The two bars unite to the same solid whichever is handed in first: each
+/// pipe with a hole, and the four caps.
 #[test]
 fn two_bars_unite_to_the_same_solid_either_way_round() {
     let whole = UPRIGHT + LEANING - what_the_two_bars_share(1000);
-    let upright_first = answer(Rule::Union, true, whole);
-    let leaning_first = answer(Rule::Union, false, whole);
+    let upright_first = answer(Rule::Union, true, whole, 6);
+    let leaning_first = answer(Rule::Union, false, whole, 6);
     the_same_volume(upright_first, leaning_first, "the union");
 }
 
 /// Each bar less the other answers, and measures its own volume less what
-/// the two share.
+/// the two share: its pipe with a hole, its two caps, and the dent.
 #[test]
 fn each_bar_less_the_other_answers() {
     let shared = what_the_two_bars_share(1000);
-    answer(Rule::Difference, true, UPRIGHT - shared);
-    answer(Rule::Difference, false, LEANING - shared);
+    answer(Rule::Difference, true, UPRIGHT - shared, 4);
+    answer(Rule::Difference, false, LEANING - shared, 4);
 }
 
 /// The upright bar's volume, `π · 2² · 12`.
@@ -79,9 +80,10 @@ struct Measured {
 }
 
 /// The fuse `rule` of the two bars, the upright one first or not: assert that
-/// it answers one solid, that the model validates, and that the solid measures
-/// `volume` to within its mesh's own error. Hands back what it measured.
-fn answer(rule: Rule, upright_first: bool, volume: f64) -> Measured {
+/// it answers one solid of `faces` faces, that the model validates, and that
+/// the solid measures `volume` to within its mesh's own error. Hands back what
+/// it measured.
+fn answer(rule: Rule, upright_first: bool, volume: f64, faces: usize) -> Measured {
     let what = format!("{rule:?}, upright bar first: {upright_first}");
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -120,6 +122,15 @@ fn answer(rule: Rule, upright_first: bool, volume: f64) -> Measured {
         volume: measure.volume(),
         error: measure.volume_error(),
     };
+    assert_eq!(
+        model
+            .solid(solid)
+            .expect("a solid the fuse made")
+            .faces()
+            .count(),
+        faces,
+        "{what}: faces"
+    );
     assert!(
         (measured.volume - volume).abs() <= measured.error,
         "{what}: measured {measured:?} against {volume}"
