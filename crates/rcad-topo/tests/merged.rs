@@ -144,6 +144,8 @@ pub mod a_cap_whose_rim_bends_back_past_its_own_meridian;
 pub mod a_chamfered_bar_cut_by_a_block_turned_another_way;
 #[path = "a_closed_edge_cornered_a_hair_off_where_its_loop_was_walked_from.rs"]
 pub mod a_closed_edge_cornered_a_hair_off_where_its_loop_was_walked_from;
+#[path = "a_closed_edge_whose_corner_moved_after_one_face_read_it.rs"]
+pub mod a_closed_edge_whose_corner_moved_after_one_face_read_it;
 #[path = "a_cone_and_its_copy.rs"]
 pub mod a_cone_and_its_copy;
 #[path = "a_cone_arc_past_the_far_end_of_a_long_ellipse.rs"]
