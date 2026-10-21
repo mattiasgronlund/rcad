@@ -154,6 +154,28 @@ fn certified_the_intersection_and_the_block_first_difference_answer_at_two_more_
     }
 }
 
+/// At `(t, p) = (0.05, 0.05)` and `(0.02, 0.001)`, under `Policy::certified()`,
+/// the union, both orders, and the turned cube less the block measure the two
+/// volumes worked by hand; they refused `DynamicRangeTooWide` at `626c389a`
+/// (Q2305).
+#[test]
+fn certified_the_union_and_the_turned_first_difference_answer_at_two_more_turns() {
+    for (t, p) in [(0.05, 0.05), (0.02, 0.001)] {
+        for (rule, order, worked) in [
+            (Rule::Union, Order::BlockFirst, 2000.0),
+            (Rule::Union, Order::TurnedFirst, 2000.0),
+            (Rule::Difference, Order::TurnedFirst, 1000.0),
+        ] {
+            let asked = format!("certified, t = {t}, p = {p}, {rule:?}, {order:?}");
+            assert_about(
+                volume_of_a_fuse(&Policy::certified(), t, p, rule, order, &asked),
+                worked,
+                &asked,
+            );
+        }
+    }
+}
+
 /// Under `Policy::tolerant(100.0)`, every fuse of the two cubes, both orders,
 /// answers at four turns that refused `CannotTellTheCellsOfAFaceApart` on
 /// `65d5ef12` (Q2303).
