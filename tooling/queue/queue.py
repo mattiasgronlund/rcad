@@ -1210,15 +1210,22 @@ def pick_step(queue, claims, here, args, batch):
 
 
 def put_in_its_block(queue, row):
-    """The markers stand where the frame side had the row; the side kept may belong elsewhere."""
+    """The markers stand where the frame side had the row; the side kept may belong elsewhere.
+
+    A tier with no block gets one, the way `add` and `tier` do (§307.3); the
+    closed heading is never optional, so a missing one there still refuses.
+    Writing the heading can put lines above the row, so it is found again by
+    its id before it is taken out, the way `move_to_tier` does.
+    """
     home = "closed" if row.is_closed() else row.tier
     if row.block[0] == home:
         return
-    block = queue.block_of_key(home)
+    block = queue.block_for_tier(home) if home in TIERS_IN_ORDER else queue.block_of_key(home)
     if block is None:
         raise Refused(f"{row.id} belongs under the {home} heading, and the file has no block there")
-    queue.remove(row)
-    queue.append_to_block(block, row.text)
+    moved = queue.find(row.id)
+    queue.remove(moved)
+    queue.append_to_block(block, moved.text)
 
 
 def pin_step(queue, claims, here, args, batch):
