@@ -3862,13 +3862,25 @@ impl BuildingAMesh {
             return Err(Invalid::FaceHasNoWires.into());
         }
         let deflection = Deflection::of(room)?;
+        // Read where made, exactly, rather than where a loop was walked in
+        // the chart the solid is placed in: a placed hole whose corners lie
+        // on one line where made can round off that line once placed, and
+        // the triangulator refuses a loop with a corner on a side of its own
+        // loop (Q2531). `hand_over` fans a flat piece the same way above.
+        let on_one_line_where_made: Vec<bool> = loops
+            .iter()
+            .map(|one| self.every_corner_lies_on_one_line_where_made(face, &one.points))
+            .collect();
         let ThePatchAsCut {
             pieces,
             drawn_here,
             cut_from,
         } = match how {
             HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder => {
-                what_the_triangulator_can_cut(surface, loops)
+                what_the_triangulator_can_cut(
+                    surface,
+                    loops.into_iter().zip(on_one_line_where_made).collect(),
+                )
             }
             HowToCut::ZipUpABand => ThePatchAsCut {
                 pieces: vec![loops],
@@ -4429,6 +4441,17 @@ struct ThePatchAsCut {
 /// corners stand on their sides or inside them, no further from where they
 /// are than the corners' own roundings.
 ///
+/// **That collinearity is read off where the face was made, not off the
+/// chart this function is handed** — `on_one_line_where_made`, computed once
+/// per loop by [`BuildingAMesh::every_corner_lies_on_one_line_where_made`] and
+/// passed down from [`BuildingAMesh::hand_over`]. A placed hole on one line
+/// where made can round off that line once placed, the same way a placed flat
+/// piece's own outline can below, so reading it from `hole.corners.corners()`
+/// here instead missed it at some placements and left the hole for the
+/// triangulator to refuse `LoopsTouch`, or to mesh wound whichever way the
+/// rounding went (Q2531,
+/// `a_hole_on_one_line_where_made_is_fanned_however_it_is_placed`).
+///
 /// **A loop that names one place in the chart twice is cut there into two
 /// lobes**: from the first of the two to the corner before the second, and
 /// from the second round to the corner before the first. Two triangles bridge
@@ -4486,15 +4509,18 @@ struct ThePatchAsCut {
 /// `P′` was the walk's one point on the arc from `P` to `C`, stored at `P`.
 /// `BuildingAMesh::walk` now drops it, and that difference is refused
 /// `FacesDoNotAgreeWhichWayTheyFace` instead.
-fn what_the_triangulator_can_cut(surface: &Surface, patch: Vec<ALoopToCut>) -> ThePatchAsCut {
+fn what_the_triangulator_can_cut(
+    surface: &Surface,
+    patch: Vec<(ALoopToCut, bool)>,
+) -> ThePatchAsCut {
     let mut drawn_here = Vec::new();
     let mut loops = patch.into_iter();
-    let outline = loops
+    let (outline, _) = loops
         .next()
         .expect("hand_over refuses a patch with no loops");
     let mut kept = vec![outline];
-    for hole in loops {
-        if surface.as_plane().is_some() && every_corner_is_on_one_line(hole.corners.corners()) {
+    for (hole, on_one_line_where_made) in loops {
+        if surface.as_plane().is_some() && on_one_line_where_made {
             drawn_here.extend(
                 a_fan_round_each_loop(std::iter::once(hole.points.len()))
                     .into_iter()
@@ -12377,5 +12403,55 @@ mod tests {
             orient: Orientation::Forward,
         }]);
         model.key_for_solid(solid)
+    }
+
+    /// Row Q2531. A hole whose corners are not on one line in the chart the
+    /// face is handed in — the triangulator would keep it as a hole rather
+    /// than fan it away — is fanned anyway when `on_one_line_where_made` says
+    /// it was on one line where the face was made.
+    ///
+    /// Before this row's fix, `what_the_triangulator_can_cut` ignored that
+    /// flag and re-derived collinearity from the placed chart alone
+    /// (`every_corner_is_on_one_line(hole.corners.corners())`), so this same
+    /// hole was kept rather than fanned: a placed hole on one line where made
+    /// can round off that line once placed, which is exactly backwards from
+    /// what Q2512 already fixed for a flat piece's own outline.
+    #[test]
+    fn a_hole_on_one_line_where_made_is_fanned_however_it_is_placed() {
+        let outline = ALoopToCut {
+            corners: Loop::through(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+                .expect("a square"),
+            points: vec![0, 1, 2, 3],
+            between_two_edges: vec![false; 4],
+        };
+        let hole_corners = [[1.0, 1.0], [2.0, 1.0], [1.5, 1.5]];
+        assert_ne!(
+            orient2d(hole_corners[0], hole_corners[1], hole_corners[2]),
+            Decision::Zero,
+            "the hole's corners must not be on one line in the chart, or the \
+             old code would fan it too and this test would prove nothing"
+        );
+        let hole = ALoopToCut {
+            corners: Loop::through(hole_corners.to_vec()).expect("three finite corners"),
+            points: vec![10, 11, 12],
+            between_two_edges: vec![false; 3],
+        };
+        let surface = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(0.0, 0.0, 1.0))
+                .expect("a normal with a length"),
+        );
+        let cut = what_the_triangulator_can_cut(&surface, vec![(outline, false), (hole, true)]);
+        assert_eq!(
+            cut.drawn_here,
+            vec![[10, 11, 12]],
+            "the hole's fan, {:?}",
+            cut.drawn_here
+        );
+        let piece_lengths: Vec<usize> = cut.pieces.iter().map(Vec::len).collect();
+        assert_eq!(
+            piece_lengths,
+            vec![1],
+            "one piece, the outline alone, the hole gone rather than kept beside it"
+        );
     }
 }
