@@ -12119,14 +12119,24 @@ fn across_a_circle_that_starts_at_a_pole(
 /// of the loop runs from pole to pole, as each half of a great circle down a
 /// ball's polar axis does (§194.5).
 ///
-/// Only where the ball and the pipe both certify the other pole is on them, so
-/// nothing is guessed, and only where the ball is proved to cross the pipe in
-/// one loop at most ([`a_ball_crosses_a_pipe_in_one_loop_at_most`]). A ball
-/// that crosses it in two has one loop each side of the plane through its
-/// centre square to the pipe's axis, and its two poles lie either side of that
-/// plane too, or both on it where no loop reaches; so where both are on the
-/// pipe, each is on a loop of its own. `None` otherwise, and a loop that
-/// starts at a pole is still refused where it was.
+/// Only where the ball is proved to cross the pipe in one loop at most
+/// ([`a_ball_crosses_a_pipe_in_one_loop_at_most`]). A ball that crosses it in
+/// two has one loop each side of the plane through its centre square to the
+/// pipe's axis, and its two poles lie either side of that plane too, or both on
+/// it where no loop reaches; so where both are on the pipe, each is on a loop of
+/// its own.
+///
+/// **The other pole as it is, where the ball and the pipe both certify it is
+/// on them.** Otherwise a box round it, the size of the box a ball and a plane
+/// get across their circle ([`across_a_circle_that_starts_at_a_pole`]), but
+/// only where [`the_loop_passes_through_the_box_round_the_pole`] proves a point
+/// of the loop is inside it. A centre a rounding off the wall leaves the poles
+/// a rounding off it too: `(−2 sin 0.9, 2 cos 0.9)` is `3.9e-17` inside a bar
+/// of radius 2, and the ball of `0.3` at height `5.1` on its seam has a lower
+/// pole whose height rounds. Each was refused
+/// [`Error::AClosedEdgeOfTheAnswerWouldStartAtAPole`] under every rule until
+/// Q2579. `None` where neither holds, and a loop that starts at a pole is still
+/// refused where it was.
 fn the_other_pole_on_the_one_loop(
     ball: &Sphere,
     pipe: &Cylinder,
@@ -12134,11 +12144,14 @@ fn the_other_pole_on_the_one_loop(
 ) -> Option<PredicatePoint> {
     let round = Surface::Sphere(*ball);
     let latitude = round.coordinates_of(at).1;
-    if !the_surface_pinches_at(&round, latitude) {
+    if !the_surface_pinches_at(&round, latitude)
+        || !a_ball_crosses_a_pipe_in_one_loop_at_most(ball, pipe)
+    {
         return None;
     }
+    let below = latitude > 0.0;
     let [x, y, z] = ball.centre().coordinates();
-    let height = if latitude > 0.0 {
+    let height = if below {
         z - ball.radius()
     } else {
         z + ball.radius()
@@ -12147,7 +12160,76 @@ fn the_other_pole_on_the_one_loop(
     let on_both = [round, Surface::Cylinder(*pipe)]
         .iter()
         .all(|surface| side_of_surface(surface, other) == Decision::Zero);
-    (on_both && a_ball_crosses_a_pipe_in_one_loop_at_most(ball, pipe)).then_some(other)
+    if on_both {
+        return Some(other);
+    }
+    let pole = Point::new(x, y, height);
+    let largest = [pole, at, ball.centre()]
+        .map(|point| point.largest_coordinate_magnitude())
+        .into_iter()
+        .fold(1.0, f64::max);
+    let reach = 2.0 * POINT_ALONG_A_CROSSING_ROUNDOFF * largest;
+    the_loop_passes_through_the_box_round_the_pole(ball, pipe, (height, below), reach).then(|| {
+        PredicatePoint::Constructed(pole.coordinates().map(|coordinate| {
+            Interval::around(coordinate, reach)
+                .expect("a finite pole and a positive reach leave a low end below a high one")
+        }))
+    })
+}
+
+/// Whether the box `reach` either side of the pole `(x, y, height)` of `ball`
+/// along every axis holds a point where the ball crosses `pipe`, for `x` and
+/// `y` the ball's centre's and `height` its centre's less its radius where
+/// `below`, and plus it otherwise, each rounded to `f64`.
+///
+/// **Only for a pipe whose axis runs exactly along `z`**, the way a ball's
+/// poles lie from its centre whatever it is turned by. Then the line through
+/// both poles is parallel to the axis, `d` from it, for `d` how far the
+/// centre is from the axis in `x` and `y`. The point `Q` of the ball over the
+/// place `r` from the axis straight out through the centre, on the pole's own
+/// half, is on both surfaces: it is `|d − r|` from the pole across, and
+/// `R − √(R² − (d − r)²)`, under `(d − r)²/R`, from the true pole up or down,
+/// for `R` the ball's radius and `r` the pipe's. So the box holds `Q` where
+///
+/// - `|d² − r²| < reach · r`, which puts `|d − r|`, being `|d² − r²|/(d + r)`,
+///   under `reach` and so `Q` inside the box across, and under `R` where
+/// - `reach < R`, so that `Q` is a point at all; and
+/// - the true pole, worked out in intervals from the centre and the radius,
+///   is more than `reach²/R` inside the box's top and bottom, so that `Q` is
+///   inside them too, however `height` rounded.
+///
+/// Each is read off the sign of an [`Interval`], with nothing divided and no
+/// root taken; a sign not proved positive is `false`.
+fn the_loop_passes_through_the_box_round_the_pole(
+    ball: &Sphere,
+    pipe: &Cylinder,
+    (height, below): (f64, bool),
+    reach: f64,
+) -> bool {
+    let [across_x, across_y, _] = pipe.axis().direction().components();
+    if across_x != 0.0 || across_y != 0.0 {
+        return false;
+    }
+    let [x, y, z] = ball.centre().coordinates().map(Interval::exactly);
+    let [axis_x, axis_y, _] = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let (radius, pipe_radius) = (
+        Interval::exactly(ball.radius()),
+        Interval::exactly(pipe.radius()),
+    );
+    let (reach, height) = (Interval::exactly(reach), Interval::exactly(height));
+    let off_the_wall =
+        (x - axis_x) * (x - axis_x) + (y - axis_y) * (y - axis_y) - pipe_radius * pipe_radius;
+    let pole = if below { z - radius } else { z + radius };
+    let [under_the_top, over_the_bottom] = [height + reach - pole, pole - (height - reach)];
+    [
+        reach * pipe_radius - off_the_wall,
+        reach * pipe_radius + off_the_wall,
+        radius - reach,
+        radius * under_the_top - reach * reach,
+        radius * over_the_bottom - reach * reach,
+    ]
+    .iter()
+    .all(|room| room.sign() == Decision::Pos)
 }
 
 /// Whether `ball` is proved not to hold the whole cross-section of `pipe`
