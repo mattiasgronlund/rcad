@@ -12022,7 +12022,8 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
 /// through its middle, the line between the two centres or the ring's axis,
 /// and is cut where both surfaces certify the point across exactly
 /// ([`across_a_circle_round_a_line`]). **And a ball against a pipe**, whose
-/// loop is cut at the ball's other pole where that is on the loop
+/// loop is cut at the ball's other pole where that is on the loop, or in a box
+/// round it proved to hold a point of the loop
 /// ([`the_other_pole_on_the_one_loop`]). `None` for every other pair, and one
 /// of those starting at a pole is still refused where it was. A ball against a
 /// cone is one of those, but no frustum Q2171 ran against a ball centred on its
@@ -12040,15 +12041,18 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
 ///
 /// # Its box
 ///
-/// Only a ball against a plane gets a box; every other pair gets a point both
-/// surfaces certify, or `None`. The start sits within
+/// A ball against a plane gets a box, and a ball against a pipe gets one only
+/// where [`the_loop_passes_through_the_box_round_the_pole`] proves the loop
+/// runs through it; every other pair gets a point both surfaces certify, or
+/// `None`. Against a plane, the start sits within
 /// [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of its largest coordinate off the
 /// circle, and mirroring it through the circle's centre carries that distance
 /// across unchanged. The drop onto the plane and the
 /// mirror round a few units in the last place of the largest coordinate in
 /// play, which a second allowance of the same size covers many times over.
-/// Where both surfaces certify the rounded point is on them, it is used as it
-/// is, as [`where_the_crossing_starts`] does.
+/// The pipe's box is the same size. Where both surfaces certify the rounded
+/// point is on them, it is used as it is, as [`where_the_crossing_starts`]
+/// does.
 fn across_a_circle_that_starts_at_a_pole(
     pair: [&Surface; 2],
     from: Point,

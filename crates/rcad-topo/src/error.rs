@@ -623,18 +623,21 @@ pub enum Error {
     /// second node on it, so it is left one closed edge whose one corner is the
     /// pole. That function cuts such a crossing straight across for a ball
     /// against a plane, a ball, or a ring whose axis holds the ball's centre,
-    /// and at the ball's other pole for a ball against a pipe. It names none for
-    /// any other pair, for a pipe whose other pole is not on the one loop, for a
-    /// ring whose axis misses the ball's centre, or where the point across a
-    /// circle with a ball or a ring is not certified exactly.
+    /// and at the ball's other pole for a ball against a pipe, or in a box round
+    /// that pole where the box is proved to hold a point of the loop. It names
+    /// none for any other pair, for a pipe whose other pole is neither on the one
+    /// loop nor in such a box, for a ring whose axis misses the ball's centre, or
+    /// where the point across a circle with a ball or a ring is not certified
+    /// exactly.
     ///
-    /// **Every shape run that reached it is answered now, or refused
-    /// elsewhere.** A ball cut by a plane down its polar axis is answered since
-    /// §194.5. A ball centred on a bar's wall, and two balls crossing in a great
-    /// circle of one, are answered under every rule both ways round since
-    /// Q2171. A ball crossing a ring in a circle through its poles is cut there
-    /// since Q2171 too, and is refused [`Error::Undecidable`] for want of a
-    /// point inside a piece of a face instead.
+    /// **Every shape run that reached it is answered now.** A ball cut by a
+    /// plane down its polar axis is answered since §194.5. A ball centred on a
+    /// bar's wall whose poles lie on the wall exactly, two balls crossing in a
+    /// great circle of one, and a ball crossing a ring in a circle through its
+    /// poles are cut at the other pole since Q2171, and answered under every rule
+    /// both ways round, the ring since Q2287. A ball whose centre is a rounding
+    /// off a bar's wall, or whose pole's height rounds, was still refused here
+    /// until Q2579 boxed the other pole.
     ///
     /// **A gap and not a limit** (§16.10): each of those shapes has an answer,
     /// and cut a second time, each half of the crossing has two corners and a
