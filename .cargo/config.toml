@@ -1,6 +1,6 @@
-# `inari` refuses to build on x86-64 without AVX+FMA — its directed-rounding
-# primitives have no baseline fallback. Haswell (2013) is the floor.
-# See decisions.md §2.4.
+# `inari` refuses to build on x86-64 without SSE4.2, and picks its AVX+FMA
+# backend only when both are enabled. That is the backend every test runs
+# against, so Haswell (2013) is the floor. See decisions.md §460.
 [target.'cfg(target_arch = "x86_64")']
 rustflags = ["-C", "target-cpu=x86-64-v3"]
 

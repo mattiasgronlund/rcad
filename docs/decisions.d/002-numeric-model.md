@@ -63,6 +63,11 @@ This is a real constraint on where the kernel runs, and it is worth knowing that
 the §2.4 newtype is now also the seam behind which a baseline-x86-64 fallback
 would go, should one ever be needed.
 
+**Amended 2026-10-21.** `inari` now comes from Mattias's fork, pinned at one
+commit rather than at a crates.io version. The fork rounds without switching
+MXCSR and builds from SSE4.2 (Nehalem) up. Haswell stays the floor. §460 says
+why.
+
 ### 2.5 `Undecidable` is reached through constructed points
 
 M0's geometry is planar (§3.1), so there are no quadrics to make a predicate
