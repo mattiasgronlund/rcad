@@ -4441,6 +4441,17 @@ struct ThePatchAsCut {
 /// corners stand on their sides or inside them, no further from where they
 /// are than the corners' own roundings.
 ///
+/// **That collinearity is read off where the face was made, not off the
+/// chart this function is handed** — `on_one_line_where_made`, computed once
+/// per loop by [`BuildingAMesh::every_corner_lies_on_one_line_where_made`] and
+/// passed down from [`BuildingAMesh::hand_over`]. A placed hole on one line
+/// where made can round off that line once placed, the same way a placed flat
+/// piece's own outline can below, so reading it from `hole.corners.corners()`
+/// here instead missed it at some placements and left the hole for the
+/// triangulator to refuse `LoopsTouch`, or to mesh wound whichever way the
+/// rounding went (Q2531,
+/// `a_hole_on_one_line_where_made_is_fanned_however_it_is_placed`).
+///
 /// **A loop that names one place in the chart twice is cut there into two
 /// lobes**: from the first of the two to the corner before the second, and
 /// from the second round to the corner before the first. Two triangles bridge
