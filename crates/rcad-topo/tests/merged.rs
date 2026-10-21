@@ -102,6 +102,8 @@ pub mod a_bar_moved_by_whole_numbers_keeps_its_seam_corner_exact;
 pub mod a_bar_notched_by_a_block;
 #[path = "a_bar_on_a_tube_touching_along_one_circle.rs"]
 pub mod a_bar_on_a_tube_touching_along_one_circle;
+#[path = "a_bar_turned_a_quarter_by_rotation_across_an_upright_bar.rs"]
+pub mod a_bar_turned_a_quarter_by_rotation_across_an_upright_bar;
 #[path = "a_bar_turned_three_quarter_turns_and_halved.rs"]
 pub mod a_bar_turned_three_quarter_turns_and_halved;
 #[path = "a_bar_whose_wall_is_two_faces.rs"]

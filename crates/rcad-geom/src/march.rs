@@ -56,10 +56,14 @@ const SAGITTA_MAY_TAKE: f64 = 0.75;
 /// a caller may hand over a budget larger than the whole crossing — the coarse
 /// walk in `crates/rcad-geom/tests/fuzzing/mod.rs` asks `f64::MAX / 4.0` on
 /// purpose, to find out how big a crossing is before asking for the real one.
-/// Against a budget like that the question decides nothing, and a step of
-/// `2.2e307` along the tangent is accepted wherever the settling happens to land
-/// it. This is the question that does not go away: **a straight piece is a piece
-/// of the curve only if it is straighter than it is long.**
+/// Against a budget like that the question decides nothing: alone, it accepted
+/// a step of `2.2e307` along the tangent wherever the settling happened to land
+/// it, when [`march`] still asked its first trial the whole budget. Since Q2581
+/// the first ask is at most the smaller of the two surfaces' radii, but each
+/// step after it is still asked twice what the last covered, and a budget like
+/// that does not stop it. This is the question that does not go away: **a
+/// straight piece is a piece of the curve only if it is straighter than it is
+/// long.**
 ///
 /// A quarter. On a circular arc the sagitta is `tan(θ/4)/2` of the chord, so the
 /// quarter-turn rule below sits at `0.2071` and a quarter leaves a little room
@@ -170,6 +174,52 @@ pub(crate) struct Marched {
 /// A step whose sagitta is comfortably inside the budget grows for the next one,
 /// so a large gentle loop does not get walked at the step a tight corner needed.
 ///
+/// # The first ask
+///
+/// The first trial is asked `room` or the smaller of the two surfaces' radii,
+/// whichever is shorter ([`the_smaller_radius`]), with the radius never taken
+/// below one step of the grid at the seed. Each step after it is asked
+/// twice what the one before covered, so the first step kept sets the scale the
+/// walk starts at, and that has to come from the two surfaces rather than from
+/// wherever a trial asked far too much happened to settle.
+///
+/// **Asked the whole room, it came from such a trial.** A coarse walk asks a
+/// room of `1.7e307` to find out how big a crossing is. Measured at `bb1f44fe`,
+/// on a bar of radius 3 lying along `x` through `(0, 4, 5)` across an upright
+/// bar of radius 2, from the seed on the upright bar's seam: the asks
+/// `1.7e307`, `4.1e153` and `6.4e76` could not be measured, `2.5e38` settled
+/// `2.8e-9` behind the seed, and half that chord was kept as the first step.
+/// Doubling from `1.4e-9` put the first 29 points within `0.73` of the seed,
+/// along a stretch of the crossing that is one line to within a rounding in
+/// both walls' charts, and the mesh refused the face as a side cutting off a
+/// corner of a curved patch (Q2581,
+/// `a_bar_turned_a_quarter_by_rotation_across_an_upright_bar.rs`). Asked 2, the
+/// upright bar's radius, the first trial lands `1.34` along the loop and is
+/// kept.
+///
+/// **This does not do away with far trials**, and [`one_step`]'s rules for them
+/// are still met. Where the loop is much smaller than both surfaces, a radius is
+/// still far. Measured: a ball of radius 1 and a pipe of radius 1 whose axis
+/// passes `1.9998` from the ball's centre cross in a loop about `0.04` across.
+/// Walked from `(0.9999, 0.0141, 0)` with `1.7e307` of room, the first trial,
+/// asked 1, comes back `2.4e-2` from the seed, still settling, and is
+/// shortened. With the axis `1.998` off, the loop is about `0.13` across, and
+/// the first trial comes back `7.7e-2` from the seed, ahead of it and settled,
+/// and is kept.
+///
+/// **Never below one step of the grid at the seed**, because a shorter step can
+/// leave every coordinate where it was, and each shortening after a trial that
+/// settled back is shorter still. A step of one grid step does move the seed:
+/// the tangent is a unit vector, so the step goes at least `1/√3` of its length
+/// along some coordinate, which is more than half that coordinate's grid step.
+/// Measured: a pipe of radius `4.34e-19` through one of radius `5.04e7`,
+/// crossing near `x = −393352` where one grid step is `5.82e-11`, asked its
+/// first trial the thin pipe's radius, kept none of fifty trials and refused
+/// none, and was refused as no step staying on the crossing. Asked one grid
+/// step, it is refused as tangent while bounding how far off a point sits,
+/// which is how it was refused when asked the whole room
+/// (`a_crossing_thinner_than_one_step_of_the_grid_is_refused_at_its_first_step`).
+///
 /// # Why it terminates
 ///
 /// Every accepted step moves the point somewhere it was not, and a step is only
@@ -210,6 +260,43 @@ pub(crate) fn march(
     room: f64,
     most: usize,
 ) -> Result<Marched> {
+    let first = room.min(the_smaller_radius(surfaces).max(one_step_of_the_grid_at(seed)));
+    march_with_a_first_ask(surfaces, seed, first, room, most)
+}
+
+/// The smaller of the two surfaces' own radii: a ball's or a pipe's, and a
+/// ring's tube. A plane and a cone have none, and stand for infinity here.
+fn the_smaller_radius(surfaces: [&Surface; 2]) -> f64 {
+    surfaces
+        .map(|surface| match surface {
+            Surface::Plane(_) | Surface::Cone(_) => f64::INFINITY,
+            Surface::Sphere(ball) => ball.radius(),
+            Surface::Cylinder(pipe) => pipe.radius(),
+            Surface::Torus(ring) => ring.tube_radius(),
+        })
+        .into_iter()
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// How far apart two neighbouring `f64` are at `at`'s largest coordinate, which
+/// is the furthest apart they are anywhere in `at`.
+fn one_step_of_the_grid_at(at: Point) -> f64 {
+    let largest = at.largest_coordinate_magnitude();
+    largest.next_up() - largest
+}
+
+/// [`march`], its first trial asked `first`.
+///
+/// # Errors
+///
+/// The same as [`march`]'s.
+fn march_with_a_first_ask(
+    surfaces: [&Surface; 2],
+    seed: Point,
+    first: f64,
+    room: f64,
+    most: usize,
+) -> Result<Marched> {
     let start = settled(surfaces, seed)?;
     if the_settling_did_not_land_on_both(surfaces, start) {
         return Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces);
@@ -217,7 +304,7 @@ pub(crate) fn march(
     let mut deviation = how_far_off_the_crossing(surfaces, start)?;
     let mut points = Vec::new();
     let mut here = start;
-    let mut step = room.max(f64::MIN_POSITIVE);
+    let mut step = first.max(f64::MIN_POSITIVE);
     let mut travelled = 0.0;
 
     loop {
@@ -670,7 +757,8 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 /// about the curve, as a trial that could not be settled has not, so it is
 /// retried at the square root of the ask the way that one is, below, and never
 /// kept. Halving it was not enough. A pipe of radius 1 through the axis of one
-/// of radius 4, walked from `(4, 0, 6)` with `f64::MAX / 4` of room, settles
+/// of radius 4, walked from `(4, 0, 6)` with `f64::MAX / 4` of room and a first
+/// ask of all of it, settles
 /// every trial from `6.7e153` down back onto that seed exactly, so fifty
 /// halvings ran out at `2.4e139` and the walk was refused as the two pipes being
 /// tangent, which they are nowhere; rooted, the seventh trial, `6.4e4`, lands on
@@ -720,7 +808,8 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 ///
 /// **A refused trial is retried at the square root of the ask, not at half of
 /// it.** Halving searches the exponent one bit at a time, and the coarse walk
-/// starts at `f64::MAX / 4`: measured, fifty halvings of `2.25e307` reach
+/// started at `f64::MAX / 4` until Q2581 asked its first trial a radius
+/// ([`march`]): measured, fifty halvings of `2.25e307` reach
 /// `9.3e43` and every one of them refuses, because the whole range is still
 /// absurd. A trial that could not be settled has said nothing about the curve —
 /// not even how long it is, which is what the chord rule below reads off a short
@@ -1199,14 +1288,18 @@ mod tests {
     /// while settling, which they are nowhere. Rooted, the trials from `6.7e153`
     /// to `1.7e19` settle onto the seed, `4.1e9` cannot be settled, `6.4e4`
     /// lands on the loop `1.8` away, and half that chord is taken.
+    ///
+    /// It walks from a first ask of the whole room, as [`march`] did before
+    /// Q2581.
     #[test]
     fn a_trial_that_settles_back_onto_its_start_is_shortened_by_its_root() {
         let fat = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 4.0);
         let thin = a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 5.0], 1.0);
 
-        let walked = march(
+        let walked = march_with_a_first_ask(
             [&fat, &thin],
             Point::new(4.0, 0.0, 6.0),
+            f64::MAX / 4.0,
             f64::MAX / 4.0,
             1 << 20,
         )
@@ -1248,14 +1341,18 @@ mod tests {
     /// rooted, and the first step kept lands `0.78` along the loop. The walk
     /// closes in six points, every step `0.78` to `1.12` long, each point known
     /// to `1.3e-15`.
+    ///
+    /// It walks from a first ask of the whole room, as [`march`] did before
+    /// Q2581.
     #[test]
     fn a_trial_that_settles_a_rounding_off_its_start_is_shortened_and_not_kept() {
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.5, 0.0, -3.0], 1.0);
         let ball = a_ball([0.0, 0.0, 0.0], 2.0);
         let top = Point::new(-0.5, 0.0, 3.75_f64.sqrt());
 
-        let walked = march([&pipe, &ball], top, f64::MAX / 4.0, 1 << 20)
-            .expect("a pipe through a ball off its axis crosses it in two loops");
+        let walked =
+            march_with_a_first_ask([&pipe, &ball], top, f64::MAX / 4.0, f64::MAX / 4.0, 1 << 20)
+                .expect("a pipe through a ball off its axis crosses it in two loops");
 
         let gaps: Vec<f64> = core::iter::once(top)
             .chain(walked.points.iter().copied())
@@ -1289,13 +1386,17 @@ mod tests {
     /// that will not lie flat on its face (Q1889). Now that trial is shortened
     /// to half its chord, the first point kept is at `z = 1.46`, ahead of the
     /// seed, and all ten points go round one way.
+    ///
+    /// It walks from a first ask of the whole room, as [`march`] did before
+    /// Q2581.
     #[test]
     fn a_trial_that_settles_behind_its_start_is_shortened_and_not_kept() {
         let thin = a_pipe([1.0, 0.0, 0.0], [-10.0, 1.0, 1.0], 1.0);
         let fat = a_pipe([0.0, 0.0, 1.0], [0.0, -2.5, -4.0], 4.0);
         let start = Point::new(3.122498999199199, 0.0, 1.0);
+        let room = 1.685337313933421e307;
 
-        let walked = march([&thin, &fat], start, 1.685337313933421e307, 1 << 20)
+        let walked = march_with_a_first_ask([&thin, &fat], start, room, room, 1 << 20)
             .expect("a thin pipe out of a fat one's side crosses it in one loop");
 
         let round_the_line = |at: Point| f64::atan2(at.z() - 1.0, at.x());
@@ -1339,13 +1440,17 @@ mod tests {
     /// Now that trial is not kept, and the next ask is half its chord, `1.84`.
     /// That one lands `1.25` from the seed and is kept, the shortest step of
     /// the walk, which is known to `1.9e-15`.
+    ///
+    /// It walks from a first ask of the whole room, as [`march`] did before
+    /// Q2581.
     #[test]
     fn a_trial_whose_far_end_has_not_finished_settling_is_shortened_and_not_kept() {
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, -1.0], 2.0);
         let ball = a_ball([0.0, 3.0, 5.0], 3.0);
         let start = Point::new(0.0, 1.9999999999999998, 2.1715728752538097);
+        let room = 1.685337313933421e307;
 
-        let walked = march([&pipe, &ball], start, 1.685337313933421e307, 1 << 20)
+        let walked = march_with_a_first_ask([&pipe, &ball], start, room, room, 1 << 20)
             .expect("a ball off a pipe's axis crosses it in one loop");
 
         let gaps: Vec<f64> = core::iter::once(start)
