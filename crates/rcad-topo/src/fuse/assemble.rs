@@ -9018,6 +9018,20 @@ impl Corners {
     /// passed one corner twice or two faces facing apart
     /// (`tests/a_block_edge_grazing_a_ball_at_cx_16.rs`, Q2193).
     ///
+    /// **Except a piece of an open input edge cut off at one of that edge's
+    /// own ends** ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]),
+    /// which [`sides_of`] leaves out as it leaves out a straight side. Such a
+    /// piece is the stretch of the input arc between its own end and a cut
+    /// that rounds onto that end, and so has no length as written, where a
+    /// circle a block's edge grazes is a crossing this fuse made, which is no
+    /// input edge, and either of whose arcs could be the long one. A plate
+    /// with a round corner tab, turned `0.05` about `z`, kept a corner where
+    /// its own wall's plane `x = 10` cut the tab's rim; in the next fuse that
+    /// plane cut the rim again, a rounding beside that corner, and the union
+    /// with a block nowhere near was refused here though it is the plate and
+    /// the block as they were (§38.1,
+    /// `tests/a_plate_with_a_round_corner_tab_turned.rs`, Q2408).
+    ///
     /// A side whose two ends are one name is a closed curve, and its one
     /// corner is what it is meant to have. A name another corner takes over
     /// ([`Corners::with_each_closed_curve_started_once`]) ends only sides of
@@ -9049,6 +9063,7 @@ impl Corners {
                 .any(|surface| surface.as_plane().is_none())
             && self.goes_by(self.name_of(model, &meet.ends[0], policy, log)?)
                 != self.goes_by(self.name_of(model, &meet.ends[1], policy, log)?)
+            && !is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model)
         {
             return Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint {
                 face,
@@ -11681,7 +11696,7 @@ fn the_corners_each_side_runs_between(
     let mut ends_of_each_side = Vec::with_capacity(wire.len());
     for meet in wire {
         let ends = corners.of_both_ends(model, meet, ancestors[0], policy, log)?;
-        if !is_a_straight_side_with_no_length(meet, ends) {
+        if !is_a_side_with_no_length(meet, ends, model) {
             for (end, corner) in meet.ends.iter().zip(ends) {
                 if let Some(pole) = the_input_pole_an_end_is(solid, ancestors, end) {
                     let made = &mut corners.made[corner];
@@ -11743,7 +11758,7 @@ fn sides_of(
     );
     let mut sides = Vec::new();
     for (meet, &[from, to]) in wire.iter().zip(ends) {
-        if is_a_straight_side_with_no_length(meet, [from, to]) {
+        if is_a_side_with_no_length(meet, [from, to], model) {
             continue;
         }
         let seam = the_seam_a_side_runs_along(model, solid, ancestors, meet);
@@ -11768,14 +11783,43 @@ fn sides_of(
     Ok(sides)
 }
 
-/// Whether `meet` is a side two planes carry whose two ends came out one
-/// corner, which [`sides_of`] leaves out.
-fn is_a_straight_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2]) -> bool {
+/// Whether `meet` is a side whose two ends came out one corner and that has no
+/// length as the answer is written, which [`sides_of`] leaves out: one two
+/// planes carry, or a stretch of an open input edge off one of its own ends
+/// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]).
+fn is_a_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2], model: &Model) -> bool {
     from == to
-        && meet
+        && (meet
             .carried_by
             .iter()
             .all(|surface| surface.as_plane().is_some())
+            || is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model))
+}
+
+/// Whether `meet` runs along one input edge that does not close on itself,
+/// from one of that edge's own two ends to a place that is neither.
+///
+/// **Where both ends come out one corner, such a stretch is the short one.**
+/// The input edge is an arc of less than a whole turn between two corners
+/// that [`Model::validate`]'s range check keeps more than a rounding apart, as
+/// the shortest chord of an edge that does not close. So the places along it
+/// that land on its own end's `f64` triple are near that end along the arc
+/// too, and never round the far side of the circle, where a crossing this
+/// fuse made, which runs along no input edge, can have either arc between two
+/// such places.
+fn is_a_stretch_of_an_open_input_edge_off_its_own_end(meet: &FaceMeet, model: &Model) -> bool {
+    let [edge] = meet.along.as_slice() else {
+        return false;
+    };
+    let input = model
+        .edge(*edge)
+        .expect("a side runs along an edge of the model the fuse was given");
+    let own_ends = [input.start().key(), input.end().key()];
+    if own_ends[0] == own_ends[1] {
+        return false;
+    }
+    let is_an_own_end = |end: &MeetPoint| matches!(end, MeetPoint::Existing { vertex, .. } if own_ends.contains(vertex));
+    is_an_own_end(&meet.ends[0]) != is_an_own_end(&meet.ends[1])
 }
 
 /// Whether a wire of a flat piece of the answer bounds anything: whether some
