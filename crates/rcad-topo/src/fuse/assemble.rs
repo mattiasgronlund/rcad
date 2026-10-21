@@ -3070,12 +3070,24 @@ impl Assembly {
     /// A corner on an arc's surface is outside that arc's piece: it is not on
     /// this ring, so it is on the rest of the curve, which lies across the
     /// chord. A corner of this ring, one on a chord inside its arc's surface,
-    /// or one the arithmetic cannot place, is passed over. Which side of its
-    /// chord an arc bulges is read off the direction it leaves its named corner
-    /// ([`WhichArc::LeavingACorner`]); every other sign is exact.
-    /// `a_sliver_arc_on_a_joined_flat_face.rs` pins how far from wrong that
-    /// reading stays: on every chord the fuse builds down to a few millionths
-    /// long, the rounding never puts the point on the wrong side.
+    /// or one the arithmetic cannot place, is passed over.
+    ///
+    /// **Which side of its chord an arc bulges is read the way the answer names
+    /// the arc**, by [`Edge::the_way_across_the_chord_into_the_arc`], the
+    /// reading the arc's picker is built from ([`how_each_arc_bulges`]). That
+    /// is a float reading and every other sign here is exact, but it cannot
+    /// disagree with the half-space the arc is written with, so the ring is
+    /// placed against the arc the answer holds. It used to be the exact winding
+    /// of the rounded point at the arc's named corner plus the direction it
+    /// leaves that corner ([`WhichArc::LeavingACorner`]) against the chord
+    /// between the stored corners, which weighs the tangent against a chord
+    /// whose ends are rounded. On a chord a hair long the rounding can lean the
+    /// chord further than the arc turns off it: a bar united `1e-15` out past a
+    /// tube's wall at 180 degrees joins the cap's outline on a chord `1.41e-7`
+    /// long whose ends are two roundings apart in `x`, so it leans `1.26e-8`
+    /// where the radius 7 circle turns `1.01e-8` off it. The tube's arc read the
+    /// wrong way, neither ring held the other, and [`Assembly::rings_round`]
+    /// panicked (`a_sliver_arc_on_a_joined_flat_face.rs`, Q2589).
     ///
     /// **A ring every side of which runs along one torus is the whole of one of
     /// the two circles the plane cuts it in**, because the two circles do not
@@ -5857,6 +5869,12 @@ struct Bulging {
 /// How each arc of `ring` bulges against its chord, for
 /// [`Assembly::holds_the_other_rings`] to wind a point round; `None` where an
 /// arc's surface, its bulge, or the ring itself cannot be placed.
+///
+/// The side an arc bulges to is the side its edge's picker faces,
+/// [`Edge::the_way_across_the_chord_into_the_arc`], dotted with the dart's
+/// chord turned a quarter turn on the plane. Both are square to the chord, so
+/// they point the same way or opposite ways and the dot only says which. Where
+/// the edge cannot face its arc, the ring is not placed.
 fn how_each_arc_bulges(
     assembly: &Assembly,
     ring: &[Dart],
