@@ -95,7 +95,8 @@
 // commit and no merge), `branch` (default `lane-<label>`, and it must not exist
 // yet: the lane creates it and refuses to reset one), `model`, `sourcePaths`
 // (what the verifier reverts to base to prove the tests fail without the
-// change; defaults to the `crates/<c>/src` dirs in `writeSet`), `pinsOnly`
+// change; defaults to the `crates/<c>/src` dirs in `writeSet`, a whole
+// `crates/<c>/` included), `pinsOnly`
 // (true for a lane whose write set has nothing to revert -- a verdict, a
 // pinned test and a decisions section, no `src/` path anywhere in its work.
 // The verifier then proves the merge on the new tests passing on the branch,
@@ -151,6 +152,8 @@ const fullFields = (lane) => FULL_FORM.filter((k) => lane[k] !== undefined)
 
 if (!args || typeof args !== 'object') throw new Error('lanes: pass args {base, lanes: [...]}')
 const BASE = args.base
+// The workflow has no git to look the base up with; START has each lane
+// resolve it before branching and stop as blocked when it names no commit (Q2548).
 if (typeof BASE !== 'string' || BASE.length < 7) throw new Error('lanes: args.base must be a full sha of the tree the lanes start from')
 const LANES = Array.isArray(args.lanes) ? args.lanes : []
 if (!LANES.length) throw new Error('lanes: args.lanes is empty')
@@ -385,6 +388,7 @@ function verified(report, lane) {
   if (report.outcome === 'does_not_reproduce') return gone(lane, report, out)
   if (branchIsBase(report)) return measuredNothing(lane, out)
   if (lane.verify === false) return out
+  if (lane.pinsOnly === true && !namesTests(report)) return stopped(lane, out, 'the lane is marked pinsOnly and names no test it pins in tests_that_fail_without_the_change, so it would be verified as moved text, which refuses every line that runs (Q2546, §287)')
   out.kind = lane.sameBehaviour === true ? 'same_behaviour' : namesTests(report) ? 'tests' : 'moved_text'
   if (out.kind === 'same_behaviour') {
     if (namesTests(report)) return stopped(lane, out, 'the lane is marked sameBehaviour and names a test that fails without its change, which says the behaviour changed')
@@ -562,12 +566,21 @@ function sourcePathsOf(lane) {
   if (Array.isArray(lane.sourcePaths) && lane.sourcePaths.length) return lane.sourcePaths
   const dirs = []
   for (const f of lane.writeSet || []) {
-    const cut = f.indexOf('/src/')
-    if (cut < 0) continue
-    const dir = f.slice(0, cut + 4)
-    if (!dirs.includes(dir)) dirs.push(dir)
+    const dir = sourceDirOf(f)
+    if (dir && !dirs.includes(dir)) dirs.push(dir)
   }
   return dirs
+}
+
+// A write set naming a crate whole holds its src/ too: Q1770's lane, on
+// crates/rcad-fuzz-explain/, was verified merge and still refused for having
+// no source directory to revert (Q2547). Every crate under crates/ has a src/,
+// and the workflow has no way to look.
+function sourceDirOf(entry) {
+  const cut = `${entry}/`.indexOf('/src/')
+  if (cut >= 0) return entry.slice(0, cut + 4)
+  const crate = /^(crates\/[^/]+)\/?$/.exec(entry)
+  return crate ? `${crate[1]}/src` : null
 }
 
 // Merges inside one run wait for one another, so they never race each other;
@@ -777,9 +790,11 @@ function treesOf(prior) {
 
 function START(lane) {
   return `
-Base: main at ${BASE}. Your first two commands, in this order, and report both shas back:
+Base: main at ${BASE}. Your first three commands, in this order, and report both shas back:
   git log --oneline -1
+  git rev-parse --verify '${BASE}^{commit}'
   git switch -c ${branchOf(lane)} ${BASE}
+If the rev-parse prints nothing, or a sha that does not start with ${BASE}, stop and report it as blocked, naming the base: never substitute a prefix or another sha for the base (§237).
 If the switch refuses because ${branchOf(lane)} already exists, stop and report it as blocked. Never reach for \`checkout -B\` or \`switch -C\`: they reset a branch that another worktree may still have checked out, and that tree then shows a staged revert of everything since its commit.`
 }
 
@@ -787,7 +802,7 @@ function WRITING(lane) {
   return `Queue ${rowsOf(lane)}. You own these files and no others: ${lane.writeSet.join(', ')}.
 Your branch: ${branchOf(lane)}.
 
-${lane.brief}
+${lane.brief}${pinsNote(lane)}
 ${START(lane)}
 ${handOver()}`
 }
@@ -812,7 +827,7 @@ ${before.handoff}
 
 The row's brief, as that lane had it:
 
-${lane.brief}
+${lane.brief}${pinsNote(lane)}
 
 Base of the branch: main at ${BASE}. Your first commands, in this order:
   git log --oneline -1
@@ -833,6 +848,14 @@ The lane before you reported (JSON): ${JSON.stringify(before)}`
 // types it started with through a `/clear`, so a dispatcher cleared after §416
 // sends lanes whose lane.md has no relay, from briefs that no longer tell them
 // to carry on past the warning (Q1422).
+// A pins-only lane's pinned test can pass on its base too, and a lane that
+// named none for that reason was verified as moved text, which refuses every
+// line that runs (Q368's run, Q2546).
+function pinsNote(lane) {
+  if (lane.pinsOnly !== true) return ''
+  return '\n\nThis lane is marked pinsOnly (§287): name each test it pins in tests_that_fail_without_the_change, a check-*-selftest by its recipe name, even when it passes on the base. A pinsOnly report that names none is stopped before its verifier runs.'
+}
+
 function handOver() {
   return 'When "Lane budget passed" comes and your row is not done, hand over (§416), even if this brief says to carry on past it: commit everything by explicit path, run git switch --detach, and report outcome relay, with landed_sha your last commit and a handoff saying what is done by commit, what is next in order, the places as file, function and lines, what you measured with its command, and what you tried that did not work.'
 }
@@ -872,7 +895,7 @@ function marksOf(answer) {
 }
 
 function rowsNote() {
-  return 'Rows: no `tag` step when the add text already starts with the class; `add` tags it from the text, `queue apply` refuses the repeat, and `just land` stops (Q1047). The class must be the text\'s first word exactly, `refuses/B` and not `refuses/B:`, or `add` does not read it (Q1505). A row\'s text ends with its §N and nothing after it, not even a full stop, or check-queue refuses it and `just land` stops.'
+  return 'Rows: no `tag` step when the add text already starts with the class; `add` tags it from the text, so the step does nothing (Q2549). The class must be the text\'s first word exactly, `refuses/B` and not `refuses/B:`, or `add` does not read it (Q1505). A row\'s text ends with its §N and nothing after it, not even a full stop, or check-queue refuses it and `just land` stops.'
 }
 
 function testsNote() {

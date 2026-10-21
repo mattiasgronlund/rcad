@@ -3396,6 +3396,30 @@ check-skills-selftest:
 # guard in `lanes.js` and that `lane.md` tells a lane that a row whose shape
 # another open row's fault stops first reports `blocked`, naming that row,
 # instead of `does_not_reproduce` with rows.
+#
+# **Arm forty checks that a lane marked `pinsOnly` is told to name the tests it
+# pins, and is stopped before its verifier when it names none** (Q2546). A
+# pins-only lane whose pinned test already passed on its base named none, so
+# `verified()` read it as moved text, which refuses any line that runs: Q368's
+# run was verified merge and still refused for 2 lines that run. The arm wants
+# the refusal above the line that picks the kind, the note's text, and the
+# note used in both the lane's brief and a relay's.
+#
+# **Arm forty-one checks that a write set naming a crate whole, `crates/<c>/`,
+# gives that crate's `src/` as the source directory to revert** (Q2547).
+# `sourcePathsOf` read one only off a path with `/src/` in it, so Q1770's lane,
+# on `crates/rcad-fuzz-explain/` whole, was verified merge and still refused
+# for declaring no source directory, and took a second lane to land. The arm
+# wants the line that reads the crate off the entry, its use, and `prep.md`
+# saying such a row needs no `sourcePaths`.
+#
+# **Arm forty-two checks that a lane resolves its base before it branches from
+# it, and stops as blocked when the base names no commit** (Q2548). `lanes.js`
+# checks only that `args.base` has seven characters or more, so a base whose
+# tail a dispatcher wrote from memory went out twice, on 2026-09-29 and
+# 2026-10-05; it has no git of its own to look with. The arm wants the
+# `rev-parse --verify` line once and above the switch, the stop, and
+# `lane.md`'s why.
 [doc("The lanes workflow makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, refuses to share a run across rows unless asked, and prunes only what merged.")]
 check-lanes-workflow:
     #!/usr/bin/env bash
@@ -3555,6 +3579,15 @@ check-lanes-workflow:
     answers_merger='gets a `done` step too, with the same'
     answers_asked='${alsoAnswersNote(r)}'
     answers_told='${answeredNote(lane, prior)}'
+    pins_named='  if (lane.pinsOnly === true && !namesTests(report)) return stopped(lane, out, '
+    pins_note='name each test it pins in tests_that_fail_without_the_change'
+    pins_note_use='${pinsNote(lane)}'
+    crate_dir='  const crate = /^(crates\/[^/]+)\/?$/.exec(entry)'
+    crate_use='    const dir = sourceDirOf(f)'
+    crate_prep='A write set naming a crate whole, `crates/<c>/`, defaults to `crates/<c>/src`'
+    resolve="  git rev-parse --verify '\${BASE}^{commit}'"
+    resolve_blocked='never substitute a prefix or another sha for the base'
+    resolve_why='because a base can be written from memory'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -3998,6 +4031,24 @@ check-lanes-workflow:
             echo "$1 does not see, right after the does_not_reproduce check and before verify: false is read ('$gone_route' above '$nothing_route' above '$gone_unverified'), that a writing lane's branch is its base for a reason other than does_not_reproduce, sharing the does_not_reproduce check rather than testing the sha again ('branchIsBase(report)' wanted at least 3 times, found $n), and hand its report back whole the way a read-only lane's goes ('$nothing_whole', set by '$nothing_flag'); such a lane has no road through lanes.js otherwise (Q1382, §399)"
             [ "$failed" != 0 ] || failed=35
         fi
+        at=$(grep -nF -- "$pins_named" "$1" | head -1 | cut -d: -f1)
+        line=$(grep -nxF -- "$same_kind" "$1" | head -1 | cut -d: -f1)
+        n=$(grep -cF -- "$pins_note_use" "$1" || true)
+        if [ -z "$at" ] || [ -z "$line" ] || [ "$at" -ge "$line" ] || ! grep -qF -- "$pins_note" "$1" || [ "$n" != 2 ]; then
+            echo "$1 does not stop a pinsOnly lane that names no test it pins before it picks the kind ('$pins_named' above '$same_kind'), or does not tell such a lane to '$pins_note' in both its brief and a relay's ('$pins_note_use' want twice, found $n); a pins-only lane whose pinned test passed on its base would be verified as moved text and refused for every line that runs, as Q368's was (Q2546, §287)"
+            [ "$failed" != 0 ] || failed=40
+        fi
+        if ! grep -qxF -- "$crate_dir" "$1" || ! grep -qxF -- "$crate_use" "$1" || ! grep -qF -- "$crate_prep" "$2/prep.md"; then
+            echo "$1 does not read a crate's src/ off a write-set entry naming the crate whole ('$crate_dir', used as '$crate_use'), or $2/prep.md does not say so ('$crate_prep'); a lane on crates/<c>/ whole would be refused for declaring no source directory to revert, as Q1770's was (Q2547, §396)"
+            [ "$failed" != 0 ] || failed=41
+        fi
+        n=$(grep -cxF -- "$resolve" "$1" || true)
+        at=$(grep -nxF -- "$resolve" "$1" | head -1 | cut -d: -f1)
+        line=$(grep -nxF -- "$create" "$1" | head -1 | cut -d: -f1)
+        if [ "$n" != 1 ] || [ -z "$line" ] || [ "$at" -ge "$line" ] || ! grep -qF -- "$resolve_blocked" "$1" || ! grep -qF -- "$resolve_why" "$2/lane.md"; then
+            echo "$1 does not have a lane resolve its base before it branches ('$resolve' want once, found $n, and above '$create'), or stop as blocked when it does not resolve ('$resolve_blocked'), or $2/lane.md does not say why ('$resolve_why'); a base whose tail was written from memory would go to a lane that falls back on the prefix by itself, as Q660's did (Q2548, §237)"
+            [ "$failed" != 0 ] || failed=42
+        fi
         return "$failed"
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
@@ -4306,7 +4357,29 @@ check-lanes-workflow:
     grep -vxF -- "$nothing_flag" "$file" > "$dir/nothing-flag-unset/lanes.js"
     fresh nothing-fn-missing
     grep -vxF -- "$nothing_fn" "$file" > "$dir/nothing-fn-missing/lanes.js"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-from-prep:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33 dnr-rows-ignored:34 dnr-blocked-unsaid:34 nothing-after-verify-false:35 nothing-not-shared:35 nothing-not-whole:35 nothing-flag-unset:35 nothing-fn-missing:35 landed-optional:36 runs-note-unbound:37 runs-note-unsaid:37 relay-check-not-run:38 relay-check-ignored:38 relay-check-untyped:38 relay-handoff-no-fallback:39 relay-handoff-unlogged:39)
+    fresh pins-unnamed-verified
+    grep -vF -- "$pins_named" "$file" > "$dir/pins-unnamed-verified/lanes.js"
+    fresh pins-unnamed-after-kind
+    P="$pins_named" K="$same_kind" awk 'index($0, ENVIRON["P"]) == 1 { held = $0; next } { print } $0 == ENVIRON["K"] { print held }' "$file" > "$dir/pins-unnamed-after-kind/lanes.js"
+    fresh pins-note-unsaid
+    swap "$file" "$pins_note" '' > "$dir/pins-note-unsaid/lanes.js"
+    fresh pins-note-unused
+    swap "$file" "$pins_note_use" '' > "$dir/pins-note-unused/lanes.js"
+    fresh crate-dir-unread
+    grep -vxF -- "$crate_dir" "$file" > "$dir/crate-dir-unread/lanes.js"
+    fresh crate-dir-unused
+    grep -vxF -- "$crate_use" "$file" > "$dir/crate-dir-unused/lanes.js"
+    fresh crate-dir-unsaid
+    grep -vF -- "$crate_prep" "$agents/prep.md" > "$dir/crate-dir-unsaid/agents/prep.md"
+    fresh resolve-skipped
+    grep -vxF -- "$resolve" "$file" > "$dir/resolve-skipped/lanes.js"
+    fresh resolve-after-switch
+    R="$resolve" U="$create" awk '$0 == ENVIRON["R"] { next } { print } $0 == ENVIRON["U"] { print ENVIRON["R"] }' "$file" > "$dir/resolve-after-switch/lanes.js"
+    fresh resolve-unblocked
+    swap "$file" "$resolve_blocked" '' > "$dir/resolve-unblocked/lanes.js"
+    fresh resolve-why-unsaid
+    grep -vF -- "$resolve_why" "$agents/lane.md" > "$dir/resolve-why-unsaid/agents/lane.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-from-prep:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33 dnr-rows-ignored:34 dnr-blocked-unsaid:34 nothing-after-verify-false:35 nothing-not-shared:35 nothing-not-whole:35 nothing-flag-unset:35 nothing-fn-missing:35 landed-optional:36 runs-note-unbound:37 runs-note-unsaid:37 relay-check-not-run:38 relay-check-ignored:38 relay-check-untyped:38 relay-handoff-no-fallback:39 relay-handoff-unlogged:39 pins-unnamed-verified:40 pins-unnamed-after-kind:40 pins-note-unsaid:40 pins-note-unused:40 crate-dir-unread:41 crate-dir-unused:41 crate-dir-unsaid:41 resolve-skipped:42 resolve-after-switch:42 resolve-unblocked:42 resolve-why-unsaid:42)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -4323,7 +4396,7 @@ check-lanes-workflow:
             exit 1
         fi
     done
-    echo "lanes.js makes each lane's branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, relays a lane past its budget to a fresh one, briefs a short-form lane through prep and starts no lane on anything but ok, closes a row whose fault no longer shows only on its verifier's confirm, closes the rows a fix lane also answers only on its verifier's word, hands a writing lane's report back whole, as a read-only lane's, when its branch is its base for a reason other than does_not_reproduce, and prunes only what merged; ${#cuts[@]} cuts, each caught"
+    echo "lanes.js has each lane resolve its base and make its branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, relays a lane past its budget to a fresh one, briefs a short-form lane through prep and starts no lane on anything but ok, closes a row whose fault no longer shows only on its verifier's confirm, closes the rows a fix lane also answers only on its verifier's word, hands a writing lane's report back whole, as a read-only lane's, when its branch is its base for a reason other than does_not_reproduce, stops a pinsOnly lane that names no test it pins, reverts a whole crate's src/, and prunes only what merged; ${#cuts[@]} cuts, each caught"
 
 # Print the changed lines between two commits that could change what runs:
 # everything but `.md` files, comment lines, and test code -- files under
@@ -13737,8 +13810,9 @@ queue-page:
 # tree and a verifier's detached tree, locked the way the worktree hook locks
 # them (§55). Its takes are one whose tier is not the row's tier now, as after a
 # `tier` move; one that records no tier, so the row's tier in main's copy
-# stands in; one for a row main's copy does not hold; one with neither; and one
-# released, which must not show.
+# stands in; one for a row main's copy does not hold; one with neither; one
+# whose only tree is an Opus merger's on merge-<label>-after-land, as after a
+# lander's stop (§384.3); and one released, which must not show.
 #
 # A fourth commit, on a day of its own, adds the rows the table of rows the fill
 # will not take reads (Q1510), each reason beside the rows it holds back (§444):
@@ -14048,6 +14122,9 @@ check-queue-page-selftest:
     git -C "$left_tree" switch -q -c lane-q17 main
     git -C "$left_tree" switch -q --detach "$(g rev-list --max-parents=0 main)"
     g worktree lock --reason "agent wf_page-3 since 2026-09-03T10:00:00Z" "$left_tree"
+    after_land_tree="$sessions/dispatch-b-worktrees/wf_page-4"
+    g worktree add -q -b merge-q23-after-land "$after_land_tree" main || fail "could not add Q23's merger tree"
+    g worktree lock --reason "agent wf_page-4 since 2026-09-03T10:00:00Z" "$after_land_tree"
     claims="$(g rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims"
     {
         printf 'take\tQ2\t2026-09-03T10:00:00Z\t%s\tlane-q2\tdocs/b.md\t2\n' "$sessions/dispatch-a"
@@ -14058,6 +14135,7 @@ check-queue-page-selftest:
         printf 'take\tQ8\t2026-09-03T10:05:00Z\t%s\tlane-q8\t-\t3\n' "$sessions/dispatch-b"
         printf 'take\tQ9\t2026-09-03T10:06:00Z\t%s\tlane-q9\t-\n' "$sessions/dispatch-b"
         printf 'take\tQ17\t2026-09-03T10:07:00Z\t%s\tlane-q17\t-\t3\n' "$sessions/dispatch-b"
+        printf 'take\tQ23\t2026-09-03T10:08:00Z\t%s\tlane-q23\t-\t3\n' "$sessions/dispatch-b"
     } > "$claims"
 
     fuzz="$root/fuzz-logs"
@@ -14117,7 +14195,7 @@ check-queue-page-selftest:
     [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Families</h2> <h2>Queue</h2> ' ] \
         || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Pinned, Rows the fill will not take now, Families, then Queue: $order"
     # Each line: the row, the tier its take was taken from, the agent whose tree it runs in, the dispatcher's tree.
-    # A row main's copy holds is linked to its page; Q8, Q9 and Q17 are in no copy of main, so they have none.
+    # A row main's copy holds is linked to its page; Q8, Q9, Q17 and Q23 are in no copy of main, so they have none.
     has '<tr><th><code><a href="rows/Q2.html">Q2</a></code></th><td>2</td><td><code>wf_page-1</code></td><td><code>dispatch-a</code></td></tr>' \
         "Q2's running line: taken from tier 2 though main's copy has it in tier 1 now, running in wf_page-1's tree on lane-q2"
     has '<tr><th><code><a href="rows/Q5.html">Q5</a></code></th><td>2.2</td><td>no tree yet</td><td><code>dispatch-b</code></td></tr>' \
@@ -14130,9 +14208,11 @@ check-queue-page-selftest:
         "Q9's running line: in no copy of main and its take records no tier, so the page should say so"
     has '<tr><th><code>Q17</code></th><td>3</td><td><code>wf_page-3</code></td><td><code>dispatch-b</code></td></tr>' \
         "Q17's running line: wf_page-3 left lane-q17, whose tip is on main, for an old commit, and its reflog says so (§299.6)"
+    has '<tr><th><code>Q23</code></th><td>3</td><td><code>wf_page-4</code></td><td><code>dispatch-b</code></td></tr>' \
+        "Q23's running line: its only tree is the Opus merger's wf_page-4, on merge-q23-after-land after a lander's stop (§384.3)"
     between() { sed -n "/<h2>$1<\/h2>/,/<h2>$2<\/h2>/p" "$out/index.html"; }
     row_heads() { grep -oE '<tr><th><code>(<a href="rows/[TDQ][0-9]+\.html">)?[TDQ][0-9]+<' | grep -oE '[TDQ][0-9]+<$' | tr -d '<' | tr '\n' ' '; }
-    [ "$(between 'Running rows' 'Pinned' | row_heads)" = 'Q17 Q2 Q5 Q6 Q8 Q9 ' ] \
+    [ "$(between 'Running rows' 'Pinned' | row_heads)" = 'Q17 Q2 Q23 Q5 Q6 Q8 Q9 ' ] \
         || fail "the running table should hold each held row once, and not Q7, which was released"
     # Each line: the row, its pin, and what holds it back.
     has '<tr><th><code><a href="rows/Q19.html">Q19</a></code></th><td class="n">1</td><td>waits on <code><a href="rows/Q13.html">Q13</a></code> (todo); waits on <code><a href="rows/Q12.html">Q12</a></code> (todo)</td></tr>' \
@@ -14752,6 +14832,8 @@ _queue-check file decisions:
 # after the word, refused. `add` refuses a row without the word, one naming a
 # row that exists nowhere, and `was/-`; writes the word after the tag whichever
 # came first; and still refuses a class with punctuation or a pin behind it.
+# An `apply` that adds a row whose text starts with its class and then tags it
+# with the same class again passes, the tag step doing nothing (Q2549).
 # §433 adds `from/fuzz:<target>` and `from/step:<file>`: on an open row after a
 # pin and a class, and on a closed row after `small`, passed by their shape
 # alone, a name ending like a row id included; and a kind it does not know, a kind with no name, `was/` with a kind,
@@ -15552,6 +15634,15 @@ check-queue-selftest:
         || fail "add refused a class with nothing stuck after it"
     grep -q "^$got .*wrong/B from/- a tier one row with its class exactly §230\$" "$dir/addfix.md" \
         || fail "add did not write the row with its class still tagging it"
+
+    # Q2549: a lane's rows can add a row whose text starts with its class and
+    # then tag it with that class again; the tag step is nothing to do, not a
+    # refusal that stops just land's apply (Q1047).
+    got=$(qf apply add 1 opus - 'wrong/B from/- a row whose class its text and a tag step both give §230' + tag @1 wrong/B 2>&1) \
+        || fail "apply refused a tag step repeating the class its add's text gave: $got"
+    got=$(head -n 1 <<<"$got")
+    grep -q "^$got .*  wrong/B from/- a row whose class its text and a tag step both give §230\$" "$dir/addfix.md" \
+        || fail "apply did not write the added row with its class tagging it once"
 
     # §432: a new row says where it came from, and the word is written after
     # the tag whichever of the two came first, since just land puts it in front.
@@ -16388,11 +16479,9 @@ check-queue-api-selftest:
     grep -qxF "merge-after-land-after-land  $merger_tree" <<<"$got" || fail "the after-land merger's tree was not counted"
     grep -q "^lane-after-land  .*no tree yet" <<<"$got" \
         && fail "a row whose merger is on merge-<label>-after-land was also counted as treeless"
-    # `tooling/queue-page/render.py`'s own `tree_for` does not yet know the
-    # `-after-land` pattern (out of this row's write set, filed separately), so
-    # a dangling hold of this shape left past this point throws inside
-    # `queue-page`'s render, swallowed by its own `|| true` but leaving later
-    # pages stale. Released here so the checks below still see a fresh page.
+    # Released here, so the checks below see only the holds they set up.
+    # check-queue-page-selftest's Q23 checks that the page's own `tree_for`
+    # finds this merger's tree too (Q2544).
     got=$(q "$hub" drop "$q_after_land" 230 2>&1) || fail "drop could not release $q_after_land"
 
     # Q2283 (§263.4): an agent that dies before `git worktree remove` leaves
