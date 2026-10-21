@@ -129,6 +129,7 @@ gate_steps := "check-plugins \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
     check-timing-hooked-calls-selftest \
+    check-timing-hooked-calls \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
@@ -258,11 +259,12 @@ pre_gate_steps := "check-fmt lint check-wildcards"
 # name because of the second:
 #
 #   It needs a build. `check`, `lint`, `test`, `test-slow`, `check-release-build`,
-#   `check-fuzz-builds` and `check-systemd-units` obviously; `check-wildcards`
-#   because it reads clippy's output; `deny` because it resolves the dependency
-#   graph, and a prose commit cannot change `Cargo.lock`. `check-fmt` builds
-#   nothing, but `cargo fmt` needs the pinned toolchain, which the docs arm
-#   does not install, and a prose commit cannot change a `.rs` file.
+#   `check-fuzz-builds`, `check-timing-hooked-calls` and `check-systemd-units`
+#   obviously; `check-wildcards` because it reads clippy's output; `deny`
+#   because it resolves the dependency graph, and a prose commit cannot change
+#   `Cargo.lock`. `check-fmt` builds nothing, but `cargo fmt` needs the pinned
+#   toolchain, which the docs arm does not install, and a prose commit cannot
+#   change a `.rs` file.
 #
 #   It needs the STEP corpus. `check-corpus` is 0.16 s and compiles nothing, and
 #   it is here anyway: it **fails** when `RCAD_STEP_CORPUS` is not a directory,
@@ -273,7 +275,7 @@ pre_gate_steps := "check-fmt lint check-wildcards"
 #   fixture and never reads the real corpus.
 #
 # On a metered runner this is 1m07s against 9m46s. `docs/decisions.md` §172.
-gate_metered_steps := "check check-fuzz-builds check-wildcards check-fmt lint test test-slow check-release-build check-systemd-units deny check-corpus"
+gate_metered_steps := "check check-fuzz-builds check-timing-hooked-calls check-wildcards check-fmt lint test test-slow check-release-build check-systemd-units deny check-corpus"
 
 # The steps `gate` may serve from an earlier green of the same code instead of
 # running (`docs/decisions.md` §337). The first nine were the slow ones: together
@@ -290,6 +292,17 @@ gate_metered_steps := "check check-fuzz-builds check-wildcards check-fmt lint te
 # because it reads git's config. Every step that reads `docs/` is left out as
 # well. A step missing from this list runs every time, so a new step is never
 # served by default.
+#
+# **`check-timing-hooked-calls` is the one exception, and not a silent one.**
+# It too reads something outside the tree — the installed nightly rustc and
+# `cargo-fuzz` — but `gate`'s own body gives it a fingerprint of its own
+# rather than folding it into the whole-tree one this list otherwise shares,
+# because docs/decisions.d/425 §425.7 found its answer depends on nothing else
+# in the tree: the fuzz targets' own closures into the kernel crates are never
+# reachable from the scan's starting points, by construction of `timed`'s
+# inlining in the release binary cargo-fuzz always builds. Being in this list
+# says only that `gate` knows how to serve it; the narrow fingerprint, not this
+# list's blanket rule, is what makes serving it sound.
 gate_reusable_steps := "check \
     check-fuzz-builds \
     check-enums \
@@ -325,6 +338,7 @@ gate_reusable_steps := "check \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
     check-timing-hooked-calls-selftest \
+    check-timing-hooked-calls \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
@@ -917,9 +931,14 @@ gate mode="loud" verdicts="reuse" jobs="cores":
 
     # Which of this run's steps an earlier green could stand in for. None is
     # the usual answer inside the selftests, and then there is nothing to look
-    # up and nothing to say.
+    # up and nothing to say. `check-timing-hooked-calls` is left out here even
+    # when it is in `gate_reusable_steps`: it gets a fingerprint of its own,
+    # below, narrower than the whole-tree one this loop builds for everything
+    # else, and mixing it into `$reusable` would serve or record it off the
+    # wrong fingerprint.
     reusable=""
     for step in {{ gate_steps }}; do
+        [ "$step" != check-timing-hooked-calls ] || continue
         case " {{ gate_reusable_steps }} " in *" $step "*) reusable="$reusable $step" ;; esac
     done
     fingerprint="" record="" served=""
@@ -963,6 +982,45 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         fi
     fi
 
+    # `check-timing-hooked-calls`'s own lookup, off its own narrower
+    # fingerprint and its own record directory (docs/decisions.d/425 §425.7).
+    # Shaped like the block above, but kept apart from it rather than
+    # generalised into it: the two differ in which fingerprint names the
+    # record, and folding them into one parametrised block would have made
+    # that difference implicit instead of named.
+    thc_fingerprint="" thc_record=""
+    case " {{ gate_steps }} " in *" check-timing-hooked-calls "*)
+        case " {{ gate_reusable_steps }} " in *" check-timing-hooked-calls "*)
+            thc_fingerprint=$($j _timing-hooked-calls-fingerprint)
+            if [[ "$thc_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+                thc_record="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-verdicts-timing-hooked-calls/$thc_fingerprint"
+            else
+                note "· verdicts: ${thc_fingerprint:-no fingerprint could be taken} for check-timing-hooked-calls, so it is not served or recorded"
+                thc_fingerprint=""
+            fi
+            ;;
+        esac
+        ;;
+    esac
+    if [ -n "$thc_record" ] && [ -f "$thc_record" ]; then
+        thc_from=$(sed -n 's/^commit //p' "$thc_record")
+        thc_at=$(sed -n 's/^date //p' "$thc_record")
+        thc_at_s=$(date -u -d "${thc_at:-unreadable}" +%s 2>/dev/null || echo 0)
+        thc_age=$(( $(date +%s) - thc_at_s ))
+        if [ -z "$thc_from" ] || [ "$thc_at_s" -eq 0 ]; then
+            note "· verdicts: the record for check-timing-hooked-calls's inputs cannot be read, so it runs: $thc_record"
+        elif [ "$verdicts" = fresh ]; then
+            note "· verdicts: fresh, so ${thc_from:0:8}'s green for check-timing-hooked-calls's inputs is run again, not served"
+        elif [ "$thc_age" -lt 0 ] || [ "$thc_age" -ge 86400 ]; then
+            note "· verdicts: ${thc_from:0:8}'s green for check-timing-hooked-calls's inputs is from $thc_at, not the last day, so it is run again"
+        elif [[ "$head" == 0* ]]; then
+            note "· verdicts: audit, since this sha starts with 0: ${thc_from:0:8}'s green for check-timing-hooked-calls's inputs is run again"
+        else
+            served="$served check-timing-hooked-calls"
+            note "· served: check-timing-hooked-calls from ${thc_from:0:8}'s gate at $thc_at"
+        fi
+    fi
+
     # The steps that build with cargo run one after another, in the order
     # `gate_steps` gives them, beside everything else. Cargo locks the build
     # directory, so two of them started together only wait on each other: all 56
@@ -971,7 +1029,7 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     # built, which is why it comes after `test` in the list.
     # `check-gate-runs-every-check` holds this line to the steps whose recipes
     # run cargo, so a new one cannot be left off it unnoticed.
-    cargo_steps="check check-fuzz-builds check-wildcards check-ignored lint test test-slow check-release-build check-t-selftest"
+    cargo_steps="check check-fuzz-builds check-timing-hooked-calls check-wildcards check-ignored lint test test-slow check-release-build check-t-selftest"
     names=()
     chained=()
     unchained=()
@@ -1124,6 +1182,49 @@ gate mode="loud" verdicts="reuse" jobs="cores":
             note "!!! input, or the step is not deterministic (docs/decisions.md §337.6). The record is"
             note "!!! deleted, and the case is kept in $violations"
         fi
+    fi
+
+    # `check-timing-hooked-calls`'s own write-back, parallel to the block
+    # above but against its own fingerprint and record (§425.7). It ran this
+    # time if its name reached `names` — a served step never does — and
+    # ended with 0.
+    thc_ran=""
+    for i in "${!names[@]}"; do
+        [ "${names[$i]}" = check-timing-hooked-calls ] || continue
+        [ "${ended_with[$i]}" -ne 0 ] || thc_ran=yes
+    done
+    if [ -n "$thc_fingerprint" ] && [ -n "$thc_ran" ]; then
+        if [ "$($j _timing-hooked-calls-fingerprint)" != "$thc_fingerprint" ]; then
+            note "· verdicts: check-timing-hooked-calls not recorded, because its inputs changed while the gate ran"
+        else
+            thc_store=$(dirname "$thc_record")
+            mkdir -p "$thc_store"
+            thc_new=$(mktemp "$thc_store/.new.XXXXXX")
+            {
+                echo "commit $head"
+                echo "date $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                echo "host $(hostname)"
+                echo "steps check-timing-hooked-calls"
+            } >"$thc_new"
+            mv "$thc_new" "$thc_record"
+            # Same week as the whole-tree store, for the same reason (above).
+            find "$thc_store" -maxdepth 1 -type f -mtime +7 -delete
+            note "· verdicts: check-timing-hooked-calls's green is recorded as ${thc_fingerprint:0:12}"
+        fi
+    elif [ -n "$thc_fingerprint" ] && [ -f "$thc_record" ]; then
+        for step in $failed; do
+            [ "$step" = check-timing-hooked-calls ] || continue
+            thc_from=$(sed -n 's/^commit //p' "$thc_record")
+            thc_at=$(sed -n 's/^date //p' "$thc_record")
+            # The same violations file the whole-tree block uses: both
+            # records live under the same git common dir, two directories up.
+            thc_violations="$(dirname "$(dirname "$thc_record")")/rcad-verdict-violations"
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $thc_fingerprint check-timing-hooked-calls $head passed-at=$thc_from $(hostname)" >>"$thc_violations"
+            rm -f "$thc_record"
+            note "!!! verdict violated: check-timing-hooked-calls failed on inputs that ${thc_from:0:8}'s gate passed at $thc_at."
+            note "!!! Same inputs, different answer: the narrow fingerprint is missing something, or the"
+            note "!!! step is not deterministic. The record is deleted, and the case is kept in $thc_violations"
+        done
     fi
     echo "$summary" | tee -a "$log"
     # After the block, so that a reader's `tail -6` still lands on the summary,
@@ -4524,8 +4625,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "62" ]; then \
-        echo "found $n check-* recipes, expected 62"; \
+    if [ "$n" != "63" ]; then \
+        echo "found $n check-* recipes, expected 63"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -9695,6 +9796,98 @@ check-timing-hooked-calls-selftest:
         echo "expected a chain through std's default panic hook to bcmp"
         exit 1
     }
+
+# A step of its own rather than folded into `check-fuzz-builds` (Q324,
+# docs/decisions.d/425): that recipe runs `cargo check --all-targets` on
+# stable and never links anything, so it cannot see what this checks —
+# docs/decisions.d/267.4's stand-in, and the hooked libFuzzer memcmp
+# intercepts `fuzz/timing-hooked-calls.py` scans a *linked* binary for.
+# Reuses `fuzz-overnight`'s own build command and its two post-build guards
+# (the rlib found by name, and no sancov reference in it) rather than
+# building twice.
+#
+# Skips, printing "skipped, not passed" rather than failing, where there is
+# no nightly toolchain or no cargo-fuzz on PATH — true of every CI runner
+# today, since nightly is not pinned by this repo (docs/decisions.md §29.9)
+# — because a gate that could never have told the difference should not fail
+# one.
+#
+# `gate`'s body serves this off a fingerprint of its own
+# (`_timing-hooked-calls-fingerprint`, below), narrower than the whole-tree
+# one `gate_reusable_steps` otherwise shares, because docs/decisions.d/425
+# §425.7 found this scan's answer depends on nothing in the kernel crates a
+# lane actually changes.
+[doc("Builds the five fuzz targets and runs timing-hooked-calls.py on them; skips without a nightly toolchain or cargo-fuzz.")]
+check-timing-hooked-calls:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! rustup which --toolchain nightly rustc >/dev/null 2>&1; then
+        echo "no nightly toolchain installed (not pinned by this repo, docs/decisions.md §29.9): the hooked-call scan is skipped, not passed"
+        exit 0
+    fi
+    if ! command -v cargo-fuzz >/dev/null 2>&1; then
+        echo "no cargo-fuzz on this PATH (mise.toml pins cargo:cargo-fuzz): the hooked-call scan is skipped, not passed"
+        exit 0
+    fi
+    cd fuzz
+    CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
+        RUSTFLAGS="-C target-cpu=x86-64-v3" \
+        cargo +nightly fuzz build
+    timing_rlibs=$(find target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing \
+        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null)
+    if [ -z "$timing_rlibs" ]; then
+        echo "rcad-fuzz-timing's rlib was not found by name after the build, so whether it carries coverage could not be checked"
+        exit 1
+    fi
+    sancov_found=()
+    while IFS= read -r candidate; do
+        [ -n "$candidate" ] || continue
+        refs=$(nm "$candidate" 2>/dev/null | grep -ic sancov || true)
+        [ "$refs" -eq 0 ] || sancov_found+=("$candidate ($refs)")
+    done <<<"$timing_rlibs"
+    if [ "${#sancov_found[@]}" -gt 0 ]; then
+        echo "rcad-fuzz-timing's rlib carries a sancov reference, so the stand-in did not keep it out of coverage:"
+        printf '    %s\n' "${sancov_found[@]}"
+        exit 1
+    fi
+    ./timing-hooked-calls.py \
+        target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross \
+        target/x86_64-unknown-linux-gnu/release/no_step_file_makes_the_reader_panic \
+        target/x86_64-unknown-linux-gnu/release/no_model_makes_the_writer_panic \
+        target/x86_64-unknown-linux-gnu/release/two_solids_fused_by_a_stranger \
+        target/x86_64-unknown-linux-gnu/release/where_a_cone_or_a_torus_crosses
+
+# `check-timing-hooked-calls`'s own fingerprint, narrower than
+# `_code-fingerprint`'s: its scan's answer depends only on
+# `rcad-fuzz-timing`'s own source, the fuzz crate's build files, the script
+# itself, and the installed nightly rustc and `cargo-fuzz` (docs/decisions.d/425
+# §425.7 is the demonstration that nothing else moves it). Same shape as
+# `_code-fingerprint` — `git ls-tree` over the paths, then the environment —
+# so the two stay easy to compare by eye.
+[private]
+_timing-hooked-calls-fingerprint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git rev-parse --verify --quiet HEAD >/dev/null || { echo "there is no commit here"; exit 0; }
+    if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+        echo "the tree has uncommitted or untracked files"
+        exit 0
+    fi
+    {
+        git ls-tree -r --full-tree HEAD -- crates/rcad-fuzz-timing fuzz/Cargo.toml \
+            fuzz/Cargo.lock fuzz/timing-hooked-calls.py
+        echo "-- toolchain"
+        if rustc_path=$(rustup which --toolchain nightly rustc 2>/dev/null); then
+            "$rustc_path" --version
+        else
+            echo "no nightly rustc"
+        fi
+        if command -v cargo-fuzz >/dev/null 2>&1; then
+            cargo-fuzz --version
+        else
+            echo "no cargo-fuzz"
+        fi
+    } | sha256sum | cut -d' ' -f1
 
 # `fuzz-watermark` picks the night's commit, and every way it can pick wrongly
 # costs a night: too far back and the fuzzer re-finds what is already fixed, and
