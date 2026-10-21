@@ -7654,6 +7654,12 @@ check-fuzz-overnight-selftest:
     # trap first waits for any such arm still running: one that went on writing
     # after the files were taken away would leave its own behind.
     tag="overnight-selftest-$$-${RANDOM}"
+    # This process's own pid, captured here rather than read with `$$` inside
+    # an arm: bash hands a subshell the *parent's* `$$`, not its own, so every
+    # arm forked by `beside` below would have read the same value anyway —
+    # but captured here, once, at top level, it is unmistakably this run's
+    # own, and arm Twenty-seven below is the one that needs that (Q1060).
+    pid=$$
     clean_up() {
         wait
         rm -rf "$dir"
@@ -8830,9 +8836,17 @@ check-fuzz-overnight-selftest:
     # still carrying it after the night has exited can only be this arm's.
     # Polled rather than checked once, because `kill` only asks the process to
     # die and this arm cares whether it did, not whether the signal was sent.
+    #
+    # The marker used to be the constant 28351, true only when this is the
+    # only gate on the machine running this selftest. A second gate's own
+    # live copier, mid-`sleep 28351` for the same reason, then read as this
+    # run's own orphan and failed it (Q1060 — pids 2359475, 2570927 and
+    # 2618027 seen this way on 2026-10-03 and 10-05). `$pid` is this run's
+    # own, captured once at the top before any arm forked, so two gates
+    # running this selftest side by side now pick two different numbers.
     twenty_seven() {
     : >"$dir/log"
-    marker=28351
+    marker="$pid"
     RCAD_FUZZ_COPY_EVERY="$marker" run 8
     deadline=$(( $(date +%s) + 2 ))
     while pgrep -f "^sleep $marker\$" >/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do
