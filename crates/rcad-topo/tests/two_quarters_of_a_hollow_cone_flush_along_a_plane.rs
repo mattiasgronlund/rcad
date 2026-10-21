@@ -8,9 +8,11 @@
 //! `8` and the other from `4.5` to `8.5`. Their intersection is that plane:
 //! nothing, or a sliver no thicker than the rounding. Nothing is what one
 //! start answers, and a sliver too thin for `f64` is what the others are
-//! refused for (Q2551, Q2562). The same two quarters with no bore are refused
-//! for the same slivers at the same starts, and so are two with no bore that
-//! both run from `z = 4` to `8`, the way Q2543 built them (Q2589).
+//! refused for (Q2551, Q2562). At two starts which refusal comes depends on
+//! which quarter the fuse is handed first, since that is the one whose sliver
+//! of the cone it keeps (Q2604). The same two quarters with no bore are
+//! refused for the same slivers at the same starts, and so are two with no
+//! bore that both run from `z = 4` to `8`, the way Q2543 built them (Q2589).
 
 use core::f64::consts::FRAC_PI_2;
 use core::ops::Range;
@@ -66,31 +68,49 @@ fn two_quarters_of_a_cone_flush_along_a_plane_meet_in_nothing_or_a_sliver() {
 /// `z = 4.5` to `z = 8`. That sliver is too thin for `f64`, and its refusal is
 /// a limit, not a gap (`docs/decisions.md` §16.10).
 ///
-/// At six starts it is refused [`Invalid::DynamicRangeTooWide`], far past
+/// It is refused [`Invalid::DynamicRangeTooWide`], far past
 /// [`rcad_geom::DynamicRange::LARGEST_SUPPORTED_RATIO`], at the ratios
 /// [`Quarters::ratios_of_the_sliver`] names: the top at `8.5` over the
 /// sliver's shortest arc, as for the wedge of
 /// [`turned_a_trillionth_of_a_radian_further_the_wedge_is_too_thin_for_f64`].
 /// §87.3 calls the range refusal of a sliver where two nearly flush faces meet
-/// a limit. At [`STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT`] a refusal comes first:
-/// the sliver's arc on `z = 4.5` runs between the places where the two side
-/// planes cross the cone there, and those are one `f64` triple. Worked out to
-/// sixty digits from the two planes' normals as stored, they are `9.6e-18`
-/// apart at `-2` and `4.6e-17` at `0.3`, and each coordinate of the one rounds
-/// to the same `f64` as the other's. So no tighter solve would part them, and
+/// a limit.
+///
+/// At [`STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT`], with the first quarter first, a
+/// refusal comes before that one: the sliver's arc on `z = 4.5` runs between
+/// the places where the two side planes cross the cone there, and those are
+/// one `f64` triple. Worked out to sixty digits from the two planes' normals as
+/// stored, they are `9.6e-18` apart at `-2` and `4.6e-17` at `0.3`, and each
+/// coordinate of the one rounds to the same `f64` as the other's. So no tighter
+/// solve would part them, and
 /// [`Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`] is that variant's
 /// limit. The bore does not reach that arc, so with no bore it is refused at
 /// the same point. With both quarters from `z = 4` the sliver has no arc on
 /// `z = 4.5`, and it is refused for the range at those two starts too.
+///
+/// **Which of the two comes depends on which quarter is handed over first.**
+/// The two quarters' slivers of the cone lie on one cone bit for bit, so the
+/// intersection keeps one of them, the one of the solid that comes first. The
+/// first quarter's meets `z = 4.5` where the other quarter's bottom cap cuts
+/// it, along no input edge, and its arc there is refused. The other quarter's
+/// meets it along the rim of its own bottom cap, from the rim's own end to
+/// where the first quarter's side plane crosses the rim. That stretch has no
+/// length as the answer is written, so it is left out as a straight side of
+/// no length is (Q2408), and the sliver goes on to be refused for its range.
 ///
 /// Until Q2551 each of these was refused `a point inside a piece of a face`
 /// first: a sliver of the first quarter's bottom cap at `z = 4` between the two
 /// planes, or with the other quarter first one of the other's top cap at
 /// `z = 8.5`, which no point inside was found for, and then the first
 /// quarter's cone between the two planes from `z = 4` to `z = 4.5`, which the
-/// other quarter's bottom cap cuts off. Before Q2537, a quarter's cone was
-/// refused [`Error::CannotTellTheCellsOfAFaceApart`] at every start instead, in
-/// the arrangement, before any piece was placed.
+/// other quarter's bottom cap cuts off. That piece is placed by its top, the
+/// one side it shares with the other quarter. On Q2408's merge it was refused
+/// so again at [`STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT`], both ways round, bored
+/// or not: the naming `select` places a piece by left that stretch of the
+/// other quarter's rim out too, and the piece shared no side with the other
+/// quarter. The naming has it again (Q2604). Before Q2537, a quarter's cone was refused
+/// [`Error::CannotTellTheCellsOfAFaceApart`] at every start instead, in the
+/// arrangement, before any piece was placed.
 #[test]
 fn at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64() {
     for start in STARTS {
@@ -104,9 +124,10 @@ fn at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64() {
                 let what = format!("{} quarters, {what}", quarters.name);
                 let intersected =
                     the_two_quarters_intersected(&quarters, start, the_first_first, 0.0);
-                if quarters
-                    .starts_where_two_ends_are_one_point
-                    .contains(&start)
+                if the_first_first
+                    && quarters
+                        .starts_where_two_ends_are_one_point
+                        .contains(&start)
                 {
                     let Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { at, .. }) =
                         intersected
@@ -220,7 +241,8 @@ struct Quarters {
     /// first quarter is from `z = 4`.
     other_from: f64,
     /// The starts the sliver is refused at for two ends that round to one
-    /// point, rather than for its range.
+    /// point, rather than for its range, when the first quarter is handed over
+    /// first.
     starts_where_two_ends_are_one_point: &'static [f64],
     /// The ratios the sliver of
     /// [`at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64`] is
