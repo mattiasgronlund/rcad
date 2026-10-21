@@ -675,6 +675,40 @@ impl Assembly {
             })
             .fold(f64::INFINITY, f64::min);
         let shortest = shortest_chord.min(self.narrowest_a_cone_face_is_at_a_corner());
+        if std::env::var("RCAD_PROBE_Q2305").is_ok() {
+            eprintln!(
+                "PROBE largest {largest:e} shortest {shortest:e} corners {} edges {} faces {} shells {}",
+                self.corners.len(),
+                self.edges.len(),
+                self.faces.len(),
+                self.shells.len()
+            );
+            for (i, c) in self.corners.iter().enumerate() {
+                eprintln!(
+                    "PROBE corner {i} {:?} from {:?} wobble {:e}",
+                    c.point, c.from, c.wobble
+                );
+            }
+            for (i, e) in self.edges.iter().enumerate() {
+                let chord =
+                    how_far_apart(self.corners[e.ends[0]].point, self.corners[e.ends[1]].point);
+                eprintln!(
+                    "PROBE edge {i} ends {:?} chord {chord:e} from {:?}",
+                    e.ends, e.from
+                );
+                if e.ends.contains(&8) {
+                    eprintln!("PROBE    carried_by {:?}", e.carried_by);
+                }
+            }
+            for (i, f) in self.faces.iter().enumerate() {
+                let wires: Vec<Vec<usize>> = f
+                    .wires
+                    .iter()
+                    .map(|w| w.iter().map(|s| s.edge).collect())
+                    .collect();
+                eprintln!("PROBE face {i} wires {wires:?}");
+            }
+        }
         if largest == 0.0 {
             return Ok(None);
         }
