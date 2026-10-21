@@ -95,7 +95,8 @@
 // commit and no merge), `branch` (default `lane-<label>`, and it must not exist
 // yet: the lane creates it and refuses to reset one), `model`, `sourcePaths`
 // (what the verifier reverts to base to prove the tests fail without the
-// change; defaults to the `crates/<c>/src` dirs in `writeSet`), `pinsOnly`
+// change; defaults to the `crates/<c>/src` dirs in `writeSet`, a whole
+// `crates/<c>/` included), `pinsOnly`
 // (true for a lane whose write set has nothing to revert -- a verdict, a
 // pinned test and a decisions section, no `src/` path anywhere in its work.
 // The verifier then proves the merge on the new tests passing on the branch,
@@ -563,12 +564,21 @@ function sourcePathsOf(lane) {
   if (Array.isArray(lane.sourcePaths) && lane.sourcePaths.length) return lane.sourcePaths
   const dirs = []
   for (const f of lane.writeSet || []) {
-    const cut = f.indexOf('/src/')
-    if (cut < 0) continue
-    const dir = f.slice(0, cut + 4)
-    if (!dirs.includes(dir)) dirs.push(dir)
+    const dir = sourceDirOf(f)
+    if (dir && !dirs.includes(dir)) dirs.push(dir)
   }
   return dirs
+}
+
+// A write set naming a crate whole holds its src/ too: Q1770's lane, on
+// crates/rcad-fuzz-explain/, was verified merge and still refused for having
+// no source directory to revert (Q2547). Every crate under crates/ has a src/,
+// and the workflow has no way to look.
+function sourceDirOf(entry) {
+  const cut = `${entry}/`.indexOf('/src/')
+  if (cut >= 0) return entry.slice(0, cut + 4)
+  const crate = /^(crates\/[^/]+)\/?$/.exec(entry)
+  return crate ? `${crate[1]}/src` : null
 }
 
 // Merges inside one run wait for one another, so they never race each other;

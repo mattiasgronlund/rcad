@@ -92,6 +92,10 @@ without the change. Leave it empty and `lanes.js` defaults it to the
 `crates/<c>/src` directories in the write set. Set it when that is not what the
 verifier should revert: for a tooling row whose test is a recipe, the file the
 recipe checks.
+A write set naming a crate whole, `crates/<c>/`, defaults to `crates/<c>/src`,
+so such a row needs no `sourcePaths` (Q2547); before that, Q1770's lane, on
+`crates/rcad-fuzz-explain/` with `sourcePaths` empty, was refused for having
+nothing to revert.
 
 A row whose `lines-that-run` print will end `lines that run: 0` — `.md` files,
 comments, test code — needs no mark. It names no failing test, and its verifier
@@ -104,7 +108,9 @@ section, with no `src/` path anywhere in its work (§287). Say it explicitly;
 it is never inferred from an empty `sourcePaths`, because that emptiness is
 also what a tooling row shows when nobody set `sourcePaths`, and that must keep
 refusing. A `pinsOnly` row with a `src/` path too — in `writeSet` or
-`sourcePaths` — is refused: there is something to revert then.
+`sourcePaths` — is refused: there is something to revert then. A whole crate,
+`crates/<c>/`, counts as its `src/`, so a `pinsOnly` row names its test file
+rather than the crate.
 
 **`sameBehaviour: true`** is for a row that changes lines that run and keeps
 what they compute — one of two copies dropped for the other (Q854), a body
