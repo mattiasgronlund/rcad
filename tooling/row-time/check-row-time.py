@@ -23,6 +23,8 @@ every case of §411.9's list:
   label rather than by `role_of`'s own lane field (§411.5, §416, Q1935);
 - a shared gate whose holder's own run is gone from the retained transcripts,
   named rather than crashing the whole read (§411.5, Q1935);
+- a response priced from its usage, a streamed group keeping only the record
+  with the largest `output_tokens` (§411.1);
 - and a fixture whose parts do not add up, which must make `row-time` fail
   and print nothing.
 
@@ -38,12 +40,22 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "session-spend"))
 
 import row_time  # noqa: E402
+import spend  # noqa: E402
 
 REPO = "-home-me-git-rcad"
 BASE = row_time.ms_of_stamp("2026-10-05T10:00:00Z")
 FAILURES = []
+
+# The usage §411.1's cost beside each time is priced from, in a made-up run
+# whose transcripts carry nothing else worth asserting (Q2596).
+COST_MODEL = "claude-sonnet-5"
+COST_USAGE_1 = {"input_tokens": 100_000, "output_tokens": 200, "cache_read_input_tokens": 500_000,
+                "cache_creation": {"ephemeral_1h_input_tokens": 1_000, "ephemeral_5m_input_tokens": 2_000}}
+COST_USAGE_2 = {"input_tokens": 1, "output_tokens": 50}
+COST_USAGE_3 = {"input_tokens": 10, "output_tokens": 5}
 
 
 def main():
@@ -60,6 +72,8 @@ def main():
         check_a_close_at_base_row(assembled)
         check_a_relayed_holder_lands_another_run(assembled)
         check_a_missing_holder_lands_another_run(assembled)
+        check_a_response_priced_from_its_usage(assembled)
+        check_cost_in_the_summary(world)
         check_every_step_adds_up(assembled)
         check_the_printed_report(world)
     with tempfile.TemporaryDirectory() as scratch:
@@ -105,6 +119,7 @@ def build_the_week(world):
     a_close_at_base_row(world)
     a_relayed_holder_lands_another_run(world)
     a_missing_holder_lands_another_run(world)
+    a_response_priced_from_its_usage(world)
 
 
 def a_plain_lane(world):
@@ -442,6 +457,40 @@ def a_missing_holder_lands_another_run(world):
     run.agent("land:q12-ghost-holder", "d12", 1_110_000, 1_186_900, lander, queued=1_109_500)
     world.claim("take", "Q12", 1_099_000, "lane-q12-ghost-holder")
     world.claim("release", "Q12", 1_186_000, "done")
+
+
+def a_response_priced_from_its_usage(world):
+    """Q13: a lane and a verifier, each priced by `spend.py`'s `cost_of` from its own responses' usage (§411.1).
+
+    The lane's first response streams three records of growing
+    `output_tokens`; only the last, which also carries the cache-write split,
+    is the one `cost_of_step` must keep, mirroring `spend.py`'s own grouping
+    rule. Its second response is one record. The verifier's one response adds
+    a third cost. Timing is not the point here, so nothing about the buckets
+    or the waits is asserted again.
+    """
+    lane = Talk("/trees/r30-1")
+    lane.prompt(1_200_000)
+    lane.response(
+        (1_201_000, call("t300", "StructuredOutput"), {"input_tokens": 1, "output_tokens": 10}),
+        (1_201_500, thinking(), {"input_tokens": 1, "output_tokens": 60}),
+        (1_202_000, prose(), COST_USAGE_1),
+        model=COST_MODEL,
+    )
+    lane.result(1_201_100, "t300")
+    lane.response((1_203_000, call("t301", "StructuredOutput"), COST_USAGE_2), model=COST_MODEL)
+    lane.result(1_203_100, "t301")
+
+    verifier = Talk("/trees/r30-2")
+    verifier.prompt(1_204_000)
+    verifier.response((1_205_000, call("t302", "StructuredOutput"), COST_USAGE_3), model=COST_MODEL)
+    verifier.result(1_205_100, "t302")
+
+    run = world.run("wf_r30", REPO, "sess-h", [lane_of("q13-known-usage", "Q13")])
+    run.agent("q13-known-usage", "l13", 1_200_000, 1_203_200, lane)
+    run.agent("verify:q13-known-usage", "v13", 1_204_000, 1_205_200, verifier, queued=1_203_900)
+    world.claim("take", "Q13", 1_199_000, "lane-q13-known-usage")
+    world.claim("release", "Q13", 1_205_200, "done")
 
 
 def land_json(merge_branch):
