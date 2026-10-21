@@ -651,10 +651,10 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 ///
 /// **That a corpus took no such path is not a fact about this door, so here is
 /// the door itself.** Inside the kernel the only callers are in `rcad-topo`'s
-/// fuse, in `fuse::arrange` and `fuse::assemble`, so a consumer reaches this by fusing.
-/// Importing and meshing do not pass through it — `Import::read` builds and
-/// validates, and `SolidView::mesh` never asks which piece of a crossing a run
-/// is. The other way in is this function itself, which is re-exported from
+/// fuse, in `fuse::arrange` and `fuse::assemble`, so a consumer reaches this by
+/// fusing. Importing and meshing do not pass through it — `Import::read` builds
+/// and validates, and `SolidView::mesh` never asks which piece of a crossing a
+/// run is. The other way in is this function itself, which is re-exported from
 /// `rcad` and which anyone may call.
 ///
 /// So this is reached only by a caller that **fuses**, and it hands that caller a

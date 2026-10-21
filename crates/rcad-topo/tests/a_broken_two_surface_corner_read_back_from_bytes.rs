@@ -112,19 +112,24 @@
 //!   unturned outcomes.
 //!
 //!   **Turned and then shifted, the block's face is one ulp off the moved
-//!   seam plane, as the bar's is, though the other way** (§294.13). Since
-//!   Q2374 the bottom seam corner's side of it is read off the two offsets, as
-//!   the bar's is, and under `certified` the sound frustum and the corner
-//!   moved a quarter turn round refuse `side of a half-space` at the box round
-//!   where the apex lands instead; until then every corner refused `side of
-//!   plane` at the bottom seam corner. Under `tolerant(100)` it answers, as
-//!   the bar does: half the frustum, `26π/3`, from the sound frustum and the
-//!   corner moved a quarter turn round. Under both policies the corners moved
-//!   off the wall and off the cap refuse `ResultIsNotManifold`. Until Q1405 the sound frustum refused `CannotNameWhichPieceOfACrossingThisIs`
-//!   there: meshing its answer, the walk along the cut asked a hyperbola's
-//!   vertex a rounding from the cone's apex which side of the apex it is on, to
-//!   pick a branch the ends already pick (§294.14). The ends pick it now
-//!   (§294.15).
+//!   seam plane, as the bar's is, though the other way, and the cut answers
+//!   under both policies, as the bar's does** (§294.13, §294.25): half the
+//!   frustum, `26π/3`, from the sound frustum and the corner moved a quarter
+//!   turn round, while the corners moved off the wall and off the cap refuse
+//!   `ResultIsNotManifold`. Since Q2374 the bottom seam corner's side of the
+//!   face is read off the two offsets, as the bar's is; until then every
+//!   corner refused `side of plane` there. From then until Q2587 `certified`
+//!   refused `side of a half-space` at the box round where the apex lands
+//!   instead: the face crosses the cone's far nappe in a branch of a hyperbola
+//!   with no corner on it, and where such a crossing starts was answered by
+//!   naming the branch first, which asked a point a rounding from the apex
+//!   which side of it it is. A plane at least as steep as a cone crosses it in
+//!   nothing closed, so that is answered from how the two lean now, and
+//!   nothing is asked. Until Q1405 the sound frustum refused
+//!   `CannotNameWhichPieceOfACrossingThisIs` under both policies: meshing its
+//!   answer, the walk along the cut asked a hyperbola's vertex a rounding from
+//!   the cone's apex which side of the apex it is on, to pick a branch the ends
+//!   already pick (§294.14). The ends pick it now (§294.15).
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
@@ -134,7 +139,7 @@ use std::f64::consts::PI;
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, Isometry, NamedRun, Plane, Point, Scale, Surface,
     SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
-    intersect, walk, where_a_cones_apex_stands_against_a_plane,
+    intersect, walk, where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
@@ -1146,7 +1151,6 @@ fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answe
 {
     let policy = Policy::tolerant(100.0);
     let placement = the_turn_then_the_shift();
-    let half_the_frustum = 26.0 * PI / 3.0;
     for rule in [Rule::Difference, Rule::Intersection] {
         let bar = fuse(
             Shape::Bar(placement),
