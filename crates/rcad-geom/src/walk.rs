@@ -42,9 +42,10 @@ use crate::enclosure::{
 use crate::exact::Exact;
 use crate::intersect::{
     Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS,
-    ask, how_a_ball_on_a_cones_axis_meets_it, one_cone_either_way_round,
-    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
-    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
+    ask, how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_cone,
+    one_cone_either_way_round, whether_a_ball_runs_through_a_cones_apex,
+    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
+    whether_two_cones_share_an_axis,
 };
 use crate::march::{Marched, march, settled_with_a_bound, settled_with_a_bound_where_they_bend};
 use crate::meet::nowhere_in_particular;
@@ -618,7 +619,11 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// cone that cross in a parabola or a hyperbola, which is the same refusal as
 /// for the straight lines above and for the same reason: a curve that runs on
 /// for ever has no one place a vertex has to go. A plane through the apex
-/// crosses the cone in straight lines and gets it too.
+/// crosses the cone in straight lines and gets it too. **It is said from how the
+/// plane leans against the cone alone, before any branch is named**, so it asks
+/// no point and logs nothing: which branch of a hyperbola a run is changes
+/// nothing about whether it closes, and naming one can ask a point a rounding
+/// from a picker (`docs/decisions.md` §294.25).
 ///
 /// # It takes no policy, so it asks the half-spaces under a certified one
 ///
@@ -629,18 +634,27 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 ///
 /// **That is a gap and not a limit**, and the reason it is still here is that
 /// closing it changes a `pub` signature that `rcad-topo`'s fuse and half a dozen
-/// test files call. Nothing measured reaches a picker through this door: while
-/// the STEP corpus still left undecided half-spaces behind they all came in
-/// through [`walk`], from `Model::validate` checking which way a flat face's
-/// wire winds, and since the closed form below the corpus leaves none at all
-/// (`docs/decisions.md` §118.8).
+/// test files call. The STEP corpus reaches no picker through this door: while
+/// it still left undecided half-spaces behind they all came in through
+/// [`walk`], from `Model::validate` checking which way a flat face's wire winds,
+/// and since the closed form below it leaves none at all (§118.8).
 ///
-/// **"Nothing measured" is a fact about the paths one corpus takes, not about
-/// this door, so here is the door itself.** Inside the kernel the only callers
-/// are in `rcad-topo`'s `fuse::arrange`, so a consumer reaches this by fusing.
-/// Importing and meshing do not pass through it — `Import::read` builds and
-/// validates, and `SolidView::mesh` never asks which piece of a crossing a run
-/// is. The other way in is this function itself, which is re-exported from
+/// **A fuse did reach one, and it was a question this need not ask.** A plane
+/// steeper than a cone and a rounding off its apex — the face along a turned
+/// and shifted frustum's seam — crosses it in a hyperbola. The fuse handed the
+/// branch with no corner on it here, and naming that branch asked the picker
+/// through the apex square to the axis at each branch's vertex, a rounding from
+/// it. Both refused, both records stayed in the fuse's log when the fuse
+/// dropped this refusal, and the fuse refused its whole answer on them (§294.25,
+/// Q2587). That pair is answered from the lean now, above. No other shape is
+/// known to reach an undecided picker here, and none has been looked for.
+///
+/// **That a corpus took no such path is not a fact about this door, so here is
+/// the door itself.** Inside the kernel the only callers are in `rcad-topo`'s
+/// fuse, in `fuse::arrange` and `fuse::assemble`, so a consumer reaches this by
+/// fusing. Importing and meshing do not pass through it — `Import::read` builds
+/// and validates, and `SolidView::mesh` never asks which piece of a crossing a
+/// run is. The other way in is this function itself, which is re-exported from
 /// `rcad` and which anyone may call.
 ///
 /// So this is reached only by a caller that **fuses**, and it hands that caller a
@@ -661,6 +675,9 @@ pub fn where_a_closed_crossing_starts(
 ) -> Result<Point> {
     let certified = Policy::certified();
     let pair = which_two_surfaces_a_run_is_between(run.run(), along);
+    if a_plane_at_least_as_steep_as_a_cone(&pair) {
+        return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
+    }
     match what_a_run_between_these_two_lies_on(pair, run, &certified, log)? {
         WhatARunLiesOn::StraightLine => Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
         WhatARunLiesOn::QuarticPickedUpAt(seeds, held_apart_by) => {
@@ -686,6 +703,29 @@ pub fn where_a_closed_crossing_starts(
             Ok(start)
         }
     }
+}
+
+/// Whether `pair` is a plane and a cone, with the plane parallel to one of the
+/// cone's rulings or steeper than the cone: `E ≤ 0`, proved by
+/// [`how_a_plane_leans_against_a_cone`] with no policy and nothing to log.
+///
+/// **Every such pair crosses in something that runs on for ever**: a parabola,
+/// a hyperbola, or straight lines through the apex. [`where_a_plane_cuts_a_cone`]
+/// reads `E` again as the `f64` nearest the same exact sum, and the nearest
+/// `f64` to a number at or below zero is at or below zero, so where this says
+/// yes that takes its `leaning <= 0.0` arm, every way out of which is one of
+/// those three or a refusal. An `E` this cannot prove is left to that arm to
+/// read, as before.
+fn a_plane_at_least_as_steep_as_a_cone(pair: &[Surface; 2]) -> bool {
+    let ([Surface::Plane(flat), Surface::Cone(cone)] | [Surface::Cone(cone), Surface::Plane(flat)]) =
+        pair
+    else {
+        return false;
+    };
+    matches!(
+        how_a_plane_leans_against_a_cone(flat, cone),
+        Decision::Neg | Decision::Zero
+    )
 }
 
 /// Whether this end says where it is.
@@ -5704,6 +5744,61 @@ mod tests {
                 Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
                 "{one:?} and {other:?} cross in straight lines"
             );
+        }
+    }
+
+    /// **A plane a rounding off a cone's apex and steeper than the cone crosses
+    /// it in a hyperbola, which has no place to put a vertex either, and that
+    /// is said without asking which branch a run is** (`docs/decisions.md`
+    /// §294.25). The plane misses the apex by one ulp of 7, so each branch's
+    /// vertex stands about `1e-15` from the apex, in a box about `2e-13`
+    /// across. Each run `intersect` names has no ends, and is picked by the
+    /// plane through the apex square to the axis, which straddles both boxes.
+    /// Until Q2587 naming the branch asked it at both vertices, wrote both
+    /// refusals into the log under the certified policy this makes itself, and
+    /// refused, and a fuse kept the two records and refused its whole answer on
+    /// them, though both branches are as open as each other.
+    #[test]
+    fn a_plane_a_rounding_off_a_cones_apex_and_steeper_than_it_is_not_closed_and_asks_nothing() {
+        let apex = Point::new(7.0, -5.0, 2.5);
+        let skin = Cone::new(
+            crate::Axis::new(apex, Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+            0.5,
+        )
+        .expect("a slope");
+        let flat = Plane::from_point_and_normal(
+            Point::new(7.0_f64.next_up(), 0.0, 0.0),
+            Vector::new(1.0, 0.0, 0.0),
+        )
+        .expect("a unit normal");
+        assert_eq!(
+            crate::intersect::how_a_plane_leans_against_a_cone(&flat, &skin),
+            Decision::Neg,
+            "the plane runs along the axis, so it is steeper than the cone"
+        );
+        let (face, cone) = (Surface::Plane(flat), Surface::Cone(skin));
+        let met = crate::intersect::intersect(
+            &face,
+            &cone,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(branches)) = met else {
+            panic!("the hyperbola is named: {met:?}");
+        };
+        assert_eq!(branches.len(), 2, "its two branches");
+
+        for branch in &branches {
+            for pair in [[&face, &cone], [&cone, &face]] {
+                let mut log = ProvenanceLog::new();
+                let started = where_a_closed_crossing_starts(branch, pair, &mut log);
+                assert!(log.is_empty(), "{branch:?} asked something: {log:?}");
+                assert_eq!(
+                    started,
+                    Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                    "{branch:?} is half a hyperbola"
+                );
+            }
         }
     }
 

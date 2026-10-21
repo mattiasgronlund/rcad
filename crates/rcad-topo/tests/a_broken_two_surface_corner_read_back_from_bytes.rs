@@ -112,19 +112,24 @@
 //!   unturned outcomes.
 //!
 //!   **Turned and then shifted, the block's face is one ulp off the moved
-//!   seam plane, as the bar's is, though the other way** (§294.13). Since
-//!   Q2374 the bottom seam corner's side of it is read off the two offsets, as
-//!   the bar's is, and under `certified` the sound frustum and the corner
-//!   moved a quarter turn round refuse `side of a half-space` at the box round
-//!   where the apex lands instead; until then every corner refused `side of
-//!   plane` at the bottom seam corner. Under `tolerant(100)` it answers, as
-//!   the bar does: half the frustum, `26π/3`, from the sound frustum and the
-//!   corner moved a quarter turn round. Under both policies the corners moved
-//!   off the wall and off the cap refuse `ResultIsNotManifold`. Until Q1405 the sound frustum refused `CannotNameWhichPieceOfACrossingThisIs`
-//!   there: meshing its answer, the walk along the cut asked a hyperbola's
-//!   vertex a rounding from the cone's apex which side of the apex it is on, to
-//!   pick a branch the ends already pick (§294.14). The ends pick it now
-//!   (§294.15).
+//!   seam plane, as the bar's is, though the other way, and the cut answers
+//!   under both policies, as the bar's does** (§294.13, §294.25): half the
+//!   frustum, `26π/3`, from the sound frustum and the corner moved a quarter
+//!   turn round, while the corners moved off the wall and off the cap refuse
+//!   `ResultIsNotManifold`. Since Q2374 the bottom seam corner's side of the
+//!   face is read off the two offsets, as the bar's is; until then every
+//!   corner refused `side of plane` there. From then until Q2587 `certified`
+//!   refused `side of a half-space` at the box round where the apex lands
+//!   instead: the face crosses the cone's far nappe in a branch of a hyperbola
+//!   with no corner on it, and where such a crossing starts was answered by
+//!   naming the branch first, which asked a point a rounding from the apex
+//!   which side of it it is. A plane at least as steep as a cone crosses it in
+//!   nothing closed, so that is answered from how the two lean now, and
+//!   nothing is asked. Until Q1405 the sound frustum refused
+//!   `CannotNameWhichPieceOfACrossingThisIs` under both policies: meshing its
+//!   answer, the walk along the cut asked a hyperbola's vertex a rounding from
+//!   the cone's apex which side of the apex it is on, to pick a branch the ends
+//!   already pick (§294.14). The ends pick it now (§294.15).
 //!
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
@@ -134,7 +139,7 @@ use std::f64::consts::PI;
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, Isometry, NamedRun, Plane, Point, Scale, Surface,
     SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
-    intersect, walk, where_a_cones_apex_stands_against_a_plane,
+    intersect, walk, where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
@@ -1028,13 +1033,14 @@ fn a_turned_frustum_cut_along_its_seam_gives_what_the_unturned_frustum_gives_tur
     }
 }
 
-/// **Turned and then shifted, the frustum cut along its seam gets past its
-/// bottom seam corner, as the bar does, and refuses at its apex** (§294.13,
-/// Q2374). Under `certified` the sound frustum and the corner moved a quarter
-/// turn round refuse `side of a half-space`, with two records, each on a box
-/// `2e-13` across round where the apex `(0, 0, 0)` lands, which the block's
-/// face along the seam straddles. The corners moved off the wall and off the
-/// cap refuse `ResultIsNotManifold`.
+/// **Turned and then shifted, the frustum cut along its seam gives what the
+/// turned frustum gives, shifted, under `certified` as under `tolerant(100)`**
+/// (§294.25, Q2587). The sound frustum answers both rules with half the
+/// frustum, `26π/3` on a fine mesh, its whole model validates, and its corners
+/// are the turned frustum's shifted, to a rounding. The corner moved a quarter
+/// turn round is cut away and gives the sound answer to a rounding. The corners
+/// moved off the wall and off the cap refuse `ResultIsNotManifold`, where
+/// turned alone they give `CannotTellTheCellsOfAFaceApart`.
 ///
 /// The face has the normal of the frustum's seam plane, moved and turned
 /// round, bit for bit, and an offset one ulp further out along it, because the
@@ -1050,9 +1056,19 @@ fn a_turned_frustum_cut_along_its_seam_gives_what_the_unturned_frustum_gives_tur
 /// reaches a rounding past the axis, and the face crosses the cone in a
 /// hyperbola, whose two branches `intersect` names. The bar's face is one ulp
 /// the other way (§294.9).
+///
+/// **From Q2374 until Q2587 `certified` refused `side of a half-space`** for
+/// the sound frustum and the corner moved a quarter turn round, with two
+/// records, each on a box `2e-13` across round where the apex `(0, 0, 0)`
+/// lands, which the block's face straddles (Q2396). No corner is on the branch
+/// in the nappe past the apex, so the fuse asked
+/// `rcad_geom::where_a_closed_crossing_starts` where to put one, and that named
+/// the branch first, by asking the plane through the apex square to the axis
+/// about each branch's vertex, `1e-15` from the apex. Neither branch is closed,
+/// so that is answered from how the face leans against the cone now, and
+/// nothing is asked.
 #[test]
-fn a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_a_half_space_its_apex_is()
- {
+fn a_turned_and_shifted_frustum_cut_along_its_seam_gives_what_the_turned_frustum_gives_shifted() {
     let placement = the_turn_then_the_shift();
     let (mut model, frustum) = read_back(Shape::Frustum(placement), WHERE_THE_FRUSTUM_PUTS_IT);
     let block = a_block(
@@ -1082,86 +1098,43 @@ fn a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_a_h
         Decision::Neg,
         "and misses it, with the apex behind the face"
     );
+    assert_eq!(
+        how_a_plane_leans_against_a_cone(&face, &cone),
+        Decision::Neg,
+        "and is steeper than the cone"
+    );
+    let pair = [&Surface::Plane(face), &Surface::Cone(cone)];
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        let met = intersect(
-            &Surface::Plane(face),
-            &Surface::Cone(cone),
-            &policy,
-            &mut ProvenanceLog::new(),
-        );
+        let met = intersect(pair[0], pair[1], &policy, &mut ProvenanceLog::new());
         let Ok(SurfaceMeet::Curves(branches)) = met else {
             panic!("{policy:?}: the hyperbola is named: {met:?}");
         };
         assert_eq!(branches.len(), 2, "{policy:?}: its two branches");
+        for branch in &branches {
+            let mut log = ProvenanceLog::new();
+            let started = where_a_closed_crossing_starts(branch, pair, &mut log);
+            assert!(
+                log.is_empty(),
+                "{policy:?}: where {branch:?} starts asked something: {log:?}"
+            );
+            assert_eq!(
+                started,
+                Err(rcad_geom::Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                "{policy:?}: {branch:?} is half a hyperbola"
+            );
+        }
     }
 
-    let where_the_apex_lands = placement.apply_to_point(Point::origin()).coordinates();
-    for rule in [Rule::Difference, Rule::Intersection] {
-        for moved_to in [
-            WHERE_THE_FRUSTUM_PUTS_IT,
-            THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND,
-        ] {
-            let case = format!("{rule:?} with the top corner at {moved_to:?}");
-            let refused = fuse(
-                Shape::Frustum(placement),
-                moved_to,
-                THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
-                rule,
-                &Policy::certified(),
-            );
-            let Err(Error::Undecidable { records }) = refused else {
-                panic!("{case}: {:?}", refused.map(|answer| answer.solids.len()));
-            };
-            let [_, _] = records.records() else {
-                panic!("{case}: two records, {records:?}");
-            };
-            for record in records.records() {
-                assert_eq!(record.predicate(), "side of a half-space", "{case}");
-                let [apex] = record.inputs() else {
-                    panic!("{case}: one point asked about, {record:?}");
-                };
-                assert!(apex.uncertainty() < 5e-13, "{case}: {apex:?}");
-                assert!(
-                    apex.enclosure()
-                        .iter()
-                        .zip(where_the_apex_lands)
-                        .all(|(side, at)| side.lo() <= at && at <= side.hi()),
-                    "{case}: {apex:?} holds {where_the_apex_lands:?}"
-                );
-                assert!(
-                    matches!(face.side_of_point(*apex), Decision::Undecidable { .. }),
-                    "{case}: the block's face straddles {apex:?}"
-                );
-            }
-        }
-        for moved_to in [
-            THE_FRUSTUMS_CORNER_OFF_THE_WALL,
-            THE_FRUSTUMS_CORNER_OFF_THE_CAP,
-        ] {
-            check(
-                Shape::Frustum(placement),
-                moved_to,
-                THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
-                rule,
-                &Policy::certified(),
-                Outcome::ResultIsNotManifold,
-            );
-        }
-    }
+    the_turned_and_shifted_frustum_cut_along_its_seam_answers(&Policy::certified());
 }
 
 /// **Under `tolerant(100)` the turned and shifted frustum cut along its seam
-/// answers, as the turned and shifted bar does** (§294.15, Q1405), where
-/// `certified` cannot tell which side of a half-space the apex is
-/// (`a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_a_half_space_its_apex_is`).
-/// The sound frustum answers both rules with half the frustum, `26π/3` on a
-/// fine mesh, its whole model validates, and its corners are the turned
-/// frustum's shifted, to a rounding. The corner moved a quarter turn round is
-/// cut away and gives the sound answer to a rounding. The corners moved off the
-/// wall and off the cap give `ResultIsNotManifold`, as under `certified`, where
-/// turned alone they give `CannotTellTheCellsOfAFaceApart` (Q2374). The bar,
-/// placed the same way and cut by the half past its seam, is half the bar
-/// under both rules.
+/// answers, as the turned and shifted bar does** (§294.15, Q1405), and as it
+/// does under `certified` since Q2587
+/// (`a_turned_and_shifted_frustum_cut_along_its_seam_gives_what_the_turned_frustum_gives_shifted`).
+/// The frustum gives the same answers under both policies; the bar, placed the
+/// same way and cut by the half past its seam, is half the bar under both
+/// rules.
 ///
 /// **Until Q1405 the sound frustum and the corner moved a quarter turn round
 /// refused `CannotNameWhichPieceOfACrossingThisIs`** (§294.13, §294.14), when
@@ -1178,7 +1151,6 @@ fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answe
 {
     let policy = Policy::tolerant(100.0);
     let placement = the_turn_then_the_shift();
-    let half_the_frustum = 26.0 * PI / 3.0;
     for rule in [Rule::Difference, Rule::Intersection] {
         let bar = fuse(
             Shape::Bar(placement),
@@ -1189,33 +1161,46 @@ fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answe
         )
         .unwrap_or_else(|why| panic!("the bar, {rule:?}, refused: {why:?}"));
         holds(&bar, PI * RADIUS * RADIUS * HEIGHT / 2.0, rule, &policy);
+    }
+    the_turned_and_shifted_frustum_cut_along_its_seam_answers(&policy);
+}
 
+/// Under `policy` and both rules, the sound frustum turned and then shifted,
+/// cut along its seam, is half the frustum, `26π/3` on a fine mesh, its whole
+/// model validates, and its corners are the turned frustum's shifted, to a
+/// rounding. The corner moved a quarter turn round is cut away and gives the
+/// sound answer to a rounding. The corners moved off the wall and off the cap
+/// refuse `ResultIsNotManifold`.
+fn the_turned_and_shifted_frustum_cut_along_its_seam_answers(policy: &Policy) {
+    let placement = the_turn_then_the_shift();
+    let half_the_frustum = 26.0 * PI / 3.0;
+    for rule in [Rule::Difference, Rule::Intersection] {
         let answer_of = |placement, moved_to| {
             fuse(
                 Shape::Frustum(placement),
                 moved_to,
                 THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
                 rule,
-                &policy,
+                policy,
             )
             .unwrap_or_else(|why| {
                 panic!(
-                    "the frustum at {placement:?} with its corner at {moved_to:?}, {rule:?}, \
-                     refused: {why:?}"
+                    "the frustum at {placement:?} with its corner at {moved_to:?}, {rule:?} \
+                     under {policy:?}, refused: {why:?}"
                 )
             })
         };
         let sound = answer_of(placement, WHERE_THE_FRUSTUM_PUTS_IT);
-        holds(&sound, half_the_frustum, rule, &policy);
+        holds(&sound, half_the_frustum, rule, policy);
         sound
             .model
-            .validate(&policy, &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| panic!("{rule:?} does not validate: {why:?}"));
+            .validate(policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{rule:?} under {policy:?} does not validate: {why:?}"));
         let turned = answer_of(the_turn(), WHERE_THE_FRUSTUM_PUTS_IT);
         the_same_corners_to_a_rounding(&sound, &turned, &the_shift(), rule);
 
         let cut_away = answer_of(placement, THE_FRUSTUMS_CORNER_A_QUARTER_TURN_ROUND);
-        holds(&cut_away, half_the_frustum, rule, &policy);
+        holds(&cut_away, half_the_frustum, rule, policy);
         the_same_corners_to_a_rounding(&cut_away, &sound, &Isometry::identity(), rule);
 
         for moved_to in [
@@ -1227,7 +1212,7 @@ fn under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answe
                 moved_to,
                 THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM,
                 rule,
-                &policy,
+                policy,
                 Outcome::ResultIsNotManifold,
             );
         }
