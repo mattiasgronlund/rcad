@@ -1947,12 +1947,19 @@ check-gate-verdicts-selftest:
     done <<<"$reusable"
     # These read prose, or something outside the tree that no fingerprint of
     # it can see, which is what the traces behind §337.2 and §369 found.
-    for never in check-plugins check-hooks check-hub check-corpus check-systemd-units deny \
+    for never in check-hub check-corpus check-systemd-units \
                  check-decisions check-plan check-queue check-where-the-work-is \
-                 check-skills check-lanes-workflow check-questions-selftest \
+                 check-skills check-lanes-workflow \
                  check-queue-merge-driver check-gate-lane-callers; do
         grep -qx "$never" <<<"$reusable" \
             && fail "$never reads prose or something outside the tree, and gate_reusable_steps would serve it"
+    done
+    # These four read something outside the tree as well, the plugins, Claude
+    # Code's config and the advisory database, and `gate` serves each off a key
+    # that adds what it reads there to the code's fingerprint (§337.9).
+    for machine in check-hooks check-questions-selftest check-plugins deny; do
+        grep -qx "$machine" <<<"$reusable" \
+            || fail "$machine is not in gate_reusable_steps, so gate's key for what it reads outside the tree would serve nothing"
     done
     # check-timing-hooked-calls is not named above: it reads something outside
     # the tree too, the installed nightly rustc and cargo-fuzz, same as the
@@ -2127,6 +2134,7 @@ check-gate-verdicts-selftest:
     got=$(gate list list) || fail "an audited gate failed"
     grep -q '^· list (' <<<"$got" || fail "a commit whose sha starts with 0 was served"
     grep -q '^· verdicts: audit' <<<"$got" || fail "an audit did not say it was one"
+    audit=$(g rev-parse HEAD)
     g reset -q --hard "$base"
 
     # A violation: a step the record says passed fails on the same code. No
@@ -2308,6 +2316,130 @@ check-gate-verdicts-selftest:
     [ -f "$thc_store/$thc_fp2" ] \
         || fail "the re-run after a toolchain version change recorded nothing under the new fingerprint"
     g reset -q --hard "$base"
+
+    # The steps that check the machine, each served off a key of its own: the
+    # code's fingerprint and what the step reads outside the tree (§337.9).
+    # `check-questions-selftest` stands in for the four, since it is the one
+    # whose whole recipe is a plugin's own script. The real recipe runs against
+    # a fixture plugin, whose cases fail while `questions-fails` is there and
+    # change a file of the plugin while `questions-moves` is. The paths reach
+    # the step through the environment, since each step is a `just` of its own
+    # that an outer `--set` does not reach.
+    m_store="$repo/.git/rcad-verdicts-machine"
+    fixture="$dir/plugins"
+    mkdir -p "$fixture/questions/bin" "$fixture/guardrails" "$fixture/practices" "$dir/claude"
+    printf '#!/usr/bin/env bash\n[ ! -e "%s" ] || echo moved >>"%s"\n[ ! -e "%s" ] || { echo "the fixture questions cases fail"; exit 1; }\necho "the fixture questions cases pass"\n' \
+        "$dir/questions-moves" "$fixture/questions/moved" "$dir/questions-fails" >"$fixture/questions/bin/selftest.sh"
+    chmod +x "$fixture/questions/bin/selftest.sh"
+    machine_gate() {
+        CLAUDE_CONFIG_DIR=${claude:-$dir/claude} CLAUDE_PLUGINS_ROOT=$fixture \
+            CLAUDE_QUESTIONS_PLUGIN=$fixture/questions CLAUDE_GUARDRAILS_PLUGIN=$fixture/guardrails \
+            "$j" --set gate_steps check-questions-selftest --set gate_reusable_steps check-questions-selftest \
+            --set gate_log "$dir/gate.log" gate quiet "$@" 2>&1
+    }
+    machine_recorded() {
+        sed -n "s/^· verdicts: check-questions-selftest's green is recorded as \([0-9a-f]\{12\}\)\$/\1/p" <<<"$got"
+    }
+
+    touch "$dir/machine-mark"
+    got=$(machine_gate) || fail "the first gate of check-questions-selftest failed"
+    grep -q '^· check-questions-selftest (' <<<"$got" || fail "the first gate of check-questions-selftest did not run it"
+    grep -q 'the fixture questions cases pass' "$dir/gate.log" \
+        || fail "check-questions-selftest did not run the fixture plugin's cases"
+    m_key=$(machine_recorded)
+    [ -n "$m_key" ] || fail "a passing check-questions-selftest did not say it was recorded under a key of its own"
+    [ -d "$m_store" ] || fail "a passing check-questions-selftest left no store of its own"
+    m_record=$(find "$m_store" -maxdepth 1 -type f -name "$m_key*")
+    [ "$(grep -c . <<<"$m_record")" -eq 1 ] || fail "the key $m_key names $(grep -c . <<<"$m_record") records, not one"
+    grep -qx "commit $base" "$m_record" || fail "the record of check-questions-selftest does not name the commit that was gated"
+    grep -qx 'steps check-questions-selftest' "$m_record" || fail "the record of check-questions-selftest does not name its step"
+    [ -z "$(find "$store" -type f -newer "$dir/machine-mark")" ] \
+        || fail "check-questions-selftest was recorded in the whole-tree store, off the code's fingerprint alone"
+
+    got=$(machine_gate) || fail "a served gate of check-questions-selftest failed"
+    grep -q "^· served: check-questions-selftest from ${base:0:8}'s gate at " <<<"$got" \
+        || fail "a gate of the same code and the same plugins did not serve check-questions-selftest"
+    grep -q '^· check-questions-selftest (' <<<"$got" && fail "a served check-questions-selftest ran anyway"
+    grep -qx 'gate: PASS' <<<"$got" || fail "a gate served check-questions-selftest did not say it passed"
+    grep -q 'the record it was served from is gone' <<<"$got" \
+        && fail "a gate served only check-questions-selftest said a whole-tree record it was never served is gone"
+
+    g reset -q --hard "$prose"
+    got=$(machine_gate) || fail "a served gate of check-questions-selftest on a prose commit failed"
+    grep -q "^· served: check-questions-selftest from ${base:0:8}'s gate" <<<"$got" \
+        || fail "a commit that touched only docs/ was not served check-questions-selftest's green of the code under it"
+    g reset -q --hard "$base"
+
+    got=$(machine_gate fresh) || fail "a fresh gate of check-questions-selftest failed"
+    grep -q '^· check-questions-selftest (' <<<"$got" || fail "fresh served check-questions-selftest"
+    grep -q "^· verdicts: fresh, so [0-9a-f]\{8\}'s green for check-questions-selftest" <<<"$got" \
+        || fail "fresh did not say why it ran check-questions-selftest"
+
+    g reset -q --hard "$audit"
+    got=$(machine_gate) || fail "an audited gate of check-questions-selftest failed"
+    grep -q '^· check-questions-selftest (' <<<"$got" || fail "a commit whose sha starts with 0 was served check-questions-selftest"
+    grep -q '^· verdicts: audit, since this sha starts with 0: .* check-questions-selftest' <<<"$got" \
+        || fail "an audit of check-questions-selftest did not say it was one"
+    g reset -q --hard "$base"
+
+    sed -i "s/^date .*/date $old/" "$m_record"
+    got=$(machine_gate) || fail "a gate of check-questions-selftest over an expired record failed"
+    grep -q '^· check-questions-selftest (' <<<"$got" || fail "a record of check-questions-selftest two days old was served"
+    grep -q "check-questions-selftest's inputs is from $old, not the last day" <<<"$got" \
+        || fail "an expired record of check-questions-selftest did not say why it was not served"
+
+    touch "$dir/questions-fails"
+    got=$(machine_gate fresh) && fail "a gate whose check-questions-selftest fails exited 0"
+    grep -q '^!!! verdict violated: check-questions-selftest failed' <<<"$got" \
+        || fail "check-questions-selftest failed on the code and plugins of a green on record, and nothing said so"
+    grep -q " check-questions-selftest $base " "$repo/.git/rcad-verdict-violations" \
+        || fail "the violation of check-questions-selftest was not written down"
+    [ -f "$m_record" ] && fail "a violated record of check-questions-selftest was kept, so the next gate would serve it"
+    [ "$(tail -6 <<<"$got" | grep -c '=== gate summary ===')" -eq 1 ] \
+        || fail "the violation of check-questions-selftest pushed the summary block off the end"
+    rm "$dir/questions-fails"
+
+    got=$(machine_gate) || fail "a gate of check-questions-selftest after its violation failed"
+    grep -q '^· check-questions-selftest (' <<<"$got" || fail "a deleted record of check-questions-selftest was served"
+    [ "$(machine_recorded)" = "$m_key" ] || fail "a pass of check-questions-selftest after its violation did not record it again"
+
+    printf '// moved\n' >>"$repo/crates/a.rs"
+    g add -A
+    g commit -q -m 'a code change under the same plugins'
+    [[ "$(g rev-parse HEAD)" != 0* ]] || fail "the code commit starts with 0, so it would be an audit"
+    got=$(machine_gate) || fail "a gate of check-questions-selftest on a code commit failed"
+    grep -q '^· check-questions-selftest (' <<<"$got" \
+        || fail "a code commit was served check-questions-selftest's green of the code under it"
+    g reset -q --hard "$base"
+
+    claude="$dir/no-claude"
+    got=$(machine_gate) || fail "a gate of check-questions-selftest with no Claude Code failed"
+    unset claude
+    grep -q '^· check-questions-selftest (' <<<"$got" \
+        || fail "a gate with no Claude Code was served check-questions-selftest's green of a gate that had one"
+    grep -q 'skipped, not passed' "$dir/gate.log" || fail "check-questions-selftest with no Claude Code did not say it skipped"
+
+    # What the step reads, changed while it runs, is a pass that names nothing,
+    # and a failure that is no violation: `deny` fetches the advisory database
+    # while it runs.
+    touch "$dir/questions-moves"
+    got=$(machine_gate fresh) || fail "a gate of check-questions-selftest whose plugin changed while it ran failed"
+    grep -qx '· verdicts: check-questions-selftest not recorded, because what it reads changed while the gate ran' <<<"$got" \
+        || fail "a pass of check-questions-selftest whose plugin changed while it ran did not say why it recorded nothing"
+    [ -z "$(machine_recorded)" ] || fail "a pass of check-questions-selftest whose plugin changed while it ran was recorded"
+    rm "$dir/questions-moves"
+    got=$(machine_gate) || fail "a gate of check-questions-selftest after its plugin changed failed"
+    grep -q '^· check-questions-selftest (' <<<"$got" \
+        || fail "a changed file in the plugin was served check-questions-selftest's green of the plugin before it"
+    m_key2=$(machine_recorded)
+    [ -n "$m_key2" ] && [ "$m_key2" != "$m_key" ] || fail "a changed file in the plugin did not move check-questions-selftest's key"
+    m_record2=$(find "$m_store" -maxdepth 1 -type f -name "$m_key2*")
+    touch "$dir/questions-moves" "$dir/questions-fails"
+    got=$(machine_gate fresh) && fail "a gate whose check-questions-selftest fails exited 0"
+    grep -q 'verdict violated' <<<"$got" \
+        && fail "check-questions-selftest failing once what it reads had changed under it was taken as a violation"
+    [ -f "$m_record2" ] || fail "a failure after the plugin changed under it deleted the record of the plugin before"
+    rm "$dir/questions-moves" "$dir/questions-fails"
 
     # A clean tree can still change while its gate runs, and then no sha names
     # what the gate read, so its pass is not recorded. This is the path that
