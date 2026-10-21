@@ -872,7 +872,7 @@ function marksOf(answer) {
 }
 
 function rowsNote() {
-  return 'Rows: no `tag` step when the add text already starts with the class; `add` tags it from the text, `queue apply` refuses the repeat, and `just land` stops (Q1047). The class must be the text\'s first word exactly, `refuses/B` and not `refuses/B:`, or `add` does not read it (Q1505). A row\'s text ends with its §N and nothing after it, not even a full stop, or check-queue refuses it and `just land` stops.'
+  return 'Rows: no `tag` step when the add text already starts with the class; `add` tags it from the text, so the step does nothing (Q2549). The class must be the text\'s first word exactly, `refuses/B` and not `refuses/B:`, or `add` does not read it (Q1505). A row\'s text ends with its §N and nothing after it, not even a full stop, or check-queue refuses it and `just land` stops.'
 }
 
 function testsNote() {

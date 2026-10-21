@@ -234,7 +234,11 @@ what is not a row.
   row. A defect's row takes its class from `remaining`: `wrong`, `crash` or
   `refuses`, then `/A` to `/D` as above. The class names the tier (§403): a row
   of class A or B is `add 1`, and one of class C or D is `add 5`. A row in any
-  tier is `small` by the rule above.
+  tier is `small` by the rule above. Write the tag once: as a tag step, or as
+  the add text's first word, exactly `wrong/B` with nothing stuck after it,
+  since `add` reads a class there. A tag step that repeats what its own
+  apply's `add` read off the text does nothing (Q2549); on any other row, a
+  tag the row already carries is refused.
 - `["after", "@1", "<id>[,<id>]"]` for a row that waits on another. A row
   with no class goes down to the latest tier among the rows it waits on, so
   `add 1` and then `after` a tier 5 row lands it in tier 5 (§435.6).

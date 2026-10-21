@@ -1000,6 +1000,11 @@ def tag_step(queue, claims, here, args, batch):
     A row carries one tag at most, since a defect needs a trace first and so is
     never small. On a pinned row it sets and takes off `small` alone, which
     moves the row nowhere; a class there is Mattias's to keep (§430.8).
+
+    A tag the row already carries is refused, except on a row this same batch
+    added: `add` reads a class off the text's first word, so a lane's `add`
+    whose text starts with the class followed by `tag @1` with that class asks
+    for nothing new, and refusing it stopped `just land`'s whole apply (Q1047).
     """
     need(args, 2, "tag <id> <class>|small|-")
     row_id, tag = args
@@ -1017,6 +1022,8 @@ def tag_step(queue, claims, here, args, batch):
     if is_class and row.tier not in ("1", "5"):
         raise Refused(f"{row_id} is tier {row.tier}, and a class ranks tier 1 and tier 5 rows only")
     if tag == row.tag:
+        if row_id in batch.added_ids:
+            return queue, f"{row_id}: tagged {tag or 'nothing'} already by its add; nothing to do", None
         raise Refused(f"{row_id} is tagged {tag or 'nothing'} already")
     queue.replace(row, row.with_tag(tag))
     message = f"{row_id}: tag {row.tag or '-'} -> {tag or '-'}"
