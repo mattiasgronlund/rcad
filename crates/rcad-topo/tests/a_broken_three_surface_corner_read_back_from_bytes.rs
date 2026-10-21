@@ -64,7 +64,14 @@
 //! `tolerant(100)` answers the difference and the union and is refused the
 //! intersection for a triangle a rounding across. The union panicked there
 //! until the fuse left out a stretch of a wedge face's outline that the other
-//! wedge face walks back.
+//! wedge face walks back. Turned 0.4 about `x`, the wedge over the `+y` edge
+//! cuts the `−x` side face into a triangle a rounding across by the apex that
+//! no point could be placed in, and every rule was refused `Undecidable` under
+//! both policies until the fuse read the triangle's corner at the apex where
+//! the lines of its two sides cross. Now `certified` refuses it at the range
+//! check, and so it does at the two shifts after a turn where the same wedge
+//! was refused `Undecidable` too; `tolerant(100)` answers at the turn about
+//! `x`.
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -777,9 +784,14 @@ fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_cannot_tell_its_ce
 ///
 /// Of the 39 fuses here, `Difference` and `certified` with each wedge at each
 /// of 13 placements, 23 are refused so, and each of those has a wedge plane
-/// between two apexes. 4 more have one and are refused otherwise, 1 at the
-/// range check and 3 `Undecidable`; why the orders' quarrel does not show
-/// there is not traced. 12 have none, and none of those is refused so.
+/// between two apexes. 4 more have one and are refused at the range check
+/// instead; why the orders' quarrel does not show there is not traced. 3 of
+/// those 4 were refused `Undecidable` until `by_a_plane` in `fuse/select.rs`
+/// read a corner of the input with four planes round it where the lines of
+/// the piece's two sides there cross (Q2334): the wedge over the `+y` edge at
+/// `every_placement`'s turn about `x` shifted, and twice over at the shift
+/// after the turn 0.1 about `(1, 2, 3)`. 12 have none, and none of those is
+/// refused so.
 ///
 /// So the refusal is the gap `limit_or_gap` names for it: the cells are there,
 /// and it is the fuse's reading of the corner that contradicts itself. What a
@@ -794,23 +806,31 @@ fn a_placed_pyramid_cannot_tell_its_cells_apart_only_where_a_wedge_plane_runs_be
         .chain(where_the_orders_loop_by_the_apex().map(|(_, placement)| placement))
         .chain([a_tenth_of_a_radian_about_a_tilted_axis()]);
     let mut refused_with_a_plane_between = 0;
-    let mut a_plane_between_and_refused_otherwise = 0;
+    let mut a_plane_between_and_refused_at_the_range_check = 0;
     let mut no_plane_between = 0;
     for placement in placements {
         for wedge in EVERY_WEDGE {
             let between = a_wedge_plane_runs_between_two_apexes(wedge, placement);
-            let refused = matches!(
-                the_wedge_through_the_apex(
-                    wedge,
-                    placement,
-                    Rule::Difference,
-                    &Policy::certified()
-                ),
-                Err(Error::CannotTellTheCellsOfAFaceApart { .. })
+            let fused = the_wedge_through_the_apex(
+                wedge,
+                placement,
+                Rule::Difference,
+                &Policy::certified(),
             );
+            let refused = matches!(fused, Err(Error::CannotTellTheCellsOfAFaceApart { .. }));
             match (between, refused) {
                 (true, true) => refused_with_a_plane_between += 1,
-                (true, false) => a_plane_between_and_refused_otherwise += 1,
+                (true, false) => {
+                    assert!(
+                        matches!(
+                            fused,
+                            Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
+                        ),
+                        "{placement:?}, {wedge:?}: a wedge plane between two apexes came back \
+                         {fused:?}"
+                    );
+                    a_plane_between_and_refused_at_the_range_check += 1;
+                }
                 (false, false) => no_plane_between += 1,
                 (false, true) => panic!(
                     "{placement:?}, {wedge:?}: refused with no wedge plane between two apexes"
@@ -821,7 +841,7 @@ fn a_placed_pyramid_cannot_tell_its_cells_apart_only_where_a_wedge_plane_runs_be
     assert_eq!(
         (
             refused_with_a_plane_between,
-            a_plane_between_and_refused_otherwise,
+            a_plane_between_and_refused_at_the_range_check,
             no_plane_between
         ),
         (23, 4, 12)
@@ -931,6 +951,39 @@ fn a_sound_pyramid_turned_about_x_and_cut_by_a_wedge_over_the_plus_y_edge_reache
             match the_wedge_through_the_apex(wedge, placement, rule, &Policy::tolerant(100.0)) {
                 Ok(named) => assert_eq!(named, [DYNAMIC_RANGE_CHECK], "{case}"),
                 other => panic!("{case} came back {other:?} under tolerant(100)"),
+            }
+        }
+    }
+}
+
+/// **Shifted after the turn 0.1 about `(1, 2, 3)`, or after the turn 0.7
+/// about `(0.3, −1, 2)`, the sound pyramid and the wedge over the `+y` edge
+/// built there are refused at the range check by every rule under
+/// `certified`.** Queue row Q2576 found the difference refused `Undecidable`
+/// at each. With `by_a_plane` reading a corner of the input with four planes
+/// round it where the lines of the piece's two sides there cross (Q2334), each
+/// rule comes to the limit §448.7 settled for the cut through the apex, as at
+/// the turn about `x` in the test above.
+#[test]
+fn a_sound_pyramid_shifted_after_a_turn_and_cut_by_a_wedge_over_the_plus_y_edge_is_refused_at_the_range_check()
+ {
+    let wedge = A_WEDGE_OVER_THE_PLUS_Y_EDGE;
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
+    let turn = |[x, y, z]: [f64; 3], angle: f64| {
+        let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(x, y, z)).expect("an axis");
+        Isometry::rotation(&axis, angle).expect("a turn")
+    };
+    for placement in [
+        shift.compose(&turn([1.0, 2.0, 3.0], 0.1)),
+        shift.compose(&turn([0.3, -1.0, 2.0], 0.7)),
+    ] {
+        for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+            let case = format!("{placement:?}, {wedge:?} {rule:?}");
+            match the_wedge_through_the_apex(wedge, placement, rule, &Policy::certified()) {
+                Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+                    assert!(ratio > 1e15, "{case}: a range of {ratio}");
+                }
+                other => panic!("{case} came back {other:?}"),
             }
         }
     }
