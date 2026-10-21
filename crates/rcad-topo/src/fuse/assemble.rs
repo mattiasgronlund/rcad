@@ -8582,7 +8582,7 @@ struct Corners {
     made: Vec<Corner>,
     named: BTreeMap<CornerName, usize>,
     /// Which corner first claimed each `f64` triple: what [`Corners::of`]
-    /// joins a later name to, unless [`the_planes_prove_two_points`].
+    /// joins a later name to, unless [`the_planes_keep_them_apart`].
     at: BTreeMap<[u64; 3], usize>,
     /// The three planes of the name each corner was made for, where that name
     /// is a meet of three planes: what [`Corners::of`] asks before it joins
@@ -9025,19 +9025,19 @@ impl Corners {
     /// wider of the corner and what arrived.
     ///
     /// **Two names whose places land on one `f64` triple are one corner**
-    /// ([`exactly_at`]), **unless their planes prove them two points**
-    /// ([`the_planes_prove_two_points`]) **and no side runs between them**.
-    /// A cube set corner to corner on a block and turned a little has two of
-    /// its edges cross the block's planes `x = 0` and `y = 0` a rounding from
-    /// the block's top corner, outside the block, and at `(t, p) = (0.05,
-    /// 0.05)` both crossings land on that corner's own triple, `(0, 0, 10)`.
-    /// Joined to it, they left the turned cube four edges at the block's
-    /// corner, so [`Assembly::what_is_left`] kept it as a corner of the turned
-    /// cube, with two edges `1.8e-15` long from it to the turned cube's own
-    /// corner, and the union was refused `DynamicRangeTooWide` (Q2305,
-    /// `tests/two_cubes_corner_to_corner_turned_a_little.rs`). Kept apart,
-    /// each crossing is a corner only two edges of the turned cube leave, and
-    /// both are read through.
+    /// ([`exactly_at`]), **unless they share one plane or none, their planes
+    /// prove them two points** ([`the_planes_keep_them_apart`]), **and no side
+    /// runs between them**. A cube set corner to corner on a block and turned a
+    /// little short of a half turn has two of its edges cross the block's
+    /// planes `x = 0` and `y = 0` a rounding from the block's top corner,
+    /// outside the block, and at `(t, p) = (0.05, 0.05)` both crossings land on
+    /// that corner's own triple, `(0, 0, 10)`. Each crossing shares one plane
+    /// with the corner. Joined to it, they left the turned cube four edges at
+    /// the block's corner, so [`Assembly::what_is_left`] kept it as a corner of
+    /// the turned cube, with two edges `1.8e-15` long from it to the turned
+    /// cube's own corner, and the union was refused `DynamicRangeTooWide`
+    /// (Q2305, `tests/two_cubes_corner_to_corner_turned_a_little.rs`). Kept
+    /// apart, the union is both cubes.
     ///
     /// **Two names a kept side runs between are one corner whatever their
     /// planes prove**, where both land on one triple
@@ -9080,7 +9080,7 @@ impl Corners {
             .get(&exactly_at(corner.point))
             .copied()
             .filter(|already| {
-                !the_planes_prove_two_points(
+                !the_planes_keep_them_apart(
                     self.made_on_three_planes.get(already).copied(),
                     planes,
                     policy,
@@ -9311,9 +9311,22 @@ impl Corners {
 }
 
 /// Whether a corner made for a meet of the three planes `made_on` and a name
-/// that is a meet of the three planes `arrived` are proved two points: one of
-/// `arrived`'s planes proved off the point where `made_on`'s three meet, in
+/// that is a meet of the three planes `arrived` stay two corners, though both
+/// land on one `f64` triple: the two share one plane or none, and one of
+/// `arrived`'s planes is proved off the point where `made_on`'s three meet, in
 /// exact arithmetic ([`side_of_a_plane_where_three_planes_meet`]).
+///
+/// **Two names that share two planes are one corner, whatever the third
+/// planes prove.** Both lie on the line the two shared planes cross in, less
+/// than a rounding apart along it. Kept apart, a leaning frame less a comb
+/// came back two solids where it is refused with four faces along one edge
+/// (`tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`), the union of two
+/// combs wrote the first comb's corner at `(3, 1, 0)` and not one rounding off
+/// with the crossing beside it, where that file pins it, and no skew fuse of
+/// `tests/fuses_that_must_agree.rs` came back not a solid (Q2555). Two names
+/// that share one plane or none lie on two lines, as the turned cube's edges
+/// that cross the block's `y = 0` beside the block's top corner do, and one
+/// corner of the two gives it the edges of both (Q2305).
 ///
 /// **Asked under a certified policy only.** Under a tolerant one a fold may
 /// put a corner a rounding off where its own three planes meet
@@ -9321,7 +9334,7 @@ impl Corners {
 /// the name it was made for need not say where it is. Where either is no meet
 /// of three planes, or no plane is proved off, nothing is proved, and the two
 /// are one corner by their `f64` triple as they were before Q2305.
-fn the_planes_prove_two_points(
+fn the_planes_keep_them_apart(
     made_on: Option<[Plane; 3]>,
     arrived: Option<[Plane; 3]>,
     policy: &Policy,
@@ -9331,6 +9344,16 @@ fn the_planes_prove_two_points(
     else {
         return false;
     };
+    let made_on_names = made_on.map(name_of_a_plane);
+    if arrived
+        .map(name_of_a_plane)
+        .iter()
+        .filter(|name| made_on_names.contains(name))
+        .count()
+        >= 2
+    {
+        return false;
+    }
     arrived.iter().any(|plane| {
         matches!(
             side_of_a_plane_where_three_planes_meet(
