@@ -823,6 +823,16 @@ pub(crate) fn the_meridian_half_space_keeps(
 /// sides, and [`Walked::ACornerOnTheLine`] when a corner's side of that
 /// half-line's line has no sign.
 ///
+/// **A point whose side of a side's line has no sign is not refused for it
+/// when both of that side's corners are strictly on one side of the half-line**
+/// ([`is_wholly_on_one_side_of_the_half_line`]): the half-line does not cross
+/// that side and the point is not on it, wherever the point is across its line,
+/// so the side counts nothing. A box straddling the line of a side past its
+/// ends is one (row Q2563). Where a corner of it has no sign either, the
+/// half-line may run along that side, and the walk is aimed elsewhere as for
+/// any corner it cannot read. Only a side whose corners are on the line or
+/// either side of it is refused.
+///
 /// Every side must be straight between its two corners: stored as
 /// [`EdgeRun::Straight`], or a piece of a cone's ruling
 /// ([`is_a_piece_of_a_ruling`]), which is the same segment stored as part of a
@@ -878,6 +888,9 @@ fn walk_one_outline(
             },
             Decision::Pos | Decision::Neg => (),
             Decision::Undecidable { enclosure } => {
+                if is_wholly_on_one_side_of_the_half_line(sides[index], sides[next]) {
+                    continue;
+                }
                 return Err(gave_up_turning_a_corner(point, enclosure));
             }
             other => panic!("a corner came back with a decision nothing here knows: {other:?}"),
@@ -9765,6 +9778,23 @@ fn crossing(from_side: Decision, to_side: Decision, along: Decision) -> Option<i
             (true, false, Decision::Neg) => -1,
             _ => 0,
         },
+    )
+}
+
+/// Whether both ends of a side are strictly on one side of the half-line's line,
+/// as `from_side` and `to_side` say, so that the side neither crosses the
+/// half-line nor holds the point, whichever side of the side's own line the
+/// point is on.
+///
+/// Each sign is of a determinant affine in its corner, and zero with the point
+/// itself in the corner's place, so a point of the side between two corners of
+/// one sign has that sign too and is not the point. A certified sign holds for
+/// every point of a box, so no point of a box is on the side either. A corner
+/// on the line is not enough: the point may be that corner.
+fn is_wholly_on_one_side_of_the_half_line(from_side: Decision, to_side: Decision) -> bool {
+    matches!(
+        (from_side, to_side),
+        (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg)
     )
 }
 
