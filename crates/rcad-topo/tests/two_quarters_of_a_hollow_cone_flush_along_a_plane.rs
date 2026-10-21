@@ -4,14 +4,20 @@
 //! prism on its axis and bored through by a bar on that axis, then turned about
 //! `z`. One is turned by `start` and the other by `start - π/2`, so the two lie
 //! side by side on one cone round one bore and touch along the plane at angle
-//! `start`, apart only by how each turn rounds. Their intersection is that
-//! plane: nothing, or a sliver no thicker than the rounding.
+//! `start`, apart only by how each turn rounds. The first runs from `z = 4` to
+//! `8` and the other from `4.5` to `8.5`. Their intersection is that plane:
+//! nothing, or a sliver no thicker than the rounding. Nothing is what one
+//! start answers, and a sliver too thin for `f64` is what the others are
+//! refused for (Q2551, Q2562). The same two quarters with no bore are refused
+//! for the same slivers at the same starts, and so are two with no bore that
+//! both run from `z = 4` to `8`, the way Q2543 built them (Q2589).
 
 use core::f64::consts::FRAC_PI_2;
+use core::ops::Range;
 
 use rcad_geom::{Axis, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Invalid, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 /// The angles Q2355's lane found the refusal at, every one it tried.
 const STARTS: [f64; 9] = [
@@ -27,79 +33,256 @@ const STARTS: [f64; 9] = [
 ];
 
 /// The starts of [`STARTS`] at which the intersection answers, both ways round.
-/// At each of the others it is refused, where
-/// [`at_every_other_start_a_sliver_of_a_cap_the_other_quarter_never_reaches_is_not_placed`]
+/// At each of the others the two quarters overlap in a sliver too thin to
+/// answer, as [`at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64`]
 /// says.
 const STARTS_THAT_ANSWER: [f64; 1] = [1.1];
 
 #[test]
-fn two_hollow_quarters_of_a_cone_flush_along_a_plane_meet_in_nothing_or_a_sliver() {
-    for start in STARTS_THAT_ANSWER {
-        for the_first_first in [true, false] {
-            let what = format!("start {start}, the first first {the_first_first}");
-            let measured = the_two_quarters_intersected(start, the_first_first)
-                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
-            for (volume, error) in measured {
-                assert!(
-                    volume.abs() <= error,
-                    "{what}: a sliver of {volume} past its error {error}"
+fn two_quarters_of_a_cone_flush_along_a_plane_meet_in_nothing_or_a_sliver() {
+    for quarters in EVERY_KIND {
+        for start in STARTS_THAT_ANSWER {
+            for the_first_first in [true, false] {
+                let what = format!(
+                    "{} quarters, start {start}, the first first {the_first_first}",
+                    quarters.name
                 );
+                let measured = the_two_quarters_intersected(&quarters, start, the_first_first, 0.0)
+                    .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                for (volume, error) in measured {
+                    assert!(
+                        volume.abs() <= error,
+                        "{what}: a sliver of {volume} past its error {error}"
+                    );
+                }
             }
         }
     }
 }
 
-/// The other quarter's side plane, an ulp off the first quarter's own, cuts a
-/// sliver off the first quarter's bottom cap at `z = 4`, between the two
-/// planes, from the bore to the cone. The other quarter starts at `z = 4.5`,
-/// so the sliver is plainly outside it. But no point inside a sliver an ulp
-/// wide is found, and each of its four corners lies on the cone or the bore
-/// the two quarters share, so no rule places it. With the other quarter first,
-/// the piece refused is one of the other's top cap at `z = 8.5` instead, above
-/// the first quarter's top at `z = 8`, its four corners on that cap.
+/// At every other start the two side planes, which should be one, round about
+/// `1e-16` radians into each other, and the two quarters overlap in the sliver
+/// between them, from the bore, or the axis with no bore, to the cone and from
+/// `z = 4.5` to `z = 8`. That sliver is too thin for `f64`, and its refusal is
+/// a limit, not a gap (`docs/decisions.md` §16.10).
 ///
-/// Before Q2537, a quarter's cone was refused
-/// [`Error::CannotTellTheCellsOfAFaceApart`] at every start instead, in the
-/// arrangement, before any piece was placed.
+/// At six starts it is refused [`Invalid::DynamicRangeTooWide`], far past
+/// [`rcad_geom::DynamicRange::LARGEST_SUPPORTED_RATIO`], at the ratios
+/// [`Quarters::ratios_of_the_sliver`] names: the top at `8.5` over the
+/// sliver's shortest arc, as for the wedge of
+/// [`turned_a_trillionth_of_a_radian_further_the_wedge_is_too_thin_for_f64`].
+/// §87.3 calls the range refusal of a sliver where two nearly flush faces meet
+/// a limit. At [`STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT`] a refusal comes first:
+/// the sliver's arc on `z = 4.5` runs between the places where the two side
+/// planes cross the cone there, and those are one `f64` triple. Worked out to
+/// sixty digits from the two planes' normals as stored, they are `9.6e-18`
+/// apart at `-2` and `4.6e-17` at `0.3`, and each coordinate of the one rounds
+/// to the same `f64` as the other's. So no tighter solve would part them, and
+/// [`Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`] is that variant's
+/// limit. The bore does not reach that arc, so with no bore it is refused at
+/// the same point. With both quarters from `z = 4` the sliver has no arc on
+/// `z = 4.5`, and it is refused for the range at those two starts too.
+///
+/// Until Q2551 each of these was refused `a point inside a piece of a face`
+/// first: a sliver of the first quarter's bottom cap at `z = 4` between the two
+/// planes, or with the other quarter first one of the other's top cap at
+/// `z = 8.5`, which no point inside was found for, and then the first
+/// quarter's cone between the two planes from `z = 4` to `z = 4.5`, which the
+/// other quarter's bottom cap cuts off. Before Q2537, a quarter's cone was
+/// refused [`Error::CannotTellTheCellsOfAFaceApart`] at every start instead, in
+/// the arrangement, before any piece was placed.
 #[test]
-fn at_every_other_start_a_sliver_of_a_cap_the_other_quarter_never_reaches_is_not_placed() {
+fn at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64() {
     for start in STARTS {
         if STARTS_THAT_ANSWER.contains(&start) {
             continue;
         }
         for the_first_first in [true, false] {
             let what = format!("start {start}, the first first {the_first_first}");
-            let intersected = the_two_quarters_intersected(start, the_first_first);
-            let Err(Error::Undecidable { records }) = &intersected else {
-                panic!("{what}: {intersected:?}");
-            };
-            let record = records.records().last().expect("a refusal records why");
-            assert_eq!(
-                record.predicate(),
-                "a point inside a piece of a face",
-                "{what}"
+            let mut where_two_ends_are_one_point: Vec<Point> = Vec::new();
+            for quarters in EVERY_KIND {
+                let what = format!("{} quarters, {what}", quarters.name);
+                let intersected =
+                    the_two_quarters_intersected(&quarters, start, the_first_first, 0.0);
+                if quarters
+                    .starts_where_two_ends_are_one_point
+                    .contains(&start)
+                {
+                    let Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { at, .. }) =
+                        intersected
+                    else {
+                        panic!("{what}: {intersected:?}");
+                    };
+                    assert_eq!(at.z(), 4.5, "{what}: {at:?}");
+                    where_two_ends_are_one_point.push(at);
+                } else {
+                    let Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) = intersected
+                    else {
+                        panic!("{what}: {intersected:?}");
+                    };
+                    assert!(
+                        quarters.ratios_of_the_sliver.contains(&ratio),
+                        "{what}: a ratio of {ratio}"
+                    );
+                }
+            }
+            assert!(
+                where_two_ends_are_one_point
+                    .windows(2)
+                    .all(|both| both[0] == both[1]),
+                "{what}: bored or not, at {where_two_ends_are_one_point:?}"
             );
-            let cap = if the_first_first { 4.0 } else { 8.5 };
-            let corners = record.inputs();
-            assert_eq!(corners.len(), 4, "{what}");
-            for corner in corners {
-                let height = corner.enclosure()[2];
+        }
+    }
+}
+
+/// The starts of [`STARTS`] where the sliver's arc on `z = 4.5` runs between
+/// two places that are one `f64` triple.
+const STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT: [f64; 2] = [-2.0, 0.3];
+
+/// What refuses [`at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64`]
+/// is the sliver's thinness and nothing else. Turned a billionth of a radian
+/// further into the first quarter, the other overlaps it in a wedge of that
+/// angle, and every start answers it, both ways round, with one solid of the
+/// wedge's volume, bored or not.
+#[test]
+fn turned_a_billionth_of_a_radian_further_they_overlap_in_a_wedge_of_known_volume() {
+    let further = 1e-9;
+    for quarters in EVERY_KIND {
+        for start in STARTS {
+            for the_first_first in [true, false] {
+                let what = format!(
+                    "{} quarters, start {start}, the first first {the_first_first}",
+                    quarters.name
+                );
+                let measured =
+                    the_two_quarters_intersected(&quarters, start, the_first_first, further)
+                        .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+                let [(volume, error)] = measured[..] else {
+                    panic!("{what}: one wedge, got {measured:?}");
+                };
+                let expected = quarters.wedge_volume_per_radian * further;
                 assert!(
-                    height.lo() <= cap && cap <= height.hi(),
-                    "{what}: a corner at {height:?}, off the cap at {cap}"
+                    (volume - expected).abs()
+                        <= error + quarters.wedge_volume_per_radian * HOW_FAR_THE_TURNS_ROUND,
+                    "{what}: a wedge of {volume}, not {expected}, error {error}"
                 );
             }
         }
     }
 }
 
+/// How far the wedge's angle can be from the turn asked for. Each quarter's
+/// turn is a number below `4.1` that rounds once or twice, by at most half of
+/// its spacing, `4.4e-16`, and the sine and cosine each rotation is built from
+/// round as well.
+const HOW_FAR_THE_TURNS_ROUND: f64 = 2e-15;
+
+/// Turned a trillionth of a radian further instead, the wedge's shortest arc
+/// is a trillionth of [`Quarters::radius_of_the_shortest_arc`] long and the
+/// other quarter's top is at `8.5`, so it spans a ratio of about `8.5e12` with
+/// the bore and `3.8e12` without, past
+/// [`rcad_geom::DynamicRange::LARGEST_SUPPORTED_RATIO`], and every start
+/// refuses it for the range, both ways round.
+#[test]
+fn turned_a_trillionth_of_a_radian_further_the_wedge_is_too_thin_for_f64() {
+    let further = 1e-12;
+    for quarters in EVERY_KIND {
+        for start in STARTS {
+            for the_first_first in [true, false] {
+                let what = format!(
+                    "{} quarters, start {start}, the first first {the_first_first}",
+                    quarters.name
+                );
+                let intersected =
+                    the_two_quarters_intersected(&quarters, start, the_first_first, further);
+                let Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) = intersected
+                else {
+                    panic!("{what}: {intersected:?}");
+                };
+                let the_top_over_the_shortest_arc =
+                    (quarters.other_from + 4.0) / (quarters.radius_of_the_shortest_arc * further);
+                assert!(
+                    (ratio / the_top_over_the_shortest_arc - 1.0).abs() < 0.01,
+                    "{what}: a ratio of {ratio}"
+                );
+            }
+        }
+    }
+}
+
+/// One kind of quarter, and what the sliver and the wedge two of them overlap
+/// in measure.
+struct Quarters {
+    name: &'static str,
+    turned: fn(&mut Model, f64, f64) -> SolidKey,
+    /// Where the other quarter starts up the axis; it is `4` high, as the
+    /// first quarter is from `z = 4`.
+    other_from: f64,
+    /// The starts the sliver is refused at for two ends that round to one
+    /// point, rather than for its range.
+    starts_where_two_ends_are_one_point: &'static [f64],
+    /// The ratios the sliver of
+    /// [`at_every_other_start_they_overlap_in_a_sliver_too_thin_for_f64`] is
+    /// refused at, a little wider than the ones measured.
+    ratios_of_the_sliver: Range<f64>,
+    /// The volume of the wedge between the two quarters' side planes, per
+    /// radian of its angle: half the turn times the area between the bore, or
+    /// the axis, and the cone, `r = z / 2`, from where the other quarter
+    /// starts to where the first ends, `z = 8`.
+    wedge_volume_per_radian: f64,
+    /// The radius of the wedge's shortest arc: the bore's, or with no bore the
+    /// cone's where the other quarter starts.
+    radius_of_the_shortest_arc: f64,
+}
+
+const EVERY_KIND: [Quarters; 3] = [HOLLOW, UNBORED, UNBORED_FROM_ONE_HEIGHT];
+
+/// Measured `3.42e16` to `1.53e17`.
+const HOLLOW: Quarters = Quarters {
+    name: "hollow",
+    turned: a_hollow_quarter_turned,
+    other_from: 4.5,
+    starts_where_two_ends_are_one_point: &STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT,
+    ratios_of_the_sliver: 3.4e16..1.6e17,
+    wedge_volume_per_radian: (8.0 * 8.0 * 8.0 - 4.5 * 4.5 * 4.5) / 24.0 - (8.0 - 4.5) / 2.0,
+    radius_of_the_shortest_arc: 1.0,
+};
+
+/// Measured `1.27e16` to `7.66e16`.
+const UNBORED: Quarters = Quarters {
+    name: "unbored",
+    turned: an_unbored_quarter_turned,
+    other_from: 4.5,
+    starts_where_two_ends_are_one_point: &STARTS_WHERE_TWO_ENDS_ARE_ONE_POINT,
+    ratios_of_the_sliver: 1.2e16..8e16,
+    wedge_volume_per_radian: (8.0 * 8.0 * 8.0 - 4.5 * 4.5 * 4.5) / 24.0,
+    radius_of_the_shortest_arc: 2.25,
+};
+
+/// Q2543's quarters: no bore, and both from `z = 4` to `8`. Measured
+/// `1.61e16` to `7.21e16`, the ratio at `-1.75` the `1.6112567856389042e16`
+/// Q2543 saw there.
+const UNBORED_FROM_ONE_HEIGHT: Quarters = Quarters {
+    name: "unbored, both from 4,",
+    turned: an_unbored_quarter_turned,
+    other_from: 4.0,
+    starts_where_two_ends_are_one_point: &[],
+    ratios_of_the_sliver: 1.6e16..7.3e16,
+    wedge_volume_per_radian: (8.0 * 8.0 * 8.0 - 4.0 * 4.0 * 4.0) / 24.0,
+    radius_of_the_shortest_arc: 2.0,
+};
+
+/// The two quarters, the other turned `further` into the first, intersected.
 fn the_two_quarters_intersected(
+    quarters: &Quarters,
     start: f64,
     the_first_first: bool,
+    further: f64,
 ) -> Result<Vec<(f64, f64)>, Error> {
     let mut model = a_model();
-    let first = a_hollow_quarter_turned(&mut model, start, 4.0);
-    let other = a_hollow_quarter_turned(&mut model, start - FRAC_PI_2, 4.5);
+    let first = (quarters.turned)(&mut model, start, 4.0);
+    let other = (quarters.turned)(&mut model, start - FRAC_PI_2 + further, quarters.other_from);
     fused_and_measured(
         &mut model,
         first,
@@ -110,6 +293,17 @@ fn the_two_quarters_intersected(
 }
 
 fn a_hollow_quarter_turned(model: &mut Model, turn: f64, near: f64) -> SolidKey {
+    let quarter = a_quarter(model, near);
+    let quarter = bored(model, quarter);
+    turned(model, quarter, turn)
+}
+
+fn an_unbored_quarter_turned(model: &mut Model, turn: f64, near: f64) -> SolidKey {
+    let quarter = a_quarter(model, near);
+    turned(model, quarter, turn)
+}
+
+fn a_quarter(model: &mut Model, near: f64) -> SolidKey {
     let policy = Policy::certified();
     let frustum = a_frustum(model, near, near + 4.0);
     let triangle = ProfileBuilder::new(vec![[0.0, 0.0], [12.0, 0.0], [0.0, 12.0]])
@@ -130,6 +324,11 @@ fn a_hollow_quarter_turned(model: &mut Model, turn: f64, near: f64) -> SolidKey 
     let &[quarter] = answer.solids() else {
         panic!("one quarter, got {:?}", answer.solids());
     };
+    quarter
+}
+
+fn bored(model: &mut Model, quarter: SolidKey) -> SolidKey {
+    let policy = Policy::certified();
     let bar = model
         .add_round_bar(1.0, 6.0, &at_height(3.0))
         .expect("a round bar");
@@ -145,6 +344,10 @@ fn a_hollow_quarter_turned(model: &mut Model, turn: f64, near: f64) -> SolidKey 
     let &[quarter] = answer.solids() else {
         panic!("one hollow quarter, got {:?}", answer.solids());
     };
+    quarter
+}
+
+fn turned(model: &mut Model, quarter: SolidKey, turn: f64) -> SolidKey {
     model
         .place_solid(
             quarter,
