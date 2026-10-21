@@ -5707,6 +5707,61 @@ mod tests {
         }
     }
 
+    /// **A plane a rounding off a cone's apex and steeper than the cone crosses
+    /// it in a hyperbola, which has no place to put a vertex either, and that
+    /// is said without asking which branch a run is** (`docs/decisions.md`
+    /// §294.25). The plane misses the apex by one ulp of 7, so each branch's
+    /// vertex stands about `1e-15` from the apex, in a box about `2e-13`
+    /// across. Each run `intersect` names has no ends, and is picked by the
+    /// plane through the apex square to the axis, which straddles both boxes.
+    /// Until Q2587 naming the branch asked it at both vertices, wrote both
+    /// refusals into the log under the certified policy this makes itself, and
+    /// refused, and a fuse kept the two records and refused its whole answer on
+    /// them, though both branches are as open as each other.
+    #[test]
+    fn a_plane_a_rounding_off_a_cones_apex_and_steeper_than_it_is_not_closed_and_asks_nothing() {
+        let apex = Point::new(7.0, -5.0, 2.5);
+        let skin = Cone::new(
+            crate::Axis::new(apex, Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+            0.5,
+        )
+        .expect("a slope");
+        let flat = Plane::from_point_and_normal(
+            Point::new(7.0_f64.next_up(), 0.0, 0.0),
+            Vector::new(1.0, 0.0, 0.0),
+        )
+        .expect("a unit normal");
+        assert_eq!(
+            crate::intersect::how_a_plane_leans_against_a_cone(&flat, &skin),
+            Decision::Neg,
+            "the plane runs along the axis, so it is steeper than the cone"
+        );
+        let (face, cone) = (Surface::Plane(flat), Surface::Cone(skin));
+        let met = crate::intersect::intersect(
+            &face,
+            &cone,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(branches)) = met else {
+            panic!("the hyperbola is named: {met:?}");
+        };
+        assert_eq!(branches.len(), 2, "its two branches");
+
+        for branch in &branches {
+            for pair in [[&face, &cone], [&cone, &face]] {
+                let mut log = ProvenanceLog::new();
+                let started = where_a_closed_crossing_starts(branch, pair, &mut log);
+                assert!(log.is_empty(), "{branch:?} asked something: {log:?}");
+                assert_eq!(
+                    started,
+                    Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                    "{branch:?} is half a hyperbola"
+                );
+            }
+        }
+    }
+
     /// One of each pair whose crossing is a closed curve: the four conic ones
     /// and the two degree-four ones.
     fn every_pair_that_crosses_in_a_closed_curve() -> Vec<[Surface; 2]> {
