@@ -1954,6 +1954,14 @@ check-gate-verdicts-selftest:
         grep -qx "$never" <<<"$reusable" \
             && fail "$never reads prose or something outside the tree, and gate_reusable_steps would serve it"
     done
+    # check-timing-hooked-calls is not named above: it reads something outside
+    # the tree too, the installed nightly rustc and cargo-fuzz, same as the
+    # steps that list excludes. It is in gate_reusable_steps anyway, served
+    # off its own narrower fingerprint rather than the whole-tree one
+    # (docs/decisions.d/425 §425.7) — not an oversight the list above should
+    # have caught, so this checks it is there on purpose rather than by it.
+    grep -qx check-timing-hooked-calls <<<"$reusable" \
+        || fail "check-timing-hooked-calls is not in gate_reusable_steps, so the narrow-key design below would exercise nothing real"
     # The fingerprint leaves out what CI's docs split leaves out, for the same
     # reason. If one of the two claims changes, the other has to change with it.
     wf='{{ justfile_directory() }}/.github/workflows'
@@ -2226,6 +2234,80 @@ check-gate-verdicts-selftest:
     grep -qxF 'tests: Summary [  21.004s] 30 tests run: 30 passed, 0 skipped' <<<"$got" \
         || fail "a summary whose record had gone dropped its own counts"
     grep -q 'not reached' <<<"$got" && fail "a summary whose record had gone said the tests were not reached"
+
+    # check-timing-hooked-calls's own narrow-key cache (docs/decisions.d/425
+    # §425.7): a fingerprint and record store kept apart from the whole-tree
+    # one above, so a kernel-only commit still serves it. The real recipe
+    # would pay a real `cargo +nightly fuzz build` to exercise its pass path,
+    # so this drives it with a PATH that shadows a real nightly toolchain
+    # (narrow enough that the fingerprint recipe reads a fixture version
+    # string instead of the real one) but excludes cargo-fuzz outright, so
+    # the real recipe lands on its own "no cargo-fuzz on this PATH" branch and
+    # exits 0 for real, in well under a second — a real skip, not a fixture
+    # standing in for the recipe's own logic.
+    thc_store="$repo/.git/rcad-verdicts-timing-hooked-calls"
+    thcbin="$dir/thcbin"
+    mkdir -p "$thcbin"
+    printf '#!/usr/bin/env bash\necho "%s/rustc"\n' "$thcbin" >"$thcbin/rustup"
+    printf '#!/usr/bin/env bash\ncat "%s/version.txt"\n' "$thcbin" >"$thcbin/rustc"
+    chmod +x "$thcbin/rustup" "$thcbin/rustc"
+    printf 'rustc 1.0.0-nightly (feedface 2026-01-01)\n' >"$thcbin/version.txt"
+    # Only these two directories: the real cargo-fuzz sits later in this
+    # session's own $PATH, and a plain prepend would still find it there.
+    thc_narrow_path="$thcbin:/usr/bin:/bin"
+    thc_fingerprint() { PATH="$thc_narrow_path" "$j" _timing-hooked-calls-fingerprint; }
+    thc_gate() {
+        PATH="$thc_narrow_path" "$j" --set gate_steps check-timing-hooked-calls \
+            --set gate_reusable_steps check-timing-hooked-calls \
+            --set gate_log "$dir/gate.log" gate quiet "$@" 2>&1
+    }
+
+    mkdir -p "$repo/crates/rcad-fuzz-timing/src" "$repo/fuzz"
+    printf 'pub fn timed() {}\n' >"$repo/crates/rcad-fuzz-timing/src/lib.rs"
+    printf '[package]\nname = "fuzz"\n' >"$repo/fuzz/Cargo.toml"
+    printf '# lock\n' >"$repo/fuzz/Cargo.lock"
+    printf '#!/usr/bin/env python3\n' >"$repo/fuzz/timing-hooked-calls.py"
+    g add -A
+    g commit -q -m 'timing fixture files'
+    thc_commit1=$(g rev-parse HEAD)
+
+    got=$(thc_gate) || fail "the first narrow gate of check-timing-hooked-calls failed"
+    grep -q '^· check-timing-hooked-calls (' <<<"$got" \
+        || fail "the first narrow gate did not run check-timing-hooked-calls"
+    thc_fp1=$(thc_fingerprint)
+    [[ "$thc_fp1" =~ ^[0-9a-f]{64}$ ]] \
+        || fail "check-timing-hooked-calls's own fingerprint did not come back as a hash: $thc_fp1"
+    [ -f "$thc_store/$thc_fp1" ] || fail "a passing narrow gate recorded nothing under its own store"
+    grep -qx "commit $thc_commit1" "$thc_store/$thc_fp1" \
+        || fail "the narrow record does not name the commit that was gated"
+
+    # A kernel-only change: crates/a.rs sits outside the four narrow paths, so
+    # this is the row's own case — the narrow key must still serve it.
+    printf '// kernel change\n' >>"$repo/crates/a.rs"
+    g add -A
+    g commit -q -m 'a kernel-only change'
+    [ "$(thc_fingerprint)" = "$thc_fp1" ] \
+        || fail "a commit that touched only crates/a.rs, outside the four narrow paths, moved check-timing-hooked-calls's own fingerprint"
+    got=$(thc_gate) || fail "a narrow gate of a kernel-only change failed"
+    grep -q "^· served: check-timing-hooked-calls from ${thc_commit1:0:8}'s gate at " <<<"$got" \
+        || fail "a kernel-only commit was not served check-timing-hooked-calls's green from the commit under it"
+    grep -q '^· check-timing-hooked-calls (' <<<"$got" \
+        && fail "a served narrow step ran anyway"
+
+    # The toolchain version is part of the narrow fingerprint, so changing it
+    # moves the key and the next gate re-runs rather than serves.
+    printf 'rustc 1.0.0-nightly (deadbeef 2026-02-02)\n' >"$thcbin/version.txt"
+    thc_fp2=$(thc_fingerprint)
+    [ "$thc_fp2" != "$thc_fp1" ] \
+        || fail "overwriting the fixture toolchain's version did not move check-timing-hooked-calls's own fingerprint"
+    got=$(thc_gate) || fail "a narrow gate after a toolchain version change failed"
+    grep -q '^· check-timing-hooked-calls (' <<<"$got" \
+        || fail "a toolchain version change was served instead of run again"
+    grep -q '^· served: check-timing-hooked-calls' <<<"$got" \
+        && fail "a toolchain version change was reported as served"
+    [ -f "$thc_store/$thc_fp2" ] \
+        || fail "the re-run after a toolchain version change recorded nothing under the new fingerprint"
+    g reset -q --hard "$base"
 
     # A clean tree can still change while its gate runs, and then no sha names
     # what the gate read, so its pass is not recorded. This is the path that
