@@ -90,6 +90,8 @@ pub mod a_bar_beside_a_blocks_wall_on_a_plate_turned;
 pub mod a_bar_cut_beside_its_axis_and_united_again;
 #[path = "a_bar_flush_inside_a_turned_blocks_side.rs"]
 pub mod a_bar_flush_inside_a_turned_blocks_side;
+#[path = "a_bar_flush_with_an_l_plates_inner_side_turned.rs"]
+pub mod a_bar_flush_with_an_l_plates_inner_side_turned;
 #[path = "a_bar_inside_a_tubes_wall.rs"]
 pub mod a_bar_inside_a_tubes_wall;
 #[path = "a_bar_lying_along_a_plane_or_a_bar.rs"]
