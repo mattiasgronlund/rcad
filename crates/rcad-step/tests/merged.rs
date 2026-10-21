@@ -29,6 +29,8 @@
 
 use std::path::Path;
 
+#[path = "../../rcad-topo/tests/cones/mod.rs"]
+mod cones;
 #[path = "../../rcad-geom/tests/one_binary/mod.rs"]
 mod one_binary;
 
@@ -68,12 +70,18 @@ pub mod a_dome_on_a_flat_disc_imports;
 pub mod a_file_bounded_by_two_half_circles;
 #[path = "a_flared_bar_reads_whichever_way_its_pipe_points.rs"]
 pub mod a_flared_bar_reads_whichever_way_its_pipe_points;
+#[path = "a_flat_cap_is_cut_up_the_same_after_its_own_file.rs"]
+pub mod a_flat_cap_is_cut_up_the_same_after_its_own_file;
+#[path = "a_fuse_read_back_from_rounded_text.rs"]
+pub mod a_fuse_read_back_from_rounded_text;
 #[path = "a_mitre_ellipse_between_two_thin_pipes.rs"]
 pub mod a_mitre_ellipse_between_two_thin_pipes;
 #[path = "a_mitre_whose_centre_the_file_writes_off_its_pipe.rs"]
 pub mod a_mitre_whose_centre_the_file_writes_off_its_pipe;
 #[path = "a_quarter_bend_turned_about_x_measures_after_its_file.rs"]
 pub mod a_quarter_bend_turned_about_x_measures_after_its_file;
+#[path = "a_real_file_written_out_and_read_back_is_the_same_solid.rs"]
+pub mod a_real_file_written_out_and_read_back_is_the_same_solid;
 #[path = "a_rim_square_to_the_way_its_surface_winds.rs"]
 pub mod a_rim_square_to_the_way_its_surface_winds;
 #[path = "a_rim_through_both_poles_measures.rs"]
@@ -98,12 +106,22 @@ pub mod an_led_dome_wire_lies_flat;
 pub mod every_file_in_the_corpus_reads;
 #[path = "every_file_the_reader_fuzzer_kept_is_read_again.rs"]
 pub mod every_file_the_reader_fuzzer_kept_is_read_again;
+#[path = "every_model_the_writer_fuzzer_kept_is_written_again.rs"]
+pub mod every_model_the_writer_fuzzer_kept_is_written_again;
+#[path = "how_often_a_real_file_imports.rs"]
+pub mod how_often_a_real_file_imports;
 #[path = "instances_can_be_named_and_stored.rs"]
 pub mod instances_can_be_named_and_stored;
+#[path = "no_cone_face_arrives_out_of_the_corpus.rs"]
+pub mod no_cone_face_arrives_out_of_the_corpus;
 #[path = "one_wall_whose_normal_is_spelled_two_ways.rs"]
 pub mod one_wall_whose_normal_is_spelled_two_ways;
+#[path = "styling_is_never_among_the_shapes_walked_past.rs"]
+pub mod styling_is_never_among_the_shapes_walked_past;
 #[path = "the_reader_fuzz_dictionary_names_what_the_reader_reads.rs"]
 pub mod the_reader_fuzz_dictionary_names_what_the_reader_reads;
+#[path = "the_same_file_read_twice_by_two_readers.rs"]
+pub mod the_same_file_read_twice_by_two_readers;
 #[path = "the_same_part_written_at_another_scale.rs"]
 pub mod the_same_part_written_at_another_scale;
 #[path = "the_shapes_a_part_21_file_takes.rs"]
@@ -116,8 +134,12 @@ pub mod what_the_depth_probe_finds_behind_the_first_refusal;
 pub mod what_the_mapping_refuses_and_by_what_name;
 #[path = "what_the_reader_refuses_and_by_what_name.rs"]
 pub mod what_the_reader_refuses_and_by_what_name;
+#[path = "whether_a_tolerant_policy_buys_anything_a_certified_one_does_not.rs"]
+pub mod whether_a_tolerant_policy_buys_anything_a_certified_one_does_not;
 #[path = "which_way_a_cap_circle_is_walked.rs"]
 pub mod which_way_a_cap_circle_is_walked;
+#[path = "which_way_a_torus_faces_normal_points.rs"]
+pub mod which_way_a_torus_faces_normal_points;
 
 #[test]
 fn every_file_in_tests_is_built_into_exactly_one_test_binary() {

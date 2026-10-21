@@ -95,8 +95,8 @@ refused, as this section says.
 **2026-10-03, Q829:** since Q662, landed by Q821, the frustum is written too —
 all 48 configurations, no longer refused by the writer — so that row now
 compares something, though not much of it. Run here,
-`mise exec -- just t -p rcad-step --test a_fuse_read_back_from_rounded_text
-a_frustum_up_through_a_block --no-capture`:
+`mise exec -- just t -p rcad-step -E
+'binary(merged) & test(a_frustum_up_through_a_block)' --no-capture`:
 
     as built:            144 decided, refused {}
     read back exactly:   144 decided, refused {}

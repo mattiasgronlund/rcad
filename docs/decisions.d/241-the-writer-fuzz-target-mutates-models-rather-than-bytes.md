@@ -130,8 +130,9 @@ the seven taken out — "only 3 seeds decode into a model with a face",
 `two_cubes_that_write`, `a_ball_whose_pole_the_writer_refuses` and the Q42 round
 bar — and passes with them in. The replay now reports
 `Reached { draws: 1190, decoded: 26, faces: 34, written: 4, refused: 22, …,
-came_back_the_same: 4 }` (`mise exec -- just t -p rcad-step --test
-every_model_the_writer_fuzzer_kept_is_written_again --no-capture`).
+came_back_the_same: 4 }` (`mise exec -- just t -p rcad-step -E
+'binary(merged) & test(every_model_the_writer_fuzzer_kept_is_written_again)'
+--no-capture`).
 
 **A turned seed that is written is not among them, because the only one there is
 panics** — 241.5 item 2. The turned seed that is in is refused before the

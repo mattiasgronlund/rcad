@@ -114,7 +114,8 @@ then refuse those 118 corners as off their face.
 ### 376.4 Before and after
 
 `mise exec -- just t -p rcad-step --no-capture -E
-'test(=how_often_a_real_file_imports)'`, on the base behaviour and on the
+'binary(merged) & test(=how_often_a_real_file_imports::how_often_a_real_file_imports)'`,
+on the base behaviour and on the
 branch:
 
 - NIST imports 1 of 44 on both, and KiCad imports 164 of 323 on both. Nothing

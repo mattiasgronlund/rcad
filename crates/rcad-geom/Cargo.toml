@@ -37,27 +37,3 @@ harness = false
 [[test]]
 name = "merged"
 path = "tests/merged.rs"
-
-# The rest stay binaries of their own, because the record names each by binary,
-# as `--test <name>` or `binary(<name>)`, and those commands must still work.
-
-[[test]]
-name = "a_plane_turned_a_step_at_a_time_keeps_the_normal_its_file_wrote"
-
-[[test]]
-name = "every_point_where_three_surfaces_meet_is_on_all_three_of_them"
-
-[[test]]
-name = "how_often_naming_a_crossing_refuses"
-
-[[test]]
-name = "the_room_between_two_meridian_circles"
-
-[[test]]
-name = "the_shapes_a_plane_cuts_a_torus_in"
-
-[[test]]
-name = "two_pipes_of_one_width_on_crossing_axes"
-
-[[test]]
-name = "where_a_line_meets_a_surface"

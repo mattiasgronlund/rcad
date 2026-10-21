@@ -58,7 +58,8 @@
 //!
 //! ```text
 //! just t -p rcad-step \
-//!     --test every_model_the_writer_fuzzer_kept_is_written_again --no-capture
+//!     -E 'binary(merged) & test(every_model_the_writer_fuzzer_kept_is_written_again)' \
+//!     --no-capture
 //! ```
 //!
 //! which reported, with the two control seeds in:

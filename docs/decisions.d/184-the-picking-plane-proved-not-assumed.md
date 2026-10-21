@@ -166,8 +166,8 @@ probe_182_which_anchors_separate_the_two_lines --no-capture` and reverted; the
 probe crates `/tmp/rcad-183-probe/crash-probe/`, `sweep-probe/` and
 `sweep-probe-base/`, run with `cargo run --release`; `cargo run -p
 rcad-fuzz-explain -- where_two_surfaces_cross <file>` on each of the three
-corpus artifacts; `cargo nextest run -p rcad-geom --test
-how_often_naming_a_crossing_refuses --no-capture`, and the same for
+corpus artifacts; `cargo nextest run -p rcad-geom -E 'binary(merged) &
+test(how_often_naming_a_crossing_refuses)' --no-capture`, and the same for
 `where_two_side_by_side_pipes_stop_being_told_apart` and
 `a_pair_of_parallel_pipes_answers_one_way_round_and_refuses_the_other`, with
 and without a temporary counter; the new test run against `8ddf072f`'s two
@@ -247,6 +247,6 @@ Commands: `just decision 184`; `git show 67893d98`; the probe crates
 `crash-probe/` and `sweep-probe/` copied from `/tmp/rcad-183-probe/` and pointed at
 this tree, `cargo run --release`; `cargo run -p rcad-fuzz-explain --
 where_two_surfaces_cross <file>` on the three corpus artifacts; `python3
-check_184_7.py`; `just t -p rcad-geom --test how_often_naming_a_crossing_refuses
---no-capture`; `just t
+check_184_7.py`; `just t -p rcad-geom -E 'binary(merged) &
+test(how_often_naming_a_crossing_refuses)' --no-capture`; `just t
 the_window_around_the_middle_of_two_leaning_pipes_holds_the_true_middle`.

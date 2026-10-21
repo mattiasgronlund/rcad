@@ -95,8 +95,9 @@ between runs.
 
 Run once with no environment variables set, and once with
 `PROPTEST_RNG_SEED=999999 RCAD_SOAK_SEED=999999 RCAD_SOAK_FACTOR=5`, both
-under `taskset -c 0-5`, `mise exec -- just t -p rcad-step --test
-a_fuse_read_back_from_rounded_text --test-threads 6 --no-capture`: the two
+under `taskset -c 0-5`, `mise exec -- just t -p rcad-step -E
+'binary(merged) & test(a_fuse_read_back_from_rounded_text)' --test-threads 6
+--no-capture`: the two
 runs print identical per-family counts, digit for digit —
 
 | family | as built | 11 digits | 12 digits | 13 digits |
@@ -107,7 +108,8 @@ runs print identical per-family counts, digit for digit —
 | curved pair | 144 decided, 0 refused | 144/0 | 144/0 | 144/0 |
 
 Both runs finished in 4.4-11.4 seconds (`taskset -c 0-5 mise exec -- just t
--p rcad-step --test a_fuse_read_back_from_rounded_text --test-threads 6`), the
+-p rcad-step -E 'binary(merged) & test(a_fuse_read_back_from_rounded_text)'
+--test-threads 6`), the
 first including a warm build. These numbers also match §191.3's own published
 ones exactly, which is a second confirmation from a different run months
 apart.

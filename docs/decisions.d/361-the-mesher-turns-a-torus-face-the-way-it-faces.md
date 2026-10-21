@@ -51,12 +51,14 @@ now:
   with every turn turned over — how the kernel built bends until now — is
   refused `FacesDoNotAgreeWhichWayTheyFace`: its wall faces into the material
   and its caps out of it. The three KiCad relays import. `mise exec -- just t
-  -p rcad-step --test which_way_a_torus_faces_normal_points`, three tests.
+  -p rcad-step -E 'binary(merged) &
+  test(which_way_a_torus_faces_normal_points)'`, three tests.
 - **KiCad files that import: 161 to 164**, the three relays and nothing else
   moving either way; the files that round trip are the same 45. The run
   before the pins moved printed `left: 164, right: 161` and named the three.
-  `mise exec -- just t -p rcad-step --test how_often_a_real_file_imports
-  --test a_real_file_written_out_and_read_back_is_the_same_solid`.
+  `mise exec -- just t -p rcad-step -E 'binary(merged) &
+  (test(how_often_a_real_file_imports) |
+  test(a_real_file_written_out_and_read_back_is_the_same_solid))'`.
 - **A bend united or intersected with a copy of itself is the bend**: one
   solid, which validates and measures `2π²` within its error. It was
   `TheFuseWroteABrokenAnswer { CoedgesRunTheSameWay }` (§243.5), which is
@@ -167,8 +169,9 @@ validate, have faces plane, plane and torus, have their middle at
 the writer. Those are the test's four checks. The corpus was outside the first
 run's write set, so a second run (`lane-q667-land-the-turned-torus-mesh-2`,
 off `6273ce5e`) merged the first without a rebase and checked the new seed in
-on its own, sha256 `86943d84…f87a`: `mise exec -- just t -p rcad-step --test
-every_model_the_writer_fuzzer_kept_is_written_again` ran 13 and passed 13,
+on its own, sha256 `86943d84…f87a`: `mise exec -- just t -p rcad-step -E
+'binary(merged) & test(every_model_the_writer_fuzzer_kept_is_written_again)'`
+ran 13 and passed 13,
 and `mise exec -- just gate quiet` passed 2825 of 2825.
 
 **One doc outside the row is left stale.** The module doc of

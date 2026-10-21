@@ -36,8 +36,9 @@ by hand. It fails at base with `CornersCoincide` on `#57`, and with the fix it
 imports within the published volume bound. The verifier reverted `mesh.rs` and
 saw that failure.
 
-**What it bought**: `just t -p rcad-step --test how_often_a_real_file_imports
---no-capture`, run here on `81f58380`, gives **160 of 323**, up from 140. The
+**What it bought**: `just t -p rcad-step -E 'binary(merged) &
+test(how_often_a_real_file_imports)' --no-capture`, run here on `81f58380`,
+gives **160 of 323**, up from 140. The
 lane diffed the refused lists and the verifier re-ran the diff: 20 files newly
 import (8 `LED_D3.0mm_Horizontal`, 12 `LED_D5.0mm_Horizontal`), and 0 newly
 refuse. So the true blocker of these LEDs was the slit, not `#223`. The four

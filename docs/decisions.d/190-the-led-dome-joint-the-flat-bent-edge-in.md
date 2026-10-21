@@ -60,8 +60,9 @@ turn on, `c + w×(A−c)`. The lane measured that choice: with the opposite poin
 or a quarter turn the other way, the `O1.27 Z10` file is refused on its dome. I
 did not re-run that. The verifier did not either; it took it on the lane's word.
 
-**What it bought** (`just t -p rcad-step --test how_often_a_real_file_imports
---no-capture` here, on `0933b2fc`): the KiCad import count goes from 114 to 140,
+**What it bought** (`just t -p rcad-step -E 'binary(merged) &
+test(how_often_a_real_file_imports)' --no-capture` here, on `0933b2fc`): the
+KiCad import count goes from 114 to 140,
 and no file that imported before stops importing. On `f9c56693`, before this
 lane, `just t -p rcad-step --test a_crossing_the_marcher_gave_up_on_names_its_edge
 --no-capture` listed **29** files stopping at the tangency wall: 23 relays, the
