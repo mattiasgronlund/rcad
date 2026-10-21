@@ -1,6 +1,6 @@
 //! A stepped shaft cut in two on a plane beside or through its axis, both
 //! halves turned about that axis, and the halves fused again by every rule
-//! (`docs/decisions.md` §191.5, rows Q2228 and Q2241).
+//! (`docs/decisions.md` §191.5, rows Q2228, Q2241, Q2487 and Q2488).
 //!
 //! **The shape.** The shaft is a bar of radius 2 from `z = 0` to `z = 1`
 //! united with a bar of radius 1 from `z = 1` to `z = 2`, so `5π` in all. One
@@ -40,12 +40,24 @@
 //! `Model::validate` does not check which of two rings holds the other where
 //! one has fewer than three corners. Now both kinds of ring are candidates,
 //! and the region each bounds says which is the outline.
+//!
+//! **What was wrong before Q2487 and Q2488.** Boring leaves corners on the
+//! circles of the shaft where some surface of the bore crosses them, each a
+//! rounding off that surface. A cut then met that surface again there, as a
+//! place where three surfaces meet whose box held the corner or lay within a
+//! rounding of it, and asked the corner about the surface instead. A round
+//! bore across the narrow bar's radius was refused `order along a crossing`
+//! at the hole's corner, and a square one, turned or shifted, `side of plane`
+//! where a side of the hole meets the wide bar's circle, under the certified
+//! policy. Now a corner with two surfaces round it, a sample of the curve
+//! they share, is taken as the one place where a third surface crosses that
+//! curve within what writing the corner down cost.
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, SIDE_OF_PLANE, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 /// The turns about `z` the halves are placed with: unturned, and the three
 /// the row found panicking.
@@ -109,42 +121,36 @@ fn a_stepped_shaft_bored_with_a_round_hole_cut_and_turned_keeps_the_d_as_its_bot
             0.5,
             bore,
             &turned(turn),
-            None,
         );
         every_fuse_of_the_bored_halves_answers(
             &format!("a round hole, cut at x = 0, shifted, turned {turn}"),
             0.0,
             bore,
             &shifted_and_turned(turn),
-            None,
         );
     }
 }
 
 /// The stepped shaft bored from below with a block 0.6 on a side about
-/// `(−1.5, 0)`, then cut and turned as above. Under the tolerant policy every
-/// fuse answers with the D as its bottom's outline. Under the certified one
-/// only the halves cut beside the axis and left unturned answer: turned, or
-/// cut through the axis and shifted, every fuse is refused `Undecidable` at
-/// `side of plane`, on a point where the plane of one of the hole's sides
-/// meets the wide bar's pipe on the bottom's plane.
+/// `(−1.5, 0)`, then cut and turned as above: every fuse answers with the D as
+/// its bottom's outline, under both policies. Turned, or cut through the axis
+/// and shifted, every fuse under the certified policy was refused
+/// `Undecidable` at `side of plane`, on a point where the plane of one of the
+/// hole's sides meets the wide bar's pipe on the bottom's plane (Q2488).
 #[test]
-fn a_stepped_shaft_bored_with_a_square_hole_cut_and_turned_answers_or_is_refused_at_a_side_of_plane()
- {
+fn a_stepped_shaft_bored_with_a_square_hole_cut_and_turned_keeps_the_d_as_its_bottoms_outline() {
     for turn in TURNS {
         every_fuse_of_the_bored_halves_answers(
             &format!("a square hole, cut at x = 0.5, turned {turn}"),
             0.5,
             Bore::ASquareHole,
             &turned(turn),
-            (turn != 0.0).then_some(SIDE_OF_PLANE),
         );
         every_fuse_of_the_bored_halves_answers(
             &format!("a square hole, cut at x = 0, shifted, turned {turn}"),
             0.0,
             Bore::ASquareHole,
             &shifted_and_turned(turn),
-            Some(SIDE_OF_PLANE),
         );
     }
 }
@@ -293,39 +299,23 @@ fn every_fuse_of_the_halves_answers(
     cut_off_from: CutOffFrom,
     moves: &[Isometry],
 ) {
-    every_fuse_answers(route, cut, cut_off_from, Bore::Nothing, moves, None);
+    every_fuse_answers(route, cut, cut_off_from, Bore::Nothing, moves);
 }
 
 /// [`every_fuse_of_the_halves_answers`] with the kept half cut from the
 /// stepped shaft less `bore`, and the half cut off from the stepped shaft.
-fn every_fuse_of_the_bored_halves_answers(
-    route: &str,
-    cut: f64,
-    bore: Bore,
-    moves: &[Isometry],
-    certified_refuses_at: Option<&str>,
-) {
-    every_fuse_answers(
-        route,
-        cut,
-        CutOffFrom::TheSteppedShaft,
-        bore,
-        moves,
-        certified_refuses_at,
-    );
+fn every_fuse_of_the_bored_halves_answers(route: &str, cut: f64, bore: Bore, moves: &[Isometry]) {
+    every_fuse_answers(route, cut, CutOffFrom::TheSteppedShaft, bore, moves);
 }
 
 /// Every fuse of the halves answers, and every face of the answer with a hole
-/// has an outline spreading as wide as any hole, but under the certified
-/// policy where `certified_refuses_at` names a predicate: there every fuse is
-/// refused `Undecidable` at it.
+/// has an outline spreading as wide as any hole.
 fn every_fuse_answers(
     route: &str,
     cut: f64,
     cut_off_from: CutOffFrom,
     bore: Bore,
     moves: &[Isometry],
-    certified_refuses_at: Option<&str>,
 ) {
     let kept = a_stepped_shafts_part_left_of(cut) - bore.volume();
     let cut_off = cut_off_from.volume_right_of(cut);
@@ -359,21 +349,9 @@ fn every_fuse_answers(
                 [cut_off_half, kept_half]
             };
             let mut log = ProvenanceLog::new();
-            let fused = model.fuse(&[one], &[other], rule, &policy, &mut log);
-            if policy_name == "certified"
-                && let Some(predicate) = certified_refuses_at
-            {
-                assert!(
-                    matches!(
-                        &fused,
-                        Err(Error::Undecidable { records })
-                            if records.records().iter().all(|record| record.predicate() == predicate)
-                    ),
-                    "{asked}: refused at {predicate}, not {fused:?}"
-                );
-                continue;
-            }
-            let fused = fused.unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+            let fused = model
+                .fuse(&[one], &[other], rule, &policy, &mut log)
+                .unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
             if policy_name == "certified" {
                 assert!(
                     log.is_empty(),
