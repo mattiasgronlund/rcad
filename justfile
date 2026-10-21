@@ -1075,12 +1075,23 @@ gate mode="loud" verdicts="reuse" jobs="cores":
                             echo absent
                         fi
                     done
-                    ;;&
-                check-plugins)
+                    # What check-plugins asks Claude Code was told, given to all
+                    # three so that the selftest's fixture can reach it: only
+                    # check-plugins reads these. Every lastUpdated is dropped:
+                    # Claude Code stamps it whenever it refreshes a marketplace,
+                    # on its own clock and in the middle of a gate, and
+                    # check-declared.sh never reads it.
                     for file in "{{ claude_config }}/settings.json" .claude/settings.local.json \
                         "{{ claude_config }}/plugins/installed_plugins.json" \
                         "{{ claude_config }}/plugins/known_marketplaces.json"; do
-                        if [ -f "$file" ]; then sha256sum "$file"; else echo "absent $file"; fi
+                        if [ ! -f "$file" ]; then
+                            echo "absent $file"
+                        elif stripped=$(jq -c 'walk(if type == "object" then del(.lastUpdated) else . end)' "$file" 2>/dev/null); then
+                            echo "json $file"
+                            printf '%s\n' "$stripped"
+                        else
+                            sha256sum "$file"
+                        fi
                     done
                     ;;
                 deny)
@@ -2485,6 +2496,12 @@ check-gate-verdicts-selftest:
     printf '#!/usr/bin/env bash\n[ ! -e "%s" ] || echo moved >>"%s"\n[ ! -e "%s" ] || { echo "the fixture questions cases fail"; exit 1; }\necho "the fixture questions cases pass"\n' \
         "$dir/questions-moves" "$fixture/questions/moved" "$dir/questions-fails" >"$fixture/questions/bin/selftest.sh"
     chmod +x "$fixture/questions/bin/selftest.sh"
+    mkdir -p "$dir/claude/plugins"
+    marketplaces() {
+        printf '{"rcad":{"source":{"source":"github","repo":"%s"},"lastUpdated":"%s"}}\n' "$1" "$2" \
+            >"$dir/claude/plugins/known_marketplaces.json"
+    }
+    marketplaces mattiasgronlund/claude-questions 2026-10-21T19:30:54.000Z
     machine_gate() {
         CLAUDE_CONFIG_DIR=${claude:-$dir/claude} CLAUDE_PLUGINS_ROOT=$fixture \
             CLAUDE_QUESTIONS_PLUGIN=$fixture/questions CLAUDE_GUARDRAILS_PLUGIN=$fixture/guardrails \
@@ -2517,6 +2534,21 @@ check-gate-verdicts-selftest:
     grep -qx 'gate: PASS' <<<"$got" || fail "a gate served check-questions-selftest did not say it passed"
     grep -q 'the record it was served from is gone' <<<"$got" \
         && fail "a gate served only check-questions-selftest said a whole-tree record it was never served is gone"
+
+    # Claude Code stamps lastUpdated on its own clock, so a new stamp alone is
+    # served, and a marketplace that moved is not.
+    marketplaces mattiasgronlund/claude-questions 2026-10-21T19:38:13.627Z
+    got=$(machine_gate) || fail "a gate of check-questions-selftest after a new lastUpdated stamp failed"
+    grep -q "^· served: check-questions-selftest from ${base:0:8}'s gate at " <<<"$got" \
+        || fail "a new lastUpdated stamp in known_marketplaces.json moved check-questions-selftest's key"
+    marketplaces someone-else/claude-questions 2026-10-21T19:38:13.627Z
+    got=$(machine_gate) || fail "a gate of check-questions-selftest after its marketplace moved failed"
+    grep -q '^· check-questions-selftest (' <<<"$got" \
+        || fail "a marketplace that moved to another repository was served check-questions-selftest's green of the one before"
+    m_key_moved=$(machine_recorded)
+    [ -n "$m_key_moved" ] && [ "$m_key_moved" != "$m_key" ] \
+        || fail "a marketplace that moved to another repository did not move check-questions-selftest's key"
+    marketplaces mattiasgronlund/claude-questions 2026-10-21T19:30:54.000Z
 
     g reset -q --hard "$prose"
     got=$(machine_gate) || fail "a served gate of check-questions-selftest on a prose commit failed"

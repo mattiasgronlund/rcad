@@ -464,10 +464,42 @@ So the key adds these to the step's name and the code's fingerprint:
   directory. Then, for each of the three plugin directories, its path and every
   file's type, mode, path and sha256, or `absent`. 34 files take 90 ms
   (`target/q693-keys.sh`).
-- For `check-plugins`, also the sha256 of the four config files above, or
-  `absent`.
+- For the three plugin steps too, each of the four config files above, as
+  `jq -c` prints it with every `lastUpdated` dropped, or its sha256 where `jq`
+  cannot read it, or `absent`.
 - For `deny`: the path and HEAD commit of each checkout under
   `${CARGO_HOME:-~/.cargo}/advisory-dbs/`.
+
+**Every `lastUpdated` is dropped from the config files.** At first the key
+hashed each file whole, and the lane gate at `33ef2659` did not record
+`check-plugins`. It printed `· verdicts: check-plugins not recorded, because
+what it reads changed while the gate ran`. That gate started at
+2026-10-21T19:30:54Z, and during it Claude Code wrote `"lastUpdated":
+"2026-10-21T19:38:13.627Z"` into `~/.claude/plugins/known_marketplaces.json`.
+It stamps that field whenever it refreshes a marketplace, on its own clock.
+`installed_plugins.json` carries a `lastUpdated` in 43 entries. Hashed whole,
+`check-plugins` would seldom be served. `check-declared.sh` never reads
+`lastUpdated`. It reads `has($m)` and `.[$m].source` of
+`known_marketplaces.json`, `.plugins | has($k)` of `installed_plugins.json`,
+and `.enabledPlugins` and `.extraKnownMarketplaces` of the settings files. Any
+other change to these files still moves the key. A projection onto just the
+fields it reads was not taken: when `check-declared.sh` starts to read another
+field, the plugin's digest moves once, but the projection would then miss every
+later change to that field. Dropping `lastUpdated` has the same blind spot for
+that one field. A `check-declared.sh` that starts to read `lastUpdated` needs
+the drop taken out.
+
+**The config files are in all three plugin steps' keys, though only
+`check-plugins` reads them.** The selftest cannot drive the real
+`check-plugins`, since it runs `just question` against the real questions
+parser, which a fixture plugin does not have. It drives
+`check-questions-selftest` instead, so the config files have to be in that
+step's key for the selftest to reach the `lastUpdated` drop. The other way was
+a private recipe for the key, which the selftest could call with a fixture
+config directory. That recipe was outside this row's write set. Having more in
+the key than the step reads is still sound. It costs one more run of
+`check-hooks` and `check-questions-selftest` when a settings file or a plugin
+install changes.
 
 **`deny` fetches the advisory database on every run.** Over one `just deny`,
 `target/q693-deny-fetch.sh` saw `FETCH_HEAD`'s mtime move from 1792610807 to
@@ -547,6 +579,8 @@ a fixture plugin, through these cases:
   store;
 - the next gate is served it, and its summary does not say that a whole-tree
   record is gone;
+- a new `lastUpdated` in the fixture's `known_marketplaces.json` is served it,
+  and a marketplace moved to another repository runs it and moves its key;
 - a commit that touched only `docs/` is served it;
 - `fresh`, an audit, and a record two days old each run it, and say why;
 - a failure over its record is a violation, and the record is deleted;
@@ -556,7 +590,10 @@ a fixture plugin, through these cases:
 - a failure whose plugin changed while it ran is no violation, and the record
   of the plugin before is kept.
 
-Two mutants of `gate` were each caught. With the check of whether the key moved
-taken out, the selftest failed on "did not say why it recorded nothing". With
-the four put back into the whole-tree list, it failed on "was recorded in the
-whole-tree store, off the code's fingerprint alone".
+Three mutants of `gate` were each caught. With the check of whether the key
+moved taken out, the selftest failed on "did not say why it recorded nothing".
+With the four put back into the whole-tree list, it failed on "was recorded in
+the whole-tree store, off the code's fingerprint alone". With the config files
+read by `jq -c '.'`, so that `lastUpdated` stays, it failed on "a new
+lastUpdated stamp in known_marketplaces.json moved check-questions-selftest's
+key".
