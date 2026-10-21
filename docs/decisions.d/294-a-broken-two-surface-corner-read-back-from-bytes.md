@@ -839,6 +839,9 @@ since `side of plane` comes first.
 - Whether the rule that cuts the seam corner away has an answer `certified`
   could reach, for the bar and the frustum both. A row after Q913.
 
+Both rules answer under `certified` now, for the bar since Q2374 and for the
+frustum since Q2587 (§294.25).
+
 ### 294.14 Q1397: the tolerant refusal is a walk asking a hyperbola's vertex a rounding from the apex — 2026-10-08
 
 *Queue row Q1397, from §294.13's "What this leaves". Lane
@@ -1957,3 +1960,125 @@ surface is a limit only where nothing but the box says where the point is.
 
 **What this leaves.** A small row to add that note under §39.4's
 `face_holds_the_point` row. Nothing else: no new defect was found.
+
+### 294.25 Q2587: a plane steeper than a cone crosses it in nothing closed, and that is said before a branch is named — 2026-10-21
+
+*Queue row Q2587, from Q2585's trace. Lane
+`lane-q2587-no-branch-for-a-plane-steeper-than-a-cone`, base `e4565b86`,
+carried on by one relay. Pinned in `crates/rcad-geom/src/walk.rs`'s tests and
+in `crates/rcad-topo/tests/a_broken_two_surface_corner_read_back_from_bytes.rs`.
+Answers Q2396 and Q1398.*
+
+**What refused.** §294.13's shape: `cones::a_frustum(model, 0.5, 2, 6)` turned
+0.4 about `x` and then shifted by `(7, −5, 2.5)`, less or intersected with
+`THE_HALF_OF_THE_FRUSTUM_PAST_THE_SEAM` placed the same way. Once Q2374 read
+the bottom seam corner's side of the block's face off the two offsets, the
+sound frustum and the corner moved a quarter turn round refused under
+`certified`, both rules: `Undecidable` with two records, each `side of a
+half-space` asked of one point, in a box under `5e−13` across that holds where
+the apex lands, `(7, −5, 2.5)`, and that the block's face straddles.
+`tolerant(100)` answered with half the frustum, `26π/3` (Q2396). The base's pin
+of the refusal,
+`a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_a_half_space_its_apex_is`,
+asserts each of those, and passes there: `mise exec -- just t
+a_turned_and_shifted_frustum_cut_along_its_seam_cannot_tell_which_side_of_a_half_space_its_apex_is`
+prints `1 test run: 1 passed, 4513 skipped`.
+
+**Where the two questions came from** (Q2585's trace). The block's face is
+steeper than the cone and misses the apex by `5e−16` (§294.13), so it crosses
+the cone in a hyperbola with one branch in each nappe. The frustum's wall is in
+one nappe, and the branch in the other has no node in the fuse's arrangement
+of the face.
+
+1. `start_every_closed_crossing_that_has_no_node`, in `fuse/arrange.rs`, hands
+   that branch — a run `intersect` named, with no ends — to
+   `rcad_geom::where_a_closed_crossing_starts`, to find where to put a corner
+   on it.
+2. That names the run's shape before anything else.
+   `where_a_plane_cuts_a_cone` takes its `leaning <= 0.0` arm and calls
+   `which_branch_of_a_hyperbola_this_run_is`, which for a run with no ends asks
+   the run's picker, the plane through the apex square to the axis, at each
+   branch's vertex, through `every_half_space_holds`. Each vertex is about
+   `1e−15` from the apex, so the picker runs through both boxes.
+   `where_a_closed_crossing_starts` takes no policy and asks under `certified`
+   whatever the fuse's policy is, so both questions are undecided, and both
+   are logged into the fuse's log.
+3. Naming the branch refuses, `CannotNameWhichPieceOfACrossingThisIs`. Had it
+   named one, the answer would have been `TheCrossingOfTheseTwoSurfacesIsNotClosed`
+   for either branch.
+4. `arrange.rs` drops the refusal and goes on, but the two records stay in the
+   log, and `a_fuse_logging_this_is_refused`, in `fuse/mod.rs`, refuses the
+   finished answer on them under `certified`. A `tolerant(100)` budget covers
+   them, which is why that policy answered.
+
+**A gap.** The answer is there, `tolerant(100)` reached it, and the two
+questions that stopped `certified` could not change it: no branch of a
+hyperbola is closed, so which branch a run is says nothing about whether it
+closes.
+
+**The fix: ask how the plane leans first, and stop there.**
+`where_a_closed_crossing_starts` now asks `a_plane_at_least_as_steep_as_a_cone`
+of its pair before anything else, and where that says yes it answers
+`TheCrossingOfTheseTwoSurfacesIsNotClosed` without naming a branch. That is yes
+for a plane and a cone, in either order, where `intersect`'s
+`how_a_plane_leans_against_a_cone` is `Neg` or `Zero`: `E ≤ 0`, proved, with no
+policy and nothing to log.
+
+**Why it changes no answer but these refusals.** The lean's exact arm sums
+`(n·w)² − Σ(slope·(n × w)_j)²`, and `where_a_plane_cuts_a_cone`'s `leaning`
+sums `(n·w)² − slope²‖n × w‖²`, both exactly and from the same stored numbers.
+They are one real number, and `leaning` is the `f64` nearest it. The `f64`
+nearest a number at or below zero is at or below zero, so every pair the new
+check catches would have taken the `leaning <= 0.0` arm. Every way out of that
+arm came back to `where_a_closed_crossing_starts` as
+`TheCrossingOfTheseTwoSurfacesIsNotClosed` — straight lines, a run stated as
+closed, a parabola, a branch of a hyperbola — or as a refusal: one from naming
+the branch, or `CannotWorkOutHowBigACrossingIs` just before the arm, where a
+sum leaves `f64`'s range. Every caller, five in `fuse/arrange.rs` and one in
+`fuse/assemble.rs`, treats every `Err` alike, so all a fuse sees change is that
+nothing is logged. A pair whose `E` the lean cannot prove takes the old road.
+
+**Not by dropping the records.** The row ruled out the other way to make this
+pass, dropping the records `arrange.rs` keeps when a start is refused. Those
+records are what is left of a question the fuse could not answer about a
+crossing it then leaves without a corner, and for a closed crossing that is
+one the answer may be missing; Q2588 asks whether it is. This fix asks nothing
+where nothing could change the answer, and leaves a start that did ask as it
+was.
+
+**What it gives.** Under both policies and both rules the sound frustum gives
+half the frustum, `26π/3` on a fine mesh, its whole model validates, and its
+corners are the turned frustum's shifted, to a rounding. The corner moved a
+quarter turn round is cut away and gives the sound answer to a rounding. The
+corners moved off the wall and off the cap refuse `ResultIsNotManifold`, as
+they did. One helper asserts all of it for both policies:
+`a_turned_and_shifted_frustum_cut_along_its_seam_gives_what_the_turned_frustum_gives_shifted`,
+which also asks `where_a_closed_crossing_starts` of both branches under both
+policies and gets `NotClosed` and an empty log, calls it under `certified`, and
+`under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answers_as_the_bar_does`
+under `tolerant(100)`. `mise exec -- just t -p rcad-topo --test
+a_broken_two_surface_corner_read_back_from_bytes` prints `19 tests run: 19
+passed, 0 skipped`. In `rcad-geom`,
+`a_plane_a_rounding_off_a_cones_apex_and_steeper_than_it_is_not_closed_and_asks_nothing`
+pins the door itself: a cone with its apex at `(7, −5, 2.5)`, its axis `z` and
+slope 0.5, and the plane `x = 7.0.next_up()`. For both runs `intersect` names
+and both orders of the pair, the log is empty and the answer `NotClosed`.
+Without the fix the log holds `side of a half-space` records.
+
+**Q2396 and Q1398.** Q2396 asked which half-space is asked of the apex and
+whether the answer is there: the picker through the apex, asked by the namer
+of a branch whose name did not matter, and the answer is there. Q1398 asked
+whether the rule that cuts the seam corner away has an answer `certified` can
+reach, for the bar and the frustum each turned and then shifted. Both rules do
+for both: the bar since Q2374
+(`a_turned_and_shifted_bar_cut_along_its_seam_gives_what_the_turned_bar_gives_shifted`),
+the frustum since this.
+
+**Where it stops.** The check is in `where_a_closed_crossing_starts` alone.
+`walk` still names a hyperbola's branch for a run with no ends by asking its
+pickers, as it must to walk one branch; nothing here walks such a run. That
+`where_a_closed_crossing_starts` takes no policy is a gap its doc records, and
+it stands.
+
+**What this leaves.** Nothing new. Q2588, already filed, asks whether a closed
+crossing whose start is refused can make a tolerant fuse answer wrong.
