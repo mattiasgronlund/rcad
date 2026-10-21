@@ -900,10 +900,11 @@ enum Search {
 ///
 /// A piece `P` and a solid `S`. If a side of `P` is also a side of a piece cut
 /// from a face `G` of `S`, the other piece's side runs along none of `G`'s own
-/// edges, `P`'s side names `G`'s surface bit for bit as its partner and the
-/// other piece's side names `P`'s, and `P` is not on `G`'s surface, then **`P`
-/// is inside `S` when its material is on `S`'s inner side of `G`**, and
-/// outside it otherwise.
+/// edges or a piece `Y` cut from `S` on `P`'s surface bit for bit has the side
+/// too with its material on the partner's other side, `P`'s side and `Y`'s
+/// name `G`'s surface bit for bit as their partner and the other piece's side
+/// names `P`'s, and `P` is not on `G`'s surface, then **`P` is inside `S` when
+/// its material is on `S`'s inner side of `G`**, and outside it otherwise.
 ///
 /// **Both partners are asked because one name does not make one line.** Two
 /// sides are one edge of the naming when their ends are named the same corners,
@@ -917,15 +918,36 @@ enum Search {
 /// kept neither copy of it. The cut's partner is `x − 2y = 1`, not `y = 1`.
 ///
 /// `P` was cut by every surface of `S`, so it is all inside `S` or all outside
-/// it, which is what one point already rests on (§17.4). Beside the middle of
-/// the side, `S`'s skin is `G` alone, because the side is a cut of `G` and not
-/// one of its edges, and `P` is on the side of `G`'s surface that
+/// it, which is what one point already rests on (§17.4). Where the side is a
+/// cut of `G` and not one of its edges, `S`'s skin beside the middle of the
+/// side is `G` alone, and `P` is on the side of `G`'s surface that
 /// [`FaceMeet::material_side`] names, which the walk that made the side decided
 /// for nothing (§36.6). No number is built and nothing is a tolerance.
 ///
+/// **Along an edge of `G`, `Y` says that `P` carries on past `G`.** Take a
+/// point `m` of the side inside an edge `e` of `G` it runs along. `S`'s skin
+/// beside `m` is `G` and the face `H` across `e`. `Y`'s inside comes up to `m`
+/// and lies on `S`'s skin, on `P`'s surface, which is not `G`'s, so it lies on
+/// `H`: `H` is on `P`'s surface, and beside `m` it is on the other side of
+/// `G`'s surface from `P`. So `P` is off `S`'s skin there, and leaves `m` the
+/// way opposite to `H`. Cut across `e` at `m`, `G` and `H` leave `m` at an
+/// angle `θ` through `S`, never `π`, since the side is a crossing of the two
+/// surfaces and not a touching (§36.6). Where `θ < π`, `H` leaves on `G`'s
+/// inner side, so `P` leaves on its outer side, out of the angle: outside.
+/// Where `θ > π`, `H` leaves on `G`'s outer side and `P` on its inner side,
+/// into the angle: inside. Both are the rule's answer. The shape that needs it
+/// is two hollow quarters of one cone side by side, whose side planes round
+/// into each other: the piece of the first quarter's cone between the two
+/// planes, from `z = 4` to `z = 4.5`, has its top on the rim of the other
+/// quarter's bottom cap, and nothing else places it. Turned a trillionth of a
+/// radian further into each other, the same holds of the piece of the first
+/// quarter's bore there
+/// (`tests/two_quarters_of_a_hollow_cone_flush_along_a_plane.rs`, Q2551).
+///
 /// **None of this asks whether a point was found inside `P`**, so the rule
 /// holds where one was found and the ray could not place it. Nor can `P` lie on
-/// another face of `S`: beside the middle of the side, `S`'s skin is `G` alone.
+/// another face of `S`: beside the side, `S`'s skin is `G` alone, or `G` and a
+/// face on the far side of `G`'s surface from `P`.
 /// The piece Q1064 brought here is
 /// half of a bar's wall, `x ≥ 0`, against a block over `x < 0` that a bar on
 /// the same pipe was united with first. Every point of the half lies on the
@@ -2211,6 +2233,9 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// face on that plane, and that face cannot say it does not hold it; the
 /// middle is on no such line, and the rest of the cap across that side is
 /// placed outside (`tests/two_quarters_of_a_hollow_cone_flush_along_a_plane.rs`).
+/// No face of the other quarter reaches `z = 4`, so the sliver shares no side
+/// with a piece of it and [`SidesItShares`] cannot place it: without the
+/// middle it is refused `a point inside a piece of a face` again (Q2562).
 fn by_the_piece_across_a_side_clear_of_every_face(
     model: &Model,
     scratch: &Scratch,
