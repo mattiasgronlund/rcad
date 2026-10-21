@@ -1694,15 +1694,17 @@ impl BuildingAMesh {
         //
         // §31.10 item 5 and §35.7 both say this claim is the one lane 5
         // falsifies, and the sentence that stops being true is *"the fuse
-        // refuses a curved solid outright"*. A patch on a pipe, or on a cone
-        // clear of its apex, whose outline does not go right round, with one
-        // hole in it, which a slanted pin from a bar's axis leaves where the
-        // bar ends beside where the pin would come out, and a slot through a
-        // halved frustum leaves in its skin, is cut from the hole up to its
-        // outline and down to it. A ball's skin whose outer loop reaches both poles and whose hole
-        // reaches neither, which a half ball cut again leaves, is cut from the
-        // hole up to each pole instead. A ball's skin with only holes
-        // was opened into strips above, a cap on a ball with islands in it
+        // refuses a curved solid outright"*. A patch on a pipe, on a cone
+        // clear of its apex or on a ball clear of both poles, whose outline
+        // does not go right round, with one hole in it, which a slanted pin
+        // from a bar's axis leaves where the bar ends beside where the pin
+        // would come out, a slot through a halved frustum leaves in its skin,
+        // and a slab crossing a ball off its poles leaves of the ball's, is
+        // cut from the hole up to its outline and down to it. A ball's skin
+        // whose outer loop reaches both poles and whose hole reaches neither,
+        // which a half ball cut again leaves, is cut from the hole up to each
+        // pole instead. A ball's skin with only holes was opened into strips
+        // above, a cap on a ball with islands in it
         // was cut up to its pole, and a ring on a pipe with islands in it was
         // cut across round them. Any other face with one loop right round and
         // another that is not has already been refused in
@@ -3014,10 +3016,10 @@ impl BuildingAMesh {
         Ok(Some(patches))
     }
 
-    /// Cut a face on a pipe, or on a cone clear of its apex, whose outline does
-    /// not go right round, with one hole in it, into two pieces with one loop
-    /// each, or `None` when the face is not that shape or a leg cannot be shown
-    /// to stay on it.
+    /// Cut a face on a pipe, on a cone clear of its apex or on a ball clear of
+    /// both poles, whose outline does not go right round, with one hole in it,
+    /// into two pieces with one loop each, or `None` when the face is not that
+    /// shape or a leg cannot be shown to stay on it.
     ///
     /// A slanted pin starting on a bar's axis leaves one, when the bar ends
     /// beside where the pin would come out the other side. The plane of the
@@ -3034,6 +3036,11 @@ impl BuildingAMesh {
     /// slot through its skin leaves one, and so does a chip of a cone holed
     /// through; both were refused here until row Q2172
     /// (`a_walk_neither_winding_nor_the_axis_places.rs`).
+    ///
+    /// **So is a ball's face whose loops keep clear of both poles.** A slab
+    /// crossing a ball off its poles leaves a band of the ball's skin this
+    /// shape, and so does a plate bored through by a ball; both were refused
+    /// here until row Q2556 (`a_band_of_a_ball_holding_neither_pole.rs`).
     ///
     /// **Two legs, one from the hole's highest corner up to the outline and one
     /// from its lowest down to it**, leave a piece either side, each walked
@@ -6842,7 +6849,8 @@ fn how_far_round(around: &WalkedLoop) -> f64 {
 /// ([`Surface::where_it_pinches`]), and a torus pinches nowhere, or asks
 /// [`how_far_the_second_coordinate_wraps`] that it is not a torus, as
 /// [`a_ring_on_a_pipe_with_islands_in_it`] does on a pipe and
-/// [`BuildingAMesh::cut_a_hole_out_to_its_outline`] on a pipe or a cone.
+/// [`BuildingAMesh::cut_a_hole_out_to_its_outline`] on a pipe, a cone or a
+/// ball.
 /// `every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
 /// in `rcad-geom` is the measurement, over all five surfaces.
 fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
@@ -7165,19 +7173,29 @@ fn where_a_slit_carries_on_to(around: &WalkedLoop, tip: usize) -> Option<(Walked
 /// halved and windowed, are refused without this
 /// (`a_walk_neither_winding_nor_the_axis_places.rs`).
 ///
-/// **A ball is left out, as before.** It pinches at both poles, and no face on
-/// a ball whose outline reaches neither, with a hole, has been measured here.
+/// **So is a ball's patch clear of both poles.** A ball pinches at latitude
+/// `±π/2` and nowhere else, so when every corner of every loop lies strictly
+/// between the two, the patch and its legs do too, by the same argument. A loop
+/// that reaches a pole is walked through it on a pole side at that latitude, so
+/// one of its corners is there. A slab of a block whose two faces cross a ball
+/// off its poles leaves a band of the ball's skin this shape, and so does a
+/// plate bored through by a ball; both were refused
+/// `CurvedFaceWithAHoleGoesTooFarRound` until row Q2556
+/// (`a_band_of_a_ball_holding_neither_pole.rs`).
 fn the_loops_keep_clear_of_where_it_pinches(stored: &Surface, walked: &[WalkedLoop]) -> bool {
-    if stored.where_it_pinches().is_none() {
+    let Some(pinch) = stored.where_it_pinches() else {
         return true;
-    }
-    let Surface::Cone(_) = stored else {
-        return false;
     };
     let mut heights = walked
         .iter()
         .flat_map(|around| &around.corners)
         .map(|corner| corner[1]);
+    if let Surface::Sphere(_) = stored {
+        return heights.all(|latitude| latitude.abs() < pinch);
+    }
+    let Surface::Cone(_) = stored else {
+        return false;
+    };
     let first = heights.next().expect("a walked loop has a corner");
     first != 0.0 && heights.all(|height| height * first.signum() > 0.0)
 }
