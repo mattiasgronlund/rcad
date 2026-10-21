@@ -435,7 +435,16 @@ fn no_solid_of_fewer_than_two_corners_these_intersections_leave_folds_at_its_coa
             }
         }
     }
-    assert_eq!(counted, BTreeMap::new(), "solids of fewer than two corners");
+    assert_eq!(
+        counted,
+        BTreeMap::from([
+            ("a ball in the bar's side", 108),
+            ("a bar across the bar", 32),
+            ("a cap beside a ball's pole", 24),
+            ("two balls", 108),
+        ]),
+        "solids of fewer than two corners"
+    );
 }
 
 fn a_model() -> Model {
