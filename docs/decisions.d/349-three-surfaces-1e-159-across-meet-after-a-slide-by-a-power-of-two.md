@@ -142,8 +142,8 @@ each with an answer in `f64` shown for one triple.
 
 ### 349.6 Measured
 
-All on this lane's tree, `mise exec -- just t -p rcad-geom --test
-every_point_where_three_surfaces_meet_is_on_all_three_of_them --no-capture`
+All on this lane's tree, `mise exec -- just t -p rcad-geom -E 'binary(merged) &
+test(every_point_where_three_surfaces_meet_is_on_all_three_of_them)' --no-capture`
 unless named:
 
 | `somewhere else` row, 2051 triples | refused | corners |
@@ -290,7 +290,8 @@ classified `Outside` before and after, so no answer moved there.
 
 ### 349.9 Measured
 
-- `mise exec -- just t -p rcad-geom --test where_a_line_meets_a_surface`: 21
+- `mise exec -- just t -p rcad-geom -E 'binary(merged) &
+  test(where_a_line_meets_a_surface)'`: 21
   run, 21 passed on the branch tip. On `dcdf610b`, the tests before the slide,
   20 run, 15 passed, 5 failed: the ball, pipe, cone, ring and ring touch. On
   `cc613892`, the slide that threw the slid refusal away, 21 run, 20 passed, 1
@@ -526,8 +527,8 @@ window to 1048 binades, so this count may move with it.
 
 **Measured.** On this branch:
 
-- `mise exec -- just t -p rcad-geom --test
-  every_point_where_three_surfaces_meet_is_on_all_three_of_them --no-capture`:
+- `mise exec -- just t -p rcad-geom -E 'binary(merged) &
+  test(every_point_where_three_surfaces_meet_is_on_all_three_of_them)' --no-capture`:
   12 run, 12 passed. It prints both rows' buckets and the first ten refusals of
   each.
 - The same with `--no-fail-fast` and the slide list cut by `.take(1)`: 12 run,

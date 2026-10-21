@@ -371,8 +371,9 @@ every_normal_a_turn_leaves_sits_well_inside_the_bound --no-capture`, `mise exec
 a_turn_composed_of_any_number_of_turns_stays_within_six_epsilon_of_length_one
 --no-capture`, `mise exec -- just t -p rcad-geom --lib
 a_turn_straight_from_rotation_is_never_divided_though_dividing_would_move_one_in_five
---no-capture` and `mise exec -- just t -p rcad-geom --test
-a_plane_turned_a_step_at_a_time_keeps_the_normal_its_file_wrote --no-capture`,
+--no-capture` and `mise exec -- just t -p rcad-geom -E 'binary(merged) &
+test(a_plane_turned_a_step_at_a_time_keeps_the_normal_its_file_wrote)'
+--no-capture`,
 the first and last also with the division switched off; the probe was a
 throwaway test in `crates/rcad-geom/tests/` composing a shift after 100 000
 turns about the origin, deleted before the commit.

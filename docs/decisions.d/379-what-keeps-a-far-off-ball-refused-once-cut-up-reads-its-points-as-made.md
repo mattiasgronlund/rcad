@@ -255,7 +255,7 @@ Lane `lane-q781-a-placed-wall-cut-like-the-unplaced-wall`, off `348b9390`.
   It passes on this base, and fails under the forced-false read above. Run as
   `mise exec -- just t -p rcad-topo --test a_placed_bar_is_meshed_from_the_corners_it_stores --no-capture`;
   the rcad-step side is
-  `mise exec -- just t -p rcad-step --test a_flat_cap_is_cut_up_the_same_after_its_own_file --no-capture`.
+  `mise exec -- just t -p rcad-step -E 'binary(merged) & test(a_flat_cap_is_cut_up_the_same_after_its_own_file)' --no-capture`.
 - No pin moved, since no code did.
 
 **2026-10-03, Q784: a rule on corner order cuts the caps alike and breaks two

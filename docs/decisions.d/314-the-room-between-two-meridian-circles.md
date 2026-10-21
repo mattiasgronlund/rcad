@@ -207,8 +207,9 @@ it, beside the torus of room exactly `next(up)`, which is named.
 `two_meridian_circles`, `let margin = ring_radius` followed by
 `- Interval::exactly(ring.tube_radius())` became
 `let margin = Interval::exactly(ring.ring_radius() - ring.tube_radius())`.
-`mise exec -- just t -E 'binary(the_room_between_two_meridian_circles) |
-binary(the_shapes_a_plane_cuts_a_torus_in)' --no-fail-fast` printed
+`mise exec -- just t -p rcad-geom -E 'binary(merged) &
+(test(the_room_between_two_meridian_circles) |
+test(the_shapes_a_plane_cuts_a_torus_in))' --no-fail-fast` printed
 `17 tests run: 16 passed, 1 failed`, the one being that test. The fifteen
 tests that were in those two files before it all pass under the mutation, as
 314.2's thirteen did.

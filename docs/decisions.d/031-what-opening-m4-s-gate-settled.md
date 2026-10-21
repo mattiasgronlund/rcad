@@ -645,9 +645,9 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > axis faces a direction with whole-number components from −2 to 2 instead,
 > lying exactly in the flat of the two axes and leaning towards its own, all
 > three asked exactly. That took the test's family from 32 to 408 of 1224 pairs
-> named in four halves (`mise exec -- just t -p rcad-geom --test
-> two_pipes_of_one_width_on_crossing_axes
-> the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece
+> named in four halves (`mise exec -- just t -p rcad-geom -E 'binary(merged) &
+> test(two_pipes_of_one_width_on_crossing_axes) &
+> test(the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece)'
 > --no-capture`). The other 816 are a gap: bores on `(3, 4, 0)` and `(3, 0, 4)`
 > are pinned refused, and a facing slid a few `2⁻⁵³` along `(0, 1, −1)` would
 > pass exactly through. Three families of fix were weighed: change which
@@ -688,8 +688,9 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > the slide it tries two to four of the stored direction plus fewer of the
 > other one, so a pair named by the slide keeps its surfaces. That took the
 > family from 408 to 688 with the slide and to 704 with the sums (`mise exec --
-> just t -p rcad-geom --test two_pipes_of_one_width_on_crossing_axes
-> the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece
+> just t -p rcad-geom -E 'binary(merged) &
+> test(two_pipes_of_one_width_on_crossing_axes) &
+> test(the_namer_names_this_family_in_four_halves_and_the_walker_draws_every_piece)'
 > --no-capture`), and
 > `bores_on_3_4_0_and_3_0_4_are_picked_by_their_directions_slid_until_they_pass_exactly`
 > and
@@ -784,8 +785,9 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > and gave facings like `(−0.5, 2.09e15, −2.09e15)` at an offset of `−7.5e15`,
 > which the walk then refused, so none is taken. The count test at
 > `(11, −3.25, 0.5)` runs in 1.36 s against 2.3 s at the base. Measured with
-> `mise exec -- just t -p rcad-geom --test two_pipes_of_one_width_on_crossing_axes
-> -E 'test(/the_namer_names_this_family/)' --no-capture`. The 752 and 168 were
+> `mise exec -- just t -p rcad-geom
+> -E 'binary(merged) & test(two_pipes_of_one_width_on_crossing_axes) &
+> test(/the_namer_names_this_family/)' --no-capture`. The 752 and 168 were
 > measured with the lowest terms taken out. The 371 were counted with a
 > temporary print before the namer's `Ok(None)` and sorted by a scratch script;
 > neither is kept.

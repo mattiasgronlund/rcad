@@ -171,12 +171,12 @@ archive 5f1bce87`, under `target/`), never on a tracked file:
 - *slide off*: `the_meet_slid_into_range(surfaces).filter(|_| false)` in
   `meet_of_three_surfaces`. This is §349.6's mutant.
 
-In the copy, the row is `cargo nextest run -p rcad-geom --test
-every_point_where_three_surfaces_meet_is_on_all_three_of_them -E
-'test(/somewhere_else/)' --no-capture`. The row prints before its `refused == 0`
+In the copy, the row is `cargo nextest run -p rcad-geom -E 'binary(merged) &
+test(every_point_where_three_surfaces_meet_is_on_all_three_of_them) &
+test(/somewhere_else/)' --no-capture`. The row prints before its `refused == 0`
 pin fails, so every variant gives its figure. At the base it is `mise exec --
-just t -p rcad-geom --test
-every_point_where_three_surfaces_meet_is_on_all_three_of_them --no-capture`.
+just t -p rcad-geom -E 'binary(merged) &
+test(every_point_where_three_surfaces_meet_is_on_all_three_of_them)' --no-capture`.
 **Give each copy a `CARGO_TARGET_DIR` of its own.** The copies hold the same
 files at the same paths inside each, and with one target dir shared, a re-run
 of the *slide off* copy after the keep-off suite compiled nothing and printed
