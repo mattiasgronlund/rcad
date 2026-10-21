@@ -12044,6 +12044,36 @@ mod tests {
         assert_eq!(steps, [1, 1, 3, 16, 158]);
     }
 
+    /// A quarter band of a ring of a hundred round a tube of one meshes to fewer
+    /// triangles when it is asked for a coarser deflection.
+    ///
+    /// Charged against the tube's `3r`, its two circles were cut 35 steps
+    /// apart at every deflection from `60` up, and the wall was the triangles
+    /// between those cuts with nothing refined inside: 284 triangles at `250`
+    /// and at `60` alike (row Q2536).
+    #[test]
+    fn a_quarter_band_of_a_wide_ring_meshes_coarser_at_a_coarser_deflection() {
+        let mut model = Model::new(Scale::millimetres(1000.0).expect("a working size"));
+        let band = a_band_between_two_circles(&mut model, 100.0, 1.0, Orientation::Forward);
+        let triangles = [250.0, 60.0, 1.0].map(|room| {
+            model
+                .solid(band)
+                .expect("this model made the key")
+                .mesh(
+                    Deflection::of(room).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a quarter band of a ring meshes")
+                .triangles()
+                .len()
+        });
+        assert!(
+            triangles[0] < triangles[1] && triangles[1] < triangles[2],
+            "{triangles:?} triangles at deflections 250, 60 and 1"
+        );
+    }
+
     /// A ball cut by a plane along its own axis is walked one definite way
     /// round, and it is the way `Model::validate` reads the same edge.
     ///
