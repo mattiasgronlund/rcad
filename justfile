@@ -8007,7 +8007,15 @@ check-fuzz-overnight-selftest:
     # exported the timings path too (it runs after `export RCAD_FUZZ_TIMINGS`
     # like everything else in this recipe), so it would otherwise match this
     # pattern as a sixth "target".
-    timed=$(grep -c "fuzz run.*max_total_time.*\[timings=$dir/logs/$(date +%Y-%m-%d)/timings\]" "$dir/log" || true)
+    #
+    # `night` is read from the summary `fuzz-overnight` itself just wrote,
+    # not recomputed with a second `date +%Y-%m-%d` call here: the recipe
+    # computes its own night once, at the top, and a check that asks the
+    # clock again can cross midnight between the two and read a directory
+    # the recipe never wrote to (Q728 — a real gate hit exactly this on
+    # 2026-09-29, 23:59:56 to 00:00:00).
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
+    timed=$(grep -c "fuzz run.*max_total_time.*\[timings=$night/timings\]" "$dir/log" || true)
     [ "$timed" -eq 5 ] \
         || fail "$timed of 5 targets were told where to write their timings"
 
@@ -8017,7 +8025,6 @@ check-fuzz-overnight-selftest:
     # left only there is an input the next night cannot re-find and a sweep can
     # delete. A night on 2026-09-13 reported "nothing found" over a crash sitting
     # in it.
-    night="$dir/logs/$(date +%Y-%m-%d)"
     for target in where_two_surfaces_cross no_step_file_makes_the_reader_panic \
             no_model_makes_the_writer_panic two_solids_fused_by_a_stranger \
             where_a_cone_or_a_torus_crosses; do
@@ -8408,6 +8415,14 @@ check-fuzz-overnight-selftest:
     ten() {
     : >"$dir/log"
     copier_logs="$dir/logs-copier"
+    # Taken now, immediately before the backgrounded night starts, rather
+    # than after the sleep below: this run has not finished and has written
+    # no summary line yet, so there is no `logs/latest` to read the real
+    # night from, and a `date` call made four seconds later than this one
+    # can cross midnight and read a directory the night never wrote to
+    # (Q728, the same race arm One-and-Two now avoids by reading the
+    # summary instead).
+    today=$(date +%Y-%m-%d)
     RCAD_FUZZ_COPY_EVERY=1 STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
         STUB_ARTIFACT_TAG="$tag" RCAD_FUZZ_ALREADY_ADVANCED=1 \
         RCAD_FUZZ_LOGS="$copier_logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
@@ -8421,7 +8436,7 @@ check-fuzz-overnight-selftest:
     # Which is what happened the first time this arm was run against a night
     # with its copier taken out — the test failed, correctly, and said nothing.
     carried=0
-    copier_night="$copier_logs/$(date +%Y-%m-%d)/artifacts"
+    copier_night="$copier_logs/$today/artifacts"
     if [ -d "$copier_night" ]; then
         carried=$(find "$copier_night" -name "slow-unit-$tag" | wc -l)
     fi
@@ -8514,7 +8529,7 @@ check-fuzz-overnight-selftest:
         || fail "tonight's one new timeout was miscounted against last night's pile: $(cat "$dir/logs/latest")"
     ! grep -q 'nothing found' "$dir/logs/latest" \
         || fail "a timed-out input written tonight was reported as nothing found — this is §226.3's bug"
-    night="$dir/logs/$(date +%Y-%m-%d)"
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
     [ -f "$night/artifacts/where_two_surfaces_cross/timeout-$tag" ] \
         || fail "a timed-out input was not carried out of the worktree, so nobody can see a new one appear"
     rm -f fuzz/artifacts/where_two_surfaces_cross/timeout-"$tag"
@@ -8597,8 +8612,9 @@ check-fuzz-overnight-selftest:
         || fail "the merge did not run persistent-copy-first, scratch-second: $(grep -- '-merge=1' "$dir/log" || true)"
     grep -q -- "run no_step_file_makes_the_reader_panic -- -merge=1 -max_len=5110 $dir/corpus/no_step_file_makes_the_reader_panic-merge-tmp\.[^ ]* $dir/corpus/no_step_file_makes_the_reader_panic-scratch \[timings=unset\]" "$dir/log" \
         || fail "the reader-corpus merge ran with RCAD_FUZZ_TIMINGS still exported: $(grep -- '-merge=1' "$dir/log" || true)"
-    grep -qE 'took [0-9]+s' "$dir/logs/$(date +%Y-%m-%d)/reader-corpus-merge.log" \
-        || fail "the merge's wall-clock seconds were not written to reader-corpus-merge.log: $(cat "$dir/logs/$(date +%Y-%m-%d)/reader-corpus-merge.log" 2>/dev/null || true)"
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
+    grep -qE 'took [0-9]+s' "$night/reader-corpus-merge.log" \
+        || fail "the merge's wall-clock seconds were not written to reader-corpus-merge.log: $(cat "$night/reader-corpus-merge.log" 2>/dev/null || true)"
     [ ! -d "$dir/corpus/no_step_file_makes_the_reader_panic-scratch" ] \
         || fail "the scratch directory survived a successful merge"
     }
@@ -8691,7 +8707,6 @@ check-fuzz-overnight-selftest:
     # merge runs can say a given name was already there.
     twenty_two() {
     : >"$dir/log"
-    night="$dir/logs/$(date +%Y-%m-%d)"
     rm -rf "$dir/corpus"
     mkdir -p "$dir/corpus/where_two_surfaces_cross" \
         "$dir/corpus/no_step_file_makes_the_reader_panic" \
@@ -8708,6 +8723,7 @@ check-fuzz-overnight-selftest:
 
     STUB_CORPUS_ADD="found-tonight" run 8 \
         || fail "a night with corpus-name fixtures in place failed: $(cat "$dir/out")"
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
 
     [ "$(cat "$night/corpus-names/where_two_surfaces_cross")" = "$(printf 'a-before\nb-before')" ] \
         || fail "where_two_surfaces_cross's corpus-names list is wrong: $(cat "$night/corpus-names/where_two_surfaces_cross" 2>&1)"
@@ -8760,7 +8776,7 @@ check-fuzz-overnight-selftest:
         run 8 || status=$?
     [ "$status" -eq 0 ] \
         || fail "a carried-over artifact rewritten tonight failed the night: $(cat "$dir/logs/latest")"
-    night="$dir/logs/$(date +%Y-%m-%d)"
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
     # The rewrite actually happened — the stub overwrites the same path every
     # time its target runs, same as a `-fork` worker does — so a check that
     # still trusted mtime would see this file as new. Without this, the two
@@ -8845,7 +8861,7 @@ check-fuzz-overnight-selftest:
         || fail "a night whose merge picked more files than it added failed: $(cat "$dir/out")"
     [ "$(find "$reader_persistent" -type f | wc -l)" -eq 3 ] \
         || fail "the stub's one real pick did not land in the persistent corpus: $(find "$reader_persistent" -type f)"
-    night="$dir/logs/$(date +%Y-%m-%d)"
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
     grep -qF "net-new files tonight: 1 (MERGE-OUTER picks: 5)" "$night/reader-corpus-merge.log" \
         || fail "the merge log's net-new count did not read as the corpus's own growth, kept beside MERGE-OUTER's own pick count: $(cat "$night/reader-corpus-merge.log" 2>&1)"
     rm -rf "$reader_persistent"
@@ -8959,7 +8975,7 @@ check-fuzz-overnight-selftest:
     printf 'what a target found\n' \
         >"$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
     run 8 || fail "a night beside a byte-identical earlier night failed: $(cat "$dir/out")"
-    night="$dir/logs/$(date +%Y-%m-%d)"
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
     tonight_file="$night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
     earlier_file="$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
     tree_file="fuzz/artifacts/where_two_surfaces_cross/slow-unit-$tag"
@@ -8987,7 +9003,7 @@ check-fuzz-overnight-selftest:
     printf 'an older nights unrelated find\n' \
         >"$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-not-tonight-$tag"
     run 8 || fail "a night beside an earlier night with no matching name failed: $(cat "$dir/out")"
-    night="$dir/logs/$(date +%Y-%m-%d)"
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
     tonight_file="$night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
     [ -f "$tonight_file" ] || fail "tonight's artifact never landed at $tonight_file"
     [ "$(stat -c %h "$tonight_file")" = "1" ] \
@@ -9010,7 +9026,7 @@ check-fuzz-overnight-selftest:
     printf 'a short copy from a race, not what the tree holds\n' \
         >"$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
     run 8 || fail "a night beside an earlier night with a differing copy failed: $(cat "$dir/out")"
-    night="$dir/logs/$(date +%Y-%m-%d)"
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
     tonight_file="$night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
     earlier_file="$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
     [ -f "$tonight_file" ] || fail "tonight's artifact never landed at $tonight_file"
