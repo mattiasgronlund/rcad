@@ -2929,8 +2929,11 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// it on a mesh of 1.5 million triangles — 1.46 s of `Model::validate` spent on
 /// a bar that was sound at the coarsest mesh already. So this ladder is capped
 /// the same way [`the_coarsest_mesh_whose_sides_do_not_cross`] is, at
-/// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] below its own top: the cap ends the
-/// bar's ladder at rung 13 and the same call takes 11 ms
+/// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] below its own top, or, once a rung's
+/// mesh has strayed past the thinnest bend, at an eighth of that bend's radius
+/// when that is lower (row Q2368, below). The bar's pipe is meshed `0.667` of
+/// its radius off at every rung and charged a finite amount, so it never
+/// strays: the cap ends the bar's ladder at rung 13 and the same call takes 11 ms
 /// (`a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung`
 /// in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`).
 ///
@@ -2960,8 +2963,7 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// [`the_thinnest_bend_a_mesh_can_stray_past`] finds and was charged without
 /// end, the ladder skips every room
 /// [`ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED`] radii wide or more. It never
-/// skips the floor, so a ladder that does not answer still ends on the same
-/// rung. That bend asks seven rungs where it asked nine
+/// skips the floor. That bend asks seven rungs where it asked nine
 /// (`a_thin_bend_asks_no_room_eight_tubes_wide_once_a_mesh_strays_past_its_tube`).
 ///
 /// **It is not done from the coarsest mesh**, only after a rung. Done from
@@ -2970,13 +2972,33 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// `a_plate_and_a_ring_with_a_bar_in_its_hole_and_a_pin_beside_it_fuse_every_way`
 /// (`a_pin_beside_a_ring_it_never_touches.rs`).
 ///
-/// **It buys little where Q2208 found this ladder slow.** A quarter bend of
-/// ring 1000 tube 0.1 is charged without end down to room `0.122` and never
-/// answers, and the rungs that cost are the last three, at `0.244`, `0.122`
-/// and `0.061`, under three tubes wide, the last of them about 200 000
-/// triangles. The skip takes the rungs from `250` down to `0.98` off it, and
-/// those are cheap: Q2217's census put them at `15.3` of that ladder's
-/// `153.5` s, on a loaded machine.
+/// **Once a mesh has strayed past the thinnest bend, the floor follows that
+/// bend down** (row Q2368). The floor [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`]
+/// halvings under the top is set by how far across the solid is, and a tube
+/// thin against the ring it runs round is still several tubes wide there. A quarter bend of ring 1000
+/// tube 0.01 has its top at `500.005` and that floor at `0.0610`, six tubes:
+/// meshed `0.0520` off there, it was charged without end, and the ladder fell
+/// back on `0.3207` where Pappus gives `0.4935`. So after a rung that strays,
+/// the floor goes down to [`TIMES_UNDER_A_BEND_A_MESH_STRAYED_PAST_THE_FLOOR_GOES`]
+/// times under the bend's radius when that is lower. That bend now answers
+/// `0.4835` at room `0.0019`, a fifth of the tube. A quarter bend of ring 1000
+/// tube 0.1 answers one rung past the old floor, at `0.0305`, where it fell
+/// back on `43.4` against `49.3`
+/// (`a_bend_round_a_ring_ten_thousand_times_its_tube_answers_one_rung_past_the_cap`).
+///
+/// **What that costs.** Every room asked after a rung that strayed lies
+/// between an eighth of the bend's radius and eight radii, since the skip
+/// above leaves the room under eight radii, so the ladder asks at most six
+/// rungs under the old floor. A ladder that never strays keeps Q2060's cap as
+/// it was. The rungs down to the old floor are cheap since Q2536: ring 1000
+/// tube 0.1 is meshed at `0.488`, `0.244`, `0.122` and `0.061` into 554, 1108,
+/// 1852 and 3424 triangles, in about 2, 3, 6 and 12 ms. The rungs past it are
+/// not: that bend's answer at `0.0305` is 46 116 triangles in about `0.2` s,
+/// and ring 1000 tube 0.01's at `0.0019` is 1 679 930 triangles, a mesh that
+/// took 42 to 67 s on this machine, where that bend's whole ladder took 7 ms
+/// before, with no answer. The cost is the mesh's: meshed under about 0.4
+/// tubes off, a wide ring's torus face gains 11 to 18 times its triangles a
+/// halving, which is a row of its own.
 ///
 /// # Errors
 ///
@@ -3003,7 +3025,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let mut closest = (enclosed, leaves_out);
     let top = how_far_across(&coarsest) / 2.0;
     let mut finest = (coarsest, enclosed, rounding, ProvenanceLog::new());
-    let floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
+    let mut floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
     let thinnest_bend = the_thinnest_bend_a_mesh_can_stray_past(view);
     let mut room = top;
     while room >= floor {
@@ -3042,6 +3064,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         };
         room /= 2.0;
         if let Some(radius) = strayed_past {
+            floor = floor.min(radius / TIMES_UNDER_A_BEND_A_MESH_STRAYED_PAST_THE_FLOOR_GOES);
             while room > floor && room >= ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED * radius {
                 room /= 2.0;
             }
@@ -3111,6 +3134,37 @@ fn the_thinnest_bend_a_mesh_can_stray_past(view: SolidView<'_>) -> Option<f64> {
 /// finer one answers, the closest sum in place of an answer: every rung that
 /// answers has cleared [`the_sum_answers`], and the floor is never skipped.
 const ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED: f64 = 8.0;
+
+/// How many times under the thinnest bend's radius
+/// [`how_much_space_a_curved_solid_encloses`]'s ladder goes down to, once a
+/// rung's mesh has strayed past that bend and been charged without end, when
+/// its floor [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] halvings under its top is
+/// higher (row Q2368).
+///
+/// **Set from four bends, not proven.** The rung that answered sat at `0.197`
+/// of the tube for the quarter bend of ring 100 tube 1, at `0.305` for ring
+/// 1000 tube 0.1 and for ring 100 tube 0.01, and at `0.19` for ring 1000 tube
+/// 0.01, and the rung above each did not answer. With the floor at an eighth,
+/// the last rung a ladder asks lies between an eighth and a quarter of the
+/// radius, under every one of those. With the floor at a quarter, ring 1000
+/// tube 0.01 would have stopped one rung short of its answer.
+///
+/// **Two tests ask under the old floor.** With a probe logging every ladder
+/// that went under it, the `rcad-topo`, `rcad-step` and `rcad` suites, 2901
+/// tests, found two:
+/// `a_bend_round_a_ring_ten_thousand_times_its_tube_answers_one_rung_past_the_cap`,
+/// and `rcad-step`'s
+/// `a_half_ball_on_a_long_thin_bar_placed_far_out_and_turned_is_read_back`,
+/// whose thinnest bend is `0.125` and old floor `0.119`. That one now answers
+/// at `0.0298` on 94 triangles in about 6 ms, where no rung down to the old
+/// floor answered.
+///
+/// **It can cost a minute.** A ring 1000 tube 0.01 bend's answering mesh is
+/// 1 679 930 triangles, 42 to 67 s, where its ladder took 7 ms before, with
+/// no answer. The mesh is to blame, not the floor:
+/// [`how_much_space_a_curved_solid_encloses`]'s "What that costs" has the
+/// numbers.
+const TIMES_UNDER_A_BEND_A_MESH_STRAYED_PAST_THE_FLOOR_GOES: f64 = 8.0;
 
 /// How many times [`how_much_space_a_curved_solid_encloses`]'s own ladder has
 /// asked a finer mesh, counted only in tests. A clock says a capped call is
@@ -3971,7 +4025,9 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
 /// [`how_much_space_a_curved_solid_encloses`]'s own ladder, which retries a sum
 /// that does not answer and not only a fold, is capped the same number of
 /// halvings below its own top (Q2060, §199.4) — see that function's "What
-/// stops it".
+/// stops it". Once one of its rungs has strayed past the thinnest bend, its
+/// cap goes down to [`TIMES_UNDER_A_BEND_A_MESH_STRAYED_PAST_THE_FLOOR_GOES`]
+/// times under that bend's radius when that is lower (Q2368).
 const HALVINGS_A_FOLD_IS_ASKED_DOWN_TO: i32 = 13;
 
 /// Whether a finer mesh may clear what refused this one, because it is about
@@ -8890,6 +8946,49 @@ mod tests {
             7,
             "nine rungs from the top room down to the one that answers, less \
              the two eight tubes wide or more under a mesh charged without end"
+        );
+    }
+
+    /// A quarter bend of tube `0.1` round a ring of `1000` is answered by
+    /// [`how_much_space_a_curved_solid_encloses`]'s own ladder one rung past
+    /// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] halvings below its top, once a
+    /// mesh has strayed past its tube (row Q2368).
+    ///
+    /// The top is `500.05`, so thirteen halvings under it is `0.061`, 0.61
+    /// tubes. Meshed `0.055` off there, the bend is charged `146` against the
+    /// `43.4` it encloses, and every rung above that is charged without end.
+    /// Until Q2368 that was the floor, and the ladder fell back on `43.4`, a
+    /// sum that said nothing. One rung on, at `0.0305`, the mesh is `0.0305`
+    /// off and charged `44.8` against `47.2`, and Pappus gives `49.3`.
+    #[test]
+    fn a_bend_round_a_ring_ten_thousand_times_its_tube_answers_one_rung_past_the_cap() {
+        let mut model = an_empty_model();
+        let bend = a_quarter_bend(&mut model, 1000.0, 0.1);
+        let view = model.solid(bend).expect("this model made the key");
+        let policy = Policy::certified();
+        let enclosed =
+            how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new())
+                .expect("a bend encloses some space");
+        let coarsest =
+            the_coarsest_mesh_whose_sides_do_not_cross(view, &policy, &mut ProvenanceLog::new())
+                .expect("a bend has a coarsest mesh");
+        let past_the_cap =
+            how_far_across(&coarsest) / 2.0 / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO + 1);
+        let mesh = view
+            .mesh(
+                Deflection::of(past_the_cap).expect("a room above zero"),
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the bend meshes a third of a tube off");
+        let (there, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+        assert!(
+            the_sum_answers(there, how_far_the_sum_can_be_off(view, &mesh, rounding)),
+            "a mesh {past_the_cap} off, a third of the tube, answers: {there}"
+        );
+        assert_eq!(
+            enclosed, there,
+            "the ladder answers on the rung one past the cap, {past_the_cap} off"
         );
     }
 
