@@ -25,9 +25,12 @@ Trends come from picking dates; nothing is stored between runs. Under the rows
 comes a summary of the ones picked: total, median and p90 of each step and each
 bucket.
 
-It reports time and nothing else: no tokens, no cost. Times are UTC. Tables go
-to the terminal, and `--json` prints the same numbers. A table shows its top
-15 entries, and the rest are added together under "other".
+Beside each time it now prices the step: each response's cost, from
+`spend.py`'s `cost_of` and its price table (imported, not copied), by the
+model and usage of the response with the largest `output_tokens` it saw — so
+a merged row is read in hours and money in one table. Times are UTC. Tables
+go to the terminal, and `--json` prints the same numbers. A table shows its
+top 15 entries, and the rest are added together under "other".
 
 ### 411.2 A row
 
@@ -751,3 +754,33 @@ it. This is a remaining item, filed as a row below, not done here.
 
 **What ran this:** `verify_split.py`, the path given above; its output is
 saved beside it as `verify_split_output.txt` in the same scratchpad.
+
+### 411.13 A price beside each time — Q2596
+
+Each step's own responses are grouped by `(requestId, message.id)` — the same
+key `row_time.py` already built per assistant content block before this row,
+and the same grouping `spend.py`'s own `load()` uses — and only the record
+with the largest `output_tokens` in each group is kept, since a streamed
+response's later records repeat the same `requestId`/`message.id` with a
+growing total. `cost_of_step` sums `spend.cost_of(model, usage)` (imported
+from `tooling/session-spend/spend.py`, not copied: its price table and its
+cache-write split, `ephemeral_1h_input_tokens` and `ephemeral_5m_input_tokens`
+falling back to `cache_creation_input_tokens`, both live in one place) over
+the kept records, and a step with no transcript at all prices at `0.0`. A
+row's cost is the sum of its steps' costs.
+
+The summary carries a `"row: cost"` entry (total, median and p90, grouped
+with elapsed and slot, the way `is_cost` in `row_time.py` tells apart from a
+time so its total is not truncated by an integer `round()`) and a `"step
+cost: <role>"` entry per role, parallel to the existing `"step: <role>"` time
+entry and divided across a bundle's rows the same way. `check-row-time.py`'s
+Q13 fixture (`a_response_priced_from_its_usage`) is a lane whose first
+response streams three records of growing `output_tokens`, so the selftest
+fails with `KeyError: 'cost'` against `row_time.py` before this row (checked
+in a `git archive` scratch copy against bb1f44fe86078298765aa802621cbd9a30236365) and passes after it.
+
+A probe on 2026-10-21 priced every agent of the `lanes` runs since 2026-10-07
+this way: 930 rows and 6712 USD, a median of 8.04 USD for a row that writes a
+crate and 2.18 USD for one that writes only tooling or docs, and 12 to 16% of
+it outside the lane and its relays — a lead to re-measure, not a pin (carried
+from the row's brief, not independently re-measured by this lane).
