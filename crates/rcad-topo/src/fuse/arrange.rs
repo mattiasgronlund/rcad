@@ -4613,17 +4613,23 @@ impl<'f> Arrangement<'f> {
     /// meets with a ball or a pipe each is
     /// ([`Arrangement::as_the_two_meets_of_one_line_say`]), where a second
     /// plane cuts a plane's loop
-    /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]), where two
+    /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) and where two
     /// parallel planes cut it
-    /// ([`Arrangement::as_two_parallel_cuts_through_the_loop_say`]) and where
-    /// a plane cuts it beside a corner on it
-    /// ([`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`])
-    /// only where the boxes cannot say, because the boxes are cheaper and
-    /// nearly always enough.
+    /// ([`Arrangement::as_two_parallel_cuts_through_the_loop_say`]) only where
+    /// the boxes cannot say, because the boxes are cheaper and nearly always
+    /// enough.
     ///
     /// **Where two planes through one corner cut it
-    /// ([`Arrangement::as_two_cuts_through_one_corner_say`]) is asked only
-    /// where the policy would refuse.** That route answers where the corner is
+    /// ([`Arrangement::as_two_cuts_through_one_corner_say`]), and where a plane
+    /// cuts it beside a corner on it
+    /// ([`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`]),
+    /// is asked only where the policy would refuse.** Asked before the policy,
+    /// the second kept a tolerant fuse of a cube whose edges run through a
+    /// frustum's far rim from answering: it put the corner and the meet a
+    /// rounding apart where the policy reads them as one point, and the fuse
+    /// was refused `CannotTellTheCellsOfAFaceApart`
+    /// (`tests/two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs`,
+    /// Q2408). The first route answers where the corner is
     /// a rounding off the loop's surface, and keeps the two nodes a rounding
     /// apart; a tolerant policy reads them as one point, the corner as on the
     /// surface. Kept apart, they leave a sliver too thin to mesh or to close:
@@ -4682,12 +4688,6 @@ impl<'f> Arrangement<'f> {
         {
             decided = proved;
         }
-        if matches!(decided, Decision::Undecidable { .. })
-            && let Some(proved) =
-                self.as_a_corner_beside_a_flat_cut_through_the_loop_says(crossing, first, second)
-        {
-            decided = proved;
-        }
         let Decision::Undecidable { .. } = decided else {
             return Ok(decided);
         };
@@ -4708,6 +4708,11 @@ impl<'f> Arrangement<'f> {
             return Ok(proved);
         }
         if let Some(proved) = self.as_two_cuts_through_the_axis_say(crossing, first, second) {
+            return Ok(proved);
+        }
+        if let Some(proved) =
+            self.as_a_corner_beside_a_flat_cut_through_the_loop_says(crossing, first, second)
+        {
             return Ok(proved);
         }
         must_decide(decided, ALONG_A_CROSSING, &nodes, measures, policy, log)
