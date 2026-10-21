@@ -58,11 +58,13 @@
 //! (`why_the_walked_point_oracle_checks_nothing_on_the_slow_pipes.rs`), but the
 //! ceilings are still the caller's ask, and §125.6 keeps that open.
 //!
-//! **It is the ask and not the pair.** Swept over the budget, the same run gives
-//! five points at `1e1`, `1e4`, `1e8`, `1e10` … `1e16`, crawls to the cap at
-//! `1e20`, walks again in six points at `1e30`, and crawls at `1e100` and at
-//! `f64::MAX / 4.0`. Non-monotone, which is what a wild first step landing
-//! wherever the settling drops it looks like.
+//! **Since Q2581 that sweep does not crawl at all.** `march`'s first trial is
+//! no longer the caller's ask: it is `room` or the smaller of the two
+//! surfaces' radii, whichever is shorter, and the radius is never taken below
+//! one grid step at the seed (`march.rs`'s `march`). Swept over the same
+//! budget — `1e1`, `1e4`, `1e8`, `1e10`, `1e16`, `1e20`, `1e30`, `1e100` and
+//! `f64::MAX / 4.0` — the same run now draws six points, `8.94e-8` off, in 20
+//! to 60µs at every one of them.
 //!
 //! **It is not the magnitude.** The whole pair written at `2^-8`, `2^-16`,
 //! `2^-24`, `2^-32`, `2^8` and `2^16` — every ratio held fixed — crawls to the
@@ -73,15 +75,17 @@
 //! `65536`, `1.6777e6` and `1.6777e7` all walk in three to six points in under
 //! 29µs. The crawl lives below a ratio of about `1e-5`.
 //!
-//! The family of fixes, per §16.10, and why it is one family: the step needs a
-//! ceiling that does not come from the caller's ask. Either
-//! `MOST_A_STEP_MAY_GROW_TO` is measured against something absolute — the
-//! crossing's own size, which `walk` already works out for the conic case — or
-//! the first ask is clamped to it. Raising the point cap is not in the family:
-//! a walk that is not following the curve does not start following it with more
-//! points. Nor is changing the harness to stop asking `f64::MAX / 4.0` — §16.10
-//! says to check the **public API**, and [`Deflection`](rcad_geom::Deflection)
-//! takes any positive length from any caller.
+//! Q2581 took the second of the family's two branches: `MOST_A_STEP_MAY_GROW_TO`
+//! is untouched and still the caller's ask in disguise, but the *first* ask is
+//! now clamped to the smaller of the two surfaces' radii, never below one grid
+//! step at the seed. For this pair that is enough on its own: once the first
+//! step starts at the right scale, doubling from it reaches the loop before
+//! the caller's ceiling is ever asked for anything. Raising the point cap was
+//! never in the family: a walk that is not following the curve does not start
+//! following it with more points. Nor is changing the harness to stop asking
+//! `f64::MAX / 4.0` — §16.10 says to check the **public API**, and
+//! [`Deflection`](rcad_geom::Deflection) takes any positive length from any
+//! caller.
 //!
 //! # The second case is §94's family again, and the answer does not exist
 //!
@@ -214,17 +218,21 @@ fn a_huge_pipe_and_a_thin_one_are_walked_even_when_asked_for_all_the_room_there_
 /// microseconds and does not fire on this one.
 ///
 /// Until Q1598 the refusal came a million marched points later, as
-/// `TooManyPointsAlongOneCrossing`, and cost seconds. Now the first step takes
-/// 33 trials, from `0.5` down. Eight of them settle `7.45e-9` from the seed,
-/// no further than the two ends' own bounds reach, and the marcher no longer
-/// keeps such a trial; the other 24 are refused where the far end cannot be
-/// bounded. The one it keeps is `1.16e-10`, a chord of `5.82e-11`, one step of
-/// the grid, and the angle between the two pipes at that far end cannot be told
-/// from nought, so the walk is refused there as tangent, while bounding how far
-/// off that point sits. The pipes are not tangent: at a point one grid step
-/// from a thread `4.34e-19` wide, the thread's normal is all rounding, and
-/// that is what the refusal reports. Measured with prints in `march.rs`'s
-/// `one_step`, not kept.
+/// `TooManyPointsAlongOneCrossing`, and cost seconds. Since Q2581 the first
+/// trial is asked one grid step at the march's own seed, `[-393352.0,
+/// 50395647.66268771, 12800.0]` — which sits near the huge pipe's own radius,
+/// `50397183`, not near the crossing, so its grid step is `7.45e-9`, sixty-four
+/// times the `1.16e-10` the crossing itself needs. Each of the first six
+/// trials, from `7.45e-9` down, cannot be measured at all: not settled back,
+/// just refused outright as tangent while bounding how far off a point sits —
+/// the same way the whole walk is eventually refused. The seventh, at
+/// `1.16e-10`, is the first one that can be measured, and it is kept outright:
+/// its chord is `5.82e-11`, one step of the grid at the crossing. That lands
+/// the walk's one point. Its next step is refused before `one_step` is even
+/// asked: the tangent at that new point cannot be told from nought. The pipes
+/// are not tangent: at a point one grid step from a thread `4.34e-19` wide, the
+/// thread's normal is all rounding, and that is what the refusal reports.
+/// Measured with prints in `march.rs`'s `one_step`, not kept.
 #[test]
 fn a_crossing_thinner_than_one_step_of_the_grid_is_refused_at_its_first_step() {
     let pair = the_huge_pipe_and_the_thread_through_it(4.336808689942018e-19);
