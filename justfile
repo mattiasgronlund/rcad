@@ -284,25 +284,31 @@ gate_metered_steps := "check check-fuzz-builds check-timing-hooked-calls check-w
 # The tooling selftests after them were another 16 s of every served gate (§369).
 #
 # **A step is here only if nothing it reads is prose, or outside the tree.** An
-# strace of every step settled that (§337.2, §369). `check-hooks` and
-# `check-questions-selftest` are left out because each runs a plugin's own cases
-# from its checkout. `deny` is left out because it fetches the advisory database,
-# `check-corpus` because the corpus is outside the tree, `check-systemd-units`
-# because it reads the installed systemd units, and `check-queue-merge-driver`
-# because it reads git's config. Every step that reads `docs/` is left out as
-# well. A step missing from this list runs every time, so a new step is never
-# served by default.
+# strace of every step settled that (§337.2, §369). `check-corpus` is left out
+# because the corpus is outside the tree, `check-systemd-units` because it
+# reads the installed systemd units, `check-queue-merge-driver` because it
+# reads git's config, and `check-hub` because it reads the worktree list and
+# the hub's checkout. Each
+# takes under a third of a second (§337.9). Every step that reads `docs/` is
+# left out as well. A step missing from this list runs every time, so a new
+# step is never served by default.
 #
-# **`check-timing-hooked-calls` is the one exception, and not a silent one.**
-# It too reads something outside the tree — the installed nightly rustc and
-# `cargo-fuzz` — but `gate`'s own body gives it a fingerprint of its own
-# rather than folding it into the whole-tree one this list otherwise shares,
-# because docs/decisions.d/425 §425.7 found its answer depends on nothing else
-# in the tree: the fuzz targets' own closures into the kernel crates are never
-# reachable from the scan's starting points, by construction of `timed`'s
-# inlining in the release binary cargo-fuzz always builds. Being in this list
-# says only that `gate` knows how to serve it; the narrow fingerprint, not this
-# list's blanket rule, is what makes serving it sound.
+# **Five steps here read outside the tree, and none of them silently.** `gate`'s
+# own body gives each a key of its own rather than the whole-tree fingerprint
+# this list otherwise shares, and being in this list says only that `gate`
+# knows how to serve it: the key, not this list's blanket rule, is what makes
+# serving it sound.
+#
+# `check-timing-hooked-calls` reads the installed nightly rustc and
+# `cargo-fuzz`, and docs/decisions.d/425 §425.7 found its answer depends on
+# nothing else in the tree: the fuzz targets' own closures into the kernel
+# crates are never reachable from the scan's starting points, by construction
+# of `timed`'s inlining in the release binary cargo-fuzz always builds.
+#
+# `check-hooks`, `check-questions-selftest` and `check-plugins` read the plugin
+# checkouts and Claude Code's config, and `deny` the advisory database. Each is
+# keyed on the code's fingerprint and what it reads outside the tree
+# (§337.9).
 gate_reusable_steps := "check \
     check-fuzz-builds \
     check-enums \
@@ -339,6 +345,10 @@ gate_reusable_steps := "check \
     check-fuzz-overnight-selftest \
     check-timing-hooked-calls-selftest \
     check-timing-hooked-calls \
+    check-hooks \
+    check-questions-selftest \
+    check-plugins \
+    deny \
     check-fuzz-watermark-selftest \
     check-gate-fresh-selftest \
     check-gate-fresh-cleanup-selftest \
@@ -734,6 +744,12 @@ pre-gate:
 # `0` also serves nothing. That is the audit: it re-runs about one gate in
 # sixteen. If a re-run fails a step the record says passed, that is reported as
 # a violation and the record is deleted. `docs/decisions.md` §337.
+#
+# The four steps that check the machine rather than the tree, `check-hooks`,
+# `check-questions-selftest`, `check-plugins` and `deny`, are served the same
+# way, each off a key that adds what it reads outside the tree to the code's
+# fingerprint, so a plugin pulled or an advisory fetched runs it again
+# (§337.9).
 #
 # **The record names the steps it passed** (§397.4). A run that leaves some out,
 # as `gate-lane` and `gate-docs` do, records the ones it ran, and a later gate
@@ -1319,6 +1335,51 @@ gate mode="loud" verdicts="reuse" jobs="cores":
             note "!!! step is not deterministic. The record is deleted, and the case is kept in $thc_violations"
         done
     fi
+
+    # The write-back of the steps that check the machine, each against its own
+    # key (§337.9). The key is taken again first: `deny` fetches the advisory
+    # database while it runs, so what a step read can move under it. Then a
+    # pass names nothing that a later gate could look up, and a failure was
+    # not on the inputs any record passed, so it is no violation.
+    machine_code_now=""
+    for step in $machine_steps; do
+        m_key=${machine_keys[$step]:-}
+        [ -n "$m_key" ] || continue
+        m_ended=""
+        for i in "${!names[@]}"; do
+            [ "${names[$i]}" = "$step" ] || continue
+            m_ended=${ended_with[$i]}
+        done
+        [ -n "$m_ended" ] || continue
+        [ -n "$machine_code_now" ] || machine_code_now=$($j _code-fingerprint)
+        m_record="$machine_store/$m_key"
+        if [ "$(machine_key "$step" "$machine_code_now")" != "$m_key" ]; then
+            [ "$m_ended" -ne 0 ] || note "· verdicts: $step not recorded, because what it reads changed while the gate ran"
+        elif [ "$m_ended" -eq 0 ]; then
+            mkdir -p "$machine_store"
+            m_new=$(mktemp "$machine_store/.new.XXXXXX")
+            {
+                echo "commit $head"
+                echo "date $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                echo "host $(hostname)"
+                echo "steps $step"
+            } >"$m_new"
+            mv "$m_new" "$m_record"
+            # Same week as the whole-tree store, for the same reason (above).
+            find "$machine_store" -maxdepth 1 -type f -mtime +7 -delete
+            note "· verdicts: $step's green is recorded as ${m_key:0:12}"
+        elif [ -f "$m_record" ]; then
+            m_from=$(sed -n 's/^commit //p' "$m_record")
+            m_at=$(sed -n 's/^date //p' "$m_record")
+            m_violations="$(dirname "$machine_store")/rcad-verdict-violations"
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $m_key $step $head passed-at=$m_from $(hostname)" >>"$m_violations"
+            rm -f "$m_record"
+            note "!!! verdict violated: $step failed on code and machine inputs that ${m_from:0:8}'s gate passed at $m_at."
+            note "!!! Same inputs, different answer: the key is missing something the step reads, or the"
+            note "!!! step is not deterministic (docs/decisions.md §337.6). The record is deleted, and the"
+            note "!!! case is kept in $m_violations"
+        fi
+    done
     echo "$summary" | tee -a "$log"
     # After the block, so that a reader's `tail -6` still lands on the summary,
     # and only on a pass: what it records is that this commit was read end to
