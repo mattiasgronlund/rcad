@@ -40,12 +40,14 @@ against.
 
 ## The write set
 
-`writeSet` is the union of the rows' write sets, leaving out `-`, and nothing
-else. **You never widen it or narrow it, not even when it is wrong**: that is a
-`needs`. Only `queue next` checks a write set against the rows already running,
-`take` does not, and two preps in one fill could widen two rows onto one file
-at once (§396.4). `lanes.js` refuses an answer whose `writeSet` is not that
-union.
+The lane's write set is the union of the rows' write sets, leaving out `-`,
+and nothing else; `lanes.js` builds that union itself from the `write_set`
+column you copy into `rows`, so you report no `writeSet` of your own. **You
+never widen it or narrow it, not even when it is wrong**: that is a `needs`.
+Only `queue next` checks a write set against the rows already running, `take`
+does not, and two preps in one fill could widen two rows onto one file at once
+(§396.4). A slip in restating the union here used to be able to stop a run on
+its own; now there is nothing of yours to restate.
 
 Check the write set against what the work really touches. A row whose write set
 is wrong is fixed in the file first, by the dispatcher: a lane that needs a file
@@ -173,8 +175,8 @@ the lane would otherwise spend twenty minutes finding again:
 
 ## What to hand back
 
-`ok`, with `rows`, `writeSet`, `model`, `sourcePaths`, `pinsOnly`,
-`sameBehaviour`, `marks_why` and `facts`, and `needs` empty. Or `needs`, with
+`ok`, with `rows`, `model`, `sourcePaths`, `pinsOnly`, `sameBehaviour`,
+`marks_why` and `facts`, and `needs` empty. Or `needs`, with
 each file the work touches that its rows do not name and why, and the other
 fields as far as you got. A `needs` stops the run before any lane starts, and
 it comes back not merged with your `needs` in its lines. The dispatcher then
