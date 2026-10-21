@@ -7,11 +7,13 @@ of its rows is fixed alone.
 
 A trace is a row whose description, after its pin, its tag and the word that
 says where it came from, starts `Trace the family on <file>`, as 450.3 rule 2
-files one. It may be open or closed: a trace that is done still covers the rows
-it named. A file that has had a trace is a family again only once three open
-rows that no trace names share it, and then the family is those rows alone,
-the ones a new trace would name. A file that has had no trace keeps all its
-rows, whatever a trace on another file named.
+files one; `<file>` may be more than one `tests/*.rs` path joined by `and`, as
+Q2037's trace was, and it covers every row named on any of them. It may be
+open or closed: a trace that is done still covers the rows it named. A file
+that has had a trace is a family again only once three open rows that no
+trace names share it, and then the family is those rows alone, the ones a new
+trace would name. A file that has had no trace keeps all its rows, whatever a
+trace on another file named.
 
 A row counts as named on a file when its own `from/` or `was/` link, followed
 back through as many such links as it takes, reaches a trace on that file or a
@@ -58,11 +60,12 @@ def families(queue):
     the rows whose from/was chain does not reach it.
     """
     traces = [(row.id, *trace) for row in queue.rows for trace in [trace_of(row)] if trace is not None]
-    traced_files = {file for _, file, _ in traces}
+    traced_files = {file for _, files, _ in traces for file in files}
     sinks_by_file = {}
-    for trace_id, file, named in traces:
-        sinks_by_file.setdefault(file, set()).update(named)
-        sinks_by_file[file].add(trace_id)
+    for trace_id, files, named in traces:
+        for file in files:
+            sinks_by_file.setdefault(file, set()).update(named)
+            sinks_by_file[file].add(trace_id)
     found = []
     for file, members in members_by_file(queue).items():
         if file in traced_files:
@@ -91,7 +94,13 @@ def members_by_file(queue):
 
 
 def trace_of(row):
-    """The file a trace row is on and the ids it names after the file, or None for a row that is no trace."""
+    """The files a trace row is on and the ids it names after them, or None for a row that is no trace.
+
+    A trace may name more than one file, joined by `and`, as Q2037's did:
+    `Trace the family on a.rs and b.rs: Q493, Q861, Q1905`. Every
+    `tests/*.rs`-looking word up to and including the one carrying the colon
+    is a file; a word that is not one, such as `and`, is skipped.
+    """
     words = row.fields[5:]
     if words and PIN.match(words[0]):
         words = words[1:]
@@ -101,8 +110,20 @@ def trace_of(row):
         words = words[1:]
     if words[:len(TRACE)] != TRACE or len(words) == len(TRACE):
         return None
-    file = words[len(TRACE)].rstrip(":,.;").partition("#")[0]
-    return file, set(ROW_ID.findall(" ".join(words[len(TRACE) + 1:])))
+    rest = words[len(TRACE):]
+    files = []
+    i = 0
+    while i < len(rest):
+        word = rest[i]
+        stripped = word.rstrip(":,.;")
+        if TEST_FILE.search(stripped):
+            files.append(stripped.partition("#")[0])
+        i += 1
+        if word.endswith(":"):
+            break
+    if not files:
+        return None
+    return frozenset(files), set(ROW_ID.findall(" ".join(rest[i:])))
 
 
 def reaches_a_sink(row, sinks, queue):

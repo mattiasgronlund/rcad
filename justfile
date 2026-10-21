@@ -15134,6 +15134,19 @@ check-queue-selftest:
         '1 family with no trace (§450.3)')" ] \
         || fail "a from/ or was/ chain did not reach the trace it should, or excluded a row that only reaches a trace on another file"
 
+    # Q2041: a trace may name more than one file, joined by `and`, as Q2037's
+    # did; each file it names covers the rows it named on it, not only the
+    # first file's.
+    fence tracetwofiles <<'MD'
+    Q5001  1  done:abcdef0  opus  -  from/- Trace the family on crates/rcad-topo/tests/a_first_shape.rs and crates/rcad-topo/tests/a_second_shape.rs: Q5002, Q5003 and Q5004, naming both files it covers §450
+    Q5002  1  todo  opus  crates/rcad-topo/tests/a_second_shape.rs  from/- the trace's first named member, on the second file §450
+    Q5003  1  todo  opus  crates/rcad-topo/tests/a_second_shape.rs  from/- the trace's second named member, on the second file §450
+    Q5004  1  todo  opus  crates/rcad-topo/tests/a_second_shape.rs  from/- the trace's third named member, on the second file §450
+    MD
+    drive tracetwofiles families
+    [ "$got" = '0 families with no trace (§450.3)' ] \
+        || fail "a trace naming two files joined by and did not cover the members it named on the second file too"
+
     # §373.7 / Q2401: crates/rcad-topo/tests/merged.rs is the file every new
     # rcad-topo test file is declared in, whole or by item
     # (merged.rs#<module>), so it is never a shape's own test file. A row
