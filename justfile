@@ -18768,10 +18768,11 @@ verify-lane *args:
 # file it cannot read, or that marks a lane both `pinsOnly` and `sameBehaviour`;
 # and, pinning §429.5, the agent's own `just verify-lane` stopped mid-gate the
 # way Claude Code kills a command (§429.2), which still leaves the detached run
-# to finish and `just verify-lane wait` to read its verdict back; and a test
-# name with a space in it, the form nextest's own FAIL line reports one in,
-# which no revert can run and which is left to you by name instead of silently
-# deciding nothing (Q1347).
+# to finish and `just verify-lane wait` to read its verdict back; a test name
+# with a space in it, the form nextest's own FAIL line reports one in, which no
+# revert can run and which is left to you by name instead of silently deciding
+# nothing (Q1347); and every line the run writes to its log carrying its own
+# UTC timestamp (Q1378).
 #
 # The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
 # file, so a field the schema renames fails here and not in a verifier's report.
@@ -19157,6 +19158,16 @@ check-verify-lane-selftest:
     no_test_ran
     back_at_the_tip
 
+    fixture stamped
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/ + tests is_fixed
+    run
+    body=$(printf '%s\n' "$got" | sed '$d')
+    unstamped=$(printf '%s\n' "$body" | grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z ' || true)
+    [ -z "$unstamped" ] || fail "a line the run wrote to its log carries no UTC timestamp to the second: $unstamped"
+    back_at_the_tip
+
     fixture bad-input
     input base "$base" + colour blue
     call target/verify-lane.txt
@@ -19166,7 +19177,7 @@ check-verify-lane-selftest:
     call target/verify-lane.txt
     [ "$rc" -eq 2 ] && grep -qF 'both pinsOnly and sameBehaviour' <<<"$got" || fail "an input marking the lane both pinsOnly and sameBehaviour did not refuse"
     [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input marking the lane both pinsOnly and sameBehaviour"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 17 arms"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 18 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #
