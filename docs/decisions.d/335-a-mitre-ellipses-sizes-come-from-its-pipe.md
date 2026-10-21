@@ -286,8 +286,9 @@ pieces it cannot tell apart. This is the circle arm's row, not this one.
 > SettlingAPointOntoBothSurfaces }` at every deflection
 > (`a_quarter_circle_ending_where_a_ball_and_its_own_pipe_do_not_cross_is_refused`
 > in `walk.rs`), not `CannotNameWhichPieceOfACrossingThisIs` as the section's
-> first sentence and that note say. `mise exec -- just t -p rcad-step --test
-> how_often_a_real_file_imports --no-capture` now prints "the builder or the
+> first sentence and that note say. `mise exec -- just t -p rcad-step -E
+> 'binary(merged) & test(how_often_a_real_file_imports)' --no-capture` now
+> prints "the builder or the
 > sweep: geometry: this crossing runs where its two surfaces are too nearly
 > parallel to follow it, asked while settling a point onto both of them" for
 > both `Relay_DPDT_Fujitsu_FTR-F1C.step` and `Relay_DPST_Fujitsu_FTR-F1A.step`.

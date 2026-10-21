@@ -29,10 +29,10 @@
 
 use std::path::Path;
 
-#[path = "../../rcad-geom/tests/one_binary/mod.rs"]
-mod one_binary;
 #[path = "../../rcad-topo/tests/cones/mod.rs"]
 mod cones;
+#[path = "../../rcad-geom/tests/one_binary/mod.rs"]
+mod one_binary;
 
 #[path = "a_ball_resting_in_a_cone_rounds_its_tip.rs"]
 pub mod a_ball_resting_in_a_cone_rounds_its_tip;

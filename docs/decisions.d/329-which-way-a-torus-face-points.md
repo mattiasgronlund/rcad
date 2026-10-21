@@ -123,8 +123,8 @@ face used forwards (one line, `!= matches!(stored, Surface::Torus(_))`); each of
 those with `lane-q102-a-point-a-ray-can-leave` merged in. All four were run in a
 throwaway detached tree under this lane's `target/`, never on the branch, with a
 probe version of `tests/which_way_a_torus_faces_normal_points.rs` that printed
-rather than asserted: `mise exec -- just t -p rcad-step --test
-which_way_a_torus_faces_normal_points probe_all --no-capture`.
+rather than asserted: `mise exec -- just t -p rcad-step -E 'binary(merged) &
+test(which_way_a_torus_faces_normal_points) & test(probe_all)' --no-capture`.
 
 ### 329.3 What each configuration says
 

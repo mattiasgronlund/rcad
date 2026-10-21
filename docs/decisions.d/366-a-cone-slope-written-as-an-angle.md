@@ -148,8 +148,8 @@ and turned a quarter about `x`. All sixteen come back the same.
 `still_a_model` from the checked-in seeds, with each draw's output added back
 to the pool. Run by
 
-    mise exec -- just t -p rcad-step \
-        --test every_model_the_writer_fuzzer_kept_is_written_again how_often --no-capture
+    mise exec -- just t -p rcad-step -E \
+        'binary(merged) & test(every_model_the_writer_fuzzer_kept_is_written_again) & test(how_often)' --no-capture
 
 Before the writer change, at the lane's first commit:
 
@@ -277,8 +277,8 @@ the plane–ring circle, not 85 (§241.6).
 `a_frustum_up_through_a_block_read_back_from_rounded_text` now writes all 48
 configurations and prints, run by
 
-    mise exec -- just t -p rcad-step --test a_fuse_read_back_from_rounded_text \
-        a_frustum_up_through_a_block --no-capture
+    mise exec -- just t -p rcad-step -E \
+        'binary(merged) & test(a_frustum_up_through_a_block)' --no-capture
 
     as built:            144 decided, refused {}
     read back exactly:   144 decided, refused {}
@@ -417,8 +417,8 @@ cut corners stay a limit under Q25.
 
 **What it moved.**
 
-    mise exec -- just t -p rcad-step --test a_fuse_read_back_from_rounded_text \
-        a_frustum_up_through_a_block --no-capture
+    mise exec -- just t -p rcad-step -E \
+        'binary(merged) & test(a_frustum_up_through_a_block)' --no-capture
 
     11 digits (48 of 48 files had a real moved): 144 decided, refused {}; ...
         reader refused {}; worst volume move 0.00e0 of the bound
