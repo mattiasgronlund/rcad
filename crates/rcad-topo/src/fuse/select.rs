@@ -1368,14 +1368,19 @@ fn is_flat_with_a_curved_side(face: FaceView<'_>) -> bool {
 /// and §294.20, so the `S` it cut the pieces against has its corner at that
 /// meet, and so does the hull above. A corner of `P` that is a corner of the
 /// input is the meet of the surfaces round it when they are exactly three
-/// planes ([`BakedCorner::around`](super::bake::BakedCorner)); a meet the
+/// planes ([`BakedCorner::around`](super::bake::BakedCorner)), and where there
+/// are more, the meet of `P`'s plane and the two planes that cut it along `P`'s
+/// sides there ([`where_the_lines_of_two_sides_meet`]); a meet the
 /// arrangement placed is the meet of the three surfaces it names. A corner of
 /// `S` read out of the model, which nothing solved, any other corner of `P`, a
 /// corner of `P` not on `P`'s own plane, or a curved surface on `P` or on `S`
 /// leaves this rule out. Until Q1936 a corner of `S` was read from the planes
 /// round it too, so a solid with four planes round a corner was never asked,
 /// and the pyramid placed and cut through its apex refused on a speck of the
-/// cut a rounding across (§294.21).
+/// cut a rounding across (§294.21). Until Q2334 a corner of `P` with four
+/// planes round it was left out the same way, and the pyramid turned about `x`
+/// and cut by a wedge whose edge runs up through its apex refused on a speck of
+/// its `−x` face a rounding across by the apex.
 ///
 /// **And inside a solid whose every face plane has all of it on or behind,
 /// with every corner of the piece on or behind every one of them and, for
@@ -1423,14 +1428,56 @@ fn the_planes_meeting_at_each_corner_of_a_piece(
     piece
         .wires
         .iter()
-        .flatten()
-        .map(|side| {
+        .flat_map(|wire| {
+            (0..wire.len()).map(|at| (&wire[(at + wire.len() - 1) % wire.len()], &wire[at]))
+        })
+        .map(|(before, side)| {
             if !is_straight(side) {
                 return None;
             }
-            Some(the_planes_meeting_at(&side.ends[0], own, flat)?.map(|plane| plane.coefficients()))
+            let three = match the_planes_meeting_at(&side.ends[0], own, flat) {
+                Some(three) => three,
+                None => where_the_lines_of_two_sides_meet(before, side, own, flat)?,
+            };
+            Some(three.map(|plane| plane.coefficients()))
         })
         .collect()
+}
+
+/// `flat` and the planes that cut it along `before` and `side`, where
+/// `before` ends at the corner of the input `side` starts at and that corner
+/// has more than three planes round it, or `None` where it is not that.
+///
+/// **A corner of a flat piece with straight sides is where the lines of its
+/// two sides cross.** Each side runs along `flat` and its partner plane, so
+/// the one point on both is the meet of `flat` and the two partners, and the
+/// piece is the polygon with that corner. No other reading puts both sides on
+/// their lines. With four or more planes round the corner, as at a square
+/// pyramid's apex, bake solved it from three of them, and on the face whose
+/// plane is not one of the three the corner it solved is a rounding off
+/// `flat`. Placed by a turn, the pyramid's `−x` face is cut by a wedge's face
+/// `y = 2x` into a triangle a rounding across by the apex, with no point
+/// inside it, and its corner at the apex is the meet of `flat` and the `±y`
+/// planes, the face's own top corner (§294).
+fn where_the_lines_of_two_sides_meet(
+    before: &FaceMeet,
+    side: &FaceMeet,
+    own: &BakedSolid,
+    flat: Plane,
+) -> Option<[Plane; 3]> {
+    let MeetPoint::Existing { vertex, .. } = side.ends[0] else {
+        return None;
+    };
+    if before.ends[1] != side.ends[0] || the_corner_at(own, vertex).around.len() <= 3 {
+        return None;
+    }
+    let [one, other] = [before, side].map(|side| {
+        let [carrier, partner] = &side.carried_by;
+        is_one_plane_either_way(*carrier.as_plane()?, flat)
+            .then(|| partner.as_plane().copied())
+            .flatten()
+    });
+    Some([flat, one?, other?])
 }
 
 /// Whether `side` runs where two planes meet, and so along a straight line.
