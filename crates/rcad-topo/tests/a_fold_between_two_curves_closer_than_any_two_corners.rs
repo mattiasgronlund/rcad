@@ -1,5 +1,6 @@
 //! A ball pressed a little way into the side of a round bar, and the piece
-//! the two share (row Q2044).
+//! the two share (row Q2044); and the search for any solid of fewer than two
+//! corners whose coarsest mesh folds (row Q2498).
 //!
 //! # The shape
 //!
@@ -32,7 +33,7 @@
 //! coarsest fold straight back without asking for one finer mesh. That arm is
 //! unchanged; this lens no longer reaches it.
 //!
-//! # A gap, not a limit
+//! # For the lens, a gap and not a limit
 //!
 //! A finer mesh of the same lens does not fold. Measured on `d6433677` with a
 //! probe in `the_coarsest_mesh_whose_sides_do_not_cross`, not kept: for the
@@ -62,6 +63,55 @@
 //! face, each two faces round one loop, and neither folds at its coarsest
 //! mesh. So no shape designers make on purpose was known to be refused this
 //! way, and the refusal was class C.
+//!
+//! # No shape is known to reach the arm (row Q2498)
+//!
+//! The arm `let Some(closest) = how_close_two_corners_come(view) else { return
+//! Err(finest_refusal) }` in `the_coarsest_mesh_whose_sides_do_not_cross` is
+//! still a guard with no shape known behind it. Q2498 looked for a solid of
+//! fewer than two corner places whose coarsest mesh folds, and found none. Two
+//! tests here keep what it found:
+//!
+//! - [`no_solid_of_fewer_than_two_corners_these_intersections_leave_folds_at_its_coarsest_mesh`]
+//!   intersects four families, either solid first, and meshes at the coarsest
+//!   deflection each solid of the answer with fewer than two corner places:
+//!   108 from a ball in the bar's side, 32 from a bar across the bar, 24 from a
+//!   cap beside a ball's pole and 108 from two balls. None folds.
+//! - [`a_whole_ring_in_one_face_with_one_corner_meshes_at_the_coarsest_deflection`]
+//!   builds a whole ring as one face, which meets itself along both its edges
+//!   at its one corner, in five sizes and four orders. None folds.
+//!
+//! Tried on Q2498's branch with probes that were not kept:
+//!
+//! - a wider sweep of intersections: balls of 8 radii at 9 reaches and 10
+//!   turns in the bar's side gave 520 answers of fewer than two corner places;
+//!   bars across the bar gave 89, and lenses of two balls 144. None folds.
+//! - a slab of a block across a ball of 3: 52 of 132 are refused
+//!   `CurvedFaceWithAHoleGoesTooFarRound`, each one whose answer is a band of
+//!   the ball's skin holding neither pole, so no mesh of it is asked; the 80
+//!   that answer hold two corner places or more.
+//! - a block whose face leaves a cap of a ball of 3 that misses its pole by a
+//!   little: 212 answers of one corner place, none folding.
+//! - a ring of 5 and 3 cut into two faces by its outer equator, the circle
+//!   round its tube in `x = 0` and a Villarceau circle, all three through the
+//!   one corner `(0, 8, 0)`: `SolidBuilder::build` refuses it all 16 ways
+//!   round, so no mesh of it is ever asked.
+//!
+//! # Why the arm may hold nothing, a reading nobody has run
+//!
+//! A fold's side has both ends on edges the two folding faces share. Since
+//! Q2178 a curved patch draws no side between two points along one edge with
+//! a point inside that edge between them (`corners_cut_off_by_one_side` in
+//! `rcad-mesh`'s `triangulate.rs`), so with one corner place the two ends lie
+//! on two different closed edges through that place, and both faces hold both
+//! edges. On two different surfaces that needs the surfaces to touch at that
+//! place: where two smooth surfaces cross, they meet in one smooth curve there,
+//! and two closed edges through the place would run along each other. On one
+//! surface it needs a ring, not a ball: two loops through one point of a ball
+//! cut it into three pieces, and only the one between them holds both. A ring
+//! needs three loops through one point, its outer equator, the circle round
+//! its tube and a Villarceau circle, which is the shape above that will not
+//! build.
 //!
 //! The fuses run certified, in a model of 100 mm.
 
