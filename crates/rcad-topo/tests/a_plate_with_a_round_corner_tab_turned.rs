@@ -17,20 +17,16 @@ use rcad_geom::{Axis, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
-/// The turns about `z`, in steps of `0.05`, at which the plate itself unites on
-/// the base `88298a67`. At the other steps up to `2.95` the union that builds
-/// it is refused at side of plane by the seam corner, which this file does not
-/// pin yet.
-const STEPS_THE_PLATE_UNITES_AT: [u8; 19] = [
-    1, 2, 3, 4, 7, 8, 9, 10, 15, 17, 18, 21, 22, 33, 38, 45, 47, 50, 54,
-];
+/// The turns about `z`, in steps of `0.05` up to `2.95`. The plate itself
+/// unites at every one of them since Q2374
+/// (`a_plate_and_its_round_corner_tab_unite_at_every_turn.rs`).
+const STEPS_ABOUT_Z: std::ops::RangeInclusive<u8> = 1..=59;
 
 #[test]
 fn a_turned_plate_with_a_round_corner_tab_and_a_block_on_it_answer_every_rule_both_ways_round() {
     let mut refused = Vec::new();
-    let mut turns: Vec<(Axis, f64)> = STEPS_THE_PLATE_UNITES_AT
-        .iter()
-        .map(|&step| (Axis::z(), f64::from(step) * 0.05))
+    let mut turns: Vec<(Axis, f64)> = STEPS_ABOUT_Z
+        .map(|step| (Axis::z(), f64::from(step) * 0.05))
         .collect();
     turns.push((Axis::x(), 0.4));
     for (axis, angle) in &turns {
