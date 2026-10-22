@@ -134,6 +134,21 @@ class Row:
             return head + rest.lstrip()
         return head + f"pinned/{pin}" + rest
 
+    def with_what(self, what):
+        """The row with everything after its write set replaced by `what`, any pin kept in front.
+
+        `what` is the shape `add` takes for a new row: a class or `small`,
+        optionally, first, then the description ending in its §N. A pin is
+        Mattias's alone to set or take off (§430), so this keeps it rather
+        than reading one out of `what`.
+        """
+        match = WHAT.match(self.text)
+        assert match, f"a row of fewer than six fields reached with_what: {self.text!r}"
+        head = match.group(1)
+        if self.pin is not None:
+            return head + f"pinned/{self.pin} " + what
+        return head + what
+
 
 class Queue:
     """The file as lines, with every row and fenced block located.

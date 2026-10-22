@@ -84,7 +84,14 @@ just queue tier <id> <tier>                move an open row to the foot of anoth
 just queue tag <id> <class>|small|-        tag an open row: a class (wrong, crash or refuses, then /A to /D) ranks a tier 1
                                             or tier 5 row and moves it to tier 1 for A and B, tier 5 for C and D; small lets
                                             a lane take it with other small rows; - removes it
-just queue done <id> <merge sha>           state done:<sha>, moved under ## Closed
+just queue done <id> <merge sha>           state done:<sha>, moved under ## Closed; reads the closed id out of the
+                                            after: list of every open row that named it, writing todo once that
+                                            list is empty, less a pinned row and a tier 5 row with no class (§435.5)
+just queue sweep                           the same, over every row already left waiting on a row already closed;
+                                            for the merger to run once, not for done to repeat
+just queue reword <id> <what, ending in §N>   replace what an open row's description says, past the pin, kept to
+                                            the same shape add checks for a new row; the write guard refuses a
+                                            hand edit of this, so drop and add under a new id was the only way out
 just queue drop <id> <§N>                  state dropped:§N, moved under ## Closed
 just queue park <id> <§N>                  state parked:§N, left in its tier
 just queue after <id> <id|date>[,<id|date>...]   state after:<ids,date>; each id must exist in some copy, branch
@@ -590,9 +597,38 @@ def refuse_class_with_punctuation(what):
         )
 
 
-def refuse_a_pin(what):
+def refuse_a_pin(what, verb="add"):
     if what.split()[:1] and what.split()[0].startswith("pinned/"):
-        raise Refused("only Mattias pins a row, with `just queue pin` once it is added (§430); add it without the pin")
+        raise Refused(f"only Mattias pins a row, with `just queue pin` once it is added (§430); "
+                      f"{verb} it without the pin")
+
+
+def reword_step(queue, claims, here, args, batch):
+    """Replace what an open row's description says, past the pin (§263).
+
+    The write guard refuses a hand edit of docs/queue.md, so a row whose
+    wording turned out wrong had only `drop` and `add`, under a new id --
+    dispatch-next dropped Q112 and re-added it as Q226 to reword it this way
+    on 09-26. `reword` rewrites the text in place instead, kept to the same
+    shape `add` checks for a new row -- a class or `small` first, optionally,
+    then the description ending in its §N -- and `check-queue` holds the
+    result to the rest, the same way it holds a fresh `add`.
+    """
+    if len(args) < 2:
+        raise Refused("usage: reword <id> <what, ending in §N>")
+    row_id = args[0]
+    what = " ".join(args[1:])
+    refuse_class_with_punctuation(what)
+    refuse_a_pin(what, "reword")
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    if row.is_closed():
+        raise Refused(f"{row_id} is closed: {row.state}")
+    reworded = row.with_what(what)
+    if reworded == row.text:
+        raise Refused(f"{row_id} reads this already")
+    queue.replace(row, reworded)
+    return queue, f"{row_id}: reworded", None
 
 
 TOPO_TESTS_DIR = "crates/rcad-topo/tests/"
@@ -811,7 +847,10 @@ def done_step(queue, claims, here, args, batch):
     if subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"],
                       capture_output=True).returncode != 0:
         raise Refused(f"{sha} is not a commit in this repository")
-    return close_step(queue, here, row_id, f"done:{sha}", "done")
+    queue, message, event = close_step(queue, here, row_id, f"done:{sha}", "done")
+    for freed in free_waiters(queue, row_id):
+        message += "\n" + freed
+    return queue, message, event
 
 
 def drop_step(queue, claims, here, args, batch):
@@ -904,6 +943,42 @@ def free_step(queue, row, waits):
         raise Refused(f"{row.id} is {row.state}, and '-' frees only a row whose state is after:")
     queue.replace(row, row.with_state("todo"))
     return queue, f"{row.id}: {row.state} -> todo", None
+
+
+def sweep_step(queue, claims, here, args, batch):
+    """Free every open row still naming an already-closed row in its `after:` list (§1755).
+
+    `done` runs this sweep itself for the row it has just closed, but on main
+    at 11ba1960 35 open rows already named a closed id, from before this
+    existed. `sweep` takes no id: it is the once-over that catches those,
+    for the merger to run and never for `done` to repeat.
+    """
+    need(args, 0, "sweep")
+    refuse_conflicted(here, queue)
+    freed = [line for row in list(queue.rows) if row.is_closed() for line in free_waiters(queue, row.id)]
+    if not freed:
+        raise Refused("no open row names an already-closed row in its after: list")
+    return queue, "\n".join(freed), None
+
+
+def free_waiters(queue, closed_id):
+    """Each open row waiting on `closed_id`, with that id read out of its `after:` list, `todo` once the list is empty.
+
+    Skips a pinned row, since no verb but `take`, `done` and `pick` touches
+    one (§430), and an open tier 5 row with no class, since §435.5 reads its
+    `after:` list as why it sits in tier 5 and `check-queue` refuses it once
+    that list names no tier 5 row -- a fact this sweep, unlike `after`, has no
+    way to recheck for every id the list could still name.
+    """
+    freed = []
+    for waiter in list(waiting_on(queue, closed_id)):
+        if waiter.pin is not None or (waiter.tier == "5" and not waiter.has_class()):
+            continue
+        remaining = [w for w in waiter.state[len("after:"):].split(",") if w != closed_id]
+        state = "after:" + ",".join(remaining) if remaining else "todo"
+        queue.replace(waiter, waiter.with_state(state))
+        freed.append(f"{waiter.id}: {waiter.state} -> {state}")
+    return freed
 
 
 def refuse_unless_a_real_date(date):
@@ -1321,7 +1396,8 @@ def ids_of(args, usage):
 STEP_FUNCS = {
     "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
     "after": after_step, "cores": cores_step, "rank": rank_step, "tier": tier_step, "tag": tag_step,
-    "pick": pick_step, "pin": pin_step, "unpin": unpin_step, "give": give_step,
+    "pick": pick_step, "pin": pin_step, "unpin": unpin_step, "give": give_step, "sweep": sweep_step,
+    "reword": reword_step,
 }
 
 

@@ -13861,7 +13861,7 @@ _queue-rows file:
 # running one's.
 #
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`, `narrow`, `writes`, `give` — also runs `queue-page` after it**, so the page
+# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`, `narrow`, `writes`, `give`, `sweep`, `reword` — also runs `queue-page` after it**, so the page
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
@@ -13872,7 +13872,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow|writes|give)
+        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow|writes|give|sweep|reword)
             now_iso='{{ queue_now }}'
             [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
@@ -13898,7 +13898,9 @@ queue mode="" *args:
                 'just queue meets <id> <write set>            the skip line for the first hold read from input that the write set meets; narrow and writes ask it' \
                 'just queue take <id> <branch>                dispatch a ready row to <branch>: state lane:<branch>, held until done, drop or park' \
                 'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id. <what> starts with from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file>: where the row came from (§432, §433)' \
-                'just queue done <id> <merge sha>             close a row as done:<sha>, moved under Closed' \
+                'just queue done <id> <merge sha>             close a row as done:<sha>, moved under Closed; reads the closed id out of every open row'"'"'s after: list that named it, writing todo once that list is empty, less a pinned row and a tier 5 row with no class (§435.5)' \
+                'just queue sweep                             the same, over every row already left waiting on a row already closed; for the merger to run once' \
+                'just queue reword <id> <what, ending in §N>  replace what an open row'"'"'s description says, past the pin, kept to the same shape add checks for a new row' \
                 'just queue drop <id> <§N>                    close a row as dropped:§N, moved under Closed' \
                 'just queue park <id> <§N>                    mark a row parked:§N, left in its tier' \
                 'just queue after <id> <id>[,<id>...]         mark a row waiting on others: state after:<ids>' \
