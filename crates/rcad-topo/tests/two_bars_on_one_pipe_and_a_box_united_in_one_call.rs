@@ -85,17 +85,20 @@
 //!   is no corner of any answer, and since Q1302 `assemble.rs` reads that
 //!   wire past it (`corners_one_wire_walks_past`).
 //! - **The lower bar and Q1406's box, turned an eighth of a turn about `x`,
-//!   then the upper bar, is refused** `CannotTellTheCellsOfAFaceApart` on the
-//!   first union's wall, by union, intersection and difference alike
-//!   ([`the_turned_box_and_the_lower_bar_cannot_be_fused_with_the_upper_bar`]),
-//!   and was refused `Undecidable` at "order along a crossing" until Q2594.
+//!   then the upper bar, answers since Q2487**, by union, intersection and
+//!   difference alike
+//!   ([`the_turned_box_and_the_lower_bar_fuse_with_the_upper_bar_by_every_rule`]),
+//!   and the union is what one call gives
+//!   ([`a_box_turned_an_eighth_of_a_turn_unites_with_the_lower_bar_and_with_both_bars`]).
+//!   It was refused `Undecidable` at "order along a crossing" until Q2594 and
+//!   `CannotTellTheCellsOfAFaceApart` on the first union's wall after, beside
+//!   a corner of the first union on the bottom circle, which `fuse/arrange.rs`
+//!   now takes as the place where the plane through it crosses that circle.
 //!   The box was built to ask whether `assemble.rs` reads past corners on the
 //!   circle the bars meet on when nothing of the first union crosses that
 //!   circle there, which the first union of it and the lower bar keeps at
-//!   `(1.5, ±√1.75, 2)`. The second fuse gives up in `fuse/arrange.rs` first,
-//!   beside a corner of the first union on the bottom circle, so that is not
-//!   answered yet. One call reaches the union
-//!   ([`a_box_turned_an_eighth_of_a_turn_unites_with_the_lower_bar_and_with_both_bars`]).
+//!   `(1.5, ±√1.75, 2)`. The union keeps no corner on that circle at all, so
+//!   nothing there is left to read past.
 //! - **A square bar standing on an edge, pushed through the lower bar's wall,
 //!   unites with that bar alone lying along `x`**, either way round, since
 //!   Q1817 ([`a_square_bar_standing_on_an_edge_along_x_unites_with_the_bar`]).
@@ -360,10 +363,10 @@ fn a_notched_wall_holds_no_point_of_its_pipe_above_its_top() {
 /// gone from the union, so nothing of the union crosses that circle there. It
 /// keeps a corner on the bottom circle at `(-√(4 - k²), -k, 0)`, `k = 0.1·√2`,
 /// too, where the plane of the box's face `y + z = -k` crosses it on the side
-/// of the pipe away from the box. Uniting the upper bar with it is refused
-/// on the wall through that corner
-/// ([`the_turned_box_and_the_lower_bar_cannot_be_fused_with_the_upper_bar`]),
-/// so that refusal is a gap: the answer exists, and these calls reach it.
+/// of the pipe away from the box. Uniting the upper bar with it was refused on
+/// the wall through that corner until Q2487, and now gives what these calls
+/// give
+/// ([`the_turned_box_and_the_lower_bar_fuse_with_the_upper_bar_by_every_rule`]).
 #[test]
 fn a_box_turned_an_eighth_of_a_turn_unites_with_the_lower_bar_and_with_both_bars() {
     let one_bar = PI * RADIUS * RADIUS * MEETING;
@@ -405,73 +408,82 @@ fn a_box_turned_an_eighth_of_a_turn_unites_with_the_lower_bar_and_with_both_bars
     }
 }
 
-/// **The lower bar united with Q1406's turned box cannot be fused with the
-/// upper bar**: not by union, intersection or difference, with each fuse asked
-/// both ways round, by any spelling of the wall. Each is refused
-/// `CannotTellTheCellsOfAFaceApart`, naming the first union's wall: its face
-/// on the bar's pipe, one of whose corners is `(-√(4 - k²), -k, 0)`, with
-/// `k = 0.1·√2`.
+/// **The lower bar united with Q1406's turned box fuses with the upper bar by
+/// every rule**, with each fuse asked both ways round, by any spelling of the
+/// wall. The union is one solid, `16π` and what of the box is outside the bars
+/// ([`the_turned_box_outside_the_bars`]), the same as one call gives
+/// ([`a_box_turned_an_eighth_of_a_turn_unites_with_the_lower_bar_and_with_both_bars`]).
+/// The intersection is nothing, since the two touch only on the disc the bars
+/// meet on. The first union less the upper bar is the first union, `8π` and
+/// the box outside, and the upper bar less the first union is the upper bar,
+/// `8π`.
 ///
-/// That corner is the first union's own, where the plane of the box's face
-/// `y + z = -k` crosses the bar's bottom circle on the far side of the pipe
-/// from the box. The second fuse's arrangement of the wall holds, beside that
-/// corner on the bottom circle, a point it worked out round it, where no
-/// corner is: a rounding away. Until Q2594 each fuse was refused `Undecidable`
-/// at "order along a crossing" on the corner and that point, which could not
-/// be put in order round the circle. Now
-/// `as_a_corner_beside_a_flat_cut_through_the_loop_says` in `fuse/arrange.rs`
-/// puts them in order by which side of the box's plane the corner is on, and
-/// does the same at the corner the first union keeps where `z - y = -0.4·√2`
-/// crosses the circle on the far side, `(-√3.68, 0.4·√2, 0)`. The arrangement
-/// of the wall then cannot group its walks into the regions they bound.
+/// **Each was refused `CannotTellTheCellsOfAFaceApart` until Q2487**, naming
+/// the first union's wall. One of that wall's corners is `(-√(4 - k²), -k,
+/// 0)`, with `k = 0.1·√2`, where the plane of the box's face `y + z = -k`
+/// crosses the bar's bottom circle on the far side of the pipe from the box.
+/// The second fuse's arrangement of the wall held, beside that corner on the
+/// bottom circle, the point it worked out where the wall, the bottom cap and
+/// that plane meet: a rounding away, and no corner. Until Q2594 the two could
+/// not be put in order round the circle (`Undecidable` at "order along a
+/// crossing"), and after it the arrangement could not group its walks into the
+/// regions they bound. The corner has only the wall and the bottom cap round
+/// it, so it is a sample of their circle, and
+/// `a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve` in
+/// `fuse/arrange.rs` now takes it as the place where the plane crosses that
+/// circle. Let it take that corner and no other, and all 48 fuses answer,
+/// which a probe of Q2630's lane measured.
 ///
-/// The union exists, and one call reaches it
-/// ([`a_box_turned_an_eighth_of_a_turn_unites_with_the_lower_bar_and_with_both_bars`]),
-/// so this is a gap. It is refused in `fuse/arrange.rs`, before `assemble.rs`
-/// runs. So this shape does not yet say what Q1406 asked: whether the corners
-/// the first union keeps on the circle the bars meet on, at `(1.5, ±√1.75, 2)`
-/// where the box's face `x = 1.5` crossed it, are read past
-/// (`corners_one_wire_walks_past`) when nothing of the box crosses that circle.
+/// **The union keeps no corner at `(1.5, ±√1.75, 2)`**, where Q1406 built the
+/// box to look. The first union keeps those two corners on the circle the bars
+/// meet on, where the plane of the box's face `x = 1.5` crossed it, and nothing
+/// of the box crosses the circle there. Q1406 asked whether
+/// `corners_one_wire_walks_past` in `fuse/assemble.rs` would read past them or
+/// the union be refused `ResultIsNotManifold`. Neither: the union drops both
+/// caps on `z = 2` and keeps no corner on that circle at all, so the circle is
+/// no edge of its wall and the two corners went with it. That function reads
+/// past only the ends of the bars' seams here, which a probe that printed
+/// what it returns showed (Q2630).
 #[test]
-fn the_turned_box_and_the_lower_bar_cannot_be_fused_with_the_upper_bar() {
-    let k = 0.1 * SQRT_2;
-    let on_the_bottom_circle = [-(RADIUS * RADIUS - k * k).sqrt(), -k, 0.0];
+fn the_turned_box_and_the_lower_bar_fuse_with_the_upper_bar_by_every_rule() {
+    let one_bar = PI * RADIUS * RADIUS * MEETING;
+    let outside = the_turned_box_outside_the_bars();
+    let where_x_is_one_and_a_half_crossed_the_meeting = [
+        [1.5, 1.75_f64.sqrt(), MEETING],
+        [1.5, -1.75_f64.sqrt(), MEETING],
+    ];
     for wall in EVERY_WALL {
         for order in EVERY_ORDER_OF_THE_TWO_FUSES {
-            for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let (_, the_upper_bar_is_the_argument) = order;
+            let difference = if the_upper_bar_is_the_argument {
+                (1, one_bar)
+            } else {
+                (1, one_bar + outside)
+            };
+            for (rule, by_hand) in [
+                (Rule::Union, (1, 2.0 * one_bar + outside)),
+                (Rule::Intersection, (0, 0.0)),
+                (Rule::Difference, difference),
+            ] {
                 let asked = format!("{wall:?}, {order:?}, {rule:?}");
-                let (model, first, second) =
+                let (model, second) =
                     the_turned_box_and_the_lower_bar_then_the_upper_bar(wall, order, rule);
-                let Err(Error::CannotTellTheCellsOfAFaceApart { face }) = &second else {
-                    panic!("{asked}: {second:?}");
-                };
-                assert!(
-                    model
-                        .solid(first)
-                        .expect("this model made the key")
-                        .faces()
-                        .any(|of_it| of_it.key() == *face),
-                    "{asked}: {face:?} is not a face of the first union"
-                );
-                let refused_on = model.face(*face).expect("a face of this model");
-                assert!(
-                    matches!(refused_on.surface(), Surface::Cylinder(_)),
-                    "{asked}: {:?}",
-                    refused_on.surface()
-                );
-                let corners: Vec<[f64; 3]> = refused_on
-                    .wires()
-                    .flat_map(|wire| wire.coedges())
-                    .map(|side| side.start().point().coordinates())
-                    .collect();
-                assert!(
-                    corners.iter().any(|&at| lies_within(
-                        at.map(|along| [along, along]),
-                        on_the_bottom_circle,
-                        1e-12
-                    )),
-                    "{asked}: no corner at {on_the_bottom_circle:?} among {corners:?}"
-                );
+                let fused = second.unwrap_or_else(|refused| panic!("{asked}: {refused:?}"));
+                is_the_solid_worked_out(&model, &fused, by_hand, &asked);
+                if !matches!(rule, Rule::Union) {
+                    continue;
+                }
+                let corners = its_corners(&model, fused[0]);
+                for gone in where_x_is_one_and_a_half_crossed_the_meeting {
+                    assert!(
+                        !corners.iter().any(|&at| lies_within(
+                            at.map(|along| [along, along]),
+                            gone,
+                            1e-12
+                        )),
+                        "{asked}: a corner at {gone:?} among {corners:?}"
+                    );
+                }
             }
         }
     }
@@ -496,8 +508,9 @@ fn the_turned_box_and_the_lower_bar_cannot_be_fused_with_the_upper_bar() {
 /// the argument, was refused the same way, from `(-2, 0, 1 - √½)`.
 ///
 /// Built as a shape a designer draws with what Q1406's box has, side faces
-/// slanting across the wall, to see whether that box's refusal
-/// ([`the_turned_box_and_the_lower_bar_cannot_be_fused_with_the_upper_bar`])
+/// slanting across the wall, to see whether that box's refusal with the upper
+/// bar, answered since Q2487
+/// ([`the_turned_box_and_the_lower_bar_fuse_with_the_upper_bar_by_every_rule`]),
 /// meets designers. It did not reach that fuse: it was refused one fuse
 /// earlier.
 #[test]
@@ -730,7 +743,7 @@ fn the_turned_box_and_the_lower_bar_then_the_upper_bar(
     wall: Wall,
     (the_box_is_the_argument, the_upper_bar_is_the_argument): (bool, bool),
     rule: Rule,
-) -> (Model, SolidKey, Result<Vec<SolidKey>, Error>) {
+) -> (Model, Result<Vec<SolidKey>, Error>) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let [lower, upper] = the_two_bars(&mut model, wall);
     let the_box = a_box_turned_an_eighth_of_a_turn_about_x(&mut model);
@@ -748,7 +761,7 @@ fn the_turned_box_and_the_lower_bar_then_the_upper_bar(
     } else {
         fuse_by(&mut model, &[*first], &[upper], rule)
     };
-    (model, *first, second)
+    (model, second)
 }
 
 fn fuse_by(
