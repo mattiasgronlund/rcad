@@ -144,6 +144,19 @@
 //! lets the arrangement leave it out, whether or not it can place where the
 //! ellipse meets the bar's rim (Q2201).
 //!
+//! **And the sides every face on its own surface lies in** (Q2619), listed
+//! with the cuts' under the face's own surface, which is the first of its
+//! cuts too. Two pipes can cross in lines no plane cuts off while the faces on
+//! them lie apart: a stepped shaft bored from below to `z = 0.5`, the bore
+//! across the narrow bar's radius, has the bore's pipe and the narrow bar's
+//! cross in two lines without end, and the narrow bar starts at `z = 1`. The
+//! arrangement leaves such a crossing out where the faces of the cut lie in a
+//! side of a plane that shares no point with one the faces of the face's own
+//! surface lie in. The face across knows the face's surface only by the sides
+//! every face on it lies in, so that is what the face is told of its own, and
+//! not the sides it lies in alone: the two then ask the same question of the
+//! same sides.
+//!
 //! # Each face is told the caps through the start of their axis that cut it
 //!
 //! `bake` reads off a round bar's numbers before its move that its near cap
@@ -196,8 +209,9 @@ use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedFace, BakedS
 /// its face never reaches is then left off, why each face is told which
 /// cuts meet it only on its boundary, and each edge which of those the face
 /// across it does leave out, why each face is told the sides of planes the
-/// faces of each cut lie in, and why each face is told the caps through the
-/// start of their axis that the faces cutting it carry.
+/// faces of each cut lie in, and those the faces on its own surface lie in,
+/// and why each face is told the caps through the start of their axis that
+/// the faces cutting it carry.
 ///
 /// **No face pair is skipped, but [`how_two_faces_meet`] is only ever asked
 /// once per distinct pair of surfaces** ([`HowFacesMeetBySurface`]). The
@@ -260,11 +274,25 @@ pub(crate) fn gather(
 
     for (solid, (faces, told)) in found.into_iter().zip(told).enumerate() {
         for (face, (cuts, told)) in faces.into_iter().zip(told).enumerate() {
+            let own =
+                the_sides_every_face_on_its_surface_lies_in(solids, &within_reach, solid, face);
             let face = &mut solids[solid].faces[face];
             let kept = the_cuts_left_on(face, &cuts);
             face.cuts.extend(kept);
             face.cuts_that_reach_only_its_boundary = the_cuts_that_reach_only_its_boundary(&cuts);
             face.sides_the_faces_of_each_cut_lie_in = the_sides_the_faces_of_each_cut_lie_in(&cuts);
+            assert!(
+                face.sides_the_faces_of_each_cut_lie_in
+                    .iter()
+                    .all(|(cut, _)| *cut != face.surface),
+                "a face found its own surface {:?} as a cut carried by faces lying in sides of \
+                 planes, which only an edge between two faces of one surface would give",
+                face.surface
+            );
+            if !own.is_empty() {
+                face.sides_the_faces_of_each_cut_lie_in
+                    .push((face.surface, own));
+            }
             for cap in told {
                 if !face.caps_through_the_start_of_their_axis.contains(&cap) {
                     face.caps_through_the_start_of_their_axis.push(cap);
@@ -467,6 +495,37 @@ fn the_sides_the_faces_of_each_cut_lie_in(
         }
     }
     sides
+}
+
+/// The sides of planes the face lies in ([`BakedFace::lies_in`]) that every
+/// other face on its surface lies in too, of every solid within reach of its
+/// own: the faces across know the face's surface by just these, since each
+/// face on it cuts them, and a face asks of its own surface what they ask
+/// (Q2619).
+fn the_sides_every_face_on_its_surface_lies_in(
+    solids: &[BakedSolid],
+    within_reach: &Sameness,
+    solid: usize,
+    face: usize,
+) -> SmallVec<[ASideOfAPlane; 2]> {
+    let mine = &solids[solid].faces[face];
+    let on_it: Vec<&BakedFace> = (0..solids.len())
+        .filter(|&other| within_reach.leader(other) == within_reach.leader(solid))
+        .flat_map(|other| &solids[other].faces)
+        .filter(|other| other.surface == mine.surface)
+        .collect();
+    mine.lies_in
+        .iter()
+        .filter(|side| {
+            on_it.iter().all(|other| {
+                other
+                    .lies_in
+                    .iter()
+                    .any(|theirs| one_closed_side_of_one_plane(side, theirs))
+            })
+        })
+        .copied()
+        .collect()
 }
 
 /// Whether the two are the same closed side of the same plane, however each
