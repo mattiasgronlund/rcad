@@ -13,7 +13,7 @@
 //! refused on which of the two comes first round the circle, with an
 //! enclosure of `9.6e-15` at a turn of `0.05`.
 
-use rcad_geom::{Axis, Isometry, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
@@ -77,6 +77,98 @@ fn a_turned_plate_with_a_round_corner_tab_unites_with_a_block_nowhere_near_it() 
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the union validates");
+}
+
+/// A second block, `x` 6 to 12, `y` 6 to 12, `z` 1 to 3: one higher than the
+/// block [`a_turned_plate_with_a_round_corner_tab_and_a_block_on_it_answer_every_rule_both_ways_round`]
+/// fuses, so it reaches up into the tab from above the plate's own top rather
+/// than sitting on it. Every rule, both ways round, unturned and at every turn
+/// that test tries, answers one solid that validates and measures the closed
+/// form, within the mesh's own volume error (Q2618, from Q2373).
+#[test]
+fn a_turned_plate_with_a_round_corner_tab_and_a_block_through_its_top_measures_every_rule() {
+    let policy = Policy::certified();
+    let mut turns: Vec<(Axis, f64)> = vec![(Axis::z(), 0.0)];
+    turns.extend(STEPS_ABOUT_Z.map(|step| (Axis::z(), f64::from(step) * 0.05)));
+    turns.push((Axis::x(), 0.4));
+    let mut failed = Vec::new();
+    for (axis, angle) in &turns {
+        for (rule, plate_first, closed_form) in [
+            (Rule::Union, true, 283.3718),
+            (Rule::Union, false, 283.3718),
+            (Rule::Intersection, true, 31.0397),
+            (Rule::Intersection, false, 31.0397),
+            (Rule::Difference, true, 211.3718),
+            (Rule::Difference, false, 40.9603),
+        ] {
+            if let Err(why) =
+                measures_through_the_top(&policy, axis, *angle, rule, plate_first, closed_form)
+            {
+                failed.push(format!(
+                    "turned {angle} about {:?}, {rule:?}, plate first {plate_first}: {why}",
+                    axis.direction()
+                ));
+            }
+        }
+    }
+    assert!(
+        failed.is_empty(),
+        "{} of {} measured wrong:\n{}",
+        failed.len(),
+        6 * turns.len(),
+        failed.join("\n")
+    );
+}
+
+/// The plate and the `z` 1 to 3 block, turned by `angle` about `axis`, fused
+/// under `rule` and certified; the answer must validate as one solid and
+/// measure within `measured.volume_error()` of `closed_form`.
+fn measures_through_the_top(
+    policy: &Policy,
+    axis: &Axis,
+    angle: f64,
+    rule: Rule,
+    plate_first: bool,
+    closed_form: f64,
+) -> Result<(), String> {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let turn = Isometry::rotation(axis, angle).expect("a finite angle");
+    let plate = a_plate_with_a_round_corner_tab(&mut model, &turn);
+    let block = a_block(&mut model, [6.0, 6.0, 1.0], [12.0, 12.0, 3.0]);
+    model
+        .place_solid(block, &turn)
+        .expect("this model made the key");
+    let (first, second) = if plate_first {
+        (plate, block)
+    } else {
+        (block, plate)
+    };
+    let fused = model
+        .fuse(&[first], &[second], rule, policy, &mut ProvenanceLog::new())
+        .map_err(|why| format!("refused: {why:?}"))?;
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .map_err(|why| format!("does not validate: {why}"))?;
+    let [solid] = fused.solids() else {
+        return Err(format!("{} solids, not one", fused.solids().len()));
+    };
+    let measured = model
+        .solid(*solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            policy,
+            &mut ProvenanceLog::new(),
+        )
+        .map_err(|why| format!("does not measure: {why:?}"))?;
+    if (measured.volume() - closed_form).abs() > measured.volume_error() {
+        return Err(format!(
+            "measured {} ± {}, not within the closed form {closed_form}",
+            measured.volume(),
+            measured.volume_error()
+        ));
+    }
+    Ok(())
 }
 
 /// The plate and the block, turned by `angle` about `axis`, fused under `rule`
