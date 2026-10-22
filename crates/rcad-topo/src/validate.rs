@@ -4038,27 +4038,29 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
         let Ok(less) = Deflection::of(room) else {
             break;
         };
-        let refused = match view.mesh_or_how_it_folded(less, policy, log) {
+        let answer = view.mesh_or_how_it_folded(less, policy, log);
+        if let Err(refused) = &answer {
+            shortest_fold = [shortest_fold, refused.shortest_side_two_patches_drew]
+                .into_iter()
+                .flatten()
+                .reduce(f64::min);
+        }
+        match answer.map_err(|refused| refused.why) {
             Ok(mesh) => return Ok(mesh),
-            Err(refused) => refused,
-        };
-        shortest_fold = [shortest_fold, refused.shortest_side_two_patches_drew]
-            .into_iter()
-            .flatten()
-            .reduce(f64::min);
-        match refused.why {
-            why if they_touch_where_they_touched_before(&finest_refusal, &why) => {
+            Err(why) if they_touch_where_they_touched_before(&finest_refusal, &why) => {
                 finest_refusal = why;
                 break;
             }
-            why if a_finer_mesh_may_clear(&why) => finest_refusal = why,
-            Error::DeflectionBelowWhatAMeshCanReach { .. }
-            | Error::MoreMeshPointsThanASolidWillHold { .. }
-            | Error::CannotMeshAFace {
-                why: rcad_mesh::CannotTriangulate::MoreTrianglesThanAPatchWillHold { .. },
-                ..
-            } => break,
-            why => return Err(why),
+            Err(why) if a_finer_mesh_may_clear(&why) => finest_refusal = why,
+            Err(
+                Error::DeflectionBelowWhatAMeshCanReach { .. }
+                | Error::MoreMeshPointsThanASolidWillHold { .. }
+                | Error::CannotMeshAFace {
+                    why: rcad_mesh::CannotTriangulate::MoreTrianglesThanAPatchWillHold { .. },
+                    ..
+                },
+            ) => break,
+            Err(why) => return Err(why),
         }
         room /= 2.0;
     }
