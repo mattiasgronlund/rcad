@@ -3735,8 +3735,8 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 }
 
 /// The solid meshed as coarsely as a mesh gets, or — when that mesh's own sides
-/// cross, or two of its patches fold onto one side — as coarsely as it can be
-/// meshed without either.
+/// cross, one loop's chords lie wholly outside another's, or two of its patches
+/// fold onto one side — as coarsely as it can be meshed without any of them.
 ///
 /// **A chord the sweep chose is not a side of the solid.** At
 /// [`as_coarse_as_a_mesh_gets`] an arc is stepped a quarter turn at a time, and
@@ -3745,6 +3745,11 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// crosses itself on the way to the triangulator. That is the sweep refusing a
 /// sound solid for a sampling choice of its own: twenty KiCad LED files, a disc
 /// with its pin holes near the rim, stopped here (`docs/decisions.md` §187.2).
+/// A hole sitting wholly in that room crosses nothing, but the triangulator
+/// covers what it reaches across one loop from outside, and so covers the
+/// hole; that is [`Error::AMeshCoveredTheWrongSideOfALoop`], and it is asked
+/// again the way a crossing is, down to a crossing's floor, since it too goes
+/// once the chords stray less than the gap between hole and rim (Q2501).
 ///
 /// So a crossing is asked again with less room, halving from the width of the
 /// box round the solid — the largest a sag can usefully be — down. A chord at
@@ -3983,7 +3988,7 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     }
     .max(top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO));
     let finest = |refusal: &Error| {
-        if its_sides_cross(refusal) {
+        if its_sides_cross(refusal) || its_loops_lie_the_wrong_side_of_each_other(refusal) {
             finest_for_a_crossing
         } else {
             finest_for_a_fold
@@ -4032,9 +4037,19 @@ const HALVINGS_A_FOLD_IS_ASKED_DOWN_TO: i32 = 13;
 
 /// Whether a finer mesh may clear what refused this one, because it is about
 /// where the mesh's own chords and cuts fell and not about the solid: its sides
-/// crossing, or two of its patches drawing one side through their insides.
+/// crossing, one loop's chords falling on the wrong side of another's, or two
+/// of its patches drawing one side through their insides.
 fn a_finer_mesh_may_clear(why: &Error) -> bool {
-    its_sides_cross(why) || matches!(why, Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
+    its_sides_cross(why)
+        || its_loops_lie_the_wrong_side_of_each_other(why)
+        || matches!(why, Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
+}
+
+/// Whether one loop's chords fell wholly on the wrong side of another's, which
+/// is a crossing's floor for the reason a crossing has it: a chord at `d`
+/// strays at most `d`.
+fn its_loops_lie_the_wrong_side_of_each_other(why: &Error) -> bool {
+    matches!(why, Error::AMeshCoveredTheWrongSideOfALoop { .. })
 }
 
 /// Whether two meshes, one finer than the other, were both refused for two
