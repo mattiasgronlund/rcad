@@ -209,6 +209,32 @@ fn a_stepped_shaft_bored_across_the_narrow_bars_radius_is_cut_in_half() {
     }
 }
 
+/// The first of those bores, radius 0.3 about `(−1, 0)`, then cut and turned
+/// as the round and square holes are: every fuse answers with the D as its
+/// bottom's outline, under both policies.
+#[test]
+fn a_stepped_shaft_bored_across_the_narrow_bars_radius_cut_and_turned_keeps_the_d_as_its_bottoms_outline()
+ {
+    let bore = Bore::ARoundHole {
+        centre: [-1.0, 0.0],
+        radius: 0.3,
+    };
+    for turn in TURNS {
+        every_fuse_of_the_bored_halves_answers(
+            &format!("a hole across the narrow bar's radius, cut at x = 0.5, turned {turn}"),
+            0.5,
+            bore,
+            &turned(turn),
+        );
+        every_fuse_of_the_bored_halves_answers(
+            &format!("a hole across the narrow bar's radius, cut at x = 0, shifted, turned {turn}"),
+            0.0,
+            bore,
+            &shifted_and_turned(turn),
+        );
+    }
+}
+
 fn turned(turn: f64) -> [Isometry; 1] {
     [Isometry::rotation(&Axis::z(), turn).expect("a finite turn")]
 }
