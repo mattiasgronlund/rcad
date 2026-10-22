@@ -1734,10 +1734,13 @@ impl<'f> Arrangement<'f> {
     /// and the corner
     /// ([`BakedCorner::is_on_by_construction`](super::bake::BakedCorner::is_on_by_construction)).
     /// Only a cut has to be *asked*, and asking is
-    /// [`Arrangement::passes_through`]. One cut is not asked: a pipe of the
+    /// [`Arrangement::passes_through`]. Two cuts are not asked: a pipe of the
     /// same radius touching a cap's circle at the corner, where the cap holds
     /// the start of its axis and the other axis runs through that start
-    /// ([`Arrangement::a_corner_on_a_cap_circle_is_where_two_pipes_touch`]).
+    /// ([`Arrangement::a_corner_on_a_cap_circle_is_where_two_pipes_touch`]),
+    /// and a surface crossing the curve of a corner with two surfaces round
+    /// it, within what writing the corner down cost
+    /// ([`Arrangement::a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve`]).
     fn place_the_corners(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
         for wire in 0..self.face.wires.len() {
             let mut corners = Vec::new();
@@ -1759,6 +1762,10 @@ impl<'f> Arrangement<'f> {
                     let crossing = &self.crossings[index];
                     let on_it = if corner.is_on_by_construction(&crossing.partner)
                         || self.a_corner_on_a_cap_circle_is_where_two_pipes_touch(
+                            &corner,
+                            &crossing.partner,
+                        )
+                        || self.a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve(
                             &corner,
                             &crossing.partner,
                         ) {
@@ -1888,6 +1895,95 @@ impl<'f> Arrangement<'f> {
             })
             .count()
             == 1
+    }
+
+    /// Whether `corner` has two surfaces round it, the face's own and one
+    /// other, and is where `partner` crosses the curve those two share: the
+    /// one place where the three meet that comes within what writing the
+    /// corner down cost ([`what_writing_the_corner_down_cost`]), lying wholly
+    /// inside that room and sharing a point with the corner's own box.
+    ///
+    /// [`what_writing_the_corner_down_cost`]: super::bake::what_writing_the_corner_down_cost
+    ///
+    /// **Asked, it was answered the wrong way.** A stepped shaft, a bar of
+    /// radius 2 under one of radius 1, bored from below by a bar of radius
+    /// 0.3 about `(−1, 0)`, has the bore cross the narrow bar's pipe, as whole
+    /// pipes, along `x = −0.955`. Boring splits the hole's circle there, so
+    /// the hole has a corner at `(−0.9550000000000001, −0.2966057989992778,
+    /// 0)`, stored exactly. That point is a rounding off the narrow pipe, so
+    /// [`Arrangement::passes_through`] proved it off that pipe's circle, while
+    /// the place where the bottom, the bore and the narrow pipe meet is boxed
+    /// `[−0.9550000000000001, −0.955]` across and holds the corner. The two
+    /// were then two points on the hole's edge that nothing could put in
+    /// order, and every cut of the bored shaft in half was refused `order
+    /// along a crossing` under the certified policy (Q2487).
+    ///
+    /// **Sound because the corner is only a sample of the curve.** With only
+    /// two surfaces round it, the corner was read out of the model and is a
+    /// cached sample of the curve those two share (§17.1, §286): the faces on
+    /// either side are bounded along that curve, and where `bake` joined the
+    /// faces boring split along a seam, as it joins the two halves of the
+    /// bore's wall, the seam is no boundary. So taking the corner as the place
+    /// where `partner` crosses that curve moves it along the curve no further
+    /// than writing it down already may have, and moves no other point of the
+    /// solid. That is the argument the seam plane is taken through a corner
+    /// by ([`BakedCorner::is_on_by_construction`], §294.9), and
+    /// [`Arrangement::a_corner_on_a_cap_circle_is_where_two_pipes_touch`]'s.
+    /// Once the corner is on both crossings,
+    /// [`Arrangement::the_corner_that_is_this_place`] folds the meet into it
+    /// by the same room, so no second node stands a rounding from it.
+    ///
+    /// **Only one place may come that near.** Where two do, as where `partner`
+    /// grazes the curve, nothing says which the corner is, and it is asked as
+    /// before. The box of the place must share a point with the corner's, so
+    /// a crossing a rounding past a corner the arithmetic can tell apart from
+    /// it still is told apart.
+    ///
+    /// **Every face round the corner asks the same three in the same order**,
+    /// the two round it and `partner` sorted by name, so they all take the
+    /// corner as the place or none does. A partner proved off the whole room
+    /// cannot meet the curve inside it, and is turned away before any meet is
+    /// worked out.
+    fn a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve(
+        &self,
+        corner: &BakedCorner,
+        partner: &Surface,
+    ) -> bool {
+        let [one, two] = &corner.around[..] else {
+            return false;
+        };
+        if !one_surface(one, &self.surface) && !one_surface(two, &self.surface) {
+            return false;
+        }
+        let room = super::bake::grown_by(
+            corner.point,
+            super::bake::what_writing_the_corner_down_cost(corner.point.enclosure()),
+        );
+        let side = side_of_surface(partner, room);
+        if side == Decision::Pos || side == Decision::Neg {
+            return false;
+        }
+        let mut three = [*one, *two, *partner];
+        three.sort_by_key(name_of_surface_bits);
+        let Ok(MeetOfThree::At(places)) = meet_of_three_surfaces(
+            [&three[0], &three[1], &three[2]],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) else {
+            return false;
+        };
+        let mut reaching = places
+            .iter()
+            .copied()
+            .filter(|&place| boxes_overlap(room, place));
+        let (Some(place), None) = (reaching.next(), reaching.next()) else {
+            return false;
+        };
+        let (meet, room) = (place.enclosure(), room.enclosure());
+        boxes_overlap(corner.point, place)
+            && (0..3).all(|axis| {
+                room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
+            })
     }
 
     /// Whether a corner of the face is on one crossing: on its partner surface,
