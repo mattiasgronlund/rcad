@@ -116,7 +116,8 @@
 //! The fuses run certified, in a model of 100 mm.
 
 use rcad_geom::{
-    Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
+    Axis, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere,
+    Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
@@ -497,6 +498,112 @@ fn no_solid_of_fewer_than_two_corners_these_intersections_leave_folds_at_its_coa
     );
 }
 
+/// A ball of `radius` less a round bar of `bar` up `z` whose axis is `off` from
+/// the ball's centre along `x`, the ball turned each quarter round `z`, is one
+/// solid of two faces, the ball's band and the bore's wall, and measures the
+/// ball less [`what_a_bar_bores_out_of_a_ball`]. Until Q2641 every bore here
+/// but the last, a bar of 2 half off, was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`.
+#[test]
+fn a_ball_with_a_hole_bored_a_little_off_its_centre_answers() {
+    for (radius, bar, off) in [
+        (3.0, 2.9, -0.08),
+        (3.0, 2.9, 0.08),
+        (3.0, 2.9, -0.05),
+        (3.0, 2.8, 0.15),
+        (3.0, 2.8, -0.15),
+        (3.0, 2.5, -0.3),
+        (10.0, 8.0, -1.5),
+        (3.0, 2.0, -0.5),
+    ] {
+        let left = 4.0 * PI / 3.0 * f64::powi(radius, 3)
+            - what_a_bar_bores_out_of_a_ball(radius, bar, off, 1000);
+        for turn in 0..4 {
+            let what = format!("a ball of {radius} less a bar of {bar} {off} off, turned {turn}");
+            let mut model = a_model();
+            let ball = model
+                .add_ball(
+                    radius,
+                    &Isometry::quarter_turns(&Axis::z(), turn).expect("a turn about z"),
+                )
+                .expect("a ball");
+            let bar = model
+                .add_round_bar(bar, 4.0 * radius, &moved_to([off, 0.0, -2.0 * radius]))
+                .expect("a bar");
+            let said = model
+                .fuse(
+                    &[ball],
+                    &[bar],
+                    Rule::Difference,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .map(|answer| answer.solids().to_vec());
+            answers(&mut model, said, left, &[2], &what);
+        }
+    }
+}
+
+/// [`what_a_bar_bores_out_of_a_ball`] with the bar on the ball's axis is the
+/// ball less the napkin ring it leaves, `4π/3 · (r³ − (r² − a²)^{3/2})`, and
+/// off the axis it is within a millionth of the rule at four times the steps,
+/// for every bore this file makes.
+#[test]
+fn what_a_bar_bores_out_of_a_ball_is_within_a_millionth_of_its_closed_form_and_a_finer_rule() {
+    for (radius, bar) in [(3.0, 2.9), (10.0, 8.0)] {
+        let rule = what_a_bar_bores_out_of_a_ball(radius, bar, 0.0, 1000);
+        let closed = 4.0 * PI / 3.0 * (radius.powi(3) - (radius * radius - bar * bar).powf(1.5));
+        assert!(
+            (rule - closed).abs() < 1e-6,
+            "a bar of {bar} on the axis of a ball of {radius}: {rule} by the rule, {closed} closed"
+        );
+    }
+    for (radius, bar, off) in [
+        (3.0, 2.9, -0.08),
+        (3.0, 2.8, 0.15),
+        (3.0, 2.5, -0.3),
+        (10.0, 8.0, -1.5),
+        (3.0, 2.0, -0.5),
+    ] {
+        let (coarse, fine) = (
+            what_a_bar_bores_out_of_a_ball(radius, bar, off, 1000),
+            what_a_bar_bores_out_of_a_ball(radius, bar, off, 4000),
+        );
+        assert!(
+            (coarse - fine).abs() < 1e-6,
+            "a bar of {bar} {off} off in a ball of {radius}: {coarse} at 1000 steps, {fine} at 4000"
+        );
+    }
+}
+
+/// Q1232's ring: a ball of `221/64` less a bar of `220/64` on its axis, built
+/// as two faces, the ball's band and the bore's wall, between the two circles
+/// at `z = ±21/64` where they meet, each circle one closed edge with its one
+/// corner at a quarter turn round `z`. It builds, validates, and measures the
+/// napkin ring `4π/3 · (21/64)³`, wherever the two corners stand.
+///
+/// With both corners on one meridian it always did. With them apart round the
+/// axis the two closest corners are `0.86` or more apart while the two circles
+/// are `42/64` apart everywhere, and until Q2641 the floor a fold was asked
+/// down to was read off the corners: the ball's band and the bore's wall drew
+/// the same side between the circles at every rung down to it, and the build
+/// was refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`.
+#[test]
+fn a_ring_of_a_ball_less_a_bar_on_its_axis_builds_wherever_its_two_corners_stand() {
+    for (top, bottom) in [(0, 0), (0, 2), (0, 1), (1, 3)] {
+        let what = format!("the ring with its top corner at {top} and its bottom one at {bottom}");
+        let mut model = a_model();
+        let solid = a_ring_of_a_ball_less_a_bar(&mut model, top, bottom).map(|solid| vec![solid]);
+        answers(
+            &mut model,
+            solid,
+            4.0 * PI / 3.0 * (21.0_f64 / 64.0).powi(3),
+            &[2],
+            &what,
+        );
+    }
+}
+
 fn a_model() -> Model {
     Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"))
 }
@@ -694,4 +801,89 @@ fn coarsest_mesh(model: &Model, solid: SolidKey, what: &str) {
             &mut ProvenanceLog::new(),
         )
         .unwrap_or_else(|why| panic!("{what}: the coarsest mesh is refused: {why:?}"));
+}
+
+/// How much of a ball of `radius` at the origin a round bar of `bar` up `z`
+/// takes out, its axis `off` from the centre along `x`, by a midpoint rule of
+/// `steps` steps out from the bar's axis and `steps` round it.
+///
+/// Over the bar's disc the ball is `2√(radius² − ρ²)` tall, `ρ` how far the
+/// point is from the ball's axis: `ρ² = off² + s² + 2·off·s·cos θ` at `s` out
+/// from the bar's axis and `θ` round it. Every bore here keeps `|off| + bar`
+/// under `radius`, so the height is above zero over the whole disc.
+fn what_a_bar_bores_out_of_a_ball(radius: f64, bar: f64, off: f64, steps: u32) -> f64 {
+    assert!(
+        off.abs() + bar < radius,
+        "the bar runs wholly inside the ball"
+    );
+    let (out, round) = (bar / f64::from(steps), 2.0 * PI / f64::from(steps));
+    let mut sum = 0.0;
+    for i in 0..steps {
+        let s = out * (f64::from(i) + 0.5);
+        for j in 0..steps {
+            let theta = round * (f64::from(j) + 0.5);
+            let squared = off * off + s * s + 2.0 * off * s * theta.cos();
+            sum += 2.0 * (radius * radius - squared).sqrt() * s;
+        }
+    }
+    sum * out * round
+}
+
+/// Q1232's ring, built: a ball of `221/64` less a bar of `220/64` on its axis
+/// meet in two circles at `z = ±21/64`, each a closed edge whose one corner
+/// stands `top` or `bottom` quarter turns round `z` from `+x`. The ball's band
+/// runs the top circle backwards and the bottom one forwards, and the bore's
+/// wall each the other way, the one walk of the four that builds with both
+/// corners on one meridian.
+fn a_ring_of_a_ball_less_a_bar(
+    model: &mut Model,
+    top: i32,
+    bottom: i32,
+) -> rcad_topo::Result<SolidKey> {
+    let (ball, bar, high) = (221.0 / 64.0, 220.0 / 64.0, 21.0 / 64.0);
+    let skin = Surface::Sphere(Sphere::new(Point::origin(), ball).expect("a ball"));
+    let wall = Surface::Cylinder(Cylinder::new(Axis::z(), bar).expect("a pipe"));
+    let mut builder = SolidBuilder::new();
+    let [top_circle, bottom_circle] = [(top, high), (bottom, -high)].map(|(quarters, z)| {
+        let (x, y) = match quarters {
+            0 => (bar, 0.0),
+            1 => (0.0, bar),
+            2 => (-bar, 0.0),
+            3 => (0.0, -bar),
+            _ => panic!("a corner stands 0 to 3 quarter turns round, not {quarters}"),
+        };
+        let corner = builder.add_vertex(Point::new(x, y, z)).expect("a corner");
+        let level =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, 1.0))
+                .expect("a plane");
+        builder
+            .add_edge(
+                corner,
+                corner,
+                EdgeRun::RightRoundWhereItCrosses {
+                    and: Surface::Plane(level),
+                },
+            )
+            .expect("a circle")
+    });
+    let (f, r) = (Orientation::Forward, Orientation::Reversed);
+    let mut band = |surface: Surface, turns: [Orientation; 2]| {
+        let wires: Vec<_> = [top_circle, bottom_circle]
+            .into_iter()
+            .zip(turns)
+            .map(|(circle, turn)| {
+                let coedge = builder.add_coedge(circle, turn).expect("a coedge");
+                builder
+                    .add_wire(&[DraftStep::Along(coedge)])
+                    .expect("a wire")
+            })
+            .collect();
+        builder.add_face(surface, &wires).expect("a band")
+    };
+    let outside = band(skin, [r, f]);
+    let inside = band(wall, [f, r]);
+    builder
+        .add_shell(&[(outside, f), (inside, r)])
+        .expect("a shell");
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
