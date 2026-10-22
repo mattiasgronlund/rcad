@@ -156,6 +156,34 @@ Here `u = 2^-53`.
   4015: `The variable rel_of_lin was not found`. Gappa 1.8.0 emits
   `rel_of_lin`; gappalib 1.7.0 has `rel_of_nzr_bnd`, `rel_of_fix_float_*`
   and `lin_of_rel`, but not that.
+- **Rocq, relay 3**: gappalib 1.7.0 lacks four theorems the main proof
+  cites: `rel_of_lin`, `lin_refl`, `lin_of_lin_rel2_p` and
+  `lin_float_error_of_lin_abs_ne`. gappalib 1.8.0 (2026-02-19, "added
+  support for Gappa 1.7", "compatibility from Coq 8.16 to Rocq 9.2") has
+  them; nixpkgs, master included, packages only 1.7.0 for Coq 8.20. Built
+  from the expression below against the pinned Coq 8.20.1 and flocq 4.2.2
+  (19.6 s), `coqc` checks the main proof (exit 0, 8.9 s) and the lemma's
+  (exit 0, 3.1 s). The main proof is checked modulo its 39 hint equalities,
+  which `gappa -Bcoq` writes as `Hypothesis a1 .. a39`: field identities,
+  true only where the 194 divisors Gappa warned about are nonzero. Nothing
+  discharges them yet. Gappa's proof differs run to run (9947, 10299,
+  9967, 10205, 10194 lines), so the theorems it cites differ too.
+
+```nix
+# gappalib18.nix; build with: nix --extra-experimental-features
+# 'nix-command flakes' build --impure --no-link --print-out-paths -f gappalib18.nix
+let
+  pkgs = (builtins.getFlake "github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe").legacyPackages.x86_64-linux;
+in
+pkgs.coqPackages_8_20.gappalib.overrideAttrs (old: {
+  version = "1.8.0";
+  name = "coq8.20-gappalib-1.8.0";
+  src = pkgs.fetchurl {
+    url = "https://gitlab.inria.fr/gappa/coq/-/archive/gappalib-coq-1.8.0/coq-gappalib-coq-1.8.0.tar.gz";
+    hash = "sha256-xSoI9ZHAMbkkfG3Wnajgu7bhCkglNIBngSrz4YnmkA8=";
+  };
+})
+```
 
 ```gappa
 # Orient3d::on_floats and ORIENT3D_ERROR_BOUND,
