@@ -24256,9 +24256,10 @@ mod two_loops_of_two_leaning_pipes {
     //! A pipe of radius 2 up `z` and a pipe of radius 1 along `x` at
     //! `y = apart`, crossed by [`intersect`] with each pipe first, and asked
     //! whether the curves it names may meet
-    //! ([`the_two_loops_of_two_pipes_may_meet`]).
+    //! ([`the_two_loops_of_two_pipes_may_meet`]); and the same two pipes both
+    //! up `z`, which cross in lines.
 
-    use rcad_geom::{Axis, Cylinder, Point, Surface, SurfaceMeet, Vector, intersect};
+    use rcad_geom::{Axis, Cylinder, EdgeRun, Point, Surface, SurfaceMeet, Vector, intersect};
     use rcad_predicates::{Policy, ProvenanceLog};
 
     use super::the_two_loops_of_two_pipes_may_meet;
@@ -24315,6 +24316,47 @@ mod two_loops_of_two_leaning_pipes {
                 &partner,
                 [run, run]
             ));
+        }
+    }
+
+    /// Two pipes up `z`, of radius 2 through the origin and of radius 1
+    /// through `(2, 0, 0)`, cross in two straight lines, each picked out of the
+    /// crossing as the loops are. Two lines down one direction never meet,
+    /// however near the difference of the widths is to how far apart the axes
+    /// are: here it is half of it.
+    #[test]
+    fn the_two_lines_of_two_pipes_down_one_direction_are_no_two_loops_that_meet() {
+        let fat = Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(2.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        for [face, partner] in [[thin, fat], [fat, thin]] {
+            let SurfaceMeet::Curves(runs) = intersect(
+                &face,
+                &partner,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("two lines are named") else {
+                panic!("two pipes down one direction that cross cross in curves");
+            };
+            let [first, second] = &runs[..] else {
+                panic!("two lines: {runs:?}");
+            };
+            assert!(
+                [first, second]
+                    .iter()
+                    .all(|run| matches!(run.run(), EdgeRun::PartOfWhereItCrosses { .. })),
+                "each line is picked out of the crossing: {runs:?}"
+            );
+            assert!(
+                !the_two_loops_of_two_pipes_may_meet(&face, &partner, [first, second]),
+                "{face:?} first"
+            );
         }
     }
 
