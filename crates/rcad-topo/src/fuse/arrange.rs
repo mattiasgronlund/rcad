@@ -14172,7 +14172,9 @@ fn how_a_crossing_runs(
     // resting along a cone's ruling is the same shape, and reads the ruling.
     if a_pair_that_crosses_in_straight_lines(surface, partner, log)? {
         let direction =
-            match the_line_one_surface_rests_on_another_along(surface, partner, run, log)? {
+            match the_line_one_surface_rests_on_another_along(surface, partner, run, log)?.or_else(
+                || the_way_one_of_the_two_lines_a_plane_cuts_a_pipe_in_runs(surface, partner, run),
+            ) {
                 Some(along) => along,
                 None => cross_of(gradient_at(surface, at), gradient_at(partner, at)),
             };
@@ -15073,6 +15075,57 @@ fn the_line_one_surface_rests_on_another_along(
         return the_ruling_a_plane_rests_along(flat, cone, log).map(Some);
     }
     Ok(None)
+}
+
+/// The way `run` goes, where it is one of the two lines a plane cuts out of a
+/// pipe, as `∇S × ∇Q` has it for `surface` first; `None` for every other pair
+/// and every other run, and where the picker's facing cannot tell.
+///
+/// **It is read off the half-space that picks the line, never off a point on
+/// it.** For a plane `n` along an axis `w` through `o`, `n × ∇Q` at a point `x`
+/// of either line is `((x − o)·(w × n)) w`: the line runs up the axis on the
+/// side of it `w × n` points to, and down it on the other. The two lines are
+/// the same distance either side, and a picker that holds one and rules out
+/// the other faces the way from the other to it, so the sign of its facing
+/// against `w × n` is the side. Asked of a node box instead, `x − o` is a
+/// rounding wide where the plane is within a rounding of resting on the pipe,
+/// and so is the distance between the lines: the cross product then straddles
+/// every axis (Q2505).
+fn the_way_one_of_the_two_lines_a_plane_cuts_a_pipe_in_runs(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+) -> Option<[Interval; 3]> {
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+        return None;
+    };
+    let [picker] = picked_by.as_slice() else {
+        return None;
+    };
+    let facing = picker
+        .facing_of_a_flat()?
+        .components()
+        .map(Interval::exactly);
+    let (flat, pipe, plane_first) =
+        if let (Surface::Plane(flat), Surface::Cylinder(pipe)) = (surface, partner) {
+            (flat, pipe, true)
+        } else if let (Surface::Cylinder(pipe), Surface::Plane(flat)) = (surface, partner) {
+            (flat, pipe, false)
+        } else {
+            return None;
+        };
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let normal = flat.normal().components().map(Interval::exactly);
+    let up_the_axis = match dot_of(facing, cross_of_intervals(along, normal)).sign() {
+        Decision::Pos => plane_first,
+        Decision::Neg => !plane_first,
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    };
+    Some(if up_the_axis {
+        along
+    } else {
+        along.map(|component| -component)
+    })
 }
 
 /// [`AlongATouch`] for one crossing on `face`, or `None` when the partner does
