@@ -57,6 +57,11 @@
 //! upright wall the halves cut apart, and the side of the plane each ellipse
 //! lies in now tells them apart, so the pin unites too (Q2464).
 //!
+//! **Nor does a slanted bar across the joint.** Two halves of one ellipse
+//! meeting where the walls touch, one held as a crossing with each spelling,
+//! were not known for halves of one ellipse, and the turn between them was
+//! refused; they are now (Q2552).
+//!
 //! The comparison is not vacuous: the two bars really are two spellings, and
 //! `two_bars_stacked_on_one_pipe_are_one_pipe_written_twice` proves it before
 //! the fuse is asked — the stored numbers differ and `intersect` calls them one
@@ -781,7 +786,7 @@ impl APinnedBar {
 fn a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does() {
     let mut wrong = Vec::new();
     for axis_origin in [LOWER_ORIGIN, CROSSED_JOINT] {
-        let answers = the_bars_united_across(CROSSED_JOINT, axis_origin);
+        let answers = the_bars_united_across(CROSSED_JOINT, axis_origin, &SQUARE_ACROSS);
         for (lower_first, answer) in [true, false].into_iter().zip(answers) {
             if answer.0.is_err() {
                 wrong.push(format!(
@@ -837,7 +842,7 @@ fn a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_th
     let mut wrong = Vec::new();
     for joint in [3.0, 2.0] {
         for axis_origin in [LOWER_ORIGIN, joint] {
-            let answers = the_bars_united_across(joint, axis_origin);
+            let answers = the_bars_united_across(joint, axis_origin, &SQUARE_ACROSS);
             for (lower_first, answer) in [true, false].into_iter().zip(answers) {
                 if answer.0.is_err() {
                     wrong.push(format!(
@@ -851,27 +856,71 @@ fn a_bar_across_two_bars_on_one_pipe_meeting_on_its_axis_or_below_unites_with_th
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// **A slanted bar across where two bars on one pipe meet unites with them,
+/// one spelling and two.**
+///
+/// The shape of
+/// [`a_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them_as_one_spelling_does`]
+/// with the bar across turned about `y` to run along `(0.96, 0, 0.28)`, from
+/// `−5` to `5` ([`SLANTED_ACROSS`]). The two walls still cross in four half
+/// ellipses meeting at `(0, ±2, 3)`, now on the planes `z = 3 + 4x/3` and
+/// `z = 3 − 3x/4`. In the second union, of the two halves on the first plane
+/// that meet at `(0, −2, 3)`, the cross's wall holds the one that climbs past
+/// the joint as its crossing with the upper wall's spelling and the other as
+/// its crossing with the lower one's.
+///
+/// The two leave that corner along `±(0.96, 0, 1.28)`, the ellipse's tangent,
+/// and two halves of one ellipse turn by nothing there. But the fuse took two
+/// crossings for halves of one ellipse only where they had one partner as
+/// written and their pickers came in one order, and a half's pickers come in
+/// the order `intersect` sorts the two pipes, which puts the cross's between
+/// the two spellings. So with two spellings both orders were refused
+/// `Undecidable`, `"which way round a node two ways out of it turn"`, on a
+/// box that straddled nothing by `1.8e-15`, where one spelling answers
+/// (Q2552). Two halves whose partners `intersect` calls one surface, in
+/// opposite corners of the same two flat surfaces whichever is listed first,
+/// are now two halves of one ellipse, and every answer is one solid of the
+/// volume worked out by hand.
+#[test]
+fn a_slanted_bar_across_where_two_bars_on_one_pipe_meet_unites_with_them() {
+    let mut wrong = Vec::new();
+    for axis_origin in [LOWER_ORIGIN, CROSSED_JOINT] {
+        let answers = the_bars_united_across(CROSSED_JOINT, axis_origin, &SLANTED_ACROSS);
+        for (lower_first, answer) in [true, false].into_iter().zip(answers) {
+            if answer.0.is_err() {
+                wrong.push(format!(
+                    "wall at {axis_origin}, lower bar first {lower_first}: {}",
+                    answer.1
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// What one fuse answered: how many faces its one solid has, or the refusal,
 /// and how to say it.
 type Answer = (Result<usize, Error>, String);
 
 /// The upper bar, from `joint` to `6` with its wall naming its axis at
-/// `axis_origin`, united with a bar along `x` across the pipe at `z = 3`, and
-/// the lower bar, from `0` to the joint, united with that, both ways round.
+/// `axis_origin`, united with `across`, and the lower bar, from `0` to the
+/// joint, united with that, both ways round.
 ///
 /// An answer is checked as far as it goes before it comes back: it is one
 /// solid, it validates, and its volume is the three bars' less the part the
-/// cross shares with the pipe, worked out by hand: `16 r³/3` for two pipes of
-/// one radius whose axes cross square. A union that answers and then will not
-/// be measured comes back as that refusal, since measuring is how the volume
-/// is read.
-fn the_bars_united_across(joint: f64, axis_origin: f64) -> [Answer; 2] {
+/// cross shares with the pipe, worked out by hand
+/// ([`ABarAcross::shared_with_the_pipe`]). A union that answers and then will
+/// not be measured comes back as that refusal, since measuring is how the
+/// volume is read.
+fn the_bars_united_across(joint: f64, axis_origin: f64, across: &ABarAcross) -> [Answer; 2] {
     let policy = Policy::certified();
     let route = format!("the joint at {joint}, the upper wall at {axis_origin}");
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let lower = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, joint, LOWER_ORIGIN);
     let upper = a_bar_whose_wall_names_its_axis_at(&mut model, joint, 6.0, axis_origin);
-    let across = a_bar_across_the_pipe(&mut model);
+    let by_hand = std::f64::consts::PI * RADIUS * RADIUS * (6.0 + 2.0 * across.reach)
+        - across.shared_with_the_pipe();
+    let across = across.built_into(&mut model);
     let crossed = model
         .fuse(
             &[upper],
@@ -888,8 +937,6 @@ fn the_bars_united_across(joint: f64, axis_origin: f64) -> [Answer; 2] {
         );
     };
     let crossed = *crossed;
-    let by_hand =
-        std::f64::consts::PI * RADIUS * RADIUS * (6.0 + 8.0) - 16.0 * RADIUS.powi(3) / 3.0;
 
     [[lower, crossed], [crossed, lower]].map(|[arguments, tools]| {
         let mut model = model.clone();
@@ -943,16 +990,57 @@ fn the_bars_united_across(joint: f64, axis_origin: f64) -> [Answer; 2] {
     })
 }
 
-/// A bar of the pipe's radius along `x` from `−4` to `4`, across the pipe at
-/// `z = 3`, with its seam on top.
-fn a_bar_across_the_pipe(model: &mut Model) -> SolidKey {
-    let wall = Cylinder::new(
-        Axis::new(Point::new(0.0, 0.0, 3.0), Vector::new(1.0, 0.0, 0.0))
-            .expect("a direction with a length"),
-        RADIUS,
-    )
-    .expect("a positive radius");
-    a_bar_with_its_seam_towards(model, wall, -4.0, 4.0, Vector::new(0.0, 0.0, 1.0))
+/// A bar of the pipe's radius across it, its axis through `(0, 0, 3)` on the
+/// pipe's.
+struct ABarAcross {
+    /// Its axis direction, of length one.
+    along: [f64; 3],
+    /// How far it runs each way from `(0, 0, 3)` along its axis.
+    reach: f64,
+    /// Which way off its axis its seam is, of length one and square to it.
+    seam_towards: [f64; 3],
+}
+
+/// Along `x` from `−4` to `4`, with its seam on top.
+const SQUARE_ACROSS: ABarAcross = ABarAcross {
+    along: [1.0, 0.0, 0.0],
+    reach: 4.0,
+    seam_towards: [0.0, 0.0, 1.0],
+};
+
+/// Along `(0.96, 0, 0.28)` from `−5` to `5`, with its seam towards `y`, where
+/// both its corners sit on its wall exactly ([`a_bar_along`]).
+const SLANTED_ACROSS: ABarAcross = ABarAcross {
+    along: [0.96, 0.0, 0.28],
+    reach: 5.0,
+    seam_towards: [0.0, 1.0, 0.0],
+};
+
+impl ABarAcross {
+    fn built_into(&self, model: &mut Model) -> SolidKey {
+        let [x, y, z] = self.along;
+        let wall = Cylinder::new(
+            Axis::new(Point::new(0.0, 0.0, 3.0), Vector::new(x, y, z))
+                .expect("a direction with a length"),
+            RADIUS,
+        )
+        .expect("a positive radius");
+        let [x, y, z] = self.seam_towards;
+        a_bar_with_its_seam_towards(model, wall, -self.reach, self.reach, Vector::new(x, y, z))
+    }
+
+    /// What it shares with the pipe: `16 r³ / (3 sin θ)` for two pipes of one
+    /// radius whose axes meet at `θ`.
+    ///
+    /// The part shared reaches `r·cot(θ/2)` along each axis from where they
+    /// meet, the far end of the ellipse on the plane between the two pipes
+    /// that runs the long way: `2` for the bar along `x` and `8/3` for the
+    /// slanted one, whose `cos(θ/2)` is `0.8`. That is inside both bars, since
+    /// the pipe's run `3` each way and the bar across `4` or `5`.
+    fn shared_with_the_pipe(&self) -> f64 {
+        let [_, _, up] = self.along;
+        16.0 * RADIUS.powi(3) / (3.0 * (1.0 - up * up).sqrt())
+    }
 }
 
 /// **A pin through a cross of two bars of one radius unites with it.**
@@ -1003,7 +1091,7 @@ fn the_cross_united_with_a_thin_pin() -> [Answer; 2] {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let upright = a_bar_whose_wall_names_its_axis_at(&mut model, 0.0, 6.0, LOWER_ORIGIN);
-    let across = a_bar_across_the_pipe(&mut model);
+    let across = SQUARE_ACROSS.built_into(&mut model);
     let cross = model
         .fuse(
             &[upright],

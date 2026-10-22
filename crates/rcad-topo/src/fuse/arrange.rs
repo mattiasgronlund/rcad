@@ -3116,6 +3116,11 @@ impl<'f> Arrangement<'f> {
     /// [`Arrangement::two_crossings_provably_share_nothing`] is, so a pair
     /// whose meet answers costs nothing more. An `Err` from [`intersect`] is
     /// no proof, and the refusal in hand stands.
+    ///
+    /// [`Arrangement::are_two_halves_of_one_ellipse`] asks it too, only for two
+    /// halves already in opposite corners whose partners differ as written
+    /// (Q2552), and there `false` keeps the two apart, as it did before it
+    /// asked.
     fn the_two_partners_are_one_pipe(
         &self,
         first: usize,
@@ -6277,7 +6282,8 @@ impl<'f> Arrangement<'f> {
                 ends_of_a_whole_half[crossing] = Some([first.min(last), first.max(last)]);
             }
         }
-        self.whole_ellipses = self.the_halves_that_make_whole_ellipses(&ends_of_a_whole_half);
+        self.whole_ellipses =
+            self.the_halves_that_make_whole_ellipses(&ends_of_a_whole_half, policy, log);
         self.part_the_two_nappes_at_the_apex()?;
         self.drop_the_lumps_of_straight_cuts_alone();
         self.join_arcs_that_meet_at_nothing();
@@ -6297,6 +6303,8 @@ impl<'f> Arrangement<'f> {
     fn the_halves_that_make_whole_ellipses(
         &self,
         ends_of_a_whole_half: &[Option<[usize; 2]>],
+        policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> Vec<[usize; 2]> {
         let mut whole = Vec::new();
         for (one, ends) in ends_of_a_whole_half.iter().enumerate() {
@@ -6304,7 +6312,9 @@ impl<'f> Arrangement<'f> {
                 continue;
             };
             for (other, theirs) in ends_of_a_whole_half.iter().enumerate().skip(one + 1) {
-                if *theirs == Some(*ends) && self.are_two_halves_of_one_ellipse(one, other) {
+                if *theirs == Some(*ends)
+                    && self.are_two_halves_of_one_ellipse(one, other, policy, log)
+                {
                     whole.push([one, other]);
                 }
             }
@@ -7142,7 +7152,7 @@ impl<'f> Arrangement<'f> {
         // straddle zero. §35.2 again, arriving one function along.
         if first.crossing == second.crossing
             || self.are_two_halves_of_one_ruling(first.crossing, second.crossing)
-            || self.are_two_halves_of_one_ellipse(first.crossing, second.crossing)
+            || self.are_two_halves_of_one_ellipse(first.crossing, second.crossing, policy, log)
         {
             return Ok(Decision::Zero);
         }
@@ -7374,12 +7384,37 @@ impl<'f> Arrangement<'f> {
     /// ellipse is smooth through both ends, and worked out, `N · (t₁ × t₂)`
     /// with `t₂ = −t₁` straddles nothing every time. The halves of the other
     /// ellipse share one picker with each of these and are not opposite.
-    fn are_two_halves_of_one_ellipse(&self, one: usize, other: usize) -> bool {
+    ///
+    /// **The two halves may name the partner pipe two ways** (Q2552). Two bars
+    /// stacked on one pipe, the lower wall naming its axis at the origin and
+    /// the upper at `(0, 0, 4)`, with a bar of their radius slanting across
+    /// through `(0, 0, 3)`, are the shape: the slanted wall holds the half of
+    /// one ellipse that climbs past the joint as its crossing with the upper
+    /// spelling and the other half as its crossing with the lower, and the
+    /// lower bar united with the other two, either way round, was refused
+    /// `Undecidable` where the two halves meet. So the partners are one when
+    /// they are equal as written or [`intersect`] calls them one surface
+    /// ([`Arrangement::the_two_partners_are_one_pipe`]), and not by
+    /// [`name_of_the_surface_either_way_round`], which folds a slide of the
+    /// axis origin only along a coordinate axis.
+    ///
+    /// **The pickers may come in either order** for the same reason. Each
+    /// half's two pickers are listed in the order `intersect` sorts the face's
+    /// pipe and the partner, and the slanted wall sorts between the two
+    /// spellings, so one half lists its pickers the other way round from the
+    /// other. Either order cannot pair the pickers wrongly: one picker of a
+    /// half leans towards each pipe ([`a_half_of_an_ellipse`]), and turning a
+    /// picker round keeps the pipe it leans towards, so only two pickers
+    /// leaning towards one pipe can be opposite.
+    fn are_two_halves_of_one_ellipse(
+        &self,
+        one: usize,
+        other: usize,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> bool {
         let [mine, theirs] = [one, other].map(|crossing| &self.crossings[crossing]);
-        if mine.half_an_ellipse.is_none()
-            || theirs.half_an_ellipse.is_none()
-            || mine.partner != theirs.partner
-        {
+        if mine.half_an_ellipse.is_none() || theirs.half_an_ellipse.is_none() {
             return false;
         }
         let ([my_first, my_second], [their_first, their_second]) =
@@ -7387,7 +7422,13 @@ impl<'f> Arrangement<'f> {
         else {
             return false;
         };
-        Some(*their_first) == my_first.reversed() && Some(*their_second) == my_second.reversed()
+        let opposite = |mine: &Picker, theirs: &Picker| mine.reversed() == Some(*theirs);
+        let in_opposite_corners = (opposite(my_first, their_first)
+            && opposite(my_second, their_second))
+            || (opposite(my_first, their_second) && opposite(my_second, their_first));
+        in_opposite_corners
+            && (mine.partner == theirs.partner
+                || self.the_two_partners_are_one_pipe(one, other, policy, log))
     }
 
     /// Whether a crossing's way out of `node` is a line it carries, rather than
