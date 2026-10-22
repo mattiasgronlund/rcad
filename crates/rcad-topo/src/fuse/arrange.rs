@@ -15243,7 +15243,7 @@ fn the_one_loop_two_pipes_cross_in(surface: &Surface, partner: &Surface, run: &N
 }
 
 /// Whether `runs` are two loops of two leaning pipes of unequal widths that
-/// may meet: `false` only where they are proved apart.
+/// may meet: `false` where they are proved apart, or are no such two loops.
 ///
 /// **Two loops are apart where `r_fat − r_thin > δ` and meet where the two are
 /// equal**, for `δ` how far apart the axes are: the thin pipe then rests on the
@@ -15257,8 +15257,12 @@ fn the_one_loop_two_pipes_cross_in(surface: &Surface, partner: &Surface, run: &N
 /// are taken to meet, and the fuse refuses rather than answers with two curves
 /// crossing at a point that is no vertex.
 ///
-/// Two pipes of one width have no two loops, and two that run the same way
-/// cross in lines, not loops picked out of the crossing.
+/// Two pipes of one width have no two loops. Two that run the same way cross
+/// in two straight lines, each picked out of the crossing as a loop is, and
+/// two lines down one direction never meet. There `t × w` is nothing, and so
+/// is everything weighed above, which would take the lines to meet. So the
+/// runs are weighed as loops only where `|t × w|²` is proved above nothing,
+/// and taken for lines where it is not.
 fn the_two_loops_of_two_pipes_may_meet(
     surface: &Surface,
     partner: &Surface,
@@ -15271,19 +15275,24 @@ fn the_two_loops_of_two_pipes_may_meet(
     if one.radius() == other.radius() || !runs.into_iter().all(picked_out) {
         return false;
     }
+    let [mine, theirs] =
+        [one, other].map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
+    let across = cross_of_intervals(mine, theirs);
+    let lean_squared = dot_of(across, across);
+    let the_axes_lean = lean_squared.lo() > 0.0;
+    if !the_axes_lean {
+        return false;
+    }
     let (thin, fat) = if one.radius() < other.radius() {
         (one, other)
     } else {
         (other, one)
     };
-    let [mine, theirs] =
-        [one, other].map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
-    let across = cross_of_intervals(mine, theirs);
     let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
     let gap = [0, 1, 2].map(|axis| Interval::exactly(there[axis]) - Interval::exactly(here[axis]));
     let reach = dot_of(gap, across);
     let room = (Interval::exactly(fat.radius()) - Interval::exactly(thin.radius()))
-        * root_enclosing(dot_of(across, across));
+        * root_enclosing(lean_squared);
     let apart = (room - reach).lo() > 0.0 && (room + reach).lo() > 0.0;
     !apart
 }
