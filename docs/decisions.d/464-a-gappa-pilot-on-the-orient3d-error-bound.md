@@ -8,13 +8,17 @@
 > to be beneficial when rcad stabilize and will place more focus on perfomance
 > optimizations?
 
-*and, after the answer below: "file the Gappa pilot row for orient3d". What this
-section says about the three tools is what is known of them, not what has been
-tried here: none of them is installed, and the pilot is what checks it.*
+*and, after the answer below: "file the Gappa pilot row for orient3d". What
+464.1 to 464.3 say about the three tools is what was known of them before
+anything was tried here, when none of them was installed. 464.4 onward is the
+pilot, Q2647, and where it found 464.2 wrong 464.2 says so.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
   464.3   What the pilot answers
+  464.4   What the pilot found
+  464.5   The scripts, whole
+  464.6   What this leaves
 
 ### 464.1 The bugs a bound prover is for
 
@@ -52,9 +56,12 @@ a refusal falls in.
 ### 464.2 What each tool is expected to do, untried here
 
 - **Gappa** proves a bound on one fixed expression, given a range for every
-  input, and can write the proof out for Rocq to check. It has to show that
-  every value on the way stays in range, so an overflow like §16.9's should
-  stop it. It can state a bound against a second computed number, which
+  input, and can write the proof out for Rocq to check. It was expected to
+  have to show that every value on the way stays in range, so that an
+  overflow like §16.9's would stop it. The pilot found it does not: its
+  `float<ieee_64>` has a smallest exponent and no largest one, so it never
+  sees an overflow, and 464.4 says why `on_floats` does not need it to. It
+  can state a bound against a second computed number, which
   is the shape `ORIENT3D_ERROR_BOUND` has: an error of at most 7ε times the
   permanent, the permanent computed too. Where one input appears many times it
   overestimates unless it is given hints.
@@ -69,8 +76,9 @@ a refusal falls in.
   `crates/rcad-predicates/src/expansion.rs`, and the `inari` fork's outward step
   (§460). That last one is `inari`'s own code, and its proof belongs there.
 
-So the pilot is Gappa's. It states rcad's bound as the code writes it, it should
-see an overflow, and its proof gets checked. FPTaylor, to find tight numbers, and
+So the pilot is Gappa's. It states rcad's bound as the code writes it, and its
+proof gets checked. It was also expected to see an overflow, which it does not
+(464.4). FPTaylor, to find tight numbers, and
 Lean, for the any-degree bounds, wait on what it finds.
 
 There are twenty bound constants outside tests, found by `grep -rnE 'const
@@ -108,66 +116,192 @@ On `Orient3d::on_floats` and `ORIENT3D_ERROR_BOUND`, in
 Quote the script whole in this section, so the result can be run again. Whether
 a script joins the tree, and the gate, is for the row the pilot files.
 
-### 464.4 DRAFT, unfinished: the scripts as Q2647's relay 2 left them
+### 464.4 What the pilot found
 
-*Q2647's relays 1 and 2 committed this so the next lane does not lose it. It
-is not an answer yet. The next lane replaces this subsection with 464.4
-onward.*
+Q2647 ran the pilot in three relays and wrote it up in a fourth, on 2026-10-22
+and 2026-10-23, against `on_floats` as it stands at `d9f931e8`; neither
+`orient3d.rs` nor `cascade.rs` has changed since, up to `a1c96c57`. `u` below
+is `2⁻⁵³`, the `epsilon` of `ORIENT3D_ERROR_BOUND`'s doc comment, so the
+code's constant is `B = (7 + 56u)u = 7u + 56u²`. Block 1 in 464.5 is
+`on_floats` and its bound, written out line for line, and block 2 is a lemma
+block 1 needs. Every run is at `-Eprecision=200`: at Gappa's default of 60
+bits the `u²` terms are lost, and block 1's goal fails with the best bound it
+finds at `±1.01562`.
 
-The pins, both measured:
+**1. The pin.** Gappa 1.8.0 from nixpkgs at a fixed commit, `nix
+--extra-experimental-features 'nix-command flakes' shell
+github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe#gappa --command
+gappa`. Nix is already on the machine and keeps everything in its store, so
+nothing is installed ad hoc, and the commit fixes every byte. The first fetch
+took 1m0.9s and 15.25 MiB. Coq 8.20.1 and flocq 4.2.2 come from the same
+commit, as `#coqPackages_8_20.coq` and `#coqPackages_8_20.flocq`: 1m10.9s and
+583 MiB the first time. The same commit's gappalib, the Coq library Gappa's
+proofs are written against, is 1.7.0. So is every nixpkgs' gappalib for Coq
+8.20, master included, and `rocqPackages` and `coqPackages_9_*` have none.
+1.7.0 lacks four theorems that Gappa 1.8.0's proof of block 1 cites:
+`rel_of_lin`, `lin_refl`, `lin_of_lin_rel2_p` and
+`lin_float_error_of_lin_abs_ne`. gappalib 1.8.0, tagged 2026-02-19 ("added
+support for Gappa 1.7", "compatibility from Coq 8.16 to Rocq 9.2"), has them.
+The nix block in 464.5 builds it against the pinned Coq and flocq, in 19.6 s.
+The other routes were worse: `mise registry` has no Gappa, conda-forge has
+none, opam has gappa 1.6.0 and wants system libraries, and apt has 1.4.1 with
+no pin.
 
-- Gappa 1.8.0: `nix --extra-experimental-features 'nix-command flakes' shell
-  github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe#gappa --command
-  gappa --version`. It took 1m0.926s and fetched 15.25 MiB.
-- Coq 8.20.1 with gappalib 1.7.0 and flocq 4.2.2, from the same nixpkgs, as
-  `#coqPackages_8_20.coq`, `#coqPackages_8_20.gappalib` and
-  `#coqPackages_8_20.flocq`. `rocqPackages` and `coqPackages_9_*` have no
-  gappalib. It took 1m10.914s, fetched 583.11 MiB and built gappalib locally.
+**2. The bound.** Block 1 proves `|y − Ex| ≤ eb`, in about 4 s. `y = s12 +
+t3` is the sum `on_floats` rounds to get `value`. `Ex` is the exact
+determinant of the same `f64` inputs. `eb = rnd(B × P)` is the `error_bound`
+`on_floats` returns, and `P` its permanent. The hypotheses are §12.2's two
+conditions (the nine products normal, and `eb` normal), the twelve
+coordinates finite, no factor zero (the zero cases are below), the
+permanent's own three products `r1`, `r2`, `r3` normal, and the thirteen
+relative errors block 2 gives from those thirteen normal numbers. On the way
+Gappa prints `|y − Ex| / P6 ≤ 7u + 11u²`, where `P6` is the permanent with no
+rounding at all, and `P` within `4u + 7u²` of its unrounded value.
 
-What relay 2 ran, all with `-Eprecision=200`. At Gappa's default of 60 bits
-the `u²` terms are lost and `W1` comes out at `453b-59`, about `7.08u`.
-Here `u = 2^-53`.
+That is the claim `decide` needs, but not the one the doc comments make.
+`decide` certifies `Pos` when `value > eb`. `eb` is a double and rounding is
+monotone, so `y ≤ eb` would give `value = rnd(y) ≤ rnd(eb) = eb`. So `y >
+eb`, and `Ex ≥ y − eb > 0`. `Neg` is the same with the signs turned. So level
+1's sign is right on every input that meets the hypotheses. This step is on
+paper. So is putting block 2 into block 1: block 2's conclusion, taken at each
+of the thirteen roundings, is block 1's hypothesis about that rounding.
 
-- **The lemma** (second block) proves `|rnd(x)| >= 2^-1022` gives a relative
-  error of at most `u + 2u²`, both signs, in 0.2 s. It fails at `u` (best
-  just above `2^-53`: an exact value just below `2^-1022` rounds up to it),
-  and fails with `|p| >= 1b-1074` (best `[-0.5, 1]`). Gappa's own
-  `rel_float_of_abs` (`src/arithmetic/float.cpp:426-437`) needs the value
-  strictly above `2^-1022`, which is why the lemma is separate.
-- **The main script** (first block) proves `(y - Ex) / eb in [-1, 1]` in
-  3.9 s. `(y - Ex) / P6` comes out within `7u + 11u²`, and `P -/ Phat`
-  within `4u + 7u²`. With strict normal hypotheses (`|x| >=
-  4503599627370497b-1074`) and no lemma it also proves, at `7u + 7u²`.
-- **`B`**: `6b-53` fails (best ±1.16667); `7b-53` fails; `7b-53 + k b-106`
-  fails at k = 44, 45, 46 and proves at 47, 48. The code's 56 has 9u² over.
-- **The value version**: goal `(value - Ex) / eb`, each `W_k` times `rv =
-  value / y`, hypothesis `|y| >= 1b-1074`, hint `value / y -> 1 + (value -
-  y) / y`. Fails at the code's `B` (best ±1.14286) and at `8b-53`; proves at
-  `8b-53 + 1b-100`; fails at `6b-53` (best ±1.33333). `(value - Ex) / P6`
-  comes out at `8u` and a little. Not proved at 7ε is not shown false.
-- **No product normal** (all nine, or only `bdx * cdy`'s): `REL(bdxcdy, bdx *
-  cdy)` is not found, `rp1` is ±2^4144, `W1` is unbounded, the goal fails.
-- **No `r1..r3` normal**: `REL(P, Phat)` is not found and the goal fails.
-- **No `eb` normal**: the goal fails.
-- **`t1 + t2 = 0`** (`s12 = S`, `rs` dropped from `W1..W4`, its hypothesis
-  and hint dropped): proves, `(y - Ex) / P6` about `6u`.
-- **Rocq**: `gappa -Bcoq` on the lemma gives 548 lines and `coqc` exits 0 in
-  0.74 s. On the main script it gives 9947 lines, and `coqc` stops at line
-  4015: `The variable rel_of_lin was not found`. Gappa 1.8.0 emits
-  `rel_of_lin`; gappalib 1.7.0 has `rel_of_nzr_bnd`, `rel_of_fix_float_*`
-  and `lin_of_rel`, but not that.
-- **Rocq, relay 3**: gappalib 1.7.0 lacks four theorems the main proof
-  cites: `rel_of_lin`, `lin_refl`, `lin_of_lin_rel2_p` and
-  `lin_float_error_of_lin_abs_ne`. gappalib 1.8.0 (2026-02-19, "added
-  support for Gappa 1.7", "compatibility from Coq 8.16 to Rocq 9.2") has
-  them; nixpkgs, master included, packages only 1.7.0 for Coq 8.20. Built
-  from the expression below against the pinned Coq 8.20.1 and flocq 4.2.2
-  (19.6 s), `coqc` checks the main proof (exit 0, 8.9 s) and the lemma's
-  (exit 0, 3.1 s). The main proof is checked modulo its 39 hint equalities,
-  which `gappa -Bcoq` writes as `Hypothesis a1 .. a39`: field identities,
-  true only where the 194 divisors Gappa warned about are nonzero. Nothing
-  discharges them yet. Gappa's proof differs run to run (9947, 10299,
-  9967, 10205, 10194 lines), so the theorems it cites differ too.
+The claim on `value` itself is not proved. The doc comment above
+`level_one_stays_inside_its_error_bound_where_the_rounding_is_worst`
+(`orient3d.rs:1392`) says `value` "never falls further from the true
+determinant than `7*epsilon` of the permanent". Asked for `|value − Ex| ≤ eb`,
+with one more ratio for the last rounding, Gappa fails at the code's `B` (best
+`±1.14286`) and at `8u`, and proves it at `8u + 64u²`. `|value − Ex| / P6`
+comes out at `8u + 8u²`. Not proving it does not make it false: §18.5's search
+found no input past `6.286u`. The doc comment on `ORIENT3D_ERROR_BOUND`
+counts "folding the three terms together with two additions" as one rounding,
+but `y` takes seven roundings from the inputs and `value` takes eight. Q2658
+is the row for it.
+
+**Rocq checks the proof, modulo 39 equalities.** `gappa -Bcoq` writes block
+1's proof as 10572 lines of Coq, and `coqc` under the pinned Coq with gappalib
+1.8.0 accepts it: exit 0, in 7.1 s. Block 2's proof is 548 lines: exit 0, in
+1.8 s. Gappa does not write the same proof each run; four earlier runs wrote
+9947 to 10299 lines. Block 2's proof stands on its own. Block 1's rests on its
+39 hints: each `a -> b;` becomes `Hypothesis aN : a = b.` in the Coq file,
+with no condition attached. Gappa's manual says so (`doc/formalizing.rst` in
+1.8.0): "when generating a theorem proof, Gappa adds this equality as a
+hypothesis. It is then up to the user to prove it". Gappa checks that each
+hint is an identity of fractions, and it warned about none of the 39. It
+warned 194 times that it took a divisor to be nonzero. In Coq's reals `x / 0`
+is 0, so `adx / Adx = 1 + (adx − Adx) / Adx` is false where `Adx` is zero.
+Block 1's hypotheses rule that out on paper, since a rounding gives zero only
+from zero, but nothing in Coq checks it yet. Q2661 asks whether `field` can.
+
+**3. §12.2 would have been caught.** Drop the hypothesis that the nine
+products are normal, with what block 2 gives from it, and the goal fails, best
+`±4.63802e+1218`. Drop only `bdx * cdy`'s and Gappa names the place: it cannot
+find `REL(bdxcdy, bdx * cdy)`, so `rp1`, the factor that rounding multiplied
+by, is only known to lie within `±2⁴¹⁴⁴`, `W1` has no bound, and the goal
+fails. That is a product in the subnormals, which is §12.2. Dropping `r1`,
+`r2`, `r3` normal fails at `REL(P, Phat)`. Dropping `eb` normal fails too,
+best `[-6.95186e+1070, 1.08623e+1069]`.
+
+**4. A miscount like §16.3's would have been caught.** At `B = 6u` the goal
+fails, best `±1.16667`, and the claim on `value` fails at `6u` too, best
+`±1.33333`. Gappa failing to prove `6u` does not make it false, but §18.5's
+input at `6.286u` does, for `value`. The smallest `B` proved, in steps of
+`u²`, is `7u + 47u²`: `7u` fails and so does `7u + 46u²`. The code's `56u²`
+has `9u²` to spare over that.
+
+**5. Nothing keeps block 1 the same expression as the Rust.** It restates
+`on_floats` by hand and names the commit it was read at. If `on_floats` took
+an FMA, another order or another product, every test would run as before and
+the script would go on proving the old expression. The tests that would notice
+a looser bound are the ones §16.3 and §18.5 found too coarse. Q2661 decides
+between a script per bound run by a recipe under these pins, and a test that
+fails when `on_floats`' source changes and the script's header sha does not.
+
+**6. The other nineteen.** Eight are sign filters of orient3d's kind, an
+`on_floats` whose `error_bound` is a constant times a permanent:
+`ORIENT2D_ERROR_BOUND` and `surface.rs`' `ERROR_BOUND` in `rcad-predicates`,
+and `SIDE_OF_PLANE`, `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT`,
+`SIDE_OF_SPHERE`, `SIDE_OF_CYLINDER`, `SIDE_OF_CONE` and `SIDE_OF_TORUS` in
+`rcad-geom`. Block 1's pattern should carry over to them: one ratio hint per
+rounding, the error split into one term per product of the permanent so that
+Gappa can average them, block 2 for the closed normal end, and
+`-Eprecision=200`. That is Q2659. The eleven `*_ROUNDOFF` constants were not
+read for this. Two of them, `EVALUATION_ROUNDOFF` and `REFINEMENT_ROUNDOFF`,
+hold per de Boor pass at any degree, and a Gappa script states one fixed
+expression, so it could only do them one degree at a time. That is Q2660. The
+machine's part costs little: seconds for Gappa, under ten for `coqc`. The cost
+is in finding the hints, which took orient3d three relays and this write-up;
+with the pattern known, each of the eight should take less.
+
+**The zero cases, on paper and not run, but one.** Block 1 assumes no factor is
+zero, and `on_floats` does not. A difference of two doubles rounds to zero only
+when it is zero, and a product with a zero factor is exactly zero, so a zero
+difference zeroes its terms in both `y` and `Ex`. The branch where `t1 + t2` is
+zero was run: the goal proves, with `|y − Ex| / P6 ≤ 6u + 13u²`. The branch
+where `first` is zero was not. There `bdxcdy == cdxbdy`, so the first term of
+`y` is zero while the matching term of `Ex` need not be, and the identity block
+1 rests on still holds with `rm1 = rt1 = 1`. But `product_is_normal(adz,
+first)` passes on the zero, and `r1 = rnd(q1 × |adz|)` can then fall below the
+normals: `bdxcdy = cdxbdy = 2⁻¹⁰⁰⁰` and `adz = 2⁻¹⁰⁰` make `q1 × |adz| =
+2⁻¹⁰⁹⁹`, which rounds to zero. So block 1's hypothesis that `r1` is normal is
+one the code does not check in that branch, and the comment at
+`orient3d.rs:366-368`, that the nine checks cover the permanent's products, is
+wrong there. Where `first` is not zero the comment holds: `|first| ≤ q1` by
+monotone rounding, so `r1 ≥ |t1| ≥ 2⁻¹⁰²²`. A paper estimate says the bound
+survives the zero branch: its error is a few `u` of `q1 × |adz|`, far inside
+the slack of an `eb` that is normal. Q2658 runs it.
+
+**Overflow does not reach Gappa.** Its `float<ieee_64, ne>` has no largest
+exponent: the rounding it writes for Coq is `rounding_float rndNE (53)
+(-1074)`, a precision and a smallest exponent. So block 1 says nothing about an
+infinity, and 464.2's expectation was wrong. `on_floats` does not need it to,
+on paper.
+`decide` compares only when `eb` is normal, so finite, and then `P` is finite.
+Every intermediate of `on_floats` that could become infinite or not a number
+flows into `P`: each difference is a factor of one of the permanent's
+products, each product is one of its terms, and every term is non-negative, so
+one infinite or not-a-number term makes the sum infinite or not a number. The
+rest of `value`'s intermediates are bounded by `P`'s through monotone
+rounding: `|first| ≤ q1`, `|t1| ≤ r1`, `|s12| ≤ rnd(r1 + r2)`, `|value| ≤ P`.
+So where `decide` compares, nothing rounded to infinity, and there IEEE gives
+what Gappa's model without an overflow gives.
+
+### 464.5 The scripts, whole
+
+To run them again, save the nix block as `gappalib18.nix` and the two gappa
+blocks as `block1.g` and `block2.g`, and then:
+
+```sh
+nx="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
+pin=github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe
+$nx shell $pin#gappa --command gappa -Eprecision=200 block1.g
+$nx shell $pin#gappa --command gappa -Eprecision=200 -Bcoq block1.g > block1.v
+gl=$($nx build --impure --no-link --print-out-paths -f gappalib18.nix)
+fl=$($nx build --no-link --print-out-paths $pin#coqPackages_8_20.flocq)
+COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+  $nx shell $pin#coqPackages_8_20.coq --command coqc block1.v
+```
+
+and the same for `block2.g`. Gappa exits 0 when every goal is proved. When one
+is not, it prints `Error: some properties were not satisfied` and the best
+bound it found, and exits 1.
+
+Each variant in 464.4 is block 1 with one change. A `B` is its `B = ...`
+line. A dropped hypothesis is its lines deleted, and the run that names where
+`bdx * cdy` breaks also asks for `bdxcdy -/ bdx * cdy in ?`, `rp1 in ?` and
+`W1 in ?`. The claim on `value` writes `(value - Ex)` for each `(y - Ex)`,
+adds `rv = value / y;`, multiplies `rm1 * rt1 * rs` and `rm2 * rt2 * rs` in
+`W1` to `W4` and `rm3 * rt3` in `W5` and `W6` by `rv`, and adds the hypothesis
+`|y| >= 1b-1074` and the hint `value / y -> 1 + (value - y) / y;`. The `t1 +
+t2 = 0` branch writes `s12 = S;`, drops `rs` from `W1` to `W4`, and deletes
+`rs`'s definition, its hint and the `|t1 + t2|` hypothesis.
+
+Block 2 fails at `u` instead of `u + 2u²` (an exact value just below `2⁻¹⁰²²`
+rounds up to it), and fails with `|p| >= 1b-1074` in place of `1b-1022`, best
+`[-0.5, 1]`. Gappa's own theorem for this, `rel_float_of_abs`
+(`src/arithmetic/float.cpp:426-437` in 1.8.0), needs the exact value strictly
+above `2⁻¹⁰²²`, while `product_is_normal` checks the rounded product, and lets
+it equal `2⁻¹⁰²²`. That is why block 2 is a lemma of its own.
 
 ```nix
 # gappalib18.nix; build with: nix --extra-experimental-features
@@ -375,3 +509,24 @@ p = rnd(x);
   -> (p - x) / x in [-4503599627370497b-105, 4503599627370497b-105] }
 $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
 ```
+
+### 464.6 What this leaves
+
+- **Q2658**, the two claims in `orient3d.rs` the pilot does not back: that
+  `value` stays within `7*epsilon` of the permanent, in the doc comments on
+  `ORIENT3D_ERROR_BOUND` and on the bound test, and that the nine
+  `product_is_normal` checks cover the permanent's products when `first`,
+  `second` or `third` is zero. Either a proof at the code's bound or comments
+  that say what is proved, and a run of the zero branch.
+- **Q2659**, the eight other `*_ERROR_BOUND` sign filters, done as block 1
+  was.
+- **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
+  and proofs of those.
+- **Q2661**, whether the scripts join the tree and the gate, what notices
+  `on_floats` drifting from block 1, and whether `field` proves the 39 hint
+  equalities once their divisors are shown nonzero.
+
+None of the pilot's findings is a wrong answer found on an input. The sign
+`decide` certifies is proved right on every input block 1 covers. What is left
+is comments that claim more than is proved, zero branches argued on paper and
+one of them not run, and 39 equalities Coq takes on trust.
