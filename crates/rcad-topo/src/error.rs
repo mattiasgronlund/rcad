@@ -513,6 +513,31 @@ pub enum Error {
         used: u32,
     },
 
+    /// The chords of one loop of a face fell on the far side of another loop's
+    /// chords, so the triangles of that face covered the wrong side of a loop.
+    ///
+    /// The triangulator fills a patch by counting the loops it steps across on
+    /// the way in from outside, so a hole whose chords lie wholly outside the
+    /// outline's is filled, and the face draws the hole's sides the way the
+    /// hole's own wall does. A round bar of radius 1 less a bar of radius 0.1
+    /// standing 0.8 off its axis at an eighth of a turn, half a unit deep in
+    /// its top, is one. At the coarsest mesh the top circle is a square whose
+    /// sides run up to 0.29 inside it, the hole sits wholly in that room, and
+    /// the answer was refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)`
+    /// (Q2501, `a_blind_hole_in_a_bars_end.rs`).
+    ///
+    /// **About where the chords fell and not about the solid.** The loops of a
+    /// sound face do not cross, and a chord at a deflection `d` strays at most
+    /// `d` from its curve, so a mesh with `d` under the gap between two loops
+    /// keeps each loop's chords on its own side of the other's.
+    #[error(
+        "a loop of this face fell on the wrong side of another where the mesh's chords drew them"
+    )]
+    AMeshCoveredTheWrongSideOfALoop {
+        /// Which face.
+        face: crate::FaceKey,
+    },
+
     /// Moving this solid's mesh into place took away the space it encloses.
     ///
     /// A placed curved face is meshed in the frame it is stored in, and its
@@ -1444,6 +1469,7 @@ impl Error {
             | Self::AWireWillNotLieFlatOnItsFace { .. }
             | Self::CannotTellWhichWayRoundTheRingAFaceGoes { .. }
             | Self::TwoPatchesOfTheMeshDrewTheSameSide { .. }
+            | Self::AMeshCoveredTheWrongSideOfALoop { .. }
             | Self::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }
             | Self::CannotTellWhichWayASolidsFacesPoint { .. }
             | Self::AClosedEdgeOfTheAnswerWouldStartAtAPole { .. }
