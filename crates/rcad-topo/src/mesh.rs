@@ -415,6 +415,9 @@ impl SolidView<'_> {
     /// predicate inside a triangulation could not settle a sign.
     /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] when two patches folded
     /// onto each other and a side would be used more than twice.
+    /// [`Error::AMeshCoveredTheWrongSideOfALoop`] when one loop of a face fell
+    /// wholly outside another's chords, and the triangulator covered what lies
+    /// inside the hole; a deflection under the gap between the two clears it.
     /// [`Error::PlacingItTookAwayTheSpaceItsMeshEncloses`] when the solid is
     /// placed and its mesh, moved out to where it sits, no longer encloses the
     /// space it did where it was made.
@@ -4001,6 +4004,13 @@ impl BuildingAMesh {
                 fan = a_fan_round_each_loop(piece.iter().map(|one| one.points.len()));
                 (fan.as_slice(), against_its_loops)
             } else {
+                if matches!(
+                    how,
+                    HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder
+                ) && !the_triangles_keep_to_one_side_of_every_loop(&piece, &cut)
+                {
+                    return Err(Error::AMeshCoveredTheWrongSideOfALoop { face: face.key() });
+                }
                 (cut.triangles(), inside_out)
             };
             for triangle in triangles {
@@ -4665,6 +4675,61 @@ fn the_points_of(piece: &[ALoopToCut]) -> Vec<u32> {
         .iter()
         .flat_map(|one| one.points.iter().copied())
         .collect()
+}
+
+/// Whether the triangles `cut` drew for `piece` keep to one side of every loop
+/// of it: every side of a loop they draw, they draw the way its loop runs, or
+/// every one against it.
+///
+/// The triangulator keeps what it reaches by crossing an odd number of loops on
+/// the way in from outside, and that is the face only while no loop's chords
+/// fall wholly outside another's. A hole whose chords do is kept, and its sides
+/// are drawn from inside it, the other way round to the outline's. A round bar
+/// of radius 1 less a bar of radius 0.1 standing 0.8 off its axis at an eighth
+/// of a turn, half a unit deep in its top, is one: at the coarsest mesh the
+/// top's outline is a square that leaves the hole's square wholly outside it
+/// (Q2501, `a_blind_hole_in_a_bars_end.rs`).
+///
+/// The sides are compared with one another and never with the chart's turn,
+/// which a torus's chart flips: every loop runs with the face's material on
+/// the same hand, so a sound cut draws them all one way, whichever it is. Where
+/// two loops meet at a point the triangles name it by the first corner there,
+/// as `triangulate` does. A side drawn neither way, or both ways, says nothing.
+fn the_triangles_keep_to_one_side_of_every_loop(piece: &[ALoopToCut], cut: &Patch) -> bool {
+    let corners = piece.iter().map(|one| one.points.len()).sum::<usize>();
+    let mut first_at = HashMap::with_capacity(corners);
+    let named: Vec<u32> = (0_u32..)
+        .zip(&cut.corners()[..corners])
+        .map(|(corner, &[first, second])| {
+            *first_at
+                .entry([first.to_bits(), second.to_bits()])
+                .or_insert(corner)
+        })
+        .collect();
+    let on_a_loop = |corner: u32| (corner as usize) < corners;
+    let drawn: HashSet<(u32, u32)> = cut
+        .triangles()
+        .iter()
+        .flat_map(|&[first, second, third]| [(first, second), (second, third), (third, first)])
+        .filter(|&(from, to)| on_a_loop(from) && on_a_loop(to))
+        .collect();
+    let mut with_it = false;
+    let mut against_it = false;
+    let mut start = 0;
+    for one in piece {
+        let count = one.points.len();
+        for at in 0..count {
+            let from = named[start + at];
+            let to = named[start + (at + 1) % count];
+            match (drawn.contains(&(from, to)), drawn.contains(&(to, from))) {
+                (true, false) => with_it = true,
+                (false, true) => against_it = true,
+                (true, true) | (false, false) => {}
+            }
+        }
+        start += count;
+    }
+    !(with_it && against_it)
 }
 
 /// Where a face reads the points round it, in the frame it is cut up in: a
