@@ -632,6 +632,12 @@ def refuse_a_merged_rs_item_with_no_file(write_set, top):
     Q2353's row held `merged.rs#<module>` alone; its lane's narrow dropped the
     new file's own path, and the merge was refused for a file outside the
     write set it was taken with. Re-filed as Q2503.
+
+    A module's file is named either the dashed way `mesh.rs` uses `#[path]`
+    for, or -- 299 of 300 files under `crates/rcad-topo/tests/` -- with the
+    module's own underscores, letter for letter. Q2569: this looked for the
+    dashed spelling alone, so a write set naming a file already spelled with
+    underscores was refused though the file was right there.
     """
     entries = entries_of(write_set)
     named_paths = {entry.partition("#")[0] for entry in entries}
@@ -640,11 +646,13 @@ def refuse_a_merged_rs_item_with_no_file(write_set, top):
         tests_dir = MERGED_RS_DIRS.get(path)
         if not sep or tests_dir is None:
             continue
-        candidate = f"{tests_dir}{module.replace('_', '-')}.rs"
-        if candidate in named_paths or os.path.exists(os.path.join(top, candidate)):
+        dashed = f"{tests_dir}{module.replace('_', '-')}.rs"
+        candidates = (f"{tests_dir}{module}.rs", dashed)
+        if any(candidate in named_paths or os.path.exists(os.path.join(top, candidate))
+               for candidate in candidates):
             continue
         raise Refused(f"'{entry}' names a file the write set does not itself name and that does not exist yet: "
-                      f"add {candidate}, or whichever path the item is really for, to the write set too (§373.7)")
+                      f"add {dashed}, or whichever path the item is really for, to the write set too (§373.7)")
 
 
 CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")
