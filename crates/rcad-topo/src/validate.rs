@@ -3965,56 +3965,71 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Mesh> {
-    let mut finest_refusal = match view.mesh(as_coarse_as_a_mesh_gets(), policy, log) {
-        Err(why) if a_finer_mesh_may_clear(&why) => why,
-        answer => return answer,
-    };
+    let (mut finest_refusal, mut shortest_fold) =
+        match view.mesh_or_how_it_folded(as_coarse_as_a_mesh_gets(), policy, log) {
+            Ok(mesh) => return Ok(mesh),
+            Err(refused) if a_finer_mesh_may_clear(&refused.why) => {
+                (refused.why, refused.shortest_side_two_patches_drew)
+            }
+            Err(refused) => return Err(refused.why),
+        };
     let Some((low, high)) = view.box_around_it() else {
         return Err(finest_refusal);
     };
-    let Some(closest) = how_close_two_corners_come(view) else {
-        return Err(finest_refusal);
-    };
+    let closest = how_close_two_corners_come(view);
     let top = {
         let (low, high) = (low.coordinates(), high.coordinates());
         (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0
     };
-    let finest_for_a_crossing = closest / 8.0;
-    let finest_for_a_fold = match how_flat_a_curved_face_gets(view, [low, high]) {
-        Some(flattest) if flattest > 0.0 => {
-            finest_for_a_crossing.min(closest * closest / (6.0 * flattest))
+    let finest_for_a_crossing = closest.map_or(f64::INFINITY, |closest| closest / 8.0);
+    let flattest = how_flat_a_curved_face_gets(view, [low, high]);
+    let finest_for_a_fold = |shortest_fold: Option<f64>| {
+        let Some(gap) = [closest, shortest_fold]
+            .into_iter()
+            .flatten()
+            .reduce(f64::min)
+        else {
+            return f64::INFINITY;
+        };
+        match flattest {
+            Some(flattest) if flattest > 0.0 => (gap / 8.0).min(gap * gap / (6.0 * flattest)),
+            _ => gap / 8.0,
         }
-        _ => finest_for_a_crossing,
-    }
-    .max(top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO));
-    let finest = |refusal: &Error| {
+        .max(top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO))
+    };
+    let finest = |refusal: &Error, shortest_fold: Option<f64>| {
         if its_sides_cross(refusal) || its_loops_lie_the_wrong_side_of_each_other(refusal) {
             finest_for_a_crossing
         } else {
-            finest_for_a_fold
+            finest_for_a_fold(shortest_fold)
         }
     };
     let mut room = top;
-    while room >= finest(&finest_refusal) {
+    while room >= finest(&finest_refusal, shortest_fold) {
         let Ok(less) = Deflection::of(room) else {
             break;
         };
-        match view.mesh(less, policy, log) {
+        let refused = match view.mesh_or_how_it_folded(less, policy, log) {
             Ok(mesh) => return Ok(mesh),
-            Err(why) if they_touch_where_they_touched_before(&finest_refusal, &why) => {
+            Err(refused) => refused,
+        };
+        shortest_fold = [shortest_fold, refused.shortest_side_two_patches_drew]
+            .into_iter()
+            .flatten()
+            .reduce(f64::min);
+        match refused.why {
+            why if they_touch_where_they_touched_before(&finest_refusal, &why) => {
                 finest_refusal = why;
                 break;
             }
-            Err(why) if a_finer_mesh_may_clear(&why) => finest_refusal = why,
-            Err(
-                Error::DeflectionBelowWhatAMeshCanReach { .. }
-                | Error::MoreMeshPointsThanASolidWillHold { .. }
-                | Error::CannotMeshAFace {
-                    why: rcad_mesh::CannotTriangulate::MoreTrianglesThanAPatchWillHold { .. },
-                    ..
-                },
-            ) => break,
-            Err(why) => return Err(why),
+            why if a_finer_mesh_may_clear(&why) => finest_refusal = why,
+            Error::DeflectionBelowWhatAMeshCanReach { .. }
+            | Error::MoreMeshPointsThanASolidWillHold { .. }
+            | Error::CannotMeshAFace {
+                why: rcad_mesh::CannotTriangulate::MoreTrianglesThanAPatchWillHold { .. },
+                ..
+            } => break,
+            why => return Err(why),
         }
         room /= 2.0;
     }
