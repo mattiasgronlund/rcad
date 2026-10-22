@@ -524,7 +524,7 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
         );
 
     two_lines_told_apart(
-        picker,
+        Picker::from(picker),
         along.components(),
         &TwoLinesEitherSideOfThePicker {
             middle: how_far_in_front(picker, origin.coordinates())
@@ -1230,7 +1230,7 @@ fn two_lines_between_two_pipes(one: &Cylinder, other: &Cylinder) -> Result<Surfa
 
     let tell_apart = |picker: HalfSpace| {
         two_lines_told_apart(
-            picker,
+            Picker::from(picker),
             along.components(),
             &TwoLinesEitherSideOfThePicker {
                 middle: how_far_in_front_of_the_middle(picker, one, other),
@@ -3395,7 +3395,8 @@ fn how_far_a_picking_half_space_sits_off_a_point(picker: &HalfSpace, through: Po
 /// says what adding them up costs.
 struct TwoLinesEitherSideOfThePicker {
     /// How far in front of the picker the point midway between the two lines
-    /// sits: `normal · middle − offset`.
+    /// sits: `normal · middle − offset`, or `facing · (middle − through)` for
+    /// a picker through a point.
     ///
     /// **Each caller works this out its own way, because what is exact differs
     /// between them, and reading it off a direction is what §182 got wrong.**
@@ -3417,7 +3418,9 @@ struct TwoLinesEitherSideOfThePicker {
     out: Interval,
 }
 
-/// Two endless straight lines running along `along`, told apart by `picker`.
+/// Two endless straight lines running along `along`, told apart by `picker`,
+/// which is flat: a [`HalfSpace`] or a [`HalfSpaceThroughAPoint`]. The first
+/// line is picked by it and the second by it turned round.
 ///
 /// # Errors
 ///
@@ -3483,12 +3486,15 @@ struct TwoLinesEitherSideOfThePicker {
 /// genuinely sit off the picking plane, and the refusal below is then the right
 /// answer. This stops throwing the reading away; it does not decide it.
 fn two_lines_told_apart(
-    picker: HalfSpace,
+    picker: Picker,
     along: [f64; 3],
     lines: &TwoLinesEitherSideOfThePicker,
     and: Surface,
 ) -> Result<SurfaceMeet> {
-    let normal = picker.normal().components();
+    let (Some(facing), Some(reversed)) = (picker.facing_of_a_flat(), picker.reversed()) else {
+        panic!("two lines are told apart by a flat surface, not by {picker:?}");
+    };
+    let normal = facing.components();
     if !matches!(
         Exact::dot_of(normal, along).as_ref().map(Exact::sign),
         Some(Decision::Zero)
@@ -3504,14 +3510,14 @@ fn two_lines_told_apart(
     }
 
     Ok(SurfaceMeet::Curves(
-        [picker, picker.reversed()]
+        [picker, reversed]
             .into_iter()
-            .map(|half_space| {
+            .map(|picker| {
                 NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
                     and,
-                    picked_by: smallvec![Picker::from(half_space)],
+                    picked_by: smallvec![picker],
                 })
-                .expect("picked_by always holds the one half-space just built")
+                .expect("picked_by always holds the one picker just built")
             })
             .collect(),
     ))
@@ -6855,6 +6861,63 @@ mod tests {
             })
             .collect();
         assert_eq!(sides, [Decision::Pos, Decision::Neg]);
+    }
+
+    /// A plane a rounding inside a pipe's rim cuts two lines `2⁻⁵³` either
+    /// side of their middle, and the half-space through the axis rounds its
+    /// offset by `2⁻⁵³ − 2⁻¹⁰⁴`, so it cannot tell them apart: one line is
+    /// `2⁻¹⁰⁴` behind it. A flat surface through the axis's own start can,
+    /// and names them (Q2505, a bar flush with an L plate's inner side turned
+    /// a quarter turn back). They used to be refused
+    /// `CannotNameWhichPieceOfACrossingThisIs`.
+    #[test]
+    fn two_lines_a_rounding_apart_are_told_apart_by_a_flat_surface_through_the_axis() {
+        let tiny = f64::EPSILON;
+        let flat = Plane::from_point_and_normal_as_written(
+            Point::new(2.0, 0.0, 0.0),
+            Vector::new(1.0, tiny, 0.0),
+        )
+        .expect("a normal with a length");
+        assert_eq!(
+            (flat.normal().components(), flat.offset()),
+            ([1.0, tiny, 0.0], 2.0),
+            "the plane is stored as written"
+        );
+        let origin = [1.5 + tiny, -1.0, -1.0];
+        let pipe = a_pipe([0.0, 0.0, 1.0], origin, 0.5);
+        let half_space = HalfSpace::through_a_point_square_to(
+            Point::from(origin),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(-tiny, 1.0, 0.0),
+        )
+        .expect("a direction");
+        assert_eq!(
+            (half_space.normal().components(), half_space.offset()),
+            ([-tiny, 1.0, 0.0], -1.0 - 2.0 * tiny),
+            "the half-space's offset rounds -1 - 1.5·2⁻⁵² - 2⁻¹⁰⁴ to -1 - 2⁻⁵¹"
+        );
+
+        let met = crossing(&Surface::Plane(flat), &pipe);
+
+        let SurfaceMeet::Curves(runs) = &met else {
+            panic!("a plane inside a pipe and along it cuts two lines: {met:?}");
+        };
+        let facings: Vec<[f64; 3]> = runs
+            .iter()
+            .map(|run| {
+                assert!(run.is_the_whole_curve(), "each line is endless");
+                let EdgeRun::PartOfWhereItCrosses { and, picked_by } = run.run() else {
+                    panic!("one of two lines is a piece of the crossing: {run:?}");
+                };
+                assert_eq!(and, &pipe);
+                let [Picker::InFrontOfAFlatThrough(surface)] = picked_by[..] else {
+                    panic!("picked by a flat surface through the axis: {picked_by:?}");
+                };
+                assert_eq!(surface.through(), Point::from(origin));
+                surface.facing().components()
+            })
+            .collect();
+        assert_eq!(facings, [[-tiny, 1.0, 0.0], [tiny, -1.0, 0.0]]);
     }
 
     #[test]
