@@ -1,6 +1,7 @@
 //! A stepped shaft cut in two on a plane beside or through its axis, both
 //! halves turned about that axis, and the halves fused again by every rule
-//! (`docs/decisions.md` §191.5, rows Q2228, Q2241, Q2487 and Q2488).
+//! (`docs/decisions.md` §191.5, rows Q2228, Q2241, Q2487, Q2488, Q2613 and
+//! Q2619).
 //!
 //! **The shape.** The shaft is a bar of radius 2 from `z = 0` to `z = 1`
 //! united with a bar of radius 1 from `z = 1` to `z = 2`, so `5π` in all. One
@@ -41,9 +42,11 @@
 //! one has fewer than three corners. Now both kinds of ring are candidates,
 //! and the region each bounds says which is the outline.
 //!
-//! **What was wrong before Q2487 and Q2488.** Boring leaves corners on the
+//! **What was wrong before Q2487 and Q2488.** Boring left corners on the
 //! circles of the shaft where some surface of the bore crosses them, each a
-//! rounding off that surface. A cut then met that surface again there, as a
+//! rounding off that surface; a square hole's sides still do, and a round
+//! hole across the narrow bar's radius no longer does (Q2619, below). A cut
+//! then met that surface again there, as a
 //! place where three surfaces meet whose box held the corner or lay within a
 //! rounding of it, and asked the corner about the surface instead. A round
 //! bore across the narrow bar's radius was refused `order along a crossing`
@@ -52,10 +55,22 @@
 //! policy. Now a corner with two surfaces round it, a sample of the curve
 //! they share, is taken as the one place where a third surface crosses that
 //! curve within what writing the corner down cost.
+//!
+//! **What was wrong before Q2613 and Q2619.** A round bore across the narrow
+//! bar's radius stops at `z = 0.5`, and the narrow bar starts at `z = 1`, so
+//! the two pipes share no point of the solid. As whole pipes they cross in two
+//! lines without end, at `(−0.955, ±0.2966)`, and no plane cuts such a line
+//! off, so every face asked whether the lines lie wholly past a plane the
+//! other pipe's faces lie behind, and every face said no. Boring split both
+//! pipes in two faces along those lines, and put a corner where they cross
+//! the circles at `z = 0`, `0.5`, `1` and `2`. Now each face is also told the
+//! sides of planes every face on its own surface lies in, and leaves out a
+//! crossing whose faces lie in a side that shares no point with one of those:
+//! here `z ≤ 0.5` and `z ≥ 1`.
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
@@ -156,12 +171,13 @@ fn a_stepped_shaft_bored_with_a_square_hole_cut_and_turned_keeps_the_d_as_its_bo
 }
 
 /// Bored with a bar whose circle straddles the circle of radius 1 the narrow
-/// bar stands on, boring splits the narrow bar's pipe and the bore's where
-/// the two would cross as whole pipes, leaving the hole two corners on that
-/// circle. The cut on either plane keeps the part of the bored shaft on
-/// `x < cut`, with the whole hole in it, under the certified policy. It was
-/// refused `Undecidable` at `order along a crossing`, on one of those two
-/// corners, for each of these six bores (Q2487).
+/// bar stands on, the cut on either plane keeps the part of the bored shaft
+/// on `x < cut`, with the whole hole in it, under the certified policy.
+/// Boring split the narrow bar's pipe and the bore's where the two would cross
+/// as whole pipes, leaving the hole two corners on that circle, and the cut
+/// was refused `Undecidable` at `order along a crossing`, on one of those two
+/// corners, for each of these six bores (Q2487). Since Q2619 boring leaves no
+/// such corner, and the square hole is what still brings one to the cut.
 #[test]
 fn a_stepped_shaft_bored_across_the_narrow_bars_radius_is_cut_in_half() {
     for (centre, radius) in [
@@ -204,6 +220,52 @@ fn a_stepped_shaft_bored_across_the_narrow_bars_radius_is_cut_in_half() {
                 *solid,
                 a_stepped_shafts_part_left_of(cut) - bore.volume(),
                 &asked,
+            );
+        }
+    }
+}
+
+/// Bored with a bar of radius 0.3 about `(−1, 0)`, from below the shaft to
+/// `z = 0.5`, the shaft keeps the narrow bar's pipe and the bore's pipe one
+/// face each, and no corner where the two pipes would cross. The bore stops
+/// half a unit below the narrow bar, so the two pipes meet nowhere on the
+/// solid: as whole pipes they cross on two lines without end, at
+/// `(−0.955, ±0.2966)`. Boring split both pipes along those lines, and the
+/// circles at `z = 0`, `0.5`, `1` and `2` where they cross them (Q2613,
+/// Q2619).
+#[test]
+fn a_stepped_shaft_bored_across_the_narrow_bars_radius_keeps_each_pipe_one_face() {
+    let mut model = a_model();
+    let shaft = a_stepped_shaft(&mut model);
+    let bored = Bore::ARoundHole {
+        centre: [-1.0, 0.0],
+        radius: 0.3,
+    }
+    .cut_into(&mut model, shaft);
+    let view = model.solid(bored).expect("this model made the key");
+    let faces_on_a_pipe_of = |radius: f64| {
+        view.faces()
+            .filter(
+                |face| matches!(face.surface(), Surface::Cylinder(pipe) if pipe.radius() == radius),
+            )
+            .count()
+    };
+    assert_eq!(
+        [faces_on_a_pipe_of(1.0), faces_on_a_pipe_of(0.3)],
+        [1, 1],
+        "faces on the narrow bar's pipe and on the bore's"
+    );
+    let where_the_pipes_would_cross = |corner: &Point| {
+        (corner.x() + 0.955).abs() < 1e-3 && (corner.y().abs() - 0.2966).abs() < 1e-3
+    };
+    for face in view.faces() {
+        for wire in face.wires() {
+            let corners: Vec<Point> = wire.points().collect();
+            assert!(
+                !corners.iter().any(where_the_pipes_would_cross),
+                "face {:?} on {:?} has a corner where the pipes would cross: {corners:?}",
+                face.key(),
+                face.surface()
             );
         }
     }

@@ -1908,8 +1908,8 @@ impl<'f> Arrangement<'f> {
     /// **Asked, it was answered the wrong way.** A stepped shaft, a bar of
     /// radius 2 under one of radius 1, bored from below by a bar of radius
     /// 0.3 about `(−1, 0)`, has the bore cross the narrow bar's pipe, as whole
-    /// pipes, along `x = −0.955`. Boring splits the hole's circle there, so
-    /// the hole has a corner at `(−0.9550000000000001, −0.2966057989992778,
+    /// pipes, along `x = −0.955`. Boring split the hole's circle there, so
+    /// the hole had a corner at `(−0.9550000000000001, −0.2966057989992778,
     /// 0)`, stored exactly. That point is a rounding off the narrow pipe, so
     /// [`Arrangement::passes_through`] proved it off that pipe's circle, while
     /// the place where the bottom, the bore and the narrow pipe meet is boxed
@@ -1917,6 +1917,14 @@ impl<'f> Arrangement<'f> {
     /// were then two points on the hole's edge that nothing could put in
     /// order, and every cut of the bored shaft in half was refused `order
     /// along a crossing` under the certified policy (Q2487).
+    ///
+    /// **Boring leaves that corner off since Q2619**, as the bore and the
+    /// narrow bar lie apart, **but a square pocket still leaves one.** Its
+    /// side `y = −0.3`, from `x = −1.8` to `−1.2`, crosses the wide bar's
+    /// pipe at `x = −1.977`, outside the pocket, and boring puts a corner on
+    /// the bottom's rim there. With this test taken away, the pocketed shaft
+    /// cut on `x = 0`, shifted and fused with its other half was refused
+    /// `side of plane` at that corner under the certified policy (Q2488).
     ///
     /// **Sound because the corner is only a sample of the curve.** With only
     /// two surfaces round it, the corner was read out of the model and is a
@@ -2468,13 +2476,25 @@ impl<'f> Arrangement<'f> {
     /// with the partner of `gone` too, so that it splits `stays` nowhere there
     /// and neither may this face.
     ///
-    /// **Both curves the partner of `gone` crosses the other two in lie wholly
-    /// past one plane every face carrying it lies behind**
-    /// ([`a_curve_of_two_lies_wholly_past`]). The one through the face's
-    /// surface is `gone`, and the one through the partner of `stays` is the
-    /// crossing the face across draws there. Asked of the two the same way and
-    /// in either order, so the face across asks just this of the same three
-    /// and gets the same answer.
+    /// **Both curves the partner of `gone` crosses the other two in lie past
+    /// one plane every face carrying it lies behind, wherever a face carrying
+    /// the other surface is** ([`Arrangement::a_curve_of_two_lies_past`]). The
+    /// one through the face's surface is `gone`, and the one through the
+    /// partner of `stays` is the crossing the face across draws there. Asked
+    /// of the two the same way and in either order, so the face across asks
+    /// just this of the same three and gets the same answer.
+    ///
+    /// **Past wherever a face of it is, and not only wholly past** (Q2619).
+    /// A face leaves out a crossing that lies wholly past such a plane, and
+    /// one whose own faces all lie apart from it
+    /// ([`Arrangement::no_face_that_draws_it_reaches_it`]), so this asks both.
+    /// The stepped shaft bored across the narrow bar's radius is the shape: the
+    /// annulus at `z = 1` leaves out its circle with the bore's pipe, wholly
+    /// above the bore's top, and the narrow bar's pipe leaves out its lines
+    /// with it, which no plane cuts off but which run on that pipe only above
+    /// `z = 1`. Asked of the lines as whole curves, the annulus put a corner on
+    /// its edge with the narrow bar's pipe where they cross the circle, and
+    /// the pipe kept the lines, so both were split there.
     ///
     /// **And so does every other surface that draws `gone`**
     /// ([`Crossing::every_surface_that_draws_it`]), since the face across
@@ -2499,19 +2519,14 @@ impl<'f> Arrangement<'f> {
         let places: SmallVec<[PredicatePoint; 2]> =
             places.iter().copied().map(as_exact_as_it_is).collect();
         let across = self.crossings[stays].partner;
-        let sides = &self.face.sides_the_faces_of_each_cut_lie_in;
         self.crossings[gone]
             .every_surface_that_draws_it()
             .all(|&third| {
-                sides
-                    .iter()
-                    .filter(|(cut, _)| *cut == third)
-                    .flat_map(|(_, sides)| sides)
-                    .any(|&side| {
-                        [self.surface, across].iter().all(|&other| {
-                            a_curve_of_two_lies_wholly_past([other, third], &places, side)
-                        })
-                    })
+                self.the_sides_its_faces_lie_in(third).any(|side| {
+                    [self.surface, across]
+                        .into_iter()
+                        .all(|other| self.a_curve_of_two_lies_past(other, third, &places, side))
+                })
             })
     }
 
@@ -3272,6 +3287,16 @@ impl<'f> Arrangement<'f> {
     /// past ([`BakedFace::sides_the_faces_of_each_cut_lie_in`]), so that no
     /// face of the other solid, or of this one, has a point on it (Q1909).
     ///
+    /// **Or strictly past a side of a plane every face on the face's own
+    /// surface lies in**, as that list holds it for this face's surface too:
+    /// then no face carrying the cut shares a point with this face at all, and
+    /// the part of the crossing on the face is what matters (Q2619,
+    /// [`two_sides_share_no_point`]). A stepped shaft bored from below across
+    /// the narrow bar's radius is the shape: the bore's pipe and the narrow
+    /// bar's cross in two lines without end, and no plane cuts either line
+    /// off, but the bore stops at `z = 0.5` and the narrow bar starts at
+    /// `z = 1`. Kept, the lines split both pipes, and every circle they cross.
+    ///
     /// **Such a crossing is no edge of the answer.** To go from inside a solid
     /// to outside it, a walk on the face has to cross one of that solid's
     /// faces, and no face carrying the crossing's surfaces is anywhere on it.
@@ -3294,13 +3319,11 @@ impl<'f> Arrangement<'f> {
         if !it.cuts || along_the_rim[crossing] {
             return false;
         }
-        let sides = &self.face.sides_the_faces_of_each_cut_lie_in;
         it.every_surface_that_draws_it().all(|surface| {
-            sides
-                .iter()
-                .filter(|(cut, _)| cut == surface)
-                .flat_map(|(_, sides)| sides)
-                .any(|&side| self.lies_wholly_past(crossing, side, log))
+            self.the_sides_its_faces_lie_in(*surface).any(|side| {
+                self.lies_wholly_past(crossing, side, log)
+                    || self.its_faces_lie_apart_from(self.surface, side)
+            })
         })
     }
 
@@ -3788,12 +3811,15 @@ impl<'f> Arrangement<'f> {
     /// `at` alone, on its own crossing along this face's surface
     /// ([`Arrangement::kept_where_a_crossing_left_out_meets_it`]).
     ///
-    /// **The curve `cut` crosses the face across in lies wholly past a plane
-    /// every face carrying `cut` lies behind**, so that face may leave it out
+    /// **The curve `cut` crosses the face across in lies past a plane every
+    /// face carrying `cut` lies behind, wherever a face of the surface across
+    /// is**, so that face may leave it out
     /// ([`Arrangement::no_face_that_draws_it_reaches_it`]), **and the curve
     /// `cut` crosses this face in lies past no such plane with it**, so that
     /// [`Arrangement::the_face_across_leaves_it_out_too`], asked there of the
-    /// same three surfaces, says no. That face then splits its edge with this
+    /// same three surfaces, says no. Both ask
+    /// [`Arrangement::a_curve_of_two_lies_past`], so that this says what the
+    /// face across will do (Q2619). That face then splits its edge with this
     /// one at `at` whatever this face's own list says, and this face must
     /// split it there too. A block with a step up beside a bar is the shape
     /// (Q2364): the lower top crosses the bar's pipe in a circle wholly above
@@ -3810,22 +3836,58 @@ impl<'f> Arrangement<'f> {
     ) -> bool {
         let across = self.crossings[along].partner;
         let places = [at];
-        let sides = self
-            .face
-            .sides_the_faces_of_each_cut_lie_in
-            .iter()
-            .filter(|(carried, _)| *carried == cut)
-            .flat_map(|(_, sides)| sides);
         let mut past_across = false;
-        for &side in sides {
-            if a_curve_of_two_lies_wholly_past([across, cut], &places, side) {
-                if a_curve_of_two_lies_wholly_past([self.surface, cut], &places, side) {
+        for side in self.the_sides_its_faces_lie_in(cut) {
+            if self.a_curve_of_two_lies_past(across, cut, &places, side) {
+                if self.a_curve_of_two_lies_past(self.surface, cut, &places, side) {
                     return false;
                 }
                 past_across = true;
             }
         }
         past_across
+    }
+
+    /// The sides of planes every face carrying `surface` lies in, as
+    /// [`BakedFace::sides_the_faces_of_each_cut_lie_in`] holds them, the
+    /// face's own surface among them.
+    fn the_sides_its_faces_lie_in(
+        &self,
+        surface: Surface,
+    ) -> impl Iterator<Item = ASideOfAPlane> + '_ {
+        self.face
+            .sides_the_faces_of_each_cut_lie_in
+            .iter()
+            .filter(move |(carried, _)| *carried == surface)
+            .flat_map(|(_, sides)| sides.iter().copied())
+    }
+
+    /// Whether the curve `surface` crosses `third` in, through `places`, is
+    /// past `side` wherever a face carrying `surface` is: wholly past it
+    /// ([`a_curve_of_two_lies_wholly_past`]), or with every such face apart
+    /// from it ([`Arrangement::its_faces_lie_apart_from`]).
+    ///
+    /// **Each face along an edge asks it of the same three surfaces from the
+    /// same sides**, since a face holds those of its own surface as the faces
+    /// across hold them ([`BakedFace::sides_the_faces_of_each_cut_lie_in`]):
+    /// the sides every face on it lies in, and not the sides of its own alone
+    /// ([`BakedFace::lies_in`]), which the faces across do not know.
+    fn a_curve_of_two_lies_past(
+        &self,
+        surface: Surface,
+        third: Surface,
+        places: &[PredicatePoint],
+        side: ASideOfAPlane,
+    ) -> bool {
+        a_curve_of_two_lies_wholly_past([surface, third], places, side)
+            || self.its_faces_lie_apart_from(surface, side)
+    }
+
+    /// Whether every face carrying `surface` lies in a side of a plane that
+    /// shares no point with `side` ([`two_sides_share_no_point`]).
+    fn its_faces_lie_apart_from(&self, surface: Surface, side: ASideOfAPlane) -> bool {
+        self.the_sides_its_faces_lie_in(surface)
+            .any(|theirs| two_sides_share_no_point(theirs, side))
     }
 
     /// A closed crossing with no node on it still needs one.
@@ -14950,6 +15012,35 @@ fn a_curve_of_two_lies_wholly_past(
     };
     a_cut_of_a_pipe_is_clear_of_the_third([two[0], two[1], Surface::Plane(side.plane)])
         && places.iter().all(|&place| past(place))
+}
+
+/// Whether no point is on both closed sides: their planes are written with
+/// one normal, or each with the other's turned round, and the gap between
+/// them along it is open.
+///
+/// Decided from the numbers as stored and nothing else, so it is exact:
+/// written with the normal `n`, a side behind its plane is `n·x ≤ k`, one in
+/// front `n·x ≥ k`, and turning `n` round negates `k` and swaps behind for in
+/// front, which rounds nothing. Planes that are parallel but written with
+/// normals that differ in their last bits are not asked, and a face then
+/// keeps what it would have kept before, so the answer stays the one it was.
+/// Caps of bars on one axis, or on parallel axes turned by one turn, are
+/// written with one normal.
+fn two_sides_share_no_point(one: ASideOfAPlane, other: ASideOfAPlane) -> bool {
+    let normal = one.plane.normal().components();
+    let theirs = other.plane.normal().components();
+    let (offset, behind) = if theirs == normal {
+        (other.plane.offset(), other.behind)
+    } else if theirs == normal.map(|component| -component) {
+        (-other.plane.offset(), !other.behind)
+    } else {
+        return false;
+    };
+    match (one.behind, behind) {
+        (true, false) => one.plane.offset() < offset,
+        (false, true) => offset < one.plane.offset(),
+        (true, true) | (false, false) => false,
+    }
 }
 
 /// Whether, of these three surfaces, a flat one cuts a pipe in a curve that
