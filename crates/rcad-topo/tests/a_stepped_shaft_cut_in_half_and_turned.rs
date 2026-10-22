@@ -55,7 +55,7 @@
 
 use core::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
@@ -204,6 +204,52 @@ fn a_stepped_shaft_bored_across_the_narrow_bars_radius_is_cut_in_half() {
                 *solid,
                 a_stepped_shafts_part_left_of(cut) - bore.volume(),
                 &asked,
+            );
+        }
+    }
+}
+
+/// Bored with a bar of radius 0.3 about `(−1, 0)`, from below the shaft to
+/// `z = 0.5`, the shaft keeps the narrow bar's pipe and the bore's pipe one
+/// face each, and no corner where the two pipes would cross. The bore stops
+/// half a unit below the narrow bar, so the two pipes meet nowhere on the
+/// solid: as whole pipes they cross on two lines without end, at
+/// `(−0.955, ±0.2966)`. Boring split both pipes along those lines, and the
+/// circles at `z = 0`, `0.5`, `1` and `2` where they cross them (Q2613,
+/// Q2619).
+#[test]
+fn a_stepped_shaft_bored_across_the_narrow_bars_radius_keeps_each_pipe_one_face() {
+    let mut model = a_model();
+    let shaft = a_stepped_shaft(&mut model);
+    let bored = Bore::ARoundHole {
+        centre: [-1.0, 0.0],
+        radius: 0.3,
+    }
+    .cut_into(&mut model, shaft);
+    let view = model.solid(bored).expect("this model made the key");
+    let faces_on_a_pipe_of = |radius: f64| {
+        view.faces()
+            .filter(
+                |face| matches!(face.surface(), Surface::Cylinder(pipe) if pipe.radius() == radius),
+            )
+            .count()
+    };
+    assert_eq!(
+        [faces_on_a_pipe_of(1.0), faces_on_a_pipe_of(0.3)],
+        [1, 1],
+        "faces on the narrow bar's pipe and on the bore's"
+    );
+    let where_the_pipes_would_cross = |corner: &Point| {
+        (corner.x() + 0.955).abs() < 1e-3 && (corner.y().abs() - 0.2966).abs() < 1e-3
+    };
+    for face in view.faces() {
+        for wire in face.wires() {
+            let corners: Vec<Point> = wire.points().collect();
+            assert!(
+                !corners.iter().any(where_the_pipes_would_cross),
+                "face {:?} on {:?} has a corner where the pipes would cross: {corners:?}",
+                face.key(),
+                face.surface()
             );
         }
     }
