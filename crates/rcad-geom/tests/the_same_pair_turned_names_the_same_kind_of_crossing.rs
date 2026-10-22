@@ -21,8 +21,9 @@
 //! move across:
 //!
 //! - **a tangency** — a plane resting on a ball, two balls resting on each
-//!   other, or two pipes of one width whose axes meet, whose walls touch at two
-//!   points — where the discriminant is exactly zero; and
+//!   other, two pipes of one width whose axes meet, whose walls touch at two
+//!   points, or a thin pipe resting on the inside of a fat one, whose walls
+//!   touch at one — where the discriminant is exactly zero; and
 //! - **two directions exactly square or exactly parallel**: a plane along a
 //!   pipe's axis, or two parallel planes. The pipe one is the surprise. A plane
 //!   *not* parallel to an endless pipe always cuts it in an ellipse, however far
@@ -52,9 +53,10 @@
 //! ranges over rather than by reading the property — which is the whole of
 //! §16.10's method (§30).
 //!
-//! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1612 of 2048
-//! quartic pairs compared and 438 skipped**, 10 of those 438 two pipes of one
-//! width whose axes meet (§347.9).
+//! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1564 of 2048
+//! quartic pairs compared and 486 skipped**, 10 of those 486 two pipes of one
+//! width whose axes meet (§347.9) and 57 a thin pipe resting on the inside of
+//! a fat one (Q2636).
 
 #![forbid(unsafe_code)]
 
@@ -108,8 +110,8 @@ const MOST_PLANAR_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
 /// Half. The generator draws radii up to five and places them up to six apart in
 /// whole numbers, so a lattice pipe pair is exactly tangent surprisingly often —
 /// five apart with radii of two and three is one — and every one of those is a
-/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1612 of
-/// 2048 compared, 438 skipped.
+/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1564 of
+/// 2048 compared, 486 skipped.
 const MOST_QUARTIC_PAIRS_MUST_BE_COMPARED: f64 = 0.5;
 
 /// The four pairs whose crossing lies in a plane.
@@ -136,10 +138,13 @@ fn turning_a_pair_of_surfaces_names_the_same_kind_of_crossing() {
 /// turn moves it off exactly as it moves a tangency off. Two pipes of one width
 /// whose axes meet are named, as four half ellipses, and skipped by
 /// [`is_on_a_knife_edge`] (see
-/// [`two_pipes_of_one_width_whose_axes_meet_cross_in_one_curve_once_a_turn_parts_the_axes`]).
-/// The rest — a ball and a pipe, or two pipes of two widths, tangent at a point
-/// of their crossing — are still refused by name rather than answered, so they
-/// are skipped by [`named`] alongside the other refusals.
+/// [`two_pipes_of_one_width_whose_axes_meet_cross_in_one_curve_once_a_turn_parts_the_axes`]),
+/// and so is a thin pipe resting on the inside of a fat one, named as two
+/// loops that meet where the walls touch (see
+/// [`a_thin_pipe_resting_inside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves_the_axes`]).
+/// The rest — a ball and a pipe tangent at a point of their crossing — are
+/// still refused by name rather than answered, so they are skipped by
+/// [`named`] alongside the other refusals.
 #[test]
 fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
     the_same_kind_before_and_after(
@@ -266,6 +271,11 @@ fn a_thin_pipe_resting_inside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves
         (one.radius(), other.radius()),
         (3.0, 2.0),
         "a turn leaves both radii alone"
+    );
+    assert_eq!(
+        how_far_apart_the_axes_are_against_what_the_widths_differ_by(&one, &other),
+        Decision::Pos,
+        "the turn rounds the two axes further apart than the widths differ"
     );
     assert_eq!(
         kind_of(&named(&moved).expect("the turned pair is named")),
@@ -532,6 +542,9 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
                 == 0.0;
             down_one_direction
                 || (one.radius() == other.radius() && the_axes_meet_exactly(one, other))
+                || (one.radius() != other.radius()
+                    && how_far_apart_the_axes_are_against_what_the_widths_differ_by(one, other)
+                        == Decision::Zero)
         }
         _ => false,
     }
@@ -553,26 +566,88 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
 ///
 /// If a product leaves the range of `f64`, which no pair drawn here comes near.
 fn the_axes_meet_exactly(one: &Cylinder, other: &Cylinder) -> bool {
+    let (gap, square) = the_gap_and_the_square_to_both_axes(one, other);
+    the_sign_of(&dot_of(&gap, &square)) == Decision::Zero
+}
+
+/// How far apart the two stored axes are against what the two widths differ
+/// by, asked exactly: the sign of `((o₂ − o₁)·(d₁ × d₂))² − (r₁ − r₂)²|d₁ × d₂|²`,
+/// which is `δ² − (r₁ − r₂)²` times `|d₁ × d₂|²`, for `δ` how far apart the
+/// axes are.
+///
+/// **A thin pipe resting on the inside of a fat one is a tangency**: where `δ`
+/// is what the widths differ by, the walls touch at one point, and the thin
+/// pipe's two loops meet there. A turn rounds both axes, so a turned pair's
+/// `δ` is a few last bits from that on one side or the other: nearer, the two
+/// loops part, and further, the thin pipe pokes out through the fat one's wall
+/// and the two cross in one loop. So this is asked exactly, as
+/// [`the_axes_meet_exactly`] asks the same of two pipes of one width, for
+/// which `r₁ − r₂` is nothing.
+///
+/// # Panics
+///
+/// If a product leaves the range of `f64`, which no pair drawn here comes near.
+fn how_far_apart_the_axes_are_against_what_the_widths_differ_by(
+    one: &Cylinder,
+    other: &Cylinder,
+) -> Decision {
+    let (gap, square) = the_gap_and_the_square_to_both_axes(one, other);
+    let reach = dot_of(&gap, &square);
+    let (difference, roundoff) = two_diff(one.radius(), other.radius());
+    let narrowing = [roundoff, difference];
+    let room = product_of(
+        &product_of(&narrowing, &narrowing),
+        &dot_of(&square, &square),
+    );
+    let less_room = room.iter().map(|part| -part).collect::<Vec<_>>();
+    the_sign_of(&sum_of(&product_of(&reach, &reach), &less_room))
+}
+
+/// `o₂ − o₁`, from one stored axis's origin to the other's, and `d₁ × d₂`,
+/// square to both, each coordinate an exact expansion.
+fn the_gap_and_the_square_to_both_axes(
+    one: &Cylinder,
+    other: &Cylinder,
+) -> ([Vec<f64>; 3], [Vec<f64>; 3]) {
     let [from, to] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
     let [a, b] = [one, other].map(|pipe| pipe.axis().direction().components());
-    let mut total = Vec::new();
-    for axis in 0..3 {
-        let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
-        let (across, across_used) = difference_of_two_products(a[next], b[last], a[last], b[next])
-            .expect("a stored direction's products are exact");
+    let gap = [0, 1, 2].map(|axis| {
         let (gap, roundoff) = two_diff(to[axis], from[axis]);
-        for part in [roundoff, gap] {
-            let mut scaled = [0.0; 8];
-            let scaled_used = scale_expansion(&across[..across_used], part, &mut scaled);
-            let mut summed = vec![0.0; total.len() + scaled_used];
-            let summed_used = expansion_sum(&total, &scaled[..scaled_used], &mut summed);
-            summed.truncate(summed_used);
-            total = summed;
-        }
-    }
-    match expansion_sign(&total) {
-        Decision::Zero => true,
-        Decision::Pos | Decision::Neg => false,
+        vec![roundoff, gap]
+    });
+    let square = [0, 1, 2].map(|axis| {
+        let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
+        let (across, used) = difference_of_two_products(a[next], b[last], a[last], b[next])
+            .expect("a stored direction's products are exact");
+        across[..used].to_vec()
+    });
+    (gap, square)
+}
+
+fn dot_of(one: &[Vec<f64>; 3], other: &[Vec<f64>; 3]) -> Vec<f64> {
+    (0..3).fold(Vec::new(), |total, axis| {
+        sum_of(&total, &product_of(&one[axis], &other[axis]))
+    })
+}
+
+fn product_of(one: &[f64], other: &[f64]) -> Vec<f64> {
+    other.iter().fold(Vec::new(), |total, &part| {
+        let mut scaled = vec![0.0; 2 * one.len()];
+        let used = scale_expansion(one, part, &mut scaled);
+        sum_of(&total, &scaled[..used])
+    })
+}
+
+fn sum_of(one: &[f64], other: &[f64]) -> Vec<f64> {
+    let mut summed = vec![0.0; one.len() + other.len()];
+    let used = expansion_sum(one, other, &mut summed);
+    summed.truncate(used);
+    summed
+}
+
+fn the_sign_of(exact: &[f64]) -> Decision {
+    match expansion_sign(exact) {
+        sign @ (Decision::Pos | Decision::Zero | Decision::Neg) => sign,
         Decision::Undecidable { .. } | _ => panic!("a sum of exact products has a sign"),
     }
 }
