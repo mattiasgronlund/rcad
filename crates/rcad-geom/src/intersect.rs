@@ -7204,6 +7204,49 @@ mod tests {
         assert_eq!(sides, [Decision::Pos, Decision::Neg]);
     }
 
+    /// A thin pipe resting on the inside of a fat one: the two loops of
+    /// `a_thin_pipe_run_through_a_fat_one_leaves_two_closed_loops` pushed
+    /// together until they meet, at the one point where the walls touch.
+    ///
+    /// The pipe of radius 2 up `z` and the pipe of radius 1 along `x` at
+    /// `y = 1` touch at `(0, 2, 0)`. Each loop is picked by one flat surface
+    /// through the fat pipe's axis, and the surface passes exactly through the
+    /// touching point, so both loops hold it. Away from it the loops reach out
+    /// to `(±2, 0, 0)`, one either side.
+    #[test]
+    fn a_thin_pipe_resting_on_the_inside_of_a_fat_one_leaves_two_loops_that_meet_where_they_touch()
+    {
+        let thin = a_pipe([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 1.0);
+        let fat = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, -2.0], 2.0);
+        for (one, other) in [(&thin, &fat), (&fat, &thin)] {
+            let mut log = ProvenanceLog::new();
+            let SurfaceMeet::Curves(runs) = intersect(one, other, &Policy::certified(), &mut log)
+                .expect("two loops that meet are named")
+            else {
+                panic!("a thin pipe resting inside a fat one crosses it in curves");
+            };
+            assert!(log.is_empty(), "nothing here needs approximating: {log:?}");
+            assert_eq!(runs.len(), 2, "two loops: {runs:?}");
+            let sides_of = |point: [f64; 3]| -> Vec<Decision> {
+                runs.iter()
+                    .map(|run| {
+                        let EdgeRun::PartOfWhereItCrosses { and, picked_by } = run.run() else {
+                            panic!("one of two loops is a piece of the crossing: {run:?}");
+                        };
+                        assert_eq!(and, &fat, "the picked run names the pipe it goes round");
+                        let [picker] = picked_by[..] else {
+                            panic!("one flat surface picks a loop: {picked_by:?}");
+                        };
+                        picker.side_of_point(PredicatePoint::from(point))
+                    })
+                    .collect()
+            };
+            assert_eq!(sides_of([0.0, 2.0, 0.0]), [Decision::Zero, Decision::Zero]);
+            assert_eq!(sides_of([2.0, 0.0, 0.0]), [Decision::Pos, Decision::Neg]);
+            assert_eq!(sides_of([-2.0, 0.0, 0.0]), [Decision::Neg, Decision::Pos]);
+        }
+    }
+
     /// Two pipes of the same thickness leaning across each other, well clear and
     /// overlapping.
     #[test]
