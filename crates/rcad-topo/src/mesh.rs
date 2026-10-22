@@ -460,6 +460,20 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Mesh> {
+        self.mesh_or_how_it_folded(deflection, policy, log)
+            .map_err(|refused| refused.why)
+    }
+
+    /// [`SolidView::mesh`], and when it is refused because two patches drew the
+    /// same side, how long the shortest such side is, which
+    /// `the_coarsest_mesh_whose_sides_do_not_cross` in `validate.rs` reads a
+    /// fold's floor off.
+    pub(crate) fn mesh_or_how_it_folded(
+        self,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> core::result::Result<Mesh, MeshRefused> {
         let along_each_edge = self.surfaces_along_each_edge();
         let deflection = self.room_a_mesh_has_to_work_in(deflection, policy, &along_each_edge)?;
         let mut building = BuildingAMesh::new(deflection, along_each_edge);
@@ -477,11 +491,11 @@ impl SolidView<'_> {
                         {
                             Ok(mesh)
                         } else {
-                            Self::unless_placing_it_took_away_its_space(mesh, made)
+                            Ok(Self::unless_placing_it_took_away_its_space(mesh, made)?)
                         }
                     });
                     let (answer, mut said) = match (meshed, finest_crossing) {
-                        (Err(_), Some((crossing, its_log))) => (Err(crossing), its_log),
+                        (Err(_), Some((crossing, its_log))) => (Err(crossing.into()), its_log),
                         (meshed, _) => (meshed, said),
                     };
                     said.drain_into(log);
@@ -504,7 +518,7 @@ impl SolidView<'_> {
                 _ => (why, said),
             };
             said.drain_into(log);
-            return Err(why);
+            return Err(why.into());
         }
     }
 
@@ -762,6 +776,32 @@ const MOST_PIECES_A_FACE_IS_CUT_INTO: usize = 16;
 /// it costs instead.
 const HOW_FAR_A_READ_LONGITUDE_CAN_BE_OFF: f64 =
     4.0 * DynamicRange::LARGEST_SUPPORTED_RATIO * f64::EPSILON;
+
+/// Why [`SolidView::mesh_or_how_it_folded`] made no mesh, and how long the
+/// shortest side two patches both drew was when that is why.
+///
+/// The length stays inside the crate rather than going on
+/// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`]: it is a number one ladder in
+/// `validate.rs` reads, and not something a caller can act on.
+#[derive(Debug)]
+pub(crate) struct MeshRefused {
+    pub(crate) why: Error,
+    /// `Some` exactly when `why` is [`Error::TwoPatchesOfTheMeshDrewTheSameSide`].
+    pub(crate) shortest_side_two_patches_drew: Option<f64>,
+}
+
+impl From<Error> for MeshRefused {
+    fn from(why: Error) -> Self {
+        assert!(
+            !matches!(why, Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }),
+            "a fold is refused by BuildingAMesh::finish alone, which says how long it is"
+        );
+        Self {
+            why,
+            shortest_side_two_patches_drew: None,
+        }
+    }
+}
 
 /// A mesh part way through being built.
 struct BuildingAMesh {
@@ -4360,8 +4400,9 @@ impl BuildingAMesh {
     /// onto each other the same way, and
     /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] says what it is for both.
     /// The side reported is the lowest-numbered one, so the same model is
-    /// refused the same way every time.
-    fn finish(self) -> Result<Mesh> {
+    /// refused the same way every time. Beside it goes the length of the
+    /// shortest side so drawn, the finest feature the fold shows.
+    fn finish(self) -> core::result::Result<Mesh, MeshRefused> {
         let mut times_used: HashMap<(u32, u32), u32> = HashMap::new();
         for triangle in &self.triangles {
             let [first, second, third] = triangle.corners;
@@ -4369,14 +4410,23 @@ impl BuildingAMesh {
                 *times_used.entry(a_side(from, to)).or_default() += 1;
             }
         }
-        let folded = self
+        let folded: Vec<((u32, u32), u32, u32)> = self
             .drawn_inside_a_patch
             .iter()
             .map(|(&side, &drawn)| (side, drawn, times_used[&side]))
             .filter(|&(_, drawn, used)| drawn != 2 || used != 2)
-            .min_by_key(|&(side, _, _)| side);
-        if let Some((_, drawn, used)) = folded {
-            return Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn, used });
+            .collect();
+        if let Some(&(_, drawn, used)) = folded.iter().min_by_key(|&&(side, _, _)| side) {
+            let shortest = folded
+                .iter()
+                .map(|&((from, to), _, _)| {
+                    self.points[from as usize].distance_to(self.points[to as usize])
+                })
+                .fold(f64::INFINITY, f64::min);
+            return Err(MeshRefused {
+                why: Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn, used },
+                shortest_side_two_patches_drew: Some(shortest),
+            });
         }
         Ok(Mesh {
             points: self.points,

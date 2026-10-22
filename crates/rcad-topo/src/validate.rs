@@ -3878,15 +3878,43 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// the ball takes a point inside below `4/9`, and at 0.4375 the ring measures
 /// its closed form.
 ///
-/// So a fold is asked down to `closest²/(6ρ)` — half of `closest²/(3ρ)`, so
-/// that the halving lands on a rung below it — with `closest` standing in for
-/// the gap the way it does for a crossing, and `ρ` the flattest radius any
-/// curved face of the solid bends at ([`how_flat_a_curved_face_gets`]). Never
-/// above the corner floor, and the corner floor alone when a face is on a
-/// surface that function has not been taught. That is again **a cost bound and
-/// not a proof**: two curves closer than any two corners still fold past it.
-/// What it costs is a mesh whose sides across the flattest face are about
-/// `closest / √2`, which is the size of the finest feature the corners show.
+/// So a fold is asked down to `g²/(6ρ)` — half of `g²/(3ρ)`, so that the
+/// halving lands on a rung below it — with `g` standing in for the gap and `ρ`
+/// the flattest radius any curved face of the solid bends at
+/// ([`how_flat_a_curved_face_gets`]). Never above `g/8`, and `g/8` alone when a
+/// face is on a surface that function has not been taught. What it costs is a
+/// mesh whose sides across the flattest face are about `g / √2`.
+///
+/// **`g` is the shorter of the two closest corners and the shortest side two
+/// patches drew on any rung so far** (Q2641). A folded side runs from one
+/// curve the two faces share to another, so it is never shorter than the gap
+/// between them, and where it is shorter than the corners it is the nearer of
+/// the two to that gap. The corners alone were `g` until a ball of 3 less a bar
+/// of 2.9 bored `0.08` off its centre: its two corners stand `2.047` apart,
+/// where its two loops are furthest apart, and both faces draw the folded side
+/// where they come closest, `0.70` long. The corners' floor stopped the ladder
+/// at room `0.375`; the fold clears at `0.046875`, three rungs further. Q1232's
+/// ring of a ball of `221/64` less a bar of `220/64` on its axis, its two
+/// corners on opposite sides, was refused the same way at `0.86328125`, and
+/// meshes at `0.0269775390625` (`a_fold_between_two_curves_closer_than_any_two_corners.rs`).
+///
+/// **The shorter of the two, and never the fold alone.** Both floors grow with
+/// the length they are read off, so the shorter gives a floor no higher, and
+/// every rung the corners asked is still asked: no fold they cleared is
+/// refused now. A side along a pipe is charged nothing for its length, so a
+/// floor read off such a fold alone could stop above the corners' one.
+///
+/// **A fold a curved face charges for is asked until it clears or the cap below
+/// ends it.** A side `L` long that a face charges `L²/(3ρ)` or more is drawn at
+/// room `d` only when that charge is at most `d`, so the floor it gives is at
+/// most `d/2` and the next rung is asked. That is again **a cost bound and not
+/// a proof**: the fold clears once `d` is under `gap²/(3ρ)`, since no folded
+/// side is shorter than the gap, but only if that comes before the cap.
+///
+/// A solid of fewer than two corner places gives no corner distance. A fold on
+/// it is asked down to the floor its own side gives; a crossing on it is handed
+/// back at once, since nothing then says how far down a crossing is worth
+/// asking.
 ///
 /// **And never more than [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] halvings below
 /// the top**, whatever `closest` says. The bar `2⁻⁴⁰` wider than `1`, less
@@ -3932,10 +3960,11 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 ///
 /// **A fold alone ends it in at most fourteen rungs.** A solid that folds at
 /// every deflection walks the halving from half the box's width down to the
-/// higher of the two floors, about `log₂(3ρ·width/closest²)` rungs or
-/// fourteen, whichever is fewer, and is refused with the finest fold. The floor
-/// of the rung after a crossing is the corner floor, so a solid that crosses at
-/// some deflections and folds at others can go further. The three refusals that
+/// higher of the two floors, about `log₂(3ρ·width/g²)` rungs or fourteen,
+/// whichever is fewer, and is refused with the finest fold; where its folded
+/// sides are charged for their length, that is fourteen. The floor of the rung
+/// after a crossing is the corner floor, so a solid that crosses at some
+/// deflections and folds at others can go further. The three refusals that
 /// end a crossing's ladder before its floor end this one too, and so does
 /// `Deflection::of` refusing a room that is not above zero, as on a box with no
 /// width.
@@ -3965,41 +3994,58 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Mesh> {
-    let mut finest_refusal = match view.mesh(as_coarse_as_a_mesh_gets(), policy, log) {
-        Err(why) if a_finer_mesh_may_clear(&why) => why,
-        answer => return answer,
-    };
+    let (mut finest_refusal, mut shortest_fold) =
+        match view.mesh_or_how_it_folded(as_coarse_as_a_mesh_gets(), policy, log) {
+            Ok(mesh) => return Ok(mesh),
+            Err(refused) if a_finer_mesh_may_clear(&refused.why) => {
+                (refused.why, refused.shortest_side_two_patches_drew)
+            }
+            Err(refused) => return Err(refused.why),
+        };
     let Some((low, high)) = view.box_around_it() else {
         return Err(finest_refusal);
     };
-    let Some(closest) = how_close_two_corners_come(view) else {
-        return Err(finest_refusal);
-    };
+    let closest = how_close_two_corners_come(view);
     let top = {
         let (low, high) = (low.coordinates(), high.coordinates());
         (0..3).fold(0.0, |widest: f64, axis| widest.max(high[axis] - low[axis])) / 2.0
     };
-    let finest_for_a_crossing = closest / 8.0;
-    let finest_for_a_fold = match how_flat_a_curved_face_gets(view, [low, high]) {
-        Some(flattest) if flattest > 0.0 => {
-            finest_for_a_crossing.min(closest * closest / (6.0 * flattest))
+    let finest_for_a_crossing = closest.map_or(f64::INFINITY, |closest| closest / 8.0);
+    let flattest = how_flat_a_curved_face_gets(view, [low, high]);
+    let finest_for_a_fold = |shortest_fold: Option<f64>| {
+        let Some(gap) = [closest, shortest_fold]
+            .into_iter()
+            .flatten()
+            .reduce(f64::min)
+        else {
+            return f64::INFINITY;
+        };
+        match flattest {
+            Some(flattest) if flattest > 0.0 => (gap / 8.0).min(gap * gap / (6.0 * flattest)),
+            _ => gap / 8.0,
         }
-        _ => finest_for_a_crossing,
-    }
-    .max(top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO));
-    let finest = |refusal: &Error| {
+        .max(top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO))
+    };
+    let finest = |refusal: &Error, shortest_fold: Option<f64>| {
         if its_sides_cross(refusal) || its_loops_lie_the_wrong_side_of_each_other(refusal) {
             finest_for_a_crossing
         } else {
-            finest_for_a_fold
+            finest_for_a_fold(shortest_fold)
         }
     };
     let mut room = top;
-    while room >= finest(&finest_refusal) {
+    while room >= finest(&finest_refusal, shortest_fold) {
         let Ok(less) = Deflection::of(room) else {
             break;
         };
-        match view.mesh(less, policy, log) {
+        let answer = view.mesh_or_how_it_folded(less, policy, log);
+        if let Err(refused) = &answer {
+            shortest_fold = [shortest_fold, refused.shortest_side_two_patches_drew]
+                .into_iter()
+                .flatten()
+                .reduce(f64::min);
+        }
+        match answer.map_err(|refused| refused.why) {
             Ok(mesh) => return Ok(mesh),
             Err(why) if they_touch_where_they_touched_before(&finest_refusal, &why) => {
                 finest_refusal = why;

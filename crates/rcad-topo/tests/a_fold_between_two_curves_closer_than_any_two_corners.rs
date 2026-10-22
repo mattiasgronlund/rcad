@@ -1,6 +1,7 @@
 //! A ball pressed a little way into the side of a round bar, and the piece
-//! the two share (row Q2044); and the search for any solid of fewer than two
-//! corners whose coarsest mesh folds (row Q2498).
+//! the two share (row Q2044); the search for any solid of fewer than two
+//! corners whose coarsest mesh folds (row Q2498); and a ball less a bar whose
+//! two curves come closer than its two corners (rows Q2641 and Q1232).
 //!
 //! # The shape
 //!
@@ -26,12 +27,16 @@
 //! the edge between them, the coarsest mesh does not fold, and all six fuses
 //! answer.
 //!
-//! A fold is meant to be asked again at half the room, rung by rung, down to a
-//! floor read off the distance between the two closest corners of the solid
-//! (`how_close_two_corners_come`). The lens has one corner, so there is no
-//! distance, that function says `None`, and the arm that reads it hands the
-//! coarsest fold straight back without asking for one finer mesh. That arm is
-//! unchanged; this lens no longer reaches it.
+//! A fold is asked again at half the room, rung by rung, down to a floor. Until
+//! Q2641 that floor was read off the distance between the two closest corners
+//! of the solid (`how_close_two_corners_come`). The lens has one corner, so
+//! there is no distance, that function says `None`, and the arm that read it
+//! handed the coarsest fold straight back without asking for one finer mesh.
+//! Since Q2641 the floor is read off the shorter of that distance and the
+//! shortest side two patches drew on any rung, so a fold with no corner
+//! distance is asked down to the floor its own side gives, and only a crossing
+//! is still handed back at once. Since Q2178 this lens does not fold at its
+//! coarsest mesh, so no rung is asked for it at all.
 //!
 //! # For the lens, a gap and not a limit
 //!
@@ -45,14 +50,13 @@
 //! measured within the mesh's error of [`ball_in_the_side_of_the_bar`]. So the
 //! answer is there, and only the missing distance kept the fuse from it.
 //!
-//! # Not the case row Q1232 searches for
+//! # Not the case row Q1232 searched for
 //!
-//! Q1232 looks for a fold that outlasts every rung down to `closest²/(6ρ)`,
+//! Q1232 looked for a fold that outlasts every rung down to `closest²/(6ρ)`,
 //! where two corners stand far apart and two curves both faces share pass close
-//! between them. Here no rung is asked at all, because there is no second
-//! corner. A floor read off the gap between the curves, which is what Q1232
-//! would put in place of the corners, still needs this arm to start the
-//! ladder when the corners give no distance.
+//! between them. Here no rung was asked at all, because there is no second
+//! corner. Q1232's case is the last one below, two curves closer than any two
+//! corners.
 //!
 //! # What answers
 //!
@@ -64,13 +68,18 @@
 //! mesh. So no shape designers make on purpose was known to be refused this
 //! way, and the refusal was class C.
 //!
-//! # No shape is known to reach the arm (row Q2498)
+//! # No shape was known to reach the arm (row Q2498)
 //!
-//! The arm `let Some(closest) = how_close_two_corners_come(view) else { return
-//! Err(finest_refusal) }` in `the_coarsest_mesh_whose_sides_do_not_cross` is
-//! still a guard with no shape known behind it. Q2498 looked for a solid of
-//! fewer than two corner places whose coarsest mesh folds, and found none. Two
-//! tests here keep what it found:
+//! Until Q2641, the arm `let Some(closest) = how_close_two_corners_come(view)
+//! else { return Err(finest_refusal) }` in
+//! `the_coarsest_mesh_whose_sides_do_not_cross` handed a fold or a crossing
+//! back without asking a finer mesh when the corners gave no distance, a guard
+//! with no shape known behind it. Q2498 looked for a solid of fewer than two
+//! corner places whose coarsest mesh folds, and found none. Q2641 took the arm
+//! out for a fold: a fold on such a solid now runs the ladder down to the floor
+//! its own folded side gives, and only a crossing there is still handed back at
+//! once. Two tests here keep what Q2498 found, and a fold among them would now
+//! be asked at finer rungs rather than handed back:
 //!
 //! - [`no_solid_of_fewer_than_two_corners_these_intersections_leave_folds_at_its_coarsest_mesh`]
 //!   intersects four families, either solid first, and meshes at the coarsest
@@ -86,10 +95,16 @@
 //! - a wider sweep of intersections: balls of 8 radii at 9 reaches and 10
 //!   turns in the bar's side gave 520 answers of fewer than two corner places;
 //!   bars across the bar gave 89, and lenses of two balls 144. None folds.
-//! - a slab of a block across a ball of 3: 52 of 132 are refused
+//! - a slab of a block across a ball of 3: 52 of 132 were refused
 //!   `CurvedFaceWithAHoleGoesTooFarRound`, each one whose answer is a band of
-//!   the ball's skin holding neither pole, so no mesh of it is asked; the 80
-//!   that answer hold two corner places or more.
+//!   the ball's skin holding neither pole, so no mesh of it was asked; the 80
+//!   that answered held two corner places or more. Since Q2556 such bands
+//!   answer. Run again on Q2641's branch, 432 slabs along `x`, `y` and `z`,
+//!   their near face at twelve places from `−2.9` to `2.5` and `0.3` or `1`
+//!   thick, fused with the ball by each rule, either solid first, all answer
+//!   and validate. Of the 144 intersections, 132 hold two corner places; the
+//!   12 of one are the caps the slabs from `2` and `2.5` cut off the ball's
+//!   end along each axis, and each meshes at the coarsest deflection.
 //! - a block whose face leaves a cap of a ball of 3 that misses its pole by a
 //!   little: 212 answers of one corner place, none folding.
 //! - a ring of 5 and 3 cut into two faces by its outer equator, the circle
@@ -97,7 +112,7 @@
 //!   one corner `(0, 8, 0)`: `SolidBuilder::build` refuses it all 16 ways
 //!   round, so no mesh of it is ever asked.
 //!
-//! # Why the arm may hold nothing, a reading nobody has run
+//! # Why no such fold may exist, a reading nobody has run
 //!
 //! A fold's side has both ends on edges the two folding faces share. Since
 //! Q2178 a curved patch draws no side between two points along one edge with
@@ -113,10 +128,31 @@
 //! its tube and a Villarceau circle, which is the shape above that will not
 //! build.
 //!
+//! # Two curves closer than any two corners (rows Q2641 and Q1232)
+//!
+//! A ball of 3 less a bar of 2.9 bored `0.08` off its centre is one solid of
+//! two faces, the ball's band and the bore's wall, between two loops. Its two
+//! corners stand `2.047` apart, where the loops are furthest apart, and both
+//! faces draw the folded side where the loops come closest, about `0.70` long.
+//! With the floor read off the corners, `0.2328`, the ladder stopped at room
+//! `0.375`, and the fuse was refused
+//! `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`; the fold clears
+//! at `0.046875`. Q1232's ring of a ball of `221/64` less a bar of `220/64` on
+//! its axis, built with its two corners apart round the axis, was refused the
+//! same way, where the same ring with both corners on one meridian builds. A
+//! gap and not a limit: run past the corners' floor, the same ladder meshes
+//! them all.
+//!
+//! Since Q2641 the floor is read off the shorter of the two closest corners and
+//! the shortest side two patches drew on any rung, and both answer:
+//! [`a_ball_with_a_hole_bored_a_little_off_its_centre_answers`] and
+//! [`a_ring_of_a_ball_less_a_bar_on_its_axis_builds_wherever_its_two_corners_stand`].
+//!
 //! The fuses run certified, in a model of 100 mm.
 
 use rcad_geom::{
-    Axis, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Torus, Vector,
+    Axis, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere,
+    Surface, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
@@ -370,10 +406,11 @@ fn a_whole_ring_in_one_face_with_one_corner_meshes_at_the_coarsest_deflection() 
 
 /// Every intersection of four families answers, and each solid of fewer than
 /// two corners among the answers meshes at the coarsest deflection, so none
-/// reaches the arm of `the_coarsest_mesh_whose_sides_do_not_cross` that hands
-/// a fold or a crossing back without asking a finer mesh when the corners give
-/// no distance. The count of such solids, family by family, is the proof that
-/// the sweep reached that arm's shapes at all:
+/// asks `the_coarsest_mesh_whose_sides_do_not_cross` for a finer mesh where the
+/// corners give no distance. Until Q2641 a fold there was handed back without
+/// one; now a fold runs the ladder on its own folded side, and only a crossing
+/// is handed back. The count of such solids, family by family, is the proof
+/// that the sweep reached solids of fewer than two corners at all:
 ///
 /// - a ball of `1.5`, `3` or `6` pressed `0.05`, `0.5` or `1` into the side of
 ///   the bar, at six turns round it;
@@ -495,6 +532,114 @@ fn no_solid_of_fewer_than_two_corners_these_intersections_leave_folds_at_its_coa
         ]),
         "solids of fewer than two corners"
     );
+}
+
+/// A ball of `radius` less a round bar of `bar` up `z` whose axis is `off` from
+/// the ball's centre along `x`, the ball turned each quarter round `z`, is one
+/// solid of two faces, the ball's band and the bore's wall, and measures the
+/// ball less [`what_a_bar_bores_out_of_a_ball`]. Until Q2641 every bore here
+/// but the last, a bar of 2 half off, was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`.
+#[test]
+fn a_ball_with_a_hole_bored_a_little_off_its_centre_answers() {
+    for (radius, bar, off) in [
+        (3.0, 2.9, -0.08),
+        (3.0, 2.9, 0.08),
+        (3.0, 2.9, -0.05),
+        (3.0, 2.8, 0.15),
+        (3.0, 2.8, -0.15),
+        (3.0, 2.5, -0.3),
+        (10.0, 8.0, -1.5),
+        (3.0, 2.0, -0.5),
+    ] {
+        let left = 4.0 * PI / 3.0 * f64::powi(radius, 3)
+            - what_a_bar_bores_out_of_a_ball(radius, bar, off, 1000);
+        for turn in 0..4 {
+            let what = format!("a ball of {radius} less a bar of {bar} {off} off, turned {turn}");
+            let mut model = a_model();
+            let ball = model
+                .add_ball(
+                    radius,
+                    &Isometry::quarter_turns(&Axis::z(), turn).expect("a turn about z"),
+                )
+                .expect("a ball");
+            let bar = model
+                .add_round_bar(bar, 4.0 * radius, &moved_to([off, 0.0, -2.0 * radius]))
+                .expect("a bar");
+            let said = model
+                .fuse(
+                    &[ball],
+                    &[bar],
+                    Rule::Difference,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .map(|answer| answer.solids().to_vec());
+            answers(&mut model, said, left, &[2], &what);
+        }
+    }
+}
+
+/// [`what_a_bar_bores_out_of_a_ball`] with the bar on the ball's axis is the
+/// ball less the napkin ring it leaves, `4π/3 · (r³ − (r² − a²)^{3/2})`, and
+/// off the axis it agrees with the rule at four times the steps, each to within
+/// a millionth of what the bar takes out, for every bore this file makes. The
+/// mesh at `0.01` the fuses are measured at may miss by a tenth or more, far
+/// more than that.
+#[test]
+fn what_a_bar_bores_out_of_a_ball_is_within_a_millionth_of_its_closed_form_and_a_finer_rule() {
+    for (radius, bar) in [(3.0, 2.9), (10.0, 8.0)] {
+        let rule = what_a_bar_bores_out_of_a_ball(radius, bar, 0.0, 1000);
+        let closed = 4.0 * PI / 3.0 * (radius.powi(3) - (radius * radius - bar * bar).powf(1.5));
+        assert!(
+            (rule - closed).abs() < 1e-6 * closed,
+            "a bar of {bar} on the axis of a ball of {radius}: {rule} by the rule, {closed} closed"
+        );
+    }
+    for (radius, bar, off) in [
+        (3.0, 2.9, -0.08),
+        (3.0, 2.8, 0.15),
+        (3.0, 2.5, -0.3),
+        (10.0, 8.0, -1.5),
+        (3.0, 2.0, -0.5),
+    ] {
+        let (coarse, fine) = (
+            what_a_bar_bores_out_of_a_ball(radius, bar, off, 1000),
+            what_a_bar_bores_out_of_a_ball(radius, bar, off, 4000),
+        );
+        assert!(
+            (coarse - fine).abs() < 1e-6 * fine,
+            "a bar of {bar} {off} off in a ball of {radius}: {coarse} at 1000 steps, {fine} at 4000"
+        );
+    }
+}
+
+/// Q1232's ring: a ball of `221/64` less a bar of `220/64` on its axis, built
+/// as two faces, the ball's band and the bore's wall, between the two circles
+/// at `z = ±21/64` where they meet, each circle one closed edge with its one
+/// corner at a quarter turn round `z`. It builds, validates, and measures the
+/// napkin ring `4π/3 · (21/64)³`, wherever the two corners stand.
+///
+/// With both corners on one meridian it always did. With them apart round the
+/// axis the two closest corners are `0.86` or more apart while the two circles
+/// are `42/64` apart everywhere, and until Q2641 the floor a fold was asked
+/// down to was read off the corners: the ball's band and the bore's wall drew
+/// the same side between the circles at every rung down to it, and the build
+/// was refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`.
+#[test]
+fn a_ring_of_a_ball_less_a_bar_on_its_axis_builds_wherever_its_two_corners_stand() {
+    for (top, bottom) in [(0, 0), (0, 2), (0, 1), (1, 3)] {
+        let what = format!("the ring with its top corner at {top} and its bottom one at {bottom}");
+        let mut model = a_model();
+        let solid = a_ring_of_a_ball_less_a_bar(&mut model, top, bottom).map(|solid| vec![solid]);
+        answers(
+            &mut model,
+            solid,
+            4.0 * PI / 3.0 * (21.0_f64 / 64.0).powi(3),
+            &[2],
+            &what,
+        );
+    }
 }
 
 fn a_model() -> Model {
@@ -694,4 +839,89 @@ fn coarsest_mesh(model: &Model, solid: SolidKey, what: &str) {
             &mut ProvenanceLog::new(),
         )
         .unwrap_or_else(|why| panic!("{what}: the coarsest mesh is refused: {why:?}"));
+}
+
+/// How much of a ball of `radius` at the origin a round bar of `bar` up `z`
+/// takes out, its axis `off` from the centre along `x`, by a midpoint rule of
+/// `steps` steps out from the bar's axis and `steps` round it.
+///
+/// Over the bar's disc the ball is `2√(radius² − ρ²)` tall, `ρ` how far the
+/// point is from the ball's axis: `ρ² = off² + s² + 2·off·s·cos θ` at `s` out
+/// from the bar's axis and `θ` round it. Every bore here keeps `|off| + bar`
+/// under `radius`, so the height is above zero over the whole disc.
+fn what_a_bar_bores_out_of_a_ball(radius: f64, bar: f64, off: f64, steps: u32) -> f64 {
+    assert!(
+        off.abs() + bar < radius,
+        "the bar runs wholly inside the ball"
+    );
+    let (out, round) = (bar / f64::from(steps), 2.0 * PI / f64::from(steps));
+    let mut sum = 0.0;
+    for i in 0..steps {
+        let s = out * (f64::from(i) + 0.5);
+        for j in 0..steps {
+            let theta = round * (f64::from(j) + 0.5);
+            let squared = off * off + s * s + 2.0 * off * s * theta.cos();
+            sum += 2.0 * (radius * radius - squared).sqrt() * s;
+        }
+    }
+    sum * out * round
+}
+
+/// Q1232's ring, built: a ball of `221/64` less a bar of `220/64` on its axis
+/// meet in two circles at `z = ±21/64`, each a closed edge whose one corner
+/// stands `top` or `bottom` quarter turns round `z` from `+x`. The ball's band
+/// runs the top circle backwards and the bottom one forwards, and the bore's
+/// wall each the other way, the one walk of the four that builds with both
+/// corners on one meridian.
+fn a_ring_of_a_ball_less_a_bar(
+    model: &mut Model,
+    top: i32,
+    bottom: i32,
+) -> rcad_topo::Result<SolidKey> {
+    let (ball, bar, high) = (221.0 / 64.0, 220.0 / 64.0, 21.0 / 64.0);
+    let skin = Surface::Sphere(Sphere::new(Point::origin(), ball).expect("a ball"));
+    let wall = Surface::Cylinder(Cylinder::new(Axis::z(), bar).expect("a pipe"));
+    let mut builder = SolidBuilder::new();
+    let [top_circle, bottom_circle] = [(top, high), (bottom, -high)].map(|(quarters, z)| {
+        let (x, y) = match quarters {
+            0 => (bar, 0.0),
+            1 => (0.0, bar),
+            2 => (-bar, 0.0),
+            3 => (0.0, -bar),
+            _ => panic!("a corner stands 0 to 3 quarter turns round, not {quarters}"),
+        };
+        let corner = builder.add_vertex(Point::new(x, y, z)).expect("a corner");
+        let level =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, 1.0))
+                .expect("a plane");
+        builder
+            .add_edge(
+                corner,
+                corner,
+                EdgeRun::RightRoundWhereItCrosses {
+                    and: Surface::Plane(level),
+                },
+            )
+            .expect("a circle")
+    });
+    let (f, r) = (Orientation::Forward, Orientation::Reversed);
+    let mut band = |surface: Surface, turns: [Orientation; 2]| {
+        let wires: Vec<_> = [top_circle, bottom_circle]
+            .into_iter()
+            .zip(turns)
+            .map(|(circle, turn)| {
+                let coedge = builder.add_coedge(circle, turn).expect("a coedge");
+                builder
+                    .add_wire(&[DraftStep::Along(coedge)])
+                    .expect("a wire")
+            })
+            .collect();
+        builder.add_face(surface, &wires).expect("a band")
+    };
+    let outside = band(skin, [r, f]);
+    let inside = band(wall, [f, r]);
+    builder
+        .add_shell(&[(outside, f), (inside, r)])
+        .expect("a shell");
+    builder.build(model, &Policy::certified(), &mut ProvenanceLog::new())
 }
