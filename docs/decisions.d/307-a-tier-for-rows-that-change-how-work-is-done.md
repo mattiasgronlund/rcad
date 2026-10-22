@@ -100,8 +100,13 @@ once and in order, but a tier with no rows may leave its heading out. Nothing
 is lost: an open row may only sit under its own tier's heading, so a missing
 heading can only mean an empty tier. `add` and `tier` write the heading when a
 row first goes to that tier, above the first heading that comes after it.
-`pick` still refuses when the side it keeps belongs to a tier with no block;
-that needs one side of a merge to have lost a heading, which no verb does.
+
+**Corrected 2026-10-22 (Q2611, from Q286):** this used to say `pick` still
+refused when the side it keeps belongs to a tier with no block, needing one
+side of a merge to have lost a heading, which no verb did. `pick` now writes a
+missing tier heading itself, through `put_in_its_block`, the same way `add`
+and `tier` do; it refuses only when the row belongs under `## Closed` and that
+heading itself is missing, which a well-formed file never leaves out.
 
 ### 307.4 The queue page keeps five tiers for now
 
