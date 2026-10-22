@@ -3116,6 +3116,11 @@ impl<'f> Arrangement<'f> {
     /// [`Arrangement::two_crossings_provably_share_nothing`] is, so a pair
     /// whose meet answers costs nothing more. An `Err` from [`intersect`] is
     /// no proof, and the refusal in hand stands.
+    ///
+    /// [`Arrangement::are_two_halves_of_one_ellipse`] asks it too, only for two
+    /// halves already in opposite corners whose partners differ as written
+    /// (Q2552), and there `false` keeps the two apart, as it did before it
+    /// asked.
     fn the_two_partners_are_one_pipe(
         &self,
         first: usize,
@@ -7379,6 +7384,28 @@ impl<'f> Arrangement<'f> {
     /// ellipse is smooth through both ends, and worked out, `N · (t₁ × t₂)`
     /// with `t₂ = −t₁` straddles nothing every time. The halves of the other
     /// ellipse share one picker with each of these and are not opposite.
+    ///
+    /// **The two halves may name the partner pipe two ways** (Q2552). Two bars
+    /// stacked on one pipe, the lower wall naming its axis at the origin and
+    /// the upper at `(0, 0, 4)`, with a bar of their radius slanting across
+    /// through `(0, 0, 3)`, are the shape: the slanted wall holds the half of
+    /// one ellipse that climbs past the joint as its crossing with the upper
+    /// spelling and the other half as its crossing with the lower, and the
+    /// lower bar united with the other two, either way round, was refused
+    /// `Undecidable` where the two halves meet. So the partners are one when
+    /// they are equal as written or [`intersect`] calls them one surface
+    /// ([`Arrangement::the_two_partners_are_one_pipe`]), and not by
+    /// [`name_of_the_surface_either_way_round`], which folds a slide of the
+    /// axis origin only along a coordinate axis.
+    ///
+    /// **The pickers may come in either order** for the same reason. Each
+    /// half's two pickers are listed in the order `intersect` sorts the face's
+    /// pipe and the partner, and the slanted wall sorts between the two
+    /// spellings, so one half lists its pickers the other way round from the
+    /// other. Either order cannot pair the pickers wrongly: one picker of a
+    /// half leans towards each pipe ([`a_half_of_an_ellipse`]), and turning a
+    /// picker round keeps the pipe it leans towards, so only two pickers
+    /// leaning towards one pipe can be opposite.
     fn are_two_halves_of_one_ellipse(
         &self,
         one: usize,
