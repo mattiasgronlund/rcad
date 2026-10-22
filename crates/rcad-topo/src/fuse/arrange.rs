@@ -5357,7 +5357,7 @@ impl<'f> Arrangement<'f> {
         let quadric = surfaces
             .iter()
             .find(|surface| matches!(surface, Surface::Sphere(_) | Surface::Cylinder(_)))?;
-        let (way, climbs) = the_way_two_planes_line_runs(one, other)?;
+        let (way, goes) = the_way_two_planes_line_runs(one, other)?;
         let lower_first = match &self.crossings[crossing].order {
             HowItRuns::AlongAnAxis {
                 axis,
@@ -5366,14 +5366,17 @@ impl<'f> Arrangement<'f> {
                 let partner = self.crossings[crossing].partner;
                 let a_plane_of_the_line =
                     |surface: &Surface| surface != quadric && surfaces.contains(surface);
-                if !climbs[*axis]
-                    || self.surface == partner
+                if self.surface == partner
                     || !a_plane_of_the_line(&self.surface)
                     || !a_plane_of_the_line(&partner)
                 {
                     return None;
                 }
-                *forward_climbs_the_axis
+                match goes[*axis] {
+                    Decision::Pos => *forward_climbs_the_axis,
+                    Decision::Neg => !*forward_climbs_the_axis,
+                    Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+                }
             }
             HowItRuns::RoundAClosedCurve {
                 from,
@@ -14052,48 +14055,117 @@ fn the_turn_at_one_of_two_meets(rows: [&Surface; 3], which: u8) -> Option<Decisi
 }
 
 /// The sign `s` for which [`meet_of_three_surfaces`] runs along the line two
-/// planes cross in along `s (a × b)`, handing its meets with a ball or a pipe
-/// back lower first, for `a` and `b` the planes' normals in the order given;
-/// and the axes `a × b` is something along, which are the axes that way
-/// climbs. `None` where a component of `a × b` is not proved, where all three
-/// are nothing, or where two that are something have different signs.
+/// planes cross in along `d = s (a × b)`, handing its meets with a ball or a
+/// pipe back lower first, for `a` and `b` the planes' normals in the order
+/// given; and which way `d` goes along each axis: `Pos` up it, `Neg` down it
+/// and `Zero` neither. `None` where a component of `a × b` cannot be worked
+/// out exactly, where all three are nothing, or where which one the line
+/// divides by is not fixed by the planes' numbers.
 ///
 /// **The line runs along `(a × b) / m`**, for `m` the component of `a × b`
-/// along the axis it divides by. Which axis that is is ranked in `f64`, and
-/// one is passed over where a product it builds does not fit, at the size the
-/// planes are written or at a size they are slid to, so it is not worked out
-/// here. Where every component of `a × b` that is something has one sign `s`,
-/// every axis it can divide by gives `m` that sign, and the line runs along
-/// `s (a × b)` whichever it is: up every axis `a × b` is something along, and
-/// along no other. Writing the two planes the other way round turns `a × b`
-/// and `s` round together, so the way is the same.
+/// along the axis it divides by, so `s` is the sign of `m`. That axis is the
+/// first of the three, ranked by the size of `a × b` worked out in `f64`,
+/// whose component is not nothing and whose point the line is put through can
+/// be built (`the_line_two_planes_cross_in` in `rcad-geom`). The ranking and
+/// the components are worked out here as they are there, from the normals
+/// alone, so they are the same at the size the planes are written and at every
+/// size they are slid to. Writing the two planes the other way round, or
+/// turning either one's normal round, turns `a × b` and `m` round together, so
+/// the way is the same.
 ///
-/// Each component is a two-by-two determinant of stored numbers, which is
-/// [`orient2d`] measured from the origin, as in
-/// [`two_pipes_run_along_one_line`].
-fn the_way_two_planes_line_runs(one: &Plane, other: &Plane) -> Option<(Decision, [bool; 3])> {
+/// **The point is built from the planes' offsets, so it alone can pass the
+/// first axis over, and only at some sizes.** Where every component of
+/// `a × b` that is something has the first one's sign, every axis it can then
+/// divide by gives `m` that sign. Where one has the other sign, the line could
+/// run the other way at a size where the first axis's point cannot be built
+/// and that one's can, unless that one's cannot be built wherever the first's
+/// cannot ([`the_point_on_this_axis_fails_wherever_another_does`]). An L plate
+/// turned `−π/2` about `z`, its inner side's plane stored with a normal
+/// `±(1, 2⁻⁵², 0)`, has `a × b = (2⁻⁵², −1, 0)` with the bar's floor: the
+/// line divides by `−1`, and its point on the axis of `2⁻⁵²` takes the floor's
+/// offset times `±2⁻⁵²` where the point on the axis of `−1` takes it times
+/// `±1`, so the first fails wherever the second does (Q2629).
+///
+/// Each component is built as `rcad-geom` builds it, an exact difference of
+/// two products that refuses where either product would round
+/// ([`difference_of_two_products`]).
+fn the_way_two_planes_line_runs(one: &Plane, other: &Plane) -> Option<(Decision, [Decision; 3])> {
     let [mine, theirs] = [one, other].map(|flat| flat.normal().components());
-    let mut way = None;
-    let mut climbs = [false; 3];
-    for axis in 0..3 {
+    let mut across = [Decision::Zero; 3];
+    for (axis, component) in across.iter_mut().enumerate() {
         let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
-        let sign = orient2d(
-            [0.0, 0.0],
-            [mine[next], mine[after]],
-            [theirs[next], theirs[after]],
-        );
-        // Compared rather than matched: only a proved nothing is passed over,
-        // and every other answer is read as one sign or gives up (§40).
-        if sign == Decision::Zero {
-            continue;
-        }
-        if !(sign == Decision::Pos || sign == Decision::Neg) || way.is_some_and(|way| way != sign) {
+        let (entries, len) =
+            difference_of_two_products(mine[next], theirs[after], mine[after], theirs[next])?;
+        *component = expansion_sign(&entries[..len]);
+        // Compared rather than matched: a sign or a proved nothing is kept, and
+        // every other answer gives up (§40).
+        if !(*component == Decision::Pos
+            || *component == Decision::Neg
+            || *component == Decision::Zero)
+        {
             return None;
         }
-        way = Some(sign);
-        climbs[axis] = true;
     }
-    Some((way?, climbs))
+    let ranked = one.normal().cross(other.normal()).components();
+    let mut by_size = [0usize, 1, 2];
+    by_size.sort_by(|&this, &that| ranked[that].abs().total_cmp(&ranked[this].abs()));
+    let mut something = by_size
+        .into_iter()
+        .filter(|&axis| across[axis] != Decision::Zero);
+    let first = something.next()?;
+    let way = across[first];
+    if something.any(|then| {
+        across[then] != way
+            && !the_point_on_this_axis_fails_wherever_another_does([one, other], then)
+    }) {
+        return None;
+    }
+    Some((
+        way,
+        across.map(|component| {
+            if component == Decision::Zero {
+                Decision::Zero
+            } else if component == way {
+                Decision::Pos
+            } else {
+                Decision::Neg
+            }
+        }),
+    ))
+}
+
+/// Whether the point the line two planes cross in is put through on `axis`
+/// cannot be built at any size at which the one on another axis cannot.
+///
+/// **The point on axis `k` is built from each plane's offset times the other's
+/// normal along the two axes that are not `k`**, four products, and a slide
+/// multiplies both offsets by one power of two (`the_line_two_planes_cross_in`
+/// and `the_meet_slid_into_range` in `rcad-geom`). A product is refused where
+/// it would round ([`product_is_exact`]), and one with a nought in it never
+/// is. Of another axis's products, those along the third axis belong to the
+/// point on `axis` too, so they fail for both together. What the other has
+/// and `axis` does not is each offset times the other plane's normal along
+/// `axis`, `o c`, the same whichever the other axis is. Where `|c|` is at
+/// most one, `o c` is no larger than `o`, so it never runs off the top and
+/// can only fall off the bottom. There it takes with it `o c'` for every `c'`
+/// of the same normal that is not nought and no larger than `c`, and the
+/// point on `axis` takes the normal along both other axes. Where `o` or `c`
+/// is nought, there is nothing to fail.
+fn the_point_on_this_axis_fails_wherever_another_does(planes: [&Plane; 2], axis: usize) -> bool {
+    [[planes[0], planes[1]], [planes[1], planes[0]]]
+        .iter()
+        .all(|[offset_of, normal_of]| {
+            let normal = normal_of.normal().components();
+            let only_the_other_has = normal[axis].abs();
+            offset_of.offset() == 0.0
+                || only_the_other_has == 0.0
+                || only_the_other_has <= 1.0
+                    && (0..3).any(|along| {
+                        along != axis
+                            && normal[along] != 0.0
+                            && normal[along].abs() <= only_the_other_has
+                    })
+        })
 }
 
 /// How fast a surface's gradient turns along a direction: `d·H·d` for the very
@@ -19589,6 +19661,102 @@ mod curved {
         assert!(
             proved * 10 > compared * 9,
             "the box proves the sign at ordinary points: {proved} of {compared}"
+        );
+    }
+
+    /// **The two meets of the line two planes cross in with a ball come back
+    /// lower first along the way [`super::the_way_two_planes_line_runs`]
+    /// says**, wherever it says one, with the planes written either way round.
+    ///
+    /// That way is read off the planes' normals by ranking the axes
+    /// [`rcad_geom::meet_of_three_surfaces`] could divide by as it ranks them,
+    /// so a ranking that drifted from its own would turn round the order of
+    /// every pair of meets it reads, with no refusal. A search, not a bound:
+    /// random pairs of planes, and a ball of radius one round a point of the
+    /// line they cross in, so the two meets are two apart. Most such pairs
+    /// have an `a × b` whose components are of both signs, which a way read
+    /// only where they had one sign never answered for, so the search must
+    /// reach many of those (Q2629).
+    #[test]
+    fn two_meets_of_a_line_with_a_ball_come_back_along_the_way_the_planes_say() {
+        use rcad_geom::{MeetOfThree, Sphere, meet_of_three_surfaces};
+        use rcad_predicates::Decision;
+
+        use super::the_way_two_planes_line_runs;
+        use crate::fuse::middle_of;
+
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut draw = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            ((state >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0) * 4.0
+        };
+        let mut both_signs = 0_usize;
+        for _ in 0..2_000 {
+            let mut a_point = || Point::new(draw(), draw(), draw());
+            let (here, there) = (a_point(), a_point());
+            let mut a_way = || Vector::new(draw(), draw(), draw());
+            let (normal, other_normal) = (a_way(), a_way());
+            let (Ok(flat), Ok(other)) = (
+                Plane::from_point_and_normal(here, normal),
+                Plane::from_point_and_normal(there, other_normal),
+            ) else {
+                continue;
+            };
+            let (n, m) = (flat.normal(), other.normal());
+            let d = n.cross(m);
+            let squared = d.dot(d);
+            if squared < 0.01 {
+                continue;
+            }
+            let [c_n, c_m] = [flat, other].map(|plane| -plane.coefficients()[3]);
+            let on_both = Point::origin() + (m.cross(d) * c_n + d.cross(n) * c_m) * (1.0 / squared);
+            let ball = Surface::Sphere(
+                Sphere::new(on_both + d * draw(), 1.0).expect("a ball of radius one"),
+            );
+            let meets = meet_of_three_surfaces(
+                [&Surface::Plane(flat), &Surface::Plane(other), &ball],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let Ok(MeetOfThree::At(meets)) = meets else {
+                panic!("a line through a ball's centre meets it twice: {meets:?}");
+            };
+            let [lower, higher] = [meets[0], meets[1]].map(|meet| middle_of(meet).coordinates());
+            let step: [f64; 3] = core::array::from_fn(|axis| higher[axis] - lower[axis]);
+            for (one, two) in [(flat, other), (other, flat)] {
+                let Some((way, goes)) = the_way_two_planes_line_runs(&one, &two) else {
+                    continue;
+                };
+                if goes.contains(&Decision::Pos) && goes.contains(&Decision::Neg) {
+                    both_signs += 1;
+                }
+                let across = one.normal().cross(two.normal()).components();
+                let along: f64 = (0..3).map(|axis| step[axis] * across[axis]).sum();
+                let ahead = if way == Decision::Pos { along } else { -along };
+                assert!(
+                    ahead > 0.0,
+                    "{one:?} and {two:?} read {way:?}, and the meets run {step:?}"
+                );
+                for axis in 0..3 {
+                    if step[axis].abs() > 1e-9 {
+                        let up = if step[axis] > 0.0 {
+                            Decision::Pos
+                        } else {
+                            Decision::Neg
+                        };
+                        assert_eq!(
+                            goes[axis], up,
+                            "{one:?} and {two:?}, the meets run {step:?}"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            both_signs > 1_000,
+            "pairs whose a × b has both signs and whose way is read: {both_signs}"
         );
     }
 
