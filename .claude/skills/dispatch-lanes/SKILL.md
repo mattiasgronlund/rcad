@@ -159,8 +159,10 @@ the code at the base, and holds the rules this step held: the write set
 against the work, the recipe that pins a count the row moves, the model per
 row and per bundle, `sourcePaths`, the marks, and the facts the lane needs. A
 row prep finds wrong comes back not merged before any lane starts, with a
-`needs <file>: <why>` line for each file it is missing. Re-file it with those
-files, drop and add, then `queue next` (§396.4).
+`needs <file>: <why>` line for each file it is missing. When the write set is
+the only thing wrong, fix it in place with `just queue writes <id> <write
+set>` instead of re-filing (§230.3); any other finding still needs re-filing
+with those files, drop and add, then `queue next` (§396.4).
 
 **A row that adds a test file directly under `crates/rcad-topo/tests/`,
 `crates/rcad-geom/tests/` or `crates/rcad-step/tests/` holds one item of
