@@ -212,6 +212,69 @@ fn two_pipes_of_one_width_whose_axes_meet_cross_in_one_curve_once_a_turn_parts_t
     );
 }
 
+/// Why the two loops of a thin pipe resting on the inside of a fat one are a
+/// knife edge, and the one loop the same pair turned is named is not a wrong
+/// answer.
+///
+/// The pair is the one the quartic property above first drew once the two
+/// loops were named (Q2636): a pipe of radius 3 up `z` through `(−2, 0, 0)`
+/// and a pipe of radius 2 along `y` through `(−3, 0, 0)`, whose axes are one
+/// apart, which is what the widths differ by. The thin pipe touches the fat
+/// one from inside at `(−5, 0, 0)`, and its two loops meet there. The turn
+/// rounds both axes, and the turned axes are a few last bits nearer or further
+/// apart than one. Nearer, the two loops part; further, the thin pipe pokes
+/// out through the fat one's wall and the two cross in one loop, and that is
+/// what this turn gives.
+#[test]
+fn a_thin_pipe_resting_inside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves_the_axes() {
+    let resting = Crossing {
+        first: Piece::Pipe {
+            along: [0, 0, 1],
+            through: [-2, 0, 0],
+            radius: 3,
+        },
+        second: Piece::Pipe {
+            along: [0, 1, 0],
+            through: [-3, 0, 0],
+            radius: 2,
+        },
+        turn: None,
+        elsewhere: Elsewhere::here(),
+        hair: None,
+    };
+    let turned = Crossing {
+        turn: Some(Turn {
+            direction: [0, -2, -1],
+            steps: 3,
+        }),
+        ..resting
+    };
+
+    let still = resting.surfaces();
+    assert_eq!(
+        kind_of(&named(&still).expect("a thin pipe resting inside a fat one is named")),
+        ("curves", 2),
+        "two loops, which meet where the walls touch"
+    );
+    assert!(is_on_a_knife_edge(&still), "and that is a knife edge");
+
+    let moved = turned.surfaces();
+    let [Surface::Cylinder(one), Surface::Cylinder(other)] = moved else {
+        panic!("this pair is two pipes");
+    };
+    assert_eq!(
+        (one.radius(), other.radius()),
+        (3.0, 2.0),
+        "a turn leaves both radii alone"
+    );
+    assert_eq!(
+        kind_of(&named(&moved).expect("the turned pair is named")),
+        ("curves", 1),
+        "the turned axes are further apart than the widths differ, so the thin pipe pokes out \
+         and the two cross in one loop"
+    );
+}
+
 /// The pair that used to be this file's third knife edge, and is not one any
 /// more.
 ///
