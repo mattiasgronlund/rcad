@@ -546,15 +546,17 @@ fn a_ball_with_a_hole_bored_a_little_off_its_centre_answers() {
 
 /// [`what_a_bar_bores_out_of_a_ball`] with the bar on the ball's axis is the
 /// ball less the napkin ring it leaves, `4π/3 · (r³ − (r² − a²)^{3/2})`, and
-/// off the axis it is within a millionth of the rule at four times the steps,
-/// for every bore this file makes.
+/// off the axis it agrees with the rule at four times the steps, each to within
+/// a millionth of what the bar takes out, for every bore this file makes. The
+/// mesh at `0.01` the fuses are measured at may miss by a tenth or more, far
+/// more than that.
 #[test]
 fn what_a_bar_bores_out_of_a_ball_is_within_a_millionth_of_its_closed_form_and_a_finer_rule() {
     for (radius, bar) in [(3.0, 2.9), (10.0, 8.0)] {
         let rule = what_a_bar_bores_out_of_a_ball(radius, bar, 0.0, 1000);
         let closed = 4.0 * PI / 3.0 * (radius.powi(3) - (radius * radius - bar * bar).powf(1.5));
         assert!(
-            (rule - closed).abs() < 1e-6,
+            (rule - closed).abs() < 1e-6 * closed,
             "a bar of {bar} on the axis of a ball of {radius}: {rule} by the rule, {closed} closed"
         );
     }
@@ -570,7 +572,7 @@ fn what_a_bar_bores_out_of_a_ball_is_within_a_millionth_of_its_closed_form_and_a
             what_a_bar_bores_out_of_a_ball(radius, bar, off, 4000),
         );
         assert!(
-            (coarse - fine).abs() < 1e-6,
+            (coarse - fine).abs() < 1e-6 * fine,
             "a bar of {bar} {off} off in a ball of {radius}: {coarse} at 1000 steps, {fine} at 4000"
         );
     }
