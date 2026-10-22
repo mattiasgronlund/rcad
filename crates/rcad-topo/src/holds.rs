@@ -828,7 +828,9 @@ pub(crate) fn the_meridian_half_space_keeps(
 /// ([`is_wholly_on_one_side_of_the_half_line`]): the half-line does not cross
 /// that side and the point is not on it, wherever the point is across its line,
 /// so the side counts nothing. A box straddling the line of a side past its
-/// ends is one (row Q2563). Where a corner of it has no sign either, the
+/// ends is one (row Q2563). The answer then rests on no unproven sign, so the
+/// one it did without is not logged: a certified fuse refuses at its end
+/// whenever its log holds one. Where a corner of it has no sign either, the
 /// half-line may run along that side, and the walk is aimed elsewhere as for
 /// any corner it cannot read. Only a side whose corners are on the line or
 /// either side of it is refused.
@@ -879,7 +881,14 @@ fn walk_one_outline(
     let mut winding = 0i64;
     for (index, &from) in corners.iter().enumerate() {
         let next = (index + 1) % corners.len();
-        let along = decide(from, corners[next], target, point, policy, log);
+        let mut asked = ProvenanceLog::new();
+        let along = decide(from, corners[next], target, point, policy, &mut asked);
+        if let Decision::Undecidable { .. } = along
+            && is_wholly_on_one_side_of_the_half_line(sides[index], sides[next])
+        {
+            continue;
+        }
+        asked.drain_into(log);
         match along {
             Decision::Zero => match lies_between(from, corners[next], point) {
                 Ok(true) => return Ok(Walked::OnASide),
@@ -888,9 +897,6 @@ fn walk_one_outline(
             },
             Decision::Pos | Decision::Neg => (),
             Decision::Undecidable { enclosure } => {
-                if is_wholly_on_one_side_of_the_half_line(sides[index], sides[next]) {
-                    continue;
-                }
                 if above_the_line(sides[index]).is_some() && above_the_line(sides[next]).is_some() {
                     return Err(gave_up_turning_a_corner(point, enclosure));
                 }
