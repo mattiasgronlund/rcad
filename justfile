@@ -16352,6 +16352,15 @@ check-queue-selftest:
     git -C "$repo" add -A
     got=$(qf add 1 opus 'crates/rcad-topo/tests/merged.rs#an_existing_item_shape' 'from/- an item whose file exists already §230' 2>&1) \
         || fail "add refused a merged.rs item whose file exists on disk already"
+    # Q2569: 299 of 300 files under crates/rcad-topo/tests/ are named with
+    # their module's own underscores, letter for letter, rather than with the
+    # module's _ written -. The check must accept either spelling.
+    touch "$repo/crates/rcad-topo/tests/an_existing_underscore_item_shape.rs"
+    git -C "$repo" add -A
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/merged.rs#an_existing_underscore_item_shape' 'from/- an item whose file exists already, named with its own underscores §230' 2>&1) \
+        || fail "add refused a merged.rs item whose underscore-named file exists on disk already"
+    got=$(qf add 1 opus 'crates/rcad-topo/tests/merged.rs#a_missing_underscore_shape,crates/rcad-topo/tests/a_missing_underscore_shape.rs' 'from/- the same item, its underscore-named file in the write set too §230' 2>&1) \
+        || fail "add refused a merged.rs item whose underscore-named file is also in the write set"
     got=$(qf add 1 opus 'crates/rcad-geom/tests/merged.rs#a_missing_geom_shape' 'from/- the same check, for rcad-geom §230' 2>&1) \
         && fail "add accepted a rcad-geom merged.rs item naming no file"
     grep -qF "'crates/rcad-geom/tests/merged.rs#a_missing_geom_shape' names a file the write set does not itself name and that does not exist yet" <<<"$got" \
