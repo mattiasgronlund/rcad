@@ -5287,17 +5287,15 @@ impl<'f> Arrangement<'f> {
     /// ball or a pipe in order along the line.** The line two planes cross in,
     /// with normals `a` and `b`, runs there along `(a × b) / m`, for `m` the
     /// component of `a × b` it divides by, and the meets come back lower first
-    /// along that. Where every component of `a × b` that is not nothing has
-    /// one sign, whichever it divides by, the line runs along `d`, `a × b`
-    /// turned that sign's way, whichever way round the two planes are written
-    /// and whichever way each faces ([`the_way_two_planes_line_runs`]). Meet
-    /// `0` is then the
-    /// lower of the two along `d`, and meet `1` the higher, however far their
-    /// boxes overlap.
+    /// along that. Where [`the_way_two_planes_line_runs`] answers, the line
+    /// runs along `d`, `a × b` turned the way of the sign of `m`, whichever way
+    /// round the two planes are written and whichever way each faces. Meet `0`
+    /// is then the lower of the two along `d`, and meet `1` the higher, however
+    /// far their boxes overlap.
     ///
     /// - **Along the line itself**, the crossing of the two planes, the lower
-    ///   comes first where the crossing climbs the axis it is ordered on, which
-    ///   `d` climbs too wherever `a × b` is something along it.
+    ///   comes first where the crossing goes along the axis it is ordered on
+    ///   the way `d` goes along it, which that function also says.
     /// - **Round the loop one of the planes cuts the ball or the pipe in**,
     ///   the line lies in that plane and cuts the loop at the two meets alone,
     ///   so into two arcs, one each side of the line. Going round from the
@@ -13514,6 +13512,14 @@ fn the_way_a_plane_and_a_pipe_wind(pair: &[Surface; 2], across: Decision) -> Dec
 /// Both starts are asked, and must be on one side, because the start may be a
 /// rounding off the loop: the box counted from holds the place it was rounded
 /// off.
+///
+/// **A start a rounding off the line is not read.** Its box holds the meets,
+/// so no sign read over it says which arc it is on. A round bar through
+/// `(1.5, 1)` in an L plate turned `π/2` about `z` starts the loop on the
+/// plate's top at the bar's seam, which the stored numbers put `1.09e−47` past
+/// the line, and the box counted from is `2.3e−13` wide. Every certified fuse
+/// of the two with the plate first is refused for it
+/// (`a_bar_flush_with_an_l_plates_inner_side_turned.rs`, Q2629).
 fn the_lower_meet_first_round_the_loop(
     wound_as: &[Surface; 2],
     starts: [PredicatePoint; 2],
@@ -14015,16 +14021,16 @@ fn the_turn_where_two_planes_cross_a_quadric(
 
 /// The sign of `det(∇S, ∇Q₁, ∇Q₂)` for three surfaces two of which are planes
 /// and one a ball or a pipe, at meet `which` of the planes' line with the
-/// curved one, where the line meets it twice and every component of `a × b`
-/// that is something has one sign: `None` for any other three, or for a meet
-/// past the second.
+/// curved one, where the line meets it twice and
+/// [`the_way_two_planes_line_runs`] answers: `None` for any other three, or
+/// for a meet past the second.
 ///
 /// **The determinant is `g · (a × b)` up to which row the curved one is
 /// in**, for `a` and `b` the planes' normals in the order their rows come and
 /// `g` the curved one's gradient, as in
 /// [`the_turn_where_two_planes_cross_a_quadric`]. [`meet_of_three_surfaces`]
-/// hands the two meets back lower first along `d = s (a × b)`, for `s` that
-/// one sign ([`the_way_two_planes_line_runs`]), and a ball's or a pipe's value
+/// hands the two meets back lower first along `d = s (a × b)`, for `s` the
+/// sign [`the_way_two_planes_line_runs`] gives, and a ball's or a pipe's value
 /// falls through the lower going along the line and rises through the higher,
 /// so `g · d` is below nothing at meet `0` and above it at meet `1`. And
 /// `g · (a × b)` is `s (g · d)`.

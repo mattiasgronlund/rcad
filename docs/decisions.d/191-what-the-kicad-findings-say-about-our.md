@@ -361,6 +361,44 @@ limit, not a gap — the model's largest coordinate over that is past what
 `DynamicRangeTooWide`, though its answer is the plate itself, which has no
 such sliver; that one is a gap, left for its own row (§191.5, Q2275).
 
+**2026-10-22 note (Q2629, carrying Q2505): a round bar flush with an L plate's
+inner side, turned.** A round bar of radius `1/2` stands in the L plate
+`(0,0) (4,0) (4,2) (2,2) (2,4) (0,4)`, its pipe touching the line of an inner
+side past that side's end, so it meets no face of the plate's sides
+(`a_bar_flush_with_an_l_plates_inner_side_turned.rs`). Unturned and turned
+`0.3` about `z`, every fuse answers. Turned a quarter turn, the side's plane is
+stored with its normal a rounding off an axis, and on the stored numbers it
+cuts the pipe in two lines about `2.2e−16` apart, still off the side's face.
+Q2505 kept each meet of a line with the pipe on the one of the two lines that
+holds it, and told the two lines apart through the axis's own start
+(`two_lines_along_a_pipe` in `intersect.rs`). Q2629 reads which way the line
+two planes cross in runs where its direction has components of both signs: the
+sign of the component `rcad-geom` divides by, which the normals fix
+(`the_way_two_planes_line_runs` in `fuse/arrange.rs`). What is still refused,
+each pinned at what it does:
+
+- **Through `(1, 1.5)` turned `3π/2` or `−π/2`**, every fuse is refused
+  `DynamicRangeTooWide`, at `2⁵⁵` and `2⁵⁵/3`. The side's plane cuts the
+  circles of the plate's floor and top at two places `2⁻⁵³` or `3·2⁻⁵³` apart.
+  The pipe is joined back with one of its two lines as its seam, but
+  `where_curved_pieces_met_off_a_run_that_closes_up` in `fuse/assemble.rs`
+  keeps the other line's ends as corners, so each circle comes back as an arc
+  that short and an arc the rest of the way round. The side's face never
+  reaches the pipe and the answer has no such arc: a gap.
+- **Through `(1.5, 1)` turned `π/2`**, the bar's seam lands on the side's line.
+  Unturned, the side's plane touches the pipe along its seam; turned, the
+  stored numbers put the seam `1.09e−47` past that plane, between the two lines
+  it cuts the pipe in. With the bar first every fuse is refused `Undecidable`
+  "side of plane" in `Arrangement::passes_through`, asked whether the seam's
+  corner on the bar's floor is on that plane. The corner's box is `1.1e−13`
+  wide and holds both places the plane crosses the floor's circle, so
+  `side_of_a_plane_crossing_a_cap_circle` does not answer. With the plate first
+  it is "order along a crossing": the loop on the plate's top starts at the
+  seam, and `the_lower_meet_first_round_the_loop` does not read a start whose
+  box holds the meets. Which side of the plane the seam is on is a sign of the
+  stored numbers, so both are gaps. Q2109's pair is the same `passes_through`
+  step, a plane that touched the pipe along its seam before a turn.
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which
