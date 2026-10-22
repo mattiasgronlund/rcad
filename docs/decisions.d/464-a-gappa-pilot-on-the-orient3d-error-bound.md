@@ -108,10 +108,11 @@ On `Orient3d::on_floats` and `ORIENT3D_ERROR_BOUND`, in
 Quote the script whole in this section, so the result can be run again. Whether
 a script joins the tree, and the gate, is for the row the pilot files.
 
-### 464.4 DRAFT, unfinished: the script as Q2647's second lane left it
+### 464.4 DRAFT, unfinished: the scripts as Q2647's relay 2 left them
 
-*Q2647's relay 1 committed this so the next lane does not lose it. It is not
-an answer yet. The next lane replaces this subsection with 464.4 onward.*
+*Q2647's relays 1 and 2 committed this so the next lane does not lose it. It
+is not an answer yet. The next lane replaces this subsection with 464.4
+onward.*
 
 The pins, both measured:
 
@@ -123,13 +124,38 @@ The pins, both measured:
   `#coqPackages_8_20.flocq`. `rocqPackages` and `coqPackages_9_*` have no
   gappalib. It took 1m10.914s, fetched 583.11 MiB and built gappalib locally.
 
-Where the draft stands. Gappa parses it, takes every hint as a field identity
-and runs in about 10 to 15 s. It bounds the ratios of the differences, the
-minors and `s12` within `[1 - 2^-53, 1 + 2^-53]`. It does not bound the
-products (`rp1`, `rt1`), because `rel_float_of_abs` in Gappa's
-`src/arithmetic/float.cpp`, lines 426-437, refuses an ABS range that touches
-`[-2^-1022, 2^-1022]`. Its own end is included, so `|x| >= 1b-1022` is one ulp
-short. The goal `(y - Ex) / eb in [-1, 1]` therefore fails.
+What relay 2 ran, all with `-Eprecision=200`. At Gappa's default of 60 bits
+the `u²` terms are lost and `W1` comes out at `453b-59`, about `7.08u`.
+Here `u = 2^-53`.
+
+- **The lemma** (second block) proves `|rnd(x)| >= 2^-1022` gives a relative
+  error of at most `u + 2u²`, both signs, in 0.2 s. It fails at `u` (best
+  just above `2^-53`: an exact value just below `2^-1022` rounds up to it),
+  and fails with `|p| >= 1b-1074` (best `[-0.5, 1]`). Gappa's own
+  `rel_float_of_abs` (`src/arithmetic/float.cpp:426-437`) needs the value
+  strictly above `2^-1022`, which is why the lemma is separate.
+- **The main script** (first block) proves `(y - Ex) / eb in [-1, 1]` in
+  3.9 s. `(y - Ex) / P6` comes out within `7u + 11u²`, and `P -/ Phat`
+  within `4u + 7u²`. With strict normal hypotheses (`|x| >=
+  4503599627370497b-1074`) and no lemma it also proves, at `7u + 7u²`.
+- **`B`**: `6b-53` fails (best ±1.16667); `7b-53` fails; `7b-53 + k b-106`
+  fails at k = 44, 45, 46 and proves at 47, 48. The code's 56 has 9u² over.
+- **The value version**: goal `(value - Ex) / eb`, each `W_k` times `rv =
+  value / y`, hypothesis `|y| >= 1b-1074`, hint `value / y -> 1 + (value -
+  y) / y`. Fails at the code's `B` (best ±1.14286) and at `8b-53`; proves at
+  `8b-53 + 1b-100`; fails at `6b-53` (best ±1.33333). `(value - Ex) / P6`
+  comes out at `8u` and a little. Not proved at 7ε is not shown false.
+- **No product normal** (all nine, or only `bdx * cdy`'s): `REL(bdxcdy, bdx *
+  cdy)` is not found, `rp1` is ±2^4144, `W1` is unbounded, the goal fails.
+- **No `r1..r3` normal**: `REL(P, Phat)` is not found and the goal fails.
+- **No `eb` normal**: the goal fails.
+- **`t1 + t2 = 0`** (`s12 = S`, `rs` dropped from `W1..W4`, its hypothesis
+  and hint dropped): proves, `(y - Ex) / P6` about `6u`.
+- **Rocq**: `gappa -Bcoq` on the lemma gives 548 lines and `coqc` exits 0 in
+  0.74 s. On the main script it gives 9947 lines, and `coqc` stops at line
+  4015: `The variable rel_of_lin was not found`. Gappa 1.8.0 emits
+  `rel_of_lin`; gappalib 1.7.0 has `rel_of_nzr_bnd`, `rel_of_fix_float_*`
+  and `lin_of_rel`, but not that.
 
 ```gappa
 # Orient3d::on_floats and ORIENT3D_ERROR_BOUND,
@@ -170,7 +196,8 @@ value = rnd(y);
 q1 = rnd(|bdxcdy| + |cdxbdy|);
 q2 = rnd(|cdxady| + |adxcdy|);
 q3 = rnd(|adxbdy| + |bdxady|);
-r1 = rnd(q1 * |adz|); r2 = rnd(q2 * |bdz|); r3 = rnd(q3 * |cdz|);
+R1 = q1 * |adz|; R2 = q2 * |bdz|; R3 = q3 * |cdz|;
+r1 = rnd(R1); r2 = rnd(R2); r3 = rnd(R3);
 P = rnd(rnd(r1 + r2) + r3);
 
 B = 7b-53 + 7b-103;
@@ -226,28 +253,40 @@ e5 = cdz * adxbdy * W5; e6 = -(cdz * bdxady * W6);
   /\ |bdx| >= 1b-1074 /\ |bdy| >= 1b-1074 /\ |bdz| >= 1b-1074
   /\ |cdx| >= 1b-1074 /\ |cdy| >= 1b-1074 /\ |cdz| >= 1b-1074
   /\ |first| >= 1b-1074 /\ |second| >= 1b-1074 /\ |third| >= 1b-1074
-  # §12.2, first condition: the nine products are normal, which is what
-  # product_is_normal checks once neither factor is zero.
+  # The first two terms do not cancel to zero.
+  /\ |t1 + t2| >= 1b-1074
+  # §12.2's first condition: product_is_normal on the nine products.
   /\ |bdxcdy| >= 1b-1022 /\ |cdxbdy| >= 1b-1022 /\ |cdxady| >= 1b-1022
   /\ |adxcdy| >= 1b-1022 /\ |adxbdy| >= 1b-1022 /\ |bdxady| >= 1b-1022
   /\ |t1| >= 1b-1022 /\ |t2| >= 1b-1022 /\ |t3| >= 1b-1022
-  # The permanent's own three products are normal. The comment above
-  # stays_accurate argues it from the nine; Gappa takes it as given.
+  # The permanent's own three products are normal too. The comment above
+  # stays_accurate argues it from the nine.
   /\ |r1| >= 1b-1022 /\ |r2| >= 1b-1022 /\ |r3| >= 1b-1022
-  # §12.2, second condition: the bound is normal, which decide checks.
+  # §12.2's second condition: the bound is normal, which decide checks.
   /\ |eb| >= 1b-1022
-  # The first two terms do not cancel to zero.
-  /\ |t1 + t2| >= 1b-1074
+  # What lemma.g proves each of those thirteen gives: the rounding is off by
+  # at most u + 2u^2. Gappa's own theorem needs the value strictly above
+  # 2^-1022, so it cannot take the step itself.
+  /\ bdxcdy -/ bdx * cdy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ cdxbdy -/ cdx * bdy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ cdxady -/ cdx * ady in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ adxcdy -/ adx * cdy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ adxbdy -/ adx * bdy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ bdxady -/ bdx * ady in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t1 -/ U1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t2 -/ U2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t3 -/ U3 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ r1 -/ R1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ r2 -/ R2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ r3 -/ R3 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
   # x / |x| is in [-1, 1] for any x that is not zero.
   /\ adz / |adz| in [-1, 1] /\ bdz / |bdz| in [-1, 1] /\ cdz / |cdz| in [-1, 1]
   /\ bdxcdy / |bdxcdy| in [-1, 1] /\ cdxbdy / |cdxbdy| in [-1, 1]
   /\ cdxady / |cdxady| in [-1, 1] /\ adxcdy / |adxcdy| in [-1, 1]
   /\ adxbdy / |adxbdy| in [-1, 1] /\ bdxady / |bdxady| in [-1, 1]
 ->
-  |bdxcdy| in ? /\ bdxcdy -/ bdx * cdy in ? /\ (bdxcdy - bdx * cdy) / (bdx * cdy) in ? /\ t1 -/ U1 in ?
-  /\ radz in ? /\ rp1 in ? /\ rm1 in ? /\ rt1 in ? /\ rs in ? /\ W1 in ? /\ W5 in ?
-  /\ e1 / c1 in ? /\ (c1 + e1) -/ c1 in ? /\ c1 / (c1 + c2) in ?
-  /\ (y - Ex) / P6 in ? /\ P -/ Phat in ? /\ eb -/ B * P in ?
+  (y - Ex) / P6 in ? /\ P -/ Phat in ?
   /\ (y - Ex) / eb in [-1, 1]
 }
 
@@ -293,8 +332,18 @@ e5 / c5 -> (cdz / |cdz|) * (adxbdy / |adxbdy|) * W5;
 e6 / c6 -> -((cdz / |cdz|) * (bdxady / |bdxady|) * W6);
 
 # From the six terms' permanent to the one on_floats rounds, and on to eb.
-P ~ Phat;
 (y - Ex) / eb -> ((y - Ex) / P6) * (Phat / P) * (P / eb);
 Phat / P -> 1 / (1 + (P - Phat) / Phat);
 P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+```gappa
+# lemma.g: a double that rounds to at least MIN_POSITIVE in magnitude is
+# off by at most u + 2u^2 relatively, u = 2^-53, even when the exact value
+# is below MIN_POSITIVE.
+@rnd = float<ieee_64, ne>;
+p = rnd(x);
+{ |x| <= 1b1024 /\ |p| >= 1b-1022
+  -> (p - x) / x in [-4503599627370497b-105, 4503599627370497b-105] }
+$ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
 ```
