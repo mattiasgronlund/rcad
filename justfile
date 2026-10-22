@@ -17507,59 +17507,65 @@ check-queue-api-selftest:
 
     # Q2640 (was/Q293, §230.3, §263, §424.7): `writes` sets a row's write set
     # in place, on a todo row or a held one, where `narrow` cannot reach it
-    # because the new set is not inside the one the row was taken with.
+    # because the new set is not inside the one the row was taken with. The
+    # entries here are docs/decisions.d/, not tooling/queue/, because the
+    # earlier narrow test above leaves lane-wide holding tooling/queue/queue.py
+    # for the rest of this recipe, and `writes` checks a todo row's new set
+    # against every hold anywhere, not just this worktree's own.
     writes_wt="$root/rcad-worktrees/writes"
     g "$hub" worktree add -q -b writes "$writes_wt" main
     wrongly_filed=$(q "$writes_wt" add 2 opus - "from/- a row filed with the wrong write set §230") \
         || fail "add for the wrongly filed row failed"
-    beside_filed=$(q "$writes_wt" add 2 opus tooling/queue/rows.py "from/- a row on a file under the crate the fix widens into §230") \
+    beside_filed=$(q "$writes_wt" add 2 opus docs/decisions.d/230-one-queue.md "from/- a row on a file under the directory the fix widens into §230") \
         || fail "add for the row beside it failed"
     g "$writes_wt" commit -qam "two rows for writes"
-    got=$(q "$writes_wt" writes "$wrongly_filed" tooling/queue/ 2>&1) \
+    got=$(q "$writes_wt" writes "$wrongly_filed" docs/decisions.d/ 2>&1) \
         || fail "writes refused to set a todo row's write set"
-    grep -qxF "$wrongly_filed: write set - -> tooling/queue/" <<<"$got" \
+    grep -qxF "$wrongly_filed: write set - -> docs/decisions.d/" <<<"$got" \
         || fail "writes did not report the write set it set on the todo row"
-    got=$(q "$writes_wt" next 20 2>&1) || fail "next failed after writes set a todo row's write set"
-    grep -qxF "skip $beside_filed (tier 2): its tooling/queue/rows.py meets $wrongly_filed's tooling/queue/, taken above" <<<"$got" \
-        || fail "next did not skip a row that meets the corrected write set of a todo row"
     got=$(q "$writes_wt" 2>&1) || fail "the plain listing failed after writes corrected a todo row"
-    grep -qxF "      narrowed to tooling/queue/" <<<"$got" \
+    grep -qxF "      narrowed to docs/decisions.d/" <<<"$got" \
         || fail "the plain listing did not show what writes set the todo row's write set to"
+    got=$(q "$writes_wt" next 20 2>&1) || fail "next failed after writes set a todo row's write set"
+    grep -qxF "skip $beside_filed (tier 2): its docs/decisions.d/230-one-queue.md meets $wrongly_filed's docs/decisions.d/, taken above" <<<"$got" \
+        || fail "next did not skip a row that meets the corrected write set of a todo row"
 
     held_wrong=$(q "$writes_wt" add 2 opus - "from/- a row taken with - while its lane holds a crate §230") \
         || fail "add for the wrongly taken row failed"
     g "$writes_wt" commit -qam "a row for writes on a held row"
     q "$writes_wt" take "$held_wrong" lane-writes-held >/dev/null || fail "take of the wrongly filed row was refused"
-    got=$(q "$writes_wt" narrow "$held_wrong" tooling/queue/queue.py 2>&1) \
+    got=$(q "$writes_wt" narrow "$held_wrong" docs/decisions.d/ 2>&1) \
         && fail "narrow widened a hold back past the set it was taken with"
     grep -qF "outside -, the write set $held_wrong was taken with" <<<"$got" \
         || fail "narrow did not refuse widening a hold taken with - past -"
-    got=$(q "$writes_wt" writes "$held_wrong" tooling/queue/queue.py 2>&1) \
+    got=$(q "$writes_wt" writes "$held_wrong" docs/decisions.d/ 2>&1) \
         || fail "writes refused to correct a held row's write set outside what it was taken with"
-    grep -qxF "$held_wrong: write set - -> tooling/queue/queue.py" <<<"$got" \
+    grep -qxF "$held_wrong: write set - -> docs/decisions.d/" <<<"$got" \
         || fail "writes did not report the write set it set on the held row"
     got=$(q "$writes_wt" next 20 2>&1) || fail "next failed after writes corrected a held row's write set"
-    grep -qxF "skip $beside_filed (tier 2): its tooling/queue/rows.py meets $held_wrong's tooling/queue/queue.py, held by lane:lane-writes-held" <<<"$got" \
+    grep -qxF "skip $beside_filed (tier 2): its docs/decisions.d/230-one-queue.md meets $held_wrong's docs/decisions.d/, held by lane:lane-writes-held" <<<"$got" \
         || fail "next did not skip a row that meets the write-corrected held row"
     got=$(q "$writes_wt" show "$held_wrong" 2>&1) || fail "show failed after writes corrected a held row"
-    grep -qxF "narrowed to tooling/queue/queue.py, taken with -" <<<"$got" \
+    grep -qxF "narrowed to docs/decisions.d/, taken with -" <<<"$got" \
         || fail "show did not say what writes corrected the held row's write set to"
 
     # writes refuses a write set that meets a running hold, the same guard
-    # narrow runs before it widens a hold back (§424.7).
+    # narrow runs before it widens a hold back (§424.7). held_wrong's own
+    # corrected hold on docs/decisions.d/ is the running hold this meets, so
+    # this stays self-contained rather than reaching back for lane-wide's.
     met_row=$(q "$writes_wt" add 2 opus - "from/- a row writes cannot set onto a file another lane holds §230") \
         || fail "add for the met row failed"
     g "$writes_wt" commit -qam "a row for writes's own meets guard"
-    got=$(q "$writes_wt" writes "$met_row" tooling/queue/queue.py 2>&1) \
+    got=$(q "$writes_wt" writes "$met_row" docs/decisions.d/230-one-queue.md 2>&1) \
         && fail "writes set a write set that meets a running hold"
     grep -qF "meets a running hold" <<<"$got" || fail "writes did not say the new set meets a running hold"
 
     # writes refuses a closed row and a write set a row already carries.
     got=$(q "$writes_wt" writes T1 docs/a.md 2>&1) && fail "writes set the write set of a closed row"
     grep -qF "T1 is closed" <<<"$got" || fail "writes did not refuse a closed row by name"
-    got=$(q "$writes_wt" writes "$beside_filed" tooling/queue/rows.py 2>&1) \
+    got=$(q "$writes_wt" writes "$beside_filed" docs/decisions.d/230-one-queue.md 2>&1) \
         && fail "writes accepted a write set a row already carries"
-    grep -qF "write set is tooling/queue/rows.py already" <<<"$got" \
+    grep -qF "write set is docs/decisions.d/230-one-queue.md already" <<<"$got" \
         || fail "writes did not refuse a write set a row already carries"
 
     # Q252 (§263.3, §263.4): `give` releases a hold and restores the state
