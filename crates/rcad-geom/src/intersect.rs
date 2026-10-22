@@ -475,6 +475,25 @@ fn how_the_plane_leans_against_the_axis(flat: &Plane, pipe: &Cylinder) -> impl P
 /// that reading is a window a hundred times wider than the pipe: an axis lying
 /// in the plane `1e10` from the origin. The separation is `√(room/n·n)` for the
 /// `room` the caller certified, so it is read off that sum instead.
+///
+/// # Why a second picker, through the axis's own start
+///
+/// The half-space rounds `normal · origin` into its offset, so its flat
+/// surface can miss the axis by as much as the lines are apart. A plane
+/// stored with normal `(1, 2⁻⁵², 0)` at `2`, cutting a pipe of radius `1/2`
+/// along `z` through `(1.5 + 2⁻⁵², −1, −1)`, puts its lines `2⁻⁵³` either side
+/// of the middle, and the offset rounds the middle `2⁻⁵³ − 2⁻¹⁰⁴` in front of
+/// the surface: one line `2⁻¹⁰⁴` behind it, under the width of the
+/// enclosures, and the pair was refused. A bar flush with an L plate's inner
+/// side, the two turned a quarter turn back, is that plane and pipe (Q2505).
+///
+/// So where the half-space cannot tell the two apart, a
+/// [`HalfSpaceThroughAPoint`] through `origin` with the same facing is asked.
+/// Its surface holds the axis exactly, so the middle reads the step alone,
+/// `leaning · (−reading / n·n)`, which is exactly zero wherever the facing is
+/// exactly square to the cutting plane's normal, as it is here. The
+/// half-space is asked first so that every pair named before keeps the picker
+/// it had, as §443's pairs of pipes do.
 fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> {
     let normal = flat.normal();
     let along = pipe.axis().direction();
@@ -522,18 +541,23 @@ fn two_lines_along_a_pipe(flat: &Plane, pipe: &Cylinder) -> Result<SurfaceMeet> 
             },
             Exact::enclosure,
         );
+    let from_the_axis_to_the_middle = leaning * quotient_or_everything(-reading, squared_normal);
+    let lines = |middle| TwoLinesEitherSideOfThePicker { middle, up, out };
 
-    two_lines_told_apart(
+    match two_lines_told_apart(
         Picker::from(picker),
         along.components(),
-        &TwoLinesEitherSideOfThePicker {
-            middle: how_far_in_front(picker, origin.coordinates())
-                + leaning * quotient_or_everything(-reading, squared_normal),
-            up,
-            out,
-        },
+        &lines(how_far_in_front(picker, origin.coordinates()) + from_the_axis_to_the_middle),
         Surface::Cylinder(*pipe),
-    )
+    ) {
+        Err(Error::CannotNameWhichPieceOfACrossingThisIs) => two_lines_told_apart(
+            Picker::from(HalfSpaceThroughAPoint::new(origin, picker.normal())?),
+            along.components(),
+            &lines(from_the_axis_to_the_middle),
+            Surface::Cylinder(*pipe),
+        ),
+        named => named,
+    }
 }
 
 /// `n·n·r² − (n·o − d)²` as an enclosure: how much room a plane running along a
