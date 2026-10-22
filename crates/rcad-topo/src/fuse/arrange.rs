@@ -1908,8 +1908,8 @@ impl<'f> Arrangement<'f> {
     /// **Asked, it was answered the wrong way.** A stepped shaft, a bar of
     /// radius 2 under one of radius 1, bored from below by a bar of radius
     /// 0.3 about `(−1, 0)`, has the bore cross the narrow bar's pipe, as whole
-    /// pipes, along `x = −0.955`. Boring splits the hole's circle there, so
-    /// the hole has a corner at `(−0.9550000000000001, −0.2966057989992778,
+    /// pipes, along `x = −0.955`. Boring split the hole's circle there, so
+    /// the hole had a corner at `(−0.9550000000000001, −0.2966057989992778,
     /// 0)`, stored exactly. That point is a rounding off the narrow pipe, so
     /// [`Arrangement::passes_through`] proved it off that pipe's circle, while
     /// the place where the bottom, the bore and the narrow pipe meet is boxed
@@ -1917,6 +1917,14 @@ impl<'f> Arrangement<'f> {
     /// were then two points on the hole's edge that nothing could put in
     /// order, and every cut of the bored shaft in half was refused `order
     /// along a crossing` under the certified policy (Q2487).
+    ///
+    /// **Boring leaves that corner off since Q2619**, as the bore and the
+    /// narrow bar lie apart, **but a square pocket still leaves one.** Its
+    /// side `y = −0.3`, from `x = −1.8` to `−1.2`, crosses the wide bar's
+    /// pipe at `x = −1.977`, outside the pocket, and boring puts a corner on
+    /// the bottom's rim there. With this test taken away, the pocketed shaft
+    /// cut on `x = 0`, shifted and fused with its other half was refused
+    /// `side of plane` at that corner under the certified policy (Q2488).
     ///
     /// **Sound because the corner is only a sample of the curve.** With only
     /// two surfaces round it, the corner was read out of the model and is a
