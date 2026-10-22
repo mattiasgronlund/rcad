@@ -2471,8 +2471,9 @@ impl<'f> Arrangement<'f> {
             // box straddling the surface cannot prove and would refuse.
             // What is still open is which curve of each pair it is on,
             // and only a pair naming more than one has anything to say.
-            if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
-                || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
+            let two = places.len() == 2;
+            if !self.nothing_rules_the_meet_out(first, second, (which, two), place)
+                || !self.nothing_rules_the_meet_out(second, first, (which, two), place)
             {
                 continue;
             }
@@ -2499,6 +2500,39 @@ impl<'f> Arrangement<'f> {
                 crossings: on.to_vec(),
             });
         }
+    }
+
+    /// Whether nothing rules `place` off `crossing`, where it is meet `which`
+    /// of the face's surface and the partners of `crossing` and `other`, and
+    /// `two` says whether those three meet twice.
+    ///
+    /// **One of the two lines a plane cuts a pipe in holds one of the two
+    /// meets of a line with that pipe, and which one is exact**
+    /// ([`a_line_of_two_holds_the_meet`]). The picker is asked of the place's
+    /// box only where that cannot say. Where the plane is within a rounding of
+    /// resting on the pipe, the two lines are a rounding apart, both boxes
+    /// straddle the picker, and each meet was kept on both lines: two nodes
+    /// for one place, a rounding apart, and nothing could put them in order
+    /// round the circle the bar's floor cuts the pipe in (Q2505).
+    fn nothing_rules_the_meet_out(
+        &self,
+        crossing: usize,
+        other: usize,
+        (which, two): (usize, bool),
+        place: PredicatePoint,
+    ) -> bool {
+        let on = &self.crossings[crossing];
+        let held = two
+            .then(|| {
+                a_line_of_two_holds_the_meet(
+                    [&self.surface, &on.partner],
+                    &on.run,
+                    &self.crossings[other].partner,
+                    which,
+                )
+            })
+            .flatten();
+        held.unwrap_or_else(|| nothing_rules_the_point_out(on.picked_by(), place))
     }
 
     /// The nodes where two crossings of one pair meet: where two half
@@ -5253,19 +5287,29 @@ impl<'f> Arrangement<'f> {
     /// ball or a pipe in order along the line.** The line two planes cross in,
     /// with normals `a` and `b`, runs there along `(a × b) / m`, for `m` the
     /// component of `a × b` it divides by, and the meets come back lower first
-    /// along that. Where `a × b` has one component that is not nothing, along
-    /// axis `k`, that is the one it divides by, so the line runs up axis `k`
-    /// whichever way round the two planes are written and whichever way each
-    /// faces. Meet `0` is then the lower of the two up axis `k`, and meet `1`
-    /// the higher, however far their boxes overlap.
+    /// along that. Where every component of `a × b` that is not nothing has
+    /// one sign, whichever it divides by, the line runs along `d`, `a × b`
+    /// turned that sign's way, whichever way round the two planes are written
+    /// and whichever way each faces ([`the_way_two_planes_line_runs`]). Meet
+    /// `0` is then the
+    /// lower of the two along `d`, and meet `1` the higher, however far their
+    /// boxes overlap.
     ///
     /// - **Along the line itself**, the crossing of the two planes, the lower
-    ///   comes first where the crossing climbs axis `k`.
+    ///   comes first where the crossing climbs the axis it is ordered on, which
+    ///   `d` climbs too wherever `a × b` is something along it.
     /// - **Round the loop one of the planes cuts the ball or the pipe in**,
     ///   the line lies in that plane and cuts the loop at the two meets alone,
     ///   so into two arcs, one each side of the line. Going round from the
     ///   start, the first meet is the end of the arc the start is on
     ///   ([`the_lower_meet_first_round_the_loop`]).
+    ///
+    /// An L plate turned `3π/2` about `z`, its inner side's plane stored with
+    /// normal `(1, −2⁻⁵², 0)`, has `a × b = (−2⁻⁵², −1, 0)` with its floor. A
+    /// round bar through the floor, its pipe a rounding over that plane, meets
+    /// the line at two places `2.2e−16` apart. Every certified fuse of the two
+    /// was refused on their order, along the line and round the bar's floor's
+    /// circle, while only an `a × b` along one axis was read (Q2505).
     ///
     /// A round bar turned about `y` by `−π/2` from `(3, 2, 5)` dips `2⁻¹⁰⁵`
     /// through the top of the block `[0, 4]³`, its low cap stored `2⁻⁵²` past
@@ -5313,7 +5357,7 @@ impl<'f> Arrangement<'f> {
         let quadric = surfaces
             .iter()
             .find(|surface| matches!(surface, Surface::Sphere(_) | Surface::Cylinder(_)))?;
-        let (up, _) = the_one_axis_two_planes_cross_along(one, other)?;
+        let (way, climbs) = the_way_two_planes_line_runs(one, other)?;
         let lower_first = match &self.crossings[crossing].order {
             HowItRuns::AlongAnAxis {
                 axis,
@@ -5322,7 +5366,7 @@ impl<'f> Arrangement<'f> {
                 let partner = self.crossings[crossing].partner;
                 let a_plane_of_the_line =
                     |surface: &Surface| surface != quadric && surfaces.contains(surface);
-                if *axis != up
+                if !climbs[*axis]
                     || self.surface == partner
                     || !a_plane_of_the_line(&self.surface)
                     || !a_plane_of_the_line(&partner)
@@ -5336,13 +5380,23 @@ impl<'f> Arrangement<'f> {
                 node,
                 named_the_start,
                 wound_as,
-            } => the_lower_meet_first_round_the_loop(
-                wound_as,
-                [*from, named_the_start.unwrap_or(*node)],
-                [first, second].map(|meet| self.nodes[meet].point),
-                (&surfaces, quadric),
-                up,
-            )?,
+            } => {
+                let across = cross_of_intervals(
+                    one.normal().components().map(Interval::exactly),
+                    other.normal().components().map(Interval::exactly),
+                );
+                the_lower_meet_first_round_the_loop(
+                    wound_as,
+                    [*from, named_the_start.unwrap_or(*node)],
+                    [first, second].map(|meet| self.nodes[meet].point),
+                    (&surfaces, quadric),
+                    if way == Decision::Pos {
+                        across
+                    } else {
+                        across.map(|component| -component)
+                    },
+                )?
+            }
             HowItRuns::AlongABend { .. } => return None,
         };
         Some(if (mine == 0) == lower_first {
@@ -13430,23 +13484,29 @@ fn the_way_a_plane_and_a_pipe_wind(pair: &[Surface; 2], across: Decision) -> Dec
 /// point with a meet's, or which side of the line the starts are on is not
 /// proved.
 ///
-/// The line runs up axis `up`, lies in `P`, and is one of the two lines
-/// `surfaces` names the third of. `meets` are the boxes of its two meets with
-/// `Q`, and `starts` the walked start and the box counted from
-/// ([`HowItRuns::RoundAClosedCurve`]).
+/// The line runs along `d`, lies in `P`, and is one of the two lines
+/// `surfaces` names the third of; lower means further back along `d`. `meets`
+/// are the boxes of its two meets with `Q`, and `starts` the walked start and
+/// the box counted from ([`HowItRuns::RoundAClosedCurve`]).
 ///
 /// **The loop runs out of the start's side of the line at the first meet it
 /// reaches.** The line cuts the loop at the two meets alone, so one arc of
 /// the loop lies each side of it, and from the start the loop runs on to the
-/// end of the arc it is on. With `n` the normal of `P` and `e` the unit step up
-/// axis `up`, `(n × e) · (x − meet)` says which side of the line `x` is on.
-/// The loop runs along `n × g` with `P` wound first, for `g` the gradient of
-/// `Q` ([`gradient_at`]), and `(n × e) · (n × g) = |n|² (e · g)`, since `e`
-/// lies in `P`. A ball's or a pipe's value falls through the lower meet going
-/// up the line and rises through the higher, so `e · g` is below nothing at
-/// the lower: there the loop runs to the side `n × e` points away from. So from
-/// a start on the side `n × e` points to, the lower meet comes first, and with
-/// `Q` wound first the other.
+/// end of the arc it is on. With `n` the normal of `P`, `(n × d) · (x − meet)`
+/// says which side of the line `x` is on. The loop runs along `n × g` with `P`
+/// wound first, for `g` the gradient of `Q` ([`gradient_at`]), and
+/// `(n × d) · (n × g) = |n|² (d · g)`, since `d` lies in `P`. A ball's or a
+/// pipe's value falls through the lower meet going along the line and rises
+/// through the higher, so `d · g` is below nothing at the lower: there the
+/// loop runs to the side `n × d` points away from. So from a start on the side
+/// `n × d` points to, the lower meet comes first, and with `Q` wound first the
+/// other.
+///
+/// **`d` is the line's own way and not a step up the axis it climbs
+/// fastest.** Where the plane cuts the pipe a rounding off where it touches it,
+/// `g` at both meets is a rounding off square to that axis, and a step up it
+/// can say `g` points up the line at both. The L plate turned `3π/2` in
+/// [`Arrangement::as_the_two_meets_of_one_line_say`] is that shape.
 ///
 /// Both starts are asked, and must be on one side, because the start may be a
 /// rounding off the loop: the box counted from holds the place it was rounded
@@ -13456,7 +13516,7 @@ fn the_lower_meet_first_round_the_loop(
     starts: [PredicatePoint; 2],
     meets: [PredicatePoint; 2],
     (surfaces, quadric): (&[Surface; 3], &Surface),
-    up: usize,
+    along: [Interval; 3],
 ) -> Option<bool> {
     let (flat, plane_first) = if let [Surface::Plane(flat), other] = wound_as
         && other == quadric
@@ -13476,9 +13536,7 @@ fn the_lower_meet_first_round_the_loop(
     {
         return None;
     }
-    let mut step_up = [Interval::exactly(0.0); 3];
-    step_up[up] = Interval::exactly(1.0);
-    let across = cross_of_intervals(flat.normal().components().map(Interval::exactly), step_up);
+    let across = cross_of_intervals(flat.normal().components().map(Interval::exactly), along);
     let on_the_line = meets[0].enclosure();
     let side_of = |start: PredicatePoint| {
         let start = start.enclosure();
@@ -13954,19 +14012,19 @@ fn the_turn_where_two_planes_cross_a_quadric(
 
 /// The sign of `det(∇S, ∇Q₁, ∇Q₂)` for three surfaces two of which are planes
 /// and one a ball or a pipe, at meet `which` of the planes' line with the
-/// curved one, where the line meets it twice and runs along one axis: `None`
-/// for any other three, or for a meet past the second.
+/// curved one, where the line meets it twice and every component of `a × b`
+/// that is something has one sign: `None` for any other three, or for a meet
+/// past the second.
 ///
 /// **The determinant is `g · (a × b)` up to which row the curved one is
 /// in**, for `a` and `b` the planes' normals in the order their rows come and
 /// `g` the curved one's gradient, as in
-/// [`the_turn_where_two_planes_cross_a_quadric`]. Where `a × b` has one
-/// component that is not nothing, along axis `k`, `g · (a × b)` is that
-/// component times `g`'s own along `k`. [`meet_of_three_surfaces`] hands the
-/// two meets back lower first up axis `k`
-/// ([`Arrangement::as_the_two_meets_of_one_line_say`]), and a ball's or a
-/// pipe's value falls through the lower going up the line and rises through
-/// the higher, so `g` points down axis `k` at meet `0` and up it at meet `1`.
+/// [`the_turn_where_two_planes_cross_a_quadric`]. [`meet_of_three_surfaces`]
+/// hands the two meets back lower first along `d = s (a × b)`, for `s` that
+/// one sign ([`the_way_two_planes_line_runs`]), and a ball's or a pipe's value
+/// falls through the lower going along the line and rises through the higher,
+/// so `g · d` is below nothing at meet `0` and above it at meet `1`. And
+/// `g · (a × b)` is `s (g · d)`.
 fn the_turn_at_one_of_two_meets(rows: [&Surface; 3], which: u8) -> Option<Decision> {
     let curved = rows
         .iter()
@@ -13980,26 +14038,43 @@ fn the_turn_at_one_of_two_meets(rows: [&Surface; 3], which: u8) -> Option<Decisi
         1 => Decision::Pos,
         _ => return None,
     };
-    let (_, across) = the_one_axis_two_planes_cross_along(a, b)?;
-    let way = if across == climbs {
+    let (way, _) = the_way_two_planes_line_runs(a, b)?;
+    let turn = if way == climbs {
         Decision::Pos
     } else {
         Decision::Neg
     };
-    Some(if curved == 1 { the_other_way(way) } else { way })
+    Some(if curved == 1 {
+        the_other_way(turn)
+    } else {
+        turn
+    })
 }
 
-/// The one axis the line two planes cross in runs along, and the sign of the
-/// part of `a × b` along it, for `a` and `b` their normals in the order
-/// given, where `a × b` is proved nothing in two components and something in
-/// the third: `None` everywhere else.
+/// The sign `s` for which [`meet_of_three_surfaces`] runs along the line two
+/// planes cross in along `s (a × b)`, handing its meets with a ball or a pipe
+/// back lower first, for `a` and `b` the planes' normals in the order given;
+/// and the axes `a × b` is something along, which are the axes that way
+/// climbs. `None` where a component of `a × b` is not proved, where all three
+/// are nothing, or where two that are something have different signs.
+///
+/// **The line runs along `(a × b) / m`**, for `m` the component of `a × b`
+/// along the axis it divides by. Which axis that is is ranked in `f64`, and
+/// one is passed over where a product it builds does not fit, at the size the
+/// planes are written or at a size they are slid to, so it is not worked out
+/// here. Where every component of `a × b` that is something has one sign `s`,
+/// every axis it can divide by gives `m` that sign, and the line runs along
+/// `s (a × b)` whichever it is: up every axis `a × b` is something along, and
+/// along no other. Writing the two planes the other way round turns `a × b`
+/// and `s` round together, so the way is the same.
 ///
 /// Each component is a two-by-two determinant of stored numbers, which is
 /// [`orient2d`] measured from the origin, as in
 /// [`two_pipes_run_along_one_line`].
-fn the_one_axis_two_planes_cross_along(one: &Plane, other: &Plane) -> Option<(usize, Decision)> {
+fn the_way_two_planes_line_runs(one: &Plane, other: &Plane) -> Option<(Decision, [bool; 3])> {
     let [mine, theirs] = [one, other].map(|flat| flat.normal().components());
-    let mut along = None;
+    let mut way = None;
+    let mut climbs = [false; 3];
     for axis in 0..3 {
         let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
         let sign = orient2d(
@@ -14008,16 +14083,17 @@ fn the_one_axis_two_planes_cross_along(one: &Plane, other: &Plane) -> Option<(us
             [theirs[next], theirs[after]],
         );
         // Compared rather than matched: only a proved nothing is passed over,
-        // and every other answer is read as something or gives up (§40).
+        // and every other answer is read as one sign or gives up (§40).
         if sign == Decision::Zero {
             continue;
         }
-        if along.is_some() || !(sign == Decision::Pos || sign == Decision::Neg) {
+        if !(sign == Decision::Pos || sign == Decision::Neg) || way.is_some_and(|way| way != sign) {
             return None;
         }
-        along = Some((axis, sign));
+        way = Some(sign);
+        climbs[axis] = true;
     }
-    along
+    Some((way?, climbs))
 }
 
 /// How fast a surface's gradient turns along a direction: `d·H·d` for the very
@@ -14171,7 +14247,9 @@ fn how_a_crossing_runs(
     // resting along a cone's ruling is the same shape, and reads the ruling.
     if a_pair_that_crosses_in_straight_lines(surface, partner, log)? {
         let direction =
-            match the_line_one_surface_rests_on_another_along(surface, partner, run, log)? {
+            match the_line_one_surface_rests_on_another_along(surface, partner, run, log)?.or_else(
+                || the_way_one_of_the_two_lines_a_plane_cuts_a_pipe_in_runs(surface, partner, run),
+            ) {
                 Some(along) => along,
                 None => cross_of(gradient_at(surface, at), gradient_at(partner, at)),
             };
@@ -15072,6 +15150,117 @@ fn the_line_one_surface_rests_on_another_along(
         return the_ruling_a_plane_rests_along(flat, cone, log).map(Some);
     }
     Ok(None)
+}
+
+/// The way `run` goes, where it is one of the two lines a plane cuts out of a
+/// pipe, as `∇S × ∇Q` has it for `surface` first; `None` for every other pair
+/// and every other run, and where the picker's facing cannot tell.
+///
+/// **It is read off the side of the axis the line is on, never off a point on
+/// it.** For a plane `n` along an axis `w` through `o`, `n × ∇Q` at a point `x`
+/// of either line is `((x − o)·(w × n)) w`: the line runs up the axis on the
+/// side of it `w × n` points to, and down it on the other
+/// ([`one_of_the_two_lines_a_plane_cuts_a_pipe_in`]). Asked of a node box
+/// instead, `x − o` is a rounding wide where the plane is within a rounding of
+/// resting on the pipe, and so is the distance between the lines: the cross
+/// product then straddles every axis (Q2505).
+fn the_way_one_of_the_two_lines_a_plane_cuts_a_pipe_in_runs(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+) -> Option<[Interval; 3]> {
+    let (_, pipe, where_w_cross_n_points) =
+        one_of_the_two_lines_a_plane_cuts_a_pipe_in(surface, partner, run)?;
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    Some(
+        if where_w_cross_n_points == matches!(surface, Surface::Plane(_)) {
+            along
+        } else {
+            along.map(|component| -component)
+        },
+    )
+}
+
+/// The plane and the pipe, where `run` is one of the two lines the plane cuts
+/// the pipe in, and whether it is the one on the side of the axis `w × n`
+/// points to, for `n` the plane's normal and `w` the axis's direction; `None`
+/// for every other pair and every other run, and where the picker's facing
+/// cannot tell.
+///
+/// **It is read off the half-space that picks the line.** The two lines are
+/// the same distance either side of the axis along `w × n`, and a picker that
+/// holds one and rules out the other faces the way from the other to it, so
+/// the sign of its facing against `w × n` is the side. The facing is `w × n`
+/// itself, or that turned round, as [`intersect`] writes it, so the sign is
+/// clear of nothing by the whole of `|w × n|²`.
+fn one_of_the_two_lines_a_plane_cuts_a_pipe_in<'a>(
+    surface: &'a Surface,
+    partner: &'a Surface,
+    run: &NamedRun,
+) -> Option<(&'a Plane, &'a Cylinder, bool)> {
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+        return None;
+    };
+    let [picker] = picked_by.as_slice() else {
+        return None;
+    };
+    let facing = picker
+        .facing_of_a_flat()?
+        .components()
+        .map(Interval::exactly);
+    let (flat, pipe) = if let (Surface::Plane(flat), Surface::Cylinder(pipe)) = (surface, partner) {
+        (flat, pipe)
+    } else if let (Surface::Cylinder(pipe), Surface::Plane(flat)) = (surface, partner) {
+        (flat, pipe)
+    } else {
+        return None;
+    };
+    if a_plane_lies_along_a_pipes_axis(flat, pipe) != Decision::Zero {
+        return None;
+    }
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let normal = flat.normal().components().map(Interval::exactly);
+    match dot_of(facing, cross_of_intervals(along, normal)).sign() {
+        Decision::Pos => Some((flat, pipe, true)),
+        Decision::Neg => Some((flat, pipe, false)),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    }
+}
+
+/// Whether meet `which` of the three surfaces `on` and `third` name lies on
+/// `run`, where `run` is one of the two lines a plane cuts a pipe in, `on`
+/// is that plane and that pipe in either order, and `third` is a second
+/// plane, so that the meets are the two of the line the planes cross in with
+/// the pipe; `None` everywhere else, and where the way that line runs cannot
+/// be told.
+///
+/// **The meets come back lower first along `d = s (n × q)`**, for `n` and
+/// `q` the planes' normals ([`the_way_two_planes_line_runs`]). The line lies
+/// in the plane `n` and crosses both of its lines, so its meet on the line on
+/// the side of the axis `w × n` points to is the higher along `d` where
+/// `d · (w × n)` is above nothing. That is `−s |n|² (q · w)`, since `n · w`
+/// is nothing, so it is meet `1` exactly where `s` and the sign of `q · w`
+/// differ ([`one_of_the_two_lines_a_plane_cuts_a_pipe_in`]).
+fn a_line_of_two_holds_the_meet(
+    on: [&Surface; 2],
+    run: &NamedRun,
+    third: &Surface,
+    which: usize,
+) -> Option<bool> {
+    let (flat, pipe, where_w_cross_n_points) =
+        one_of_the_two_lines_a_plane_cuts_a_pipe_in(on[0], on[1], run)?;
+    let other = third.as_plane()?;
+    let (way, _) = the_way_two_planes_line_runs(flat, other)?;
+    let up_the_axis = dot_of(
+        other.normal().components().map(Interval::exactly),
+        pipe.axis().direction().components().map(Interval::exactly),
+    );
+    let the_higher_is_where_w_cross_n_points = match up_the_axis.sign() {
+        Decision::Pos => way == Decision::Neg,
+        Decision::Neg => way == Decision::Pos,
+        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+    };
+    Some((which == 1) == (the_higher_is_where_w_cross_n_points == where_w_cross_n_points))
 }
 
 /// [`AlongATouch`] for one crossing on `face`, or `None` when the partner does
