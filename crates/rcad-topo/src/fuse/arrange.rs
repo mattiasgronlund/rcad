@@ -2634,6 +2634,19 @@ impl<'f> Arrangement<'f> {
     /// The nodes where two crossings of one pair meet: where two half
     /// ellipses meet, or where two rulings cross, and none for every other two
     /// ([`Arrangement::place_the_meets`]).
+    ///
+    /// # Errors
+    ///
+    /// [`ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`](rcad_geom::Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+    /// where the two are the two loops of two leaning pipes and they are not
+    /// proved apart ([`the_two_loops_of_two_pipes_may_meet`]): a thin pipe
+    /// resting on the inside of a fat one, whose two loops meet where the walls
+    /// touch. Nothing here places a node there, and let through without one,
+    /// five of the six fuses of a bar of radius 1 resting inside a bar of
+    /// radius 2 answered with the two loops crossing at a point that is no
+    /// vertex (Q2628). A **gap** (§16.10): the place is known, as the foot of
+    /// the line square to both axes on the fat wall. Whatever
+    /// [`Arrangement::place_where_two_halves_meet`] refuses.
     fn place_where_two_crossings_of_one_pair_meet(
         &mut self,
         first: usize,
@@ -2643,11 +2656,17 @@ impl<'f> Arrangement<'f> {
         if self.crossings[first].half_an_ellipse.is_some()
             && self.crossings[second].half_an_ellipse.is_some()
         {
-            self.place_where_two_halves_meet(first, second, log)
-        } else {
-            self.place_where_two_rulings_cross(first, second);
-            Ok(())
+            return self.place_where_two_halves_meet(first, second, log);
         }
+        if the_two_loops_of_two_pipes_may_meet(
+            &self.surface,
+            &self.crossings[first].partner,
+            [&self.crossings[first].run, &self.crossings[second].run],
+        ) {
+            return Err(rcad_geom::Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo.into());
+        }
+        self.place_where_two_rulings_cross(first, second);
+        Ok(())
     }
 
     /// Whether some corner of the face is on both crossings, which is where
@@ -2668,10 +2687,11 @@ impl<'f> Arrangement<'f> {
     /// apex is [`Cone::apex`], stored, and [`a_plane_cuts_a_cone_in_rulings`]
     /// has proved it on the plane. Two half ellipses of two pipes of one width
     /// meet at places worked out in intervals and not stored, and
-    /// [`Arrangement::place_where_two_halves_meet`] places those. Every other
-    /// pair that names two curves is left without a node, and passes through
-    /// here only to be turned away; §347 says which of them can have two
-    /// curves that cross.
+    /// [`Arrangement::place_where_two_halves_meet`] places those. Two loops of
+    /// two leaning pipes that may meet are refused before this
+    /// ([`the_two_loops_of_two_pipes_may_meet`]). Every other pair that names
+    /// two curves is left without a node, and passes through here only to be
+    /// turned away; §347 says which of them can have two curves that cross.
     ///
     /// The node is named by the plane and the cone, whichever of the two the
     /// face is, so that the face on the plane and the face on the cone name
@@ -15222,6 +15242,52 @@ fn the_one_loop_two_pipes_cross_in(surface: &Surface, partner: &Surface, run: &N
     )
 }
 
+/// Whether `runs` are two loops of two leaning pipes of unequal widths that
+/// may meet: `false` only where they are proved apart.
+///
+/// **Two loops are apart where `r_fat − r_thin > δ` and meet where the two are
+/// equal**, for `δ` how far apart the axes are: the thin pipe then rests on the
+/// inside of the fat one, and both loops pass through the one point where the
+/// walls touch ([`intersect`] names the loops alike either way, each picked out
+/// by one flat surface through the fat axis). `δ·|t × w|` is `|g · (t × w)|`,
+/// for `g` from one axis's origin to the other's and `t` and `w` the two
+/// directions, so the loops are apart where `(r_fat − r_thin)·|t × w|` is above
+/// both `g · (t × w)` and its negative, and that is asked in intervals. Where
+/// it cannot be proved, which takes the loops closer than the rounding, they
+/// are taken to meet, and the fuse refuses rather than answers with two curves
+/// crossing at a point that is no vertex.
+///
+/// Two pipes of one width have no two loops, and two that run the same way
+/// cross in lines, not loops picked out of the crossing.
+fn the_two_loops_of_two_pipes_may_meet(
+    surface: &Surface,
+    partner: &Surface,
+    runs: [&NamedRun; 2],
+) -> bool {
+    let (Surface::Cylinder(one), Surface::Cylinder(other)) = (surface, partner) else {
+        return false;
+    };
+    let picked_out = |run: &NamedRun| matches!(run.run(), EdgeRun::PartOfWhereItCrosses { .. });
+    if one.radius() == other.radius() || !runs.into_iter().all(picked_out) {
+        return false;
+    }
+    let (thin, fat) = if one.radius() < other.radius() {
+        (one, other)
+    } else {
+        (other, one)
+    };
+    let [mine, theirs] =
+        [one, other].map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
+    let across = cross_of_intervals(mine, theirs);
+    let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
+    let gap = [0, 1, 2].map(|axis| Interval::exactly(there[axis]) - Interval::exactly(here[axis]));
+    let reach = dot_of(gap, across);
+    let room = (Interval::exactly(fat.radius()) - Interval::exactly(thin.radius()))
+        * root_enclosing(dot_of(across, across));
+    let apart = (room - reach).lo() > 0.0 && (room + reach).lo() > 0.0;
+    !apart
+}
+
 /// How points along a circle a ring shares with a ball, a pipe or a cone on
 /// its axis are put in order: round the circle that surface and the circle's
 /// own plane `level` cross in, which is the circle as the run names it
@@ -24182,5 +24248,86 @@ mod four_half_ellipses_named_two_ways {
         builder
             .build(model, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("a bar described face by face")
+    }
+}
+
+#[cfg(test)]
+mod two_loops_of_two_leaning_pipes {
+    //! A pipe of radius 2 up `z` and a pipe of radius 1 along `x` at
+    //! `y = apart`, crossed by [`intersect`] with each pipe first, and asked
+    //! whether the curves it names may meet
+    //! ([`the_two_loops_of_two_pipes_may_meet`]).
+
+    use rcad_geom::{Axis, Cylinder, Point, Surface, SurfaceMeet, Vector, intersect};
+    use rcad_predicates::{Policy, ProvenanceLog};
+
+    use super::the_two_loops_of_two_pipes_may_meet;
+
+    /// Resting on the inside, at `y = ±1`, the two loops meet where the walls
+    /// touch, at `(0, ±2, 0)`. Half a unit further in, at `y = ±1/2`, they
+    /// are apart, as `a_thin_bar_through_a_thick_one_crosses_it_in_two_loops_and_every_fuse_answers`
+    /// in `tests/two_curves_of_one_pair_that_meet.rs` has them.
+    #[test]
+    fn two_loops_meet_where_a_thin_pipe_rests_inside_a_fat_one_and_not_half_a_unit_in() {
+        for (apart, meet) in [(1.0, true), (-1.0, true), (0.5, false), (-0.5, false)] {
+            for [face, partner] in the_two_pipes_each_way(apart) {
+                let SurfaceMeet::Curves(runs) = intersect(
+                    &face,
+                    &partner,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("two loops are named") else {
+                    panic!("y = {apart}: two leaning pipes that cross cross in curves");
+                };
+                let [first, second] = &runs[..] else {
+                    panic!("y = {apart}: two loops: {runs:?}");
+                };
+                assert_eq!(
+                    the_two_loops_of_two_pipes_may_meet(&face, &partner, [first, second]),
+                    meet,
+                    "y = {apart}, {face:?} first"
+                );
+            }
+        }
+    }
+
+    /// At `y = 2` the thin pipe reaches out of the fat one's side, and the two
+    /// cross in one loop. Named twice, as where the partner is one pipe written
+    /// two ways, it is no two loops to meet.
+    #[test]
+    fn the_one_loop_of_a_thin_pipe_out_of_a_fat_ones_side_is_no_two_loops_that_meet() {
+        for [face, partner] in the_two_pipes_each_way(2.0) {
+            let SurfaceMeet::Curves(runs) = intersect(
+                &face,
+                &partner,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("one loop is named") else {
+                panic!("two leaning pipes that cross cross in curves");
+            };
+            let [run] = &runs[..] else {
+                panic!("one loop: {runs:?}");
+            };
+            assert!(!the_two_loops_of_two_pipes_may_meet(
+                &face,
+                &partner,
+                [run, run]
+            ));
+        }
+    }
+
+    fn the_two_pipes_each_way(apart: f64) -> [[Surface; 2]; 2] {
+        let fat = Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a radius"));
+        let thin = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::new(0.0, apart, 0.0), Vector::new(1.0, 0.0, 0.0))
+                    .expect("an axis"),
+                1.0,
+            )
+            .expect("a radius"),
+        );
+        [[thin, fat], [fat, thin]]
     }
 }
