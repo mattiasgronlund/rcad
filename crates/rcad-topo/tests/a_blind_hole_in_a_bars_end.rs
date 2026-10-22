@@ -72,7 +72,7 @@ fn a_mesh_too_coarse_to_keep_the_hole_inside_the_rim_does_not_cover_the_hole() {
                         if from < to { 1 } else { -1 };
                 }
             }
-            let one_way: Vec<_> = drawn.iter().filter(|(_, &count)| count != 0).collect();
+            let one_way: Vec<_> = drawn.iter().filter(|&(_, &count)| count != 0).collect();
             assert!(
                 one_way.is_empty(),
                 "these sides are used more one way than the other: {one_way:?}"
