@@ -3878,15 +3878,43 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// the ball takes a point inside below `4/9`, and at 0.4375 the ring measures
 /// its closed form.
 ///
-/// So a fold is asked down to `closest²/(6ρ)` — half of `closest²/(3ρ)`, so
-/// that the halving lands on a rung below it — with `closest` standing in for
-/// the gap the way it does for a crossing, and `ρ` the flattest radius any
-/// curved face of the solid bends at ([`how_flat_a_curved_face_gets`]). Never
-/// above the corner floor, and the corner floor alone when a face is on a
-/// surface that function has not been taught. That is again **a cost bound and
-/// not a proof**: two curves closer than any two corners still fold past it.
-/// What it costs is a mesh whose sides across the flattest face are about
-/// `closest / √2`, which is the size of the finest feature the corners show.
+/// So a fold is asked down to `g²/(6ρ)` — half of `g²/(3ρ)`, so that the
+/// halving lands on a rung below it — with `g` standing in for the gap and `ρ`
+/// the flattest radius any curved face of the solid bends at
+/// ([`how_flat_a_curved_face_gets`]). Never above `g/8`, and `g/8` alone when a
+/// face is on a surface that function has not been taught. What it costs is a
+/// mesh whose sides across the flattest face are about `g / √2`.
+///
+/// **`g` is the shorter of the two closest corners and the shortest side two
+/// patches drew on any rung so far** (Q2641). A folded side runs from one
+/// curve the two faces share to another, so it is never shorter than the gap
+/// between them, and where it is shorter than the corners it is the nearer of
+/// the two to that gap. The corners alone were `g` until a ball of 3 less a bar
+/// of 2.9 bored `0.08` off its centre: its two corners stand `2.047` apart,
+/// where its two loops are furthest apart, and both faces draw the folded side
+/// where they come closest, `0.70` long. The corners' floor stopped the ladder
+/// at room `0.375`; the fold clears at `0.046875`, three rungs further. Q1232's
+/// ring of a ball of `221/64` less a bar of `220/64` on its axis, its two
+/// corners on opposite sides, was refused the same way at `0.86328125`, and
+/// meshes at `0.0269775390625` (`a_fold_between_two_curves_closer_than_any_two_corners.rs`).
+///
+/// **The shorter of the two, and never the fold alone.** Both floors grow with
+/// the length they are read off, so the shorter gives a floor no higher, and
+/// every rung the corners asked is still asked: no fold they cleared is
+/// refused now. A side along a pipe is charged nothing for its length, so a
+/// floor read off such a fold alone could stop above the corners' one.
+///
+/// **A fold a curved face charges for is asked until it clears or the cap below
+/// ends it.** A side `L` long that a face charges `L²/(3ρ)` or more is drawn at
+/// room `d` only when that charge is at most `d`, so the floor it gives is at
+/// most `d/2` and the next rung is asked. That is again **a cost bound and not
+/// a proof**: the fold clears once `d` is under `gap²/(3ρ)`, since no folded
+/// side is shorter than the gap, but only if that comes before the cap.
+///
+/// A solid of fewer than two corner places gives no corner distance. A fold on
+/// it is asked down to the floor its own side gives; a crossing on it is handed
+/// back at once, since nothing then says how far down a crossing is worth
+/// asking.
 ///
 /// **And never more than [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] halvings below
 /// the top**, whatever `closest` says. The bar `2⁻⁴⁰` wider than `1`, less
@@ -3932,10 +3960,11 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 ///
 /// **A fold alone ends it in at most fourteen rungs.** A solid that folds at
 /// every deflection walks the halving from half the box's width down to the
-/// higher of the two floors, about `log₂(3ρ·width/closest²)` rungs or
-/// fourteen, whichever is fewer, and is refused with the finest fold. The floor
-/// of the rung after a crossing is the corner floor, so a solid that crosses at
-/// some deflections and folds at others can go further. The three refusals that
+/// higher of the two floors, about `log₂(3ρ·width/g²)` rungs or fourteen,
+/// whichever is fewer, and is refused with the finest fold; where its folded
+/// sides are charged for their length, that is fourteen. The floor of the rung
+/// after a crossing is the corner floor, so a solid that crosses at some
+/// deflections and folds at others can go further. The three refusals that
 /// end a crossing's ladder before its floor end this one too, and so does
 /// `Deflection::of` refusing a room that is not above zero, as on a box with no
 /// width.
