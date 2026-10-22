@@ -647,22 +647,33 @@ pub enum Error {
     /// `fuse/arrange.rs`'s `across_a_circle_that_starts_at_a_pole` names no
     /// second node on it, so it is left one closed edge whose one corner is the
     /// pole. That function cuts such a crossing straight across for a ball
-    /// against a plane, a ball, or a ring whose axis holds the ball's centre,
-    /// and at the ball's other pole for a ball against a pipe, or in a box round
-    /// that pole where the box is proved to hold a point of the loop. It names
-    /// none for any other pair, for a pipe whose other pole is neither on the one
-    /// loop nor in such a box, for a ring whose axis misses the ball's centre, or
-    /// where the point across a circle with a ball or a ring is not certified
-    /// exactly.
+    /// against a plane, a ball, or a ring whose axis holds the ball's centre.
+    /// Against a pipe it cuts the one loop the two cross in at the ball's other
+    /// pole, or in a box round that pole where the box is proved to hold a point
+    /// of the loop. Where the ball holds the pipe's whole cross-section, so that
+    /// the two cross in two loops apart, each through one pole, it cuts each loop
+    /// where it crosses the pipe's ruling across from the ball's centre. It names
+    /// none for any other pair, for a pipe crossed in one loop whose other pole
+    /// is neither on that loop nor in such a box, for a pipe crossed in two loops
+    /// whose axis does not run exactly along `z`, for a ring whose axis misses
+    /// the ball's centre, or where the point across a circle with a ball or a
+    /// ring is not certified exactly.
     ///
-    /// **Every shape run that reached it is answered now.** A ball cut by a
-    /// plane down its polar axis is answered since §194.5. A ball centred on a
-    /// bar's wall whose poles lie on the wall exactly, two balls crossing in a
-    /// great circle of one, and a ball crossing a ring in a circle through its
-    /// poles are cut at the other pole since Q2171, and answered under every rule
-    /// both ways round, the ring since Q2287. A ball whose centre is a rounding
-    /// off a bar's wall, or whose pole's height rounds, was still refused here
-    /// until Q2579 boxed the other pole.
+    /// **No shape run reaches it now.** A ball cut by a plane down its polar
+    /// axis is answered since §194.5. A ball centred on a bar's wall whose poles
+    /// lie on the wall exactly, two balls crossing in a great circle of one, and
+    /// a ball crossing a ring in a circle through its poles are cut at the other
+    /// pole since Q2171, and answered under every rule both ways round, the ring
+    /// since Q2287. A ball whose centre is a rounding off a bar's wall, or whose
+    /// pole's height rounds, was still refused here until Q2579 boxed the other
+    /// pole. A ball bored through both poles by a bar whose wall runs through
+    /// its centre, the ball of 2.5 against the bar of radius 1 up `z` at
+    /// `x = ±1`, was refused here under every rule until Q2650 cut each of its
+    /// two loops across the bar. Every fuse of it answers now and validates, but
+    /// the ball's skin with both holes in it, in the union and in the ball less
+    /// the bar, folds in its mesh at a pole at some deflections of 0.1 and
+    /// finer, which `measure` refuses as two patches drawing one side: a fault of
+    /// the mesh and not of this cut.
     ///
     /// **A gap and not a limit** (§16.10): each of those shapes has an answer,
     /// and cut a second time, each half of the crossing has two corners and a

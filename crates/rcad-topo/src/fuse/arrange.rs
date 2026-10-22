@@ -3901,9 +3901,12 @@ impl<'f> Arrangement<'f> {
     ///
     /// A circle that starts at a ball's pole, where the ball meets a plane, a
     /// ball, or a ring whose axis holds the ball's centre, gets a second node
-    /// straight across from the first, and a loop between a ball and a pipe one
-    /// at the ball's other pole, so that it is two edges with a direction each
-    /// rather than one with none — see [`across_a_circle_that_starts_at_a_pole`].
+    /// straight across from the first. A loop between a ball and a pipe gets
+    /// one at the ball's other pole, or, where the ball holds the pipe's whole
+    /// cross-section and so crosses it in two loops, where the loop crosses the
+    /// ruling across the pipe from the ball's centre. Either way it is two
+    /// edges with a direction each rather than one with none — see
+    /// [`across_a_circle_that_starts_at_a_pole`].
     fn start_every_closed_crossing_that_has_no_node(
         &mut self,
         log: &mut ProvenanceLog,
@@ -12396,7 +12399,8 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
 /// Where a closed crossing is cut a second time, when the one place it starts
 /// is a pole of a ball. A circle between a ball and a plane, a ball, or a ring
 /// whose axis holds the ball's centre is cut straight across the circle, and a
-/// loop between a ball and a pipe at the ball's other pole.
+/// loop between a ball and a pipe at the ball's other pole, or across the pipe
+/// from the ball's centre where the two cross in two loops.
 ///
 /// **A closed edge starting at a pole has no direction anyone can read.** It
 /// is stored running the way the ball's longitude runs at its corner, and at a
@@ -12428,10 +12432,17 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
 /// ring whose axis holds the ball's centre**, whose circle is square to a line
 /// through its middle, the line between the two centres or the ring's axis,
 /// and is cut where both surfaces certify the point across exactly
-/// ([`across_a_circle_round_a_line`]). **And a ball against a pipe**, whose
-/// loop is cut at the ball's other pole where that is on the loop, or in a box
-/// round it proved to hold a point of the loop
-/// ([`the_other_pole_on_the_one_loop`]). `None` for every other pair, and one
+/// ([`across_a_circle_round_a_line`]). **And a ball against a pipe.** Where
+/// the two cross in one loop at most
+/// ([`a_ball_holds_a_pipes_whole_cross_section`] says `Neg`), the loop is cut
+/// at the ball's other pole where that is on the loop, or in a box round it
+/// proved to hold a point of the loop ([`the_other_pole_on_the_one_loop`]).
+/// Where the ball holds the pipe's whole cross-section (`Pos`), the two cross
+/// in two loops, the other pole is on the other loop, and each loop is cut
+/// where it crosses the ruling across the pipe from the ball's centre
+/// ([`across_the_pipe_on_the_loop_through_a_pole`]), for a pipe up `z` alone.
+/// `None` for a ball that touches the far side of the pipe's wall from inside
+/// (`Zero`) or where that is not decided. `None` for every other pair, and one
 /// of those starting at a pole is still refused where it was. A ball against a
 /// cone is one of those, but no frustum Q2171 ran against a ball centred on its
 /// axis, seamed or not, reached that refusal.
@@ -12448,10 +12459,13 @@ fn the_one_pole_a_circle_runs_through(pair: [&Surface; 2]) -> Option<PredicatePo
 ///
 /// # Its box
 ///
-/// A ball against a plane gets a box, and a ball against a pipe gets one only
-/// where [`the_loop_passes_through_the_box_round_the_pole`] proves the loop
-/// runs through it; every other pair gets a point both surfaces certify, or
-/// `None`. Against a plane, the start sits within
+/// A ball against a plane gets a box, and a ball against a pipe crossed in one
+/// loop gets one only where [`the_loop_passes_through_the_box_round_the_pole`]
+/// proves the loop runs through it. A ball against a pipe crossed in two loops
+/// gets the box interval arithmetic gives the place across the pipe in, which
+/// holds that place exactly, wherever both surfaces do not certify the box's
+/// middle. Every other pair gets a point both surfaces certify, or `None`.
+/// Against a plane, the start sits within
 /// [`POINT_ALONG_A_CROSSING_ROUNDOFF`] of its largest coordinate off the
 /// circle, and mirroring it through the circle's centre carries that distance
 /// across unchanged. The drop onto the plane and the
