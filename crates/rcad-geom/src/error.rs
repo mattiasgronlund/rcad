@@ -308,6 +308,13 @@ pub enum Error {
     /// theirs is two ellipses that need no marcher, and `intersect` names them
     /// as four halves (`docs/decisions.md` §31.9).
     ///
+    /// **`intersect` gives this for the ball and the pipe.** The thin pipe
+    /// resting inside a wider one it names, as two loops each picked out by one
+    /// flat surface through the wide pipe's axis and exactly through the
+    /// touching point (Q2628), and the fuse's arrangement in `rcad-topo` gives
+    /// this for them instead, since it has no node to put where the two loops
+    /// meet.
+    ///
     /// **A gap** (§16.10, §31.9). [`EdgeRun`](crate::EdgeRun) *can* say this:
     /// the two loops of a pinch are the two sides of one half-space through the
     /// tangent point. Writing that plane down is the question
@@ -315,16 +322,22 @@ pub enum Error {
     /// ball and pipe in `what_a_geometry_refusal_says_about_its_answer.rs` the
     /// tangent point `(-2, 0, 0)` is one `f64` holds exactly.
     ///
-    /// The reason to refuse here rather than there is the evaluator. Where a
-    /// crossing runs through itself the two surfaces are **tangent**, so the
-    /// crossing has no direction and the marcher has nothing to follow — and
-    /// naming two pieces nothing can draw is the half-answer §24.10 refuses
-    /// whole. `marching_from_where_a_crossing_runs_through_itself_has_no_direction_to_follow`
-    /// is the demonstration.
+    /// The reason the ball and pipe are refused here rather than there is the
+    /// evaluator. Where a crossing runs through itself the two surfaces are
+    /// **tangent**, so the crossing has no direction and the marcher has
+    /// nothing to follow — and naming two pieces nothing can draw is the
+    /// half-answer §24.10 refuses whole.
+    /// `marching_from_where_a_crossing_runs_through_itself_has_no_direction_to_follow`
+    /// is the demonstration. That is a march from the touching point: the
+    /// thin pipe's two loops, named and let through the arrangement, were
+    /// walked by five of the six fuses of a bar resting inside a wider one, and
+    /// what was wrong with those answers was that no vertex was where the loops
+    /// meet.
     ///
     /// The family of fixes: a marcher that can be told to start away from a
     /// singular point and stop at it. §31.9 defers it to the milestone that
-    /// builds the algebraic solver.
+    /// builds the algebraic solver. For the two pipes, a node where the loops
+    /// meet, on both walls.
     #[error(
         "these two surfaces are tangent along where they cross, so what they cross in is one \
          curve that runs through itself"

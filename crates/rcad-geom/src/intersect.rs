@@ -173,9 +173,11 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when a crossing comes in two
 /// pieces and no half-space that `f64` can write down provably holds them apart.
 ///
-/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] when the two
-/// surfaces are tangent along the curve rather than at a point, so what they
-/// cross in is one curve that runs through itself.
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] for a ball
+/// resting on the inside of a pipe from the far side, tangent to it at a point
+/// of the curve they cross in, so what they cross in is one curve that runs
+/// through itself there. A thin pipe resting on the inside of a wider one is
+/// named instead, as two loops that meet where the walls touch.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against a
 /// pipe, a ball or a second cone that does not share its axis, and for a ball on
