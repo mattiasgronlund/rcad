@@ -2471,8 +2471,9 @@ impl<'f> Arrangement<'f> {
             // box straddling the surface cannot prove and would refuse.
             // What is still open is which curve of each pair it is on,
             // and only a pair naming more than one has anything to say.
-            if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
-                || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
+            let two = places.len() == 2;
+            if !self.nothing_rules_the_meet_out(first, second, (which, two), place)
+                || !self.nothing_rules_the_meet_out(second, first, (which, two), place)
             {
                 continue;
             }
@@ -2499,6 +2500,39 @@ impl<'f> Arrangement<'f> {
                 crossings: on.to_vec(),
             });
         }
+    }
+
+    /// Whether nothing rules `place` off `crossing`, where it is meet `which`
+    /// of the face's surface and the partners of `crossing` and `other`, and
+    /// `two` says whether those three meet twice.
+    ///
+    /// **One of the two lines a plane cuts a pipe in holds one of the two
+    /// meets of a line with that pipe, and which one is exact**
+    /// ([`a_line_of_two_holds_the_meet`]). The picker is asked of the place's
+    /// box only where that cannot say. Where the plane is within a rounding of
+    /// resting on the pipe, the two lines are a rounding apart, both boxes
+    /// straddle the picker, and each meet was kept on both lines: two nodes
+    /// for one place, a rounding apart, and nothing could put them in order
+    /// round the circle the bar's floor cuts the pipe in (Q2505).
+    fn nothing_rules_the_meet_out(
+        &self,
+        crossing: usize,
+        other: usize,
+        (which, two): (usize, bool),
+        place: PredicatePoint,
+    ) -> bool {
+        let on = &self.crossings[crossing];
+        let held = two
+            .then(|| {
+                a_line_of_two_holds_the_meet(
+                    [&self.surface, &on.partner],
+                    &on.run,
+                    &self.crossings[other].partner,
+                    which,
+                )
+            })
+            .flatten();
+        held.unwrap_or_else(|| nothing_rules_the_point_out(on.picked_by(), place))
     }
 
     /// The nodes where two crossings of one pair meet: where two half
@@ -15081,21 +15115,48 @@ fn the_line_one_surface_rests_on_another_along(
 /// pipe, as `∇S × ∇Q` has it for `surface` first; `None` for every other pair
 /// and every other run, and where the picker's facing cannot tell.
 ///
-/// **It is read off the half-space that picks the line, never off a point on
+/// **It is read off the side of the axis the line is on, never off a point on
 /// it.** For a plane `n` along an axis `w` through `o`, `n × ∇Q` at a point `x`
 /// of either line is `((x − o)·(w × n)) w`: the line runs up the axis on the
-/// side of it `w × n` points to, and down it on the other. The two lines are
-/// the same distance either side, and a picker that holds one and rules out
-/// the other faces the way from the other to it, so the sign of its facing
-/// against `w × n` is the side. Asked of a node box instead, `x − o` is a
-/// rounding wide where the plane is within a rounding of resting on the pipe,
-/// and so is the distance between the lines: the cross product then straddles
-/// every axis (Q2505).
+/// side of it `w × n` points to, and down it on the other
+/// ([`one_of_the_two_lines_a_plane_cuts_a_pipe_in`]). Asked of a node box
+/// instead, `x − o` is a rounding wide where the plane is within a rounding of
+/// resting on the pipe, and so is the distance between the lines: the cross
+/// product then straddles every axis (Q2505).
 fn the_way_one_of_the_two_lines_a_plane_cuts_a_pipe_in_runs(
     surface: &Surface,
     partner: &Surface,
     run: &NamedRun,
 ) -> Option<[Interval; 3]> {
+    let (_, pipe, where_w_cross_n_points) =
+        one_of_the_two_lines_a_plane_cuts_a_pipe_in(surface, partner, run)?;
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    Some(
+        if where_w_cross_n_points == matches!(surface, Surface::Plane(_)) {
+            along
+        } else {
+            along.map(|component| -component)
+        },
+    )
+}
+
+/// The plane and the pipe, where `run` is one of the two lines the plane cuts
+/// the pipe in, and whether it is the one on the side of the axis `w × n`
+/// points to, for `n` the plane's normal and `w` the axis's direction; `None`
+/// for every other pair and every other run, and where the picker's facing
+/// cannot tell.
+///
+/// **It is read off the half-space that picks the line.** The two lines are
+/// the same distance either side of the axis along `w × n`, and a picker that
+/// holds one and rules out the other faces the way from the other to it, so
+/// the sign of its facing against `w × n` is the side. The facing is `w × n`
+/// itself, or that turned round, as [`intersect`] writes it, so the sign is
+/// clear of nothing by the whole of `|w × n|²`.
+fn one_of_the_two_lines_a_plane_cuts_a_pipe_in<'a>(
+    surface: &'a Surface,
+    partner: &'a Surface,
+    run: &NamedRun,
+) -> Option<(&'a Plane, &'a Cylinder, bool)> {
     let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
         return None;
     };
@@ -15106,26 +15167,59 @@ fn the_way_one_of_the_two_lines_a_plane_cuts_a_pipe_in_runs(
         .facing_of_a_flat()?
         .components()
         .map(Interval::exactly);
-    let (flat, pipe, plane_first) =
-        if let (Surface::Plane(flat), Surface::Cylinder(pipe)) = (surface, partner) {
-            (flat, pipe, true)
-        } else if let (Surface::Cylinder(pipe), Surface::Plane(flat)) = (surface, partner) {
-            (flat, pipe, false)
-        } else {
-            return None;
-        };
+    let (flat, pipe) = if let (Surface::Plane(flat), Surface::Cylinder(pipe)) = (surface, partner) {
+        (flat, pipe)
+    } else if let (Surface::Cylinder(pipe), Surface::Plane(flat)) = (surface, partner) {
+        (flat, pipe)
+    } else {
+        return None;
+    };
+    if a_plane_lies_along_a_pipes_axis(flat, pipe) != Decision::Zero {
+        return None;
+    }
     let along = pipe.axis().direction().components().map(Interval::exactly);
     let normal = flat.normal().components().map(Interval::exactly);
-    let up_the_axis = match dot_of(facing, cross_of_intervals(along, normal)).sign() {
-        Decision::Pos => plane_first,
-        Decision::Neg => !plane_first,
+    match dot_of(facing, cross_of_intervals(along, normal)).sign() {
+        Decision::Pos => Some((flat, pipe, true)),
+        Decision::Neg => Some((flat, pipe, false)),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    }
+}
+
+/// Whether meet `which` of the three surfaces `on` and `third` name lies on
+/// `run`, where `run` is one of the two lines a plane cuts a pipe in, `on`
+/// is that plane and that pipe in either order, and `third` is a second
+/// plane, so that the meets are the two of the line the planes cross in with
+/// the pipe; `None` everywhere else, and where the way that line runs cannot
+/// be told.
+///
+/// **The meets come back lower first along `d = s (n × q)`**, for `n` and
+/// `q` the planes' normals ([`the_way_two_planes_line_runs`]). The line lies
+/// in the plane `n` and crosses both of its lines, so its meet on the line on
+/// the side of the axis `w × n` points to is the higher along `d` where
+/// `d · (w × n)` is above nothing. That is `−s |n|² (q · w)`, since `n · w`
+/// is nothing, so it is meet `1` exactly where `s` and the sign of `q · w`
+/// differ ([`one_of_the_two_lines_a_plane_cuts_a_pipe_in`]).
+fn a_line_of_two_holds_the_meet(
+    on: [&Surface; 2],
+    run: &NamedRun,
+    third: &Surface,
+    which: usize,
+) -> Option<bool> {
+    let (flat, pipe, where_w_cross_n_points) =
+        one_of_the_two_lines_a_plane_cuts_a_pipe_in(on[0], on[1], run)?;
+    let other = third.as_plane()?;
+    let (way, _) = the_way_two_planes_line_runs(flat, other)?;
+    let up_the_axis = dot_of(
+        other.normal().components().map(Interval::exactly),
+        pipe.axis().direction().components().map(Interval::exactly),
+    );
+    let the_higher_is_where_w_cross_n_points = match up_the_axis.sign() {
+        Decision::Pos => way == Decision::Neg,
+        Decision::Neg => way == Decision::Pos,
         Decision::Zero | Decision::Undecidable { .. } | _ => return None,
     };
-    Some(if up_the_axis {
-        along
-    } else {
-        along.map(|component| -component)
-    })
+    Some((which == 1) == (the_higher_is_where_w_cross_n_points == where_w_cross_n_points))
 }
 
 /// [`AlongATouch`] for one crossing on `face`, or `None` when the partner does
