@@ -14176,6 +14176,48 @@ mod tests {
         }
     }
 
+    /// **A sign the walk did without is not logged as unproven** (row Q2563).
+    /// A box across the line of a side past its ends is placed without its
+    /// side of that line, so the answer is proved, and a certified fuse refuses
+    /// at its end whenever its log holds an unproven sign. Left in, the record
+    /// turned the corner-up cube on a unit cone of
+    /// `a_plane_cut_along_a_cones_other_nappe.rs` from a refusal to find a
+    /// point inside a piece into one by `orient3d`, though every walk answered.
+    #[test]
+    fn a_box_across_the_line_of_a_side_past_its_ends_leaves_nothing_in_the_log() {
+        let (model, solid, caps) = an_l_and_its_caps();
+        let wobbling = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        let on = Interval::exactly;
+        for (cap, height) in caps {
+            for [x, y] in [
+                [on(2.0), wobbling(5.0)],
+                [wobbling(5.0), on(2.0)],
+                [wobbling(10.0), on(-3.0)],
+                [on(-3.0), wobbling(10.0)],
+                [on(15.0), wobbling(0.0)],
+                [wobbling(0.0), on(-5.0)],
+            ] {
+                let mut log = ProvenanceLog::new();
+                model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .face_holds_the_point(
+                        cap,
+                        PredicatePoint::Constructed([x, y, on(height)]),
+                        &Policy::certified(),
+                        &mut log,
+                    )
+                    .unwrap_or_else(|refused| {
+                        panic!("({x:?}, {y:?}) on the cap at height {height}: {refused:?}")
+                    });
+                assert!(
+                    log.is_empty(),
+                    "({x:?}, {y:?}) on the cap at height {height}: {log:?}"
+                );
+            }
+        }
+    }
+
     /// **A box across the line a ruling side is seen on, past that side's
     /// ends, is placed by the other sides** (row Q2563). Seen down the axis,
     /// the skin of a frustum cut to a quarter, or to three quarters, has two
