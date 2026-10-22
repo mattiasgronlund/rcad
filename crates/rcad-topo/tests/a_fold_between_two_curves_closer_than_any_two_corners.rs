@@ -1,6 +1,7 @@
 //! A ball pressed a little way into the side of a round bar, and the piece
-//! the two share (row Q2044); and the search for any solid of fewer than two
-//! corners whose coarsest mesh folds (row Q2498).
+//! the two share (row Q2044); the search for any solid of fewer than two
+//! corners whose coarsest mesh folds (row Q2498); and a ball less a bar whose
+//! two curves come closer than its two corners (rows Q2641 and Q1232).
 //!
 //! # The shape
 //!
@@ -26,12 +27,16 @@
 //! the edge between them, the coarsest mesh does not fold, and all six fuses
 //! answer.
 //!
-//! A fold is meant to be asked again at half the room, rung by rung, down to a
-//! floor read off the distance between the two closest corners of the solid
-//! (`how_close_two_corners_come`). The lens has one corner, so there is no
-//! distance, that function says `None`, and the arm that reads it hands the
-//! coarsest fold straight back without asking for one finer mesh. That arm is
-//! unchanged; this lens no longer reaches it.
+//! A fold is asked again at half the room, rung by rung, down to a floor. Until
+//! Q2641 that floor was read off the distance between the two closest corners
+//! of the solid (`how_close_two_corners_come`). The lens has one corner, so
+//! there is no distance, that function says `None`, and the arm that read it
+//! handed the coarsest fold straight back without asking for one finer mesh.
+//! Since Q2641 the floor is read off the shorter of that distance and the
+//! shortest side two patches drew on any rung, so a fold with no corner
+//! distance is asked down to the floor its own side gives, and only a crossing
+//! is still handed back at once. Since Q2178 this lens does not fold at its
+//! coarsest mesh, so no rung is asked for it at all.
 //!
 //! # For the lens, a gap and not a limit
 //!
@@ -45,14 +50,13 @@
 //! measured within the mesh's error of [`ball_in_the_side_of_the_bar`]. So the
 //! answer is there, and only the missing distance kept the fuse from it.
 //!
-//! # Not the case row Q1232 searches for
+//! # Not the case row Q1232 searched for
 //!
-//! Q1232 looks for a fold that outlasts every rung down to `closest²/(6ρ)`,
+//! Q1232 looked for a fold that outlasts every rung down to `closest²/(6ρ)`,
 //! where two corners stand far apart and two curves both faces share pass close
-//! between them. Here no rung is asked at all, because there is no second
-//! corner. A floor read off the gap between the curves, which is what Q1232
-//! would put in place of the corners, still needs this arm to start the
-//! ladder when the corners give no distance.
+//! between them. Here no rung was asked at all, because there is no second
+//! corner. Q1232's case is the last one below, two curves closer than any two
+//! corners.
 //!
 //! # What answers
 //!
@@ -64,13 +68,18 @@
 //! mesh. So no shape designers make on purpose was known to be refused this
 //! way, and the refusal was class C.
 //!
-//! # No shape is known to reach the arm (row Q2498)
+//! # No shape was known to reach the arm (row Q2498)
 //!
-//! The arm `let Some(closest) = how_close_two_corners_come(view) else { return
-//! Err(finest_refusal) }` in `the_coarsest_mesh_whose_sides_do_not_cross` is
-//! still a guard with no shape known behind it. Q2498 looked for a solid of
-//! fewer than two corner places whose coarsest mesh folds, and found none. Two
-//! tests here keep what it found:
+//! Until Q2641, the arm `let Some(closest) = how_close_two_corners_come(view)
+//! else { return Err(finest_refusal) }` in
+//! `the_coarsest_mesh_whose_sides_do_not_cross` handed a fold or a crossing
+//! back without asking a finer mesh when the corners gave no distance, a guard
+//! with no shape known behind it. Q2498 looked for a solid of fewer than two
+//! corner places whose coarsest mesh folds, and found none. Q2641 took the arm
+//! out for a fold: a fold on such a solid now runs the ladder down to the floor
+//! its own folded side gives, and only a crossing there is still handed back at
+//! once. Two tests here keep what Q2498 found, and a fold among them would now
+//! be asked at finer rungs rather than handed back:
 //!
 //! - [`no_solid_of_fewer_than_two_corners_these_intersections_leave_folds_at_its_coarsest_mesh`]
 //!   intersects four families, either solid first, and meshes at the coarsest
@@ -86,10 +95,16 @@
 //! - a wider sweep of intersections: balls of 8 radii at 9 reaches and 10
 //!   turns in the bar's side gave 520 answers of fewer than two corner places;
 //!   bars across the bar gave 89, and lenses of two balls 144. None folds.
-//! - a slab of a block across a ball of 3: 52 of 132 are refused
+//! - a slab of a block across a ball of 3: 52 of 132 were refused
 //!   `CurvedFaceWithAHoleGoesTooFarRound`, each one whose answer is a band of
-//!   the ball's skin holding neither pole, so no mesh of it is asked; the 80
-//!   that answer hold two corner places or more.
+//!   the ball's skin holding neither pole, so no mesh of it was asked; the 80
+//!   that answered held two corner places or more. Since Q2556 such bands
+//!   answer. Run again on Q2641's branch, 432 slabs along `x`, `y` and `z`,
+//!   their near face at twelve places from `−2.9` to `2.5` and `0.3` or `1`
+//!   thick, fused with the ball by each rule, either solid first, all answer
+//!   and validate. Of the 144 intersections, 132 hold two corner places; the
+//!   12 of one are the caps the slabs from `2` and `2.5` cut off the ball's
+//!   end along each axis, and each meshes at the coarsest deflection.
 //! - a block whose face leaves a cap of a ball of 3 that misses its pole by a
 //!   little: 212 answers of one corner place, none folding.
 //! - a ring of 5 and 3 cut into two faces by its outer equator, the circle
@@ -97,7 +112,7 @@
 //!   one corner `(0, 8, 0)`: `SolidBuilder::build` refuses it all 16 ways
 //!   round, so no mesh of it is ever asked.
 //!
-//! # Why the arm may hold nothing, a reading nobody has run
+//! # Why no such fold may exist, a reading nobody has run
 //!
 //! A fold's side has both ends on edges the two folding faces share. Since
 //! Q2178 a curved patch draws no side between two points along one edge with
@@ -112,6 +127,26 @@
 //! needs three loops through one point, its outer equator, the circle round
 //! its tube and a Villarceau circle, which is the shape above that will not
 //! build.
+//!
+//! # Two curves closer than any two corners (rows Q2641 and Q1232)
+//!
+//! A ball of 3 less a bar of 2.9 bored `0.08` off its centre is one solid of
+//! two faces, the ball's band and the bore's wall, between two loops. Its two
+//! corners stand `2.047` apart, where the loops are furthest apart, and both
+//! faces draw the folded side where the loops come closest, about `0.70` long.
+//! With the floor read off the corners, `0.2328`, the ladder stopped at room
+//! `0.375`, and the fuse was refused
+//! `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`; the fold clears
+//! at `0.046875`. Q1232's ring of a ball of `221/64` less a bar of `220/64` on
+//! its axis, built with its two corners apart round the axis, was refused the
+//! same way, where the same ring with both corners on one meridian builds. A
+//! gap and not a limit: run past the corners' floor, the same ladder meshes
+//! them all.
+//!
+//! Since Q2641 the floor is read off the shorter of the two closest corners and
+//! the shortest side two patches drew on any rung, and both answer:
+//! [`a_ball_with_a_hole_bored_a_little_off_its_centre_answers`] and
+//! [`a_ring_of_a_ball_less_a_bar_on_its_axis_builds_wherever_its_two_corners_stand`].
 //!
 //! The fuses run certified, in a model of 100 mm.
 
@@ -371,10 +406,11 @@ fn a_whole_ring_in_one_face_with_one_corner_meshes_at_the_coarsest_deflection() 
 
 /// Every intersection of four families answers, and each solid of fewer than
 /// two corners among the answers meshes at the coarsest deflection, so none
-/// reaches the arm of `the_coarsest_mesh_whose_sides_do_not_cross` that hands
-/// a fold or a crossing back without asking a finer mesh when the corners give
-/// no distance. The count of such solids, family by family, is the proof that
-/// the sweep reached that arm's shapes at all:
+/// asks `the_coarsest_mesh_whose_sides_do_not_cross` for a finer mesh where the
+/// corners give no distance. Until Q2641 a fold there was handed back without
+/// one; now a fold runs the ladder on its own folded side, and only a crossing
+/// is handed back. The count of such solids, family by family, is the proof
+/// that the sweep reached solids of fewer than two corners at all:
 ///
 /// - a ball of `1.5`, `3` or `6` pressed `0.05`, `0.5` or `1` into the side of
 ///   the bar, at six turns round it;
