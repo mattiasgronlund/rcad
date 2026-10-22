@@ -116,6 +116,8 @@ pub mod a_bend_under_two_planes;
 pub mod a_bends_cap_holds_one_of_the_two_disks;
 #[path = "a_bent_edge_between_two_flat_faces_is_refused.rs"]
 pub mod a_bent_edge_between_two_flat_faces_is_refused;
+#[path = "a_blind_hole_in_a_bars_end.rs"]
+pub mod a_blind_hole_in_a_bars_end;
 #[path = "a_block_cornered_on_a_round_tabs_rim.rs"]
 pub mod a_block_cornered_on_a_round_tabs_rim;
 #[path = "a_block_edge_grazing_a_ball.rs"]
