@@ -4007,7 +4007,7 @@ impl BuildingAMesh {
                 if matches!(
                     how,
                     HowToCut::Triangulate | HowToCut::TriangulateByCornerOrder
-                ) && !the_triangles_keep_to_one_side_of_every_loop(&piece, &cut)
+                ) && !the_triangles_keep_the_inside_of_one_loop_at_most(&piece, &cut)
                 {
                     return Err(Error::AMeshCoveredTheWrongSideOfALoop { face: face.key() });
                 }
@@ -4677,25 +4677,36 @@ fn the_points_of(piece: &[ALoopToCut]) -> Vec<u32> {
         .collect()
 }
 
-/// Whether the triangles `cut` drew for `piece` keep to one side of every loop
-/// of it: every side of a loop they draw, they draw the way its loop runs, or
-/// every one against it.
+/// Whether the triangles `cut` drew for `piece` keep the inside of one of its
+/// loops at most: the outline's, and the outside of every hole.
 ///
 /// The triangulator keeps what it reaches by crossing an odd number of loops on
-/// the way in from outside, and that is the face only while no loop's chords
-/// fall wholly outside another's. A hole whose chords do is kept, and its sides
-/// are drawn from inside it, the other way round to the outline's. A round bar
-/// of radius 1 less a bar of radius 0.1 standing 0.8 off its axis at an eighth
-/// of a turn, half a unit deep in its top, is one: at the coarsest mesh the
-/// top's outline is a square that leaves the hole's square wholly outside it
-/// (Q2501, `a_blind_hole_in_a_bars_end.rs`).
+/// the way in from outside, and that is the face only while no hole's chords
+/// fall wholly outside the outline's. A hole whose chords do is kept as well
+/// as the outline. A round bar of radius 1 less a bar of radius 0.1 standing
+/// 0.8 off its axis at an eighth of a turn, half a unit deep in its top, is
+/// one: at the coarsest mesh the top's outline is a square that leaves the
+/// hole's square wholly outside it (Q2501, `a_blind_hole_in_a_bars_end.rs`).
 ///
-/// The sides are compared with one another and never with the chart's turn,
-/// which a torus's chart flips: every loop runs with the face's material on
-/// the same hand, so a sound cut draws them all one way, whichever it is. Where
-/// two loops meet at a point the triangles name it by the first corner there,
-/// as `triangulate` does. A side drawn neither way, or both ways, says nothing.
-fn the_triangles_keep_to_one_side_of_every_loop(piece: &[ALoopToCut], cut: &Patch) -> bool {
+/// **Which side of a loop is its inside is read off the chart, never off the
+/// way the loop runs.** The triangles run anticlockwise in the chart, so a
+/// side drawn the way its loop runs has them on its left, and that is the
+/// loop's inside when the loop runs anticlockwise. The way a loop runs is no
+/// guide to where the face's material is: a ring cut across on a pipe is
+/// walked along whichever of its two rims the face stores first, so with the
+/// top rim first each patch runs clockwise round the material, while a window
+/// left whole in one runs the face's way. Read off the way the loops ran, the
+/// bar's wall with the window between two cuts was refused this
+/// (`a_bar_with_a_wedge_cut_out_through_a_window_in_its_wall_measures`).
+///
+/// Where two loops meet at a point the triangles name it by the first corner
+/// there, as `triangulate` does. A side drawn neither way, or both ways, says
+/// nothing, and neither does a loop [`whether_a_loop_runs_anticlockwise`]
+/// cannot tell the way of.
+fn the_triangles_keep_the_inside_of_one_loop_at_most(piece: &[ALoopToCut], cut: &Patch) -> bool {
+    if piece.len() < 2 {
+        return true;
+    }
     let corners = piece.iter().map(|one| one.points.len()).sum::<usize>();
     let mut first_at = HashMap::with_capacity(corners);
     let named: Vec<u32> = (0_u32..)
@@ -4713,23 +4724,56 @@ fn the_triangles_keep_to_one_side_of_every_loop(piece: &[ALoopToCut], cut: &Patc
         .flat_map(|&[first, second, third]| [(first, second), (second, third), (third, first)])
         .filter(|&(from, to)| on_a_loop(from) && on_a_loop(to))
         .collect();
-    let mut with_it = false;
-    let mut against_it = false;
+    let mut insides_kept = 0;
     let mut start = 0;
     for one in piece {
         let count = one.points.len();
-        for at in 0..count {
-            let from = named[start + at];
-            let to = named[start + (at + 1) % count];
-            match (drawn.contains(&(from, to)), drawn.contains(&(to, from))) {
-                (true, false) => with_it = true,
-                (false, true) => against_it = true,
-                (true, true) | (false, false) => {}
-            }
+        let around = start..start + count;
+        if let Some(anticlockwise) = whether_a_loop_runs_anticlockwise(&cut.corners()[around]) {
+            let its_inside_is_kept = (0..count).any(|at| {
+                let from = named[start + at];
+                let to = named[start + (at + 1) % count];
+                match (drawn.contains(&(from, to)), drawn.contains(&(to, from))) {
+                    (true, false) => anticlockwise,
+                    (false, true) => !anticlockwise,
+                    (true, true) | (false, false) => false,
+                }
+            });
+            insides_kept += usize::from(its_inside_is_kept);
         }
         start += count;
     }
-    !(with_it && against_it)
+    insides_kept <= 1
+}
+
+/// Whether the loop through `corners` runs anticlockwise in the chart, read
+/// exactly at its corner lowest in the first coordinate and then the second.
+///
+/// That corner is on the hull of the loop, so a loop that does not cross
+/// itself turns there the way it runs round. `None` when the turn there is
+/// not [`Decision::Pos`] or [`Decision::Neg`], a variant `Decision` grows later
+/// included: the loop runs out and back through that corner, or the turn
+/// could not be told.
+fn whether_a_loop_runs_anticlockwise(corners: &[[f64; 2]]) -> Option<bool> {
+    let count = corners.len();
+    let lowest = (0..count).min_by(|&one, &other| {
+        let [first, second] = [corners[one], corners[other]];
+        first[0]
+            .total_cmp(&second[0])
+            .then(first[1].total_cmp(&second[1]))
+    })?;
+    let turn = orient2d(
+        corners[(lowest + count - 1) % count],
+        corners[lowest],
+        corners[(lowest + 1) % count],
+    );
+    if turn == Decision::Pos {
+        Some(true)
+    } else if turn == Decision::Neg {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// Where a face reads the points round it, in the frame it is cut up in: a
