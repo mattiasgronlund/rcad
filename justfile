@@ -16904,6 +16904,7 @@ check-queue-api-selftest:
     got=$(check "$lanes/up") || fail "the file tier wrote moving a row up fails check-queue"
 
     got=$(q "$two" take Q2 lane-q2 2>&1) || fail "two could not take Q2"
+    g "$hub" branch lane-q2 main
     got=$(q "$one" running 2>&1) || fail "running failed"
     grep -qx '3 running' <<<"$got" \
         || fail "a lane, its verifier and a take with no tree are three slots, and two session trees and an unlocked tree none"
@@ -16982,6 +16983,18 @@ check-queue-api-selftest:
     [ "$got" = "## Tier 1|## Tier 2|## Tier 2.2|## Tier 2.5|## Tier 3|## Tier 4|## Closed|" ] \
         || fail "pick did not write ## Tier 2.2 between ## Tier 2 and ## Tier 2.5"
     got=$(check "$lanes/eight") || fail "the file pick wrote a missing tier heading into fails check-queue"
+
+    # Q297: ten filler rows, so lane-gone-3 and lane-gone-4 below land on ids
+    # past Q19. `running` sorts the claims file's holds by row id as a
+    # string, which puts "Q10" before "Q2" but "Q22" after it, so whether
+    # these cases passed used to turn on which side of that split their ids
+    # landed on. Q2's own hold below now has a real branch, already on main,
+    # so it never again competes for the same "no tree yet" line these cases
+    # check for; the filler proves that holds regardless of where the id
+    # counter has reached.
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        q "$hub" add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" >/dev/null 2>&1
+    done
 
     # §299: once a lane hands off, its own tree can be gone while its
     # verifier's (detached, no branch) is still held; `running` must count
