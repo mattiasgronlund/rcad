@@ -13851,8 +13851,17 @@ _queue-rows file:
 # one the write set meets, so the rule for when two write sets meet stays here
 # alone.
 #
+# **`writes <id> <write set>` sets a row's write set where `narrow` cannot
+# reach it** (§230.3, Q2640): a row filed, or taken, with the wrong set from
+# the start has no bound to stay inside, so `writes` takes none, asking `meets`
+# the same way `narrow` does before it widens a hold back. It writes the
+# claims file alone too, and reaches a todo row as well as a held one — the
+# `narrowed` records above carry a todo row's `writes` override beside a held
+# row's, since the fill reads a ready row's write set the same way as a
+# running one's.
+#
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`, `narrow`, `give` — also runs `queue-page` after it**, so the page
+# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`, `narrow`, `writes`, `give` — also runs `queue-page` after it**, so the page
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
@@ -13863,7 +13872,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow|give)
+        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow|writes|give)
             now_iso='{{ queue_now }}'
             [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
@@ -13885,7 +13894,8 @@ queue mode="" *args:
                 'just queue running                           what holds a slot on this machine, one line each' \
                 'just queue families [--count]                three or more open rows on one tests/*.rs file that no trace named (§450.3); --count prints how many' \
                 'just queue narrow <id> <write set>           narrow a held row to entries inside the set it was taken with; a lane runs it (§424.7)' \
-                'just queue meets <id> <write set>            the skip line for the first hold read from input that the write set meets; narrow asks it' \
+                'just queue writes <id> <write set>           set a todo row'"'"'s or a held row'"'"'s write set outright, with no bound to stay inside (§230.3)' \
+                'just queue meets <id> <write set>            the skip line for the first hold read from input that the write set meets; narrow and writes ask it' \
                 'just queue take <id> <branch>                dispatch a ready row to <branch>: state lane:<branch>, held until done, drop or park' \
                 'just queue add <tier> <model> <write set> <what ending in §N>   a new todo row at the foot of its tier; prints the id. <what> starts with from/<id>, was/<id>, from/-, from/fuzz:<target> or from/step:<file>: where the row came from (§432, §433)' \
                 'just queue done <id> <merge sha>             close a row as done:<sha>, moved under Closed' \
@@ -14013,11 +14023,9 @@ queue mode="" *args:
             }
             for (i = 1; i <= r; i++) {
                 s = st[i]
+                if (id[i] in nws) { ws[i] = nws[id[i]]; narrowedrow[i] = 1 }
                 if (s == "todo") kind[i] = "ready"
-                else if (s ~ /^lane:/) {
-                    kind[i] = "running"; lanes++
-                    if (id[i] in nws) { ws[i] = nws[id[i]]; narrowedrow[i] = 1 }
-                }
+                else if (s ~ /^lane:/) { kind[i] = "running"; lanes++ }
                 else if (s ~ /^after:/) {
                     kind[i] = "ready"
                     m = split(substr(s, 7), a, ",")
@@ -14087,6 +14095,7 @@ queue mode="" *args:
                 i = walk[x]
                 if (tier[i] != cur) { print "  tier " tier[i]; cur = tier[i] }
                 print "    " raw[i]
+                if (i in narrowedrow) print "      narrowed to " ws[i]
             }
             printf "running, %d of %d slots on this machine (`just queue running` names them); the rows held:\n", running, slots
             if (!lanes && !e) print "    none"
@@ -17495,6 +17504,63 @@ check-queue-api-selftest:
     grep -qF ", narrowed from tooling/queue/)" <<<"$got" || fail "the other copy's listing did not say what the hold was taken with"
     grep -qF "narrowed to <code>tooling/queue/queue.py</code>" "$page_dir/index.html" \
         || fail "the queue page did not say what the hold was narrowed to"
+
+    # Q2640 (was/Q293, §230.3, §263, §424.7): `writes` sets a row's write set
+    # in place, on a todo row or a held one, where `narrow` cannot reach it
+    # because the new set is not inside the one the row was taken with.
+    writes_wt="$root/rcad-worktrees/writes"
+    g "$hub" worktree add -q -b writes "$writes_wt" main
+    wrongly_filed=$(q "$writes_wt" add 2 opus - "from/- a row filed with the wrong write set §230") \
+        || fail "add for the wrongly filed row failed"
+    beside_filed=$(q "$writes_wt" add 2 opus tooling/queue/rows.py "from/- a row on a file under the crate the fix widens into §230") \
+        || fail "add for the row beside it failed"
+    g "$writes_wt" commit -qam "two rows for writes"
+    got=$(q "$writes_wt" writes "$wrongly_filed" tooling/queue/ 2>&1) \
+        || fail "writes refused to set a todo row's write set"
+    grep -qxF "$wrongly_filed: write set - -> tooling/queue/" <<<"$got" \
+        || fail "writes did not report the write set it set on the todo row"
+    got=$(q "$writes_wt" next 20 2>&1) || fail "next failed after writes set a todo row's write set"
+    grep -qxF "skip $beside_filed (tier 2): its tooling/queue/rows.py meets $wrongly_filed's tooling/queue/, taken above" <<<"$got" \
+        || fail "next did not skip a row that meets the corrected write set of a todo row"
+    got=$(q "$writes_wt" 2>&1) || fail "the plain listing failed after writes corrected a todo row"
+    grep -qxF "      narrowed to tooling/queue/" <<<"$got" \
+        || fail "the plain listing did not show what writes set the todo row's write set to"
+
+    held_wrong=$(q "$writes_wt" add 2 opus - "from/- a row taken with - while its lane holds a crate §230") \
+        || fail "add for the wrongly taken row failed"
+    g "$writes_wt" commit -qam "a row for writes on a held row"
+    q "$writes_wt" take "$held_wrong" lane-writes-held >/dev/null || fail "take of the wrongly filed row was refused"
+    got=$(q "$writes_wt" narrow "$held_wrong" tooling/queue/queue.py 2>&1) \
+        && fail "narrow widened a hold back past the set it was taken with"
+    grep -qF "outside -, the write set $held_wrong was taken with" <<<"$got" \
+        || fail "narrow did not refuse widening a hold taken with - past -"
+    got=$(q "$writes_wt" writes "$held_wrong" tooling/queue/queue.py 2>&1) \
+        || fail "writes refused to correct a held row's write set outside what it was taken with"
+    grep -qxF "$held_wrong: write set - -> tooling/queue/queue.py" <<<"$got" \
+        || fail "writes did not report the write set it set on the held row"
+    got=$(q "$writes_wt" next 20 2>&1) || fail "next failed after writes corrected a held row's write set"
+    grep -qxF "skip $beside_filed (tier 2): its tooling/queue/rows.py meets $held_wrong's tooling/queue/queue.py, held by lane:lane-writes-held" <<<"$got" \
+        || fail "next did not skip a row that meets the write-corrected held row"
+    got=$(q "$writes_wt" show "$held_wrong" 2>&1) || fail "show failed after writes corrected a held row"
+    grep -qxF "narrowed to tooling/queue/queue.py, taken with -" <<<"$got" \
+        || fail "show did not say what writes corrected the held row's write set to"
+
+    # writes refuses a write set that meets a running hold, the same guard
+    # narrow runs before it widens a hold back (§424.7).
+    met_row=$(q "$writes_wt" add 2 opus - "from/- a row writes cannot set onto a file another lane holds §230") \
+        || fail "add for the met row failed"
+    g "$writes_wt" commit -qam "a row for writes's own meets guard"
+    got=$(q "$writes_wt" writes "$met_row" tooling/queue/queue.py 2>&1) \
+        && fail "writes set a write set that meets a running hold"
+    grep -qF "meets a running hold" <<<"$got" || fail "writes did not say the new set meets a running hold"
+
+    # writes refuses a closed row and a write set a row already carries.
+    got=$(q "$writes_wt" writes T1 docs/a.md 2>&1) && fail "writes set the write set of a closed row"
+    grep -qF "T1 is closed" <<<"$got" || fail "writes did not refuse a closed row by name"
+    got=$(q "$writes_wt" writes "$beside_filed" tooling/queue/rows.py 2>&1) \
+        && fail "writes accepted a write set a row already carries"
+    grep -qF "write set is tooling/queue/rows.py already" <<<"$got" \
+        || fail "writes did not refuse a write set a row already carries"
 
     # Q252 (§263.3, §263.4): `give` releases a hold and restores the state
     # the take replaced, an after: list included since take's own claims event

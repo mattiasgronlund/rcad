@@ -13,6 +13,7 @@ branch. It is a log, one line per event, tab-separated:
     add      <id>  <time>  <worktree>  <row>
     take     <id>  <time>  <worktree>  <branch>  <write set>  <tier>
     narrow   <id>  <time>  <worktree>  <write set>
+    writes   <id>  <time>  <worktree>  <write set>
     release  <id>  <time>  <worktree>  <how>
 
 A row is held from its `take` until the `release` that `done`, `drop` or `park`
@@ -20,8 +21,10 @@ writes. The tier is the row's when it was taken, which the file cannot say once
 `tier` or `tag` has moved the held row; a `take` line of five fields after its
 verb records none. Two worktrees taking one row is refused at the second `take`, before
 either has committed the file, because the hold is written under the lock. The
-last `narrow` since a row's `take` is the write set its hold now has, inside
-the one it was taken with; a lane writes it from its own tree (§424.7).
+last `narrow` or `writes` since a row's `take` is the write set its hold now
+has; `narrow`'s stays inside the one it was taken with, `writes`'s need not,
+and either is written from a lane's own tree (§424.7). A row with no `take` at
+all still takes a `writes` event, read the same way for a todo row (§230.3).
 
 `just queue apply <verb> <args...> + <verb> <args...> ...` runs several write
 verbs as one batch: every step lands on an in-memory copy of the queue, in
@@ -65,8 +68,11 @@ just queue families [--count]              the families of §450.3: three or mor
 just queue narrow <id> <write set>         a lane's hold, narrowed to entries inside the set its row was taken with;
                                             written to the claims file alone, so a lane runs it from its own tree.
                                             Widening back is refused while the entry meets another hold (§424.7)
+just queue writes <id> <write set>         set a todo row's or a held row's write set outright, where narrow cannot
+                                            reach it because the new set is not inside what the row was taken with;
+                                            written to the claims file alone, refused while it meets another hold
 just queue meets <id> <write set>          the fill's skip line for the first hold on its input the write set meets;
-                                            what narrow asks before it widens a hold back
+                                            what narrow and writes ask before either widens a hold back
 just queue take <id> <branch>              dispatch a ready row to <branch>: state lane:<branch>, held until done/drop/park
 just queue add <tier> <model> <write set> <what ending in §N>    a new todo row at the foot of its tier; prints the id
                                             <what> starts with from/<id>, was/<id>, from/-, from/fuzz:<target>
@@ -123,13 +129,16 @@ def main(argv):
         return 0
     # A plain verb is a batch of one step, run through `apply` itself (§309.3.5):
     # one path writes the file, whether the call names one verb or several.
-    # `narrow` writes the claims file alone, so it is no step of a batch.
-    if verb not in ("apply", "narrow") and verb not in STEP_FUNCS:
+    # `narrow` and `writes` write the claims file alone, so neither is a step
+    # of a batch.
+    if verb not in ("apply", "narrow", "writes") and verb not in STEP_FUNCS:
         print(f"queue: '{verb}' is not a verb\n{USAGE}", file=sys.stderr)
         return 2
     try:
         if verb == "narrow":
             narrow(here, args)
+        elif verb == "writes":
+            writes(here, args)
         else:
             apply(here, args if verb == "apply" else [verb, *args])
     except Refused as refusal:
@@ -273,7 +282,7 @@ class Claims:
             if event[0] == "take":
                 held[event[1]] = {"time": event[2], "tree": event[3], "branch": event[4], "write_set": event[5],
                                   "taken": event[5], "tier": event[6] if len(event) > 6 else None}
-            elif event[0] == "narrow" and event[1] in held:
+            elif event[0] in ("narrow", "writes") and event[1] in held:
                 held[event[1]]["write_set"] = event[4]
             elif event[0] == "release":
                 held.pop(event[1], None)
@@ -1350,6 +1359,43 @@ def narrow(here, args):
     print(f"{row_id}: narrowed from {hold['write_set']} to {write_set}, taken with {hold['taken']}")
 
 
+def writes(here, args):
+    """Set an open row's write set outright, where `narrow` cannot reach it and a hand edit is refused (Q2640, was/Q293).
+
+    `narrow` only shrinks a hold back to entries inside the set its row was
+    taken with, so a row filed, or taken, with the wrong set from the start
+    has no way back except `drop` and `add`, which gives it a new id -- Q166
+    and Q170 were taken with `-` while their lanes held whole crates (09-27),
+    and `queue next` went on offering rows into the same crates for want of a
+    fix. `writes` rewrites the set directly, on a todo row or a held one
+    alike, with no bound to stay inside, and refuses only where the new set
+    meets a hold `just queue meets` finds, the guard `narrow` runs before it
+    widens a hold back. It writes the claims file alone, no copy of
+    docs/queue.md, so a lane or a dispatcher runs it from its own tree.
+    """
+    need(args, 2, "writes <id> <write set>")
+    row_id, write_set = args
+    with Claims(here.claims) as claims:
+        row = require_row(here.read(), here, row_id)
+        if row.is_closed():
+            raise Refused(f"{row_id} is closed: {row.state}")
+        entries = parsed_write_set(here, write_set)
+        write_set = ",".join(entries) if entries else "-"
+        holds = claims.holds()
+        hold = holds.get(row_id)
+        current = hold["write_set"] if hold else latest_writes(here.claims).get(row_id, row.write_set)
+        if write_set == current:
+            raise Refused(f"{row_id}'s write set is {write_set} already")
+        others = {other: theirs for other, theirs in holds.items()
+                  if other != row_id and (hold is None or theirs["branch"] != hold["branch"])}
+        met = the_hold_it_meets(row_id, entries, others) if entries else ""
+        if met:
+            raise Refused(f"nothing written: {row_id}'s write set {write_set} meets a running hold, "
+                          f"as the fill says it:\n    {met}")
+        claims.append("writes", row_id, now(), here.top, write_set)
+    print(f"{row_id}: write set {current} -> {write_set}")
+
+
 WRITE_SET_ENTRY = re.compile(r"^[A-Za-z0-9._/-]+(#[A-Za-z0-9_-]+)?$")
 
 
@@ -1445,6 +1491,10 @@ def show(here, args):
     print(f"held by {hold['branch']} from {hold['tree']} since {hold['time']}" if hold else "no hold")
     if hold and hold["write_set"] != hold["taken"]:
         print(f"narrowed to {hold['write_set']}, taken with {hold['taken']}")
+    elif not hold and row is not None:
+        written = latest_writes(here.claims).get(row_id)
+        if written is not None and written != row.write_set:
+            print(f"write set set to {written} by `writes`, {row.write_set} in {here.relative}")
     for tree, text in here.other_copies(lanes_too=False):
         theirs = Queue(text).find(row_id) if row_id in text else None
         if theirs and (row is None or theirs.state != row.state):
@@ -1702,17 +1752,36 @@ def elsewhere(here, args):
         print(sep.join(["R", "closedelsewhere", "", "6", row_id, "-", state, "-", "-", f"(closed in {where})", raw]))
 
 
+def latest_writes(claims_path):
+    """The write set of the latest `writes` event for each row, by id, a later event overriding an earlier one."""
+    out = {}
+    for event in Claims(claims_path).events():
+        if event[0] == "writes":
+            out[event[1]] = event[4]
+    return out
+
+
 def narrowed(here, args):
-    """Each hold its lane has narrowed, for the fill to read in place of this copy's own `lane:` row (§424.7).
+    """Each hold its lane has narrowed, and each row a `writes` has set, for the fill to read in place (§424.7, §230.3).
 
     `elsewhere` already carries the narrowed set of a row held from another
     tree; a row this copy shows as `lane:` is read from the copy, so the fill
-    needs the claims file's word for it too.
+    needs the claims file's word for it too. A todo row has no hold at all,
+    so its own copy of `docs/queue.md` is the only other place its write set
+    could come from, and `writes` corrects it there only once the row lands.
     """
     sep = "\037"
-    for row_id, hold in sorted(Claims(here.claims).holds().items()):
+    holds = Claims(here.claims).holds()
+    for row_id, hold in sorted(holds.items()):
         if hold["write_set"] != hold["taken"]:
             print(sep.join(["R", "narrowed", "", "6", row_id, "-", "-", "-", hold["write_set"]]))
+    queue = here.read()
+    for row_id, write_set in sorted(latest_writes(here.claims).items()):
+        if row_id in holds:
+            continue
+        row = queue.find(row_id)
+        if row is not None and not row.is_closed() and write_set != row.write_set:
+            print(sep.join(["R", "narrowed", "", "6", row_id, "-", "-", "-", write_set]))
 
 
 def held(here, args):
