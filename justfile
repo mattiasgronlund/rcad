@@ -16967,10 +16967,12 @@ check-queue-api-selftest:
     # asks `pick` to put Q4 somewhere the file has no block for yet.
     g "$hub" worktree add -q -b six "$lanes/six" main
     g "$hub" worktree add -q -b seven "$lanes/seven" main
-    sed -i 's/^Q4  2  after:Q1  opus  -  waits on the first §230$/Q4  2.2  after:Q1  opus  -  waits on the first §230/' \
+    # Q4's own after:Q1 is gone by now: `done Q1`, above, freed it to todo
+    # (§1755), since Q1 is the only id Q4 ever waited on.
+    sed -i 's/^Q4  2  todo  opus  -  waits on the first §230$/Q4  2.2  todo  opus  -  waits on the first §230/' \
         "$lanes/six/docs/queue.md"
     g "$lanes/six" commit -qam "six: Q4's tier field says 2.2"
-    sed -i 's/^Q4  2  after:Q1  opus  -  waits on the first §230$/Q4  2  after:Q1  sonnet  -  waits on the first §230/' \
+    sed -i 's/^Q4  2  todo  opus  -  waits on the first §230$/Q4  2  todo  sonnet  -  waits on the first §230/' \
         "$lanes/seven/docs/queue.md"
     g "$lanes/seven" commit -qam "seven: Q4's model changes"
     g "$hub" worktree add -q -b eight "$lanes/eight" main
