@@ -1901,8 +1901,9 @@ prints `(value − Ex) / D` within `4u + O(u²)`, `D` the sum of the shares.
 Its controls (`controls.py`) fail: at `7.875u`, best `±8.80372e-16`, which is
 `7.93u`, the doc's own count; without the `Σ|nᵢ|` hypothesis, best
 `±2.39501e+293`; without the products normal, best `±5.25151e+616`. `gappa
--Bcoq` writes 3047 lines with 18 hints, and `coqc` accepts it, exit 0, in
-1.94 s.
+-Bcoq` writes 3047 to 3074 lines with 18 hints over four runs, since Gappa
+does not write the same proof each run (464.4), and `coqc` accepts each, exit
+0, in under two seconds.
 
 The doc comment states no normal-number condition, and without one the bound
 is false. `subnormal.py` runs `signed_distance_to`'s arithmetic, in Python's
@@ -1939,9 +1940,9 @@ of `2⁻¹¹⁰⁰` in place of an `f64`, so that a small sum rounds, best `[0,
 abort in `src/parser/ast.cpp:255` while printing a warning, so it is written
 with `fixed<-1100, ne>`.
 
-`gappa -Bcoq` writes 2638 lines with 18 hints for `shiftplane.g` and 991
-lines with 6 hints for `shiftball.g`, and `coqc` accepts both, exit 0, each
-in under two seconds.
+`gappa -Bcoq` writes 2638 to 2651 lines with 18 hints for `shiftplane.g` over
+four runs, and 991 lines with 6 hints for `shiftball.g` in both of its two, and
+`coqc` accepts each, exit 0, in under two seconds.
 
 **4. The subnormal case through the kernel.** A probe test, run with `just t`
 and not kept, built `Plane::from_point_and_normal` through the origin with
@@ -1954,7 +1955,42 @@ shifted: normal [0.6, 0.8, 0.0], offset 5e-324 = 1 * 2^-1074, slip / L 0.4, SURF
 ```
 
 The second line is the same plane moved by `Isometry::translation((2⁻¹⁰⁷⁴, 0,
-0))`. So both doc comments state a bound that is false when every number in
+0))`. A third lane wrote the probe again from this description, appended to
+`crates/rcad-geom/tests/reading_a_distance_off_a_plane_stays_inside_its_bound.rs`,
+and it printed the same two lines:
+
+```rust
+#[test]
+fn q2660_probe_a_point_at_the_smallest_subnormal() {
+    let smallest = f64::from_bits(1);
+    let plane =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.6, 0.8, 0.0))
+            .unwrap();
+    let normal = plane.normal().components();
+    let computed = plane.signed_distance_to(Point::new(smallest, 0.0, 0.0));
+    println!(
+        "normal {normal:?}, offset {:e}, computed {computed:e} = {} * 2^-1074, error / L {}, SIGNED_DISTANCE_ROUNDOFF {:?}",
+        plane.offset(),
+        computed / smallest,
+        computed / smallest - normal[0],
+        Plane::SIGNED_DISTANCE_ROUNDOFF
+    );
+    let shifted = plane.transformed(
+        &rcad_geom::Isometry::translation(Vector::new(smallest, 0.0, 0.0)).unwrap(),
+    );
+    println!(
+        "shifted: normal {:?}, offset {:e} = {} * 2^-1074, slip / L {}, SURFACE_AFTER_SHIFTING_ROUNDOFF {:?}",
+        shifted.normal().components(),
+        shifted.offset(),
+        shifted.offset() / smallest,
+        shifted.offset() / smallest - normal[0],
+        rcad_geom::SURFACE_AFTER_SHIFTING_ROUNDOFF
+    );
+}
+```
+
+`computed / smallest` and `offset / smallest` are exact, so `error / L` and
+`slip / L` are each `1 − 0.6` in `f64`, which prints `0.4`. So both doc comments state a bound that is false when every number in
 it is below `2⁻¹⁰²²`: `signed_distance_to` and a shifted plane's offset each
 miss by `0.4·L`. That is class wrong/D (§352.3): the size `L` is below
 `2.2e-308`, `2.2e-310` times §3.5's nominal `100`, and so far past its `1e11`
