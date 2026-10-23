@@ -128,7 +128,7 @@ and `fuses_that_touch.rs` (§191.5's touching family).
 
 Every chunk: `PROPTEST_RNG_SEED=<seed> RCAD_SOAK_SEED=<seed>
 RCAD_SOAK_FACTOR=<factor> taskset -c 0-5 /usr/bin/time -v mise exec -- just t
---test fuses_that_must_agree --test fuses_that_touch --test-threads 6
+--test merged -E 'test(/^fuses_that_must_agree::/) or test(/^fuses_that_touch::/)' --test-threads 6
 --no-fail-fast`, bracketed by `uptime`. Chunk 1 calibrated the factor (75 came
 out at 10:17.62, too long for one call's 600s ceiling and the harness moved it
 to the background); chunks 2-17 used 66, which lands close to nine minutes.
@@ -486,7 +486,7 @@ Q266's count, not re-measured by this note.
 
 This section's own figures counted the *time* these replays cost without
 separating it out: §290.3's wall and CPU seconds are `/usr/bin/time` over the
-whole `just t --test fuses_that_must_agree --test fuses_that_touch` command,
+whole `just t --test merged -E 'test(/^fuses_that_must_agree::/) or test(/^fuses_that_touch::/)'` command,
 so whatever the 19-times-33 replay invocations took is already inside every
 row of that table, uncounted as its own line. §290.4's fuse counts (the
 25401 denominator) are not this note's figures at all — they come from
@@ -523,8 +523,8 @@ on this same box — so the idle-machine road §290.5 and §290.8 left open is
 closed for this row too. The other road is per-test timing. One fresh chunk,
 same command line as §290.3's twenty-four: `PROPTEST_RNG_SEED=300
 RCAD_SOAK_SEED=300 RCAD_SOAK_FACTOR=66 taskset -c 0-5 /usr/bin/time -v mise
-exec -- cargo nextest run -p rcad-topo --test fuses_that_must_agree --test
-fuses_that_touch --test-threads 6 --no-fail-fast`, this time also carrying
+exec -- cargo nextest run -p rcad-topo --test merged -E
+'test(/^fuses_that_must_agree::/) or test(/^fuses_that_touch::/)' --test-threads 6 --no-fail-fast`, this time also carrying
 `--message-format libtest-json-plus` (needs `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`,
 an experimental nextest flag) so every test writes a `{"event":"started", ...}`
 line the moment nextest launches it and a `{"event":"ok"/"ignored", ...,

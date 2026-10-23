@@ -30,7 +30,7 @@ All four exist in `holds.rs` at this tip (`mise exec -- just src <name>`).
 
 ### 394.3 What answers now
 
-`mise exec -- just t -p rcad-topo --test two_half_bars_stacked_on_one_pipe --test fusing_two_bars_side_by_side --no-capture`
+`mise exec -- just t -p rcad-topo --test merged -E 'test(/^two_half_bars_stacked_on_one_pipe::/) or test(/^fusing_two_bars_side_by_side::/)' --no-capture`
 on this tip: 14 and 9 tests, all pass. Among them:
 
 - **`two_half_bars_fuse_directly_to_what_cutting_the_block_off_afterwards_gives`**

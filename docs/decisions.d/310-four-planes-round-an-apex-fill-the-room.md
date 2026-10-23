@@ -60,7 +60,7 @@ refuse with the room halved
 (`a_pyramid_whose_two_faces_fold_by_a_sixteenth_is_united_though_its_apex_meets_stick_out_past_half_the_room`),
 and at a fold of 1/64 every one of the 36 was refused as it stood
 (`a_pyramid_whose_two_faces_fold_by_a_sixty_fourth_is_refused_because_its_apex_meets_stick_out_past_the_room`).
-`mise exec -- just t -p rcad-topo --test a_corner_with_four_planes_round_it`
+`mise exec -- just t -p rcad-topo --test merged -E 'test(/^a_corner_with_four_planes_round_it::/)'`
 (log kept at `target/q276/test-a_corner_with_four_planes_round_it.log`), 2
 tests run, 2 passed — a re-measurement, not a citation. **Both tests have
 since moved.** §356 turned the sixty-fourth's test round: it unites rather

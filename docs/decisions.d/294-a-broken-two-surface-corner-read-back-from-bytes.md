@@ -34,7 +34,7 @@ under `Policy::certified` refuses each: off the wall and the quarter turn as
 corner left alone validate. All four checked in
 `a_bar_whose_top_corner_is_moved_a_millimetre_in_its_file_reads_back_and_does_not_validate`,
 which passed re-run here (`mise exec -- just t -E
-'binary(a_broken_two_surface_corner_read_back_from_bytes)'`, 4 tests run, 4
+'test(/^a_broken_two_surface_corner_read_back_from_bytes::/)'`, 4 tests run, 4
 passed, 0 skipped — the whole file, including this one).
 
 The first run's probe (a temporary `eprintln` behind `RCAD_Q218_PROBE` in
@@ -1052,7 +1052,7 @@ three surfaces meet", and leave the model byte for byte as it was. **No wrong
 answer wherever the partner cut it away, the box refuses with every partner,
 `FAR_AWAY` and the partners that cut the corner away among them, and with every
 move, placement and policy. `mise exec -- just t -E
-'binary(a_broken_three_surface_corner_read_back_from_bytes)'` runs the three
+'test(/^a_broken_three_surface_corner_read_back_from_bytes::/)'` runs the three
 pins: 3 tests run, 3 passed.
 
 **Why the partner does not matter.** `bake` places every corner of every input
@@ -1097,7 +1097,7 @@ now gives this result.
 a plane as `validate` allows, because `the_place_the_model_points_at` grew the
 stored corner by a rounding alone. §368 grew it by `validate`'s room, and
 `a_corner_its_own_surfaces_place_somewhere_else.rs` pins it: `mise exec -- just
-t -E 'binary(a_corner_its_own_surfaces_place_somewhere_else)'`, 5 tests run, 5
+t -E 'test(/^a_corner_its_own_surfaces_place_somewhere_else::/)'`, 5 tests run, 5
 passed. The corner here is a millimetre off, past any room, and not that gap.
 
 **What this leaves.** Two corners not tried when this was written, each with
@@ -1206,7 +1206,7 @@ the stored front face is a rounding off the apex, the answer the kernel is
 handed does have a small feature, and all five refusals are limits.*
 
 `mise exec -- just t -E
-'binary(a_broken_three_surface_corner_read_back_from_bytes)'` runs the box's
+'test(/^a_broken_three_surface_corner_read_back_from_bytes::/)'` runs the box's
 three pins and the pyramid's four: 7 tests run, 7 passed.
 
 **What this leaves.**
@@ -1332,7 +1332,7 @@ that has no length. That refusal names the broken input, as `validate` does,
 where the millimetre moves' refusal names the arithmetic (§294.16).
 
 `mise exec -- just t -E
-'binary(a_broken_three_surface_corner_read_back_from_bytes)'` runs the box's
+'test(/^a_broken_three_surface_corner_read_back_from_bytes::/)'` runs the box's
 three pins, the pyramid's four and the half bar's five: 12 tests run, 12
 passed.
 
@@ -1430,7 +1430,7 @@ and `a_sound_pyramid_placed_and_cut_through_its_apex_cannot_order_two_points_by_
 which replace §294.17's
 `a_sound_pyramid_cut_through_its_apex_cannot_tell_which_side_of_the_cut_its_apex_is_on`.
 `mise exec -- just t -E
-'binary(a_broken_three_surface_corner_read_back_from_bytes)'` runs the box's
+'test(/^a_broken_three_surface_corner_read_back_from_bytes::/)'` runs the box's
 three pins, the pyramid's five and the half bar's five: 13 tests run, 13
 passed.
 
@@ -1498,7 +1498,7 @@ The pin: `a_sound_pyramid_placed_and_cut_through_its_apex_cannot_place_a_speck_o
 which replaces §294.19's
 `a_sound_pyramid_placed_and_cut_through_its_apex_cannot_order_two_points_by_the_apex`.
 `mise exec -- just t -E
-'binary(a_broken_three_surface_corner_read_back_from_bytes)'`: 13 tests run,
+'test(/^a_broken_three_surface_corner_read_back_from_bytes::/)'`: 13 tests run,
 13 passed.
 
 **What this leaves.**
@@ -1604,7 +1604,7 @@ The pin: `a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_c
 which replaces §294.20's
 `a_sound_pyramid_placed_and_cut_through_its_apex_cannot_place_a_speck_of_the_cut`.
 `mise exec -- just t -E
-'binary(a_broken_three_surface_corner_read_back_from_bytes)'`: 13 tests run,
+'test(/^a_broken_three_surface_corner_read_back_from_bytes::/)'`: 13 tests run,
 13 passed.
 
 **What this leaves.**
@@ -1731,7 +1731,7 @@ the cut meets two of the side planes, a rounding from the apex, as the apex.
 - `a_front_face_through_the_apex_placed_first_is_refused_where_the_placement_rounds`.
 
 `mise exec -- just t -p rcad-topo -E
-'binary(a_tetrahedron_cut_through_its_apex)'`: 20 tests run, 20 passed.
+'test(/^a_tetrahedron_cut_through_its_apex::/)'`: 20 tests run, 20 passed.
 
 **What this leaves.** No row.
 
@@ -1915,7 +1915,7 @@ from, the flat face, which is parallel to the partner.
 
 **Which rule each test needs.** Each rule was taken out on its own, with the
 other two left in, and the test file run again (`mise exec -- just t -p
-rcad-topo --test a_broken_three_surface_corner_read_back_from_bytes`):
+rcad-topo --test merged -E 'test(/^a_broken_three_surface_corner_read_back_from_bytes::/)'`):
 
 - Without the side rule, 12 of 14 pass.
   `a_sound_half_bar_cut_flush_along_its_flat_face_answers_in_every_placement`
@@ -2056,8 +2056,8 @@ they did. One helper asserts all of it for both policies:
 which also asks `where_a_closed_crossing_starts` of both branches under both
 policies and gets `NotClosed` and an empty log, calls it under `certified`, and
 `under_a_tolerant_policy_a_turned_and_shifted_frustum_cut_along_its_seam_answers_as_the_bar_does`
-under `tolerant(100)`. `mise exec -- just t -p rcad-topo --test
-a_broken_two_surface_corner_read_back_from_bytes` prints `19 tests run: 19
+under `tolerant(100)`. `mise exec -- just t -p rcad-topo --test merged -E
+'test(/^a_broken_two_surface_corner_read_back_from_bytes::/)'` prints `19 tests run: 19
 passed, 0 skipped`. In `rcad-geom`,
 `a_plane_a_rounding_off_a_cones_apex_and_steeper_than_it_is_not_closed_and_asks_nothing`
 pins the door itself: a cone with its apex at `(7, −5, 2.5)`, its axis `z` and

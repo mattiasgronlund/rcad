@@ -743,7 +743,7 @@ between "cannot" and "we chose not to", which §24.17 is about.
 > by which pipe each picker leans towards, asked exactly as
 > `(n·E)²‖U‖² > (n·U)²‖E‖²`. Where those bars stop now is in the dated sentence
 > that ends Q1625's note above. Pinned in `two_equal_bars_leaning_at_each_other.rs`
-> (`mise exec -- just t -p rcad-topo --test two_equal_bars_leaning_at_each_other`).
+> (`mise exec -- just t -p rcad-topo --test merged -E 'test(/^two_equal_bars_leaning_at_each_other::/)'`).
 
 > **2026-10-10 note (Q1653, Q1654): the slide is solved for rather than
 > searched, and names 1096 of the 1224.** `a_flat_surface_through_where_the_walls_touch`

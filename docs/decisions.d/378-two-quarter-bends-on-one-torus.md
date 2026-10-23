@@ -39,7 +39,7 @@ what each rule should give needs no measuring:
 
 ### 378.2 What each fuse gives
 
-`mise exec -- just t -p rcad-topo --test two_quarter_bends_on_one_torus`,
+`mise exec -- just t -p rcad-topo --test merged -E 'test(/^two_quarter_bends_on_one_torus::/)'`,
 three tests, each fusing both ways round, all passing:
 
 | rule | `+x→+y` first | `+y→−x` first |

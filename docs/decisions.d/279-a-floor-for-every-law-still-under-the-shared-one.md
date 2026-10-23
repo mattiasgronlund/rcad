@@ -24,7 +24,7 @@ own) — 24 call sites, all of them running from a fresh seed (`over`, not
 
 ```text
 PROPTEST_RNG_SEED=<seed> mise exec -- cargo nextest run -p rcad-topo \
-  --test fuses_that_must_agree -E 'test(<name>)' --test-threads 4 --no-capture
+  --test merged -E 'test(fuses_that_must_agree::<name>)' --test-threads 4 --no-capture
 ```
 
 That is **25 series**, not 24, because
@@ -141,8 +141,8 @@ source between runs:
 
 ```text
 PROPTEST_RNG_SEED=1 mise exec -- cargo nextest run -p rcad-topo \
-  --test fuses_that_must_agree \
-  -E 'test(turning_a_ball_and_block_together_changes_no_answer_s_volume)' \
+  --test merged \
+  -E 'test(fuses_that_must_agree::turning_a_ball_and_block_together_changes_no_answer_s_volume)' \
   --no-capture
 ```
 

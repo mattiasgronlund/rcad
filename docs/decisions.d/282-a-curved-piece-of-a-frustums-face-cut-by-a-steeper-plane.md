@@ -155,7 +155,7 @@ does nothing for Q102.
 
 ### 282.6 What moved
 
-Commands: `mise exec -- just t -p rcad-topo --test a_plane_cut_along_a_cones_other_nappe`
+Commands: `mise exec -- just t -p rcad-topo --test merged -E 'test(/^a_plane_cut_along_a_cones_other_nappe::/)'`
 before and after, and `mise exec -- just t -p rcad-topo --no-fail-fast` after
 (1028 run, 1028 pass).
 

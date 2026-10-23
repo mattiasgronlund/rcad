@@ -497,7 +497,7 @@ fn the_crown_of_a_ring_holds_what_pappus_gives_and_no_rung_of_its_ladder_folds()
 /// So it was taken out by hand, run, and put back. Verbatim, in order:
 ///
 /// ```text
-/// $ mise exec -- just t -E 'binary(a_mesh_that_folds_at_one_deflection_and_not_the_next)'
+/// $ mise exec -- just t -E 'binary(merged) and test(/^a_mesh_that_folds_at_one_deflection_and_not_the_next::/)'
 ///      Summary [  11.383s] 4 tests run: 4 passed, 0 skipped
 /// ```
 ///

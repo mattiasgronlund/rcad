@@ -70,7 +70,7 @@ solid, checks that the corners are exactly `(3, ±4, 0)` and `(3, ±4, 10)`, and
 checks the volume against the one worked out by hand.
 
 With `git checkout 50a3165e -- crates/rcad-topo/src/fuse/assemble.rs` and
-`mise exec -- just t -p rcad-topo --test fusing_two_bars_side_by_side where_a_bar_started`,
+`mise exec -- just t -p rcad-topo --test merged -E 'test(~fusing_two_bars_side_by_side::where_a_bar_started)'`,
 it failed at the first fuse:
 
 ```
@@ -111,7 +111,7 @@ The whole of `rcad-topo` is the wider check. `fuses_that_must_agree.rs` and
 
 A temporary test ran all six fuses of the side-by-side pair, each on a fresh
 copy of the model, and printed each answer. It was
-`mise exec -- just t -p rcad-topo --test fusing_two_bars_side_by_side temp_probe_all_six --no-capture`,
+`mise exec -- just t -p rcad-topo --test merged -E 'test(~fusing_two_bars_side_by_side::temp_probe_all_six)' --no-capture`,
 and the test is deleted again:
 
 ```

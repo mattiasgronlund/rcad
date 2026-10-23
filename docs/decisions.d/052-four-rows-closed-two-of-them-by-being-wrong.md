@@ -110,8 +110,8 @@ builder or the deserialize door can make such a wire. §52.11 keeps it.
 The pointed cone refused at 1e-3 of its own size with finer deflections meshing
 either side. Reproduced exactly on `22a163a`: **6 of 21 deflections refused, 9
 finer ones meshed anyway, the ladder changes its mind 6 times**
-(`cargo nextest run -p rcad-topo --test whether_a_coarser_deflection_always_meshes
-the_pointed_cones_refusals --no-capture`). §51.7's numbers were inherited
+(`cargo nextest run -p rcad-topo --test merged -E
+'test(~whether_a_coarser_deflection_always_meshes::the_pointed_cones_refusals)' --no-capture`). §51.7's numbers were inherited
 correctly, which is worth saying because most of this section is about ones that
 were not.
 

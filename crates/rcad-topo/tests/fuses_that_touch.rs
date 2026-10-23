@@ -27,7 +27,8 @@
 //!
 //! # The table
 //!
-//! `mise exec -- just t -p rcad-topo --test fuses_that_touch --no-capture`, from
+//! `mise exec -- just t -p rcad-topo --test merged -E 'test(/^fuses_that_touch::/)'
+//! --no-capture`, from
 //! the fixed seed: 26 drawn shapes per cell, split between the two rows, six
 //! fuses each. "answered" is out of every fuse that row made. Refreshed by
 //! queue row Q1062, whose change moved two cells, the bar's cap and the
@@ -232,7 +233,8 @@ const CASES: u32 = 24;
 /// The environment variable that multiplies [`CASES`] for a soak.
 ///
 /// ```text
-/// RCAD_SOAK_FACTOR=100 cargo nextest run -p rcad-topo --test fuses_that_touch
+/// RCAD_SOAK_FACTOR=100 cargo nextest run -p rcad-topo --test merged \
+///     -E 'test(/^fuses_that_touch::/)'
 /// ```
 const SOAK_FACTOR: &str = "RCAD_SOAK_FACTOR";
 

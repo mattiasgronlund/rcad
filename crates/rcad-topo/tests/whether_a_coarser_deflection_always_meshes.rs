@@ -845,7 +845,7 @@ const CASES: u32 = 32;
 ///
 /// ```text
 /// RCAD_SOAK_FACTOR=50 cargo nextest run -p rcad-topo \
-///     --test whether_a_coarser_deflection_always_meshes
+///     --test merged -E 'test(/^whether_a_coarser_deflection_always_meshes::/)'
 /// ```
 const SOAK_FACTOR: &str = "RCAD_SOAK_FACTOR";
 

@@ -218,7 +218,7 @@ report lists both.
 ### 283.7 Where the numbers come from
 
 - The six refusals, and the face they name: `mise exec -- just t -p rcad-topo
-  --test a_block_face_through_a_cones_apex`, where
+  --test merged -E 'test(/^a_block_face_through_a_cones_apex::/)'`, where
   `every_fuse_of_a_block_whose_face_runs_through_the_apex_is_refused_by_name`
   matches `Error::CannotTellTheCellsOfAFaceApart { face }` with
   `face == ` the block's face on `x = 0`.

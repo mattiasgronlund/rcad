@@ -15,7 +15,7 @@ changed.*
 ### 317.1 Where it refuses
 
 Reproduced on the base with §244.3's shape (`mise exec -- just t -p rcad-topo
---test a_block_edge_grazing_a_ball_at_cx_16 --no-capture`, with a probe test
+--test merged -E 'test(/^a_block_edge_grazing_a_ball_at_cx_16::/)' --no-capture`, with a probe test
 that printed every record). All three rules refuse with one record:
 
 ```
