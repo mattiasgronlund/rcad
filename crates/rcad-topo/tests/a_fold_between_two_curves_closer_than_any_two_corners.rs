@@ -749,10 +749,8 @@ fn what_a_thin_bar_resting_inside_a_thick_one_shares_is_handed_back_at_once_roun
             builder.add_wire(&steps).expect("a wire round both loops")
         };
         let (band, lobes) = (both_loops(band_way), both_loops(lobes_way));
-        let band = builder.add_face(thin.clone(), &[band]).expect("the band");
-        let lobes = builder
-            .add_face(thick.clone(), &[lobes])
-            .expect("the lobes");
+        let band = builder.add_face(thin, &[band]).expect("the band");
+        let lobes = builder.add_face(thick, &[lobes]).expect("the lobes");
         builder
             .add_shell(&[(band, f), (lobes, f)])
             .expect("a shell");
