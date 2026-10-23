@@ -323,7 +323,7 @@ What this leaves:
 *Queue row Q1427. Seeds 1 to 48, `RCAD_SOAK_FACTOR=66 RCAD_SOAK_SEED=<1..48>
 <fuses_that_must_agree binary> --exact <test> --nocapture --test-threads 1`,
 from `crates/rcad-topo`, 20 at a time. The binary is built with `cargo nextest
-run --cargo-profile test --no-run -p rcad-topo --test fuses_that_must_agree`.
+run --cargo-profile test --no-run -p rcad-topo --test merged`.
 Scripts are under `target/q1427/` (gitignored): `one.sh <family> <seed>` runs
 one, `run-<family>.sh` the batch of 48, `extract.py <family>` the table below.
 `fuses_that_must_agree.proptest-regressions` gained the turned family's own

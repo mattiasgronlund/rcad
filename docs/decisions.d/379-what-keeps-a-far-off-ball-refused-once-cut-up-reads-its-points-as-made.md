@@ -22,7 +22,7 @@ indices, and split by whether the triangle's face is flat. The test that prints
 it is `a_placed_bar_is_cut_into_the_unplaced_bars_triangles`, kept at
 `/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-ci-verdict-cache/361883b9-99a3-4c0e-97d8-a972c39b393b/scratchpad/a_placed_bar_is_meshed_from_the_corners_it_stores.rs`.
 Copied over the tracked file and run as
-`mise exec -- just t -p rcad-topo --test a_placed_bar_is_meshed_from_the_corners_it_stores --no-capture`:
+`mise exec -- just t -p rcad-topo --test merged -E 'test(/^a_placed_bar_is_meshed_from_the_corners_it_stores::/)' --no-capture`:
 
 | placement | triangles off of 500 | on the caps | on the wall |
 |---|---|---|---|
@@ -90,7 +90,7 @@ it was made, and `walk_a_wire_round` reads that for a placed curved face), the
 question in `SolidView::mesh`, and a sweep test in the ball file. The question
 refuses with a stand-in error, `Invalid::DynamicRangeTooWide { ratio: NaN }`,
 only so that it can be told apart. Applied with `git apply` and run as
-`mise exec -- just t -p rcad-topo --test how_far_out_a_ball_can_sit_and_still_mesh --test a_placed_bar_is_meshed_from_the_corners_it_stores --no-fail-fast --no-capture`:
+`mise exec -- just t -p rcad-topo --test merged -E 'test(/^how_far_out_a_ball_can_sit_and_still_mesh::/) or test(/^a_placed_bar_is_meshed_from_the_corners_it_stores::/)' --no-fail-fast --no-capture`:
 
 - At `x = EVEN` along `x` the volume where made is `1.3333333333333333`, and
   where it lands `0`. Refused. Up `z` at `EVEN`, refused too. `ODD` meshes on

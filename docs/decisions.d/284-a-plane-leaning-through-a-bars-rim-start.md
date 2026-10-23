@@ -30,7 +30,7 @@ The bar is `add_round_bar(5, 10)`. A temporary `eprintln!` in
 walk's start and both nodes whenever the sweep came back undecided. A second
 one, in `Assembly::darts_along_each_edge`, printed every edge claimed other
 than twice. Both ran under
-`mise exec -- just t -p rcad-topo --test a_plane_leaning_through_a_bars_rim_start --no-capture`
+`mise exec -- just t -p rcad-topo --test merged -E 'test(/^a_plane_leaning_through_a_bars_rim_start::/)' --no-capture`
 and both are removed.
 
 ### 284.2 What cannot be ordered, and against what budget
@@ -226,7 +226,7 @@ corners.
 
 A print of every kept side's two ends, in `Assembly::from_the_pieces`, since
 removed, showed it for the union with the bar first
-(`PROBE_Q363=1 mise exec -- just t -p rcad-topo --test a_plane_leaning_through_a_bars_rim_start --no-capture under_a_tolerant_policy`).
+(`PROBE_Q363=1 mise exec -- just t -p rcad-topo --test merged -E 'test(~a_plane_leaning_through_a_bars_rim_start::under_a_tolerant_policy)' --no-capture`).
 The three surfaces are the turned face, the cap plane and the wall; their two
 meets are `which 0`, far, at `(−5, 2.5e-15, 0)`, and `which 1`, near:
 
@@ -252,8 +252,8 @@ fuses answer, `Model::validate` passes, and each is one solid inside
 | bar less block | `701.787 ± 2.641` | `702.065` |
 | block less bar | `63916.714 ± 0.496` | `63916.667` |
 
-Run as `PROBE_Q363_JOIN=1 mise exec -- just t -p rcad-topo --test
-a_plane_leaning_through_a_bars_rim_start --no-capture probe_q363_measure`, a
+Run as `PROBE_Q363_JOIN=1 mise exec -- just t -p rcad-topo --test merged -E
+'test(~a_plane_leaning_through_a_bars_rim_start::probe_q363_measure)' --no-capture`, a
 test since removed. The take-over fired 48 times over the six fuses, every
 time `Meet(which 1)` to vertex `1v1`.
 
@@ -487,7 +487,8 @@ be rebuilt in a few minutes, the way 284.10 did for its own probe.
 **This proxy's count for
 `a_fused_draw_hands_its_provenance_back_through_the_door` matches 284.8's
 exactly: 20.** Over `PROBE_Q942_DUPES=1 mise exec -- cargo nextest run -p
-rcad-topo --test a_fused_draw_hands_its_provenance_back_through_the_door
+rcad-topo --test merged -E
+'test(/^a_fused_draw_hands_its_provenance_back_through_the_door::/)'
 --no-capture` on `f4775743`, 368 pairs printed, but every one was either a
 duplicate of another (the "both ways round" check runs the same pair of
 groups twice) or sat at a distance from `1.1e-16` up to `8.8e-7` — most of

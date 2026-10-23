@@ -65,7 +65,7 @@ block's size, two, the room off a plane is `min(1e-7, 2e-9) + 128ε`, just over
 `2e-9`; at size one it is `1e-9 + 64ε` (worked from the formula; the test
 asserts the miss lies between the two). With `L` capped at one in `room_a_corner_of_this_solid_gets`, that
 test fails and the other four it was run with pass (`just t -p rcad-topo
---no-fail-fast -E 'binary(a_corner_with_fewer_than_three_surfaces_round_it) |
+--no-fail-fast -E 'test(/^a_corner_with_fewer_than_three_surfaces_round_it::/) |
 test(/big_solid_is_baked|grazing_planes/)'`: 5 run, 4 passed, 1 failed). The
 cap was removed before commit.
 
@@ -104,8 +104,8 @@ and §70.3's corner is a whole unit off.
 Which tests fail without the change was run as a mutation, validate's two
 rooms multiplied by zero in `room_a_corner_of_this_solid_gets`, which is the
 code at the base: `just t -p rcad-topo --no-fail-fast -E
-'binary(a_corner_with_fewer_than_three_surfaces_round_it) |
-binary(a_corner_its_own_surfaces_place_somewhere_else) |
+'test(/^a_corner_with_fewer_than_three_surfaces_round_it::/) |
+test(/^a_corner_its_own_surfaces_place_somewhere_else::/) |
 test(/big_solid_is_baked|grazing_planes|a_fourth_plane/)'` gives 10 run, 7
 passed, 3 failed. The three are the §136.8 test, the §136.4 test and the
 size test above.
@@ -175,9 +175,9 @@ pinned the rounding-only room from both sides.
 
 Under the mutation of 368.2 the three flipped pins fail, and so do the three
 tests 368.2 names: `just t -p rcad-topo -p rcad-step --no-fail-fast -E
-'binary(a_corner_its_own_surfaces_place_somewhere_else) |
+'test(/^a_corner_its_own_surfaces_place_somewhere_else::/) |
 test(a_turned_cube_read_back_from_thirteen_digits_is_united_with_nothing) |
-binary(a_corner_with_fewer_than_three_surfaces_round_it) |
+test(/^a_corner_with_fewer_than_three_surfaces_round_it::/) |
 test(/bake::tests::/)'` gives 20 run, 14 passed, 6 failed. The header's
 `allowed_wobble` figure was also wrong, a tenth of a nanometre where the
 formula gives `1e-9` at size one, and Q705 corrected it.

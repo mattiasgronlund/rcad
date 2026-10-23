@@ -103,14 +103,14 @@ never charged, so the change leaves nothing to take off.
 `how_far_out_a_ball_can_sit_and_still_mesh.rs` places a unit ball at
 `EVEN = 1.0808639105689192e16` and at `ODD = 1.170935903116329e16`, along `x`
 and up `z`, at a deflection of `1e5`. The parity law still holds: the whole file
-passes, 13 of 13 (`mise exec -- just t -p rcad-topo --test how_far_out_a_ball_can_sit_and_still_mesh`).
+passes, 13 of 13 (`mise exec -- just t -p rcad-topo --test merged -E 'test(/^how_far_out_a_ball_can_sit_and_still_mesh::/)'`).
 Up `z`, `EVEN` still refuses, but with a different error. Before this change it
 was `Geometry(CannotNameWhichPieceOfACrossingThisIs)` from the walk. Now it is
 `AWireWillNotLieFlatOnItsFace` from `cut_up`.
 
 **The cause, checked and not guessed.** Temporary `eprintln!`s in `walk` and
 `walk_a_wire_round` printed what each step read, with
-`mise exec -- just t -p rcad-topo --test how_far_out_a_ball_can_sit_and_still_mesh the_law_travels --no-capture`.
+`mise exec -- just t -p rcad-topo --test merged -E 'test(~how_far_out_a_ball_can_sit_and_still_mesh::the_law_travels)' --no-capture`.
 They are removed again, and the diff is kept at `…/scratchpad/probe-z-axis.diff`
 beside the probe. Up `z` at `EVEN`, with this change:
 
@@ -215,7 +215,7 @@ measurement shows:
 So this is not a right answer that the refusal withheld. The refusal is the
 right answer, and the fix in `cut_up` has to keep it. It also changes one pinned
 number elsewhere. Running
-`mise exec -- just t -p rcad-topo --test how_far_out_a_ball_can_sit_and_still_mesh --test whether_the_floor_predicts_the_step_cap --test a_placed_bar_is_meshed_from_the_corners_it_stores --no-fail-fast`
+`mise exec -- just t -p rcad-topo --test merged -E 'test(/^how_far_out_a_ball_can_sit_and_still_mesh::/) or test(/^whether_the_floor_predicts_the_step_cap::/) or test(/^a_placed_bar_is_meshed_from_the_corners_it_stores::/)' --no-fail-fast`
 with the hunks gave 10 failures of 16. Nine are in the ball file: every test
 that expects a refusal inside or above the band now meshes, including this
 section's `z` pin. One is
