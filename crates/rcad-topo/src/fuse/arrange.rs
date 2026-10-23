@@ -4963,19 +4963,11 @@ impl<'f> Arrangement<'f> {
             read_as_one_point.drain_into(log);
             return Ok(settled);
         }
-        if let Some(proved) = self.as_two_cuts_through_one_corner_say(crossing, first, second) {
-            return Ok(proved);
-        }
-        if let Some(proved) = self.as_two_cuts_through_the_axis_say(crossing, first, second) {
-            return Ok(proved);
-        }
-        if let Some(proved) =
-            self.as_a_corner_beside_a_flat_cut_through_the_loop_says(crossing, first, second)
-        {
-            return Ok(proved);
-        }
-        if let Some(proved) =
-            self.as_a_corner_between_the_two_meets_of_one_cut_says(crossing, first, second)
+        if let Some(proved) = self
+            .as_a_reading_asked_after_the_policy_says(crossing, first, second)
+            .or_else(|| {
+                self.as_the_two_meets_of_one_cut_alone_on_the_loop_say(crossing, first, second)
+            })
         {
             return Ok(proved);
         }
@@ -5025,6 +5017,26 @@ impl<'f> Arrangement<'f> {
             decided = proved;
         }
         Ok((decided, measures))
+    }
+
+    /// Which of two nodes on a crossing comes first along it, by the readings
+    /// [`Arrangement::order_along`] asks only where the policy would refuse,
+    /// all but [`Arrangement::as_the_two_meets_of_one_cut_alone_on_the_loop_say`],
+    /// which asks these of the other pairs on its loop.
+    fn as_a_reading_asked_after_the_policy_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        self.as_two_cuts_through_one_corner_say(crossing, first, second)
+            .or_else(|| self.as_two_cuts_through_the_axis_say(crossing, first, second))
+            .or_else(|| {
+                self.as_a_corner_beside_a_flat_cut_through_the_loop_says(crossing, first, second)
+            })
+            .or_else(|| {
+                self.as_a_corner_between_the_two_meets_of_one_cut_says(crossing, first, second)
+            })
     }
 
     /// Which of two nodes on a crossing comes first along it, from their boxes
@@ -6150,6 +6162,156 @@ impl<'f> Arrangement<'f> {
             Decision::Neg
         } else {
             Decision::Pos
+        })
+    }
+
+    /// Which of two nodes on the loop a plane cuts a ball or a pipe in comes
+    /// first, where the loop holds no node but the two places a second plane
+    /// `P` cuts it and at most one corner of the face, proved off `P`: an order
+    /// that is a turn of the true one round the loop, wherever the loop starts.
+    /// `None` everywhere else.
+    ///
+    /// **Only the order round the loop matters, not where it is counted
+    /// from.** Arcs join each node to the next and the last back to the first
+    /// ([`Arrangement::cut_the_crossings_into_arcs`]), so any turn of the true
+    /// order cuts the same arcs. Two places have one order round a loop, so
+    /// either is first. With the corner, the loop enters the side of `P` the
+    /// corner is on through one place, runs past the corner, and leaves
+    /// through the other, so `[enters, corner, leaves]` is a turn of the true
+    /// order wherever the start is.
+    ///
+    /// **Which place it enters by is read off which meet of the line is the
+    /// lower** ([`the_lower_meet_first_round_the_loop`]): with the loop's plane
+    /// wound first, the loop runs off the side `n × d` points to at the lower
+    /// meet, for `n` its plane's normal and `d` the way the line runs, and with
+    /// the ball or pipe first, onto it. The corner's side of the line in those
+    /// terms is its side of `P` times the sign of `n_P · (n × d)`, since `P`
+    /// holds the line and the corner is on the loop's plane.
+    ///
+    /// **Every other pair keeps what another reading proves of it.** Those
+    /// readings count from the true start, so its turn agrees with all of
+    /// them, and the first of the three turns that does is the one read. A
+    /// turn that disagreed with one would sort the three into an order that is
+    /// no turn of the true one.
+    ///
+    /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
+    /// whose inner side lies along `x = 2`, both turned `π/2` about `z`: the
+    /// side's plane cuts the plate's top and the bar's top circles at two
+    /// places `2.2e−16` apart, and the bar's seam corner on its top lies
+    /// between them. Each circle is walked from the seam, in a box `2.8e−13`
+    /// wide that holds every node on it, so no reading counted from the start
+    /// orders any two of them, and every certified fuse of the two was refused
+    /// (Q2655, `tests/a_bar_flush_with_an_l_plates_inner_side_turned.rs`).
+    fn as_the_two_meets_of_one_cut_alone_on_the_loop_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve { ref wound_as, .. } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let (flat, plane_first) = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) => (flat, true),
+            (None, Some(flat)) => (flat, false),
+            (Some(_), Some(_)) | (None, None) => return None,
+        };
+        let quadric = &wound_as[usize::from(plane_first)];
+        if !matches!(quadric, Surface::Sphere(_) | Surface::Cylinder(_)) {
+            return None;
+        }
+        let mut meets: [Option<(usize, [Surface; 3])>; 2] = [None, None];
+        let mut corner = None;
+        for at in (0..self.nodes.len()).filter(|&at| self.nodes[at].crossings.contains(&crossing)) {
+            match (self.nodes[at].vertex, self.the_one_meet_it_stands_for(at)) {
+                (None, Some((three, which @ (0 | 1)))) if meets[usize::from(which)].is_none() => {
+                    meets[usize::from(which)] = Some((at, three));
+                }
+                (Some(_), None) if corner.is_none() => corner = Some(at),
+                (Some(_) | None, Some(_) | None) => return None,
+            }
+        }
+        let [Some((lower, three)), Some((higher, also))] = meets else {
+            return None;
+        };
+        if three != also {
+            return None;
+        }
+        let Some(corner) = corner else {
+            return Some(if first == lower {
+                Decision::Pos
+            } else {
+                Decision::Neg
+            });
+        };
+        let cut = self.the_cut_through_the_loop_at(lower, wound_as)?;
+        let mut planes = three.iter().filter_map(Surface::as_plane);
+        let (Some(one), Some(other), None) = (planes.next(), planes.next(), planes.next()) else {
+            return None;
+        };
+        let (way, _) = the_way_two_planes_line_runs(one, other)?;
+        let across = cross_of_intervals(
+            one.normal().components().map(Interval::exactly),
+            other.normal().components().map(Interval::exactly),
+        );
+        let along = if way == Decision::Pos {
+            across
+        } else {
+            across.map(|component| -component)
+        };
+        let facing = dot_of(
+            cut.normal().components().map(Interval::exactly),
+            cross_of_intervals(flat.normal().components().map(Interval::exactly), along),
+        )
+        .sign();
+        let side = self.side_of_a_corner(
+            self.the_baked_corner_of(&self.nodes[corner]),
+            &Surface::Plane(cut),
+        );
+        let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
+        if !(proved(facing) && proved(side)) {
+            return None;
+        }
+        let corner_past_the_line = side == facing;
+        let lower_enters = corner_past_the_line != plane_first;
+        let (enters, leaves) = if lower_enters {
+            (lower, higher)
+        } else {
+            (higher, lower)
+        };
+        let read = |one: usize, other: usize| match self
+            .as_proved_before_any_policy(crossing, one, other)
+        {
+            Ok((Decision::Undecidable { .. }, _)) => {
+                Ok(self.as_a_reading_asked_after_the_policy_says(crossing, one, other))
+            }
+            Ok((decided, _)) => Ok(Some(decided)),
+            Err(why) => Err(why),
+        };
+        let turns = [
+            [enters, corner, leaves],
+            [corner, leaves, enters],
+            [leaves, enters, corner],
+        ];
+        let mut agreed = None;
+        for turn in turns {
+            let mut agrees = true;
+            for (before, after) in [(0, 1), (0, 2), (1, 2)] {
+                let said = read(turn[before], turn[after]).ok()?;
+                agrees &= said.is_none() || said == Some(Decision::Pos);
+            }
+            if agrees {
+                agreed = Some(turn);
+                break;
+            }
+        }
+        let turn = agreed?;
+        let place = |node: usize| turn.iter().position(|&each| each == node);
+        Some(if place(first)? < place(second)? {
+            Decision::Pos
+        } else {
+            Decision::Neg
         })
     }
 
