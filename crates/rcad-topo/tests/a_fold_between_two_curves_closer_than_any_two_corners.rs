@@ -1,6 +1,8 @@
 //! A ball pressed a little way into the side of a round bar, and the piece
 //! the two share (row Q2044); the search for any solid of fewer than two
-//! corners whose coarsest mesh folds (row Q2498); and a ball less a bar whose
+//! corners whose coarsest mesh folds (row Q2498); what a thin bar resting
+//! inside a thick one shares, a solid of one corner whose coarsest mesh
+//! crosses and is handed back at once (row Q2561); and a ball less a bar whose
 //! two curves come closer than its two corners (rows Q2641 and Q1232).
 //!
 //! # The shape
@@ -68,7 +70,7 @@
 //! mesh. So no shape designers make on purpose was known to be refused this
 //! way, and the refusal was class C.
 //!
-//! # No shape was known to reach the arm (row Q2498)
+//! # The arm for a solid of fewer than two corners (rows Q2498 and Q2561)
 //!
 //! Until Q2641, the arm `let Some(closest) = how_close_two_corners_come(view)
 //! else { return Err(finest_refusal) }` in
@@ -78,8 +80,10 @@
 //! corner places whose coarsest mesh folds, and found none. Q2641 took the arm
 //! out for a fold: a fold on such a solid now runs the ladder down to the floor
 //! its own folded side gives, and only a crossing there is still handed back at
-//! once. Two tests here keep what Q2498 found, and a fold among them would now
-//! be asked at finer rungs rather than handed back:
+//! once. Q2561 found a solid of one corner place that reaches that crossing
+//! arm, and again none that folds. Three tests here keep what the two rows
+//! found, and a fold among them would now be asked at finer rungs rather than
+//! handed back:
 //!
 //! - [`no_solid_of_fewer_than_two_corners_these_intersections_leave_folds_at_its_coarsest_mesh`]
 //!   intersects four families, either solid first, and meshes at the coarsest
@@ -89,6 +93,10 @@
 //! - [`a_whole_ring_in_one_face_with_one_corner_meshes_at_the_coarsest_deflection`]
 //!   builds a whole ring as one face, which meets itself along both its edges
 //!   at its one corner, in five sizes and four orders. None folds.
+//! - [`what_a_thin_bar_resting_inside_a_thick_one_shares_is_handed_back_at_once_round_one_corner`]
+//!   builds by hand what a thin bar resting inside a thick one shares, round
+//!   its one corner where the two pipes touch. It does not fold: its coarsest
+//!   mesh crosses, and that is handed back at once.
 //!
 //! Tried on Q2498's branch with probes that were not kept:
 //!
@@ -112,7 +120,7 @@
 //!   one corner `(0, 8, 0)`: `SolidBuilder::build` refuses it all 16 ways
 //!   round, so no mesh of it is ever asked.
 //!
-//! # Why no such fold may exist, a reading nobody has run
+//! # Why no such fold may exist, and the one case run (row Q2561)
 //!
 //! A fold's side has both ends on edges the two folding faces share. Since
 //! Q2178 a curved patch draws no side between two points along one edge with
@@ -126,7 +134,35 @@
 //! cut it into three pieces, and only the one between them holds both. A ring
 //! needs three loops through one point, its outer equator, the circle round
 //! its tube and a Villarceau circle, which is the shape above that will not
-//! build.
+//! build. That much is a reading, and not a run.
+//!
+//! Q2561 built the case of two surfaces, and it does not fold. A bar of 1
+//! along `x` at `y = 1` rests on the inside of the bar of 2 up `z`, the two
+//! pipes touching at `(0, 2, 0)`, and what they share is bounded by two loops
+//! that meet there, one each side of `x = 0`. The fuse refuses that pair where
+//! the loops meet (row Q2637), so it is built by hand, of two faces: the thin
+//! pipe's band between the loops, and the thick pipe's two lobes, one inside
+//! each loop, as one face walked round both, since a loop `intersect` names
+//! closes no wire of its own. Both faces hold both closed edges through the
+//! one corner. At the coarsest mesh the face of both lobes is refused
+//! `AMeshCoveredTheWrongSideOfALoop`, a crossing and not a fold, and with one
+//! corner place `the_coarsest_mesh_whose_sides_do_not_cross` hands that back at
+//! once. So the arm Q2641 left for a crossing is reached through the public
+//! API and cannot become an assertion.
+//!
+//! Handing it back loses no answer for this solid. Measured on `1df3fb5f` with
+//! a probe in `the_coarsest_mesh_whose_sides_do_not_cross`, not kept, at every
+//! room from `2`, half the box's width, down to `2⁻¹²`: the solid meshes at
+//! none. The face of both lobes is refused `AMeshCoveredTheWrongSideOfALoop`
+//! at `2` and at every room from `2⁻⁵` down to `2⁻¹¹`, and
+//! `CurvedFaceWithAHoleGoesTooFarRound` at `2⁻⁴`. The band is refused
+//! `ACurvedFaceCannotBeCutSmallEnoughToMesh` at `1`, `0.5` and `0.125`, a
+//! boundary that crosses itself at `0.25`, and
+//! `CurvedFaceWithAHoleGoesTooFarRound` at `2⁻¹²`. Given a floor for the
+//! crossing, the ladder would stop at room `1`, on the band's refusal, which is
+//! about something else and is handed back as it is. Each band way round gives
+//! the same rooms. What stops this solid is the mesher at every rung, and not
+//! the arm.
 //!
 //! # Two curves closer than any two corners (rows Q2641 and Q1232)
 //!
@@ -152,7 +188,7 @@
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere,
-    Surface, Torus, Vector,
+    Surface, SurfaceMeet, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
@@ -638,6 +674,97 @@ fn a_ring_of_a_ball_less_a_bar_on_its_axis_builds_wherever_its_two_corners_stand
             4.0 * PI / 3.0 * (21.0_f64 / 64.0).powi(3),
             &[2],
             &what,
+        );
+    }
+}
+
+/// What a bar of radius 1 along `x` at `y = 1` shares with a bar of radius 2 up
+/// `z`, built round its one corner `(0, 2, 0)`, where the thin pipe rests on the
+/// inside of the thick one and its two loops meet (row Q2561). The fuse refuses
+/// that pair where the loops meet
+/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet`,
+/// row Q2637), so it is built by hand.
+///
+/// Each loop is one closed edge from the corner back to it, as `intersect`
+/// names it, and such an edge closes no wire of its own: a lobe of the thick
+/// pipe inside one loop is refused `ADraftWireIsTooShort`. So the thick pipe's
+/// two lobes are one face, walked round both loops, and the thin pipe's band
+/// between the loops is the other. Both faces hold both closed edges through
+/// the one corner, which is what a fold there needs.
+///
+/// It does not fold. Whichever way the band walks its loops, the build is
+/// refused `AMeshCoveredTheWrongSideOfALoop`, for the face of both lobes at the
+/// coarsest mesh. `the_coarsest_mesh_whose_sides_do_not_cross` asks that again
+/// the way it asks a crossing, and with one corner place there is no distance
+/// to read a crossing's floor off, so it hands the refusal back at once. That
+/// arm is reached through the public API, so it cannot become an assertion.
+#[test]
+fn what_a_thin_bar_resting_inside_a_thick_one_shares_is_handed_back_at_once_round_one_corner() {
+    let thick = Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a pipe"));
+    let along_x =
+        Axis::new(Point::new(0.0, 1.0, 0.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
+    let thin = Surface::Cylinder(Cylinder::new(along_x, 1.0).expect("a pipe"));
+    let Ok(SurfaceMeet::Curves(loops)) = rcad_geom::intersect(
+        &thick,
+        &thin,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) else {
+        panic!("the thin pipe crosses the thick one in curves")
+    };
+    let [one, other] = &loops[..] else {
+        panic!("two loops, not {}", loops.len())
+    };
+    let (f, r) = (Orientation::Forward, Orientation::Reversed);
+
+    let mut builder = SolidBuilder::new();
+    let corner = builder
+        .add_vertex(Point::new(0.0, 2.0, 0.0))
+        .expect("a corner");
+    let edge = builder
+        .add_edge(corner, corner, one.run().clone())
+        .expect("a loop");
+    let coedge = builder.add_coedge(edge, f).expect("a coedge");
+    assert!(
+        matches!(
+            builder.add_wire(&[DraftStep::Along(coedge)]),
+            Err(rcad_topo::Error::ADraftWireIsTooShort { steps: 1 })
+        ),
+        "a lobe inside one loop is a wire of its own"
+    );
+
+    for (band_way, lobes_way) in [(f, r), (r, f)] {
+        let mut builder = SolidBuilder::new();
+        let corner = builder
+            .add_vertex(Point::new(0.0, 2.0, 0.0))
+            .expect("a corner");
+        let edges = [one, other].map(|named| {
+            builder
+                .add_edge(corner, corner, named.run().clone())
+                .expect("a loop")
+        });
+        let mut both_loops = |way: Orientation| {
+            let steps = edges
+                .map(|edge| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")));
+            builder.add_wire(&steps).expect("a wire round both loops")
+        };
+        let (band, lobes) = (both_loops(band_way), both_loops(lobes_way));
+        let band = builder.add_face(thin, &[band]).expect("the band");
+        let lobes = builder.add_face(thick, &[lobes]).expect("the lobes");
+        builder
+            .add_shell(&[(band, f), (lobes, f)])
+            .expect("a shell");
+        let said = builder.build(
+            &mut a_model(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(
+                said,
+                Err(rcad_topo::Error::AMeshCoveredTheWrongSideOfALoop { .. })
+            ),
+            "the band walking its loops {band_way:?}: {said:?}"
         );
     }
 }
