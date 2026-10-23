@@ -4467,8 +4467,8 @@ struct ALoopToCut {
 struct ThePatchAsCut {
     /// What goes to the triangulator, each an outline and its holes.
     pieces: Vec<Vec<ALoopToCut>>,
-    /// The triangles drawn here, in table entries, turned the way the patch's
-    /// loops run.
+    /// The triangles drawn here, in table entries, turned to agree with the
+    /// triangles the triangulator draws beside them on a face used forward.
     drawn_here: Vec<[u32; 3]>,
     /// The loop as it came, when it was cut into lobes.
     cut_from: Option<ALoopToCut>,
@@ -4476,12 +4476,12 @@ struct ThePatchAsCut {
 
 /// The pieces of one patch the triangulator is handed, each an outline and its
 /// holes, and the triangles drawn here for what it would refuse, in table
-/// entries and turned the way the patch's loops run. A loop runs with the
-/// face's material on its left about the stored surface's own normal, so
-/// [`BuildingAMesh::hand_over`] turns these over on a face used reversed: the
-/// groove the dipping bar leaves in the block is such a face, and drawn the
-/// loop's way there its bridges used each side the way the top and the cap
-/// beside them did (`FacesDoNotAgreeWhichWayTheyFace`).
+/// entries, turned to agree with the triangles the triangulator draws beside
+/// them on a face used forward. [`BuildingAMesh::hand_over`] turns these over
+/// on a face used reversed: the groove the dipping bar leaves in the block is
+/// such a face, and drawn unturned there its bridges used each side the way
+/// the top and the cap beside them did (`FacesDoNotAgreeWhichWayTheyFace`).
+/// How each kind is turned is said with it below.
 ///
 /// Both kinds drawn here are where two or more table entries of one patch
 /// round onto one line or one place in the chart, and both were met in one
@@ -4497,9 +4497,11 @@ struct ThePatchAsCut {
 /// `LoopsTouch`, a corner on a side of its own loop. The hole encloses nothing,
 /// and the faces across it use each of its sides once, so a fan the way the
 /// hole runs is what closes the mesh there: it uses them the way the face's
-/// own triangles would. The outline's triangles cover the line, and the hole's
-/// corners stand on their sides or inside them, no further from where they
-/// are than the corners' own roundings.
+/// own triangles would, since a flat face's loops are its wires as walked,
+/// which keep its material on their left about its own normal. The outline's
+/// triangles cover the line, and the hole's corners stand on their sides or
+/// inside them, no further from where they are than the corners' own
+/// roundings.
 ///
 /// **That collinearity is read off where the face was made, not off the
 /// chart this function is handed** — `on_one_line_where_made`, computed once
@@ -4516,12 +4518,25 @@ struct ThePatchAsCut {
 /// lobes**: from the first of the two to the corner before the second, and
 /// from the second round to the corner before the first. Two triangles bridge
 /// the cut, `[first, before the second, second]` and `[second, before the
-/// first, first]`. Each uses the side into the place the way the loop runs,
-/// the other's side across the place the other way, and a lobe's closing side
-/// the other way to the lobe's own triangles, so every side is used once each
-/// way. The triangulator refuses such a loop `CornersCoincide`. The sliver's
-/// piece of the pipe is `B`, `P`, `A`, `P′`, where `P` and `P′` are the one
-/// point inside each of the sliver's two arcs, two entries at one double
+/// first, first]`, each turned over when the lobe the triangulator is handed
+/// runs clockwise in the chart off a torus, or anticlockwise on one. The
+/// triangulator draws anticlockwise in the chart, and `hand_over` turns its
+/// triangles over against these on a torus, whose chart turns into its tube.
+/// So turned, each bridge uses its side across the place the other way to the
+/// other bridge, and a lobe's closing side the other way to that lobe's own
+/// triangles, so every side is used once each way. A loop that keeps the
+/// face's material on its left about the stored surface's own normal is never
+/// turned. A patch of a ring cut across with its top rim stored first runs
+/// the other way round the material
+/// ([`the_triangles_keep_the_inside_of_one_loop_at_most`]), and built by hand,
+/// such a loop bridged the way it ran used its lobe's closing side twice the
+/// same way; no solid is known to hand one over (Q2646,
+/// `a_pinched_loop_is_bridged_the_way_its_lobe_is_cut_whichever_way_it_runs`).
+/// With no lobe of three corners there is no turn to read, and the bridges
+/// stay the way the loop runs. The triangulator refuses a loop that names one
+/// place twice `CornersCoincide`. The sliver's piece of the pipe is `B`, `P`,
+/// `A`, `P′`, where `P` and `P′` are the one point inside each of the sliver's
+/// two arcs, two entries at one double
 /// `(3, 2 − 2⁻⁵², 4)`; both lobes are two corners there, so it is the two
 /// bridges and nothing else. The bar with its seam underneath leaves the
 /// union's pipe a piece whose arc tip and near seam corner are both
@@ -4599,6 +4614,7 @@ fn what_the_triangulator_can_cut(
     }
     let mut pieces = Vec::new();
     let mut cut_from = None;
+    let mut bridges = Vec::new();
     let mut rest = kept.pop();
     while let Some(one) = rest.take() {
         let Some([first, again]) = the_first_place_a_loop_names_twice(one.corners.corners()) else {
@@ -4615,14 +4631,23 @@ fn what_the_triangulator_can_cut(
             break;
         }
         let point = |at: usize| one.points[at % count];
-        drawn_here.push([point(first), point(again - 1), point(again)]);
-        drawn_here.push([point(again), point(first + count - 1), point(first)]);
+        bridges.push([point(first), point(again - 1), point(again)]);
+        bridges.push([point(again), point(first + count - 1), point(first)]);
         rest = lobes
             .iter()
             .find(|lobe| lobe.len() >= 3)
             .map(|lobe| one.just(lobe));
         cut_from.get_or_insert(one);
     }
+    let on_a_torus = matches!(surface, Surface::Torus(_));
+    if let [lobe] = pieces.as_slice()
+        && whether_a_loop_runs_anticlockwise(lobe[0].corners.corners()) == Some(on_a_torus)
+    {
+        for bridge in &mut bridges {
+            bridge.swap(1, 2);
+        }
+    }
+    drawn_here.extend(bridges);
     ThePatchAsCut {
         pieces,
         drawn_here,
@@ -12708,5 +12733,109 @@ mod tests {
             vec![1],
             "one piece, the outline alone, the hole gone rather than kept beside it"
         );
+    }
+
+    /// Row Q2646. A loop that names one place twice is bridged there so that
+    /// no side is used twice the same way by the bridges and the triangles of
+    /// the lobe the triangulator cuts, whichever way the loop runs in the
+    /// chart, on a pipe and on a ring.
+    ///
+    /// A ring cut across is walked along whichever of its two rims the face
+    /// stores first, so with the top rim first each patch of a pipe runs
+    /// clockwise in the chart round the face's material. Here such a patch
+    /// runs along its top through two table entries at one place, `(0.5, 1)`.
+    /// Bridged the way the loop runs, the bridge used the side that closes the
+    /// kept lobe the way the lobe's own triangles do, since the triangulator
+    /// draws those anticlockwise in the chart whichever way the lobe runs.
+    ///
+    /// The triangles are turned over on a ring, as
+    /// [`BuildingAMesh::hand_over`] turns them and not the bridges, since a
+    /// ring's chart turns into its tube.
+    #[test]
+    fn a_pinched_loop_is_bridged_the_way_its_lobe_is_cut_whichever_way_it_runs() {
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe"));
+        let ring = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a ring"));
+        let deflection = Deflection::of(1.0).expect("a length");
+        let clockwise = [
+            [0.0, 1.0],
+            [0.5, 1.0],
+            [0.5, 1.0],
+            [1.0, 1.0],
+            [1.0, 0.5],
+            [1.0, 0.0],
+            [0.5, 0.0],
+            [0.0, 0.0],
+            [0.0, 0.5],
+        ];
+        let mut folded = Vec::new();
+        for surface in [pipe, ring] {
+            let on_a_ring = matches!(surface, Surface::Torus(_));
+            for runs_anticlockwise in [true, false] {
+                let case = format!("on a ring {on_a_ring}, anticlockwise {runs_anticlockwise}");
+                let mut corners = clockwise.to_vec();
+                let mut points: Vec<u32> = (0..9).collect();
+                if runs_anticlockwise {
+                    corners.reverse();
+                    points.reverse();
+                }
+                let one = ALoopToCut {
+                    corners: Loop::through(corners).expect("nine finite corners"),
+                    points,
+                    between_two_edges: vec![false; 9],
+                };
+                let ThePatchAsCut {
+                    pieces,
+                    drawn_here,
+                    cut_from,
+                } = what_the_triangulator_can_cut(&surface, vec![(one, false)]);
+                assert!(
+                    cut_from.is_some(),
+                    "{case}: the loop is cut into lobes at (0.5, 1)"
+                );
+                let [piece] = pieces.as_slice() else {
+                    panic!(
+                        "{case}: one lobe of three corners or more, not {}",
+                        pieces.len()
+                    )
+                };
+                let cut = cut_one_piece(&surface, piece, HowToCut::Triangulate, deflection)
+                    .unwrap_or_else(|why| panic!("{case}: the lobe was refused {why:?}"));
+                let mut corner_is = the_points_of(piece);
+                let inside = cut.corners().len() - corner_is.len();
+                corner_is.extend((1000_u32..).take(inside));
+                let mut used: HashMap<(u32, u32), u32> = HashMap::new();
+                let triangles = cut
+                    .triangles()
+                    .iter()
+                    .map(|triangle| {
+                        let [first, second, third] =
+                            triangle.map(|corner| corner_is[corner as usize]);
+                        if on_a_ring {
+                            [first, third, second]
+                        } else {
+                            [first, second, third]
+                        }
+                    })
+                    .chain(drawn_here)
+                    .filter(|&[first, second, third]| {
+                        first != second && second != third && third != first
+                    });
+                for [first, second, third] in triangles {
+                    for side in [(first, second), (second, third), (third, first)] {
+                        *used.entry(side).or_default() += 1;
+                    }
+                }
+                let mut twice: Vec<(u32, u32)> = used
+                    .into_iter()
+                    .filter(|&(_, times)| times > 1)
+                    .map(|(side, _)| side)
+                    .collect();
+                twice.sort_unstable();
+                if !twice.is_empty() {
+                    folded.push(format!("{case}: sides used twice the same way {twice:?}"));
+                }
+            }
+        }
+        assert!(folded.is_empty(), "{folded:#?}");
     }
 }
