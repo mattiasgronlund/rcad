@@ -1592,20 +1592,30 @@ fn the_arc_between(
     backwards.reverse();
 
     let mut held = [false; 2];
-    for (arc, holds) in [&onwards, &backwards].into_iter().zip(&mut held) {
+    let mut asked = [ProvenanceLog::new(), ProvenanceLog::new()];
+    for ((arc, holds), asked) in [&onwards, &backwards]
+        .into_iter()
+        .zip(&mut held)
+        .zip(&mut asked)
+    {
         *holds = if arc.is_empty() {
             let [one, other] = [from, to].map(|end| Point::from(end.enclosure().map(middle_of)));
             let between = one + (other - one) * 0.5;
             let (middle, off) = settled_with_a_bound(surfaces, between)?;
-            every_half_space_holds(picked_by, middle, off, policy, log)?
+            every_half_space_holds(picked_by, middle, off, policy, asked)?
         } else {
-            every_point_is_held(arc, picked_by, deviation, policy, log)?
+            every_point_is_held(arc, picked_by, deviation, policy, asked)?
         };
     }
     match held {
         [true, false] => Ok(onwards),
         [false, true] => Ok(backwards),
-        [true, true] | [false, false] => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+        [true, true] | [false, false] => {
+            for asked in asked {
+                asked.drain_into(log);
+            }
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+        }
     }
 }
 
