@@ -2298,19 +2298,33 @@ impl Assembly {
     /// so the wall's far ring is the far rim in arcs, and the wall itself is a
     /// grid. Where no chain of the grid reached the near rim the wall stayed in
     /// 25 pieces, and where one did it kept that chain as a seam, though the
-    /// block met no face of the frustum (Q2170). **Only on a cone, and only
-    /// where every ring goes right round.** A cone face with a ring right
-    /// round beside a hole is refused by the mesher, which takes islands only
-    /// on a pipe's ring or a ball's cap (`AWireWillNotLieFlatOnItsFace`, in
+    /// block met no face of the frustum (Q2170). **Only on a cone or a pipe,
+    /// and only where every ring goes right round**, but for a ring of one
+    /// side on a cone. A cone face with a ring right round beside a hole is
+    /// refused by the mesher, which takes islands only on a pipe's ring or a
+    /// ball's cap (`AWireWillNotLieFlatOnItsFace`, in
     /// `pieces_of_one_curved_surface.rs` and `a_walk_neither_winding_nor_the_axis_places.rs`).
-    /// On a pipe, closed up, 3 tests of the bar files failed, an answer
-    /// `TheFuseWroteABrokenAnswer` among them. **Not where the group was
-    /// joined only across whole closed curves**
+    /// **Not where the group was joined only across whole closed curves**
     /// ([`Assembly::joined_only_across_whole_rings`]): a frustum beside a block
     /// whose floor cuts a circle round its wall has a far rim cut where the
     /// block's walls touch it, and joined whole across that circle, the three
     /// tests of `a_rim_a_fuse_cut_round_one_cone.rs` that pin it failed.
     /// Whether that circle stays is row Q1051's.
+    ///
+    /// **A pipe band whose rings all go right round closes up since Q2657.**
+    /// A stepped shaft bored with a square pocket had its wide wall joined
+    /// back with a seam kept along the ruling at `x = −1.977, y = −0.3`, where
+    /// the pocket's side plane, run on past the pocket, crosses it, and the
+    /// seam's corners stayed on the rim circles
+    /// (`a_stepped_shaft_cut_in_half_and_turned.rs`). **A pipe face with a
+    /// ring that does not go right round is left as before.** Let through
+    /// with a ring of one side, as on a cone, the slanted pin of
+    /// `one_pipe_whose_origin_sits_at_two_places.rs` on the bar from 1.9375
+    /// kept the bar's input corner `(2, 0, 1.9375)`, which lies inside the
+    /// pin's pipe where it runs on behind its cap, and was refused
+    /// `AFaceStraddlesSomethingTrimmingIt`. With every pipe let through by
+    /// the cone's rule, 3 tests of the bar files failed, an answer
+    /// `TheFuseWroteABrokenAnswer` among them.
     fn needs_no_seam(
         &self,
         members: &[usize],
@@ -4463,10 +4477,12 @@ impl Assembly {
     /// **A plane and a cone only.** The crossing of a ball and a plane can run
     /// through the ball's poles, which the arrangement makes corners of, and
     /// closed up across them a closed edge's one corner sits on a pole: 22
-    /// tests across the ball-and-block files failed (§400.5). A pipe is left
-    /// out as [`Assembly::needs_no_seam`] leaves it out: a ring right round a
-    /// pipe is an island the mesher takes, and closing rings up on a pipe
-    /// there failed 3 tests of the bar files.
+    /// tests across the ball-and-block files failed (§400.5). A crossing of a
+    /// plane and a pipe made here stays in its pieces. It was left out when
+    /// [`Assembly::needs_no_seam`] left every pipe out (Q2170), and since
+    /// Q2657 that closes up a pipe band whose rings go right round only
+    /// where they are pieces of input edges, as the bored shaft's rims are.
+    /// Joining the pieces of such a crossing made here is untried.
     fn are_pieces_of_one_closed_curve(&self, edges: &[usize]) -> bool {
         let pieces: Vec<&[EdgeKey]> = edges
             .iter()

@@ -1919,12 +1919,16 @@ impl<'f> Arrangement<'f> {
     /// along a crossing` under the certified policy (Q2487).
     ///
     /// **Boring leaves that corner off since Q2619**, as the bore and the
-    /// narrow bar lie apart, **but a square pocket still leaves one.** Its
-    /// side `y = −0.3`, from `x = −1.8` to `−1.2`, crosses the wide bar's
-    /// pipe at `x = −1.977`, outside the pocket, and boring puts a corner on
-    /// the bottom's rim there. With this test taken away, the pocketed shaft
-    /// cut on `x = 0`, shifted and fused with its other half was refused
-    /// `side of plane` at that corner under the certified policy (Q2488).
+    /// narrow bar lie apart, **but the halves of a shaft with a square pocket
+    /// still keep one.** The pocket's side `y = −0.3`, from `x = −1.8` to
+    /// `−1.2`, run on, crosses the wide bar's pipe at `x = −1.977`, outside
+    /// the pocket. Boring put a corner on the bottom's rim there, and since
+    /// Q2657 the whole bored shaft keeps none, as its wall closes up its rims.
+    /// The half of it on `x < 0` or `x < 0.5`, whose rims are arcs, still
+    /// keeps that corner and the others like it. With this test taken away,
+    /// that half cut on `x = 0`, shifted and fused with its other half was
+    /// refused `side of plane` at the corner under the certified policy
+    /// (Q2488), and still is on Q2657's branch.
     ///
     /// **Sound because the corner is only a sample of the curve.** With only
     /// two surfaces round it, the corner was read out of the model and is a
