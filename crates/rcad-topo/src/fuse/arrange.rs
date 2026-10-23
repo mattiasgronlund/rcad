@@ -2690,8 +2690,9 @@ impl<'f> Arrangement<'f> {
     }
 
     /// The nodes where two crossings of one pair meet: where two half
-    /// ellipses meet, where two loops of two pipes meet, or where two rulings
-    /// cross, and none for every other two ([`Arrangement::place_the_meets`]).
+    /// ellipses meet, where two loops of two pipes or of a ball and a pipe
+    /// meet, or where two rulings cross, and none for every other two
+    /// ([`Arrangement::place_the_meets`]).
     ///
     /// # Errors
     ///
@@ -2702,7 +2703,9 @@ impl<'f> Arrangement<'f> {
     /// loops a rounding apart, or a product that rounds. Let through without a
     /// node where the walls touch, five of the six fuses of a bar of radius 1
     /// resting inside a bar of radius 2 answered with the two loops crossing at
-    /// a point that is no vertex (Q2628). Whatever
+    /// a point that is no vertex (Q2628). The same where the two are the two
+    /// loops of a ball and a pipe and a product rounds before they are proved
+    /// to meet or not ([`where_two_loops_of_a_ball_and_a_pipe_meet`]). Whatever
     /// [`Arrangement::place_where_two_halves_meet`] refuses.
     fn place_where_two_crossings_of_one_pair_meet(
         &mut self,
@@ -2730,17 +2733,26 @@ impl<'f> Arrangement<'f> {
             self.place_where_two_loops_meet(first, second, &meet);
             return Ok(());
         }
+        if let Some(meet) = where_two_loops_of_a_ball_and_a_pipe_meet(
+            &self.surface,
+            &self.crossings[first].partner,
+            [&self.crossings[first].run, &self.crossings[second].run],
+        )? {
+            self.place_where_two_loops_meet(first, second, &meet);
+            return Ok(());
+        }
         self.place_where_two_rulings_cross(first, second);
         Ok(())
     }
 
     /// The node where the two loops `first` and `second` of a thin pipe
-    /// resting on the inside of a fat one meet, where the walls touch, and one
-    /// node half way round each loop, so that each loop is two edges and each
-    /// edge has a direction ([`WhereTwoLoopsMeet`]).
+    /// resting on the inside of a fat one, or of a ball resting on the far
+    /// inside of a pipe, meet, where the walls touch, and one node half way
+    /// round each loop, so that each loop is two edges and each edge has a
+    /// direction ([`WhereTwoLoopsMeet`]).
     ///
     /// **Named by [`where_two_halves_meet`]'s three surfaces**, so that the
-    /// face on either pipe names them alike: `which` 6 for where they meet, and
+    /// face on either surface names them alike: `which` 6 for where they meet, and
     /// for the middle of a loop 7 where the facing of the flat surface that
     /// picks it out is [`written_the_one_way`] and 8 where it is not. The two
     /// loops are picked out by one flat surface faced both ways, so the two
@@ -2758,7 +2770,7 @@ impl<'f> Arrangement<'f> {
     ///
     /// If a loop is not picked out by one flat surface, or that surface's
     /// facing lies square to the thin pipe: `intersect` faces it along the
-    /// thin pipe's way across the fat one.
+    /// thin pipe's way across the fat one, or along the pipe a ball rests in.
     fn place_where_two_loops_meet(
         &mut self,
         first: usize,
@@ -2775,11 +2787,11 @@ impl<'f> Arrangement<'f> {
         }
         for crossing in [first, second] {
             let [picker] = self.crossings[crossing].picked_by()[..] else {
-                unreachable!("each of two loops of two pipes is picked out by one flat surface")
+                unreachable!("each of two loops of one pair is picked out by one flat surface")
             };
             let facing = picker
                 .facing_of_a_flat()
-                .expect("each of two loops of two pipes is picked out by a flat surface")
+                .expect("each of two loops of one pair is picked out by a flat surface")
                 .components()
                 .map(|number| number + 0.0);
             let ahead = match exactly_dotted(facing, meet.thin_way)
@@ -15814,16 +15826,19 @@ fn the_two_loops_of_two_pipes_may_meet(
     !apart
 }
 
-/// Where the two loops of a thin pipe resting on the inside of a fat one
-/// meet, and a place half way round each ([`where_two_loops_of_two_pipes_meet`]).
+/// Where the two loops of a thin pipe resting on the inside of a fat one, or
+/// of a ball resting on the far inside of a pipe, meet, and a place half way
+/// round each ([`where_two_loops_of_two_pipes_meet`],
+/// [`where_two_loops_of_a_ball_and_a_pipe_meet`]).
 struct WhereTwoLoopsMeet {
     /// Where the walls touch, which both loops pass through.
     at: PredicatePoint,
     /// A place on each loop across the thin pipe from `at`: the first behind
-    /// the place on the thin axis nearest the fat one along `thin_way`, the
-    /// second ahead of it.
+    /// the place on the thin axis nearest the fat one, or the ball's centre,
+    /// along `thin_way`, the second ahead of it.
     middles: [PredicatePoint; 2],
-    /// The thin pipe's direction, exactly as stored.
+    /// The thin pipe's direction, exactly as stored: of the thinner of two
+    /// pipes, or of the pipe a ball rests in.
     thin_way: [f64; 3],
 }
 
@@ -15933,6 +15948,109 @@ fn where_two_loops_of_two_pipes_meet(
         middles,
         thin_way,
     })
+}
+
+/// Where the two loops a ball and a pipe cross in meet, and a place half way
+/// round each, for a ball resting on the far inside of the pipe; `None` where
+/// the two runs are not two loops of a ball and a pipe or the ball does not
+/// rest so, which takes the loops apart.
+///
+/// **It rests so where `A = W(R − r)²`**, for `A = |(c − o) × w|²` and
+/// `W = w·w`, with `c` the ball's centre and `o` and `w` the pipe's axis
+/// origin and direction: `√(A/W)` is how far the centre is off the axis, and
+/// the ball reaches the wall across the axis where that is `R − r`. Asked in
+/// intervals first, so that loops proved apart are let by at any scale, and
+/// then exactly, so that it says meet only where they do; `intersect` asked
+/// the same before it named the two loops as meeting.
+///
+/// **Where they meet** is `F − r·ê`, for `F` the foot of the centre on the
+/// axis and `ê = (c − F)/(R − r)` the way from the axis to the centre: the
+/// place on the wall across the axis from the centre, `R` from it. **Half way
+/// round** each loop is where the line of the pipe on the centre's side,
+/// `F + r·ê + s·ŵ`, meets the ball: `(2r − R)² + s² = R²`, which is
+/// `s = ±2√(r(R − r))`. Viviani's figure of eight, the ball of radius 2 at the
+/// origin and the pipe of radius 1 up `z` through `(1, 0, 0)`, meets at
+/// `(2, 0, 0)`, with its middles at `(0, 0, ±2)`.
+///
+/// # Errors
+///
+/// [`ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`](rcad_geom::Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+/// where the intervals cannot tell and a product rounds, so nothing says
+/// whether the loops meet.
+fn where_two_loops_of_a_ball_and_a_pipe_meet(
+    surface: &Surface,
+    partner: &Surface,
+    runs: [&NamedRun; 2],
+) -> Result<Option<WhereTwoLoopsMeet>> {
+    let ((Surface::Sphere(ball), Surface::Cylinder(pipe))
+    | (Surface::Cylinder(pipe), Surface::Sphere(ball))) = (surface, partner)
+    else {
+        return Ok(None);
+    };
+    let picked_out = |run: &NamedRun| matches!(run.run(), EdgeRun::PartOfWhereItCrosses { .. });
+    if pipe.radius() >= ball.radius() || !runs.into_iter().all(picked_out) {
+        return Ok(None);
+    }
+    let centre = ball.centre().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let way = pipe.axis().direction().components();
+    let [c, o, w] = [centre, origin, way].map(|point| point.map(Interval::exactly));
+    let off = [0, 1, 2].map(|axis| c[axis] - o[axis]);
+    let sideways = cross_of_intervals(off, w);
+    let squared_way = dot_of(w, w);
+    let room = Interval::exactly(ball.radius()) - Interval::exactly(pipe.radius());
+    let gap = dot_of(sideways, sideways) - squared_way * room * room;
+    if gap.lo() > 0.0 || gap.hi() < 0.0 {
+        return Ok(None);
+    }
+
+    let rounds =
+        || -> Error { rcad_geom::Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo.into() };
+    let off_exactly = [0, 1, 2].map(|axis| exactly_added(&[centre[axis]], &[-origin[axis]]));
+    let mut sideways_squared = Vec::new();
+    for (i, j) in [(1, 2), (2, 0), (0, 1)] {
+        let side = exactly_added(
+            &exactly_multiplied(&off_exactly[i], &[way[j]]).ok_or_else(rounds)?,
+            &negated(&exactly_multiplied(&off_exactly[j], &[way[i]]).ok_or_else(rounds)?),
+        );
+        sideways_squared = exactly_added(
+            &sideways_squared,
+            &exactly_multiplied(&side, &side).ok_or_else(rounds)?,
+        );
+    }
+    let room_exactly = exactly_added(&[ball.radius()], &[-pipe.radius()]);
+    let reach = exactly_multiplied(
+        &exactly_multiplied(&room_exactly, &room_exactly).ok_or_else(rounds)?,
+        &exactly_dotted(way, way).ok_or_else(rounds)?,
+    )
+    .ok_or_else(rounds)?;
+    if expansion_sign(&exactly_added(&sideways_squared, &negated(&reach))) != Decision::Zero {
+        return Ok(None);
+    }
+    if room.contains_zero() || squared_way.contains_zero() {
+        return Err(rounds());
+    }
+
+    let along_the_axis = quotient_of(dot_of(off, w), squared_way);
+    let foot = [0, 1, 2].map(|axis| o[axis] + along_the_axis * w[axis]);
+    let towards_the_centre = [0, 1, 2].map(|axis| quotient_of(c[axis] - foot[axis], room));
+    let skin = Interval::exactly(pipe.radius());
+    let at = [0, 1, 2].map(|axis| foot[axis] - skin * towards_the_centre[axis]);
+    let far_side = [0, 1, 2].map(|axis| foot[axis] + skin * towards_the_centre[axis]);
+    let step = quotient_of(
+        Interval::exactly(2.0) * root_enclosing(skin * room),
+        root_enclosing(squared_way),
+    );
+    let middles = [Interval::exactly(-1.0), Interval::exactly(1.0)].map(|side| {
+        as_exact_as_it_is(PredicatePoint::Constructed(
+            [0, 1, 2].map(|axis| far_side[axis] + side * step * w[axis]),
+        ))
+    });
+    Ok(Some(WhereTwoLoopsMeet {
+        at: as_exact_as_it_is(PredicatePoint::Constructed(at)),
+        middles,
+        thin_way: way,
+    }))
 }
 
 /// How points along a circle a ring shares with a ball, a pipe or a cone on
@@ -20784,6 +20902,59 @@ mod curved {
                 }
             }
         }
+    }
+
+    /// Viviani's figure of eight, the ball of radius 2 at the origin and the
+    /// bar of radius 1 up `z` through `(1, 0, 0)`, is two loops that meet at
+    /// `(2, 0, 0)`, where the walls touch, and reach `(0, 0, ±2)` half way
+    /// round, exactly, whichever of the two is the face's surface. The same
+    /// bar moved to `x = 1/2` crosses the ball in two loops apart, and they
+    /// get no node.
+    #[test]
+    fn a_ball_resting_on_the_far_inside_of_a_pipe_meets_it_where_the_walls_touch() {
+        use rcad_geom::{Cylinder, Sphere, intersect};
+
+        let ball = Surface::Sphere(Sphere::new(Point::origin(), 2.0).expect("a ball of radius 2"));
+        let bar_at = |x: f64| {
+            let axis = Axis::new(Point::new(x, 0.0, -3.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a direction with length");
+            Surface::Cylinder(Cylinder::new(axis, 1.0).expect("a pipe of radius 1"))
+        };
+        let two_loops = |one: &Surface, other: &Surface| {
+            let mut log = ProvenanceLog::new();
+            let SurfaceMeet::Curves(runs) = intersect(one, other, &Policy::certified(), &mut log)
+                .expect("a ball and a pipe are named")
+            else {
+                panic!("a ball and a pipe through it cross in curves");
+            };
+            assert_eq!(runs.len(), 2, "two loops: {runs:?}");
+            runs
+        };
+
+        let touching = bar_at(1.0);
+        for (one, other) in [(ball, touching), (touching, ball)] {
+            let runs = two_loops(&one, &other);
+            let meet = super::where_two_loops_of_a_ball_and_a_pipe_meet(
+                &one,
+                &other,
+                [&runs[0], &runs[1]],
+            )
+            .expect("every product here is exact")
+            .expect("the two loops meet");
+            assert_eq!(meet.at.exact_coordinates(), Some([2.0, 0.0, 0.0]));
+            assert_eq!(
+                meet.middles.map(PredicatePoint::exact_coordinates),
+                [Some([0.0, 0.0, -2.0]), Some([0.0, 0.0, 2.0])]
+            );
+            assert_eq!(meet.thin_way, [0.0, 0.0, 1.0]);
+        }
+
+        let through = bar_at(0.5);
+        let runs = two_loops(&ball, &through);
+        let apart =
+            super::where_two_loops_of_a_ball_and_a_pipe_meet(&ball, &through, [&runs[0], &runs[1]])
+                .expect("the intervals prove the loops apart");
+        assert!(apart.is_none(), "two loops apart get no node");
     }
 }
 
