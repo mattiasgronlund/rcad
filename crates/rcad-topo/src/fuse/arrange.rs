@@ -2124,7 +2124,8 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Leave out every cut whose surface keeps the whole box round the face on
-    /// one side of it, before any meet is placed.
+    /// one side of it, or whose crossing lies in a plane clear of the face,
+    /// before any meet is placed.
     ///
     /// **Such a cut draws nothing on the face.** Every point of its crossing is
     /// on its surface, and that surface was just proved to miss every point of
@@ -2159,23 +2160,44 @@ impl<'f> Arrangement<'f> {
     /// one of those is a curve or a point off the face, and none of them is
     /// part of a piece.
     ///
+    /// **A crossing that lies in a plane clear of a side every face on the
+    /// face's own surface lies in is left out too** (Q2648,
+    /// [`lies_in_a_plane_clear_of`]), on the same grounds: no point of it is on
+    /// the face. The box cannot say so for a ring's face, whose box is the
+    /// whole ring's: a half ring's skin lies above its flat face, and the plane
+    /// the whole ring would rest on touches the skin's surface round a circle
+    /// below it. Kept, that circle was ordered along, where the plane and the
+    /// ring are tangent and no way along follows from them, and every fuse of a
+    /// half ring with a face on that plane was refused.
+    ///
     /// **A crossing a boundary edge runs along, or one a corner is on, is never
     /// left out.** The first is the rim. The second passes through a corner of
     /// the face, by the model's word or by [`Arrangement::passes_through`]'s,
     /// and the corner is in the box, so its surface is proved clear of the box
     /// only where two answers disagree, which is not this function's to settle.
     fn leave_out_the_cuts_clear_of_the_face(&mut self) {
-        let Some(anywhere_on_the_face) = self.face.bounds.as_a_point_anywhere_inside() else {
-            return;
-        };
+        let anywhere_on_the_face = self.face.bounds.as_a_point_anywhere_inside();
+        let own: SmallVec<[ASideOfAPlane; 2]> =
+            self.the_sides_its_faces_lie_in(self.surface).collect();
         for (crossing, kept) in self.crossings_never_left_out().into_iter().enumerate() {
             if kept {
                 continue;
             }
-            match side_of_surface(&self.crossings[crossing].partner, anywhere_on_the_face) {
-                Decision::Pos | Decision::Neg => self.crossings[crossing].reaches_the_face = false,
-                Decision::Zero | Decision::Undecidable { .. } => {}
-                other => panic!("a decision nothing here knows: {other:?}"),
+            let partner = self.crossings[crossing].partner;
+            let clear_of_the_box =
+                anywhere_on_the_face.is_some_and(|anywhere| {
+                    match side_of_surface(&partner, anywhere) {
+                        Decision::Pos | Decision::Neg => true,
+                        Decision::Zero | Decision::Undecidable { .. } => false,
+                        other => panic!("a decision nothing here knows: {other:?}"),
+                    }
+                });
+            if clear_of_the_box
+                || own
+                    .iter()
+                    .any(|&side| lies_in_a_plane_clear_of([self.surface, partner], side))
+            {
+                self.crossings[crossing].reaches_the_face = false;
             }
         }
     }
@@ -2266,6 +2288,20 @@ impl<'f> Arrangement<'f> {
     /// bar's rim was refused until one wall mirrored the three (Q2196), and
     /// drawn once answered, it put two corners on the rim where nothing of the
     /// pin is.
+    ///
+    /// **So is a crossing no pair holds back** (Q2648): once every pair is
+    /// placed, each crossing no face reaches and nothing placed is on is left
+    /// undrawn, whether or not a pair of it was asked about, unless the rim
+    /// runs along it or a corner of the face is on it. A half ring as a bead on
+    /// a round plate from `z = −1` is the shape: the plate's bottom crosses the
+    /// skin's surface round a circle that meets nothing on the bottom, and no
+    /// face of the ring reaches it, since the skin lies above the ring's flat
+    /// face. Drawn, it had every fuse of the two refused `Undecidable` on a
+    /// point inside a piece of the bottom, at `(4, 0, −1)` on the circle. It is
+    /// left out after the meets and not before them, as a pair set aside is:
+    /// with a half bar's floor on that plane, the circle meets the bar's cut
+    /// face on the rim, and a Q2644 probe that dropped it before the meets had
+    /// the union refused as not a manifold.
     ///
     /// **Here a corner of the face on the crossing does not keep it** (Q2246).
     /// The corner is a vertex of the face whether or not the crossing is drawn,
@@ -2388,14 +2424,17 @@ impl<'f> Arrangement<'f> {
             return Err(gave_up_on_it.into());
         }
         let mut left_out = left_out_where_it_refuses;
-        for &(first, second, _) in &set_aside {
-            for crossing in [first, second] {
-                if !left_out.contains(&crossing)
-                    && self.no_face_reaches(crossing, &along_the_rim, &mut known_unreached, log)
-                    && !self.something_placed_is_on(&[crossing], &folded_into_a_corner)
-                {
-                    left_out.push(crossing);
-                }
+        for (crossing, &kept) in never_left_out.iter().enumerate() {
+            let of_a_pair_set_aside = set_aside
+                .iter()
+                .any(|&(first, second, _)| crossing == first || crossing == second);
+            if self.crossings[crossing].reaches_the_face
+                && (of_a_pair_set_aside || !kept)
+                && !left_out.contains(&crossing)
+                && !self.something_placed_is_on(&[crossing], &folded_into_a_corner)
+                && self.no_face_reaches(crossing, &along_the_rim, &mut known_unreached, log)
+            {
+                left_out.push(crossing);
             }
         }
         for (first, second, meet) in set_aside {
@@ -3353,6 +3392,9 @@ impl<'f> Arrangement<'f> {
 
     /// Whether every point of `crossing` is strictly past `side`'s plane.
     ///
+    /// - **A plane parallel to `side`'s and clear of it**, as one of the two
+    ///   surfaces, holds the whole crossing past it
+    ///   ([`lies_in_a_plane_clear_of`]).
     /// - **A flat surface and a pipe** cross in one curve, held whole by the
     ///   box [`a_box_round_where_a_flat_surface_cuts_a_pipe`] gives, so a sign
     ///   over that box is the sign at every point of the crossing.
@@ -3371,6 +3413,9 @@ impl<'f> Arrangement<'f> {
         log: &mut ProvenanceLog,
     ) -> bool {
         let partner = self.crossings[crossing].partner;
+        if lies_in_a_plane_clear_of([self.surface, partner], side) {
+            return true;
+        }
         let past = |point: PredicatePoint| side.plane.side_of_point(point) == side.past_it();
         if let (Surface::Plane(flat), Surface::Cylinder(pipe))
         | (Surface::Cylinder(pipe), Surface::Plane(flat)) = (&self.surface, &partner)
@@ -9054,9 +9099,11 @@ impl<'f> Arrangement<'f> {
     /// curve that does not close runs on past its last node, but to come
     /// inside the face it crosses the rim, and that is a node
     /// ([`Arrangement::drop_the_lumps_of_straight_cuts_alone`] rests on the
-    /// same). Each crossing left out is either clear of the face's box or has
-    /// every node of it clear of the box
-    /// ([`Arrangement::work_out_how_each_crossing_runs`]), and so not inside
+    /// same). Each crossing left out is clear of the face's box, or lies in a
+    /// plane clear of a side every face on the face's surface lies in
+    /// ([`Arrangement::leave_out_the_cuts_clear_of_the_face`]), or has every
+    /// node of it clear of the box
+    /// ([`Arrangement::work_out_how_each_crossing_runs`]), and so is not inside
     /// the face, **or is one of the cuts that reach only the face's boundary**
     /// ([`Arrangement::leave_out_the_cuts_that_reach_only_the_boundary`]),
     /// **or one no face of its cut reaches**
@@ -15104,6 +15151,8 @@ fn the_axis_of_a_cone_or_a_pipe(round: &Surface) -> Option<Axis> {
 /// both, lies wholly past `side`'s plane, as
 /// [`Arrangement::lies_wholly_past`] asks it of a crossing.
 ///
+/// - **A plane parallel to `side`'s and clear of it**, as one of the two,
+///   holds the whole curve past it ([`lies_in_a_plane_clear_of`]).
 /// - **A flat surface and a pipe** cross in one curve, held whole by
 ///   [`a_box_round_where_a_flat_surface_cuts_a_pipe`].
 /// - **Two pipes** can cross in two loops. Where the plane provably shares no
@@ -15116,6 +15165,9 @@ fn a_curve_of_two_lies_wholly_past(
     places: &[PredicatePoint],
     side: ASideOfAPlane,
 ) -> bool {
+    if lies_in_a_plane_clear_of(two, side) {
+        return true;
+    }
     let past = |point: PredicatePoint| side.plane.side_of_point(point) == side.past_it();
     if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
     | [Surface::Cylinder(pipe), Surface::Plane(flat)] = two
@@ -15128,6 +15180,32 @@ fn a_curve_of_two_lies_wholly_past(
     };
     a_cut_of_a_pipe_is_clear_of_the_third([two[0], two[1], Surface::Plane(side.plane)])
         && places.iter().all(|&place| past(place))
+}
+
+/// Whether one of `two` is a plane that shares no point with `side`, so that
+/// the curve the two cross in, which lies in that plane, is strictly past
+/// `side`'s plane at every point.
+///
+/// The plane misses `side` where one of its own closed sides does
+/// ([`two_sides_share_no_point`]), and that is decided from the numbers as
+/// stored, so it is exact. The half ring is the shape (Q2648): a plane the
+/// whole ring would rest on crosses the ring's skin round a circle below the
+/// half ring's flat face, which the skin lies above.
+fn lies_in_a_plane_clear_of(two: [Surface; 2], side: ASideOfAPlane) -> bool {
+    two.iter().any(|surface| {
+        let Surface::Plane(flat) = surface else {
+            return false;
+        };
+        [true, false].into_iter().any(|behind| {
+            two_sides_share_no_point(
+                side,
+                ASideOfAPlane {
+                    plane: *flat,
+                    behind,
+                },
+            )
+        })
+    })
 }
 
 /// Whether no point is on both closed sides: their planes are written with

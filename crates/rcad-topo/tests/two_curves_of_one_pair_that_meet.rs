@@ -28,7 +28,7 @@
 
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, Isometry, Plane, Point, Sphere, Surface, SurfaceMeet, Torus,
-    Vector, WhereFollowingACrossingGaveUp, intersect,
+    Vector, intersect,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
@@ -364,31 +364,59 @@ fn a_half_ring_cut_by_a_round_plate_crosses_it_in_two_circles_and_every_fuse_ans
 /// with its floor raised to `z = −1`. The floor is still clear of the half
 /// ring, which lies above `z = 0`, but it is the plane the whole ring would
 /// rest on, and it touches the ring's torus round the circle of radius 4 at
-/// `z = −1`. That circle lies on no face of the half ring, yet every fuse is
-/// refused ordering points along it.
+/// `z = −1`. That circle lies on no face of the half ring. Every fuse was
+/// refused ordering points along it, where the plane and the torus are
+/// tangent and no way along follows from them, until Q2648 left it off.
+///
+/// The half bar is `300π`; the rest is as with the floor at `z = −2`.
 #[test]
-fn a_half_bar_whose_floor_the_whole_ring_would_rest_on_is_refused_ordering_that_circle() {
-    for (rule, first_first) in six_fuses() {
-        let mut model = a_model();
-        let said = fuse(
-            &mut model,
-            |model| a_half_ring_and_a_half_bar_with_its_floor_at(model, -1.0),
-            rule,
-            first_first,
-        );
-        assert!(
-            matches!(
-                said,
-                Err(rcad_topo::Error::Geometry(
-                    rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
-                        at: WhereFollowingACrossingGaveUp::OrderingTheCircleAPlaneRestsOnARingAlong,
-                        ..
-                    }
-                ))
-            ),
-            "{rule:?} (ring first: {first_first}): {said:?}"
-        );
-    }
+fn a_half_bar_whose_floor_the_whole_ring_would_rest_on_touches_it_round_a_circle_no_face_reaches_and_every_fuse_answers()
+ {
+    every_fuse_answers(
+        |model| a_half_ring_and_a_half_bar_with_its_floor_at(model, -1.0),
+        [4.0 * PI * PI, 300.0 * PI, 2.0 * PI * PI],
+        [&[6], &[4], &[4], &[6]],
+    );
+}
+
+/// The top half of a ring of 4 round a tube of 1 about `z`, as a bead on a
+/// round plate of radius 10 from `z = −1` to 0: the ring's flat face lies on
+/// the plate's top, and the plate's bottom is the plane the whole ring would
+/// rest on, touching its torus round the circle of radius 4 at `z = −1`, on
+/// no face of the half ring. Every fuse was refused `Undecidable` on a point
+/// inside a piece of the plate's bottom at `(4, 0, −1)` until Q2648 left that
+/// circle off.
+///
+/// They share the flat face and no volume.
+#[test]
+fn a_half_ring_bead_on_a_plate_as_thick_as_its_tube_shares_its_flat_face_and_every_fuse_answers() {
+    every_fuse_answers(
+        |model| a_half_ring_bead_on_a_plate_up_to(model, 0.0),
+        [4.0 * PI * PI, 100.0 * PI, 0.0],
+        [&[5], &[], &[2], &[3]],
+    );
+}
+
+/// The bead of
+/// `a_half_ring_bead_on_a_plate_as_thick_as_its_tube_shares_its_flat_face_and_every_fuse_answers`
+/// sunk in a plate whose top is at `z = 1/2`. The top cuts the ring in two
+/// circles, as in
+/// `a_half_ring_cut_by_a_round_plate_crosses_it_in_two_circles_and_every_fuse_answers`,
+/// and the bottom touches the torus round the circle at `z = −1`. Every fuse
+/// was refused telling the cells of the bottom apart until Q2648 left that
+/// circle off.
+///
+/// What they share is the tube's cross-section below `z = 1/2` swept round the
+/// ring, `4π²/3 + 2π√3`.
+#[test]
+fn a_half_ring_bead_sunk_in_a_plate_whose_bottom_the_ring_would_rest_on_crosses_its_top_in_two_circles_and_every_fuse_answers()
+ {
+    let shared = 4.0 * PI * PI / 3.0 + 2.0 * PI * 3f64.sqrt();
+    every_fuse_answers(
+        |model| a_half_ring_bead_on_a_plate_up_to(model, 0.5),
+        [4.0 * PI * PI, 150.0 * PI, shared],
+        [&[5], &[4], &[2], &[7]],
+    );
 }
 
 /// A plane through a ring's axis cuts the tube in two circles, `2(R − r)`
@@ -806,6 +834,14 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one(model: &mut Model) -> [SolidK
 fn a_half_ring_cut_by_a_round_plate(model: &mut Model) -> [SolidKey; 2] {
     let ring = rings::the_top_half_of_a_ring(model, 4.0, 1.0, false).expect("a half ring");
     [ring, a_bar(model, 6.0, [0.0, 0.0, -2.0], 2.5)]
+}
+
+/// The top half of a ring of 4 round a tube of 1 about `z`, and a round plate
+/// of radius 10 about `z` from `z = −1`, where the whole ring would rest, up
+/// to `top`.
+fn a_half_ring_bead_on_a_plate_up_to(model: &mut Model, top: f64) -> [SolidKey; 2] {
+    let ring = rings::the_top_half_of_a_ring(model, 4.0, 1.0, false).expect("a half ring");
+    [ring, a_bar(model, 10.0, [0.0, 0.0, -1.0], top + 1.0)]
 }
 
 /// The four balls with a bar through them off their axis, each with the bar's
