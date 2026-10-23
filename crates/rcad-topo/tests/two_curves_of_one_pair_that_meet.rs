@@ -734,7 +734,7 @@ fn answers(
                 &policy,
                 &mut ProvenanceLog::new(),
             )
-            .expect("the answer measures");
+            .unwrap_or_else(|why| panic!("{what}: the answer does not measure: {why:?}"));
         measured += measure.volume();
         error += measure.volume_error();
     }
