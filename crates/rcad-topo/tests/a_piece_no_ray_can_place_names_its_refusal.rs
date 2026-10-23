@@ -190,7 +190,7 @@ fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() 
     let (ring, tube) = (4.0, 1.0);
     let one_bend = PI * PI * ring * tube * tube / 2.0;
     let a_radian_of_bend = PI * ring * tube * tube;
-    for turn in [1e-9, 1e-13, 3e-14, 1e-14, 2.0 * PI] {
+    for turn in [1e-9, 1e-12, 1e-13, 3e-14, 1e-14, 2.0 * PI] {
         let wedge = a_radian_of_bend * turn.sin().abs();
         for rule in EVERY_RULE {
             for the_first_first in [true, false] {
@@ -209,16 +209,6 @@ fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() 
                 };
                 each_within_its_error(measured, &[expected], &what);
             }
-        }
-    }
-    for rule in EVERY_RULE {
-        for the_first_first in [true, false] {
-            let what = format!("1e-12 of a turn, {rule:?}, the first first {the_first_first}");
-            let mut model = a_model();
-            let first = a_quarter_bend(&mut model, ring, tube);
-            let placed = a_quarter_bend_placed_round_by(&mut model, ring, tube, 1e-12);
-            let fused = fused_or_refused(&mut model, first, placed, rule, the_first_first);
-            expect(fused, Some("side of torus"), &what);
         }
     }
 }
