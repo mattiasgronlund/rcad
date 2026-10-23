@@ -173,9 +173,11 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when a crossing comes in two
 /// pieces and no half-space that `f64` can write down provably holds them apart.
 ///
-/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] when the two
-/// surfaces are tangent along the curve rather than at a point, so what they
-/// cross in is one curve that runs through itself.
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] for a ball
+/// resting on the inside of a pipe from the far side, tangent to it at a point
+/// of the curve they cross in, so what they cross in is one curve that runs
+/// through itself there. A thin pipe resting on the inside of a wider one is
+/// named instead, as two loops that meet where the walls touch.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against a
 /// pipe, a ball or a second cone that does not share its axis, and for a ball on
@@ -1757,24 +1759,28 @@ fn where_two_leaning_pipes_cross(
 
     // r₂ − r₁ − δ. Above zero the second pipe takes the whole of the first's
     // cross-section and what is left is two loops.
-    // Zero with the two widths equal is `δ` zero: the axes meet.
+    // Zero with the two widths equal is `δ` zero: the axes meet. Zero with
+    // them unequal is the first pipe resting on the inside of the second.
     match ask(&reach(-1.0, 1.0, -1.0), Measures::Length, &at, policy, log)? {
         Decision::Pos => return two_loops_either_side_of_a_pipe(one, other),
         Decision::Zero if one.radius() == other.radius() => {
             return four_half_ellipses_where_two_pipes_of_one_width_meet(one, other);
         }
-        Decision::Zero => return Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo),
+        Decision::Zero => {
+            return two_loops_that_meet_where_a_thin_pipe_rests_inside_a_fat_one(one, other);
+        }
         Decision::Neg => (),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
 
     // r₂ − r₁ + δ, which is the row above with the two pipes the other way
-    // round and the sign of the gap flipped.
+    // round and the sign of the gap flipped. Two pipes of one width never
+    // reach its zero, which is `δ` zero again and was answered above.
     match ask(&reach(-1.0, 1.0, 1.0), Measures::Length, &at, policy, log)? {
         Decision::Pos => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
             EdgeRun::RightRoundWhereItsFacesCross,
         )?])),
-        Decision::Zero => Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo),
+        Decision::Zero => two_loops_that_meet_where_a_thin_pipe_rests_inside_a_fat_one(other, one),
         Decision::Neg => two_loops_either_side_of_a_pipe(other, one),
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
@@ -3036,6 +3042,113 @@ fn how_a_picking_half_space_lies_across_an_axis(
         Interval::exactly(leaning_into),
         Interval::exactly(leaning_away.hi()),
     )
+}
+
+/// Two closed loops of a leaning-pipe crossing that meet at one point, where a
+/// thin pipe rests on the inside of a fat one, told apart by a flat surface
+/// through the fat pipe's axis that passes exactly through that point.
+///
+/// # Where the loops meet
+///
+/// This is [`two_loops_either_side_of_a_pipe`] with `r_fat = r_thin + δ`. Every
+/// point of the crossing is at least `√(r_fat² − (δ + r_thin)²)` from the flat
+/// surface through the fat axis square to the thin pipe's way across it, and
+/// that is nought now. The surface cuts the fat pipe in two lines along its
+/// axis, `r_fat` either side, and the thin pipe reaches the one on its own side
+/// at one point and the other not at all: the foot of the common perpendicular,
+/// `o + s·ŵ + r_fat·n̂` with `n̂` along `t × w`, where the walls touch. So each
+/// loop is on its own side of the surface but for that point, which both pass
+/// through. The fat pipe of radius 2 up `z` and the thin one of radius 1 along
+/// `x` at `y = 1` touch at `(0, 2, 0)`: the thin pipe's section at `θ` round
+/// its axis reaches the fat wall at `x² = (1 − cos θ)(3 + cos θ)`, which near
+/// `θ = 0` is `x = ±√2·θ`, so the loops cross there like an X, each turning
+/// from one stroke to the other
+/// (`a_thin_pipe_resting_on_the_inside_of_a_fat_one_leaves_two_loops_that_meet_where_they_touch`).
+///
+/// # What has to be exact
+///
+/// A picker is closed, so each holds its own loop and the touching point, but
+/// only where its surface passes exactly through that point: a surface a
+/// rounding off holds a stub of the other loop, or misses its own loop's
+/// corner, as `docs/decisions.md` §443 found for the four half ellipses
+/// [`four_half_ellipses_where_two_pipes_of_one_width_meet`] names. So the
+/// facing is asked exactly to be square to `w` and to lie in the flat of `t`
+/// and `w`, which makes it square to `n̂` too, and the surface passes exactly
+/// through `o`. Then it holds the whole line `o + s·ŵ + r_fat·n̂`, and the
+/// touching point with it. A facing that passes both checks is the thin pipe's
+/// way across the fat one, so unlike in [`two_loops_either_side_of_a_pipe`]
+/// there is no lean to charge, and no margin to ask: the loops reach the
+/// surface by construction.
+///
+/// The facings tried are `t` itself, which passes wherever the two axes are
+/// square; the way across worked out in `f64`, `t·‖w‖² − w·(t·w)`; and `w`
+/// crossed with `x`, `y` and `z`, which are square to `w` whatever it is
+/// ([`normals_exactly_square_to`]). Each is turned to read positive along the
+/// way across, so the first loop is the one the thin pipe heads into. The
+/// surface is a [`HalfSpace`] where one of them passes exactly through `o`,
+/// and otherwise a [`HalfSpaceThroughAPoint`] through `o` facing the first.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when no facing tried is
+/// exactly square to `w` and in the flat of `t` and `w`. A **gap** (§16.10):
+/// the two loops are there and the true surface tells them apart, and what runs
+/// out is a facing written in `f64` along it. Whatever
+/// [`HalfSpace::through_a_point_facing`] and [`HalfSpaceThroughAPoint::new`]
+/// refuse.
+fn two_loops_that_meet_where_a_thin_pipe_rests_inside_a_fat_one(
+    thin: &Cylinder,
+    fat: &Cylinder,
+) -> Result<SurfaceMeet> {
+    let (thin_way, fat_way) = (thin.axis().direction(), fat.axis().direction());
+    let across = thin_way * fat_way.length_squared() - fat_way * thin_way.dot(fat_way);
+    let [first, second, third] = normals_exactly_square_to(fat_way);
+    let facings: Vec<Vector> = [thin_way, across, first, second, third]
+        .into_iter()
+        .filter(|facing| {
+            *facing != Vector::zero()
+                && Exact::dot_of(facing.components(), fat_way.components())
+                    .is_some_and(|reach| reach.sign() == Decision::Zero)
+                && it_lies_exactly_in_the_flat_of(*facing, thin_way, fat_way)
+        })
+        .map(|facing| {
+            if facing.dot(across) < 0.0 {
+                -facing
+            } else {
+                facing
+            }
+        })
+        .collect();
+    let origin = fat.axis().origin();
+    let picker = 'found: {
+        for &facing in &facings {
+            let surface = HalfSpace::through_a_point_facing(origin, facing)?;
+            if it_passes_exactly_through(&surface, origin) {
+                break 'found Picker::from(surface);
+            }
+        }
+        let Some(&facing) = facings.first() else {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        };
+        Picker::from(HalfSpaceThroughAPoint::new(origin, facing)?)
+    };
+    let other_side = picker
+        .reversed()
+        .expect("the picker is flat, so it has another side");
+
+    let and = Surface::Cylinder(*fat);
+    Ok(SurfaceMeet::Curves(
+        [picker, other_side]
+            .into_iter()
+            .map(|picker| {
+                NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+                    and,
+                    picked_by: smallvec![picker],
+                })
+                .expect("picked_by always holds the one flat picker just built")
+            })
+            .collect(),
+    ))
 }
 
 /// The one point two leaning pipes resting against each other share, as the box
@@ -7289,6 +7402,49 @@ mod tests {
             })
             .collect();
         assert_eq!(sides, [Decision::Pos, Decision::Neg]);
+    }
+
+    /// A thin pipe resting on the inside of a fat one: the two loops of
+    /// `a_thin_pipe_run_through_a_fat_one_leaves_two_closed_loops` pushed
+    /// together until they meet, at the one point where the walls touch.
+    ///
+    /// The pipe of radius 2 up `z` and the pipe of radius 1 along `x` at
+    /// `y = 1` touch at `(0, 2, 0)`. Each loop is picked by one flat surface
+    /// through the fat pipe's axis, and the surface passes exactly through the
+    /// touching point, so both loops hold it. Away from it the loops reach out
+    /// to `(±2, 0, 0)`, one either side.
+    #[test]
+    fn a_thin_pipe_resting_on_the_inside_of_a_fat_one_leaves_two_loops_that_meet_where_they_touch()
+    {
+        let thin = a_pipe([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 1.0);
+        let fat = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, -2.0], 2.0);
+        for (one, other) in [(&thin, &fat), (&fat, &thin)] {
+            let mut log = ProvenanceLog::new();
+            let SurfaceMeet::Curves(runs) = intersect(one, other, &Policy::certified(), &mut log)
+                .expect("two loops that meet are named")
+            else {
+                panic!("a thin pipe resting inside a fat one crosses it in curves");
+            };
+            assert!(log.is_empty(), "nothing here needs approximating: {log:?}");
+            assert_eq!(runs.len(), 2, "two loops: {runs:?}");
+            let sides_of = |point: [f64; 3]| -> Vec<Decision> {
+                runs.iter()
+                    .map(|run| {
+                        let EdgeRun::PartOfWhereItCrosses { and, picked_by } = run.run() else {
+                            panic!("one of two loops is a piece of the crossing: {run:?}");
+                        };
+                        assert_eq!(and, &fat, "the picked run names the pipe it goes round");
+                        let [picker] = picked_by[..] else {
+                            panic!("one flat surface picks a loop: {picked_by:?}");
+                        };
+                        picker.side_of_point(PredicatePoint::from(point))
+                    })
+                    .collect()
+            };
+            assert_eq!(sides_of([0.0, 2.0, 0.0]), [Decision::Zero, Decision::Zero]);
+            assert_eq!(sides_of([2.0, 0.0, 0.0]), [Decision::Pos, Decision::Neg]);
+            assert_eq!(sides_of([-2.0, 0.0, 0.0]), [Decision::Neg, Decision::Pos]);
+        }
     }
 
     /// Two pipes of the same thickness leaning across each other, well clear and

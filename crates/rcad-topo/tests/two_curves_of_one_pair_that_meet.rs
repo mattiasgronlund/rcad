@@ -16,11 +16,13 @@
 //! here reaches its meet only at its tangent limit, and the tests below show
 //! what the kernel does there: `intersect` names one curve where there were
 //! two, refuses the shape by name before any arrangement, or cannot make the
-//! surface at all. The one surface with a point and no normal is a cone, at
-//! its apex, and that is the node §347.1 built. Two pipes of one radius whose
-//! axes meet are tangent at two points, and their crossing reaches them
-//! without being pushed there: that is the Steinmetz cross, which gets its
-//! nodes, and every fuse of it answers.
+//! surface at all. A thin pipe resting on the inside of a thick one is the one
+//! more: `intersect` names its two loops, and the arrangement, which has no
+//! node for where they meet, refuses them. The one surface with a point and
+//! no normal is a cone, at its apex, and that is the node §347.1 built. Two
+//! pipes of one radius whose axes meet are tangent at two points, and their
+//! crossing reaches them without being pushed there: that is the Steinmetz
+//! cross, which gets its nodes, and every fuse of it answers.
 //!
 //! The fuses run three rules both ways round, certified, in a model of 100 mm.
 
@@ -123,8 +125,9 @@ fn a_block_beside_a_cones_apex_cuts_both_nappes_and_every_fuse_answers() {
 /// A bar of radius 2 up `z` from −2 to 2, and a bar of radius 1 along `x` from
 /// −4 to 4 at `y = 1/2`, `z = 0`. The thin pipe crosses the thick one in two
 /// loops, one either side of `x = 0`. They come together only where the thin
-/// pipe touches the thick one from inside, and `intersect` refuses that
-/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrangement`).
+/// pipe touches the thick one from inside, where `intersect` names them and
+/// the arrangement refuses them, having no node for where they meet
+/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet`).
 ///
 /// The thin bar less the thick one is its two ends.
 #[test]
@@ -200,11 +203,19 @@ fn two_bars_of_one_radius_whose_axes_meet_cross_in_four_half_ellipses_and_every_
 }
 
 /// A bar of radius 2 up `z`, and a bar of radius 1 along `x` at `y = 1`, which
-/// touches it from inside along `(x, 2, 0)`: the two loops of
+/// touches it from inside at the one point `(0, 2, 0)`: the two loops of
 /// `a_thin_bar_through_a_thick_one_crosses_it_in_two_loops_and_every_fuse_answers`
-/// pushed together until they meet. `intersect` refuses it.
+/// pushed together until they meet there, crossing like an X.
+///
+/// `intersect` names the two loops since Q2628, and `place_the_meets` puts no
+/// node where they meet. Let through, five of the six fuses answered with the
+/// right volume and the sixth, the thick bar less the thin one, could not be
+/// meshed, and in every answer the two loops ran through `(0, 2, 0)` with no
+/// vertex anywhere near it: two edges meeting at a point that is no corner of
+/// either. So the arrangement refuses the two loops until it has a node for
+/// them.
 #[test]
-fn a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrangement() {
+fn a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet() {
     every_fuse_is_refused_where_two_loops_meet(a_thin_bar_resting_on_the_inside_of_a_thick_one);
 }
 
