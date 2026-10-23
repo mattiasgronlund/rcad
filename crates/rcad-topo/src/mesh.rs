@@ -12508,6 +12508,85 @@ mod tests {
         }
     }
 
+    /// Every patch a ring is cut into runs each side it shares with a wire of
+    /// the face the way that wire runs, whichever rim the face stores first.
+    ///
+    /// The wires keep the face's material on their left about the stored
+    /// surface's own normal, and [`what_the_triangulator_can_cut`] draws the
+    /// two bridges across a loop that names one place twice the way the loop
+    /// runs, so a patch has to run that way too. Walked along whichever rim
+    /// came first, the bar's wall with its top rim stored first (`window
+    /// first`) was cut into patches that each ran clockwise in the chart, along
+    /// the top up the longitude and back along the bottom: every side of a rim
+    /// against its wire (Q2646).
+    #[test]
+    fn a_rings_patches_run_the_way_its_wires_run_whichever_rim_is_stored_first() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let deflection = Deflection::of(0.1).expect("a length");
+        for (sides, through_a_cut) in [
+            ([[4.0, -3.0], [4.0, 3.0]], true),
+            ([[4.0, 3.0], [3.0, 4.0]], false),
+        ] {
+            for window_first in [false, true] {
+                let case = format!("through a cut {through_a_cut}, window first {window_first}");
+                let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+                let bar =
+                    a_bar_with_a_wedge_cut_out_through_its_wall(&mut model, sides, window_first);
+                let solid = model.solid(bar).expect("this model made the key");
+                let mut building = BuildingAMesh::new(deflection, solid.surfaces_along_each_edge());
+                for face in solid.faces() {
+                    building
+                        .walk_the_edges_this_face_can_place(solid, face, &policy, &mut log)
+                        .expect("every edge of the bar is walked");
+                }
+                let wall = solid
+                    .faces()
+                    .find(|face| face.surface().as_plane().is_none())
+                    .expect("the bar has one curved face");
+                let surface = the_surface_this_face_is_cut_up_on(wall);
+                let walked: Vec<WalkedLoop> = wall
+                    .wires()
+                    .map(|wire| {
+                        building
+                            .walk_a_wire_round(wire, wall, &surface)
+                            .expect("each wire of the wall lies flat on it")
+                    })
+                    .collect();
+                let sides_of = |one: &WalkedLoop| -> Vec<(u32, u32)> {
+                    let count = one.points.len();
+                    (0..count)
+                        .map(|at| (one.points[at], one.points[(at + 1) % count]))
+                        .collect()
+                };
+                let along_a_wire: HashSet<(u32, u32)> = walked.iter().flat_map(sides_of).collect();
+                let patches = building
+                    .cut_off_what_goes_too_far_round(wall, &surface, walked, deflection.length())
+                    .unwrap_or_else(|why| panic!("{case}: the wall was refused {why:?}"));
+                assert!(
+                    patches.len() >= 4,
+                    "{case}: a ring is cut into four patches or more"
+                );
+                for (at, patch) in patches.iter().enumerate() {
+                    let sides: Vec<(u32, u32)> = patch.iter().flat_map(sides_of).collect();
+                    let with_it = sides
+                        .iter()
+                        .filter(|&side| along_a_wire.contains(side))
+                        .count();
+                    let against_it = sides
+                        .iter()
+                        .filter(|&&(from, to)| along_a_wire.contains(&(to, from)))
+                        .count();
+                    assert!(
+                        with_it > 0 && against_it == 0,
+                        "{case}: patch {at} runs {with_it} sides of a wire the wire's way and \
+                         {against_it} against it"
+                    );
+                }
+            }
+        }
+    }
+
     /// A bar of radius 5 about `z` from `z = 0` to `z = 10`, its cap circles
     /// starting at `+x`, less the wedge from its axis out to the points
     /// `sides` of the circle `x² + y² = 25`, between `z = 4` and `z = 6`.
