@@ -1833,7 +1833,10 @@ struct HowFineToGo<'a> {
 /// step across do not overlap, they all sit inside a patch of finite area, and
 /// so there are at most `4·area·256/(π·step²)` of them. [`triangulate`] refuses
 /// a patch whose area over its step squared is already past what it will hold,
-/// so this is a count it agreed to within a constant.
+/// so this is a count it agreed to within a constant. Two kinds of point skip
+/// the eighth, the middle of a side that cuts off a corner and the middle of a
+/// side that unfolds a pocket beside a pole side
+/// ([`pockets_beside_a_pole_side`]), and each is counted where it is offered.
 ///
 /// The eighth is not a tolerance and nothing is measured against it. It is
 /// there so the count above is finite, and it is set well under the spacing the
@@ -1847,7 +1850,8 @@ struct HowFineToGo<'a> {
 ///
 /// # Errors
 ///
-/// [`CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection`].
+/// [`CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection`] or
+/// [`CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch`].
 fn refine_the_inside(
     mesh: &mut ConstrainedDelaunayTriangulation<Point2<f64>>,
     corners: &mut Vec<[f64; 2]>,
@@ -1855,6 +1859,7 @@ fn refine_the_inside(
     aim: &HowFineToGo<'_>,
 ) -> Result<f64, CannotTriangulate> {
     let mut placed = PointsAlreadyPlaced::new(aim.step / 8.0);
+    let mut unfolds = vec![false; corners.len()];
     loop {
         let inside = walk_in_from_the_outside(mesh);
         let mut furthest = 0.0_f64;
@@ -1901,30 +1906,48 @@ fn refine_the_inside(
         // own triangulation drew adds at most one point this way, and a second
         // attempt finds the first one there and places nothing.
         let corners_cut_off = corners_cut_off_by_one_side(mesh, &inside, aim);
-        let breaking = corners_cut_off.iter().map(|(_, either_side)| {
-            let [from, to] = either_side.map(|handle| corners[corner_of[handle.index()] as usize]);
-            ([(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0], true)
+        let middle_of = |[from, to]: [FixedVertexHandle; 2]| {
+            let [from, to] = [from, to].map(|handle| corners[corner_of[handle.index()] as usize]);
+            [(from[0] + to[0]) / 2.0, (from[1] + to[1]) / 2.0]
+        };
+        let breaking = corners_cut_off
+            .iter()
+            .map(|&(_, either_side)| (middle_of(either_side), true, false));
+        // **A pocket beside a pole side is unfolded whether or not a point is
+        // close by**, for the reason above, but only once in a row. The side it
+        // halves runs from a corner at the pole, and is never drawn again once
+        // gone. Its other end is placed for some other reason, or it is itself a
+        // point that unfolded a pocket, and only in the first case does the new
+        // point skip the eighth: the first kind are counted above and below, so
+        // these are at most the corners at a pole times those. Q2650's ball,
+        // bored through both poles by a bar, needed it at 0.001: the point that
+        // unfolded its pocket was in the eighth of a step round another.
+        let pockets = pockets_beside_a_pole_side(mesh, &inside, corners, corner_of, aim.surface);
+        let unfolding = pockets.iter().map(|&side @ [_, other]| {
+            let first_in_a_row = !unfolds[corner_of[other.index()] as usize];
+            (middle_of(side), first_in_a_row, true)
         });
         let scaled = |corner: [f64; 2]| Point2::new(corner[0] * aim.across, corner[1] * aim.along);
         // **Where each point lands is asked before any goes in**, because
         // `inside` names this round's triangles and an insertion remakes them.
         // A point strictly inside the patch now is strictly inside it after any
         // insertion that keeps to the inside, since the loops' sides stay put.
-        let wanted: Vec<([f64; 2], bool)> = wanted
+        let wanted: Vec<([f64; 2], bool, bool)> = wanted
             .into_iter()
-            .map(|corner| (corner, false))
+            .map(|corner| (corner, false, false))
             .chain(breaking)
-            .filter(|&(corner, _)| lands_strictly_inside_the_patch(mesh, &inside, scaled(corner)))
+            .chain(unfolding)
+            .filter(|&(corner, ..)| lands_strictly_inside_the_patch(mesh, &inside, scaled(corner)))
             .collect();
 
-        if !anything_missed && corners_cut_off.is_empty() {
+        if !anything_missed && corners_cut_off.is_empty() && pockets.is_empty() {
             return Ok(furthest);
         }
 
         let mut anything_placed = false;
-        for (corner, breaks_a_side) in wanted {
+        for (corner, whatever_the_room, unfolding) in wanted {
             let at = scaled(corner);
-            if !breaks_a_side && !placed.has_room_for(at) {
+            if !whatever_the_room && !placed.has_room_for(at) {
                 continue;
             }
             let before = mesh.num_vertices();
@@ -1940,6 +1963,7 @@ fn refine_the_inside(
             }
             remember_which_corner(corner_of, handle.index(), corners.len());
             corners.push(corner);
+            unfolds.push(unfolding);
             placed.remember(at);
             anything_placed = true;
         }
@@ -2140,6 +2164,72 @@ fn corners_cut_off_by_one_side(
         }
     }
     cut_off
+}
+
+/// For each point inside the patch whose only neighbours are the two ends of a
+/// pole side and one other point, a side from one of those two ends to the
+/// other point, one off the loops where there is one.
+///
+/// **Such a point is a pocket.** The two ends of a pole side are one point in
+/// space, the pole `S`, so of the point's three triangles the one on the pole
+/// side is a sliver of nothing, and the other two are the triangle from it to
+/// `S` and the other point, once each way round: one triangle facing both ways,
+/// and a mesh that is refused as two patches drawing one side
+/// (`docs/decisions.md` §187.4). Halving either side from `S` to the other
+/// point joins the point to a fourth. Q2650's ball of `2.5`, bored through both
+/// poles by a bar of radius 1 whose wall runs through its centre, is where it
+/// showed: the middle of a side that cut off a corner landed strictly inside
+/// the triangle from the two ends of a pole side to a third point, and no flip
+/// took it out, so at `0.1` the union's skin was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`
+/// (`a_walk_neither_winding_nor_the_axis_places.rs` in `rcad-topo`).
+///
+/// **Not refused where it would land instead**, which cures that one and
+/// refuses five other fuses of the same pair: a fine mesh puts many points in
+/// such triangles, and the flips that follow take nearly all of them out.
+fn pockets_beside_a_pole_side(
+    mesh: &ConstrainedDelaunayTriangulation<Point2<f64>>,
+    inside: &[bool],
+    corners: &[[f64; 2]],
+    corner_of: &[u32],
+    surface: &Surface,
+) -> Vec<[FixedVertexHandle; 2]> {
+    let Some(pinch) = surface.where_it_pinches() else {
+        return Vec::new();
+    };
+    let second = |vertex: FixedVertexHandle| corners[corner_of[vertex.index()] as usize][1];
+    let at_the_pinch = |vertex: FixedVertexHandle| second(vertex).abs() == pinch;
+    let mut sides = Vec::new();
+    for vertex in mesh.vertices() {
+        if at_the_pinch(vertex.fix()) || vertex.out_edges().count() != 3 {
+            continue;
+        }
+        if !vertex.out_edges().all(|side| {
+            side.face()
+                .as_inner()
+                .is_some_and(|face| inside[face.index()])
+        }) {
+            continue;
+        }
+        let (pinched, other): (Vec<_>, Vec<_>) = vertex
+            .out_edges()
+            .map(|side| side.to().fix())
+            .partition(|&neighbour| at_the_pinch(neighbour));
+        let (&[one, two], &[other]) = (pinched.as_slice(), other.as_slice()) else {
+            continue;
+        };
+        if second(one) != second(two) {
+            continue;
+        }
+        let free = [one, two].into_iter().find(|&end| {
+            !mesh
+                .get_edge_from_neighbors(end, other)
+                .expect("each two neighbours of a point with three are joined round it")
+                .is_constraint_edge()
+        });
+        sides.push([free.unwrap_or(one), other]);
+    }
+    sides
 }
 
 /// Each stretch of the domain's loops that runs along one edge of the solid:
@@ -2626,6 +2716,14 @@ pub enum CannotTriangulate {
     /// ([`where_to_cut`]). The floor stays because it is what makes
     /// [`refine_the_inside`] terminate at all, not because something is
     /// expected to land on it.
+    ///
+    /// **It is also what is left of a pocket that will not unfold**, and then
+    /// `strays` can be within `deflection`: a point beside a pole side joined
+    /// to nothing but the side's two ends and one more, whose halving side's
+    /// middle will not go in ([`pockets_beside_a_pole_side`]). Handing that on
+    /// as a mesh would hand on one triangle facing both ways
+    /// (`docs/decisions.md` §187.4). No test reaches it; Q2650's shape needed
+    /// the halving and never this.
     #[error(
         "the mesh still strays {strays}, the deflection is {deflection}, and there is nowhere left to put a point"
     )]
