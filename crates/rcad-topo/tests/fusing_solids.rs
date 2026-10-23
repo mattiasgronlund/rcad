@@ -858,203 +858,94 @@ fn two_turned_blocks_meeting_at_a_corner() -> (Model, SolidKey, SolidKey) {
     (model, one, other)
 }
 
-/// A certified union of a block and a wedge is refused `Error::Undecidable`
-/// by criterion 7's judgment, over two records left by a ray that placed
-/// nothing, and the union exists.
+/// A certified union of a block and a wedge answers, both ways round, and so
+/// does the wedge less the block, with nothing in the log, though a ray fired
+/// for it grazed the block's edge and could not prove what it met.
 ///
 /// The wedge's floor runs through the block's edge from `(1, 1, 0)` to `(1, 1,
 /// 1)` and on through the first point `ray_targets` aims at from the block.
 /// Selection asks the block where a point on that floor is. The point is a
 /// box, and the box straddles the plane through the edge and the target, so the
-/// first ray grazes the edge. Its two `orient3d` calls cannot be decided, and
-/// `resolve_under_policy` writes each into the log it was handed, under a
-/// certified policy too. `classify_uncertain_point` keeps that log and tries
-/// the next target, which places the point inside. Selection then drains the
-/// log into the fuse's, and the judgment refuses a union it had already built.
+/// first ray grazes the edge and its two `orient3d` calls cannot be decided.
+/// `classify_uncertain_point` throws that ray away, and the next places the
+/// point inside.
 ///
-/// **A gap, not criterion 7's refusing half.** `tolerant(100)` builds the same
-/// union, and it validates and measures what the closed form says. When each
-/// ray keeps a log of its own and only the one that decided is kept, this
-/// answers, and this test is moved to the answer (`docs/decisions.md` §17.8).
-/// The floor is aimed at `ray_targets`' first point on purpose: if those
-/// targets move, aim the floor at the new one rather than moving this pin.
+/// **No answer rests on a ray thrown away.** Until Q2489 the thrown-away ray's
+/// two records stayed in the point's log, selection drained them into the
+/// fuse's, and criterion 7's judgment refused, under a certified policy, every
+/// one of these fuses it had already built. `tolerant(100)` built the union,
+/// so the refusal was a gap (`docs/decisions.md` §17.8). The floor is aimed at
+/// `ray_targets`' first point on purpose: if those targets move, aim the floor
+/// at the new one rather than moving this pin.
 #[test]
-fn a_certified_union_is_refused_over_the_records_of_a_ray_it_threw_away() {
-    for wedge_first in [true, false] {
-        let case = format!("wedge first: {wedge_first}");
-        let (mut model, wedge, block) =
-            a_wedge_whose_floor_runs_through_a_blocks_edge_and_the_first_ray_target(100.0);
-        let (first, second) = if wedge_first {
-            (wedge, block)
-        } else {
-            (block, wedge)
-        };
-        let records = match model.fuse(
-            &[first],
-            &[second],
-            Rule::Union,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) {
-            Err(Error::Undecidable { records }) => records,
-            Err(other) => panic!("{case}: refused by the judgment, not by {other}"),
-            Ok(_) => panic!("{case}: refused by the judgment, and it answered"),
-        };
-        assert_they_are_the_two_records_of_the_ray_that_grazed_the_edge(&case, &records);
-
-        let mut ray = ProvenanceLog::new();
-        let placed = model
-            .solid(block)
-            .expect("this model made the key")
-            .classify_uncertain_point(
-                records.records()[0].inputs()[3],
-                &Policy::certified(),
-                &mut ray,
-            );
-        assert_eq!(
-            placed,
-            Containment::Inside,
-            "{case}: the point the ray was fired from is placed"
-        );
-        assert_eq!(
-            ray, records,
-            "{case}: placing it leaves the ray's records behind"
-        );
-
-        let (mut model, wedge, block) =
-            a_wedge_whose_floor_runs_through_a_blocks_edge_and_the_first_ray_target(100.0);
-        let (first, second) = if wedge_first {
-            (wedge, block)
-        } else {
-            (block, wedge)
-        };
-        let tolerant = Policy::tolerant(100.0);
-        let fused = model
-            .fuse(
-                &[first],
-                &[second],
-                Rule::Union,
-                &tolerant,
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|why| panic!("{case}: tolerant(100) unites the pair: {why}"));
-        model
-            .validate(&tolerant, &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| panic!("{case}: the union is a valid solid: {why}"));
-        assert_eq!(fused.solids().len(), 1, "{case}");
-        let measured = volume_of(&model, fused.solids());
-        assert!(
-            (measured - the_pairs_union()).abs() <= 1e-12,
-            "{case}: the union is {:e}, got {measured:e}",
-            the_pairs_union()
-        );
+fn a_certified_union_answers_over_a_ray_it_threw_away() {
+    for (rule, wedge_first, closed) in [
+        (Rule::Union, true, the_pairs_union()),
+        (Rule::Union, false, the_pairs_union()),
+        (Rule::Difference, true, the_wedge_less_the_block()),
+    ] {
+        the_pair_answers(100.0, rule, wedge_first, closed);
     }
 }
 
-/// [`a_certified_union_is_refused_over_the_records_of_a_ray_it_threw_away`]'s
-/// pair on a model declared `1e160` across: a certified policy takes the
-/// union, with the same two records still in the log.
+/// [`a_certified_union_answers_over_a_ray_it_threw_away`]'s pair on a model
+/// declared `1e160` across: the same fuses answer the same, with nothing in
+/// the log.
 ///
-/// Under a certified policy the judgment reads the log at the model's
-/// `Scale::nominal_size`. A record of a volume is divided by that size twice
-/// (§15.2), and an enclosure of about `1.7e-15` divided by `1e160` twice rounds
-/// to zero, which a budget of zero accepts. So the same decisions refused on a
-/// 100 mm model are passed unproved on a big one. The test pins where that
-/// starts: still above zero at `2.5e154`, zero at `2.7e154`.
-///
-/// **Wrong, and only reachable this way while a grazed ray's records stay in
-/// the log.** When each ray keeps a log of its own, this pair stops reaching
-/// it, and the judgment's reading wants a pin that hands it a log directly
-/// (`docs/decisions.md` §17.8).
+/// Until Q2489 a certified policy took this union with the thrown-away ray's
+/// two records still in the log. Under a certified policy the judgment reads
+/// the log at the model's `Scale::nominal_size`. A record of a volume is
+/// divided by that size twice (§15.2), and an enclosure of about `1.7e-15`
+/// divided by `1e160` twice rounds to zero, which a budget of zero accepts. So
+/// the decisions refused on a 100 mm model were passed unproved on a big one,
+/// from about `2.7e154` across. This pair no longer hands the judgment a
+/// record, and Q2617's probe found no other test that does: reading a log
+/// without the model's size wants a pin that hands the judgment one directly
+/// (`docs/decisions.md` §17.8, Q2626).
 #[test]
-fn a_model_declared_1e160_across_takes_the_same_union_with_the_rays_records_still_in_its_log() {
-    for wedge_first in [true, false] {
-        let case = format!("wedge first: {wedge_first}");
-        let (mut model, wedge, block) =
-            a_wedge_whose_floor_runs_through_a_blocks_edge_and_the_first_ray_target(1e160);
-        let (first, second) = if wedge_first {
-            (wedge, block)
-        } else {
-            (block, wedge)
-        };
-        let mut log = ProvenanceLog::new();
-        let fused = model
-            .fuse(
-                &[first],
-                &[second],
-                Rule::Union,
-                &Policy::certified(),
-                &mut log,
-            )
-            .unwrap_or_else(|why| panic!("{case}: the judgment passes the union: {why}"));
-        model
-            .validate(&Policy::certified(), &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| panic!("{case}: the union is a valid solid: {why}"));
-        assert_eq!(fused.solids().len(), 1, "{case}");
-        let measured = volume_of(&model, fused.solids());
-        assert!(
-            (measured - the_pairs_union()).abs() <= 1e-12,
-            "{case}: the union is {:e}, got {measured:e}",
-            the_pairs_union()
-        );
-        assert_they_are_the_two_records_of_the_ray_that_grazed_the_edge(&case, &log);
-
-        assert!(
-            log.worst_wobble(100.0) > 0.0,
-            "{case}: read at 100 the records are past a budget of zero"
-        );
-        assert!(
-            log.worst_wobble(2.5e154) > 0.0,
-            "{case}: read at 2.5e154 they still are"
-        );
-        assert_eq!(
-            log.worst_wobble(2.7e154),
-            0.0,
-            "{case}: read at 2.7e154 they round to nothing"
-        );
-        assert_eq!(log.worst_wobble(1e160), 0.0, "{case}");
+fn a_model_declared_1e160_across_takes_the_same_union_with_nothing_in_its_log() {
+    for (rule, wedge_first, closed) in [
+        (Rule::Union, true, the_pairs_union()),
+        (Rule::Union, false, the_pairs_union()),
+        (Rule::Difference, true, the_wedge_less_the_block()),
+    ] {
+        the_pair_answers(1e160, rule, wedge_first, closed);
     }
 }
 
-/// The two `orient3d` records the block's first ray leaves when it grazes the
-/// edge from `(1, 1, 0)` to `(1, 1, 1)`: neither proved, the edge's two ends
-/// and the ray's target first, and the box the ray was fired from last.
-fn assert_they_are_the_two_records_of_the_ray_that_grazed_the_edge(
-    case: &str,
-    records: &ProvenanceLog,
-) {
-    let the_edge = [
-        PredicatePoint::Exact([1.0, 1.0, 0.0]),
-        PredicatePoint::Exact([1.0, 1.0, 1.0]),
-    ];
-    let the_first_ray_target = PredicatePoint::Exact([
-        2.0,
-        1.0 + 0.618_033_988_749_895,
-        1.0 + 0.414_213_562_373_095_1,
-    ]);
-    assert_eq!(records.len(), 2, "{case}: {records:?}");
-    for record in records.records() {
-        assert_eq!(record.predicate(), "orient3d", "{case}: {record:?}");
-        assert!(
-            record.approximation().is_none() && record.enclosure() > 0.0,
-            "{case}: nothing proved it and no policy accepted it: {record:?}"
-        );
-        let inputs = record.inputs();
-        assert_eq!(inputs.len(), 4, "{case}: {record:?}");
-        assert!(
-            the_edge.iter().all(|end| inputs[..2].contains(end)),
-            "{case}: {record:?}"
-        );
-        assert_eq!(inputs[2], the_first_ray_target, "{case}: {record:?}");
-        assert!(
-            matches!(inputs[3], PredicatePoint::Constructed(_)),
-            "{case}: {record:?}"
-        );
-    }
+/// That [`a_wedge_whose_floor_runs_through_a_blocks_edge_and_the_first_ray_target`]
+/// on a model declared `size` across, fused by `rule` under a certified policy,
+/// is one valid solid of `closed`, and leaves the log empty.
+fn the_pair_answers(size: f64, rule: Rule, wedge_first: bool, closed: f64) {
+    let case = format!("{size:e} across, {rule:?}, wedge first: {wedge_first}");
+    let (mut model, wedge, block) =
+        a_wedge_whose_floor_runs_through_a_blocks_edge_and_the_first_ray_target(size);
+    let (first, second) = if wedge_first {
+        (wedge, block)
+    } else {
+        (block, wedge)
+    };
+    let mut log = ProvenanceLog::new();
+    let fused = model
+        .fuse(&[first], &[second], rule, &Policy::certified(), &mut log)
+        .unwrap_or_else(|why| panic!("{case}: {why}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{case}: the answer is a valid solid: {why}"));
+    assert_eq!(fused.solids().len(), 1, "{case}");
+    let measured = volume_of(&model, fused.solids());
+    assert!(
+        (measured - closed).abs() <= 1e-12,
+        "{case}: the answer is {closed:e}, got {measured:e}"
+    );
+    assert!(
+        log.is_empty(),
+        "{case}: a certified fuse records nothing: {log:?}"
+    );
 }
 
-/// [`a_certified_union_is_refused_over_the_records_of_a_ray_it_threw_away`]'s
-/// pair, on a model declared `size` across: a block `[0.3, 1] × [0, 1]`
+/// [`a_certified_union_answers_over_a_ray_it_threw_away`]'s pair, on a model
+/// declared `size` across: a block `[0.3, 1] × [0, 1]`
 /// extruded `1` high, and a wedge whose floor rises at [`SLOPE`] through the
 /// block's edge at `x = 1, y = 1`, extruded `0.5` high from `z = 0.25`. The
 /// block's box is `[0.3, 1] × [0, 1] × [0, 1]`, so `ray_targets`' first point
@@ -1096,6 +987,12 @@ const SLOPE: f64 = (1.0 + 0.618_033_988_749_895) - 1.0;
 /// `0.7`, less the prism they share, `0.1225 SLOPE`.
 fn the_pairs_union() -> f64 {
     3.7 + 0.6275 * SLOPE
+}
+
+/// What the wedge less the block takes up: the wedge, `3 + 0.75 SLOPE`, less
+/// the prism they share, `0.1225 SLOPE`.
+fn the_wedge_less_the_block() -> f64 {
+    3.0 + 0.6275 * SLOPE
 }
 
 /// Two towers `1e308` tall, a certified fuse settles them, and nothing it
