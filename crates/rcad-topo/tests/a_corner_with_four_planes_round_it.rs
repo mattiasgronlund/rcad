@@ -107,7 +107,8 @@
 //! (`a_pyramid_whose_apex_is_far_enough_to_leave_the_scale_envelope_refuses_to_build`).
 //!
 //! Measured with `RCAD_Q275_PROBE=1 mise exec -- cargo nextest run -p
-//! rcad-topo -E 'binary(a_corner_with_four_planes_round_it)' --no-capture`,
+//! rcad-topo -E 'binary(merged) and test(/^a_corner_with_four_planes_round_it::/)'
+//! --no-capture`,
 //! a probe temporarily added to `Arrangement::the_corner_that_is_this_place`
 //! (`crates/rcad-topo/src/fuse/arrange.rs`) and taken back out before this
 //! file's own commit — none of these three corners stuck a meet out past its

@@ -7,7 +7,8 @@
 //! Measured here with
 //!
 //! ```text
-//! just t -p rcad-topo --test the_three_flat_seeds_and_the_corners_they_move
+//! just t -p rcad-topo --test merged \
+//!     -E 'test(/^the_three_flat_seeds_and_the_corners_they_move::/)'
 //! ```
 //!
 //! Every half that decodes is checked below, not only the half §316.1
