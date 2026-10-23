@@ -1,6 +1,6 @@
 //! A round bar standing in an L plate, its pipe touching the line of one of the
 //! plate's inner sides past that side's end, both turned about `z`
-//! (`docs/decisions.md` §191.5, Q2505, Q2629).
+//! (`docs/decisions.md` §191.5, Q2505, Q2629, Q2654).
 //!
 //! # The shape
 //!
@@ -11,29 +11,33 @@
 //! the pipe meets no face of the plate's sides: it goes through the plate's
 //! top and floor alone. `(1.5, 1)` is the same against `x = 2`.
 //!
-//! # Where it is refused
+//! # A quarter turn off an axis
 //!
 //! Turned a quarter turn, the side's plane is stored with a normal a rounding
 //! off an axis, `±(1, 2⁻⁵², 0)` or `(2⁻⁵², 1, 0)`. Worked out on the stored
 //! numbers it is a little under a radius from the bar's axis, so it cuts the
-//! pipe in two lines about `2.2e−16` apart, still off the side's face. Every
-//! certified fuse of the three quarter turns is refused, and the tests below
-//! pin each at the refusal it meets.
+//! pipe in two lines about `2.2e−16` apart, still off the side's face.
 //!
-//! - **Through `(1, 1.5)` turned `3π/2` or `−π/2`**, every fuse is refused
-//!   `DynamicRangeTooWide`, at `2⁵⁵` and `2⁵⁵/3`. The side's plane cuts the
-//!   circles of the plate's floor and top at two places `2⁻⁵³` or `3·2⁻⁵³`
-//!   apart. The pipe is joined back with one of its two lines as its seam, but
-//!   the other line's ends are kept as corners, so each circle comes back as
-//!   an arc that short and an arc the rest of the way round.
-//! - **Through `(1.5, 1)` turned `π/2`**, the bar's seam lands on the side's
-//!   line, `1.09e−47` past the side's plane, between the two lines it cuts the
-//!   pipe in. With the bar first every fuse is refused `Undecidable` "side of
-//!   plane", for whether the seam's corner on the bar's floor is on that
-//!   plane. With the plate first it is "order along a crossing", for the order
-//!   of the two meets of the side's line with the top's circle, going round
-//!   from the seam. Both read a box `1.1e−13` wide round the seam, and that
-//!   box holds both lines.
+//! - **Through `(1, 1.5)` turned `3π/2` or `−π/2`**, every fuse answers the
+//!   two as they stand. The side's plane cuts the circles of the plate's
+//!   floor and top at two places `2⁻⁵³` or `3·2⁻⁵³` apart. The pipe is joined
+//!   back with one of its two lines as its seam. Until Q2654 the other line's
+//!   ends were kept as corners, so each circle came back as an arc that short
+//!   and an arc the rest of the way round, and every fuse was refused
+//!   `DynamicRangeTooWide`, at `2⁵⁵` and `2⁵⁵/3`. Now each circle, which
+//!   leaves the seam's corner and comes back round to it on faces that hold
+//!   it whole, is folded back into one closed edge on that corner
+//!   (`where_curved_pieces_met_off_a_run_that_closes_up` in
+//!   `fuse/assemble.rs`).
+//! - **Through `(1.5, 1)` turned `π/2`** every fuse is still refused, and the
+//!   test below pins each at the refusal it meets. The bar's seam lands on
+//!   the side's line, `1.09e−47` past the side's plane, between the two lines
+//!   it cuts the pipe in. With the bar first every fuse is refused
+//!   `Undecidable` "side of plane", for whether the seam's corner on the
+//!   bar's floor is on that plane. With the plate first it is "order along a
+//!   crossing", for the order of the two meets of the side's line with the
+//!   top's circle, going round from the seam. Both read a box `1.1e−13` wide
+//!   round the seam, and that box holds both lines.
 //!
 //! Turned `−π/2`, every fuse was refused on the order of the two meets of the
 //! side's plane and the bar's floor, whose normals' cross product has both

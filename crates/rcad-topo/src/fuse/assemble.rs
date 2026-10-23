@@ -4284,8 +4284,9 @@ impl Assembly {
 
     /// Every corner where pieces of one cone, pipe or ball met, as
     /// `curved_pieces_met` marks them ([`Assembly::where_curved_pieces_met`]),
-    /// as lump and corner, that `straight_through` walks on a run that does
-    /// not close up into the one closed input edge it was cut from, between
+    /// as lump and corner, that `straight_through` walks on a run that neither
+    /// closes up into the one closed input edge it was cut from nor goes back
+    /// round one closed crossing that every face along it holds whole, between
     /// two edges that are neither both pieces of one open input edge nor both
     /// straight. Each stays a corner.
     ///
@@ -4308,6 +4309,42 @@ impl Assembly {
     /// frustum had one circle, and the frustum's own corner on it went, since
     /// nothing kept that one (Q2170). The corners left here are walked as they
     /// were before, so the runs that do not close up are the runs they were.
+    ///
+    /// **And except on a run back round one closed crossing**
+    /// ([`Assembly::runs_back_round_one_closed_crossing`]): one that leaves a
+    /// corner kept for something else and comes back round to it, every piece
+    /// of it a piece of one closed input edge or of one crossing of a plane
+    /// and a cone or a pipe that this fuse made. Folded, it is that closed
+    /// curve whole again, from the kept corner back to it, and again no picker
+    /// holds an arc of it. Kept, the corner can be a rounding off the kept
+    /// one: a round bar of radius `1/2` standing in an L plate, its pipe
+    /// touching the line of one of the plate's inner sides past that side's
+    /// end, both turned `3π/2` or `−π/2` about `z`, has that side's plane cut
+    /// the pipe in two lines a rounding apart. The pipe was joined back with
+    /// one line as its seam and the other line's ends kept, so each circle
+    /// round the pipe came back as an arc a rounding long and an arc the rest
+    /// of the way round, and every certified fuse of the two was refused
+    /// `DynamicRangeTooWide`, at `2⁵⁵` and `2⁵⁵/3`, though the answer is the
+    /// two as they stand (Q2654,
+    /// `a_bar_flush_with_an_l_plates_inner_side_turned.rs`).
+    ///
+    /// **Only where every face along the run holds it whole**
+    /// ([`Assembly::the_runs_each_face_along_holds_whole`]): a curved face
+    /// beside nothing but its seams and other closed curves given back whole,
+    /// a band, and a flat face only in rings of nothing but the run. A whole
+    /// closed curve on a pipe face beside parts of other crossings is a side
+    /// `holds.rs` cannot read (`the_way_a_side_runs`), and so the next fuse
+    /// cannot follow the face. Folded wherever it went back round, five tests
+    /// failed, four of them refused `AFaceTrimmedByACurveThisCannotFollow`:
+    /// the slot end built from two stacked blocks
+    /// (`a_slot_end_built_from_two_stacked_blocks.rs`), and four of
+    /// `two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`, among them a
+    /// box turned an eighth of a turn, whose pipe face holds the box's hole
+    /// beside the bar's top rim.
+    /// A flat face reads a whole closed curve only as a ring of its own
+    /// (`is_a_round_wire_of_a_flat_face` in `holds.rs`), so its rule keeps to
+    /// that; no test here meets a flat face that fails it, and with that rule
+    /// left out the 1619 tests of round shapes in this crate still pass.
     ///
     /// **And except between two pieces of one open input edge**
     /// ([`Assembly::are_pieces_of_one_open_input_edge`]): an arc that started
@@ -4577,11 +4614,14 @@ impl Assembly {
     /// through the ball's poles, which the arrangement makes corners of, and
     /// closed up across them a closed edge's one corner sits on a pole: 22
     /// tests across the ball-and-block files failed (§400.5). A crossing of a
-    /// plane and a pipe made here stays in its pieces. It was left out when
+    /// plane and a pipe made here does not close up here. It was left out when
     /// [`Assembly::needs_no_seam`] left every pipe out (Q2170), and since
     /// Q2657 that closes up a pipe band whose rings go right round only
     /// where they are pieces of input edges, as the bored shaft's rims are.
-    /// Joining the pieces of such a crossing made here is untried.
+    /// Its pieces are joined back up only on a run that leaves a kept corner
+    /// and comes back round to it, where every face along the run holds it
+    /// whole ([`Assembly::runs_back_round_one_closed_crossing`], Q2654); closing
+    /// up a run of them with every corner walked straight through is untried.
     fn are_pieces_of_one_closed_curve(&self, edges: &[usize]) -> bool {
         let pieces: Vec<&[EdgeKey]> = edges
             .iter()
