@@ -308,36 +308,31 @@ pub enum Error {
     /// theirs is two ellipses that need no marcher, and `intersect` names them
     /// as four halves (`docs/decisions.md` §31.9).
     ///
-    /// **`intersect` gives this for the ball and the pipe.** The thin pipe
-    /// resting inside a wider one it names, as two loops each picked out by one
-    /// flat surface through the wide pipe's axis and exactly through the
-    /// touching point (Q2628), and the fuse's arrangement in `rcad-topo` gives
-    /// this for them instead, since it has no node to put where the two loops
-    /// meet.
+    /// **`intersect` gives this for neither.** It names both as two loops,
+    /// each picked out by one side of a flat surface exactly through the
+    /// touching point: through the wide pipe's axis for two pipes (Q2628), and
+    /// through the ball's centre square to the pipe's axis for the ball (Q2649).
+    /// The fuse's arrangement in `rcad-topo` gives this for two loops of two
+    /// pipes that it can prove neither apart nor meeting, since it has nowhere
+    /// to put the node where they meet.
     ///
     /// **A gap** (§16.10, §31.9). [`EdgeRun`](crate::EdgeRun) *can* say this:
     /// the two loops of a pinch are the two sides of one half-space through the
-    /// tangent point. Writing that plane down is the question
-    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] is about, and for the
-    /// ball and pipe in `what_a_geometry_refusal_says_about_its_answer.rs` the
-    /// tangent point `(-2, 0, 0)` is one `f64` holds exactly.
+    /// tangent point, and for the ball and pipe in
+    /// `what_a_geometry_refusal_says_about_its_answer.rs` the tangent point
+    /// `(-2, 0, 0)` is one `f64` holds exactly.
     ///
-    /// The reason the ball and pipe are refused here rather than there is the
-    /// evaluator. Where a crossing runs through itself the two surfaces are
-    /// **tangent**, so the crossing has no direction and the marcher has
-    /// nothing to follow — and naming two pieces nothing can draw is the
-    /// half-answer §24.10 refuses whole.
+    /// Where a crossing runs through itself the two surfaces are **tangent**,
+    /// so the crossing has no direction there and the marcher has nothing to
+    /// follow from that point.
     /// `marching_from_where_a_crossing_runs_through_itself_has_no_direction_to_follow`
-    /// is the demonstration. That is a march from the touching point: the
-    /// thin pipe's two loops, named and let through the arrangement, were
-    /// walked by five of the six fuses of a bar resting inside a wider one, and
-    /// what was wrong with those answers was that no vertex was where the loops
-    /// meet.
+    /// is the demonstration. The thin pipe's two loops, named and let through
+    /// the arrangement without a node, were walked by five of the six fuses of
+    /// a bar resting inside a wider one, and what was wrong with those answers
+    /// was that no vertex was where the loops meet.
     ///
-    /// The family of fixes: a marcher that can be told to start away from a
-    /// singular point and stop at it. §31.9 defers it to the milestone that
-    /// builds the algebraic solver. For the two pipes, a node where the loops
-    /// meet, on both walls.
+    /// The family of fixes: a node where the loops meet, on both walls, and a
+    /// marcher that walks each loop between that node and one away from it.
     #[error(
         "these two surfaces are tangent along where they cross, so what they cross in is one \
          curve that runs through itself"
@@ -580,9 +575,11 @@ pub enum Error {
     /// A **gap** where the crossing is a real curve and the arithmetic ran out
     /// of angle, and a **limit** where the two surfaces are genuinely tangent
     /// along it, because then there is no direction to be had at any precision.
-    /// The two are told apart by the naming half:
-    /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] is what a
-    /// tangency along a whole curve comes back as before anything is walked.
+    /// Which one is not known here, so it is neither. A crossing that touches
+    /// itself at a point is named as two loops that meet there, and a run with
+    /// that point for a corner is refused this today where the corner is
+    /// settled onto both surfaces, though a corner where the walls touch is a
+    /// real place on the crossing: there it is a gap (Q2649).
     ///
     /// **It carries the two surfaces and which question gave up on them**,
     /// because a refusal that carries neither cannot be told from the three

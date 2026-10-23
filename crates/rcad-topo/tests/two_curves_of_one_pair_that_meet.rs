@@ -15,14 +15,14 @@
 //! crossing is a smooth curve, one piece through each point. So each family
 //! here reaches its meet only at its tangent limit, and the tests below show
 //! what the kernel does there: `intersect` names one curve where there were
-//! two, refuses the shape by name before any arrangement, or cannot make the
-//! surface at all. A thin pipe resting on the inside of a thick one is the one
-//! more: `intersect` names its two loops, and the arrangement, which has no
-//! node for where they meet, refuses them. The one surface with a point and
-//! no normal is a cone, at its apex, and that is the node §347.1 built. Two
-//! pipes of one radius whose axes meet are tangent at two points, and their
-//! crossing reaches them without being pushed there: that is the Steinmetz
-//! cross, which gets its nodes, and every fuse of it answers.
+//! two, or cannot make the surface at all. A pipe resting on the inside of a
+//! thick pipe or of a ball is tangent at one point, and there `intersect` names
+//! its two loops and the arrangement puts a node where they meet, so every
+//! fuse of it answers. The one surface with a point and no normal is a cone,
+//! at its apex, and that is the node §347.1 built. Two pipes of one radius
+//! whose axes meet are tangent at two points, and their crossing reaches them
+//! without being pushed there: that is the Steinmetz cross, which gets its
+//! nodes, and every fuse of it answers.
 //!
 //! The fuses run three rules both ways round, certified, in a model of 100 mm.
 
@@ -125,9 +125,8 @@ fn a_block_beside_a_cones_apex_cuts_both_nappes_and_every_fuse_answers() {
 /// A bar of radius 2 up `z` from −2 to 2, and a bar of radius 1 along `x` from
 /// −4 to 4 at `y = 1/2`, `z = 0`. The thin pipe crosses the thick one in two
 /// loops, one either side of `x = 0`. They come together only where the thin
-/// pipe touches the thick one from inside, where `intersect` names them and
-/// the arrangement refuses them, having no node for where they meet
-/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet`).
+/// pipe touches the thick one from inside
+/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`).
 ///
 /// The thin bar less the thick one is its two ends.
 #[test]
@@ -163,12 +162,23 @@ fn a_half_bar_on_a_rings_axis_cuts_the_tube_in_two_circles_and_every_fuse_answer
 }
 
 /// A ball of radius 2 at the origin and a bar of radius 1 at `x = 1`: the bar
-/// touches the ball from inside at `(2, 0, 0)`, and the two loops it would
-/// cross the ball in meet there, Viviani's figure of eight. `intersect`
-/// refuses it, so no arrangement is ever asked to put the node.
+/// touches the ball from inside at `(2, 0, 0)`, and the two loops it crosses
+/// the ball in meet there, Viviani's figure of eight. Each loop runs through
+/// one of the ball's poles, `(0, 0, ±2)`.
+///
+/// Every fuse was refused by `intersect` until Q2649, which names the two
+/// loops either side of the plane through the ball's centre square to the
+/// bar, and puts a node where they meet and one half way round each. What they
+/// share is Viviani's window, `16π/3 − 64/9`, and every answer has a corner at
+/// `(2, 0, 0)`.
 #[test]
-fn a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement() {
-    every_fuse_is_refused_where_two_loops_meet(a_bar_touching_a_ball_from_inside);
+fn a_bar_touching_a_ball_from_inside_crosses_it_in_two_loops_that_meet_and_every_fuse_answers() {
+    every_fuse_answers_with_a_corner_at(
+        a_bar_touching_a_ball_from_inside,
+        [32.0 * PI / 3.0, 6.0 * PI, 16.0 * PI / 3.0 - 64.0 / 9.0],
+        [&[5], &[3], &[2], &[3, 3]],
+        [2.0, 0.0, 0.0],
+    );
 }
 
 /// Two bars of radius 1, one up `z` and one along `x`, each from −2 to 2, whose
@@ -207,23 +217,26 @@ fn two_bars_of_one_radius_whose_axes_meet_cross_in_four_half_ellipses_and_every_
 /// `a_thin_bar_through_a_thick_one_crosses_it_in_two_loops_and_every_fuse_answers`
 /// pushed together until they meet there, crossing like an X.
 ///
-/// `intersect` names the two loops since Q2628, and `place_the_meets` puts no
-/// node where they meet. Let through, five of the six fuses answered with the
-/// right volume and the sixth, the thick bar less the thin one, could not be
-/// meshed, and in every answer the two loops ran through `(0, 2, 0)` with no
-/// vertex anywhere near it: two edges meeting at a point that is no corner of
-/// either. So the arrangement refuses the two loops until it has a node for
-/// them.
+/// `intersect` names the two loops since Q2628. Until Q2649 the arrangement
+/// refused them, having no node for where they meet: let through, the two
+/// loops ran through `(0, 2, 0)` with no vertex anywhere near it, and the
+/// answers validated all the same. So every answer is held to a corner there.
 #[test]
-fn a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet() {
-    every_fuse_is_refused_where_two_loops_meet(a_thin_bar_resting_on_the_inside_of_a_thick_one);
+fn a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers()
+ {
+    every_fuse_answers_with_a_corner_at(
+        a_thin_bar_resting_on_the_inside_of_a_thick_one,
+        [16.0 * PI, 8.0 * PI, bar_through_bar(2.0, 1.0, 1.0)],
+        [&[7], &[3], &[4], &[3, 3]],
+        [0.0, 2.0, 0.0],
+    );
 }
 
 /// A ball of radius 2 with a bar from `z = −3` to 3 through it off its axis,
 /// so that the pipe crosses the ball in two loops apart, one above `z = 0` and
 /// one below. They come together only where the bar touches the ball from
 /// inside
-/// (`a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement`).
+/// (`a_bar_touching_a_ball_from_inside_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`).
 /// Four placements: the bar of radius 1 at `x = 1/2` and at `y = 1/2`, the bar
 /// of radius 1/2 at `y = 1` clear of the ball's poles, and the ball turned a
 /// quarter round `z` with the bar at `x = 1/2`. Every fuse was refused ordering
@@ -600,13 +613,14 @@ fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
 }
 
 /// The fuse `rule` of `build`'s two solids, the first first or not, answers
-/// with the volume and faces `every_fuse_answers` reads for it.
+/// with the volume and faces `every_fuse_answers` reads for it. The model and
+/// the answer's solids are handed back.
 fn the_fuse_answers(
     build: Pair,
     (rule, first_first): (Rule, bool),
     [first, second, shared]: [f64; 3],
     faces: [&[usize]; 4],
-) {
+) -> (Model, Vec<SolidKey>) {
     let (volume, faces) = match (rule, first_first) {
         (Rule::Union, _) => (first + second - shared, faces[0]),
         (Rule::Intersection, _) => (shared, faces[1]),
@@ -619,22 +633,39 @@ fn the_fuse_answers(
     let what = format!(
         "{rule:?} (first first: {first_first}), solids of {faces:?} faces and volume {volume}"
     );
-    answers(&mut model, said, volume, faces, &what);
+    let solids = answers(&mut model, said, volume, faces, &what);
+    (model, solids)
 }
 
-fn every_fuse_is_refused_where_two_loops_meet(build: Pair) {
+/// [`every_fuse_answers`], with every solid of every answer holding a corner
+/// within `1e-9` of `corner`: where two loops meet, which an answer whose
+/// loops run through it with no vertex there still validates.
+fn every_fuse_answers_with_a_corner_at(
+    build: Pair,
+    volumes: [f64; 3],
+    faces: [&[usize]; 4],
+    corner: [f64; 3],
+) {
     for (rule, first_first) in six_fuses() {
-        let mut model = a_model();
-        let said = fuse(&mut model, build, rule, first_first);
-        assert!(
-            matches!(
-                said,
-                Err(rcad_topo::Error::Geometry(
-                    rcad_geom::Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo
-                ))
-            ),
-            "{rule:?} (first first: {first_first}): {said:?}"
-        );
+        let (model, solids) = the_fuse_answers(build, (rule, first_first), volumes, faces);
+        for solid in solids {
+            let view = model.solid(solid).expect("a solid the fuse made");
+            let nearest = view
+                .faces()
+                .flat_map(|face| face.wires().flat_map(|wire| wire.points()))
+                .map(|point| {
+                    let at = point.coordinates();
+                    (0..3)
+                        .map(|i| (at[i] - corner[i]).powi(2))
+                        .sum::<f64>()
+                        .sqrt()
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                nearest <= 1e-9,
+                "{rule:?} (first first: {first_first}): the corner nearest {corner:?} is {nearest} from it"
+            );
+        }
     }
 }
 
@@ -678,15 +709,15 @@ fn fuse(
 
 /// Assert that `said` is one solid for each of `faces`, each with that many
 /// faces, that the model validates, and that together they measure `volume`
-/// to within the mesh's own error. `what` is the right answer, which is what
-/// every message carries.
+/// to within the mesh's own error, and hand the solids back. `what` is the
+/// right answer, which is what every message carries.
 fn answers(
     model: &mut Model,
     said: rcad_topo::Result<Vec<SolidKey>>,
     volume: f64,
     faces: &[usize],
     what: &str,
-) {
+) -> Vec<SolidKey> {
     let policy = Policy::certified();
     let solids = said.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
     model
@@ -694,7 +725,7 @@ fn answers(
         .unwrap_or_else(|why| panic!("{what}: the answer does not validate: {why:?}"));
     let mut counted = Vec::with_capacity(solids.len());
     let (mut measured, mut error) = (0.0, 0.0);
-    for solid in solids {
+    for &solid in &solids {
         let view = model.solid(solid).expect("a solid the fuse made");
         counted.push(view.faces().count());
         let measure = view
@@ -703,7 +734,7 @@ fn answers(
                 &policy,
                 &mut ProvenanceLog::new(),
             )
-            .expect("the answer measures");
+            .unwrap_or_else(|why| panic!("{what}: the answer does not measure: {why:?}"));
         measured += measure.volume();
         error += measure.volume_error();
     }
@@ -712,6 +743,7 @@ fn answers(
         (measured - volume).abs() <= error,
         "{what}: measured {measured} and the mesh may miss by {error}"
     );
+    solids
 }
 
 /// How many curves `intersect` names where the two cross, `0` for a touch at
