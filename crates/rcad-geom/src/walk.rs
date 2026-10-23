@@ -7090,6 +7090,45 @@ mod tests {
         }
     }
 
+    /// The same runs, walked under a certified policy, log nothing, so a
+    /// certified fuse that draws them is not refused for what they log.
+    ///
+    /// The march steps ever shorter as it nears where the loops meet, and
+    /// leaves points there `4e-9` to `2e-7` from it, inside the bound it claims
+    /// for them. The box round each of them holds the corner, which is on the
+    /// flat surface `y = 0` the run is picked by, so none of them could be put
+    /// on either side of it. Each was recorded, and every fuse of a bar
+    /// touching a ball from inside was refused `Undecidable` for them, though
+    /// the arc it picked did not hang on them (Q2649).
+    #[test]
+    fn a_run_from_where_two_loops_of_a_ball_and_a_pipe_meet_logs_nothing_under_a_certified_policy()
+    {
+        let (ball, pipe) = a_ball_and_a_pipe_resting_on_its_inside();
+        let [ball, pipe] = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
+        for (up, side) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+            let pole = Point::new(0.0, 0.0, 2.0 * up);
+            for [from, to] in [[where_they_touch(), pole], [pole, where_they_touch()]] {
+                let run = a_run_picked_by_which_way_y_goes(pipe, [from, to], side);
+                for along in [[&ball, &pipe], [&pipe, &ball]] {
+                    let mut log = ProvenanceLog::new();
+                    let walked = walk(
+                        &run,
+                        along,
+                        Deflection::of(0.01).expect("a length"),
+                        &Policy::certified(),
+                        &mut log,
+                    );
+                    assert!(
+                        walked.is_ok() && log.records().is_empty(),
+                        "the run from {from:?} to {to:?} on y·{side} > 0 gave {:?} and logged {:?}",
+                        walked.err(),
+                        log.records()
+                    );
+                }
+            }
+        }
+    }
+
     /// Where the pipe of [`a_ball_and_a_pipe_resting_on_its_inside`] rests on
     /// the ball's inside.
     fn where_they_touch() -> Point {
