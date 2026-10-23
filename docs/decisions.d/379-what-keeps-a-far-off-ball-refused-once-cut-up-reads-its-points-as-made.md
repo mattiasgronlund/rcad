@@ -166,7 +166,7 @@ The second and third items above are done; the first stays open (Q781).
 - The unit ball at `EVEN` is refused by that name through `mesh`, `validate`
   and `measure` alike, `4/3` where made and `0` where it lands, along `x` and
   up `z`:
-  `mise exec -- just t -p rcad-topo --test how_far_out_a_ball_can_sit_and_still_mesh`.
+  `mise exec -- just t -p rcad-topo --test merged -E 'test(/^how_far_out_a_ball_can_sit_and_still_mesh::/)'`.
 - **Both band edges are honest meshes, and their pins moved to the answer.**
   The unit ball at `2^53` and the ball of radius `0.25` at `2^51` mesh as a
   closed square pyramid: the octahedron with its far corner pressed onto the
@@ -253,7 +253,7 @@ Lane `lane-q781-a-placed-wall-cut-like-the-unplaced-wall`, off `348b9390`.
 - The test is now `a_placed_bars_wall_is_cut_into_the_unplaced_walls_triangles`:
   the wall's triangles corner for corner and in order, with the caps printed.
   It passes on this base, and fails under the forced-false read above. Run as
-  `mise exec -- just t -p rcad-topo --test a_placed_bar_is_meshed_from_the_corners_it_stores --no-capture`;
+  `mise exec -- just t -p rcad-topo --test merged -E 'test(/^a_placed_bar_is_meshed_from_the_corners_it_stores::/)' --no-capture`;
   the rcad-step side is
   `mise exec -- just t -p rcad-step -E 'binary(merged) & test(a_flat_cap_is_cut_up_the_same_after_its_own_file)' --no-capture`.
 - No pin moved, since no code did.
@@ -345,7 +345,7 @@ tests come back as pinned.
   `0.5`, and `no_sliver_cut_through_a_balls_pole_folds_at_any_deflection`
   counts 68 folds in 1440, all cured at a later rung. A fan from corner 0: the
   same, with 96 folds. Every number is Q784's. Run as
-  `mise exec -- just t -E 'binary(a_placed_bar_is_meshed_from_the_corners_it_stores) | binary(a_flat_cap_is_cut_up_the_same_after_its_own_file) | test(=a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures) | test(=no_sliver_cut_through_a_balls_pole_folds_at_any_deflection)' --no-capture --no-fail-fast`.
+  `mise exec -- just t -E 'test(/^a_placed_bar_is_meshed_from_the_corners_it_stores::/) | binary(a_flat_cap_is_cut_up_the_same_after_its_own_file) | test(=a_rim_cornered_on_the_pole_builds_one_way_round_and_that_way_measures) | test(=no_sliver_cut_through_a_balls_pole_folds_at_any_deflection)' --no-capture --no-fail-fast`.
 - **What landed.** `TrimmedDomain::cut_by_corner_order` is the way to ask. The
   triangulator honours it for a flat patch with no holes whose outline turns
   the same way at every corner by `orient2d` and climbs then falls once, and
@@ -375,7 +375,7 @@ tests come back as pinned.
   compares caps and wall corner for corner and in order. With `mesh.rs`'s ask
   forced off it fails, printing 142, 155, 141, 143, 165, 187, 197, 199, 177,
   189, 163 and 183 off on the caps, Q781's numbers:
-  `mise exec -- just t -p rcad-topo --test a_placed_bar_is_meshed_from_the_corners_it_stores --no-capture`.
+  `mise exec -- just t -p rcad-topo --test merged -E 'test(/^a_placed_bar_is_meshed_from_the_corners_it_stores::/)' --no-capture`.
   In `rcad-mesh`, a disc of 40 corners turned by twelve angles and moved is cut
   the same in all twelve when asked, where spade cut 11 of the 11 turned ones
   differently from the first; a clockwise disc comes back anticlockwise; a disc
@@ -404,7 +404,7 @@ off `9e6da7e1`.
   have 796 triangles, bottom and top together, in every placement.
   `crates/rcad-topo/tests/a_placed_pipe_is_meshed_from_the_corners_it_stores.rs`,
   run as
-  `mise exec -- just t -p rcad-topo --test a_placed_pipe_is_meshed_from_the_corners_it_stores --no-capture`.
+  `mise exec -- just t -p rcad-topo --test merged -E 'test(/^a_placed_pipe_is_meshed_from_the_corners_it_stores::/)' --no-capture`.
 
   | placement | bottom ring off | top ring off |
   |---|---|---|
@@ -469,7 +469,7 @@ off `9e02c8f0`, merged at `6710f521`.
 - **The Q796 entry's command no longer runs the rim test**: that test was
   renamed from `…_builds_one_way_round_and_that_way_measures`. The four tests
   run now as
-  `mise exec -- just t -E 'binary(a_placed_bar_is_meshed_from_the_corners_it_stores) | binary(a_flat_cap_is_cut_up_the_same_after_its_own_file) | test(=a_rim_cornered_on_the_pole_builds_either_way_round_and_both_ways_measure) | test(=no_sliver_cut_through_a_balls_pole_folds_at_any_deflection)' --no-capture --no-fail-fast`.
+  `mise exec -- just t -E 'test(/^a_placed_bar_is_meshed_from_the_corners_it_stores::/) | binary(a_flat_cap_is_cut_up_the_same_after_its_own_file) | test(=a_rim_cornered_on_the_pole_builds_either_way_round_and_both_ways_measure) | test(=no_sliver_cut_through_a_balls_pole_folds_at_any_deflection)' --no-capture --no-fail-fast`.
 - **Left, not run (Q1274).** A ring whose outline's corner 0 lies within a
   rounding of the line through one of its hole's sides could see another run
   of sides once placed, start the hole at another corner, and be cut into
