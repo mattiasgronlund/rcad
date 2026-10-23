@@ -29,8 +29,8 @@
 //!   it whole, is folded back into one closed edge on that corner
 //!   (`where_curved_pieces_met_off_a_run_that_closes_up` in
 //!   `fuse/assemble.rs`).
-//! - **Through `(1.5, 1)` turned `π/2`** every fuse is still refused, and the
-//!   test below pins each at the refusal it meets. The bar's seam lands on
+//! - **Through `(1.5, 1)` turned `π/2`** the test below asks every fuse to
+//!   answer, and until Q2655 lands each is refused. The bar's seam lands on
 //!   the side's line, `1.09e−47` past the side's plane, between the two lines
 //!   it cuts the pipe in. With the bar first every fuse is refused
 //!   `Undecidable` "side of plane", for whether the seam's corner on the
@@ -48,7 +48,7 @@ use core::f64::consts::{FRAC_PI_2, PI};
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Fused, Model, ProfileBuilder, Rule, SolidKey};
 
 #[test]
 fn every_fuse_of_the_bar_and_the_l_plate_unturned_answers_the_two_as_they_stand() {
@@ -74,35 +74,8 @@ fn every_fuse_of_the_bar_and_the_l_plate_turned_back_a_quarter_turn_answers_the_
 }
 
 #[test]
-fn the_bar_by_the_other_side_turned_a_quarter_turn_is_refused_at_its_seam() {
-    every_fuse_is_refused([1.5, 1.0], FRAC_PI_2, |bar_first| {
-        if bar_first {
-            "side of plane"
-        } else {
-            "order along a crossing"
-        }
-    });
-}
-
-/// Every rule with either solid first, under a certified policy, is refused
-/// `Undecidable`, with one record, of the predicate `refused` names for that
-/// order, the bar first or not.
-fn every_fuse_is_refused(at: [f64; 2], turn: f64, refused: impl Fn(bool) -> &'static str) {
-    for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-        for bar_first in [true, false] {
-            let case = format!("bar at {at:?} turned {turn}, {rule:?}, bar first {bar_first}");
-            let (_, fused) = the_two_fused(at, turn, rule, bar_first, &mut ProvenanceLog::new());
-            let Err(Error::Undecidable { records }) = fused else {
-                panic!("{case}: {:?}", fused.map(|fused| fused.solids().len()));
-            };
-            let named: Vec<_> = records
-                .records()
-                .iter()
-                .map(|record| record.predicate())
-                .collect();
-            assert_eq!(named, [refused(bar_first)], "{case}");
-        }
-    }
+fn every_fuse_of_the_bar_by_the_other_side_turned_a_quarter_turn_answers_the_two_as_they_stand() {
+    every_fuse_answers_the_two_as_they_stand([1.5, 1.0], FRAC_PI_2);
 }
 
 /// Every rule with either solid first, under a certified policy, answers the
