@@ -337,22 +337,24 @@ impl Predicate for Orient2d {
 /// Every other predicate in the cascade checks that its products stayed out of
 /// the subnormals, because a bound of this shape is *relative* and rounding
 /// down there is not (see [`product_is_normal`](crate::product_is_normal)).
-/// This one does not need to, because its *sign* cannot go wrong even when the
-/// bound does.
+/// This one does not need to — but not for the reason an earlier version of
+/// this comment gave. That version called `acx * bcy` and `acy * bcx` exact
+/// products and argued from rounding to nearest never reordering two exact
+/// numbers. They are not exact: each is a product of two already-rounded
+/// differences, so that step only gives the sign of the *rounded* differences'
+/// determinant, not the true one.
 ///
-/// The whole value is `fl(fl(f) - fl(b))` for two exact products `f` and `b`.
-/// Rounding to nearest never reorders two numbers: if `f > b` then
-/// `fl(f) >= fl(b)`, subnormals and flushes to zero included. Subtracting two
-/// `f64` cannot reorder them either, and gives exactly zero only when they are
-/// equal. So the sign of the value is either the true sign or zero — never the
-/// opposite sign. A wrong bound can therefore only make this filter certify a
-/// sign that happens to be right, and a value of zero clears no bound at all,
-/// since the bound is never negative.
-///
-/// That argument turns on there being exactly one subtraction at the end. It
-/// does not survive a third term: `orient3d` adds three such differences after
-/// scaling each by a different height, and one of those scalings can swamp
-/// another, which is exactly how it used to certify wrong signs.
+/// The real reason is a size argument, checked with Gappa rather than argued
+/// by hand (decisions.md §464.8). [`decide`] only reaches this bound once it
+/// is itself a normal number, and that alone pins the permanent above
+/// `2^(-970.585)`. A product that lands in the subnormals can be wrong by at
+/// most `2⁻¹⁰⁷⁵`, the most a flush to the nearest subnormal can cost — and
+/// against a permanent that large, that is at most one `epsilon` of the bound
+/// itself, which the `16*epsilon^2` term above already has room for. Gappa
+/// proves the bound at the code's constant in every case of where the two
+/// products can land: both normal, one normal and one subnormal of either
+/// sign, and both too small for the bound to be a normal number at all, where
+/// the claim is vacuous.
 ///
 /// The bound itself still holds only while nothing overflows or falls into the
 /// subnormals, and [`decide`] refuses a bound that is not a normal number.
