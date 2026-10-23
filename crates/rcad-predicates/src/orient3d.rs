@@ -1452,6 +1452,56 @@ mod tests {
         }
     }
 
+    /// `value`, the double level 1 compares, can land further from the true
+    /// determinant than `error_bound`, and the sign level 1 certifies from it
+    /// is still right.
+    ///
+    /// `ORIENT3D_ERROR_BOUND` bounds the sum `value` is rounded from, which
+    /// seven roundings stand between and the inputs; `value` is an eighth.
+    /// This tetrahedron is built so that all eight go the same way by nearly a
+    /// whole `epsilon`, along the one term that is nearly all of the
+    /// permanent: `adz`, `bdx` and `cdy`, the product `bdx * cdy`, the minor
+    /// `first`, `adz * first`, the sum of the first two terms, and `value`.
+    /// That puts `value` 8 epsilon of the permanent from the truth where the
+    /// constant carries 7. The sign holds because `error_bound` is a double:
+    /// rounding cannot carry the sum past it unless the sum was past it
+    /// already (decisions.md §464.7).
+    #[test]
+    fn level_one_can_land_past_its_error_bound_and_still_certify_the_right_sign() {
+        let a = [7.450580596923828e-9, 1.0, 1.0000000049670539];
+        let b = [1.0000000149011614, 1.0, -1.4901160971803051e-8];
+        let c = [
+            -8.478601278668534e-22,
+            1.0000000074505806,
+            -8.231416447182961e-25,
+        ];
+        let d = [1.1102230163533504e-16; 3];
+
+        let (error, filtered) = how_far_level_one_falls_from_the_truth([a, b, c, d])
+            .expect("no product here leaves the range");
+        assert!(
+            error.abs() > filtered.error_bound,
+            "level 1 came out {error:e} from the truth, inside the {:e} it carries, so this \
+             no longer shows what it is for",
+            filtered.error_bound
+        );
+        let permanent = filtered.error_bound / ORIENT3D_ERROR_BOUND;
+        let in_epsilon = error.abs() / permanent / (f64::EPSILON / 2.0);
+        assert!(
+            in_epsilon > 7.99,
+            "this used to land 8 epsilon of the permanent from the truth and now lands \
+             {in_epsilon}"
+        );
+
+        let decided = decide(&Orient3d {
+            a: a.into(),
+            b: b.into(),
+            c: c.into(),
+            d: d.into(),
+        });
+        assert_eq!(decided, (Decision::Pos, Level::Float));
+    }
+
     /// How far level 1's `value` falls from the true determinant, and the bound
     /// it promised to stay inside.
     ///
