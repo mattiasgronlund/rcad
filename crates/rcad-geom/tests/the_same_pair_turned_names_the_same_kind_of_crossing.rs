@@ -263,20 +263,20 @@ fn the_486_skipped_quartic_pairs_split_by_which_clause_skips_them() {
             }
             let before = named(&surfaces)?;
             if matches!(before, SurfaceMeet::TouchAtOnePoint { .. }) {
-                match surfaces {
-                    [Surface::Sphere(_), Surface::Cylinder(_)]
-                    | [Surface::Cylinder(_), Surface::Sphere(_)] => {
-                        a_ball_and_a_pipe_touching_at_one_point
-                            .set(a_ball_and_a_pipe_touching_at_one_point.get() + 1);
-                    }
-                    [Surface::Cylinder(_), Surface::Cylinder(_)] => {
-                        two_pipes_resting_from_outside_on_no_named_knife_edge
-                            .set(two_pipes_resting_from_outside_on_no_named_knife_edge.get() + 1);
-                    }
-                    _ => panic!(
-                        "the quartic family draws only ball-against-pipe and \
-                         pipe-against-pipe"
-                    ),
+                if let [Surface::Cylinder(_), Surface::Cylinder(_)] = surfaces {
+                    two_pipes_resting_from_outside_on_no_named_knife_edge
+                        .set(two_pipes_resting_from_outside_on_no_named_knife_edge.get() + 1);
+                } else {
+                    let ([Surface::Sphere(_), Surface::Cylinder(_)]
+                    | [Surface::Cylinder(_), Surface::Sphere(_)]) = surfaces
+                    else {
+                        panic!(
+                            "the quartic family draws only ball-against-pipe and \
+                             pipe-against-pipe"
+                        );
+                    };
+                    a_ball_and_a_pipe_touching_at_one_point
+                        .set(a_ball_and_a_pipe_touching_at_one_point.get() + 1);
                 }
                 return Ok(());
             }
