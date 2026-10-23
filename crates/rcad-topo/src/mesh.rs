@@ -2853,10 +2853,10 @@ impl BuildingAMesh {
         }
 
         // **The two loops of a ring run opposite ways round it**, which is what
-        // keeps the material between them on the left of both, and a patch is
-        // walked along the one going up and back along the one going down. Which
-        // of the two is stored first is an order the face happens to hold
-        // (§31.3), so it is asked rather than assumed.
+        // keeps the material between them on the left of both. A patch is
+        // walked along the first loop turned to run up and back along the other,
+        // and turned at the end to run the way the loops do.
+        //
         // **Both loops are walked the way the longitude grows**, and the patch
         // goes along one and back along the other. Which way each was stored is
         // an order the face happens to hold — on a closed surface neither wire
@@ -3055,6 +3055,21 @@ impl BuildingAMesh {
                 return Ok(None);
             };
             patches[patch].push(moved);
+        }
+        // **Every patch runs the way the face's wires do**, with the material on
+        // its left about the stored surface's own normal: that is the way
+        // `what_the_triangulator_can_cut` turns the two triangles it draws
+        // across a loop that names one place twice. A patch runs along `up`,
+        // which is the first loop the way it was walked only when that loop
+        // runs up the longitude. With the top rim of a bar's wall stored first
+        // every patch ran clockwise in the chart, along the top up the
+        // longitude and back along the bottom, while an island put whole into
+        // one ran the face's way (Q2646). Turned last, so that the islands are
+        // placed against the same loops as before.
+        if !runs_up(outer) {
+            for patch in &mut patches {
+                patch[0] = patch[0].the_other_way();
+            }
         }
         Ok(Some(patches))
     }
