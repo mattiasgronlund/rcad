@@ -32,7 +32,7 @@ use core::cmp::Ordering;
 
 use rcad_predicates::{
     Approximation, Cause, Decision, Filtered, Interval, Level, Measures, Point as PredicatePoint,
-    Policy, Predicate, ProvenanceLog, Record, decide, resolve_under_policy,
+    Policy, Predicate, ProvenanceLog, Record, SideOfSurface, decide, resolve_under_policy,
 };
 use smallvec::SmallVec;
 
@@ -805,6 +805,24 @@ impl TwoLoopsHeldApartBy {
             Self::AFatPipesAxis { thin, fat } => [thin.radius(), fat.radius()],
         }
     }
+
+    /// Whether `corner` is a point both surfaces are proved to pass through
+    /// exactly, which puts it on their crossing. Only an exact point is asked,
+    /// since a box is never a point both pass through.
+    fn both_pass_exactly_through(self, corner: PredicatePoint) -> bool {
+        if corner.exact_coordinates().is_none() {
+            return false;
+        }
+        let sides = match self {
+            Self::ABallsCentre { ball, pipe } => [ball.side_of(corner), pipe.side_of(corner)],
+            Self::AFatPipesAxis { thin, fat } => [thin.side_of(corner), fat.side_of(corner)],
+        };
+        sides.into_iter().all(|side| match side {
+            Decision::Zero => true,
+            Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
+            other => panic!("a side of a surface came back as {other:?}"),
+        })
+    }
 }
 
 /// Which of those three the crossing of these two surfaces is, and the thing
@@ -1236,9 +1254,17 @@ fn how_far_off_the_crossing_a_corner_can_be(
     let radii = held_apart_by.the_two_radii();
     let mut furthest = 0.0_f64;
     for end in ends {
-        furthest = furthest.max(how_far_off_the_crossing_this_corner_can_be(end, |at| {
+        let reach = match how_far_off_the_crossing_this_corner_can_be(end, |at| {
             settled_with_a_bound_where_they_bend(surfaces, at, radii)
-        })?);
+        }) {
+            Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. })
+                if held_apart_by.both_pass_exactly_through(end) =>
+            {
+                0.0
+            }
+            reach => reach?,
+        };
+        furthest = furthest.max(reach);
     }
     Ok(furthest)
 }
