@@ -6860,6 +6860,203 @@ mod tests {
         );
     }
 
+    /// A run between where the two loops of a ball and a pipe resting on its
+    /// inside meet and the top or the bottom of the ball starts on the loop its
+    /// other corner is on, either way round and whichever face is listed first.
+    ///
+    /// The corner where they meet is on the flat surface `z = 0` that holds the
+    /// two loops apart, so it is on both loops and names neither. It was asked
+    /// as though it were a corner of a crossing in one loop, given the first
+    /// seed, and a run whose other corner is on the other seed's loop was
+    /// refused as a run between two loops (Q2649).
+    #[test]
+    fn a_run_from_where_two_loops_meet_starts_on_the_loop_its_other_corner_is_on() {
+        let (ball, pipe) = a_ball_and_a_pipe_resting_on_its_inside();
+        let [ball, pipe] = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
+        let certified = Policy::certified();
+        for up in [1.0, -1.0] {
+            let pole = Point::new(0.0, 0.0, 2.0 * up);
+            for corners in [[where_they_touch(), pole], [pole, where_they_touch()]] {
+                let run = a_run_picked_by_which_way_y_goes(pipe, corners, 1.0);
+                for along in [[&ball, &pipe], [&pipe, &ball]] {
+                    let pair = which_two_surfaces_a_run_is_between(run.run(), along);
+                    let mut log = ProvenanceLog::new();
+                    let Ok(WhatARunLiesOn::QuarticPickedUpAt(seeds, held_apart_by)) =
+                        what_a_run_between_these_two_lies_on(pair, &run, &certified, &mut log)
+                    else {
+                        panic!("a ball and a pipe resting on its inside are not two loops apart");
+                    };
+                    let seed = the_seed_this_run_is_picked_up_at(
+                        &run,
+                        &pair,
+                        seeds,
+                        held_apart_by,
+                        &certified,
+                        &mut log,
+                    );
+                    assert!(
+                        matches!(seed, Ok(seed) if seed.coordinates()[2] * up > 0.0),
+                        "the run from {:?} to {:?} along {along:?} starts at {seed:?}",
+                        corners[0],
+                        corners[1]
+                    );
+                }
+            }
+        }
+    }
+
+    /// A corner exactly on both of two surfaces that touch there is on their
+    /// crossing, and is no distance off it, since its box is a point: where a
+    /// pipe rests on a ball's inside. One where they touch off their crossing
+    /// is still refused: the Fujitsu FTR-F1 relays' `#1030 = (10.15, 1.15,
+    /// 16.4)`, `0.14` from where its ball and its pipe cross (§335.5).
+    ///
+    /// Settling refuses at both, since the two surfaces are tangent there, and
+    /// a run between two corners with the first as one of them was refused
+    /// before the march (Q2649).
+    #[test]
+    fn a_corner_exactly_where_two_surfaces_touch_is_no_distance_off_their_crossing() {
+        let (ball, pipe) = a_ball_and_a_pipe_resting_on_its_inside();
+        let held_apart_by = TwoLoopsHeldApartBy::ABallsCentre { ball, pipe };
+        let [ball, pipe] = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
+        let touching = PredicatePoint::from(where_they_touch().coordinates());
+        let top = PredicatePoint::from([0.0, 0.0, 2.0]);
+        for ends in [[touching, top], [top, touching]] {
+            for surfaces in [[&ball, &pipe], [&pipe, &ball]] {
+                let reach = how_far_off_the_crossing_a_corner_can_be(ends, surfaces, held_apart_by);
+                assert!(
+                    matches!(reach, Ok(reach) if reach < 1e-15),
+                    "the corners {ends:?} are exactly on {surfaces:?} and reach {reach:?}"
+                );
+            }
+        }
+
+        let ball = Sphere::new(Point::new(10.05, 1.15, 16.4), 0.1).expect("a radius");
+        let pipe = Cylinder::new(
+            crate::Axis::new(
+                Point::new(10.05, -19.75, 16.4),
+                Vector::new(3.663_735_981_263e-15, 1.0, 0.0),
+            )
+            .expect("a direction"),
+            0.1,
+        )
+        .expect("a radius");
+        let held_apart_by = TwoLoopsHeldApartBy::ABallsCentre { ball, pipe };
+        let [ball, pipe] = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
+        let off_the_crossing = PredicatePoint::from([10.15, 1.15, 16.4]);
+        for surfaces in [[&ball, &pipe], [&pipe, &ball]] {
+            let reach = how_far_off_the_crossing_a_corner_can_be(
+                [off_the_crossing, off_the_crossing],
+                surfaces,
+                held_apart_by,
+            );
+            assert!(
+                matches!(
+                    reach,
+                    Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. })
+                ),
+                "#1030 is 0.14 off where {surfaces:?} cross and reaches {reach:?}"
+            );
+        }
+    }
+
+    /// A run between where the two loops of a ball and a pipe resting on its
+    /// inside meet and the top or the bottom of the ball, picked by `y ≥ 0` or
+    /// `y ≤ 0`, is walked along that half of that loop, from its first corner
+    /// to its second, either way round and whichever face is listed first.
+    /// Every point is on both surfaces within the bound the walk claims.
+    ///
+    /// The march begun at the pole passes through where the loops meet, and
+    /// none of what comes back is on the other loop. The run was refused
+    /// before the march, since its corner where they meet cannot be settled
+    /// onto both surfaces (Q2649).
+    #[test]
+    fn a_run_from_where_two_loops_of_a_ball_and_a_pipe_meet_is_walked_along_its_half() {
+        let (ball, pipe) = a_ball_and_a_pipe_resting_on_its_inside();
+        let [ball, pipe] = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
+        for (up, side) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+            let pole = Point::new(0.0, 0.0, 2.0 * up);
+            for [from, to] in [[where_they_touch(), pole], [pole, where_they_touch()]] {
+                let run = a_run_picked_by_which_way_y_goes(pipe, [from, to], side);
+                for along in [[&ball, &pipe], [&pipe, &ball]] {
+                    let walked = walk(
+                        &run,
+                        along,
+                        Deflection::of(0.01).expect("a length"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| {
+                        panic!(
+                            "the run from {from:?} to {to:?} on y·{side} > 0 is refused: {why:?}"
+                        )
+                    });
+                    let bound = walked.deviation().magnitude();
+                    let points = walked.points();
+                    assert!(points.len() > 2, "half the loop has points");
+                    for point in points {
+                        let [x, y, z] = point.coordinates();
+                        let off_the_ball = ((x * x + y * y + z * z).sqrt() - 2.0).abs();
+                        let off_the_pipe = (((x - 1.0) * (x - 1.0) + y * y).sqrt() - 1.0).abs();
+                        assert!(
+                            z * up > 0.0
+                                && y * side > 0.0
+                                && off_the_ball <= bound
+                                && off_the_pipe <= bound,
+                            "the run from {from:?} to {to:?} on y·{side} > 0 was walked through \
+                             ({x}, {y}, {z}), {off_the_ball} and {off_the_pipe} off the two \
+                             surfaces against {bound}"
+                        );
+                    }
+                    let [first, last] = [points[0], points[points.len() - 1]];
+                    assert!(
+                        (first - from).length() < (first - to).length()
+                            && (last - to).length() < (last - from).length(),
+                        "the run from {from:?} to {to:?} was walked from {first:?} to {last:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Where the pipe of [`a_ball_and_a_pipe_resting_on_its_inside`] rests on
+    /// the ball's inside.
+    fn where_they_touch() -> Point {
+        Point::new(2.0, 0.0, 0.0)
+    }
+
+    /// A ball of radius two round the origin and a pipe of radius one up `z`
+    /// through `(1, 0, 0)`, which rests on the ball's inside at
+    /// [`where_they_touch`]. They cross in Viviani's figure of eight, two loops
+    /// either side of `z = 0` that meet there.
+    fn a_ball_and_a_pipe_resting_on_its_inside() -> (Sphere, Cylinder) {
+        let ball = Sphere::new(Point::origin(), 2.0).expect("a radius");
+        let pipe = Cylinder::new(
+            crate::Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("an axis"),
+            1.0,
+        )
+        .expect("a radius");
+        (ball, pipe)
+    }
+
+    /// A run along the crossing with `and` between `corners`, picked by
+    /// `y·side ≥ 0`.
+    fn a_run_picked_by_which_way_y_goes(and: Surface, corners: [Point; 2], side: f64) -> NamedRun {
+        let half = Picker::from(
+            crate::HalfSpace::through_a_point_facing(Point::origin(), Vector::new(0.0, side, 0.0))
+                .expect("the y axis has length"),
+        );
+        NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and,
+                picked_by: smallvec![half],
+            },
+            corners.map(|end| PredicatePoint::from(end.coordinates())),
+        )
+        .expect("a run between two corners")
+    }
+
     /// A thin pipe of radius one slanting through a fat one of radius four,
     /// its axis `2.9` or `2.99` from the fat one's, leaves two loops that
     /// nearly touch, and a closed run whose corner is on either is walked round
