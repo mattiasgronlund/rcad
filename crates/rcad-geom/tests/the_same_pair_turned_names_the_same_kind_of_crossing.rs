@@ -54,9 +54,12 @@
 //! §16.10's method (§30).
 //!
 //! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1564 of 2048
-//! quartic pairs compared and 486 skipped**, 10 of those 486 two pipes of one
-//! width whose axes meet (§347.9) and 57 a thin pipe resting on the inside of
-//! a fat one (Q2636).
+//! quartic pairs compared and 486 skipped**. Those 486 are a mix of two pipes
+//! of one width whose axes meet (§347.9) and a thin pipe resting on the
+//! inside of a fat one, plus pairs down one direction; an attempt to split
+//! the three apart (Q2636, then re-run for Q2663) gave different counts each
+//! time it was tried without a committed test behind the count, so no split
+//! is published here.
 
 #![forbid(unsafe_code)]
 

@@ -711,3 +711,15 @@ test's doc comment. Relay 1's quartic probe is described here and not kept.
 > --no-fail-fast` and tallied. The moved pins: `mise exec -- just t
 > --workspace --no-fail-fast`, which prints `3808 tests run: 3804 passed (19
 > slow), 4 failed, 3 skipped`, the four being those above.
+
+> **2026-10-23 note (Q2628): the thin bar resting inside a thick one is
+> renamed, not refused before any arrangement.** The pin above,
+> `a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_before_any_arrangement`,
+> no longer holds under that name. Since Q2628 `intersect` names the two
+> loops where the thin bar touches the thick one from inside
+> (`a_thin_bar_through_a_thick_one_crosses_it_in_two_loops_and_every_fuse_answers`'s
+> loops, pushed together until they cross like an X at `(0, 2, 0)`), and
+> `place_the_meets` puts no node where they meet, so the arrangement refuses
+> the two loops rather than `intersect` refusing them by name. The pin is now
+> `a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet`
+> in `two_curves_of_one_pair_that_meet.rs`.

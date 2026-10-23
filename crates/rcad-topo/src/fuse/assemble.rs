@@ -11468,14 +11468,21 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// are not parallel have one such line, and the point is `r₁` from one axis and
 /// `r₂` from the other along it, so the axes are `r₁ + r₂` or `|r₁ − r₂|`
 /// apart. There `where_two_leaning_pipes_cross` in `rcad-geom` answers that the
-/// two rest against each other at one point, for `r₁ + r₂`; refuses
-/// `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`, for `|r₁ − r₂|` with
-/// two widths; and for one width, where the axes meet, names four half
-/// ellipses, each running from one of the two points where the gradients line
-/// up to the other. That last pair is refused telling the cells of a pipe
-/// apart today
+/// two rest against each other at one point, for `r₁ + r₂`; for `|r₁ − r₂|`
+/// with two widths, names the two loops where the thin pipe rests on the
+/// inside of the fat one and they meet where the walls touch (Q2628, since
+/// when `intersect` no longer refuses
+/// `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo` for that pair itself);
+/// and for one width, where the axes meet, names four half ellipses, each
+/// running from one of the two points where the gradients line up to the
+/// other. The thin-pipe pair is now refused instead where
+/// `place_where_two_crossings_of_one_pair_meet` in `fuse/arrange.rs` places
+/// their two loops' node, for want of one
+/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet`
+/// in `tests/two_curves_of_one_pair_that_meet.rs`), and the one-width pair is
+/// refused telling the cells of a pipe apart today
 /// (`two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart`
-/// in `tests/two_curves_of_one_pair_that_meet.rs`). So the cross product never
+/// in the same file). So the cross product never
 /// vanishes inside an arc named here, and every face along one arc reads the
 /// same sign. A pipe written with its axis turned round or slid along has the
 /// same gradient, so both are named either way round.
