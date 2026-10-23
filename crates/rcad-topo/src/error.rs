@@ -669,11 +669,11 @@ pub enum Error {
     /// pole. A ball bored through both poles by a bar whose wall runs through
     /// its centre, the ball of 2.5 against the bar of radius 1 up `z` at
     /// `x = ±1`, was refused here under every rule until Q2650 cut each of its
-    /// two loops across the bar. Every fuse of it answers now and validates, but
-    /// the ball's skin with both holes in it, in the union and in the ball less
-    /// the bar, folds in its mesh at a pole at some deflections of 0.1 and
-    /// finer, which `measure` refuses as two patches drawing one side: a fault of
-    /// the mesh and not of this cut.
+    /// two loops across the bar. Every fuse of it answers and validates, and
+    /// measures under every rule at every deflection the test asks, the union
+    /// and the ball less the bar since the mesher unfolds a point left beside a
+    /// pole side with no other neighbour than its two ends and one more
+    /// (`rcad-mesh`'s `pockets_beside_a_pole_side`).
     ///
     /// **A gap and not a limit** (§16.10): each of those shapes has an answer,
     /// and cut a second time, each half of the crossing has two corners and a
