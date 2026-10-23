@@ -252,7 +252,7 @@ one the code does not check in that branch, and the comment at
 wrong there. Where `first` is not zero the comment holds: `|first| ≤ q1` by
 monotone rounding, so `r1 ≥ |t1| ≥ 2⁻¹⁰²²`. A paper estimate says the bound
 survives the zero branch: its error is a few `u` of `q1 × |adz|`, far inside
-the slack of an `eb` that is normal. Q2658 runs it.
+the slack of an `eb` that is normal. Q2658 runs it, and it proves (464.7).
 
 **Overflow does not reach Gappa.** Its `float<ieee_64, ne>` has no largest
 exponent: the rounding it writes for Coq is `rounding_float rndNE (53)
@@ -538,3 +538,504 @@ one of them not run, and 39 equalities Coq takes on trust. Since 464.7 the
 comments in `orient3d.rs` say what is proved, and every branch with a minor at
 zero is run. The branches where one of the nine differences is zero are still
 on paper, as 464.4 argues them, and so is the step from `y` to the sign.
+
+### 464.7 value past the bound, and every minor at zero run
+
+Q2658 took up the two claims 464.4 left unbacked, in two lanes on 2026-10-23.
+Neither changed a function body in `orient3d.rs`, so what Gappa ran is still
+`on_floats` as 464.4 read it at `d9f931e8`. The `block1.g` the scripts below
+start from is 464.5's block 1 byte for byte: `cmp` against lines 326 to 502
+of this file finds no difference. Every run is Gappa 1.8.0 under 464.4's pin,
+at `-Eprecision=200`, and at the code's `B = 7u + 56u²` unless it names
+another `B`.
+
+**1. `value` lands past the bound.** 464.4 proved `y` within `eb` of the true
+determinant and could not prove `value` within it. It is not within it, on
+this tetrahedron:
+
+- `a = (2⁻²⁷, 1, 1 + 22369622·2⁻⁵²)`
+- `b = (1 + 2⁻²⁶ + 2⁻⁵², 1, −2⁻²⁶(1 − 2⁻²⁶))`
+- `c = (−(2⁻⁷⁰ + 2⁻⁸⁰), 1 + 2⁻²⁷, −2⁻⁸⁰ + 40·2⁻⁹³)`
+- `d = 2⁻⁵³ − 2⁻⁸⁰` on every axis
+
+`d` is just under half an ulp of 1, so `a.z − d.z`, `b.x − d.x` and
+`c.y − d.y` each round up by nearly `u` of themselves. From there the first
+term rounds up at every step. Eight roundings lie along it, and each goes up
+by between `0.999992u` and `1.000000u` of what it rounds: `adz`, `bdx`, `cdy`,
+`bdx * cdy`, `first`, `adz * first`, the sum of the first two terms, and
+`value`.
+
+For that to come to `8u` of the permanent, the determinant has to be nearly
+all of the permanent: no minor may cancel inside itself, and no two terms may
+cancel each other. A minor does not cancel when its two products have opposite
+signs, and all three minors cannot have that. The first products of the three
+minors multiply to the six differences `adx` to `cdy`, and so do the second
+products, so the three conditions together say a sign equals minus itself. So
+the first two minors are built not to cancel, their terms have the same sign,
+and the third term is kept small, with `cdz` about `−2⁻⁵³`. Here `value` and
+the rounded permanent `P` are the same double, `0x1.000000755555cp+0`.
+
+A scratch search tried `b.z = −2⁻²⁶(1 + k·2⁻³⁰)` and `c.z = −2⁻⁸⁰ − j·2⁻⁹³`
+for `k` and `j` from −40 to 40, and kept the best, `k = −16` and `j = −40`,
+which are the points above. On them it printed:
+
+```text
+ratio in u: 7.999992112355106
+|value - exact| / eb: 1.1428560160507284 err > eb: True
+signs: value 1 exact 1 value > eb True
+```
+
+So `value` lands `7.99999u` of the permanent from the true determinant, which
+is `1.14286` times `eb`: the `±1.14286` Gappa could not get under for `value`
+in 464.4, now met by an input. `j = −40` is the edge of the search, so a wider
+one may come a little closer to `8u`, and 464.4's proof at `8u + 64u²` is a
+bound no input passes. The sign is still right: `value > eb`, the truth is
+positive, and `decide` answers `(Pos, Float)`, as 464.4's step from `y` to the
+sign says it must.
+`level_one_can_land_past_its_error_bound_and_still_certify_the_right_sign`, in
+`orient3d.rs`'s tests, keeps the tetrahedron and checks all three: `value`
+past `error_bound`, past `7.99` epsilon of the permanent, and `decide`'s
+answer. That test is what runs this again; the scratch scripts are not kept.
+
+**2. The comments now say what is proved.** `922db1fd` adds the test above.
+In `orient3d.rs`, `813f8a09` and `c827c89b` change only comments and the names
+of test items:
+
+- `ORIENT3D_ERROR_BOUND`'s doc says it bounds `y`, the sum `value` is rounded
+  from, counts `y`'s seven roundings, and gives the step from `y` to the sign.
+  It says `value` takes an eighth rounding and names the test above.
+- The bound test's doc no longer says `value` never falls further than
+  `7*epsilon` of the permanent from the truth. It says what the search found,
+  6.29 epsilon, and that the built tetrahedron rounds worse.
+- Three names said the search's tetrahedra round as badly as any can, and the
+  built one rounds worse, so they are renamed:
+  `level_one_stays_inside_its_error_bound_where_the_rounding_is_worst` to
+  `level_one_stays_inside_its_error_bound_on_the_tetrahedra_a_search_found`,
+  `the_worst_rounding_tetrahedra_are_settled_by_level_one_itself` to
+  `the_searched_tetrahedra_are_settled_by_level_one_itself`, and
+  `tetrahedra_whose_arithmetic_rounds_as_badly_as_it_can` to
+  `tetrahedra_a_search_found_rounding_badly`. Outside Q2658's own row in
+  the queue, only 464.4 named one of them, the first, by its old name and
+  line. It keeps them, as a record of what it read at `d9f931e8`.
+- The comment above `stays_accurate` says the nine checks cover the
+  permanent's matching product only for a minor that is not zero. It gives
+  464.4's example: `bdxcdy == cdxbdy == 2⁻¹⁰⁰⁰` makes `q1 = 2⁻⁹⁹⁹`, and with
+  `adz == 2⁻¹⁰⁰`, `q1 × |adz| = 2⁻¹⁰⁹⁹`, which rounds to zero. It says the sign
+  is proved with any one or any two minors at zero, which 3 below runs.
+
+**3. Every minor at zero, run.** A minor is zero when its two products round
+to the same double. Then the minor is exactly zero and so is its term in `y`,
+while its term in the true determinant need not be: what is left of it is the
+two products' rounding errors, which block 1 already carries. `product_is_normal`
+passes on the zero, so nothing checks that the permanent's matching product is
+normal. Each script is block 1 with that minor's two products made one double,
+the minor and its term left unrounded, their two ratios set to 1, and the
+hypotheses the term and the permanent's product being normal gave dropped.
+Where that leaves one of `t1` and `t2` zero, their sum is the other one and
+does not round, so `rs` goes too.
+
+- **`first` zero**, `zero2.g`: proves, with `(y − Ex) / P6` within
+  `6u + 13u²`. At `B = 5u` it fails, best `±1.2`.
+- **`second` zero**: proves, within `6u + 13u²`. At `B = 5u` it fails, best
+  `±1.2`.
+- **`third` zero**: with block 1's hints alone it fails, best `±1`. With six
+  more hints it proves, with `(y − Ex) / P6` within `7u + 11u²`. It fails at
+  `B = 6u`, best `±1.16667`, and at `7u + 46u²`, best `±1`: the same two places
+  block 1 fails (464.4).
+- **Two at zero**: `first` and `second` with block 1's hints alone fail where
+  block 1 does without `r1`, `r2` and `r3` normal, at `REL(P, Phat)`, best
+  `[-2.29099e+538, 7.5465e+645]`. The three scripts `make_two_zero.py` writes,
+  one for each pair, each prove, with `(y − Ex) / P6` within `6u + 13u²` and
+  `P −/ Phat` within `8u + 14u²`. Its script for `first` and `second` fails at
+  `B = 5u`, best `±1.2`.
+- **All three at zero**: `y` is zero, so `value` is zero, and `decide`
+  certifies no sign from it: `value > eb` and `value < −eb` are both false for
+  any `eb` that is not negative. The same holds where `third` is zero and
+  `t1 + t2` is zero.
+
+The runs below `B` are there because a script whose hypotheses contradict each
+other proves every goal. Each script that proves at `B` fails below it, so none
+of them proved its goal from a contradiction.
+
+The hints `third` needs, and the seven `make_two_zero.py` adds, carry the error
+of a permanent product that may be below the normals as an amount against
+`Phat`, not as a fraction of itself, and keep `Phat` away from zero through a
+product that is normal: `P12` for `third`, and the one minor not at zero for a
+pair. Why block 1's hints are enough when `first` or `second` is zero and not
+when `third` is was not traced.
+
+`gappa -Bcoq` writes each of the six proofs (one minor at zero, three ways, and
+two at zero, three ways), and `coqc` under 464.5's pins, with gappalib 1.8.0,
+accepts each: exit 0, in 2.8 to 4.5 s. Like block 1's, each rests on its
+hints, 36 to 43 of them, which enter Coq as hypotheses (464.4).
+
+**4. The scripts.** Each runs as 464.5 runs block 1. A run at another `B` is
+the script with its `B = ...` line changed: `B = 5b-53;`, `B = 6b-53;`, or
+`B = 7b-53 + 23b-105;` for `7u + 46u²`.
+
+`zero2.g`, `first` zero, whole:
+
+```gappa
+# Block 1 where first is zero: bdx * cdy and cdx * bdy round to the same
+# double, so first = rnd(0) = 0 and t1 = rnd(adz * 0) = 0, and r1 is not
+# checked by any product_is_normal.
+@rnd = float<ieee_64, ne>;
+
+# The twelve input coordinates, each an f64.
+ax = rnd(ax_); ay = rnd(ay_); az = rnd(az_);
+bx = rnd(bx_); by = rnd(by_); bz = rnd(bz_);
+cx = rnd(cx_); cy = rnd(cy_); cz = rnd(cz_);
+dx = rnd(dx_); dy = rnd(dy_); dz = rnd(dz_);
+
+# What on_floats computes, line for line.
+Adx = ax - dx; Ady = ay - dy; Adz = az - dz;
+Bdx = bx - dx; Bdy = by - dy; Bdz = bz - dz;
+Cdx = cx - dx; Cdy = cy - dy; Cdz = cz - dz;
+adx = rnd(Adx); ady = rnd(Ady); adz = rnd(Adz);
+bdx = rnd(Bdx); bdy = rnd(Bdy); bdz = rnd(Bdz);
+cdx = rnd(Cdx); cdy = rnd(Cdy); cdz = rnd(Cdz);
+
+bdxcdy = rnd(bdx * cdy);
+# The same double as bdxcdy; that it is cdx * bdy rounded comes in as its
+# relative error below.
+cdxbdy = bdxcdy;
+cdxady = rnd(cdx * ady);
+adxcdy = rnd(adx * cdy);
+adxbdy = rnd(adx * bdy);
+bdxady = rnd(bdx * ady);
+
+M1 = bdxcdy - cdxbdy; M2 = cdxady - adxcdy; M3 = adxbdy - bdxady;
+first = M1; second = rnd(M2); third = rnd(M3);
+
+U1 = adz * first; U2 = bdz * second; U3 = cdz * third;
+t1 = U1; t2 = rnd(U2); t3 = rnd(U3);
+# t1 is zero, so t1 + t2 is the double t2 and rounds to itself.
+S = t1 + t2;
+s12 = S;
+y = s12 + t3;
+value = rnd(y);
+
+q1 = rnd(|bdxcdy| + |cdxbdy|);
+q2 = rnd(|cdxady| + |adxcdy|);
+q3 = rnd(|adxbdy| + |bdxady|);
+R1 = q1 * |adz|; R2 = q2 * |bdz|; R3 = q3 * |cdz|;
+r1 = rnd(R1); r2 = rnd(R2); r3 = rnd(R3);
+P = rnd(rnd(r1 + r2) + r3);
+
+B = 7b-53 + 7b-103;
+eb = rnd(B * P);
+
+# The true determinant of the same inputs.
+Ex = Adz * (Bdx * Cdy - Cdx * Bdy)
+   + Bdz * (Cdx * Ady - Adx * Cdy)
+   + Cdz * (Adx * Bdy - Bdx * Ady);
+
+# The permanent with every rounding taken out, twice: as P groups it, and
+# as six products.
+Phat = (|bdxcdy| + |cdxbdy|) * |adz|
+     + (|cdxady| + |adxcdy|) * |bdz|
+     + (|adxbdy| + |bdxady|) * |cdz|;
+c1 = |adz| * |bdxcdy|; c2 = |adz| * |cdxbdy|;
+c3 = |bdz| * |cdxady|; c4 = |bdz| * |adxcdy|;
+c5 = |cdz| * |adxbdy|; c6 = |cdz| * |bdxady|;
+P6 = c1 + c2 + c3 + c4 + c5 + c6;
+
+# What each rounding multiplied its argument by.
+radx = adx / Adx; rady = ady / Ady; radz = adz / Adz;
+rbdx = bdx / Bdx; rbdy = bdy / Bdy; rbdz = bdz / Bdz;
+rcdx = cdx / Cdx; rcdy = cdy / Cdy; rcdz = cdz / Cdz;
+rp1 = bdxcdy / (bdx * cdy); rp2 = cdxbdy / (cdx * bdy);
+rp3 = cdxady / (cdx * ady); rp4 = adxcdy / (adx * cdy);
+rp5 = adxbdy / (adx * bdy); rp6 = bdxady / (bdx * ady);
+rm1 = 1; rm2 = second / M2; rm3 = third / M3;
+rt1 = 1; rt2 = t2 / U2; rt3 = t3 / U3;
+
+# Each of the six terms of the determinant, as y carries it, less the
+# term itself.
+W1 = rm1 * rt1 - 1 / (radz * rbdx * rcdy * rp1);
+W2 = rm1 * rt1 - 1 / (radz * rcdx * rbdy * rp2);
+W3 = rm2 * rt2 - 1 / (rbdz * rcdx * rady * rp3);
+W4 = rm2 * rt2 - 1 / (rbdz * radx * rcdy * rp4);
+W5 = rm3 * rt3 - 1 / (rcdz * radx * rbdy * rp5);
+W6 = rm3 * rt3 - 1 / (rcdz * rbdx * rady * rp6);
+e1 = adz * bdxcdy * W1; e2 = -(adz * cdxbdy * W2);
+e3 = bdz * cdxady * W3; e4 = -(bdz * adxcdy * W4);
+e5 = cdz * adxbdy * W5; e6 = -(cdz * bdxady * W6);
+
+{
+  # Every coordinate is a finite f64.
+     |ax| <= 1b1024 /\ |ay| <= 1b1024 /\ |az| <= 1b1024
+  /\ |bx| <= 1b1024 /\ |by| <= 1b1024 /\ |bz| <= 1b1024
+  /\ |cx| <= 1b1024 /\ |cy| <= 1b1024 /\ |cz| <= 1b1024
+  /\ |dx| <= 1b1024 /\ |dy| <= 1b1024 /\ |dz| <= 1b1024
+  # No factor of the nine products is zero but first. For an f64 that is
+  # the same as being at least the smallest subnormal.
+  /\ |adx| >= 1b-1074 /\ |ady| >= 1b-1074 /\ |adz| >= 1b-1074
+  /\ |bdx| >= 1b-1074 /\ |bdy| >= 1b-1074 /\ |bdz| >= 1b-1074
+  /\ |cdx| >= 1b-1074 /\ |cdy| >= 1b-1074 /\ |cdz| >= 1b-1074
+  /\ |second| >= 1b-1074 /\ |third| >= 1b-1074
+  # §12.2's first condition: product_is_normal on the nine products. The
+  # check on adz and first passes on the zero, and says nothing.
+  /\ |bdxcdy| >= 1b-1022 /\ |cdxbdy| >= 1b-1022 /\ |cdxady| >= 1b-1022
+  /\ |adxcdy| >= 1b-1022 /\ |adxbdy| >= 1b-1022 /\ |bdxady| >= 1b-1022
+  /\ |t2| >= 1b-1022 /\ |t3| >= 1b-1022
+  # r2 and r3 are normal because |second| <= q2 and |third| <= q3. Nothing
+  # says r1 is.
+  /\ |r2| >= 1b-1022 /\ |r3| >= 1b-1022
+  # §12.2's second condition: the bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those normal numbers gives: the rounding is
+  # off by at most u + 2u^2. Gappa's own theorem needs the value strictly
+  # above 2^-1022, so it cannot take the step itself.
+  /\ bdxcdy -/ bdx * cdy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ cdxbdy -/ cdx * bdy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ cdxady -/ cdx * ady in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ adxcdy -/ adx * cdy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ adxbdy -/ adx * bdy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ bdxady -/ bdx * ady in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t2 -/ U2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t3 -/ U3 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ r2 -/ R2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ r3 -/ R3 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ adz / |adz| in [-1, 1] /\ bdz / |bdz| in [-1, 1] /\ cdz / |cdz| in [-1, 1]
+  /\ bdxcdy / |bdxcdy| in [-1, 1] /\ cdxbdy / |cdxbdy| in [-1, 1]
+  /\ cdxady / |cdxady| in [-1, 1] /\ adxcdy / |adxcdy| in [-1, 1]
+  /\ adxbdy / |adxbdy| in [-1, 1] /\ bdxady / |bdxady| in [-1, 1]
+->
+  (y - Ex) / P6 in ? /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+adx / Adx -> 1 + (adx - Adx) / Adx;
+ady / Ady -> 1 + (ady - Ady) / Ady;
+adz / Adz -> 1 + (adz - Adz) / Adz;
+bdx / Bdx -> 1 + (bdx - Bdx) / Bdx;
+bdy / Bdy -> 1 + (bdy - Bdy) / Bdy;
+bdz / Bdz -> 1 + (bdz - Bdz) / Bdz;
+cdx / Cdx -> 1 + (cdx - Cdx) / Cdx;
+cdy / Cdy -> 1 + (cdy - Cdy) / Cdy;
+cdz / Cdz -> 1 + (cdz - Cdz) / Cdz;
+bdxcdy / (bdx * cdy) -> 1 + (bdxcdy - bdx * cdy) / (bdx * cdy);
+cdxbdy / (cdx * bdy) -> 1 + (cdxbdy - cdx * bdy) / (cdx * bdy);
+cdxady / (cdx * ady) -> 1 + (cdxady - cdx * ady) / (cdx * ady);
+adxcdy / (adx * cdy) -> 1 + (adxcdy - adx * cdy) / (adx * cdy);
+adxbdy / (adx * bdy) -> 1 + (adxbdy - adx * bdy) / (adx * bdy);
+bdxady / (bdx * ady) -> 1 + (bdxady - bdx * ady) / (bdx * ady);
+second / M2 -> 1 + (second - M2) / M2;
+third / M3 -> 1 + (third - M3) / M3;
+t2 / U2 -> 1 + (t2 - U2) / U2;
+t3 / U3 -> 1 + (t3 - U3) / U3;
+
+# The error is the sum of the six terms' errors, each a fraction of its
+# own piece of the permanent; add_rr then averages them.
+(y - Ex) / P6 -> ((P6 + (y - Ex)) - P6) / P6;
+P6 + (y - Ex) -> (c1 + e1) + (c2 + e2) + (c3 + e3) + (c4 + e4) + (c5 + e5) + (c6 + e6);
+(c1 + e1) - c1 -> e1;
+(c2 + e2) - c2 -> e2;
+(c3 + e3) - c3 -> e3;
+(c4 + e4) - c4 -> e4;
+(c5 + e5) - c5 -> e5;
+(c6 + e6) - c6 -> e6;
+e1 / c1 -> (adz / |adz|) * (bdxcdy / |bdxcdy|) * W1;
+e2 / c2 -> -((adz / |adz|) * (cdxbdy / |cdxbdy|) * W2);
+e3 / c3 -> (bdz / |bdz|) * (cdxady / |cdxady|) * W3;
+e4 / c4 -> -((bdz / |bdz|) * (adxcdy / |adxcdy|) * W4);
+e5 / c5 -> (cdz / |cdz|) * (adxbdy / |adxbdy|) * W5;
+e6 / c6 -> -((cdz / |cdz|) * (bdxady / |bdxady|) * W6);
+
+# From the six terms' permanent to the one on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / P6) * (Phat / P) * (P / eb);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+**`second` zero** is block 1 with these changes:
+
+- `adxcdy = rnd(adx * cdy);` becomes `adxcdy = cdxady;`. In the next lines,
+  `second = rnd(M2)` becomes `second = M2`, `t2 = rnd(U2)` becomes `t2 = U2`,
+  and `s12 = rnd(S);` becomes `s12 = S;`.
+- `rm2 = second / M2` becomes `rm2 = 1`, and `rt2 = t2 / U2` becomes
+  `rt2 = 1`. `rs = s12 / S;` goes, and so does the ` * rs` in `W1` to `W4`.
+- In the hypotheses, `|second| >= 1b-1074`, `|t1 + t2| >= 1b-1074`,
+  `|t2| >= 1b-1022` and `|r2| >= 1b-1022` go, and so do the `t2 -/ U2` and
+  `r2 -/ R2` lines.
+- The hints `second / M2 -> ...`, `t2 / U2 -> ...` and `s12 / S -> ...` go.
+
+**`third` zero** is block 1 with these changes:
+
+- `bdxady = rnd(bdx * ady);` becomes `bdxady = adxbdy;`. In the next lines,
+  `third = rnd(M3)` becomes `third = M3`, and `t3 = rnd(U3)` becomes
+  `t3 = U3`.
+- `rm3 = third / M3` becomes `rm3 = 1`, and `rt3 = t3 / U3` becomes
+  `rt3 = 1`.
+- `P = rnd(rnd(r1 + r2) + r3);` becomes two lines, and `Phat` four:
+
+  ```gappa
+  P12 = rnd(r1 + r2);
+  P = rnd(P12 + r3);
+  Phat12 = (|bdxcdy| + |cdxbdy|) * |adz|
+         + (|cdxady| + |adxcdy|) * |bdz|;
+  Phat3 = (|adxbdy| + |bdxady|) * |cdz|;
+  Phat = Phat12 + Phat3;
+  ```
+
+- In the hypotheses, `|third| >= 1b-1074`, `|t3| >= 1b-1022` and
+  `|r3| >= 1b-1022` go, and so do the `t3 -/ U3` and `r3 -/ R3` lines.
+- The hints `third / M3 -> ...` and `t3 / U3 -> ...` go, and these six are
+  added at the end:
+
+  ```gappa
+  # r3 may be below the normals, so its error is an amount and not a
+  # fraction. Carry it as an amount against Phat, which eb being normal keeps
+  # far above it.
+  (P - Phat) / Phat -> ((P - (P12 + r3)) / (P12 + r3)) * (1 + ((P12 + r3) - Phat) / Phat) + ((P12 + r3) - Phat) / Phat;
+  ((P12 + r3) - Phat) / Phat -> ((P12 - Phat12) / Phat12) * (Phat12 / Phat) + (r3 - R3) / Phat + ((q3 - (|adxbdy| + |bdxady|)) / (|adxbdy| + |bdxady|)) * (Phat3 / Phat);
+  Phat12 / Phat -> 1 / (1 + Phat3 / Phat12);
+  Phat3 / Phat -> 1 / (1 + Phat12 / Phat3);
+  Phat12 -> P12 / (1 + (P12 - Phat12) / Phat12);
+  P12 + r3 -> P / (1 + (P - (P12 + r3)) / (P12 + r3));
+  ```
+
+The run with block 1's hints alone is this without the six, and with `P` and
+`Phat` as block 1 writes them.
+
+**Two at zero.** `make_two_zero.py`, whole, run as `python3 make_two_zero.py 12
+13 23` beside `block1.g`, writes `zero12d.g`, `zero13d.g` and `zero23d.g`. The
+run with block 1's hints alone is `zero12d.g` without what the script appends
+at the end, and with `P` and `Phat` as block 1 writes them.
+
+```python
+"""Write block 1 with two of first, second and third zero, as zeroJK.g."""
+import sys
+
+PAIR = {
+    1: ("cdxbdy = rnd(cdx * bdy);", "cdxbdy = bdxcdy;"),
+    2: ("adxcdy = rnd(adx * cdy);", "adxcdy = cdxady;"),
+    3: ("bdxady = rnd(bdx * ady);", "bdxady = adxbdy;"),
+}
+MINOR = {1: "first", 2: "second", 3: "third"}
+NOTE = {1: "|bdxcdy| + |cdxbdy|", 2: "|cdxady| + |adxcdy|", 3: "|adxbdy| + |bdxady|"}
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def make(zero):
+    (normal,) = {1, 2, 3} - zero
+    src = open("block1.g").read()
+    names = " and ".join(MINOR[k] for k in sorted(zero))
+    src = sub(
+        src,
+        "# Orient3d::on_floats and ORIENT3D_ERROR_BOUND,\n"
+        "# crates/rcad-predicates/src/orient3d.rs at d9f931e8.\n",
+        f"# Block 1 where {names} are both zero. The permanent's products\n"
+        f"# for those two are checked by no product_is_normal.\n",
+    )
+    for k in zero:
+        src = sub(src, *PAIR[k])
+        src = sub(src, f"{MINOR[k]} = rnd(M{k});", f"{MINOR[k]} = M{k};")
+        src = sub(src, f"t{k} = rnd(U{k});", f"t{k} = U{k};")
+        src = sub(src, f"rm{k} = {MINOR[k]} / M{k};", f"rm{k} = 1;")
+        src = sub(src, f"rt{k} = t{k} / U{k};", f"rt{k} = 1;")
+        src = sub(src, f"{MINOR[k]} / M{k} -> 1 + ({MINOR[k]} - M{k}) / M{k};\n", "")
+        src = sub(src, f"t{k} / U{k} -> 1 + (t{k} - U{k}) / U{k};\n", "")
+        bound = "in [-4503599627370497b-105, 4503599627370497b-105]\n"
+        src = sub(src, f"  /\\ t{k} -/ U{k} {bound}", "")
+        src = sub(src, f"  /\\ r{k} -/ R{k} {bound}", "")
+    # One of t1 and t2 is zero, so their sum is the other and rounds to
+    # itself.
+    src = sub(src, "s12 = rnd(S);", "s12 = S;")
+    src = sub(src, "rs = s12 / S;\n", "")
+    src = src.replace(" * rs - 1", " - 1")
+    src = sub(src, "  # The first two terms do not cancel to zero.\n  /\\ |t1 + t2| >= 1b-1074\n", "")
+    src = sub(src, "s12 / S -> 1 + (s12 - S) / S;\n", "")
+    m = MINOR[normal]
+    src = sub(
+        src,
+        "  # No factor of the nine products is zero. For an f64 that is the same as\n"
+        "  # being at least the smallest subnormal.\n",
+        f"  # No factor of the nine products is zero but {names}. For an f64\n"
+        "  # that is the same as being at least the smallest subnormal.\n",
+    )
+    src = sub(
+        src,
+        "  # The permanent's own three products are normal too. The comment above\n"
+        "  # stays_accurate argues it from the nine.\n",
+        f"  # r{normal} is normal because |{m}| <= q{normal}. Nothing says the other\n"
+        "  # two are.\n",
+    )
+    src = sub(
+        src,
+        "  /\\ |first| >= 1b-1074 /\\ |second| >= 1b-1074 /\\ |third| >= 1b-1074\n",
+        f"  /\\ |{m}| >= 1b-1074\n",
+    )
+    src = sub(
+        src,
+        "  /\\ |t1| >= 1b-1022 /\\ |t2| >= 1b-1022 /\\ |t3| >= 1b-1022\n",
+        f"  /\\ |t{normal}| >= 1b-1022\n",
+    )
+    src = sub(
+        src,
+        "  /\\ |r1| >= 1b-1022 /\\ |r2| >= 1b-1022 /\\ |r3| >= 1b-1022\n",
+        f"  /\\ |r{normal}| >= 1b-1022\n",
+    )
+    src = sub(src, "P = rnd(rnd(r1 + r2) + r3);", "P12 = rnd(r1 + r2);\nP = rnd(P12 + r3);")
+    src = sub(
+        src,
+        "Phat = (|bdxcdy| + |cdxbdy|) * |adz|\n"
+        "     + (|cdxady| + |adxcdy|) * |bdz|\n"
+        "     + (|adxbdy| + |bdxady|) * |cdz|;\n",
+        "Phat1 = (|bdxcdy| + |cdxbdy|) * |adz|;\n"
+        "Phat2 = (|cdxady| + |adxcdy|) * |bdz|;\n"
+        "Phat3 = (|adxbdy| + |bdxady|) * |cdz|;\n"
+        "Phat12 = Phat1 + Phat2;\n"
+        "Phat = Phat12 + Phat3;\n",
+    )
+    pieces = ["(P12 - (r1 + r2)) / Phat"]
+    for k in (1, 2, 3):
+        if k in zero:
+            pieces.append(f"(r{k} - R{k}) / Phat")
+            pieces.append(f"((q{k} - ({NOTE[k]})) / ({NOTE[k]})) * (Phat{k} / Phat)")
+        else:
+            pieces.append(f"((r{k} - Phat{k}) / Phat{k}) * (Phat{k} / Phat)")
+    others = {1: "Phat2 + Phat3", 2: "Phat1 + Phat3", 3: "Phat12"}
+    src += (
+        "\n"
+        "# Two of r1, r2 and r3 may be below the normals, so their errors are\n"
+        "# amounts and not fractions. Carry each as an amount against Phat,\n"
+        f"# which r{normal} being normal keeps away from zero.\n"
+        "(P - Phat) / Phat -> ((P - (P12 + r3)) / (P12 + r3)) * (1 + ((P12 + r3) - Phat) / Phat)"
+        " + ((P12 + r3) - Phat) / Phat;\n"
+        f"((P12 + r3) - Phat) / Phat -> {' + '.join(pieces)};\n"
+        + "".join(
+            f"Phat{k} / Phat -> 1 / (1 + ({others[k]}) / Phat{k});\n" for k in (1, 2, 3)
+        )
+        + f"Phat{normal} -> r{normal} / (1 + (r{normal} - Phat{normal}) / Phat{normal});\n"
+        "P12 + r3 -> P / (1 + (P - (P12 + r3)) / (P12 + r3));\n"
+    )
+    return src
+
+
+for arg in sys.argv[1:]:
+    zero = {int(c) for c in arg}
+    open(f"zero{arg}d.g", "w").write(make(zero))
+```
+
+**5. For Q2659.** The eight other filters' doc comments may claim what
+orient3d's did, that `value` stays within the constant times the permanent,
+where a proof like block 1's gives that for the sum before the last rounding.
+None of them was read for this.
+
+**6. What this leaves.**
+
+- A row to restate `Filtered::error_bound`'s doc, `cascade.rs:25-28`, which
+  says it is the most `value` can differ from the truth. For orient3d `value`
+  lands 8/7 of it away (1 above). What `decide`'s sign test needs, and what
+  Gappa proves, is a bound on the sum before `value`'s last rounding.
+- A row to run block 1 where one of the nine differences `adx` to `cdz` is
+  zero, which 464.4 argues on paper only, reusing the scripts in 4.
