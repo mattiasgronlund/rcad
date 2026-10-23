@@ -1675,6 +1675,98 @@ fn the_ball_inside_the_bar(radius: f64) -> f64 {
     })
 }
 
+/// A ball of `2.5` at the origin bored through by the round bar of radius 1 up
+/// `z` from `−3` to `3` at `x = 1`, under every rule both ways round. The two
+/// tests after this one are the bar at `x = −1`, and a ball of 3 against the
+/// bar at `x = 1` from `−4` to `4`.
+///
+/// **The hole's wall runs through the ball's centre**, and so through both its
+/// poles, `(0, 0, ±2.5)`, since a ball's poles are straight up and down from
+/// its centre. The ball holds the bar's whole cross-section, `2.5 > 1 + 1`, so
+/// the two cross in two loops apart, one each side of `z = 0`, each going once
+/// round the bar and through one pole: on the wall `x² + y² = 2x`, so
+/// `z² = 6.25 − 2x`. The walk starts each loop at its pole, and until Q2650
+/// every fuse was refused `AClosedEdgeOfTheAnswerWouldStartAtAPole`:
+/// `fuse/arrange.rs`'s `the_other_pole_on_the_one_loop` cut a loop at the
+/// ball's other pole only where the two cross in one loop at most, and here the
+/// other pole is on the other loop. Each loop is now cut a second time where it
+/// crosses the bar's ruling across from the ball's centre, at `(2, 0, ±1.5)`.
+///
+/// **The answer.** The bar is `6π` and the ball `125π/6`, and the two share
+/// [`the_ball_round_a_hole_through_its_centre`]. The bar less the ball is its
+/// two ends, half of what is left each.
+#[test]
+fn a_ball_bored_through_both_poles_by_a_bar_at_plus_x_is_answered_under_every_rule() {
+    a_ball_bored_through_both_poles_is_answered_under_every_rule(2.5, 1.0, 3.0);
+}
+
+/// The test above with the bar at `x = −1`, so its seam runs up the ball's
+/// polar axis, through both poles, and each loop is cut a second time at
+/// `(−2, 0, ±1.5)`.
+#[test]
+fn a_ball_bored_through_both_poles_by_a_bar_at_minus_x_is_answered_under_every_rule() {
+    a_ball_bored_through_both_poles_is_answered_under_every_rule(2.5, -1.0, 3.0);
+}
+
+/// A ball of 3 at the origin bored through by the round bar of radius 1 up `z`
+/// from `−4` to `4` at `x = 1`, under every rule both ways round: the shape of
+/// the test two above, with its loops cut a second time at `(2, 0, ±√5)`,
+/// which `f64` cannot write.
+#[test]
+fn a_ball_of_three_bored_through_both_poles_by_a_bar_is_answered_under_every_rule() {
+    a_ball_bored_through_both_poles_is_answered_under_every_rule(3.0, 1.0, 4.0);
+}
+
+/// A ball of `radius` at the origin against the round bar of radius 1 up `z`
+/// from `−reach` to `reach` at `(x, 0)`, for `|x|` of 1, under every rule both
+/// ways round: one solid for each rule but the bar less the ball, which is the
+/// bar's two ends.
+fn a_ball_bored_through_both_poles_is_answered_under_every_rule(radius: f64, x: f64, reach: f64) {
+    use std::f64::consts::PI;
+    let (bar, ball) = (2.0 * PI * reach, 4.0 * PI * radius * radius * radius / 3.0);
+    let shared = the_ball_round_a_hole_through_its_centre(radius, 1.0);
+    for (rule, ball_first) in every_rule_both_ways() {
+        let mut model = a_model();
+        let round = model
+            .add_ball(radius, &Isometry::identity())
+            .expect("a ball");
+        let pipe = model
+            .add_round_bar(1.0, 2.0 * reach, &shift(x, 0.0, -reach))
+            .expect("a bar");
+        let what = format!(
+            "the ball of {radius} and the bar at x = {x}, {rule:?}, the ball first {ball_first}"
+        );
+        let answer = fuse(&mut model, round, pipe, rule, ball_first)
+            .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+        let volumes = match (rule, ball_first) {
+            (Rule::Union, _) => vec![bar + ball - shared],
+            (Rule::Intersection, _) => vec![shared],
+            (Rule::Difference, true) => vec![ball - shared],
+            (Rule::Difference, false) => vec![(bar - shared) / 2.0; 2],
+            (other, _) => panic!("not a rule this probes: {other:?}"),
+        };
+        assert_each_holds(&model, &answer, &volumes, &what);
+    }
+}
+
+/// The part of a ball of `radius` inside a bar of radius `bar` whose wall runs
+/// through the ball's centre, where the ball holds the bar's whole
+/// cross-section and the bar runs past it both ways.
+///
+/// Each line up the bar `s` from the ball's centre holds `2√(R² − s²)` of the
+/// ball, for `R` its radius, and the bar's disc is `s < 2r cos a` at the angle
+/// `a` round the ball's centre from the bar's axis, for `r` the bar's radius.
+/// So the part is `(2/3)(πR³ − ∫ (R² − 4r² cos² a)^(3/2) da)`, `a` from `−π/2`
+/// to `π/2`, by Simpson's rule.
+fn the_ball_round_a_hole_through_its_centre(radius: f64, bar: f64) -> f64 {
+    use std::f64::consts::PI;
+    assert!(radius > 2.0 * bar, "a ball that holds the bar's disc");
+    let rest = by_simpsons_rule(-PI / 2.0, PI / 2.0, |a| {
+        (radius * radius - 4.0 * bar * bar * a.cos() * a.cos()).powf(1.5)
+    });
+    2.0 / 3.0 * (PI * radius * radius * radius - rest)
+}
+
 /// A ball of radius `3/8` at the origin against a ball of radius `5/8` whose
 /// centre is `1/2` away along `x` or `y`, under every rule both ways round.
 ///
