@@ -4052,10 +4052,16 @@ impl Assembly {
                 _ => still_a_corner[corner] = true,
             }
         }
+        let either_side: Vec<[usize; 2]> = along
+            .iter()
+            .map(|darts| darts.map(|dart| lump_of_face[dart.face]))
+            .collect();
         for (lump, corner) in self.where_curved_pieces_met_off_a_run_that_closes_up(
             &leaving,
             &straight_through,
             curved_pieces_met,
+            joined,
+            &either_side,
         ) {
             straight_through.remove(&(lump, corner));
             still_a_corner[corner] = true;
@@ -4341,6 +4347,8 @@ impl Assembly {
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
         straight_through: &BTreeSet<(usize, usize)>,
         curved_pieces_met: &[bool],
+        joined: &[JoinedFace],
+        either_side: &[[usize; 2]],
     ) -> Vec<(usize, usize)> {
         let runs = runs_through(self.edges.len(), leaving, straight_through);
         let closed_up: BTreeSet<usize> = self
@@ -4349,11 +4357,12 @@ impl Assembly {
             .into_iter()
             .map(|at| runs.leader(leaving[&at][0]))
             .collect();
-        let back_round = self.runs_back_round_one_closed_crossing(
-            leaving,
-            straight_through,
-            curved_pieces_met,
+        let back_round = self.the_runs_each_face_along_holds_whole(
+            self.runs_back_round_one_closed_crossing(leaving, straight_through, &runs),
+            &closed_up,
             &runs,
+            joined,
+            either_side,
         );
         straight_through
             .iter()
@@ -4371,108 +4380,78 @@ impl Assembly {
             .collect()
     }
 
-    /// Every run of `runs`, by its leader, that leaves one corner
-    /// `straight_through` does not walk and comes back round to that same
-    /// corner through one corner `curved_pieces_met` marks, every piece of it
-    /// a piece of one closed crossing
-    /// ([`Assembly::are_pieces_of_one_closed_crossing`]), where the two arcs
-    /// between those two corners are not two halves
-    /// ([`Assembly::is_centred_off_the_line_through`]).
+    /// Every run of `runs`, by its leader, with its edges, that leaves one
+    /// corner `straight_through` does not walk and comes back round to that
+    /// same corner, every piece of it a piece of one closed crossing
+    /// ([`Assembly::are_pieces_of_one_closed_crossing`]).
     fn runs_back_round_one_closed_crossing(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
         straight_through: &BTreeSet<(usize, usize)>,
-        curved_pieces_met: &[bool],
         runs: &Sameness,
-    ) -> BTreeSet<usize> {
+    ) -> BTreeMap<usize, Vec<usize>> {
         let mut ends_of_run: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-        let mut met_on_run: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
-        let mut edges_of: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut edges_of: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
         for (&(lump, corner), by) in leaving {
             for &edge in by {
                 let run = runs.leader(edge);
-                edges_of.entry(run).or_default().push(edge);
+                edges_of.entry(run).or_default().insert(edge);
                 if !straight_through.contains(&(lump, corner)) {
                     ends_of_run.entry(run).or_default().push(corner);
-                } else if curved_pieces_met[corner] {
-                    met_on_run.entry(run).or_default().insert(corner);
                 }
             }
         }
-        let found: BTreeSet<usize> = ends_of_run
+        ends_of_run
             .into_iter()
-            .filter(|(run, ends)| {
-                let [kept, back] = ends[..] else {
-                    return false;
-                };
-                let Some(&met) = met_on_run.get(run).and_then(|met| {
-                    let mut met = met.iter();
-                    met.next().filter(|_| met.next().is_none())
-                }) else {
-                    return false;
-                };
-                kept == back
-                    && self.are_pieces_of_one_closed_crossing(&edges_of[run])
-                    && self.is_centred_off_the_line_through(edges_of[run][0], [kept, met])
-            })
-            .map(|(run, _)| run)
-            .collect();
-        found
+            .filter(|(_, ends)| matches!(ends[..], [kept, back] if kept == back))
+            .map(|(run, _)| (run, edges_of[&run].iter().copied().collect::<Vec<_>>()))
+            .filter(|(_, edges)| self.are_pieces_of_one_closed_crossing(edges))
+            .collect()
     }
 
-    /// Whether the closed curve `edge` runs along, where a plane crosses a
-    /// ball, a cone or a pipe, is centred strictly off the line through
-    /// `corners`, so that one of its two arcs between them runs past half of
-    /// it. `false` where it is centred on that line, which makes the two arcs
-    /// halves, where the arithmetic cannot say, and for any other crossing.
-    ///
-    /// **Read exactly off the stored numbers.** The centre lies on the line
-    /// through a point `from` along `along` ([`where_a_closed_crossing_is_centred`]
-    /// spells out which, for each surface), and two corners on the plane are
-    /// in line with it exactly when the line between them and that one lie in
-    /// one plane: when `(b − a) · ((from − a) × along)` is nought. Every
-    /// number in it is stored, so its sign is a sign of the model and not of
-    /// a rounding.
-    fn is_centred_off_the_line_through(&self, edge: usize, corners: [usize; 2]) -> bool {
-        let ([Surface::Plane(flat), round] | [round, Surface::Plane(flat)]) =
-            &self.edges[edge].carried_by
-        else {
-            return false;
-        };
-        let (from, along) = match round {
-            Surface::Sphere(ball) => (
-                ball.centre(),
-                flat.normal().components().map(Interval::exactly),
-            ),
-            Surface::Cone(cone) => match cone.which_way_a_closed_crossings_centre_lies(flat) {
-                Some(along) => (cone.apex(), along),
-                None => return false,
-            },
-            Surface::Cylinder(pipe) => (
-                pipe.axis().origin(),
-                pipe.axis().direction().components().map(Interval::exactly),
-            ),
-            Surface::Plane(_) | Surface::Torus(_) => return false,
-            // A surface kind added to `rcad-geom` after this is not read as
-            // having a centre.
-            _ => return false,
-        };
-        let [a, b] = corners.map(|corner| {
-            self.corners[corner]
-                .point
-                .coordinates()
-                .map(Interval::exactly)
-        });
-        let from = from.coordinates().map(Interval::exactly);
-        let chord: [Interval; 3] = core::array::from_fn(|axis| b[axis] - a[axis]);
-        let towards: [Interval; 3] = core::array::from_fn(|axis| from[axis] - a[axis]);
-        let square = [
-            towards[1] * along[2] - towards[2] * along[1],
-            towards[2] * along[0] - towards[0] * along[2],
-            towards[0] * along[1] - towards[1] * along[0],
-        ];
-        let off = chord[0] * square[0] + chord[1] * square[1] + chord[2] * square[2];
-        matches!(off.sign(), Decision::Pos | Decision::Neg)
+    /// The runs of `back_round`, by their leaders, that every joined face
+    /// along them holds whole: a flat face only in rings of nothing but the
+    /// run, and a curved face only beside its seams, closed edges, and runs
+    /// that close up or are left in `back_round`. Dropping one run can leave a
+    /// curved face beside a run that is no longer whole, so the drop is
+    /// repeated until it drops nothing.
+    fn the_runs_each_face_along_holds_whole(
+        &self,
+        mut back_round: BTreeMap<usize, Vec<usize>>,
+        closed_up: &BTreeSet<usize>,
+        runs: &Sameness,
+        joined: &[JoinedFace],
+        either_side: &[[usize; 2]],
+    ) -> BTreeSet<usize> {
+        loop {
+            let still: BTreeSet<usize> = back_round.keys().copied().collect();
+            let is_whole_beside_a_band = |dart: &Dart| {
+                let edge = self.edge_of(*dart);
+                let [one, other] = either_side[edge];
+                let [start, end] = self.edges[edge].ends;
+                let run = runs.leader(edge);
+                one == other || start == end || closed_up.contains(&run) || still.contains(&run)
+            };
+            back_round.retain(|&run, edges| {
+                let on_run = |dart: &Dart| runs.leader(self.edge_of(*dart)) == run;
+                edges
+                    .iter()
+                    .flat_map(|&edge| either_side[edge])
+                    .all(|face| {
+                        let rings = &joined[face].rings;
+                        if joined[face].surface.as_plane().is_some() {
+                            rings
+                                .iter()
+                                .all(|ring| ring.iter().all(on_run) || !ring.iter().any(on_run))
+                        } else {
+                            rings.iter().flatten().all(is_whole_beside_a_band)
+                        }
+                    })
+            });
+            if back_round.len() == still.len() {
+                return still;
+            }
+        }
     }
 
     /// Whether `edges` are pieces of one closed curve
