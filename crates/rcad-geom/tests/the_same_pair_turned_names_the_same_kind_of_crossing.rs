@@ -73,7 +73,7 @@ use std::cell::Cell;
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
-use rcad_geom::{Cylinder, Error, Surface, SurfaceMeet, intersect};
+use rcad_geom::{Cylinder, Error, Sphere, Surface, SurfaceMeet, intersect};
 use rcad_predicates::expansion::{
     difference_of_two_products, expansion_sign, expansion_sum, scale_expansion, two_diff,
     two_product,
@@ -473,6 +473,77 @@ fn a_thin_pipe_resting_inside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves
     );
 }
 
+/// Why the two loops of a ball resting on the far inside of a pipe are a knife
+/// edge, and the one loop the same pair turned is named is not a wrong answer.
+///
+/// The pair is the one the quartic property above first drew once the two
+/// loops were named (Q2649): a ball of radius 5 round `(0, −2, −2)` and a pipe
+/// of radius 4 along `x` through `(0, −1, −2)`, whose axis is one from the
+/// ball's centre, which is what the radii differ by. The pipe's wall touches
+/// the ball's from inside at `(0, 3, −2)`, and the two loops meet there. The
+/// turn rounds the centre and the axis, and the turned centre is a few last
+/// bits nearer or further than one from the turned axis. Nearer, the ball
+/// swallows a whole cross-section and the two loops part; further, that
+/// cross-section pokes out through the ball and the two cross in one loop, and
+/// that is what this turn gives.
+#[test]
+fn a_ball_resting_on_the_far_inside_of_a_pipe_crosses_it_in_one_loop_once_a_turn_moves_it() {
+    let resting = Crossing {
+        first: Piece::Ball {
+            centre: [0, -2, -2],
+            radius: 5,
+        },
+        second: Piece::Pipe {
+            along: [1, 0, 0],
+            through: [0, -1, -2],
+            radius: 4,
+        },
+        turn: None,
+        elsewhere: Elsewhere::here(),
+        hair: None,
+    };
+    let turned = Crossing {
+        turn: Some(Turn {
+            direction: [1, 0, 0],
+            steps: 21,
+        }),
+        ..resting
+    };
+
+    let still = resting.surfaces();
+    assert_eq!(
+        kind_of(&named(&still).expect("a ball resting on the far inside of a pipe is named")),
+        ("curves", 2),
+        "two loops, which meet where the walls touch"
+    );
+    assert!(is_on_a_knife_edge(&still), "and that is a knife edge");
+
+    let moved = turned.surfaces();
+    let [Surface::Sphere(ball), Surface::Cylinder(pipe)] = moved else {
+        panic!("this pair is a ball and a pipe, in that order");
+    };
+    assert_eq!(
+        (ball.radius(), pipe.radius()),
+        (5.0, 4.0),
+        "a turn leaves both radii alone"
+    );
+    assert_eq!(
+        how_far_off_the_axis_the_centre_is_against_what_the_radii_differ_by(&ball, &pipe),
+        Decision::Pos,
+        "the turn rounds the centre further off the axis than the radii differ"
+    );
+    assert!(
+        !is_on_a_knife_edge(&moved),
+        "so the turned pair is on no knife edge"
+    );
+    assert_eq!(
+        kind_of(&named(&moved).expect("the turned pair is named")),
+        ("curves", 1),
+        "the turned centre is further off the axis than the radii differ, so the pipe's \
+         cross-section pokes out through the ball and the two cross in one loop"
+    );
+}
+
 /// The pair that used to be this file's third knife edge, and is not one any
 /// more.
 ///
@@ -789,6 +860,61 @@ fn how_far_apart_the_axes_are_against_what_the_widths_differ_by(
     );
     let less_room = room.iter().map(|part| -part).collect::<Vec<_>>();
     the_sign_of(&sum_of(&product_of(&reach, &reach), &less_room))
+}
+
+/// How far the ball's centre is off the pipe's stored axis against what the
+/// two radii differ by, asked exactly: the sign of
+/// `‖(c − o) × w‖² − (R − r)²‖w‖²`, which is `a² − (R − r)²` times `‖w‖²`, for
+/// `a` how far off the axis the centre is.
+///
+/// **A ball resting on the far inside of a pipe is a tangency**: where the
+/// ball is the wider and `a` is `R − r`, the pipe's wall touches the ball's at
+/// the point of the pipe across its axis from the centre, and the two loops the
+/// ball leaves meet there. A turn rounds the centre and the axis, so a turned
+/// pair's `a` is a few last bits from that on one side or the other: nearer,
+/// the ball swallows a whole cross-section of the pipe and the two loops part,
+/// and further, that cross-section pokes out through the ball and the two
+/// cross in one loop. So this is asked exactly, as
+/// [`how_far_apart_the_axes_are_against_what_the_widths_differ_by`] asks the
+/// same of two pipes. It is `intersect`'s own `V < 0, Δ = 0`: `Δ = 0` with
+/// `V < 0` is `√A = (R − r)√W`.
+///
+/// # Panics
+///
+/// If a product leaves the range of `f64`, which no pair drawn here comes near.
+fn how_far_off_the_axis_the_centre_is_against_what_the_radii_differ_by(
+    ball: &Sphere,
+    pipe: &Cylinder,
+) -> Decision {
+    let centre = ball.centre().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    let gap = [0, 1, 2].map(|axis| {
+        let (gap, roundoff) = two_diff(centre[axis], origin[axis]);
+        vec![roundoff, gap]
+    });
+    let square_to_the_axis = [0, 1, 2].map(|axis| {
+        let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
+        sum_of(
+            &product_of(&gap[next], &[along[last]]),
+            &negated(&product_of(&gap[last], &[along[next]])),
+        )
+    });
+    let stored = along.map(|step| vec![step]);
+    let (difference, roundoff) = two_diff(ball.radius(), pipe.radius());
+    let narrowing = [roundoff, difference];
+    let room = product_of(
+        &product_of(&narrowing, &narrowing),
+        &dot_of(&stored, &stored),
+    );
+    the_sign_of(&sum_of(
+        &dot_of(&square_to_the_axis, &square_to_the_axis),
+        &negated(&room),
+    ))
+}
+
+fn negated(exact: &[f64]) -> Vec<f64> {
+    exact.iter().map(|part| -part).collect()
 }
 
 /// `o₂ − o₁`, from one stored axis's origin to the other's, and `d₁ × d₂`,
