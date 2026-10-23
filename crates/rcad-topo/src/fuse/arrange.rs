@@ -2690,20 +2690,19 @@ impl<'f> Arrangement<'f> {
     }
 
     /// The nodes where two crossings of one pair meet: where two half
-    /// ellipses meet, or where two rulings cross, and none for every other two
-    /// ([`Arrangement::place_the_meets`]).
+    /// ellipses meet, where two loops of two pipes meet, or where two rulings
+    /// cross, and none for every other two ([`Arrangement::place_the_meets`]).
     ///
     /// # Errors
     ///
     /// [`ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`](rcad_geom::Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
-    /// where the two are the two loops of two leaning pipes and they are not
-    /// proved apart ([`the_two_loops_of_two_pipes_may_meet`]): a thin pipe
-    /// resting on the inside of a fat one, whose two loops meet where the walls
-    /// touch. Nothing here places a node there, and let through without one,
-    /// five of the six fuses of a bar of radius 1 resting inside a bar of
-    /// radius 2 answered with the two loops crossing at a point that is no
-    /// vertex (Q2628). A **gap** (§16.10): the place is known, as the foot of
-    /// the line square to both axes on the fat wall. Whatever
+    /// where the two are the two loops of two leaning pipes, they are not
+    /// proved apart ([`the_two_loops_of_two_pipes_may_meet`]), and they are not
+    /// proved to meet either ([`where_two_loops_of_two_pipes_meet`]): two
+    /// loops a rounding apart, or a product that rounds. Let through without a
+    /// node where the walls touch, five of the six fuses of a bar of radius 1
+    /// resting inside a bar of radius 2 answered with the two loops crossing at
+    /// a point that is no vertex (Q2628). Whatever
     /// [`Arrangement::place_where_two_halves_meet`] refuses.
     fn place_where_two_crossings_of_one_pair_meet(
         &mut self,
@@ -2721,10 +2720,119 @@ impl<'f> Arrangement<'f> {
             &self.crossings[first].partner,
             [&self.crossings[first].run, &self.crossings[second].run],
         ) {
-            return Err(rcad_geom::Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo.into());
+            let Some(meet) =
+                where_two_loops_of_two_pipes_meet(&self.surface, &self.crossings[first].partner)
+            else {
+                return Err(
+                    rcad_geom::Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo.into(),
+                );
+            };
+            self.place_where_two_loops_meet(first, second, &meet);
+            return Ok(());
         }
         self.place_where_two_rulings_cross(first, second);
         Ok(())
+    }
+
+    /// The node where the two loops `first` and `second` of a thin pipe
+    /// resting on the inside of a fat one meet, where the walls touch, and one
+    /// node half way round each loop, so that each loop is two edges and each
+    /// edge has a direction ([`WhereTwoLoopsMeet`]).
+    ///
+    /// **Named by [`where_two_halves_meet`]'s three surfaces**, so that the
+    /// face on either pipe names them alike: `which` 6 for where they meet, and
+    /// for the middle of a loop 7 where the facing of the flat surface that
+    /// picks it out is [`written_the_one_way`] and 8 where it is not. The two
+    /// loops are picked out by one flat surface faced both ways, so the two
+    /// middles are named apart, and `which` from 6 keeps every name clear of
+    /// the places two pipes of one width touch at and the middles of their
+    /// halves ([`Arrangement::is_where_two_pipes_touch`],
+    /// [`Arrangement::place_the_middle_of_each_half`]).
+    ///
+    /// **Asked once for each two loops, and a loop can be in more than one
+    /// two** where a pipe is written twice, so each node is looked for by its
+    /// name before it is placed, as [`Arrangement::place_where_two_rulings_cross`]
+    /// does at a cone's apex.
+    ///
+    /// # Panics
+    ///
+    /// If a loop is not picked out by one flat surface, or that surface's
+    /// facing lies square to the thin pipe: `intersect` faces it along the
+    /// thin pipe's way across the fat one.
+    fn place_where_two_loops_meet(
+        &mut self,
+        first: usize,
+        second: usize,
+        meet: &WhereTwoLoopsMeet,
+    ) {
+        let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
+        if let Some(corner) =
+            self.the_corner_that_is_this_place(first, second, meet.at, meet.at, &[meet.at])
+        {
+            self.nodes[corner].stands_for_too((named, 6));
+        } else {
+            self.place_one_node_named((named, 6), meet.at, false, &[first, second]);
+        }
+        for crossing in [first, second] {
+            let [picker] = self.crossings[crossing].picked_by()[..] else {
+                unreachable!("each of two loops of two pipes is picked out by one flat surface")
+            };
+            let facing = picker
+                .facing_of_a_flat()
+                .expect("each of two loops of two pipes is picked out by a flat surface")
+                .components()
+                .map(|number| number + 0.0);
+            let ahead = match exactly_dotted(facing, meet.thin_way)
+                .map(|along| expansion_sign(&along))
+            {
+                Some(Decision::Pos) => true,
+                Some(Decision::Neg) => false,
+                Some(Decision::Zero | Decision::Undecidable { .. } | _) | None => {
+                    unreachable!("the flat surface picking a loop out faces along the thin pipe")
+                }
+            };
+            let which = 7 + u8::from(facing != written_the_one_way(facing));
+            self.place_one_node_named(
+                (named, which),
+                meet.middles[usize::from(ahead)],
+                true,
+                &[crossing],
+            );
+        }
+    }
+
+    /// One node named `name` at `point`, with `crossings` through it, or
+    /// `crossings` added to the node already named so.
+    fn place_one_node_named(
+        &mut self,
+        name: ([Surface; 3], u8),
+        point: PredicatePoint,
+        half_way_round: bool,
+        crossings: &[usize],
+    ) {
+        if let Some(placed) = self
+            .nodes
+            .iter_mut()
+            .find(|node| node.vertex.is_none() && node.made_of == Some(name))
+        {
+            for &crossing in crossings {
+                if !placed.crossings.contains(&crossing) {
+                    placed.crossings.push(crossing);
+                }
+            }
+            placed.crossings.sort_unstable();
+            return;
+        }
+        let mut crossings = crossings.to_vec();
+        crossings.sort_unstable();
+        self.nodes.push(Node {
+            point,
+            vertex: None,
+            made_of: Some(name),
+            also: Vec::new(),
+            half_way_round,
+            crossings,
+        });
     }
 
     /// Whether some corner of the face is on both crossings, which is where
@@ -15560,6 +15668,127 @@ fn the_two_loops_of_two_pipes_may_meet(
         * root_enclosing(lean_squared);
     let apart = (room - reach).lo() > 0.0 && (room + reach).lo() > 0.0;
     !apart
+}
+
+/// Where the two loops of a thin pipe resting on the inside of a fat one
+/// meet, and a place half way round each ([`where_two_loops_of_two_pipes_meet`]).
+struct WhereTwoLoopsMeet {
+    /// Where the walls touch, which both loops pass through.
+    at: PredicatePoint,
+    /// A place on each loop across the thin pipe from `at`: the first behind
+    /// the place on the thin axis nearest the fat one along `thin_way`, the
+    /// second ahead of it.
+    middles: [PredicatePoint; 2],
+    /// The thin pipe's direction, exactly as stored.
+    thin_way: [f64; 3],
+}
+
+/// Where the two loops two leaning pipes cross in meet, and a place half way
+/// round each, for a thin pipe resting on the inside of a fat one; `None`
+/// where the two are not proved to rest so, which takes the loops apart or a
+/// rounding apart, or a product that rounds.
+///
+/// **They rest so where `S²K = T²`**, for `S = r_fat − r_thin`, `K = |t × w|²`
+/// and `T = g · (t × w)`, with `t` and `w` the thin and fat directions and `g`
+/// from the fat axis's origin to the thin one's: `|T|/√K` is how far apart
+/// the axes are, and the thin pipe rests inside the fat one where that is
+/// `S`. Asked exactly, so that it says meet only where they do; `intersect`
+/// asked the same in intervals before it named the two loops as meeting.
+///
+/// **Where they meet** is `F + r_fat·n̂`, for `F` the foot on the fat axis of
+/// the line square to both axes and `n̂` along `t × w` turned towards the thin
+/// axis, which `T`'s sign says. That line runs through both axes and the
+/// walls touch on it.
+///
+/// **Half way round** each loop is where the line of the thin pipe across
+/// from `at`, `F + (S − r_thin)·n̂ + s·t̂`, meets the fat wall again. Square to
+/// the fat axis it sits `S − r_thin` along `n̂` and `s·sin α` across, for
+/// `sin α = |t̂ × ŵ|`, so it is on the fat wall where `(S − r_thin)² +
+/// s² sin² α = r_fat²`, which is `s = ±2√(r_thin·S)/sin α`. The thin bar of
+/// radius 1 along `x` at `y = 1` inside the bar of radius 2 up `z` meets at
+/// `(0, 2, 0)`, with its middles at `(±2, 0, 0)`.
+fn where_two_loops_of_two_pipes_meet(
+    surface: &Surface,
+    partner: &Surface,
+) -> Option<WhereTwoLoopsMeet> {
+    let (Surface::Cylinder(one), Surface::Cylinder(other)) = (surface, partner) else {
+        return None;
+    };
+    let (thin, fat) = if one.radius() < other.radius() {
+        (one, other)
+    } else {
+        (other, one)
+    };
+    let thin_way = thin.axis().direction().components();
+    let fat_way = fat.axis().direction().components();
+    let [thin_origin, fat_origin] = [thin, fat].map(|pipe| pipe.axis().origin().coordinates());
+    let mut across: Vec<Vec<f64>> = Vec::with_capacity(3);
+    for (i, j) in [(1, 2), (2, 0), (0, 1)] {
+        let (entries, used) =
+            difference_of_two_products(thin_way[i], fat_way[j], thin_way[j], fat_way[i])?;
+        across.push(entries[..used].to_vec());
+    }
+    let mut lean_exactly = Vec::new();
+    let mut reach = Vec::new();
+    for (axis, component) in across.iter().enumerate() {
+        lean_exactly = exactly_added(&lean_exactly, &exactly_multiplied(component, component)?);
+        let between = exactly_added(&[thin_origin[axis]], &[-fat_origin[axis]]);
+        reach = exactly_added(&reach, &exactly_multiplied(&between, component)?);
+    }
+    let room_exactly = exactly_added(&[fat.radius()], &[-thin.radius()]);
+    let gap = exactly_added(
+        &exactly_multiplied(
+            &exactly_multiplied(&room_exactly, &room_exactly)?,
+            &lean_exactly,
+        )?,
+        &negated(&exactly_multiplied(&reach, &reach)?),
+    );
+    if expansion_sign(&gap) != Decision::Zero {
+        return None;
+    }
+    let towards_the_thin = match expansion_sign(&reach) {
+        Decision::Pos => Interval::exactly(1.0),
+        Decision::Neg => Interval::exactly(-1.0),
+        Decision::Zero | Decision::Undecidable { .. } | _ => {
+            unreachable!("two leaning axes a radius apart are not on one line")
+        }
+    };
+
+    let [t, w] = [thin_way, fat_way].map(|way| way.map(Interval::exactly));
+    let between = [0, 1, 2]
+        .map(|axis| Interval::exactly(thin_origin[axis]) - Interval::exactly(fat_origin[axis]));
+    let up = cross_of_intervals(t, w).map(|side| towards_the_thin * side);
+    let lean = dot_of(up, up);
+    let along_the_fat = quotient_of(
+        dot_of(between, w) * dot_of(t, t) - dot_of(between, t) * dot_of(t, w),
+        lean,
+    );
+    let foot = [0, 1, 2].map(|axis| Interval::exactly(fat_origin[axis]) + along_the_fat * w[axis]);
+    let unit = along_one_coordinate_axis(up).map_or_else(
+        || {
+            let length = root_enclosing(lean);
+            up.map(|side| quotient_of(side, length))
+        },
+        |unit| unit.map(Interval::exactly),
+    );
+    let [thin_radius, fat_radius] = [thin, fat].map(|pipe| Interval::exactly(pipe.radius()));
+    let at = [0, 1, 2].map(|axis| foot[axis] + fat_radius * unit[axis]);
+    let room = fat_radius - thin_radius;
+    let far_side = [0, 1, 2].map(|axis| foot[axis] + (room - thin_radius) * unit[axis]);
+    let step = quotient_of(
+        Interval::exactly(2.0) * root_enclosing(thin_radius * room) * root_enclosing(dot_of(w, w)),
+        root_enclosing(lean),
+    );
+    let middles = [Interval::exactly(-1.0), Interval::exactly(1.0)].map(|side| {
+        as_exact_as_it_is(PredicatePoint::Constructed(
+            [0, 1, 2].map(|axis| far_side[axis] + side * step * t[axis]),
+        ))
+    });
+    Some(WhereTwoLoopsMeet {
+        at: as_exact_as_it_is(PredicatePoint::Constructed(at)),
+        middles,
+        thin_way,
+    })
 }
 
 /// How points along a circle a ring shares with a ball, a pipe or a cone on
