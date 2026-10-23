@@ -1,5 +1,5 @@
 //! A round bar of radius 3 leaning across a round bar of radius 2 whose seam
-//! it presses into, fused either way round (row Q2571).
+//! it presses into, fused either way round (rows Q2571 and Q2590).
 //!
 //! # The shape
 //!
@@ -26,24 +26,67 @@
 //! (`+4.4e-16` and `−2.7e-15`), so the two faces walked the one edge the same
 //! way. The corners are now all settled before any closed side is read.
 //!
+//! # A way read off rounding gives the right solid (Q2590)
+//!
+//! Settling the corners first makes both faces read the one sign, but at that
+//! corner the sign is still rounding: the dot of the loop's direction with the
+//! leaning pipe's longitude is zero in exact arithmetic and comes out about
+//! `±1e-15`. The guess was that some such shape stores the edge the wrong way
+//! on both faces, and so gives a solid that validates and is wrong.
+//!
+//! **It cannot while every reader takes the one sign.** The sign says only
+//! which way the edge is *stored* running. The fuse's
+//! `which_way_a_closed_edge_is_walked` then says whether each face walks it
+//! that way, as the same sign read against which side of its partner the
+//! face's material is on. So a face walks the edge along `∇S × ∇T` or against
+//! it by its material alone, and the sign cancels out of where the face goes.
+//! What the sign settles is the stored way, a convention, and
+//! `Model::validate` reads it back with the same certified function at the
+//! same corner.
+//!
+//! The pins below are the same two bars at other leans, with the pair turned
+//! about the upright bar's axis and the leaning bar rolled about its own. At
+//! each, the loop runs along the leaning pipe's ruling where it crosses the
+//! upright seam, and the rounding comes out positive at some and negative at
+//! others ([`the_shapes_here_read_the_way_off_rounding_and_get_both_signs`]).
+//! Every answer measures what the formula says either way round. The lane
+//! that ran this swept 89 shapes, at leans from 0.1 to 0.6, eight turns, two
+//! rolls and three pairs of radii, with all three rules either way round: 534
+//! fuses, none of them wrong, none failing `Model::validate`, and 83 refused.
+//!
+//! # What is still refused
+//!
+//! - Leaning 0.6 and turned 2.9, the dot rounds to exactly `0.0` in `f64` and
+//!   the certified rule says it is negative. The mesher reads the same rule in
+//!   plain `f64` (`the_way_a_closed_edge_is_stored_running` in `mesh.rs`),
+//!   falls to the latitude on that `0.0`, and stores the edge the other way
+//!   from the fuse. The intersection meshes all the same; the union and both
+//!   differences are refused `AWireWillNotLieFlatOnItsFace`
+//!   ([`the_union_where_the_dot_rounds_to_nothing_is_refused`]).
+//! - Turned 4.0 or 5.5, where the upright pipe names the way rather than the
+//!   leaning one, and at some turns leaning 0.6, the union and one difference
+//!   are refused `CurvedFaceWithAHoleGoesTooFarRound`
+//!   ([`the_same_pair_turned_four_radians_is_refused_its_union`]).
+//!
 //! The fuses run certified, in a model of 100 mm.
 
 use std::f64::consts::PI;
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, Rule};
+use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface, Vector};
+use rcad_predicates::{Decision, Policy, ProvenanceLog};
+use rcad_topo::{Error, Model, Rule, SolidKey};
 
-/// How far the leaning bar's axis leans down from `x`, in radians.
+/// How far Q2571's leaning bar's axis leans down from `x`, in radians.
 const LEAN: f64 = 0.3;
 
 /// The two bars share the same piece whichever is handed in first, and it
 /// measures what they share.
 #[test]
 fn the_piece_two_bars_share_is_the_same_either_way_round() {
-    let shared = what_the_two_bars_share(1000);
-    let upright_first = answer(Rule::Intersection, true, shared, 2);
-    let leaning_first = answer(Rule::Intersection, false, shared, 2);
+    let bars = TwoBars::as_q2571_built();
+    let shared = what_the_two_bars_share(LEAN);
+    let upright_first = answer(&bars, Rule::Intersection, true, shared, 2);
+    let leaning_first = answer(&bars, Rule::Intersection, false, shared, 2);
     the_same_volume(upright_first, leaning_first, "the intersection");
 }
 
@@ -51,9 +94,10 @@ fn the_piece_two_bars_share_is_the_same_either_way_round() {
 /// pipe with a hole, and the four caps.
 #[test]
 fn two_bars_unite_to_the_same_solid_either_way_round() {
-    let whole = UPRIGHT + LEANING - what_the_two_bars_share(1000);
-    let upright_first = answer(Rule::Union, true, whole, 6);
-    let leaning_first = answer(Rule::Union, false, whole, 6);
+    let bars = TwoBars::as_q2571_built();
+    let whole = UPRIGHT + LEANING - what_the_two_bars_share(LEAN);
+    let upright_first = answer(&bars, Rule::Union, true, whole, 6);
+    let leaning_first = answer(&bars, Rule::Union, false, whole, 6);
     the_same_volume(upright_first, leaning_first, "the union");
 }
 
@@ -61,9 +105,119 @@ fn two_bars_unite_to_the_same_solid_either_way_round() {
 /// the two share: its pipe with a hole, its two caps, and the dent.
 #[test]
 fn each_bar_less_the_other_answers() {
-    let shared = what_the_two_bars_share(1000);
-    answer(Rule::Difference, true, UPRIGHT - shared, 4);
-    answer(Rule::Difference, false, LEANING - shared, 4);
+    let bars = TwoBars::as_q2571_built();
+    let shared = what_the_two_bars_share(LEAN);
+    answer(&bars, Rule::Difference, true, UPRIGHT - shared, 4);
+    answer(&bars, Rule::Difference, false, LEANING - shared, 4);
+}
+
+/// Leaning 0.6 and turned to 1.0, the corner's rounding is negative: the
+/// edge is stored the other way from the one the latitude would name.
+#[test]
+fn leaning_further_and_turned_the_two_bars_answer_all_three_either_way_round() {
+    all_three_answer_either_way_round(&TwoBars::turned(0.6, 1.0, 0.0));
+}
+
+/// Leaning 0.1 and turned to 2.0, the corner's rounding is negative.
+#[test]
+fn leaning_less_and_turned_the_two_bars_answer_all_three_either_way_round() {
+    all_three_answer_either_way_round(&TwoBars::turned(0.1, 2.0, 0.0));
+}
+
+/// Leaning as Q2571's and turned to 1.0, the corner's rounding is positive.
+#[test]
+fn turned_the_other_way_the_two_bars_answer_all_three_either_way_round() {
+    all_three_answer_either_way_round(&TwoBars::turned(LEAN, 1.0, 0.0));
+}
+
+/// Leaning 0.6, turned to 2.0 and the leaning bar rolled 1.3 about its own
+/// axis, so that its seam is elsewhere, the corner's rounding is positive.
+#[test]
+fn with_the_leaning_bar_rolled_the_two_bars_answer_all_three_either_way_round() {
+    all_three_answer_either_way_round(&TwoBars::turned(0.6, 2.0, 1.3));
+}
+
+/// Leaning 0.6 and turned to 2.9, the dot rounds to exactly `0.0` in `f64`,
+/// and the piece the two share still answers right either way round.
+#[test]
+fn the_piece_two_bars_share_where_the_dot_rounds_to_nothing_is_the_same_either_way_round() {
+    let bars = TwoBars::turned(0.6, 2.9, 0.0);
+    let shared = what_the_two_bars_share(bars.lean);
+    let upright_first = answer(&bars, Rule::Intersection, true, shared, 2);
+    let leaning_first = answer(&bars, Rule::Intersection, false, shared, 2);
+    the_same_volume(upright_first, leaning_first, "the intersection");
+}
+
+/// The same shape's union and differences are refused, both ways round,
+/// because the mesher reads in `f64` the sign the fuse reads certified, gets
+/// `0.0`, and stores the edge the other way. Measured with the mesher reading
+/// the certified rule instead, the upright bar less the leaning one answered
+/// and the other three were refused `CurvedFaceWithAHoleGoesTooFarRound`.
+#[test]
+fn the_union_where_the_dot_rounds_to_nothing_is_refused() {
+    let bars = TwoBars::turned(0.6, 2.9, 0.0);
+    for rule in [Rule::Union, Rule::Difference] {
+        for upright_first in [true, false] {
+            let why = refused(&bars, rule, upright_first);
+            assert!(
+                matches!(why, Error::AWireWillNotLieFlatOnItsFace { .. }),
+                "{rule:?}, upright bar first: {upright_first}: {why:?}"
+            );
+        }
+    }
+}
+
+/// Q2571's two bars turned 4.0 about the upright bar's axis, rather than a
+/// quarter turn, answer the piece they share and the leaning bar less the
+/// upright one, and are refused the union either way round and the upright
+/// bar less the leaning one.
+#[test]
+fn the_same_pair_turned_four_radians_is_refused_its_union() {
+    let bars = TwoBars::turned(LEAN, 4.0, 0.0);
+    let shared = what_the_two_bars_share(bars.lean);
+    let upright_first = answer(&bars, Rule::Intersection, true, shared, 2);
+    let leaning_first = answer(&bars, Rule::Intersection, false, shared, 2);
+    the_same_volume(upright_first, leaning_first, "the intersection");
+    answer(&bars, Rule::Difference, false, LEANING - shared, 4);
+    for (rule, upright_first) in [
+        (Rule::Union, true),
+        (Rule::Union, false),
+        (Rule::Difference, true),
+    ] {
+        let why = refused(&bars, rule, upright_first);
+        assert!(
+            matches!(why, Error::CurvedFaceWithAHoleGoesTooFarRound { .. }),
+            "{rule:?}, upright bar first: {upright_first}: {why:?}"
+        );
+    }
+}
+
+/// At every shape the pins above answer at, the way the closed edge is stored
+/// running is read off a dot product that is zero but for its rounding, and
+/// that rounding is positive at some shapes and negative at others. So the
+/// pins have a right answer with the edge stored either way, and not only the
+/// one the sign happened to give at Q2571's shape.
+///
+/// It is read as the fuse reads it: off the answer's own two pipes at the
+/// edge's corner, the loop's direction `∇S × ∇T` against the leaning pipe's
+/// longitude `axis × ∇T`, with each gradient as `Model::validate` spells it.
+#[test]
+fn the_shapes_here_read_the_way_off_rounding_and_get_both_signs() {
+    let read: Vec<Decision> = [
+        TwoBars::turned(0.6, 1.0, 0.0),
+        TwoBars::turned(0.1, 2.0, 0.0),
+        TwoBars::turned(LEAN, 1.0, 0.0),
+        TwoBars::turned(0.6, 2.0, 1.3),
+        TwoBars::turned(0.6, 2.9, 0.0),
+    ]
+    .iter()
+    .map(the_way_read_at_the_corner)
+    .collect();
+    assert!(
+        read.iter().any(|way| matches!(way, Decision::Pos))
+            && read.iter().any(|way| matches!(way, Decision::Neg)),
+        "the rounding came out one way at every shape: {read:?}"
+    );
 }
 
 /// The upright bar's volume, `π · 2² · 12`.
@@ -71,6 +225,62 @@ const UPRIGHT: f64 = 48.0 * PI;
 
 /// The leaning bar's volume, `π · 3² · 20`.
 const LEANING: f64 = 180.0 * PI;
+
+/// The two bars, placed.
+struct TwoBars {
+    said: String,
+    lean: f64,
+    upright: Isometry,
+    leaning: Isometry,
+}
+
+impl TwoBars {
+    /// Q2571's two bars, placed as that row placed them.
+    fn as_q2571_built() -> Self {
+        Self {
+            said: "Q2571's".to_owned(),
+            lean: LEAN,
+            upright: seamed_up_y(),
+            leaning: leaning_across(),
+        }
+    }
+
+    /// The upright bar with its seam turned to `turned` about `z`, and the
+    /// leaning bar `lean` down from level, its axis 4 out from the upright
+    /// one's along that seam, square to it and 5 up, rolled `roll` about its
+    /// own axis. At `turned = π/2` and `roll = 0` this is Q2571's pair, but
+    /// for the rounding in its turns.
+    fn turned(lean: f64, turned: f64, roll: f64) -> Self {
+        let z = Axis::z();
+        let the_y_axis = Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("an axis");
+        Self {
+            said: format!("leaning {lean}, turned {turned}, rolled {roll}"),
+            lean,
+            upright: moved_to([0.0, 0.0, -1.0])
+                .compose(&Isometry::rotation(&z, turned).expect("a turn")),
+            leaning: moved_to([4.0 * turned.cos(), 4.0 * turned.sin(), 5.0])
+                .compose(&Isometry::rotation(&z, turned - PI / 2.0).expect("a turn"))
+                .compose(&Isometry::rotation(&the_y_axis, PI / 2.0 + lean).expect("a turn"))
+                .compose(&moved_to([0.0, 0.0, -10.0]))
+                .compose(&Isometry::rotation(&z, roll).expect("a turn")),
+        }
+    }
+}
+
+/// All three rules answer either way round, and measure what the formula
+/// says: the piece the two share, the union and each bar less the other.
+fn all_three_answer_either_way_round(bars: &TwoBars) {
+    let shared = what_the_two_bars_share(bars.lean);
+    let upright_first = answer(bars, Rule::Intersection, true, shared, 2);
+    let leaning_first = answer(bars, Rule::Intersection, false, shared, 2);
+    the_same_volume(upright_first, leaning_first, "the intersection");
+    let whole = UPRIGHT + LEANING - shared;
+    let upright_first = answer(bars, Rule::Union, true, whole, 6);
+    let leaning_first = answer(bars, Rule::Union, false, whole, 6);
+    the_same_volume(upright_first, leaning_first, "the union");
+    answer(bars, Rule::Difference, true, UPRIGHT - shared, 4);
+    answer(bars, Rule::Difference, false, LEANING - shared, 4);
+}
 
 /// What a measured volume is, and how far its mesh may miss it.
 #[derive(Clone, Copy, Debug)]
@@ -83,26 +293,14 @@ struct Measured {
 /// it answers one solid of `faces` faces, that the model validates, and that
 /// the solid measures `volume` to within its mesh's own error. Hands back what
 /// it measured.
-fn answer(rule: Rule, upright_first: bool, volume: f64, faces: usize) -> Measured {
-    let what = format!("{rule:?}, upright bar first: {upright_first}");
+fn answer(bars: &TwoBars, rule: Rule, upright_first: bool, volume: f64, faces: usize) -> Measured {
+    let what = format!(
+        "{} bars, {rule:?}, upright bar first: {upright_first}",
+        bars.said
+    );
     let policy = Policy::certified();
-    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let upright = model
-        .add_round_bar(2.0, 12.0, &seamed_up_y())
-        .expect("a bar");
-    let leaning = model
-        .add_round_bar(3.0, 20.0, &leaning_across())
-        .expect("a bar");
-    let (arguments, tools) = if upright_first {
-        ([upright], [leaning])
-    } else {
-        ([leaning], [upright])
-    };
-    let solids = model
-        .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
-        .unwrap_or_else(|why| panic!("{what}: refused: {why:?}"))
-        .solids()
-        .to_vec();
+    let (mut model, fused) = the_fuse(bars, rule, upright_first, &policy);
+    let solids = fused.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
     model
         .validate(&policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{what}: the answer does not validate: {why:?}"));
@@ -138,6 +336,44 @@ fn answer(rule: Rule, upright_first: bool, volume: f64, faces: usize) -> Measure
     measured
 }
 
+/// What the fuse `rule` of the two bars is refused with, the upright one
+/// first or not.
+fn refused(bars: &TwoBars, rule: Rule, upright_first: bool) -> Error {
+    let (_, fused) = the_fuse(bars, rule, upright_first, &Policy::certified());
+    let Err(why) = fused else {
+        panic!(
+            "{} bars, {rule:?}, upright bar first: {upright_first}: answered {fused:?}",
+            bars.said
+        );
+    };
+    why
+}
+
+/// The model holding the two bars, and what fusing them by `rule` gave.
+fn the_fuse(
+    bars: &TwoBars,
+    rule: Rule,
+    upright_first: bool,
+    policy: &Policy,
+) -> (Model, rcad_topo::Result<Vec<SolidKey>>) {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let upright = model
+        .add_round_bar(2.0, 12.0, &bars.upright)
+        .expect("a bar");
+    let leaning = model
+        .add_round_bar(3.0, 20.0, &bars.leaning)
+        .expect("a bar");
+    let (arguments, tools) = if upright_first {
+        ([upright], [leaning])
+    } else {
+        ([leaning], [upright])
+    };
+    let fused = model
+        .fuse(&arguments, &tools, rule, policy, &mut ProvenanceLog::new())
+        .map(|fused| fused.solids().to_vec());
+    (model, fused)
+}
+
 /// Assert that the two orders' answers measure the same, to within the two
 /// meshes' errors added.
 fn the_same_volume(upright_first: Measured, leaning_first: Measured, what: &str) {
@@ -146,6 +382,67 @@ fn the_same_volume(upright_first: Measured, leaning_first: Measured, what: &str)
             <= upright_first.error + leaning_first.error,
         "{what}: upright bar first {upright_first:?}, leaning bar first {leaning_first:?}"
     );
+}
+
+/// Which way the one closed edge of the piece the two bars share is stored
+/// running, read as the fuse reads it, after asserting that the dot product
+/// it is read off is zero but for rounding.
+///
+/// That dot is `(∇U × ∇L) · (axis × ∇L)` for `U` the upright pipe and `L` the
+/// leaning one, both gradients of length 2 or 3 and the axis of length one,
+/// so the latitude it falls back on comes to about 40; a dot under `1e-12`
+/// is the rounding in a sum of terms that size.
+fn the_way_read_at_the_corner(bars: &TwoBars) -> Decision {
+    let policy = Policy::certified();
+    let (model, fused) = the_fuse(bars, Rule::Intersection, true, &policy);
+    let solids = fused.unwrap_or_else(|why| panic!("{} bars: refused: {why:?}", bars.said));
+    let edge = model
+        .solid(solids[0])
+        .expect("a solid the fuse made")
+        .faces()
+        .flat_map(|face| face.wires().collect::<Vec<_>>())
+        .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+        .map(|coedge| coedge.edge())
+        .next()
+        .expect("the piece the two share has an edge");
+    assert!(
+        edge.is_closed().expect("an edge of the model"),
+        "{} bars",
+        bars.said
+    );
+    let pipes: Vec<(Vector, Vector)> = edge
+        .neighbouring_faces()
+        .map(|key| match model.face(key).expect("a face").surface() {
+            Surface::Cylinder(pipe) => {
+                let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
+                let out = edge.start().point() - origin;
+                (out * along.dot(along) - along * along.dot(out), along)
+            }
+            other => panic!(
+                "{} bars: a face of the piece they share is {other:?}",
+                bars.said
+            ),
+        })
+        .collect();
+    let [first, second] = pipes[..] else {
+        panic!(
+            "{} bars: one edge between two faces, got {pipes:?}",
+            bars.said
+        );
+    };
+    let is_upright = |(_, along): (Vector, Vector)| along.components()[2].abs() > 0.999;
+    let ((upright, _), (leaning, leaning_axis)) = if is_upright(first) {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    let along_the_ruling = upright.cross(leaning).dot(leaning_axis.cross(leaning));
+    assert!(
+        along_the_ruling.abs() < 1e-12,
+        "{} bars: the loop does not run along the leaning pipe's ruling: {along_the_ruling:e}",
+        bars.said
+    );
+    rcad_geom::which_way_a_closed_crossing_turns([upright, leaning], leaning, leaning_axis)
 }
 
 /// The upright bar, up `z` from −1 to 11, turned a quarter round `z` so that
@@ -168,16 +465,20 @@ fn moved_to(at: [f64; 3]) -> Isometry {
     Isometry::translation(Vector::new(at[0], at[1], at[2])).expect("a finite move")
 }
 
-/// What the two bars share, by a midpoint rule of `steps` steps.
+/// What the two bars share, at a lean of `lean`, by a midpoint rule of 1000
+/// steps.
 ///
-/// A line up `z` through `(x, y)` inside the upright bar is inside the leaning
-/// one where `(y − 4)² + (x·sin 0.3 + (z − 5)·cos 0.3)² ≤ 9`, a length of
-/// `2√(9 − (y − 4)²)/cos 0.3`, for `y` from 1 to 2, well inside both bars'
-/// ends. Across `x` the upright bar is `2√(4 − y²)` wide, so the volume is
-/// `(4/cos 0.3) ∫₁² √((2 − y)(y − 1)) √((2 + y)(7 − y)) dy`. Put
-/// `y = 1.5 − cos(t)/2`: the first root is `sin(t)/2` and `dy` is `sin(t)/2 dt`,
-/// which leaves a smooth integrand over `t` from 0 to π.
-fn what_the_two_bars_share(steps: u32) -> f64 {
+/// Turned and rolled as [`TwoBars::turned`] places them, the pair is Q2571's
+/// at its own lean, and a turn changes no volume, so it is enough to measure
+/// that one. A line up `z` through `(x, y)` inside the upright bar is inside
+/// the leaning one where `(y − 4)² + (x·sin lean + (z − 5)·cos lean)² ≤ 9`, a
+/// length of `2√(9 − (y − 4)²)/cos lean`, for `y` from 1 to 2, well inside
+/// both bars' ends. Across `x` the upright bar is `2√(4 − y²)` wide, so the
+/// volume is `(4/cos lean) ∫₁² √((2 − y)(y − 1)) √((2 + y)(7 − y)) dy`. Put
+/// `y = 1.5 − cos(t)/2`: the first root is `sin(t)/2` and `dy` is
+/// `sin(t)/2 dt`, which leaves a smooth integrand over `t` from 0 to π.
+fn what_the_two_bars_share(lean: f64) -> f64 {
+    let steps = 1000;
     let step = PI / f64::from(steps);
     let sum: f64 = (0..steps)
         .map(|at| {
@@ -186,275 +487,5 @@ fn what_the_two_bars_share(steps: u32) -> f64 {
             t.sin().powi(2) / 4.0 * ((2.0 + y) * (7.0 - y)).sqrt()
         })
         .sum();
-    4.0 / LEAN.cos() * sum * step
-}
-
-#[derive(Clone, Copy, Debug)]
-struct ProbeShape {
-    upright_radius: f64,
-    leaning_radius: f64,
-    apart: f64,
-    lean: f64,
-    seam_at: f64,
-    roll: f64,
-    height: f64,
-}
-
-fn probe_shared(shape: ProbeShape) -> f64 {
-    let steps = 4000u32;
-    let (a, b) = (shape.apart - shape.leaning_radius, shape.upright_radius);
-    let (m, w) = ((a + b) / 2.0, (b - a) / 2.0);
-    let step = PI / f64::from(steps);
-    let sum: f64 = (0..steps)
-        .map(|at| {
-            let t = step * (f64::from(at) + 0.5);
-            let y = m - w * t.cos();
-            w * w
-                * t.sin().powi(2)
-                * ((shape.upright_radius + y) * (shape.apart + shape.leaning_radius - y)).sqrt()
-        })
-        .sum();
-    4.0 / shape.lean.cos() * sum * step
-}
-
-fn probe_one(shape: ProbeShape, rule: Rule, upright_first: bool) -> String {
-    let policy = Policy::certified();
-    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let z = Axis::z();
-    let upright_placement =
-        moved_to([0.0, 0.0, -1.0]).compose(&Isometry::rotation(&z, shape.seam_at).expect("a turn"));
-    let the_y_axis = Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("an axis");
-    let (c, s) = (shape.seam_at.cos(), shape.seam_at.sin());
-    let leaning_placement = moved_to([shape.apart * c, shape.apart * s, shape.height])
-        .compose(&Isometry::rotation(&z, shape.seam_at - PI / 2.0).expect("a turn"))
-        .compose(&Isometry::rotation(&the_y_axis, PI / 2.0 + shape.lean).expect("a turn"))
-        .compose(&moved_to([0.0, 0.0, -10.0]))
-        .compose(&Isometry::rotation(&z, shape.roll).expect("a turn"));
-    let upright = model
-        .add_round_bar(shape.upright_radius, 12.0, &upright_placement)
-        .expect("a bar");
-    let leaning = model
-        .add_round_bar(shape.leaning_radius, 20.0, &leaning_placement)
-        .expect("a bar");
-    let (arguments, tools) = if upright_first {
-        ([upright], [leaning])
-    } else {
-        ([leaning], [upright])
-    };
-    let shared = probe_shared(shape);
-    let r1 = shape.upright_radius;
-    let r2 = shape.leaning_radius;
-    let expected = match rule {
-        Rule::Intersection => shared,
-        Rule::Union => PI * r1 * r1 * 12.0 + PI * r2 * r2 * 20.0 - shared,
-        Rule::Difference if upright_first => PI * r1 * r1 * 12.0 - shared,
-        Rule::Difference => PI * r2 * r2 * 20.0 - shared,
-        _ => unreachable!(),
-    };
-    let fused = match model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new()) {
-        Ok(fused) => fused.solids().to_vec(),
-        Err(why) => return format!("REFUSED {why:?}"),
-    };
-    if let Err(why) = model.validate(&policy, &mut ProvenanceLog::new()) {
-        return format!("INVALID {why:?}");
-    }
-    let [solid] = fused[..] else {
-        return format!("SOLIDS {}", fused.len());
-    };
-    let view = model.solid(solid).expect("a solid");
-    let faces = view.faces().count();
-    match view.measure(
-        Deflection::of(0.01).expect("a positive length"),
-        &policy,
-        &mut ProvenanceLog::new(),
-    ) {
-        Ok(measure) => {
-            let off = measure.volume() - expected;
-            let verdict = if off.abs() <= measure.volume_error() {
-                "ok"
-            } else {
-                "WRONG"
-            };
-            format!(
-                "{verdict} faces {faces} volume {:.6} expected {expected:.6} error {:.2e}",
-                measure.volume(),
-                measure.volume_error()
-            )
-        }
-        Err(why) => format!("UNMEASURED faces {faces} {why:?}"),
-    }
-}
-
-#[test]
-fn probe_q2590_sweep() {
-    let mut shapes = Vec::new();
-    for &lean in &[0.1, 0.2, 0.3, 0.45, 0.6] {
-        for &seam_at in &[PI / 2.0, 0.0, 0.3, 1.0, 2.0, 2.9, 4.0, 5.5] {
-            for &roll in &[0.0, 1.3] {
-                shapes.push(ProbeShape {
-                    upright_radius: 2.0,
-                    leaning_radius: 3.0,
-                    apart: 4.0,
-                    lean,
-                    seam_at,
-                    roll,
-                    height: 5.0,
-                });
-            }
-        }
-    }
-    for &(r1, r2, apart) in &[(2.0, 2.5, 3.5), (1.5, 3.0, 3.75), (2.0, 3.0, 4.5)] {
-        for &seam_at in &[PI / 2.0, 1.0, 4.0] {
-            shapes.push(ProbeShape {
-                upright_radius: r1,
-                leaning_radius: r2,
-                apart,
-                lean: 0.3,
-                seam_at,
-                roll: 0.0,
-                height: 5.0,
-            });
-        }
-    }
-    let mut bad = 0;
-    for shape in shapes {
-        for rule in [Rule::Intersection, Rule::Union, Rule::Difference] {
-            for upright_first in [true, false] {
-                let said = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    probe_one(shape, rule, upright_first)
-                }))
-                .unwrap_or_else(|_| "PANICKED".to_owned());
-                if !said.starts_with("ok") {
-                    bad += 1;
-                }
-                println!("{shape:?} {rule:?} upright_first {upright_first}: {said}");
-            }
-        }
-    }
-    println!("bad: {bad}");
-}
-
-fn probe_gradient(surface: &rcad_geom::Surface, at: Point) -> Vector {
-    match surface {
-        rcad_geom::Surface::Cylinder(pipe) => {
-            let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
-            let out = at - origin;
-            out * along.dot(along) - along * along.dot(out)
-        }
-        other => panic!("{other:?}"),
-    }
-}
-
-fn probe_inspect(shape: ProbeShape, rule: Rule, upright_first: bool) {
-    let policy = Policy::certified();
-    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let z = Axis::z();
-    let upright_placement =
-        moved_to([0.0, 0.0, -1.0]).compose(&Isometry::rotation(&z, shape.seam_at).expect("a turn"));
-    let the_y_axis = Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("an axis");
-    let (c, s) = (shape.seam_at.cos(), shape.seam_at.sin());
-    let leaning_placement = moved_to([shape.apart * c, shape.apart * s, shape.height])
-        .compose(&Isometry::rotation(&z, shape.seam_at - PI / 2.0).expect("a turn"))
-        .compose(&Isometry::rotation(&the_y_axis, PI / 2.0 + shape.lean).expect("a turn"))
-        .compose(&moved_to([0.0, 0.0, -10.0]))
-        .compose(&Isometry::rotation(&z, shape.roll).expect("a turn"));
-    let upright = model
-        .add_round_bar(shape.upright_radius, 12.0, &upright_placement)
-        .expect("a bar");
-    let leaning = model
-        .add_round_bar(shape.leaning_radius, 20.0, &leaning_placement)
-        .expect("a bar");
-    let (arguments, tools) = if upright_first {
-        ([upright], [leaning])
-    } else {
-        ([leaning], [upright])
-    };
-    let solids = match model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new()) {
-        Ok(fused) => fused.solids().to_vec(),
-        Err(why) => {
-            println!("{shape:?} {rule:?} {upright_first}: refused {why:?}");
-            return;
-        }
-    };
-    let view = model.solid(solids[0]).expect("a solid");
-    let mut seen = Vec::new();
-    for face in view.faces() {
-        for wire in face.wires() {
-            for coedge in wire.coedges() {
-                let edge = coedge.edge();
-                if !edge.is_closed().expect("closed") || seen.contains(&edge.key()) {
-                    continue;
-                }
-                seen.push(edge.key());
-                let at = edge.start().point();
-                let surfaces: Vec<rcad_geom::Surface> = edge
-                    .neighbouring_faces()
-                    .map(|key| model.face(key).expect("a face").surface())
-                    .collect();
-                let pipes: Vec<rcad_geom::Surface> = surfaces
-                    .iter()
-                    .copied()
-                    .filter(|s| matches!(s, rcad_geom::Surface::Cylinder(_)))
-                    .collect();
-                if pipes.len() != 2 {
-                    continue;
-                }
-                let is_upright = |s: &rcad_geom::Surface| match s {
-                    rcad_geom::Surface::Cylinder(pipe) => {
-                        pipe.axis().direction().components()[2].abs() > 0.999
-                    }
-                    _ => false,
-                };
-                let (up, lean) = if is_upright(&pipes[0]) {
-                    (pipes[0], pipes[1])
-                } else {
-                    (pipes[1], pipes[0])
-                };
-                let origin_x = |s: &rcad_geom::Surface| match s {
-                    rcad_geom::Surface::Cylinder(pipe) => pipe.axis().origin().coordinates(),
-                    _ => unreachable!(),
-                };
-                let lean_axis = match lean {
-                    rcad_geom::Surface::Cylinder(pipe) => pipe.axis().direction(),
-                    _ => unreachable!(),
-                };
-                let (g_up, g_lean) = (probe_gradient(&up, at), probe_gradient(&lean, at));
-                let walked = g_up.cross(g_lean);
-                let longitude = lean_axis.cross(g_lean);
-                let along = walked.dot(longitude);
-                let latitude = walked.dot(g_lean.cross(longitude));
-                let rule_says =
-                    rcad_geom::which_way_a_closed_crossing_turns([g_up, g_lean], g_lean, lean_axis);
-                let p = at.coordinates();
-                let off_seam = p[1].atan2(p[0]) - shape.seam_at;
-                println!(
-                    "{shape:?} {rule:?} {upright_first}: corner {p:?} off seam {off_seam:.3e} up origin {:?} lean origin {:?} lean longitude f64 {along:.3e} latitude {latitude:.3e} rule {rule_says:?}",
-                    origin_x(&up),
-                    origin_x(&lean)
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn probe_q2590_inspect() {
-    for &lean in &[0.1, 0.3, 0.6] {
-        for &seam_at in &[PI / 2.0, 1.0, 2.0, 2.9, 4.0] {
-            for &roll in &[0.0, 1.3] {
-                let shape = ProbeShape {
-                    upright_radius: 2.0,
-                    leaning_radius: 3.0,
-                    apart: 4.0,
-                    lean,
-                    seam_at,
-                    roll,
-                    height: 5.0,
-                };
-                for upright_first in [true, false] {
-                    probe_inspect(shape, Rule::Intersection, upright_first);
-                }
-            }
-        }
-    }
+    4.0 / lean.cos() * sum * step
 }
