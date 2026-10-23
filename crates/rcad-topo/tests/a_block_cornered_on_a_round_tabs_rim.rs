@@ -22,25 +22,27 @@
 //! A tolerant policy reads the two crossings as one point, and there every
 //! fuse of a block cornered on the rim once answers.
 //!
+//! The block `x 7.6 to 12.4` by `y 8.2 to 11.8` has its other corner `(7.6,
+//! 11.8)` on the rim too. On the plate's top, under a certified policy, the
+//! block less the plate, the plate less it and their common part were refused
+//! `Undecidable` at `side of cylinder` for a point a rounding from that corner,
+//! over the records of a ray the classification threw away (Q2477). No answer
+//! rests on such a ray, and since Q2489 its records are kept out of the log, so
+//! the three answer: one of the two solids as it stands, or nothing, since they
+//! touch along a face.
+//!
 //! What is still refused, and whether its answer exists (§16.10, §437.6):
 //!
 //! - **The union, a limit.** It holds the sliver of the block's floor or roof
 //!   outside the rim, a face thinner than a rounding of its own coordinates,
 //!   so it is refused `DynamicRangeTooWide`.
-//! - **The block `x 7.6 to 12.4` by `y 8.2 to 11.8` on the plate's top, less
-//!   the plate, the plate less it, and their common part, a gap.** Its other
-//!   corner `(7.6, 11.8)` is on the rim too. Under a certified policy these are
-//!   refused `Undecidable` on which side of the tab's wall a point a rounding
-//!   from that corner lies (Q2477). Each answer is one of the two solids as it
-//!   stands, or nothing, since they touch along a face; under the floor, and
-//!   under a tolerant policy, the same three give it.
 //! - **That block's union under a tolerant policy, not yet traced.** The mesh
 //!   refuses it, a wire that does not fan into a loop with the block on the
 //!   plate's top and two patches drawing the same side with it under the
 //!   floor. Q2478 traces it and says whether it is a gap.
 
-use rcad_geom::{Deflection, Isometry, SIDE_OF_CYLINDER, Scale, Vector};
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_geom::{Deflection, Isometry, Scale, Vector};
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 /// Every rule, with the plate first and second.
@@ -146,10 +148,12 @@ fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_when_the_corner_
 /// - Under a certified policy the union is refused `DynamicRangeTooWide`, as
 ///   each block cornered once is: it has the same corner `(12.4, 8.2)` on the
 ///   rim.
-/// - Under a certified policy, on the plate's top, the block less the plate,
-///   the plate less the block and their common part are refused `Undecidable`
-///   on which side of the tab's wall a point a rounding from `(7.6, 11.8, 2)`
-///   lies (Q2477). Under the floor they answer.
+/// - Under a certified policy the block less the plate, the plate less the
+///   block and their common part answer, on the plate's top and under its
+///   floor. On the top they were refused `Undecidable` at `side of cylinder`
+///   for a point a rounding from `(7.6, 11.8, 2)`, over the records of a ray
+///   the classification threw away, until Q2489 kept those out of the log
+///   (Q2477).
 /// - Under a tolerant policy the union is refused by the mesh: a wire that
 ///   does not fan into a loop on the plate's top, and two patches drawing the
 ///   same side under its floor (Q2478). The rest answer.
@@ -181,7 +185,7 @@ fn what_each_fuse_of_a_block_cornered_twice_on_a_round_tabs_rim_comes_to() {
         (
             &certified,
             &BUT_THE_UNIONS[..],
-            Should::BeUndecidedOnWhichSideOfTheTabsWallAPointLiesNear([7.6, 11.8, 2.0]),
+            Should::Answer,
             Should::Answer,
         ),
         (
@@ -215,18 +219,11 @@ enum Should {
     Answer,
     /// `DynamicRangeTooWide`.
     BeRefusedAsTooWideARangeToComputeIn,
-    /// `Undecidable` on which side of the tab's wall a point lies, for a point
-    /// within [`A_FEW_ROUNDINGS`] of this one.
-    BeUndecidedOnWhichSideOfTheTabsWallAPointLiesNear([f64; 3]),
     /// `AWireDoesNotFanIntoALoopToMesh`.
     BeRefusedForAWireThatDoesNotFanIntoALoop,
     /// `TwoPatchesOfTheMeshDrewTheSameSide`.
     BeRefusedForTwoPatchesOfTheMeshDrawingTheSameSide,
 }
-
-/// How far each bound of a point's box may be from the point it is read as
-/// being near: a few roundings of `11.8`.
-const A_FEW_ROUNDINGS: f64 = 1e-14;
 
 /// Each of `blocks`, set on the plate's top or under its floor, fused with the
 /// plate by each of `fuses` (a rule and whether the plate is first) under
@@ -275,9 +272,6 @@ fn what_the_fuses_get_wrong(
                     Should::BeRefusedAsTooWideARangeToComputeIn => {
                         is_refused_as_too_wide_a_range(&fused)
                     }
-                    Should::BeUndecidedOnWhichSideOfTheTabsWallAPointLiesNear(near) => {
-                        is_undecided_on_which_side_of_the_tabs_wall_a_point_lies_near(&fused, near)
-                    }
                     Should::BeRefusedForAWireThatDoesNotFanIntoALoop => match &fused {
                         Err(Error::AWireDoesNotFanIntoALoopToMesh { .. }) => Ok(()),
                         other => Err(what_it_came_to_instead(other)),
@@ -315,36 +309,6 @@ fn is_refused_as_too_wide_a_range(fused: &rcad_topo::Result<Fused>) -> Result<()
         Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. })) => Ok(()),
         other => Err(what_it_came_to_instead(other)),
     }
-}
-
-fn is_undecided_on_which_side_of_the_tabs_wall_a_point_lies_near(
-    fused: &rcad_topo::Result<Fused>,
-    near: [f64; 3],
-) -> Result<(), String> {
-    match fused {
-        Err(Error::Undecidable { records })
-            if records.records().iter().any(|record| {
-                record.predicate() == SIDE_OF_CYLINDER
-                    && record
-                        .inputs()
-                        .iter()
-                        .any(|&point| is_within_a_few_roundings(point, near))
-            }) =>
-        {
-            Ok(())
-        }
-        other => Err(what_it_came_to_instead(other)),
-    }
-}
-
-fn is_within_a_few_roundings(point: PredicatePoint, near: [f64; 3]) -> bool {
-    let PredicatePoint::Constructed(range) = point else {
-        return false;
-    };
-    (0..3).all(|axis| {
-        (range[axis].lo() - near[axis]).abs() <= A_FEW_ROUNDINGS
-            && (range[axis].hi() - near[axis]).abs() <= A_FEW_ROUNDINGS
-    })
 }
 
 fn what_it_came_to_instead(fused: &rcad_topo::Result<Fused>) -> String {

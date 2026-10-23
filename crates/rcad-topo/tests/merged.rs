@@ -361,6 +361,8 @@ pub mod a_prism_lying_on_one_edge;
 pub mod a_quarter_of_a_ball_built_face_by_face;
 #[path = "a_ray_from_beside_a_box.rs"]
 pub mod a_ray_from_beside_a_box;
+#[path = "a_ray_thrown_away_leaves_no_record.rs"]
+pub mod a_ray_thrown_away_leaves_no_record;
 #[path = "a_refusal_that_names_the_wrong_corner.rs"]
 pub mod a_refusal_that_names_the_wrong_corner;
 #[path = "a_rim_a_fuse_cut_round_one_cone.rs"]
