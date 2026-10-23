@@ -202,7 +202,7 @@ use rcad_geom::{
     Cylinder, EdgeRun, MeetOfThree, NamedRun, PlaneAgreement, Surface, SurfaceMeet, intersect,
     meet_of_three_surfaces,
 };
-use rcad_predicates::{Decision, Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
 use smallvec::SmallVec;
 
 use crate::{EdgeKey, Error, Result};
