@@ -3914,7 +3914,12 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// A solid of fewer than two corner places gives no corner distance. A fold on
 /// it is asked down to the floor its own side gives; a crossing on it is handed
 /// back at once, since nothing then says how far down a crossing is worth
-/// asking.
+/// asking. One solid is known to be handed back that way (Q2561): what a thin
+/// bar resting inside a thick one shares, built by hand round its one corner,
+/// where the face of the thick pipe's two lobes crosses at the coarsest mesh.
+/// Run past this with a probe, no room from `2` down to `2⁻¹²` meshes it, and
+/// given a floor the ladder would stop at room `1` on a refusal about
+/// something else (`a_fold_between_two_curves_closer_than_any_two_corners.rs`).
 ///
 /// **And never more than [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] halvings below
 /// the top**, whatever `closest` says. The bar `2⁻⁴⁰` wider than `1`, less
