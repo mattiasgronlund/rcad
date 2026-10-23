@@ -6829,6 +6829,13 @@ mod tests {
     /// point's height further out than its foot: about `8.6e-5` in `x`, so over
     /// the chord. Read there the chord's turn put the point in the half disk
     /// (`docs/decisions.md` §346.6, Q685).
+    ///
+    /// Over the point's box stretched to the plane the chord's turn cannot say,
+    /// and until Q2655 the piece answered nothing. The chord side runs back along
+    /// the plane `x = 2²⁰` between two corners that are meets of both planes, so
+    /// the chord is that plane's line across `x + z = 0`, and the stretched box,
+    /// `x = 2²⁰ − 2⁻²⁰` all through, is wholly short of it: the point and its
+    /// foot are both off the half disk ([`which_side_of_a_wall_back_along_the_chord`]).
     #[test]
     fn a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held() {
         let out = f64::powi(2.0, 20);
@@ -6881,8 +6888,8 @@ mod tests {
         );
         assert_eq!(
             the_piece_holds_asked_as_selection_asks(&half_disk, point),
-            None,
-            "the point is read over the chord and its foot short of it"
+            Some(false),
+            "the point and its foot are both short of the chord's plane"
         );
     }
 
