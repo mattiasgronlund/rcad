@@ -157,6 +157,16 @@
 //! not the sides it lies in alone: the two then ask the same question of the
 //! same sides.
 //!
+//! **Both lists hold the side a ring's band lies in too** (Q2648,
+//! [`the_side_a_band_of_a_ring_lies_in`]): a ring's face whose only edges are
+//! the two circles a plane square to its axis cuts it in lies on one side of
+//! that plane, which `bake` does not record. A half ring's skin lies above its
+//! flat face, and a plane the whole ring would rest on touches the skin's
+//! surface round a circle below it, where no face of the half ring is. Told
+//! the side, the arrangement leaves that circle out, on the skin and on the
+//! plane's face, rather than order points along it where the two surfaces are
+//! tangent and no way along follows from them.
+//!
 //! # Each face is told the caps through the start of their axis that cut it
 //!
 //! `bake` reads off a round bar's numbers before its move that its near cap
@@ -189,17 +199,17 @@
 use std::collections::HashMap;
 
 use rcad_geom::{
-    EdgeRun, MeetOfThree, NamedRun, PlaneAgreement, Surface, SurfaceMeet, intersect,
+    Cylinder, EdgeRun, MeetOfThree, NamedRun, PlaneAgreement, Surface, SurfaceMeet, intersect,
     meet_of_three_surfaces,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Policy, ProvenanceLog};
 use smallvec::SmallVec;
 
 use crate::{EdgeKey, Error, Result};
 
 use super::Sameness;
 use super::arrange::{stretches_of_a_line_inside, the_listed_cuts_it_still_draws};
-use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedFace, BakedSolid};
+use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedEdge, BakedFace, BakedSolid};
 
 /// Work out every cut line, and hang each on the face it cuts.
 ///
@@ -396,7 +406,7 @@ fn cuts_from_how_they_meet(
 struct ACutFound {
     cut: Surface,
     /// The sides of planes the face that carries `cut` lies in
-    /// ([`BakedFace::lies_in`]) when `cut` is that face's own surface, and
+    /// ([`the_sides_it_lies_in`]) when `cut` is that face's own surface, and
     /// none when it is a surface across that face's boundary.
     its_face_lies_in: SmallVec<[ASideOfAPlane; 2]>,
     /// Whether the face that carries `cut` provably shares no point with the
@@ -414,11 +424,16 @@ fn found_on(face: &BakedFace, against: &BakedFace, cuts: Vec<Surface>) -> Vec<AC
         !cuts.is_empty() && a_face_misses_a_surface_by_its_band(against, &face.surface);
     let reaches_only_its_boundary =
         !cuts.is_empty() && meets_it_only_on_its_boundary(face, against);
+    let against_lies_in = if cuts.contains(&against.surface) {
+        the_sides_it_lies_in(against)
+    } else {
+        SmallVec::new()
+    };
     cuts.into_iter()
         .map(|cut| ACutFound {
             cut,
             its_face_lies_in: if cut == against.surface {
-                against.lies_in.clone()
+                against_lies_in.clone()
             } else {
                 SmallVec::new()
             },
@@ -497,7 +512,7 @@ fn the_sides_the_faces_of_each_cut_lie_in(
     sides
 }
 
-/// The sides of planes the face lies in ([`BakedFace::lies_in`]) that every
+/// The sides of planes the face lies in ([`the_sides_it_lies_in`]) that every
 /// other face on its surface lies in too, of every solid within reach of its
 /// own: the faces across know the face's surface by just these, since each
 /// face on it cuts them, and a face asks of its own surface what they ask
@@ -509,23 +524,91 @@ fn the_sides_every_face_on_its_surface_lies_in(
     face: usize,
 ) -> SmallVec<[ASideOfAPlane; 2]> {
     let mine = &solids[solid].faces[face];
-    let on_it: Vec<&BakedFace> = (0..solids.len())
+    let on_it: Vec<SmallVec<[ASideOfAPlane; 2]>> = (0..solids.len())
         .filter(|&other| within_reach.leader(other) == within_reach.leader(solid))
         .flat_map(|other| &solids[other].faces)
         .filter(|other| other.surface == mine.surface)
+        .map(the_sides_it_lies_in)
         .collect();
-    mine.lies_in
-        .iter()
+    the_sides_it_lies_in(mine)
+        .into_iter()
         .filter(|side| {
-            on_it.iter().all(|other| {
-                other
-                    .lies_in
+            on_it.iter().all(|theirs| {
+                theirs
                     .iter()
                     .any(|theirs| one_closed_side_of_one_plane(side, theirs))
             })
         })
-        .copied()
         .collect()
+}
+
+/// The sides of planes `face` lies in, closed: [`BakedFace::lies_in`], and
+/// for a ring's face between the two circles a plane square to the ring's
+/// axis cuts it in, the side of that plane the face is on
+/// ([`the_side_a_band_of_a_ring_lies_in`]).
+fn the_sides_it_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 2]> {
+    let mut sides = face.lies_in.clone();
+    sides.extend(the_side_a_band_of_a_ring_lies_in(face));
+    sides
+}
+
+/// The closed side of a plane square to a ring's axis that `face`, a ring's
+/// face whose only edges are the two circles the plane cuts the ring in,
+/// lies in.
+///
+/// **A plane square to a ring's axis that cuts its tube cuts the ring in two
+/// circles round the axis and nothing else**, one nearer the axis than the
+/// circle through the tube's middle and one further out. The ring less those
+/// two is two bands, one either side of the plane. One input face is in one
+/// piece, so where its only edges are the two circles its inside misses the
+/// plane, and it lies in the side [`BakedEdge::inside_across`] says at both.
+/// The two corners have to be on the two circles, one inside the pipe
+/// through the tube's middle and one outside it: a wire that walks one
+/// circle twice says one side at both, and that face runs right round the
+/// tube (Q790, `holds.rs`'s `are_on_two_circles`).
+///
+/// The half ring is the shape (Q2648): its skin is bound by the circles of
+/// radius `R ± r` on its flat face, so it lies on the flat face's inner side.
+/// A plane the whole ring would rest on touches the skin's surface round a
+/// circle on the far side, which no face of the half ring reaches.
+///
+/// A plane through the axis, or leaning to it, is not asked: nothing needs it
+/// (§13), and [`BakedFace::lies_in`] already holds a ring's face between two
+/// planes through its axis.
+fn the_side_a_band_of_a_ring_lies_in(face: &BakedFace) -> Option<ASideOfAPlane> {
+    let Surface::Torus(ring) = face.surface else {
+        return None;
+    };
+    if face.keys.len() != 1 {
+        return None;
+    }
+    let edges: Vec<&BakedEdge> = face.wires.iter().flatten().collect();
+    let [one, other] = edges[..] else {
+        return None;
+    };
+    let side_of = |edge: &BakedEdge| {
+        Some(ASideOfAPlane {
+            plane: *edge.across.as_plane()?,
+            behind: edge.inside_across?,
+        })
+    };
+    let (mine, theirs) = (side_of(one)?, side_of(other)?);
+    let through_the_tube = Cylinder::new(ring.axis(), ring.ring_radius())
+        .expect("a ring's radius is positive and finite, so a pipe round its axis can be made");
+    let on_two_circles = matches!(
+        (
+            through_the_tube.side_of(one.start.point),
+            through_the_tube.side_of(other.start.point),
+        ),
+        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
+    );
+    (one_closed_side_of_one_plane(&mine, &theirs)
+        && crate::holds::lie_along_one_line(
+            mine.plane.normal().components(),
+            ring.axis().direction().components(),
+        )
+        && on_two_circles)
+        .then_some(mine)
 }
 
 /// Whether the two are the same closed side of the same plane, however each
