@@ -1689,6 +1689,7 @@ impl BuildingAMesh {
             let (rims, islands): (Vec<WalkedLoop>, Vec<WalkedLoop>) = walked
                 .into_iter()
                 .partition(|around| around.goes_right_round);
+            let touching = the_points_two_loops_pass(&islands);
             let Some(patches) = self.cut_a_ring_across(
                 face,
                 stored,
@@ -1701,7 +1702,16 @@ impl BuildingAMesh {
             else {
                 return Err(Error::CurvedFaceWithAHoleGoesTooFarRound { face: face.key() });
             };
-            return Ok(patches);
+            return Ok(patches
+                .into_iter()
+                .flat_map(|patch| match <[WalkedLoop; 1]>::try_from(patch) {
+                    Ok([one]) => apart_where_two_holes_touch(one, &touching)
+                        .into_iter()
+                        .map(|piece| vec![piece])
+                        .collect(),
+                    Err(with_holes) => vec![with_holes],
+                })
+                .collect());
         }
         if walked.len() == 1
             && let Some((one, other)) = self.open_a_slit(face, stored, &walked[0], room)?
@@ -6058,7 +6068,13 @@ fn the_legs_round_islands_stay_inside_a_ring(
                         .iter()
                         .enumerate()
                         .filter(|&(at, _)| at != round.which)
-                        .all(|(_, other)| !a_leg_meets_an_island(other, leg, None, whole))
+                        .all(|(_, other)| {
+                            let shared = other
+                                .points
+                                .iter()
+                                .position(|&point| point == round.island.points[corner]);
+                            !a_leg_meets_an_island(other, leg, shared, whole)
+                        })
                     && (0..ends.len())
                         .filter(|&other| other != cut)
                         .flat_map(sides_of)
