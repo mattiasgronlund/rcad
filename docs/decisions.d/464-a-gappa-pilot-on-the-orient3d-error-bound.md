@@ -14,7 +14,9 @@ anything was tried here, when none of them was installed. 464.4 to 464.6 are
 the pilot, Q2647, and where it found 464.2 wrong 464.2 says so. 464.7 is
 Q2658, which took up the two claims the pilot left unbacked, and 464.8 is
 Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
-`*_ROUNDOFF` constants.*
+`*_ROUNDOFF` constants. 464.10 is Q2661, which proves block 1's hints in Coq
+and settles how the scripts join the tree and what notices the Rust moving
+under them.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -25,6 +27,7 @@ Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
   464.7   value past the bound, and every minor at zero run
   464.8   orient2d and the side of a plane
   464.9   Which of the eleven *_ROUNDOFF constants Gappa can state
+  464.10  Whether the scripts join the tree and the gate
 
 ### 464.1 The bugs a bound prover is for
 
@@ -198,7 +201,8 @@ hint is an identity of fractions, and it warned about none of the 39. It
 warned 194 times that it took a divisor to be nonzero. In Coq's reals `x / 0`
 is 0, so `adx / Adx = 1 + (adx − Adx) / Adx` is false where `Adx` is zero.
 Block 1's hypotheses rule that out on paper, since a rounding gives zero only
-from zero, but nothing in Coq checks it yet. Q2661 asks whether `field` can.
+from zero, but nothing in Coq checks it yet. `field` can, given 35 numbers
+nonzero (464.10).
 
 **3. §12.2 would have been caught.** Drop the hypothesis that the nine
 products are normal, with what block 2 gives from it, and the goal fails, best
@@ -220,9 +224,10 @@ has `9u²` to spare over that.
 `on_floats` by hand and names the commit it was read at. If `on_floats` took
 an FMA, another order or another product, every test would run as before and
 the script would go on proving the old expression. The tests that would notice
-a looser bound are the ones §16.3 and §18.5 found too coarse. Q2661 decides
-between a script per bound run by a recipe under these pins, and a test that
-fails when `on_floats`' source changes and the script's header sha does not.
+a looser bound are the ones §16.3 and §18.5 found too coarse. 464.10 settles
+it: each script names the Rust it restates in its header, and a gate step,
+`just check-proofs`, fails when that Rust's code moves from what the script's
+stamp recorded.
 
 **6. The other nineteen.** Eight are sign filters of orient3d's kind, an
 `on_floats` whose `error_bound` is a constant times a permanent:
@@ -538,14 +543,19 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   of the others is a row of its own.
 - **Q2661**, whether the scripts join the tree and the gate, what notices
   `on_floats` drifting from block 1, and whether `field` proves the 39 hint
-  equalities once their divisors are shown nonzero.
+  equalities once their divisors are shown nonzero. Done, in 464.10: `field`
+  proves all 39, leaving 35 numbers taken to be nonzero; the scripts join the
+  tree with a recipe to run them, and a gate step notices the Rust they
+  restate moving.
 
 None of the pilot's findings is a wrong answer found on an input. The sign
 `decide` certifies is proved right on every input block 1 covers. What is left
 is comments that claim more than is proved, zero branches argued on paper and
 one of them not run, and 39 equalities Coq takes on trust. Since 464.7 the
 comments in `orient3d.rs` say what is proved, and every branch with a minor at
-zero is run. The branches where one of the nine differences is zero are still
+zero is run. Since 464.10 the 39 equalities are proved, and what Coq takes on
+trust is 35 facts that a number is not zero, each one step on paper from block
+1's hypotheses. The branches where one of the nine differences is zero are still
 on paper, as 464.4 argues them, and so is the step from `y` to the sign.
 
 ### 464.7 value past the bound, and every minor at zero run
@@ -1175,7 +1185,8 @@ so the sizes are the third lane's:
 
 Each hint enters the Coq file as a hypothesis with no condition attached, as
 in 464.4, so each proof stands on its hints, and on the divisors Gappa took to
-be nonzero. Q2661 asks whether `field` can discharge them.
+be nonzero. `field` took all 39 of block 1's hints (464.10). It has not been
+run on the hints of these scripts, nor on those of 464.7 and 464.9.
 
 **6. The scripts.** `o2.g`, whole:
 
@@ -2410,3 +2421,383 @@ write("c_shiftball_finer.g", sub(ball, "c0 = rnd(c0_); c1 = rnd(c1_); c2 = rnd(c
                                  "c0 = fixed<-1100, ne>(c0_); c1 = fixed<-1100, ne>(c1_);"
                                  " c2 = fixed<-1100, ne>(c2_);"))
 ```
+
+### 464.10 Whether the scripts join the tree and the gate
+
+Q2661 took up three questions, in three lanes on 2026-10-23, at `78d223eb`:
+
+- whether Coq's `field` proves the hints `gappa -Bcoq` leaves as hypotheses;
+- what would notice `on_floats` drifting from block 1;
+- whether the scripts join the tree, and the gate.
+
+Every run is under 464.4's pins, with gappalib 1.8.0 from 464.5's nix block.
+
+**1. `field` proves block 1's 39 hints, given 35 numbers nonzero.** `field`
+is the Coq tactic that proves an equation between fractions. It leaves as side
+conditions that each divisor is not zero.
+
+- `fieldtry.py`, in 4, asks `field` to prove each of block 1's 39 hints, with
+  every definition that is not a rounding unfolded. It took every one, in 0.01
+  to 0.61 s each. All it left were side conditions of the form `X <> 0`.
+- `makedemo.py`, in 4, turns `block1.v` into `block1_proved.v`. There each
+  `Hypothesis aN` becomes a `Lemma aN` that `field` proves. Each number `field`
+  needs nonzero becomes a hypothesis of the Coq section, `nz_X : X <> 0`,
+  declared just before the first hint that needs it. Which hint needs which
+  was read off `fieldtry.py`'s run.
+- `coqc` accepts `block1_proved.v`, exit 0, in 5.41 s and 11.55 s on two runs.
+  `Print Assumptions l1` lists what block 1's last lemma stands on. It names
+  the twelve coordinates, four axioms (the two Coq's reals rest on,
+  functional extensionality and the excluded middle), and 35 `nz_` facts. It
+  names no hint.
+- The same print on `block1.v` as Gappa wrote it names 38 of the 39 hints.
+  The one left out is `a38`, `Phat / P`. Its fact, `nz_Phat`, is the 36th
+  declared, and the only one `l1` does not use.
+- Gappa writes a different proof each run (464.4), so this was run twice: on
+  a `block1.v` of 10169 lines and on a fresh one of 10007. On both, with
+  `makedemo.py`'s table unchanged, `field` took all 39 hints, `coqc`
+  accepted `block1_proved.v`, and `l1` stood on 35 `nz_` facts.
+
+So block 1's proof now rests on 35 facts that a number is not zero, where it
+rested on 39 equalities. A hint is false exactly where its divisor is zero, as
+464.4 showed for `adx / Adx`, so the 35 are what the 39 stood in for. Each is
+one step on paper from block 1's hypotheses:
+
+- 20 are hypotheses read as "not zero". These are the nine differences `adx`
+  to `cdz` and the three minors `first`, `second`, `third`, each at least
+  `2⁻¹⁰⁷⁴`; the six products `bdxcdy` to `bdxady` and `eb`, each at least
+  `2⁻¹⁰²²`; and `S = t1 + t2`, at least `2⁻¹⁰⁷⁴`.
+- 13 follow because a rounding of zero is zero, which is Flocq's `round_0`:
+  - the nine exact differences `Adx` to `Cdz`, which round to `adx` to `cdz`;
+  - `M1` to `M3`, which round to the minors;
+  - `P`, since `eb = rnd(B × P)` is not zero.
+- 2 are arithmetic. `B` is a constant above zero, and `P6` is a sum of six
+  products of absolute values that are not zero.
+
+None of the 35 is proved in Coq yet. They would be proved from `s1`, the Coq
+form of block 1's hypotheses: a nested `/\` of `BND <expr> <interval>` terms.
+That is a row. `field` was run on block 1 alone. The scripts of 464.7 to 464.9
+have not had it run on their hints.
+
+**2. What would notice `on_floats` drifting.** Today nothing does (464.4's 5).
+A check that fires when the Rust under a script changes is worth having only if
+it fires on real changes, not on every edit to a doc comment. So `drift.sh`
+(not kept) went through each commit that touched `orient3d.rs`. For each, it
+asked whether three hashes had moved since the commit before:
+
+- the whole file;
+- `on_floats`' text, from `fn on_floats` to the first `    }`;
+- `on_floats`' code: that text with every `//` line taken out, doc comments
+  included, every blank line taken out, and every run of white space made one
+  space.
+
+Over the file's whole history, the 14 commits after `4941b88f` wrote it:
+
+- the file's hash moved on all 14;
+- the text's moved on 3;
+- the code's moved on 1, `1ece0789`. That is §12.2's fix, a real change to the
+  arithmetic.
+
+Since the pilot read it at `d9f931e8`, up to `78d223eb`, 3 commits touched the
+file. The file's hash moved on all 3 and the text's on 2, `813f8a09` and
+`c827c89b`, which are Q2658's comments. The code's moved on none. `on_floats`
+is 33 lines of code by that count at `78d223eb`.
+
+So a hash of the file would have had someone re-read block 1 fourteen times
+for one real change. A hash of the text would have done it three times. A hash
+of the code would have done it once, the time it mattered. `cascade.rs`, whose
+`product_is_normal` and `decide` block 1 also restates, changed once after the
+pilot: `4eb9f90d`, a doc comment only.
+
+**3. The decision.**
+
+a. **`field` proves the hints**, in every script where it takes them, through
+the transform of 4. A hint it does not take stays a hypothesis. The nonzero
+facts stay section hypotheses until a row proves them from `s1`.
+`prove-bounds`, in c, counts both for each proof, from `Print Assumptions`.
+
+b. **Each proved script joins the tree** as `proofs/gappa/<name>.g`.
+
+- Its controls go beside it as `proofs/gappa/c_<name>_<what>.g`. A control is
+  a script that must fail, as each of 464.4's variants must. 464.8 and 464.9
+  already name theirs `c_*.g`.
+- A script that a Python generator writes is committed as the files it writes,
+  with the generator beside them, so that each stamp names a file. The
+  generators are `o2cases.py`, `planecases.py`, `controls.py` and
+  `shiftcontrols.py`.
+- Each script starts with one line per item of Rust it restates. The item is
+  named as `just src` takes it, with the commit it was read at:
+
+```gappa
+# restates: crates/rcad-predicates/src/orient3d.rs on_floats at d9f931e8
+# restates: crates/rcad-predicates/src/orient3d.rs exact_coordinates at d9f931e8
+# restates: crates/rcad-predicates/src/point.rs exact_coordinates at d9f931e8
+# restates: crates/rcad-predicates/src/orient3d.rs ORIENT3D_ERROR_BOUND at d9f931e8
+# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at d9f931e8
+# restates: crates/rcad-predicates/src/cascade.rs decide at d9f931e8
+```
+
+- A dependency whose arithmetic a script restates is a line too. `signed.g`
+  restates nalgebra 0.35's `dot` (464.9), so it carries
+  `# restates: Cargo.lock nalgebra at c3b2160e`. That line's hash is the
+  package's entry in `Cargo.lock`.
+
+c. **`just prove-bounds [script]`** runs each script, or the one named, under
+464.4's pins:
+
+- `gappa`, `gappa -Bcoq`, the transform of 4, and `coqc`;
+- each of the script's controls, each of which must fail.
+
+Before it writes a stamp, it checks each `restates` line. The item's code now
+must be the item's code at the commit the line names. So when the Rust under a
+script moves, the script has to be read again against it, and the line moved
+to a commit after that reading, before the script can be stamped again.
+Without this check, running `prove-bounds` would re-stamp an old script
+against new code, and that hides the drift the stamp is there to show.
+
+It then writes `proofs/gappa/<name>.stamp`, holding:
+
+- the script's hash;
+- each restated item's code hash;
+- the pin;
+- the count of hints and of nonzero facts the proof stands on.
+
+`prove-bounds` is not a gate step, for three reasons:
+
+- CI has no nix. `grep -ci nix` counts 0 lines in both workflows, and CI runs
+  `just gate` (`ci.yml:301`), so a gate step CI could not run would split the
+  two. CI's minutes are paid for, and get spent, too.
+- The first fetch is 583 MiB of Coq (464.4).
+- So far the verdict has depended only on the script and the pin. Gappa
+  writes a different proof each run (464.4), but no run has changed whether a
+  script proves. Running an unchanged script under an unchanged pin again
+  would learn what the stamp already says.
+
+d. **A gate step, `just check-proofs`**, needs no nix, so CI runs it. It reads
+the working tree only, because CI's `actions/checkout@v4` fetches one commit
+and no history. For each script it hashes the script. It recomputes each
+restated item's code hash, using `just src`'s extent of the item and the way
+2 takes comments and blank lines out. It fails, naming the script and `just
+prove-bounds <script>`, in four cases:
+
+- a hash differs from the stamp;
+- the stamp's pin differs from the one `prove-bounds` uses;
+- a script has no stamp;
+- an item is no longer found.
+
+`check-proofs-selftest` works in a scratch copy. It changes a restated item's
+code, a comment in it, and a script, one at a time, and checks that the code
+and the script fail and the comment passes. By 2's figures, `check-proofs`
+would have fired once in `orient3d.rs`' fourteen commits, at §12.2's fix, and
+not at all since the pilot.
+
+What it misses:
+
+- a change to an item no header names, such as a helper `on_floats` calls;
+- a script that got its Rust wrong when it was written or read again. The
+  check compares the code with the code, never with the script.
+
+e. **A check that runs the script's expression in `f64` against `on_floats`**
+was weighed and not built. It would compare `value` and `eb` bit for bit on
+sampled inputs.
+
+- For it: it would catch a script that restates its code wrong, which d does
+  not.
+- Against it: it needs an evaluator for Gappa's language, written in Rust.
+  And it sees only `value` and `eb`, on the inputs sampled. It sees neither the
+  checks `product_is_normal` makes nor `decide`'s comparison.
+
+By §13 it is built when a script is found to restate its code wrong.
+
+f. **The fourteen open Gappa rows** go on appending their scripts to this
+section, as they were filed: Q2675, Q2677 to Q2682, Q2684, and Q2689 to
+Q2694. So the proofs do not wait on the tooling. The row that builds c and d
+moves in the scripts this section holds when that row is taken. A row after it,
+and after the fourteen, moves in the rest.
+
+**4. The transform, whole.** To run it again, run 464.5's commands to write
+`block1.v`, with `nx`, `pin`, `gl` and `fl` set as there. Save the two scripts
+below beside it as `fieldtry.py` and `makedemo.py`, and then:
+
+```sh
+python3 fieldtry.py block1.v    # 39 hints; 279 definitions unfolded
+python3 makedemo.py block1.v    # 39 hints proved by field; 36 nonzero hypotheses
+for f in block1_field1.v block1_proved.v block1_asis.v; do
+  COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+    $nx shell $pin#coqPackages_8_20.coq --command coqc $f > ${f%.v}.out
+done
+grep -c 'FIELD FAILED' block1_field1.out    # 0
+grep -c '^nz_' block1_proved.out            # 35
+grep -c '^a[0-9]' block1_asis.out           # 38
+```
+
+`block1_field1.out` lists, for each hint, the side conditions `field` left.
+`block1_asis.v` is `block1.v` with only `Print Assumptions l1.` added. A
+transform for `prove-bounds` reads that table off `field`'s side conditions,
+as `fieldtry.py` prints them, rather than by hand.
+
+Some things were tried and did not work:
+
+- `Require Import Reals` after gappalib's `Require` hides gappalib's `neg`,
+  and the proof then fails at a term citing it: "has type R while it is
+  expected to have type negreal". So both scripts put `Reals` first.
+- `field` with no `Reals` imported fails: "Cannot find a declared field
+  structure over R".
+- Gappa's `Float1` is not a defined object until gappalib is required.
+
+```python
+"""Take the hint section of a gappa -Bcoq file and ask Coq's field to prove
+each hint hypothesis aN, with every definition that is not a rounding
+unfolded. Writes <stem>_field1.v, which prints for each hint whether field
+took it and the side conditions it left, without proving them.
+
+Run as: python3 fieldtry.py block1.v
+"""
+import re
+import sys
+
+src_path = sys.argv[1]
+stem = src_path[: -len(".v")]
+lines = open(src_path).read().split("\n")
+
+defs = []  # (name, body) in order
+hyps = []  # (name, statement)
+cut = None
+for i, line in enumerate(lines):
+    m = re.match(r"^Definition (\w+) := (.*)\.( \(\*.*\*\))?$", line)
+    if m:
+        defs.append((m.group(1), m.group(2)))
+        continue
+    m = re.match(r"^Hypothesis (a\d+) : (.*)\.$", line)
+    if m:
+        hyps.append((m.group(1), m.group(2), i))
+last_hyp_line = hyps[-1][2]
+# The hint section ends with the last hint's Lemma bN ... Qed.
+end = last_hyp_line
+while not lines[end].startswith("Qed."):
+    end += 1
+head = lines[: end + 1]
+
+arith = [n for n, b in defs if "rounding_float" not in b and not b.startswith("BND")
+         and not b.startswith("makepairF") and not b.startswith("Float2")
+         and not b.startswith("REL") and not b.startswith("ABS")]
+# Only those defined in the head.
+head_text = "\n".join(head)
+arith = [n for n in arith if re.search(rf"^Definition {n} :=", head_text, flags=re.M)]
+unfold = ", ".join(reversed(arith))
+
+out = [head[0], "From Coq Require Import Reals Field.", "Print Float1.", "Print float2R.", "Print rounding_float.", ""]
+out += head[1:]
+for name, stmt, _ in hyps:
+    out += [
+        f"Goal {stmt}.",
+        "Proof.",
+        f"  unfold {unfold}.",
+        "  unfold Float1.",
+        f"  Time first [ field | idtac \"{name} FIELD FAILED\" ].",
+        f"  all: match goal with |- ?G => idtac \"{name} SIDE\" G end.",
+        "Abort.",
+    ]
+out.append("End Generated_by_Gappa.")
+open(f"{stem}_field1.v", "w").write("\n".join(out) + "\n")
+print(len(hyps), "hints;", len(arith), "definitions unfolded")
+```
+
+```python
+"""Turn gappa -Bcoq's block1.v into block1_proved.v: each hint
+`Hypothesis aN : S.` becomes `Lemma aN : S.` proved by field, and the
+nonzero facts field asks for become Section hypotheses nz_*, each declared
+just before the first hint that needs it. Both files get a
+`Print Assumptions l1.` before `End Generated_by_Gappa.`, so coqc prints
+what the final lemma stands on in each.
+
+Run as: python3 makedemo.py block1.v
+"""
+import re
+import sys
+
+src_path = sys.argv[1]
+stem = src_path[: -len(".v")]
+lines = open(src_path).read().split("\n")
+
+# The nonzero facts field asked for, by the first hint that asks for each,
+# read off block1_field1.v's run. Any other side condition field leaves is
+# one of these up to Rabs or ring.
+first_needed = {
+    1: ["_Adx"], 2: ["_Ady"], 3: ["_Adz"],
+    4: ["_Bdx"], 5: ["_Bdy"], 6: ["_Bdz"],
+    7: ["_Cdx"], 8: ["_Cdy"], 9: ["_Cdz"],
+    10: ["_cdy", "_bdx"], 11: ["_bdy", "_cdx"], 12: ["_ady"], 13: ["_adx"],
+    16: ["_M1"], 17: ["_M2"], 18: ["_M3"],
+    19: ["_first", "_adz"], 20: ["_second", "_bdz"], 21: ["_third", "_cdz"],
+    22: ["_S"],
+    23: ["_P6"],
+    24: ["_bdxcdy", "_cdxbdy", "_cdxady", "_adxcdy", "_adxbdy", "_bdxady"],
+    37: ["_eb", "_P"],
+    38: ["_Phat"],
+    39: ["_B"],
+}
+
+closer = """Ltac close_nz :=
+  first [ assumption
+        | apply Coq.Reals.Rbasic_fun.Rabs_no_R0; assumption
+        | match goal with H : ?X <> 0%R |- ?E <> 0%R =>
+            let Hz := fresh in
+            intro Hz; apply H; transitivity E; [ring | exact Hz]
+          end ]."""
+
+defined = []
+out = []
+proved = []
+for line in lines:
+    m = re.match(r"^Definition (\w+) := (.*)\.( \(\*.*\*\))?$", line)
+    if m:
+        defined.append((m.group(1), m.group(2)))
+    m = re.match(r"^Hypothesis a(\d+) : (.*)\.$", line)
+    if m:
+        n = int(m.group(1))
+        for name in first_needed.get(n, []):
+            out.append(f"Hypothesis nz{name} : {name} <> 0%R.")
+        arith = [d for d, b in defined if "rounding_float" not in b]
+        out += [
+            f"Lemma a{n} : {m.group(2)}.",
+            "Proof.",
+            f"  unfold {', '.join(reversed(arith))}.",
+            "  unfold Float1.",
+            "  field; repeat split; close_nz.",
+            "Qed.",
+        ]
+        proved.append(n)
+        continue
+    if line == "End Generated_by_Gappa.":
+        out.append("Print Assumptions l1.")
+    out.append(line)
+    if line == "Section Generated_by_Gappa.":
+        out.append(closer)
+
+# Before gappalib, so that Reals' `neg` does not shadow the gappalib lemma
+# the proof cites.
+out.insert(0, "From Coq Require Import Reals Field.")
+open(f"{stem}_proved.v", "w").write("\n".join(out))
+
+plain = [l if l != "End Generated_by_Gappa." else "Print Assumptions l1.\n" + l
+         for l in lines]
+open(f"{stem}_asis.v", "w").write("\n".join(plain))
+print(len(proved), "hints proved by field;",
+      sum(len(v) for v in first_needed.values()), "nonzero hypotheses")
+```
+
+`close_nz` closes a side condition in one of three ways:
+
+- by a hypothesis as it stands;
+- through `Rabs_no_R0`, for `|X| <> 0`;
+- by `ring`, from a hypothesis about an equal number. This takes
+  `Phat + (P − Phat)` and `B × P + (eb − B × P)`.
+
+**What this leaves.**
+
+- The build of 3 b to d: `proofs/gappa/`, `prove-bounds`, the stamps,
+  `check-proofs` in the gate, and `check-proofs-selftest`. That is a row.
+- Moving in the scripts the fourteen rows of 3 f append after the build row
+  is taken: a row, after the build row and the fourteen.
+- The 35 nonzero facts of 1, proved in Coq from `s1`, so that block 1's proof
+  stands on its hypotheses alone: a row, after the build row.
