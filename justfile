@@ -16748,7 +16748,13 @@ check-queue-merge-driver:
 # the hold was narrowed to. §451's: a drop refused while two rows wait on it,
 # naming the `after` step for each, and going through with those steps in one
 # `apply`, one row back to `todo` and the other still waiting on Q2; and `-`
-# refused on a row that does not wait and beside an id. The
+# refused on a row that does not wait and beside an id. §1755's: `done`
+# freeing a plain waiter to `todo` once it closes the row the waiter named,
+# leaving a pinned waiter and a tier-5-no-class waiter untouched; `sweep`
+# freeing a row whose `after:` already names a row closed before `sweep` ever
+# ran, then refusing once nothing is left stale; and `reword` setting an open
+# row's wording, refusing a closed row, a pinned first word, a no-op, and a
+# class the row's own tier does not allow. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -17655,6 +17661,87 @@ check-queue-api-selftest:
     got=$(q "$give_wt" give "$with_commits_row" 2>&1) || fail "give refused once the branch no longer carries commits main lacks"
     grep -qxF "$with_commits_row: lane:lane-give-ahead -> todo, the take lane-give-ahead had on it given back" <<<"$got" \
         || fail "give did not restore $with_commits_row to todo once its branch's extra commit was gone"
+
+    # §1755: `done` frees every open row waiting on the row it closes, except a
+    # pinned row (only take, done and pick touch one, §430) and an open tier 5
+    # row with no class (§435.5 reads its after: list as why it sits there).
+    donefrees_wt="$root/rcad-worktrees/done-frees"
+    g "$hub" worktree add -q -b done-frees "$donefrees_wt" main
+    head_1755=$(q "$donefrees_wt" add 1 opus - "from/- a row other rows wait on, for done to free them §230") \
+        || fail "add for the §1755 head row failed"
+    plain_1755=$(q "$donefrees_wt" add 1 opus - "from/- a plain row done frees to todo §230") \
+        || fail "add for the plain waiter failed"
+    pinned_1755=$(q "$donefrees_wt" add 1 opus - "from/- a pinned row done leaves waiting §230") \
+        || fail "add for the pinned waiter failed"
+    c5_1755=$(q "$donefrees_wt" add 5 opus - "refuses/C from/- a tier 5 row beside the pinned waiter §230") \
+        || fail "add for the tier 5 row to wait on failed"
+    tier5_1755=$(q "$donefrees_wt" add 1 opus - "from/- a row that sits in tier 5 with no class until done frees it §230") \
+        || fail "add for the tier-5-no-class waiter failed"
+    got=$(q "$donefrees_wt" apply after "$plain_1755" "$head_1755" + after "$pinned_1755" "$head_1755" \
+        + after "$tier5_1755" "$c5_1755,$head_1755" 2>&1) \
+        || fail "the waits for the §1755 done-frees fixture were refused"
+    got=$(q "$donefrees_wt" pin "$pinned_1755" 2>&1) || fail "pin refused the §1755 pinned waiter"
+    g "$donefrees_wt" add -A && g "$donefrees_wt" commit -qam "done-frees base rows"
+    sha_1755=$(g "$donefrees_wt" rev-parse HEAD)
+    got=$(q "$donefrees_wt" done "$head_1755" "$sha_1755" 2>&1) || fail "done refused the §1755 head row"
+    grep -qxF "$plain_1755: after:$head_1755 -> todo" <<<"$got" || fail "done did not free the plain waiter to todo"
+    grep -qF "$pinned_1755:" <<<"$got" && fail "done printed a free for the pinned waiter, which it must leave alone"
+    grep -qF "$tier5_1755:" <<<"$got" && fail "done printed a free for the tier-5-no-class waiter, which it must leave alone"
+    got=$(awk -v id="$plain_1755" '$1 == id { print $3 }' "$donefrees_wt/docs/queue.md")
+    [ "$got" = todo ] || fail "done did not write the plain waiter back to todo"
+    got=$(awk -v id="$pinned_1755" '$1 == id { print $3 }' "$donefrees_wt/docs/queue.md")
+    [ "$got" = "after:$head_1755" ] || fail "done changed the pinned waiter's after: list"
+    got=$(awk -v id="$tier5_1755" '$1 == id { print $3 }' "$donefrees_wt/docs/queue.md")
+    [ "$got" = "after:$c5_1755,$head_1755" ] || fail "done changed the tier-5-no-class waiter's after: list"
+    got=$(check "$donefrees_wt") || fail "the file done's free-waiters sweep wrote fails check-queue"
+
+    # §1755: `sweep` frees every open row, across the whole file, still naming
+    # an already-closed row in its after: list, for the merger to run once --
+    # the once-over for the 35 open rows main already carried like that at
+    # 11ba1960, from before `done` swept its own closed row. T1 is the
+    # fixture's own row, closed from the start.
+    sweep_wt="$root/rcad-worktrees/sweep"
+    g "$hub" worktree add -q -b sweep "$sweep_wt" main
+    stale_1755=$(q "$sweep_wt" add 2 opus - "from/- a row left naming an already-closed row in its after: list §230") \
+        || fail "add for the sweep's stale row failed"
+    got=$(q "$sweep_wt" after "$stale_1755" T1 2>&1) || fail "after refused a wait on T1, which is closed already"
+    got=$(q "$sweep_wt" sweep 2>&1) || fail "sweep refused to free a row waiting on an already-closed row"
+    grep -qxF "$stale_1755: after:T1 -> todo" <<<"$got" || fail "sweep did not free the stale row to todo"
+    got=$(awk -v id="$stale_1755" '$1 == id { print $3 }' "$sweep_wt/docs/queue.md")
+    [ "$got" = todo ] || fail "sweep did not write the stale row back to todo"
+    got=$(q "$sweep_wt" sweep 2>&1) && fail "sweep found something stale a second time, with nothing left to free"
+    grep -qF "no open row names an already-closed row in its after: list" <<<"$got" \
+        || fail "sweep did not say nothing was left stale"
+    got=$(check "$sweep_wt") || fail "the file sweep wrote fails check-queue"
+
+    # §1755: `reword` replaces an open row's wording, past any pin, held to
+    # the same shape `add` checks for a new row.
+    reword_wt="$root/rcad-worktrees/reword"
+    g "$hub" worktree add -q -b reword "$reword_wt" main
+    desc_1755() { awk -v id="$1" '$1 == id { out = ""; for (i = 6; i <= NF; i++) out = out (out == "" ? "" : " ") $i; print out }' "$reword_wt/docs/queue.md"; }
+    reworded_1755=$(q "$reword_wt" add 2 opus - "from/- a row reword rewrites §230") \
+        || fail "add for the row to reword failed"
+    got=$(q "$reword_wt" reword "$reworded_1755" "from/- a row reword rewrote §230" 2>&1) \
+        || fail "reword refused to set an open row's wording"
+    grep -qxF "$reworded_1755: reworded" <<<"$got" || fail "reword did not report the row it reworded"
+    [ "$(desc_1755 "$reworded_1755")" = "from/- a row reword rewrote §230" ] \
+        || fail "reword did not replace the row's wording"
+    got=$(q "$reword_wt" reword T1 "a closed row cannot be reworded §230" 2>&1) \
+        && fail "reword changed a closed row's wording"
+    grep -qF "T1 is closed" <<<"$got" || fail "reword did not refuse T1 by name"
+    got=$(q "$reword_wt" reword "$reworded_1755" "pinned/9 a reword cannot write a pin §230" 2>&1) \
+        && fail "reword wrote a pin onto a row's wording"
+    grep -qF "reword it without the pin" <<<"$got" || fail "reword did not say a pin is Mattias's to set"
+    got=$(q "$reword_wt" reword "$reworded_1755" "from/- a row reword rewrote §230" 2>&1) \
+        && fail "reword accepted the wording a row already carries"
+    grep -qF "$reworded_1755 reads this already" <<<"$got" || fail "reword did not refuse a no-op"
+    mismatch_1755=$(q "$reword_wt" add 2 opus - "from/- a row reword cannot tag past its tier §230") \
+        || fail "add for the class-mismatch row failed"
+    got=$(q "$reword_wt" reword "$mismatch_1755" "wrong/B from/- a reword cannot write a tier 1 class on a tier 2 row §230" 2>&1) \
+        && fail "reword wrote a tier 1 class onto a tier 2 row"
+    grep -qF "the class wrong/B ranks tier 1 and tier 5 rows only, and this row is tier 2" <<<"$got" \
+        || fail "reword did not carry check-queue's reason for the class/tier mismatch"
+    got=$(check "$reword_wt") || fail "the file reword wrote fails check-queue"
     exit 0
 
 # The fuzz half of `status`: for the night `latest` names, how many of the
