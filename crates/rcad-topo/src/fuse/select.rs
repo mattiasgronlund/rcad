@@ -6098,6 +6098,88 @@ mod tests {
         assert_eq!(holds([7.5, 8.1, 0.0]), Some(false), "outside the rim");
     }
 
+    /// The floor `z = 0` of a pipe of `0.5` about the `z` axis, cut by the
+    /// plane `y = c`, `c` the double just under `0.5`: the plane crosses the
+    /// rim `2⁻²⁷` either side of `x = 0`, and leaves above it a sliver no
+    /// double lies in. The two crossings are boxes that overlap, so the chord
+    /// between them has no direction and the turn about it is undecided for
+    /// every point. The disk less the sliver then held no point, its centre
+    /// included, and every certified fuse of the bar turned a quarter turn in
+    /// the L plate was refused "a point inside a piece of a face"
+    /// (`tests/a_bar_flush_with_an_l_plates_inner_side_turned.rs`, Q2655).
+    #[test]
+    fn a_disk_cut_a_rounding_inside_its_rim_holds_its_centre_and_the_sliver_does_not() {
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::new(0.0, 0.0, 1.0))
+                    .expect("an axis"),
+                0.5,
+            )
+            .expect("a positive radius"),
+        );
+        let just_under_a_half = 0.5 - f64::EPSILON / 4.0;
+        let wall = Surface::Plane(
+            Plane::from_coefficients([0.0, 1.0, 0.0, -just_under_a_half]).expect("a normal"),
+        );
+        let crossing = |which: u8, lo: f64, hi: f64| MeetPoint::OfThreeSurfaces {
+            surfaces: [Surface::Plane(flat), wall, pipe],
+            which,
+            point: PredicatePoint::Constructed([
+                Interval::new(lo, hi).expect("an interval"),
+                Interval::new(0.499_999_9, 0.5).expect("an interval"),
+                Interval::exactly(0.0),
+            ]),
+        };
+        let east = crossing(0, -1e-8, 2e-8);
+        let west = crossing(1, -2e-8, 1e-8);
+        let side = |partner: Surface, from: &MeetPoint, to: &MeetPoint, material_side| FaceMeet {
+            carried_by: [Surface::Plane(flat), partner],
+            ends: [from.clone(), to.clone()],
+            material_side,
+            along: SmallVec::new(),
+            approximation: None,
+        };
+        let piece = |wire: Vec<FaceMeet>| Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires: vec![wire],
+            is_the_whole_surface: false,
+        };
+        let the_disk_less_the_sliver = piece(vec![
+            side(wall, &east, &west, Decision::Neg),
+            side(pipe, &west, &east, Decision::Neg),
+        ]);
+        let the_sliver = piece(vec![
+            side(wall, &west, &east, Decision::Pos),
+            side(pipe, &east, &west, Decision::Neg),
+        ]);
+        let holds = |piece: &Piece, at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(piece, PredicatePoint::from(at))
+        };
+        assert_eq!(
+            holds(&the_disk_less_the_sliver, [0.0, 0.0, 0.0]),
+            Some(true),
+            "the disk's centre"
+        );
+        assert_eq!(
+            holds(&the_disk_less_the_sliver, [0.3, 0.3, 0.0]),
+            Some(true),
+            "a point of the disk under the wall"
+        );
+        assert_eq!(
+            holds(&the_disk_less_the_sliver, [0.0, -0.6, 0.0]),
+            Some(false),
+            "outside the rim"
+        );
+        assert_eq!(
+            holds(&the_sliver, [0.0, 0.0, 0.0]),
+            Some(false),
+            "the disk's centre, on the far side of the wall from the sliver"
+        );
+    }
+
     /// The half of the plate `z = 0` with `x ≥ 0` beyond the ring of four
     /// round a tube of one: between the circle of 5 the ring cuts it in and a
     /// pipe of 10, its four corners on the line `x = 0`, so they wind round
