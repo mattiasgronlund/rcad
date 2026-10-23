@@ -1652,6 +1652,15 @@ fn the_two_corners_of_an_open_run(run: &NamedRun) -> Option<[PredicatePoint; 2]>
 /// cut by a wall through that loop, has its two seeds at its two corners, one
 /// each side of that surface, and was refused for it (Q1683).
 ///
+/// **A corner on the flat surface between the seeds names no loop, and the
+/// other corner names it.** Two loops that touch meet on that surface, as a
+/// pipe resting on a ball's inside meets it at one point, so a corner there is
+/// on both, and a run from it is on whichever loop its other corner is on.
+/// Asked alone, as it is for a closed run, such a corner gets the first seed,
+/// and a run between it and a corner on the other seed's loop was refused as a
+/// run between two loops (Q2649). Two corners on that surface take the first
+/// seed, as either alone does.
+///
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces pick
@@ -1671,13 +1680,23 @@ fn the_seed_this_run_is_picked_up_at(
     let surfaces = [&pair[0], &pair[1]];
     let picked_by = the_half_spaces_that_pick(run);
 
-    if let Some([from, to]) = the_two_corners_of_an_open_run(run) {
+    if let Some(corners) = the_two_corners_of_an_open_run(run) {
         let settled = [
             settled_with_a_bound(surfaces, seeds[0])?,
             settled_with_a_bound(surfaces, seeds[1])?,
         ];
-        let seed = the_seed_on_the_loop_a_corner_is_on(from, held_apart_by, settled, policy, log)?;
-        if the_seed_on_the_loop_a_corner_is_on(to, held_apart_by, settled, policy, log)? != seed
+        let sides = corners.map(|corner| {
+            which_side_of_what_holds_two_loops_apart(held_apart_by, corner, policy, log)
+        });
+        let [naming, other] = match sides {
+            [Decision::Zero, other] => [other, Decision::Zero],
+            sides => sides,
+        };
+        let seed =
+            the_seed_on_the_side_a_corner_is_on(naming, held_apart_by, settled, policy, log)?;
+        if !matches!(other, Decision::Zero)
+            && the_seed_on_the_side_a_corner_is_on(other, held_apart_by, settled, policy, log)?
+                != seed
             && !the_crossing_is_one_loop(pair, policy, log)?
         {
             return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
@@ -1747,8 +1766,11 @@ fn the_half_spaces_that_pick(run: &NamedRun) -> &[Picker] {
 /// loop it cut was walked round the other one with none of its points on its
 /// own (Q1520).
 ///
-/// A corner or a seed **on** the flat surface is on no loop of two, so the
-/// crossing is a single loop and the first seed, or that seed, is taken. A
+/// A corner or a seed **on** the flat surface is on no loop of two held apart,
+/// so the crossing is a single loop, or two loops that meet there, and the
+/// first seed, or that seed, is taken. Of two loops that meet, that is a guess
+/// at which loop a corner where they meet is on, and a run between two corners
+/// does not ask it of that corner ([`the_seed_this_run_is_picked_up_at`]). A
 /// corner or a seed whose side cannot be told is refused rather than guessed
 /// at. An exact corner's side is told unless a product leaves the range exact
 /// arithmetic holds, so a corner refused for its own side is in practice a box
@@ -1767,16 +1789,32 @@ fn the_seed_on_the_loop_a_corner_is_on(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Point> {
-    let the_corners_side =
-        match which_side_of_what_holds_two_loops_apart(held_apart_by, corner, policy, log) {
-            Decision::Pos => Decision::Pos,
-            Decision::Neg => Decision::Neg,
-            Decision::Zero => return Ok(seeds[0].0),
-            Decision::Undecidable { .. } => {
-                return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-            }
-            other => panic!("a side of a flat surface came back as {other:?}"),
-        };
+    let side = which_side_of_what_holds_two_loops_apart(held_apart_by, corner, policy, log);
+    the_seed_on_the_side_a_corner_is_on(side, held_apart_by, seeds, policy, log)
+}
+
+/// [`the_seed_on_the_loop_a_corner_is_on`], for a corner whose side of the
+/// flat surface between the two loops has been asked already.
+///
+/// # Errors
+///
+/// As [`the_seed_on_the_loop_a_corner_is_on`].
+fn the_seed_on_the_side_a_corner_is_on(
+    side: Decision,
+    held_apart_by: TwoLoopsHeldApartBy,
+    seeds: [(Point, f64); 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Point> {
+    let the_corners_side = match side {
+        Decision::Pos => Decision::Pos,
+        Decision::Neg => Decision::Neg,
+        Decision::Zero => return Ok(seeds[0].0),
+        Decision::Undecidable { .. } => {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        }
+        other => panic!("a side of a flat surface came back as {other:?}"),
+    };
     for (seed, off) in seeds {
         let Some(at) = somewhere_within(seed, off) else {
             return Err(Error::CannotWorkOutHowBigACrossingIs);
