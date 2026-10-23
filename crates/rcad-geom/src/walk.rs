@@ -7052,59 +7052,79 @@ mod tests {
     /// inside meet and the top or the bottom of the ball, picked by `y ≥ 0` or
     /// `y ≤ 0`, is walked along that half of that loop, from its first corner
     /// to its second, either way round and whichever face is listed first.
-    /// Every point is on both surfaces within the bound the walk claims.
+    /// Every point is on both surfaces within the bound the walk claims, at
+    /// each of five deflections, two of them ones a mesh asked of the edge.
     ///
-    /// The march begun at the pole passes through where the loops meet, and
-    /// none of what comes back is on the other loop. The run was refused
-    /// before the march, since its corner where they meet cannot be settled
-    /// onto both surfaces (Q2649).
+    /// The march begun at the pole passes through where the loops meet. The
+    /// run was refused before the march, since its corner where they meet
+    /// cannot be settled onto both surfaces (Q2649). At a deflection of `0.01`
+    /// none of what comes back is on the other loop, and at `0.0703125` the
+    /// march runs on round the other loop and back through where they meet,
+    /// and the run was refused as one whose half-spaces hold both arcs.
     #[test]
     fn a_run_from_where_two_loops_of_a_ball_and_a_pipe_meet_is_walked_along_its_half() {
         let (ball, pipe) = a_ball_and_a_pipe_resting_on_its_inside();
         let [ball, pipe] = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
-        for (up, side) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
-            let pole = Point::new(0.0, 0.0, 2.0 * up);
-            for [from, to] in [[where_they_touch(), pole], [pole, where_they_touch()]] {
-                let run = a_run_picked_by_which_way_y_goes(pipe, [from, to], side);
-                for along in [[&ball, &pipe], [&pipe, &ball]] {
-                    let walked = walk(
-                        &run,
-                        along,
-                        Deflection::of(0.01).expect("a length"),
-                        &Policy::certified(),
-                        &mut ProvenanceLog::new(),
-                    )
-                    .unwrap_or_else(|why| {
-                        panic!(
-                            "the run from {from:?} to {to:?} on y·{side} > 0 is refused: {why:?}"
-                        )
-                    });
-                    let bound = walked.deviation().magnitude();
-                    let points = walked.points();
-                    assert!(points.len() > 2, "half the loop has points");
-                    for point in points {
-                        let [x, y, z] = point.coordinates();
-                        let off_the_ball = ((x * x + y * y + z * z).sqrt() - 2.0).abs();
-                        let off_the_pipe = (((x - 1.0) * (x - 1.0) + y * y).sqrt() - 1.0).abs();
-                        assert!(
-                            z * up > 0.0
-                                && y * side > 0.0
-                                && off_the_ball <= bound
-                                && off_the_pipe <= bound,
-                            "the run from {from:?} to {to:?} on y·{side} > 0 was walked through \
-                             ({x}, {y}, {z}), {off_the_ball} and {off_the_pipe} off the two \
-                             surfaces against {bound}"
+        for deflection in [0.1, 0.070_312_5, 0.01, 0.001_875, 0.001] {
+            for (up, side) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+                let pole = Point::new(0.0, 0.0, 2.0 * up);
+                for [from, to] in [[where_they_touch(), pole], [pole, where_they_touch()]] {
+                    let run = a_run_picked_by_which_way_y_goes(pipe, [from, to], side);
+                    for along in [[&ball, &pipe], [&pipe, &ball]] {
+                        a_run_from_where_they_meet_is_walked_along_its_half(
+                            &run,
+                            along,
+                            deflection,
+                            [from, to],
+                            up,
+                            side,
                         );
                     }
-                    let [first, last] = [points[0], points[points.len() - 1]];
-                    assert!(
-                        (first - from).length() < (first - to).length()
-                            && (last - to).length() < (last - from).length(),
-                        "the run from {from:?} to {to:?} was walked from {first:?} to {last:?}"
-                    );
                 }
             }
         }
+    }
+
+    fn a_run_from_where_they_meet_is_walked_along_its_half(
+        run: &NamedRun,
+        along: [&Surface; 2],
+        deflection: f64,
+        [from, to]: [Point; 2],
+        up: f64,
+        side: f64,
+    ) {
+        let walked = walk(
+            run,
+            along,
+            Deflection::of(deflection).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| {
+            panic!(
+                "the run from {from:?} to {to:?} on y·{side} > 0 at {deflection} is refused: {why:?}"
+            )
+        });
+        let bound = walked.deviation().magnitude();
+        let points = walked.points();
+        assert!(points.len() > 2, "half the loop has points");
+        for point in points {
+            let [x, y, z] = point.coordinates();
+            let off_the_ball = ((x * x + y * y + z * z).sqrt() - 2.0).abs();
+            let off_the_pipe = (((x - 1.0) * (x - 1.0) + y * y).sqrt() - 1.0).abs();
+            assert!(
+                z * up > 0.0 && y * side > 0.0 && off_the_ball <= bound && off_the_pipe <= bound,
+                "the run from {from:?} to {to:?} on y·{side} > 0 at {deflection} was walked \
+                 through ({x}, {y}, {z}), {off_the_ball} and {off_the_pipe} off the two surfaces \
+                 against {bound}"
+            );
+        }
+        let [first, last] = [points[0], points[points.len() - 1]];
+        assert!(
+            (first - from).length() < (first - to).length()
+                && (last - to).length() < (last - from).length(),
+            "the run from {from:?} to {to:?} at {deflection} was walked from {first:?} to {last:?}"
+        );
     }
 
     /// The same runs, walked under a certified policy, log nothing, so a
