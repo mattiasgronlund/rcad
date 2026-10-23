@@ -90,9 +90,9 @@ knows, which is the form `cc494235` gave `holds.rs`.
 On `4514eff4`, each lane's source put back to `055aa4a9` with `git restore
 --source`, then restored:
 
-- `holds.rs` at base: `just t -p rcad-topo --test a_pointed_cone_knows_its_inside
-  --test a_plane_cut_along_a_cones_other_nappe` — 9 run, 3 failed.
-- `fuse/` at base: `just t -p rcad-topo --test a_narrow_lune_from_a_pole_corner`
+- `holds.rs` at base: `just t -p rcad-topo --test merged -E 'test(/^a_pointed_cone_knows_its_inside::/)
+  or test(/^a_plane_cut_along_a_cones_other_nappe::/)'` — 9 run, 3 failed.
+- `fuse/` at base: `just t -p rcad-topo --test merged -E 'test(/^a_narrow_lune_from_a_pole_corner::/)'`
   — 5 run, 1 failed (the two-knives wedge test).
 
 The flat-half-disk lane also says a test pins the disagreement itself. That test

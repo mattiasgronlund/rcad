@@ -38,8 +38,8 @@ comparison floors were flagged as stale:
 The first five run from a fresh seed every time (`over`), so each was measured
 over twenty runs, `PROPTEST_RNG_SEED` 1 through 20, at the shipped case count
 (`CASES = 48`, `LONGER_CASES = 24`), through
-`mise exec -- cargo nextest run -p rcad-topo --test fuses_that_must_agree -E
-'test(<name>)' --no-capture`. The last two turned out to run from a fixed seed
+`mise exec -- cargo nextest run -p rcad-topo --test merged -E
+'test(fuses_that_must_agree::<name>)' --no-capture`. The last two turned out to run from a fixed seed
 regardless of `PROPTEST_RNG_SEED` (§276.4) and needed a different treatment.
 
 ### 276.2 Turned-pair commutativity and the depth-four chain
@@ -151,24 +151,24 @@ Commands, with the scratch patch applied:
 
 ```text
 PROPTEST_RNG_SEED=8 mise exec -- cargo nextest run -p rcad-topo \
-  --test fuses_that_must_agree \
-  -E 'test(swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit)' \
+  --test merged \
+  -E 'test(fuses_that_must_agree::swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit)' \
   --no-capture
 
 PROPTEST_RNG_SEED=15 mise exec -- cargo nextest run -p rcad-topo \
-  --test fuses_that_must_agree \
-  -E 'test(uniting_four_at_once_is_uniting_them_one_at_a_time)' --no-capture
+  --test merged \
+  -E 'test(fuses_that_must_agree::uniting_four_at_once_is_uniting_them_one_at_a_time)' --no-capture
 
 PROPTEST_RNG_SEED=9 mise exec -- cargo nextest run -p rcad-topo \
-  --test fuses_that_must_agree \
-  -E 'test(swapping_the_two_sides_of_a_turned_frustum_and_block_changes_not_one_bit) \
-      or test(turning_a_frustum_and_block_together_changes_no_answer_s_volume)' \
+  --test merged \
+  -E 'test(fuses_that_must_agree::swapping_the_two_sides_of_a_turned_frustum_and_block_changes_not_one_bit) \
+      or test(fuses_that_must_agree::turning_a_frustum_and_block_together_changes_no_answer_s_volume)' \
   --no-capture
 
 PROPTEST_RNG_SEED=1 mise exec -- cargo nextest run -p rcad-topo \
-  --test fuses_that_must_agree \
-  -E 'test(swapping_the_two_sides_of_a_bar_leaning_through_a_block_changes_not_one_bit) \
-      or test(what_a_block_and_a_leaning_bar_take_up_adds_up_inside_a_stated_share_of_what_they_declare)' \
+  --test merged \
+  -E 'test(fuses_that_must_agree::swapping_the_two_sides_of_a_bar_leaning_through_a_block_changes_not_one_bit) \
+      or test(fuses_that_must_agree::what_a_block_and_a_leaning_bar_take_up_adds_up_inside_a_stated_share_of_what_they_declare)' \
   --no-capture
 ```
 
