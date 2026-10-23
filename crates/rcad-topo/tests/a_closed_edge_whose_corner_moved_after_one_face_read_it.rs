@@ -188,3 +188,273 @@ fn what_the_two_bars_share(steps: u32) -> f64 {
         .sum();
     4.0 / LEAN.cos() * sum * step
 }
+
+#[derive(Clone, Copy, Debug)]
+struct ProbeShape {
+    upright_radius: f64,
+    leaning_radius: f64,
+    apart: f64,
+    lean: f64,
+    seam_at: f64,
+    roll: f64,
+    height: f64,
+}
+
+fn probe_shared(shape: ProbeShape) -> f64 {
+    let steps = 4000u32;
+    let (a, b) = (shape.apart - shape.leaning_radius, shape.upright_radius);
+    let (m, w) = ((a + b) / 2.0, (b - a) / 2.0);
+    let step = PI / f64::from(steps);
+    let sum: f64 = (0..steps)
+        .map(|at| {
+            let t = step * (f64::from(at) + 0.5);
+            let y = m - w * t.cos();
+            w * w
+                * t.sin().powi(2)
+                * ((shape.upright_radius + y) * (shape.apart + shape.leaning_radius - y)).sqrt()
+        })
+        .sum();
+    4.0 / shape.lean.cos() * sum * step
+}
+
+fn probe_one(shape: ProbeShape, rule: Rule, upright_first: bool) -> String {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let z = Axis::z();
+    let upright_placement =
+        moved_to([0.0, 0.0, -1.0]).compose(&Isometry::rotation(&z, shape.seam_at).expect("a turn"));
+    let the_y_axis = Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("an axis");
+    let (c, s) = (shape.seam_at.cos(), shape.seam_at.sin());
+    let leaning_placement = moved_to([shape.apart * c, shape.apart * s, shape.height])
+        .compose(&Isometry::rotation(&z, shape.seam_at - PI / 2.0).expect("a turn"))
+        .compose(&Isometry::rotation(&the_y_axis, PI / 2.0 + shape.lean).expect("a turn"))
+        .compose(&moved_to([0.0, 0.0, -10.0]))
+        .compose(&Isometry::rotation(&z, shape.roll).expect("a turn"));
+    let upright = model
+        .add_round_bar(shape.upright_radius, 12.0, &upright_placement)
+        .expect("a bar");
+    let leaning = model
+        .add_round_bar(shape.leaning_radius, 20.0, &leaning_placement)
+        .expect("a bar");
+    let (arguments, tools) = if upright_first {
+        ([upright], [leaning])
+    } else {
+        ([leaning], [upright])
+    };
+    let shared = probe_shared(shape);
+    let r1 = shape.upright_radius;
+    let r2 = shape.leaning_radius;
+    let expected = match rule {
+        Rule::Intersection => shared,
+        Rule::Union => PI * r1 * r1 * 12.0 + PI * r2 * r2 * 20.0 - shared,
+        Rule::Difference if upright_first => PI * r1 * r1 * 12.0 - shared,
+        Rule::Difference => PI * r2 * r2 * 20.0 - shared,
+        _ => unreachable!(),
+    };
+    let fused = match model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new()) {
+        Ok(fused) => fused.solids().to_vec(),
+        Err(why) => return format!("REFUSED {why:?}"),
+    };
+    if let Err(why) = model.validate(&policy, &mut ProvenanceLog::new()) {
+        return format!("INVALID {why:?}");
+    }
+    let [solid] = fused[..] else {
+        return format!("SOLIDS {}", fused.len());
+    };
+    let view = model.solid(solid).expect("a solid");
+    let faces = view.faces().count();
+    match view.measure(
+        Deflection::of(0.01).expect("a positive length"),
+        &policy,
+        &mut ProvenanceLog::new(),
+    ) {
+        Ok(measure) => {
+            let off = measure.volume() - expected;
+            let verdict = if off.abs() <= measure.volume_error() {
+                "ok"
+            } else {
+                "WRONG"
+            };
+            format!(
+                "{verdict} faces {faces} volume {:.6} expected {expected:.6} error {:.2e}",
+                measure.volume(),
+                measure.volume_error()
+            )
+        }
+        Err(why) => format!("UNMEASURED faces {faces} {why:?}"),
+    }
+}
+
+#[test]
+fn probe_q2590_sweep() {
+    let mut shapes = Vec::new();
+    for &lean in &[0.1, 0.2, 0.3, 0.45, 0.6] {
+        for &seam_at in &[PI / 2.0, 0.0, 0.3, 1.0, 2.0, 2.9, 4.0, 5.5] {
+            for &roll in &[0.0, 1.3] {
+                shapes.push(ProbeShape {
+                    upright_radius: 2.0,
+                    leaning_radius: 3.0,
+                    apart: 4.0,
+                    lean,
+                    seam_at,
+                    roll,
+                    height: 5.0,
+                });
+            }
+        }
+    }
+    for &(r1, r2, apart) in &[(2.0, 2.5, 3.5), (1.5, 3.0, 3.75), (2.0, 3.0, 4.5)] {
+        for &seam_at in &[PI / 2.0, 1.0, 4.0] {
+            shapes.push(ProbeShape {
+                upright_radius: r1,
+                leaning_radius: r2,
+                apart,
+                lean: 0.3,
+                seam_at,
+                roll: 0.0,
+                height: 5.0,
+            });
+        }
+    }
+    let mut bad = 0;
+    for shape in shapes {
+        for rule in [Rule::Intersection, Rule::Union, Rule::Difference] {
+            for upright_first in [true, false] {
+                let said = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    probe_one(shape, rule, upright_first)
+                }))
+                .unwrap_or_else(|_| "PANICKED".to_owned());
+                if !said.starts_with("ok") {
+                    bad += 1;
+                }
+                println!("{shape:?} {rule:?} upright_first {upright_first}: {said}");
+            }
+        }
+    }
+    println!("bad: {bad}");
+}
+
+fn probe_gradient(surface: &rcad_geom::Surface, at: Point) -> Vector {
+    match surface {
+        rcad_geom::Surface::Cylinder(pipe) => {
+            let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
+            let out = at - origin;
+            out * along.dot(along) - along * along.dot(out)
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+fn probe_inspect(shape: ProbeShape, rule: Rule, upright_first: bool) {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let z = Axis::z();
+    let upright_placement =
+        moved_to([0.0, 0.0, -1.0]).compose(&Isometry::rotation(&z, shape.seam_at).expect("a turn"));
+    let the_y_axis = Axis::new(Point::origin(), Vector::new(0.0, 1.0, 0.0)).expect("an axis");
+    let (c, s) = (shape.seam_at.cos(), shape.seam_at.sin());
+    let leaning_placement = moved_to([shape.apart * c, shape.apart * s, shape.height])
+        .compose(&Isometry::rotation(&z, shape.seam_at - PI / 2.0).expect("a turn"))
+        .compose(&Isometry::rotation(&the_y_axis, PI / 2.0 + shape.lean).expect("a turn"))
+        .compose(&moved_to([0.0, 0.0, -10.0]))
+        .compose(&Isometry::rotation(&z, shape.roll).expect("a turn"));
+    let upright = model
+        .add_round_bar(shape.upright_radius, 12.0, &upright_placement)
+        .expect("a bar");
+    let leaning = model
+        .add_round_bar(shape.leaning_radius, 20.0, &leaning_placement)
+        .expect("a bar");
+    let (arguments, tools) = if upright_first {
+        ([upright], [leaning])
+    } else {
+        ([leaning], [upright])
+    };
+    let solids = match model.fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new()) {
+        Ok(fused) => fused.solids().to_vec(),
+        Err(why) => {
+            println!("{shape:?} {rule:?} {upright_first}: refused {why:?}");
+            return;
+        }
+    };
+    let view = model.solid(solids[0]).expect("a solid");
+    let mut seen = Vec::new();
+    for face in view.faces() {
+        for wire in face.wires() {
+            for coedge in wire.coedges() {
+                let edge = coedge.edge();
+                if !edge.is_closed().expect("closed") || seen.contains(&edge.key()) {
+                    continue;
+                }
+                seen.push(edge.key());
+                let at = edge.start().point();
+                let surfaces: Vec<rcad_geom::Surface> = edge
+                    .neighbouring_faces()
+                    .map(|key| model.face(key).expect("a face").surface())
+                    .collect();
+                let pipes: Vec<rcad_geom::Surface> = surfaces
+                    .iter()
+                    .copied()
+                    .filter(|s| matches!(s, rcad_geom::Surface::Cylinder(_)))
+                    .collect();
+                if pipes.len() != 2 {
+                    continue;
+                }
+                let is_upright = |s: &rcad_geom::Surface| match s {
+                    rcad_geom::Surface::Cylinder(pipe) => {
+                        pipe.axis().direction().components()[2].abs() > 0.999
+                    }
+                    _ => false,
+                };
+                let (up, lean) = if is_upright(&pipes[0]) {
+                    (pipes[0], pipes[1])
+                } else {
+                    (pipes[1], pipes[0])
+                };
+                let origin_x = |s: &rcad_geom::Surface| match s {
+                    rcad_geom::Surface::Cylinder(pipe) => pipe.axis().origin().coordinates(),
+                    _ => unreachable!(),
+                };
+                let lean_axis = match lean {
+                    rcad_geom::Surface::Cylinder(pipe) => pipe.axis().direction(),
+                    _ => unreachable!(),
+                };
+                let (g_up, g_lean) = (probe_gradient(&up, at), probe_gradient(&lean, at));
+                let walked = g_up.cross(g_lean);
+                let longitude = lean_axis.cross(g_lean);
+                let along = walked.dot(longitude);
+                let latitude = walked.dot(g_lean.cross(longitude));
+                let rule_says =
+                    rcad_geom::which_way_a_closed_crossing_turns([g_up, g_lean], g_lean, lean_axis);
+                let p = at.coordinates();
+                let off_seam = p[1].atan2(p[0]) - shape.seam_at;
+                println!(
+                    "{shape:?} {rule:?} {upright_first}: corner {p:?} off seam {off_seam:.3e} up origin {:?} lean origin {:?} lean longitude f64 {along:.3e} latitude {latitude:.3e} rule {rule_says:?}",
+                    origin_x(&up),
+                    origin_x(&lean)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn probe_q2590_inspect() {
+    for &lean in &[0.1, 0.3, 0.6] {
+        for &seam_at in &[PI / 2.0, 1.0, 2.0, 2.9, 4.0] {
+            for &roll in &[0.0, 1.3] {
+                let shape = ProbeShape {
+                    upright_radius: 2.0,
+                    leaning_radius: 3.0,
+                    apart: 4.0,
+                    lean,
+                    seam_at,
+                    roll,
+                    height: 5.0,
+                };
+                for upright_first in [true, false] {
+                    probe_inspect(shape, Rule::Intersection, upright_first);
+                }
+            }
+        }
+    }
+}
