@@ -6083,7 +6083,11 @@ impl<'f> Arrangement<'f> {
     /// reads** ([`Arrangement::side_of_a_corner`]), so the face that keeps the
     /// corner off `P` and the order that puts it between the two places cannot
     /// disagree. The corner is on the loop by the model's word, as every corner
-    /// of the face a crossing runs through is ([`BakedCorner::around`]).
+    /// of the face a crossing runs through is ([`BakedCorner::around`]), and
+    /// that word is checked against the loop's plane
+    /// ([`Arrangement::is_proved_off_the_loops_plane`]), as
+    /// [`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`]
+    /// checks it (§286).
     ///
     /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
     /// whose inner side lies along `x = 2`, both turned `π/2` about `z`: the
@@ -6115,20 +6119,20 @@ impl<'f> Arrangement<'f> {
                 Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
             )
         };
-        let flat_and_round = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
-            (Some(_), None) => round(&wound_as[1]),
-            (None, Some(_)) => round(&wound_as[0]),
-            (Some(_), Some(_)) | (None, None) => false,
+        let flat = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) if round(&wound_as[1]) => flat,
+            (None, Some(flat)) if round(&wound_as[0]) => flat,
+            (Some(_) | None, Some(_) | None) => return None,
         };
-        if !flat_and_round {
-            return None;
-        }
         let (corner, meet, corner_is_first) =
             match [first, second].map(|at| self.nodes[at].vertex.is_some()) {
                 [true, false] => (first, second, true),
                 [false, true] => (second, first, false),
                 [true, true] | [false, false] => return None,
             };
+        if self.is_proved_off_the_loops_plane(corner, flat) {
+            return None;
+        }
         let (surfaces, which) = self.the_one_meet_it_stands_for(meet)?;
         if which > 1 {
             return None;
@@ -6178,7 +6182,9 @@ impl<'f> Arrangement<'f> {
     /// either is first. With the corner, the loop enters the side of `P` the
     /// corner is on through one place, runs past the corner, and leaves
     /// through the other, so `[enters, corner, leaves]` is a turn of the true
-    /// order wherever the start is.
+    /// order wherever the start is. The corner is on the loop by the model's
+    /// word, and that word is checked against the loop's plane first
+    /// ([`Arrangement::is_proved_off_the_loops_plane`]).
     ///
     /// **Which place it enters by is read off which meet of the line is the
     /// lower** ([`the_lower_meet_first_round_the_loop`]): with the loop's plane
@@ -6245,6 +6251,9 @@ impl<'f> Arrangement<'f> {
                 Decision::Neg
             });
         };
+        if self.is_proved_off_the_loops_plane(corner, flat) {
+            return None;
+        }
         let cut = self.the_cut_through_the_loop_at(lower, wound_as)?;
         let mut planes = three.iter().filter_map(Surface::as_plane);
         let (Some(one), Some(other), None) = (planes.next(), planes.next(), planes.next()) else {
@@ -6313,6 +6322,24 @@ impl<'f> Arrangement<'f> {
         } else {
             Decision::Neg
         })
+    }
+
+    /// Whether the plane a loop runs round proves the corner `node` off it by
+    /// more than writing the corner down costs
+    /// ([`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost)).
+    ///
+    /// A corner of the face a loop runs through is on the loop by the model's
+    /// word ([`BakedCorner::around`]), and a corner read out of the model with
+    /// two surfaces round it was asked about neither (§286). One this far off
+    /// the plane is not on the loop, whatever the model says, so no order round
+    /// the loop is read off where it lies.
+    fn is_proved_off_the_loops_plane(&self, node: usize, flat: &Plane) -> bool {
+        let as_written = self.nodes[node].point;
+        let side = flat.side_of_point(super::bake::grown_by(
+            as_written,
+            super::bake::what_writing_the_corner_down_cost(as_written.enclosure()),
+        ));
+        matches!(side, Decision::Pos | Decision::Neg)
     }
 
     /// Which of two nodes on the loop a plane `S` cuts a ball or a pipe `Q` in
