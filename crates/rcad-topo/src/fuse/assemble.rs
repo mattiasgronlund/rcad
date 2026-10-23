@@ -2298,19 +2298,33 @@ impl Assembly {
     /// so the wall's far ring is the far rim in arcs, and the wall itself is a
     /// grid. Where no chain of the grid reached the near rim the wall stayed in
     /// 25 pieces, and where one did it kept that chain as a seam, though the
-    /// block met no face of the frustum (Q2170). **Only on a cone, and only
-    /// where every ring goes right round.** A cone face with a ring right
-    /// round beside a hole is refused by the mesher, which takes islands only
-    /// on a pipe's ring or a ball's cap (`AWireWillNotLieFlatOnItsFace`, in
+    /// block met no face of the frustum (Q2170). **Only on a cone or a pipe,
+    /// and only where every ring goes right round**, but for a ring of one
+    /// side on a cone. A cone face with a ring right round beside a hole is
+    /// refused by the mesher, which takes islands only on a pipe's ring or a
+    /// ball's cap (`AWireWillNotLieFlatOnItsFace`, in
     /// `pieces_of_one_curved_surface.rs` and `a_walk_neither_winding_nor_the_axis_places.rs`).
-    /// On a pipe, closed up, 3 tests of the bar files failed, an answer
-    /// `TheFuseWroteABrokenAnswer` among them. **Not where the group was
-    /// joined only across whole closed curves**
+    /// **Not where the group was joined only across whole closed curves**
     /// ([`Assembly::joined_only_across_whole_rings`]): a frustum beside a block
     /// whose floor cuts a circle round its wall has a far rim cut where the
     /// block's walls touch it, and joined whole across that circle, the three
     /// tests of `a_rim_a_fuse_cut_round_one_cone.rs` that pin it failed.
     /// Whether that circle stays is row Q1051's.
+    ///
+    /// **A pipe band whose rings all go right round closes up since Q2657.**
+    /// A stepped shaft bored with a square pocket had its wide wall joined
+    /// back with a seam kept along the ruling at `x = −1.977, y = −0.3`, where
+    /// the pocket's side plane, run on past the pocket, crosses it, and the
+    /// seam's corners stayed on the rim circles
+    /// (`a_stepped_shaft_cut_in_half_and_turned.rs`). **A pipe face with a
+    /// ring that does not go right round is left as before.** Let through
+    /// with a ring of one side, as on a cone, the slanted pin of
+    /// `one_pipe_whose_origin_sits_at_two_places.rs` on the bar from 1.9375
+    /// kept the bar's input corner `(2, 0, 1.9375)`, which lies inside the
+    /// pin's pipe where it runs on behind its cap, and was refused
+    /// `AFaceStraddlesSomethingTrimmingIt`. With every pipe let through by
+    /// the cone's rule, 3 tests of the bar files failed, an answer
+    /// `TheFuseWroteABrokenAnswer` among them.
     fn needs_no_seam(
         &self,
         members: &[usize],
@@ -2325,10 +2339,12 @@ impl Assembly {
         {
             return true;
         }
-        let may_close_up = matches!(surface, Surface::Cone(_))
+        let on_a_cone = matches!(surface, Surface::Cone(_));
+        let may_close_up = (on_a_cone || matches!(surface, Surface::Cylinder(_)))
             && !self.joined_only_across_whole_rings(inside, along)
             && rings.iter().all(|ring| {
-                ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(true)
+                (on_a_cone && ring.len() == 1)
+                    || self.a_ring_goes_right_round(ring, &surface) == Some(true)
             });
         rings.iter().all(|ring| {
             ring.len() == 1
@@ -4458,10 +4474,12 @@ impl Assembly {
     /// **A plane and a cone only.** The crossing of a ball and a plane can run
     /// through the ball's poles, which the arrangement makes corners of, and
     /// closed up across them a closed edge's one corner sits on a pole: 22
-    /// tests across the ball-and-block files failed (§400.5). A pipe is left
-    /// out as [`Assembly::needs_no_seam`] leaves it out: a ring right round a
-    /// pipe is an island the mesher takes, and closing rings up on a pipe
-    /// there failed 3 tests of the bar files.
+    /// tests across the ball-and-block files failed (§400.5). A crossing of a
+    /// plane and a pipe made here stays in its pieces. It was left out when
+    /// [`Assembly::needs_no_seam`] left every pipe out (Q2170), and since
+    /// Q2657 that closes up a pipe band whose rings go right round only
+    /// where they are pieces of input edges, as the bored shaft's rims are.
+    /// Joining the pieces of such a crossing made here is untried.
     fn are_pieces_of_one_closed_curve(&self, edges: &[usize]) -> bool {
         let pieces: Vec<&[EdgeKey]> = edges
             .iter()
@@ -5326,10 +5344,17 @@ impl Assembly {
         let far_sides =
             sides().filter_map(|side| self.across_a_closed_edge_from_its_corner(side.edge));
         let middles = sides().filter_map(|side| self.the_middle_of_an_open_arc(side.edge));
+        let quarter_turns = sides()
+            .flat_map(|side| self.a_quarter_turn_round_a_closed_edge_from_its_corner(side.edge))
+            .flatten();
         let off_a_seam = self.shells[shell]
             .iter()
             .filter_map(|&face| self.a_point_off_the_seam_of_a_whole_ball(face));
-        corners.chain(far_sides).chain(middles).chain(off_a_seam)
+        corners
+            .chain(far_sides)
+            .chain(middles)
+            .chain(quarter_turns)
+            .chain(off_a_seam)
     }
 
     /// The point of a closed edge across its curve from the one corner it
@@ -5396,6 +5421,50 @@ impl Assembly {
             seen_along * (flat.normal().dot(out) / flat.normal().dot(seen_along));
         let middle = centre + out - back_onto_the_plane;
         middle.is_finite().then_some(middle)
+    }
+
+    /// The two points of a closed edge a quarter turn round its curve from the
+    /// one corner it starts and ends at, either way, or `None` for an edge that
+    /// does not close or a curve this does not find the middle of.
+    ///
+    /// Seen along the direction [`Assembly::where_an_edges_circle_is_centred`]
+    /// names, the curve is a circle, and the corner turned a quarter round its
+    /// centre is on it. Slid back along that direction onto the edge's plane,
+    /// as [`Assembly::the_middle_of_an_open_arc`] slides an arc's middle, it is
+    /// a point of the edge itself. It is worked out in `f64`, so it is on the
+    /// edge to within a few roundings as a corner is. Points that do not fit
+    /// in an `f64` are not asked.
+    ///
+    /// **A closed edge whose corner and far side both touch the outer shell
+    /// has these left** (Q2657). A bar touching two walls of a block along two
+    /// rulings is the shape once its cap circles close up again: each corner is
+    /// on one wall and the far side on the other, and the hollow was refused
+    /// `Undecidable`, for one solid of two shells
+    /// (`tests/a_bar_lying_along_a_plane_or_a_bar.rs`).
+    fn a_quarter_turn_round_a_closed_edge_from_its_corner(
+        &self,
+        edge: usize,
+    ) -> Option<[Point; 2]> {
+        let [corner, other_end] = self.edges[edge].ends;
+        if corner != other_end {
+            return None;
+        }
+        let (flat, centre, seen_along) = self.where_an_edges_circle_is_centred(edge)?;
+        let seen = |vector: Vector| {
+            vector - seen_along * (vector.dot(seen_along) / seen_along.dot(seen_along))
+        };
+        let out = seen(self.corners[corner].point - centre);
+        let turned = seen_along.cross(out);
+        let turned = turned * (out.length() / turned.length());
+        let quarter_turns = [turned, -turned].map(|way| {
+            let back_onto_the_plane =
+                seen_along * (flat.normal().dot(way) / flat.normal().dot(seen_along));
+            centre + way - back_onto_the_plane
+        });
+        quarter_turns
+            .iter()
+            .all(|point| point.is_finite())
+            .then_some(quarter_turns)
     }
 
     /// Where the circle or ellipse an edge runs round is centred, with the

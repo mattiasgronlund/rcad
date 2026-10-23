@@ -1,7 +1,7 @@
 //! A stepped shaft cut in two on a plane beside or through its axis, both
 //! halves turned about that axis, and the halves fused again by every rule
-//! (`docs/decisions.md` §191.5, rows Q2228, Q2241, Q2487, Q2488, Q2613 and
-//! Q2619).
+//! (`docs/decisions.md` §191.5, rows Q2228, Q2241, Q2487, Q2488, Q2613, Q2619
+//! and Q2657).
 //!
 //! **The shape.** The shaft is a bar of radius 2 from `z = 0` to `z = 1`
 //! united with a bar of radius 1 from `z = 1` to `z = 2`, so `5π` in all. One
@@ -44,9 +44,10 @@
 //!
 //! **What was wrong before Q2487 and Q2488.** Boring left corners on the
 //! circles of the shaft where some surface of the bore crosses them, each a
-//! rounding off that surface; a square hole's sides still do, and a round
-//! hole across the narrow bar's radius no longer does (Q2619, below). A cut
-//! then met that surface again there, as a
+//! rounding off that surface. A round hole across the narrow bar's radius no
+//! longer leaves one (Q2619, below), nor does a square hole on the whole
+//! shaft (Q2657, below), but the halves cut from the shaft with a square hole
+//! still keep them. A cut then met that surface again there, as a
 //! place where three surfaces meet whose box held the corner or lay within a
 //! rounding of it, and asked the corner about the surface instead. A round
 //! bore across the narrow bar's radius was refused `order along a crossing`
@@ -67,6 +68,17 @@
 //! sides of planes every face on its own surface lies in, and leaves out a
 //! crossing whose faces lie in a side that shares no point with one of those:
 //! here `z ≤ 0.5` and `z ≥ 1`.
+//!
+//! **What was wrong before Q2657.** The square hole's side planes, run on past
+//! the hole, cross the shaft's circles far from it: on the bottom and the
+//! annulus at `(±1.977, ±0.3)`, `(−1.8, ±0.872)` and `(−1.2, ±1.6)`, and on the
+//! narrow bar's circles at `(±0.954, ±0.3)`. Boring left a corner at each,
+//! though no face of the hole is there. The wide bar's pipe was joined back up
+//! with a seam kept along the ruling at `(−1.977, −0.3)`, and that seam's
+//! corner on each rim kept the rims in pieces at all of those crossings. Now a
+//! pipe band whose rings all go right round closes them up, as a cone's did,
+//! and needs no seam. The halves cut from the bored shaft still keep every one
+//! of those corners.
 
 use core::f64::consts::PI;
 
@@ -177,7 +189,9 @@ fn a_stepped_shaft_bored_with_a_square_hole_cut_and_turned_keeps_the_d_as_its_bo
 /// as whole pipes, leaving the hole two corners on that circle, and the cut
 /// was refused `Undecidable` at `order along a crossing`, on one of those two
 /// corners, for each of these six bores (Q2487). Since Q2619 boring leaves no
-/// such corner, and the square hole is what still brings one to the cut.
+/// such corner, and since Q2657 neither does a square hole, but the halves of
+/// the shaft with a square hole keep theirs, and bring them to the fuse of the
+/// two halves.
 #[test]
 fn a_stepped_shaft_bored_across_the_narrow_bars_radius_is_cut_in_half() {
     for (centre, radius) in [
@@ -294,6 +308,41 @@ fn a_stepped_shaft_bored_across_the_narrow_bars_radius_cut_and_turned_keeps_the_
             bore,
             &shifted_and_turned(turn),
         );
+    }
+}
+
+/// Bored with the square hole, the shaft keeps no corner on its circles where
+/// a side plane of the hole, run on past the hole, crosses them: on the
+/// bottom and the annulus at `(±1.977, ±0.3)`, `(−1.8, ±0.872)` and
+/// `(−1.2, ±1.6)`, and on the narrow bar's circles at `(±0.954, ±0.3)`. No
+/// face of the hole is there. Boring put a corner at every one of them
+/// (Q2657), and those corners are what Q2488's refusal met.
+#[test]
+fn a_stepped_shaft_bored_with_a_square_hole_keeps_no_corner_where_the_holes_side_planes_cross_its_circles()
+ {
+    let mut model = a_model();
+    let shaft = a_stepped_shaft(&mut model);
+    let bored = Bore::ASquareHole.cut_into(&mut model, shaft);
+    let view = model.solid(bored).expect("this model made the key");
+    let on_a_circle_and_a_side_plane = |corner: &Point| {
+        let radius = corner.x().hypot(corner.y());
+        let on_a_circle = (radius - 1.0).abs() < 1e-6 || (radius - 2.0).abs() < 1e-6;
+        let on_a_side_plane = (corner.x() + 1.8).abs() < 1e-6
+            || (corner.x() + 1.2).abs() < 1e-6
+            || (corner.y().abs() - 0.3).abs() < 1e-6;
+        on_a_circle && on_a_side_plane
+    };
+    for face in view.faces() {
+        for wire in face.wires() {
+            let corners: Vec<Point> = wire.points().collect();
+            assert!(
+                !corners.iter().any(on_a_circle_and_a_side_plane),
+                "face {:?} on {:?} has a corner where a side plane of the hole crosses a circle: \
+                 {corners:?}",
+                face.key(),
+                face.surface()
+            );
+        }
     }
 }
 

@@ -15,17 +15,26 @@
 //!
 //! **What answers.** A bar at `(−3, 0)` fused with the half bar at the origin
 //! answers by every rule, both ways round. The fuse runs the line `x = 0` right
-//! across the bar's cap, so the cap is cut at `(0, ±4)` and joined back up: its
-//! outline is two arcs of the one pipe meeting there, and its hole is the half
-//! disk from `(0, −1)` to `(0, 1)`. That is this family with both arcs on one
-//! surface.
+//! across the bar's cap, so the cap is cut at `(0, ±4)` and joined back up.
+//! When `rings_round` places the joined cap's rings its outline is two arcs of
+//! the one pipe meeting there, and its hole is the half disk from `(0, −1)` to
+//! `(0, 1)`: this family with both arcs on one surface. Only after that, since
+//! queue row Q2657, is the bar's pipe closed back up round its circle, and the
+//! cap is written with the bar's own circle as its outline, one corner at the
+//! bar's seam `(2, 0)`. No face of the half bar is at `(0, ±4)`, so a corner
+//! there was one the answer did not need. So the question is still asked on one
+//! pipe, with every corner of both rings on `x = 0`, and the pins read its
+//! answer off the circle.
 //!
 //! Run under gdb on base `04a469ad`, with a breakpoint on the first line of
 //! `holds_the_other_rings`, the three fuses that keep the cap each call it
 //! twice: the ring along the one pipe answers that it holds the other, and the
 //! half disk, through the count of turns round a corner, that it holds nothing.
+//! Run again on Q2657's branch with a print in `rings_round` that was not
+//! kept, they give the same two answers, of the same two rings, with their
+//! corners at `(0, ±4)` and `(0, ±1)`.
 //!
-//! With the two arcs on two pipes — a real lens, where the bars at `(−3, 0)`
+//! With the two arcs on two pipes instead — a real lens, where the bars at `(−3, 0)`
 //! and `(3, 0)` meet — the plane `x = 0` used to cross each pipe along the
 //! vertical line through a corner of the lens, where the two walls meet, and
 //! every route was refused in the arrangement before any face was joined:
@@ -101,7 +110,10 @@
 //! `the_rings_of_the_cap` reads the outline first, as the face stores it, so
 //! the pins hold `rings_round` to that choice. Nothing else here would notice
 //! a swap: with `rings_round` made to take the other ring, every fuse still
-//! validated and held its volume, and only those pins failed.
+//! validated and held its volume, and only those pins failed. On Q2657's
+//! branch, with the cap on one pipe written round the bar's circle, the swap
+//! still fails the pin of the bar and the half bar, reading the half disk
+//! first and the circle second.
 
 use core::f64::consts::PI;
 
@@ -120,6 +132,13 @@ type AnswerRoute = (&'static str, fn(&mut Model) -> [SolidKey; 2], [Expect; 4]);
 const THE_OUTLINE_THEN_THE_HALF_DISK: &[&[[f64; 2]]] =
     &[&[[0.0, -4.0], [0.0, 4.0]], &[[0.0, -1.0], [0.0, 1.0]]];
 
+/// The rings of the bar's cap kept with the half disk of radius 1 in it, as
+/// [`the_rings_of_the_cap`] reads them: the bar's own circle, with its one
+/// corner where the bar's seam is, at `(2, 0)`, then the hole from `(0, −1)`
+/// to `(0, 1)`.
+const THE_BARS_CIRCLE_THEN_THE_HALF_DISK: &[&[[f64; 2]]] =
+    &[&[[2.0, 0.0]], &[[0.0, -1.0], [0.0, 1.0]]];
+
 /// A bar of radius 5 at `(−3, 0)` and the half bar rising out of its cap, by
 /// every rule and both ways round.
 ///
@@ -129,9 +148,15 @@ const THE_OUTLINE_THEN_THE_HALF_DISK: &[&[[f64; 2]]] =
 /// - The bar less the half bar has a pocket three deep: `98.5π`.
 /// - The half bar less the bar is its two units above the cap: `π`.
 ///
-/// Where the answer keeps the bar's cap, the cap is the face this file is
-/// about: an outline with corners at `(0, ±4)` and a hole with corners at
-/// `(0, ±1)`, four corners on one line.
+/// Where the answer keeps the bar's cap, its outline is the bar's circle as
+/// the bar had it, one corner at its seam, and its hole is the half disk.
+/// The half bar's flat side is on `x = 0`, which crosses that circle at
+/// `(0, ±4)`, far from the half bar. Until Q2657 the cap kept corners there,
+/// though no face of the half bar reaches them: the outline was two arcs of
+/// the one pipe meeting at `(0, ±4)`. The fuse still cuts the cap there and
+/// still places its rings with those two corners in, every corner of both
+/// rings on `x = 0` (see the module doc), and only then closes the bar's
+/// pipe back up into its circle.
 #[test]
 fn a_half_bar_rising_out_of_a_bars_cap_is_fused_by_every_rule_either_way_round() {
     for (rule, bar_first, volume, keeps_the_cap) in [
@@ -156,7 +181,7 @@ fn a_half_bar_rising_out_of_a_bars_cap_is_fused_by_every_rule_either_way_round()
         if keeps_the_cap {
             assert_eq!(
                 the_rings_of_the_cap(&model, solid),
-                THE_OUTLINE_THEN_THE_HALF_DISK,
+                THE_BARS_CIRCLE_THEN_THE_HALF_DISK,
                 "{asked}: the corners of the cap's outline, then of its hole"
             );
         }
@@ -630,7 +655,10 @@ fn assert_each_fuse(
 /// cut by the half bar's flat side as well as its cap, and Q503's own lane
 /// counted six faces here in a probe it did not commit, two of them on the
 /// bar's pipe rather than one — still not the single wall of the route's own
-/// first bullet. Not traced further; re-files what is left of Q626.
+/// first bullet. Not traced further; re-files what is left of Q626. Printed
+/// on Q2657's branch, the two faces on a pipe are one on each: the bar's
+/// whole, between its two circles with no corner but the seam's at `(2, 0)`,
+/// and the half bar's.
 #[test]
 fn the_first_union_of_the_third_route_answers_with_two_wall_pieces() {
     let mut model = a_model();
