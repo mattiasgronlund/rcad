@@ -152,7 +152,7 @@
 
 use rcad_geom::{
     Axis, Cylinder, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Sphere,
-    Surface, Torus, Vector,
+    Surface, SurfaceMeet, Torus, Vector,
 };
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
@@ -638,6 +638,99 @@ fn a_ring_of_a_ball_less_a_bar_on_its_axis_builds_wherever_its_two_corners_stand
             4.0 * PI / 3.0 * (21.0_f64 / 64.0).powi(3),
             &[2],
             &what,
+        );
+    }
+}
+
+/// What a bar of radius 1 along `x` at `y = 1` shares with a bar of radius 2 up
+/// `z`, built round its one corner `(0, 2, 0)`, where the thin pipe rests on the
+/// inside of the thick one and its two loops meet (row Q2561). The fuse refuses
+/// that pair where the loops meet
+/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet`),
+/// so it is built by hand.
+///
+/// Each loop is one closed edge from the corner back to it, as `intersect`
+/// names it, and such an edge closes no wire of its own: a lobe of the thick
+/// pipe inside one loop is refused `ADraftWireIsTooShort`. So the thick pipe's
+/// two lobes are one face, walked round both loops, and the thin pipe's band
+/// between the loops is the other. Both faces hold both closed edges through
+/// the one corner, which is what a fold there needs.
+///
+/// It does not fold. Whichever way the band walks its loops, the build is
+/// refused `AMeshCoveredTheWrongSideOfALoop`, for the face of both lobes at the
+/// coarsest mesh. `the_coarsest_mesh_whose_sides_do_not_cross` asks that again
+/// the way it asks a crossing, and with one corner place there is no distance
+/// to read a crossing's floor off, so it hands the refusal back at once. That
+/// arm is reached through the public API, so it cannot become an assertion.
+#[test]
+fn what_a_thin_bar_resting_inside_a_thick_one_shares_is_handed_back_at_once_round_one_corner() {
+    let thick = Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a pipe"));
+    let along_x =
+        Axis::new(Point::new(0.0, 1.0, 0.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
+    let thin = Surface::Cylinder(Cylinder::new(along_x, 1.0).expect("a pipe"));
+    let Ok(SurfaceMeet::Curves(loops)) = rcad_geom::intersect(
+        &thick,
+        &thin,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) else {
+        panic!("the thin pipe crosses the thick one in curves")
+    };
+    let [one, other] = &loops[..] else {
+        panic!("two loops, not {}", loops.len())
+    };
+    let (f, r) = (Orientation::Forward, Orientation::Reversed);
+
+    let mut builder = SolidBuilder::new();
+    let corner = builder
+        .add_vertex(Point::new(0.0, 2.0, 0.0))
+        .expect("a corner");
+    let edge = builder
+        .add_edge(corner, corner, one.run().clone())
+        .expect("a loop");
+    let coedge = builder.add_coedge(edge, f).expect("a coedge");
+    assert!(
+        matches!(
+            builder.add_wire(&[DraftStep::Along(coedge)]),
+            Err(rcad_topo::Error::ADraftWireIsTooShort { steps: 1 })
+        ),
+        "a lobe inside one loop is a wire of its own"
+    );
+
+    for (band_way, lobes_way) in [(f, r), (r, f)] {
+        let mut builder = SolidBuilder::new();
+        let corner = builder
+            .add_vertex(Point::new(0.0, 2.0, 0.0))
+            .expect("a corner");
+        let edges = [one, other].map(|named| {
+            builder
+                .add_edge(corner, corner, named.run().clone())
+                .expect("a loop")
+        });
+        let mut both_loops = |way: Orientation| {
+            let steps = edges
+                .map(|edge| DraftStep::Along(builder.add_coedge(edge, way).expect("a coedge")));
+            builder.add_wire(&steps).expect("a wire round both loops")
+        };
+        let (band, lobes) = (both_loops(band_way), both_loops(lobes_way));
+        let band = builder.add_face(thin.clone(), &[band]).expect("the band");
+        let lobes = builder
+            .add_face(thick.clone(), &[lobes])
+            .expect("the lobes");
+        builder
+            .add_shell(&[(band, f), (lobes, f)])
+            .expect("a shell");
+        let said = builder.build(
+            &mut a_model(),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(
+                said,
+                Err(rcad_topo::Error::AMeshCoveredTheWrongSideOfALoop { .. })
+            ),
+            "the band walking its loops {band_way:?}: {said:?}"
         );
     }
 }
