@@ -16748,7 +16748,7 @@ check-queue-merge-driver:
 # the hold was narrowed to. §451's: a drop refused while two rows wait on it,
 # naming the `after` step for each, and going through with those steps in one
 # `apply`, one row back to `todo` and the other still waiting on Q2; and `-`
-# refused on a row that does not wait and beside an id. §1755's: `done`
+# refused on a row that does not wait and beside an id. Q1755's: `done`
 # freeing a plain waiter to `todo` once it closes the row the waiter named,
 # leaving a pinned waiter and a tier-5-no-class waiter untouched; `sweep`
 # freeing a row whose `after:` already names a row closed before `sweep` ever
@@ -16974,7 +16974,7 @@ check-queue-api-selftest:
     g "$hub" worktree add -q -b six "$lanes/six" main
     g "$hub" worktree add -q -b seven "$lanes/seven" main
     # Q4's own after:Q1 is gone by now: `done Q1`, above, freed it to todo
-    # (§1755), since Q1 is the only id Q4 ever waited on.
+    # (Q1755), since Q1 is the only id Q4 ever waited on.
     sed -i 's/^Q4  2  todo  opus  -  waits on the first §230$/Q4  2.2  todo  opus  -  waits on the first §230/' \
         "$lanes/six/docs/queue.md"
     g "$lanes/six" commit -qam "six: Q4's tier field says 2.2"
@@ -17662,13 +17662,13 @@ check-queue-api-selftest:
     grep -qxF "$with_commits_row: lane:lane-give-ahead -> todo, the take lane-give-ahead had on it given back" <<<"$got" \
         || fail "give did not restore $with_commits_row to todo once its branch's extra commit was gone"
 
-    # §1755: `done` frees every open row waiting on the row it closes, except a
+    # Q1755: `done` frees every open row waiting on the row it closes, except a
     # pinned row (only take, done and pick touch one, §430) and an open tier 5
     # row with no class (§435.5 reads its after: list as why it sits there).
     donefrees_wt="$root/rcad-worktrees/done-frees"
     g "$hub" worktree add -q -b done-frees "$donefrees_wt" main
     head_1755=$(q "$donefrees_wt" add 1 opus - "from/- a row other rows wait on, for done to free them §230") \
-        || fail "add for the §1755 head row failed"
+        || fail "add for the Q1755 head row failed"
     plain_1755=$(q "$donefrees_wt" add 1 opus - "from/- a plain row done frees to todo §230") \
         || fail "add for the plain waiter failed"
     pinned_1755=$(q "$donefrees_wt" add 1 opus - "from/- a pinned row done leaves waiting §230") \
@@ -17679,11 +17679,11 @@ check-queue-api-selftest:
         || fail "add for the tier-5-no-class waiter failed"
     got=$(q "$donefrees_wt" apply after "$plain_1755" "$head_1755" + after "$pinned_1755" "$head_1755" \
         + after "$tier5_1755" "$c5_1755,$head_1755" 2>&1) \
-        || fail "the waits for the §1755 done-frees fixture were refused"
-    got=$(q "$donefrees_wt" pin "$pinned_1755" 2>&1) || fail "pin refused the §1755 pinned waiter"
+        || fail "the waits for the Q1755 done-frees fixture were refused"
+    got=$(q "$donefrees_wt" pin "$pinned_1755" 2>&1) || fail "pin refused the Q1755 pinned waiter"
     g "$donefrees_wt" add -A && g "$donefrees_wt" commit -qam "done-frees base rows"
     sha_1755=$(g "$donefrees_wt" rev-parse HEAD)
-    got=$(q "$donefrees_wt" done "$head_1755" "$sha_1755" 2>&1) || fail "done refused the §1755 head row"
+    got=$(q "$donefrees_wt" done "$head_1755" "$sha_1755" 2>&1) || fail "done refused the Q1755 head row"
     grep -qxF "$plain_1755: after:$head_1755 -> todo" <<<"$got" || fail "done did not free the plain waiter to todo"
     grep -qF "$pinned_1755:" <<<"$got" && fail "done printed a free for the pinned waiter, which it must leave alone"
     grep -qF "$tier5_1755:" <<<"$got" && fail "done printed a free for the tier-5-no-class waiter, which it must leave alone"
@@ -17695,7 +17695,7 @@ check-queue-api-selftest:
     [ "$got" = "after:$c5_1755,$head_1755" ] || fail "done changed the tier-5-no-class waiter's after: list"
     got=$(check "$donefrees_wt") || fail "the file done's free-waiters sweep wrote fails check-queue"
 
-    # §1755: `sweep` frees every open row, across the whole file, still naming
+    # Q1755: `sweep` frees every open row, across the whole file, still naming
     # an already-closed row in its after: list, for the merger to run once --
     # the once-over for the 35 open rows main already carried like that at
     # 11ba1960, from before `done` swept its own closed row. T1 is the
@@ -17714,7 +17714,7 @@ check-queue-api-selftest:
         || fail "sweep did not say nothing was left stale"
     got=$(check "$sweep_wt") || fail "the file sweep wrote fails check-queue"
 
-    # §1755: `reword` replaces an open row's wording, past any pin, held to
+    # Q1755: `reword` replaces an open row's wording, past any pin, held to
     # the same shape `add` checks for a new row.
     reword_wt="$root/rcad-worktrees/reword"
     g "$hub" worktree add -q -b reword "$reword_wt" main

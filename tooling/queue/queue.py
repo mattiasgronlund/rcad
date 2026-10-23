@@ -946,7 +946,7 @@ def free_step(queue, row, waits):
 
 
 def sweep_step(queue, claims, here, args, batch):
-    """Free every open row still naming an already-closed row in its `after:` list (§1755).
+    """Free every open row still naming an already-closed row in its `after:` list (Q1755).
 
     `done` runs this sweep itself for the row it has just closed, but on main
     at 11ba1960 35 open rows already named a closed id, from before this
