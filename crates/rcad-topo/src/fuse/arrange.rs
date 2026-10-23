@@ -2289,6 +2289,20 @@ impl<'f> Arrangement<'f> {
     /// drawn once answered, it put two corners on the rim where nothing of the
     /// pin is.
     ///
+    /// **So is a crossing no pair holds back** (Q2648): once every pair is
+    /// placed, each crossing no face reaches and nothing placed is on is left
+    /// undrawn, whether or not a pair of it was asked about, unless the rim
+    /// runs along it or a corner of the face is on it. A half ring as a bead on
+    /// a round plate from `z = −1` is the shape: the plate's bottom crosses the
+    /// skin's surface round a circle that meets nothing on the bottom, and no
+    /// face of the ring reaches it, since the skin lies above the ring's flat
+    /// face. Drawn, it had every fuse of the two refused `Undecidable` on a
+    /// point inside a piece of the bottom, at `(4, 0, −1)` on the circle. It is
+    /// left out after the meets and not before them, as a pair set aside is:
+    /// with a half bar's floor on that plane, the circle meets the bar's cut
+    /// face on the rim, and a Q2644 probe that dropped it before the meets had
+    /// the union refused as not a manifold.
+    ///
     /// **Here a corner of the face on the crossing does not keep it** (Q2246).
     /// The corner is a vertex of the face whether or not the crossing is drawn,
     /// so it is not something placed on it
@@ -2410,14 +2424,17 @@ impl<'f> Arrangement<'f> {
             return Err(gave_up_on_it.into());
         }
         let mut left_out = left_out_where_it_refuses;
-        for &(first, second, _) in &set_aside {
-            for crossing in [first, second] {
-                if !left_out.contains(&crossing)
-                    && self.no_face_reaches(crossing, &along_the_rim, &mut known_unreached, log)
-                    && !self.something_placed_is_on(&[crossing], &folded_into_a_corner)
-                {
-                    left_out.push(crossing);
-                }
+        for crossing in 0..self.crossings.len() {
+            let of_a_pair_set_aside = set_aside
+                .iter()
+                .any(|&(first, second, _)| crossing == first || crossing == second);
+            if self.crossings[crossing].reaches_the_face
+                && (of_a_pair_set_aside || !never_left_out[crossing])
+                && !left_out.contains(&crossing)
+                && !self.something_placed_is_on(&[crossing], &folded_into_a_corner)
+                && self.no_face_reaches(crossing, &along_the_rim, &mut known_unreached, log)
+            {
+                left_out.push(crossing);
             }
         }
         for (first, second, meet) in set_aside {
@@ -9082,9 +9099,11 @@ impl<'f> Arrangement<'f> {
     /// curve that does not close runs on past its last node, but to come
     /// inside the face it crosses the rim, and that is a node
     /// ([`Arrangement::drop_the_lumps_of_straight_cuts_alone`] rests on the
-    /// same). Each crossing left out is either clear of the face's box or has
-    /// every node of it clear of the box
-    /// ([`Arrangement::work_out_how_each_crossing_runs`]), and so not inside
+    /// same). Each crossing left out is clear of the face's box, or lies in a
+    /// plane clear of a side every face on the face's surface lies in
+    /// ([`Arrangement::leave_out_the_cuts_clear_of_the_face`]), or has every
+    /// node of it clear of the box
+    /// ([`Arrangement::work_out_how_each_crossing_runs`]), and so is not inside
     /// the face, **or is one of the cuts that reach only the face's boundary**
     /// ([`Arrangement::leave_out_the_cuts_that_reach_only_the_boundary`]),
     /// **or one no face of its cut reaches**
