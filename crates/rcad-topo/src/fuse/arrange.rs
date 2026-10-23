@@ -17683,8 +17683,8 @@ mod tests {
     use core::cmp::Ordering;
 
     use rcad_geom::{
-        Axis, Cone, HalfSpace, Isometry, MeetOfThree, Plane, Point, Scale, Surface, Vector,
-        meet_of_three_surfaces,
+        Axis, Cone, Cylinder, HalfSpace, Isometry, MeetOfThree, Plane, Point, Scale, Surface,
+        Vector, meet_of_three_surfaces,
     };
     use rcad_predicates::{
         Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d,
@@ -17932,6 +17932,69 @@ mod tests {
             Arrangement::side_of_a_plane_parallel_to_one_it_is_on(&three, &leaning),
             None,
             "parallel to none of the three"
+        );
+    }
+
+    /// The pipe of radius one about the `z` axis, its cap `z = 0` and the
+    /// plane `y = 0` through its axis: the line the two planes share is the `x`
+    /// axis, which crosses the cap's circle at `(1, 0, 0)` and `(−1, 0, 0)`,
+    /// both `f64` points, so the stored partner's own predicate says which
+    /// side of it each crossing is on. Each partner runs through `(a, 0, 0)`
+    /// exactly, leaning off the `x` axis a different way each time and turned
+    /// round too, so the three planes meet at `(a, 0, 0)` on the stored
+    /// numbers: inside the pipe for `|a| < 1`, outside it for `|a| > 1`, which
+    /// puts both crossings on one side, and on it for `|a| = 1`, where the
+    /// crossing at the meet is on the partner. A box holding both crossings,
+    /// and a partner along the line, say nothing (Q2655).
+    #[test]
+    fn a_plane_puts_each_place_a_line_crosses_a_cap_circle_on_the_side_its_own_sign_says() {
+        let pipe = Cylinder::new(Axis::z(), 1.0).expect("a positive radius");
+        let cap = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let through = Plane::from_coefficients([0.0, 1.0, 0.0, 0.0]).expect("a normal");
+        let round = |x: f64, width: f64| {
+            PredicatePoint::Constructed([
+                Interval::new(x - width, x + width).expect("an interval"),
+                Interval::new(-1e-9, 1e-9).expect("an interval"),
+                Interval::exactly(0.0),
+            ])
+        };
+        let side = |partner: &Plane, at: PredicatePoint| {
+            Arrangement::side_of_a_plane_where_a_line_crosses_a_cap_circle(
+                partner, &cap, &through, &pipe, at,
+            )
+        };
+        let mut on_the_partner = 0;
+        for a in [0.5, -0.5, 2.0, -2.0, 1.0, -1.0] {
+            for [k, m] in [[0.0, 0.0], [3.0, 0.0], [0.0, 1.0], [-2.0, 5.0]] {
+                for facing in [1.0, -1.0] {
+                    let partner = Plane::from_point_and_normal(
+                        Point::from([a, 0.0, 0.0]),
+                        Vector::new(facing, facing * k, facing * m),
+                    )
+                    .expect("a plane");
+                    for x in [1.0, -1.0] {
+                        let truly = partner.side_of_point(PredicatePoint::from([x, 0.0, 0.0]));
+                        on_the_partner += usize::from(truly == Decision::Zero);
+                        assert_eq!(
+                            side(&partner, round(x, 1e-9)),
+                            Some(truly),
+                            "through ({a}, 0, 0) facing ({facing}, {k}, {m}), at ({x}, 0, 0)"
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            on_the_partner, 16,
+            "every partner through (±1, 0, 0) holds that crossing exactly"
+        );
+        let partner = Plane::from_coefficients([1.0, 0.0, 0.0, -0.5]).expect("a normal");
+        assert_eq!(side(&partner, round(0.0, 1.5)), None, "a box holding both");
+        let along = Plane::from_coefficients([0.0, 1.0, 1.0, 0.0]).expect("a normal");
+        assert_eq!(
+            side(&along, round(1.0, 1e-9)),
+            None,
+            "a partner along the line"
         );
     }
 
