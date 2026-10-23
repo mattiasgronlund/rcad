@@ -399,6 +399,16 @@ each pinned at what it does:
   stored numbers, so both are gaps. Q2109's pair is the same `passes_through`
   step, a plane that touched the pipe along its seam before a turn.
 
+**2026-10-24 note (Q2687, carrying Q2654): the `(1, 1.5)` turned bullet above
+is fixed.** `every_fuse_of_the_bar_and_the_l_plate_turned_three_quarter_turns_answers_the_two_as_they_stand`
+and `every_fuse_of_the_bar_and_the_l_plate_turned_back_a_quarter_turn_answers_the_two_as_they_stand`
+in `a_bar_flush_with_an_l_plates_inner_side_turned.rs` now pass. Where a circle
+leaves the seam's corner and comes back round to it on faces that hold it
+whole, `where_curved_pieces_met_off_a_run_that_closes_up` in
+`fuse/assemble.rs` now folds it back into one closed edge on that corner,
+instead of keeping the other line's ends as corners, so every fuse of the two
+as they stand answers.
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which
