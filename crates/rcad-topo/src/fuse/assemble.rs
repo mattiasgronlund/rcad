@@ -2325,11 +2325,16 @@ impl Assembly {
         {
             return true;
         }
-        let may_close_up = matches!(surface, Surface::Cone(_))
-            && !self.joined_only_across_whole_rings(inside, along)
-            && rings.iter().all(|ring| {
-                ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(true)
-            });
+        let goes_right_round =
+            |ring: &Vec<Dart>| self.a_ring_goes_right_round(ring, &surface) == Some(true);
+        let may_close_up = !self.joined_only_across_whole_rings(inside, along)
+            && match surface {
+                Surface::Cone(_) => rings
+                    .iter()
+                    .all(|ring| ring.len() == 1 || goes_right_round(ring)),
+                Surface::Cylinder(_) => rings.iter().all(goes_right_round),
+                _ => false,
+            };
         rings.iter().all(|ring| {
             ring.len() == 1
                 || (may_close_up && self.a_ring_that_closes_up(ring, dissolved))
@@ -5326,10 +5331,17 @@ impl Assembly {
         let far_sides =
             sides().filter_map(|side| self.across_a_closed_edge_from_its_corner(side.edge));
         let middles = sides().filter_map(|side| self.the_middle_of_an_open_arc(side.edge));
+        let quarter_turns = sides()
+            .flat_map(|side| self.a_quarter_turn_round_a_closed_edge_from_its_corner(side.edge))
+            .flatten();
         let off_a_seam = self.shells[shell]
             .iter()
             .filter_map(|&face| self.a_point_off_the_seam_of_a_whole_ball(face));
-        corners.chain(far_sides).chain(middles).chain(off_a_seam)
+        corners
+            .chain(far_sides)
+            .chain(middles)
+            .chain(quarter_turns)
+            .chain(off_a_seam)
     }
 
     /// The point of a closed edge across its curve from the one corner it
@@ -5396,6 +5408,50 @@ impl Assembly {
             seen_along * (flat.normal().dot(out) / flat.normal().dot(seen_along));
         let middle = centre + out - back_onto_the_plane;
         middle.is_finite().then_some(middle)
+    }
+
+    /// The two points of a closed edge a quarter turn round its curve from the
+    /// one corner it starts and ends at, either way, or `None` for an edge that
+    /// does not close or a curve this does not find the middle of.
+    ///
+    /// Seen along the direction [`Assembly::where_an_edges_circle_is_centred`]
+    /// names, the curve is a circle, and the corner turned a quarter round its
+    /// centre is on it. Slid back along that direction onto the edge's plane,
+    /// as [`Assembly::the_middle_of_an_open_arc`] slides an arc's middle, it is
+    /// a point of the edge itself. It is worked out in `f64`, so it is on the
+    /// edge to within a few roundings as a corner is. Points that do not fit
+    /// in an `f64` are not asked.
+    ///
+    /// **A closed edge whose corner and far side both touch the outer shell
+    /// has these left** (Q2657). A bar touching two walls of a block along two
+    /// rulings is the shape once its cap circles close up again: each corner is
+    /// on one wall and the far side on the other, and the hollow was refused
+    /// `Undecidable`, for one solid of two shells
+    /// (`tests/a_bar_lying_along_a_plane_or_a_bar.rs`).
+    fn a_quarter_turn_round_a_closed_edge_from_its_corner(
+        &self,
+        edge: usize,
+    ) -> Option<[Point; 2]> {
+        let [corner, other_end] = self.edges[edge].ends;
+        if corner != other_end {
+            return None;
+        }
+        let (flat, centre, seen_along) = self.where_an_edges_circle_is_centred(edge)?;
+        let seen = |vector: Vector| {
+            vector - seen_along * (vector.dot(seen_along) / seen_along.dot(seen_along))
+        };
+        let out = seen(self.corners[corner].point - centre);
+        let turned = seen_along.cross(out);
+        let turned = turned * (out.length() / turned.length());
+        let quarter_turns = [turned, -turned].map(|way| {
+            let back_onto_the_plane =
+                seen_along * (flat.normal().dot(way) / flat.normal().dot(seen_along));
+            centre + way - back_onto_the_plane
+        });
+        quarter_turns
+            .iter()
+            .all(|point| point.is_finite())
+            .then_some(quarter_turns)
     }
 
     /// Where the circle or ellipse an edge runs round is centred, with the
