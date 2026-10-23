@@ -2339,16 +2339,13 @@ impl Assembly {
         {
             return true;
         }
-        let goes_right_round =
-            |ring: &Vec<Dart>| self.a_ring_goes_right_round(ring, &surface) == Some(true);
-        let may_close_up = !self.joined_only_across_whole_rings(inside, along)
-            && match surface {
-                Surface::Cone(_) => rings
-                    .iter()
-                    .all(|ring| ring.len() == 1 || goes_right_round(ring)),
-                Surface::Cylinder(_) => rings.iter().all(goes_right_round),
-                _ => false,
-            };
+        let on_a_cone = matches!(surface, Surface::Cone(_));
+        let may_close_up = (on_a_cone || matches!(surface, Surface::Cylinder(_)))
+            && !self.joined_only_across_whole_rings(inside, along)
+            && rings.iter().all(|ring| {
+                (on_a_cone && ring.len() == 1)
+                    || self.a_ring_goes_right_round(ring, &surface) == Some(true)
+            });
         rings.iter().all(|ring| {
             ring.len() == 1
                 || (may_close_up && self.a_ring_that_closes_up(ring, dissolved))
