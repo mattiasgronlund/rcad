@@ -19,7 +19,7 @@ built through `SolidBuilder`, validates and meshes. Both bands sit on the one
 cone, so the pair either side of the rim between them names no crossing, which is
 exactly the run `what_a_run_between_these_two_lies_on`'s same-surface arm
 answers — and it answers the circle through the rim's own corner square to the
-axis. Measured, `just t --test a_leaning_cut_round_one_cone -- --no-capture`: the
+axis. Measured, `just t --test merged -E 'test(/^a_leaning_cut_round_one_cone::/)' -- --no-capture`: the
 rim comes back as **89 mesh points level with its own corner**, the furthest of
 them **1.454760496437048** from the plane that was meant to cut it, on a 100 mm
 solid. Not a refusal, not a rounding: a different curve, which is §4.1's worst

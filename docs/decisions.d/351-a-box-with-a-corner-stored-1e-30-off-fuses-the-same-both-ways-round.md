@@ -92,7 +92,7 @@ says why a `Zero` is not counted there.
 ### 351.3 What else moved
 
 Every tally line of `fuses_that_must_agree.rs` was compared, base against fix
-1 (`mise exec -- just t -p rcad-topo --test fuses_that_must_agree
+1 (`mise exec -- just t -p rcad-topo --test merged -E 'test(/^fuses_that_must_agree::/)'
 --no-capture`, one run each):
 
 | property | base | fix 1 |

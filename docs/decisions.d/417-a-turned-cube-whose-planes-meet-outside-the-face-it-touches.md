@@ -80,8 +80,8 @@ within `1e−9`. None is refused `Undecidable`. The 137 left: 65
 `Invalid::VolumeIsNotPositive { volume: 0.0 }`, 16 `ResultIsNotManifold {
 count: 4 }` and 6 `ResultIsNotManifold { count: 0 }` (relay 0 on `5c91b4ed`,
 and this relay again on `852579c8`, the same split; `mise exec -- just t -p
-rcad-topo --test a_turned_cube_with_its_corner_on_a_face --no-capture
-probe_q1353_split`). So the 74 `Undecidable` went to 11 answers, 7 holes
+rcad-topo --test merged -E 'test(~a_turned_cube_with_its_corner_on_a_face::probe_q1353_split)'
+--no-capture`). So the 74 `Undecidable` went to 11 answers, 7 holes
 winding with the outline, 34 shells enclosing nothing and 22 edges with four
 faces or none. `random_turns_whose_planes_meet_outside_the_block_answer_or_are_refused_by_name_tolerant`
 pins the first 60, of which 31 meet outside: 15 answer, turns 47 and 48 among
@@ -98,8 +98,8 @@ counted again below.
 
 **Since queue row Q1442 the 6 `count: 0` answer too**, 68 in all, and the 131
 left are the 65, 16, 34 and 16 above (Q1442's lane on `4a7dec01`, `mise exec
--- just t -p rcad-topo --test a_turned_cube_with_its_corner_on_a_face
---no-capture q1442_the_count`, a probe pasted into that file and taken out
+-- just t -p rcad-topo --test merged -E 'test(~a_turned_cube_with_its_corner_on_a_face::q1442_the_count)'
+--no-capture`, a probe pasted into that file and taken out
 after). Each of the 6 was an edge only left-out wires walked: the three
 crossings round to one triple and the tip, where the three planes meet, to
 another a rounding off the face, each of the cube's three faces at the corner
@@ -202,9 +202,8 @@ did not move.
 > `VolumeIsNotPositive` and 15 `OuterWireWindsAgainstTheNormal`, in both
 > orders of the two checks.
 > `the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside`
-> pins both splits (`mise exec -- just t -p rcad-topo --test
-> a_turned_cube_with_its_corner_on_a_face
-> the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside`).
+> pins both splits (`mise exec -- just t -p rcad-topo --test merged -E
+> 'test(~a_turned_cube_with_its_corner_on_a_face::the_turned_cube_less_the_block_over_the_199_turns_whose_planes_meet_outside)'`).
 >
 > Nothing else of the 199 moved: the certified union, either way round, still
 > answers 53 and is refused 95 for the range, 35 holes winding with the outline
@@ -428,8 +427,8 @@ chose to move it, it was not only rounded.
 *Queue row Q1527's third lane. Each count over the 199 is `probe_q1527_narrow`,
 a probe at the end of `a_turned_cube_with_its_corner_on_a_face.rs` at
 `1c54c454`, taken out in `9cdcf07b`: `PROBE_Q1527_NARROW=both mise exec --
-just t -p rcad-topo --test a_turned_cube_with_its_corner_on_a_face
---no-capture probe_q1527_narrow`. For each of the six fuses it gives the
+just t -p rcad-topo --test merged -E 'test(~a_turned_cube_with_its_corner_on_a_face::probe_q1527_narrow)'
+--no-capture`. For each of the six fuses it gives the
 split, each answer against the same fuse with the turned cube `2⁻³⁰` further
 in, solid by solid within what `each_solid_agrees_with_the_turned_cube_further_in`
 allows, and how many fold records each answer's log holds. "Before" is the
@@ -830,8 +829,8 @@ unless the answer validates.
 tilts, every rule, either way round: `probe_q1711_count`, a probe at the end of
 the test file, never committed, run by this lane on the branch and with the
 test file laid on `bda1bbb2`'s code: `mise exec -- just t -p rcad-topo --test
-a_cube_tipped_onto_one_edge_along_another_cubes_floor --no-capture
-probe_q1711_count`.
+merged -E 'test(~a_cube_tipped_onto_one_edge_along_another_cubes_floor::probe_q1711_count)'
+--no-capture`.
 
 | fuse                       | before (`bda1bbb2`)    | after                                     |
 |----------------------------|------------------------|-------------------------------------------|

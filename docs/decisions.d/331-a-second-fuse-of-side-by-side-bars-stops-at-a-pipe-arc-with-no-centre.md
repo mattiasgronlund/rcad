@@ -17,7 +17,7 @@ reaches one of the refused answers by another route.*
 A temporary test fused each of the six first answers again, by every rule and
 both ways round, with two blocks 30 by 20 and 10 tall: one from `z = 5` up,
 over the answer's top half, and one from `z = 50` up, touching nothing. It was
-`mise exec -- just t -p rcad-topo --test fusing_two_bars_side_by_side zz_temp_probe_second_fuse --no-capture`,
+`mise exec -- just t -p rcad-topo --test merged -E 'test(~fusing_two_bars_side_by_side::zz_temp_probe_second_fuse)' --no-capture`,
 and it is deleted again. All 72 fuses refused the same way, for example:
 
 ```

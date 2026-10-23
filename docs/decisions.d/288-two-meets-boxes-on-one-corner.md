@@ -241,7 +241,7 @@ within && count == 1
 The probe test file fused the shapes of the test file, plus the small ball at
 `s = 2⁻⁴⁶` to `2⁻⁴⁰` and the leaning block of 288.3. Each ran under all three
 rules and both policies, and printed the outcome and every record. The command
-was `Q110_PROBE=1 mise exec -- just t -p rcad-topo --test two_meets_reach_one_corner --no-capture`.
+was `Q110_PROBE=1 mise exec -- just t -p rcad-topo --test merged -E 'test(/^two_meets_reach_one_corner::/)' --no-capture`.
 For (a) and (c) the probe build also read `Q110_MUTANT_A` and `Q110_MUTANT_C`
 and made those edits. The mutation (a) run was diffed against the base run for
 the grazing shapes and the small ball at `2⁻⁴⁸` to `2⁻⁵²`, every record

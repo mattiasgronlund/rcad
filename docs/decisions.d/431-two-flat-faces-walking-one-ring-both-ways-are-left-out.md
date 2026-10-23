@@ -165,7 +165,7 @@ side's strip has a partner walking it back and in the difference it does not.
   `the_union_is_both_cubes_less_what_they_share_where_it_was_refused`, above.
 - `fuses_that_must_agree.rs`, rule off then on (the second relay with the
   call switched off, and the branch;
-  `mise exec -- just t -p rcad-topo --test fuses_that_must_agree --no-capture -E 'test(=how_often_a_certified_fuse_of_a_skew_pair_refuses) | test(=swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit) | test(=how_often_a_certified_fuse_of_a_turned_pair_refuses)'`):
+  `mise exec -- just t -p rcad-topo --test merged --no-capture -E 'test(=fuses_that_must_agree::how_often_a_certified_fuse_of_a_skew_pair_refuses) | test(=fuses_that_must_agree::swapping_the_two_sides_of_a_skew_pair_changes_not_one_bit) | test(=fuses_that_must_agree::how_often_a_certified_fuse_of_a_turned_pair_refuses)'`):
   - `how_often_a_certified_fuse_of_a_skew_pair_refuses`: 2 refused and 7 not
     a solid of 450, then 3 and 5. The union with the first comb first now
     answers, and the first comb less the second is refused for its edge.

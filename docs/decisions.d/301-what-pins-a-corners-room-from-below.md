@@ -375,8 +375,8 @@ below, the way 301.5's unit test pins the fold's.
 
 With the picker's `validate` half multiplied by zero, a scratch edit to
 `the_place_the_model_points_at`, both fail. `Q437_VSCALE=0 mise exec -- just
-t -p rcad-topo --no-fail-fast --test a_meet_that_fills_a_corners_room --test
-a_corner_with_four_planes_round_it` failed those two, and none of the other
+t -p rcad-topo --no-fail-fast --test merged -E 'test(/^a_meet_that_fills_a_corners_room::/)
+or test(/^a_corner_with_four_planes_round_it::/)'` failed those two, and none of the other
 four of the six failed. Under the same knob the scratch test refused all ten
 of §344.3's pyramids and the wedge at 1/512 turned 2.5 about `(1, 2, 3)`, each
 at "where three surfaces meet".

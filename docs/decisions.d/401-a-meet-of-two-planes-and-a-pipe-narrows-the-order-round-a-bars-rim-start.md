@@ -14,7 +14,7 @@ hand.*
 §345's `MeetOfThree::boxed_tight` matched `[Plane, Plane, Plane]` only and
 returned `self.clone()` for anything else. A temporary `eprintln!` in
 `place_the_meets`, run as `PROBE_Q209=1 mise exec -- just t -p rcad-topo
---test a_plane_leaning_through_a_bars_rim_start --no-capture a_block_turned`,
+--test merged -E 'test(~a_plane_leaning_through_a_bars_rim_start::a_block_turned)' --no-capture`,
 printed `kinds ["plane", "pipe", "plane"]` or `["plane", "plane", "pipe"]`
 with `boxed_tight` equal to `place` — "same true" — in 9 of 9 calls at this
 meet: the turned face, the bar's cap plane and the bar's wall, two planes and
@@ -130,7 +130,7 @@ volume by hand:
 | bar less block | `701.7885311031195 ± 2.641392009288458` | `702.064830064115` |
 | block less bar | `63916.7144984306 ± 0.49632664752785616` | `63916.666666666664` |
 
-(`mise exec -- just t -p rcad-topo --test a_plane_leaning_through_a_bars_rim_start --no-capture a_block_turned`.)
+(`mise exec -- just t -p rcad-topo --test merged -E 'test(~a_plane_leaning_through_a_bars_rim_start::a_block_turned)' --no-capture`.)
 
 The same six numbers come under `Policy::tolerant(100)`, with an empty log:
 on this base the order round the cap circle is proved, so the meet is never
@@ -138,7 +138,7 @@ folded into the rim start, and the check renamed itself from
 `under_a_tolerant_policy_the_turned_block_is_ordered_and_its_faces_disagree_on_a_corner`
 to
 `under_a_tolerant_policy_the_turned_block_answers_all_six_fuses_with_one_solid_each_too`
-(`mise exec -- just t -p rcad-topo --test a_plane_leaning_through_a_bars_rim_start --no-capture under_a_tolerant_policy`).
+(`mise exec -- just t -p rcad-topo --test merged -E 'test(~a_plane_leaning_through_a_bars_rim_start::under_a_tolerant_policy)' --no-capture`).
 On the base `ef6c6fcd`, all six certified fuses refused `Undecidable` on
 "order along a crossing", and all six tolerant ones refused
 `ResultIsNotManifold { count: 1 }`.

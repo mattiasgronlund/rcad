@@ -78,7 +78,7 @@ and `Model::validate` passes. The joiner leaves the two spellings apart, as
 **Its volume is wrong, and the fuse did not make it so.** A throwaway probe in
 that test file, taken out before committing, measured each frustum alone at
 deflection `0.01`, certified
-(`mise exec -- just t -p rcad-topo --test two_frustums_stacked_on_one_cone --no-capture`):
+(`mise exec -- just t -p rcad-topo --test merged -E 'test(/^two_frustums_stacked_on_one_cone::/)' --no-capture`):
 
 | frustum | wall about `+z` | wall about `−z` | true |
 |---|---|---|---|
@@ -175,7 +175,7 @@ its bound in both spellings, and the union's in both orders, at deflection
 
 **What the frustums measure now**, from a throwaway probe in that test file,
 taken out before committing
-(`mise exec -- just t -p rcad-topo --test two_frustums_stacked_on_one_cone q560_probe --no-capture`):
+(`mise exec -- just t -p rcad-topo --test merged -E 'test(~two_frustums_stacked_on_one_cone::q560_probe)' --no-capture`):
 
 | | `d = 0.01` | `d = 0.001` | true |
 |---|---|---|---|

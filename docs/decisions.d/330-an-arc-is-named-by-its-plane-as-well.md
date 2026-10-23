@@ -40,7 +40,7 @@ block `x ∈ [−10, −3]`, `y ∈ [−10, 10]`, `z ∈ [0, 10]`. The planes `x
 `z = 0` cut the ball in two circles through `(−3, ±4, 0)`, and an arc of each
 runs between those corners on the skin. On the base the difference refuses
 `ResultIsNotManifold { count: 4 }` (run on the base tree with
-`mise exec -- just t -p rcad-topo --test a_ball_less_a_wedge`). With the change
+`mise exec -- just t -p rcad-topo --test merged -E 'test(/^a_ball_less_a_wedge::/)'`). With the change
 it refuses `ACurvedFaceGoesRightRoundWithNoSeam` on the answer's `FaceSlot(2v1)`,
 in the sweep `Assembly::commit` runs over a throwaway model.
 
@@ -259,8 +259,8 @@ back to `740ae21a`'s, both files' changed tests fail — every one of the 32
 lune cases refused `ResultIsNotManifold { count: 4 }`, the exact plane's union
 refused the same, and the tolerant turned block's union refused `count: 3` —
 and with it as this section leaves it, all nine tests in the two files pass
-(`mise exec -- just t -p rcad-topo --test a_plane_leaning_through_a_bars_rim_start
---test a_narrow_lune_from_a_pole_corner`).
+(`mise exec -- just t -p rcad-topo --test merged -E
+'test(/^a_plane_leaning_through_a_bars_rim_start::/) or test(/^a_narrow_lune_from_a_pole_corner::/)'`).
 
 - **`crates/rcad-topo/tests/a_narrow_lune_from_a_pole_corner.rs`.** 32 cases
   pinned as refused now answer: in
@@ -403,7 +403,7 @@ both in the new `crates/rcad-topo/tests/two_flat_faces_on_one_plane_facing_apart
   and the ball less the blocks, and the union, now stop one step later, in
   the mesher, on the second bullet above, closed since by Q508
   (`a_ball_less_or_united_with_two_blocks_meeting_its_equator_from_opposite_sides_keeps_all_of_it_but_the_two_pieces`,
-  six fuses — `just t --test two_flat_faces_on_one_plane_facing_apart_along_an_arc`
+  six fuses — `just t --test merged -E 'test(/^two_flat_faces_on_one_plane_facing_apart_along_an_arc::/)'`
   passes all five tests in the file on this section's base). §39.4 records
   both refusals under their own rows.
 - **A lower half ball, split flat side up, under two blocks standing on it

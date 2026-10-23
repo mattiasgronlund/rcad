@@ -200,7 +200,7 @@ comes back one solid that passes `Model::validate` and measures inside
 | 3 | union | `59.11833 ± 1.17640` | `59.11833 ± 1.17640` |
 
 against `4π² = 39.47842` and `6π² = 59.21763`. Command: `mise exec -- just t
--p rcad-topo --test a_half_bend_fused_with_a_quarter_bend_on_one_torus
+-p rcad-topo --test merged -E 'test(/^a_half_bend_fused_with_a_quarter_bend_on_one_torus::/)'
 --no-capture`.
 
 The first run did not run the test file against the base `holds.rs` in its

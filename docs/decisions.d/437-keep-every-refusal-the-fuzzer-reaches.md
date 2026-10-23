@@ -94,9 +94,9 @@ The files themselves took 95 s. The rest was waiting out two inputs that hang.
   `Geometry(TheseTwoSurfacesDoNotCrossInAConic)` 4,
   `Geometry(CannotWorkOutHowBigACrossingIs)` 1.
 
-**Against the refusal-rate families.** `just t -p rcad-topo --test
-how_often_a_fuse_with_a_cone_refuses --test how_often_a_fuse_with_a_torus_refuses
---test how_often_a_curved_fuse_refuses --no-capture` (18 passed) prints what each
+**Against the refusal-rate families.** `just t -p rcad-topo --test merged -E
+'test(/^how_often_a_fuse_with_a_cone_refuses::/) or test(/^how_often_a_fuse_with_a_torus_refuses::/)
+or test(/^how_often_a_curved_fuse_refuses::/)' --no-capture` (18 passed) prints what each
 family refuses. Two of the fuzzer's 40 groups (437.4) are among them: `Undecidable`
 at "order along a crossing", and at "a point in a piece that every solid could
 place". Two more family groups print only "could not settle 1 decisions", so

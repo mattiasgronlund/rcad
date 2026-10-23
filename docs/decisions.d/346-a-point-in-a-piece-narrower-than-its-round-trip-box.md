@@ -186,7 +186,7 @@ already.*
 **Q335 does not move, and it is not this piece.**
 `a_fuse_that_needs_a_decision_nothing_can_prove_refuses` in `fusing_solids.rs`
 passes on `3e0abbe7` as it did on the base (`mise exec -- just t -p rcad-topo
---test fusing_solids a_fuse_that_needs_a_decision_nothing_can_prove_refuses`).
+--test merged -E 'test(~fusing_solids::a_fuse_that_needs_a_decision_nothing_can_prove_refuses)'`).
 Its piece is flat, the quarter of a tower's top at `z = 1e308`, half a unit
 across, with four exact corners. A flat piece's candidates are exact and never
 go through `back_onto_the_surface`, and a square half a unit wide holds plenty
@@ -283,7 +283,7 @@ leaves it out. The volumes are measured summed because the turn rounds the
 block's corners: on its own, the block measured `7.999999999999997` with an
 error of `1.4e-15` in `off 0.3` turned 0.5 (a throwaway probe, taken out),
 which is the solid's own distance from `8` and not its sums' (§338.1). `mise
-exec -- just t -p rcad-topo --test a_ball_shaved_by_a_turned_blocks_face
+exec -- just t -p rcad-topo --test merged -E 'test(/^a_ball_shaved_by_a_turned_blocks_face::/)'
 --no-capture` prints each of the 16 answers, four draws in two orders under two
 policies: from `12.16826` to `12.16910`, against `12.18879`, with published
 errors from `0.12615` to `0.12655`. The two policies give the same volume, and

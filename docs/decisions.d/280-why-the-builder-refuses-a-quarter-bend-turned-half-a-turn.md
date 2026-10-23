@@ -243,7 +243,7 @@ The dispatcher merged the branch, moved the pin, and ran the three new tests
 in `building_a_solid_out_of_faces.rs` with `mesh.rs` checked out at the base
 `b0623d41`. All three failed, and the turned bend was refused. With the fix
 restored, all three passed (`./target/q190-revert.sh`, which runs `just t -p
-rcad-topo --test building_a_solid_out_of_faces` on the three names). Then
+rcad-topo --test merged -E 'test(/^building_a_solid_out_of_faces::/)'` on the three names). Then
 `just gate quiet` ran on the merged tree.
 
 Q40's relay file still does not import: `assert_pinned_kicad_imports` passes

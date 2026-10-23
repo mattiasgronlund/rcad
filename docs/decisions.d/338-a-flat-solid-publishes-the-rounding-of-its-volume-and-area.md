@@ -16,7 +16,7 @@ triangle `FaceView::for_each_triangle` hands out, taken from the world origin
 and not from the kernel's hub. So it is a different route to the same number.
 On the base, both of the row's cases fail it.
 `a_flat_solid_publishes_the_rounding_of_its_measure.rs`, run with `mise exec
--- just t -p rcad-topo --test a_flat_solid_publishes_the_rounding_of_its_measure
+-- just t -p rcad-topo --test merged -E 'test(/^a_flat_solid_publishes_the_rounding_of_its_measure::/)'
 --no-capture`:
 
 - **Q81's two turned cubes.** `a` less `b` measures `8.000000000000002` with an

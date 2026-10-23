@@ -65,18 +65,18 @@ now:
   Q82's refusal; the bend written back was the bend turned round. The quarter
   bend now goes through every test `copying_a_solid.rs` runs on a fuse with a
   copy — bit for bit the same as with a bend built again, under all three
-  rules. `mise exec -- just t -p rcad-topo --test
-  how_often_a_fuse_with_a_torus_refuses --test copying_a_solid`.
+  rules. `mise exec -- just t -p rcad-topo --test merged -E
+  'test(/^how_often_a_fuse_with_a_torus_refuses::/) or test(/^copying_a_solid::/)'`.
 - **A bend less a second bend turned an eighth of a turn is one piece**,
   holding `π²` within its error, and the bend built face by face gives the same
   numbers bit for bit: `building_a_solid_out_of_faces.rs`'s bend now takes
   `the_same_numbers` like the cube, the bar and the ball, as its doc said it
   would when the refusal closed. `mise exec -- just t -p rcad-topo --test
-  building_a_solid_out_of_faces`.
+  merged -E 'test(/^building_a_solid_out_of_faces::/)'`.
 - **A bend growing out of a block's side builds** when the side walks the cap
   circle forwards, validates and measures `32 + 2π²`; walked the other way it
   is refused `AClosedEdgeIsWalkedAgainstItsSurface`. Both walks were refused
-  before. `mise exec -- just t -p rcad-topo --test a_ray_from_beside_a_box`.
+  before. `mise exec -- just t -p rcad-topo --test merged -E 'test(/^a_ray_from_beside_a_box::/)'`.
 
 The three-quarter bend in `holds.rs` and the three-quarter band in
 `two_loops_side_by_side_on_a_torus.rs`, rebuilt the standard way, are still
@@ -147,12 +147,12 @@ Q644's branch at `3e51e291` and did 361.3's list.*
   eighth of the ring by Pappus, and the union holds `3π²`, all within
   `measure`'s bound. The difference and the intersection have 3 faces. The
   union has 5, because its wall stays in three pieces. `mise exec -- just t
-  -p rcad-topo --test a_bend_less_a_turned_copy_of_itself`.
+  -p rcad-topo --test merged -E 'test(/^a_bend_less_a_turned_copy_of_itself::/)'`.
 - **A bend's cap against a block: its control answers 90 of 90**, 105 laws
   checked. It was 45, the fuses that keep the bend having stopped writing it
   back. The touching row still refuses all 66 as a quartic. `mise exec -- just
-  t -p rcad-topo --test fuses_that_touch a_bends_cap_flush_against_a_block
-  --no-capture`.
+  t -p rcad-topo --test merged -E
+  'test(~fuses_that_touch::a_bends_cap_flush_against_a_block)' --no-capture`.
 - `error.rs`'s first example for `TheFuseWroteABrokenAnswer` is now history.
   No test in `rcad-topo` pins a sound pair that still ends there.
 

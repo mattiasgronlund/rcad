@@ -13,7 +13,7 @@ circle through the run's own end square to the cone's axis. Guarded and not a
 wildcard, so a cone against a *different* cone still refuses and a sixth kind of
 `Surface` is still a compile error in that `match` (§40).
 
-Measured, `just t --test how_often_a_fuse_with_a_cone_refuses --no-capture`: the
+Measured, `just t --test merged -E 'test(/^how_often_a_fuse_with_a_cone_refuses::/)' --no-capture`: the
 block family answers **15 of 96 → 24 of 96**, its wall map goes from five named
 things to four, and the cone-crossing entry goes **9 → 0**. The 15 that §214.4
 called an honest gap are **unmoved**, and so are the other three walls — a point
