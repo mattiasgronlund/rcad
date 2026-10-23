@@ -4349,18 +4349,66 @@ impl Assembly {
             .into_iter()
             .map(|at| runs.leader(leaving[&at][0]))
             .collect();
+        let back_round = self.runs_back_round_one_closed_crossing(leaving, straight_through, &runs);
         straight_through
             .iter()
             .copied()
             .filter(|&(lump, corner)| {
+                let run = runs.leader(leaving[&(lump, corner)][0]);
                 curved_pieces_met[corner]
-                    && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
+                    && !closed_up.contains(&run)
+                    && !back_round.contains(&run)
                     && !self.are_pieces_of_one_open_input_edge(&leaving[&(lump, corner)])
                     && !leaving[&(lump, corner)]
                         .iter()
                         .all(|&edge| self.edges[edge].runs_straight())
             })
             .collect()
+    }
+
+    /// Every run of `runs`, by its leader, that leaves one corner
+    /// `straight_through` does not walk and comes back round to that same
+    /// corner, every piece of it a piece of one closed crossing
+    /// ([`Assembly::are_pieces_of_one_closed_crossing`]).
+    fn runs_back_round_one_closed_crossing(
+        &self,
+        leaving: &BTreeMap<(usize, usize), Vec<usize>>,
+        straight_through: &BTreeSet<(usize, usize)>,
+        runs: &Sameness,
+    ) -> BTreeSet<usize> {
+        let mut ends_of_run: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut edges_of: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for (&(lump, corner), by) in leaving {
+            for &edge in by {
+                edges_of.entry(runs.leader(edge)).or_default().push(edge);
+                if !straight_through.contains(&(lump, corner)) {
+                    ends_of_run
+                        .entry(runs.leader(edge))
+                        .or_default()
+                        .push(corner);
+                }
+            }
+        }
+        let found: BTreeSet<usize> = ends_of_run
+            .into_iter()
+            .filter(|(run, ends)| {
+                matches!(ends[..], [one, other] if one == other)
+                    && self.are_pieces_of_one_closed_crossing(&edges_of[run])
+            })
+            .map(|(run, _)| run)
+            .collect();
+        found
+    }
+
+    /// Whether `edges` are pieces of one closed curve
+    /// ([`Assembly::are_pieces_of_one_closed_curve`]), or of the crossing of
+    /// a plane and a pipe that this fuse made.
+    fn are_pieces_of_one_closed_crossing(&self, edges: &[usize]) -> bool {
+        self.are_pieces_of_one_closed_curve(edges)
+            || matches!(
+                self.the_surface_a_plane_crossing_made_here_runs_round(edges),
+                Some(Surface::Cylinder(_))
+            )
     }
 
     /// Whether `edges` are all pieces of one input edge that does not close on
@@ -4485,23 +4533,34 @@ impl Assembly {
             .iter()
             .map(|&edge| self.edges[edge].from.as_slice())
             .collect();
-        if is_one_input_edge(&pieces) {
-            return true;
-        }
-        let Some(&first) = edges.first() else {
-            return false;
+        is_one_input_edge(&pieces)
+            || matches!(
+                self.the_surface_a_plane_crossing_made_here_runs_round(edges),
+                Some(Surface::Cone(_))
+            )
+    }
+
+    /// The surface other than a plane that `edges` all run round, where each
+    /// is a piece of the one crossing of a plane and that surface that this
+    /// fuse made, and of nothing else.
+    fn the_surface_a_plane_crossing_made_here_runs_round(
+        &self,
+        edges: &[usize],
+    ) -> Option<&Surface> {
+        let &first = edges.first()?;
+        let pair = &self.edges[first].carried_by;
+        let ([Surface::Plane(_), round] | [round, Surface::Plane(_)]) = pair else {
+            return None;
         };
-        let pair @ ([Surface::Plane(_), Surface::Cone(_)] | [Surface::Cone(_), Surface::Plane(_)]) =
-            &self.edges[first].carried_by
-        else {
-            return false;
-        };
-        edges.iter().all(|&edge| {
-            let [one, other] = &self.edges[edge].carried_by;
-            self.edges[edge].from.is_empty()
-                && ((one_surface(one, &pair[0]) && one_surface(other, &pair[1]))
-                    || (one_surface(one, &pair[1]) && one_surface(other, &pair[0])))
-        })
+        edges
+            .iter()
+            .all(|&edge| {
+                let [one, other] = &self.edges[edge].carried_by;
+                self.edges[edge].from.is_empty()
+                    && ((one_surface(one, &pair[0]) && one_surface(other, &pair[1]))
+                        || (one_surface(one, &pair[1]) && one_surface(other, &pair[0])))
+            })
+            .then_some(round)
     }
 
     /// Every corner walked straight through on a run of edges whose two ends
