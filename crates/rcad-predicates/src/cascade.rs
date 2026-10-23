@@ -22,9 +22,16 @@ pub enum Level {
 pub struct Filtered {
     /// The value the predicate polynomial came to in `f64`.
     pub value: f64,
-    /// The most `value` can differ from the true value. The sign of `value` is
-    /// proved when its magnitude is above this — and only while this is itself
-    /// a normal number, which is what [`decide`] checks before believing it.
+    /// The bound on the sum `value` is rounded from — not on `value` itself,
+    /// which takes one rounding more and can land past this bound while the
+    /// sign it settles stays right: on one tetrahedron, `orient3d.rs`'s
+    /// `level_one_can_land_past_its_error_bound_and_still_certify_the_right_sign`
+    /// has `value` land 8/7 of `error_bound` from the truth. What [`decide`]'s
+    /// sign test needs is the weaker claim: rounding the sum to `value` cannot
+    /// carry it past `error_bound` unless the sum was past it already, so
+    /// `value > error_bound` still proves the sum, and so the true value,
+    /// positive. That test also needs this to be a normal number, which is
+    /// what [`decide`] checks before believing it (decisions.md §464.7).
     pub error_bound: f64,
 }
 
