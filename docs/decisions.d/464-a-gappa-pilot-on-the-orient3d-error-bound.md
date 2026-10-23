@@ -21,6 +21,7 @@ Q2658, which took up the two claims the pilot left unbacked.*
   464.5   The scripts, whole
   464.6   What this leaves
   464.7   value past the bound, and every minor at zero run
+  464.8   orient2d and the side of a plane (Q2659, unfinished)
 
 ### 464.1 The bugs a bound prover is for
 
@@ -1039,3 +1040,432 @@ None of them was read for this.
   Gappa proves, is a bound on the sum before `value`'s last rounding.
 - A row to run block 1 where one of the nine differences `adx` to `cdz` is
   zero, which 464.4 argues on paper only, reusing the scripts in 4.
+
+### 464.8 orient2d and the side of a plane (Q2659, unfinished)
+
+*Q2659's first lane, on 2026-10-23, handed over at its budget with this
+written down and its controls not yet run. What is below was run; what is
+not run says so.*
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, against
+`orient2d.rs` and `plane.rs` at `affe0f01`. `u` is `2⁻⁵³` as in 464.4. Each
+script follows block 1's pattern: one ratio hint per rounding, the error split
+into one term per product of the permanent so that Gappa averages them, the
+lemma (464.5's block 2) for a product that rounds to a normal number, and the
+step from `y`, the sum before `value`'s last rounding, to the sign as 464.4
+gives it.
+
+**1. `ORIENT2D_ERROR_BOUND`, with both products normal.** `o2.g` proves
+`|y − Ex| ≤ eb` at the code's `B = 3u + 16u²`, in 0.33 s, printing
+`(y − Ex) / Phat` within `3u + 8u²` and `P −/ Phat` within `u`. The smallest
+`B` it proves, in steps of `u²`, is `3u + 15u²`: `3u + 14u²` fails, and so
+does `3u`. The claim on `value`, `o2v.g` (block 1's change in 464.5, here
+`rv` multiplying the `1` in `W1` and `W2`), fails at the code's `B`, best
+`[-1.33333, 1.33333]`, with `(value − Ex) / Phat` within `4u + 8u²`. The doc
+comment on `ORIENT2D_ERROR_BOUND` does not claim it: it counts three
+roundings and argues the fourth apart. No input was built for it.
+
+**2. orient2d without the products normal.** `on_floats` does not check them
+(`orient2d.rs:278-280`), so `o2.g`'s hypotheses are ones the code does not
+give. The bound holds anyway, wherever `decide` compares. Split on the exact
+products `F = acx * bcy` and `G = acy * bcx`:
+
+- both at least `2⁻¹⁰²²`: `o2.g`.
+- `G` under `2⁻¹⁰²²` and `|F|` at least `2⁻¹⁰⁰⁰`: `o2s.g` for `G` positive
+  and `o2sn.g` for `G` negative. Each proves at the code's `B`, printing
+  `(e1 + e2) / Phat2` within `3u + 6u²`, what rounding `G` cost within
+  `±2⁻¹⁰⁷⁵`, and `P` at least `2^(-970.585)`.
+- `F` under `2⁻¹⁰²²` and `|G|` at least `2⁻¹⁰⁰⁰`: `o2f.g` and `o2fn.g`, the
+  same, and each proves.
+- both under `2⁻¹⁰⁰⁰`: `o2tiny.g` prints "remaining results are pointless,
+  anything can be proved": `eb` cannot then be normal.
+
+What makes it work is that `eb` normal puts `P` above `2^(-970.585)`, so a
+product below the normals loses at most `2⁻¹⁰⁷⁵`, which is at most `u` of
+`eb`, and the code's `16u²` has room for it. The controls are written and
+not run: each case script at `B = 3u` and at `3u + 14u²`, and `o2tiny.g`
+without `|eb| >= 1b-1022`, each of which must fail for its parent not to
+have proved from a contradiction.
+
+The doc comment's own argument, `orient2d.rs:343-350`, does not hold as
+written: it calls `acx * bcy` and `acy * bcx` exact products, but they are
+products of rounded differences, so monotone rounding gives the sign of the
+rounded differences' determinant, not the true one. The conclusion, that no
+subnormal guard is needed, is what the scripts above show instead, by way of
+`eb` being normal. Nothing here ran the paper argument's failure on an input.
+
+**3. `SIDE_OF_PLANE_ERROR_BOUND`.** `plane.g` proves `|y − Ex| ≤ eb` at the
+code's `B = 4u + 32u²`, in 0.59 s, printing `(y − Ex) / P3` within `3u + 2u²`
+(`P3` the three products' part of the permanent; the offset reaches `y` with
+no rounding and only makes the permanent larger) and `P −/ Phat` within
+`3u + 3u²`. The smallest `B` proved is `3u + 15u²`: `3u + 14u²` fails, best
+`[-1, 1]`. The claim on `value`, `planev.g`, proves at the code's `B`, with
+`(value − Ex) / Phat` within `4u + 4u²`: the doc comment on
+`SIDE_OF_PLANE_ERROR_BOUND` counts four roundings to `value`, and that is
+proved. Not yet run: `plane.g` without `product_is_normal` and without `eb`
+normal, and `planev.g` below the code's `B`.
+
+**4. Not started.** `surface.rs`' `ERROR_BOUND`,
+`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT`, `SIDE_OF_SPHERE`,
+`SIDE_OF_CYLINDER`, `SIDE_OF_CONE` and `SIDE_OF_TORUS`, and `coqc` on any
+proof here.
+
+**5. The scripts.** `o2.g`, whole:
+
+```gappa
+# Orient2d::on_floats and ORIENT2D_ERROR_BOUND,
+# crates/rcad-predicates/src/orient2d.rs at affe0f01.
+@rnd = float<ieee_64, ne>;
+
+# The six input coordinates, each an f64.
+ax = rnd(ax_); ay = rnd(ay_);
+bx = rnd(bx_); by = rnd(by_);
+cx = rnd(cx_); cy = rnd(cy_);
+
+# What on_floats computes, line for line.
+Acx = ax - cx; Acy = ay - cy;
+Bcx = bx - cx; Bcy = by - cy;
+acx = rnd(Acx); acy = rnd(Acy);
+bcx = rnd(Bcx); bcy = rnd(Bcy);
+
+forwards = rnd(acx * bcy);
+backwards = rnd(acy * bcx);
+y = forwards - backwards;
+value = rnd(y);
+
+Phat = |forwards| + |backwards|;
+P = rnd(Phat);
+
+B = 3b-53 + 1b-102;
+eb = rnd(B * P);
+
+# The true determinant of the same inputs.
+Ex = Acx * Bcy - Acy * Bcx;
+
+# What each rounding multiplied its argument by.
+racx = acx / Acx; racy = acy / Acy;
+rbcx = bcx / Bcx; rbcy = bcy / Bcy;
+rp1 = forwards / (acx * bcy); rp2 = backwards / (acy * bcx);
+
+# Each of the two products, as y carries it, less the product of the
+# exact differences.
+W1 = 1 - 1 / (racx * rbcy * rp1);
+W2 = 1 - 1 / (racy * rbcx * rp2);
+c1 = |forwards|; c2 = |backwards|;
+e1 = forwards * W1; e2 = -(backwards * W2);
+
+{
+  # Every coordinate is a finite f64.
+     |ax| <= 1b1024 /\ |ay| <= 1b1024
+  /\ |bx| <= 1b1024 /\ |by| <= 1b1024
+  /\ |cx| <= 1b1024 /\ |cy| <= 1b1024
+  # No difference is zero.
+  /\ |acx| >= 1b-1074 /\ |acy| >= 1b-1074
+  /\ |bcx| >= 1b-1074 /\ |bcy| >= 1b-1074
+  # Both products are normal. on_floats does not check this.
+  /\ |forwards| >= 1b-1022 /\ |backwards| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those three gives.
+  /\ forwards -/ acx * bcy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ backwards -/ acy * bcx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ forwards / |forwards| in [-1, 1] /\ backwards / |backwards| in [-1, 1]
+->
+  (y - Ex) / Phat in ? /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+acx / Acx -> 1 + (acx - Acx) / Acx;
+acy / Acy -> 1 + (acy - Acy) / Acy;
+bcx / Bcx -> 1 + (bcx - Bcx) / Bcx;
+bcy / Bcy -> 1 + (bcy - Bcy) / Bcy;
+forwards / (acx * bcy) -> 1 + (forwards - acx * bcy) / (acx * bcy);
+backwards / (acy * bcx) -> 1 + (backwards - acy * bcx) / (acy * bcx);
+
+# The error is the sum of the two products' errors, each a fraction of its
+# own piece of the permanent; add_rr then averages them.
+(y - Ex) / Phat -> ((Phat + (y - Ex)) - Phat) / Phat;
+Phat + (y - Ex) -> (c1 + e1) + (c2 + e2);
+(c1 + e1) - c1 -> e1;
+(c2 + e2) - c2 -> e2;
+e1 / c1 -> (forwards / |forwards|) * W1;
+e2 / c2 -> -((backwards / |backwards|) * W2);
+
+# From the permanent to the one on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / Phat) * (Phat / P) * (P / eb);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+`o2s.g`, whole:
+
+```gappa
+# o2.g where backwards may be below the normals, which on_floats does not
+# check: acy * bcx is under 2^-1022 and positive, and acx * bcy is at
+# least 2^-1000.
+@rnd = float<ieee_64, ne>;
+
+ax = rnd(ax_); ay = rnd(ay_);
+bx = rnd(bx_); by = rnd(by_);
+cx = rnd(cx_); cy = rnd(cy_);
+
+Acx = ax - cx; Acy = ay - cy;
+Bcx = bx - cx; Bcy = by - cy;
+acx = rnd(Acx); acy = rnd(Acy);
+bcx = rnd(Bcx); bcy = rnd(Bcy);
+
+F = acx * bcy;
+G = acy * bcx;
+forwards = rnd(F);
+backwards = rnd(G);
+y = forwards - backwards;
+value = rnd(y);
+
+# backwards is not negative, as G is not, so |backwards| is backwards.
+Phat = |forwards| + backwards;
+P = rnd(Phat);
+
+B = 3b-53 + 1b-102;
+eb = rnd(B * P);
+
+Ex = Acx * Bcy - Acy * Bcx;
+
+racx = acx / Acx; racy = acy / Acy;
+rbcx = bcx / Bcx; rbcy = bcy / Bcy;
+rp1 = forwards / F;
+
+# The permanent with G in place of what it rounds to.
+c1 = |forwards|; c2 = G;
+Phat2 = c1 + c2;
+
+# Each product less the product of the exact differences, as relative
+# errors for forwards and for G, and what rounding G cost, as an amount.
+W1 = 1 - 1 / (racx * rbcy * rp1);
+W2 = 1 - 1 / (racy * rbcx);
+e1 = forwards * W1; e2 = -(G * W2);
+d2 = -(backwards - G);
+
+{
+     |ax| <= 1b1024 /\ |ay| <= 1b1024
+  /\ |bx| <= 1b1024 /\ |by| <= 1b1024
+  /\ |cx| <= 1b1024 /\ |cy| <= 1b1024
+  /\ |acx| >= 1b-1074 /\ |acy| >= 1b-1074
+  /\ |bcx| >= 1b-1074 /\ |bcy| >= 1b-1074
+  # The case: G is positive and below the normals, F is far above them.
+  # A product of two doubles that are not zero is at least 2^-2148.
+  /\ G in [1b-2148, 1b-1022] /\ |F| >= 1b-1000
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ forwards / |forwards| in [-1, 1]
+->
+  (e1 + e2) / Phat2 in ? /\ d2 in ? /\ P in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+acx / Acx -> 1 + (acx - Acx) / Acx;
+acy / Acy -> 1 + (acy - Acy) / Acy;
+bcx / Bcx -> 1 + (bcx - Bcx) / Bcx;
+bcy / Bcy -> 1 + (bcy - Bcy) / Bcy;
+forwards / F -> 1 + (forwards - F) / F;
+
+# The relative part is averaged over Phat2 as in o2.g; what rounding G
+# cost is an amount, and eb being normal keeps it small against eb.
+(y - Ex) / eb -> ((e1 + e2) / Phat2) * (Phat2 / P) * (P / eb) + d2 / eb;
+(e1 + e2) / Phat2 -> ((Phat2 + (e1 + e2)) - Phat2) / Phat2;
+Phat2 + (e1 + e2) -> (c1 + e1) + (c2 + e2);
+(c1 + e1) - c1 -> e1;
+(c2 + e2) - c2 -> e2;
+e1 / c1 -> (forwards / |forwards|) * W1;
+e2 / c2 -> -W2;
+Phat2 / P -> Phat / P + (G - backwards) / P;
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+P -> eb / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+`o2cases.py`, whole, run beside `o2s.g` and `o2.g`, writes `o2sn.g`, `o2f.g`,
+`o2fn.g` and `o2tiny.g`:
+
+```python
+"""Write o2s.g's other cases: o2sn.g (G negative), o2f.g and o2fn.g (the same
+with forwards below the normals instead), and o2tiny.g (both products under
+2^-1000)."""
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+base = open("o2s.g").read()
+
+# G negative: |G| is -G and |backwards| is -backwards.
+src = base
+src = sub(src, "acy * bcx is under 2^-1022 and positive", "acy * bcx is under 2^-1022 and negative")
+src = sub(src, "# backwards is not negative, as G is not, so |backwards| is backwards.\nPhat = |forwards| + backwards;",
+          "# backwards is not positive, as G is not, so |backwards| is -backwards.\nPhat = |forwards| - backwards;")
+src = sub(src, "c2 = G;", "c2 = -G;")
+src = sub(src, "G is positive and below", "G is negative and above")
+src = sub(src, "G in [1b-2148, 1b-1022]", "G in [-1b-1022, -1b-2148]")
+src = sub(src, "e2 / c2 -> -W2;", "e2 / c2 -> W2;")
+src = sub(src, "Phat2 / P -> Phat / P + (G - backwards) / P;", "Phat2 / P -> Phat / P + (backwards - G) / P;")
+open("o2sn.g", "w").write(src)
+
+# forwards below the normals instead of backwards.
+for sign in ("", "n"):
+    src = open(f"o2s{sign}.g").read()
+    src = sub(src, "# o2.g where backwards may be below", "# o2.g where forwards may be below")
+    if sign:
+        src = sub(src, "acy * bcx is under 2^-1022 and negative, and acx * bcy is at",
+                  "acx * bcy is under 2^-1022 and negative, and acy * bcx is at")
+    else:
+        src = sub(src, "acy * bcx is under 2^-1022 and positive, and acx * bcy is at",
+                  "acx * bcy is under 2^-1022 and positive, and acy * bcx is at")
+    src = sub(src, "F = acx * bcy;\nG = acy * bcx;\nforwards = rnd(F);\nbackwards = rnd(G);",
+              "G = acx * bcy;\nF = acy * bcx;\nforwards = rnd(G);\nbackwards = rnd(F);")
+    if sign:
+        src = sub(src, "# backwards is not positive, as G is not, so |backwards| is -backwards.\nPhat = |forwards| - backwards;",
+                  "# forwards is not positive, as G is not, so |forwards| is -forwards.\nPhat = -forwards + |backwards|;")
+    else:
+        src = sub(src, "# backwards is not negative, as G is not, so |backwards| is backwards.\nPhat = |forwards| + backwards;",
+                  "# forwards is not negative, as G is not, so |forwards| is forwards.\nPhat = forwards + |backwards|;")
+    src = sub(src, "rp1 = forwards / F;", "rp1 = backwards / F;")
+    src = sub(src, "c1 = |forwards|;", "c1 = |backwards|;")
+    src = sub(src, "W1 = 1 - 1 / (racx * rbcy * rp1);\nW2 = 1 - 1 / (racy * rbcx);",
+              "W1 = 1 - 1 / (racy * rbcx * rp1);\nW2 = 1 - 1 / (racx * rbcy);")
+    # y - Ex = (G - Acx Bcy) + (forwards - G) - (backwards - Acy Bcx).
+    src = sub(src, "e1 = forwards * W1; e2 = -(G * W2);\nd2 = -(backwards - G);",
+              "e1 = -(backwards * W1); e2 = G * W2;\nd2 = forwards - G;")
+    src = sub(src, "/\\ forwards / |forwards| in [-1, 1]", "/\\ backwards / |backwards| in [-1, 1]")
+    src = sub(src, "forwards / F -> 1 + (forwards - F) / F;", "backwards / F -> 1 + (backwards - F) / F;")
+    src = sub(src, "e1 / c1 -> (forwards / |forwards|) * W1;", "e1 / c1 -> -((backwards / |backwards|) * W1);")
+    if sign:
+        src = sub(src, "e2 / c2 -> W2;", "e2 / c2 -> -W2;")
+        src = sub(src, "Phat2 / P -> Phat / P + (backwards - G) / P;", "Phat2 / P -> Phat / P + (forwards - G) / P;")
+    else:
+        src = sub(src, "e2 / c2 -> -W2;", "e2 / c2 -> W2;")
+        src = sub(src, "Phat2 / P -> Phat / P + (G - backwards) / P;", "Phat2 / P -> Phat / P + (G - forwards) / P;")
+    open(f"o2f{sign}.g", "w").write(src)
+
+# Both products under 2^-1000: then eb is not normal, so decide does not
+# compare. Gappa proves the goal from the contradiction.
+src = open("o2.g").read()
+src = sub(src, "# o2.g\n", "# o2.g\n") if "# o2.g\n" in src else src
+src = sub(src, "  # Both products are normal. on_floats does not check this.\n  /\\ |forwards| >= 1b-1022 /\\ |backwards| >= 1b-1022\n",
+          "  # The case: both products are under 2^-1000.\n  /\\ |acx * bcy| <= 1b-1000 /\\ |acy * bcx| <= 1b-1000\n")
+src = sub(src, "  # What lemma.g proves each of those three gives.\n"
+          "  /\\ forwards -/ acx * bcy in [-4503599627370497b-105, 4503599627370497b-105]\n"
+          "  /\\ backwards -/ acy * bcx in [-4503599627370497b-105, 4503599627370497b-105]\n"
+          "  /\\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]\n", "")
+src = sub(src, "  (y - Ex) / Phat in ? /\\ P -/ Phat in ?\n  /\\ (y - Ex) / eb in [-1, 1]", "  eb in ? /\\ (y - Ex) / eb in [-1, 1]")
+open("o2tiny.g", "w").write(src)
+```
+
+`plane.g`, whole:
+
+```gappa
+# SideOfAFlatSurface::on_floats and SIDE_OF_PLANE_ERROR_BOUND,
+# crates/rcad-geom/src/plane.rs at affe0f01.
+@rnd = float<ieee_64, ne>;
+
+# The normal, the point and the offset, each an f64.
+n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);
+p0 = rnd(p0_); p1 = rnd(p1_); p2 = rnd(p2_);
+off = rnd(off_);
+
+# What on_floats computes, line for line.
+t0 = rnd(n0 * p0); t1 = rnd(n1 * p1); t2 = rnd(n2 * p2);
+S01 = t0 + t1;
+s01 = rnd(S01);
+S012 = s01 + t2;
+s012 = rnd(S012);
+y = s012 - off;
+value = rnd(y);
+
+Phat = |t0| + |t1| + |t2| + |off|;
+P = rnd(rnd(rnd(|t0| + |t1|) + |t2|) + |off|);
+
+B = 4b-53 + 1b-101;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Ex = n0 * p0 + n1 * p1 + n2 * p2 - off;
+
+# The three terms' part of the permanent, with no rounding.
+c0 = |t0|; c1 = |t1|; c2 = |t2|;
+P3 = c0 + c1 + c2;
+
+# What each rounding multiplied its argument by.
+rp0 = t0 / (n0 * p0); rp1 = t1 / (n1 * p1); rp2 = t2 / (n2 * p2);
+rs01 = s01 / S01; rs012 = s012 / S012;
+
+# Each of the three terms, as y carries it, less the term itself. The
+# offset reaches y with no rounding.
+W0 = rs01 * rs012 - 1 / rp0;
+W1 = rs01 * rs012 - 1 / rp1;
+W2 = rs012 - 1 / rp2;
+e0 = t0 * W0; e1 = t1 * W1; e2 = t2 * W2;
+
+{
+  # Every input is a finite f64.
+     |n0| <= 1b1024 /\ |n1| <= 1b1024 /\ |n2| <= 1b1024
+  /\ |p0| <= 1b1024 /\ |p1| <= 1b1024 /\ |p2| <= 1b1024
+  /\ |off| <= 1b1024
+  # No factor of the three products is zero.
+  /\ |n0| >= 1b-1074 /\ |n1| >= 1b-1074 /\ |n2| >= 1b-1074
+  /\ |p0| >= 1b-1074 /\ |p1| >= 1b-1074 /\ |p2| >= 1b-1074
+  # Neither sum cancels to zero.
+  /\ |S01| >= 1b-1074 /\ |S012| >= 1b-1074
+  # product_is_normal on the three products.
+  /\ |t0| >= 1b-1022 /\ |t1| >= 1b-1022 /\ |t2| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those four gives.
+  /\ t0 -/ n0 * p0 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t1 -/ n1 * p1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t2 -/ n2 * p2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ t0 / |t0| in [-1, 1] /\ t1 / |t1| in [-1, 1] /\ t2 / |t2| in [-1, 1]
+->
+  (y - Ex) / P3 in ? /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+t0 / (n0 * p0) -> 1 + (t0 - n0 * p0) / (n0 * p0);
+t1 / (n1 * p1) -> 1 + (t1 - n1 * p1) / (n1 * p1);
+t2 / (n2 * p2) -> 1 + (t2 - n2 * p2) / (n2 * p2);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+s012 / S012 -> 1 + (s012 - S012) / S012;
+
+# The error is the sum of the three terms' errors, each a fraction of its
+# own piece of the permanent; add_rr then averages them.
+(y - Ex) / P3 -> ((P3 + (y - Ex)) - P3) / P3;
+P3 + (y - Ex) -> (c0 + e0) + (c1 + e1) + (c2 + e2);
+(c0 + e0) - c0 -> e0;
+(c1 + e1) - c1 -> e1;
+(c2 + e2) - c2 -> e2;
+e0 / c0 -> (t0 / |t0|) * W0;
+e1 / c1 -> (t1 / |t1|) * W1;
+e2 / c2 -> (t2 / |t2|) * W2;
+
+# From the three terms to the whole permanent, which the offset only
+# makes larger, to the one on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / P3) * (P3 / Phat) * (Phat / P) * (P / eb);
+P3 / Phat -> 1 / (1 + |off| / P3);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+`planev.g` is `plane.g` with the claim taken on `value`: `rv = value / y;`
+multiplies the first term of `W0`, `W1` and `W2`, the offset gets a term of its
+own, `W3 = rv - 1;` and `e3 = -(off * W3);` with `c3 = |off|` in the average
+in place of `P3`, the hypotheses gain `|off| >= 1b-1074 /\ |y| >= 1b-1074` and
+`off / |off| in [-1, 1]`, and the hints gain `value / y -> 1 + (value - y) / y;`
+and lose `P3 / Phat -> ...`. The zero offset is then on paper: it leaves
+`value`'s error the same three terms.
