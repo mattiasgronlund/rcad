@@ -4052,10 +4052,16 @@ impl Assembly {
                 _ => still_a_corner[corner] = true,
             }
         }
+        let either_side: Vec<[usize; 2]> = along
+            .iter()
+            .map(|darts| darts.map(|dart| lump_of_face[dart.face]))
+            .collect();
         for (lump, corner) in self.where_curved_pieces_met_off_a_run_that_closes_up(
             &leaving,
             &straight_through,
             curved_pieces_met,
+            joined,
+            &either_side,
         ) {
             straight_through.remove(&(lump, corner));
             still_a_corner[corner] = true;
@@ -4278,8 +4284,9 @@ impl Assembly {
 
     /// Every corner where pieces of one cone, pipe or ball met, as
     /// `curved_pieces_met` marks them ([`Assembly::where_curved_pieces_met`]),
-    /// as lump and corner, that `straight_through` walks on a run that does
-    /// not close up into the one closed input edge it was cut from, between
+    /// as lump and corner, that `straight_through` walks on a run that neither
+    /// closes up into the one closed input edge it was cut from nor goes back
+    /// round one closed crossing that every face along it holds whole, between
     /// two edges that are neither both pieces of one open input edge nor both
     /// straight. Each stays a corner.
     ///
@@ -4302,6 +4309,42 @@ impl Assembly {
     /// frustum had one circle, and the frustum's own corner on it went, since
     /// nothing kept that one (Q2170). The corners left here are walked as they
     /// were before, so the runs that do not close up are the runs they were.
+    ///
+    /// **And except on a run back round one closed crossing**
+    /// ([`Assembly::runs_back_round_one_closed_crossing`]): one that leaves a
+    /// corner kept for something else and comes back round to it, every piece
+    /// of it a piece of one closed input edge or of one crossing of a plane
+    /// and a cone or a pipe that this fuse made. Folded, it is that closed
+    /// curve whole again, from the kept corner back to it, and again no picker
+    /// holds an arc of it. Kept, the corner can be a rounding off the kept
+    /// one: a round bar of radius `1/2` standing in an L plate, its pipe
+    /// touching the line of one of the plate's inner sides past that side's
+    /// end, both turned `3π/2` or `−π/2` about `z`, has that side's plane cut
+    /// the pipe in two lines a rounding apart. The pipe was joined back with
+    /// one line as its seam and the other line's ends kept, so each circle
+    /// round the pipe came back as an arc a rounding long and an arc the rest
+    /// of the way round, and every certified fuse of the two was refused
+    /// `DynamicRangeTooWide`, at `2⁵⁵` and `2⁵⁵/3`, though the answer is the
+    /// two as they stand (Q2654,
+    /// `a_bar_flush_with_an_l_plates_inner_side_turned.rs`).
+    ///
+    /// **Only where every face along the run holds it whole**
+    /// ([`Assembly::the_runs_each_face_along_holds_whole`]): a curved face
+    /// beside nothing but its seams and other closed curves given back whole,
+    /// a band, and a flat face only in rings of nothing but the run. A whole
+    /// closed curve on a pipe face beside parts of other crossings is a side
+    /// `holds.rs` cannot read (`the_way_a_side_runs`), and so the next fuse
+    /// cannot follow the face. Folded wherever it went back round, five tests
+    /// failed, four of them refused `AFaceTrimmedByACurveThisCannotFollow`:
+    /// the slot end built from two stacked blocks
+    /// (`a_slot_end_built_from_two_stacked_blocks.rs`), and four of
+    /// `two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`, among them a
+    /// box turned an eighth of a turn, whose pipe face holds the box's hole
+    /// beside the bar's top rim.
+    /// A flat face reads a whole closed curve only as a ring of its own
+    /// (`is_a_round_wire_of_a_flat_face` in `holds.rs`), so its rule keeps to
+    /// that; no test here meets a flat face that fails it, and with that rule
+    /// left out the 1619 tests of round shapes in this crate still pass.
     ///
     /// **And except between two pieces of one open input edge**
     /// ([`Assembly::are_pieces_of_one_open_input_edge`]): an arc that started
@@ -4341,6 +4384,8 @@ impl Assembly {
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
         straight_through: &BTreeSet<(usize, usize)>,
         curved_pieces_met: &[bool],
+        joined: &[JoinedFace],
+        either_side: &[[usize; 2]],
     ) -> Vec<(usize, usize)> {
         let runs = runs_through(self.edges.len(), leaving, straight_through);
         let closed_up: BTreeSet<usize> = self
@@ -4349,18 +4394,112 @@ impl Assembly {
             .into_iter()
             .map(|at| runs.leader(leaving[&at][0]))
             .collect();
+        let back_round = self.the_runs_each_face_along_holds_whole(
+            self.runs_back_round_one_closed_crossing(leaving, straight_through, &runs),
+            &closed_up,
+            &runs,
+            joined,
+            either_side,
+        );
         straight_through
             .iter()
             .copied()
             .filter(|&(lump, corner)| {
+                let run = runs.leader(leaving[&(lump, corner)][0]);
                 curved_pieces_met[corner]
-                    && !closed_up.contains(&runs.leader(leaving[&(lump, corner)][0]))
+                    && !closed_up.contains(&run)
+                    && !back_round.contains(&run)
                     && !self.are_pieces_of_one_open_input_edge(&leaving[&(lump, corner)])
                     && !leaving[&(lump, corner)]
                         .iter()
                         .all(|&edge| self.edges[edge].runs_straight())
             })
             .collect()
+    }
+
+    /// Every run of `runs`, by its leader, with its edges, that leaves one
+    /// corner `straight_through` does not walk and comes back round to that
+    /// same corner, every piece of it a piece of one closed crossing
+    /// ([`Assembly::are_pieces_of_one_closed_crossing`]).
+    fn runs_back_round_one_closed_crossing(
+        &self,
+        leaving: &BTreeMap<(usize, usize), Vec<usize>>,
+        straight_through: &BTreeSet<(usize, usize)>,
+        runs: &Sameness,
+    ) -> BTreeMap<usize, Vec<usize>> {
+        let mut ends_of_run: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut edges_of: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+        for (&(lump, corner), by) in leaving {
+            for &edge in by {
+                let run = runs.leader(edge);
+                edges_of.entry(run).or_default().insert(edge);
+                if !straight_through.contains(&(lump, corner)) {
+                    ends_of_run.entry(run).or_default().push(corner);
+                }
+            }
+        }
+        ends_of_run
+            .into_iter()
+            .filter(|(_, ends)| matches!(ends[..], [kept, back] if kept == back))
+            .map(|(run, _)| (run, edges_of[&run].iter().copied().collect::<Vec<_>>()))
+            .filter(|(_, edges)| self.are_pieces_of_one_closed_crossing(edges))
+            .collect()
+    }
+
+    /// The runs of `back_round`, by their leaders, that every joined face
+    /// along them holds whole: a flat face only in rings of nothing but the
+    /// run, and a curved face only beside its seams, closed edges, and runs
+    /// that close up or are left in `back_round`. Dropping one run can leave a
+    /// curved face beside a run that is no longer whole, so the drop is
+    /// repeated until it drops nothing.
+    fn the_runs_each_face_along_holds_whole(
+        &self,
+        mut back_round: BTreeMap<usize, Vec<usize>>,
+        closed_up: &BTreeSet<usize>,
+        runs: &Sameness,
+        joined: &[JoinedFace],
+        either_side: &[[usize; 2]],
+    ) -> BTreeSet<usize> {
+        loop {
+            let still: BTreeSet<usize> = back_round.keys().copied().collect();
+            let is_whole_beside_a_band = |dart: &Dart| {
+                let edge = self.edge_of(*dart);
+                let [one, other] = either_side[edge];
+                let [start, end] = self.edges[edge].ends;
+                let run = runs.leader(edge);
+                one == other || start == end || closed_up.contains(&run) || still.contains(&run)
+            };
+            back_round.retain(|&run, edges| {
+                let on_run = |dart: &Dart| runs.leader(self.edge_of(*dart)) == run;
+                edges
+                    .iter()
+                    .flat_map(|&edge| either_side[edge])
+                    .all(|face| {
+                        let rings = &joined[face].rings;
+                        if joined[face].surface.as_plane().is_some() {
+                            rings
+                                .iter()
+                                .all(|ring| ring.iter().all(on_run) || !ring.iter().any(on_run))
+                        } else {
+                            rings.iter().flatten().all(is_whole_beside_a_band)
+                        }
+                    })
+            });
+            if back_round.len() == still.len() {
+                return still;
+            }
+        }
+    }
+
+    /// Whether `edges` are pieces of one closed curve
+    /// ([`Assembly::are_pieces_of_one_closed_curve`]), or of the crossing of
+    /// a plane and a pipe that this fuse made.
+    fn are_pieces_of_one_closed_crossing(&self, edges: &[usize]) -> bool {
+        self.are_pieces_of_one_closed_curve(edges)
+            || matches!(
+                self.the_surface_a_plane_crossing_made_here_runs_round(edges),
+                Some(Surface::Cylinder(_))
+            )
     }
 
     /// Whether `edges` are all pieces of one input edge that does not close on
@@ -4475,33 +4614,47 @@ impl Assembly {
     /// through the ball's poles, which the arrangement makes corners of, and
     /// closed up across them a closed edge's one corner sits on a pole: 22
     /// tests across the ball-and-block files failed (§400.5). A crossing of a
-    /// plane and a pipe made here stays in its pieces. It was left out when
+    /// plane and a pipe made here does not close up here. It was left out when
     /// [`Assembly::needs_no_seam`] left every pipe out (Q2170), and since
     /// Q2657 that closes up a pipe band whose rings go right round only
     /// where they are pieces of input edges, as the bored shaft's rims are.
-    /// Joining the pieces of such a crossing made here is untried.
+    /// Its pieces are joined back up only on a run that leaves a kept corner
+    /// and comes back round to it, where every face along the run holds it
+    /// whole ([`Assembly::runs_back_round_one_closed_crossing`], Q2654); closing
+    /// up a run of them with every corner walked straight through is untried.
     fn are_pieces_of_one_closed_curve(&self, edges: &[usize]) -> bool {
         let pieces: Vec<&[EdgeKey]> = edges
             .iter()
             .map(|&edge| self.edges[edge].from.as_slice())
             .collect();
-        if is_one_input_edge(&pieces) {
-            return true;
-        }
-        let Some(&first) = edges.first() else {
-            return false;
+        is_one_input_edge(&pieces)
+            || matches!(
+                self.the_surface_a_plane_crossing_made_here_runs_round(edges),
+                Some(Surface::Cone(_))
+            )
+    }
+
+    /// The surface other than a plane that `edges` all run round, where each
+    /// is a piece of the one crossing of a plane and that surface that this
+    /// fuse made, and of nothing else.
+    fn the_surface_a_plane_crossing_made_here_runs_round(
+        &self,
+        edges: &[usize],
+    ) -> Option<&Surface> {
+        let &first = edges.first()?;
+        let pair = &self.edges[first].carried_by;
+        let ([Surface::Plane(_), round] | [round, Surface::Plane(_)]) = pair else {
+            return None;
         };
-        let pair @ ([Surface::Plane(_), Surface::Cone(_)] | [Surface::Cone(_), Surface::Plane(_)]) =
-            &self.edges[first].carried_by
-        else {
-            return false;
-        };
-        edges.iter().all(|&edge| {
-            let [one, other] = &self.edges[edge].carried_by;
-            self.edges[edge].from.is_empty()
-                && ((one_surface(one, &pair[0]) && one_surface(other, &pair[1]))
-                    || (one_surface(one, &pair[1]) && one_surface(other, &pair[0])))
-        })
+        edges
+            .iter()
+            .all(|&edge| {
+                let [one, other] = &self.edges[edge].carried_by;
+                self.edges[edge].from.is_empty()
+                    && ((one_surface(one, &pair[0]) && one_surface(other, &pair[1]))
+                        || (one_surface(one, &pair[1]) && one_surface(other, &pair[0])))
+            })
+            .then_some(round)
     }
 
     /// Every corner walked straight through on a run of edges whose two ends
