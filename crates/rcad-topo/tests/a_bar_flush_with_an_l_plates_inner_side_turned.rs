@@ -44,7 +44,7 @@ use core::f64::consts::{FRAC_PI_2, PI};
 
 use rcad_geom::{Axis, Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Error, Fused, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Fused, Model, ProfileBuilder, Rule, SolidKey};
 
 #[test]
 fn every_fuse_of_the_bar_and_the_l_plate_unturned_answers_the_two_as_they_stand() {
@@ -58,58 +58,45 @@ fn every_fuse_of_the_bar_and_the_l_plate_turned_three_tenths_answers_the_two_as_
 }
 
 #[test]
-fn the_bar_and_the_l_plate_turned_three_quarter_turns_are_refused_for_an_arc_a_rounding_long() {
-    every_fuse_is_refused([1.0, 1.5], 1.5 * PI, |_| Refused::OnRange(2f64.powi(55)));
+fn every_fuse_of_the_bar_and_the_l_plate_turned_three_quarter_turns_answers_the_two_as_they_stand()
+{
+    every_fuse_answers_the_two_as_they_stand([1.0, 1.5], 1.5 * PI);
 }
 
 #[test]
-fn the_bar_and_the_l_plate_turned_back_a_quarter_turn_are_refused_for_an_arc_a_rounding_long() {
-    every_fuse_is_refused([1.0, 1.5], -FRAC_PI_2, |_| {
-        Refused::OnRange(2f64.powi(55) / 3.0)
-    });
+fn every_fuse_of_the_bar_and_the_l_plate_turned_back_a_quarter_turn_answers_the_two_as_they_stand()
+{
+    every_fuse_answers_the_two_as_they_stand([1.0, 1.5], -FRAC_PI_2);
 }
 
 #[test]
 fn the_bar_by_the_other_side_turned_a_quarter_turn_is_refused_at_its_seam() {
     every_fuse_is_refused([1.5, 1.0], FRAC_PI_2, |bar_first| {
-        Refused::Undecidable(if bar_first {
+        if bar_first {
             "side of plane"
         } else {
             "order along a crossing"
-        })
+        }
     });
 }
 
-/// How a fuse pinned at what it does is refused.
-enum Refused {
-    /// `DynamicRangeTooWide`, at this ratio.
-    OnRange(f64),
-    /// `Undecidable`, with one record, of the predicate this names.
-    Undecidable(&'static str),
-}
-
 /// Every rule with either solid first, under a certified policy, is refused
-/// as `refused` says for that order, the bar first or not.
-fn every_fuse_is_refused(at: [f64; 2], turn: f64, refused: impl Fn(bool) -> Refused) {
+/// `Undecidable`, with one record, of the predicate `refused` names for that
+/// order, the bar first or not.
+fn every_fuse_is_refused(at: [f64; 2], turn: f64, refused: impl Fn(bool) -> &'static str) {
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for bar_first in [true, false] {
             let case = format!("bar at {at:?} turned {turn}, {rule:?}, bar first {bar_first}");
             let (_, fused) = the_two_fused(at, turn, rule, bar_first, &mut ProvenanceLog::new());
-            match (refused(bar_first), fused) {
-                (
-                    Refused::OnRange(wanted),
-                    Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })),
-                ) => assert_eq!(ratio, wanted, "{case}"),
-                (Refused::Undecidable(wanted), Err(Error::Undecidable { records })) => {
-                    let named: Vec<_> = records
-                        .records()
-                        .iter()
-                        .map(|record| record.predicate())
-                        .collect();
-                    assert_eq!(named, [wanted], "{case}");
-                }
-                (_, fused) => panic!("{case}: {:?}", fused.map(|fused| fused.solids().len())),
-            }
+            let Err(Error::Undecidable { records }) = fused else {
+                panic!("{case}: {:?}", fused.map(|fused| fused.solids().len()));
+            };
+            let named: Vec<_> = records
+                .records()
+                .iter()
+                .map(|record| record.predicate())
+                .collect();
+            assert_eq!(named, [refused(bar_first)], "{case}");
         }
     }
 }
