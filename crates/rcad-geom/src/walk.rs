@@ -1152,7 +1152,8 @@ fn a_quartic_picked_up_at(
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when a corner of a
 /// run between two corners sits where the two surfaces are tangent, so it
-/// cannot be settled onto both, also asked before the march.
+/// cannot be settled onto both, also asked before the march, unless the corner
+/// is an exact point both surfaces are proved to pass through.
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a settled point has no box
 /// round it.
@@ -1245,7 +1246,12 @@ fn follow_the_quartic(
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] at a corner where
 /// the two surfaces are tangent, or too nearly so for their bend to leave a
 /// bound, and [`Error::CannotWorkOutHowBigACrossingIs`] when settling one lands
-/// somewhere that is not a point.
+/// somewhere that is not a point. A tangent corner that is an exact point both
+/// surfaces are proved to pass through is on the crossing, so it is no distance
+/// off it and is not refused: two loops of a ball and a pipe that meet where
+/// the two touch have their runs cornered there
+/// (`a_corner_exactly_where_two_surfaces_touch_is_no_distance_off_their_crossing`).
+/// The FTR-F1 corner `#1030` is not proved to be on both, and is still refused.
 fn how_far_off_the_crossing_a_corner_can_be(
     ends: [PredicatePoint; 2],
     surfaces: [&Surface; 2],
@@ -1294,8 +1300,9 @@ fn how_far_off_the_crossing_a_corner_can_be(
 /// (`a_closed_loop_cornered_where_its_surfaces_touch_is_walked_though_its_corner_cannot_be_settled`).
 /// The bound only ever leaves a point out beside the corner, so going without it
 /// costs that and no more, where refusing would refuse a loop the march has
-/// already walked. A run between two corners never reaches this: a corner of
-/// one where the surfaces touch is refused before the march
+/// already walked. A run between two corners reaches this only at a corner
+/// both surfaces are proved to pass through exactly: any other corner of one
+/// where the surfaces touch is refused before the march
 /// ([`how_far_off_the_crossing_a_corner_can_be`]).
 ///
 /// # Errors
