@@ -670,10 +670,10 @@ pub enum Error {
     /// its centre, the ball of 2.5 against the bar of radius 1 up `z` at
     /// `x = ±1`, was refused here under every rule until Q2650 cut each of its
     /// two loops across the bar. Every fuse of it answers and validates, and
-    /// measures under every rule at every deflection the test asks, the union
-    /// and the ball less the bar since the mesher unfolds a point left beside a
-    /// pole side with no other neighbour than its two ends and one more
-    /// (`rcad-mesh`'s `pockets_beside_a_pole_side`).
+    /// measures at deflections of 0.3, 0.1, 0.01 and 0.001: the union and the
+    /// ball less the bar since the mesher unfolds a point left beside a pole
+    /// side with no other neighbour than its two ends and one more (`rcad-mesh`'s
+    /// `pockets_beside_a_pole_side`).
     ///
     /// **A gap and not a limit** (§16.10): each of those shapes has an answer,
     /// and cut a second time, each half of the crossing has two corners and a
