@@ -7529,6 +7529,14 @@ impl<'f> Arrangement<'f> {
     /// or a pipe**, that reading has no one meet to find in it, and which of
     /// the two meets the node was placed as says the sign instead
     /// ([`Arrangement::the_turn_at_one_of_two_meets_of_a_line`]).
+    ///
+    /// **Where two loops of one pair meet, a loop's two ways out are not one
+    /// curve.** The two surfaces touch there, so the loops cross like an X,
+    /// and each loop comes in along one line of the X and leaves along the
+    /// other ([`Arrangement::way_a_loop_leaves_where_two_loops_meet`]). Both
+    /// loops leave forward along one line, on its two sides, so two ways out
+    /// of the two loops that are both forward or both back lie on one line,
+    /// opposite ways; every other two of the four turn by the X's angle.
     fn turns_anticlockwise(
         &self,
         node: usize,
@@ -7543,6 +7551,17 @@ impl<'f> Arrangement<'f> {
         // two of its rows, and a gradient that is a *box* — every corner of a
         // placed curved solid is one — makes an interval evaluation of it
         // straddle zero. §35.2 again, arriving one function along.
+        if self.is_where_two_loops_meet(node, first.crossing)
+            && self.is_where_two_loops_meet(node, second.crossing)
+        {
+            let on_one_line = first == second
+                || (first.crossing != second.crossing && first.forward == second.forward);
+            return if on_one_line {
+                Ok(Decision::Zero)
+            } else {
+                self.turn_between_two_ways_out(node, first, second, policy, log)
+            };
+        }
         if first.crossing == second.crossing
             || self.are_two_halves_of_one_ruling(first.crossing, second.crossing)
             || self.are_two_halves_of_one_ellipse(first.crossing, second.crossing, policy, log)
@@ -7824,13 +7843,14 @@ impl<'f> Arrangement<'f> {
                 || self.the_two_partners_are_one_pipe(one, other, policy, log))
     }
 
-    /// Whether a crossing's way out of `node` is a line it carries, rather than
-    /// `∇S × ∇Q`.
+    /// Whether a crossing's way out of `node` is a line it carries, or one
+    /// worked out where `∇S × ∇Q` is nothing, rather than `∇S × ∇Q`.
     fn has_a_way_of_its_own(&self, node: usize, crossing: usize) -> bool {
         self.crossings[crossing].through_an_apex.is_some()
             || self.crossings[crossing].touching.is_some()
             || (self.crossings[crossing].half_an_ellipse.is_some()
                 && self.is_an_end_of_the_halves(node, crossing))
+            || self.is_where_two_loops_meet(node, crossing)
     }
 
     /// The cone the face lies on, when `node` is that cone's apex exactly.
@@ -8164,8 +8184,13 @@ impl<'f> Arrangement<'f> {
     /// `±` the line's own direction for a ruling through a cone's apex
     /// ([`ThroughAnApex`]) and for a line one surface rests on another along
     /// ([`AlongATouch`]), and at either end of a half ellipse, the way it runs
-    /// there ([`Arrangement::the_way_a_half_ellipse_runs_at_its_end`]).
+    /// there ([`Arrangement::the_way_a_half_ellipse_runs_at_its_end`]), and
+    /// where two loops of one pair meet, the line of the X the loop leaves
+    /// along ([`Arrangement::way_a_loop_leaves_where_two_loops_meet`]).
     fn way_out_of(&self, node: usize, direction: Direction) -> [Interval; 3] {
+        if self.is_where_two_loops_meet(node, direction.crossing) {
+            return self.way_a_loop_leaves_where_two_loops_meet(node, direction);
+        }
         let at = self.nodes[node].point;
         let crossing = &self.crossings[direction.crossing];
         let at_an_end = crossing.half_an_ellipse.and_then(|half| {
@@ -8266,6 +8291,125 @@ impl<'f> Arrangement<'f> {
             .iter()
             .chain(also)
             .any(|(surfaces, which)| *surfaces == name && *which < 2)
+    }
+
+    /// Whether `node` is where `crossing` and another loop of the same pair
+    /// meet, named so by [`Arrangement::place_where_two_loops_meet`].
+    fn is_where_two_loops_meet(&self, node: usize, crossing: usize) -> bool {
+        let Node {
+            made_of,
+            also,
+            crossings,
+            ..
+        } = &self.nodes[node];
+        let name = (
+            where_two_halves_meet(&self.surface, &self.crossings[crossing].partner),
+            6,
+        );
+        crossings.contains(&crossing) && made_of.iter().chain(also).any(|named| *named == name)
+    }
+
+    /// The way a loop leaves the node where it and another loop of the same
+    /// pair meet, where the two surfaces touch and `∇S × ∇Q` is nothing.
+    ///
+    /// **Near the node the crossing is where `q(d) = 0`**, for `d` along the
+    /// face and `q(d) = (∇S·∇Q)·d·H_S·d − (∇S·∇S)·d·H_Q·d`: with `∇Q = λ∇S`
+    /// there, `Q − λS` has no first-order part, and `q` is its second-order
+    /// part times `∇S·∇S`. Both are [`gradient_at`]'s and [`bend_along`]'s,
+    /// one polynomial for each surface, so their scales agree. `q` is a
+    /// saddle on the face, so it is nothing along two lines, the X the two
+    /// loops make. In `e₁`, along a pipe's axis, and `e₂ = ∇S × e₁`, with `A
+    /// = q(e₁)`, `B` the pairing of the two and `C = q(e₂)`, the lines are
+    /// `(−B ± √(B² − AC))·e₁ + A·e₂`. `A` is nothing only where the other
+    /// surface is flat along that axis, which a ball is not and a pipe
+    /// leaning against it is not either.
+    ///
+    /// **Which line a loop leaves along forward** is the one the crossing
+    /// runs away from the node on. A step `εv` out along a line, `∇S × ∇Q`
+    /// is `−ε·∇S × Rv` to first order, for `R = λH_S − H_Q`, and that runs
+    /// along `v` itself, since `Rv` is square to `v` along the face. It runs
+    /// away from the node where `(∇S × v)·Rv`, the pairing of `∇S × v` and
+    /// `v` by `q` over `∇S·∇S`, is above nothing. That holds for `v` and `−v`
+    /// alike, and the two lines have opposite signs, so both loops leave
+    /// forward along one line and come in along the other. **Of the two
+    /// halves of the line, the loop's own** is the one on the side its
+    /// flat surface faces, which runs through the node. Back out of the node
+    /// is that half of the other line as it is, since the loop comes in from
+    /// there.
+    ///
+    /// Where a sign here cannot be told, the way out is a box holding every
+    /// way it could be, so every turn asked of it is refused rather than
+    /// guessed.
+    ///
+    /// # Panics
+    ///
+    /// If neither surface is a pipe, or the loop is not picked out by a flat
+    /// surface: two loops meet only where a pipe rests inside a pipe or a
+    /// ball, and `intersect` picks each out by a flat surface faced along the
+    /// pipe.
+    fn way_a_loop_leaves_where_two_loops_meet(
+        &self,
+        node: usize,
+        direction: Direction,
+    ) -> [Interval; 3] {
+        let at = self.nodes[node].point;
+        let crossing = &self.crossings[direction.crossing];
+        let partner = &crossing.partner;
+        let mine = gradient_at(&self.surface, at).enclosure();
+        let theirs = gradient_at(partner, at).enclosure();
+        let (together, mine_squared) = (dot_of(mine, theirs), dot_of(mine, mine));
+        let saddle = |along: [Interval; 3]| {
+            together * bend_along(&self.surface, at, along)
+                - mine_squared * bend_along(partner, at, along)
+        };
+        let paired = |one: [Interval; 3], other: [Interval; 3]| {
+            let sum = [0, 1, 2].map(|axis| one[axis] + other[axis]);
+            let difference = [0, 1, 2].map(|axis| one[axis] - other[axis]);
+            (saddle(sum) - saddle(difference)) * Interval::exactly(0.25)
+        };
+        let ((Surface::Cylinder(pipe), _) | (_, Surface::Cylinder(pipe))) =
+            (&self.surface, partner)
+        else {
+            unreachable!(
+                "two loops of one pair meet only where a pipe rests inside another surface"
+            )
+        };
+        let first_way = pipe.axis().direction().components().map(Interval::exactly);
+        let second_way = cross_of_intervals(mine, first_way);
+        let (a, b) = (saddle(first_way), paired(first_way, second_way));
+        let root = root_enclosing(b * b - a * saddle(second_way));
+        let lines = [root, Interval::exactly(0.0) - root]
+            .map(|root| [0, 1, 2].map(|axis| (root - b) * first_way[axis] + a * second_way[axis]));
+        let either_way = |line: [Interval; 3]| {
+            a_box_holding_both(line, line.map(|side| Interval::exactly(0.0) - side))
+        };
+        // Compared rather than matched, so that `Decision`'s wildcard arm is
+        // not written once more (§40).
+        let away = paired(cross_of_intervals(mine, lines[0]), lines[0]).sign();
+        let [out, back] = if away == Decision::Pos {
+            lines
+        } else if away == Decision::Neg {
+            [lines[1], lines[0]]
+        } else {
+            return a_box_holding_both(either_way(lines[0]), either_way(lines[1]));
+        };
+        let line = if direction.forward { out } else { back };
+        let [picker] = crossing.picked_by() else {
+            unreachable!("each of two loops of one pair is picked out by one flat surface")
+        };
+        let facing = picker
+            .facing_of_a_flat()
+            .expect("each of two loops of one pair is picked out by a flat surface")
+            .components()
+            .map(Interval::exactly);
+        let side = dot_of(facing, line).sign();
+        if side == Decision::Pos {
+            line
+        } else if side == Decision::Neg {
+            line.map(|component| Interval::exactly(0.0) - component)
+        } else {
+            either_way(line)
+        }
     }
 
     /// Which cell of the surface each walk bounds.
@@ -17182,6 +17326,19 @@ fn cross_of_intervals(mine: [Interval; 3], theirs: [Interval; 3]) -> [Interval; 
     [0, 1, 2].map(|axis| {
         let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
         mine[next] * theirs[last] - mine[last] * theirs[next]
+    })
+}
+
+/// A box holding both `one` and `other`, for a vector that is one of the two
+/// where the arithmetic cannot say which: a sign proved of every vector in the
+/// box is proved of the one it is.
+fn a_box_holding_both(one: [Interval; 3], other: [Interval; 3]) -> [Interval; 3] {
+    [0, 1, 2].map(|axis| {
+        Interval::new(
+            one[axis].lo().min(other[axis].lo()),
+            one[axis].hi().max(other[axis].hi()),
+        )
+        .expect("two boxes of finite numbers have a finite box round both")
     })
 }
 
