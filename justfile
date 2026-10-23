@@ -17278,33 +17278,6 @@ check-queue-api-selftest:
     [ "$first" -gt 1 ] || fail "the probe batch ran before any spammed row landed, so this case raced against nothing"
     [ "$third" -lt "$total_lines" ] || fail "the probe batch ran after every spammed row, so this case raced against nothing"
 
-    # §309.3: the lock must stay held for the whole batch, not only within
-    # each step. The case above shows a batch's own claims events land
-    # together even when a second worktree spams single adds beside it; it
-    # says nothing about whether the batch keeps the lock between its own
-    # steps. Two worktrees each run a loop of two-step add batches at once:
-    # if a batch let the lock go between its two steps, another batch's step
-    # could compute "the next id" from a file neither batch has written yet,
-    # and both could hand out the same id. One continuous hold rules that
-    # out, since no other batch's step can ever run between this one's own.
-    race_a="$root/rcad-worktrees/race-a"
-    race_b="$root/rcad-worktrees/race-b"
-    g "$hub" worktree add -q -b race-a "$race_a" main
-    g "$hub" worktree add -q -b race-b "$race_b" main
-    (for i in $(seq 1 12); do
-        q "$race_a" apply add 2.5 opus - "from/- a racing row a-$i step 1 §230" \
-            + add 2.5 opus - "from/- a racing row a-$i step 2 §230" >/dev/null 2>&1
-    done) &
-    race_a_pid=$!
-    (for i in $(seq 1 12); do
-        q "$race_b" apply add 2.5 opus - "from/- a racing row b-$i step 1 §230" \
-            + add 2.5 opus - "from/- a racing row b-$i step 2 §230" >/dev/null 2>&1
-    done) &
-    race_b_pid=$!
-    wait "$race_a_pid" "$race_b_pid"
-    dup=$(awk -F '\t' '$1 == "add" { print $2 }' "$claims_file" | sort | uniq -d)
-    [ -z "$dup" ] || fail "two racing batches handed out the same id: $dup"
-
     # §352: a tag is the first word of the description, set through `tag` only.
     tag_wt="$root/rcad-worktrees/tag"
     g "$hub" worktree add -q -b tag "$tag_wt" main
@@ -17769,6 +17742,34 @@ check-queue-api-selftest:
     grep -qF "the class wrong/B ranks tier 1 and tier 5 rows only, and this row is tier 2" <<<"$got" \
         || fail "reword did not carry check-queue's reason for the class/tier mismatch"
     got=$(check "$reword_wt") || fail "the file reword wrote fails check-queue"
+
+    # §309.3: the lock must stay held for the whole batch, not only within
+    # each step. The §309.3.2 case above shows a batch's own claims events
+    # land together even when a second worktree spams single adds beside it;
+    # it says nothing about whether the batch keeps the lock between its own
+    # steps. Two worktrees each run a loop of two-step add batches at once:
+    # if a batch let the lock go between its two steps, another batch's step
+    # could compute "the next id" from a file neither batch has written yet,
+    # and both could hand out the same id. One continuous hold rules that
+    # out, since no other batch's step can ever run between this one's own.
+    race_a="$root/rcad-worktrees/race-a"
+    race_b="$root/rcad-worktrees/race-b"
+    g "$hub" worktree add -q -b race-a "$race_a" main
+    g "$hub" worktree add -q -b race-b "$race_b" main
+    (for i in $(seq 1 12); do
+        q "$race_a" apply add 2.5 opus - "from/- a racing row a-$i step 1 §230" \
+            + add 2.5 opus - "from/- a racing row a-$i step 2 §230" >/dev/null 2>&1
+    done) &
+    race_a_pid=$!
+    (for i in $(seq 1 12); do
+        q "$race_b" apply add 2.5 opus - "from/- a racing row b-$i step 1 §230" \
+            + add 2.5 opus - "from/- a racing row b-$i step 2 §230" >/dev/null 2>&1
+    done) &
+    race_b_pid=$!
+    wait "$race_a_pid" "$race_b_pid"
+    dup=$(awk -F '\t' '$1 == "add" { print $2 }' "$claims_file" | sort | uniq -d)
+    [ -z "$dup" ] || fail "two racing batches handed out the same id: $dup"
+
     exit 0
 
 # The fuzz half of `status`: for the night `latest` names, how many of the
