@@ -161,15 +161,15 @@ fn two_bends_turned_by_whole_quarter_turns_answer_every_rule() {
 /// the cap. A box round a point of a piece of the wall is about `256 ε · 5`,
 /// `3e-13` across, so the hair is that thin below about `6e-14` of a turn.
 ///
-/// At `1e-9`, `1e-13`, `3e-14` and `1e-14` of a turn every rule both ways
-/// round answers one solid that validates: the union and the intersection
-/// `19.706 ± 0.39` against a bend's `π² R r² / 2`, `19.739`, and the
-/// difference the wedge the hair turns, `12.536 ± 0.123` times the hair
-/// against `π R r²`, `12.566`. A whole turn, `2π`, is such a hair: its sine
-/// rounds to `−2.4e-16`, so the copy sits that far back round the ring, and
-/// it answers the same with that for its hair. At `1e-12` the pieces are not
-/// cut, `Undecidable` at `side of torus`; Q2489's fix, which keeps the records
-/// of a ray the fuse threw away out of its log, answers the union there.
+/// At `1e-9`, `1e-12`, `1e-13`, `3e-14` and `1e-14` of a turn every rule both
+/// ways round answers one solid that validates: the union and the intersection
+/// `19.706 ± 0.4` against a bend's `π² R r² / 2`, `19.739`, and the difference
+/// the wedge the hair turns, `12.536 ± 0.123` times the hair against `π R r²`,
+/// `12.566`. A whole turn, `2π`, is such a hair: its sine rounds to
+/// `−2.4e-16`, so the copy sits that far back round the ring, and it answers
+/// the same with that for its hair. At `1e-12` every rule both ways round was
+/// refused `Undecidable` at `side of torus`, over the records of rays the
+/// classification threw away, until Q2489 kept those out of the fuse's log.
 ///
 /// Below `1e-12` no point was found inside one piece, and every rule both ways
 /// round was refused `Undecidable` at `a point inside a piece of a face`. Run
@@ -186,7 +186,7 @@ fn two_bends_turned_by_whole_quarter_turns_answer_every_rule() {
 /// axis was put on a side of another such plane by the planes' own numbers
 /// (Q1392).
 #[test]
-fn a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray() {
+fn a_bend_placed_a_hair_round_from_another_answers_every_rule() {
     let (ring, tube) = (4.0, 1.0);
     let one_bend = PI * PI * ring * tube * tube / 2.0;
     let a_radian_of_bend = PI * ring * tube * tube;
@@ -1022,7 +1022,7 @@ fn half_a_ring_joined_to_a_quarter_of_a_tube_is_refused_with_a_bar_in_it_or_a_tu
 /// the copy's axis leans a rounding off `z`, so neither bend's caps lie on a
 /// plane through the other's axis, `ACrossingBetweenAPlaneAndATorusThatIsAQuartic`.
 /// Turned round `z` by `2π` is a hair round the ring, in
-/// `a_bend_placed_a_hair_round_from_another_answers_or_is_refused_before_a_ray`.
+/// `a_bend_placed_a_hair_round_from_another_answers_every_rule`.
 #[test]
 fn a_bend_and_a_copy_moved_a_rounding_off_it_are_refused_when_crossed() {
     for (moved, refusal) in [
@@ -2149,11 +2149,13 @@ fn expect(fused: Result<usize, Error>, said: Option<&str>, what: &str) {
 /// The fuse places every piece. The copy's end cap is placed outside the first
 /// bend by a point a rounding inside its rim, at the ring's inner equator,
 /// whose first ray met the first bend's start cap on that cap's rim, where the
-/// sign of the ring cannot be told. That ray was thrown away and the next
-/// placed the point, but the thrown-away ray's two `side of torus` records
-/// stayed in the fuse's log, and a certified policy refuses any record. The
-/// next point the search offers places the cap the same way and asks nothing
-/// undecided.
+/// sign of the ring cannot be told. That ray is thrown away and the next
+/// places the point. Its two `side of torus` records stayed in the point's
+/// log, which a certified policy refuses, so from Q2267 the search held that
+/// point back and took the next, which places the cap the same way and asks
+/// nothing undecided. Since Q2489 a ray thrown away leaves no record, and that
+/// point places the cap itself: run with a print in `place_the_piece`, every
+/// point these fuses placed had nothing in its log, and none was held back.
 ///
 /// So the union answers both bends, the difference the first, and the
 /// intersection nothing, each bend within the measure's own error of
