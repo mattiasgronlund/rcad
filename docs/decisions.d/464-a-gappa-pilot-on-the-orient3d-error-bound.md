@@ -13,7 +13,8 @@
 anything was tried here, when none of them was installed. 464.4 to 464.6 are
 the pilot, Q2647, and where it found 464.2 wrong 464.2 says so. 464.7 is
 Q2658, which took up the two claims the pilot left unbacked, and 464.8 is
-Q2659, which proved two more of the bounds.*
+Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
+`*_ROUNDOFF` constants.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -23,6 +24,7 @@ Q2659, which proved two more of the bounds.*
   464.6   What this leaves
   464.7   value past the bound, and every minor at zero run
   464.8   orient2d and the side of a plane
+  464.9   Which of the eleven *_ROUNDOFF constants Gappa can state
 
 ### 464.1 The bugs a bound prover is for
 
@@ -531,7 +533,9 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   with its products below the normals too, and each of the other six is a row
   of its own.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
-  and proofs of those.
+  and proofs of those. Done, in 464.9: three are proved at the code's
+  constants, two of them false when every number is below `2⁻¹⁰²²`, and each
+  of the others is a row of its own.
 - **Q2661**, whether the scripts join the tree and the gate, what notices
   `on_floats` drifting from block 1, and whether `field` proves the 39 hint
   equalities once their divisors are shown nonzero.
@@ -1828,3 +1832,581 @@ for byte as they were run.
   which `o2.g` assumes away as block 1 does (464.4), and then to restate
   `plane.rs:851-853` and say whether `SideOfAFlatSurface::on_floats` needs its
   three `product_is_normal` checks.
+
+### 464.9 Which of the eleven *_ROUNDOFF constants Gappa can state
+
+Q2660 read the eleven `*_ROUNDOFF` constants in `rcad-geom` at `c3b2160e`,
+in three lanes on 2026-10-23.
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, and `coqc`
+under 464.5's pins with gappalib 1.8.0. `u` is `2⁻⁵³` and `ε` is
+`f64::EPSILON = 2u`.
+
+**Which Gappa can state.** Gappa proves a bound on one fixed expression in
+`+ − × / sqrt fma abs` (464.2). By that test:
+
+- **Stated and proved here:** `NEAREST_F64_POINT_ROUNDOFF` (`lib.rs:134-201`,
+  `ε`), one rounding per coordinate; `Plane::SIGNED_DISTANCE_ROUNDOFF`
+  (`plane.rs:85-112`, `4ε`), the arithmetic of `SideOfAFlatSurface::on_floats`
+  without its checks; `SURFACE_AFTER_SHIFTING_ROUNDOFF`
+  (`moved_corner.rs:99-143`, `8ε`), a shift with no turn, which carries the
+  normal over exactly. A plane's offset becomes `offset + normal.dot(t)`
+  (`plane.rs:544-550`, and `HalfSpace::shifted` at `half_space.rs:244-249`),
+  which is `signed.g` with the point `t` and the offset's sign turned. A ball's
+  centre or a pipe's axis origin becomes `rnd(cᵢ + tᵢ)`
+  (`Isometry::apply_to_point`, `isometry.rs:303-308`, whose `turned_by` at
+  515-520 hands the point back bit for bit when the turn is none), which is
+  `nearest.g` with `x = c + t`.
+- **Statable, each a larger script:** `Isometry::POINT_ROUNDOFF`
+  (`isometry.rs:36-92`, `18ε`), Rodrigues' form through nalgebra's
+  `transform_vector`, with a hypothesis on the quaternion's length; its doc
+  counts `35.78u` against `36u`, so it needs averaging as `signed.g` does.
+  `Plane::NORMAL_LENGTH_ROUNDOFF` (`plane.rs:114-165`, `64ε`), the
+  constructor's rounding, then a turn, then `n·n`, resting on
+  `POINT_ROUNDOFF`'s script; its doc says one share is measured, not
+  derived. `CORNER_AFTER_MOVING_ROUNDOFF` (`moved_corner.rs:37-97`, `128ε`),
+  one script per surface kind, each on `POINT_ROUNDOFF`'s. The one-stage
+  recurrence of `EVALUATION_ROUNDOFF` (`de_boor.rs:28-114`), `E_r ≤
+  E_{r−1}(1 + 9u) + 9uM`. The parabola branch of
+  `POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF` (`walk.rs:110-214`, `64ε`).
+- **Not statable in Gappa:** `EVALUATION_ROUNDOFF` over up to fifteen stages
+  at any degree, and `REFINEMENT_ROUNDOFF` (`bspline_curve.rs:55-85`), two
+  passes composed at any depth: Lean's (464.2). `Surface::ROUND_TRIP_ROUNDOFF`
+  (`surface.rs:85-133`, `256ε`) runs through `atan2`, `cos` and `sin`,
+  `POINT_ALONG_A_CROSSING_ROUNDOFF` (`walk.rs:57-108`, `256ε`) through `cos`
+  and `sin`, and the hyperbola branch of the endless bend through `cosh` and
+  `sinh`, which its doc already calls a hole in the derivation. Gappa has no
+  way to write those; FPTaylor or Lean can, under an assumed `libm` error.
+
+**1. `NEAREST_F64_POINT_ROUNDOFF`.** `nearest.g` proves the nearest `f64`
+triple within `ε·L` of a point whose coordinates are at most `L`, for `L` at
+least `2⁻¹⁰²²`, in 0.11 s, printing each coordinate's slip within `±u·L`. Its
+two controls fail: with `L` allowed down to `2⁻¹⁰⁷⁴`, best `[0, 0.866025]`
+(each slip within `±L/2`), and asked for `1.6875u`, below the `√3·u` the doc
+counts, best `[1.8735e-16, 1.92296e-16]`, whose top is `√3·u`. So the doc's
+condition, coordinates normal, is more than the bound needs: `L` normal is
+enough, since a subnormal coordinate slips at most `2⁻¹⁰⁷⁵ = u·2⁻¹⁰²²`.
+`gappa -Bcoq` writes 408 lines with 3 hints, and `coqc` accepts it, exit 0,
+in 0.87 s.
+
+**2. `SIGNED_DISTANCE_ROUNDOFF`.** `signed.g` proves `|value − Ex| ≤ 8u·L`,
+the code's `4ε·L`, in 1.53 s, where `Ex` is the true `n·p − offset` of the
+same `f64` and `L` is at least every `|pᵢ|` and `|offset|`. The hypotheses are
+`SideOfAFlatSurface`'s products normal, which `signed_distance_to` does not
+check, and `|n₀| + |n₁| + |n₂| ≤ 1774/1024`, which Cauchy-Schwarz gives on
+paper for a normal whose `n·n` is within `NORMAL_LENGTH_ROUNDOFF` of one.
+Plain interval bounds give `13u` here (`3·4u + u`); the doc's `(4√3 + 1)u`
+comes from averaging, with each term's share of the bound `|nᵢ|·L` and the
+offset's `L/4`, since it meets one rounding where a product meets four. It
+prints `(value − Ex) / D` within `4u + O(u²)`, `D` the sum of the shares.
+Its controls (`controls.py`) fail: at `7.875u`, best `±8.80372e-16`, which is
+`7.93u`, the doc's own count; without the `Σ|nᵢ|` hypothesis, best
+`±2.39501e+293`; without the products normal, best `±5.25151e+616`. `gappa
+-Bcoq` writes 3047 to 3074 lines with 18 hints over four runs, since Gappa
+does not write the same proof each run (464.4), and `coqc` accepts each, exit
+0, in under two seconds.
+
+The doc comment states no normal-number condition, and without one the bound
+is false. `subnormal.py` runs `signed_distance_to`'s arithmetic, in Python's
+`f64`, on `n = (0.6, 0.8, 0)`, `p = (2⁻¹⁰⁷⁴, 0, 0)`, offset `0`: the value is
+`2⁻¹⁰⁷⁴` against a true `0.6·2⁻¹⁰⁷⁴`, an error of `0.4·L` against the
+`8.9e-16·L` promised. The kernel gives the same, in 4 below. The test,
+`reading_a_distance_off_a_plane_stays_inside_its_bound.rs`, asserts its
+products stay normal, so it never meets this.
+
+**3. `SURFACE_AFTER_SHIFTING_ROUNDOFF`.** The doc counts under `9u·L` for a
+plane and under `2√3·u·L` for a ball or a pipe, and the constant is `16u`.
+
+`shiftplane.g` is `signed.g` with the shift `d` for the point, `y = off +
+s012` for `y = s012 − off`, and every size measured against `|n|·L` rather
+than `L`, since an offset is a distance times `|n|` and
+`a_surface_moved_by_a_shift_stays_inside_its_published_bound` divides both
+the slip and the size by it. So it covers a half-space, whose normal is any
+length, as well as a plane. Its hypotheses are `signed.g`'s, with `(|n₀| +
+|n₁| + |n₂|) / |n| ≤ 1774/1024`, Cauchy-Schwarz on paper for every nonzero
+`n`, in place of the bound on the sum. It proves the slip within `16u·|n|·L`
+in under a second, printing `(value − Ex) / D` within `±2⁻⁵¹`, so `4u·D`, which is
+`7.93u·|n|·L`. Its controls (`shiftcontrols.py`) fail: at `7.875u`, best
+`±8.80372e-16`, which is `7.93u` again, and without the three products
+normal, best `±1.26044e+632`.
+
+`shiftball.g` proves the shifted centre within `16u·L` in under a second,
+printing
+each coordinate's slip within `±2u·L`, and needs no normal-number condition at
+all: a sum of two `f64` that lands below `2⁻¹⁰²²` is exact, and Gappa finds
+that without being told. Its controls fail: asked for `3.4u`, best `[0,
+3.84593e-16]`, whose top is the doc's `2√3·u`; and with the centre on a grid
+of `2⁻¹¹⁰⁰` in place of an `f64`, so that a small sum rounds, best `[0,
+0.866025]`. Written as a plain real, `c0 = c0_`, that control made Gappa 1.8.0
+abort in `src/parser/ast.cpp:255` while printing a warning, so it is written
+with `fixed<-1100, ne>`.
+
+`gappa -Bcoq` writes 2638 to 2651 lines with 18 hints for `shiftplane.g` over
+four runs, and 991 lines with 6 hints for `shiftball.g` in both of its two, and
+`coqc` accepts each, exit 0, in under two seconds.
+
+**4. The subnormal case through the kernel.** A probe test, run with `just t`
+and not kept, built `Plane::from_point_and_normal` through the origin with
+normal `(0.6, 0.8, 0)`, which stores `(0.6, 0.8, 0.0)` and offset `0`, and read
+the point `(2⁻¹⁰⁷⁴, 0, 0)`. It printed:
+
+```text
+normal [0.6, 0.8, 0.0], offset 0e0, computed 5e-324 = 1 * 2^-1074, error / L 0.4, SIGNED_DISTANCE_ROUNDOFF 8.881784197001252e-16
+shifted: normal [0.6, 0.8, 0.0], offset 5e-324 = 1 * 2^-1074, slip / L 0.4, SURFACE_AFTER_SHIFTING_ROUNDOFF 1.7763568394002505e-15
+```
+
+The second line is the same plane moved by `Isometry::translation((2⁻¹⁰⁷⁴, 0,
+0))`. A third lane wrote the probe again from this description, appended to
+`crates/rcad-geom/tests/reading_a_distance_off_a_plane_stays_inside_its_bound.rs`,
+and it printed the same two lines:
+
+```rust
+#[test]
+fn q2660_probe_a_point_at_the_smallest_subnormal() {
+    let smallest = f64::from_bits(1);
+    let plane =
+        Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.6, 0.8, 0.0))
+            .unwrap();
+    let normal = plane.normal().components();
+    let computed = plane.signed_distance_to(Point::new(smallest, 0.0, 0.0));
+    println!(
+        "normal {normal:?}, offset {:e}, computed {computed:e} = {} * 2^-1074, error / L {}, SIGNED_DISTANCE_ROUNDOFF {:?}",
+        plane.offset(),
+        computed / smallest,
+        computed / smallest - normal[0],
+        Plane::SIGNED_DISTANCE_ROUNDOFF
+    );
+    let shifted = plane.transformed(
+        &rcad_geom::Isometry::translation(Vector::new(smallest, 0.0, 0.0)).unwrap(),
+    );
+    println!(
+        "shifted: normal {:?}, offset {:e} = {} * 2^-1074, slip / L {}, SURFACE_AFTER_SHIFTING_ROUNDOFF {:?}",
+        shifted.normal().components(),
+        shifted.offset(),
+        shifted.offset() / smallest,
+        shifted.offset() / smallest - normal[0],
+        rcad_geom::SURFACE_AFTER_SHIFTING_ROUNDOFF
+    );
+}
+```
+
+`computed / smallest` and `offset / smallest` are exact, so `error / L` and
+`slip / L` are each `1 − 0.6` in `f64`, which prints `0.4`. So both doc comments state a bound that is false when every number in
+it is below `2⁻¹⁰²²`: `signed_distance_to` and a shifted plane's offset each
+miss by `0.4·L`. That is class wrong/D (§352.3): the size `L` is below
+`2.2e-308`, `2.2e-310` times §3.5's nominal `100`, and so far past its `1e11`
+spread, and the absolute miss is `0.8·2⁻¹⁰⁷⁵`, nothing a tolerance can see.
+The products-normal controls of `signed.g` and `shiftplane.g` must fail, since
+this case is inside them. Whether `L` normal is enough, with a product below
+`2⁻¹⁰²²`, is not run: such a product's rounding is no longer a relative slip,
+which the averaging rests on, so it needs a split by size as `planecases.py`
+did (464.8).
+
+**What this leaves.**
+
+- A Gappa script each for `Isometry::POINT_ROUNDOFF`, then
+  `Plane::NORMAL_LENGTH_ROUNDOFF` and `CORNER_AFTER_MOVING_ROUNDOFF` on it,
+  `EVALUATION_ROUNDOFF`'s one-stage recurrence, and the parabola branch of
+  `POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`: five rows.
+- `SIGNED_DISTANCE_ROUNDOFF` and the plane's shift with a product below the
+  normals and `L` normal: a row.
+- The two doc comments of 4, `plane.rs:85-112` and `moved_corner.rs:99-143`,
+  restated with the condition the proofs need, once that row says whether `L`
+  normal is enough: a row, wrong/D, after it.
+- `EVALUATION_ROUNDOFF` and `REFINEMENT_ROUNDOFF` at any degree in Lean, and
+  `ROUND_TRIP_ROUNDOFF`, `POINT_ALONG_A_CROSSING_ROUNDOFF` and the hyperbola
+  branch in FPTaylor or Lean under an assumed `libm` bound: two rows.
+- `NEAREST_F64_POINT_ROUNDOFF`'s doc asks for coordinates normal where `L`
+  normal is enough. That asks a caller for more than it needs and promises
+  nothing false, so it is no row.
+
+`nearest.g`, whole:
+
+```gappa
+# NEAREST_F64_POINT_ROUNDOFF, crates/rcad-geom/src/lib.rs at c3b2160e:
+# the nearest f64 triple to a point x lies within f64::EPSILON * L of it,
+# L at least the largest |x_i|.
+@rnd = float<ieee_64, ne>;
+
+p0 = rnd(x0); p1 = rnd(x1); p2 = rnd(x2);
+
+# Each coordinate's slip, per unit of L.
+e0 = (p0 - x0) / L; e1 = (p1 - x1) / L; e2 = (p2 - x2) / L;
+
+{
+  # L is at least every |x_i|, and is a normal number no larger than the
+  # largest f64.
+     x0 / L in [-1, 1] /\ x1 / L in [-1, 1] /\ x2 / L in [-1, 1]
+  /\ L in [1b-1022, 1b1024]
+->
+  e0 in ? /\ e1 in ? /\ e2 in ?
+  /\ sqrt(e0 * e0 + e1 * e1 + e2 * e2) in [0, 1b-52]
+}
+
+# Above 2^-1022 a slip is relative to x_i, and x_i is at most L. Below it the
+# slip is at most 2^-1075, and L is at least 2^-1022.
+(p0 - x0) / L -> ((p0 - x0) / x0) * (x0 / L);
+(p1 - x1) / L -> ((p1 - x1) / x1) * (x1 / L);
+(p2 - x2) / L -> ((p2 - x2) / x2) * (x2 / L);
+$ x0 in (-1b-1022, 1b-1022);
+$ x1 in (-1b-1022, 1b-1022);
+$ x2 in (-1b-1022, 1b-1022);
+```
+
+The control at `L` down to `2⁻¹⁰⁷⁴` is `nearest.g` with `L in [1b-1074,
+1b1024]`; the one at `1.6875u` has the single goal `sqrt(e0 * e0 + e1 * e1 +
+e2 * e2) in [0, 27b-57]`.
+
+`signed.g`, whole:
+
+```gappa
+# Plane::signed_distance_to and Plane::SIGNED_DISTANCE_ROUNDOFF,
+# crates/rcad-geom/src/plane.rs at c3b2160e: what it returns is within
+# 4 * f64::EPSILON * L of the true value, L at least every |p_i| and |offset|.
+@rnd = float<ieee_64, ne>;
+
+# The normal, the point and the offset, each an f64.
+n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);
+p0 = rnd(p0_); p1 = rnd(p1_); p2 = rnd(p2_);
+off = rnd(off_);
+
+# normal.dot(point - origin) - offset. The origin is zero, so subtracting it
+# rounds nothing, and nalgebra 0.35's dot on a Vector3 is (a + b) + c.
+t0 = rnd(n0 * p0); t1 = rnd(n1 * p1); t2 = rnd(n2 * p2);
+S01 = t0 + t1;
+s01 = rnd(S01);
+S012 = s01 + t2;
+s012 = rnd(S012);
+y = s012 - off;
+value = rnd(y);
+
+# The true value of the same inputs.
+Ex = n0 * p0 + n1 * p1 + n2 * p2 - off;
+
+# What each rounding multiplied its argument by.
+rp0 = t0 / (n0 * p0); rp1 = t1 / (n1 * p1); rp2 = t2 / (n2 * p2);
+rs01 = s01 / S01; rs012 = s012 / S012; rv = value / y;
+
+# Each term as value carries it, less the term itself.
+W0 = rv * rs012 * rs01 * rp0 - 1;
+W1 = rv * rs012 * rs01 * rp1 - 1;
+W2 = rv * rs012 * rp2 - 1;
+W3 = rv - 1;
+e0 = n0 * p0 * W0; e1 = n1 * p1 * W1; e2 = n2 * p2 * W2; e3 = -(off * W3);
+
+# Each term's share of the bound: |n_i| L for a product, and L / 4 for the
+# offset, which meets one rounding where a product meets four.
+c0 = |n0| * L; c1 = |n1| * L; c2 = |n2| * L; c3 = 1b-2 * L;
+D = c0 + c1 + c2 + c3;
+
+{
+  # Every input is a finite f64.
+     |n0| <= 1b1024 /\ |n1| <= 1b1024 /\ |n2| <= 1b1024
+  /\ |p0| <= 1b1024 /\ |p1| <= 1b1024 /\ |p2| <= 1b1024
+  /\ |off| <= 1b1024
+  # No factor of the three products is zero.
+  /\ |n0| >= 1b-1074 /\ |n1| >= 1b-1074 /\ |n2| >= 1b-1074
+  /\ |p0| >= 1b-1074 /\ |p1| >= 1b-1074 /\ |p2| >= 1b-1074
+  # No sum cancels to zero.
+  /\ |S01| >= 1b-1074 /\ |S012| >= 1b-1074 /\ |y| >= 1b-1074
+  # The three products are normal, which signed_distance_to does not check.
+  /\ |t0| >= 1b-1022 /\ |t1| >= 1b-1022 /\ |t2| >= 1b-1022
+  # What lemma.g proves each of those three gives.
+  /\ t0 -/ n0 * p0 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t1 -/ n1 * p1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t2 -/ n2 * p2 in [-4503599627370497b-105, 4503599627370497b-105]
+  # L is at least every coordinate of the point and the offset.
+  /\ L in [1b-1074, 1b1024]
+  /\ p0 / L in [-1, 1] /\ p1 / L in [-1, 1] /\ p2 / L in [-1, 1]
+  /\ off / L in [-1, 1]
+  # A stored normal has n.n within NORMAL_LENGTH_ROUNDOFF = 64 epsilon of
+  # one, so |n0| + |n1| + |n2| <= sqrt(3 (1 + 64 epsilon)) < 1774 / 1024.
+  /\ |n0| + |n1| + |n2| in [0, 1774b-10]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ n0 / |n0| in [-1, 1] /\ n1 / |n1| in [-1, 1] /\ n2 / |n2| in [-1, 1]
+->
+  W0 in ? /\ W2 in ? /\ W3 in ? /\ (value - Ex) / D in ?
+  /\ (value - Ex) / L in [-1b-50, 1b-50]
+}
+
+# How far each rounding is from the identity.
+t0 / (n0 * p0) -> 1 + (t0 - n0 * p0) / (n0 * p0);
+t1 / (n1 * p1) -> 1 + (t1 - n1 * p1) / (n1 * p1);
+t2 / (n2 * p2) -> 1 + (t2 - n2 * p2) / (n2 * p2);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+s012 / S012 -> 1 + (s012 - S012) / S012;
+value / y -> 1 + (value - y) / y;
+
+# The error is the sum of the four terms' errors, each a fraction of its own
+# share of D; add_rr then averages them.
+(value - Ex) / L -> ((value - Ex) / D) * (D / L);
+D / L -> |n0| + |n1| + |n2| + 1b-2;
+(value - Ex) / D -> ((D + (value - Ex)) - D) / D;
+D + (value - Ex) -> (c0 + e0) + (c1 + e1) + (c2 + e2) + (c3 + e3);
+(c0 + e0) - c0 -> e0;
+(c1 + e1) - c1 -> e1;
+(c2 + e2) - c2 -> e2;
+(c3 + e3) - c3 -> e3;
+e0 / c0 -> (n0 / |n0|) * (p0 / L) * W0;
+e1 / c1 -> (n1 / |n1|) * (p1 / L) * W1;
+e2 / c2 -> (n2 / |n2|) * (p2 / L) * W2;
+e3 / c3 -> -(4 * (off / L) * W3);
+```
+
+`controls.py`, whole, run beside `signed.g`:
+
+```python
+"""Write signed.g's controls. Each changes one thing in it: a smaller bound,
+to see whether it proved its goal from hypotheses that contradict each other,
+or a hypothesis dropped, to see whether the proof needs it."""
+
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def write(name, src):
+    open(name, "w").write(src)
+
+
+signed = open("signed.g").read()
+GOAL = "/\\ (value - Ex) / L in [-1b-50, 1b-50]"
+
+# 7.875u, below the (4 sqrt(3) + 1)u = 7.93u the doc comment counts.
+write("c_signed_7875.g", sub(signed, GOAL, "/\\ (value - Ex) / L in [-63b-56, 63b-56]"))
+
+# Without |n0| + |n1| + |n2| bounded.
+write("c_signed_nosum.g", sub(signed, "  /\\ |n0| + |n1| + |n2| in [0, 1774b-10]\n", ""))
+
+# Without the three products normal, and what lemma.g gives from them.
+src = sub(signed, "  /\\ |t0| >= 1b-1022 /\\ |t1| >= 1b-1022 /\\ |t2| >= 1b-1022\n", "")
+src = sub(src, "  /\\ t0 -/ n0 * p0 in [-4503599627370497b-105, 4503599627370497b-105]\n"
+          "  /\\ t1 -/ n1 * p1 in [-4503599627370497b-105, 4503599627370497b-105]\n"
+          "  /\\ t2 -/ n2 * p2 in [-4503599627370497b-105, 4503599627370497b-105]\n", "")
+write("c_signed_nonormal.g", src)
+```
+
+`subnormal.py`, whole:
+
+```python
+"""signed_distance_to's arithmetic, (n0*p0 + n1*p1) + n2*p2 - off in f64, on
+a point whose largest coordinate is the smallest subnormal, against the
+exact value of the same f64 inputs and against 4 * EPSILON * L."""
+
+from fractions import Fraction as F
+import sys
+
+eps = sys.float_info.epsilon
+n = (0.6, 0.8, 0.0)
+p = (5e-324, 0.0, 0.0)
+off = 0.0
+L = max(abs(c) for c in p + (off,))
+
+value = (n[0] * p[0] + n[1] * p[1]) + n[2] * p[2] - off
+exact = sum(F(a) * F(b) for a, b in zip(n, p)) - F(off)
+err = abs(F(value) - exact)
+bound = F(4 * eps) * F(L)
+print("n.n - 1 in epsilon:", float((sum(F(a) * F(a) for a in n) - 1) / F(eps)))
+print("value:", value.hex(), "exact / 2^-1074:", float(exact / F(5e-324)))
+print("error / L:", float(err / F(L)), "bound / L:", float(bound / F(L)))
+print("error within 4 epsilon L:", err <= bound)
+```
+
+It printed:
+
+```text
+n.n - 1 in epsilon: 0.2
+value: 0x0.0000000000001p-1022 exact / 2^-1074: 0.6
+error / L: 0.4 bound / L: 8.881784197001252e-16
+error within 4 epsilon L: False
+```
+
+`shiftplane.g`, whole:
+
+```gappa
+# Plane::transformed by a shift with no turn, HalfSpace::shifted, and
+# SURFACE_AFTER_SHIFTING_ROUNDOFF, crates/rcad-geom/src at c3b2160e: the new
+# offset is within 8 * f64::EPSILON * |n| * L of offset + n.t, L at least
+# every |t_i| and |offset| / |n|.
+@rnd = float<ieee_64, ne>;
+
+# The normal, the shift and the offset, each an f64.
+n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);
+d0 = rnd(d0_); d1 = rnd(d1_); d2 = rnd(d2_);
+off = rnd(off_);
+
+# self.offset + normal.dot(shift). A movement with no turn hands the normal
+# back bit for bit, and nalgebra 0.35's dot on a Vector3 is (a + b) + c.
+t0 = rnd(n0 * d0); t1 = rnd(n1 * d1); t2 = rnd(n2 * d2);
+S01 = t0 + t1;
+s01 = rnd(S01);
+S012 = s01 + t2;
+s012 = rnd(S012);
+y = off + s012;
+value = rnd(y);
+
+# The true new offset of the same inputs, and the normal's true length.
+Ex = off + n0 * d0 + n1 * d1 + n2 * d2;
+N = sqrt(n0 * n0 + n1 * n1 + n2 * n2);
+
+# What each rounding multiplied its argument by.
+rp0 = t0 / (n0 * d0); rp1 = t1 / (n1 * d1); rp2 = t2 / (n2 * d2);
+rs01 = s01 / S01; rs012 = s012 / S012; rv = value / y;
+
+# Each term as value carries it, less the term itself.
+W0 = rv * rs012 * rs01 * rp0 - 1;
+W1 = rv * rs012 * rs01 * rp1 - 1;
+W2 = rv * rs012 * rp2 - 1;
+W3 = rv - 1;
+e0 = n0 * d0 * W0; e1 = n1 * d1 * W1; e2 = n2 * d2 * W2; e3 = off * W3;
+
+# Each term's share of the bound: |n_i| L for a product, and |n| L / 4 for
+# the offset, which meets one rounding where a product meets four.
+c0 = |n0| * L; c1 = |n1| * L; c2 = |n2| * L; c3 = 1b-2 * (N * L);
+D = c0 + c1 + c2 + c3;
+
+{
+  # Every input is a finite f64.
+     |n0| <= 1b1024 /\ |n1| <= 1b1024 /\ |n2| <= 1b1024
+  /\ |d0| <= 1b1024 /\ |d1| <= 1b1024 /\ |d2| <= 1b1024
+  /\ |off| <= 1b1024
+  # No factor of the three products is zero.
+  /\ |n0| >= 1b-1074 /\ |n1| >= 1b-1074 /\ |n2| >= 1b-1074
+  /\ |d0| >= 1b-1074 /\ |d1| >= 1b-1074 /\ |d2| >= 1b-1074
+  # No sum cancels to zero.
+  /\ |S01| >= 1b-1074 /\ |S012| >= 1b-1074 /\ |y| >= 1b-1074
+  # The three products are normal, which neither caller checks.
+  /\ |t0| >= 1b-1022 /\ |t1| >= 1b-1022 /\ |t2| >= 1b-1022
+  # What lemma.g proves each of those three gives.
+  /\ t0 -/ n0 * d0 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t1 -/ n1 * d1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t2 -/ n2 * d2 in [-4503599627370497b-105, 4503599627370497b-105]
+  # L is at least every coordinate of the shift and the offset over |n|.
+  /\ L in [1b-1074, 1b1024]
+  /\ d0 / L in [-1, 1] /\ d1 / L in [-1, 1] /\ d2 / L in [-1, 1]
+  /\ off / (N * L) in [-1, 1]
+  # |n0| + |n1| + |n2| <= sqrt(3) |n| < 1774 / 1024 |n|, by Cauchy-Schwarz.
+  /\ (|n0| + |n1| + |n2|) / N in [0, 1774b-10]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ n0 / |n0| in [-1, 1] /\ n1 / |n1| in [-1, 1] /\ n2 / |n2| in [-1, 1]
+->
+  W0 in ? /\ W2 in ? /\ W3 in ? /\ (value - Ex) / D in ?
+  /\ (value - Ex) / (N * L) in [-1b-49, 1b-49]
+}
+
+# How far each rounding is from the identity.
+t0 / (n0 * d0) -> 1 + (t0 - n0 * d0) / (n0 * d0);
+t1 / (n1 * d1) -> 1 + (t1 - n1 * d1) / (n1 * d1);
+t2 / (n2 * d2) -> 1 + (t2 - n2 * d2) / (n2 * d2);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+s012 / S012 -> 1 + (s012 - S012) / S012;
+value / y -> 1 + (value - y) / y;
+
+# The error is the sum of the four terms' errors, each a fraction of its own
+# share of D; add_rr then averages them.
+(value - Ex) / (N * L) -> ((value - Ex) / D) * (D / (N * L));
+D / (N * L) -> (|n0| + |n1| + |n2|) / N + 1b-2;
+(value - Ex) / D -> ((D + (value - Ex)) - D) / D;
+D + (value - Ex) -> (c0 + e0) + (c1 + e1) + (c2 + e2) + (c3 + e3);
+(c0 + e0) - c0 -> e0;
+(c1 + e1) - c1 -> e1;
+(c2 + e2) - c2 -> e2;
+(c3 + e3) - c3 -> e3;
+e0 / c0 -> (n0 / |n0|) * (d0 / L) * W0;
+e1 / c1 -> (n1 / |n1|) * (d1 / L) * W1;
+e2 / c2 -> (n2 / |n2|) * (d2 / L) * W2;
+e3 / c3 -> 4 * (off / (N * L)) * W3;
+```
+
+`shiftball.g`, whole:
+
+```gappa
+# Isometry::apply_to_point with no turn, as Sphere::transformed and
+# Axis::transformed use it, and SURFACE_AFTER_SHIFTING_ROUNDOFF,
+# crates/rcad-geom/src at c3b2160e: the shifted centre is within
+# 8 * f64::EPSILON * L of c + t, L at least every |c_i| and |t_i|.
+@rnd = float<ieee_64, ne>;
+
+# The centre and the shift, each an f64.
+c0 = rnd(c0_); c1 = rnd(c1_); c2 = rnd(c2_);
+d0 = rnd(d0_); d1 = rnd(d1_); d2 = rnd(d2_);
+
+# turned_by hands the centre back bit for bit when there is no turn, and the
+# translation is one addition per coordinate.
+x0 = c0 + d0; x1 = c1 + d1; x2 = c2 + d2;
+p0 = rnd(x0); p1 = rnd(x1); p2 = rnd(x2);
+
+# Each coordinate's slip, per unit of L.
+e0 = (p0 - x0) / L; e1 = (p1 - x1) / L; e2 = (p2 - x2) / L;
+
+{
+  # L is at least every |c_i| and |t_i|, and need not be a normal number.
+     c0 / L in [-1, 1] /\ c1 / L in [-1, 1] /\ c2 / L in [-1, 1]
+  /\ d0 / L in [-1, 1] /\ d1 / L in [-1, 1] /\ d2 / L in [-1, 1]
+  /\ L in [1b-1074, 1b1024]
+->
+  e0 in ? /\ e1 in ? /\ e2 in ?
+  /\ sqrt(e0 * e0 + e1 * e1 + e2 * e2) in [0, 1b-49]
+}
+
+# A slip is relative to x_i, and x_i is at most 2L. Gappa needs no split at
+# 2^-1022: a sum of two f64 that lands below it is exact.
+(p0 - x0) / L -> ((p0 - x0) / x0) * (x0 / L);
+(p1 - x1) / L -> ((p1 - x1) / x1) * (x1 / L);
+(p2 - x2) / L -> ((p2 - x2) / x2) * (x2 / L);
+x0 / L -> c0 / L + d0 / L;
+x1 / L -> c1 / L + d1 / L;
+x2 / L -> c2 / L + d2 / L;
+```
+
+`shiftcontrols.py`, whole, run beside the two:
+
+```python
+"""Write shiftplane.g's and shiftball.g's controls. Each changes one thing in
+its script: a smaller bound, to see whether it proved its goal from
+hypotheses that contradict each other, or a hypothesis dropped, to see
+whether the proof needs it."""
+
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def write(name, src):
+    open(name, "w").write(src)
+
+
+plane = open("shiftplane.g").read()
+ball = open("shiftball.g").read()
+
+# 7.875u, below the (4 sqrt(3) + 1)u = 7.93u the averaging reaches.
+write("c_shiftplane_7875.g", sub(plane, "/\\ (value - Ex) / (N * L) in [-1b-49, 1b-49]",
+                                 "/\\ (value - Ex) / (N * L) in [-63b-56, 63b-56]"))
+
+# Without the three products normal, and what lemma.g gives from them.
+src = sub(plane, "  /\\ |t0| >= 1b-1022 /\\ |t1| >= 1b-1022 /\\ |t2| >= 1b-1022\n", "")
+src = sub(src, "  /\\ t0 -/ n0 * d0 in [-4503599627370497b-105, 4503599627370497b-105]\n"
+          "  /\\ t1 -/ n1 * d1 in [-4503599627370497b-105, 4503599627370497b-105]\n"
+          "  /\\ t2 -/ n2 * d2 in [-4503599627370497b-105, 4503599627370497b-105]\n", "")
+write("c_shiftplane_nonormal.g", src)
+
+# 3.4u, below the 2 sqrt(3) u = 3.46u the doc comment counts.
+write("c_shiftball_34.g", sub(ball, "sqrt(e0 * e0 + e1 * e1 + e2 * e2) in [0, 1b-49]",
+                              "sqrt(e0 * e0 + e1 * e1 + e2 * e2) in [0, 435b-60]"))
+
+# The centre on a grid of 2^-1100 rather than an f64: a sum below 2^-1022 is
+# then no longer exact, and L may be below 2^-1022. (Written as a plain real,
+# c0 = c0_, Gappa 1.8.0 aborts in ast.cpp printing a warning.)
+write("c_shiftball_finer.g", sub(ball, "c0 = rnd(c0_); c1 = rnd(c1_); c2 = rnd(c2_);",
+                                 "c0 = fixed<-1100, ne>(c0_); c1 = fixed<-1100, ne>(c1_);"
+                                 " c2 = fixed<-1100, ne>(c2_);"))
+```
