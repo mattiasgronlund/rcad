@@ -1,8 +1,8 @@
 //! The two checks that keep a crate's merged test binary whole, shared by
-//! rcad-geom's `tests/merged.rs` and rcad-step's, which reaches it by `#[path]`.
-//! Each root passes its own text and crate directory, since `include_str!` and
-//! `env!` here would name this file's crate and not the caller's.
-//! `docs/decisions.md` §373.
+//! rcad-geom's `tests/merged.rs`, rcad-step's and rcad-topo's, which each reach
+//! it by `#[path]`. Each root passes its own text and crate directory, since
+//! `include_str!` and `env!` here would name this file's crate and not the
+//! caller's. `docs/decisions.md` §373.
 
 use std::collections::BTreeMap;
 use std::path::Path;
