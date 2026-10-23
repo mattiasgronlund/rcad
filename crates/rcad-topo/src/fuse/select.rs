@@ -745,9 +745,12 @@ fn keeps(fate: Fate, placement: Placement, mine: usize) -> Option<bool> {
 /// was placed outside the first bend by its second ray, after the first grazed
 /// that bend's start cap on its rim, where `side of torus` cannot be told. The
 /// graze's two records stayed in the point's log, and every rule both ways
-/// round was refused under a certified policy. The next candidate places the
-/// cap outside and asks nothing undecided
-/// (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`, Q2267, §35.6).
+/// round was refused under a certified policy, until this held the point back
+/// for the next candidate, which places the cap outside and asks nothing
+/// undecided (`tests/a_piece_no_ray_can_place_names_its_refusal.rs`, Q2267,
+/// §35.6). Since Q2489 a ray `classify_uncertain_point` throws away leaves no
+/// record, so that point places the cap itself and none is held back, and
+/// Q2617's probe found no other test that hands this check a record.
 ///
 /// The point held back is taken where no later point places the piece, and
 /// where a later point's search fails, before the refusals below: a piece some
