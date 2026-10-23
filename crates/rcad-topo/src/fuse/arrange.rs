@@ -2424,12 +2424,12 @@ impl<'f> Arrangement<'f> {
             return Err(gave_up_on_it.into());
         }
         let mut left_out = left_out_where_it_refuses;
-        for crossing in 0..self.crossings.len() {
+        for (crossing, &kept) in never_left_out.iter().enumerate() {
             let of_a_pair_set_aside = set_aside
                 .iter()
                 .any(|&(first, second, _)| crossing == first || crossing == second);
             if self.crossings[crossing].reaches_the_face
-                && (of_a_pair_set_aside || !never_left_out[crossing])
+                && (of_a_pair_set_aside || !kept)
                 && !left_out.contains(&crossing)
                 && !self.something_placed_is_on(&[crossing], &folded_into_a_corner)
                 && self.no_face_reaches(crossing, &along_the_rim, &mut known_unreached, log)
