@@ -360,12 +360,21 @@ impl Predicate for Orient3d {
         let (first, second, third) = (bdxcdy - cdxbdy, cdxady - adxcdy, adxbdy - bdxady);
 
         // The bound below is a fraction of the permanent, which only bounds
-        // anything while every product keeps its relative accuracy. One of them
-        // in the subnormals and this level certifies a wrong sign.
+        // anything while every product here keeps its relative accuracy. One
+        // of them in the subnormals and this level can certify a wrong sign
+        // (decisions.md §12.2).
         //
         // The permanent's own three products are each at least as large as the
-        // matching one here — `|x| + |y|` is never below `|x - y|` — so
-        // checking these nine covers the permanent too.
+        // matching one here — `|x| + |y|` is never below `|x - y|` — so for
+        // each of `first`, `second` and `third` that is not zero, checking
+        // these nine covers its product in the permanent too. A minor that is
+        // zero passes its check on the zero, and the permanent's matching
+        // product can then fall into the subnormals or to zero: `bdxcdy ==
+        // cdxbdy == 2^-1000` with `adz == 2^-100` make it `2^-1099`, which
+        // rounds to zero. The sign level 1 certifies is still right there:
+        // Gappa proves it with any one or any two of the three minors at zero,
+        // and with all three `value` is zero, which certifies nothing
+        // (decisions.md §464.7).
         let stays_accurate = product_is_normal(bdx, cdy)
             && product_is_normal(cdx, bdy)
             && product_is_normal(cdx, ady)
@@ -436,17 +445,30 @@ impl Orient3d {
 /// `epsilon` below is the `f64` unit roundoff, 2⁻⁵³: half an ulp of 1, and so
 /// the most a single rounding can cost in relative terms.
 ///
-/// Where the 7 comes from — walk the longest chain of roundings between an
-/// input coordinate and `value` in [`Orient3d::on_floats`]. Each difference
-/// (`bdx = b.x - d.x`) is one rounding. Each product inside a 2x2 minor
-/// (`bdx * cdy`) is a second, and it multiplies two already-rounded
-/// differences, so it carries two more. The minor's own subtraction is a
-/// fourth, multiplying by the third rounded difference `adz` is a fifth and
-/// sixth, and folding the three terms together with two additions is the
-/// seventh. Seven roundings, each costing at most a factor of `(1 + epsilon)`,
-/// give `(1 + epsilon)^7 - 1 <= 7*epsilon + 21*epsilon^2 + ...` times the
-/// permanent. The `56*epsilon^2` covers those higher-order terms together with
-/// the rounding of the permanent itself.
+/// **It bounds the sum `value` is rounded from, not `value`.** In
+/// [`Orient3d::on_floats`], `value = adz * first + bdz * second + cdz * third`
+/// ends with one addition; call what that addition comes to before it rounds
+/// `y`. Where the 7 comes from — walk the longest chain of roundings between
+/// the input coordinates and `y`. The three differences that meet in one term
+/// (`adz`, `bdx`, `cdy`) are a rounding each, since their errors multiply into
+/// it. The product inside the 2x2 minor (`bdx * cdy`) is a fourth, the
+/// minor's own subtraction a fifth, multiplying it by `adz` a sixth, and adding
+/// it to the second term the seventh. Seven roundings, each costing at most a
+/// factor of `(1 + epsilon)`, give `(1 + epsilon)^7 - 1 <= 7*epsilon +
+/// 21*epsilon^2 + ...` times the permanent. The `56*epsilon^2` covers those
+/// higher-order terms together with the rounding of the permanent itself.
+/// Gappa proves `y` within this bound of the true determinant (decisions.md
+/// §464.4, and §464.7 for a minor that is zero).
+///
+/// That is what the sign needs. [`decide`] certifies `Pos` when `value >
+/// error_bound`, and `error_bound` is a double, so rounding `y` to `value`
+/// cannot carry it past `error_bound` unless `y` was past it already: `y` at
+/// most `error_bound` rounds to at most `error_bound`. And `y` above
+/// `error_bound` and within it of the truth makes the truth positive. `Neg` is
+/// the same with the signs turned. `value` itself takes an eighth rounding,
+/// and can land further from the truth than `error_bound`:
+/// `level_one_can_land_past_its_error_bound_and_still_certify_the_right_sign`
+/// builds a tetrahedron where it lands 8/7 as far (decisions.md §464.7).
 ///
 /// The value is Shewchuk's `o3derrboundA`, from "Adaptive Precision
 /// Floating-Point Arithmetic and Fast Robust Geometric Predicates" (1997)
@@ -1389,10 +1411,12 @@ mod tests {
         assert_eq!((decision, level), (Decision::Neg, Level::Interval));
     }
 
-    /// `ORIENT3D_ERROR_BOUND` promises that level 1's `value` never falls
-    /// further from the true determinant than `7*epsilon` of the permanent.
-    /// Here that promise is measured rather than argued, on tetrahedra searched
-    /// out for making the gap as wide as they can.
+    /// Level 1's `value` against its error bound, measured on four tetrahedra
+    /// a search found rounding badly. This is a tripwire on the constant, not a
+    /// bound that holds on every input (decisions.md §16.3, §18.5): the
+    /// constant bounds the sum `value` is rounded from, and
+    /// `level_one_can_land_past_its_error_bound_and_still_certify_the_right_sign`
+    /// builds a tetrahedron whose `value` lands past it.
     ///
     /// **The worst found comes to 6.29 epsilon of the permanent**, against the
     /// 7 the constant carries. So this fails as soon as the constant is cut
@@ -1404,14 +1428,15 @@ mod tests {
     ///
     /// The tetrahedra came from random coordinates followed by hill climbing on
     /// that ratio, over some hundred million candidates, and the best of them
-    /// would not improve under a further six million. The shape that rounds
-    /// worst is not a near-degenerate one — cancellation shrinks the error and
-    /// the permanent together — but an ordinary tetrahedron whose twelve
-    /// coordinates happen to round the same way at every step.
+    /// would not improve under a further six million. The best it found is not
+    /// a near-degenerate one — cancellation shrinks the error and the permanent
+    /// together — but an ordinary tetrahedron whose twelve coordinates happen
+    /// to round the same way step after step. The one built to round worse, to
+    /// 8 epsilon, is an ordinary tetrahedron too.
     #[test]
-    fn level_one_stays_inside_its_error_bound_where_the_rounding_is_worst() {
+    fn level_one_stays_inside_its_error_bound_on_the_tetrahedra_a_search_found() {
         let mut worst = 0.0f64;
-        for points in tetrahedra_whose_arithmetic_rounds_as_badly_as_it_can() {
+        for points in tetrahedra_a_search_found_rounding_badly() {
             let (error, filtered) = how_far_level_one_falls_from_the_truth(points)
                 .expect("no product here leaves the range");
             assert!(
@@ -1438,8 +1463,8 @@ mod tests {
     /// scaled copy is ever formed and no retry can be quietly supplying the
     /// answer (decisions.md §16.9).
     #[test]
-    fn the_worst_rounding_tetrahedra_are_settled_by_level_one_itself() {
-        for points in tetrahedra_whose_arithmetic_rounds_as_badly_as_it_can() {
+    fn the_searched_tetrahedra_are_settled_by_level_one_itself() {
+        for points in tetrahedra_a_search_found_rounding_badly() {
             let [a, b, c, d] = points;
             let (decision, level) = decide(&Orient3d {
                 a: a.into(),
@@ -1450,6 +1475,56 @@ mod tests {
             assert!(decision.is_certified(), "{points:?} was not settled at all");
             assert_eq!(level, Level::Float, "{points:?}");
         }
+    }
+
+    /// `value`, the double level 1 compares, can land further from the true
+    /// determinant than `error_bound`, and the sign level 1 certifies from it
+    /// is still right.
+    ///
+    /// `ORIENT3D_ERROR_BOUND` bounds the sum `value` is rounded from, which is
+    /// at most seven roundings from the inputs; `value` is an eighth.
+    /// This tetrahedron is built so that all eight go the same way by nearly a
+    /// whole `epsilon`, along the one term that is nearly all of the
+    /// permanent: `adz`, `bdx` and `cdy`, the product `bdx * cdy`, the minor
+    /// `first`, `adz * first`, the sum of the first two terms, and `value`.
+    /// That puts `value` 8 epsilon of the permanent from the truth where the
+    /// constant carries 7. The sign holds because `error_bound` is a double:
+    /// rounding cannot carry the sum past it unless the sum was past it
+    /// already (decisions.md §464.7).
+    #[test]
+    fn level_one_can_land_past_its_error_bound_and_still_certify_the_right_sign() {
+        let a = [7.450580596923828e-9, 1.0, 1.0000000049670539];
+        let b = [1.0000000149011614, 1.0, -1.4901160971803051e-8];
+        let c = [
+            -8.478601278668534e-22,
+            1.0000000074505806,
+            -8.231416447182961e-25,
+        ];
+        let d = [1.1102230163533504e-16; 3];
+
+        let (error, filtered) = how_far_level_one_falls_from_the_truth([a, b, c, d])
+            .expect("no product here leaves the range");
+        assert!(
+            error.abs() > filtered.error_bound,
+            "level 1 came out {error:e} from the truth, inside the {:e} it carries, so this \
+             no longer shows what it is for",
+            filtered.error_bound
+        );
+        let permanent = filtered.error_bound / ORIENT3D_ERROR_BOUND;
+        let in_epsilon = error.abs() / permanent / (f64::EPSILON / 2.0);
+        assert!(
+            in_epsilon > 7.99,
+            "this used to land 8 epsilon of the permanent from the truth and now lands \
+             {in_epsilon}"
+        );
+
+        let decided = decide(&Orient3d {
+            a: a.into(),
+            b: b.into(),
+            c: c.into(),
+            d: d.into(),
+        });
+        assert_eq!(decided, (Decision::Pos, Level::Float));
     }
 
     /// How far level 1's `value` falls from the true determinant, and the bound
@@ -1487,7 +1562,7 @@ mod tests {
     /// They are kept as literals because that is what makes this a test rather
     /// than a second search: the coordinates are the finding, and re-deriving
     /// them on every run would cost minutes and prove nothing.
-    fn tetrahedra_whose_arithmetic_rounds_as_badly_as_it_can() -> [[[f64; 3]; 4]; 4] {
+    fn tetrahedra_a_search_found_rounding_badly() -> [[[f64; 3]; 4]; 4] {
         [
             [
                 [-0.01787677771316376, 215.14081658155717, 2.2116568307902695],
