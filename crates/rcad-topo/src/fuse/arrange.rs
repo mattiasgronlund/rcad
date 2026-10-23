@@ -12749,7 +12749,7 @@ fn a_ball_holds_a_pipes_whole_cross_section(ball: &Sphere, pipe: &Cylinder) -> D
     let wider_by = Interval::exactly(ball.radius()) - Interval::exactly(pipe.radius());
     match wider_by.sign() {
         Decision::Neg | Decision::Zero => return Decision::Neg,
-        undecided @ Decision::Undecidable { .. } => return undecided,
+        Decision::Undecidable { enclosure } => return Decision::Undecidable { enclosure },
         Decision::Pos => {}
         other => panic!("a decision nothing here knows: {other:?}"),
     }
