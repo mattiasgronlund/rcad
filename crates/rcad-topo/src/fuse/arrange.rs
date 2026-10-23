@@ -2085,6 +2085,11 @@ impl<'f> Arrangement<'f> {
                             .or_else(|| {
                                 Self::side_of_a_plane_crossing_a_cap_circle(&on, point, plane)
                             })
+                            .or_else(|| {
+                                corner.seam_plane.and_then(|seam| {
+                                    Self::side_of_a_plane_at_a_seam_corner(&on, point, &seam, plane)
+                                })
+                            })
                             .unwrap_or(undecided)
                     }
                 }
@@ -11329,6 +11334,165 @@ impl<'f> Arrangement<'f> {
         Some([k, a])
     }
 
+    /// Which side of `partner` a seam corner lies, on a pipe and on a plane
+    /// square to the pipe's axis, both among the surfaces it is `on`: read as
+    /// the point where its `seam` plane crosses the circle the two meet in, the
+    /// crossing whose box is `at` ([`BakedCorner::seam_plane`], §294.9).
+    /// `None` where it is not that shape, where the box does not say which of
+    /// the two crossings it is, or where a product would round.
+    ///
+    /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
+    /// whose inner side lies along `x = 2`, both turned `π/2` about `z`, has
+    /// the side's plane stored with the normal `(2⁻⁵², 1, 0)` and the offset
+    /// `2`. That plane cuts the bar's floor circle at two points `2.2e−16`
+    /// apart, and the bar's seam corner on the floor is between them,
+    /// `1.09e−47` past the plane, in a box `1.1e−13` wide that holds both.
+    /// [`Arrangement::side_of_a_plane_crossing_a_cap_circle`] needs a box
+    /// between the two, and every fuse with the bar first was refused
+    /// `Undecidable` "side of plane" (Q2655).
+    ///
+    /// **The corner is where the line the cap and the seam plane share crosses
+    /// the circle.** Let the cap be `n_c·p = d_c`, the seam plane
+    /// `n_s·p = d_s` and `partner` `n·p = d`, and let the axis run through `o`
+    /// along `w`. The line runs along `e = n_c × n_s`, and `e·w` is exactly
+    /// nought, since `n_c` lies along `w`. Let `Y` be where the line meets
+    /// `partner`, so `Y` is the meet of the three planes, and `D = n·e`, which
+    /// is not nought or the line never meets `partner`. A point `Y + t·e` of
+    /// the line is `t·D` off `partner`, so the side is the sign of `t·D` at the
+    /// corner.
+    ///
+    /// - **The pipe along the line** is `f(t) = |b|²·t² + 2·B·t + C`, for
+    ///   `b = e × w`, `B = ((Y − o) × w)·b` and `C = |(Y − o) × w|² − r²·|w|²`,
+    ///   since `e` is square to `w`. Its two roots are the two crossings.
+    /// - **The box says which root the corner is**: `e·(p − o)` is nought at
+    ///   the middle of the chord and grows along `e`, so its sign over the box
+    ///   is `Pos` at the root with the larger `t` and `Neg` at the other. The
+    ///   middle of the chord is the foot of the circle's centre on the line,
+    ///   and `e·(c − o)` is nought for every point `c` of the axis.
+    /// - **Where `C < 0`**, `Y` is inside the pipe, so the two roots lie either
+    ///   side of `t = 0` and the corner's `t` has the box's sign.
+    /// - **Where `C > 0`**, both roots lie on the side of `t = 0` that `−B`
+    ///   points to.
+    /// - **Where `C = 0`**, `Y` is a root, the larger one where `B > 0`. If it
+    ///   is the corner, the corner is on `partner`; if not, the corner is on
+    ///   the side `−B` points to.
+    ///
+    /// Every quantity is worked out exactly and never divided: `Y` as
+    /// `D·Y = d_c·(n_s × n) + d_s·(n × n_c) + d·(n_c × n_s)`, and then `B` and
+    /// `C` times `D` and `D²`, which keeps their signs where they are read.
+    fn side_of_a_plane_at_a_seam_corner(
+        on: &[Surface],
+        at: PredicatePoint,
+        seam: &Plane,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        on.iter().find_map(|pipe| {
+            let Surface::Cylinder(pipe) = pipe else {
+                return None;
+            };
+            on.iter().find_map(|cap| {
+                let Surface::Plane(cap) = cap else {
+                    return None;
+                };
+                if !lie_along_one_line(
+                    cap.normal().components(),
+                    pipe.axis().direction().components(),
+                ) {
+                    return None;
+                }
+                Self::side_of_a_plane_where_a_line_crosses_a_cap_circle(
+                    partner, cap, seam, pipe, at,
+                )
+            })
+        })
+    }
+
+    /// The side of `partner` at the point whose box is `at` where the line
+    /// `cap` and `through` share crosses the circle `cap` meets `pipe` in, for
+    /// a `cap` square to the pipe's axis; `None` where the box does not say
+    /// which crossing, `partner` runs along the line, or a product would round
+    /// ([`Arrangement::side_of_a_plane_at_a_seam_corner`] says how).
+    fn side_of_a_plane_where_a_line_crosses_a_cap_circle(
+        partner: &Plane,
+        cap: &Plane,
+        through: &Plane,
+        pipe: &Cylinder,
+        at: PredicatePoint,
+    ) -> Option<Decision> {
+        let exact = |vector: [f64; 3]| vector.map(|component| vec![component]);
+        let [cap_normal, its_normal, normal] =
+            [cap, through, partner].map(|flat| exact(flat.normal().components()));
+        let (origin, along) = (
+            pipe.axis().origin().coordinates(),
+            exact(pipe.axis().direction().components()),
+        );
+        let line = exactly_crossed(&cap_normal, &its_normal)?;
+        let box_ = at.enclosure();
+        let which_root = dot_of(
+            line.each_ref()
+                .map(|component| held_as_an_interval(component)),
+            core::array::from_fn(|axis| box_[axis] - Interval::exactly(origin[axis])),
+        )
+        .sign();
+        if !matches!(which_root, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        let along_the_line = exactly_dotted_across(&normal, &line)?;
+        let way = expansion_sign(&along_the_line);
+        if !matches!(way, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        let meet = exactly_added_across(
+            &exactly_added_across(
+                &exactly_scaled_across(&exactly_crossed(&its_normal, &normal)?, &[cap.offset()])?,
+                &exactly_scaled_across(
+                    &exactly_crossed(&normal, &cap_normal)?,
+                    &[through.offset()],
+                )?,
+            ),
+            &exactly_scaled_across(&line, &[partner.offset()])?,
+        );
+        let off_the_axis = exactly_added_across(
+            &meet,
+            &exactly_scaled_across(&exact(origin), &negated(&along_the_line))?,
+        );
+        let square_to_the_axis = exactly_crossed(&off_the_axis, &along)?;
+        let radius_squared = exactly_scaled(&[pipe.radius()], pipe.radius())?;
+        let pipe_at_the_meet = expansion_sign(&exactly_added(
+            &exactly_dotted_across(&square_to_the_axis, &square_to_the_axis)?,
+            &negated(&exactly_multiplied(
+                &exactly_multiplied(&radius_squared, &exactly_dotted_across(&along, &along)?)?,
+                &exactly_multiplied(&along_the_line, &along_the_line)?,
+            )?),
+        ));
+        let lean = expansion_sign(&exactly_dotted_across(
+            &square_to_the_axis,
+            &exactly_crossed(&line, &along)?,
+        )?);
+        let times = |one: Decision, other: Decision| {
+            if one == other {
+                Decision::Pos
+            } else {
+                Decision::Neg
+            }
+        };
+        if pipe_at_the_meet == Decision::Neg {
+            return Some(times(which_root, way));
+        }
+        if !matches!(pipe_at_the_meet, Decision::Pos | Decision::Zero)
+            || !matches!(lean, Decision::Pos | Decision::Neg)
+        {
+            return None;
+        }
+        let the_meet_is_the_corner =
+            pipe_at_the_meet == Decision::Zero && times(lean, way) == which_root;
+        Some(if the_meet_is_the_corner {
+            Decision::Zero
+        } else {
+            the_other_way(lean)
+        })
+    }
+
     /// How many times the face's boundary winds round each walk, counting only
     /// what one lump of the drawing can say on its own.
     ///
@@ -14947,6 +15111,44 @@ fn exactly_dotted(one: [f64; 3], other: [f64; 3]) -> Option<Vec<f64>> {
 /// `expansion` turned round, which is exact: no entry changes but its sign.
 fn negated(expansion: &[f64]) -> Vec<f64> {
     expansion.iter().map(|entry| -entry).collect()
+}
+
+/// `one × other` for two vectors whose components are expansions, exactly;
+/// `None` where a product would round.
+fn exactly_crossed(one: &[Vec<f64>; 3], other: &[Vec<f64>; 3]) -> Option<[Vec<f64>; 3]> {
+    let [x, y, z] = [0, 1, 2].map(|axis| {
+        let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
+        Some(exactly_added(
+            &exactly_multiplied(&one[next], &other[last])?,
+            &negated(&exactly_multiplied(&one[last], &other[next])?),
+        ))
+    });
+    Some([x?, y?, z?])
+}
+
+/// `one·other` for two vectors whose components are expansions, exactly;
+/// `None` where a product would round.
+fn exactly_dotted_across(one: &[Vec<f64>; 3], other: &[Vec<f64>; 3]) -> Option<Vec<f64>> {
+    (0..3).try_fold(Vec::new(), |total, axis| {
+        Some(exactly_added(
+            &total,
+            &exactly_multiplied(&one[axis], &other[axis])?,
+        ))
+    })
+}
+
+/// Each component of `vector` times the expansion `factor`, exactly; `None`
+/// where a product would round.
+fn exactly_scaled_across(vector: &[Vec<f64>; 3], factor: &[f64]) -> Option<[Vec<f64>; 3]> {
+    let [x, y, z] = vector
+        .each_ref()
+        .map(|component| exactly_multiplied(component, factor));
+    Some([x?, y?, z?])
+}
+
+/// `one + other` for two vectors whose components are expansions, exactly.
+fn exactly_added_across(one: &[Vec<f64>; 3], other: &[Vec<f64>; 3]) -> [Vec<f64>; 3] {
+    core::array::from_fn(|axis| exactly_added(&one[axis], &other[axis]))
 }
 
 /// An interval holding what `expansion` adds up to. Each entry is exact and
