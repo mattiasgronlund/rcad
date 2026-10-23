@@ -551,6 +551,8 @@ pub mod three_flat_seeds_that_fuse_one_way_round;
 pub mod turning_a_fuse;
 #[path = "two_arcs_where_two_curved_surfaces_cross.rs"]
 pub mod two_arcs_where_two_curved_surfaces_cross;
+#[path = "two_bars_of_one_radius_leaning_across_each_other.rs"]
+pub mod two_bars_of_one_radius_leaning_across_each_other;
 #[path = "two_bars_on_one_pipe_and_a_box_united_in_one_call.rs"]
 pub mod two_bars_on_one_pipe_and_a_box_united_in_one_call;
 #[path = "two_boxes_one_with_a_corner_moved_by_1e-300.rs"]
