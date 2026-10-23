@@ -11678,8 +11678,11 @@ impl<'f> Arrangement<'f> {
     ///   the side `−B` points to.
     ///
     /// Every quantity is worked out exactly and never divided: `Y` as
-    /// `D·Y = d_c·(n_s × n) + d_s·(n × n_c) + d·(n_c × n_s)`, and then `B` and
-    /// `C` times `D` and `D²`, which keeps their signs where they are read.
+    /// `D·Y = d_c·(n_s × n) + d_s·(n × n_c) + d·(n_c × n_s)`, then `C` times
+    /// `D²`, which keeps the sign of `C`, and `B` times `D`, which does not keep
+    /// the sign of `B`. So the side where `C > 0` is the sign of `−B·D`, which
+    /// is the sign of `t·D` there, and where `C = 0` the larger root is `Y`
+    /// where `B·D` and `D` have one sign.
     fn side_of_a_plane_at_a_seam_corner(
         on: &[Surface],
         at: PredicatePoint,
@@ -14302,9 +14305,11 @@ fn the_way_a_plane_and_a_pipe_wind(pair: &[Surface; 2], across: Decision) -> Dec
 /// so no sign read over it says which arc it is on. A round bar through
 /// `(1.5, 1)` in an L plate turned `π/2` about `z` starts the loop on the
 /// plate's top at the bar's seam, which the stored numbers put `1.09e−47` past
-/// the line, and the box counted from is `2.3e−13` wide. Every certified fuse
-/// of the two with the plate first is refused for it
-/// (`a_bar_flush_with_an_l_plates_inner_side_turned.rs`, Q2629).
+/// the line, and the box counted from is `2.3e−13` wide. That loop holds no
+/// node but the two meets and at most one corner, so
+/// [`Arrangement::as_the_two_meets_of_one_cut_alone_on_the_loop_say`] orders
+/// it without reading the start, and the fuses with the plate first answer
+/// (`a_bar_flush_with_an_l_plates_inner_side_turned.rs`, Q2629, Q2655).
 fn the_lower_meet_first_round_the_loop(
     wound_as: &[Surface; 2],
     starts: [PredicatePoint; 2],
