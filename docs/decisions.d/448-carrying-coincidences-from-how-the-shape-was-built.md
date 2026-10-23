@@ -447,7 +447,7 @@ and 16 sides. Placed first, the same pyramid refuses `DynamicRangeTooWide` at
 all six placed fuses
 (`a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut`).
 `mise exec -- just t -p rcad-topo -E
-'binary(a_broken_three_surface_corner_read_back_from_bytes)'`: 14 tests run,
+'test(/^a_broken_three_surface_corner_read_back_from_bytes::/)'`: 14 tests run,
 14 passed.
 
 **What carrying (c) inside the kernel would take.** The model would keep each

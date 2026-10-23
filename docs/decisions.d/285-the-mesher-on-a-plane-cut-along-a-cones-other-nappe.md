@@ -210,7 +210,7 @@ seam. They are different faults.
 
 All against `ff78f99f`, in `crates/rcad-topo/src/`, outside this lane's files,
 so none is committed. Apply one or more, set its variable, and run
-`mise exec -- just t -p rcad-topo --test meshing_a_plane_cut_along_a_cones_other_nappe -E 'test(=the_eighteen_held_to_the_familys_four_checks)' --no-capture`.
+`mise exec -- just t -p rcad-topo --test merged -E 'test(=meshing_a_plane_cut_along_a_cones_other_nappe::the_eighteen_held_to_the_familys_four_checks)' --no-capture`.
 That test's assertion is this tree's result, so it fails on purpose and prints
 the tally first.
 

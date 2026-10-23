@@ -128,7 +128,7 @@ its own that carries a hyperbola arc.** Idempotence of union points the same way
 `AFaceTrimmedByACurveThisCannotFollow` ×8 and `AFaceMeetsItsNeighbourOnItsOwnSurface`
 ×12 on `U∪U'`. Nobody has shown this. It is a hypothesis for a `fuse-debugging`
 lane. Each case reproduces with
-`mise exec -- just t -p rcad-topo --test fuse_laws_over_a_cone --run-ignored ignored-only <name>`.
+`mise exec -- just t -p rcad-topo --test merged -E 'test(/^fuse_laws_over_a_cone::/)' --run-ignored ignored-only <name>`.
 
 The doc comment of `what_the_answered_block_fuses_actually_say.rs` said
 `fuses_that_must_agree.rs` has no cone in it. It has run commutativity over

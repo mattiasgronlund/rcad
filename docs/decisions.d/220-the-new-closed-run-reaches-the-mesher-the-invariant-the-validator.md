@@ -37,7 +37,7 @@ answer, and every one has a mesh point exactly on the north pole, 0 away. The
 volumes run 467.11215906329 at the coarsest to 523.2627879331797 at the finest
 against the closed form's 523.5987755982989. All of that is from a printing probe
 in the test file under `mise exec -- just t -E
-'binary(a_closed_rim_the_new_way_still_gets_its_poles)' --no-capture`; the
+'test(/^a_closed_rim_the_new_way_still_gets_its_poles::/)' --no-capture`; the
 verifier reverted the source to base and reproduced the quoted failure to sixteen
 significant figures.
 

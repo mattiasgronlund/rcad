@@ -126,7 +126,7 @@ lane-led-repro d1e573a4`; `mise exec -- just decision 124`, `124.1`–`124.4`;
 direct `Read` of `builder.rs`, `validate.rs`, `march.rs`, `along_a_crossing.rs`,
 `mesh.rs`, `building_a_solid_out_of_faces.rs`, and of
 `kicad/LED_D5.0mm-3.step`'s `#10`–`#59`; `mise exec -- just t -E
-'binary(a_dome_on_a_shaft_of_the_same_radius)' --no-fail-fast`; a scratchpad
+'test(/^a_dome_on_a_shaft_of_the_same_radius::/)' --no-fail-fast`; a scratchpad
 `python3` for the two distances in §128.2; `mise exec -- just test` (1980 tests,
 1975 before this lane); `mise exec -- just gate`.
 

@@ -87,8 +87,8 @@ turned 16 steps about `x`. The union refused with
 `AClosedEdgeOfTheAnswerWouldStartAtAPole`, which `a_turned_curved_refusal` does
 not allow. I replayed the seed on `699704fe`, before that lane's change: all
 three `ball_and_block` properties failed the same way
-(`PROPTEST_CASES=1 just t -p rcad-topo --test fuses_that_must_agree
-ball_and_block`, 0 of 3). So it was already on `main`, and I did not treat it as
+(`PROPTEST_CASES=1 just t -p rcad-topo --test merged -E
+'test(~fuses_that_must_agree::ball_and_block)'`, 0 of 3). So it was already on `main`, and I did not treat it as
 the lane's regression.
 
 It is §194.2's shape inside the fuse. Turned, the floor meets the ball in a

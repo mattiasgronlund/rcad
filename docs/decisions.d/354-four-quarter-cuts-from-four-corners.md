@@ -33,7 +33,7 @@ to the triangulator as before.
 ### 354.2 The two tables
 
 The eighteen of §285.1, by
-`mise exec -- just t -p rcad-topo --test meshing_a_plane_cut_along_a_cones_other_nappe -E 'test(=the_eighteen_held_to_the_familys_four_checks)' --no-capture`:
+`mise exec -- just t -p rcad-topo --test merged -E 'test(=meshing_a_plane_cut_along_a_cones_other_nappe::the_eighteen_held_to_the_familys_four_checks)' --no-capture`:
 
 | tree | right | the rest |
 |---|---|---|

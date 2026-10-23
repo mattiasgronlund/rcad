@@ -17,8 +17,8 @@ only to stop one step further down.
 Re-derived on this HEAD by
 
 ```text
-cargo nextest run -p rcad-topo --test how_often_a_fuse_with_a_cone_refuses \
-    how_often_a_certified_fuse_with_a_cone_in_it_refuses --no-capture
+cargo nextest run -p rcad-topo --test merged -E \
+    'test(~how_often_a_fuse_with_a_cone_refuses::how_often_a_certified_fuse_with_a_cone_in_it_refuses)' --no-capture
 ```
 
 > `a frustum against a bar: 96 fuses, 0 answered, 96 refused (100.0%):`

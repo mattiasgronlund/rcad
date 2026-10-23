@@ -28,8 +28,8 @@ search found nothing.
 
 A throwaway probe in `place_the_piece` printed the reference point, every
 candidate and every turn of the winding whenever it gave up. It was run on the
-base with `Q335_PROBE=1 mise exec -- just t -p rcad-topo --test fusing_solids
-a_fuse_that_needs_a_decision_nothing_can_prove_refuses --no-capture`, then taken
+base with `Q335_PROBE=1 mise exec -- just t -p rcad-topo --test merged -E
+'test(~fusing_solids::a_fuse_that_needs_a_decision_nothing_can_prove_refuses)' --no-capture`, then taken
 out.
 
 - The piece is the quarter `[0.5, 1] × [0, 0.5]` of the first tower's top, on

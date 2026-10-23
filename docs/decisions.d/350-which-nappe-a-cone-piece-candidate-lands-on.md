@@ -347,8 +347,8 @@ count in the table was the same on all three runs.
 > model validates after each refusal:
 > `a_unit_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range`
 > pins it, in place of the pin named in the bullet above (`just t -p rcad-topo
-> --test a_plane_cut_along_a_cones_other_nappe
-> a_unit_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range`).
+> --test merged -E
+> 'test(~a_plane_cut_along_a_cones_other_nappe::a_unit_cone_and_a_lean_four_block_through_its_apex_are_refused_as_too_wide_a_range)'`).
 > Behind the guard, (b) refuses only a feature finer than any the inputs could
 > carry, and it asks of the inputs and the answer together what validate asks
 > of the model the caller holds after the fuse. The check still runs where it

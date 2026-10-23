@@ -90,7 +90,7 @@ encoding starts with a tag that fixes its length, so two different rings cannot
 write out the same numbers.
 
 Checked by taking each piece out and running
-`just t -p rcad-topo --test fuses_that_must_agree --no-fail-fast`, as §163.3 did:
+`just t -p rcad-topo --test merged -E 'test(/^fuses_that_must_agree::/)' --no-fail-fast`, as §163.3 did:
 
 | taken out | tests that fail |
 |---|---|
