@@ -54,9 +54,12 @@
 //! §16.10's method (§30).
 //!
 //! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1564 of 2048
-//! quartic pairs compared and 486 skipped**, 10 of those 486 two pipes of one
-//! width whose axes meet (§347.9) and 57 a thin pipe resting on the inside of
-//! a fat one (Q2636).
+//! quartic pairs compared and 486 skipped**. Those 486 are a mix of two pipes
+//! of one width whose axes meet (§347.9) and a thin pipe resting on the
+//! inside of a fat one, plus pairs down one direction; an attempt to split
+//! the three apart (Q2636, then re-run for Q2663) gave different counts each
+//! time it was tried without a committed test behind the count, so no split
+//! is published here.
 
 #![forbid(unsafe_code)]
 
@@ -411,70 +414,6 @@ fn a_ball_resting_along_a_whole_circle_inside_a_pipe_answers_one_circle_however_
         !is_on_a_knife_edge(&resting.surfaces()),
         "a pair every turn above answers the same way is not a knife edge, and the properties \
          above skip it if this says it is"
-    );
-}
-
-#[test]
-fn q2663_probe_split_the_486() {
-    let cases = soak::cases(CASES);
-    let mut runner = TestRunner::new_with_rng(
-        Config {
-            cases,
-            max_global_rejects: cases.saturating_mul(REJECTS_ALLOWED_PER_CASE),
-            source_file: Some(file!()),
-            failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
-                "proptest-regressions",
-            ))),
-            ..Config::default()
-        },
-        soak::seeded(),
-    );
-
-    let compared = Cell::new(0usize);
-    let on_a_knife_edge = Cell::new(0usize);
-    let steinmetz = Cell::new(0usize);
-    let thin_in_fat = Cell::new(0usize);
-    let outcome = runner.run(&(a_quartic_lattice_crossing().boxed(), a_turn()), |(crossing, turn)| {
-        let still = crossing;
-        let mut moved = crossing;
-        moved.turn = Some(turn);
-
-        let still_surfaces = still.surfaces();
-        if is_on_a_knife_edge(&still_surfaces) {
-            on_a_knife_edge.set(on_a_knife_edge.get() + 1);
-            if let [Surface::Cylinder(one), Surface::Cylinder(other)] = &still_surfaces {
-                if one.radius() == other.radius() && the_axes_meet_exactly(one, other) {
-                    steinmetz.set(steinmetz.get() + 1);
-                } else if one.radius() != other.radius()
-                    && how_far_apart_the_axes_are_against_what_the_widths_differ_by(one, other)
-                        == Decision::Zero
-                {
-                    thin_in_fat.set(thin_in_fat.get() + 1);
-                }
-            }
-            return Ok(());
-        }
-        let before = named(&still_surfaces)?;
-        if matches!(before, SurfaceMeet::TouchAtOnePoint { .. }) {
-            on_a_knife_edge.set(on_a_knife_edge.get() + 1);
-            return Ok(());
-        }
-        let after = named(&moved.surfaces())?;
-
-        compared.set(compared.get() + 1);
-        prop_assert_eq!(kind_of(&before), kind_of(&after), "mismatch");
-        Ok(())
-    });
-    if let Err(why) = outcome {
-        panic!("{why}");
-    }
-
-    eprintln!(
-        "Q2663 PROBE {} compared, {} skipped, {} steinmetz, {} thin_in_fat",
-        compared.get(),
-        on_a_knife_edge.get(),
-        steinmetz.get(),
-        thin_in_fat.get()
     );
 }
 
