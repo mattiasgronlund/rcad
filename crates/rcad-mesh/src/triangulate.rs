@@ -1850,9 +1850,8 @@ struct HowFineToGo<'a> {
 ///
 /// # Errors
 ///
-/// [`CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection`],
-/// [`CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch`] or
-/// [`CannotTriangulate::APocketBesideAPoleSideWouldNotUnfold`].
+/// [`CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection`] or
+/// [`CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch`].
 fn refine_the_inside(
     mesh: &mut ConstrainedDelaunayTriangulation<Point2<f64>>,
     corners: &mut Vec<[f64; 2]>,
@@ -1972,9 +1971,6 @@ fn refine_the_inside(
         if !anything_placed {
             if let (false, Some(&(corner, _))) = (anything_missed, corners_cut_off.first()) {
                 return Err(CannotTriangulate::ASideCutsOffOneCornerOfACurvedPatch { corner });
-            }
-            if !anything_missed {
-                return Err(CannotTriangulate::APocketBesideAPoleSideWouldNotUnfold);
             }
             return Err(CannotTriangulate::RanOutOfRoomBeforeMeetingTheDeflection {
                 strays: furthest,
@@ -2720,6 +2716,14 @@ pub enum CannotTriangulate {
     /// ([`where_to_cut`]). The floor stays because it is what makes
     /// [`refine_the_inside`] terminate at all, not because something is
     /// expected to land on it.
+    ///
+    /// **It is also what is left of a pocket that will not unfold**, and then
+    /// `strays` can be within `deflection`: a point beside a pole side joined
+    /// to nothing but the side's two ends and one more, whose halving side's
+    /// middle will not go in ([`pockets_beside_a_pole_side`]). Handing that on
+    /// as a mesh would hand on one triangle facing both ways
+    /// (`docs/decisions.md` §187.4). No test reaches it; Q2650's shape needed
+    /// the halving and never this.
     #[error(
         "the mesh still strays {strays}, the deflection is {deflection}, and there is nowhere left to put a point"
     )]
@@ -2752,26 +2756,6 @@ pub enum CannotTriangulate {
         /// The first corner the side cuts off.
         corner: usize,
     },
-
-    /// Where the surface pinches, a point inside the patch is joined to the two
-    /// ends of a pole side and one other point and to nothing else, and the
-    /// point that would join it to a fourth cannot be placed.
-    ///
-    /// The two ends of a pole side are one point in space, so such a point's
-    /// two triangles that are not on the pole side are one triangle facing both
-    /// ways: a pocket, which `docs/decisions.md` §187.4 says is worse than no
-    /// mesh. The refinement halves a side from one of those two ends to the
-    /// other point, and this is what is left when that middle will not go in:
-    /// the triangulation would not take it, rounded it is not strictly inside
-    /// the patch, or a point that already unfolded a pocket is its other end and
-    /// it is within an eighth of a step of a point placed before
-    /// ([`refine_the_inside`]). No test reaches this; Q2650's shape needed the
-    /// halving and never this.
-    #[error(
-        "beside a pole side, a point is joined only to the pole and one other point, \
-         and there is nowhere to put the point that would join it to a fourth"
-    )]
-    APocketBesideAPoleSideWouldNotUnfold,
 }
 
 #[cfg(test)]
