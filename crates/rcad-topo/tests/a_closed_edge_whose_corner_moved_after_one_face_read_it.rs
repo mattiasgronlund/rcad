@@ -275,11 +275,31 @@ fn all_three_answer_either_way_round(bars: &TwoBars) {
     let leaning_first = answer(bars, Rule::Intersection, false, shared, 2);
     the_same_volume(upright_first, leaning_first, "the intersection");
     let whole = UPRIGHT + LEANING - shared;
-    let upright_first = answer(bars, Rule::Union, true, whole, 6);
-    let leaning_first = answer(bars, Rule::Union, false, whole, 6);
+    let ends = faces_cut_off_the_leaning_ends(bars.lean);
+    let upright_first = answer(bars, Rule::Union, true, whole, 6 + ends);
+    let leaning_first = answer(bars, Rule::Union, false, whole, 6 + ends);
     the_same_volume(upright_first, leaning_first, "the union");
     answer(bars, Rule::Difference, true, UPRIGHT - shared, 4);
-    answer(bars, Rule::Difference, false, LEANING - shared, 4);
+    answer(bars, Rule::Difference, false, LEANING - shared, 4 + ends);
+}
+
+/// How many faces the fuse adds to an answer holding the leaning bar's ends,
+/// by cutting them along the planes of the upright bar's two caps, `z = 11`
+/// and `z = −1`: two when the leaning bar reaches past those planes, and none
+/// when it does not. Each end comes off its pipe as a face of its own, though
+/// the cap whose plane cut it is a disc of radius 2 about nine away. The
+/// answer measures right and validates all the same.
+///
+/// The leaning bar's highest point is its upper cap's centre, `10 sin lean`
+/// above the `z = 5` its axis crosses at, plus that cap's radius of 3 tilted
+/// by the lean. So its ends pass the planes when `10 sin lean + 3 cos lean >
+/// 6`, which is from a lean of about 0.32.
+fn faces_cut_off_the_leaning_ends(lean: f64) -> usize {
+    if 10.0 * lean.sin() + 3.0 * lean.cos() > 6.0 {
+        2
+    } else {
+        0
+    }
 }
 
 /// What a measured volume is, and how far its mesh may miss it.
@@ -299,7 +319,7 @@ fn answer(bars: &TwoBars, rule: Rule, upright_first: bool, volume: f64, faces: u
         bars.said
     );
     let policy = Policy::certified();
-    let (mut model, fused) = the_fuse(bars, rule, upright_first, &policy);
+    let (model, fused) = the_fuse(bars, rule, upright_first, &policy);
     let solids = fused.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
     model
         .validate(&policy, &mut ProvenanceLog::new())
@@ -400,28 +420,30 @@ fn the_way_read_at_the_corner(bars: &TwoBars) -> Decision {
         .solid(solids[0])
         .expect("a solid the fuse made")
         .faces()
-        .flat_map(|face| face.wires().collect::<Vec<_>>())
-        .flat_map(|wire| wire.coedges().collect::<Vec<_>>())
+        .flat_map(|face| face.wires())
+        .flat_map(|wire| wire.coedges())
         .map(|coedge| coedge.edge())
-        .next()
-        .expect("the piece the two share has an edge");
-    assert!(
-        edge.is_closed().expect("an edge of the model"),
-        "{} bars",
-        bars.said
-    );
+        .find(|edge| edge.is_closed().expect("an edge of the model"))
+        .unwrap_or_else(|| {
+            panic!(
+                "{} bars: the piece they share has no closed edge",
+                bars.said
+            )
+        });
+    let corner = edge.start().point();
     let pipes: Vec<(Vector, Vector)> = edge
         .neighbouring_faces()
-        .map(|key| match model.face(key).expect("a face").surface() {
-            Surface::Cylinder(pipe) => {
-                let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
-                let out = edge.start().point() - origin;
-                (out * along.dot(along) - along * along.dot(out), along)
-            }
-            other => panic!(
-                "{} bars: a face of the piece they share is {other:?}",
-                bars.said
-            ),
+        .map(|key| {
+            let surface = model.face(key).expect("a face").surface();
+            let Surface::Cylinder(pipe) = surface else {
+                panic!(
+                    "{} bars: a face of the piece they share is {surface:?}",
+                    bars.said
+                );
+            };
+            let (origin, along) = (pipe.axis().origin(), pipe.axis().direction());
+            let out = corner - origin;
+            (out * along.dot(along) - along * along.dot(out), along)
         })
         .collect();
     let [first, second] = pipes[..] else {
