@@ -2866,8 +2866,10 @@ impl<'f> Arrangement<'f> {
     /// has proved it on the plane. Two half ellipses of two pipes of one width
     /// meet at places worked out in intervals and not stored, and
     /// [`Arrangement::place_where_two_halves_meet`] places those. Two loops of
-    /// two leaning pipes that may meet are refused before this
-    /// ([`the_two_loops_of_two_pipes_may_meet`]). Every other pair that names
+    /// two leaning pipes, or of a ball and a pipe, that meet where the walls
+    /// touch meet at a place worked out in intervals too, and
+    /// [`Arrangement::place_where_two_loops_meet`] places that, before this is
+    /// asked. Every other pair that names
     /// two curves is left without a node, and passes through here only to be
     /// turned away; §347 says which of them can have two curves that cross.
     ///
