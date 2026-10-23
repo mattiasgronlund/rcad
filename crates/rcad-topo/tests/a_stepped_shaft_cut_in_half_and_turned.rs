@@ -297,6 +297,41 @@ fn a_stepped_shaft_bored_across_the_narrow_bars_radius_cut_and_turned_keeps_the_
     }
 }
 
+/// Bored with the square hole, the shaft keeps no corner on its circles where
+/// a side plane of the hole, run on past the hole, crosses them: on the
+/// bottom and the annulus at `(±1.977, ±0.3)`, `(−1.8, ±0.872)` and
+/// `(−1.2, ±1.6)`, and on the narrow bar's circles at `(±0.954, ±0.3)`. No
+/// face of the hole is there. Boring put a corner at every one of them
+/// (Q2657), and those corners are what Q2488's refusal met.
+#[test]
+fn a_stepped_shaft_bored_with_a_square_hole_keeps_no_corner_where_the_holes_side_planes_cross_its_circles()
+ {
+    let mut model = a_model();
+    let shaft = a_stepped_shaft(&mut model);
+    let bored = Bore::ASquareHole.cut_into(&mut model, shaft);
+    let view = model.solid(bored).expect("this model made the key");
+    let on_a_circle_and_a_side_plane = |corner: &Point| {
+        let radius = corner.x().hypot(corner.y());
+        let on_a_circle = (radius - 1.0).abs() < 1e-6 || (radius - 2.0).abs() < 1e-6;
+        let on_a_side_plane = (corner.x() + 1.8).abs() < 1e-6
+            || (corner.x() + 1.2).abs() < 1e-6
+            || (corner.y().abs() - 0.3).abs() < 1e-6;
+        on_a_circle && on_a_side_plane
+    };
+    for face in view.faces() {
+        for wire in face.wires() {
+            let corners: Vec<Point> = wire.points().collect();
+            assert!(
+                !corners.iter().any(on_a_circle_and_a_side_plane),
+                "face {:?} on {:?} has a corner where a side plane of the hole crosses a circle: \
+                 {corners:?}",
+                face.key(),
+                face.surface()
+            );
+        }
+    }
+}
+
 fn turned(turn: f64) -> [Isometry; 1] {
     [Isometry::rotation(&Axis::z(), turn).expect("a finite turn")]
 }
