@@ -10,8 +10,9 @@
 
 *and, after the answer below: "file the Gappa pilot row for orient3d". What
 464.1 to 464.3 say about the three tools is what was known of them before
-anything was tried here, when none of them was installed. 464.4 onward is the
-pilot, Q2647, and where it found 464.2 wrong 464.2 says so.*
+anything was tried here, when none of them was installed. 464.4 to 464.6 are
+the pilot, Q2647, and where it found 464.2 wrong 464.2 says so. 464.7 is
+Q2658, which took up the two claims the pilot left unbacked.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -19,6 +20,7 @@ pilot, Q2647, and where it found 464.2 wrong 464.2 says so.*
   464.4   What the pilot found
   464.5   The scripts, whole
   464.6   What this leaves
+  464.7   value past the bound, and every minor at zero run
 
 ### 464.1 The bugs a bound prover is for
 
@@ -173,7 +175,8 @@ determinant than `7*epsilon` of the permanent". Asked for `|value − Ex| ≤ eb
 with one more ratio for the last rounding, Gappa fails at the code's `B` (best
 `±1.14286`) and at `8u`, and proves it at `8u + 64u²`. `|value − Ex| / P6`
 comes out at `8u + 8u²`. Not proving it does not make it false: §18.5's search
-found no input past `6.286u`. The doc comment on `ORIENT3D_ERROR_BOUND`
+found no input past `6.286u`. (464.7 builds one at `7.99999u`, so it is false.)
+The doc comment on `ORIENT3D_ERROR_BOUND`
 counts "folding the three terms together with two additions" as one rounding,
 but `y` takes seven roundings from the inputs and `value` takes eight. Q2658
 is the row for it.
@@ -517,7 +520,9 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   `ORIENT3D_ERROR_BOUND` and on the bound test, and that the nine
   `product_is_normal` checks cover the permanent's products when `first`,
   `second` or `third` is zero. Either a proof at the code's bound or comments
-  that say what is proved, and a run of the zero branch.
+  that say what is proved, and a run of the zero branch. Done, in 464.7: the
+  claim on `value` is false, the comments now say what is proved, and every
+  branch with one or two minors at zero proves at the code's bound.
 - **Q2659**, the eight other `*_ERROR_BOUND` sign filters, done as block 1
   was.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
@@ -529,4 +534,7 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
 None of the pilot's findings is a wrong answer found on an input. The sign
 `decide` certifies is proved right on every input block 1 covers. What is left
 is comments that claim more than is proved, zero branches argued on paper and
-one of them not run, and 39 equalities Coq takes on trust.
+one of them not run, and 39 equalities Coq takes on trust. Since 464.7 the
+comments in `orient3d.rs` say what is proved, and every branch with a minor at
+zero is run. The branches where one of the nine differences is zero are still
+on paper, as 464.4 argues them, and so is the step from `y` to the sign.

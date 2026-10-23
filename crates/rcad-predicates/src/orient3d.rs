@@ -371,9 +371,10 @@ impl Predicate for Orient3d {
         // zero passes its check on the zero, and the permanent's matching
         // product can then fall into the subnormals or to zero: `bdxcdy ==
         // cdxbdy == 2^-1000` with `adz == 2^-100` make it `2^-1099`, which
-        // rounds to zero. The sign level 1 certifies is still right there;
-        // Gappa proves it for each of the three minors at zero (decisions.md
-        // §464.7).
+        // rounds to zero. The sign level 1 certifies is still right there:
+        // Gappa proves it with any one or any two of the three minors at zero,
+        // and with all three `value` is zero, which certifies nothing
+        // (decisions.md §464.7).
         let stays_accurate = product_is_normal(bdx, cdy)
             && product_is_normal(cdx, bdy)
             && product_is_normal(cdx, ady)
