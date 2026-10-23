@@ -12,7 +12,8 @@
 464.1 to 464.3 say about the three tools is what was known of them before
 anything was tried here, when none of them was installed. 464.4 to 464.6 are
 the pilot, Q2647, and where it found 464.2 wrong 464.2 says so. 464.7 is
-Q2658, which took up the two claims the pilot left unbacked.*
+Q2658, which took up the two claims the pilot left unbacked, and 464.8 is
+Q2659, which proved two more of the bounds.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -21,7 +22,7 @@ Q2658, which took up the two claims the pilot left unbacked.*
   464.5   The scripts, whole
   464.6   What this leaves
   464.7   value past the bound, and every minor at zero run
-  464.8   orient2d and the side of a plane (Q2659, unfinished)
+  464.8   orient2d and the side of a plane
 
 ### 464.1 The bugs a bound prover is for
 
@@ -525,7 +526,10 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   claim on `value` is false, the comments now say what is proved, and every
   branch with one or two minors at zero proves at the code's bound.
 - **Q2659**, the eight other `*_ERROR_BOUND` sign filters, done as block 1
-  was.
+  was. Done for two, in 464.8: `ORIENT2D_ERROR_BOUND` and
+  `SIDE_OF_PLANE_ERROR_BOUND` are proved at the code's constants, orient2d's
+  with its products below the normals too, and each of the other six is a row
+  of its own.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those.
 - **Q2661**, whether the scripts join the tree and the gate, what notices
@@ -1041,11 +1045,15 @@ None of them was read for this.
 - A row to run block 1 where one of the nine differences `adx` to `cdz` is
   zero, which 464.4 argues on paper only, reusing the scripts in 4.
 
-### 464.8 orient2d and the side of a plane (Q2659, unfinished)
+### 464.8 orient2d and the side of a plane
 
-*Q2659's first lane, on 2026-10-23, handed over at its budget with this
-written down and its controls not yet run. What is below was run; what is
-not run says so.*
+Q2659 took up 464.6's eight other sign filters, in two lanes on 2026-10-23,
+and did two of them: `ORIENT2D_ERROR_BOUND` and `SIDE_OF_PLANE_ERROR_BOUND`.
+The first lane ran the proofs and handed over at its budget. The second ran
+the controls, `coqc`, and plane's cases with a product below the normals, and
+handed over at its budget too, with 1 and 2 below written up and 3 to 7 not
+yet: plane's controls, its cases below the normals, `coqc`, `planecases.py`
+and what this leaves are in its handoff, unwritten here.
 
 Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, against
 `orient2d.rs` and `plane.rs` at `affe0f01`. `u` is `2⁻⁵³` as in 464.4. Each
@@ -1061,7 +1069,8 @@ gives it.
 `B` it proves, in steps of `u²`, is `3u + 15u²`: `3u + 14u²` fails, and so
 does `3u`. The claim on `value`, `o2v.g` (block 1's change in 464.5, here
 `rv` multiplying the `1` in `W1` and `W2`), fails at the code's `B`, best
-`[-1.33333, 1.33333]`, with `(value − Ex) / Phat` within `4u + 8u²`. The doc
+`[-1.33333, 1.33333]`, with `(value − Ex) / Phat` within `4u + 8u²`, and it
+fails at `4u + 16u²` too, best `[-1, 1]` as Gappa prints it, rounded. The doc
 comment on `ORIENT2D_ERROR_BOUND` does not claim it: it counts three
 roundings and argues the fourth apart. No input was built for it.
 
@@ -1082,10 +1091,15 @@ products `F = acx * bcy` and `G = acy * bcx`:
 
 What makes it work is that `eb` normal puts `P` above `2^(-970.585)`, so a
 product below the normals loses at most `2⁻¹⁰⁷⁵`, which is at most `u` of
-`eb`, and the code's `16u²` has room for it. The controls are written and
-not run: each case script at `B = 3u` and at `3u + 14u²`, and `o2tiny.g`
-without `|eb| >= 1b-1022`, each of which must fail for its parent not to
-have proved from a contradiction.
+`eb`, and the code's `16u²` has room for it.
+
+A script whose hypotheses contradict each other proves every goal (464.7's
+3), so each case was run below the code's `B` as well. At `B = 3u` each of
+the four fails, best `[-1, 1]` as printed. At `3u + 14u²` each proves, where
+`o2.g` needs `15u²`. `o2tiny.g` without `|eb| >= 1b-1022` fails, best
+`[-inf, inf]`, printing `eb` at most `2^(-1050.41)`: what proves `o2tiny.g`
+is the contradiction with `eb` normal and nothing else, which is what it is
+meant to show.
 
 The doc comment's own argument, `orient2d.rs:343-350`, does not hold as
 written: it calls `acx * bcy` and `acy * bcx` exact products, but they are
