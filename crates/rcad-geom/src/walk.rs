@@ -1558,9 +1558,21 @@ fn every_point_is_held(
 /// `end` is the box the place on the crossing the run's end stands for is in
 /// ([`where_on_the_crossing_this_corner_can_be`]). The end is put on the step
 /// nearest its middle, and is that step's point at either end when `end` and
-/// the box `deviation` round that point share a point; that point is then
-/// marked as not `kept`, and a point left out moves the step by no more than
-/// the two boxes reach.
+/// the box `deviation` round that point share a point. Every point whose box
+/// shares a point with `end` is marked as not `kept`, since nothing the
+/// arithmetic knows tells it from the end, and a point left out moves the step
+/// by no more than the two boxes reach.
+///
+/// **Every such point, and not only the step's.** The march steps ever shorter
+/// as it nears a place where the two surfaces touch, and the half of a loop of
+/// Viviani's figure of eight from where its loops meet to a pole has five or
+/// six points `1.1e-8` to `1.7e-7` from that corner at a deflection of `0.01`,
+/// each box holding it. Kept, they were asked which side of the flat surface
+/// through the corner that picks the run they were on, none could be told, and
+/// the records refused every certified fuse of a bar touching a ball from
+/// inside, though the arc picked did not hang on them
+/// (`a_run_from_where_two_loops_of_a_ball_and_a_pipe_meet_logs_nothing_under_a_certified_policy`,
+/// Q2649).
 ///
 /// **Judged by how far off the crossing the end can be, and not by its own
 /// box**, for the reason a closed run's corner is (Q1690). A
@@ -1584,18 +1596,23 @@ fn where_on_the_loop_this_end_is(
     kept: &mut [bool],
 ) -> Result<f64> {
     let count = round.len();
+    let shares = round
+        .iter()
+        .map(|&point| {
+            somewhere_within(point, deviation)
+                .map(|round_it| the_boxes_share_a_point(end, round_it))
+                .ok_or(Error::CannotWorkOutHowBigACrossingIs)
+        })
+        .collect::<Result<Vec<bool>>>()?;
+    for (kept, _) in kept.iter_mut().zip(&shares).filter(|(_, shares)| **shares) {
+        *kept = false;
+    }
     let at = Point::from(end.enclosure().map(middle_of));
     let (nearest, along) = the_step_nearest(at, round);
-    for corner in [nearest, (nearest + 1) % count] {
-        let Some(round_the_corner) = somewhere_within(round[corner], deviation) else {
-            return Err(Error::CannotWorkOutHowBigACrossingIs);
-        };
-        if the_boxes_share_a_point(end, round_the_corner) {
-            kept[corner] = false;
-            return Ok(corner as f64);
-        }
-    }
-    Ok(nearest as f64 + along)
+    Ok([nearest, (nearest + 1) % count]
+        .into_iter()
+        .find(|&corner| shares[corner])
+        .map_or(nearest as f64 + along, |corner| corner as f64))
 }
 
 /// The step of the closed loop of points `round` that passes nearest `at`: the
@@ -7094,12 +7111,12 @@ mod tests {
     /// certified fuse that draws them is not refused for what they log.
     ///
     /// The march steps ever shorter as it nears where the loops meet, and
-    /// leaves points there `4e-9` to `2e-7` from it, inside the bound it claims
-    /// for them. The box round each of them holds the corner, which is on the
-    /// flat surface `y = 0` the run is picked by, so none of them could be put
-    /// on either side of it. Each was recorded, and every fuse of a bar
-    /// touching a ball from inside was refused `Undecidable` for them, though
-    /// the arc it picked did not hang on them (Q2649).
+    /// leaves five or six points there, `1.1e-8` to `1.7e-7` from it. The box
+    /// round each of them holds the corner, which is on the flat surface
+    /// `y = 0` the run is picked by, so none of them could be put on either
+    /// side of it. Each was recorded, and every fuse of a bar touching a ball
+    /// from inside was refused `Undecidable` for them, though the arc picked
+    /// did not hang on them (Q2649).
     #[test]
     fn a_run_from_where_two_loops_of_a_ball_and_a_pipe_meet_logs_nothing_under_a_certified_policy()
     {
