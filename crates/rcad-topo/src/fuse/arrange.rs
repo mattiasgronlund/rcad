@@ -26103,6 +26103,112 @@ mod two_loops_of_two_leaning_pipes {
         }
     }
 
+    #[test]
+    fn scratch_q2662_hunt() {
+        use super::{
+            Interval, cross_of_intervals, dot_of, expansion_sign, two_leaning_pipes_exactly,
+        };
+        let up = |x: f64| f64::from_bits(x.to_bits() + 1);
+        let down = |x: f64| f64::from_bits(x.to_bits() - 1);
+        let ys = [
+            0.6_f64,
+            0.8,
+            0.5403023058681398,
+            0.8414709848078965,
+            0.7,
+            0.3,
+            0.9,
+        ];
+        for &a in &ys {
+            let b = (1.0 - a * a).sqrt();
+            for (label, c, d) in [
+                ("up up", up(a), up(b)),
+                ("down down", down(a), down(b)),
+                ("up -", up(a), b),
+                ("- up", a, up(b)),
+                ("up down", up(a), down(b)),
+            ] {
+                for written in [true, false] {
+                    let axis = |origin: Point, direction: Vector| {
+                        if written {
+                            Axis::as_written(origin, direction).expect("an axis")
+                        } else {
+                            Axis::new(origin, direction).expect("an axis")
+                        }
+                    };
+                    let fat =
+                        Cylinder::new(axis(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, a, b)), 2.0)
+                            .expect("r");
+                    let thin =
+                        Cylinder::new(axis(Point::new(1.0, 0.0, 0.0), Vector::new(0.0, c, d)), 1.0)
+                            .expect("r");
+                    let [mine, theirs] = [&thin, &fat]
+                        .map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
+                    let across = cross_of_intervals(mine, theirs);
+                    let lean_squared = dot_of(across, across);
+                    let Some(e) = two_leaning_pipes_exactly(&thin, &fat) else {
+                        eprintln!("a {a} {label} written {written}: exactly None");
+                        continue;
+                    };
+                    let lean_exact = expansion_sign(&e.lean);
+                    let gap_exact = expansion_sign(&e.gap);
+                    let interesting = lean_squared.lo() <= 0.0;
+                    eprintln!(
+                        "a {a} {label} written {written}: t {:?} w {:?} lean_sq {lean_squared:?} exact lean {lean_exact:?} gap {gap_exact:?}{}",
+                        thin.axis().direction(),
+                        fat.axis().direction(),
+                        if interesting {
+                            "  <== intervals cannot tell"
+                        } else {
+                            ""
+                        }
+                    );
+                    if !interesting {
+                        continue;
+                    }
+                    let [thin, fat] = [thin, fat].map(Surface::Cylinder);
+                    for [face, partner] in [[thin, fat], [fat, thin]] {
+                        match intersect(
+                            &face,
+                            &partner,
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new(),
+                        ) {
+                            Ok(SurfaceMeet::Curves(runs)) => {
+                                eprintln!(
+                                    "    {} runs: {:?}",
+                                    runs.len(),
+                                    runs.iter()
+                                        .map(|r| format!("{:?}", r.run())
+                                            .chars()
+                                            .take(60)
+                                            .collect::<String>())
+                                        .collect::<Vec<_>>()
+                                );
+                                if let [first, second] = &runs[..] {
+                                    eprintln!(
+                                        "    may_meet {}",
+                                        the_two_loops_of_two_pipes_may_meet(
+                                            &face,
+                                            &partner,
+                                            [first, second]
+                                        )
+                                    );
+                                    match where_two_loops_of_two_pipes_meet(&face, &partner) {
+                                        None => eprintln!("    where: None"),
+                                        Some(m) => eprintln!("    where at {:?}", m.at),
+                                    }
+                                }
+                            }
+                            Ok(other) => eprintln!("    meet {other:?}"),
+                            Err(error) => eprintln!("    intersect refused {error:?}"),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn the_two_loops_named(face: &Surface, partner: &Surface) -> [NamedRun; 2] {
         let SurfaceMeet::Curves(runs) = intersect(
             face,
