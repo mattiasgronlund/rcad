@@ -3026,6 +3026,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
     let top = how_far_across(&coarsest) / 2.0;
     let mut finest = (coarsest, enclosed, rounding, ProvenanceLog::new());
     let mut floor = top / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO);
+    let mut halvings_a_repeated_mesh_may_add = HALVINGS_A_FOLD_IS_ASKED_DOWN_TO;
     let thinnest_bend = the_thinnest_bend_a_mesh_can_stray_past(view);
     let mut room = top;
     while room >= floor {
@@ -3049,6 +3050,13 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
                 let strayed_past = thinnest_bend.filter(|&radius| {
                     leaves_out.is_infinite() && finer.deviation().magnitude() >= radius
                 });
+                if finer == finest.0
+                    && finer.deviation().magnitude() <= room
+                    && halvings_a_repeated_mesh_may_add > 0
+                {
+                    floor /= 2.0;
+                    halvings_a_repeated_mesh_may_add -= 1;
+                }
                 finest = (finer, finer_encloses, rounding, this_rung);
                 strayed_past
             }
