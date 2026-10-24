@@ -17006,6 +17006,13 @@ check-queue-api-selftest:
     awk '/^## Closed/ { c = 1 } c && /^Q3  2  dropped:§230 / { f = 1 } END { exit !f }' "$hub/docs/queue.md" \
         || fail "pick theirs did not keep four's drop under ## Closed"
     got=$(check "$hub") || fail "the file pick settled fails check-queue"
+    # `pick` only rewrites the working-tree file (§263.4): it never runs `git
+    # add`, so the conflicted merge from "$hub" merge --no-edit four, above, is
+    # still open in the index after this. Finish it, the way a merger would
+    # after `just queue pick`, or every later `g "$hub" merge` in this script
+    # refuses with "you have unmerged files" (Q692).
+    g "$hub" add docs/queue.md
+    g "$hub" commit -q --no-edit
 
     # §307.3's other gap (Q286): `pick` could keep a row whose tier field
     # names a tier the file has no heading for, and refuse rather than write
