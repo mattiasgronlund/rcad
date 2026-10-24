@@ -67,20 +67,23 @@
 //!
 //! # A quarter a rounding below the far rim's first corner (Q2725)
 //!
-//! Turned 4.0 or 5.5 at every lean, and leaning 0.6 at turns 0.3, 2.0 and
-//! 2.9, the union and one difference were refused
-//! `CurvedFaceWithAHoleGoesTooFarRound`. The mesher cuts a pipe's ring into
-//! four patches at quarters of a turn from the near rim's first corner, and
-//! lands each cut on the far rim's corner nearest its quarter. It took that
-//! corner by moving the quarter whole turns into the far rim's own turn, and a
-//! quarter that rounds just below that rim's first corner went a whole turn
-//! on, to the corner farthest round before the first
+//! Turned 4, 5 or 5.5 at every lean, and leaning 0.6 at some other turns, the
+//! union and one difference were refused `CurvedFaceWithAHoleGoesTooFarRound`.
+//! The mesher cuts a pipe's ring into four patches at quarters of a turn from
+//! the near rim's first corner, and lands each cut on the far rim's corner
+//! nearest its quarter. It took that corner by moving the quarter whole turns
+//! into the far rim's own turn, and a quarter that rounds just below that
+//! rim's first corner went a whole turn on, to the corner farthest round
+//! before the first
 //! ([`turned_four_radians_the_two_bars_answer_all_three_either_way_round`]).
-//! The far rim's corners are now read the short way round.
+//! The far rim's corners are now read the short way round. Of 576 fuses —
+//! leans 0.1 to 0.6, turns 0.3, 1, π/2, 2, 2.9, 4, 5 and 5.5, rolls 0 and 1.3,
+//! all three rules either way round — 126 were refused so, and now all 576
+//! answer, validate and measure what the formula says.
 //!
-//! At 4.0 the fuse reads the way against the upright pipe rather than the
+//! At 4 the fuse reads the way against the upright pipe rather than the
 //! leaning one, but that was not why it refused: leaning 0.6 and turned 0.3
-//! it reads the leaning pipe and was refused the same way
+//! it reads the leaning pipe (Q2723) and was refused the same way
 //! ([`leaning_0_6_and_turned_0_3_the_two_bars_answer_all_three_either_way_round`]).
 //!
 //! The fuses run certified, in a model of 100 mm.
