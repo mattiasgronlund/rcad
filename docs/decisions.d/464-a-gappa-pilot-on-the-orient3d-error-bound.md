@@ -28,6 +28,7 @@ under them.*
   464.8   orient2d and the side of a plane
   464.9   Which of the eleven *_ROUNDOFF constants Gappa can state
   464.10  Whether the scripts join the tree and the gate
+  464.11  One of the nine differences at zero
 
 ### 464.1 The bugs a bound prover is for
 
@@ -2801,3 +2802,188 @@ print(len(proved), "hints proved by field;",
   is taken: a row, after the build row and the fourteen.
 - The 35 nonzero facts of 1, proved in Coq from `s1`, so that block 1's proof
   stands on its hypotheses alone: a row, after the build row.
+
+### 464.11 One of the nine differences at zero
+
+DRAFT, Q2675, unfinished: a relay lane finishes it. What is below was run;
+what is not below was not.
+
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200` and the code's
+`B = 7u + 56u²`, against `on_floats` as 464.4 read it at `d9f931e8`: no line of
+its code has changed since, up to `ca9b6493`.
+
+**The two steps 464.4 takes on paper.** Both prove in Gappa:
+
+```gappa
+# diffzero.g: a difference of two doubles that rounds to zero is zero.
+@rnd = float<ieee_64, ne>;
+x = rnd(x_); z = rnd(z_);
+D = x - z;
+{ |x| <= 1b1024 /\ |z| <= 1b1024 /\ rnd(D) in [0, 0] -> D in [0, 0] }
+```
+
+```gappa
+# refl.g: x - x is zero, and so are its rounding and a product with it.
+@rnd = float<ieee_64, ne>;
+x = rnd(x_); y = rnd(y_);
+a = x - x;
+p = a * y;
+{ |x| <= 1b1024 /\ |y| <= 1b1024 -> a in [0, 0] /\ rnd(a) in [0, 0] /\ rnd(p) in [0, 0] }
+```
+
+Gappa's check that a hint is an identity cancels `x - x`, but takes `|x - x|`
+as a number of its own: a hint that needs `|x - x|` to be zero draws "not
+trivially equal".
+
+**The scripts.** `make_one_difference_zero.py`, below, run as `python3
+make_one_difference_zero.py adx ady adz bdx bdy bdz cdx cdy cdz` beside
+`block1.g`, writes `zd_<name>.g` for each. In each, `d`'s coordinate is the
+same double as the point's, the difference and each product with it are left
+unrounded, and a term whose product is zero stays in `P6` and in the split of
+`P6 + (y − Ex)` as a bare `c_k`, with no error of its own.
+
+- **`cdz` zero** proves: `(y − Ex) / P6` within `7.77156e-16`, as block 1, and
+  `P −/ Phat` within `4.44089e-16`.
+- **`adz` and `bdz` zero**: `P −/ Phat` proves, within `4.44089e-16`, and the
+  goal fails, best `±3.01471e+1218`, with `(y − Ex) / P6` only within
+  `±2.3429e+1203`.
+- **`adx`, `ady`, `bdx`, `bdy`, `cdx`, `cdy` zero**: `REL(P, Phat)` and the
+  goal fail, best `±3.24661e+1218` (`±3.01471e+1218` for `cdx` and `cdy`).
+
+Untried: in `cdz`'s script the zero `c5` and `c6` come last in the split, and
+in `adz`'s, `c1` and `c2` come first. Whether that is why one proves and the
+other does not was not run.
+
+```python
+"""Write block 1 with one of the nine differences adx to cdz zero, as zd_<name>.g."""
+import sys
+
+# The six products: name, factors, the minor they are in.
+PRODUCT = {
+    1: ("bdxcdy", "bdx * cdy", 1),
+    2: ("cdxbdy", "cdx * bdy", 1),
+    3: ("cdxady", "cdx * ady", 2),
+    4: ("adxcdy", "adx * cdy", 2),
+    5: ("adxbdy", "adx * bdy", 3),
+    6: ("bdxady", "bdx * ady", 3),
+}
+MINOR = {1: "first", 2: "second", 3: "third"}
+# The z difference each term multiplies its minor by.
+TERM_OF = {"adz": 1, "bdz": 2, "cdz": 3}
+BOUND = "in [-4503599627370497b-105, 4503599627370497b-105]\n"
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def drop_conj(src, item):
+    """Take one conjunct out of a hypothesis line."""
+    if src.count(item + " /\\ ") == 1:
+        return src.replace(item + " /\\ ", "")
+    if src.count(" /\\ " + item + "\n") == 1:
+        return src.replace(" /\\ " + item + "\n", "\n")
+    return sub(src, "  /\\ " + item + "\n", "")
+
+
+def drop_def(src, item):
+    """Take one definition out of a line of definitions."""
+    if src.count(item + " ") == 1:
+        return src.replace(item + " ", "")
+    if src.count(" " + item + "\n") == 1:
+        return src.replace(" " + item + "\n", "\n")
+    return sub(src, item + "\n", "")
+
+
+def make(name):
+    point, axis = name[0], name[2]
+    exact = name[0].upper() + name[1:]
+    src = open("block1.g").read()
+    src = sub(
+        src,
+        "# Orient3d::on_floats and ORIENT3D_ERROR_BOUND,\n"
+        "# crates/rcad-predicates/src/orient3d.rs at d9f931e8.\n",
+        f"# Block 1 where {name} is zero: d{axis} is the same double as {point}{axis}. A\n"
+        "# zero rounds to itself, and so does a product with a zero factor.\n",
+    )
+    src = sub(src, f"d{axis} = rnd(d{axis}_);", f"d{axis} = {point}{axis};")
+    src = sub(src, f"{name} = rnd({exact});", f"{name} = {exact};")
+    src = drop_def(src, f"r{name} = {name} / {exact};")
+    src = drop_conj(src, f"|{name}| >= 1b-1074")
+    src = sub(src, f"{name} / {exact} -> 1 + ({name} - {exact}) / {exact};\n", "")
+    if name in TERM_OF:
+        m = TERM_OF[name]
+        gone = [2 * m - 1, 2 * m]
+        minor = MINOR[m]
+        src = sub(src, f"t{m} = rnd(U{m});", f"t{m} = U{m};")
+        src = sub(src, f"r{m} = rnd(R{m});", f"r{m} = R{m};")
+        src = drop_def(src, f"rm{m} = {minor} / M{m};")
+        src = drop_def(src, f"rt{m} = t{m} / U{m};")
+        src = drop_conj(src, f"|{minor}| >= 1b-1074")
+        src = drop_conj(src, f"|t{m}| >= 1b-1022")
+        src = drop_conj(src, f"|r{m}| >= 1b-1022")
+        src = sub(src, f"  /\\ t{m} -/ U{m} {BOUND}", "")
+        src = sub(src, f"  /\\ r{m} -/ R{m} {BOUND}", "")
+        src = drop_conj(src, f"{name} / |{name}| in [-1, 1]")
+        src = sub(src, f"{minor} / M{m} -> 1 + ({minor} - M{m}) / M{m};\n", "")
+        src = sub(src, f"t{m} / U{m} -> 1 + (t{m} - U{m}) / U{m};\n", "")
+        others = [MINOR[k] for k in (1, 2, 3) if k != m]
+        src = sub(
+            src,
+            "  # The permanent's own three products are normal too. The comment above\n"
+            "  # stays_accurate argues it from the nine.\n",
+            f"  # The other two of the permanent's products are normal because |{others[0]}|\n"
+            f"  # and |{others[1]}| are at most their q. r{m} is zero.\n",
+        )
+        src = sub(
+            src,
+            "  # §12.2's first condition: product_is_normal on the nine products.\n",
+            "  # §12.2's first condition: product_is_normal on the nine products. The\n"
+            f"  # check on {name} and {minor} passes on the zero, and says nothing.\n",
+        )
+    else:
+        gone = [k for k, (_, f, _) in PRODUCT.items() if name in f]
+        for k in gone:
+            prod, factors, _ = PRODUCT[k]
+            src = sub(src, f"{prod} = rnd({factors});", f"{prod} = {factors};")
+            src = drop_def(src, f"rp{k} = {prod} / ({factors});")
+            src = drop_conj(src, f"|{prod}| >= 1b-1022")
+            src = sub(src, f"  /\\ {prod} -/ {factors} {BOUND}", "")
+            src = drop_conj(src, f"{prod} / |{prod}| in [-1, 1]")
+            src = sub(src, f"{prod} / ({factors}) -> 1 + ({prod} - {factors}) / ({factors});\n", "")
+        names = " and ".join(PRODUCT[k][0] for k in gone)
+        src = sub(
+            src,
+            "  # §12.2's first condition: product_is_normal on the nine products.\n",
+            "  # §12.2's first condition: product_is_normal on the nine products. The\n"
+            f"  # checks on {names} pass on the zero, and say nothing.\n",
+        )
+    src = sub(
+        src,
+        "  # No factor of the nine products is zero. For an f64 that is the same as\n"
+        "  # being at least the smallest subnormal.\n",
+        f"  # No factor of the nine products is zero but {name}. For an f64 that is\n"
+        "  # the same as being at least the smallest subnormal.\n",
+    )
+    # A term whose product is zero carries no error: it is zero in y and in
+    # Ex alike, and stays in P6 only as the zero it is.
+    for k in gone:
+        src = sub(src, line_starting(src, f"W{k} = ") + "\n", "")
+        line = line_starting(src, "", f"e{k} = ")
+        part = line[line.index(f"e{k} = "):]
+        src = drop_def(src, part[: part.index(";") + 1])
+        src = sub(src, f"(c{k} + e{k}) - c{k} -> e{k};\n", "")
+        src = sub(src, line_starting(src, f"e{k} / c{k} -> ") + "\n", "")
+        src = sub(src, f"(c{k} + e{k})", f"c{k}")
+    return src
+
+
+def line_starting(src, start, containing=""):
+    (line,) = [l for l in src.split("\n") if l.startswith(start) and containing in l]
+    return line
+
+
+for name in sys.argv[1:]:
+    open(f"zd_{name}.g", "w").write(make(name))
+```
