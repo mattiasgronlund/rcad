@@ -265,13 +265,13 @@ fn every_point_of_a_picked_run_is_inside_every_half_space_that_picked_it() {
 
 /// Roadmap §7.4's tangent sphere–cylinder row, all three ways it can happen.
 ///
-/// **Tangency is not one row here, it is three**, and only the third refuses.
-/// Two quadrics can rest against each other at a point, along a whole curve, or
-/// at a point *on* their crossing curve — and the third is the only one this
-/// vocabulary cannot say, because a curve that runs through itself is neither
-/// one closed curve nor a piece picked out by a half-space.
+/// **Tangency is not one row here, it is three**, and all three answer since
+/// Q2649 named the third. Two quadrics can rest against each other at a point,
+/// along a whole curve, or at a point *on* their crossing curve. The third is
+/// two loops that meet at that point, each picked out by one side of the flat
+/// surface through it.
 #[test]
-fn a_ball_tangent_to_a_pipe_answers_three_different_ways_and_refuses_only_the_third() {
+fn a_ball_tangent_to_a_pipe_answers_all_three_ways() {
     let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
 
     // At a point: a ball five out with a radius of three rests on the skin.
@@ -292,16 +292,26 @@ fn a_ball_tangent_to_a_pipe_answers_three_different_ways_and_refuses_only_the_th
     assert_eq!(runs[0].run(), &EdgeRun::RightRoundWhereItsFacesCross);
 
     // Through itself: a ball one out with a radius of three reaches exactly the
-    // pipe's whole width, so the two loops it would leave pinch together.
-    assert_eq!(
-        intersect(
-            &a_ball([1.0, 0.0, 0.0], 3.0),
-            &pipe,
-            &Policy::certified(),
-            &mut ProvenanceLog::new()
-        ),
-        Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
-    );
+    // pipe's whole width, so the two loops it leaves meet at `(-2, 0, 0)`.
+    let through_itself = crossing(&a_ball([1.0, 0.0, 0.0], 3.0), &pipe);
+    let SurfaceMeet::Curves(runs) = &through_itself else {
+        panic!("a ball reaching exactly across a pipe crosses it in curves: {through_itself:?}");
+    };
+    assert_eq!(runs.len(), 2, "two loops: {runs:?}");
+    let pinch = rcad_predicates::Point::from([-2.0, 0.0, 0.0]);
+    for run in runs {
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+            panic!("each loop is a piece of the crossing: {run:?}");
+        };
+        let [picker] = picked_by[..] else {
+            panic!("one flat surface picks each loop: {picked_by:?}");
+        };
+        assert_eq!(
+            picker.side_of_point(pinch),
+            Decision::Zero,
+            "both loops pass through the point where the walls touch"
+        );
+    }
 }
 
 /// Roadmap §7.4's tangent cylinder–cylinder row, the same three ways, and all

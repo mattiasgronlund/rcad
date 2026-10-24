@@ -173,11 +173,11 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when a crossing comes in two
 /// pieces and no half-space that `f64` can write down provably holds them apart.
 ///
-/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] for a ball
-/// resting on the inside of a pipe from the far side, tangent to it at a point
-/// of the curve they cross in, so what they cross in is one curve that runs
-/// through itself there. A thin pipe resting on the inside of a wider one is
-/// named instead, as two loops that meet where the walls touch.
+/// **Nothing is refused for running through itself.** A ball resting on the
+/// far inside of a pipe and a thin pipe resting on the inside of a wider one
+/// are each tangent at a point of the curve they cross in, and each is named as
+/// two loops that meet there, picked out by the two sides of one flat surface
+/// through that point.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against a
 /// pipe, a ball or a second cone that does not share its axis, and for a ball on
@@ -760,10 +760,8 @@ fn where_a_ball_and_a_pipe_cross(
         (Decision::Neg, Decision::Pos) => {
             two_loops_either_side_of_a_ball(ball, pipe, how_far_apart_two_loops_are(ball, pipe))
         }
-        // The two loops touch. What they make is one curve that runs through
-        // itself, and neither "one closed curve" nor "two pieces" says that.
         (Decision::Neg, Decision::Zero) => {
-            Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+            two_loops_that_meet_where_a_ball_rests_on_the_far_inside_of_a_pipe(ball, pipe)
         }
         other => unreachable!("a sign question answers with a sign: {other:?}"),
     }
@@ -922,6 +920,71 @@ fn two_loops_either_side_of_a_ball(
                     picked_by: smallvec![Picker::from(half_space)],
                 })
                 .expect("picked_by always holds the one half-space just built")
+            })
+            .collect(),
+    ))
+}
+
+/// Two closed loops of a ball-and-pipe crossing that meet at one point, where
+/// the ball rests on the far inside of the pipe, told apart by the flat surface
+/// through the ball's centre square to the pipe's axis.
+///
+/// # Where the loops meet
+///
+/// This is [`two_loops_either_side_of_a_ball`] with the centre `R − r` off the
+/// axis, which is what `V < 0` and `Δ = 0` say: `Δ = 0` is `V = −2r√(AW)`, so
+/// `√A = (R − r)√W`. Put the axis along `z` and the centre at `x = R − r`, on
+/// `z = 0`; the pipe's point at `θ` round its axis is on the ball where
+/// `z² = 2r(R − r)(1 + cos θ)`. So each loop is on its own side of `z = 0` but
+/// for `θ = π`, the point of the pipe across its axis from the centre, `R` from
+/// the centre and on `z = 0`, where the walls touch. Both loops pass through
+/// it, and each reaches `z = ±2√(r(R − r))` at `θ = 0`. The ball of radius 2 at
+/// the origin and the pipe of radius 1 up `z` through `(1, 0, 0)`, Viviani's
+/// figure of eight, touch at `(2, 0, 0)`, and the loops reach `(0, 0, ±2)`
+/// (`a_ball_resting_on_the_far_inside_of_a_pipe_leaves_two_loops_that_meet_where_they_touch`).
+///
+/// # What has to be exact
+///
+/// A picker is closed, so each holds its own loop and the touching point, but
+/// only where its surface passes exactly through that point
+/// ([`two_loops_that_meet_where_a_thin_pipe_rests_inside_a_fat_one`] says why).
+/// The facing is the pipe's direction as stored, which a half-space keeps as it
+/// is handed, and the touching point is square to it from the centre, so the
+/// surface holds that point exactly where it passes exactly through the centre.
+/// It is a [`HalfSpace`] where its rounded offset does, and otherwise a
+/// [`HalfSpaceThroughAPoint`] through the centre, which always does. No margin
+/// is asked: the loops reach the surface by construction.
+///
+/// # Errors
+///
+/// Whatever [`HalfSpace::through_a_point_facing`] and
+/// [`HalfSpaceThroughAPoint::new`] refuse.
+fn two_loops_that_meet_where_a_ball_rests_on_the_far_inside_of_a_pipe(
+    ball: &Sphere,
+    pipe: &Cylinder,
+) -> Result<SurfaceMeet> {
+    let along = pipe.axis().direction();
+    let centre = ball.centre();
+    let surface = HalfSpace::through_a_point_facing(centre, along)?;
+    let picker = if it_passes_exactly_through(&surface, centre) {
+        Picker::from(surface)
+    } else {
+        Picker::from(HalfSpaceThroughAPoint::new(centre, along)?)
+    };
+    let other_side = picker
+        .reversed()
+        .expect("the picker is flat, so it has another side");
+
+    let and = Surface::Cylinder(*pipe);
+    Ok(SurfaceMeet::Curves(
+        [picker, other_side]
+            .into_iter()
+            .map(|picker| {
+                NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+                    and,
+                    picked_by: smallvec![picker],
+                })
+                .expect("picked_by always holds the one flat picker just built")
             })
             .collect(),
     ))
@@ -7236,23 +7299,61 @@ mod tests {
         );
     }
 
-    /// The one shape this vocabulary cannot say: a ball resting on the far
-    /// inside of a pipe leaves two loops that touch, and a curve that runs
-    /// through itself is neither one closed curve nor two pieces.
+    /// A ball resting on the far inside of a pipe: the two loops it leaves
+    /// meet where the walls touch, and the flat surface through the ball's
+    /// centre square to the axis holds that point and each loop on its own
+    /// side. A centre one out from the axis with a radius of three reaches
+    /// exactly `1 + 3 = 4` across, the pipe's whole width, and touches at
+    /// `(-2, 0, 0)`; Viviani's ball of radius 2 against a pipe of radius 1
+    /// through `(1, 0, 0)` touches at `(2, 0, 0)`, and its loops reach
+    /// `(0, 0, ±2)`.
     #[test]
-    fn a_ball_resting_on_the_far_inside_of_a_pipe_crosses_it_in_a_curve_with_no_name() {
-        // A centre one out from the axis and a radius of three reaches exactly
-        // `1 + 3 = 4` across, which is the pipe's whole width, so the two loops
-        // pinch together at the far side.
-        assert_eq!(
-            intersect(
-                &a_ball([1.0, 0.0, 0.0], 3.0),
-                &a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0),
-                &Policy::certified(),
-                &mut ProvenanceLog::new()
+    fn a_ball_resting_on_the_far_inside_of_a_pipe_leaves_two_loops_that_meet_where_they_touch() {
+        let shapes = [
+            (
+                a_ball([1.0, 0.0, 0.0], 3.0),
+                a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0),
+                [-2.0, 0.0, 0.0],
+                [2.0, 0.0, 2.0],
             ),
-            Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
-        );
+            (
+                a_ball([0.0, 0.0, 0.0], 2.0),
+                a_pipe([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 1.0),
+                [2.0, 0.0, 0.0],
+                [0.0, 0.0, 2.0],
+            ),
+        ];
+        for (ball, pipe, touching, top) in shapes {
+            for (one, other) in [(&ball, &pipe), (&pipe, &ball)] {
+                let mut log = ProvenanceLog::new();
+                let SurfaceMeet::Curves(runs) =
+                    intersect(one, other, &Policy::certified(), &mut log)
+                        .expect("two loops that meet are named")
+                else {
+                    panic!("a ball resting on the far inside of a pipe crosses it in curves");
+                };
+                assert!(log.is_empty(), "nothing here needs approximating: {log:?}");
+                assert_eq!(runs.len(), 2, "two loops: {runs:?}");
+                let sides_of = |point: [f64; 3]| -> Vec<Decision> {
+                    runs.iter()
+                        .map(|run| {
+                            let EdgeRun::PartOfWhereItCrosses { and, picked_by } = run.run() else {
+                                panic!("one of two loops is a piece of the crossing: {run:?}");
+                            };
+                            assert_eq!(and, &pipe, "the picked run names the pipe it goes round");
+                            let [picker] = picked_by[..] else {
+                                panic!("one flat surface picks a loop: {picked_by:?}");
+                            };
+                            picker.side_of_point(PredicatePoint::from(point))
+                        })
+                        .collect()
+                };
+                let bottom = [top[0], top[1], -top[2]];
+                assert_eq!(sides_of(touching), [Decision::Zero, Decision::Zero]);
+                assert_eq!(sides_of(top), [Decision::Pos, Decision::Neg]);
+                assert_eq!(sides_of(bottom), [Decision::Neg, Decision::Pos]);
+            }
+        }
     }
 
     /// The planar special case of the pipe-and-pipe row: two pipes down one axis

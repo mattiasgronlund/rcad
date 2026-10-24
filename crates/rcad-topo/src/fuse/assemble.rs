@@ -11587,12 +11587,16 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 ///   `Δ = 0` with `V = 2r(R + r)` or `V = 2r(r − R)` for an axis of length
 ///   one: above zero it answers
 ///   that the ball rests on the pipe at one point, and below zero, where
-///   `R > r`, it refuses `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`
-///   (`a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement` in
-///   `tests/two_curves_of_one_pair_that_meet.rs`).
+///   `R > r`, it names two loops that meet where the walls touch, Viviani's
+///   figure of eight. `place_where_two_crossings_of_one_pair_meet` in
+///   `fuse/arrange.rs` puts a node there, so the point ends every arc of the
+///   two loops and is inside none
+///   (`a_bar_touching_a_ball_from_inside_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`
+///   in `tests/two_curves_of_one_pair_that_meet.rs`).
 ///
-/// So on every loop `intersect` names, and on both circles a ball on the axis
-/// cuts, the cross product runs along the curve and never vanishes. A loop off
+/// So inside every arc of every loop `intersect` names, and on both circles a
+/// ball on the axis cuts, the cross product runs along the curve and never
+/// vanishes. A loop off
 /// the axis is reached here between two corners too: the wall through the loop
 /// a ball off a bar's axis crosses it in puts two corners on it, and every
 /// rule answers
@@ -11630,10 +11634,10 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
 /// `ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo` for that pair itself);
 /// and for one width, where the axes meet, names four half ellipses, each
 /// running from one of the two points where the gradients line up to the
-/// other. The thin-pipe pair is now refused instead where
-/// `place_where_two_crossings_of_one_pair_meet` in `fuse/arrange.rs` places
-/// their two loops' node, for want of one
-/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet`
+/// other. `place_where_two_crossings_of_one_pair_meet` in `fuse/arrange.rs`
+/// puts a node where the thin pipe's two loops meet, so that point ends every
+/// arc through it
+/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`
 /// in `tests/two_curves_of_one_pair_that_meet.rs`), and the one-width pair is
 /// refused telling the cells of a pipe apart today
 /// (`two_bars_of_one_radius_whose_axes_meet_are_refused_telling_the_cells_of_a_pipe_apart`
