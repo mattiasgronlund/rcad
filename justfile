@@ -7351,9 +7351,10 @@ fuzz-overnight window="28800":
     #
     # `RUSTC` points at the stand-in (docs/decisions.d/267.4, §292): cargo-fuzz
     # hands every crate the same coverage flags through `RUSTFLAGS`, with no
-    # allow-list, so the only working way to leave `rcad-fuzz-timing`
-    # uninstrumented is to catch its compile in a script that appends a second,
-    # overriding `-sanitizer-coverage-level` and let everything else through.
+    # allow-list, so the only working way to leave `rcad-fuzz-timing` or
+    # `inari` (docs/decisions.d/465) uninstrumented is to catch each one's
+    # compile in a script that appends a second, overriding
+    # `-sanitizer-coverage-level` and let everything else through.
     # `CI=1` keeps kache out of this build: the `cargo` on this PATH is mise's
     # shim, and it puts `RUSTC_WRAPPER=kache` back on every call unless `CI` is
     # set, which would run kache *around* the stand-in and risk a cache key
@@ -8220,7 +8221,7 @@ fuzz-target target duration corpus_root="" max_len="" fork="0" dict="" step_corp
         dict_flag=(-dict={{dict}})
     fi
     # `RUSTC` and `CI=1` here for the same reason as `fuzz-overnight`'s build
-    # (docs/decisions.d/267.4, §292): a run started here without a build already
+    # (docs/decisions.d/267.4, §292, §465): a run started here without a build already
     # done — a hand `just fuzz` or `just fuzz-target` on its own — does the real
     # build itself, and it needs the same stand-in and the same kache bypass as
     # that build does. When the night has already built, cargo's fingerprint
