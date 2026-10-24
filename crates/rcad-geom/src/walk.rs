@@ -7280,6 +7280,81 @@ mod tests {
         }
     }
 
+    /// A closed run round Viviani's figure of eight, cornered at either pole or
+    /// where the loops meet, and a run with no corner at all, are each walked
+    /// round one loop. The march goes on through where the two loops meet and
+    /// round the other one, and only [`what_the_march_walked_on_the_seeds_loop`]
+    /// leaves that out: with it skipped, the run cornered at the top pole, ball
+    /// first, at `0.1`, had 38 of its 106 points below `z = 0` (Q2649).
+    #[test]
+    fn a_closed_run_or_one_with_no_corner_on_vivianis_figure_of_eight_goes_round_one_loop() {
+        let (ball, pipe) = a_ball_and_a_pipe_resting_on_its_inside();
+        let [ball, pipe] = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
+        let corners = [
+            ("the top pole", Some(Point::new(0.0, 0.0, 2.0)), Some(1.0)),
+            (
+                "the bottom pole",
+                Some(Point::new(0.0, 0.0, -2.0)),
+                Some(-1.0),
+            ),
+            ("where the loops meet", Some(where_they_touch()), None),
+            ("no corner", None, None),
+        ];
+        for deflection in [0.1, 0.070_312_5, 0.01, 0.001_875, 0.001] {
+            for (cornered_at, corner, the_loop) in corners {
+                let ends = corner.map_or([nowhere_in_particular(); 2], |at| {
+                    [PredicatePoint::from(at.coordinates()); 2]
+                });
+                let run = NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, ends)
+                    .expect("a run right round");
+                for along in [[&ball, &pipe], [&pipe, &ball]] {
+                    let walked = walk(
+                        &run,
+                        along,
+                        Deflection::of(deflection).expect("a length"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|why| {
+                        panic!(
+                            "the run cornered at {cornered_at} at {deflection} is refused: {why:?}"
+                        )
+                    });
+                    let bound = walked.deviation().magnitude();
+                    let points = walked.points();
+                    let on_the_side = |up: f64| {
+                        points
+                            .iter()
+                            .filter(|point| point.coordinates()[2] * up > bound)
+                            .count()
+                    };
+                    let [above, below] = [on_the_side(1.0), on_the_side(-1.0)];
+                    let one_loop = match the_loop {
+                        Some(up) => on_the_side(-up) == 0,
+                        None => above == 0 || below == 0,
+                    };
+                    assert!(
+                        points.len() > 2 && one_loop,
+                        "the run cornered at {cornered_at} at {deflection} has {above} of its {} \
+                         points above z = 0 and {below} below",
+                        points.len()
+                    );
+                    for point in points {
+                        let [x, y, z] = point.coordinates();
+                        let off_the_ball = ((x * x + y * y + z * z).sqrt() - 2.0).abs();
+                        let off_the_pipe = (((x - 1.0) * (x - 1.0) + y * y).sqrt() - 1.0).abs();
+                        assert!(
+                            off_the_ball <= bound && off_the_pipe <= bound,
+                            "the run cornered at {cornered_at} at {deflection} was walked through \
+                             ({x}, {y}, {z}), {off_the_ball} and {off_the_pipe} off the two surfaces \
+                             against {bound}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Where the pipe of [`a_ball_and_a_pipe_resting_on_its_inside`] rests on
     /// the ball's inside.
     fn where_they_touch() -> Point {
