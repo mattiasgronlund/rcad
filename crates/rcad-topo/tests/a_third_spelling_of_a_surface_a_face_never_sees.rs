@@ -239,6 +239,130 @@ fn two_spellings_of_the_bars_pipe_beside_a_raised_step_or_climbing_top_answer_ev
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// A block drawn in `y` and `z` across `x ∈ [-3, 3]`: flat on `z = -1` from
+/// `y = -1.5` to `y = 2.5`, a side leaning in up to `y = 1.5` at `z = 3`, a
+/// top on `z = 3` back to `y = -0.3`, a riser down to `z = 2`, and a lower top
+/// on `z = 2` back to `y = -1.5`.
+const A_STEP_WITH_A_LEANING_SIDE: [[f64; 2]; 6] = [
+    [-1.5, -1.0],
+    [2.5, -1.0],
+    [1.5, 3.0],
+    [-0.3, 3.0],
+    [-0.3, 2.0],
+    [-1.5, 2.0],
+];
+
+/// The radius of the pipe the D-shaped hole and the D-shaped bar share, and
+/// where its axis crosses `x = 0`: along `z` through `y = 0.5`.
+const THE_PIPES_RADIUS: f64 = 1.5;
+const THE_PIPES_AXIS_AT: f64 = 0.5;
+
+/// The block of [`A_STEP_WITH_A_LEANING_SIDE`] with a D-shaped hole through
+/// it, the part of the pipe's disc with `x ≤ -1.3`, beside a D-shaped bar on
+/// the same pipe, the part of its disc with `y ≤ -0.6`, from `z = -2` to
+/// `z = 4`, every rule both ways round (Q2541).
+///
+/// Meant as the shape of Q2541's second case: the upper top's edge with the
+/// hole is an arc of the circle the pipe crosses it in, and the rest of that
+/// circle runs on through the upper top, across its edge with the leaning
+/// side at `x = ±√1.25` and its edge with the riser at `x = ±√2.21`. **It does
+/// not reach that case yet**: a probe in `the_listed_cuts_it_still_draws`
+/// found no face here that lists the pipe and draws it only along its rim.
+/// What the two share is the bar's part of the disc, from `z = -1` to `z = 2`.
+#[test]
+fn a_rim_drawn_on_past_the_hole_beside_a_d_shaped_bar_on_its_pipe_answers_every_rule() {
+    let block = 6.0 * area_inside(&A_STEP_WITH_A_LEANING_SIDE);
+    let hole = 4.0 * a_slice_of_the_disc(1.3);
+    let bar = 6.0 * a_slice_of_the_disc(THE_PIPES_AXIS_AT + 0.6);
+    let holed = block - hole;
+    let shared = 3.0 * a_slice_of_the_disc(THE_PIPES_AXIS_AT + 0.6);
+    let mut failed = Vec::new();
+    let mut ran = 0;
+    for rule in EVERY_RULE {
+        for bar_first in [true, false] {
+            let by_hand = match (rule, bar_first) {
+                (Rule::Union, _) => bar + holed - shared,
+                (Rule::Intersection, _) => shared,
+                (Rule::Difference, true) => bar - shared,
+                (Rule::Difference, false) => holed - shared,
+                _ => unreachable!(),
+            };
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a size"));
+            let the_block = a_block_across_x(&mut model, &A_STEP_WITH_A_LEANING_SIDE);
+            let the_hole = a_part_of_the_pipes_bar(&mut model, [[-2.0, -1.3], [-1.5, 2.5]]);
+            let holed_block = one_solid(&mut model, &[the_block], &[the_hole], Rule::Difference);
+            let the_bar = a_part_of_the_pipes_bar(&mut model, [[-2.0, 2.0], [-1.5, -0.6]]);
+            let (arguments, tools) = if bar_first {
+                (vec![the_bar], vec![holed_block])
+            } else {
+                (vec![holed_block], vec![the_bar])
+            };
+            let asked = format!("{rule:?} bar_first={bar_first}");
+            ran += 1;
+            if let Some(wrong) = check(&mut model, &arguments, &tools, rule, by_hand) {
+                println!("{asked}: {wrong}");
+                failed.push(asked);
+            }
+        }
+    }
+    println!("ran {ran}, failed {}", failed.len());
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The area of the part of the pipe's disc further than `apart` from its
+/// centre along one direction.
+fn a_slice_of_the_disc(apart: f64) -> f64 {
+    let r = THE_PIPES_RADIUS;
+    r * r * (apart / r).acos() - apart * (r * r - apart * apart).sqrt()
+}
+
+/// `profile`, drawn in `y` and `z`, pushed across `x ∈ [-3, 3]`.
+fn a_block_across_x(model: &mut Model, profile: &[[f64; 2]]) -> SolidKey {
+    let profile = ProfileBuilder::new(profile.to_vec())
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a profile");
+    let about_x = Isometry::quarter_turns(&Axis::x(), 1).expect("a quarter turn");
+    let about_z = Isometry::quarter_turns(&Axis::z(), 1).expect("a quarter turn");
+    let back = Isometry::translation(Vector::new(-3.0, 0.0, 0.0)).expect("a finite shift");
+    model
+        .add_extrusion(&profile, 6.0, &back.compose(&about_z.compose(&about_x)))
+        .expect("a positive height")
+}
+
+/// The part over `x` and `y` of a bar of radius [`THE_PIPES_RADIUS`] about
+/// the pipe's axis from `z = -2` to `z = 4`.
+fn a_part_of_the_pipes_bar(model: &mut Model, [x, y]: [[f64; 2]; 2]) -> SolidKey {
+    let placed =
+        Isometry::translation(Vector::new(0.0, THE_PIPES_AXIS_AT, -2.0)).expect("a finite shift");
+    let bar = model
+        .add_round_bar(THE_PIPES_RADIUS, 6.0, &placed)
+        .expect("a bar");
+    let the_box = a_box(model, [x, y, [-3.0, 5.0]]);
+    one_solid(model, &[bar], &[the_box], Rule::Intersection)
+}
+
+/// The one solid fusing `arguments` and `tools` by `rule` gives.
+fn one_solid(
+    model: &mut Model,
+    arguments: &[SolidKey],
+    tools: &[SolidKey],
+    rule: Rule,
+) -> SolidKey {
+    let fused = model
+        .fuse(
+            arguments,
+            tools,
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("a fuse that makes the shape");
+    let [one] = fused.solids() else {
+        panic!("{} solids where one was meant", fused.solids().len());
+    };
+    *one
+}
+
 /// What goes wrong fusing a bar of radius 2 on `z ∈ [0, 2]` with the block
 /// of `profile` across `y ∈ [-1.5, 1.5]`, every rule both ways round, as the
 /// fuses' names: the block covers `z ∈ [-1, 2.2]` over `x ∈ [-3, 3]` at
