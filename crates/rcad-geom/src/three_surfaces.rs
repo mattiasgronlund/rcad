@@ -90,9 +90,11 @@
 //! curve is a line bent by little across the other, and it crosses it once
 //! on each side of where that one's axis crosses the plane. A sign at each
 //! end of each arc says a crossing is there, a bound on how the line turns
-//! says it is the only one, and a few rounds of two equations shrink a box
-//! round each — the same cap with a bar and a cone it cuts in one circle on
-//! paper, or a cap leaning a hundredth to a bar and its chamfer cone. A ball
+//! says it is the only one, and rounds of two equations shrink a box round
+//! each until a round narrows it no more ([`MOST_ROUNDS_ROUND_A_CROSSING`]) —
+//! the same cap with a bar and a cone it cuts in one circle on paper, a cap
+//! leaning a hundredth to a bar and its chamfer cone, or the cap of one of two
+//! cones on one apex leaning apart. A ball
 //! whose centre is on a pipe's or a cone's axis is taken first, since the two
 //! touch along a circle on a plane known exactly: a slanted cut through where
 //! a rod's round end meets it.

@@ -800,11 +800,11 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
 /// more than [`DynamicRange::LARGEST_SUPPORTED_RATIO`], so there is no
 /// certified answer to find. What refuses is the order along a rim, which the
 /// boxes round the two corners cannot tell: where a cap and both cones meet,
-/// the box is `1.3e−11` across.
+/// the box is `1.3e−14` across, ten times the gap between the two.
 ///
 /// Turned 0.25 or 0.4 rather than 0.3, the two are refused the same way where
 /// their rulings reach the rims. The tolerant policy is
-/// [`two_cones_on_one_apex_leaning_apart_are_refused_under_a_tolerant_policy_for_the_box_where_a_cap_and_both_cones_meet`]'s.
+/// [`two_cones_on_one_apex_leaning_apart_answer_every_fuse_under_a_tolerant_policy`]'s.
 #[test]
 fn two_cones_on_one_apex_leaning_apart_meet_both_rims_in_corners_too_close_for_a_certified_answer()
 {
@@ -867,40 +867,52 @@ fn a_short_cone_on_the_apex_of_a_tall_one_leaning_apart_crosses_it_in_two_ruling
     );
 }
 
-/// The union of the test above, fused again with a block over its top, is
-/// refused by every rule. The refusal is the order along a crossing at the
-/// corner the union keeps on the tall rim, where the turned cone's ruling is
-/// cut on up to `z = 8`.
+/// The union of the test above, fused again with the block `[−10, 10]² ×
+/// [7, 10]` over its top, answers every rule both ways round. The short cone
+/// stays below `z = 7`, so what the two share is the tall cone's top from 7 to
+/// 8, a frustum of `169π/12`, and the block less the union is the rest of the
+/// block. The tall side's pieces are still not joined up, so the union has 12
+/// faces and the union less the block 7.
+///
+/// Every fuse was refused on the order along a crossing at the corner the
+/// union keeps on the tall rim, `(3.8129, −1.2091, 8)`, where the turned
+/// cone's ruling is cut on up to `z = 8`, until Q2741 narrowed the box round
+/// the meet of the tall cap and both cones from `1.9e−11` across to a few
+/// roundings.
 #[test]
-fn the_union_of_a_short_cone_on_the_apex_of_a_tall_one_is_refused_when_a_block_cuts_it_again() {
+fn the_union_of_a_short_cone_on_the_apex_of_a_tall_one_answers_every_fuse_when_a_block_cuts_it_again()
+ {
+    let frustum = 169.0 * PI / 12.0;
+    let block = 1200.0;
+    let mut model = a_model();
+    let [union, _] = a_block_over_the_union_of_a_short_cone_on_the_apex_of_a_tall_one(&mut model);
+    let (_, cones, cones_may_miss) =
+        measures(&mut model, Ok(vec![union]), &[6], "the union of the cones");
+    let faces: [&[usize]; 4] = [&[12], &[5], &[7], &[10]];
     for (rule, union_first) in six_fuses() {
+        let which = which_answer(rule, union_first);
+        let (volume, volume_may_miss) = [
+            (cones + block - frustum, cones_may_miss),
+            (frustum, 0.0),
+            (cones - frustum, cones_may_miss),
+            (block - frustum, 0.0),
+        ][which];
         let mut model = a_model();
-        let union = fuse(
+        let said = fuse(
             &mut model,
-            a_short_cone_on_the_apex_of_a_tall_one_leaning_apart,
-            Rule::Union,
-            true,
-        )
-        .expect("the union answers");
-        let block = vec![a_block(&mut model, [-10.0, -10.0, 7.0], [10.0, 10.0, 10.0])];
-        let (arguments, tools) = if union_first {
-            (union, block)
-        } else {
-            (block, union)
-        };
-        let said = model
-            .fuse(
-                &arguments,
-                &tools,
-                rule,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .map(|answer| answer.solids().to_vec());
-        refused_on_the_order_along_a_crossing_at(
-            &said,
-            [3.8128888438034316, -1.2090817444653312, 8.0],
-            &format!("{rule:?} (the union first: {union_first})"),
+            a_block_over_the_union_of_a_short_cone_on_the_apex_of_a_tall_one,
+            rule,
+            union_first,
+        );
+        let what = format!(
+            "{rule:?} (the union first: {union_first}), solids of {:?} faces and volume {volume}",
+            faces[which]
+        );
+        let (_, measured, may_miss) = measures(&mut model, said, faces[which], &what);
+        assert!(
+            (measured - volume).abs() <= may_miss + volume_may_miss,
+            "{what}: measured {measured} and the meshes may miss by {}",
+            may_miss + volume_may_miss
         );
     }
 }
@@ -1429,6 +1441,27 @@ fn two_cones_on_one_apex_leaning_apart(model: &mut Model) -> [SolidKey; 2] {
 
 fn a_short_cone_on_the_apex_of_a_tall_one_leaning_apart(model: &mut Model) -> [SolidKey; 2] {
     two_cones_on_one_apex_turned_apart(model, 6.0)
+}
+
+/// The union of [`a_short_cone_on_the_apex_of_a_tall_one_leaning_apart`]'s two
+/// cones, and the block `[−10, 10]² × [7, 10]` over its top.
+fn a_block_over_the_union_of_a_short_cone_on_the_apex_of_a_tall_one(
+    model: &mut Model,
+) -> [SolidKey; 2] {
+    let said = fuse(
+        model,
+        a_short_cone_on_the_apex_of_a_tall_one_leaning_apart,
+        Rule::Union,
+        true,
+    )
+    .expect("the union answers");
+    let [union] = said[..] else {
+        panic!("the union of two cones that overlap is one solid: {said:?}");
+    };
+    [
+        union,
+        a_block(model, [-10.0, -10.0, 7.0], [10.0, 10.0, 10.0]),
+    ]
 }
 
 /// A pointed cone of slope ½ up `z` to 8, and one up to `far` turned 0.3 about
