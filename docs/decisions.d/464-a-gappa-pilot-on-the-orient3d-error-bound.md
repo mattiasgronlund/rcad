@@ -17,7 +17,7 @@ Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
 `*_ROUNDOFF` constants. 464.10 is Q2661, which proves block 1's hints in Coq
 and settles how the scripts join the tree and what notices the Rust moving
 under them. 464.11 is Q2675, which runs the branches where one of the nine
-differences is zero.*
+differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -30,6 +30,7 @@ differences is zero.*
   464.9   Which of the eleven *_ROUNDOFF constants Gappa can state
   464.10  Whether the scripts join the tree and the gate
   464.11  One of the nine differences at zero
+  464.12  The sphere of surface.rs' tests
 
 ### 464.1 The bugs a bound prover is for
 
@@ -92,13 +93,16 @@ proof gets checked. It was also expected to see an overflow, which it does not
 (464.4). FPTaylor, to find tight numbers, and
 Lean, for the any-degree bounds, wait on what it finds.
 
-There are twenty bound constants outside tests, found by `grep -rnE 'const
+There are twenty bound constants, found by `grep -rnE 'const
 [A-Z0-9_]*(ROUNDOFF|ERROR_BOUND)[A-Z0-9_]*\s*:' crates`: 17 in `rcad-geom`, 3 in
-`rcad-predicates`. The case for proving them grows once rcad turns to speed.
-Every rewrite of an expression for speed (another order, an FMA, two lanes at
-once) moves its rounding, so its derivation has to be done again, and §16.3's
-test could not tell a bound wrong by a factor of two. A tighter bound may also let the `f64` level decide
-more often, but how often each level runs today has not been measured.
+`rcad-predicates`. One of the three, `surface.rs:77`, sits inside `#[cfg(test)]
+mod tests` (`surface.rs:20-21`), so nineteen are outside tests, two of them in
+`rcad-predicates` (464.12). The case for proving them grows once rcad turns
+to speed. Every rewrite of an expression for speed (another order, an FMA, two
+lanes at once) moves its rounding, so its derivation has to be done again, and
+§16.3's test could not tell a bound wrong by a factor of two. A tighter bound
+may also let the `f64` level decide more often, but how often each level runs
+today has not been measured.
 
 ### 464.3 What the pilot answers
 
@@ -233,13 +237,13 @@ stamp recorded.
 
 **6. The other nineteen.** Eight are sign filters of orient3d's kind, an
 `on_floats` whose `error_bound` is a constant times a permanent:
-`ORIENT2D_ERROR_BOUND` and `surface.rs`' `ERROR_BOUND` in `rcad-predicates`,
-and `SIDE_OF_PLANE`, `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT`,
-`SIDE_OF_SPHERE`, `SIDE_OF_CYLINDER`, `SIDE_OF_CONE` and `SIDE_OF_TORUS` in
-`rcad-geom`. Block 1's pattern should carry over to them: one ratio hint per
-rounding, the error split into one term per product of the permanent so that
-Gappa can average them, block 2 for the closed normal end, and
-`-Eprecision=200`. That is Q2659. The eleven `*_ROUNDOFF` constants were not
+`ORIENT2D_ERROR_BOUND` and `surface.rs`' `ERROR_BOUND` (a test's, 464.12) in
+`rcad-predicates`, and `SIDE_OF_PLANE`,
+`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT`, `SIDE_OF_SPHERE`, `SIDE_OF_CYLINDER`,
+`SIDE_OF_CONE` and `SIDE_OF_TORUS` in `rcad-geom`. Block 1's pattern should
+carry over to them: one ratio hint per rounding, the error split into one term
+per product of the permanent so that Gappa can average them, block 2 for the
+closed normal end, and `-Eprecision=200`. That is Q2659. The eleven `*_ROUNDOFF` constants were not
 read for this. Two of them, `EVALUATION_ROUNDOFF` and `REFINEMENT_ROUNDOFF`,
 hold per de Boor pass at any degree, and a Gappa script states one fixed
 expression, so it could only do them one degree at a time. That is Q2660. The
@@ -539,7 +543,7 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   was. Done for two, in 464.8: `ORIENT2D_ERROR_BOUND` and
   `SIDE_OF_PLANE_ERROR_BOUND` are proved at the code's constants, orient2d's
   with its products below the normals too, and each of the other six is a row
-  of its own.
+  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those. Done, in 464.9: three are proved at the code's
   constants, two of them false when every number is below `2⁻¹⁰²²`, and each
@@ -1832,8 +1836,8 @@ for byte as they were run.
 **7. What this leaves.** The rows filed with this write-up:
 
 - Six rows, one for each bound 464.6 named that is not proved yet:
-  `surface.rs`' `ERROR_BOUND` in `rcad-predicates`, and
-  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND`,
+  `surface.rs`' `ERROR_BOUND` in `rcad-predicates` (Q2677, done in 464.12),
+  and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND`,
   `SIDE_OF_SPHERE_ERROR_BOUND`, `SIDE_OF_CYLINDER_ERROR_BOUND`,
   `SIDE_OF_CONE_ERROR_BOUND` and `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
   Each is to be proved as 1 to 5 here prove orient2d and the side of a plane:
@@ -3288,7 +3292,7 @@ bisect.py sphere.g 5 64` and `python3 bisect.py spherev.g 6 64`. Given a
 script, `a` and a top `m`, it checks that the script fails at `B = a u` and
 proves at `B = a u + m u²`, and then halves the range of `m` until the two
 ends are one apart. It writes each `B` it tries as `<name>_b<a>_<m>.g` and
-runs it with the first `gappa` line above.
+runs it with the first `gappa` line above. It is whole after `why.py` below.
 
 `spherecases.py`, whole:
 
@@ -3658,6 +3662,54 @@ text = open("c_sphere_noeb.g").read()
 head, rest = text.split("->\n", 1)
 _, hints = rest.split("}\n", 1)
 open("c_sphere_noeb_rel.g", "w").write(head + "->\n  eb -/ B * P in ?\n}\n" + hints)
+```
+
+`bisect.py`, whole. Its `best` line is never read; the line after it is what
+prints a failing run's best:
+
+```python
+"""Find the smallest B = a u + m u^2 a script proves at, in steps of u^2, by
+bisection on m, as 464.8 did. Run as: python3 bisect.py <file.g> <a> <hi m>.
+Writes <name>_b<a>_<m>.g beside itself for each B tried, and prints each run's
+exit and the goal's best bound when it fails."""
+import os
+import re
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+B_CODE = "B = 8b-53 + 1b-100;"
+NIX = ["nix", "--extra-experimental-features", "nix-command",
+       "--extra-experimental-features", "flakes", "shell",
+       "github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe#gappa",
+       "--command", "gappa", "-Eprecision=200"]
+
+name, a, hi = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+text = open(name).read()
+assert text.count(B_CODE) == 1, f"no single B line in {name}"
+
+
+def proves(m):
+    b = f"B = {a}b-53 + {m}b-106;" if m else f"B = {a}b-53;"
+    out_name = f"{name[:-2]}_b{a}_{m}.g"
+    open(out_name, "w").write(text.replace(B_CODE, b))
+    run = subprocess.run(NIX + [out_name], capture_output=True, text=True, timeout=200)
+    best = re.findall(r"best: \[[^\]]*\]|\{[-0-9.e+]+, [-0-9.e+^()]+\}\]", run.stderr + run.stdout)
+    fail = [l for l in (run.stderr + run.stdout).splitlines() if "best" in l or "failed" in l.lower()]
+    print(f"{out_name}: {b} exit {run.returncode}; {' | '.join(fail[:3])}", flush=True)
+    return run.returncode == 0
+
+
+lo = 0
+assert not proves(lo), "proves with no u^2 term"
+assert proves(hi), "does not prove at the top of the range"
+while hi - lo > 1:
+    mid = (lo + hi) // 2
+    if proves(mid):
+        hi = mid
+    else:
+        lo = mid
+print(f"smallest: {a}u + {hi}u^2 proves, {a}u + {lo}u^2 fails")
 ```
 
 **10. What this leaves.** No row.
