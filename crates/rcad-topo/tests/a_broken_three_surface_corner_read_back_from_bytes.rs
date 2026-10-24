@@ -42,22 +42,23 @@
 //! itself at every placement (§448.7).
 //!
 //! A wedge whose edge runs up through the apex answers too, where the pyramid
-//! stands and cut there and placed after. **Placed first, it is refused
-//! `CannotTellTheCellsOfAFaceApart` by every rule under both policies** at 50
-//! of the 112 wedges and placements Q1937's lane swept. At 8 of the 50 the
-//! order along a side face's edge goes round in a loop by the apex, which is a
-//! rounding off that edge: the apex is put in order against each of the two
-//! places the wedge's faces cross the edge by that face alone, and the two
-//! places against each other by the boxes or the planes round them. Ending
-//! the loop in the 5 where `as_the_planes_say` makes it changed none of the
-//! 672 fuses swept, and the other 42 refuse with no loop, so the loop is not
-//! what refuses. The apex is. Placed, each three of the four side planes meet
-//! in an apex of their own, a rounding from the others, and the fuse puts the
-//! one corner it makes of them on every side plane's line across a face. At
-//! each of the 23 fuses of 39 tried here that are refused so, a wedge plane
-//! runs between two of those apexes, and then no drawing of the face with
-//! straight lines keeps the order along each of them. Drawing it takes one
-//! reading of the corner that every face round it shares, a row of its own.
+//! stands and cut there and placed after. Placed first, it was refused
+//! `CannotTellTheCellsOfAFaceApart` by every rule under both policies at 50 of
+//! the 112 wedges and placements Q1937's lane swept. Placed, each three of the
+//! four side planes meet in an apex of their own, a rounding from the others,
+//! and the fuse put the one corner it makes of them on every side plane's line
+//! across a face, a rounding off one of them. Where a wedge plane runs between
+//! two of those apexes, no drawing of the face with straight lines kept the
+//! order along each line. **The fuse now reads every plane round such a
+//! corner as its copy moved through the corner**, on each face round it and
+//! for each piece of one by it (Q2575). None of the 39 fuses tried here is
+//! refused so: under `certified` 30 are refused at the range check §448.7
+//! settled for the cut through the apex and 7 answer. 2 are refused
+//! `Undecidable` for a speck of a wedge face by the apex, which has no corner
+//! there and so is drawn in the true planes. At the eight placements where the
+//! order along a side face's edge went round in a loop by the apex,
+//! `tolerant(100)` is refused `ResultIsNotManifold` at five, which
+//! `CannotTell` hid.
 //! Turned a tenth of a radian about `(0.3, −1, 2)`, the wedge
 //! round the `x` axis keeps an edge a rounding long by the apex, as the cut
 //! through it does: `certified` refuses every rule for it, and
@@ -89,6 +90,7 @@
 //! The corner is moved in the bytes because nothing in the public API writes a
 //! corner off its surfaces: every builder validates what it built.
 
+use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
 use rcad_geom::{
@@ -722,48 +724,73 @@ fn a_tilted_wall_is_one_plane_whether_a_prism_or_the_hole_it_fills_stands_on_it(
 }
 
 /// **Placed, the sound pyramid cut by a wedge whose edge runs up through its
-/// apex cannot tell the cells of a face apart**, by every rule and under both
-/// policies, and each refusal leaves the model as it was. Q1937 asked whether
-/// `as_the_planes_say` in `fuse/arrange.rs` orders two cuts against a corner a
-/// rounding off a crossing's line the way it orders the cuts against each
-/// other. These are the eight placements, of the 112 the lane swept, where it
-/// does not. The crossing is a side face's edge, the corner off it is the
-/// apex, and the two cuts are where the wedge's two faces cross that edge. The
-/// apex is put in order against each cut by that cut's own wedge face, the
-/// boxes or the planes order the two cuts against each other, and the three
-/// answers go round in a loop.
+/// apex tells the cells of every face apart**, at the eight placements, of the
+/// 112 Q1937's lane swept, where the order along a side face's edge went round
+/// in a loop by the apex. Each was refused `CannotTellTheCellsOfAFaceApart` by
+/// every rule under both policies. The crossing is a side face's edge, the
+/// corner off it is the apex, and the two cuts are where the wedge's two faces
+/// cross that edge. The apex was put in order against each cut by that cut's
+/// own wedge face, the boxes or the planes ordered the two cuts against each
+/// other, and the three answers went round in a loop. The loop did not make
+/// the refusal: ending it in `as_the_planes_say` changed none of the 672
+/// fuses swept. The apex did, a rounding off one of the lines it is put on
+/// (the test below), and the fuse now reads every plane round it as running
+/// through it (Q2575).
 ///
-/// The loop does not make the refusal. A change to `as_the_planes_say` that
-/// let the apex order the two cuts it falls between, which ends the loop in
-/// the five of the eight where the planes ordered the cuts, changed none of the
-/// 672 fuses the lane swept, these 48 among them. The other three are ordered
-/// by the boxes, which `as_the_planes_say` is never asked. And 42 more
-/// placements with no loop refuse the same way. What does make it is the
-/// apex itself, a rounding off one of the lines it is put on, with a wedge
-/// plane running between it and where that line meets another (the test
-/// below). No change to `fuse/` comes with this pin.
+/// Each rule then comes to the same thing at each placement. Under
+/// `certified`, six placements are refused at the range check §448.7 settled
+/// for the cut through the apex, and the wedge round the `x` axis turned 2.9
+/// about `(−2, 1, 0.5)` answers. Under `tolerant(100)` that one answers too,
+/// the wedge over the `+y` edge turned 0.7 about `(1, 2, 3)` answers with the
+/// range check in the log, and the other five are refused
+/// `ResultIsNotManifold`, which `CannotTell` hid; why is not traced. The wedge
+/// over the `−y` edge shifted after the turn 0.7 about `(0.3, −1, 2)` is
+/// refused `Undecidable` under both: its face cuts a speck by the apex out of
+/// itself, and that face has no corner there, so it is drawn in the true
+/// planes, which do not part the speck (the test below).
 #[test]
-fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_cannot_tell_its_cells_apart() {
-    for (wedge, placement) in where_the_orders_loop_by_the_apex() {
+fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_tells_its_cells_apart() {
+    use Came::{
+        Answered, AnsweredPastTheRangeCheck, NoPointInsideAPiece, NotManifold,
+        RefusedAtTheRangeCheck,
+    };
+    let under_each_policy = [
+        (RefusedAtTheRangeCheck, NotManifold),
+        (RefusedAtTheRangeCheck, NotManifold),
+        (Answered, Answered),
+        (RefusedAtTheRangeCheck, NotManifold),
+        (NoPointInsideAPiece, NoPointInsideAPiece),
+        (RefusedAtTheRangeCheck, AnsweredPastTheRangeCheck),
+        (RefusedAtTheRangeCheck, NotManifold),
+        (RefusedAtTheRangeCheck, NotManifold),
+    ];
+    for ((wedge, placement), (certified, tolerant)) in where_the_orders_loop_by_the_apex()
+        .into_iter()
+        .zip(under_each_policy)
+    {
         for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
-            for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            for (policy, came) in [
+                (Policy::certified(), certified),
+                (Policy::tolerant(100.0), tolerant),
+            ] {
                 let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
-                match the_wedge_through_the_apex(wedge, placement, rule, &policy) {
-                    Err(Error::CannotTellTheCellsOfAFaceApart { .. }) => {}
-                    other => panic!("{case} came back {other:?}"),
-                }
+                assert_eq!(
+                    what_the_wedge_through_the_apex_came_to(wedge, placement, rule, &policy),
+                    came,
+                    "{case}"
+                );
             }
         }
     }
 }
 
-/// **Placed, the pyramid has four apexes a rounding apart, and it cannot tell
-/// a face's cells apart only where a wedge plane runs between two of them.**
-/// Each three of the four side planes meet in an apex of their own. The fuse
-/// makes one corner of them, worked out from three of the planes, and on each
-/// side face puts that corner on every line where another side plane crosses
-/// the face. So on each face the corner is on two of those lines exactly and
-/// off the third by a rounding.
+/// **Placed, the pyramid has four apexes a rounding apart, and where a wedge
+/// plane runs between two of them the fuse reads the side planes as running
+/// through one.** Each three of the four side planes meet in an apex of their
+/// own. The fuse makes one corner of them, worked out from three of the
+/// planes, and on each side face puts that corner on every line where another
+/// side plane crosses the face. So on each face the corner is on two of those
+/// lines exactly and off the third by a rounding.
 ///
 /// On the `−y` face at the plain shift, with the wedge over the `+y` edge, a
 /// print put in `order_along` in `fuse/arrange.rs` and taken out found the
@@ -778,73 +805,57 @@ fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_cannot_tell_its_ce
 /// the corner then crosses `r` on one side of where `a` does, while the order
 /// along `r` has the real `c` cross it on the other. No drawing of the face
 /// with straight lines and the corner on all three keeps every order, and the
-/// fuse refuses as above. The lane that found this let the planes overrule
-/// the boxes on that face, and then turned round two cuts along `r` as well:
-/// each still refused, the first on two windings that disagree.
+/// fuse was refused `CannotTellTheCellsOfAFaceApart`. The lane that found this
+/// let the planes overrule the boxes on that face, and then turned round two
+/// cuts along `r` as well: each still refused, the first on two windings that
+/// disagree.
 ///
 /// Of the 39 fuses here, `Difference` and `certified` with each wedge at each
-/// of 13 placements, 23 are refused so, and each of those has a wedge plane
-/// between two apexes. 4 more have one and are refused at the range check
-/// instead; why the orders' quarrel does not show there is not traced. 3 of
-/// those 4 were refused `Undecidable` until `by_a_plane` in `fuse/select.rs`
-/// read a corner of the input with four planes round it where the lines of
-/// the piece's two sides there cross (Q2334): the wedge over the `+y` edge at
-/// `every_placement`'s turn about `x` shifted, and twice over at the shift
-/// after the turn 0.1 about `(1, 2, 3)`. 12 have none, and none of those is
-/// refused so.
-///
-/// So the refusal is the gap `limit_or_gap` names for it: the cells are there,
-/// and it is the fuse's reading of the corner that contradicts itself. What a
-/// face drawn whole would come to under `certified`, the range check §448.7
-/// settled for the cut through the apex or something else, nobody has run.
-/// Drawing it takes one reading of the corner that every face round it
-/// shares, which is a row of its own.
+/// of 13 placements, 23 were refused so, and each of those has a wedge plane
+/// between two apexes. Now `as_read_round_a_corner` in `fuse/arrange.rs` reads
+/// every plane round the corner as its copy moved through the corner on each
+/// face round it, so the orders along `a`, `b`, `c` and `r` are those of one
+/// straight drawing, and `by_a_plane` in `fuse/select.rs` reads a piece by the
+/// corner the same way (Q2575). None of the 39 is refused so. Of the 27 with a
+/// wedge plane between two apexes, 21 are refused at the range check §448.7
+/// settled for the cut through the apex, 4 answer, and 2 are refused
+/// `Undecidable`, "a point inside a piece of a face": the wedge over the `+y`
+/// edge turned 2.9 about `(−2, 1, 0.5)`, and the wedge over the `−y` edge
+/// shifted after the turn 0.7 about `(0.3, −1, 2)`. At each a print put in
+/// `choose` in `fuse/select.rs` and taken out found the piece no rule placed
+/// on a face of the wedge, a speck by the apex cut out of it by the lines
+/// where side planes cross it. The wedge has no corner there, so its face is
+/// drawn in the true planes, and they do not part the speck. Of the 12 with none, 9
+/// are refused at the range check and 3 answer.
 #[test]
-fn a_placed_pyramid_cannot_tell_its_cells_apart_only_where_a_wedge_plane_runs_between_two_apexes() {
+fn a_placed_pyramid_reaches_the_range_check_where_a_wedge_plane_runs_between_two_apexes() {
+    use Came::{Answered, NoPointInsideAPiece, RefusedAtTheRangeCheck};
     let placements = every_placement()
         .into_iter()
         .chain(where_the_orders_loop_by_the_apex().map(|(_, placement)| placement))
         .chain([a_tenth_of_a_radian_about_a_tilted_axis()]);
-    let mut refused_with_a_plane_between = 0;
-    let mut a_plane_between_and_refused_at_the_range_check = 0;
-    let mut no_plane_between = 0;
+    let mut tally = BTreeMap::new();
     for placement in placements {
         for wedge in EVERY_WEDGE {
             let between = a_wedge_plane_runs_between_two_apexes(wedge, placement);
-            let fused = the_wedge_through_the_apex(
+            let came = what_the_wedge_through_the_apex_came_to(
                 wedge,
                 placement,
                 Rule::Difference,
                 &Policy::certified(),
             );
-            let refused = matches!(fused, Err(Error::CannotTellTheCellsOfAFaceApart { .. }));
-            match (between, refused) {
-                (true, true) => refused_with_a_plane_between += 1,
-                (true, false) => {
-                    assert!(
-                        matches!(
-                            fused,
-                            Err(Error::Invalid(Invalid::DynamicRangeTooWide { .. }))
-                        ),
-                        "{placement:?}, {wedge:?}: a wedge plane between two apexes came back \
-                         {fused:?}"
-                    );
-                    a_plane_between_and_refused_at_the_range_check += 1;
-                }
-                (false, false) => no_plane_between += 1,
-                (false, true) => panic!(
-                    "{placement:?}, {wedge:?}: refused with no wedge plane between two apexes"
-                ),
-            }
+            *tally.entry((between, came)).or_insert(0) += 1;
         }
     }
     assert_eq!(
-        (
-            refused_with_a_plane_between,
-            a_plane_between_and_refused_at_the_range_check,
-            no_plane_between
-        ),
-        (23, 4, 12)
+        tally,
+        BTreeMap::from([
+            ((true, RefusedAtTheRangeCheck), 21),
+            ((true, Answered), 4),
+            ((true, NoPointInsideAPiece), 2),
+            ((false, RefusedAtTheRangeCheck), 9),
+            ((false, Answered), 3),
+        ])
     );
 }
 
@@ -1356,6 +1367,52 @@ fn the_wedge_through_the_apex(
             );
             Err(refused)
         }
+    }
+}
+
+/// What a fuse of the placed pyramid and a wedge through its apex came to, as
+/// much of it as the pins tell apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Came {
+    /// An answer with nothing in the log.
+    Answered,
+    /// An answer with the range check `tolerant` takes in the log.
+    AnsweredPastTheRangeCheck,
+    /// Refused `DynamicRangeTooWide`, across more than fifteen digits.
+    RefusedAtTheRangeCheck,
+    /// Refused `ResultIsNotManifold`.
+    NotManifold,
+    /// Refused `Undecidable`, "a point inside a piece of a face".
+    NoPointInsideAPiece,
+}
+
+/// [`the_wedge_through_the_apex`] read as what it [`Came`] to; any other
+/// answer or refusal is a panic.
+fn what_the_wedge_through_the_apex_came_to(
+    wedge: Wedge,
+    placement: Isometry,
+    rule: Rule,
+    policy: &Policy,
+) -> Came {
+    let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
+    match the_wedge_through_the_apex(wedge, placement, rule, policy) {
+        Ok(named) if named.is_empty() => Came::Answered,
+        Ok(named) if named == [DYNAMIC_RANGE_CHECK] => Came::AnsweredPastTheRangeCheck,
+        Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+            assert!(ratio > 1e15, "{case}: a range of {ratio}");
+            Came::RefusedAtTheRangeCheck
+        }
+        Err(Error::ResultIsNotManifold { .. }) => Came::NotManifold,
+        Err(Error::Undecidable { records })
+            if records
+                .records()
+                .iter()
+                .map(|record| record.predicate())
+                .eq(["a point inside a piece of a face"]) =>
+        {
+            Came::NoPointInsideAPiece
+        }
+        other => panic!("{case} came back {other:?}"),
     }
 }
 
