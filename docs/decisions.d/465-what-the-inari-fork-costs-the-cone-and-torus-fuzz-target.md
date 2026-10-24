@@ -340,3 +340,9 @@ fuzz target's body on one corpus file at a time.
   pins both sizes. Scaled by 2^1006 the pair walked 21 points even on the
   old count, so the fault needed a tiny size, not a wide spread: class C, and
   fixed.
+- **Q2733's count covers all 16.** Q2734, read-only at ca9b6493, replayed the
+  other 11 through a probe it removed. Each walks 21 or 22 points but
+  481232f8, which walks 3 that round to one point: its cone's apex sits at
+  x = 8.6e-188, which swamps a parabola about 4e-303 across. The same probe
+  found 150ecee9's 21 points lying on a straight chord, y exactly 0 and about
+  3e-303 off the cone, which is Q2743.
