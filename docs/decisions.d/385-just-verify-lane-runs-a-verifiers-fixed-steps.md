@@ -113,8 +113,52 @@ whole output in `full.log`, and an `exit` file written after the JSON. A second
 start in the same tree refuses and points at `wait`. A run whose process is
 gone with no `exit` file is reported as dead, with `full.log` named.
 
-A run with a served gate ended inside its first call (§385.4). How many calls
-a cold one takes was not measured.
+**Measured 2026-10-24**, over every `verifier` agent of a `lanes` run since
+Q793 landed (2026-10-03) to 2026-10-24, read with `row_time.py`'s own loader
+(`load()`, `read_transcript()`), extended to pair each `just verify-lane`
+Bash call with its own tool result rather than bucketing them together the
+way `KEYED_BY_RECIPE` does — the method §383.6 used, run fresh from this
+session's scratchpad (`q804final.py`; a reboot clears it, the same as
+§383.6's scripts).
+
+Of 961 verifier agents, 933 called `just verify-lane` at least once. The
+other 28 fell back to steps 1 to 7 by hand, as `verifier.md` says to do in a
+tree whose justfile has none: 26 of them are from the day Q793 landed, on a
+lane whose base predates the merge, `verify:q793` and `verify:q792`
+included, since each judged the row that built the recipe or the one just
+before it; the remaining 2 are later lanes on an old base.
+
+Of the 933 that called it: 799 (85.6%) had a served gate, read off the
+recipe's own `· served:` line, and 128 (13.7%) a cold one, read off a `gate:
+PASS` or `gate: FAIL` line with no `served:` (6 showed neither and are
+uncounted below). A served run took **1.25 calls on average, 1 at the
+median, 6 at the most**: 647 of 799 (81%) ended inside the first call, and
+the rest needed a `wait` because the phase after the gate — the revert's
+rebuild, a lane's numbers, slow tests re-run one at a time — still ran past
+540 s on its own, not because the gate was slow. A cold run took **2.48 calls
+on average, 2 at the median, 13 at the most**, and still finished inside the
+first call 53 times out of 128 (41%). So "a served gate ended inside its
+first call" held for most served runs but not all of them: a served gate
+makes the gate step fast, not the whole recipe.
+
+Across 1326 individual calls with a measured span — the time from the Bash
+tool call to its own result, not a response's streamed timestamp — the mean
+was **294.9 s**, the median **267.4 s**, and the longest was **542.7 s**: a
+few seconds past `VERIFY_LANE_WAIT`'s 540 s default, from the time it takes
+to print and return, never past it on purpose. **No call came within 55 s of
+the harness's 600 s bound**; the recipe's own 540 s wait ends the call first,
+every time.
+
+A verifier still ran a step the recipe had already filled: 244 of the 933
+(26.2%) ran `just lines-that-run` by hand as well, 239 of those *before*
+calling the recipe at all, the same step `verify_lane.py` runs for itself
+before the checkout (§385.1). 9 (1.0%) ran the gate a second time directly,
+with `just pre-gate gate-lane` or `just gate quiet`, the same question
+`tests_pass_on_branch` already answers. Checking the branch out, reverting a
+path and unlocking the tree by hand turned up too, but mixed in with a
+verifier's own deeper checks of a lane's specific claims — checking out one
+named commit to rerun one test, say — rather than a plain repeat of the
+recipe's own step, so they are not counted here.
 
 ### 385.3 What it fills, and what it leaves
 
@@ -194,8 +238,11 @@ Its JSON holds the `verdictSchema` fields it can decide, and two of its own:
 
 ### 385.5 What this leaves
 
-- **How many calls a real run takes**, cold and served, and how often a
-  verifier still ran a step the recipe had filled. Q800 measures §383.6's
+- **How many calls a real run takes, cold and served, and how often a
+  verifier still ran a step the recipe had filled: measured, in §385.2.** A
+  served run averages 1.25 calls, a cold one 2.48; no call came within 55 s
+  of the harness's 600 s; 26.2% of verifiers still ran `lines-that-run` by
+  hand and 1.0% still ran the gate a second time. Q800 measures §383.6's
   estimates from the same transcripts but writes only §383 and §384.
 - **A verifier sent by a `claude` process started before this merge** may
   read the old `verifier.md`, if agent files load when the process starts, as
