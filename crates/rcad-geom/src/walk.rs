@@ -5806,6 +5806,67 @@ mod tests {
         );
     }
 
+    /// A parabola about `4e-303` across is walked into as many points as the
+    /// same parabola written `2^1006` times larger (Q2733).
+    ///
+    /// The pair is the fuzz corpus's `70fbff12`: a cone of slope one with its
+    /// apex at the origin and its axis along `(0, 1, 1)`, cut by the plane
+    /// `z = -1.950951127282395e-303`. The deflection is the fuzz harness's, a
+    /// hundredth of how big a coarse walk says the crossing is, so it scales
+    /// with the pair. Counted from `√(room / ‖bend‖)`, a length squared about
+    /// `1e-305` over `1e302`, every step came out `2^-1022` wide and the tiny
+    /// one drew 350 723 points.
+    #[test]
+    fn a_parabola_written_tiny_is_walked_into_as_many_points_as_the_same_one_written_large() {
+        let walked = |scale: f64| {
+            let skin = Surface::Cone(
+                Cone::new(
+                    crate::Axis::new(Point::origin(), Vector::new(0.0, 1.0, 1.0))
+                        .expect("a direction"),
+                    1.0,
+                )
+                .expect("a slope"),
+            );
+            let flat = Surface::Plane(
+                Plane::from_point_and_normal(
+                    Point::new(0.0, 0.0, -1.950_951_127_282_395e-303 * scale),
+                    Vector::new(0.0, 0.0, 1.0),
+                )
+                .expect("a unit normal"),
+            );
+            let mut log = ProvenanceLog::new();
+            let met = crate::intersect::intersect(&skin, &flat, &Policy::certified(), &mut log);
+            let Ok(SurfaceMeet::Curves(runs)) = met else {
+                panic!("a plane along a cone's side cuts a parabola: {met:?}");
+            };
+            assert_eq!(runs.len(), 1, "one parabola");
+            let walk_it = |deflection: f64, log: &mut ProvenanceLog| {
+                walk(
+                    &runs[0],
+                    [&skin, &flat],
+                    Deflection::of(deflection).expect("a length"),
+                    &Policy::certified(),
+                    log,
+                )
+                .expect("a parabola is walked")
+            };
+            let sized = walk_it(f64::MAX / 4.0, &mut log);
+            let how_big = sized.deviation().magnitude() / POINT_ALONG_A_CROSSING_ROUNDOFF;
+            walk_it(how_big * 1e-2, &mut log).points().len()
+        };
+
+        let large = walked(2.0_f64.powi(1006));
+        assert!(
+            large < 100,
+            "the parabola written large is walked into {large} points"
+        );
+        assert_eq!(
+            walked(1.0),
+            large,
+            "the same parabola written 2^1006 times smaller is walked into as many points"
+        );
+    }
+
     /// The whole of a curve still walks, and that is what stops the check above
     /// from being a check that nothing gets through.
     #[test]
