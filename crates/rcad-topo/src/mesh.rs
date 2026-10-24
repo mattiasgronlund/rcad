@@ -23,6 +23,7 @@ use rcad_geom::{
     Axis, Deflection, DynamicRange, EdgeRun, Isometry, MOST_POINTS_ALONG_ONE_CROSSING, NamedRun,
     Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Point, PointsAlongACrossing,
     SURFACE_AFTER_SHIFTING_ROUNDOFF, Surface, Torus, Vector, which_two_surfaces_a_run_is_between,
+    which_way_a_closed_crossing_turns,
 };
 use rcad_mesh::{
     CannotTriangulate, Loop, NotALoop, Patch, TrimmedDomain, triangulate, zip_up_a_band,
@@ -1058,6 +1059,9 @@ impl BuildingAMesh {
     /// faces along it whose run names no curved surface — the rule
     /// [`nothing_curved_says_where_it_bends`], which the sweep refuses by too,
     /// so only a solid that never went through the sweep reaches that refusal.
+    /// [`Error::CannotTellWhichWayAClosedEdgeRuns`] for a closed edge whose way
+    /// the rule cannot read at its corner
+    /// ([`the_way_a_closed_edge_is_stored_running`]).
     ///
     /// # The pair it walks between is the one everyone reads
     ///
@@ -1220,7 +1224,7 @@ impl BuildingAMesh {
         // corner of a face: [`the_way_the_faces_along_a_closed_edge_walk_it`].
         if edge.is_closed()? {
             let corner = ends[0];
-            let read_at_the_corner = the_way_a_closed_edge_is_stored_running(&along, corner)
+            let read_at_the_corner = the_way_a_closed_edge_is_stored_running(&along, corner)?
                 .or_else(|| the_way_a_closed_edge_where_its_faces_touch_runs(&along, corner));
             let read_off_the_faces = match read_at_the_corner {
                 Some(way) => Some(way),
@@ -8487,13 +8491,26 @@ impl SurfaceAlongAnEdge {
 /// starts at.
 ///
 /// **The same rule the fuse wrote the edge with and `Model::validate` reads it
-/// back with**, spelled once (§23.8):
-/// [`a_closed_crossing_is_walked_the_way_it_is_stored`] asks whether the
-/// crossing's forward direction `∇S × ∇T` runs with the longitude
-/// `axis × ∇S` **at the corner**, and this hands back the direction that does.
+/// back with, asked of the same function** (§23.8):
+/// [`which_way_a_closed_crossing_turns`] says whether the crossing's forward
+/// direction `∇S × ∇T` runs with the longitude `axis × ∇S` **at the corner**,
+/// as [`a_closed_crossing_is_walked_the_way_it_is_stored`] asks it, and this
+/// hands back the direction that does.
 ///
-/// **Summing the longitude all the way round instead is what this replaces, and
-/// it was one authority short.** A cap circle of a bar gains a whole turn either
+/// **A copy of that rule's arithmetic in plain `f64` is what this replaces, and
+/// it read some edges the other way from the fuse** (Q2706). It took the same two
+/// references in the same order, but compared each dot against `0.0`. Two round
+/// bars, radius 2 upright and radius 3 leaning 0.6 across it with their axes 4
+/// apart, turned 2.9 about the upright axis, cross in a loop that runs along the
+/// leaning pipe's ruling where it meets the upright seam: the dot against the
+/// longitude is zero there in exact arithmetic, comes out exactly `0.0` in
+/// `f64`, and is negative for the numbers the corner is stored as. The copy fell
+/// to the latitude on that `0.0` and stored the edge the other way from the fuse,
+/// and the union and both differences were refused `AWireWillNotLieFlatOnItsFace`
+/// (`a_closed_edge_whose_corner_moved_after_one_face_read_it.rs`).
+///
+/// **Summing the longitude all the way round, which the copy replaced, was one
+/// authority short.** A cap circle of a bar gains a whole turn either
 /// way and the sum reads it; a circle cut out of a ball by a plane that misses
 /// its polar axis gains **nothing** — it climbs and comes straight back — so the
 /// sum was exactly zero and the walk was left running whichever way the
@@ -8516,40 +8533,54 @@ impl SurfaceAlongAnEdge {
 /// `ẑ × ∇C` and the latitude `∇C × (ẑ × ∇C)` — mutually square and spanning.
 /// `∇S × ∇T` is square to `∇C` because it is a cross product with it, so it lies
 /// in the plane the other two span and, unless it has no length at all, cannot be
-/// square to both. Read the
-/// longitude first, which keeps every answer this rule gave before, and the
-/// latitude only where the longitude says exactly nothing. This is the same two
-/// references, read in the same order, as
-/// [`a_closed_crossing_is_walked_the_way_it_is_stored`]; two spellings of one
-/// question is how the fuse and `Model::validate` come to disagree (§23.8).
+/// square to both. The rule reads the longitude first and the latitude only
+/// where the longitude says exactly nothing.
 ///
-/// `None` when neither sign is a fact: neither surface is curved, so there is no
-/// longitude at all; the two are tangent here, so there is no crossing
+/// `Ok(None)` when neither sign is a fact: neither surface is curved, so there
+/// is no longitude at all; the two are tangent here, so there is no crossing
 /// direction; or the corner is at a pole, where every longitude runs through the
 /// one point and `axis × ∇S` is exactly zero (§38.3). Zero against both legs of
 /// the frame leaves the wire with no length at all — it is square to `∇C` by
 /// construction, so being square to the longitude and the latitude too leaves it
 /// nothing to be but the zero vector — which is the two surfaces touching rather
 /// than crossing and has no direction to name.
-fn the_way_a_closed_edge_is_stored_running(along: &[Surface; 2], at: Point) -> Option<Vector> {
-    let reference = the_curved_surface_that_names_a_closed_edge(along)?;
-    let forward = gradient_of(&along[0], at).cross(gradient_of(&along[1], at));
-    let gradient = gradient_of(&reference, at);
-    let longitude = the_way_it_is_parametrised_about(&reference, at).cross(gradient);
-    let with_the_longitude = forward.dot(longitude);
-    let against_the_frame = if with_the_longitude == 0.0 {
-        forward.dot(gradient.cross(longitude))
-    } else {
-        with_the_longitude
+///
+/// # Errors
+///
+/// [`Error::CannotTellWhichWayAClosedEdgeRuns`] when the rule comes back
+/// [`Decision::Undecidable`], as `Model::validate` refuses the same edge: the
+/// sign is a fact there that the arithmetic could not read, and guessing it is
+/// how an edge gets stored the other way from the fuse.
+///
+/// # Panics
+///
+/// If [`which_way_a_closed_crossing_turns`] grows a fifth answer, as
+/// [`a_closed_crossing_is_walked_the_way_it_is_stored`] says.
+fn the_way_a_closed_edge_is_stored_running(
+    along: &[Surface; 2],
+    at: Point,
+) -> Result<Option<Vector>> {
+    let Some(reference) = the_curved_surface_that_names_a_closed_edge(along) else {
+        return Ok(None);
     };
-    if against_the_frame == 0.0 {
-        return None;
-    }
-    Some(if against_the_frame > 0.0 {
-        forward
+    let outward = [gradient_of(&along[0], at), gradient_of(&along[1], at)];
+    let forward = outward[0].cross(outward[1]);
+    let turning = which_way_a_closed_crossing_turns(
+        outward,
+        gradient_of(&reference, at),
+        the_way_it_is_parametrised_about(&reference, at),
+    );
+    if turning == Decision::Pos {
+        Ok(Some(forward))
+    } else if turning == Decision::Neg {
+        Ok(Some(-forward))
+    } else if turning == Decision::Zero {
+        Ok(None)
+    } else if let Decision::Undecidable { enclosure } = turning {
+        Err(Error::CannotTellWhichWayAClosedEdgeRuns { enclosure })
     } else {
-        -forward
-    })
+        panic!("a fifth answer out of the closed-edge rule: {turning:?}")
+    }
 }
 
 /// Which way a closed edge runs where its two faces touch at its corner rather
@@ -12383,6 +12414,7 @@ mod tests {
             );
 
             let stored = the_way_a_closed_edge_is_stored_running(&along, corner)
+                .expect("the rule can tell")
                 .expect("neither a pole nor a touch");
             let runs_along_stored = a_closed_crossing_is_walked_the_way_it_is_stored(
                 [&flat, &ball],

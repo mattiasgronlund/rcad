@@ -55,19 +55,25 @@
 //! rolls and three pairs of radii, with all three rules either way round: 534
 //! fuses, none of them wrong, none failing `Model::validate`, and 83 refused.
 //!
+//! # A dot that rounds to nothing (Q2706)
+//!
+//! Leaning 0.6 and turned 2.9, and leaning 0.4 and turned 2.0, the dot rounds
+//! to exactly `0.0` in `f64` and the certified rule says it is negative. The
+//! mesher used to read the same rule in plain `f64`
+//! (`the_way_a_closed_edge_is_stored_running` in `mesh.rs`), fell to the
+//! latitude on that `0.0`, and stored the edge the other way from the fuse: the
+//! union and both differences were refused `AWireWillNotLieFlatOnItsFace`. It
+//! now reads the way with the fuse's own certified function.
+//!
 //! # What is still refused
 //!
-//! - Leaning 0.6 and turned 2.9, the dot rounds to exactly `0.0` in `f64` and
-//!   the certified rule says it is negative. The mesher reads the same rule in
-//!   plain `f64` (`the_way_a_closed_edge_is_stored_running` in `mesh.rs`),
-//!   falls to the latitude on that `0.0`, and stores the edge the other way
-//!   from the fuse. The intersection meshes all the same; the union and both
-//!   differences are refused `AWireWillNotLieFlatOnItsFace`
-//!   ([`the_union_where_the_dot_rounds_to_nothing_is_refused`]).
 //! - Turned 4.0 or 5.5, and at some turns leaning 0.6, the union and one
 //!   difference are refused `CurvedFaceWithAHoleGoesTooFarRound`. At 4.0 the
 //!   fuse reads the way against the upright pipe rather than the leaning one
-//!   ([`the_same_pair_turned_four_radians_is_refused_its_union`]).
+//!   ([`the_same_pair_turned_four_radians_is_refused_its_union`]). Leaning 0.6
+//!   and turned 2.9 the union and the leaning bar less the upright one are
+//!   refused the same way
+//!   ([`the_union_where_the_dot_rounds_to_nothing_is_refused`]).
 //!
 //! The fuses run certified, in a model of 100 mm.
 
@@ -149,23 +155,42 @@ fn the_piece_two_bars_share_where_the_dot_rounds_to_nothing_is_the_same_either_w
     the_same_volume(upright_first, leaning_first, "the intersection");
 }
 
-/// The same shape's union and differences are refused, both ways round,
-/// because the mesher reads in `f64` the sign the fuse reads certified, gets
-/// `0.0`, and stores the edge the other way. Measured with the mesher reading
-/// the certified rule instead, the upright bar less the leaning one answered
-/// and the other three were refused `CurvedFaceWithAHoleGoesTooFarRound`.
+/// The same shape's upright bar less the leaning one answers, and its union
+/// either way round and the leaning bar less the upright one are refused
+/// `CurvedFaceWithAHoleGoesTooFarRound`, as at the turn of four radians.
+///
+/// All four were refused `AWireWillNotLieFlatOnItsFace` while the mesher read
+/// the way the closed edge is stored running in plain `f64`: it got `0.0`
+/// against the longitude where the fuse's certified reading is negative, fell
+/// to the latitude, and stored the edge the other way from the fuse (Q2706).
 #[test]
 fn the_union_where_the_dot_rounds_to_nothing_is_refused() {
     let bars = TwoBars::turned(0.6, 2.9, 0.0);
-    for rule in [Rule::Union, Rule::Difference] {
-        for upright_first in [true, false] {
-            let why = refused(&bars, rule, upright_first);
-            assert!(
-                matches!(why, Error::AWireWillNotLieFlatOnItsFace { .. }),
-                "{rule:?}, upright bar first: {upright_first}: {why:?}"
-            );
-        }
+    let shared = what_the_two_bars_share(bars.lean);
+    answer(&bars, Rule::Difference, true, UPRIGHT - shared, 4);
+    for (rule, upright_first) in [
+        (Rule::Union, true),
+        (Rule::Union, false),
+        (Rule::Difference, false),
+    ] {
+        let why = refused(&bars, rule, upright_first);
+        assert!(
+            matches!(why, Error::CurvedFaceWithAHoleGoesTooFarRound { .. }),
+            "{rule:?}, upright bar first: {upright_first}: {why:?}"
+        );
     }
+}
+
+/// Leaning 0.4 and turned to 2.0, all three answer either way round.
+///
+/// Here too the dot against the longitude rounds to exactly `0.0` in `f64` at
+/// the closed edge's corner, `(−0.832, 1.819, 7.428)`, where the fuse's
+/// certified reading is negative. The union and both differences were refused
+/// `AWireWillNotLieFlatOnItsFace` while the mesher read that dot in plain
+/// `f64` and fell to the latitude (Q2706).
+#[test]
+fn leaning_0_4_and_turned_2_the_two_bars_answer_all_three_either_way_round() {
+    all_three_answer_either_way_round(&TwoBars::turned(0.4, 2.0, 0.0));
 }
 
 /// Q2571's two bars turned 4.0 about the upright bar's axis, rather than a
