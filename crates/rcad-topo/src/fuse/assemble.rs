@@ -387,9 +387,9 @@ pub(crate) struct InputSide {
 ///
 /// **A straight side whose two ends come out one corner is left out**, as
 /// [`sides_of`] leaves it out of a kept piece (§365.7). Two corners of two
-/// names that land on one `f64` triple are one corner unless they share one
-/// plane or none, their planes prove them two points and no kept side runs
-/// between them ([`Corners::of`]), and a piece can have a straight
+/// names that land on one `f64` triple are one corner unless their planes
+/// prove them two points ([`the_planes_keep_them_apart`]) and no kept side
+/// runs between them ([`Corners::of`]), and a piece can have a straight
 /// side between two such: a seed of the fuse
 /// fuzzer's corpus and the draw of
 /// `a_fused_draw_hands_its_provenance_back_through_the_door.rs` reach one in a
@@ -683,8 +683,8 @@ impl Assembly {
     /// more than `f64` carries, under a policy that fails on that.
     /// [`Error::Geometry`] when an edge runs between two corners of the answer
     /// that sit on one `f64` triple, which leaves it no length at all. Two
-    /// names that land on one triple are one corner unless they share one
-    /// plane or none, their planes prove them two points and no kept side runs
+    /// names that land on one triple are one corner unless their planes prove
+    /// them two points ([`the_planes_keep_them_apart`]) and no kept side runs
     /// between them ([`Corners::of`]), so this asks of two corners one of
     /// which moved onto a triple the other already held
     /// ([`Corners::settle_on_the_lower_rounding`]), and of two proved apart
@@ -8973,6 +8973,11 @@ struct Corners {
     /// their planes prove. See
     /// [`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`].
     one_corner: BTreeMap<CornerName, CornerName>,
+    /// The three planes of every end of a kept side that is a meet of three
+    /// planes, with the `f64` triple its name lands on: where
+    /// [`the_planes_keep_them_apart`] looks for a corner between two names
+    /// that share two planes.
+    ends_on_three_planes: Vec<([Plane; 3], [u64; 3])>,
     /// The corner made for each least name of [`Corners::one_corner`].
     made_for_one_corner: BTreeMap<CornerName, usize>,
     /// Names that are another corner's, settled before any piece was walked:
@@ -9279,14 +9284,18 @@ impl Corners {
     /// `FeatureSizeNotPositive { size: 0.0 }` (§365.7).
     ///
     /// **Two names on one triple with no side between them are one corner
-    /// too, unless they share one plane or none and their planes prove them
-    /// two points** ([`Corners::of`], [`the_planes_keep_them_apart`]). Only
-    /// then do they stay two corners. A cube set corner to corner on a block
-    /// and turned a little short of a half turn has two of its edges cross a
-    /// side of the block a rounding from the block's top corner, outside the
-    /// block, and at `(t, p) = (0.05, 0.05)` both crossings land on that
-    /// corner's own triple, `(0, 0, 10)`, sharing one plane with it
-    /// (`tests/two_cubes_corner_to_corner_turned_a_little.rs`).
+    /// too, unless their planes prove them two points**
+    /// ([`Corners::of`], [`the_planes_keep_them_apart`]). Only then do they
+    /// stay two corners. A cube set corner to corner on a block and turned a
+    /// little short of a half turn has two of its edges cross a side of the
+    /// block a rounding from the block's top corner, outside the block, and
+    /// at `(t, p) = (0.05, 0.05)` both crossings land on that corner's own
+    /// triple, `(0, 0, 10)`, sharing one plane with it
+    /// (`tests/two_cubes_corner_to_corner_turned_a_little.rs`). Two names
+    /// that share two planes are proved two points only by a corner between
+    /// them on the line they share, so every end of a kept side that is a
+    /// meet of three planes is kept here too, with the triple it lands on
+    /// ([`Corners::ends_on_three_planes`]).
     ///
     /// **Where a name lands is where its corner settles**: the lowest of the
     /// places its ends would put it ([`Corners::settle_on_the_lower_rounding`]),
@@ -9307,6 +9316,7 @@ impl Corners {
     ) -> Result<()> {
         let mut lands_at: BTreeMap<CornerName, Point> = BTreeMap::new();
         let mut between = Vec::new();
+        let mut on_three_planes = Vec::new();
         for meet in sides {
             let from = self.goes_by(self.name_of(model, &meet.ends[0], policy, log)?);
             let to = self.goes_by(self.name_of(model, &meet.ends[1], policy, log)?);
@@ -9316,11 +9326,18 @@ impl Corners {
                 if is_the_lower_rounding(point, *lowest) {
                     *lowest = point;
                 }
+                if let Some(planes) = self.three_planes_of(model, end) {
+                    on_three_planes.push((planes, name));
+                }
             }
             if from != to {
                 between.push([from, to]);
             }
         }
+        self.ends_on_three_planes = on_three_planes
+            .into_iter()
+            .map(|(planes, name)| (planes, exactly_at(lands_at[&name])))
+            .collect();
         self.one_corner = the_least_name_of_each_group(
             between
                 .into_iter()
@@ -9423,11 +9440,12 @@ impl Corners {
     /// wider of the corner and what arrived.
     ///
     /// **Two names whose places land on one `f64` triple are one corner**
-    /// ([`exactly_at`]), **unless they share one plane or none, their planes
-    /// prove them two points** ([`the_planes_keep_them_apart`]), **and no side
-    /// runs between them**. A cube set corner to corner on a block and turned a
-    /// little short of a half turn has two of its edges cross a side of the
-    /// block a rounding from the block's top corner, outside the block, and at
+    /// ([`exactly_at`]), **unless their planes prove them two points**
+    /// ([`the_planes_keep_them_apart`]) **and no side runs between them**.
+    /// A name is asked only against the corner that first claimed the triple.
+    /// A cube set corner to corner on a block and turned a little short of a
+    /// half turn has two of its edges cross a side of the block a rounding
+    /// from the block's top corner, outside the block, and at
     /// `(t, p) = (0.05, 0.05)` both crossings land on that corner's own
     /// triple, `(0, 0, 10)`. Each crossing shares one plane with the corner.
     /// Joined to it, they left the turned cube four edges at the block's
@@ -9436,6 +9454,18 @@ impl Corners {
     /// own corner, and the union was refused `DynamicRangeTooWide`
     /// (Q2305, `tests/two_cubes_corner_to_corner_turned_a_little.rs`). Kept
     /// apart, the union is both cubes.
+    ///
+    /// The same two crossings share two planes with each other, the block's
+    /// side and a side of the turned cube. At the turn leaning `0.002` they
+    /// land on that triple too, and the block's top cuts the line they share
+    /// between them, on another triple. With the block first each crossing was
+    /// asked only against the block's corner and kept apart from it; with the
+    /// turned cube first the second crossing was asked against the first and
+    /// joined to it, which made the two sides either side of that cut one edge
+    /// four faces claimed, and the union was refused `DynamicRangeTooWide`
+    /// (Q2565,
+    /// `tests/a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`).
+    /// The cut proves them two points, so both orders keep the three apart.
     ///
     /// **Two names a kept side runs between are one corner whatever their
     /// planes prove**, where both land on one triple
@@ -9482,6 +9512,8 @@ impl Corners {
                 !the_planes_keep_them_apart(
                     self.made_on_three_planes.get(already).copied(),
                     planes,
+                    exactly_at(corner.point),
+                    &self.ends_on_three_planes,
                     policy,
                 )
             });
@@ -9711,31 +9743,48 @@ impl Corners {
 
 /// Whether a corner made for a meet of the three planes `made_on` and a name
 /// that is a meet of the three planes `arrived` stay two corners, though both
-/// land on one `f64` triple: the two share one plane or none, and one of
-/// `arrived`'s planes is proved off the point where `made_on`'s three meet, in
-/// exact arithmetic ([`side_of_a_plane_where_three_planes_meet`]).
+/// land on one `f64` triple, `landed_on`, in exact arithmetic
+/// ([`side_of_a_plane_where_three_planes_meet`]):
 ///
-/// **Two names that share two planes are one corner, whatever the third
-/// planes prove.** Both lie on the line the two shared planes cross in, less
-/// than a rounding apart along it. Kept apart, a leaning frame less a comb
-/// came back two solids where it is refused with four faces along one edge
+/// - **Sharing one plane or none**, where one of `arrived`'s planes is proved
+///   off the point where `made_on`'s three meet. The two lie on two lines, as
+///   the turned cube's edges that cross the block's `y = 0` beside the
+///   block's top corner do, and one corner of the two gives it the edges of
+///   both (Q2305).
+/// - **Sharing two planes**, where one of `ends_on_three_planes` lands on
+///   another triple, is a meet of those two planes and a third, and that third
+///   plane is proved on one side at `made_on`'s point and on the other at
+///   `arrived`'s. Both lie on the line the two shared planes cross in, and the
+///   third cuts that line strictly between them, at a corner a kept side ends
+///   at. One corner of the two would fold the line back through that corner:
+///   the sides from it to each of them were one edge four faces claimed, and
+///   the union of a cube set on a block's corner, turned about an axis leaning
+///   `0.002`, was refused with the turned cube first and not with the block
+///   first (Q2565).
+///
+/// **Two names that share two planes and nothing proved between them are one
+/// corner, whatever their third planes prove.** Less than a rounding apart
+/// along one line, kept apart, a leaning frame less a comb came back two
+/// solids where it is refused with four faces along one edge
 /// (`tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`), the union of two
 /// combs wrote the first comb's corner at `(3, 1, 0)` and not one rounding off
 /// with the crossing beside it, where that file pins it, and no skew fuse of
-/// `tests/fuses_that_must_agree.rs` came back not a solid (Q2555). Two names
-/// that share one plane or none lie on two lines, as the turned cube's edges
-/// that cross the block's `y = 0` beside the block's top corner do, and one
-/// corner of the two gives it the edges of both (Q2305).
+/// `tests/fuses_that_must_agree.rs` came back not a solid (Q2555). A corner
+/// between them on their own triple holds nothing apart: a side from it to
+/// either has both ends on one triple, and those are one corner whatever is
+/// proved ([`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`]).
 ///
 /// **Asked under a certified policy only.** Under a tolerant one a fold may
 /// put a corner a rounding off where its own three planes meet
 /// ([`fold_each_corner_one_plane_cuts_a_rounding_from_it`]), so the planes of
 /// the name it was made for need not say where it is. Where either is no meet
-/// of three planes, or no plane is proved off, nothing is proved, and the two
-/// are one corner by their `f64` triple as they were before Q2305.
+/// of three planes, or nothing is proved, the two are one corner by their
+/// `f64` triple as they were before Q2305.
 fn the_planes_keep_them_apart(
     made_on: Option<[Plane; 3]>,
     arrived: Option<[Plane; 3]>,
+    landed_on: [u64; 3],
+    ends_on_three_planes: &[([Plane; 3], [u64; 3])],
     policy: &Policy,
 ) -> bool {
     let (Some(made_on), Some(arrived), Strictness::Certified) =
@@ -9744,24 +9793,49 @@ fn the_planes_keep_them_apart(
         return false;
     };
     let made_on_names = made_on.map(name_of_a_plane);
-    if arrived
+    let shared: Vec<[u64; 9]> = arrived
         .map(name_of_a_plane)
-        .iter()
+        .into_iter()
         .filter(|name| made_on_names.contains(name))
-        .count()
-        >= 2
-    {
-        return false;
+        .collect();
+    match shared.as_slice() {
+        [] | [_] => arrived.iter().any(|plane| {
+            matches!(
+                side_of_a_plane_where_three_planes_meet(
+                    made_on.map(|flat| flat.coefficients()),
+                    plane.coefficients(),
+                ),
+                Ok(Decision::Pos | Decision::Neg)
+            )
+        }),
+        [one, other] => ends_on_three_planes
+            .iter()
+            .filter(|&&(_, at)| at != landed_on)
+            .filter_map(|(planes, _)| {
+                let names = planes.map(name_of_a_plane);
+                if !(names.contains(one) && names.contains(other)) {
+                    return None;
+                }
+                planes
+                    .iter()
+                    .zip(names)
+                    .find(|(_, name)| name != one && name != other)
+                    .map(|(plane, _)| *plane)
+            })
+            .any(|third| {
+                let side = |three: [Plane; 3]| {
+                    side_of_a_plane_where_three_planes_meet(
+                        three.map(|flat| flat.coefficients()),
+                        third.coefficients(),
+                    )
+                };
+                matches!(
+                    (side(made_on), side(arrived)),
+                    (Ok(Decision::Pos), Ok(Decision::Neg)) | (Ok(Decision::Neg), Ok(Decision::Pos))
+                )
+            }),
+        _ => false,
     }
-    arrived.iter().any(|plane| {
-        matches!(
-            side_of_a_plane_where_three_planes_meet(
-                made_on.map(|flat| flat.coefficients()),
-                plane.coefficients(),
-            ),
-            Ok(Decision::Pos | Decision::Neg)
-        )
-    })
 }
 
 /// Whether `one` is the lower of two roundings of one corner, as
@@ -10119,9 +10193,9 @@ fn names_of_the_three_surfaces(surfaces: &[Surface; 3]) -> [[u64; 9]; 3] {
 /// entry, and it is the catalogue's to settle.
 ///
 /// Nor is every exact match one corner. Under a certified policy two meets of
-/// three planes that share one plane or none, and whose planes prove them two
-/// points, stay two corners on one triple unless a kept side runs between them
-/// ([`Corners::of`], [`the_planes_keep_them_apart`], Q2305).
+/// three planes whose planes prove them two points stay two corners on one
+/// triple unless a kept side runs between them ([`Corners::of`],
+/// [`the_planes_keep_them_apart`], Q2305, Q2565).
 fn exactly_at(point: Point) -> [u64; 3] {
     point
         .coordinates()
