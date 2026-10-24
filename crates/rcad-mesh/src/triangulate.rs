@@ -2934,6 +2934,105 @@ mod tests {
         }
     }
 
+    /// The part of the skin of a ball of `1.5` between its seam and the curve
+    /// where the wall of a bar of radius 2 crosses it, as `rcad-topo` hands it
+    /// over at a deflection of `0.375` for the ball centred a rounding off that
+    /// wall at `a` of `0.3`
+    /// (`a_ball_of_one_and_a_half_centred_a_rounding_off_a_bars_wall_is_answered_under_every_rule`
+    /// in `a_walk_neither_winding_nor_the_axis_places.rs`). The wall runs
+    /// through both poles, so the loop runs along the north pole side, down the
+    /// wall's curve to `S`, along the south pole side from corner 15 to corner
+    /// 16, and up the seam.
+    ///
+    /// The refinement's first round breaks the sides from corner 16 to corners
+    /// 12 and 13, which cut corners 13 and 14 off the curve. The middle of the
+    /// second lands inside the triangle from 15 and 16 to the middle of the
+    /// first, nothing flips it out, and it is joined to those three alone: a
+    /// pocket ([`pockets_beside_a_pole_side`]). Its two triangles off the pole
+    /// side are one triangle in space, from `S` to it to the first middle, once
+    /// each way round (`docs/decisions.md` §187.4). With that function made to
+    /// find nothing, the patch comes back holding `[26, 25, 15]` and
+    /// `[26, 16, 25]`; with it, the side from 15 to the first middle is halved.
+    /// In `rcad-topo` the fold only cost the coarsest mesh's ladder a finer
+    /// rung, and that test passes without the halving, so this is where the
+    /// lune's pocket is seen. It is a ball face meshed with no fuse of Q2650's
+    /// in it, where Q2650's ball bored through both poles was the one place a
+    /// pocket had been shown (Q2665).
+    ///
+    /// So no two triangles may join the same three points in space, with every
+    /// corner at one pole taken as that pole. A triangle with two corners at
+    /// one pole is a sliver of nothing and is not asked about. The middle that
+    /// was the pocket is asked to be there, so the test is still about it.
+    #[test]
+    fn no_two_triangles_of_a_balls_lune_from_pole_to_pole_are_one_triangle_in_space() {
+        let pole = core::f64::consts::FRAC_PI_2;
+        let corners = vec![
+            [-5.3898505820473455, pole],
+            [-6.036600538650527, pole],
+            [-6.036600538650527, 1.4279380098028933],
+            [-6.129647591481654, 1.1710645955185723],
+            [-6.2162969135637, 0.907120957528288],
+            [-6.2896746029309005, 0.6358468564233045],
+            [-6.342478327293932, 0.35503796031606205],
+            [-6.3668004533908125, 0.06217981798320722],
+            [-6.355741321320228, -0.24283809990157776],
+            [-6.3069684377462085, -0.5578138212210811],
+            [-6.223516220258194, -0.8831362585002515],
+            [-6.1105928892327395, -1.2251178341745115],
+            [-6.044195298599461, -1.407478878680559],
+            [-6.009502659968968, -1.5005671043100068],
+            [-5.991971052539132, -1.5473658301231639],
+            [-5.991971052539132, -pole],
+            [-5.3898505820473455, -pole],
+            [-5.3898505820473455, -1.0471975511965979],
+            [-5.3898505820473455, -0.5235987755982989],
+            [-5.3898505820473455, 0.0],
+            [-5.3898505820473455, 0.5235987755982987],
+            [-5.3898505820473455, 1.0471975511965979],
+        ];
+        let pocket = [
+            (corners[13][0] + corners[16][0]) / 2.0,
+            (corners[13][1] + corners[16][1]) / 2.0,
+        ];
+        let ball = Sphere::new(Point::new(0.0, 0.0, 1.5), 1.5).expect("a ball of 1.5");
+        // The two corners at `N`, the curve's thirteen, then `S` twice and the
+        // seam's five.
+        let between_two_edges = [vec![true; 2], vec![false; 13], vec![true; 7]].concat();
+        let domain = TrimmedDomain::new(
+            Surface::from(ball),
+            crate::domain::Loop::through(corners).expect("twenty-two corners"),
+            Vec::new(),
+            rcad_geom::Deflection::of(0.374_999_999_999_962_5).expect("a positive length"),
+        )
+        .with_corners_between_two_edges(between_two_edges);
+        let patch = triangulate(&domain).expect("the lune is cut");
+        assert!(
+            patch.corners().contains(&pocket),
+            "the middle of the side from corner 16 to corner 13, {pocket:?}, is no longer put \
+             in, so this no longer asks about the pocket it made"
+        );
+
+        let place = |corner: u32| {
+            let [u, v] = patch.corners()[corner as usize];
+            let u = if v.abs() == pole { 0.0 } else { u };
+            [u.to_bits(), v.to_bits()]
+        };
+        let mut drawn = HashMap::new();
+        for &triangle in patch.triangles() {
+            let mut places = triangle.map(place);
+            places.sort_unstable();
+            if places[0] == places[1] || places[1] == places[2] {
+                continue;
+            }
+            if let Some(earlier) = drawn.insert(places, triangle) {
+                panic!(
+                    "triangles {earlier:?} and {triangle:?} are one triangle in space, once \
+                     each way round"
+                );
+            }
+        }
+    }
+
     /// The wall of the round bar of radius 3 lying along `x` through
     /// `(0, 4.5, 5)`, inside the upright bar of radius 2, as `rcad-topo` hands
     /// it over for Q2572's intersection when it asks for the coarsest mesh
