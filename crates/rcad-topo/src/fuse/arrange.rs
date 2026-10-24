@@ -80,7 +80,8 @@ use rcad_geom::{
     where_a_cones_apex_stands_against_a_plane, which_comes_first_round_a_crossing,
 };
 use rcad_predicates::expansion::{
-    difference_of_two_products, expansion_sign, expansion_sum, product_is_exact, scale_expansion,
+    compress, difference_of_two_products, expansion_sign, expansion_sum, product_is_exact,
+    scale_expansion,
 };
 use rcad_predicates::{
     Decision, Interval, Level, Measures, ORIENT2D, ORIENT3D, Point as PredicatePoint, Policy,
@@ -2064,6 +2065,8 @@ impl<'f> Arrangement<'f> {
     /// policy: its box first, and where `partner` is a plane the box cannot
     /// place it against, each of the exact readings of the corner below in
     /// turn ([`Arrangement::passes_through`] says why the planes come first).
+    /// Where `partner` is a pipe, the one exact reading is of a seam corner
+    /// ([`Arrangement::side_of_a_pipe_at_a_seam_corner`]).
     ///
     /// **Kept apart so that the one reading is asked wherever the side is**:
     /// [`Arrangement::as_a_corner_between_the_two_meets_of_one_cut_says`]
@@ -2123,6 +2126,18 @@ impl<'f> Arrangement<'f> {
                             .unwrap_or(undecided)
                     }
                 }
+            }
+            (undecided @ Decision::Undecidable { .. }, None) => {
+                let Surface::Cylinder(pipe) = partner else {
+                    return undecided;
+                };
+                let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
+                    .chain(corner.around.iter().copied())
+                    .collect();
+                corner
+                    .seam_plane
+                    .and_then(|seam| Self::side_of_a_pipe_at_a_seam_corner(&on, point, &seam, pipe))
+                    .unwrap_or(undecided)
             }
             (side, _) => side,
         }
@@ -12198,6 +12213,207 @@ impl<'f> Arrangement<'f> {
         })
     }
 
+    /// Which side of the pipe `partner` a seam corner lies, read as
+    /// [`Arrangement::side_of_a_plane_at_a_seam_corner`] reads it: the point
+    /// where the line its cap and its `seam` plane share crosses the circle
+    /// the cap meets its own pipe in, the crossing whose box is `at`. `None`
+    /// where it is not that shape, where the box does not say which of the two
+    /// crossings it is, or where a product would round.
+    ///
+    /// A bar of radius 1 up `z` from `(1, 0, −3)` inside the bar of radius 2
+    /// up `z` from `(0, 0, −2)`, both turned 1 about `z`, has the thin axis
+    /// stored at `(c, s)`, the cosine and sine of 1 as `f64`, and `c² + s²` is
+    /// `1 + 9.7e−17`. So the thin pipe pokes out of the thick one along the
+    /// line both seams run up, and the seam corners at `(2c, 2s)` on the four
+    /// caps are within `2.4e−17` of the other pipe, in boxes `1e−13` wide.
+    /// Every fuse was refused `Undecidable` "side of cylinder" at one of them
+    /// (Q2756). Read this way the thick floor's corner is inside the thin pipe
+    /// and the thin floor's outside the thick one.
+    ///
+    /// **The corner is `Y + t·e` with `t·D` of the box's sign.** Let the cap
+    /// be `n_c·p = d_c`, the seam plane `n_s·p = d_s`, and the pipe the
+    /// corner is on run through `o` along `w` with radius `r`. The line runs
+    /// along `e = n_c × n_s`, and `e·w` is exactly nought, since `n_c` lies
+    /// along `w`. Let `D = e·e` and `Y` the point of the line with
+    /// `e·Y = e·o`, the middle of the chord the circle cuts off it, so that
+    /// `D·Y = d_c·(n_s × e) + d_s·(e × n_c) + (e·o)·e`. Then `e·(p − o)` is
+    /// `t·D` along the line, nought at the middle and growing along `e`, so
+    /// the box's sign of it is the sign of the corner's `t·D`.
+    ///
+    /// - **Any pipe along the line**, through `o'` along `w'` with radius
+    ///   `r'`, is `D²` times `|(p − o') × w'|² − r'²·|w'|²` at `Y + t·e`:
+    ///   `G₀ + 2·G₁·(t·D) + G₂·(t·D)²`, for `V = D·(Y − o') × w'`,
+    ///   `b = e × w'`, `G₀ = |V|² − D²·r'²·|w'|²`, `G₁ = V·b` and `G₂ = |b|²`
+    ///   ([`Arrangement::a_pipe_along_a_line`]).
+    /// - **The corner's own pipe** has `G₁` exactly nought, since `D·(Y − o)`
+    ///   and `w` are both square to `e`, so with `F₀` and `F₂` for its `G₀`
+    ///   and `G₂` the corner is at `t·D = σ·√S / F₂`, for `σ` the box's sign
+    ///   and `S = −F₀·F₂`. `F₀` is below nought where the line crosses the
+    ///   circle at all.
+    /// - **So the side is the sign of `P + 2·σ·G₁·√S`**, for `P = G₀·F₂ −
+    ///   G₂·F₀`: `partner`'s `D²·(G₀ + …)` there times `F₂²`, divided by
+    ///   `F₂`, which is above nought. That is the sign of `P` where the two
+    ///   terms agree or one is nought, and otherwise of whichever is larger,
+    ///   `P²` against `4·G₁²·S`.
+    ///
+    /// Every quantity is worked out exactly and never divided, packed with
+    /// [`compress`] as it goes, since `P²` is of degree 36 in the inputs.
+    fn side_of_a_pipe_at_a_seam_corner(
+        on: &[Surface],
+        at: PredicatePoint,
+        seam: &Plane,
+        partner: &Cylinder,
+    ) -> Option<Decision> {
+        on.iter().find_map(|pipe| {
+            let Surface::Cylinder(pipe) = pipe else {
+                return None;
+            };
+            on.iter().find_map(|cap| {
+                let Surface::Plane(cap) = cap else {
+                    return None;
+                };
+                if !lie_along_one_line(
+                    cap.normal().components(),
+                    pipe.axis().direction().components(),
+                ) {
+                    return None;
+                }
+                Self::side_of_a_pipe_where_a_line_crosses_a_cap_circle(partner, cap, seam, pipe, at)
+            })
+        })
+    }
+
+    /// The side of `partner` at the point whose box is `at` where the line
+    /// `cap` and `through` share crosses the circle `cap` meets `pipe` in, for
+    /// a `cap` square to the pipe's axis; `None` where the box does not say
+    /// which crossing, the line misses the circle, or a product would round
+    /// ([`Arrangement::side_of_a_pipe_at_a_seam_corner`] says how).
+    fn side_of_a_pipe_where_a_line_crosses_a_cap_circle(
+        partner: &Cylinder,
+        cap: &Plane,
+        through: &Plane,
+        pipe: &Cylinder,
+        at: PredicatePoint,
+    ) -> Option<Decision> {
+        let exact = |vector: [f64; 3]| vector.map(|component| vec![component]);
+        let [cap_normal, its_normal] = [cap, through].map(|flat| exact(flat.normal().components()));
+        let origin = pipe.axis().origin().coordinates();
+        let line = exactly_crossed(&cap_normal, &its_normal)?;
+        let box_ = at.enclosure();
+        let which_root = dot_of(
+            line.each_ref()
+                .map(|component| held_as_an_interval(component)),
+            core::array::from_fn(|axis| box_[axis] - Interval::exactly(origin[axis])),
+        )
+        .sign();
+        if !matches!(which_root, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        let length_squared = packed(&exactly_dotted_across(&line, &line)?);
+        if expansion_sign(&length_squared) != Decision::Pos {
+            return None;
+        }
+        let foot = exactly_added_across(
+            &exactly_added_across(
+                &exactly_scaled_across(&exactly_crossed(&its_normal, &line)?, &[cap.offset()])?,
+                &exactly_scaled_across(&exactly_crossed(&line, &cap_normal)?, &[through.offset()])?,
+            ),
+            &exactly_scaled_across(&line, &exactly_dotted_across(&line, &exact(origin))?)?,
+        )
+        .map(|component| packed(&component));
+        let [inside, square, across] =
+            Self::a_pipe_along_a_line(pipe, &foot, &length_squared, &line)?;
+        if expansion_sign(&inside) != Decision::Neg {
+            return None;
+        }
+        assert_eq!(
+            expansion_sign(&square),
+            Decision::Zero,
+            "a line square to a pipe's axis, through the foot of the axis on it, runs square to \
+             the pipe there: {square:?}"
+        );
+        assert_eq!(
+            expansion_sign(&across),
+            Decision::Pos,
+            "a line that meets a pipe's circle is not along its axis: {across:?}"
+        );
+        let [constant, lean, curve] =
+            Self::a_pipe_along_a_line(partner, &foot, &length_squared, &line)?;
+        let base = packed(&exactly_added(
+            &exactly_multiplied(&constant, &across)?,
+            &negated(&exactly_multiplied(&curve, &inside)?),
+        ));
+        let root_squared = packed(&negated(&exactly_multiplied(&inside, &across)?));
+        let [base_sign, lean_sign] = [&base, &lean].map(|expansion| expansion_sign(expansion));
+        let lean_sign = signs_multiplied([which_root, lean_sign, Decision::Pos])?;
+        if !matches!(base_sign, Decision::Pos | Decision::Neg | Decision::Zero) {
+            return None;
+        }
+        if lean_sign == Decision::Zero || lean_sign == base_sign {
+            return Some(base_sign);
+        }
+        if base_sign == Decision::Zero {
+            return Some(lean_sign);
+        }
+        let leaned = exactly_scaled(
+            &exactly_multiplied(&packed(&exactly_multiplied(&lean, &lean)?), &root_squared)?,
+            4.0,
+        )?;
+        let larger = expansion_sign(&exactly_added(
+            &exactly_multiplied(&base, &base)?,
+            &negated(&leaned),
+        ));
+        if larger == Decision::Pos {
+            Some(base_sign)
+        } else if larger == Decision::Neg {
+            Some(lean_sign)
+        } else if larger == Decision::Zero {
+            Some(Decision::Zero)
+        } else {
+            None
+        }
+    }
+
+    /// `[G₀, G₁, G₂]` for `pipe`, through `o` along `w` with radius `r`, along
+    /// the line through `Y` along `e`, given as `foot = D·Y` and
+    /// `length_squared = D = e·e`: `D²·(|(p − o) × w|² − r²·|w|²)` at
+    /// `p = Y + t·e` is `G₀ + 2·G₁·(t·D) + G₂·(t·D)²`, each worked out exactly
+    /// and packed. `None` where a product would round.
+    fn a_pipe_along_a_line(
+        pipe: &Cylinder,
+        foot: &[Vec<f64>; 3],
+        length_squared: &[f64],
+        line: &[Vec<f64>; 3],
+    ) -> Option<[Vec<f64>; 3]> {
+        let exact = |vector: [f64; 3]| vector.map(|component| vec![component]);
+        let along = exact(pipe.axis().direction().components());
+        let off_the_axis = exactly_added_across(
+            foot,
+            &exactly_scaled_across(
+                &exact(pipe.axis().origin().coordinates()),
+                &negated(length_squared),
+            )?,
+        );
+        let square_to_the_axis =
+            exactly_crossed(&off_the_axis, &along)?.map(|component| packed(&component));
+        let across = exactly_crossed(line, &along)?.map(|component| packed(&component));
+        let skin = exactly_multiplied(
+            &exactly_multiplied(
+                &exactly_scaled(&[pipe.radius()], pipe.radius())?,
+                &exactly_dotted_across(&along, &along)?,
+            )?,
+            &packed(&exactly_multiplied(length_squared, length_squared)?),
+        )?;
+        Some([
+            packed(&exactly_added(
+                &exactly_dotted_across(&square_to_the_axis, &square_to_the_axis)?,
+                &negated(&skin),
+            )),
+            packed(&exactly_dotted_across(&square_to_the_axis, &across)?),
+            packed(&exactly_dotted_across(&across, &across)?),
+        ])
+    }
+
     /// How many times the face's boundary winds round each walk, counting only
     /// what one lump of the drawing can say on its own.
     ///
@@ -16057,6 +16273,16 @@ fn exactly_scaled_across(vector: &[Vec<f64>; 3], factor: &[f64]) -> Option<[Vec<
 /// `one + other` for two vectors whose components are expansions, exactly.
 fn exactly_added_across(one: &[Vec<f64>; 3], other: &[Vec<f64>; 3]) -> [Vec<f64>; 3] {
     core::array::from_fn(|axis| exactly_added(&one[axis], &other[axis]))
+}
+
+/// `expansion` in as few entries as one sweep of [`compress`] leaves, the
+/// same value. Without it every product multiplies the lengths of what it
+/// multiplies, and a value of high degree runs to thousands of entries.
+fn packed(expansion: &[f64]) -> Vec<f64> {
+    let mut out = vec![0.0; expansion.len()];
+    let used = compress(expansion, &mut out);
+    out.truncate(used);
+    out
 }
 
 /// An interval holding what `expansion` adds up to. Each entry is exact and
