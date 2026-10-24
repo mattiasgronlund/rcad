@@ -289,12 +289,69 @@ fn a_thin_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_answer
 
 /// The thin bar of
 /// `a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`
-/// at other radii, each 8 long and resting on the inside of the bar of radius
-/// 2: of `3/4` along `y` at `x = 5/4` and along `x` at `y = 5/4`, and of `1/2`
-/// along `y` at `x = −3/2` and along `x` at `y = −3/2`.
+/// thinner, resting on the inside of the bar of radius 2 at `(0, 2, 0)`: of
+/// `3/4` along `x` at `y = 5/4`, and of `1/2` along `x` at `y = 3/2`, each 8
+/// long.
+///
+/// Every fuse was refused `TheseTwoSurfacesDoNotCrossInAConic` until Q2709.
+/// Two points on one loop that came out of the arrangement as one were put in
+/// order round it, and a thin pipe touching a fat one from inside was refused
+/// there, though each of its two loops runs once round the thin pipe's axis as
+/// the loops of a thin pipe the fat one swallows do. The bar of radius 1 asked
+/// no such order.
 #[test]
-fn a_thin_bar_resting_inside_a_thick_one_at_any_radius_answers_every_fuse() {
-    let placements: [(Pair, f64, f64, [f64; 3]); 4] = [
+fn a_thinner_bar_resting_inside_a_thick_one_answers_every_fuse() {
+    let placements: [(Pair, f64, f64); 2] = [
+        (
+            |model| {
+                [
+                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+                    a_bar_along_x(model, 0.75, [-4.0, 1.25, 0.0], 8.0),
+                ]
+            },
+            0.75,
+            1.25,
+        ),
+        (
+            |model| {
+                [
+                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+                    a_bar_along_x(model, 0.5, [-4.0, 1.5, 0.0], 8.0),
+                ]
+            },
+            0.5,
+            1.5,
+        ),
+    ];
+    for (build, radius, off) in placements {
+        every_fuse_answers_with_a_corner_at(
+            build,
+            [
+                16.0 * PI,
+                8.0 * PI * radius * radius,
+                bar_through_bar(2.0, radius, off),
+            ],
+            [&[7], &[3], &[4], &[3, 3]],
+            [0.0, 2.0, 0.0],
+        );
+    }
+}
+
+/// [`a_thinner_bar_resting_inside_a_thick_one_answers_every_fuse`] turned by
+/// quarter turns, so the loops meet where a cut across the thick bar's wall
+/// runs: of `3/4` along `y` at `x = 5/4`, meeting at `(2, 0, 0)`, and of `1/2`
+/// along `y` at `x = −3/2` and along `x` at `y = −3/2`, meeting at
+/// `(−2, 0, 0)` and `(0, −2, 0)`.
+///
+/// Every fuse was refused `TheseTwoSurfacesDoNotCrossInAConic` until Q2709.
+/// Now what they share and the thin bar less the thick one answer, with a
+/// corner where the loops meet, and the union and the thick bar less the thin
+/// one are refused `CurvedFaceWithAHoleGoesTooFarRound` meshing the thick
+/// bar's wall, whose two windows are each narrower than a quarter turn here.
+#[test]
+fn a_thinner_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_is_refused_by_the_union_and_the_thick_bar_less_it()
+ {
+    let placements: [(Pair, f64, f64, [f64; 3]); 3] = [
         (
             |model| {
                 [
@@ -305,17 +362,6 @@ fn a_thin_bar_resting_inside_a_thick_one_at_any_radius_answers_every_fuse() {
             0.75,
             1.25,
             [2.0, 0.0, 0.0],
-        ),
-        (
-            |model| {
-                [
-                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
-                    a_bar_along_x(model, 0.75, [-4.0, 1.25, 0.0], 8.0),
-                ]
-            },
-            0.75,
-            1.25,
-            [0.0, 2.0, 0.0],
         ),
         (
             |model| {
@@ -341,16 +387,35 @@ fn a_thin_bar_resting_inside_a_thick_one_at_any_radius_answers_every_fuse() {
         ),
     ];
     for (build, radius, off, corner) in placements {
-        every_fuse_answers_with_a_corner_at(
-            build,
-            [
-                16.0 * PI,
-                8.0 * PI * radius * radius,
-                bar_through_bar(2.0, radius, off),
-            ],
-            [&[7], &[3], &[4], &[3, 3]],
-            corner,
-        );
+        for (rule, first_first) in six_fuses() {
+            let what = format!("{rule:?} (first first: {first_first}), meeting at {corner:?}");
+            if matches!(
+                (rule, first_first),
+                (Rule::Union, _) | (Rule::Difference, true)
+            ) {
+                let mut model = a_model();
+                let said = fuse(&mut model, build, rule, first_first);
+                assert!(
+                    matches!(
+                        said,
+                        Err(rcad_topo::Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
+                    ),
+                    "{what}: {said:?}"
+                );
+                continue;
+            }
+            the_fuse_answers_with_a_corner_at(
+                build,
+                (rule, first_first),
+                [
+                    16.0 * PI,
+                    8.0 * PI * radius * radius,
+                    bar_through_bar(2.0, radius, off),
+                ],
+                [&[7], &[3], &[4], &[3, 3]],
+                corner,
+            );
+        }
     }
 }
 
@@ -905,26 +970,38 @@ fn every_fuse_answers_with_a_corner_at(
     faces: [&[usize]; 4],
     corner: [f64; 3],
 ) {
-    for (rule, first_first) in six_fuses() {
-        let (model, solids) = the_fuse_answers(build, (rule, first_first), volumes, faces);
-        for solid in solids {
-            let view = model.solid(solid).expect("a solid the fuse made");
-            let nearest = view
-                .faces()
-                .flat_map(|face| face.wires().flat_map(|wire| wire.points()))
-                .map(|point| {
-                    let at = point.coordinates();
-                    (0..3)
-                        .map(|i| (at[i] - corner[i]).powi(2))
-                        .sum::<f64>()
-                        .sqrt()
-                })
-                .fold(f64::INFINITY, f64::min);
-            assert!(
-                nearest <= 1e-9,
-                "{rule:?} (first first: {first_first}): the corner nearest {corner:?} is {nearest} from it"
-            );
-        }
+    for one in six_fuses() {
+        the_fuse_answers_with_a_corner_at(build, one, volumes, faces, corner);
+    }
+}
+
+/// [`the_fuse_answers`], with every solid of the answer holding a corner
+/// within `1e-9` of `corner`, as [`every_fuse_answers_with_a_corner_at`] says.
+fn the_fuse_answers_with_a_corner_at(
+    build: Pair,
+    (rule, first_first): (Rule, bool),
+    volumes: [f64; 3],
+    faces: [&[usize]; 4],
+    corner: [f64; 3],
+) {
+    let (model, solids) = the_fuse_answers(build, (rule, first_first), volumes, faces);
+    for solid in solids {
+        let view = model.solid(solid).expect("a solid the fuse made");
+        let nearest = view
+            .faces()
+            .flat_map(|face| face.wires().flat_map(|wire| wire.points()))
+            .map(|point| {
+                let at = point.coordinates();
+                (0..3)
+                    .map(|i| (at[i] - corner[i]).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(
+            nearest <= 1e-9,
+            "{rule:?} (first first: {first_first}): the corner nearest {corner:?} is {nearest} from it"
+        );
     }
 }
 
