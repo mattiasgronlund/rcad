@@ -20,6 +20,10 @@ as a broken hook rather than as a broken parser — and that is exactly what the
 first draft did, on the three sessions of 39 whose transcripts record the
 warning only as its summary line.
 
+`purpose_of` is what `report_start` sorts every call into, and §396.1 and
+§396.5's test reason from its buckets the same way §144 reasons from
+`ritual_of`'s.
+
 Run through `just check-spend-selftest`.
 """
 
@@ -33,6 +37,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from spend import (
+    PURPOSES,
     RITUALS,
     bucket_of,
     decision_read,
@@ -41,10 +46,15 @@ from spend import (
     found_hits,
     is_lookup,
     load,
+    purpose_of,
     ritual_of,
     targets_of,
     warning_said,
 )
+
+
+def read(path):
+    return {"name": "Read", "input": {"file_path": path}}
 
 
 def write(path, content=""):
@@ -104,6 +114,34 @@ CASES = [
     ("reading a decision", [bash("just decision 152")], None),
     ("a test file mentioning a worktree in a comment",
      [write("crates/rcad-geom/tests/walk.rs", "// see the worktree notes")], None),
+]
+
+
+# §396.1's seven buckets, one call each — `purpose_of` is held the same way
+# `ritual_of` is, because §396 and §396.5's test reason from its answer.
+PURPOSE_CASES = [
+    ("dispatching a lane", {"name": "Workflow", "input": {"workflow": "lanes"}},
+     "write the briefs"),
+    ("the old Agent dispatch", {"name": "Agent", "input": {"subagent_type": "general-purpose"}},
+     "write the briefs"),
+    ("reading a recipe", bash("just recipe spend"), "write the briefs"),
+    ("reading the code a row touches", read("crates/rcad-geom/src/meet.rs"), "check a row against the code"),
+    ("reading a decision", bash("just decision 396.1"), "check a row against the code"),
+    ("reading the queue file", read("docs/queue.md"), "queue"),
+    ("writing to the queue", bash("mise exec -- just queue take Q841 lane-q841"), "queue"),
+    ("a run's own transcript",
+     read("/home/mattias/.claude/projects/x/6cf2726f-f1c9-41fe/subagents/workflows/wf_1-2/journal.jsonl"),
+     "a returned run"),
+    ("a lane or wf branch", bash("git log --oneline -1 lane-q841-a-start-report-for-just-spend"),
+     "a returned run"),
+    ("checking the base", bash("git rev-parse --verify 5afdb494^{commit}"), "slots and trees"),
+    ("worktree admin", bash("git worktree list"), "slots and trees"),
+    ("listing agents", {"name": "ListAgents", "input": {}}, "slots and trees"),
+    ("a skill load", {"name": "Skill", "input": {"skill": "dispatch-lanes"}}, "start"),
+    ("reading memory", read("/home/mattias/.claude/projects/x/memory/MEMORY.md"), "start"),
+    ("editing the code a row touches", edit("crates/rcad-geom/src/meet.rs", "fn a", "fn b"),
+     "check a row against the code"),
+    ("something none of the seven name", {"name": "WebFetch", "input": {}}, "other"),
 ]
 
 
@@ -340,6 +378,17 @@ def main():
             print("wanted %r, got %r: %s" % (want, got, why))
             failed += 1
 
+    for why, call, want in PURPOSE_CASES:
+        got = purpose_of(call)
+        if got != want:
+            print("purpose_of wanted %r, got %r: %s" % (want, got, why))
+            failed += 1
+    covered_purposes = {want for _, _, want in PURPOSE_CASES}
+    for name in PURPOSES:
+        if name not in covered_purposes:
+            print("no case covers the %r purpose" % name)
+            failed += 1
+
     for why, text, want in SAYINGS:
         got = warning_said(text)
         if got != want:
@@ -377,8 +426,8 @@ def main():
             print("no case covers the %r ritual" % name)
             failed += 1
 
-    every = (len(CASES) + len(LOOKUPS) + len(RUNS) + 3 + len(SAYINGS) + len(BUCKETS)
-             + PAIR_CASES + 1)
+    every = (len(CASES) + len(PURPOSE_CASES) + len(LOOKUPS) + len(RUNS) + 3 + len(SAYINGS)
+             + len(BUCKETS) + PAIR_CASES + 1)
     if failed:
         print("%d of %d classifier cases came out wrong" % (failed, every))
         return 1

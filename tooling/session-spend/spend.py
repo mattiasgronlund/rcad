@@ -439,6 +439,103 @@ def is_lookup(response):
     return ritual_of(response["tools"]) is None
 
 
+# The seven jobs §396.1 sorts a dispatcher's own work into, in that section's
+# order. `report_start` means by this; `other` is both the last resort here
+# and what a response with no tool call is counted as, since there is no call
+# to sort.
+PURPOSES = (
+    "write the briefs",
+    "check a row against the code",
+    "queue",
+    "a returned run",
+    "slots and trees",
+    "start",
+    "other",
+)
+
+
+def purpose_of(call):
+    """Which of `PURPOSES` one tool call's work was for. §396.1.
+
+    A pure function of the call alone, the same shape as `ritual_of`: it reads
+    only what the call addressed — a file path, a shell command, a tool name —
+    never the response's prose, so a brief that *mentions* the queue in
+    passing is not sorted as queue work.
+    """
+    name = call.get("name")
+    inp = call.get("input") or {}
+    if name in ("Workflow", "Agent"):
+        return "write the briefs"
+    if name in ("ToolSearch", "Skill"):
+        return "start"
+    if name in ("ListAgents", "EnterWorktree", "ExitWorktree", "SendMessage", "TaskStop"):
+        return "slots and trees"
+    if name in ("Read", "NotebookEdit", "Edit", "Write"):
+        return _purpose_of_file(str(inp.get("file_path", "")))
+    if name in ("Grep", "Glob"):
+        return _purpose_of_file(str(inp.get("path") or inp.get("glob") or ""))
+    if name == "Bash":
+        return _purpose_of_command(" ".join(str(inp.get("command", "")).split()))
+    return "other"
+
+
+# A run's own record, wherever a dispatcher goes looking for it: a workflow's
+# subagent files, the saved tool results beside them, its journal, or a
+# transcript read directly rather than through `.claude/projects/<repo>/memory`
+# or a handoff, which are `start`'s and checked first. §396.1's "run journals
+# and transcripts".
+RUN_RECORD = re.compile(r"/subagents/|/tool-results/|workflows/wf_|journal\.jsonl|\.jsonl$")
+
+
+def _purpose_of_file(path):
+    if ("handoff" in path or "/memory/" in path
+            or os.path.basename(path) in ("MEMORY.md", "CLAUDE.md")):
+        return "start"
+    if RUN_RECORD.search(path):
+        return "a returned run"
+    if "lanes.js" in path:
+        return "write the briefs"
+    if is_decisions(path) or "/crates/" in path or path.startswith("crates/"):
+        return "check a row against the code"
+    if os.path.basename(path) == "queue.md" or "bin/queue" in path:
+        return "queue"
+    return "other"
+
+
+def _purpose_of_command(command):
+    words = command.split()
+    head = words[0] if words else ""
+    if head in ("mise", "env", "timeout", "nohup"):
+        for word in words[1:]:
+            if word not in ("exec", "--") and not word.startswith("-") and "=" not in word:
+                head = word
+                break
+    if RUN_RECORD.search(command):
+        return "a returned run"
+    if re.search(r"just recipe\b", command):
+        return "write the briefs"
+    if re.search(r"just (decisions?|src|claim-section)\b", command):
+        return "check a row against the code"
+    if re.search(r"just queue\b", command) or "queue.md" in command or "bin/queue" in command:
+        return "queue"
+    if re.search(r"just ff-main\b", command):
+        return "a returned run"
+    if re.search(r"worktree (lock|unlock|add|remove|list)|release-lanes|just (lanes|status)"
+                 r"|prune-worktrees|check-hub|clean-targets", command):
+        return "slots and trees"
+    if head == "git":
+        if re.search(r"\b(lane-\S*|wf_\S*)", command):
+            return "a returned run"
+        if re.search(r"\b(fetch|rev-parse|merge-base)\b", command) or "--ff-only" in command:
+            return "slots and trees"
+        if re.search(r"crates/|docs/decisions", command):
+            return "check a row against the code"
+        return "other"
+    if "crates/" in command and head in ("grep", "rg", "cat", "sed", "head", "tail", "find"):
+        return "check a row against the code"
+    return "other"
+
+
 # ------------------------------------------------------------------- reports
 
 def banner(responses, window):
@@ -779,6 +876,111 @@ def report_ritual(responses, total):
     print()
 
 
+def _sends_lane(call):
+    """A `Workflow` call, or the old `Agent` dispatch of a general-purpose lane.
+
+    §396.1: of the 69 segments that sent a lane between 2026-09-25 and
+    2026-10-03, the nine newest end at a `Workflow` call on `lanes.js`; of the
+    60 older ones, 20 end at an `Agent` call instead, 17 of them
+    general-purpose. A session's own lookup or verifier `Agent` call is
+    neither — it asks a question or checks a run, and sends no lane.
+    """
+    name = call.get("name")
+    if name == "Workflow":
+        return True
+    return name == "Agent" and (call.get("input") or {}).get("subagent_type") == "general-purpose"
+
+
+def report_start(responses, results, total):
+    """What a dispatcher spends before it sends its first lane, and on what.
+
+    §396.1's own counting rules, run instead of by hand: group by session,
+    find the first response that dispatches a lane (`_sends_lane`), and look
+    at everything up to and including it. A session that never makes that
+    call sent no lane and is not one of these; everyone else in the window is
+    a lookup, a kernel session or a lane's own transcript.
+    """
+    print("=== a dispatcher's start: context and output before its first lane ===")
+    by_session = collections.defaultdict(list)
+    for r in responses:
+        if not r["lane"]:
+            by_session[r["session"]].append(r)
+
+    before_ctx, lane_ctx, between_out = [], [], []
+    read_ranks = collections.defaultdict(list)
+    out_before = {p: [] for p in PURPOSES}
+    chars_before = {p: [] for p in PURPOSES}
+    out_whole = {p: [] for p in PURPOSES}
+    chars_whole = {p: [] for p in PURPOSES}
+
+    for chunk in by_session.values():
+        lane_idx = next((i for i, r in enumerate(chunk)
+                          if any(_sends_lane(c) for c in r["tools"])), None)
+        if lane_idx is None:
+            continue
+
+        before_ctx.append(chunk[0]["context"])
+        lane_ctx.append(chunk[lane_idx]["context"])
+        between_out.append(sum(r["output"] for r in chunk[: lane_idx + 1]))
+
+        reads = sorted(
+            (len(results.get(call.get("id"), "")) for r in chunk[:lane_idx]
+             for call in r["tools"] if call.get("name") == "Read"),
+            reverse=True,
+        )
+        for rank, size in enumerate(reads[:5]):
+            read_ranks[rank].append(size)
+
+        session_out = [{p: 0.0 for p in PURPOSES} for _ in range(2)]
+        session_chars = [{p: 0.0 for p in PURPOSES} for _ in range(2)]
+        for i, r in enumerate(chunk):
+            tools = r["tools"]
+            purposes = [purpose_of(c) for c in tools] if tools else ["other"]
+            share = r["output"] / len(purposes)
+            halves = (0, 1) if i <= lane_idx else (1,)
+            for half in halves:
+                for purpose in purposes:
+                    session_out[half][purpose] += share
+                for call, purpose in zip(tools, purposes):
+                    session_chars[half][purpose] += len(results.get(call.get("id"), ""))
+        for p in PURPOSES:
+            out_before[p].append(session_out[0][p])
+            chars_before[p].append(session_chars[0][p])
+            out_whole[p].append(session_out[1][p])
+            chars_whole[p].append(session_chars[1][p])
+
+    if not before_ctx:
+        print("  no session in this window sent a lane")
+        print()
+        return
+
+    def median(values):
+        values = sorted(values)
+        return values[len(values) // 2]
+
+    def mean(values):
+        return sum(values) / len(values) if values else 0.0
+
+    print(f"  {len(before_ctx)} sessions sent a lane")
+    print(f"  context before the first word               median {median(before_ctx):>8,.0f}")
+    print(f"  context at the first Workflow/Agent call     median {median(lane_ctx):>8,.0f}")
+    print(f"  output tokens in between                     median {median(between_out):>8,.0f}")
+    reads = "  ".join(f"#{rank + 1} {median(read_ranks[rank]):,.0f}"
+                       for rank in sorted(read_ranks))
+    print(f"  five biggest reads before that call, median by rank: {reads}")
+    print()
+
+    print(f"  {'what for':30} {'out before':>11} {'chars before':>13}"
+          f" {'out whole':>10} {'chars whole':>12}")
+    totals = [0.0, 0.0, 0.0, 0.0]
+    for p in PURPOSES:
+        row = (mean(out_before[p]), mean(chars_before[p]), mean(out_whole[p]), mean(chars_whole[p]))
+        totals = [t + v for t, v in zip(totals, row)]
+        print(f"  {p:30} {row[0]:11,.0f} {row[1]:13,.0f} {row[2]:10,.0f} {row[3]:12,.0f}")
+    print(f"  {'all':30} {totals[0]:11,.0f} {totals[1]:13,.0f} {totals[2]:10,.0f} {totals[3]:12,.0f}")
+    print()
+
+
 def report_sessions(responses, total):
     print("=== sessions, dearest first ===")
     per = collections.defaultdict(
@@ -1111,6 +1313,7 @@ REPORTS = {
     "finding": lambda rs, res, ws, t: report_finding(rs, res, t),
     "classes": lambda rs, res, ws, t: report_classes(rs, t),
     "ritual": lambda rs, res, ws, t: report_ritual(rs, t),
+    "start": lambda rs, res, ws, t: report_start(rs, res, t),
     "sessions": lambda rs, res, ws, t: report_sessions(rs, t),
     "carry": lambda rs, res, ws, t: report_carry(rs, res, t),
     "ceiling": lambda rs, res, ws, t: report_ceiling(rs, t),
