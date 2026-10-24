@@ -5890,6 +5890,63 @@ mod tests {
         );
     }
 
+    /// An arc up a pipe of radius `2^-999` is walked into as many points as the
+    /// same arc up a pipe of radius two (Q2733).
+    ///
+    /// The pair is `an_arc_of_a_plane_cut_nearly_along_a_pipes_axis.rs`'s, a
+    /// wall leaning `2^-52` off a pipe's axis and an arc `1.23` long between
+    /// two of its corners, written `2^-1000` times smaller with its deflection.
+    /// Up a pipe `stands_off_a_chord` is one over a length, as it is for a
+    /// parabola, so `room / stands_off_a_chord` was a length squared here too.
+    #[test]
+    fn an_arc_up_a_tiny_pipe_is_walked_into_as_many_points_as_the_same_one_up_a_pipe_of_radius_two()
+    {
+        let walked = |scale: f64| {
+            let pipe =
+                Surface::Cylinder(Cylinder::new(crate::Axis::z(), 2.0 * scale).expect("a radius"));
+            let wall = Surface::Plane(
+                Plane::from_coefficients([
+                    0.0,
+                    -1.0,
+                    -f64::EPSILON,
+                    1.500_000_000_000_000_2 * scale,
+                ])
+                .expect("a plane"),
+            );
+            let on_the_ends_side =
+                crate::HalfSpace::new(Vector::new(1.0, 0.0, 0.0), 1.322_875_655_532_295 * scale)
+                    .expect("a half-space");
+            let ends = [
+                Point::new(1.322_875_655_532_295, 1.5, 0.384_231_125_654_252_3),
+                Point::new(1.322_875_655_532_295_4, 1.5, 1.615_768_874_345_747_7),
+            ]
+            .map(|end| PredicatePoint::from(end.coordinates().map(|at| at * scale)));
+            let arc = NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: wall.clone(),
+                    picked_by: smallvec![Picker::InFrontOf(on_the_ends_side)],
+                },
+                ends,
+            )
+            .expect("a run with two ends");
+            walk(
+                &arc,
+                [&pipe, &wall],
+                Deflection::of(1e-3 * scale).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .map(|along_it| along_it.points().len())
+        };
+
+        let ordinary = walked(1.0).expect("the arc up a pipe of radius two is walked");
+        assert_eq!(
+            walked(2.0_f64.powi(-1000)),
+            Ok(ordinary),
+            "the same arc written 2^1000 times smaller is walked into as many points"
+        );
+    }
+
     /// The whole of a curve still walks, and that is what stops the check above
     /// from being a check that nothing gets through.
     #[test]
