@@ -4015,7 +4015,7 @@ check-lanes-workflow:
     docs_required="'push_attempts', 'docs_catch_ups',"
     landed_required="'merged', 'merged_sha', 'gate_pass_line', 'push_attempts', 'docs_catch_ups', 'ff_main', 'rows_closed'"
     pass_rule='Step 3 already proved the tests pass; do not run them again to watch that (§370)'
-    runs_awk='^ +\| awk .function show\(line\)'
+    runs_awk='^ +\| awk .function show_run\(line\)'
     runs_diff='    git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 "$1" "$2" \'
     runs_command='  return `mise exec -- just lines-that-run ${BASE} ${branchOf(lane)}`'
     runs_handed='  ${linesThatRunCommand(lane)}'
@@ -4028,6 +4028,8 @@ check-lanes-workflow:
     runs_rule='6. If step 1'"'"'s print does not end `lines that run: 0`, the verdict cannot be'
     old_md_rule='6. If any changed file does not end in `.md`, the verdict cannot be `merge`: a'
     runs_want=$(printf '%s\n' \
+        'crates/k/tests/pins.rs: -fn pinned() {}' \
+        'test code lines removed: 1' \
         'crates/k/src/lib.rs: -        2' \
         'crates/k/src/lib.rs: +        3' \
         'crates/k/src/lib.rs: +pub fn three() -> u32 {' \
@@ -4037,7 +4039,7 @@ check-lanes-workflow:
         'justfile: +    #!/usr/bin/env bash' \
         'lines that run: 7')
     runs_empty='git diff printed nothing, so it shows nothing'
-    many_want=$(seq -f 'crates/k/src/lib.rs: +pub fn f%g() {}' 1 10; echo 'lines that run: 15')
+    many_want=$(echo 'test code lines removed: 0'; seq -f 'crates/k/src/lib.rs: +pub fn f%g() {}' 1 10; echo 'lines that run: 15')
     notes_bound="    notes: { type: 'string', description: 'at most five lines, for the merger:"
     notes_rule='`notes` is at most five lines, for the merger: what it must act on and what no'
     runs_note_field="    lines_that_run_note: { type: 'string', description: 'your own note about the print above, if any"
@@ -4966,26 +4968,33 @@ check-lanes-workflow:
 # print that ends `lines that run: 0` lets the lane merge without a revert
 # (§375).
 #
+# It prints a second list first: the lines a branch takes out of test code --
+# a file wholly under `crates/*/tests/`, the body after a column-0
+# `#[cfg(test)]`, or a `check-*` recipe body. `fuzz/corpus/` holds data, not
+# assertions, so it stays out of this list. Catching a test weakened or taken
+# out used to be the verifier's own reading of the whole diff, by eye (§375.5);
+# now step 1 of `verifier.md` reads this list instead.
+#
 # It reads the whole-file diff, so it sees each `#[cfg(test)]` and each recipe
 # header above a changed line. The prefixes and the flags are spelled out so no
 # one's git config can change what it reads.
 #
-# **It prints the first ten lines, then how many there are** (§382). A verifier
-# copies the print into its report, and before the cap one ran to 199 lines.
-# The count line is always printed, so there is no empty print for a verifier to
-# report: Q708's verifier wrote one as the two characters `""`, and `lanes.js`
-# read that as lines that run.
+# **It prints the first ten lines of each list, then how many there are in
+# each** (§382). A verifier copies the print into its report, and before the
+# cap one ran to 199 lines. Both count lines are always printed, so there is
+# no empty print for a verifier to report: Q708's verifier wrote one as the
+# two characters `""`, and `lanes.js` read that as lines that run.
 #
 # It is a recipe so a verifier types and reports a short command, not 1.6 KB of
 # git and awk: Q753's verifier reported the awk as a paraphrase of it, and its
 # merge was refused for that. A verifier runs it before it checks the branch out, so the
 # copy of this recipe that judges a branch is never one the branch changed.
-[doc("Print the first ten changed lines between two commits that could change what runs, then how many there are.")]
+[doc("Print the first ten test-code lines a branch takes out and how many there are, then the first ten changed lines that could change what runs and how many there are.")]
 lines-that-run base branch:
     #!/usr/bin/env bash
     set -euo pipefail
     git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 "$1" "$2" \
-        | awk 'function show(line) { if (++shown <= 10) print line } function test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// || p ~ /^fuzz\/corpus\// } function rust_test(s, c) { if (in_test[s]) { if (c ~ /^}/) in_test[s] = 0; return 1 } if (c ~ /^([ \t]|$)/) return 0; if (c ~ /^#\[cfg\(test\)\][ \t]*$/) { pending[s] = 1; return 0 } if (c ~ /^(\/\/|#\[)/) return 0; if (pending[s]) { pending[s] = 0; in_test[s] = c ~ /\{[ \t]*$/; return 1 } return 0 } function recipe_test(s, c) { if (c ~ /^([ \t]|$)/) return in_check[s]; in_check[s] = c ~ /^@?check-[A-Za-z0-9_-]+[^:]*:([^=]|$)/; return 0 } /^diff --git / { seen = 1; hunk = 0; a = $3; b = $4; sub(/^a\//, "", a); sub(/^b\//, "", b); skip = (a ~ /\.md$/ && b ~ /\.md$/) || (test_path(a) && test_path(b)); rust = b ~ /\.rs$/; slash = b ~ /\.(rs|js)$/; just = b ~ /(^|\/)justfile$/; hash = just || b ~ /\.(toml|sh|py|ya?ml)$/; for (s = 0; s < 2; s++) { pending[s] = 0; in_test[s] = 0; in_check[s] = 0 } next } skip { next } /^@@/ { hunk = 1; next } !hunk { if ($0 ~ /^(rename (from|to)|old mode|new mode|Binary files)/) show(b ": " $0); next } /^\\/ { next } { m = substr($0, 1, 1); c = substr($0, 2); for (s = 0; s < 2; s++) { if (m == (s ? "-" : "+")) continue; t[s] = rust ? rust_test(s, c) : (just ? recipe_test(s, c) : 0) } if (m == " ") next; if (t[m == "+"]) next; if (slash && c ~ /^[ \t]*(\/\/.*)?$/) next; if (hash && c ~ /^[ \t]*(#([^!].*)?)?$/) next; show(b ": " m c) } END { if (!seen) { print "git diff printed nothing, so it shows nothing"; exit 1 } print "lines that run: " (shown + 0) }'
+        | awk 'function show_run(line) { run_shown++; if (run_shown <= 10) run_buf[run_shown] = line } function show_test(line) { test_shown++; if (test_shown <= 10) test_buf[test_shown] = line } function test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// || p ~ /^fuzz\/corpus\// } function whole_test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// } function is_comment(c) { return (slash && c ~ /^[ \t]*(\/\/.*)?$/) || (hash && c ~ /^[ \t]*(#([^!].*)?)?$/) } function rust_test(s, c) { if (in_test[s]) { if (c ~ /^}/) in_test[s] = 0; return 1 } if (c ~ /^([ \t]|$)/) return 0; if (c ~ /^#\[cfg\(test\)\][ \t]*$/) { pending[s] = 1; return 0 } if (c ~ /^(\/\/|#\[)/) return 0; if (pending[s]) { pending[s] = 0; in_test[s] = c ~ /\{[ \t]*$/; return 1 } return 0 } function recipe_test(s, c) { if (c ~ /^([ \t]|$)/) return in_check[s]; in_check[s] = c ~ /^@?check-[A-Za-z0-9_-]+[^:]*:([^=]|$)/; return 0 } /^diff --git / { seen = 1; hunk = 0; a = $3; b = $4; sub(/^a\//, "", a); sub(/^b\//, "", b); skip = (a ~ /\.md$/ && b ~ /\.md$/) || (test_path(a) && test_path(b)); whole = whole_test_path(a) && whole_test_path(b); rust = b ~ /\.rs$/; slash = b ~ /\.(rs|js)$/; just = b ~ /(^|\/)justfile$/; hash = just || b ~ /\.(toml|sh|py|ya?ml)$/; for (s = 0; s < 2; s++) { pending[s] = 0; in_test[s] = 0; in_check[s] = 0 } next } skip && !whole { next } /^@@/ { hunk = 1; next } !hunk { if (!skip && $0 ~ /^(rename (from|to)|old mode|new mode|Binary files)/) show_run(b ": " $0); next } /^\\/ { next } { m = substr($0, 1, 1); c = substr($0, 2); if (whole) { if (m == "-" && !is_comment(c)) show_test(a ": -" c); next } for (s = 0; s < 2; s++) { if (m == (s ? "-" : "+")) continue; t[s] = rust ? rust_test(s, c) : (just ? recipe_test(s, c) : 0) } if (m == "-" && t[0] && !is_comment(c)) show_test(a ": -" c); if (m == " ") next; if (t[m == "+"]) next; if (is_comment(c)) next; show_run(b ": " m c) } END { if (!seen) { print "git diff printed nothing, so it shows nothing"; exit 1 } for (i = 1; i <= test_shown && i <= 10; i++) print test_buf[i]; print "test code lines removed: " (test_shown + 0); for (i = 1; i <= run_shown && i <= 10; i++) print run_buf[i]; print "lines that run: " (run_shown + 0) }'
 
 # kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
 #
