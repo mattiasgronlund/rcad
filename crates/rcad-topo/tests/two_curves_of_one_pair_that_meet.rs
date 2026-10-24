@@ -344,13 +344,14 @@ fn a_thinner_bar_resting_inside_a_thick_one_answers_every_fuse() {
 /// `(−2, 0, 0)` and `(0, −2, 0)`.
 ///
 /// Every fuse was refused `TheseTwoSurfacesDoNotCrossInAConic` until Q2709.
-/// Now what they share and the thin bar less the thick one answer, with a
-/// corner where the loops meet, and the union and the thick bar less the thin
-/// one are refused `CurvedFaceWithAHoleGoesTooFarRound` meshing the thick
-/// bar's wall, whose two windows are each narrower than a quarter turn here.
+/// Then the union and the thick bar less the thin one were refused
+/// `CurvedFaceWithAHoleGoesTooFarRound` meshing the thick bar's wall, whose
+/// two windows are each narrower than a quarter turn here, so no cut but the
+/// one through where they touch meets either: that cut went round one window
+/// there and touched it at that point alone, and no patch took either side of
+/// it (Q2711).
 #[test]
-fn a_thinner_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_is_refused_by_the_union_and_the_thick_bar_less_it()
- {
+fn a_thinner_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_answers_every_fuse() {
     let placements: [(Pair, f64, f64, [f64; 3]); 3] = [
         (
             |model| {
@@ -387,35 +388,16 @@ fn a_thinner_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_is_
         ),
     ];
     for (build, radius, off, corner) in placements {
-        for (rule, first_first) in six_fuses() {
-            let what = format!("{rule:?} (first first: {first_first}), meeting at {corner:?}");
-            if matches!(
-                (rule, first_first),
-                (Rule::Union, _) | (Rule::Difference, true)
-            ) {
-                let mut model = a_model();
-                let said = fuse(&mut model, build, rule, first_first);
-                assert!(
-                    matches!(
-                        said,
-                        Err(rcad_topo::Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
-                    ),
-                    "{what}: {said:?}"
-                );
-                continue;
-            }
-            the_fuse_answers_with_a_corner_at(
-                build,
-                (rule, first_first),
-                [
-                    16.0 * PI,
-                    8.0 * PI * radius * radius,
-                    bar_through_bar(2.0, radius, off),
-                ],
-                [&[7], &[3], &[4], &[3, 3]],
-                corner,
-            );
-        }
+        every_fuse_answers_with_a_corner_at(
+            build,
+            [
+                16.0 * PI,
+                8.0 * PI * radius * radius,
+                bar_through_bar(2.0, radius, off),
+            ],
+            [&[7], &[3], &[4], &[3, 3]],
+            corner,
+        );
     }
 }
 
