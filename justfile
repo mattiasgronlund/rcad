@@ -200,7 +200,7 @@ slow_tests := "rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_corner
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_corner_up_cube_centred_on_a_unit_pointed_cones_apex_answers_right \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_turned_corner_up_cube_centred_on_a_unit_pointed_cones_apex_answers_right \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_corner_up_cube_centred_one_above_a_unit_pointed_cones_apex_answers_right_or_refuses \
-    rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_turned_corner_up_cube_centred_one_above_a_unit_pointed_cones_apex_answers_right_or_refuses \
+    rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_turned_corner_up_cube_centred_one_above_a_unit_pointed_cones_apex_answers_right \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_corner_up_cube_centred_two_and_a_half_above_a_unit_pointed_cones_apex_answers_right \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_turned_corner_up_cube_centred_two_and_a_half_above_a_unit_pointed_cones_apex_answers_right \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_corner_up_cube_centred_three_and_a_half_above_a_unit_pointed_cones_apex_answers_right \
