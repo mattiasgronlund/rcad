@@ -78,7 +78,7 @@ use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
 use rcad_geom::{Cylinder, Error, Sphere, Surface, SurfaceMeet, intersect};
 use rcad_predicates::expansion::{
     difference_of_two_products, expansion_sign, expansion_sum, scale_expansion, two_diff,
-    two_product,
+    two_product, two_sum,
 };
 use rcad_predicates::{Decision, Policy, ProvenanceLog};
 
@@ -491,6 +491,86 @@ fn a_thin_pipe_resting_inside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves
     );
 }
 
+/// Why the one point where a thin pipe rests on the outside of a fat one is a
+/// knife edge, and the one loop the same pair turned is named is not a wrong
+/// answer.
+///
+/// The pair is the first the quartic property above draws resting from
+/// outside whose turn moves the axes nearer: a pipe of radius 1 along `x`
+/// through `(0, 1, −1)` and a pipe of radius 3 along `y` through `(−2, 4, 3)`,
+/// whose axes are four apart, which is what the widths add up to. The two
+/// walls touch at `(−2, 1, 0)` and nowhere else. The turn rounds both axes,
+/// and the turned axes are a few last bits nearer or further apart than four.
+/// Further, the two miss and cross in nothing; nearer, each bites into the
+/// other and the two cross in one loop, and that is what this turn gives.
+#[test]
+fn a_thin_pipe_resting_on_the_outside_of_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves_the_axes()
+ {
+    let resting = Crossing {
+        first: Piece::Pipe {
+            along: [-1, 0, 0],
+            through: [0, 1, -1],
+            radius: 1,
+        },
+        second: Piece::Pipe {
+            along: [0, -1, 0],
+            through: [-2, 4, 3],
+            radius: 3,
+        },
+        turn: None,
+        elsewhere: Elsewhere::here(),
+        hair: None,
+    };
+    let turned = Crossing {
+        turn: Some(Turn {
+            direction: [-3, -3, -3],
+            steps: 47,
+        }),
+        ..resting
+    };
+
+    let still = resting.surfaces();
+    assert_eq!(
+        kind_of(&named(&still).expect("a thin pipe resting on the outside of a fat one is named")),
+        ("one point", 0),
+        "the walls touch at one point"
+    );
+    let [Surface::Cylinder(one), Surface::Cylinder(other)] = &still else {
+        panic!("this pair is two pipes");
+    };
+    assert_eq!(
+        how_far_apart_the_axes_are_against_what_the_widths_add_up_to(one, other),
+        Decision::Zero,
+        "the axes are exactly as far apart as the widths add up to"
+    );
+    assert!(is_on_a_knife_edge(&still), "and that is a knife edge");
+
+    let moved = turned.surfaces();
+    let [Surface::Cylinder(one), Surface::Cylinder(other)] = moved else {
+        panic!("this pair is two pipes");
+    };
+    assert_eq!(
+        (one.radius(), other.radius()),
+        (1.0, 3.0),
+        "a turn leaves both radii alone"
+    );
+    assert_eq!(
+        how_far_apart_the_axes_are_against_what_the_widths_add_up_to(&one, &other),
+        Decision::Neg,
+        "the turn rounds the two axes nearer than the widths add up to"
+    );
+    assert!(
+        !is_on_a_knife_edge(&moved),
+        "so the turned pair is on no knife edge"
+    );
+    assert_eq!(
+        kind_of(&named(&moved).expect("the turned pair is named")),
+        ("curves", 1),
+        "the turned axes are nearer than the widths add up to, so each pipe bites into the \
+         other and the two cross in one loop"
+    );
+}
+
 /// Why the two loops of a ball resting on the far inside of a pipe are a knife
 /// edge, and the one loop the same pair turned is named is not a wrong answer.
 ///
@@ -878,16 +958,50 @@ fn how_far_apart_the_axes_are_against_what_the_widths_differ_by(
     one: &Cylinder,
     other: &Cylinder,
 ) -> Decision {
+    let (difference, roundoff) = two_diff(one.radius(), other.radius());
+    how_far_apart_the_axes_are_against(one, other, &[roundoff, difference])
+}
+
+/// How far apart the two stored axes are against what the two widths add up
+/// to, asked exactly: the sign of `((o₂ − o₁)·(d₁ × d₂))² − (r₁ + r₂)²|d₁ × d₂|²`,
+/// which is `δ² − (r₁ + r₂)²` times `|d₁ × d₂|²`, for `δ` how far apart the
+/// axes are.
+///
+/// **Two pipes resting against each other from outside are a tangency**, of
+/// any two widths: where `δ` is what the widths add up to, the walls touch at
+/// one point and that point is the whole of the crossing. A turn rounds both
+/// axes, so a turned pair's `δ` is a few last bits from that on one side or
+/// the other: further, the two miss and cross in nothing, and nearer, each
+/// bites into the other and the two cross in one loop. So this is asked
+/// exactly, as [`how_far_apart_the_axes_are_against_what_the_widths_differ_by`]
+/// asks the same of a thin pipe resting on the inside of a fat one.
+///
+/// # Panics
+///
+/// If a product leaves the range of `f64`, which no pair drawn here comes near.
+fn how_far_apart_the_axes_are_against_what_the_widths_add_up_to(
+    one: &Cylinder,
+    other: &Cylinder,
+) -> Decision {
+    let (sum, roundoff) = two_sum(one.radius(), other.radius());
+    how_far_apart_the_axes_are_against(one, other, &[roundoff, sum])
+}
+
+/// The sign of `((o₂ − o₁)·(d₁ × d₂))² − w²|d₁ × d₂|²`, which is `δ² − w²`
+/// times `|d₁ × d₂|²`, for `w` the exact expansion `width`.
+///
+/// Two axes down one direction make `d₁ × d₂` nothing, and this `Zero` however
+/// far apart they are, which is why [`is_on_a_knife_edge`] asks it only of
+/// axes that lean.
+///
+/// # Panics
+///
+/// If a product leaves the range of `f64`, which no pair drawn here comes near.
+fn how_far_apart_the_axes_are_against(one: &Cylinder, other: &Cylinder, width: &[f64]) -> Decision {
     let (gap, square) = the_gap_and_the_square_to_both_axes(one, other);
     let reach = dot_of(&gap, &square);
-    let (difference, roundoff) = two_diff(one.radius(), other.radius());
-    let narrowing = [roundoff, difference];
-    let room = product_of(
-        &product_of(&narrowing, &narrowing),
-        &dot_of(&square, &square),
-    );
-    let less_room = room.iter().map(|part| -part).collect::<Vec<_>>();
-    the_sign_of(&sum_of(&product_of(&reach, &reach), &less_room))
+    let room = product_of(&product_of(width, width), &dot_of(&square, &square));
+    the_sign_of(&sum_of(&product_of(&reach, &reach), &negated(&room)))
 }
 
 /// How far the ball's centre is off the pipe's stored axis against what the
