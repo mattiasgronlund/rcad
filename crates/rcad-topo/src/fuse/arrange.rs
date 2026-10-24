@@ -839,7 +839,8 @@ struct Crossing {
     /// outside cuts nothing off it and is left undrawn.
     reaches_the_face: bool,
     /// Where it runs through a cone's apex, for one of the two rulings a plane
-    /// through the apex cuts, and `None` for every other crossing (§347).
+    /// through the apex cuts or a half of one, or a half of a ruling two cones
+    /// on one apex share, and `None` for every other crossing (§347).
     through_an_apex: Option<ThroughAnApex>,
     /// Where the partner rests along the face's surface on one straight line
     /// and crosses it nowhere, and `None` for every other crossing.
@@ -896,6 +897,12 @@ struct AlongATouch {
 /// opposite ways by it. So such a crossing runs along `along` everywhere,
 /// which is the line's own direction, and the sign `∇S × ∇Q` has against it is
 /// then a question of which side of the apex a point is on.
+///
+/// **Two cones on one apex fail the first way and not the second**: both
+/// gradients are linear in `x`, so `∇S × ∇Q` is `t²` times one vector and runs
+/// one way on both sides of the apex. That leaves `towards_the_apex` true of
+/// one side only, and `rcad-geom` names only halves for that pair, so each
+/// such crossing has the one side.
 #[derive(Clone, Copy)]
 struct ThroughAnApex {
     /// The apex, exactly as the cone stores it.
@@ -2875,14 +2882,16 @@ impl<'f> Arrangement<'f> {
         })
     }
 
-    /// The node where two curves of one pair cross, for the pair here that
-    /// names two curves crossing at a point it stores exactly: a plane through
-    /// a cone's apex, whose two rulings cross there (§347).
+    /// The node where two curves of one pair cross, for the two pairs here that
+    /// name curves crossing at a point they store exactly: a plane through a
+    /// cone's apex, whose two rulings cross there (§347), and two cones on one
+    /// apex leaning apart, whose two rulings or four do (Q2686).
     ///
     /// No third surface passes through that point, so
     /// [`meet_of_three_surfaces`] has nothing to solve, and none is needed: the
     /// apex is [`Cone::apex`], stored, and [`a_plane_cuts_a_cone_in_rulings`]
-    /// has proved it on the plane. Two half ellipses of two pipes of one width
+    /// has proved it on the plane, or [`two_cones_cross_in_rulings`] that the
+    /// two cones store it alike. Two half ellipses of two pipes of one width
     /// meet at places worked out in intervals and not stored, and
     /// [`Arrangement::place_where_two_halves_meet`] places those. Two loops of
     /// two leaning pipes, or of a ball and a pipe, that meet where the walls
@@ -2892,42 +2901,35 @@ impl<'f> Arrangement<'f> {
     /// two curves is left without a node, and passes through here only to be
     /// turned away; §347 says which of them can have two curves that cross.
     ///
-    /// The node is named by the plane and the cone, whichever of the two the
-    /// face is, so that the face on the plane and the face on the cone name
-    /// the apex alike.
+    /// The node is named by the two surfaces, whichever of the two the face
+    /// is, so that the face on either names the apex alike
+    /// ([`where_two_rulings_of_one_pair_cross`]).
     ///
     /// **Where the pair is named in four half rulings, every two of them meet
-    /// here**, so this is asked six times about one point. The first places the
-    /// node and each later one adds its two crossings to it, so the apex is one
-    /// node with all four halves through it.
+    /// here**, so this is asked six times about one point, and twenty-eight
+    /// times for two cones' eight. The first places the node and each later
+    /// one adds its two crossings to it, so the apex is one node with every
+    /// half through it.
     ///
     /// # Panics
     ///
     /// If a picker of either ruling rules the apex out. Each ruling is picked
     /// by a pair of opposite half-spaces whose flat surface holds the ruling,
-    /// and each half by two flat surfaces whose corner holds the half, and
-    /// every one of those passes exactly through the apex, which `rcad-geom`
-    /// proves before it names the pair; a `Neg` there is that proof broken.
+    /// and each half by two or three flat surfaces whose corner holds the half,
+    /// and every one of those passes exactly through the apex, which
+    /// `rcad-geom` proves before it names the pair; a `Neg` there is that proof
+    /// broken.
     fn place_where_two_rulings_cross(&mut self, first: usize, second: usize) {
         let partner = self.crossings[first].partner;
-        let Some((flat, cone)) = a_plane_and_a_cone(&self.surface, &partner) else {
+        let Some((apex, named)) = where_two_rulings_of_one_pair_cross(&self.surface, &partner)
+        else {
             return;
         };
-        if a_plane_cuts_a_cone_in_rulings(flat, cone) != Some(true) {
-            return;
-        }
-        let apex = PredicatePoint::from(cone.apex().coordinates());
         assert!(
             nothing_rules_the_point_out(self.crossings[first].picked_by(), apex)
                 && nothing_rules_the_point_out(self.crossings[second].picked_by(), apex),
-            "each of the two rulings a plane cuts through a cone's apex holds the apex"
+            "each of the rulings a plane or a cone cuts through a cone's apex holds the apex"
         );
-        let mut named = [
-            Surface::Plane(*flat),
-            Surface::Cone(*cone),
-            Surface::Cone(*cone),
-        ];
-        named.sort_by_key(name_of_surface_bits);
         if let Some(corner) = self.the_corner_that_is_this_place(first, second, apex, apex, &[apex])
         {
             self.nodes[corner].stands_for_too((named, 0));
@@ -17045,10 +17047,17 @@ fn the_side_of_a_resting_plane_a_cone_face_lies_on(
 /// picker and is not one of these: there `∇S × ∇Q` is nothing along the whole
 /// line, not only at the apex, and it is an [`AlongATouch`].
 ///
+/// **Two cones on one apex leaning apart are the other pair**, and
+/// `rcad-geom`'s `the_rulings_two_cones_on_one_apex_share` names only halves:
+/// each by a corner of two flat surfaces through the apex or three, and the
+/// direction is [`the_way_a_half_ruling_two_cones_share_leaves_the_apex`].
+/// Both gradients are nothing at the apex there, not one, so no node there has
+/// a direction of its own to read.
+///
 /// Whether `∇S × ∇Q` runs towards the apex or away from it is read a step out,
 /// at `apex + d` for the direction `d`, as the sign of `(∇S × ∇Q) · d`. That
-/// is nothing only where the plane rests along the cone, and two rulings mean
-/// it does not.
+/// is nothing only where the plane rests along the cone, or the two cones
+/// along each other, and rulings named apart mean neither does.
 ///
 /// # Errors
 ///
@@ -17062,33 +17071,17 @@ fn a_ruling_through_an_apex(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<ThroughAnApex>> {
-    let Some((flat, cone)) = a_plane_and_a_cone(surface, partner) else {
+    let Some((apex, along)) = the_way_a_ruling_through_an_apex_runs(surface, partner, picked_by)
+    else {
         return Ok(None);
     };
-    if a_plane_cuts_a_cone_in_rulings(flat, cone) != Some(true) {
-        return Ok(None);
-    }
-    let [Picker::InFrontOf(picker), rest @ ..] = picked_by else {
-        return Ok(None);
-    };
-    let apex = PredicatePoint::from(cone.apex().coordinates());
-    let along = if let [Picker::InFrontOf(nappe)] = rest
-        && *nappe != picker.reversed()
-    {
-        let Some(way) = the_way_a_half_ruling_leaves_the_apex(flat, cone, [picker, nappe]) else {
-            return Err(gave_up(
-                WHICH_WAY_A_CROSSING_RUNS,
-                &[apex],
-                Measures::ManyLengths { how_many: 4 },
-                log,
-            ));
-        };
-        way
-    } else {
-        cross_of(
-            PredicatePoint::from(flat.normal().components()),
-            PredicatePoint::from(picker.normal().components()),
-        )
+    let Some(along) = along else {
+        return Err(gave_up(
+            WHICH_WAY_A_CROSSING_RUNS,
+            &[apex],
+            Measures::ManyLengths { how_many: 4 },
+            log,
+        ));
     };
     let apex_box = apex.enclosure();
     let a_step_out =
@@ -17127,18 +17120,112 @@ fn a_ruling_through_an_apex(
     }))
 }
 
+/// The apex and the way along, for [`a_ruling_through_an_apex`]: `None` for a
+/// curve that runs through no apex, and `Some((apex, None))` for a half whose
+/// way out cannot be shown to lie in its corner.
+fn the_way_a_ruling_through_an_apex_runs(
+    surface: &Surface,
+    partner: &Surface,
+    picked_by: &[Picker],
+) -> Option<(PredicatePoint, Option<[Interval; 3]>)> {
+    if let (Surface::Cone(one), Surface::Cone(other)) = (surface, partner) {
+        if two_cones_cross_in_rulings(one, other) != Some(true) {
+            return None;
+        }
+        let corner = picked_by
+            .iter()
+            .map(|picker| {
+                let Picker::InFrontOf(flat) = picker else {
+                    unreachable!("rcad-geom picks a half ruling two cones share by flat surfaces")
+                };
+                flat
+            })
+            .collect::<SmallVec<[&rcad_geom::HalfSpace; 3]>>();
+        let apex = PredicatePoint::from(one.apex().coordinates());
+        return Some((
+            apex,
+            the_way_a_half_ruling_two_cones_share_leaves_the_apex(one, other, &corner),
+        ));
+    }
+    let (flat, cone) = a_plane_and_a_cone(surface, partner)?;
+    if a_plane_cuts_a_cone_in_rulings(flat, cone) != Some(true) {
+        return None;
+    }
+    let [Picker::InFrontOf(picker), rest @ ..] = picked_by else {
+        return None;
+    };
+    let apex = PredicatePoint::from(cone.apex().coordinates());
+    if let [Picker::InFrontOf(nappe)] = rest
+        && *nappe != picker.reversed()
+    {
+        let normal = flat.normal().components().map(Interval::exactly);
+        return Some((
+            apex,
+            the_way_a_half_ruling_leaves_the_apex(&[normal], cone, &[picker, nappe]),
+        ));
+    }
+    Some((
+        apex,
+        Some(cross_of(
+            PredicatePoint::from(flat.normal().components()),
+            PredicatePoint::from(picker.normal().components()),
+        )),
+    ))
+}
+
+/// The way the half ruling two cones on one apex share that `corner` picks
+/// out leaves the apex, as an enclosure of the true direction, or `None` where
+/// no one way out can be shown to lie in that corner.
+///
+/// `rcad-geom` finds the rulings as what two flat surfaces through the apex
+/// cut out of the cone that sorts first, square to `n± = a₁·w₁ ± a₂·w₂` for
+/// `a₁ = √((1 + s₁²)‖w₂‖²)` and `a₂ = √((1 + s₂²)‖w₁‖²)`, and so does this,
+/// with the same enclosure of each: [`the_way_a_half_ruling_leaves_the_apex`]
+/// with both normals.
+fn the_way_a_half_ruling_two_cones_share_leaves_the_apex(
+    one: &Cone,
+    other: &Cone,
+    corner: &[&rcad_geom::HalfSpace],
+) -> Option<[Interval; 3]> {
+    let (first, second) = match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
+        Ordering::Greater => (other, one),
+        Ordering::Less | Ordering::Equal => (one, other),
+    };
+    let [along_the_first, along_the_second] =
+        [first, second].map(|cone| cone.axis().direction().components().map(Interval::exactly));
+    let widened = |cone: &Cone, along: [Interval; 3]| {
+        let slope = Interval::exactly(cone.slope());
+        root_enclosing((Interval::exactly(1.0) + slope * slope) * dot_of(along, along))
+    };
+    let by_the_first = widened(first, along_the_second);
+    let by_the_second = widened(second, along_the_first);
+    let normals = [by_the_second, -by_the_second].map(|by_the_second| {
+        core::array::from_fn(|axis| {
+            by_the_first * along_the_first[axis] + by_the_second * along_the_second[axis]
+        })
+    });
+    the_way_a_half_ruling_leaves_the_apex(&normals, first, corner)
+}
+
 /// The way the half ruling `corner` picks out leaves the cone's apex, as an
 /// enclosure of the true direction, or `None` where no one way out can be shown
 /// to lie in that corner.
 ///
-/// The two rulings leave the apex four ways, `±(‖w‖²·p ± √(−E·‖w‖²)·(n × w))`
-/// for `p = ‖n‖²·w − (n·w)·n` and `E = (n·w)² − slope²·‖n × w‖²`, and `rcad-geom`
-/// names each half by the corner of two flat surfaces through the apex it lies
-/// in, strictly. So the half's way out is the one of the four both pickers read
-/// strictly in front of them, and that sign is the corner's own: it is read off
-/// the pickers, not off which picker came first. A sign read over a whole
-/// enclosure is the sign of the true direction, and the four true ones lie in
-/// four corners, so no two can be read in one.
+/// Each flat surface through the apex, square to an enclosure `n` of
+/// `normals`, cuts the cone in two rulings, which leave the apex four ways,
+/// `±(‖w‖²·p ± √(−E·‖w‖²)·(n × w))` for `p = ‖n‖²·w − (n·w)·n` and
+/// `E = (n·w)² − slope²·‖n × w‖²`, and `rcad-geom` names each half by the
+/// corner of the flat surfaces through the apex it lies in, strictly. So the
+/// half's way out is the one of them every picker reads strictly in front of
+/// it, and that sign is the corner's own: it is read off the pickers, not off
+/// which picker came first. A sign read over a whole enclosure is the sign of
+/// the true direction, and the true ones lie in as many corners, so no two can
+/// be read in one. A flat surface whose `−E·‖w‖²` is wholly below nothing
+/// meets the cone at the apex alone and adds no way.
+///
+/// A plane through the apex hands in its own normal, and two cones on one apex
+/// the two flat surfaces their crossing lies on
+/// ([`the_way_a_half_ruling_two_cones_share_leaves_the_apex`]).
 ///
 /// **Every enclosure here is interval `+ − ×` on the stored numbers, and the
 /// one root is [`root_enclosing`], the same copy `rcad-geom` rounds its own
@@ -17147,35 +17234,39 @@ fn a_ruling_through_an_apex(
 ///
 /// # Panics
 ///
-/// If two of the four ways are both shown to lie in the one corner, which is
-/// `rcad-geom`'s proof that they lie in four broken.
+/// If two of the ways are both shown to lie in the one corner, which is
+/// `rcad-geom`'s proof that they lie in as many corners broken.
 fn the_way_a_half_ruling_leaves_the_apex(
-    flat: &Plane,
+    normals: &[[Interval; 3]],
     cone: &Cone,
-    corner: [&rcad_geom::HalfSpace; 2],
+    corner: &[&rcad_geom::HalfSpace],
 ) -> Option<[Interval; 3]> {
-    let normal = flat.normal().components().map(Interval::exactly);
     let along = cone.axis().direction().components().map(Interval::exactly);
     let squared_axis = dot_of(along, along);
-    let up = dot_of(normal, along);
-    let across = cross_of_intervals(normal, along);
     let slope = Interval::exactly(cone.slope());
-    let leaning = up * up - slope * slope * dot_of(across, across);
-    let under_the_root = -(leaning * squared_axis);
-    if under_the_root.hi() < 0.0 {
-        return None;
-    }
-    let spread = root_enclosing(under_the_root);
-    let squared_normal = dot_of(normal, normal);
-    let down: [Interval; 3] = core::array::from_fn(|axis| {
-        squared_axis * (squared_normal * along[axis] - up * normal[axis])
-    });
-    let mut in_the_corner = [spread, -spread]
-        .into_iter()
-        .flat_map(|side| {
-            let way: [Interval; 3] = core::array::from_fn(|axis| down[axis] + across[axis] * side);
-            [way, way.map(|component| -component)]
+    let mut in_the_corner = normals
+        .iter()
+        .filter_map(|&normal| {
+            let up = dot_of(normal, along);
+            let across = cross_of_intervals(normal, along);
+            let leaning = up * up - slope * slope * dot_of(across, across);
+            let under_the_root = -(leaning * squared_axis);
+            if under_the_root.hi() < 0.0 {
+                return None;
+            }
+            let spread = root_enclosing(under_the_root);
+            let squared_normal = dot_of(normal, normal);
+            let down: [Interval; 3] = core::array::from_fn(|axis| {
+                squared_axis * (squared_normal * along[axis] - up * normal[axis])
+            });
+            Some([spread, -spread].map(|side| {
+                let way: [Interval; 3] =
+                    core::array::from_fn(|axis| down[axis] + across[axis] * side);
+                [way, way.map(|component| -component)]
+            }))
         })
+        .flatten()
+        .flatten()
         .filter(|way| {
             corner.iter().all(|picker| {
                 dot_of(picker.normal().components().map(Interval::exactly), *way).sign()
@@ -17245,6 +17336,41 @@ fn a_plane_holds_a_cones_axis(flat: &Plane, cone: &Cone) -> bool {
 /// Two `if let`s rather than one `match`, because a match over two
 /// `#[non_exhaustive]` surfaces needs a wildcard arm and there is nothing here
 /// for a wildcard to say (§40).
+/// The apex and the node's name, for [`Arrangement::place_where_two_rulings_cross`]:
+/// the plane and the cone, the cone twice, for a plane through a cone's apex
+/// that cuts it in rulings, and the two cones, the one whose
+/// [`name_of_surface_bits`] is greater twice, for two cones on one apex leaning
+/// apart. Each is sorted, so it is one name from the face on either surface.
+/// `None` for every other pair.
+fn where_two_rulings_of_one_pair_cross(
+    surface: &Surface,
+    partner: &Surface,
+) -> Option<(PredicatePoint, [Surface; 3])> {
+    if let (Surface::Cone(one), Surface::Cone(other)) = (surface, partner) {
+        if two_cones_cross_in_rulings(one, other) != Some(true) {
+            return None;
+        }
+        let mut pair = [*surface, *partner];
+        pair.sort_by_key(name_of_surface_bits);
+        let [lower, higher] = pair;
+        return Some((
+            PredicatePoint::from(one.apex().coordinates()),
+            [lower, higher, higher],
+        ));
+    }
+    let (flat, cone) = a_plane_and_a_cone(surface, partner)?;
+    if a_plane_cuts_a_cone_in_rulings(flat, cone) != Some(true) {
+        return None;
+    }
+    let mut named = [
+        Surface::Plane(*flat),
+        Surface::Cone(*cone),
+        Surface::Cone(*cone),
+    ];
+    named.sort_by_key(name_of_surface_bits);
+    Some((PredicatePoint::from(cone.apex().coordinates()), named))
+}
+
 fn a_plane_and_a_cone<'s>(one: &'s Surface, other: &'s Surface) -> Option<(&'s Plane, &'s Cone)> {
     if let (Some(flat), Surface::Cone(cone)) = (one.as_plane(), other) {
         return Some((flat, cone));
@@ -17695,11 +17821,17 @@ impl rcad_predicates::Predicate for AcrossTheAxis {
 
 /// Whether the pair crosses in endless straight lines rather than in a closed
 /// curve: a plane parallel to a pipe's axis, a plane through a cone's apex that
-/// is no shallower than the cone's own side, or two pipes whose axes run along
-/// one direction.
+/// is no shallower than the cone's own side, two pipes whose axes run along
+/// one direction, or two cones on one apex whose axes lean apart.
 ///
 /// Two planes cross in a straight line too, and are answered a step up before
 /// this is asked.
+///
+/// **Two cones on one apex leaning apart are [`two_cones_cross_in_rulings`]**:
+/// `rcad-geom` names what they share as halves of rulings through the apex, and
+/// before this row they fell through to the conic gate as a cone and a cone,
+/// where no start of a closed curve could be found on a half ruling, and the
+/// fuse was refused as one this cannot order along (Q2686).
 ///
 /// **A plane against a pipe is [`a_plane_lies_along_a_pipes_axis`], and it used
 /// to be `flat.normal().dot(pipe.axis().direction()) == 0.0`.** That is the same
@@ -17719,7 +17851,7 @@ impl rcad_predicates::Predicate for AcrossTheAxis {
 /// The other pairs are named rather than swept up, because `false` for them is a
 /// fact about the question and not about the shapes: nothing but a plane holds a
 /// straight line with a ball or a ring on the other side of it, and a cone
-/// against a ball, a pipe or another cone is a degree-four space curve.
+/// against a ball or a pipe is a degree-four space curve.
 ///
 /// **Two pipes side by side are the third straight row, and both doors ask
 /// [`two_pipes_run_along_one_line`] for it.** `rcad-geom`'s
@@ -17751,8 +17883,10 @@ impl rcad_predicates::Predicate for AcrossTheAxis {
 ///
 /// [`Error::Undecidable`](crate::Error::Undecidable) when
 /// [`two_pipes_run_along_one_line`] or [`a_plane_lies_along_a_pipes_axis`] can
-/// prove neither that the two directions are flush nor that they are not, and
-/// when [`a_plane_cuts_a_cone_in_rulings`] can prove neither of *its* two signs.
+/// prove neither that the two directions are flush nor that they are not, when
+/// [`two_cones_cross_in_rulings`] cannot prove two cones' axes apart or along
+/// one line, and when [`a_plane_cuts_a_cone_in_rulings`] can prove neither of
+/// *its* two signs.
 /// Neither `true` nor `false` is the safe reading of that: `true` orders a
 /// closed curve as an endless straight line, and `false` sends a pair of endless
 /// lines to the conic gate.
@@ -17807,13 +17941,25 @@ fn a_pair_that_crosses_in_straight_lines(
                 )),
             }
         }
+        (Surface::Cone(one), Surface::Cone(other)) => {
+            match two_cones_cross_in_rulings(one, other) {
+                Some(straight) => Ok(straight),
+                None => Err(gave_up(
+                    ORIENT2D,
+                    &[one, other]
+                        .map(|cone| PredicatePoint::from(cone.axis().direction().components())),
+                    Measures::Area,
+                    log,
+                )),
+            }
+        }
         (Surface::Plane(_), Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_))
         | (Surface::Sphere(_) | Surface::Torus(_), Surface::Plane(_))
         | (Surface::Sphere(_) | Surface::Torus(_), Surface::Sphere(_) | Surface::Torus(_))
         | (Surface::Cylinder(_) | Surface::Cone(_), Surface::Sphere(_) | Surface::Torus(_))
         | (Surface::Sphere(_) | Surface::Torus(_), Surface::Cylinder(_) | Surface::Cone(_))
         | (Surface::Cylinder(_), Surface::Cone(_))
-        | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_)) => Ok(false),
+        | (Surface::Cone(_), Surface::Cylinder(_)) => Ok(false),
         _ => Ok(false),
     }
 }
@@ -17937,10 +18083,41 @@ pub(super) fn a_plane_cuts_a_cone_in_rulings(flat: &Plane, cone: &Cone) -> Optio
 /// proved non-zero settles the pair on its own; the three have to be proved
 /// *zero* together for the axes to be along one line.
 pub(super) fn two_pipes_run_along_one_line(one: &Cylinder, other: &Cylinder) -> Decision {
-    let (mine, theirs) = (
+    two_directions_run_along_one_line(
         one.axis().direction().components(),
         other.axis().direction().components(),
-    );
+    )
+}
+
+/// Whether two cones on one apex lean apart, so that they cross in rulings
+/// through it, rather than at it alone or in circles round one axis, **proved
+/// and not rounded**: `Some(true)` for one stored apex and axes
+/// [`two_directions_run_along_one_line`] proves apart, `Some(false)` for two
+/// apexes or one axis, and `None` where the axes can be shown neither.
+///
+/// That is the pair `rcad-geom`'s `the_rulings_two_cones_on_one_apex_share`
+/// names, asked of the same stored apex and the same `w₁ × w₂`. Whatever two
+/// such cones share runs through the apex along rulings, two of them, four, or
+/// none where they meet at the apex alone, so `true` says *straight* and never
+/// that there is a line.
+pub(super) fn two_cones_cross_in_rulings(one: &Cone, other: &Cone) -> Option<bool> {
+    if one.apex() != other.apex() {
+        return Some(false);
+    }
+    match two_directions_run_along_one_line(
+        one.axis().direction().components(),
+        other.axis().direction().components(),
+    ) {
+        Decision::Pos => Some(true),
+        Decision::Zero => Some(false),
+        Decision::Neg => unreachable!("a squared length is never below zero"),
+        Decision::Undecidable { .. } | _ => None,
+    }
+}
+
+/// Whether `w₁ × w₂` is nothing, for two stored directions, as
+/// [`two_pipes_run_along_one_line`] says.
+fn two_directions_run_along_one_line(mine: [f64; 3], theirs: [f64; 3]) -> Decision {
     let mut widest_that_was_not_told = None::<f64>;
     for axis in 0..3 {
         let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
@@ -18286,9 +18463,12 @@ mod tests {
         assert_eq!(mirror.normal(), Vector::new(-1.0, 0.0, 0.0));
         for (m, facing_m) in [(1.0, mirror), (-1.0, mirror.reversed())] {
             for (a, facing_a) in [(1.0, nappe), (-1.0, nappe.reversed())] {
-                let way =
-                    the_way_a_half_ruling_leaves_the_apex(&flat, &cone, [&facing_m, &facing_a])
-                        .expect("each corner holds one half");
+                let way = the_way_a_half_ruling_leaves_the_apex(
+                    &[normal_of(&flat)],
+                    &cone,
+                    &[&facing_m, &facing_a],
+                )
+                .expect("each corner holds one half");
                 let exactly = [-0.5 * m, 0.0, a];
                 for axis in 0..3 {
                     assert!(
@@ -18313,12 +18493,22 @@ mod tests {
         for facing_m in [mirror, mirror.reversed()] {
             for facing_a in [nappe, nappe.reversed()] {
                 assert!(
-                    the_way_a_half_ruling_leaves_the_apex(&flat, &cone, [&facing_m, &facing_a])
-                        .is_some(),
+                    the_way_a_half_ruling_leaves_the_apex(
+                        &[normal_of(&flat)],
+                        &cone,
+                        &[&facing_m, &facing_a]
+                    )
+                    .is_some(),
                     "turned, the corner {facing_m:?}, {facing_a:?} holds one half"
                 );
             }
         }
+    }
+
+    /// A plane's normal, as the point enclosure
+    /// [`the_way_a_half_ruling_leaves_the_apex`] reads.
+    fn normal_of(flat: &Plane) -> [Interval; 3] {
+        flat.normal().components().map(Interval::exactly)
     }
 
     /// A corner with one side a single step off the half ruling it holds is
@@ -18344,8 +18534,12 @@ mod tests {
         .expect("not nothing");
         let nappe = HalfSpace::through_a_point_facing(Point::origin(), cone.axis().direction())
             .expect("an axis direction");
-        let way = the_way_a_half_ruling_leaves_the_apex(&flat, &cone, [&one_step_off, &nappe])
-            .expect("the corner holds the half along (½, 0, 1)");
+        let way = the_way_a_half_ruling_leaves_the_apex(
+            &[normal_of(&flat)],
+            &cone,
+            &[&one_step_off, &nappe],
+        )
+        .expect("the corner holds the half along (½, 0, 1)");
         assert_eq!(
             way.map(|component| (component.lo(), component.hi())),
             [(0.5, 0.5), (0.0, 0.0), (1.0, 1.0)]
