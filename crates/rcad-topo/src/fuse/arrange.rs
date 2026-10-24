@@ -13683,14 +13683,19 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// `[0, 5.6e-17]`. The node where they touch across the ellipse is clear of
 /// it, and the two were refused on the order until this arm.
 ///
-/// **Every arm but the sweep, and but the overlap arm below, answers as wide
-/// as a box**, which is a length:
-/// [`one_point_if_both_are_exact`], [`the_one_the_start_is`] and the
-/// [`the_one_ahead_of_the_start`] behind it each hand back the wider of the two
-/// boxes' longest sides. Filed as a volume, as all of them were until Q706, a
-/// box's width was divided by the working size twice, so a tolerant policy
-/// merged two nodes whose boxes were up to `s²` times wider than its budget
-/// for a length: 625 times at 25 mm (§318.5).
+/// **Every arm but the sweep that cannot decide answers as far apart as a
+/// point of one box may be from a point of the other**, a length, for the
+/// reason the overlap arm below gives: [`one_point_if_both_are_exact`],
+/// [`the_one_the_start_is`] and the [`the_one_ahead_of_the_start`] behind it
+/// each hand back `how_far_apart_two_boxes_may_be` of the two. Until Q2144
+/// those three handed back the wider of the two boxes' longest sides, which
+/// for two exact points is `0`: a round bar whose top corner a file moved a
+/// millimetre up its wall, cut along its seam, had the moved corner and the
+/// fuse's own corner below it taken as one point by a tolerant policy at
+/// 100 mm. Filed as a volume, as all of them were until Q706, a box's width
+/// was divided by the working size twice, so a tolerant policy merged two
+/// nodes whose boxes were up to `s²` times wider than its budget for a
+/// length: 625 times at 25 mm (§318.5).
 ///
 /// **The sweep is filed as `rcad-geom` says**
 /// ([`Surface::which_comes_first_round_a_crossing_and_what_it_measures`]). It
@@ -14503,10 +14508,8 @@ fn the_one_the_start_is(
 ///
 /// Only [`Decision::Pos`] for one and [`Decision::Neg`] for the other says
 /// which. Every other pair of answers is [`Decision::Undecidable`] as far
-/// apart as a point of one box may be from a point of the other. Until Q2144
-/// it was as wide as the wider box, which for the moved corner of the bar
-/// above and the new one below it, two exact points a millimetre apart, is
-/// `0`, and a tolerant policy took the two as one point.
+/// apart as a point of one box may be from a point of the other
+/// ([`round_a_closed_crossing_and_what_it_measures`] says why).
 fn the_one_ahead_of_the_start(
     pair: [&Surface; 2],
     from: PredicatePoint,
