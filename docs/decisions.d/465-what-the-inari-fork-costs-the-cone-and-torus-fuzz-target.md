@@ -5,6 +5,13 @@ The drop came on 10-22, the first night that fuzzed §460's fork, and it is one
 target's. Built twice on one commit, with and without the fork, the slow inputs
 of that target cost twice the CPU with it. §460 took the fork for speed.*
 
+The time goes to the fork's `a * b` on numbers near 2^-1006. Those products
+take the fork's one-lane fallback, which in a benchmark with no rcad code costs
+three times what 2.0.0's multiplication does (465.3). rcad's release build pays
+nothing for it on a core to itself, and 21% when the core's other hardware
+thread is busy (465.4). The fuzz build pays most, because it instruments that
+fallback (465.5). What went to the fork's maintainer is in 465.6.
+
 ### 465.1 What the nights show
 
 `where_a_cone_or_a_torus_crosses` ran 212, 235, 286, 206 and 225 million times on
@@ -80,20 +87,176 @@ So the cost shows in the slow inputs. The timing report gives runs by percentile
 not time by percentile, so this does not say how much of a night's CPU the slow
 runs take, nor how much of 10-22's drop is the fork's.
 
-### 465.3 What is not known
+### 465.3 Where the time goes: multiplying tiny numbers
 
-- Whether the gap is the fork's own, or comes from the fuzz build. That build
-  has ASan and coverage counters on every branch, and the kernel as shipped has
-  neither. 9feb4fc0's message quotes the fork's own benchmarks: a 3x3 interval
-  determinant at 0.33 of 2.0.0's time, on a 3900X.
-- Which `inari` operations the slow inputs call, and how often. Nor how many of
-  those take the fork's one-lane fallback, which §460.1 says it uses for operands
-  near overflow or underflow; fuzz inputs are full of those.
+A copy of the 330d6728 tree, built in release with the fork, counted every call
+rcad made into `inari` and, inside the fork, which path each took. Over one run
+of each of the 16 slow inputs (`rcad-runs/counts-slow16.txt` in the directory of
+465.6):
+
+| call | count |
+|---|---|
+| `Interval::try_from((lo, hi))` | 99 414 900 |
+| `a * b` | 120 308 448 |
+| `a + b` | 50 128 832 |
+| `a - b` | 40 102 624 |
+| `a.wid()` | 15 038 400 |
+| `contains(0.0)`, `inf()`, `sup()`, `is_empty()` | 25 063 840, 27 148 794, 29 233 460, 10 025 824 |
+| `a / b`, `-a`, `a.sqrt()` | 0 |
+
+80 726 121 of the products reach the fork's AVX+FMA `mul_ru`, and 69 979 910 of
+those (87%) have a lane that leaves it for the one-lane fallback of §460.1:
+134 947 052 lanes go through `generic::mul1_ru_slow`. None of the 90 231 456
+`add_ru` calls left its fast path.
+
+The operands are tiny. Of the endpoints passed to `try_from`, `+`, `-`, `*` and
+`wid`, 29.4% are exact zero, 18.8% subnormal, 27.2% normal below 2^-1000, 5.0%
+between 2^-1000 and 2^-200, 7.5% in [2^-10, 1) and 12.2% in [1, 4). None is 4
+or more, none is infinite, and none lies between 2^-620 and 2^-53. The nonzero
+exponents are -1022 to -1005, most of them -1006 (157 million) to -1008; -668,
+-667 and -622 (53 million together); and -1 and 0 (210 million). A number near
+2^-1006 times a number near 1 is below the 2^-968 the fork's `mul_ru` accepts,
+so the product goes the slow way (lines at a6650cbe):
+
+1. `src/simd/x86_64/fma.rs`, `mul_ru` (line 100): `two_prod_is_exact(p)`
+   (line 162) is `exponent_in(p, -968, 1023)`. It fails for a product below
+   2^-968 unless a factor is zero or not finite.
+2. `src/simd/x86_64/lanewise.rs`, `or_generic` (line 154): if either lane
+   fails, both go to the portable backend.
+3. `src/simd/generic.rs`, `lanewise2` (line 328): each lane tries
+   `mul1_ru_fast` (line 550) again, and one that fails goes to the `#[cold]`
+   `mul1_ru_slow` (line 692), which splits both factors into exponent and
+   mantissa, multiplies the mantissas as a `u128` and rounds up by hand.
+
+2.0.0 multiplies in hardware with MXCSR set to round upward, the same at any
+exponent.
+
+A benchmark with no rcad code in it (465.6) replays the recorded calls of four
+slow inputs against both versions, pinned to one core, best of five passes.
+`a * b` in ns per call, fork / 2.0.0, on the recorded operands and with every
+finite nonzero exponent set to 0 (`--ordinary`):
+
+| input | products | `mul_ru` calls with a lane off the fast path | recorded | exponents 0 |
+|---|---|---|---|---|
+| 0228ef21 | 4 096 758 | 2 560 395 of 2 731 130 | 33.65 / 10.92 (3.08) | 5.84 / 7.53 (0.78) |
+| 150ecee9 | 9 174 774 | 5 734 155 of 6 116 474 | 32.87 / 10.94 (3.01) | 5.86 / 7.55 (0.78) |
+| 347a8978 | 11 971 854 | 7 482 330 of 7 981 194 | 33.33 / 10.78 (3.09) | 5.93 / 7.58 (0.78) |
+| 481232f8 | 12 507 990 | 2 605 805 of 8 859 779 | 15.53 / 9.09 (1.71) | 9.73 / 7.92 (1.23) |
+
+With exponents 0 the fork wins, as its own benchmarks say: those build every
+interval from numbers in [1, 3) and never reach this path. On the recorded
+operands `+` and `-` take 0.57 to 0.61 of 2.0.0's time, `wid` 0.26 to 0.28, and
+`try_from` the same. The two versions gave bit-identical results on every call.
+The benchmark's fallback count, worked out from the operands, matches the
+in-rcad count for 0228ef21 exactly.
+
+### 465.4 rcad as it ships
+
+A probe binary in each tree of 465.2 runs the fuzz target's body on a corpus file
+a given number of times, built in release with `target-cpu=x86-64-v3`: no ASan,
+no coverage counters. CPU seconds over the 16 slow inputs, fork / 2.0.0:
+
+| how | CPU seconds | ratio |
+|---|---|---|
+| paired as in 465.2, three runs per process | 32.70 / 30.73 | 1.064 |
+| one core, CPU 22 idle | 43.44 / 44.60 | 0.974 |
+| one core, `sha256sum /dev/zero` on CPU 22 | 55.28 / 45.55 | 1.214 |
+| one core, CPU 22 not watched | 57.85 / 46.68 | 1.239 |
+
+"One core" ran three runs per process, fork then 2.0.0, three rounds, all on
+CPU 10, while `mpstat` watched CPU 22, the other hardware thread of that core. A
+spread of 30 corpus files, 8 of them slow, paired, gives 22.86 / 20.67, 1.106.
+
+On a core to itself, 15 of the 16 inputs are between 0.98 and 1.04, and
+481232f8 is 0.64. Loading the other hardware thread made the fork's runs 27%
+slower and 2.0.0's 2%; every input but 481232f8 is then between 1.20 and 1.33,
+and 481232f8 is 0.81. The unwatched run reads like that load arriving part-way:
+its first inputs are near 1. The paired runs left CPUs 22 and 23 unwatched,
+which is why their per-input ratios scatter from 0.76 to 1.36. The fuzz nights
+run `nproc / 5`, 4 workers for each of five targets, 20 on 24 hardware threads,
+so most of them share a core.
+
+70fbff12, 8453cc06, c0ec6b28 and ddb9a9a0 make identical counts of every call
+and every fallback, from different operands. Paired, 70fbff12 was 1.02 and
+ddb9a9a0 1.18; on a core to themselves they are 1.00 and 1.01, and their
+streams bench alike (`a * b` 3.05 and 3.02). The spread was the core, not the
+stream.
+
+**The benchmark overstates what the fork costs inside rcad.** With CPU 22 idle,
+it replays one run of 70fbff12's calls, in their own order, in 345 ms with the
+fork and 185 ms with 2.0.0. A whole run of rcad on that input takes about 350 ms
+with either (3.15 s and 3.14 s for nine runs). So inside rcad the fork's
+multiplications cannot cost the 160 ms more the benchmark measures.
+
+### 465.5 The fuzz build
+
+Paired as in 465.2, one run per process, CPU seconds over the 16 slow inputs:
+
+| fuzz build | CPU seconds | ratio |
+|---|---|---|
+| as the nights build it: ASan, coverage counters, debug assertions | 46.95 / 26.53 | 1.770 |
+| no ASan (`cargo fuzz build -s none`) | 40.61 / 14.98 | 2.711 |
+| ASan, `inari` without coverage counters | 39.71 / 28.40 | 1.398 |
+| no ASan, `inari` without coverage counters | 11.61 / 9.31 | 1.247 |
+| ASan, `inari` without coverage counters, debug assertions or overflow checks | 27.70 / 20.69 | 1.339 |
+| no ASan, `inari` likewise | 11.02 / 9.64 | 1.143 |
+
+On the spread of 30, the nights' build is 1.887 (40.42 / 21.42) and the fifth
+row 1.342 (20.06 / 14.95). Two runs of one build differed by up to 0.1 in ratio:
+the nights' build gave 1.835 and 1.770, the no-ASan one 2.567 and 2.711.
+
+`inari` was left uninstrumented the way `fuzz/rustc-stand-in.sh` leaves
+`rcad-fuzz-timing` (§267): a copy of the script in each probe tree caught
+`--crate-name inari` and appended `-Cllvm-args=-sanitizer-coverage-level=0`, and
+for the last two rows `-Cdebug-assertions=off -Coverflow-checks=off`, after
+cargo-fuzz's own flags. The later flag wins: `rustc -Cdebug-assertions
+-Cdebug-assertions=off --print cfg -` prints no `debug_assertions`. Every other
+crate kept cargo-fuzz's flags, and ASan still covers `inari`'s code.
+
+So most of the fuzz build's gap is the instrumented fallback. The fork's ASan
+build falls from 46.95 to 27.70 s, near the 26.53 s that 2.0.0 cost fully
+instrumented, which is what the nights paid before 10-22. That is rcad's to
+change, not the fork's.
+
+### 465.6 What went to the fork's maintainer
+
+`~/rcad-inari-fork-cost-2026-10-24/`, beside `~/rcad-fuzz-logs`:
+
+- `README.md`, for someone who knows `inari` and not rcad: the operation and the
+  path that cost the time, the tables of 465.3 to 465.5, how the streams differ
+  from the fork's own benchmarks, the stream format, and a benchmark it suggests
+  but did not run: one factor in [2^-1010, 2^-1005), the other in [1, 3).
+- `streams/`: six recorded streams, zstd-compressed (91 KB to 35 MB), and four
+  of them unpacked (300 MB to 990 MB, 2.8 GB in all, which can go).
+- `bench/`: `inari-stream-bench`, which replays a stream against 2.0.0 and the
+  fork at a6650cbe (`stats`, `time`, `time --ordinary`).
+- `results/`: its prints, some with CPU 22 idle and busy beside them.
+- `rcad-runs/` and `recorder/`: rcad's side, the CPU tables, the call counts,
+  the scripts that built and timed the probes, and the patches that counted and
+  recorded the calls in a copy of 330d6728.
+
+### 465.7 What is not known
+
+- **Why the benchmark overstates the cost inside rcad** (465.4). One reading,
+  not tested: 2.0.0's MXCSR writes cost more among rcad's own instructions than
+  in the benchmark's loop, and that hides the fork's slower multiplications. It
+  would fit 481232f8, 0.64 in rcad and 1.07 in the benchmark's in-order replay.
+  No profile was taken.
+- **Why a busy sibling thread costs the fork 27% and 2.0.0 2%.**
+- **How much of the nights' drop this is.** The fuzz-build ratios of 465.5 were
+  taken with the sibling threads unwatched, and the nights run with them busy.
+- **Which rcad loop makes the tiny products.** Four inputs with identical counts
+  point at a loop with a fixed cap.
+- 481232f8's `a * b` is 1.23 times 2.0.0's even with every exponent set to 0.
 - Whether rcad's own tests see any of it. Daytime `just t` medians did not rise
   after 10-21 (`just row-time --since 2026-10-15 --json`), but those tests seldom
   use extreme coordinates.
 
-The agent that maintains the fork can only fix what its benchmarks show. So the
-answer has to arrive in a form it can run without rcad: the operations and
-operands the slow inputs make, and a benchmark that replays them against both
-versions.
+### 465.8 What this leaves
+
+- Build `inari` in the fuzz builds without coverage counters, debug assertions
+  or overflow checks, through `fuzz/rustc-stand-in.sh`. A row.
+- Find which rcad loop makes the tiny products, and whether it should stop
+  sooner. A row.
+- Nothing for the fork in rcad's queue: its fix belongs in the fork's
+  repository, and moving the pin waits on that.
