@@ -6200,6 +6200,23 @@ impl<'f> Arrangement<'f> {
     /// turn that disagreed with one would sort the three into an order that is
     /// no turn of the true one.
     ///
+    /// **Two meets whose boxes have one middle are not read**, for the reason
+    /// [`Arrangement::as_the_two_meets_of_one_line_say`] does not read them:
+    /// the answer writes both at that middle, one corner, and an order between
+    /// them draws an arc from that corner back to itself. Read here, such a
+    /// pair was refused further on, and by less telling names. A ball of
+    /// radius `1 + 2⁻⁵¹` round `(0, 0, 16)` meets the block edge `x = −1,
+    /// y = 2⁻²⁵` at `z = 16 ± 2⁻⁵¹`, in boxes with their middle at `16`, and
+    /// the union with the ball first was refused
+    /// `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` at that middle
+    /// (`a_block_edge_grazing_a_ball.rs`). Two balls at `y = 16` round a
+    /// circle in `z = 1` were refused on `orient3d`
+    /// (`a_tilted_wall_grazing_a_ball_sums_to_zero.rs`). And the two places one
+    /// box holds in `two_meets_in_one_box_on_a_closed_crossing.rs` went on to
+    /// the line the two planes cross in, which does not read them either, and
+    /// were refused on a step along its axis, whose enclosure is the two
+    /// boxes' widths added, twice the box (Q2655).
+    ///
     /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
     /// whose inner side lies along `x = 2`, both turned `π/2` about `z`: the
     /// side's plane cuts the plate's top and the bar's top circles at two
@@ -6241,7 +6258,9 @@ impl<'f> Arrangement<'f> {
         let [Some((lower, three)), Some((higher, also))] = meets else {
             return None;
         };
-        if three != also {
+        if three != also
+            || middle_of(self.nodes[lower].point) == middle_of(self.nodes[higher].point)
+        {
             return None;
         }
         let Some(corner) = corner else {
