@@ -155,20 +155,60 @@ can start one of its own. The choice does not depend on it:
 `lanes.js` already picks the next agent by the verifier's verdict. This adds one
 more case to the same code.
 
-### 383.6 What it should save, and what it does not touch
+### 383.6 What it saved, measured once both rows had run
 
-These are estimates, to be measured once both rows land.
+The paragraph below replaced an estimate. Measured 2026-10-24, over every
+`lander`, `merger` and `verifier` agent of a `lanes` run started from
+2026-10-03 (when Q792 landed) to 2026-10-24, joined to its row and lane by
+the same `(run, lane)` key `row_time.py` uses, and read with its own loader
+(`load()`, `read_transcript()` in `tooling/row-time/row_time.py`) rather than
+a new one. The turn-counting itself — grouping `tool_use` blocks by the
+streamed message id they share — is the kind of script §383.1 built and
+named, run fresh from this session's scratchpad; a reboot clears it, the same
+as the originals.
 
-- **A clean merge** becomes two or three Haiku turns. The time left is the
-  commands' own. In Q774 that was 16 s to fetch and merge, 7 s of served gate
-  and 18 s to push and run `ff-main`, plus the queue verbs. So about a minute
-  instead of about 220 s, with no Opus. The lane pays some of that back by
-  writing its rows, and how much was not measured.
-- **A verifier** loses about 10 turns: 7.7 fixed and 2.3 numbers. That takes
-  off up to 150 s, less the commands' own time, which stays. It keeps its 12
-  reading turns and its 57 s report.
-- **The lane** is untouched. In Q774 it was 33 turns and 825 s, most of it
-  thinking about the geometry.
+- **A clean merge is not about a minute.** Of 793 landers, 723 never needed a
+  merger. Their turns are as estimated — 4 at the median (mean 4.6; 230 of
+  793 took exactly 4, 195 took 5): `git rev-parse`, a `Write` of the steps
+  file when the row has any, one `mise exec -- just land ...`, and the
+  report. But their wall time is a median **10 m 56 s** (mean 12 m 02 s, p10
+  3 m 08 s, p90 21 m 10 s), not a minute. The commands' own time — fetch,
+  merge, gate, push, `ff-main` — is still a minute or two of that; most of
+  the rest is the land lock (§384.1): lanes now land far more often, with no
+  Opus turn in the way, and queue behind one another to do it (§397.5). A
+  bundle of 24 rows landed by one recent lane (`just row-time Q2545 Q2540
+  Q799 Q1240 Q1756 Q1964 Q1347 Q1378 Q728 Q1060 Q1995 Q2393 Q2550 Q1435 Q1448
+  Q1542 Q1847 Q1720 Q2532 Q643 Q1691 Q1695 Q1301 Q1997`) shows a lander step
+  of 24 m 11 s at the median with 10 m 50 s of it land lock; `just row-time
+  --since 2026-10-03` puts the lander step at 6 m 40 s median, 19 m 46 s p90,
+  over all 1351 rows it picked (most with no lander at all, which pulls the
+  median down). Against the roughly 220 s-to-250 s the Opus merger cost
+  before (§383.1's table: 124 s fixed + 114 s reading + 10 s report), the
+  lander's own turns are far cheaper, but its wall time, with the queue it now
+  sits in, is longer, not shorter.
+- **A verifier's fixed and numbers turns did collapse to about one call**,
+  but its total did not fall. `just verify-lane` (with an occasional `wait`
+  poll while it runs detached) is 1.37 turns on average, 1 at the median,
+  replacing the 7.7 fixed and 2.3 numbers turns of §383.1's table — a drop of
+  about 8.6 turns on the step itself, close to the "about 10" estimated. Yet
+  959 verifiers since 10-03 average 22.5 turns (median 21), against the 23.3
+  total of 7.7+2.3+12.2+1.1 before. Their "other" (reading and report) turns
+  average 21.1, median 20 — well above the 13.3 (12.2+1.1) they were. Some of
+  the rise is a wider mix of rows reaching a verifier than §383.1's 19-run
+  sample saw: one sampled run, `verify:q1428-a-fuzz-group-named-by-any-crash-
+  file`, a fuzz-triage verifier, ran 78 turns on its own, almost all reading.
+  The saving §383.6 named is real and lands on the step it named; it does not
+  show up in the verifier's total turns, because something else grew at the
+  same time.
+- **What writing its rows costs a lane** is a handful of extra reading turns,
+  not nothing, only on a run that has something to add. Of 40 sampled lanes
+  (2026-10-10 to 10-18), 11 (27.5%) wrote a non-empty `rows` list; widening
+  the sample to 60 found 16. On those, the calls that look for an open row
+  before adding one — `grep` over `docs/queue.md`, `just queue show`, `just
+  decision` — average 3.36 turns near the end of the run (median 3, max 9),
+  costing a mean 9.7 s, median 6.8 s, of their own command time. This does not
+  count the model's own thinking and writing of the `add` steps, which was
+  not isolated.
 
 ### 383.7 What this leaves
 

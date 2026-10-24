@@ -102,7 +102,28 @@ lander whose JSON went missing. On exit 0 the merger merges nothing. It runs
 ends at 600 s. A served gate takes about a minute (§367). A fresh gate in a
 cold tree can take the nine minutes the gate's `[doc]` names, and a catch-up
 over code adds another gate. A call ended there prints no JSON, and `lanes.js`
-sends it to the merger like a throw. How often this happens was not measured.
+sends it to the merger like a throw.
+
+**Measured 2026-10-24**, over the same `lander` and `merger` agents §383.6
+counts, since Q792 landed on 2026-10-03: 70 of the 793 landers (8.8%) were
+followed by a merger on the same lane-attempt, found by joining `(run, lane)`
+and checking that both roles are present. Of those 70, 45 ended with
+`land.py`'s own named `stop` and a completing line of JSON — a clean exit,
+just not a mergeable one: `queue-apply` 22, `gate` 20, `push` 2, `conflict` 1.
+The other 25 — **36% of the 70 escalations, 3.2% of all 793 landers, about one
+lander in 32** — are this paragraph's case: `stop` came back empty and the
+recipe's last line was not JSON, because the run was killed mid-recipe, most
+often during `just gate quiet`. The lander's own report says so in
+`not_merged_because`, in its own words each time: "Recipe was terminated by
+signal 15 during gate execution", "the run (pid 1316687) ended without
+finishing; .../target/land/log holds what it ran", "Exit code 137: timeout
+during second `just gate quiet` run", and two reports that left
+`not_merged_because` blank and gave no reason at all, a further way a lander
+can under-report this case (§384.2's instructions ask for the last lines; not
+every lander gave them). A further 117 lane-attempts reached the merger with
+no lander at all in the same window — `fix_first`, rows `just land` cannot
+take, or an older lane with no `rows` — outside this count, since they never
+hit the ten minutes to begin with. Methodology as in §383.6.
 
 ### 384.4 How it is tested
 
