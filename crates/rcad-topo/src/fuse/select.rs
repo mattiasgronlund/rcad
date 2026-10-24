@@ -2827,6 +2827,7 @@ fn the_piece_holds(
                     match in_the_bulge_of(
                         flat,
                         side,
+                        wire,
                         meridians[position][index].as_ref(),
                         in_plane,
                         reaching_the_plane,
@@ -3192,6 +3193,11 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 /// Q2297). Read as nothing, it would make a half disk's points near its chord
 /// read as outside it rather than as undecided
 /// (`a_far_half_disk_whose_corners_are_off_its_plane_holds_no_point_across_its_chord`).
+/// Where another side of `wire` runs back along the chord on a plane, that
+/// plane's sign settles the turn instead
+/// ([`which_side_of_a_wall_back_along_the_chord`]): a disk whose two corners
+/// are that close, cut by a straight side, has nothing else to wind round its
+/// points.
 ///
 /// **A pipe is counted the same way, where the plane crosses it**, which is
 /// [`Cylinder::is_cut_in_a_closed_curve_by`](rcad_geom::Cylinder::is_cut_in_a_closed_curve_by)
@@ -3303,6 +3309,7 @@ fn which_curve_it_runs_along(side: &FaceMeet) -> Option<&[Picker]> {
 fn in_the_bulge_of(
     flat: &Plane,
     side: &FaceMeet,
+    wire: &[FaceMeet],
     meridian: Option<&Picker>,
     in_plane: &InPlane,
     point: PredicatePoint,
@@ -3333,7 +3340,9 @@ fn in_the_bulge_of(
     if closes_on_itself(side) {
         return Some(Bulge::Counts(1));
     }
-    Some(match which_side_of_the_chord(flat, side, in_plane, point) {
+    let turn = which_side_of_the_chord(flat, side, in_plane, point)
+        .or_else(|| which_side_of_a_wall_back_along_the_chord(side, wire, point));
+    Some(match turn {
         Some(turn) => Bulge::Counts(i32::from(turn == Decision::Neg)),
         None => Bulge::OneOrNothing,
     })
@@ -3445,6 +3454,56 @@ fn which_side_of_the_chord(
     // Compared rather than matched, so that `Decision`'s wildcard arm is not
     // written once more (§40): a zero or an undecided turn is `None` either way.
     (turn == Decision::Neg || turn == Decision::Pos).then_some(turn)
+}
+
+/// Which side of the chord across `side` `point` is on, as
+/// [`which_side_of_the_chord`] says it, read off a side of `wire` along a
+/// plane that runs back between the same two ends instead: `None` where the
+/// wire has no such side, where its ends are not both certainly on that plane
+/// and on `flat`, or where the plane's sign over `point` cannot be settled.
+///
+/// **Two ends whose boxes overlap give the chord between them no direction**,
+/// so no turn about it is settled, but where a plane carries a side back
+/// between them the chord is that plane's line across `flat`. A meet of three
+/// surfaces that names both planes lies exactly on both, so a chord between
+/// two of them is on that line. The side back runs from the chord's end to its
+/// start with its material on its left, which is the chord's right, and the
+/// side of its plane that material is on says which half of `flat` that is. A
+/// corner the input already had is not read: four planes round it need not
+/// meet in one point, and it can be off the one asked (§294.19).
+///
+/// The floor `z = −1` of the round bar turned a quarter turn in the L plate is
+/// cut by the plate's inner side, which crosses the bar's rim either side of
+/// the seam in two boxes that overlap. The piece of the floor between that
+/// side and the long arc held no point, its centre included, and every
+/// certified fuse of the two was refused [`INSIDE_A_PIECE`]
+/// (`a_disk_cut_a_rounding_inside_its_rim_holds_its_centre_and_the_sliver_does_not`,
+/// `tests/a_bar_flush_with_an_l_plates_inner_side_turned.rs`, Q2655).
+fn which_side_of_a_wall_back_along_the_chord(
+    side: &FaceMeet,
+    wire: &[FaceMeet],
+    point: PredicatePoint,
+) -> Option<Decision> {
+    let back = wire.iter().find(|other| {
+        other.ends[0] == side.ends[1]
+            && other.ends[1] == side.ends[0]
+            && other.carried_by[1].as_plane().is_some()
+            && other.ends.iter().all(|end| {
+                matches!(end, MeetPoint::OfThreeSurfaces { surfaces, .. }
+                    if other.carried_by.iter().all(|carrier| surfaces.contains(carrier)))
+            })
+    })?;
+    let wall = back.carried_by[1]
+        .as_plane()
+        .expect("the side back was picked for running along a plane");
+    let found = side_of_a_flat_face(wall, point);
+    if found == back.material_side {
+        Some(Decision::Neg)
+    } else if found == the_other_way(back.material_side) {
+        Some(Decision::Pos)
+    } else {
+        None
+    }
 }
 
 /// Whether `point` is, provably, on the same half of the double cone as both
@@ -6101,6 +6160,88 @@ mod tests {
         assert_eq!(holds([7.5, 8.1, 0.0]), Some(false), "outside the rim");
     }
 
+    /// The floor `z = 0` of a pipe of `0.5` about the `z` axis, cut by the
+    /// plane `y = c`, `c` the double just under `0.5`: the plane crosses the
+    /// rim `2⁻²⁷` either side of `x = 0`, and leaves above it a sliver no
+    /// double lies in. The two crossings are boxes that overlap, so the chord
+    /// between them has no direction and the turn about it is undecided for
+    /// every point. The disk less the sliver then held no point, its centre
+    /// included, and every certified fuse of the bar turned a quarter turn in
+    /// the L plate was refused "a point inside a piece of a face"
+    /// (`tests/a_bar_flush_with_an_l_plates_inner_side_turned.rs`, Q2655).
+    #[test]
+    fn a_disk_cut_a_rounding_inside_its_rim_holds_its_centre_and_the_sliver_does_not() {
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::new(0.0, 0.0, 1.0))
+                    .expect("an axis"),
+                0.5,
+            )
+            .expect("a positive radius"),
+        );
+        let just_under_a_half = 0.5 - f64::EPSILON / 4.0;
+        let wall = Surface::Plane(
+            Plane::from_coefficients([0.0, 1.0, 0.0, -just_under_a_half]).expect("a normal"),
+        );
+        let crossing = |which: u8, lo: f64, hi: f64| MeetPoint::OfThreeSurfaces {
+            surfaces: [Surface::Plane(flat), wall, pipe],
+            which,
+            point: PredicatePoint::Constructed([
+                Interval::new(lo, hi).expect("an interval"),
+                Interval::new(0.499_999_9, 0.5).expect("an interval"),
+                Interval::exactly(0.0),
+            ]),
+        };
+        let east = crossing(0, -1e-8, 2e-8);
+        let west = crossing(1, -2e-8, 1e-8);
+        let side = |partner: Surface, from: &MeetPoint, to: &MeetPoint, material_side| FaceMeet {
+            carried_by: [Surface::Plane(flat), partner],
+            ends: [from.clone(), to.clone()],
+            material_side,
+            along: SmallVec::new(),
+            approximation: None,
+        };
+        let piece = |wire: Vec<FaceMeet>| Piece {
+            ancestors: Vec::new(),
+            surface: Surface::Plane(flat),
+            orientation: Orientation::Forward,
+            wires: vec![wire],
+            is_the_whole_surface: false,
+        };
+        let the_disk_less_the_sliver = piece(vec![
+            side(wall, &east, &west, Decision::Neg),
+            side(pipe, &west, &east, Decision::Neg),
+        ]);
+        let the_sliver = piece(vec![
+            side(wall, &west, &east, Decision::Pos),
+            side(pipe, &east, &west, Decision::Neg),
+        ]);
+        let holds = |piece: &Piece, at: [f64; 3]| {
+            the_piece_holds_asked_as_selection_asks(piece, PredicatePoint::from(at))
+        };
+        assert_eq!(
+            holds(&the_disk_less_the_sliver, [0.0, 0.0, 0.0]),
+            Some(true),
+            "the disk's centre"
+        );
+        assert_eq!(
+            holds(&the_disk_less_the_sliver, [0.3, 0.3, 0.0]),
+            Some(true),
+            "a point of the disk under the wall"
+        );
+        assert_eq!(
+            holds(&the_disk_less_the_sliver, [0.0, -0.6, 0.0]),
+            Some(false),
+            "outside the rim"
+        );
+        assert_eq!(
+            holds(&the_sliver, [0.0, 0.0, 0.0]),
+            Some(false),
+            "the disk's centre, on the far side of the wall from the sliver"
+        );
+    }
+
     /// The half of the plate `z = 0` with `x ≥ 0` beyond the ring of four
     /// round a tube of one: between the circle of 5 the ring cuts it in and a
     /// pipe of 10, its four corners on the line `x = 0`, so they wind round
@@ -6691,6 +6832,13 @@ mod tests {
     /// point's height further out than its foot: about `8.6e-5` in `x`, so over
     /// the chord. Read there the chord's turn put the point in the half disk
     /// (`docs/decisions.md` §346.6, Q685).
+    ///
+    /// Over the point's box stretched to the plane the chord's turn cannot say,
+    /// and until Q2655 the piece answered nothing. The chord side runs back along
+    /// the plane `x = 2²⁰` between two corners that are meets of both planes, so
+    /// the chord is that plane's line across `x + z = 0`, and the stretched box,
+    /// `x = 2²⁰ − 2⁻²⁰` all through, is wholly short of it: the point and its
+    /// foot are both off the half disk ([`which_side_of_a_wall_back_along_the_chord`]).
     #[test]
     fn a_point_a_rounding_off_a_far_half_disk_whose_foot_is_short_of_its_chord_is_not_held() {
         let out = f64::powi(2.0, 20);
@@ -6743,8 +6891,8 @@ mod tests {
         );
         assert_eq!(
             the_piece_holds_asked_as_selection_asks(&half_disk, point),
-            None,
-            "the point is read over the chord and its foot short of it"
+            Some(false),
+            "the point and its foot are both short of the chord's plane"
         );
     }
 
