@@ -387,9 +387,9 @@ pub(crate) struct InputSide {
 ///
 /// **A straight side whose two ends come out one corner is left out**, as
 /// [`sides_of`] leaves it out of a kept piece (§365.7). Two corners of two
-/// names that land on one `f64` triple are one corner unless they share one
-/// plane or none, their planes prove them two points and no kept side runs
-/// between them ([`Corners::of`]), and a piece can have a straight
+/// names that land on one `f64` triple are one corner unless their planes
+/// prove them two points ([`the_planes_keep_them_apart`]) and no kept side
+/// runs between them ([`Corners::of`]), and a piece can have a straight
 /// side between two such: a seed of the fuse
 /// fuzzer's corpus and the draw of
 /// `a_fused_draw_hands_its_provenance_back_through_the_door.rs` reach one in a
@@ -683,8 +683,8 @@ impl Assembly {
     /// more than `f64` carries, under a policy that fails on that.
     /// [`Error::Geometry`] when an edge runs between two corners of the answer
     /// that sit on one `f64` triple, which leaves it no length at all. Two
-    /// names that land on one triple are one corner unless they share one
-    /// plane or none, their planes prove them two points and no kept side runs
+    /// names that land on one triple are one corner unless their planes prove
+    /// them two points ([`the_planes_keep_them_apart`]) and no kept side runs
     /// between them ([`Corners::of`]), so this asks of two corners one of
     /// which moved onto a triple the other already held
     /// ([`Corners::settle_on_the_lower_rounding`]), and of two proved apart
