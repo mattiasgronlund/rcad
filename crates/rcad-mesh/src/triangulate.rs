@@ -2964,6 +2964,11 @@ mod tests {
     /// one pole is a sliver of nothing and is not asked about. The middle that
     /// was the pocket is asked to be there, so the test is still about it.
     #[test]
+    #[expect(
+        clippy::approx_constant,
+        reason = "the seam's corners are written as rcad-topo hands them over, bit for bit, and \
+                  not as the thirds and sixths of pi they are near"
+    )]
     fn no_two_triangles_of_a_balls_lune_from_pole_to_pole_are_one_triangle_in_space() {
         let pole = core::f64::consts::FRAC_PI_2;
         let corners = vec![
