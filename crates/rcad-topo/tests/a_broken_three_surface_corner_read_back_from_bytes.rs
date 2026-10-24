@@ -483,13 +483,15 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
 ///
 /// - Under `certified` every fuse refuses the short edge as too short beside
 ///   the coordinates, `DynamicRangeTooWide`, and leaves the model as it was.
-/// - Under `tolerant(100)` four fuses answer half the pyramid, 60, in one
+/// - Under `tolerant(100)` every fuse answers half the pyramid, 60, in one
 ///   solid that validates, and the log's one record is the range check that
-///   took the short edge. In the other two the half holding the apex is
-///   built, and its speck face has three corners within `5e−15` of one
-///   another, which wind against its normal: on one line, shifted for the
-///   intersection, and the wrong way round, turned and shifted for the
-///   difference. The fuse refuses that and writes nothing.
+///   took the short edge. Where the half holding the apex is built shifted
+///   for the intersection, and turned and shifted for the difference, its
+///   speck face's three corners within `5e−15` of one another wind against
+///   its normal as they are solved: on one line for the first, the wrong way
+///   round for the second. The fuse moves one or two of them a rounding, which
+///   winds the speck with its normal (Q2642, §294.21). Until then it refused
+///   both and wrote nothing.
 ///
 /// Before Q1936, all twelve refused `Undecidable`, "a point inside a piece of a
 /// face", on one of the specks.
@@ -497,20 +499,19 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
 fn a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut() {
     let [_, shift, turn, turn_then_shift] = every_placement();
     let [certified, tolerant] = [Policy::certified(), Policy::tolerant(100.0)];
-    let without_the_apex = Some(FacesAndSides {
+    let without_the_apex = FacesAndSides {
         faces: 5,
         sides: 18,
-    });
-    let with_the_apex = Some(FacesAndSides {
+    };
+    let with_the_apex = FacesAndSides {
         faces: 6,
         sides: 22,
-    });
-    let wound_against_its_normal = None;
+    };
     let what_tolerant_builds = [
         (Rule::Difference, shift, without_the_apex),
         (Rule::Difference, turn, with_the_apex),
-        (Rule::Difference, turn_then_shift, wound_against_its_normal),
-        (Rule::Intersection, shift, wound_against_its_normal),
+        (Rule::Difference, turn_then_shift, with_the_apex),
+        (Rule::Intersection, shift, with_the_apex),
         (Rule::Intersection, turn, without_the_apex),
         (Rule::Intersection, turn_then_shift, without_the_apex),
     ];
@@ -522,19 +523,12 @@ fn a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut() {
             }
             other => panic!("certified, {case} came back {other:?}"),
         }
-        match (the_cut_through_the_apex(placement, rule, &tolerant), built) {
-            (Ok((named, shape)), Some(expected)) => {
+        match the_cut_through_the_apex(placement, rule, &tolerant) {
+            Ok((named, shape)) => {
                 assert_eq!(named, [DYNAMIC_RANGE_CHECK], "tolerant, {case}");
-                assert_eq!(shape, expected, "tolerant, {case}");
+                assert_eq!(shape, built, "tolerant, {case}");
             }
-            (Err(Error::TheFuseWroteABrokenAnswer { broken }), None) => {
-                assert_eq!(
-                    broken,
-                    Invalid::OuterWireWindsAgainstTheNormal,
-                    "tolerant, {case}"
-                );
-            }
-            (other, _) => panic!("tolerant, {case} came back {other:?}"),
+            other => panic!("tolerant, {case} came back {other:?}"),
         }
     }
 }
@@ -915,41 +909,27 @@ fn a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_is_refused_for_an_
     }
 }
 
-/// **Under `tolerant(100)` the same turned pyramid and wedge answer the
-/// difference and the union**, the pyramid's 120 less the 15 the two share,
-/// and the pyramid's 120 and the wedge's 150 less it, each with the range
-/// check `tolerant` takes in the log. The union panicked here too (queue row
-/// Q2332). **The intersection is refused `TheFuseWroteABrokenAnswer`** with
-/// its outline winding against its normal, and leaves the model as it was. A
-/// print put in `validate::check_flat_face` and taken out found the face: a
-/// triangle on a side of the pyramid whose three corners are within `4e−15`
-/// of one another by the apex, which winds `Neg`. That is the triangle a
-/// rounding across that §294.21 found on the placed cut through the apex,
-/// which no winding of its stored corners can carry: the same limit, one step
-/// on from the range check (§448.7).
+/// **Under `tolerant(100)` the same turned pyramid and wedge answer every
+/// rule**: the pyramid's 120 less the 15 the two share, the 15, and the
+/// pyramid's 120 and the wedge's 150 less it, each with the range check
+/// `tolerant` takes in the log. The union panicked here too (queue row
+/// Q2332). The intersection was refused `TheFuseWroteABrokenAnswer`, its
+/// outline winding against its normal (queue row Q2583): a triangle on a side
+/// of the pyramid whose three corners are within `4e−15` of one another by the
+/// apex, whose stored corners wound `Neg`. Moved a rounding, one of them winds
+/// it with its normal, and the fuse now writes that (Q2642, §294.21).
 #[test]
-fn a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_tolerant_but_for_the_intersection()
- {
-    for (rule, answers) in [
-        (Rule::Difference, true),
-        (Rule::Intersection, false),
-        (Rule::Union, true),
-    ] {
+fn a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_every_rule_under_tolerant() {
+    for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
         let case = format!("{A_WEDGE_ROUND_THE_X_AXIS:?} {rule:?}");
-        match (
-            the_wedge_through_the_apex(
-                A_WEDGE_ROUND_THE_X_AXIS,
-                a_tenth_of_a_radian_about_a_tilted_axis(),
-                rule,
-                &Policy::tolerant(100.0),
-            ),
-            answers,
+        match the_wedge_through_the_apex(
+            A_WEDGE_ROUND_THE_X_AXIS,
+            a_tenth_of_a_radian_about_a_tilted_axis(),
+            rule,
+            &Policy::tolerant(100.0),
         ) {
-            (Ok(named), true) => assert_eq!(named, [DYNAMIC_RANGE_CHECK], "{case}"),
-            (Err(Error::TheFuseWroteABrokenAnswer { broken }), false) => {
-                assert_eq!(broken, Invalid::OuterWireWindsAgainstTheNormal, "{case}");
-            }
-            (other, _) => panic!("{case} came back {other:?}"),
+            Ok(named) => assert_eq!(named, [DYNAMIC_RANGE_CHECK], "{case}"),
+            other => panic!("{case} came back {other:?}"),
         }
     }
 }
