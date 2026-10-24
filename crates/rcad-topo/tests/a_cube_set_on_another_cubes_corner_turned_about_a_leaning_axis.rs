@@ -37,11 +37,12 @@
 //!
 //! Under `Policy::certified()` the fuzz crash file's turn answers each of
 //! these too, and the other three turns refuse `DynamicRangeTooWide`. So do
-//! the Q2299 turns, since that policy takes no two points a rounding apart as
-//! one: an edge more than two faces claimed joined two corners less than a
-//! rounding apart (`Assembly::check_the_range_at_each_edge_not_two_faces_claim`).
-//! One of those answers since Q2555: the union with the block first at the
-//! Q2299 turn leaning `0.002` (`docs/decisions.md` §365.7).
+//! the Q2299 turns but one, since that policy takes no two points a rounding
+//! apart as one: each answer has two corners less than a rounding apart, with
+//! an edge between them that two faces claim or that more than two do
+//! (`Assembly::check_the_range_at_each_edge_not_two_faces_claim`). The turn
+//! leaning `0.002` answers each fuse since Q2565, the union either way round
+//! and the turned cube less the block (`docs/decisions.md` §365.7).
 
 use rcad_geom::{Deflection, Isometry, Scale};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -171,12 +172,14 @@ fn the_turned_cube_a_little_short_of_a_half_turn_less_the_block_is_the_turned_cu
 }
 
 /// The same fuses under `Policy::certified()`, which takes no two points a
-/// rounding apart as one. Those at the turn leaning `0.003` were refused
-/// `DynamicRangeTooWide` already. Each other was refused
-/// `ResultIsNotManifold`, for an edge more than two faces claimed whose two
-/// corners were less than a rounding apart. That is a range past what `f64`
-/// resolves, and that is what each is refused for now. The turn leaning
-/// `0.002` is left out: its fuses answer, and the next two tests pin that.
+/// rounding apart as one, all but those at the turn leaning `0.002`, which
+/// answer and the next two tests pin. Each is refused `DynamicRangeTooWide`
+/// for a range of `1.9e17` to `2.4e22`, past what `f64` resolves. The unions
+/// at the half turns, and the union with the block first at the turn leaning
+/// `0.001`, join two corners less than a rounding apart by an edge more than
+/// two faces claim, and that edge's range is what is refused. Each other
+/// builds an answer whose shortest edge, which two faces claim, runs between
+/// two meets of planes `8.5e−22` to `1.5e−17` apart (Q2565).
 #[test]
 fn certified_the_same_fuses_are_refused_for_two_corners_less_than_a_rounding_apart() {
     let refused = |turn: &&[f64; 4]| **turn != A_LITTLE_SHORT_OF_A_HALF_TURN[1];
@@ -211,9 +214,10 @@ fn certified_the_same_fuses_are_refused_for_two_corners_less_than_a_rounding_apa
 /// the meet of those two with the block's top `z = 10` lies between them on
 /// the line they cross in, on another triple. Joined, the two crossings left
 /// the two sides either side of that meet one edge that four faces claimed.
-/// Since Q2555 the block first kept them apart, since each was asked only
-/// against the block's corner, which they share one plane with; the turned
-/// cube first joined them and was refused `DynamicRangeTooWide` (Q2565).
+/// Until Q2565 only the block first kept them apart, each asked only against
+/// the block's corner, which they share one plane with; the turned cube first
+/// joined them and was refused `DynamicRangeTooWide`. The meet between them
+/// now keeps them apart whichever is asked first.
 #[test]
 fn certified_the_union_at_the_turn_leaning_two_thousandths_is_both_cubes_either_way_round() {
     let turn = A_LITTLE_SHORT_OF_A_HALF_TURN[1];
