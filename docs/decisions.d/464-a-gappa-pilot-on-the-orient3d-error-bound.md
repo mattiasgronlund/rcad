@@ -16,7 +16,8 @@ Q2658, which took up the two claims the pilot left unbacked, and 464.8 is
 Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
 `*_ROUNDOFF` constants. 464.10 is Q2661, which proves block 1's hints in Coq
 and settles how the scripts join the tree and what notices the Rust moving
-under them.*
+under them. 464.11 is Q2675, which runs the branches where one of the nine
+differences is zero.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -249,7 +250,8 @@ with the pattern known, each of the eight should take less.
 **The zero cases, on paper and not run, but one.** Block 1 assumes no factor is
 zero, and `on_floats` does not. A difference of two doubles rounds to zero only
 when it is zero, and a product with a zero factor is exactly zero, so a zero
-difference zeroes its terms in both `y` and `Ex`. The branch where `t1 + t2` is
+difference zeroes its terms in both `y` and `Ex`. Q2675 runs each of the nine,
+one at a time, and each proves (464.11). The branch where `t1 + t2` is
 zero was run: the goal proves, with `|y − Ex| / P6 ≤ 6u + 13u²`. The branch
 where `first` is zero was not. There `bdxcdy == cdxbdy`, so the first term of
 `y` is zero while the matching term of `Ex` need not be, and the identity block
@@ -556,8 +558,10 @@ one of them not run, and 39 equalities Coq takes on trust. Since 464.7 the
 comments in `orient3d.rs` say what is proved, and every branch with a minor at
 zero is run. Since 464.10 the 39 equalities are proved, and what Coq takes on
 trust is 35 facts that a number is not zero, each one step on paper from block
-1's hypotheses. The branches where one of the nine differences is zero are still
-on paper, as 464.4 argues them, and so is the step from `y` to the sign.
+1's hypotheses. The branches where one of the nine differences is zero were on
+paper, as 464.4 argues them; since 464.11 each is run, and proves at the code's
+bound. Two differences at zero at once are still on paper, and so is the step
+from `y` to the sign.
 
 ### 464.7 value past the bound, and every minor at zero run
 
@@ -1058,7 +1062,8 @@ None of them was read for this.
   lands 8/7 of it away (1 above). What `decide`'s sign test needs, and what
   Gappa proves, is a bound on the sum before `value`'s last rounding.
 - A row to run block 1 where one of the nine differences `adx` to `cdz` is
-  zero, which 464.4 argues on paper only, reusing the scripts in 4.
+  zero, which 464.4 argues on paper only, reusing the scripts in 4. Done, in
+  464.11: each of the nine proves at the code's bound.
 
 ### 464.8 orient2d and the side of a plane
 
@@ -2805,8 +2810,12 @@ print(len(proved), "hints proved by field;",
 
 ### 464.11 One of the nine differences at zero
 
-DRAFT, Q2675, unfinished: a relay lane finishes it. What is below was run;
-what is not below was not.
+Q2675 ran block 1 with one of the nine differences `adx` to `cdz` at zero, in
+three lanes on 2026-10-24. 464.4's paper argument holds there. Each of the
+nine branches proves at the code's `B` and fails at `6u`, and Coq checks each
+proof, modulo its hints. Nothing in `orient3d.rs` needs to change for it. Two
+differences at zero at once, and a difference at zero with a minor at zero, are
+still not run.
 
 Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200` and the code's
 `B = 7u + 56u²`, against `on_floats` as 464.4 read it at `d9f931e8`: no line of
@@ -2864,20 +2873,26 @@ asked for more bounds says why. With `adx` zero, `REL(second, M2)`,
 whose parts is the unrounded zero, and Gappa has no `FIX` for that part, so it
 does not know the sum is a double. The hints `cdxady - adxcdy -> cdxady;` and
 `t1 + t2 -> t2;` pass its check, since `adx` is `ax − ax`, and then the
-rounding is of a double. The same hint for `q2` cannot pass, since the check
-takes `|adxcdy|` as a number of its own. So the scripts take `q`'s rounding
-off by `u + 2u²` as a hypothesis, which lemma.g gives once `|q| ≥ 2⁻¹⁰²²`, and
-a goal checks that.
+rounding is of a double. The same kind of hint for `q2`, `|cdxady| + |adxcdy|
+-> |cdxady|;`, does not pass it: Gappa warns that the two sides are "not
+trivially equal", with the difference `|adxcdy|`, as the `|x − x|` above
+says. It then uses the hint anyway, and with it and `q3`'s the `adx` script
+proves with the same two bounds. But that hint would go into Coq as an
+equality that holds only because `adx` is zero, not as an identity Gappa
+checked, and 464.4's 39 hints are all identities. So the scripts instead take
+`q`'s rounding as off by at most `u + 2u²`, as a hypothesis, which lemma.g
+gives once `|q| ≥ 2⁻¹⁰²²`, and a goal checks that `|q| ≥ 2⁻¹⁰²²`. The goal
+does not lean on the hypothesis it backs. With the `q` hypotheses taken out
+and the `|q|` goals alone left, each of the six x and y scripts still proves
+them, in 2.5 to 2.6 s. The same goals at `2⁻¹⁰²¹`, false where `cdxady` is
+`2⁻¹⁰²²`, do not prove for `adx` or `cdy` within 100 s.
 
 Putting the zero `c`'s last in `P6` and in the split, as `cdz`'s are, changed
 nothing: without the hints `adz` still printed `±2.3429e+1203`.
 
 `gappa -Bcoq` writes each of the nine proofs, 8664 to 10060 lines with 32 to
 34 hints, and `coqc` under 464.5's commands accepts each, exit 0, in 4.1 to
-9.8 s.
-
-Still DRAFT below this line: the write-up, 464.6 and 464.7's pointers here,
-and rows for two differences at zero, and a difference and a minor at zero.
+9.8 s. `field` has not been run on these hints (464.10).
 
 ```python
 """Write block 1 with one of the nine differences adx to cdz zero, as zd_<name>.g."""
@@ -3046,3 +3061,12 @@ def line_starting(src, start, containing=""):
 for name in sys.argv[1:]:
     open(f"zd_{name}.g", "w").write(make(name))
 ```
+
+**What this leaves.**
+
+- Two or more of the nine differences at zero at once. Some pairs zero a
+  minor too: `adx` and `bdx` zero both of `third`'s products. A row.
+- One difference at zero with one minor at zero, 464.7's case, such as `adx`
+  with `first`. A row.
+- The row that moves the scripts into `proofs/gappa/` after the fourteen of
+  464.10 3 f now waits on those two as well, since they append here too.
