@@ -43,7 +43,7 @@
 //! | any of those the other way round | the same answer negated |
 //! | two balls | the second centre minus the first |
 //! | two cones of one slope on one axis | the first apex minus the second |
-//! | a thin pipe and a fat one swallowing it, the loop where the thin one comes out | the thin pipe's stored axis direction negated |
+//! | a thin pipe and a fat one swallowing it or touching it from inside, the loop where the thin one comes out | the thin pipe's stored axis direction negated |
 //! | the same, the loop where it goes in | the thin pipe's stored axis direction |
 //! | two pipes neither of which swallows the other, the one loop | the step from the first axis to the second, going round the line along that step |
 //!
@@ -114,15 +114,18 @@
 //! the circle is what is convex. The loop where the thin pipe comes out of the
 //! fat one winds about the thin axis negated, and which loop a run is on is
 //! read off the point it starts from, against the plane through the fat axis
-//! that `intersect`'s picker puts between them (Q1483).
-//! `the_way_a_loop_round_a_thin_pipe_winds` has the product. Two pipes neither
-//! of which swallows the other, two of one radius included, cross in one loop
-//! that runs back and forth round both axes. Every half-plane edged by the
-//! line that meets both axes square to both crosses that loop once, so it is
-//! ordered by how far round that line each point is, as the ball's one loop
-//! is (Q1880). `the_way_the_one_loop_two_pipes_cross_in_winds` has the
-//! argument. Whether one swallows the other and whether the two reach each
-//! other are each asked exactly.
+//! that `intersect`'s picker puts between them (Q1483). A thin pipe resting on
+//! the inside of a fat one, touching it, crosses it in the same two loops,
+//! which meet at the one point where the two touch, and they are ordered the
+//! same way (Q2709). `the_way_a_loop_round_a_thin_pipe_winds` has the product
+//! and the argument. Two pipes neither of which swallows the other, two of
+//! one radius included, cross in one loop that runs back and forth round both
+//! axes. Every half-plane edged by the line that meets both axes square to
+//! both crosses that loop once, so it is ordered by how far round that line
+//! each point is, as the ball's one loop is (Q1880).
+//! `the_way_the_one_loop_two_pipes_cross_in_winds` has the argument. Whether
+//! one swallows the other and whether the two reach each other are each asked
+//! exactly.
 
 use core::cmp::Ordering;
 
@@ -171,16 +174,16 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose crossing is
 /// not one closed curve lying in a plane, nor one of the two loops a fat pipe
-/// crosses a thin one it swallows whole in, nor one of the two loops a ball
-/// crosses a pipe it swallows whole in, nor the one loop a ball off a pipe's
-/// axis crosses it in where it reaches into its side, nor the one loop two
-/// pipes cross in where neither swallows the other: two planes, a plane
-/// along a pipe's axis, two pipes of one radius whose axes meet, two running
-/// the same way, two that miss each other, touch at one point, or touch from
-/// inside in a figure of eight, a ball off a pipe's axis that misses it,
-/// touches it at one point, or touches it from inside in a figure of eight, a
-/// plane cutting a torus in a quartic, every pair with a torus
-/// on it but a plane, a cone against a pipe, a second cone or a ball off its
+/// crosses a thin one in where it swallows it whole or the thin one rests on
+/// its inside, nor one of the two loops a ball crosses a pipe it swallows
+/// whole in, nor the one loop a ball off a pipe's axis crosses it in where it
+/// reaches into its side, nor the one loop two pipes cross in where neither
+/// swallows the other: two planes, a plane along a pipe's axis, two pipes of
+/// one radius whose axes meet, two running the same way, two that miss each
+/// other or touch at one point from outside, a ball off a pipe's axis that
+/// misses it, touches it at one point, or touches it from inside in a figure
+/// of eight, a plane cutting a torus in a quartic, every pair with a torus on
+/// it but a plane, a cone against a pipe, a second cone or a ball off its
 /// axis, two cones of one apex, and a ball on a cone's axis that misses it or
 /// runs through its apex.
 ///
@@ -460,11 +463,12 @@ fn the_way_this_crossing_winds(
             );
         }
         // Two pipes cross in a degree-four space curve that is neither flat nor
-        // convex. Where one swallows the other's whole cross-section, each of
-        // its two loops runs once round the thin pipe's axis, and that is what
-        // orders it. Where neither does, the one loop runs once round the line
-        // that meets both axes square to both. Pipes that touch, miss, or run
-        // the same way are refused inside.
+        // convex. Where one swallows the other's whole cross-section, or rests
+        // on its inside touching it, each of its two loops runs once round the
+        // thin pipe's axis, and that is what orders it. Where neither does, the
+        // one loop runs once round the line that meets both axes square to
+        // both. Pipes that touch from outside, miss, or run the same way are
+        // refused inside.
         [Surface::Cylinder(one), Surface::Cylinder(other)] => {
             return match one.radius().total_cmp(&other.radius()) {
                 Ordering::Less | Ordering::Equal => {
@@ -1081,6 +1085,13 @@ fn the_way_a_circle_round_a_cones_axis_winds(
 /// going in and once coming out. So each loop meets each line of the wall
 /// once, and going round a loop goes once round the thin pipe's axis `w`.
 ///
+/// Where `R = δ + r` the thin pipe rests on the inside of the fat one and
+/// touches it. The one line of the wall at `δ + r` touches the circle instead
+/// of crossing it, at the point where the two pipes touch, and both loops run
+/// through that point: they meet there as a figure of eight does. Every other
+/// line still crosses the circle twice, so each loop still meets each line of
+/// the wall once and still goes once round `w`.
+///
 /// So three points of a loop, looked at down `w`, are three points of the
 /// thin pipe's circle in the same order round it, and the sweep
 /// `((one − from) × (other − from)) · w` only reads them down `w`: a circle is
@@ -1098,17 +1109,19 @@ fn the_way_a_circle_round_a_cones_axis_winds(
 /// `ρ_f · w` has the sign of `((from − o_f) × w_f) · (w × w_f)`, which is
 /// what is asked at `from`. [`intersect`](crate::intersect)'s picker on these
 /// two runs is a plane through the fat axis that `w`'s part across that axis
-/// is square to, so the loop it keeps in front is the one coming out.
+/// is square to, so the loop it keeps in front is the one coming out. Where
+/// the two pipes touch, `ρ_t` and `ρ_f` point the same way, so `ρ_f · w` is
+/// nothing: that point is on both loops and on the picker's plane, and an
+/// ordering that starts there cannot tell which loop it is on.
 ///
 /// # Errors
 ///
-/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the fat pipe is proved
-/// to touch the thin one from inside, `R − r = δ`, asked exactly as
-/// `(R − r)² K = T²` with `K = ‖w × w_f‖²` and `T = (o_f − o_t) · (w × w_f)`:
-/// two pipes running the same way cross in lines, two of one radius whose
-/// axes meet cross in two ellipses, and two that touch from inside cross in a
-/// figure of eight. From [`the_way_the_one_loop_two_pipes_cross_in_winds`] for
-/// two pipes that miss each other or touch at one point.
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where `(R − r)² K = T²` is
+/// proved, with `K = ‖w × w_f‖²` and `T = (o_f − o_t) · (w × w_f)`, and
+/// either `K` or `R − r` is nothing: two pipes running the same way cross in
+/// lines, and two of one radius whose axes meet cross in two ellipses. From
+/// [`the_way_the_one_loop_two_pipes_cross_in_winds`] for two pipes that miss
+/// each other or touch at one point from outside.
 fn the_way_a_loop_round_a_thin_pipe_winds(
     thin: &Cylinder,
     fat: &Cylinder,
@@ -1156,9 +1169,10 @@ fn the_way_a_loop_round_a_thin_pipe_winds(
         Decision::Pos => Ok(WhichWayItWinds::About(-thin.axis().direction())),
         Decision::Neg => Ok(WhichWayItWinds::About(thin.axis().direction())),
         // On the plane through the fat axis that the thin one's direction is
-        // square to there is no point of either loop, so which loop `from` is
-        // on cannot be told, and the answer is the one a box straddling it
-        // gets.
+        // square to there is no point of either loop but the one where a thin
+        // pipe resting inside the fat one touches it, which is on both, so
+        // which loop `from` is on cannot be told, and the answer is the one a
+        // box straddling the plane gets.
         Decision::Zero | Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
         other => unreachable!("unhandled decision: {other:?}"),
     }
@@ -2725,6 +2739,62 @@ mod tests {
                         "off {off}, side {side}, from {start} eighths, the pipes swapped"
                     );
                 }
+            }
+        }
+    }
+
+    /// Three away from the fat pipe's axis, the thin pipe rests on the fat
+    /// one's inside and touches it at `(0, 4, 5)`, where its two loops meet.
+    /// Each loop still runs once round the thin pipe's axis, so three points of
+    /// one come back in the order they run round it, from anywhere but the
+    /// point where the two touch, as where the fat pipe swallows the thin one
+    /// whole. That point is on both loops, so an ordering that starts there
+    /// cannot tell which way round to go.
+    #[test]
+    fn three_points_on_a_loop_of_a_thin_pipe_resting_inside_a_fat_one_come_back_in_the_order_they_run_round_it()
+     {
+        let off = 3.0;
+        let [thin, fat] = a_thin_pipe_and_a_fat_one(off);
+        for (side, forward) in [(1.0, -1), (-1.0, 1)] {
+            let round = |eighths: i32| round_the_thin_pipe(off, side, forward * eighths);
+            let at = |eighths| PredicatePoint::from(round(eighths));
+            for start in 1..8 {
+                let [here, next] = [round(start), round(start + 1)];
+                let runs = Vector::new(0.0, here[1] - off, here[2] - 5.0)
+                    .cross(Vector::new(here[0], here[1], 0.0));
+                let step = Vector::new(next[0] - here[0], next[1] - here[1], next[2] - here[2]);
+                assert!(
+                    runs.dot(step) > 0.0,
+                    "side {side}: the crossing runs {runs:?} at {here:?} and the step to \
+                     {next:?} is {step:?}"
+                );
+                let [first, second, third] = [start, start + 1, start + 3].map(at);
+                assert_eq!(
+                    which_comes_first_round_a_crossing([&thin, &fat], first, second, third),
+                    Ok(Decision::Pos),
+                    "side {side}, from {start} eighths"
+                );
+                assert_eq!(
+                    which_comes_first_round_a_crossing([&thin, &fat], first, third, second),
+                    Ok(Decision::Neg),
+                    "side {side}, from {start} eighths, asked the other way"
+                );
+                assert_eq!(
+                    which_comes_first_round_a_crossing([&fat, &thin], first, second, third),
+                    Ok(Decision::Neg),
+                    "side {side}, from {start} eighths, the pipes swapped"
+                );
+            }
+            let where_they_touch = at(0);
+            assert_eq!(where_they_touch, PredicatePoint::from([0.0, 4.0, 5.0]));
+            for pair in [[&thin, &fat], [&fat, &thin]] {
+                assert!(
+                    matches!(
+                        which_comes_first_round_a_crossing(pair, where_they_touch, at(1), at(3)),
+                        Ok(Decision::Undecidable { .. })
+                    ),
+                    "side {side}: from where the two touch"
+                );
             }
         }
     }
