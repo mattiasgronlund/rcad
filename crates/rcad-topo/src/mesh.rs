@@ -1684,7 +1684,11 @@ impl BuildingAMesh {
         // off its axis leaves the fat bar's wall this shape, with a window
         // where the thin bar goes in and one where it comes out (Q1494). Asked
         // before anything reads `walked[0]` as the outline, since an island
-        // may be stored first.
+        // may be stored first. Two islands may touch at a point: a thin bar
+        // resting on the inside of a fat one leaves two windows that meet
+        // where its loops do (Q2649). A cut through that point goes round one
+        // island and touches the other there, and a patch that passes the
+        // point twice is cut apart there, as a strip of a ball is.
         if a_ring_on_a_pipe_with_islands_in_it(stored, &walked) {
             let (rims, islands): (Vec<WalkedLoop>, Vec<WalkedLoop>) = walked
                 .into_iter()
@@ -6033,8 +6037,10 @@ fn where_two_sides_cross([a, b]: [[f64; 2]; 2], [c, d]: [[f64; 2]; 2]) -> Option
 
 /// Whether each leg of a ring's cuts round islands stays inside the face: it
 /// meets neither loop but at the corner it leaves, no side of its own island
-/// but the two at the corner it ends at, no other island, and no other cut,
-/// a whole turn either side as well.
+/// but the two at the corner it ends at, no other island but the two sides at
+/// that corner when the other island passes it too, and no other cut, a whole
+/// turn either side as well. Two windows meeting where the loops of a thin bar
+/// resting on the inside of a fat one meet share that corner (Q2649).
 fn the_legs_round_islands_stay_inside_a_ring(
     rims: [&WalkedLoop; 2],
     islands: &[WalkedLoop],
@@ -6921,7 +6927,8 @@ fn apart_where_it_passes_a_corner_twice(around: WalkedLoop, twice: &[u32]) -> Ve
 /// Two holes touching at a point leave the piece between them pinched shut
 /// there: one piece above the point and one below, joined at it.
 /// [`BuildingAMesh::cut_holes_side_by_side_up_to_both_poles`] walks round both
-/// as one loop through that point twice, which the triangulator refuses.
+/// as one loop through that point twice, which the triangulator refuses, and
+/// so does [`BuildingAMesh::cut_a_ring_across`] with a cut through it.
 fn apart_where_two_holes_touch(piece: WalkedLoop, touching: &[u32]) -> Vec<WalkedLoop> {
     let mut pieces = vec![piece];
     for &at in touching {
