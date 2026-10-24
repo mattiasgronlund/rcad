@@ -4998,6 +4998,9 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_the_two_meets_of_one_line_say`]) are not asked: no
     /// ray here has been shown to need either.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
+        if let Some(read) = self.as_read_round_a_corner(crossing, first, second) {
+            return Some(read);
+        }
         let (mut decided, _) = self.as_the_boxes_say(crossing, first, second).ok()?;
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_planes_say(crossing, first, second)
@@ -5102,12 +5105,21 @@ impl<'f> Arrangement<'f> {
     /// [`Arrangement::order_along`] asks before a policy, and what the boxes'
     /// enclosure measures: [`Decision::Undecidable`] where none of them can
     /// say.
+    ///
+    /// **Two nodes by a corner whose planes miss one point are put in order as
+    /// [`Arrangement::as_read_round_a_corner`] reads them, before the boxes are
+    /// asked.** The boxes hold the true points, and the order they prove for
+    /// two of them a rounding from the corner can be the one no straight
+    /// drawing of the face keeps beside the others.
     fn as_proved_before_any_policy(
         &self,
         crossing: usize,
         first: usize,
         second: usize,
     ) -> rcad_geom::Result<(Decision, Measures)> {
+        if let Some(read) = self.as_read_round_a_corner(crossing, first, second) {
+            return Ok((read, Measures::Length));
+        }
         let (mut decided, measures) = self.as_the_boxes_say(crossing, first, second)?;
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_planes_say(crossing, first, second)
@@ -5141,6 +5153,82 @@ impl<'f> Arrangement<'f> {
             decided = proved;
         }
         Ok((decided, measures))
+    }
+
+    /// Which of two nodes on a crossing between the face's plane and a
+    /// partner plane comes first along it, with every plane round a corner of
+    /// the face read as running through that corner: `None` unless the corner
+    /// has four or more planes round it and one of them misses the point
+    /// `bake` solved it at, and each node is that corner or a meet of the
+    /// crossing's two planes and a third that lies inside the corner's room.
+    ///
+    /// **Four planes written down in `f64` need not meet in one point.** A
+    /// square pyramid placed by a shift has its four side planes meet three by
+    /// three in four apexes a rounding apart (§294.19). `bake` solves the
+    /// corner from three of them, so on a side face the corner is on two of
+    /// the lines the other side planes cross it in and a rounding off the
+    /// third. A wedge plane run between two of those apexes then crosses the
+    /// three lines in an order no straight drawing with the corner on all
+    /// three keeps, and every fuse of the two was refused
+    /// `CannotTellTheCellsOfAFaceApart` (Q2575).
+    ///
+    /// Read here, each plane round the corner is its own copy moved to run
+    /// through the point `bake` solved, the meet of two of them and a third
+    /// plane is where the third crosses the line through the corner along the
+    /// two, and every other plane is where it is. Those are real planes, so
+    /// every node read so is a real point, and the orders along every crossing
+    /// of the face are the orders of one straight drawing. The moved planes
+    /// are a rounding from the true ones, which is the room `bake` asked each
+    /// of them about the corner with, so only nodes inside that room are read
+    /// so. A node further off is put in order by its true point, and is as far
+    /// from every node read so as the room is wide.
+    fn as_read_round_a_corner(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let flat = *self.surface.as_plane()?;
+        let partner = *self.crossings[crossing].partner.as_plane()?;
+        self.node_of_corner.iter().flatten().find_map(|&corner| {
+            let reading = ACornerReadAsOnePoint::of(self.the_baked_corner_of(&self.nodes[corner]))?;
+            if !reading.around.contains(&flat) {
+                return None;
+            }
+            let read = |node: usize| {
+                if node == corner {
+                    return reading
+                        .around
+                        .contains(&partner)
+                        .then_some(ANodeReadRoundACorner::TheCorner);
+                }
+                if self.nodes[node].vertex.is_some() {
+                    return None;
+                }
+                let three = self.the_three_planes_a_node_is_the_meet_of(node)?;
+                let mut others = three
+                    .into_iter()
+                    .filter(|plane| *plane != flat && *plane != partner);
+                let (Some(third), None) = (others.next(), others.next()) else {
+                    return None;
+                };
+                reading
+                    .holds(self.nodes[node].point)
+                    .then_some(ANodeReadRoundACorner::AMeet { three, third })
+            };
+            let (mine, theirs) = (read(first)?, read(second)?);
+            match (&mine, &theirs) {
+                (_, ANodeReadRoundACorner::AMeet { third, .. }) => {
+                    reading.which_comes_first([flat, partner], &mine, *third)
+                }
+                (ANodeReadRoundACorner::AMeet { third, .. }, ANodeReadRoundACorner::TheCorner) => {
+                    reading
+                        .which_comes_first([flat, partner], &theirs, *third)
+                        .map(the_other_way)
+                }
+                (ANodeReadRoundACorner::TheCorner, ANodeReadRoundACorner::TheCorner) => None,
+            }
+        })
     }
 
     /// Which of two nodes on a crossing comes first along it, by the readings
@@ -15695,6 +15783,193 @@ fn the_way_a_picker_leans(normal: [f64; 3], ways: [[f64; 3]; 2]) -> Option<[Opti
             }
         },
     )
+}
+
+/// A corner of a face with four or more planes round it, read as the one
+/// point all of them run through ([`Arrangement::as_read_round_a_corner`]).
+///
+/// **Worked in the corner's own frame, so every sign is exact.** Write `K`
+/// for the point `bake` solved the corner at, where its three
+/// [`BakedCorner::solved_from`] planes meet, and `D` for the determinant of
+/// their three normals. A point `Y` is `Z = D·(Y − K)` in the frame, and a
+/// plane `n·Y + d = 0` is `n·Z + ω = 0` there, with `ω = D` times the plane's
+/// value at `K`: the four by four determinant of the three planes and it
+/// ([`three_planes_against_a_fourth`]), exact in [`rcad_predicates::expansion`].
+/// A plane round the corner is read with `ω = 0`, through `K`, and every other
+/// plane with its own.
+struct ACornerReadAsOnePoint {
+    solved_from: [Plane; 3],
+    around: Vec<Plane>,
+    /// The sign of `D`, which turns a side in the frame into a side in space.
+    handed: Decision,
+    /// The corner's box grown by the room `bake` asked each plane round it
+    /// about it with.
+    room: PredicatePoint,
+}
+
+/// A node [`ACornerReadAsOnePoint`] reads: the corner, or the meet of three
+/// planes, `third` the one of them that is neither the face's nor the
+/// crossing's partner.
+enum ANodeReadRoundACorner {
+    TheCorner,
+    AMeet { three: [Plane; 3], third: Plane },
+}
+
+impl ACornerReadAsOnePoint {
+    /// The reading of `corner`, or `None` where it has fewer than four planes
+    /// round it, one that is not a plane, or every one of them running through
+    /// the point `bake` solved it at exactly, where the reading is the
+    /// corner's own.
+    fn of(corner: &BakedCorner) -> Option<Self> {
+        let solved_from =
+            Arrangement::the_three_planes_a_point_is_the_meet_of(corner.solved_from.as_ref()?)?;
+        let around = corner
+            .around
+            .iter()
+            .map(|surface| surface.as_plane().copied())
+            .collect::<Option<Vec<Plane>>>()?;
+        let room = super::bake::grown_by(corner.point, corner.room_its_planes_were_asked_with?);
+        let handed = expansion_sign(&exactly_determinant(
+            solved_from.map(|plane| normal_of(plane.coefficients())),
+        )?);
+        let reading = Self {
+            solved_from,
+            around,
+            handed,
+            room,
+        };
+        if reading.around.len() < 4 || !matches!(handed, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        let mut one_misses = false;
+        for plane in &reading.around {
+            let offset = reading.where_it_truly_runs(plane)?;
+            one_misses |= matches!(expansion_sign(&offset), Decision::Pos | Decision::Neg);
+        }
+        one_misses.then_some(reading)
+    }
+
+    /// Whether every point of `point`'s box lies inside the corner's room.
+    fn holds(&self, point: PredicatePoint) -> bool {
+        let (point, room) = (point.enclosure(), self.room.enclosure());
+        (0..3)
+            .all(|axis| room[axis].lo() <= point[axis].lo() && point[axis].hi() <= room[axis].hi())
+    }
+
+    /// Which of two nodes on the line the `line`'s two planes cross in comes
+    /// first along it, walked along `n₀ × n₁`, against the meet of those two
+    /// and `cut`: [`Decision::Pos`] when `node` does, [`Decision::Zero`] when
+    /// it is on `cut`, all as read. The rule is
+    /// [`Arrangement::where_a_corner_off_a_line_comes_along_it`]'s.
+    fn which_comes_first(
+        &self,
+        line: [Plane; 2],
+        node: &ANodeReadRoundACorner,
+        cut: Plane,
+    ) -> Option<Decision> {
+        let into_the_cut = orient3d(
+            normal_of(line[0].coefficients()),
+            normal_of(line[1].coefficients()),
+            normal_of(cut.coefficients()),
+            [0.0; 3],
+        );
+        match (self.side_of(node, cut)?, into_the_cut) {
+            (Decision::Zero, Decision::Pos | Decision::Neg) => Some(Decision::Zero),
+            (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => Some(Decision::Neg),
+            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => Some(Decision::Pos),
+            (_, Decision::Zero | Decision::Undecidable { .. } | _) => None,
+        }
+    }
+
+    /// Which side of `plane`, as read, the point `node` is read at lies on.
+    fn side_of(&self, node: &ANodeReadRoundACorner, plane: Plane) -> Option<Decision> {
+        let (value, turned) = match node {
+            ANodeReadRoundACorner::TheCorner => (self.where_it_runs(&plane)?, Decision::Pos),
+            ANodeReadRoundACorner::AMeet { three, .. } => {
+                let [one, two, three] = *three;
+                let offsets = [
+                    self.where_it_runs(&one)?,
+                    self.where_it_runs(&two)?,
+                    self.where_it_runs(&three)?,
+                    self.where_it_runs(&plane)?,
+                ];
+                let normals = [one, two, three, plane].map(|plane| normal_of(plane.coefficients()));
+                (
+                    three_planes_against_a_fourth(normals, offsets.each_ref().map(Vec::as_slice))?,
+                    expansion_sign(&exactly_determinant([normals[0], normals[1], normals[2]])?),
+                )
+            }
+        };
+        signs_multiplied([expansion_sign(&value), turned, self.handed])
+    }
+
+    /// `ω` for `plane` as read: nothing for a plane round the corner, and its
+    /// own for every other.
+    fn where_it_runs(&self, plane: &Plane) -> Option<Vec<f64>> {
+        if self.around.contains(plane) {
+            return Some(Vec::new());
+        }
+        self.where_it_truly_runs(plane)
+    }
+
+    /// `ω` for `plane` itself: `D` times its value at the point `bake`
+    /// solved the corner at.
+    fn where_it_truly_runs(&self, plane: &Plane) -> Option<Vec<f64>> {
+        let [one, two, three] = self.solved_from.map(|plane| plane.coefficients());
+        let fourth = plane.coefficients();
+        three_planes_against_a_fourth(
+            [one, two, three, fourth].map(normal_of),
+            [&[one[3]], &[two[3]], &[three[3]], &[fourth[3]]],
+        )
+    }
+}
+
+/// The four by four determinant of three planes and a fourth, each written as
+/// its normal and an offset given as an expansion, expanded down the offsets:
+/// `det(n₁, n₂, n₃)·ω₄ − ω₁·det(n₄, n₂, n₃) − ω₂·det(n₁, n₄, n₃) −
+/// ω₃·det(n₁, n₂, n₄)`. With the planes' own offsets that is `det(n₁, n₂, n₃)`
+/// times the fourth plane's value where the three meet. `None` where a
+/// product would round.
+fn three_planes_against_a_fourth(normals: [[f64; 3]; 4], offsets: [&[f64]; 4]) -> Option<Vec<f64>> {
+    let [one, two, three, fourth] = normals;
+    [
+        (exactly_determinant([one, two, three])?, offsets[3], false),
+        (exactly_determinant([fourth, two, three])?, offsets[0], true),
+        (exactly_determinant([one, fourth, three])?, offsets[1], true),
+        (exactly_determinant([one, two, fourth])?, offsets[2], true),
+    ]
+    .into_iter()
+    .try_fold(Vec::new(), |total, (determinant, offset, taken_away)| {
+        let product = exactly_multiplied(&determinant, offset)?;
+        let product = if taken_away {
+            negated(&product)
+        } else {
+            product
+        };
+        Some(exactly_added(&total, &product))
+    })
+}
+
+/// The determinant of three rows, exactly; `None` where a product would round.
+fn exactly_determinant(rows: [[f64; 3]; 3]) -> Option<Vec<f64>> {
+    let [one, two, three] = rows.map(|row| row.map(|entry| vec![entry]));
+    exactly_dotted_across(&one, &exactly_crossed(&two, &three)?)
+}
+
+fn normal_of([x, y, z, _]: [f64; 4]) -> [f64; 3] {
+    [x, y, z]
+}
+
+/// The sign of a product of signs; `None` where one of them is undecided.
+fn signs_multiplied(signs: [Decision; 3]) -> Option<Decision> {
+    signs.into_iter().try_fold(Decision::Pos, |so_far, sign| {
+        Some(match (so_far, sign) {
+            (Decision::Zero, _) | (_, Decision::Zero) => Decision::Zero,
+            (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg) => Decision::Pos,
+            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos) => Decision::Neg,
+            (_, Decision::Undecidable { .. } | _) => return None,
+        })
+    })
 }
 
 /// `expansion` times `factor`, exactly; `None` where one of the products would
