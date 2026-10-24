@@ -2279,6 +2279,26 @@ fn walk_an_endless_bend(
 /// bound on `‖p″‖` in place of its value; `AnArcRoundACone` and
 /// `AnArcAlongAPipe` derive the bounds.
 ///
+/// # The two square roots are taken apart, and they used to be taken together
+///
+/// The count is `|over| / √(room / stands_off_a_chord)`, and the ratio under
+/// that root is not a ratio of like things for every caller. For a parabola
+/// and for an arc up a pipe `stands_off_a_chord` is one over a length, so the
+/// ratio is a length squared; a parabola `4e-303` across made it `1e-305`
+/// over `1e302`, which is nought in `f64`, and a floor of `f64::MIN_POSITIVE`
+/// on the widest step then walked it into 350 723 points where the same
+/// parabola written `2^1006` times larger takes 22 (Q2733, §465.10). Round a
+/// cone `stands_off_a_chord` is a length and `over` an angle, so the
+/// parabola's like ratios, `over · stands_off_a_chord` and `over / room`, are
+/// a length and one over a length there, and the second of them overflows
+/// once `room` is below `2^-1024` of the angle.
+///
+/// A square root takes every positive finite `f64` to between `2^-537` and
+/// `2^512`, so `|over| · √stands_off_a_chord / √room` meets no overflow or
+/// underflow that changes the answer. A product past `2^1024` makes a count
+/// past `2^1024 / 2^512`, which is refused anyway; one under `2^-1022` makes a
+/// count under `2^-1022 / 2^-537`, which the floor takes.
+///
 /// # Errors
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when the count is not a number,
@@ -2290,8 +2310,7 @@ fn how_many_pieces_an_endless_bend_takes(
     over: f64,
     room: f64,
 ) -> Result<usize> {
-    let widest = (room / stands_off_a_chord).sqrt();
-    let steps = (over.abs() / widest.max(f64::MIN_POSITIVE)).ceil();
+    let steps = (over.abs() * stands_off_a_chord.sqrt() / room.sqrt()).ceil();
     if steps.is_nan() {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
     }
@@ -5811,11 +5830,16 @@ mod tests {
     ///
     /// The pair is the fuzz corpus's `70fbff12`: a cone of slope one with its
     /// apex at the origin and its axis along `(0, 1, 1)`, cut by the plane
-    /// `z = -1.950951127282395e-303`. The deflection is the fuzz harness's, a
-    /// hundredth of how big a coarse walk says the crossing is, so it scales
-    /// with the pair. Counted from `√(room / ‖bend‖)`, a length squared about
-    /// `1e-305` over `1e302`, every step came out `2^-1022` wide and the tiny
-    /// one drew 350 723 points.
+    /// `z = -1.950951127282395e-303`. Counted from `√(room / ‖bend‖)`, a length
+    /// squared about `1e-305` over `1e302`, every step came out `2^-1022` wide
+    /// and the tiny one drew 350 723 points at the fuzz harness's deflection.
+    ///
+    /// **The deflection is `1e-305` scaled with the pair, and not the
+    /// harness's.** The harness reads its deflection off a coarse walk's
+    /// deviation, which for the tiny pair is about `5e-317`, a subnormal that
+    /// carries about 24 bits. That moved the tiny pair's room `3e-8` off the
+    /// large pair's, and this shape's count sits a hair over twenty there, so
+    /// the two came out 20 and 21 for a reason that is not the walk's.
     #[test]
     fn a_parabola_written_tiny_is_walked_into_as_many_points_as_the_same_one_written_large() {
         let walked = |scale: f64| {
@@ -5840,19 +5864,16 @@ mod tests {
                 panic!("a plane along a cone's side cuts a parabola: {met:?}");
             };
             assert_eq!(runs.len(), 1, "one parabola");
-            let walk_it = |deflection: f64, log: &mut ProvenanceLog| {
-                walk(
-                    &runs[0],
-                    [&skin, &flat],
-                    Deflection::of(deflection).expect("a length"),
-                    &Policy::certified(),
-                    log,
-                )
-                .expect("a parabola is walked")
-            };
-            let sized = walk_it(f64::MAX / 4.0, &mut log);
-            let how_big = sized.deviation().magnitude() / POINT_ALONG_A_CROSSING_ROUNDOFF;
-            walk_it(how_big * 1e-2, &mut log).points().len()
+            walk(
+                &runs[0],
+                [&skin, &flat],
+                Deflection::of(1e-305 * scale).expect("a length"),
+                &Policy::certified(),
+                &mut log,
+            )
+            .expect("a parabola is walked")
+            .points()
+            .len()
         };
 
         let large = walked(2.0_f64.powi(1006));
