@@ -2725,11 +2725,13 @@ impl<'f> Arrangement<'f> {
     /// [`ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`](rcad_geom::Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
     /// where the two are the two loops of two leaning pipes, they are not
     /// proved apart ([`the_two_loops_of_two_pipes_may_meet`]), and they are not
-    /// proved to meet either ([`where_two_loops_of_two_pipes_meet`]): two
-    /// loops a rounding apart, or a product that rounds. Let through without a
-    /// node where the walls touch, five of the six fuses of a bar of radius 1
-    /// resting inside a bar of radius 2 answered with the two loops crossing at
-    /// a point that is no vertex (Q2628). The same where the two are the two
+    /// proved to meet either, or meet where intervals cannot box
+    /// ([`where_two_loops_of_two_pipes_meet`]): two loops a rounding apart, a
+    /// product that rounds, or two pipes leaning by less than the rounding of
+    /// the cross of their directions. Let through without a node where the
+    /// walls touch, five of the six fuses of a bar of radius 1 resting inside a
+    /// bar of radius 2 answered with the two loops crossing at a point that is
+    /// no vertex (Q2628). The same where the two are the two
     /// loops of a ball and a pipe and a product rounds before they are proved
     /// to meet or not ([`where_two_loops_of_a_ball_and_a_pipe_meet`]). Whatever
     /// [`Arrangement::place_where_two_halves_meet`] refuses.
@@ -16348,17 +16350,21 @@ fn the_one_loop_two_pipes_cross_in(surface: &Surface, partner: &Surface, run: &N
 /// by one flat surface through the fat axis). `δ·|t × w|` is `|g · (t × w)|`,
 /// for `g` from one axis's origin to the other's and `t` and `w` the two
 /// directions, so the loops are apart where `(r_fat − r_thin)·|t × w|` is above
-/// both `g · (t × w)` and its negative, and that is asked in intervals. Where
-/// it cannot be proved, which takes the loops closer than the rounding, they
-/// are taken to meet, and the fuse refuses rather than answers with two curves
+/// both `g · (t × w)` and its negative. That is asked in intervals first, and
+/// where they cannot prove it, exactly, as `S²K − T² > 0`
+/// ([`two_leaning_pipes_exactly`]). Where a product of that rounds, they are
+/// taken to meet, and the fuse refuses rather than answers with two curves
 /// crossing at a point that is no vertex.
 ///
 /// Two pipes of one width have no two loops. Two that run the same way cross
 /// in two straight lines, each picked out of the crossing as a loop is, and
 /// two lines down one direction never meet. There `t × w` is nothing, and so
 /// is everything weighed above, which would take the lines to meet. So the
-/// runs are weighed as loops only where `|t × w|²` is proved above nothing,
-/// and taken for lines where it is not.
+/// runs are taken for lines where `|t × w|²` is exactly nothing. Until Q2662
+/// they were taken for lines wherever intervals could not prove it above
+/// nothing, and two pipes leaning by less than the rounding of `t × w`, whose
+/// loops meet, said `false`
+/// (`two_loops_of_two_pipes_leaning_by_less_than_a_rounding_may_meet_and_are_not_placed`).
 fn the_two_loops_of_two_pipes_may_meet(
     surface: &Surface,
     partner: &Surface,
@@ -16371,26 +16377,39 @@ fn the_two_loops_of_two_pipes_may_meet(
     if one.radius() == other.radius() || !runs.into_iter().all(picked_out) {
         return false;
     }
-    let [mine, theirs] =
-        [one, other].map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
-    let across = cross_of_intervals(mine, theirs);
-    let lean_squared = dot_of(across, across);
-    let the_axes_lean = lean_squared.lo() > 0.0;
-    if !the_axes_lean {
-        return false;
-    }
     let (thin, fat) = if one.radius() < other.radius() {
         (one, other)
     } else {
         (other, one)
     };
-    let [here, there] = [one, other].map(|pipe| pipe.axis().origin().coordinates());
+    if two_leaning_pipes_are_proved_apart_in_intervals(thin, fat) {
+        return false;
+    }
+    let Some(exactly) = two_leaning_pipes_exactly(thin, fat) else {
+        return true;
+    };
+    let lines = expansion_sign(&exactly.lean) == Decision::Zero;
+    let apart = expansion_sign(&exactly.gap) == Decision::Pos;
+    !lines && !apart
+}
+
+/// Whether intervals prove `(r_fat − r_thin)·|t × w|` above both `g · (t × w)`
+/// and its negative, with `|t × w|²` above nothing
+/// ([`the_two_loops_of_two_pipes_may_meet`]).
+fn two_leaning_pipes_are_proved_apart_in_intervals(thin: &Cylinder, fat: &Cylinder) -> bool {
+    let [mine, theirs] =
+        [thin, fat].map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
+    let across = cross_of_intervals(mine, theirs);
+    let lean_squared = dot_of(across, across);
+    if lean_squared.lo() <= 0.0 {
+        return false;
+    }
+    let [here, there] = [thin, fat].map(|pipe| pipe.axis().origin().coordinates());
     let gap = [0, 1, 2].map(|axis| Interval::exactly(there[axis]) - Interval::exactly(here[axis]));
     let reach = dot_of(gap, across);
     let room = (Interval::exactly(fat.radius()) - Interval::exactly(thin.radius()))
         * root_enclosing(lean_squared);
-    let apart = (room - reach).lo() > 0.0 && (room + reach).lo() > 0.0;
-    !apart
+    (room - reach).lo() > 0.0 && (room + reach).lo() > 0.0
 }
 
 /// Where the two loops of a thin pipe resting on the inside of a fat one, or
@@ -16412,7 +16431,10 @@ struct WhereTwoLoopsMeet {
 /// Where the two loops two leaning pipes cross in meet, and a place half way
 /// round each, for a thin pipe resting on the inside of a fat one; `None`
 /// where the two are not proved to rest so, which takes the loops apart or a
-/// rounding apart, or a product that rounds.
+/// rounding apart, or a product that rounds; and `None` where they rest so but
+/// lean by less than the rounding of `t × w`, since where they meet is then a
+/// division by the lean, which no interval holding zero can box
+/// (`two_loops_of_two_pipes_leaning_by_less_than_a_rounding_may_meet_and_are_not_placed`).
 ///
 /// **They rest so where `S²K = T²`**, for `S = r_fat − r_thin`, `K = |t × w|²`
 /// and `T = g · (t × w)`, with `t` and `w` the thin and fat directions and `g`
@@ -16445,34 +16467,11 @@ fn where_two_loops_of_two_pipes_meet(
     } else {
         (other, one)
     };
-    let thin_way = thin.axis().direction().components();
-    let fat_way = fat.axis().direction().components();
-    let [thin_origin, fat_origin] = [thin, fat].map(|pipe| pipe.axis().origin().coordinates());
-    let mut across: Vec<Vec<f64>> = Vec::with_capacity(3);
-    for (i, j) in [(1, 2), (2, 0), (0, 1)] {
-        let (entries, used) =
-            difference_of_two_products(thin_way[i], fat_way[j], thin_way[j], fat_way[i])?;
-        across.push(entries[..used].to_vec());
-    }
-    let mut lean_exactly = Vec::new();
-    let mut reach = Vec::new();
-    for (axis, component) in across.iter().enumerate() {
-        lean_exactly = exactly_added(&lean_exactly, &exactly_multiplied(component, component)?);
-        let between = exactly_added(&[thin_origin[axis]], &[-fat_origin[axis]]);
-        reach = exactly_added(&reach, &exactly_multiplied(&between, component)?);
-    }
-    let room_exactly = exactly_added(&[fat.radius()], &[-thin.radius()]);
-    let gap = exactly_added(
-        &exactly_multiplied(
-            &exactly_multiplied(&room_exactly, &room_exactly)?,
-            &lean_exactly,
-        )?,
-        &negated(&exactly_multiplied(&reach, &reach)?),
-    );
-    if expansion_sign(&gap) != Decision::Zero {
+    let exactly = two_leaning_pipes_exactly(thin, fat)?;
+    if expansion_sign(&exactly.gap) != Decision::Zero {
         return None;
     }
-    let towards_the_thin = match expansion_sign(&reach) {
+    let towards_the_thin = match expansion_sign(&exactly.reach) {
         Decision::Pos => Interval::exactly(1.0),
         Decision::Neg => Interval::exactly(-1.0),
         Decision::Zero | Decision::Undecidable { .. } | _ => {
@@ -16480,11 +16479,17 @@ fn where_two_loops_of_two_pipes_meet(
         }
     };
 
+    let thin_way = thin.axis().direction().components();
+    let fat_way = fat.axis().direction().components();
+    let [thin_origin, fat_origin] = [thin, fat].map(|pipe| pipe.axis().origin().coordinates());
     let [t, w] = [thin_way, fat_way].map(|way| way.map(Interval::exactly));
     let between = [0, 1, 2]
         .map(|axis| Interval::exactly(thin_origin[axis]) - Interval::exactly(fat_origin[axis]));
     let up = cross_of_intervals(t, w).map(|side| towards_the_thin * side);
     let lean = dot_of(up, up);
+    if lean.contains_zero() {
+        return None;
+    }
     let along_the_fat = quotient_of(
         dot_of(between, w) * dot_of(t, t) - dot_of(between, t) * dot_of(t, w),
         lean,
@@ -16515,6 +16520,44 @@ fn where_two_loops_of_two_pipes_meet(
         middles,
         thin_way,
     })
+}
+
+/// How a thin pipe and a fat one lean and lie, exactly, for `t` and `w` the
+/// thin and the fat direction as stored, `g` from the fat axis's origin to the
+/// thin one's and `S = r_fat − r_thin` ([`where_two_loops_of_two_pipes_meet`]).
+struct TwoLeaningPipesExactly {
+    /// `K = |t × w|²`, nothing where the two run one way.
+    lean: Vec<f64>,
+    /// `T = g · (t × w)`, whose sign says which side of the fat axis the thin
+    /// one passes.
+    reach: Vec<f64>,
+    /// `S²K − T²`: above nothing where the loops are apart, nothing where
+    /// they meet, below where the thin pipe reaches out of the fat one.
+    gap: Vec<f64>,
+}
+
+/// [`TwoLeaningPipesExactly`] for `thin` and `fat`; `None` where a product
+/// would round.
+fn two_leaning_pipes_exactly(thin: &Cylinder, fat: &Cylinder) -> Option<TwoLeaningPipesExactly> {
+    let thin_way = thin.axis().direction().components();
+    let fat_way = fat.axis().direction().components();
+    let [thin_origin, fat_origin] = [thin, fat].map(|pipe| pipe.axis().origin().coordinates());
+    let mut lean = Vec::new();
+    let mut reach = Vec::new();
+    for (axis, (i, j)) in [(1, 2), (2, 0), (0, 1)].into_iter().enumerate() {
+        let (entries, used) =
+            difference_of_two_products(thin_way[i], fat_way[j], thin_way[j], fat_way[i])?;
+        let component = &entries[..used];
+        lean = exactly_added(&lean, &exactly_multiplied(component, component)?);
+        let between = exactly_added(&[thin_origin[axis]], &[-fat_origin[axis]]);
+        reach = exactly_added(&reach, &exactly_multiplied(&between, component)?);
+    }
+    let room = exactly_added(&[fat.radius()], &[-thin.radius()]);
+    let gap = exactly_added(
+        &exactly_multiplied(&exactly_multiplied(&room, &room)?, &lean)?,
+        &negated(&exactly_multiplied(&reach, &reach)?),
+    );
+    Some(TwoLeaningPipesExactly { lean, reach, gap })
 }
 
 /// Where the two loops a ball and a pipe cross in meet, and a place half way
@@ -25909,13 +25952,19 @@ mod two_loops_of_two_leaning_pipes {
     //! A pipe of radius 2 up `z` and a pipe of radius 1 along `x` at
     //! `y = apart`, crossed by [`intersect`] with each pipe first, and asked
     //! whether the curves it names may meet
-    //! ([`the_two_loops_of_two_pipes_may_meet`]); and the same two pipes both
-    //! up `z`, which cross in lines.
+    //! ([`the_two_loops_of_two_pipes_may_meet`]); the same two pipes both up
+    //! `z`, which cross in lines; and two leaning by less than the rounding
+    //! of `t × w`, which intervals cannot tell from two running one way.
 
-    use rcad_geom::{Axis, Cylinder, EdgeRun, Point, Surface, SurfaceMeet, Vector, intersect};
-    use rcad_predicates::{Policy, ProvenanceLog};
+    use rcad_geom::{
+        Axis, Cylinder, EdgeRun, NamedRun, Point, Surface, SurfaceMeet, Vector, intersect,
+    };
+    use rcad_predicates::{Interval, Policy, ProvenanceLog};
 
-    use super::the_two_loops_of_two_pipes_may_meet;
+    use super::{
+        cross_of_intervals, dot_of, the_two_loops_of_two_pipes_may_meet,
+        where_two_loops_of_two_pipes_meet,
+    };
 
     /// Resting on the inside, at `y = ±1`, the two loops meet where the walls
     /// touch, at `(0, ±2, 0)`. Half a unit further in, at `y = ±1/2`, they
@@ -26011,6 +26060,153 @@ mod two_loops_of_two_leaning_pipes {
                 "{face:?} first"
             );
         }
+    }
+
+    /// [`the_two_pipes_leaning_by_less_than_a_rounding`] a unit apart. The
+    /// axes lean, `t × w` being `(b·ε, 0, 0)` for `ε` the last bit of `0.3`, and
+    /// they are a unit apart along `x`, square to both, which is the difference
+    /// of the widths: the two loops meet where the walls touch, at `(2, 0, 0)`.
+    /// Intervals cannot tell that lean from nothing, since `t × w` is a
+    /// difference of two rounded products that differ in their last bit.
+    ///
+    /// Until Q2662 the loops were taken there for the two lines of two pipes
+    /// down one direction, and let through without a node where they meet.
+    /// Asked exactly, they may meet. Where they meet is a division by the lean,
+    /// which intervals that cannot tell it from nothing cannot box, so it is not
+    /// placed, and the fuse refuses rather than answers with two loops crossing
+    /// at a point that is no vertex.
+    #[test]
+    fn two_loops_of_two_pipes_leaning_by_less_than_a_rounding_may_meet_and_are_not_placed() {
+        let [thin, fat] = the_two_pipes_leaning_by_less_than_a_rounding(1.0);
+        let [t, w] =
+            [thin, fat].map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
+        let across = cross_of_intervals(t, w);
+        let lean = dot_of(across, across);
+        assert!(lean.lo() <= 0.0, "intervals tell the lean: {lean:?}");
+        let [thin, fat] = [thin, fat].map(Surface::Cylinder);
+        for [face, partner] in [[thin, fat], [fat, thin]] {
+            let [first, second] = the_two_loops_named(&face, &partner);
+            assert!(
+                the_two_loops_of_two_pipes_may_meet(&face, &partner, [&first, &second]),
+                "{face:?} first"
+            );
+            assert!(
+                where_two_loops_of_two_pipes_meet(&face, &partner).is_none(),
+                "{face:?} first"
+            );
+        }
+    }
+
+    /// [`the_two_pipes_leaning_by_less_than_a_rounding`] half a unit apart:
+    /// the thin pipe is deep inside the fat one, and its loops are apart,
+    /// which is asked exactly where intervals cannot tell the lean from
+    /// nothing. [`intersect`] refuses to name these loops,
+    /// `CannotNameWhichPieceOfACrossingThisIs`, so the two it names a unit
+    /// apart stand for them: the answer reads no more of them than that each
+    /// is picked out of the crossing.
+    #[test]
+    fn two_loops_of_two_pipes_leaning_by_less_than_a_rounding_half_a_unit_apart_do_not_meet() {
+        let [thin, fat] = the_two_pipes_leaning_by_less_than_a_rounding(1.0).map(Surface::Cylinder);
+        let [deep, around] =
+            the_two_pipes_leaning_by_less_than_a_rounding(0.5).map(Surface::Cylinder);
+        for ([face, partner], [inside, outside]) in [[thin, fat], [fat, thin]]
+            .into_iter()
+            .zip([[deep, around], [around, deep]])
+        {
+            let [first, second] = the_two_loops_named(&face, &partner);
+            assert!(
+                !the_two_loops_of_two_pipes_may_meet(&inside, &outside, [&first, &second]),
+                "{inside:?} first"
+            );
+        }
+    }
+
+    /// The bar of radius 2 and the bar of radius 1 a unit off it along `x`,
+    /// both turned a radian about `x`, the thin one by the next `f64` above a
+    /// radian: its direction is a last bit off the fat one's in `y` and three
+    /// in `z`. That is lean enough for intervals to prove `|t × w|²` above
+    /// nothing. A turn about `x` keeps `x`, so the axes are exactly the
+    /// difference of the widths apart, and the two loops meet where the walls
+    /// touch, which is placed exactly, at `(2, 0, 0)`.
+    #[test]
+    fn two_loops_of_two_pipes_a_few_last_bits_off_one_way_meet_where_the_walls_touch() {
+        let [thin, fat] = the_two_pipes_a_radian_and_a_last_bit_round();
+        let [t, w] =
+            [thin, fat].map(|pipe| pipe.axis().direction().components().map(Interval::exactly));
+        let across = cross_of_intervals(t, w);
+        let lean = dot_of(across, across);
+        assert!(lean.lo() > 0.0, "intervals cannot tell the lean: {lean:?}");
+        let [thin, fat] = [thin, fat].map(Surface::Cylinder);
+        for [face, partner] in [[thin, fat], [fat, thin]] {
+            let [first, second] = the_two_loops_named(&face, &partner);
+            assert!(
+                the_two_loops_of_two_pipes_may_meet(&face, &partner, [&first, &second]),
+                "{face:?} first"
+            );
+            let Some(meet) = where_two_loops_of_two_pipes_meet(&face, &partner) else {
+                panic!("{face:?} first: the loops are not placed");
+            };
+            assert_eq!(
+                meet.at.exact_coordinates(),
+                Some([2.0, 0.0, 0.0]),
+                "{face:?} first"
+            );
+        }
+    }
+
+    fn the_two_loops_named(face: &Surface, partner: &Surface) -> [NamedRun; 2] {
+        let SurfaceMeet::Curves(runs) = intersect(
+            face,
+            partner,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("two loops are named") else {
+            panic!("two leaning pipes that cross cross in curves");
+        };
+        let Ok(two) = <[NamedRun; 2]>::try_from(runs) else {
+            panic!("{face:?} first: two loops");
+        };
+        two
+    }
+
+    /// `[thin, fat]`: a pipe of radius 1 through `(apart, 0, 0)` along
+    /// `(0, 0.3⁺, b)`, for `0.3⁺` the next `f64` above `0.3` and `b` the
+    /// `f64` nearest `√0.91`, and one of radius 2 through the origin along
+    /// `(0, 0.3, b)`.
+    fn the_two_pipes_leaning_by_less_than_a_rounding(apart: f64) -> [Cylinder; 2] {
+        let b = 0.953_939_201_416_945_7;
+        let just_above = f64::from_bits(0.3_f64.to_bits() + 1);
+        [
+            a_pipe([apart, 0.0, 0.0], [0.0, just_above, b], 1.0),
+            a_pipe([0.0, 0.0, 0.0], [0.0, 0.3, b], 2.0),
+        ]
+    }
+
+    /// `[thin, fat]`: a pipe of radius 1 through `(1, 0, 0)` and one of
+    /// radius 2 through the origin, with the directions `Isometry::rotation`
+    /// about `x` gives `z` for a radian and a last bit and for a radian.
+    fn the_two_pipes_a_radian_and_a_last_bit_round() -> [Cylinder; 2] {
+        [
+            a_pipe(
+                [1.0, 0.0, 0.0],
+                [0.0, -0.841_470_984_807_896_6, 0.540_302_305_868_139_5],
+                1.0,
+            ),
+            a_pipe(
+                [0.0, 0.0, 0.0],
+                [0.0, -0.841_470_984_807_896_5, 0.540_302_305_868_139_8],
+                2.0,
+            ),
+        ]
+    }
+
+    fn a_pipe([x, y, z]: [f64; 3], [i, j, k]: [f64; 3], radius: f64) -> Cylinder {
+        Cylinder::new(
+            Axis::new(Point::new(x, y, z), Vector::new(i, j, k)).expect("an axis"),
+            radius,
+        )
+        .expect("a radius")
     }
 
     fn the_two_pipes_each_way(apart: f64) -> [[Surface; 2]; 2] {

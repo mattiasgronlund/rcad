@@ -1598,3 +1598,101 @@ fn ball_in_the_side_of_a_bar(steps: u32) -> f64 {
     }
     sum * step
 }
+
+#[test]
+fn probe_q2662_all() {
+    let shapes: Vec<(String, Box<dyn Fn(&mut Model) -> [SolidKey; 2]>)> = {
+        let mut shapes: Vec<(String, Box<dyn Fn(&mut Model) -> [SolidKey; 2]>)> = Vec::new();
+        for x in [1.0, -1.0] {
+            for lean in [0.0, 1e-4] {
+                shapes.push((
+                    format!("z-up x {x} lean {lean}"),
+                    Box::new(move |model: &mut Model| {
+                        let fat = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
+                        let thin = a_bar(model, 1.0, [x, 0.0, -3.0], 6.0);
+                        if lean != 0.0 {
+                            model
+                                .place_solid(
+                                    thin,
+                                    &Isometry::rotation(&Axis::x(), lean).expect("a turn"),
+                                )
+                                .expect("placed");
+                        }
+                        [fat, thin]
+                    }),
+                ));
+            }
+        }
+        shapes.push((
+            "Q2710".to_string(),
+            Box::new(|model: &mut Model| {
+                let fat = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
+                let thin = a_bar_along_x(model, 1.0, [-4.0, 1.0, 0.0], 8.0);
+                let turn = Isometry::rotation(&Axis::z(), 1.0).expect("a turn");
+                model.place_solid(fat, &turn).expect("placed");
+                model.place_solid(thin, &turn).expect("placed");
+                [fat, thin]
+            }),
+        ));
+        shapes
+    };
+    for (name, build) in &shapes {
+        println!("{name}");
+        for (rule, fat_first) in six_fuses() {
+            let mut model = a_model();
+            let [fat, thin] = build(&mut model);
+            let (arguments, tools) = if fat_first {
+                ([fat], [thin])
+            } else {
+                ([thin], [fat])
+            };
+            let said = model
+                .fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .map(|answer| answer.solids().to_vec());
+            match said {
+                Ok(solids) => {
+                    let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                    let faces: Vec<usize> = solids
+                        .iter()
+                        .map(|&s| model.solid(s).expect("solid").faces().count())
+                        .collect();
+                    println!(
+                        "  {rule:?} fat first {fat_first}: answers {faces:?}, validate {:?}",
+                        valid.is_ok()
+                    );
+                }
+                Err(rcad_topo::Error::Undecidable { records }) => {
+                    for record in records.records() {
+                        let places: Vec<[f64; 3]> = record
+                            .inputs()
+                            .iter()
+                            .map(|input| {
+                                let e = input.enclosure();
+                                [0, 1, 2].map(|i| (e[i].lo() + e[i].hi()) / 2.0)
+                            })
+                            .collect();
+                        let widths: Vec<f64> = record
+                            .inputs()
+                            .iter()
+                            .map(|input| {
+                                let e = input.enclosure();
+                                (0..3).map(|i| e[i].hi() - e[i].lo()).fold(0.0, f64::max)
+                            })
+                            .collect();
+                        println!(
+                            "  {rule:?} fat first {fat_first}: Undecidable {} at {places:?} widths {widths:?}",
+                            record.predicate()
+                        );
+                    }
+                }
+                Err(why) => println!("  {rule:?} fat first {fat_first}: refused {why:?}"),
+            }
+        }
+    }
+}
