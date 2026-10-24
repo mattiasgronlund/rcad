@@ -848,6 +848,30 @@ fn a_placed_pyramid_cannot_tell_its_cells_apart_only_where_a_wedge_plane_runs_be
     );
 }
 
+/// **Shifted to `(7, −5, 2.5)`, the sound pyramid cut by the wedge over its
+/// `+y` edge built there is refused at the range check under `certified`**,
+/// the limit §448.7 settled for the cut through the apex, and leaves the
+/// model as it was. It was refused `CannotTellTheCellsOfAFaceApart`: on the
+/// `−y` face the fuse put the corner it solved from three side planes on
+/// every side plane's line, a rounding off one of them, with the wedge plane
+/// `y = 2x` running between that corner and where the other two lines meet.
+#[test]
+fn a_shifted_pyramid_cut_by_a_wedge_over_its_plus_y_edge_is_refused_at_the_range_check() {
+    let shift = every_placement()[1];
+    let case = format!("{shift:?}, {A_WEDGE_OVER_THE_PLUS_Y_EDGE:?}");
+    match the_wedge_through_the_apex(
+        A_WEDGE_OVER_THE_PLUS_Y_EDGE,
+        shift,
+        Rule::Difference,
+        &Policy::certified(),
+    ) {
+        Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+            assert!(ratio > 1e15, "{case}: a range of {ratio}");
+        }
+        other => panic!("{case} came back {other:?}"),
+    }
+}
+
 /// **Turned a tenth of a radian about `(0.3, −1, 2)`, the sound pyramid and
 /// the wedge round the `x` axis built there are refused for an edge too short
 /// by every rule under `certified`**, and leave the model as it was. Turned,
