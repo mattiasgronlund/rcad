@@ -1649,7 +1649,12 @@ def has_a_tree(branch, branches, trees, claimed, left):
     already landed on main is excluded: a landed branch still held is a
     release nobody wrote (a stale claim, §263.4), not a live run, and
     attributing it to some unrelated detached tree would hide that stale hold
-    instead of counting it.
+    instead of counting it. Its own leftover detached tree, if one is still
+    locked, is claimed anyway, by an exact match on its head rather than
+    `is_ancestor`: a landed tip stays an ancestor of main forever, so of every
+    tree any later lane ever builds, and matching by ancestry here would
+    hand a live row's own tree to the stale hold instead of leaving it alone
+    (§299.5).
 
     `claimed` collects the path of every detached tree an ancestry match has
     already used, so two rows checked in the same `running` call never both
@@ -1673,6 +1678,11 @@ def has_a_tree(branch, branches, trees, claimed, left):
     if tip is None:
         return None
     if already_landed(tip):
+        for tree in trees:
+            if tree.is_lane and tree.branch == "(detached)" and tree.path not in claimed \
+                    and tree.head == tip:
+                claimed.add(tree.path)
+                break
         return False
     for tree in trees:
         if tree.is_lane and tree.branch == "(detached)" and tree.path not in claimed \
