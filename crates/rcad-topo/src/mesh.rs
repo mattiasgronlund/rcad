@@ -1690,9 +1690,12 @@ impl BuildingAMesh {
         // before anything reads `walked[0]` as the outline, since an island
         // may be stored first. Two islands may touch at a point: a thin bar
         // resting on the inside of a fat one leaves two windows that meet
-        // where its loops do (Q2649). A cut through that point goes round one
-        // island and touches the other there, and a patch that passes the
-        // point twice is cut apart there, as a strip of a ball is.
+        // where its loops do (Q2649). Where one cut alone meets both, the two
+        // are walked as one island through that point and the cut goes
+        // through both (Q2711). Where another cut meets one of them, a cut
+        // through the point goes round that one and touches the other there,
+        // and a patch that passes the point twice is cut apart there, as a
+        // strip of a ball is.
         if a_ring_on_a_pipe_with_islands_in_it(stored, &walked) {
             let (rims, islands): (Vec<WalkedLoop>, Vec<WalkedLoop>) = walked
                 .into_iter()
