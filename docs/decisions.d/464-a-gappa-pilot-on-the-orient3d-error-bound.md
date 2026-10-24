@@ -16,7 +16,8 @@ Q2658, which took up the two claims the pilot left unbacked, and 464.8 is
 Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
 `*_ROUNDOFF` constants. 464.10 is Q2661, which proves block 1's hints in Coq
 and settles how the scripts join the tree and what notices the Rust moving
-under them.*
+under them. 464.11 is Q2675, which runs the branches where one of the nine
+differences is zero.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -28,6 +29,7 @@ under them.*
   464.8   orient2d and the side of a plane
   464.9   Which of the eleven *_ROUNDOFF constants Gappa can state
   464.10  Whether the scripts join the tree and the gate
+  464.11  One of the nine differences at zero
 
 ### 464.1 The bugs a bound prover is for
 
@@ -248,7 +250,8 @@ with the pattern known, each of the eight should take less.
 **The zero cases, on paper and not run, but one.** Block 1 assumes no factor is
 zero, and `on_floats` does not. A difference of two doubles rounds to zero only
 when it is zero, and a product with a zero factor is exactly zero, so a zero
-difference zeroes its terms in both `y` and `Ex`. The branch where `t1 + t2` is
+difference zeroes its terms in both `y` and `Ex`. Q2675 runs each of the nine,
+one at a time, and each proves (464.11). The branch where `t1 + t2` is
 zero was run: the goal proves, with `|y − Ex| / P6 ≤ 6u + 13u²`. The branch
 where `first` is zero was not. There `bdxcdy == cdxbdy`, so the first term of
 `y` is zero while the matching term of `Ex` need not be, and the identity block
@@ -555,8 +558,10 @@ one of them not run, and 39 equalities Coq takes on trust. Since 464.7 the
 comments in `orient3d.rs` say what is proved, and every branch with a minor at
 zero is run. Since 464.10 the 39 equalities are proved, and what Coq takes on
 trust is 35 facts that a number is not zero, each one step on paper from block
-1's hypotheses. The branches where one of the nine differences is zero are still
-on paper, as 464.4 argues them, and so is the step from `y` to the sign.
+1's hypotheses. The branches where one of the nine differences is zero were on
+paper, as 464.4 argues them; since 464.11 each is run, and proves at the code's
+bound. Two differences at zero at once are still on paper, and so is the step
+from `y` to the sign.
 
 ### 464.7 value past the bound, and every minor at zero run
 
@@ -1057,7 +1062,8 @@ None of them was read for this.
   lands 8/7 of it away (1 above). What `decide`'s sign test needs, and what
   Gappa proves, is a bound on the sum before `value`'s last rounding.
 - A row to run block 1 where one of the nine differences `adx` to `cdz` is
-  zero, which 464.4 argues on paper only, reusing the scripts in 4.
+  zero, which 464.4 argues on paper only, reusing the scripts in 4. Done, in
+  464.11: each of the nine proves at the code's bound.
 
 ### 464.8 orient2d and the side of a plane
 
@@ -2801,3 +2807,270 @@ print(len(proved), "hints proved by field;",
   is taken: a row, after the build row and the fourteen.
 - The 35 nonzero facts of 1, proved in Coq from `s1`, so that block 1's proof
   stands on its hypotheses alone: a row, after the build row.
+
+### 464.11 One of the nine differences at zero
+
+Q2675 ran block 1 with one of the nine differences `adx` to `cdz` at zero, in
+three lanes on 2026-10-24. 464.4's paper argument holds there. Each of the
+nine branches proves at the code's `B` and fails at `6u`, and Coq checks each
+proof, modulo its hints. Nothing in `orient3d.rs` needs to change for it. Two
+differences at zero at once, and a difference at zero with a minor at zero, are
+still not run.
+
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200` and the code's
+`B = 7u + 56u²`, against `on_floats` as 464.4 read it at `d9f931e8`: no line of
+its code has changed since, up to `ca9b6493`.
+
+**The two steps 464.4 takes on paper.** Both prove in Gappa:
+
+```gappa
+# diffzero.g: a difference of two doubles that rounds to zero is zero.
+@rnd = float<ieee_64, ne>;
+x = rnd(x_); z = rnd(z_);
+D = x - z;
+{ |x| <= 1b1024 /\ |z| <= 1b1024 /\ rnd(D) in [0, 0] -> D in [0, 0] }
+```
+
+```gappa
+# refl.g: x - x is zero, and so are its rounding and a product with it.
+@rnd = float<ieee_64, ne>;
+x = rnd(x_); y = rnd(y_);
+a = x - x;
+p = a * y;
+{ |x| <= 1b1024 /\ |y| <= 1b1024 -> a in [0, 0] /\ rnd(a) in [0, 0] /\ rnd(p) in [0, 0] }
+```
+
+Gappa's check that a hint is an identity cancels `x - x`, but takes `|x - x|`
+as a number of its own: a hint that needs `|x - x|` to be zero draws "not
+trivially equal".
+
+**The scripts.** `make_one_difference_zero.py`, below, run as `python3
+make_one_difference_zero.py adx ady adz bdx bdy bdz cdx cdy cdz` beside
+`block1.g`, writes `zd_<name>.g` for each. In each, `d`'s coordinate is the
+same double as the point's, the difference and each product with it are left
+unrounded, and a term whose product is zero stays in `P6` and in the split of
+`P6 + (y − Ex)` as a bare `c_k`, with no error of its own.
+
+Each of the nine proves at the code's `B`:
+
+- `adx`, `ady`, `bdx`, `bdy` and `cdz` zero: `(y − Ex) / P6` within
+  `7.77156e-16`, which is `7u + 11u²` and some `u³`.
+- `adz`, `bdz`, `cdx` and `cdy` zero: within `6.66134e-16`, `6u + 13u²` and
+  some `u³`.
+- `P −/ Phat` within `4.44089e-16` in each: `4u + 9u²` above for the six x
+  and y differences, `4u + 7u²` for the three z ones.
+
+Each fails below `B`. At `B = 6b-53` the `7u` scripts fail with best
+`±1.16667` and the `6u` ones with best `±1`. At `B = 5b-53` they fail with
+`±1.4` and `±1.2`.
+
+Without the last lines the generator writes, eight of the nine failed: `adz`
+and `bdz` with `(y − Ex) / P6` only within `±2.3429e+1203`, and the six x and
+y differences at `REL(P, Phat)`, with the goal's best `±3.24661e+1218`. Gappa
+asked for more bounds says why. With `adx` zero, and `second -/ M2`, `third -/
+M3`, `q2 -/ (|cdxady| + |adxcdy|)` and `q3 -/ (|adxbdy| + |bdxady|)` added to
+the goal as `in ?`, `REL(second, M2)`, `REL(third, M3)`, `REL(q2, |cdxady| +
+|adxcdy|)` and `REL(q3, |adxbdy| + |bdxady|)` fail. Asked for `second` and
+`M2` alone, it bounds each by `±2²⁰⁵⁰` and no closer. With `adz` zero, `rs`
+gets only `±2.31901e+1217`. Each of these rounds a sum one of
+whose parts is the unrounded zero, and Gappa has no `FIX` for that part, so it
+does not know the sum is a double. The hints `cdxady - adxcdy -> cdxady;` and
+`t1 + t2 -> t2;` pass its check, since `adx` is `ax − ax`, and then the
+rounding is of a double. The same kind of hint for `q2`, `|cdxady| + |adxcdy|
+-> |cdxady|;`, does not pass it: Gappa warns that the two sides are "not
+trivially equal", with the difference `|adxcdy|`, as the `|x − x|` above
+says. It then uses the hint anyway, and with it and `q3`'s the `adx` script
+proves with the same two bounds. But that hint would go into Coq as an
+equality that holds only because `adx` is zero, not as an identity Gappa
+checked, and 464.4's 39 hints are all identities. So the scripts instead take
+`q`'s rounding as off by at most `u + 2u²`, as a hypothesis, which lemma.g
+gives once `|q| ≥ 2⁻¹⁰²²`, and a goal checks that `|q| ≥ 2⁻¹⁰²²`. The goal
+does not lean on the hypothesis it backs. With the `q` hypotheses taken out
+and the `|q|` goals alone left, each of the six x and y scripts still proves
+them, in 2.5 to 2.6 s. The same goals at `2⁻¹⁰²¹`, false where `cdxady` is
+`2⁻¹⁰²²`, do not prove for `adx` or `cdy` within 100 s.
+
+Putting the zero `c`'s last in `P6` and in the split, as `cdz`'s are, changed
+nothing: without the hints `adz` still printed `±2.3429e+1203`.
+
+`gappa -Bcoq` writes each of the nine proofs, 8591 to 10060 lines over two
+runs, since Gappa does not write the same proof each run, with 32 to 34 hints.
+`coqc` under 464.5's commands accepts each, exit 0, in 2.6 to 9.8 s. `field`
+has not been run on these hints (464.10).
+
+```python
+"""Write block 1 with one of the nine differences adx to cdz zero, as zd_<name>.g."""
+import sys
+
+# The six products: name, factors, the minor they are in.
+PRODUCT = {
+    1: ("bdxcdy", "bdx * cdy", 1),
+    2: ("cdxbdy", "cdx * bdy", 1),
+    3: ("cdxady", "cdx * ady", 2),
+    4: ("adxcdy", "adx * cdy", 2),
+    5: ("adxbdy", "adx * bdy", 3),
+    6: ("bdxady", "bdx * ady", 3),
+}
+MINOR = {1: "first", 2: "second", 3: "third"}
+# Each minor's two products, and what its q rounds.
+MINUS = {1: ("bdxcdy", "cdxbdy"), 2: ("cdxady", "adxcdy"), 3: ("adxbdy", "bdxady")}
+NOTE = {1: "|bdxcdy| + |cdxbdy|", 2: "|cdxady| + |adxcdy|", 3: "|adxbdy| + |bdxady|"}
+# The z difference each term multiplies its minor by.
+TERM_OF = {"adz": 1, "bdz": 2, "cdz": 3}
+BOUND = "in [-4503599627370497b-105, 4503599627370497b-105]\n"
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def drop_conj(src, item):
+    """Take one conjunct out of a hypothesis line."""
+    if src.count(item + " /\\ ") == 1:
+        return src.replace(item + " /\\ ", "")
+    if src.count(" /\\ " + item + "\n") == 1:
+        return src.replace(" /\\ " + item + "\n", "\n")
+    return sub(src, "  /\\ " + item + "\n", "")
+
+
+def drop_def(src, item):
+    """Take one definition out of a line of definitions."""
+    if src.count(item + " ") == 1:
+        return src.replace(item + " ", "")
+    if src.count(" " + item + "\n") == 1:
+        return src.replace(" " + item + "\n", "\n")
+    return sub(src, item + "\n", "")
+
+
+def make(name):
+    point, axis = name[0], name[2]
+    exact = name[0].upper() + name[1:]
+    src = open("block1.g").read()
+    src = sub(
+        src,
+        "# Orient3d::on_floats and ORIENT3D_ERROR_BOUND,\n"
+        "# crates/rcad-predicates/src/orient3d.rs at d9f931e8.\n",
+        f"# Block 1 where {name} is zero: d{axis} is the same double as {point}{axis}. A\n"
+        "# zero rounds to itself, and so does a product with a zero factor.\n",
+    )
+    src = sub(src, f"d{axis} = rnd(d{axis}_);", f"d{axis} = {point}{axis};")
+    src = sub(src, f"{name} = rnd({exact});", f"{name} = {exact};")
+    src = drop_def(src, f"r{name} = {name} / {exact};")
+    src = drop_conj(src, f"|{name}| >= 1b-1074")
+    src = sub(src, f"{name} / {exact} -> 1 + ({name} - {exact}) / {exact};\n", "")
+    if name in TERM_OF:
+        m = TERM_OF[name]
+        gone = [2 * m - 1, 2 * m]
+        minor = MINOR[m]
+        src = sub(src, f"t{m} = rnd(U{m});", f"t{m} = U{m};")
+        src = sub(src, f"r{m} = rnd(R{m});", f"r{m} = R{m};")
+        src = drop_def(src, f"rm{m} = {minor} / M{m};")
+        src = drop_def(src, f"rt{m} = t{m} / U{m};")
+        src = drop_conj(src, f"|{minor}| >= 1b-1074")
+        src = drop_conj(src, f"|t{m}| >= 1b-1022")
+        src = drop_conj(src, f"|r{m}| >= 1b-1022")
+        src = sub(src, f"  /\\ t{m} -/ U{m} {BOUND}", "")
+        src = sub(src, f"  /\\ r{m} -/ R{m} {BOUND}", "")
+        src = drop_conj(src, f"{name} / |{name}| in [-1, 1]")
+        src = sub(src, f"{minor} / M{m} -> 1 + ({minor} - M{m}) / M{m};\n", "")
+        src = sub(src, f"t{m} / U{m} -> 1 + (t{m} - U{m}) / U{m};\n", "")
+        others = [MINOR[k] for k in (1, 2, 3) if k != m]
+        src = sub(
+            src,
+            "  # The permanent's own three products are normal too. The comment above\n"
+            "  # stays_accurate argues it from the nine.\n",
+            f"  # The other two of the permanent's products are normal because |{others[0]}|\n"
+            f"  # and |{others[1]}| are at most their q. r{m} is zero.\n",
+        )
+        src = sub(
+            src,
+            "  # §12.2's first condition: product_is_normal on the nine products.\n",
+            "  # §12.2's first condition: product_is_normal on the nine products. The\n"
+            f"  # check on {name} and {minor} passes on the zero, and says nothing.\n",
+        )
+        if m == 3:
+            tail = ""
+        else:
+            other = 3 - m
+            tail = (
+                f"\n# t{m} is zero, so t1 + t2 is the double t{other} and rounds to itself.\n"
+                f"t1 + t2 -> t{other};\n"
+            )
+    else:
+        gone = [k for k, (_, f, _) in PRODUCT.items() if name in f]
+        for k in gone:
+            prod, factors, _ = PRODUCT[k]
+            src = sub(src, f"{prod} = rnd({factors});", f"{prod} = {factors};")
+            src = drop_def(src, f"rp{k} = {prod} / ({factors});")
+            src = drop_conj(src, f"|{prod}| >= 1b-1022")
+            src = sub(src, f"  /\\ {prod} -/ {factors} {BOUND}", "")
+            src = drop_conj(src, f"{prod} / |{prod}| in [-1, 1]")
+            src = sub(src, f"{prod} / ({factors}) -> 1 + ({prod} - {factors}) / ({factors});\n", "")
+        names = " and ".join(PRODUCT[k][0] for k in gone)
+        src = sub(
+            src,
+            "  # §12.2's first condition: product_is_normal on the nine products.\n",
+            "  # §12.2's first condition: product_is_normal on the nine products. The\n"
+            f"  # checks on {names} pass on the zero, and say nothing.\n",
+        )
+        minors = [PRODUCT[k][2] for k in gone]
+        hints = []
+        for k in gone:
+            prod, _, m = PRODUCT[k]
+            left, right = MINUS[m]
+            hints.append(f"{left} - {right} -> -{right};\n" if prod == left else f"{left} - {right} -> {left};\n")
+        qs = [f"q{m}" for m in minors]
+        last = f"  /\\ eb -/ B * P {BOUND}"
+        src = sub(
+            src,
+            last,
+            last + f"  # {qs[0]} and {qs[1]} each round a double plus a zero, so each is at least\n"
+            "  # 2^-1022 as that double is, and lemma.g gives the same of them. The\n"
+            "  # goals check the first part.\n"
+            + "".join(f"  /\\ q{m} -/ ({NOTE[m]}) {BOUND}" for m in minors),
+        )
+        goal = "  (y - Ex) / P6 in ? /\\ P -/ Phat in ?\n"
+        src = sub(src, goal, goal + "".join(f"  /\\ |q{m}| >= 1b-1022\n" for m in minors))
+        mins = " and ".join(MINOR[m] for m in minors)
+        tail = (
+            f"\n# {names} are zero, so {mins} each round a double less a zero, or a\n"
+            "# zero less a double, and so round to themselves.\n" + "".join(hints)
+        )
+    src = sub(
+        src,
+        "  # No factor of the nine products is zero. For an f64 that is the same as\n"
+        "  # being at least the smallest subnormal.\n",
+        f"  # No factor of the nine products is zero but {name}. For an f64 that is\n"
+        "  # the same as being at least the smallest subnormal.\n",
+    )
+    # A term whose product is zero carries no error: it is zero in y and in
+    # Ex alike, and stays in P6 only as the zero it is.
+    for k in gone:
+        src = sub(src, line_starting(src, f"W{k} = ") + "\n", "")
+        line = line_starting(src, "", f"e{k} = ")
+        part = line[line.index(f"e{k} = "):]
+        src = drop_def(src, part[: part.index(";") + 1])
+        src = sub(src, f"(c{k} + e{k}) - c{k} -> e{k};\n", "")
+        src = sub(src, line_starting(src, f"e{k} / c{k} -> ") + "\n", "")
+        src = sub(src, f"(c{k} + e{k})", f"c{k}")
+    return src + tail
+
+
+def line_starting(src, start, containing=""):
+    (line,) = [l for l in src.split("\n") if l.startswith(start) and containing in l]
+    return line
+
+
+for name in sys.argv[1:]:
+    open(f"zd_{name}.g", "w").write(make(name))
+```
+
+**What this leaves.**
+
+- Two or more of the nine differences at zero at once. Some pairs zero a
+  minor too: `adx` and `bdx` zero both of `third`'s products. A row.
+- One difference at zero with one minor at zero, 464.7's case, such as `adx`
+  with `first`. A row.
+- The row that moves the scripts into `proofs/gappa/` after the fourteen of
+  464.10 3 f now waits on those two as well, since they append here too.
