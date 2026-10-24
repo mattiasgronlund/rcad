@@ -124,11 +124,19 @@ fn a_block_one_spacing_above_a_turned_cubes_box_is_not_called_apart_from_it() {
 /// stored plane, is classified.
 ///
 /// The box alone answered all 3897 of them `Outside`. Now 1 is `Inside` and
-/// 3811 are `Undecidable`. The 85 still `Outside` are answered by the ray,
-/// past the box: one face's corners and plane part about each, and
-/// `is_beside` lets it through because that face's outline, read at the plane,
-/// holds none of the point's box stretched there, so the corners count it
-/// (Q1156's first shape, §346.7).
+/// the other 3896 are `Undecidable`, and none is `Outside`.
+///
+/// 85 were still `Outside`, answered by the ray past the box: one face's
+/// corners and plane part about each, and `is_beside` let it through because
+/// that face's outline, read at the plane, held none of the point's box
+/// stretched there, so the corners counted it (Q1156's first shape, §346.7).
+/// When a side of an outline whose corners are both strictly on one side of
+/// the walk's half-line came to count nothing (Q2563), the walk could say so
+/// of 52 more boxes, each past its face's corners, and 137 were `Outside`. The
+/// face is where its planes meet, though, a rounding past its corners, so
+/// `is_beside` now grows the stretched box by that much before taking the
+/// outline's holding none of it as proof, and none of the 137 is let through
+/// (Q2631).
 #[test]
 fn how_often_a_point_past_a_turned_cubes_box_that_every_plane_puts_inside_is_answered_outside() {
     let axes = [
@@ -166,7 +174,7 @@ fn how_often_a_point_past_a_turned_cubes_box_that_every_plane_puts_inside_is_ans
         "{points} points past the box that every plane puts inside: \
          {inside} Inside, {undecided} Undecidable, {outside} Outside"
     );
-    assert_eq!((points, inside, undecided, outside), (3897, 1, 3811, 85));
+    assert_eq!((points, inside, undecided, outside), (3897, 1, 3896, 0));
 }
 
 /// A point a billionth above the top cap's middle of a bar and of a frustum,

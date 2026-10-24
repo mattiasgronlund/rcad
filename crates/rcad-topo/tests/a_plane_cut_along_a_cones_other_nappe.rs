@@ -1327,9 +1327,11 @@ fn a_unit_cone_less_a_lean_four_block_turned_one_meshes_the_band_up_to_its_rim()
 
 /// The corner-up cube round the unit cone, the same sides and middles as
 /// round the steep cone ([`corner_up_cubes_of_every_side`]). Every one shares
-/// volume with the cone. Side `2`, middle `1` refuses `a point inside a piece
-/// of a face` on every rule and both turns; the other eleven answer right.
-/// Three counts turn up here that the steep cone has none of: side `4`,
+/// volume with the cone. Side `2`, middle `1`, unturned, refuses
+/// `ACurvedFaceGoesRightRoundWithNoSeam` on the union and the cone less the
+/// block (Q2635); every other fuse answers right. Until Q2563 side `2`, middle
+/// `1` refused `a point inside a piece of a face` on every rule and both
+/// turns. Three counts turn up here that the steep cone has none of: side `4`,
 /// middle `3.5` leaves the block less the cone in four, three tips round its
 /// lower side corners and its top above the cap; side `6`, middles `0` and
 /// `1` leave the cone less the block in three, one past each face through the
@@ -1363,19 +1365,19 @@ fn a_corner_up_cube_centred_one_above_a_unit_pointed_cones_apex_answers_right_or
     assert_eq!(
         tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 1.0, 0.0)),
         Tally {
-            right: 8,
-            refused: [("a point inside a piece of a face", 4)].into()
+            right: 10,
+            refused: [("ACurvedFaceGoesRightRoundWithNoSeam", 2)].into()
         }
     );
 }
 
 #[test]
-fn a_turned_corner_up_cube_centred_one_above_a_unit_pointed_cones_apex_answers_right_or_refuses() {
+fn a_turned_corner_up_cube_centred_one_above_a_unit_pointed_cones_apex_answers_right() {
     assert_eq!(
         tally_on_every_second_point(&corner_up_cubes_of_every_side(THE_UNIT_CONE, 1.0, 0.7)),
         Tally {
-            right: 8,
-            refused: [("a point inside a piece of a face", 4)].into()
+            right: 12,
+            refused: BTreeMap::new()
         }
     );
 }

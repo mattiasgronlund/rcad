@@ -74,8 +74,8 @@
 //! rather than off a corner, because every corner sits on every cut.
 
 use rcad_geom::{
-    EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, SIDE_OF_A_HALF_SPACE, Surface,
-    SurfaceMeet, Vector, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS,
+    EdgeRun, HalfSpace, Orientation, Picker, Plane, PlaneAgreement, Point, SIDE_OF_A_HALF_SPACE,
+    Surface, SurfaceMeet, Vector, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS,
     how_a_plane_leans_against_a_cone, intersect, where_a_cones_apex_stands_against_a_plane,
     which_two_surfaces_a_run_is_between,
 };
@@ -182,6 +182,147 @@ impl<'m> SolidView<'m> {
             .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
         what_a_flat_face_holds(self, face, point, aim, policy, log)
     }
+
+    /// `point`'s box grown along each axis by as far as a corner of `face`, as
+    /// [`SolidView::what_this_face_holds`] reads it, can be from where the
+    /// face's stored planes put that corner; `None` where that cannot be
+    /// bounded. Asked of a flat face whose every side is straight.
+    ///
+    /// **The walk reads the stored corners, and the face is where its planes
+    /// meet** (`docs/decisions.md` §17.1). A turn leaves each corner a rounding
+    /// off where the face's plane meets the planes across its two sides there
+    /// (§75.6), so the face those planes bound can reach a rounding past the
+    /// outline its corners draw. A point a rounding past a turned cube's corner
+    /// has its box, stretched to a face's plane, past that face's corners and
+    /// on the face its planes bound, and where the walk said the face holds
+    /// none of it the ray counted the point by the corners, `Outside`, where
+    /// every stored plane puts it inside (Q1156, Q2631).
+    ///
+    /// The walk turns each corner about a point off the plane
+    /// ([`a_point_off_the_plane`]), so it reads the outline its corners draw on
+    /// the plane as seen from there. Along each axis, each corner of that
+    /// outline is at most as far from where the three planes meet as the
+    /// stored corner is from the meet, plus how far being seen from that point
+    /// moves the stored corner onto the plane. Call the largest of those over
+    /// every corner `e` for that axis. Slide each corner of the face the
+    /// planes bound in a straight line to the corner the walk reads: a point
+    /// that face holds and the walk's outline does not is crossed by a side on
+    /// the way, so it is within `e` along each axis of a point on a side of the
+    /// walk's outline, and the walk never says a face holds none of a box that
+    /// takes in a point on its side. So where the walk says
+    /// [`OnAFace::NotHeld`] of the box grown by `e`, the face its planes bound
+    /// holds no point of `point`'s box on its plane.
+    ///
+    /// **A corner where three planes do not meet is taken where the walk reads
+    /// it**: one whose sides run on across one plane, one beside a curved face
+    /// across a straight side, and one whose face across is this face. Nothing
+    /// here says where the face its planes bound has such a corner, as
+    /// `SolidView::box_opened_out_to_where_its_planes_meet` does not either.
+    /// Where three planes cannot be shown to meet in a point, or a corner
+    /// cannot be shown to move onto the plane, the answer is `None`.
+    pub(crate) fn grown_to_where_its_planes_put_its_corners(
+        self,
+        face: FaceView<'_>,
+        point: PredicatePoint,
+    ) -> Option<PredicatePoint> {
+        let flat = face.plane();
+        let seen_from = a_point_off_the_plane(face, &flat)?;
+        let plane_across = |coedge: &CoedgeView<'_>| -> Option<Plane> {
+            let edge = coedge.edge();
+            if *edge.stored_run() != EdgeRun::Straight {
+                return None;
+            }
+            let across = edge
+                .neighbouring_faces()
+                .find(|&other| other != face.key())?;
+            self.faces()
+                .find(|used| used.key() == across)?
+                .surface()
+                .as_plane()
+                .copied()
+        };
+        let mut reach = [0.0f64; 3];
+        for wire in face.wires() {
+            let coedges: Vec<CoedgeView<'_>> = wire.coedges().collect();
+            let across: Vec<Option<Plane>> = coedges.iter().map(plane_across).collect();
+            for (index, coedge) in coedges.iter().enumerate() {
+                let before = (index + coedges.len() - 1) % coedges.len();
+                let (Some(into), Some(out_of)) = (across[before], across[index]) else {
+                    continue;
+                };
+                let one_plane = |one: &Plane, other: &Plane| {
+                    matches!(
+                        one.agreement_with(other),
+                        PlaneAgreement::SameWay | PlaneAgreement::OppositeWay
+                    )
+                };
+                if one_plane(&into, &out_of) || one_plane(&flat, &into) || one_plane(&flat, &out_of)
+                {
+                    continue;
+                }
+                let meet = Plane::meet_of_three(&flat, &into, &out_of).ok()?;
+                let off = how_far_the_walk_reads_a_corner_from(
+                    coedge.start().point(),
+                    meet,
+                    &flat,
+                    seen_from,
+                )?;
+                for axis in 0..3 {
+                    reach[axis] = reach[axis].max(off[axis]);
+                }
+            }
+        }
+        if reach == [0.0; 3] {
+            return Some(point);
+        }
+        let enclosure = point.enclosure();
+        Some(PredicatePoint::Constructed(core::array::from_fn(|axis| {
+            enclosure[axis]
+                + Interval::new(-reach[axis], reach[axis])
+                    .expect("a reach is finite and not below zero")
+        })))
+    }
+}
+
+/// How far, along each axis, the corner at `stored` is from where three
+/// planes `meet`, as a walk that sees it from `seen_from` reads it on `flat`:
+/// the furthest of `meet`'s box from `stored`, plus how far seeing `stored`
+/// from `seen_from` moves it onto `flat`. Each is rounded up. `None` where
+/// that cannot be bounded.
+///
+/// Seen from `t`, a corner `b` lands on the plane `s(x) = 0` at `t + (b − t) ·
+/// s(t) / (s(t) − s(b))`, which is `b` moved by `(b − t) · s(b) / (s(t) −
+/// s(b))`. `seen_from` is a point the plane certifies is in front of it, so
+/// `s(t)` is above zero, and the move is bounded wherever `s(t)` is shown to be
+/// further from zero than `s(b)` is.
+fn how_far_the_walk_reads_a_corner_from(
+    stored: Point,
+    meet: PredicatePoint,
+    flat: &Plane,
+    seen_from: Point,
+) -> Option<[f64; 3]> {
+    let [a, b, c, d] = flat.coefficients().map(Interval::exactly);
+    let on_the_plane = |at: [Interval; 3]| a * at[0] + b * at[1] + c * at[2] + d;
+    let stored = stored.coordinates().map(Interval::exactly);
+    let seen_from = seen_from.coordinates().map(Interval::exactly);
+    let biggest = |range: Interval| (-range.lo()).max(range.hi());
+    let off_the_plane = biggest(on_the_plane(stored));
+    let clear = (on_the_plane(seen_from) - Interval::exactly(off_the_plane)).lo();
+    if clear.is_nan() || clear <= 0.0 {
+        return None;
+    }
+    let meet = meet.enclosure();
+    let mut reach = [0.0; 3];
+    for axis in 0..3 {
+        let to_the_meet = biggest(meet[axis] - stored[axis]);
+        let leaning = biggest((stored[axis] - seen_from[axis]) * Interval::exactly(off_the_plane));
+        let moved = (leaning / clear).next_up();
+        reach[axis] = (to_the_meet + moved).next_up();
+        if !reach[axis].is_finite() {
+            return None;
+        }
+    }
+    Some(reach)
 }
 
 /// A point far enough off `plane` that the plane itself certifies it is off it.
@@ -823,6 +964,18 @@ pub(crate) fn the_meridian_half_space_keeps(
 /// sides, and [`Walked::ACornerOnTheLine`] when a corner's side of that
 /// half-line's line has no sign.
 ///
+/// **A point whose side of a side's line has no sign is not refused for it
+/// when both of that side's corners are strictly on one side of the half-line**
+/// ([`is_wholly_on_one_side_of_the_half_line`]): the half-line does not cross
+/// that side and the point is not on it, wherever the point is across its line,
+/// so the side counts nothing. A box straddling the line of a side past its
+/// ends is one (row Q2563). The answer then rests on no unproven sign, so the
+/// one it did without is not logged: a certified fuse refuses at its end
+/// whenever its log holds one. Where a corner of it has no sign either, the
+/// half-line may run along that side, and the walk is aimed elsewhere as for
+/// any corner it cannot read. Only a side whose corners are on the line or
+/// either side of it is refused.
+///
 /// Every side must be straight between its two corners: stored as
 /// [`EdgeRun::Straight`], or a piece of a cone's ruling
 /// ([`is_a_piece_of_a_ruling`]), which is the same segment stored as part of a
@@ -869,7 +1022,14 @@ fn walk_one_outline(
     let mut winding = 0i64;
     for (index, &from) in corners.iter().enumerate() {
         let next = (index + 1) % corners.len();
-        let along = decide(from, corners[next], target, point, policy, log);
+        let mut asked = ProvenanceLog::new();
+        let along = decide(from, corners[next], target, point, policy, &mut asked);
+        if let Decision::Undecidable { .. } = along
+            && is_wholly_on_one_side_of_the_half_line(sides[index], sides[next])
+        {
+            continue;
+        }
+        asked.drain_into(log);
         match along {
             Decision::Zero => match lies_between(from, corners[next], point) {
                 Ok(true) => return Ok(Walked::OnASide),
@@ -878,7 +1038,12 @@ fn walk_one_outline(
             },
             Decision::Pos | Decision::Neg => (),
             Decision::Undecidable { enclosure } => {
-                return Err(gave_up_turning_a_corner(point, enclosure));
+                if above_the_line(sides[index]).is_some() && above_the_line(sides[next]).is_some() {
+                    return Err(gave_up_turning_a_corner(point, enclosure));
+                }
+                return Ok(Walked::ACornerOnTheLine {
+                    enclosure: whichever_of_them_was_not_read(sides[index], sides[next]),
+                });
             }
             other => panic!("a corner came back with a decision nothing here knows: {other:?}"),
         }
@@ -4101,6 +4266,24 @@ fn is_on_the_other_nappe_from_the_arc(
 /// one piece, and points of it are read towards a corner of the hole
 /// (`a_walk_neither_winding_nor_the_axis_places.rs`, rows Q1395 and Q2172).
 ///
+/// # A point with no sign of a side's line
+///
+/// **A point whose side of a side's line, seen down the axis, has no sign is
+/// not refused for it when the half-line is aimed at a corner with both of that
+/// side's corners strictly on one side of the half-line's line**, as
+/// [`walk_one_outline`] reads a flat face (row Q2563). Then the half-line does
+/// not cross that side and the point is not on it, wherever the point is
+/// across its line, so the side counts nothing. A corner `c`'s sign is that of
+/// `(at − c) · ((aim − c) × w)`, which is affine in `c` and zero with `at` in
+/// `c`'s place, so [`is_wholly_on_one_side_of_the_half_line`]'s argument holds
+/// for it. A box across the line of a ruling, past the ruling's ends, is such a
+/// point, and the corner a ruling starts at is on that very line, so that
+/// corner is not aimed at. An arc's chord is such a side where the point is
+/// outside the arc's curve, since then it is in the arc's piece on neither side
+/// of the chord. Inside the curve or on it, the point is refused: what the
+/// curve bounds is convex, so the point is across the chord between its ends
+/// or at one, where no half-line leaves both of them strictly on one side.
+///
 /// # A side right round a closed curve
 ///
 /// A [`WholeCurve`] is all of the curve a plane `P` cuts the cone in, from one
@@ -4215,9 +4398,6 @@ fn what_a_cone_face_seen_down_its_axis_holds(
     for (index, side) in sides.iter().enumerate() {
         let [from, to] = [side.start.placed, side.end.placed];
         let beside = seen_down_the_axis(up, from, to, at);
-        if let Decision::Undecidable { enclosure } = beside {
-            return Err(gave_up_seeing(enclosure));
-        }
         along.push(beside);
         let SeenDownTheAxis::AsAnArc {
             on_the_left,
@@ -4249,6 +4429,11 @@ fn what_a_cone_face_seen_down_its_axis_holds(
         } else {
             read
         };
+        if let Decision::Undecidable { enclosure } = beside
+            && matches!(inside, Decision::Zero | Decision::Neg)
+        {
+            return Err(gave_up_seeing(enclosure));
+        }
         match inside {
             Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
                 return Ok(OnAFace::OnItsBoundary);
@@ -4276,6 +4461,22 @@ fn what_a_cone_face_seen_down_its_axis_holds(
             exactly(aim.coordinates()),
         )
     };
+    let seen_from = |side: &Side, aim: Point| {
+        [side.start.placed, side.end.placed].map(|corner| {
+            if corner == aim {
+                Decision::Zero
+            } else {
+                seen_down_the_axis(up, corner, aim, at)
+            }
+        })
+    };
+    let unseen = along.iter().find_map(|&beside| {
+        if let Decision::Undecidable { enclosure } = beside {
+            Some(enclosure)
+        } else {
+            None
+        }
+    });
     let aim = sides
         .iter()
         .map(|side| side.start.placed)
@@ -4285,9 +4486,14 @@ fn what_a_cone_face_seen_down_its_axis_holds(
                     the_aims_side_of(chord, corner),
                     Decision::Pos | Decision::Neg
                 )
+            }) && sides.iter().zip(&along).all(|(side, beside)| {
+                !matches!(beside, Decision::Undecidable { .. }) || {
+                    let [from, to] = seen_from(side, corner);
+                    is_wholly_on_one_side_of_the_half_line(from, to)
+                }
             })
         })
-        .ok_or_else(cannot)?;
+        .ok_or_else(|| unseen.map_or_else(cannot, gave_up_seeing))?;
     for chord in &chords {
         let toward = the_aims_side_of(chord, aim);
         along[chord.index] = toward;
@@ -4296,15 +4502,17 @@ fn what_a_cone_face_seen_down_its_axis_holds(
         }
     }
 
-    for (index, side) in sides.iter().enumerate() {
-        let [from, to] = [side.start.placed, side.end.placed].map(|corner| {
-            if corner == aim {
-                Decision::Zero
-            } else {
-                seen_down_the_axis(up, corner, aim, at)
-            }
-        });
-        winding += crossing(from, to, along[index])
+    for (side, &beside) in sides.iter().zip(&along) {
+        let [from, to] = seen_from(side, aim);
+        if let Decision::Undecidable { .. } = beside {
+            assert!(
+                is_wholly_on_one_side_of_the_half_line(from, to),
+                "the half-line was aimed with every side the point has no sign of wholly on one \
+                 side of it, and this one is not: {from:?} and {to:?}"
+            );
+            continue;
+        }
+        winding += crossing(from, to, beside)
             .ok_or_else(|| gave_up_seeing(whichever_of_them_was_not_read(from, to)))?;
     }
     Ok(held_where_it_winds(winding))
@@ -9768,6 +9976,23 @@ fn crossing(from_side: Decision, to_side: Decision, along: Decision) -> Option<i
     )
 }
 
+/// Whether both ends of a side are strictly on one side of the half-line's line,
+/// as `from_side` and `to_side` say, so that the side neither crosses the
+/// half-line nor holds the point, whichever side of the side's own line the
+/// point is on.
+///
+/// Each sign is of a determinant affine in its corner, and zero with the point
+/// itself in the corner's place, so a point of the side between two corners of
+/// one sign has that sign too and is not the point. A certified sign holds for
+/// every point of a box, so no point of a box is on the side either. A corner
+/// on the line is not enough: the point may be that corner.
+fn is_wholly_on_one_side_of_the_half_line(from_side: Decision, to_side: Decision) -> bool {
+    matches!(
+        (from_side, to_side),
+        (Decision::Pos, Decision::Pos) | (Decision::Neg, Decision::Neg)
+    )
+}
+
 /// Whether a corner is above the half-line's line, counting a corner exactly on
 /// it as below.
 ///
@@ -14033,5 +14258,331 @@ mod tests {
             ),
             None
         );
+    }
+
+    /// **A point whose box straddles the line of a side, past both its ends,
+    /// is placed by the other sides** (row Q2563). The box says nothing about
+    /// which side of that line the point is on, but both ends of the side are
+    /// strictly on one side of the half-line from the point, so the half-line
+    /// does not cross the side whichever it is, and the point is not on it.
+    /// Until then the walk refused every such point by `orient3d`, an answer it
+    /// had.
+    ///
+    /// The L's two inner sides, `y = 5` from `x = 5` to `10` and `x = 5` from
+    /// `y = 5` to `10`, run on into the L, so a point on either line short of
+    /// `5` is held. The outer sides at `x = 10` and `y = 10` run on past it, so
+    /// a point on their lines past the L is not. On both caps the half-line
+    /// aims at the origin, which none of these lines runs through.
+    #[test]
+    fn a_box_across_the_line_of_a_side_past_its_ends_is_placed_by_the_other_sides() {
+        let (model, solid, caps) = an_l_and_its_caps();
+        let wobbling = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        for cap in caps {
+            for (across, expected) in [
+                ([Interval::exactly(2.0), wobbling(5.0)], OnAFace::Held),
+                ([wobbling(5.0), Interval::exactly(2.0)], OnAFace::Held),
+                ([wobbling(10.0), Interval::exactly(-3.0)], OnAFace::NotHeld),
+                ([Interval::exactly(-3.0), wobbling(10.0)], OnAFace::NotHeld),
+            ] {
+                assert_eq!(
+                    what_a_cap_of_an_l_holds(&model, solid, cap, across),
+                    expected,
+                    "{across:?} on the cap at height {}",
+                    cap.1
+                );
+            }
+        }
+    }
+
+    /// **Where the half-line runs along the side whose line the box straddles,
+    /// the walk aims at another corner** (row Q2563). From a point on the line
+    /// of the L's bottom or left side, past its ends, the half-line towards
+    /// the corner at the origin runs along that side, so the side's other end
+    /// has no sign of it any more than the point has of the side. Aimed at the
+    /// next corner, both of the side's ends are on one side of the half-line,
+    /// and the point is placed as in
+    /// [`a_box_across_the_line_of_a_side_past_its_ends_is_placed_by_the_other_sides`].
+    #[test]
+    fn a_box_across_the_line_of_a_side_through_the_corner_aimed_at_is_placed_from_another() {
+        let (model, solid, caps) = an_l_and_its_caps();
+        let wobbling = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        for cap in caps {
+            for across in [
+                [Interval::exactly(15.0), wobbling(0.0)],
+                [Interval::exactly(-5.0), wobbling(0.0)],
+                [wobbling(0.0), Interval::exactly(15.0)],
+                [wobbling(0.0), Interval::exactly(-5.0)],
+            ] {
+                assert_eq!(
+                    what_a_cap_of_an_l_holds(&model, solid, cap, across),
+                    OnAFace::NotHeld,
+                    "{across:?} on the cap at height {}",
+                    cap.1
+                );
+            }
+        }
+    }
+
+    /// **A sign the walk did without is not logged as unproven** (row Q2563).
+    /// A box across the line of a side past its ends is placed without its
+    /// side of that line, so the answer is proved, and a certified fuse refuses
+    /// at its end whenever its log holds an unproven sign. Left in, the record
+    /// turned the corner-up cube on a unit cone of
+    /// `a_plane_cut_along_a_cones_other_nappe.rs` from a refusal to find a
+    /// point inside a piece into one by `orient3d`, though every walk answered.
+    #[test]
+    fn a_box_across_the_line_of_a_side_past_its_ends_leaves_nothing_in_the_log() {
+        let (model, solid, caps) = an_l_and_its_caps();
+        let wobbling = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        let on = Interval::exactly;
+        for (cap, height) in caps {
+            for [x, y] in [
+                [on(2.0), wobbling(5.0)],
+                [wobbling(5.0), on(2.0)],
+                [wobbling(10.0), on(-3.0)],
+                [on(-3.0), wobbling(10.0)],
+                [on(15.0), wobbling(0.0)],
+                [wobbling(0.0), on(-5.0)],
+            ] {
+                let mut log = ProvenanceLog::new();
+                model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .face_holds_the_point(
+                        cap,
+                        PredicatePoint::Constructed([x, y, on(height)]),
+                        &Policy::certified(),
+                        &mut log,
+                    )
+                    .unwrap_or_else(|refused| {
+                        panic!("({x:?}, {y:?}) on the cap at height {height}: {refused:?}")
+                    });
+                assert!(
+                    log.is_empty(),
+                    "({x:?}, {y:?}) on the cap at height {height}: {log:?}"
+                );
+            }
+        }
+    }
+
+    /// **A box across the line a ruling side is seen on, past that side's
+    /// ends, is placed by the other sides** (row Q2563). Seen down the axis,
+    /// the skin of a frustum cut to a quarter, or to three quarters, has two
+    /// sides along rulings, each seen as a piece of a line through where the
+    /// apex is seen. A point given as a box 1e-9 wide across one of those lines
+    /// has no sign of it. Past the piece's ends, above the top cap, below the
+    /// bottom one or across the apex, the piece neither holds the point nor
+    /// crosses a half-line aimed at a corner off its line, so the other sides
+    /// place it: held across the apex on the three quarters, and nowhere else.
+    #[test]
+    fn a_box_across_the_line_a_ruling_is_seen_on_past_its_ends_is_placed_by_the_other_sides() {
+        let across = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        let on = Interval::exactly;
+        let past_the_caps = [
+            [on(5.0), across(0.0), on(10.0)],
+            [on(1.0), across(0.0), on(2.0)],
+            [across(0.0), on(5.0), on(10.0)],
+        ];
+        let across_the_apex = [
+            [on(-3.0), across(0.0), on(6.0)],
+            [across(0.0), on(-3.0), on(6.0)],
+        ];
+        for (rule, across_the_apex_is) in [
+            (crate::Rule::Intersection, OnAFace::NotHeld),
+            (crate::Rule::Difference, OnAFace::Held),
+        ] {
+            let (model, solid, skin) = the_skin_of_a_frustum_cut_by_a_quarter(rule);
+            let expected = past_the_caps
+                .map(|point| (point, OnAFace::NotHeld))
+                .into_iter()
+                .chain(across_the_apex.map(|point| (point, across_the_apex_is)));
+            for (point, is) in expected {
+                let answer = model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .face_holds_the_point(
+                        skin,
+                        PredicatePoint::Constructed(point),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|refused| panic!("{point:?} after the {rule:?}: {refused:?}"));
+                assert_eq!(answer, is, "{point:?} after the {rule:?}");
+            }
+        }
+    }
+
+    /// The frustum of the cone `r = z / 2` between heights 4 and 8, and the
+    /// key of its skin, after `rule` with a prism over the quarter where `x`
+    /// and `y` are both positive: its skin between the angles 0 and π/2 after
+    /// an intersection, and between π/2 and 2π after a difference.
+    fn the_skin_of_a_frustum_cut_by_a_quarter(rule: crate::Rule) -> (Model, SolidKey, FaceKey) {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let frustum = a_frustum(&mut model, 4.0, 8.0);
+        let triangle = crate::ProfileBuilder::new(vec![[0.0, 0.0], [12.0, 0.0], [0.0, 12.0]])
+            .build(&policy, &mut ProvenanceLog::new())
+            .expect("a triangle");
+        let prism = model
+            .add_extrusion(
+                &triangle,
+                6.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, 3.0)).expect("a shift"),
+            )
+            .expect("a prism");
+        let (arguments, tools) = if rule == crate::Rule::Intersection {
+            ([prism], [frustum])
+        } else {
+            ([frustum], [prism])
+        };
+        let answer = model
+            .fuse(&arguments, &tools, rule, &policy, &mut ProvenanceLog::new())
+            .expect("a frustum cut by a prism");
+        let &[solid] = answer.solids() else {
+            panic!("one solid, not {:?}", answer.solids());
+        };
+        let skins: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("the fuse made the key")
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface::Cone(_)))
+            .map(|face| face.key())
+            .collect();
+        let &[skin] = skins.as_slice() else {
+            panic!("one face on the cone, not {skins:?}");
+        };
+        (model, solid, skin)
+    }
+
+    /// The frustum of the cone `r = z / 2` between heights `near` and `far`,
+    /// built as `two_quarters_of_a_hollow_cone_flush_along_a_plane.rs` builds
+    /// it: two caps and a skin with its seam along the ruling at angle 0.
+    fn a_frustum(model: &mut Model, near: f64, far: f64) -> SolidKey {
+        use crate::{DraftStep, SolidBuilder};
+        let slope = 0.5;
+        let skin = rcad_geom::Cone::new(Axis::z(), slope).expect("a positive slope");
+        let mut builder = SolidBuilder::new();
+        let at = |height: f64| Point::new(slope * height, 0.0, height);
+        let bottom_corner = builder.add_vertex(at(near)).expect("a finite point");
+        let top_corner = builder.add_vertex(at(far)).expect("a finite point");
+        let seam = builder
+            .add_edge(bottom_corner, top_corner, EdgeRun::Straight)
+            .expect("a ruling");
+        let bottom_circle = builder
+            .add_edge(
+                bottom_corner,
+                bottom_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("a circle");
+        let top_circle = builder
+            .add_edge(
+                top_corner,
+                top_corner,
+                EdgeRun::RightRoundWhereItsFacesCross,
+            )
+            .expect("a circle");
+        let cap = |builder: &mut SolidBuilder, at: f64, outward: f64, edge, turn| {
+            let plane = Plane::from_point_and_normal(
+                Point::new(0.0, 0.0, at),
+                Vector::new(0.0, 0.0, outward),
+            )
+            .expect("a unit normal");
+            let coedge = builder.add_coedge(edge, turn).expect("an edge");
+            let wire = builder
+                .add_wire(&[DraftStep::Along(coedge)])
+                .expect("a wire");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a cap")
+        };
+        let bottom = cap(
+            &mut builder,
+            near,
+            -1.0,
+            bottom_circle,
+            Orientation::Reversed,
+        );
+        let top = cap(&mut builder, far, 1.0, top_circle, Orientation::Forward);
+        let round_the_wall = [
+            (bottom_circle, Orientation::Forward),
+            (seam, Orientation::Forward),
+            (top_circle, Orientation::Reversed),
+            (seam, Orientation::Reversed),
+        ]
+        .map(|(edge, turn)| DraftStep::Along(builder.add_coedge(edge, turn).expect("an edge")));
+        let wire = builder.add_wire(&round_the_wall).expect("a wire");
+        let side = builder
+            .add_face(Surface::Cone(skin), &[wire])
+            .expect("a face on the cone");
+        builder
+            .add_shell(&[
+                (bottom, Orientation::Forward),
+                (top, Orientation::Forward),
+                (side, Orientation::Forward),
+            ])
+            .expect("three faces close");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a frustum")
+    }
+
+    /// An L ten by ten and ten high, the square five by five at `(10, 10)` cut
+    /// out of it, with its bottom and top caps and the height of each. Both
+    /// caps' outlines start at the origin.
+    fn an_l_and_its_caps() -> (Model, SolidKey, [(FaceKey, f64); 2]) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let l = crate::ProfileBuilder::new(vec![
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 5.0],
+            [5.0, 5.0],
+            [5.0, 10.0],
+            [0.0, 10.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("an L");
+        let solid = model
+            .add_extrusion(&l, 10.0, &Isometry::identity())
+            .expect("a positive height");
+        let caps = [0.0, 10.0].map(|height| {
+            let cap = model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .find(|face| {
+                    face.wires()
+                        .flat_map(WireView::points)
+                        .all(|corner| corner.coordinates()[2] == height)
+                })
+                .expect("a cap at each end");
+            assert_eq!(
+                cap.wires().flat_map(WireView::points).next(),
+                Some(Point::new(0.0, 0.0, height)),
+                "the half-line aims at the origin"
+            );
+            (cap.key(), height)
+        });
+        (model, solid, caps)
+    }
+
+    fn what_a_cap_of_an_l_holds(
+        model: &Model,
+        solid: SolidKey,
+        (cap, height): (FaceKey, f64),
+        [x, y]: [Interval; 2],
+    ) -> OnAFace {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .face_holds_the_point(
+                cap,
+                PredicatePoint::Constructed([x, y, Interval::exactly(height)]),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| {
+                panic!("({x:?}, {y:?}) on the cap at height {height}: {refused:?}")
+            })
     }
 }
