@@ -8973,6 +8973,11 @@ struct Corners {
     /// their planes prove. See
     /// [`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`].
     one_corner: BTreeMap<CornerName, CornerName>,
+    /// The three planes of every end of a kept side that is a meet of three
+    /// planes, with the `f64` triple its name lands on: where
+    /// [`the_planes_keep_them_apart`] looks for a corner between two names
+    /// that share two planes.
+    ends_on_three_planes: Vec<([Plane; 3], [u64; 3])>,
     /// The corner made for each least name of [`Corners::one_corner`].
     made_for_one_corner: BTreeMap<CornerName, usize>,
     /// Names that are another corner's, settled before any piece was walked:
@@ -9307,6 +9312,7 @@ impl Corners {
     ) -> Result<()> {
         let mut lands_at: BTreeMap<CornerName, Point> = BTreeMap::new();
         let mut between = Vec::new();
+        let mut on_three_planes = Vec::new();
         for meet in sides {
             let from = self.goes_by(self.name_of(model, &meet.ends[0], policy, log)?);
             let to = self.goes_by(self.name_of(model, &meet.ends[1], policy, log)?);
@@ -9316,11 +9322,18 @@ impl Corners {
                 if is_the_lower_rounding(point, *lowest) {
                     *lowest = point;
                 }
+                if let Some(planes) = self.three_planes_of(model, end) {
+                    on_three_planes.push((planes, name));
+                }
             }
             if from != to {
                 between.push([from, to]);
             }
         }
+        self.ends_on_three_planes = on_three_planes
+            .into_iter()
+            .map(|(planes, name)| (planes, exactly_at(lands_at[&name])))
+            .collect();
         self.one_corner = the_least_name_of_each_group(
             between
                 .into_iter()
@@ -9482,6 +9495,8 @@ impl Corners {
                 !the_planes_keep_them_apart(
                     self.made_on_three_planes.get(already).copied(),
                     planes,
+                    exactly_at(corner.point),
+                    &self.ends_on_three_planes,
                     policy,
                 )
             });
@@ -9736,6 +9751,8 @@ impl Corners {
 fn the_planes_keep_them_apart(
     made_on: Option<[Plane; 3]>,
     arrived: Option<[Plane; 3]>,
+    landed_on: [u64; 3],
+    ends_on_three_planes: &[([Plane; 3], [u64; 3])],
     policy: &Policy,
 ) -> bool {
     let (Some(made_on), Some(arrived), Strictness::Certified) =
@@ -9744,24 +9761,49 @@ fn the_planes_keep_them_apart(
         return false;
     };
     let made_on_names = made_on.map(name_of_a_plane);
-    if arrived
+    let shared: Vec<[u64; 9]> = arrived
         .map(name_of_a_plane)
-        .iter()
+        .into_iter()
         .filter(|name| made_on_names.contains(name))
-        .count()
-        >= 2
-    {
-        return false;
+        .collect();
+    match shared.as_slice() {
+        [] | [_] => arrived.iter().any(|plane| {
+            matches!(
+                side_of_a_plane_where_three_planes_meet(
+                    made_on.map(|flat| flat.coefficients()),
+                    plane.coefficients(),
+                ),
+                Ok(Decision::Pos | Decision::Neg)
+            )
+        }),
+        [one, other] => ends_on_three_planes
+            .iter()
+            .filter(|&&(_, at)| at != landed_on)
+            .filter_map(|(planes, _)| {
+                let names = planes.map(name_of_a_plane);
+                if !(names.contains(one) && names.contains(other)) {
+                    return None;
+                }
+                planes
+                    .iter()
+                    .zip(names)
+                    .find(|(_, name)| name != one && name != other)
+                    .map(|(plane, _)| *plane)
+            })
+            .any(|third| {
+                let side = |three: [Plane; 3]| {
+                    side_of_a_plane_where_three_planes_meet(
+                        three.map(|flat| flat.coefficients()),
+                        third.coefficients(),
+                    )
+                };
+                matches!(
+                    (side(made_on), side(arrived)),
+                    (Ok(Decision::Pos), Ok(Decision::Neg)) | (Ok(Decision::Neg), Ok(Decision::Pos))
+                )
+            }),
+        _ => false,
     }
-    arrived.iter().any(|plane| {
-        matches!(
-            side_of_a_plane_where_three_planes_meet(
-                made_on.map(|flat| flat.coefficients()),
-                plane.coefficients(),
-            ),
-            Ok(Decision::Pos | Decision::Neg)
-        )
-    })
 }
 
 /// Whether `one` is the lower of two roundings of one corner, as
