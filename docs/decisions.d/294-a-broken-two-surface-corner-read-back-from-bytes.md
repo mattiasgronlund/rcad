@@ -221,11 +221,13 @@ names something other than the file — never a wrong `Ok`, never a panic.
   rounds nothing is handed on exact (Q509 fixed this; before it, it refused
   "side of plane" there as well).
 - **A tolerant policy**, `Policy::tolerant(100.0)`, on the bar at no
-  placement, matches `certified` in every fuse except the corner moved off the
-  cap in a cut along the seam, which refuses with
-  `TwoCurvesTouchWithoutCrossing` where `certified` finds the order along a
-  crossing `Undecidable`
-  (`under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_touches_without_crossing`).
+  placement, matches `certified` in every fuse. Since Q2472 the corner moved
+  off the cap in a cut along the seam also refuses order along a crossing,
+  `Undecidable`, between `(3, 0, 10)` and `(3, 0, 11)`, a `Length` of
+  `1.0000000000000009`, as `certified` does — not
+  `TwoCurvesTouchWithoutCrossing`, which is what the policy took the two
+  points as one for until Q2144 fixed how that order is filed
+  (`under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_is_not_taken_as_the_corner_below_it`).
 - **A ball's south pole** `(0, 0, -3)`, moved to five places. `validate`
   refuses four with `VertexOffItsFaceSurface`, and the one moved onto the
   equator at `(3, 0, 0)` with `APoleStandsWhereTheSurfaceDoesNotPinch`
