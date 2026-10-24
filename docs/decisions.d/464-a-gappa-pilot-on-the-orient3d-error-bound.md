@@ -2842,17 +2842,42 @@ same double as the point's, the difference and each product with it are left
 unrounded, and a term whose product is zero stays in `P6` and in the split of
 `P6 + (y − Ex)` as a bare `c_k`, with no error of its own.
 
-- **`cdz` zero** proves: `(y − Ex) / P6` within `7.77156e-16`, as block 1, and
-  `P −/ Phat` within `4.44089e-16`.
-- **`adz` and `bdz` zero**: `P −/ Phat` proves, within `4.44089e-16`, and the
-  goal fails, best `±3.01471e+1218`, with `(y − Ex) / P6` only within
-  `±2.3429e+1203`.
-- **`adx`, `ady`, `bdx`, `bdy`, `cdx`, `cdy` zero**: `REL(P, Phat)` and the
-  goal fail, best `±3.24661e+1218` (`±3.01471e+1218` for `cdx` and `cdy`).
+Each of the nine proves at the code's `B`:
 
-Untried: in `cdz`'s script the zero `c5` and `c6` come last in the split, and
-in `adz`'s, `c1` and `c2` come first. Whether that is why one proves and the
-other does not was not run.
+- `adx`, `ady`, `bdx`, `bdy` and `cdz` zero: `(y − Ex) / P6` within
+  `7.77156e-16`, which is `7u + 11u²` and some `u³`.
+- `adz`, `bdz`, `cdx` and `cdy` zero: within `6.66134e-16`, `6u + 13u²` and
+  some `u³`.
+- `P −/ Phat` within `4.44089e-16` in each: `4u + 9u²` above for the six x
+  and y differences, `4u + 7u²` for the three z ones.
+
+Each fails below `B`. At `B = 6b-53` the `7u` scripts fail with best
+`±1.16667` and the `6u` ones with best `±1`. At `B = 5b-53` they fail with
+`±1.4` and `±1.2`.
+
+Without the last lines the generator writes, eight of the nine failed: `adz`
+and `bdz` with `(y − Ex) / P6` only within `±2.3429e+1203`, and the six x and
+y differences at `REL(P, Phat)`, with the goal's best `±3.24661e+1218`. Gappa
+asked for more bounds says why. With `adx` zero, `REL(second, M2)`,
+`REL(third, M3)`, `REL(q2, |cdxady| + |adxcdy|)` and `REL(q3, ...)` fail. With
+`adz` zero, `rs` gets only `±2.31901e+1217`. Each of these rounds a sum one of
+whose parts is the unrounded zero, and Gappa has no `FIX` for that part, so it
+does not know the sum is a double. The hints `cdxady - adxcdy -> cdxady;` and
+`t1 + t2 -> t2;` pass its check, since `adx` is `ax − ax`, and then the
+rounding is of a double. The same hint for `q2` cannot pass, since the check
+takes `|adxcdy|` as a number of its own. So the scripts take `q`'s rounding
+off by `u + 2u²` as a hypothesis, which lemma.g gives once `|q| ≥ 2⁻¹⁰²²`, and
+a goal checks that.
+
+Putting the zero `c`'s last in `P6` and in the split, as `cdz`'s are, changed
+nothing: without the hints `adz` still printed `±2.3429e+1203`.
+
+`gappa -Bcoq` writes each of the nine proofs, 8664 to 10060 lines with 32 to
+34 hints, and `coqc` under 464.5's commands accepts each, exit 0, in 4.1 to
+9.8 s.
+
+Still DRAFT below this line: the write-up, 464.6 and 464.7's pointers here,
+and rows for two differences at zero, and a difference and a minor at zero.
 
 ```python
 """Write block 1 with one of the nine differences adx to cdz zero, as zd_<name>.g."""
@@ -2868,6 +2893,9 @@ PRODUCT = {
     6: ("bdxady", "bdx * ady", 3),
 }
 MINOR = {1: "first", 2: "second", 3: "third"}
+# Each minor's two products, and what its q rounds.
+MINUS = {1: ("bdxcdy", "cdxbdy"), 2: ("cdxady", "adxcdy"), 3: ("adxbdy", "bdxady")}
+NOTE = {1: "|bdxcdy| + |cdxbdy|", 2: "|cdxady| + |adxcdy|", 3: "|adxbdy| + |bdxady|"}
 # The z difference each term multiplies its minor by.
 TERM_OF = {"adz": 1, "bdz": 2, "cdz": 3}
 BOUND = "in [-4503599627370497b-105, 4503599627370497b-105]\n"
@@ -2942,6 +2970,14 @@ def make(name):
             "  # §12.2's first condition: product_is_normal on the nine products. The\n"
             f"  # check on {name} and {minor} passes on the zero, and says nothing.\n",
         )
+        if m == 3:
+            tail = ""
+        else:
+            other = 3 - m
+            tail = (
+                f"\n# t{m} is zero, so t1 + t2 is the double t{other} and rounds to itself.\n"
+                f"t1 + t2 -> t{other};\n"
+            )
     else:
         gone = [k for k, (_, f, _) in PRODUCT.items() if name in f]
         for k in gone:
@@ -2958,6 +2994,29 @@ def make(name):
             "  # §12.2's first condition: product_is_normal on the nine products.\n",
             "  # §12.2's first condition: product_is_normal on the nine products. The\n"
             f"  # checks on {names} pass on the zero, and say nothing.\n",
+        )
+        minors = [PRODUCT[k][2] for k in gone]
+        hints = []
+        for k in gone:
+            prod, _, m = PRODUCT[k]
+            left, right = MINUS[m]
+            hints.append(f"{left} - {right} -> -{right};\n" if prod == left else f"{left} - {right} -> {left};\n")
+        qs = [f"q{m}" for m in minors]
+        last = f"  /\\ eb -/ B * P {BOUND}"
+        src = sub(
+            src,
+            last,
+            last + f"  # {qs[0]} and {qs[1]} each round a double plus a zero, so each is at least\n"
+            "  # 2^-1022 as that double is, and lemma.g gives the same of them. The\n"
+            "  # goals check the first part.\n"
+            + "".join(f"  /\\ q{m} -/ ({NOTE[m]}) {BOUND}" for m in minors),
+        )
+        goal = "  (y - Ex) / P6 in ? /\\ P -/ Phat in ?\n"
+        src = sub(src, goal, goal + "".join(f"  /\\ |q{m}| >= 1b-1022\n" for m in minors))
+        mins = " and ".join(MINOR[m] for m in minors)
+        tail = (
+            f"\n# {names} are zero, so {mins} each round a double less a zero, or a\n"
+            "# zero less a double, and so round to themselves.\n" + "".join(hints)
         )
     src = sub(
         src,
@@ -2976,7 +3035,7 @@ def make(name):
         src = sub(src, f"(c{k} + e{k}) - c{k} -> e{k};\n", "")
         src = sub(src, line_starting(src, f"e{k} / c{k} -> ") + "\n", "")
         src = sub(src, f"(c{k} + e{k})", f"c{k}")
-    return src
+    return src + tail
 
 
 def line_starting(src, start, containing=""):
