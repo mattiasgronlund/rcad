@@ -12779,6 +12779,82 @@ mod tests {
         );
     }
 
+    /// **A stretch of an open input edge off its own end is left out only on a
+    /// circle, and refused on an ellipse** (Q2600). The edge runs round the
+    /// ellipse the plane `z = x` cuts the pipe in, from `(5, 0, 5)` to
+    /// `(0, 5, 0)`, and the stretch runs from `(5, 0, 5)` to a place a rounding
+    /// off it: the shape the circle above leaves out. On a circle the chord
+    /// between the edge's two ends puts every place within a box of its end
+    /// beside that end. Nothing proves that of an ellipse, which can come back
+    /// within a box of the end further along the edge, and a stretch to there
+    /// is most of the edge.
+    #[test]
+    fn a_stretch_off_an_open_edges_own_end_round_an_ellipse_is_refused() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(5.0, &Isometry::identity())
+            .expect("a positive radius");
+        let face = model.faces().next().expect("a ball has a face").key();
+        let start = model.add_vertex(Point::new(5.0, 0.0, 5.0));
+        let end = model.add_vertex(Point::new(0.0, 5.0, 0.0));
+        let edge = model.add_edge(start, end);
+        let id = model.id();
+        let (start, edge) = (VertexKey::new(start, id), EdgeKey::new(edge, id));
+        let flat = |normal: Vector| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::origin(), normal)
+                    .expect("a normal with length"),
+            )
+        };
+        let leaning = flat(Vector::new(1.0, 0.0, -1.0));
+        let a_rounding_past_five =
+            || Interval::new(5.0, 5.0_f64.next_up()).expect("lo is below hi");
+        let stretch = side(
+            [leaning, pipe()],
+            [
+                MeetPoint::Existing {
+                    vertex: start,
+                    point: PredicatePoint::from([5.0, 0.0, 5.0]),
+                },
+                MeetPoint::OfThreeSurfaces {
+                    surfaces: [leaning, pipe(), flat(Vector::new(0.0, 1.0, 0.0))],
+                    which: 0,
+                    point: PredicatePoint::Constructed([
+                        a_rounding_past_five(),
+                        Interval::exactly(0.0),
+                        a_rounding_past_five(),
+                    ]),
+                },
+            ],
+            &[edge],
+        );
+
+        let given = Corners::with_each_closed_curve_started_once(
+            &model,
+            BTreeMap::new(),
+            &[],
+            std::iter::once(&stretch),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("no closed curve to name")
+        .of_both_ends(
+            &model,
+            &stretch,
+            face,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(
+                given,
+                Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
+                    if refused == face && at == Point::new(5.0, 0.0, 5.0)
+            ),
+            "{given:?}"
+        );
+    }
+
     /// The two circles a plane through a ring's axis cuts it in are two
     /// names, and each is one name in all four spellings of the plane and the
     /// ring, in either order (§378.6).
