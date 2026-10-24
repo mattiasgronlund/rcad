@@ -2905,10 +2905,10 @@ impl BuildingAMesh {
         let quarters: [f64; 4] = [0, 1, 2, 3].map(|step| from + f64::from(step) * whole_turn / 4.0);
         let (up, down) =
             with_a_corner_where_a_pole_side_of_either_passes(up, down, quarters, pinch, whole_turn);
-        // **Each quarter is brought into the bottom loop's own turn first.**
-        // Both loops run a whole turn, but each starts wherever the pair that
-        // cut it started, so a quarter taken off the top can land outside the
-        // longitudes the bottom's corners run between — and
+        // **Each quarter is measured against the bottom loop's corners the
+        // short way round.** Both loops run a whole turn, but each starts
+        // wherever the pair that cut it started, so a quarter taken off the top
+        // can land outside the longitudes the bottom's corners run between — and
         // [`nearest_longitude`] would then answer the same end corner for two
         // different quarters. A frustum's band, ringed by a corner-up cube's
         // arcs, has its bottom running `-2.66` to `3.58` against a top running
@@ -2922,12 +2922,23 @@ impl BuildingAMesh {
         // the bottom at all and the next spanned half the turn — which is what
         // [`BuildingAMesh::cut_off_what_goes_too_far_round`]'s own argument says
         // no patch may do.
+        //
+        // **Moving each quarter by whole turns into the bottom's own turn was
+        // not enough**, which is how both were cut until Q2725: a quarter that
+        // rounds just below the bottom's first corner went a whole turn on,
+        // past the bottom's last corner, and that last corner was then the
+        // nearest. Q2571's two round bars turned 4.0 had a quarter at
+        // `-0.7123889803846901` against the first corner's
+        // `-0.7123889803846897`, so the cut landed on the corner a quarter of a
+        // turn back, ran slanted across a hole the cut before it already met,
+        // and the fuse was refused `CurvedFaceWithAHoleGoesTooFarRound`
+        // (`a_closed_edge_whose_corner_moved_after_one_face_read_it.rs`).
         let picked = quarters.map(|at| {
             the_two_nearest_across(
                 &up,
                 &nearest_longitude(&up, at),
                 &down,
-                &nearest_longitude(&down, in_the_turn_of(&down, at, whole_turn)),
+                &nearest_longitude_the_short_way_round(&down, at, whole_turn),
             )
         });
         let islands: Vec<WalkedLoop> = islands
@@ -6536,17 +6547,26 @@ fn nearest_longitude(around: &WalkedLoop, at: f64) -> Vec<usize> {
         .collect()
 }
 
-/// A longitude moved by whole turns into the turn a loop's own corners run in,
-/// so that [`nearest_longitude`] answers corners of the stretch it names rather
-/// than whichever end of the loop is closest.
+/// Which corners of a loop that goes right round sit nearest a longitude, each
+/// taken the short way round: every one as near as the nearest, in the order
+/// the loop walks them.
 ///
-/// A loop that goes right round spans one whole turn, so every longitude has
-/// exactly one place in it and the answer is never a choice. A longitude already
-/// in that turn comes back byte for byte, which is what keeps a ring the mesher
-/// already cut meshing exactly as it did.
-fn in_the_turn_of(around: &WalkedLoop, at: f64, whole: f64) -> f64 {
-    let least = least_longitude(around);
-    at - ((at - least) / whole).floor() * whole
+/// **The side that closes such a loop runs on to its first corner a whole turn
+/// round**, so a longitude past the last corner can be nearer the first going
+/// on than the last going back, and a longitude a whole turn off is as near
+/// the same corners. Measured the short way round, neither the turn the
+/// longitude was taken in nor where the loop happens to start decides which
+/// corner answers. A corner less than half a turn away is measured as `corner
+/// − at`, byte for byte, as [`nearest_longitude`] measures it.
+fn nearest_longitude_the_short_way_round(around: &WalkedLoop, at: f64, whole: f64) -> Vec<usize> {
+    let away = |which: usize| the_short_way_round(around.corners[which][0] - at, whole).abs();
+    let nearest = (0..around.corners.len())
+        .map(away)
+        .min_by(f64::total_cmp)
+        .expect("a walked loop has a corner");
+    (0..around.corners.len())
+        .filter(|&which| away(which) == nearest)
+        .collect()
 }
 
 /// How many whole turns of longitude have to come off `at` to bring it within
