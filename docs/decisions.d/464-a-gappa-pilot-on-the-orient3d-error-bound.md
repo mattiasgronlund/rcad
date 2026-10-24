@@ -2890,9 +2890,10 @@ them, in 2.5 to 2.6 s. The same goals at `2⁻¹⁰²¹`, false where `cdxady` i
 Putting the zero `c`'s last in `P6` and in the split, as `cdz`'s are, changed
 nothing: without the hints `adz` still printed `±2.3429e+1203`.
 
-`gappa -Bcoq` writes each of the nine proofs, 8664 to 10060 lines with 32 to
-34 hints, and `coqc` under 464.5's commands accepts each, exit 0, in 4.1 to
-9.8 s. `field` has not been run on these hints (464.10).
+`gappa -Bcoq` writes each of the nine proofs, 8591 to 10060 lines over two
+runs, since Gappa does not write the same proof each run, with 32 to 34 hints.
+`coqc` under 464.5's commands accepts each, exit 0, in 2.6 to 9.8 s. `field`
+has not been run on these hints (464.10).
 
 ```python
 """Write block 1 with one of the nine differences adx to cdz zero, as zd_<name>.g."""
