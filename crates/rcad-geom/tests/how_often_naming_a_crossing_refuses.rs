@@ -337,7 +337,7 @@ fn how_often_a_certified_naming_of_a_crossing_a_hair_from_tangency_refuses() {
     tally.report("the band: drawn exactly tangent, then moved a few last bits off it");
     tally.share_that_refused_is_within(A_CROSSING_ON_A_KNIFE_EDGE_MAY_REFUSE);
     assert!(
-        tally.undecidable.get() + tally.no_half_space.get() + tally.touches_itself.get() > 0,
+        tally.undecidable.get() + tally.no_half_space.get() > 0,
         "a family drawn on the knife edge that never gives up is not reaching the knife edge"
     );
     tally.enough_of_them_crossed();
@@ -422,7 +422,6 @@ struct Tally {
     named: Cell<usize>,
     undecidable: Cell<usize>,
     no_half_space: Cell<usize>,
-    touches_itself: Cell<usize>,
     crossed: Cell<usize>,
     /// Which answer came back, and how often. A rate on its own cannot tell a
     /// timid filter from a family that stopped crossing at all (§14.7).
@@ -459,16 +458,10 @@ impl Tally {
                 self.no_half_space.set(self.no_half_space.get() + 1);
                 "refused: no half-space tells the two pieces apart"
             }
-            // A gap (§31.9), counted apart from both of the above because what
-            // runs out is not the arithmetic but the marcher. The shapes still
-            // refused here, a ball reaching exactly across a pipe and a thin
-            // pipe resting on the inside of a wider one, cross in a quartic
-            // through a point where the two surfaces are tangent, and drawing
-            // it needs a marcher that stops there.
-            Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo) => {
-                self.touches_itself.set(self.touches_itself.get() + 1);
-                "refused: the crossing runs through itself"
-            }
+            // A crossing that runs through itself is no refusal of naming's
+            // since Q2649: a ball reaching exactly across a pipe and a thin
+            // pipe resting on the inside of a wider one are both named as two
+            // loops that meet where the walls touch.
             Err(why) => panic!("a pair of surfaces this generator draws should not give {why}"),
             // `SurfaceMeet` grows as the pair table does, and guessing what a
             // new arm means is worse than stopping.
@@ -481,13 +474,11 @@ impl Tally {
         let named = self.named.get();
         println!(
             "{what}: {named} pairs, {} refused for want of a sign ({:.2}%), {} for want of a \
-             half-space ({:.2}%), {} for running through themselves ({:.2}%)",
+             half-space ({:.2}%)",
             self.undecidable.get(),
             100.0 * self.undecidable.get() as f64 / named as f64,
             self.no_half_space.get(),
-            100.0 * self.no_half_space.get() as f64 / named as f64,
-            self.touches_itself.get(),
-            100.0 * self.touches_itself.get() as f64 / named as f64
+            100.0 * self.no_half_space.get() as f64 / named as f64
         );
         for (answer, count) in self.answers.borrow().iter() {
             println!(

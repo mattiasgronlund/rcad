@@ -22,8 +22,9 @@
 //!
 //! - **a tangency** — a plane resting on a ball, two balls resting on each
 //!   other, two pipes of one width whose axes meet, whose walls touch at two
-//!   points, or a thin pipe resting on the inside of a fat one, whose walls
-//!   touch at one — where the discriminant is exactly zero; and
+//!   points, or a thin pipe resting on the inside of a fat one, or a pipe on
+//!   the inside of a wider ball, whose walls touch at one — where the
+//!   discriminant is exactly zero; and
 //! - **two directions exactly square or exactly parallel**: a plane along a
 //!   pipe's axis, or two parallel planes. The pipe one is the surprise. A plane
 //!   *not* parallel to an endless pipe always cuts it in an ellipse, however far
@@ -53,12 +54,13 @@
 //! ranges over rather than by reading the property — which is the whole of
 //! §16.10's method (§30).
 //!
-//! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1564 of 2048
-//! quartic pairs compared and 486 skipped**.
-//! [`the_486_skipped_quartic_pairs_split_by_which_clause_skips_them`] pins
-//! what the 486 are a mix of: 334 pairs down one direction, 10 two pipes of
+//! Measured: **1486 of 2048 planar pairs compared and 564 skipped, 1560 of 2048
+//! quartic pairs compared and 490 skipped**.
+//! [`the_490_skipped_quartic_pairs_split_by_which_clause_skips_them`] pins
+//! what the 490 are a mix of: 332 pairs down one direction, 10 two pipes of
 //! one width whose axes meet (§347.9), 57 a thin pipe resting on the inside
-//! of a fat one, 31 a ball and a pipe touching at one point, and 54 two
+//! of a fat one, 6 a ball resting on the far inside of a pipe, 31 a ball and
+//! a pipe touching at one point, and 54 two
 //! pipes of different widths resting against each other from the outside —
 //! a tangency `is_on_a_knife_edge` has no clause for at all (§347), so those
 //! 54 are skipped by the soak's own second check and never asked whether
@@ -73,7 +75,7 @@ use std::cell::Cell;
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence, TestRunner};
-use rcad_geom::{Cylinder, Error, Surface, SurfaceMeet, intersect};
+use rcad_geom::{Cylinder, Error, Sphere, Surface, SurfaceMeet, intersect};
 use rcad_predicates::expansion::{
     difference_of_two_products, expansion_sign, expansion_sum, scale_expansion, two_diff,
     two_product,
@@ -116,8 +118,8 @@ const MOST_PLANAR_PAIRS_MUST_BE_COMPARED: f64 = 0.6;
 /// Half. The generator draws radii up to five and places them up to six apart in
 /// whole numbers, so a lattice pipe pair is exactly tangent surprisingly often —
 /// five apart with radii of two and three is one — and every one of those is a
-/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1564 of
-/// 2048 compared, 486 skipped.
+/// knife edge a turn moves off (§29.5). Measured on the shipped corpus: 1560 of
+/// 2048 compared, 490 skipped.
 const MOST_QUARTIC_PAIRS_MUST_BE_COMPARED: f64 = 0.5;
 
 /// The four pairs whose crossing lies in a plane.
@@ -145,12 +147,12 @@ fn turning_a_pair_of_surfaces_names_the_same_kind_of_crossing() {
 /// whose axes meet are named, as four half ellipses, and skipped by
 /// [`is_on_a_knife_edge`] (see
 /// [`two_pipes_of_one_width_whose_axes_meet_cross_in_one_curve_once_a_turn_parts_the_axes`]),
-/// and so is a thin pipe resting on the inside of a fat one, named as two
-/// loops that meet where the walls touch (see
-/// [`a_thin_pipe_resting_inside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves_the_axes`]).
-/// The rest — a ball and a pipe tangent at a point of their crossing — are
-/// still refused by name rather than answered, so they are skipped by
-/// [`named`] alongside the other refusals.
+/// and so are a thin pipe resting on the inside of a fat one and a ball
+/// resting on the far inside of a pipe, each named as two loops that
+/// meet where the walls touch (see
+/// [`a_thin_pipe_resting_inside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves_the_axes`]
+/// and
+/// [`a_ball_resting_on_the_far_inside_of_a_pipe_crosses_it_in_one_loop_once_a_turn_moves_it`]).
 #[test]
 fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
     the_same_kind_before_and_after(
@@ -159,20 +161,23 @@ fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
     );
 }
 
-/// The 486 pairs the test above skips, split by which clause skips each one.
+/// The 490 pairs the test above skips, split by which clause skips each one.
 ///
 /// Runs the same soak, the same seed, the same 2048 cases, so this counts the
-/// same 486 pairs rather than a different draw of them. Three of the five
-/// buckets are [`is_on_a_knife_edge`]'s own cylinder-cylinder clauses, in the
-/// order that function tries them, since `||` in Rust stops at the first
-/// `true` and a pair that satisfies two clauses at once is counted under
-/// whichever one the function would have stopped at:
+/// same 490 pairs rather than a different draw of them. Four of the six
+/// buckets are [`is_on_a_knife_edge`]'s own clauses, the first three its
+/// cylinder-cylinder ones in the order that function tries them, since `||`
+/// in Rust stops at the first `true` and a pair that satisfies two clauses at
+/// once is counted under whichever one the function would have stopped at:
 ///
 /// - **down one direction** — the two axes are parallel, so the function
 ///   never reaches the other two clauses even when one of them also holds;
 /// - **two pipes of one width whose axes meet** — the Steinmetz tangency;
-/// - **a thin pipe resting inside a fat one** — the other tangency
-///   [`is_on_a_knife_edge`] names.
+/// - **a thin pipe resting inside a fat one** — the other tangency of two
+///   pipes [`is_on_a_knife_edge`] names;
+/// - **a ball resting on the far inside of a pipe** — the ball-against-pipe
+///   clause, the one tangency of a ball and a pipe at a point of a curve they
+///   cross in.
 ///
 /// The other two buckets are pairs [`is_on_a_knife_edge`] says are on no
 /// knife edge at all, skipped anyway on the separate check at the soak's
@@ -182,11 +187,10 @@ fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
 /// the *still* surfaces only, so neither of these two kinds is ever asked
 /// whether turning it would in fact change its answer.
 ///
-/// - **a ball and a pipe touching at one point** — true of every
-///   ball-against-pipe pair this bucket counts, since that combination
-///   always falls through [`is_on_a_knife_edge`]'s `_ => false` arm; this is
-///   the one the file's own doc already names as still refused by kind
-///   rather than answered.
+/// - **a ball and a pipe touching at one point** — from outside, or from
+///   inside a pipe wider than the ball, and named as that one point.
+///   [`is_on_a_knife_edge`]'s ball-against-pipe clause asks only after a
+///   ball wider than the pipe, whose walls touch at a point of a curve.
 /// - **two pipes of different widths resting against each other from
 ///   outside** — the tangency [`is_on_a_knife_edge`] does not name at all.
 ///   Its thin-pipe clause asks whether the axes are `|r₁ − r₂|` apart, which
@@ -201,14 +205,16 @@ fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
 ///   today without silently trusting [`is_on_a_knife_edge`]'s own account of
 ///   why.
 ///
-/// Measured on the shipped corpus: 334 down one direction, 10 two pipes of
-/// one width whose axes meet, 57 a thin pipe resting inside a fat one, 31 a
-/// ball and a pipe touching at one point, and 54 two pipes of different
-/// widths resting against each other from outside — 486 in all, which is
-/// every pair
+/// Measured on the shipped corpus: 332 down one direction, 10 two pipes of
+/// one width whose axes meet, 57 a thin pipe resting inside a fat one, 6 a
+/// ball resting on the far inside of a pipe, 31 a ball and a pipe touching at
+/// one point, and 54 two pipes of different widths resting against each other
+/// from outside — 490 in all, which is every pair
 /// `turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing` skips.
+/// The 6 were refused by [`named`] and drawn again until Q2649 named them, so
+/// naming them moved the draws after them too.
 #[test]
-fn the_486_skipped_quartic_pairs_split_by_which_clause_skips_them() {
+fn the_490_skipped_quartic_pairs_split_by_which_clause_skips_them() {
     let cases = soak::cases(CASES);
     let mut runner = TestRunner::new_with_rng(
         Config {
@@ -227,6 +233,7 @@ fn the_486_skipped_quartic_pairs_split_by_which_clause_skips_them() {
     let down_one_direction = Cell::new(0usize);
     let two_pipes_whose_axes_meet = Cell::new(0usize);
     let a_thin_pipe_inside_a_fat_one = Cell::new(0usize);
+    let a_ball_resting_on_the_far_inside_of_a_pipe = Cell::new(0usize);
     let a_ball_and_a_pipe_touching_at_one_point = Cell::new(0usize);
     let two_pipes_resting_from_outside_on_no_named_knife_edge = Cell::new(0usize);
 
@@ -239,25 +246,32 @@ fn the_486_skipped_quartic_pairs_split_by_which_clause_skips_them() {
             let surfaces = still.surfaces();
 
             if is_on_a_knife_edge(&surfaces) {
-                let [Surface::Cylinder(one), Surface::Cylinder(other)] = &surfaces else {
-                    panic!(
+                match &surfaces {
+                    [Surface::Cylinder(one), Surface::Cylinder(other)] => {
+                        if one
+                            .axis()
+                            .direction()
+                            .cross(other.axis().direction())
+                            .length_squared()
+                            == 0.0
+                        {
+                            down_one_direction.set(down_one_direction.get() + 1);
+                        } else if one.radius() == other.radius() {
+                            two_pipes_whose_axes_meet.set(two_pipes_whose_axes_meet.get() + 1);
+                        } else {
+                            a_thin_pipe_inside_a_fat_one
+                                .set(a_thin_pipe_inside_a_fat_one.get() + 1);
+                        }
+                    }
+                    [Surface::Sphere(_), Surface::Cylinder(_)]
+                    | [Surface::Cylinder(_), Surface::Sphere(_)] => {
+                        a_ball_resting_on_the_far_inside_of_a_pipe
+                            .set(a_ball_resting_on_the_far_inside_of_a_pipe.get() + 1);
+                    }
+                    other => panic!(
                         "the quartic family draws only ball-against-pipe and \
-                         pipe-against-pipe, and is_on_a_knife_edge never skips a \
-                         ball-against-pipe pair"
-                    );
-                };
-                if one
-                    .axis()
-                    .direction()
-                    .cross(other.axis().direction())
-                    .length_squared()
-                    == 0.0
-                {
-                    down_one_direction.set(down_one_direction.get() + 1);
-                } else if one.radius() == other.radius() {
-                    two_pipes_whose_axes_meet.set(two_pipes_whose_axes_meet.get() + 1);
-                } else {
-                    a_thin_pipe_inside_a_fat_one.set(a_thin_pipe_inside_a_fat_one.get() + 1);
+                         pipe-against-pipe: {other:?}"
+                    ),
                 }
                 return Ok(());
             }
@@ -297,20 +311,22 @@ fn the_486_skipped_quartic_pairs_split_by_which_clause_skips_them() {
 
     let on_a_knife_edge = down_one_direction.get()
         + two_pipes_whose_axes_meet.get()
-        + a_thin_pipe_inside_a_fat_one.get();
+        + a_thin_pipe_inside_a_fat_one.get()
+        + a_ball_resting_on_the_far_inside_of_a_pipe.get();
     let on_no_named_knife_edge = a_ball_and_a_pipe_touching_at_one_point.get()
         + two_pipes_resting_from_outside_on_no_named_knife_edge.get();
     let skipped = on_a_knife_edge + on_no_named_knife_edge;
     println!(
         "{} of {cases} quartic pairs compared, {skipped} skipped: {} down one \
          direction, {} two pipes of one width whose axes meet, {} a thin pipe \
-         resting inside a fat one, {} a ball and a pipe touching at one \
-         point, {} two pipes of different widths resting against each other \
-         from outside",
+         resting inside a fat one, {} a ball resting on the far inside of a \
+         pipe, {} a ball and a pipe touching at one point, {} two pipes of \
+         different widths resting against each other from outside",
         compared.get(),
         down_one_direction.get(),
         two_pipes_whose_axes_meet.get(),
         a_thin_pipe_inside_a_fat_one.get(),
+        a_ball_resting_on_the_far_inside_of_a_pipe.get(),
         a_ball_and_a_pipe_touching_at_one_point.get(),
         two_pipes_resting_from_outside_on_no_named_knife_edge.get(),
     );
@@ -319,20 +335,22 @@ fn the_486_skipped_quartic_pairs_split_by_which_clause_skips_them() {
         down_one_direction.get()
             + two_pipes_whose_axes_meet.get()
             + a_thin_pipe_inside_a_fat_one.get()
+            + a_ball_resting_on_the_far_inside_of_a_pipe.get()
             + a_ball_and_a_pipe_touching_at_one_point.get()
             + two_pipes_resting_from_outside_on_no_named_knife_edge.get(),
         skipped,
-        "every skip is counted in exactly one of the five buckets"
+        "every skip is counted in exactly one of the six buckets"
     );
     assert_eq!(
         compared.get(),
-        1564,
+        1560,
         "matches the module doc's published count"
     );
-    assert_eq!(skipped, 486, "matches the module doc's published count");
-    assert_eq!(down_one_direction.get(), 334);
+    assert_eq!(skipped, 490, "matches the module doc's published count");
+    assert_eq!(down_one_direction.get(), 332);
     assert_eq!(two_pipes_whose_axes_meet.get(), 10);
     assert_eq!(a_thin_pipe_inside_a_fat_one.get(), 57);
+    assert_eq!(a_ball_resting_on_the_far_inside_of_a_pipe.get(), 6);
     assert_eq!(a_ball_and_a_pipe_touching_at_one_point.get(), 31);
     assert_eq!(
         two_pipes_resting_from_outside_on_no_named_knife_edge.get(),
@@ -470,6 +488,77 @@ fn a_thin_pipe_resting_inside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves
         ("curves", 1),
         "the turned axes are further apart than the widths differ, so the thin pipe pokes out \
          and the two cross in one loop"
+    );
+}
+
+/// Why the two loops of a ball resting on the far inside of a pipe are a knife
+/// edge, and the one loop the same pair turned is named is not a wrong answer.
+///
+/// The pair is the one the quartic property above first drew once the two
+/// loops were named (Q2649): a ball of radius 5 round `(0, −2, −2)` and a pipe
+/// of radius 4 along `x` through `(0, −1, −2)`, whose axis is one from the
+/// ball's centre, which is what the radii differ by. The pipe's wall touches
+/// the ball's from inside at `(0, 3, −2)`, and the two loops meet there. The
+/// turn rounds the centre and the axis, and the turned centre is a few last
+/// bits nearer or further than one from the turned axis. Nearer, the ball
+/// swallows a whole cross-section and the two loops part; further, that
+/// cross-section pokes out through the ball and the two cross in one loop, and
+/// that is what this turn gives.
+#[test]
+fn a_ball_resting_on_the_far_inside_of_a_pipe_crosses_it_in_one_loop_once_a_turn_moves_it() {
+    let resting = Crossing {
+        first: Piece::Ball {
+            centre: [0, -2, -2],
+            radius: 5,
+        },
+        second: Piece::Pipe {
+            along: [1, 0, 0],
+            through: [0, -1, -2],
+            radius: 4,
+        },
+        turn: None,
+        elsewhere: Elsewhere::here(),
+        hair: None,
+    };
+    let turned = Crossing {
+        turn: Some(Turn {
+            direction: [1, 0, 0],
+            steps: 21,
+        }),
+        ..resting
+    };
+
+    let still = resting.surfaces();
+    assert_eq!(
+        kind_of(&named(&still).expect("a ball resting on the far inside of a pipe is named")),
+        ("curves", 2),
+        "two loops, which meet where the walls touch"
+    );
+    assert!(is_on_a_knife_edge(&still), "and that is a knife edge");
+
+    let moved = turned.surfaces();
+    let [Surface::Sphere(ball), Surface::Cylinder(pipe)] = moved else {
+        panic!("this pair is a ball and a pipe, in that order");
+    };
+    assert_eq!(
+        (ball.radius(), pipe.radius()),
+        (5.0, 4.0),
+        "a turn leaves both radii alone"
+    );
+    assert_eq!(
+        how_far_off_the_axis_the_centre_is_against_what_the_radii_differ_by(&ball, &pipe),
+        Decision::Pos,
+        "the turn rounds the centre further off the axis than the radii differ"
+    );
+    assert!(
+        !is_on_a_knife_edge(&moved),
+        "so the turned pair is on no knife edge"
+    );
+    assert_eq!(
+        kind_of(&named(&moved).expect("the turned pair is named")),
+        ("curves", 1),
+        "the turned centre is further off the axis than the radii differ, so the pipe's \
+         cross-section pokes out through the ball and the two cross in one loop"
     );
 }
 
@@ -709,6 +798,10 @@ fn kind_of(met: &SurfaceMeet) -> (&'static str, usize) {
 /// arm was there because the old question carried the stored direction's
 /// squared length on the ball's side, and `‖w‖²R² − r²` is that direction's
 /// rounding wearing a discriminant's clothes.
+///
+/// A ball **wider** than the pipe resting on its far inside is a knife edge,
+/// and has its own arm: there the centre's distance off the axis, which a turn
+/// does round, is the whole of the question.
 fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
     match surfaces {
         [Surface::Plane(flat), Surface::Cylinder(pipe)]
@@ -733,6 +826,12 @@ fn is_on_a_knife_edge(surfaces: &[Surface; 2]) -> bool {
                 || (one.radius() != other.radius()
                     && how_far_apart_the_axes_are_against_what_the_widths_differ_by(one, other)
                         == Decision::Zero)
+        }
+        [Surface::Sphere(ball), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
+            ball.radius() > pipe.radius()
+                && how_far_off_the_axis_the_centre_is_against_what_the_radii_differ_by(ball, pipe)
+                    == Decision::Zero
         }
         _ => false,
     }
@@ -789,6 +888,61 @@ fn how_far_apart_the_axes_are_against_what_the_widths_differ_by(
     );
     let less_room = room.iter().map(|part| -part).collect::<Vec<_>>();
     the_sign_of(&sum_of(&product_of(&reach, &reach), &less_room))
+}
+
+/// How far the ball's centre is off the pipe's stored axis against what the
+/// two radii differ by, asked exactly: the sign of
+/// `‖(c − o) × w‖² − (R − r)²‖w‖²`, which is `a² − (R − r)²` times `‖w‖²`, for
+/// `a` how far off the axis the centre is.
+///
+/// **A ball resting on the far inside of a pipe is a tangency**: where the
+/// ball is the wider and `a` is `R − r`, the pipe's wall touches the ball's at
+/// the point of the pipe across its axis from the centre, and the two loops the
+/// ball leaves meet there. A turn rounds the centre and the axis, so a turned
+/// pair's `a` is a few last bits from that on one side or the other: nearer,
+/// the ball swallows a whole cross-section of the pipe and the two loops part,
+/// and further, that cross-section pokes out through the ball and the two
+/// cross in one loop. So this is asked exactly, as
+/// [`how_far_apart_the_axes_are_against_what_the_widths_differ_by`] asks the
+/// same of two pipes. It is `intersect`'s own `V < 0, Δ = 0`: `Δ = 0` with
+/// `V < 0` is `√A = (R − r)√W`.
+///
+/// # Panics
+///
+/// If a product leaves the range of `f64`, which no pair drawn here comes near.
+fn how_far_off_the_axis_the_centre_is_against_what_the_radii_differ_by(
+    ball: &Sphere,
+    pipe: &Cylinder,
+) -> Decision {
+    let centre = ball.centre().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    let gap = [0, 1, 2].map(|axis| {
+        let (gap, roundoff) = two_diff(centre[axis], origin[axis]);
+        vec![roundoff, gap]
+    });
+    let square_to_the_axis = [0, 1, 2].map(|axis| {
+        let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
+        sum_of(
+            &product_of(&gap[next], &[along[last]]),
+            &negated(&product_of(&gap[last], &[along[next]])),
+        )
+    });
+    let stored = along.map(|step| vec![step]);
+    let (difference, roundoff) = two_diff(ball.radius(), pipe.radius());
+    let narrowing = [roundoff, difference];
+    let room = product_of(
+        &product_of(&narrowing, &narrowing),
+        &dot_of(&stored, &stored),
+    );
+    the_sign_of(&sum_of(
+        &dot_of(&square_to_the_axis, &square_to_the_axis),
+        &negated(&room),
+    ))
+}
+
+fn negated(exact: &[f64]) -> Vec<f64> {
+    exact.iter().map(|part| -part).collect()
 }
 
 /// `o₂ − o₁`, from one stored axis's origin to the other's, and `d₁ × d₂`,

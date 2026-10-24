@@ -3119,7 +3119,16 @@ check-fuzz-builds:
 # known to reach `Error::CannotMeshAFace` any more (Q2388), so
 # `a_three_balls_crossing_refusal` dropped that arm along with its wildcard
 # and now just defers to `a_curved_refusal` with no match of its own.
-wildcard_arms := "100"
+#
+#     Q2649's lane  100 -> 99
+#
+# One fewer, composite, and no arm went away: `is_on_a_knife_edge` in
+# `the_same_pair_turned_names_the_same_kind_of_crossing.rs` grew an arm for a
+# ball wider than a pipe resting on its far inside (a04e8e99), where the
+# centre's distance off the axis, which a turn rounds, is the whole question.
+# The match now names `Sphere` beside `Plane` and `Cylinder`, so its `_ =>
+# false` leaves two of `Surface`'s variants unnamed where it left three.
+wildcard_arms := "99"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:

@@ -14,8 +14,8 @@
 
 use rcad_geom::{
     Axis, BSplineCurve, Cone, Cylinder, Deflection, DynamicRange, EdgeRun, Error, Isometry,
-    KnotVector, MAX_DEGREE, NamedRun, Plane, Point, Scale, Segment, Sphere, Surface, Torus, Unit,
-    Vector, intersect, meet_of_three_surfaces, walk, where_a_closed_crossing_starts,
+    KnotVector, MAX_DEGREE, NamedRun, Plane, Point, Scale, Segment, Sphere, Surface, SurfaceMeet,
+    Torus, Unit, Vector, intersect, meet_of_three_surfaces, walk, where_a_closed_crossing_starts,
 };
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
 
@@ -253,9 +253,12 @@ fn one_surface_written_twice_is_a_limit() {
 
 /// A ball one out with a radius of three reaches exactly across a pipe of
 /// radius two, so the two loops it cuts pinch together at `(-2, 0, 0)`, a
-/// point both surfaces hold exactly.
+/// point both surfaces hold exactly. That the answer exists is what made the
+/// refusal a gap, and since Q2649 the pinch is named, as two loops through
+/// that point. The fuse's arrangement still gives the refusal for two loops
+/// it can prove neither apart nor meeting, and there it is still a gap.
 #[test]
-fn a_crossing_that_pinches_is_a_gap() {
+fn a_crossing_that_pinches_is_a_gap_and_is_named() {
     let ball = a_ball([1.0, 0.0, 0.0], 3.0);
     let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
     let pinch = rcad_predicates::Point::from([-2.0, 0.0, 0.0]);
@@ -265,14 +268,18 @@ fn a_crossing_that_pinches_is_a_gap() {
     assert_eq!(round.side_of(pinch), Decision::Zero);
     assert_eq!(straight.side_of(pinch), Decision::Zero);
     for [one, other] in [[&ball, &pipe], [&pipe, &ball]] {
-        let refusal = intersect(one, other, &Policy::certified(), &mut ProvenanceLog::new())
-            .expect_err("a crossing that runs through itself is not named");
-        assert_eq!(
-            refusal,
-            Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo
-        );
-        assert_eq!(refusal.limit_or_gap().to_string(), "gap");
+        let named = intersect(one, other, &Policy::certified(), &mut ProvenanceLog::new());
+        let Ok(SurfaceMeet::Curves(runs)) = &named else {
+            panic!("a crossing that runs through itself is named as two loops: {named:?}");
+        };
+        assert_eq!(runs.len(), 2, "two loops: {runs:?}");
     }
+    assert_eq!(
+        Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo
+            .limit_or_gap()
+            .to_string(),
+        "gap"
+    );
 }
 
 /// A plane beside a ring's axis, through the middle of its tube, cuts the tube
