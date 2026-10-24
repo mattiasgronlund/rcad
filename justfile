@@ -128,6 +128,7 @@ gate_steps := "check-plugins \
     check-corpus-selftest \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
+    check-rustc-stand-in-selftest \
     check-timing-hooked-calls-selftest \
     check-timing-hooked-calls \
     check-fuzz-watermark-selftest \
@@ -343,6 +344,7 @@ gate_reusable_steps := "check \
     check-corpus-selftest \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
+    check-rustc-stand-in-selftest \
     check-timing-hooked-calls-selftest \
     check-timing-hooked-calls \
     check-hooks \
@@ -5034,8 +5036,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "63" ]; then \
-        echo "found $n check-* recipes, expected 63"; \
+    if [ "$n" != "64" ]; then \
+        echo "found $n check-* recipes, expected 64"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -9817,6 +9819,91 @@ check-fuzz-overnight-selftest:
     bound=130
     [ "$SECONDS" -le "$bound" ] \
         || { echo "check-fuzz-overnight-selftest took $SECONDS s, over its bound of $bound s: arms that should run beside each other are running in turn, or one of them is waiting on something new"; exit 1; }
+
+# `fuzz/rustc-stand-in.sh`'s crate-name match, which nothing else here runs:
+# `check-fuzz-overnight-selftest` stubs `cargo` itself, so the stand-in script
+# never runs inside it, and `check-fuzz-builds` sets no `RUSTC` at all
+# (docs/decisions.d/465 §465.8). Without this, the `inari` arm the fix added
+# for §465.9 could drift — stop matching, or start catching a crate it should
+# not — and nothing would say so until a fuzz night's build log was read by
+# hand.
+#
+# Runs the real script against a stub `rustup` and a stub `rustc`, so no
+# nightly toolchain is needed. The stub `rustup` answers only the one call the
+# script makes, `rustup which --toolchain nightly rustc`, with the path of the
+# stub `rustc`; anything else is a drift in the script worth failing on. The
+# stub `rustc` writes its own argv, one word a line, to the file `$CAPTURE`
+# names, so the three flags the `inari` arm adds can be checked for by exact
+# line rather than by a loose grep that would also match a flag's name inside
+# another flag's value.
+#
+# Three crates: `inari` must get all three of `-Cllvm-args=-sanitizer-coverage-
+# level=0`, `-Cdebug-assertions=off` and `-Coverflow-checks=off`;
+# `rcad_fuzz_timing` must get the first and not the other two, since its own
+# code must still assert and still overflow-check the way the rest of the fuzz
+# build does (§267.4); and a crate that is neither must get none of the three,
+# or the match is catching more than its own two names.
+[private]
+check-rustc-stand-in-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+
+    fail() {
+        echo "fuzz/rustc-stand-in.sh's crate-name match drifted: $1"
+        exit 1
+    }
+
+    realrustc="$dir/real-rustc"
+    cat >"$realrustc" <<'STUB'
+    #!/usr/bin/env bash
+    printf '%s\n' "$@" >"$CAPTURE"
+    STUB
+    chmod +x "$realrustc"
+
+    bin="$dir/bin"
+    mkdir -p "$bin"
+    cat >"$bin/rustup" <<STUB
+    #!/usr/bin/env bash
+    if [ "\$1" = which ] && [ "\$2" = --toolchain ] && [ "\$3" = nightly ] && [ "\$4" = rustc ]; then
+        echo "$realrustc"
+        exit 0
+    fi
+    echo "stub rustup got unexpected args: \$*" >&2
+    exit 1
+    STUB
+    chmod +x "$bin/rustup"
+
+    run() {
+        local crate="$1"
+        CAPTURE="$dir/$crate.argv" PATH="$bin:$PATH" \
+            "{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" --crate-name "$crate" --edition 2021 lib.rs
+    }
+
+    run inari
+    run rcad_fuzz_timing
+    run rcad_fuzz_explain
+
+    grep -qxF -- '-Cllvm-args=-sanitizer-coverage-level=0' "$dir/inari.argv" \
+        || fail "inari did not get the coverage-counters-off flag"
+    grep -qxF -- '-Cdebug-assertions=off' "$dir/inari.argv" \
+        || fail "inari did not get debug-assertions=off"
+    grep -qxF -- '-Coverflow-checks=off' "$dir/inari.argv" \
+        || fail "inari did not get overflow-checks=off"
+
+    grep -qxF -- '-Cllvm-args=-sanitizer-coverage-level=0' "$dir/rcad_fuzz_timing.argv" \
+        || fail "rcad_fuzz_timing did not get the coverage-counters-off flag"
+    if grep -qxF -- '-Cdebug-assertions=off' "$dir/rcad_fuzz_timing.argv"; then
+        fail "rcad_fuzz_timing got inari's debug-assertions=off too"
+    fi
+    if grep -qxF -- '-Coverflow-checks=off' "$dir/rcad_fuzz_timing.argv"; then
+        fail "rcad_fuzz_timing got inari's overflow-checks=off too"
+    fi
+
+    if grep -qxF -- '-Cllvm-args=-sanitizer-coverage-level=0' "$dir/rcad_fuzz_explain.argv"; then
+        fail "a crate that is neither inari nor rcad_fuzz_timing was caught by the match"
+    fi
 
 # `fuzz/timing-hooked-calls.py`'s split, pinned against a hand-assembled
 # object rather than a compiled one — the exact instructions are under test
