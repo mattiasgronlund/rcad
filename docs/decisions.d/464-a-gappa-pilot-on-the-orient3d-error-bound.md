@@ -17,7 +17,7 @@ Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
 `*_ROUNDOFF` constants. 464.10 is Q2661, which proves block 1's hints in Coq
 and settles how the scripts join the tree and what notices the Rust moving
 under them. 464.11 is Q2675, which runs the branches where one of the nine
-differences is zero.*
+differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -30,6 +30,7 @@ differences is zero.*
   464.9   Which of the eleven *_ROUNDOFF constants Gappa can state
   464.10  Whether the scripts join the tree and the gate
   464.11  One of the nine differences at zero
+  464.12  The sphere of surface.rs' tests
 
 ### 464.1 The bugs a bound prover is for
 
@@ -92,13 +93,16 @@ proof gets checked. It was also expected to see an overflow, which it does not
 (464.4). FPTaylor, to find tight numbers, and
 Lean, for the any-degree bounds, wait on what it finds.
 
-There are twenty bound constants outside tests, found by `grep -rnE 'const
+There are twenty bound constants, found by `grep -rnE 'const
 [A-Z0-9_]*(ROUNDOFF|ERROR_BOUND)[A-Z0-9_]*\s*:' crates`: 17 in `rcad-geom`, 3 in
-`rcad-predicates`. The case for proving them grows once rcad turns to speed.
-Every rewrite of an expression for speed (another order, an FMA, two lanes at
-once) moves its rounding, so its derivation has to be done again, and §16.3's
-test could not tell a bound wrong by a factor of two. A tighter bound may also let the `f64` level decide
-more often, but how often each level runs today has not been measured.
+`rcad-predicates`. One of the three, `surface.rs:77`, sits inside `#[cfg(test)]
+mod tests` (`surface.rs:20-21`), so nineteen are outside tests, two of them in
+`rcad-predicates` (464.12). The case for proving them grows once rcad turns
+to speed. Every rewrite of an expression for speed (another order, an FMA, two
+lanes at once) moves its rounding, so its derivation has to be done again, and
+§16.3's test could not tell a bound wrong by a factor of two. A tighter bound
+may also let the `f64` level decide more often, but how often each level runs
+today has not been measured.
 
 ### 464.3 What the pilot answers
 
@@ -233,13 +237,13 @@ stamp recorded.
 
 **6. The other nineteen.** Eight are sign filters of orient3d's kind, an
 `on_floats` whose `error_bound` is a constant times a permanent:
-`ORIENT2D_ERROR_BOUND` and `surface.rs`' `ERROR_BOUND` in `rcad-predicates`,
-and `SIDE_OF_PLANE`, `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT`,
-`SIDE_OF_SPHERE`, `SIDE_OF_CYLINDER`, `SIDE_OF_CONE` and `SIDE_OF_TORUS` in
-`rcad-geom`. Block 1's pattern should carry over to them: one ratio hint per
-rounding, the error split into one term per product of the permanent so that
-Gappa can average them, block 2 for the closed normal end, and
-`-Eprecision=200`. That is Q2659. The eleven `*_ROUNDOFF` constants were not
+`ORIENT2D_ERROR_BOUND` and `surface.rs`' `ERROR_BOUND` (a test's, 464.12) in
+`rcad-predicates`, and `SIDE_OF_PLANE`,
+`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT`, `SIDE_OF_SPHERE`, `SIDE_OF_CYLINDER`,
+`SIDE_OF_CONE` and `SIDE_OF_TORUS` in `rcad-geom`. Block 1's pattern should
+carry over to them: one ratio hint per rounding, the error split into one term
+per product of the permanent so that Gappa can average them, block 2 for the
+closed normal end, and `-Eprecision=200`. That is Q2659. The eleven `*_ROUNDOFF` constants were not
 read for this. Two of them, `EVALUATION_ROUNDOFF` and `REFINEMENT_ROUNDOFF`,
 hold per de Boor pass at any degree, and a Gappa script states one fixed
 expression, so it could only do them one degree at a time. That is Q2660. The
@@ -539,7 +543,7 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   was. Done for two, in 464.8: `ORIENT2D_ERROR_BOUND` and
   `SIDE_OF_PLANE_ERROR_BOUND` are proved at the code's constants, orient2d's
   with its products below the normals too, and each of the other six is a row
-  of its own.
+  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those. Done, in 464.9: three are proved at the code's
   constants, two of them false when every number is below `2⁻¹⁰²²`, and each
@@ -1832,8 +1836,8 @@ for byte as they were run.
 **7. What this leaves.** The rows filed with this write-up:
 
 - Six rows, one for each bound 464.6 named that is not proved yet:
-  `surface.rs`' `ERROR_BOUND` in `rcad-predicates`, and
-  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND`,
+  `surface.rs`' `ERROR_BOUND` in `rcad-predicates` (Q2677, done in 464.12),
+  and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND`,
   `SIDE_OF_SPHERE_ERROR_BOUND`, `SIDE_OF_CYLINDER_ERROR_BOUND`,
   `SIDE_OF_CONE_ERROR_BOUND` and `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
   Each is to be proved as 1 to 5 here prove orient2d and the side of a plane:
@@ -3074,3 +3078,646 @@ for name in sys.argv[1:]:
   with `first`. A row.
 - The row that moves the scripts into `proofs/gappa/` after the fourteen of
   464.10 3 f now waits on those two as well, since they append here too.
+
+### 464.12 The sphere of surface.rs' tests
+
+Q2677 took up the `ERROR_BOUND` in `crates/rcad-predicates/src/surface.rs`,
+in three lanes on 2026-10-24. The first ran every proof, control and `coqc`.
+The second wrote every script again from its generator and ran each one
+again, with the same results. The third wrote this up. The bound is proved at
+the code's constant, on the sum before `value`'s last rounding and on `value`
+too, in every case where `on_floats` hands `decide` a number, and Coq checks
+each proof, modulo its hints. Nothing in `surface.rs` needs to change.
+
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
+`surface.rs`, `point.rs` and `cascade.rs` at `3d60b0de`. `u` is `2⁻⁵³`, and
+the code's `B = 8u + 64u²` is written `B = 8b-53 + 1b-100;`. Each script
+follows 464.8's pattern: one ratio hint per rounding, the error split into one
+term per square of the permanent so that Gappa averages them, 464.5's lemma
+for each square `on_floats` checks is normal, and the step from `y`, the sum
+before `value`'s last rounding, to the sign as 464.4 gives it.
+
+**1. What the proof guards.** `HowFarOut` is a demo. It sits inside
+`#[cfg(test)] mod tests` (`surface.rs:20-21`), and the `Sphere` it reads
+stands in "for the quadrics `rcad-geom` will bring" (`surface.rs:28-30`). No
+path a user reaches runs it, so the proof guards a test's predicate.
+`rcad-geom`'s own sphere, `SIDE_OF_SPHERE_ERROR_BOUND` (`sphere.rs:425`), is a
+row of its own, Q2679. 464.2 counted this constant among twenty outside tests.
+It is the one of the twenty inside them, and 464.2 now says so.
+
+**2. `on_floats`, line for line.** `HowFarOut::on_floats`
+(`surface.rs:58-87`) takes the three gaps from the centre to the point. It
+returns `None` unless `product_is_normal` holds for each gap with itself and
+for the radius with itself (`surface.rs:65-66`). Then it squares the four and
+returns `value = s0 + s1 + s2 - rr` (`surface.rs:84`) and `error_bound =
+ERROR_BOUND * permanent`, with `permanent = s0 + s1 + s2 + rr`
+(`surface.rs:81`). The code writes both sums out in full, but the same
+additions in the same order round the same, so the permanent's first two sums
+are `value`'s, and `sphere.g` writes `P = rnd(s012 + rr)`. That makes ten
+roundings: the three gaps, the three squares, `rr`, `s01`, `s012` and
+`value`. `y` takes the first nine.
+
+Block 1 gives Gappa each product's sign as a hypothesis, such as `adz / |adz|
+in [-1, 1]`. `sphere.g` needs none. Each term of its permanent is a square,
+and Gappa proves a square and its rounding are never negative. `sqsign.g`,
+whole, exits 0:
+
+```gappa
+@rnd = float<ieee_64, ne>;
+x = rnd(x_);
+s = rnd(x * x);
+{ |x| <= 1b1024 /\ |x| >= 1b-1074 -> s in [0, 1b2100] /\ x * x in [0, 1b2100] }
+```
+
+**3. The bound on `y`.** `sphere.g` (9 below) proves `|y − Ex| ≤ eb` at the
+code's `B`, printing `(y − Ex) / Phat` within `5u + 7u²` and some `u³`, and
+`P −/ Phat` within `3u + 3u²` and some `u³`. `Phat` is the permanent with no
+rounding of its own. The smallest `B` it proves, by bisection over `m` in `B
+= 5u + m u²`, is `5u + 28u²`: `5u + 27u²` fails, best `[-1, 1]` as Gappa
+prints it, rounded, and so does `5u`.
+
+**4. The claim on `value`.** `spherev.g` makes the same claim on `value`, the
+double `on_floats` returns. It proves at the code's `B`, printing `(value −
+Ex) / Phat` within `6u + 5u²` and some `u³`. Its smallest `B`, by the same
+bisection over `B = 6u + m u²`, is `6u + 30u²`: `6u + 29u²` fails, and so
+does `6u`. So here `value` itself stays within `eb`, as plane's does (464.8's
+3) and orient2d's does not (464.8's 1). `decide` does not need it to: the doc
+on `Filtered::error_bound` (`cascade.rs:25-35`) asks only for the bound on
+the sum before `value`'s last rounding, which 3 proves.
+
+**5. What the comment claims.** `ERROR_BOUND` has no `///` doc comment. The
+only prose on it is the plain `//` comment above it, `surface.rs:74-76`:
+"Deliberately looser than the six roundings this actually takes. Too large a
+bound only costs level 1 hits; too small a one costs correctness." Six is
+what a gap's term goes through on its way to `value` (the gap, its square,
+`s01`, `s012` and `value`) with the gap's rounding counted twice, since it is
+squared. It agrees with the `6u` Gappa prints in 4. On `y` the same count is
+five, and Gappa prints `5u`. The code's `8u + 64u²` is above both smallest
+`B`s, `5u + 28u²` and `6u + 30u²`, so "deliberately looser" holds, and the
+comment claims nothing that is not proved.
+
+The comment on the check, `surface.rs:63-64`, says "A relative bound says
+nothing about a product that fell into the subnormals, so this level declines
+rather than certify one." That says what the level does, not that it would
+certify a wrong sign without the check. 7 shows that the script needs the
+check's hypotheses. Whether the code needs the check, a square below the
+normals with the other three normal as 464.8's 4 ran for plane's products, was
+not run. With the check in place `on_floats` never meets that case, and
+`HowFarOut` is a test's demo, so it is not a row. `rcad-geom`'s sphere, Q2679,
+is where that question has a user behind it.
+
+**6. The zeros `product_is_normal` lets through.** 464.8's `o2s.g` splits on
+a product that `on_floats` does not check. Here there is none, since
+`on_floats` checks all four squares before it computes anything. What the
+check lets through instead is a zero. `product_is_normal(a, b)` is true when
+`a` or `b` is zero (`cascade.rs:67-69`), so a zero gap or a zero radius
+reaches the sum with a zero square, which 464.5's lemma does not cover. A zero
+gap is a shape designers make: the test's point `(2, 0, 0)` on the unit
+sphere centred at the origin (`surface.rs:162`) has two.
+
+`spherecases.py` (9 below) writes a script for each set of squares that can be
+zero at once: `sphere_z<set>.g` on `y` and `spherev_z<set>.g` on `value`,
+`<set>` naming which of the gaps `x`, `y`, `z` and the radius `r` are zero. A
+zero gap's centre coordinate is the same double as the point's (464.11's
+`diffzero.g`), and a zero radius is the double `0`. A zero, its square and a
+sum of two zeros are left unrounded (464.11's `refl.g`). Where a zero square
+is added to a double, a hint says the sum is that double, such as `sx + sy ->
+sy;` with the x gap zero, and the rounding is then of a double. Without those
+hints Gappa warned "Phat + (y - Ex) and S01 + (sz + ez) + (rr + er) are not
+trivially equal": its check that a hint is an identity took the rounding of a
+zero sum as a number of its own, as 464.11 found of `|x − x|`.
+
+Each of the fifteen sets on `y`, and each of the fourteen on `value` with at
+least one square left, proves at the code's `B`. They print `(y − Ex) /
+Phat`, `(value − Ex) / Phat` and `P −/ Phat` within:
+
+- one gap zero: `4.44089e-16`, `5.55112e-16` and `2.22045e-16`, which is
+  `4u`, `5u` and `2u` to the digits Gappa prints.
+- the radius zero: `5.55112e-16`, `5.55112e-16` and `2.22045e-16`.
+- two gaps zero: `3.33067e-16`, `4.44089e-16` and `1b-53`.
+- one gap and the radius zero: `4.44089e-16`, `4.44089e-16` and `1b-53`.
+- the three gaps zero: `1.11022e-16`, `1.11022e-16` and `[0, 0]`.
+- two gaps and the radius zero: `3.33067e-16`, `3.33067e-16` and `[0, 0]`.
+- all four zero, `sphere_zxyzr.g`: "remaining results are pointless, anything
+  can be proved." `eb` is then zero, so it is not normal, and `decide` does
+  not compare. On `value` the case is the same one, since `value` is then `y`,
+  which is zero.
+
+**7. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each of the thirty scripts above but
+`sphere_zxyzr.g` was run again at `B = u / 2`, written `B = 1b-54;`, as
+`c_<name>_half.g`. Each fails, exit 1, with a best that is what it printed in
+6 over `u / 2`:
+
+- on `y`: `sphere` `[-10, 10]`; one gap zero `[-8, 8]`; the radius zero
+  `[-10, 10]`; two gaps zero `[-6, 6]`; one gap and the radius `[-8, 8]`; the
+  three gaps `[-2, 2]`; two gaps and the radius `[-6, 6]`.
+- on `value`: `spherev` `[-12, 12]`; one gap or the radius zero `[-10, 10]`;
+  two gaps, or one and the radius, `[-8, 8]`; the three gaps `[-2, 2]`; two
+  gaps and the radius `[-6, 6]`.
+
+With 3 and 4's failures at `5u` and `6u`, that shows none of them proved from
+a contradiction.
+
+- `c_sphere_nonormal.g` is `sphere.g` with the four `product_is_normal`
+  hypotheses dropped, and the four lemma lines they give. It fails, best
+  `[-3.22221e+909, 3.22223e+909]`. Gappa finds neither `REL(P, Phat)` nor
+  `BND((y - Ex) / Phat)`. `c_sphere_nonormal_why.g` asks for `rpx` and `rpr`
+  as well, what rounding multiplied `gx * gx` and `r * r` by, and gets them
+  only within `[0, 2^(1073)]` and `[0, 2^(4142)]`. So a script of this kind
+  catches a missing check, as 464.4's 3 and 464.8's 4 did.
+- `c_sphere_zxyzr_noeb.g` is `sphere_zxyzr.g` without `eb` normal. It fails,
+  best `[-inf, inf]`, printing `eb in [0, 0]`. What proves `sphere_zxyzr.g` is
+  the contradiction with `eb` normal and nothing else, as with 464.8's
+  `o2tiny.g`, which is what it is meant to show.
+- `c_sphere_noeb.g` is `sphere.g` without `eb` normal and without the lemma
+  line it gives. It proves, as `c_plane_noeb.g` did. `c_sphere_noeb_why.g`
+  prints `P` at least `1b-1020` and `eb` at least `1b-1070`.
+  `c_sphere_noeb_rel.g`, whose only goal is `eb -/ B * P in ?`, fails on
+  `REL(eb, B * P)`, so how Gappa gets past `eb`'s rounding was not traced. On
+  paper, and not run: four squares each at least `2⁻¹⁰²²` put `P` at least
+  `2⁻¹⁰²⁰` and `B · P` at least `2⁻¹⁰⁷⁰`. Rounding moves that by at most
+  `2⁻¹⁰⁷⁵`, a thirty-second of it, and `5u + 7u²` of the permanent over
+  thirty-one thirty-seconds of `8u` of it is about `0.65`. `decide` still
+  checks that `eb` is normal, and that check is what keeps every intermediate
+  finite.
+
+464.4's argument for that carries over, on paper. Each gap is the factor of a
+square, each square is a term of the permanent, and every term is
+non-negative, so a term that rounds to infinity or is not a number makes `P`
+so too. `s01` and `s012` are at most `P`, and `|value|` is at most `P`, by
+monotone rounding. So where `decide` compares, nothing rounded to infinity.
+
+**8. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0 from 464.5's nix block, accept
+each of the 31 scripts that prove: exit 0 each, `coqc` in 0.55 to 1.66 s in
+the second lane's run. Gappa does not write the same proof each run (464.4),
+so the sizes are the second lane's. `sphere.g`'s proof is 4096 lines with 18
+hints (4057 lines in the first lane's run), `spherev.g`'s 5036 with 19, and
+`sphere_zxyzr.g`'s 366 with 2. The 28 other zero cases are 1929 to 4820 lines,
+with 9 to 19 hints. Each hint enters the Coq file as a hypothesis with no
+condition attached, as in 464.4, so each proof stands on its hints and on what
+Gappa took to be nonzero: `sphere.g`'s `gappa -Bcoq` prints 59 lines of the
+form "the expression -(cx) + (px) has been assumed to be nonzero when checking
+a rewriting rule", and `spherev.g`'s 66. It printed no other warning. `field`
+has not been run on these hints (464.10).
+
+**9. The scripts.** `spherecases.py` writes 64 scripts: `sphere.g`,
+`spherev.g`, the 29 zero cases of 6, the 30 controls at `u / 2` and the three
+other controls of 7. `why.py` writes the three `_why` and `_rel` controls of 7
+from two of them. After the runs, the second lane ran both again, and they
+wrote every file byte for byte as it was run. To run them again, save the nix
+block of 464.5 as `gappalib18.nix` and these two files beside it, and then:
+
+```sh
+python3 spherecases.py
+python3 why.py
+nx="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
+pin=github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe
+$nx shell $pin#gappa --command gappa -Eprecision=200 sphere.g
+$nx shell $pin#gappa --command gappa -Eprecision=200 -Bcoq sphere.g > sphere.v
+gl=$($nx build --impure --no-link --print-out-paths -f gappalib18.nix)
+fl=$($nx build --no-link --print-out-paths $pin#coqPackages_8_20.flocq)
+COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+  $nx shell $pin#coqPackages_8_20.coq --command coqc sphere.v
+```
+
+and the same for every other file the two write. A script that proves exits
+0; a control must exit 1. In the second lane's run, `nix shell`'s start
+counted, Gappa took 0.1 to 6.2 s on each script that proves and 8 to 31 s on
+each control.
+
+The smallest `B`s of 3 and 4 come from `bisect.py`, run as `python3
+bisect.py sphere.g 5 64` and `python3 bisect.py spherev.g 6 64`. Given a
+script, `a` and a top `m`, it checks that the script fails at `B = a u` and
+proves at `B = a u + m u²`, and then halves the range of `m` until the two
+ends are one apart. It writes each `B` it tries as `<name>_b<a>_<m>.g` and
+runs it with the first `gappa` line above. It is whole after `why.py` below.
+
+`spherecases.py`, whole:
+
+```python
+"""Write sphere.g, HowFarOut::on_floats and its ERROR_BOUND line for line, and
+its cases and controls beside it:
+
+- spherev.g, the claim on value, the double on_floats returns, not on y;
+- sphere_z<set>.g and spherev_z<set>.g for each set of the four squares that
+  are zero, which product_is_normal lets through: <set> names which of the
+  gaps x, y, z and the radius r are zero;
+- c_<name>_half.g, each of those at B = u / 2, which must fail;
+- c_sphere_nonormal.g, sphere.g without product_is_normal, and
+  c_sphere_noeb.g, sphere.g without eb normal.
+
+Run as: python3 spherecases.py; it writes beside itself.
+"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+AXES = ("x", "y", "z")
+TERMS = AXES + ("r",)
+B_CODE = "B = 8b-53 + 1b-100;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+
+
+def make(zero="", on_value=False, b=B_CODE, normal=True, eb_normal=True):
+    gaps = [a for a in AXES if a not in zero]
+    radius = "r" not in zero
+    live = gaps + (["r"] if radius else [])
+    out = "value" if on_value else "y"
+    sq = {a: f"s{a}" for a in AXES}
+    sq["r"] = "rr"
+
+    src = [
+        "# restates: crates/rcad-predicates/src/surface.rs on_floats at 3d60b0de",
+        "# restates: crates/rcad-predicates/src/point.rs exact_coordinates at 3d60b0de",
+        "# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 3d60b0de",
+        "# restates: crates/rcad-predicates/src/cascade.rs decide at 3d60b0de",
+        "# HowFarOut::on_floats and its ERROR_BOUND, the sphere of surface.rs' tests.",
+    ]
+    if on_value:
+        src.append("# The claim is on value, the double on_floats returns, not on y.")
+    if zero:
+        names = [f"the {a} gap" for a in AXES if a in zero] + (["the radius"] if not radius else [])
+        src.append(f"# The case where {' and '.join(names)} {'is' if len(names) == 1 else 'are'} zero.")
+    src += [
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The point, the centre and the radius, each an f64. A gap is zero when",
+        "# the centre's coordinate is the same double as the point's (464.11's",
+        "# diffzero.g), and a zero radius is the double 0.",
+        "px = rnd(px_); py = rnd(py_); pz = rnd(pz_);",
+        " ".join(f"c{a} = p{a};" if a in zero else f"c{a} = rnd(c{a}_);" for a in AXES),
+        "r = rnd(r_);" if radius else "r = 0;",
+        "",
+        "# What on_floats computes, line for line. A zero, a square of one and a",
+        "# sum of two round to themselves (464.11's refl.g), so they are left",
+        "# unrounded.",
+        " ".join(f"G{a} = p{a} - c{a};" for a in AXES),
+        " ".join(f"g{a} = G{a};" if a in zero else f"g{a} = rnd(G{a});" for a in AXES),
+        " ".join(f"s{a} = g{a} * g{a};" if a in zero else f"s{a} = rnd(g{a} * g{a});" for a in AXES),
+        "rr = rnd(r * r);" if radius else "rr = r * r;",
+        "S01 = sx + sy;",
+        "s01 = S01;" if "x" in zero and "y" in zero else "s01 = rnd(S01);",
+        "S012 = s01 + sz;",
+        "s012 = S012;" if not gaps else "s012 = rnd(S012);",
+        "y = s012 - rr;",
+        "value = rnd(y);",
+        "",
+        "# The permanent sums the same three squares in the same order as value",
+        "# does, so its first two sums are s01 and s012.",
+        "P = rnd(s012 + rr);",
+        "",
+        b,
+        "eb = rnd(B * P);",
+        "",
+        "# The true value of the same inputs.",
+        "Ex = Gx * Gx + Gy * Gy + Gz * Gz - r * r;",
+        "",
+        "# The permanent with no rounding of its own.",
+        "Phat = sx + sy + sz + rr;",
+    ]
+    if live:
+        src += ["", "# What each rounding multiplied its argument by."]
+        if gaps:
+            src.append(" ".join(f"rg{a} = g{a} / G{a};" for a in gaps))
+            src.append(" ".join(f"rp{a} = s{a} / (g{a} * g{a});" for a in gaps))
+        if radius:
+            src.append("rpr = rr / (r * r);")
+        rs = []
+        if "x" in gaps or "y" in gaps:
+            rs.append("rs01 = s01 / S01;")
+        if gaps:
+            rs.append("rs012 = s012 / S012;")
+        if rs:
+            src.append(" ".join(rs))
+        if on_value:
+            src.append("rv = value / y;")
+        v = " * rv" if on_value else ""
+        carry = {"x": "rs01 * rs012" + v, "y": "rs01 * rs012" + v, "z": "rs012" + v,
+                 "r": "rv" if on_value else "1"}
+        src += ["", f"# What each of the four terms, as {out} carries it, is off by: e is that",
+                "# amount and W the same over the term's square. The radius's term is",
+                "# subtracted, so its W is the other way round."]
+        for a in gaps:
+            src.append(f"W{a} = {carry[a]} - 1 / (rg{a} * rg{a} * rp{a});")
+        if radius:
+            src.append(f"Wr = 1 / rpr - {carry['r']};")
+        src.append(" ".join(f"e{a} = {sq[a]} * W{a};" for a in live))
+
+    hyps = []
+    finite = [f"|p{a}| <= 1b1024" for a in AXES] + [f"|c{a}| <= 1b1024" for a in gaps]
+    if radius:
+        finite.append("|r| <= 1b1024")
+    hyps.append(("Every input is a finite f64.", [finite[:3], finite[3:]]))
+    if live:
+        nonzero = [f"|g{a}| >= 1b-1074" for a in gaps] + (["|r| >= 1b-1074"] if radius else [])
+        hyps.append(("No factor of the squares left is zero. For an f64 that is the same\n"
+                     "  # as being at least the smallest subnormal.", [nonzero]))
+        if normal:
+            hyps.append(("product_is_normal on the squares left.",
+                         [[f"|{sq[a]}| >= 1b-1022" for a in live]]))
+    if eb_normal:
+        hyps.append(("The bound is normal, which decide checks.", [["|eb| >= 1b-1022"]]))
+    lemma = []
+    if normal:
+        lemma += [[f"s{a} -/ g{a} * g{a} {LEMMA}"] for a in gaps]
+        if radius:
+            lemma.append([f"rr -/ r * r {LEMMA}"])
+    if eb_normal:
+        lemma.append([f"eb -/ B * P {LEMMA}"])
+    if lemma:
+        hyps.append(("What lemma.g proves each of those gives.", lemma))
+    if on_value and live:
+        hyps.append(("y is not zero. Where it is, value is zero too, and the claim on y is\n"
+                     "  # the claim on value.", [["|y| >= 1b-1074"]]))
+
+    src += ["", "{"]
+    first = True
+    for comment, rows in hyps:
+        src.append(f"  # {comment}")
+        for row in rows:
+            row = [h for h in row]
+            if not row:
+                continue
+            src.append(("     " if first else "  /\\ ") + " /\\ ".join(row))
+            first = False
+    src.append("->")
+    if live:
+        src += [f"  ({out} - Ex) / Phat in ? /\\ P -/ Phat in ?",
+                f"  /\\ ({out} - Ex) / eb in [-1, 1]"]
+    else:
+        src.append(f"  eb in ? /\\ ({out} - Ex) / eb in [-1, 1]")
+    src += ["}", ""]
+
+    if live:
+        src.append("# How far each rounding is from the identity.")
+        for a in gaps:
+            src.append(f"g{a} / G{a} -> 1 + (g{a} - G{a}) / G{a};")
+        for a in gaps:
+            src.append(f"s{a} / (g{a} * g{a}) -> 1 + (s{a} - g{a} * g{a}) / (g{a} * g{a});")
+        if radius:
+            src.append("rr / (r * r) -> 1 + (rr - r * r) / (r * r);")
+        if "x" in gaps or "y" in gaps:
+            src.append("s01 / S01 -> 1 + (s01 - S01) / S01;")
+        if gaps:
+            src.append("s012 / S012 -> 1 + (s012 - S012) / S012;")
+        if on_value:
+            src.append("value / y -> 1 + (value - y) / y;")
+        split = " + ".join(f"({sq[a]} + e{a})" if a in live else sq[a] for a in TERMS)
+        src += [
+            "",
+            "# The error is the sum of the terms' errors, each a fraction of its own",
+            "# piece of the permanent; add_rr then averages them.",
+            f"({out} - Ex) / Phat -> ((Phat + ({out} - Ex)) - Phat) / Phat;",
+            f"Phat + ({out} - Ex) -> {split};",
+        ]
+        for a in live:
+            src.append(f"({sq[a]} + e{a}) - {sq[a]} -> e{a};")
+        src += [
+            "",
+            "# From the permanent to the one on_floats rounds, and on to eb.",
+            f"({out} - Ex) / eb -> (({out} - Ex) / Phat) * (Phat / P) * (P / eb);",
+            "Phat / P -> 1 / (1 + (P - Phat) / Phat);",
+            "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));",
+        ]
+    zh = []
+    if "x" in zero and "y" not in zero:
+        zh.append("sx + sy -> sy;")
+    if "y" in zero and "x" not in zero:
+        zh.append("sx + sy -> sx;")
+    if "z" in zero:
+        zh.append("s01 + sz -> s01;")
+    elif "x" in zero and "y" in zero:
+        zh.append("s01 + sz -> sz;")
+    if not radius:
+        zh.append("s012 + rr -> s012;")
+        if on_value:
+            zh.append("s012 - rr -> s012;")
+    elif not gaps:
+        zh.append("s012 + rr -> rr;")
+        if on_value:
+            zh.append("s012 - rr -> -rr;")
+    if zh:
+        src += ["", "# A zero square added to a double leaves that double, which then rounds",
+                "# to itself."] + zh
+    return "\n".join(src) + "\n"
+
+
+def write(name, text):
+    open(name, "w").write(text)
+
+
+for n in range(len(TERMS)):
+    for zero in itertools.combinations(TERMS, n):
+        zero = "".join(zero)
+        tag = f"_z{zero}" if zero else ""
+        for on_value in (False, True):
+            name = f"sphere{'v' if on_value else ''}{tag}"
+            write(f"{name}.g", make(zero, on_value))
+            write(f"c_{name}_half.g", make(zero, on_value, b=B_HALF))
+# Every square zero: then eb is zero, so decide does not compare, and Gappa
+# proves the goal from the contradiction. Its control drops eb normal.
+write("sphere_zxyzr.g", make("xyzr"))
+write("c_sphere_zxyzr_noeb.g", make("xyzr", eb_normal=False))
+write("c_sphere_nonormal.g", make(normal=False))
+write("c_sphere_noeb.g", make(eb_normal=False))
+```
+
+`sphere.g`, whole, as `spherecases.py` writes it. `on_floats` holds
+`ERROR_BOUND` as a `const` inside its body, so the line on `on_floats` covers
+it too:
+
+```gappa
+# restates: crates/rcad-predicates/src/surface.rs on_floats at 3d60b0de
+# restates: crates/rcad-predicates/src/point.rs exact_coordinates at 3d60b0de
+# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 3d60b0de
+# restates: crates/rcad-predicates/src/cascade.rs decide at 3d60b0de
+# HowFarOut::on_floats and its ERROR_BOUND, the sphere of surface.rs' tests.
+@rnd = float<ieee_64, ne>;
+
+# The point, the centre and the radius, each an f64. A gap is zero when
+# the centre's coordinate is the same double as the point's (464.11's
+# diffzero.g), and a zero radius is the double 0.
+px = rnd(px_); py = rnd(py_); pz = rnd(pz_);
+cx = rnd(cx_); cy = rnd(cy_); cz = rnd(cz_);
+r = rnd(r_);
+
+# What on_floats computes, line for line. A zero, a square of one and a
+# sum of two round to themselves (464.11's refl.g), so they are left
+# unrounded.
+Gx = px - cx; Gy = py - cy; Gz = pz - cz;
+gx = rnd(Gx); gy = rnd(Gy); gz = rnd(Gz);
+sx = rnd(gx * gx); sy = rnd(gy * gy); sz = rnd(gz * gz);
+rr = rnd(r * r);
+S01 = sx + sy;
+s01 = rnd(S01);
+S012 = s01 + sz;
+s012 = rnd(S012);
+y = s012 - rr;
+value = rnd(y);
+
+# The permanent sums the same three squares in the same order as value
+# does, so its first two sums are s01 and s012.
+P = rnd(s012 + rr);
+
+B = 8b-53 + 1b-100;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Ex = Gx * Gx + Gy * Gy + Gz * Gz - r * r;
+
+# The permanent with no rounding of its own.
+Phat = sx + sy + sz + rr;
+
+# What each rounding multiplied its argument by.
+rgx = gx / Gx; rgy = gy / Gy; rgz = gz / Gz;
+rpx = sx / (gx * gx); rpy = sy / (gy * gy); rpz = sz / (gz * gz);
+rpr = rr / (r * r);
+rs01 = s01 / S01; rs012 = s012 / S012;
+
+# What each of the four terms, as y carries it, is off by: e is that
+# amount and W the same over the term's square. The radius's term is
+# subtracted, so its W is the other way round.
+Wx = rs01 * rs012 - 1 / (rgx * rgx * rpx);
+Wy = rs01 * rs012 - 1 / (rgy * rgy * rpy);
+Wz = rs012 - 1 / (rgz * rgz * rpz);
+Wr = 1 / rpr - 1;
+ex = sx * Wx; ey = sy * Wy; ez = sz * Wz; er = rr * Wr;
+
+{
+  # Every input is a finite f64.
+     |px| <= 1b1024 /\ |py| <= 1b1024 /\ |pz| <= 1b1024
+  /\ |cx| <= 1b1024 /\ |cy| <= 1b1024 /\ |cz| <= 1b1024 /\ |r| <= 1b1024
+  # No factor of the squares left is zero. For an f64 that is the same
+  # as being at least the smallest subnormal.
+  /\ |gx| >= 1b-1074 /\ |gy| >= 1b-1074 /\ |gz| >= 1b-1074 /\ |r| >= 1b-1074
+  # product_is_normal on the squares left.
+  /\ |sx| >= 1b-1022 /\ |sy| >= 1b-1022 /\ |sz| >= 1b-1022 /\ |rr| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those gives.
+  /\ sx -/ gx * gx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sy -/ gy * gy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sz -/ gz * gz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ rr -/ r * r in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+->
+  (y - Ex) / Phat in ? /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+gx / Gx -> 1 + (gx - Gx) / Gx;
+gy / Gy -> 1 + (gy - Gy) / Gy;
+gz / Gz -> 1 + (gz - Gz) / Gz;
+sx / (gx * gx) -> 1 + (sx - gx * gx) / (gx * gx);
+sy / (gy * gy) -> 1 + (sy - gy * gy) / (gy * gy);
+sz / (gz * gz) -> 1 + (sz - gz * gz) / (gz * gz);
+rr / (r * r) -> 1 + (rr - r * r) / (r * r);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+s012 / S012 -> 1 + (s012 - S012) / S012;
+
+# The error is the sum of the terms' errors, each a fraction of its own
+# piece of the permanent; add_rr then averages them.
+(y - Ex) / Phat -> ((Phat + (y - Ex)) - Phat) / Phat;
+Phat + (y - Ex) -> (sx + ex) + (sy + ey) + (sz + ez) + (rr + er);
+(sx + ex) - sx -> ex;
+(sy + ey) - sy -> ey;
+(sz + ez) - sz -> ez;
+(rr + er) - rr -> er;
+
+# From the permanent to the one on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / Phat) * (Phat / P) * (P / eb);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+`why.py`, whole:
+
+```python
+"""Write the two controls again with more goals, to name where each breaks or
+how it gets through: c_sphere_nonormal_why.g asks for what the rounding of the
+x square and of the radius's square multiplied them by; c_sphere_noeb_why.g
+asks for P and eb, and c_sphere_noeb_rel.g for eb's relative error alone."""
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+GOAL = "  (y - Ex) / Phat in ? /\\ P -/ Phat in ?\n"
+
+
+def rewrite(src, dst, goal):
+    text = open(src).read()
+    assert text.count(GOAL) == 1, src
+    open(dst, "w").write(text.replace(GOAL, goal))
+
+
+rewrite("c_sphere_nonormal.g", "c_sphere_nonormal_why.g",
+        "  (y - Ex) / Phat in ? /\\ P -/ Phat in ? /\\ rpx in ? /\\ rpr in ?\n")
+rewrite("c_sphere_noeb.g", "c_sphere_noeb_why.g",
+        "  (y - Ex) / Phat in ? /\\ P -/ Phat in ? /\\ P in ? /\\ eb in ?\n")
+text = open("c_sphere_noeb.g").read()
+head, rest = text.split("->\n", 1)
+_, hints = rest.split("}\n", 1)
+open("c_sphere_noeb_rel.g", "w").write(head + "->\n  eb -/ B * P in ?\n}\n" + hints)
+```
+
+`bisect.py`, whole. Its `best` line is never read; the line after it is what
+prints a failing run's best:
+
+```python
+"""Find the smallest B = a u + m u^2 a script proves at, in steps of u^2, by
+bisection on m, as 464.8 did. Run as: python3 bisect.py <file.g> <a> <hi m>.
+Writes <name>_b<a>_<m>.g beside itself for each B tried, and prints each run's
+exit and the goal's best bound when it fails."""
+import os
+import re
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+B_CODE = "B = 8b-53 + 1b-100;"
+NIX = ["nix", "--extra-experimental-features", "nix-command",
+       "--extra-experimental-features", "flakes", "shell",
+       "github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe#gappa",
+       "--command", "gappa", "-Eprecision=200"]
+
+name, a, hi = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+text = open(name).read()
+assert text.count(B_CODE) == 1, f"no single B line in {name}"
+
+
+def proves(m):
+    b = f"B = {a}b-53 + {m}b-106;" if m else f"B = {a}b-53;"
+    out_name = f"{name[:-2]}_b{a}_{m}.g"
+    open(out_name, "w").write(text.replace(B_CODE, b))
+    run = subprocess.run(NIX + [out_name], capture_output=True, text=True, timeout=200)
+    best = re.findall(r"best: \[[^\]]*\]|\{[-0-9.e+]+, [-0-9.e+^()]+\}\]", run.stderr + run.stdout)
+    fail = [l for l in (run.stderr + run.stdout).splitlines() if "best" in l or "failed" in l.lower()]
+    print(f"{out_name}: {b} exit {run.returncode}; {' | '.join(fail[:3])}", flush=True)
+    return run.returncode == 0
+
+
+lo = 0
+assert not proves(lo), "proves with no u^2 term"
+assert proves(hi), "does not prove at the top of the range"
+while hi - lo > 1:
+    mid = (lo + hi) // 2
+    if proves(mid):
+        hi = mid
+    else:
+        lo = mid
+print(f"smallest: {a}u + {hi}u^2 proves, {a}u + {lo}u^2 fails")
+```
+
+**10. What this leaves.** No row.
+
+- Q2700 already waits on Q2677, and moves these scripts into `proofs/gappa/`
+  with the others that rows of 464 appended.
+- A square below the normals with the other three normal (5) was not run.
+  `on_floats` never meets it while its check stands, so it is not a row here.
+- How `c_sphere_noeb.g` gets past `eb`'s rounding (7) was not traced, as with
+  plane's.
+- `field` on these scripts' hints (464.10).
