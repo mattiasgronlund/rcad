@@ -14454,6 +14454,65 @@ mod tests {
         }
     }
 
+    /// **A box across the line from the corner the half-line is aimed at
+    /// through another corner is placed from the next corner** (row Q2634).
+    /// Seen down the axis, such a box has no sign of which side of the
+    /// half-line's line that other corner is, so the sides it ends cannot be
+    /// counted from there, though the point has a sign of every side's own
+    /// line. The quarter's skin is aimed at its corner `(2, 0, 4)`, and its
+    /// corner `(0, 4, 8)` is seen on the line `2x + y = 4` through it; the
+    /// three quarters' skin is aimed at `(0, −2, 4)`, and its corner
+    /// `(−4, 0, 8)` is seen on the line `x + 2y = −4` through it. Each point
+    /// is on the cone, at the distance from the axis its `x` and `y` give, and
+    /// is held where it is seen inside the face: between the caps, and in the
+    /// part of the turn the face keeps.
+    #[test]
+    fn a_box_across_the_line_from_the_corner_aimed_at_through_another_is_placed_from_the_next() {
+        let across = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        let on = Interval::exactly;
+        let on_the_cone = |x: f64, y: f64| on(2.0 * x.hypot(y));
+        let mut wrong = Vec::new();
+        for (rule, point, is) in [
+            (
+                crate::Rule::Intersection,
+                [on(1.0), across(2.0), on_the_cone(1.0, 2.0)],
+                OnAFace::Held,
+            ),
+            (
+                crate::Rule::Intersection,
+                [on(3.0), across(-2.0), on_the_cone(3.0, -2.0)],
+                OnAFace::NotHeld,
+            ),
+            (
+                crate::Rule::Intersection,
+                [on(-1.0), across(6.0), on_the_cone(-1.0, 6.0)],
+                OnAFace::NotHeld,
+            ),
+            (
+                crate::Rule::Difference,
+                [on(-2.0), across(-1.0), on_the_cone(-2.0, -1.0)],
+                OnAFace::Held,
+            ),
+        ] {
+            let (model, solid, skin) = the_skin_of_a_frustum_cut_by_a_quarter(rule);
+            let answer = model
+                .solid(solid)
+                .expect("this model made the key")
+                .face_holds_the_point(
+                    skin,
+                    PredicatePoint::Constructed(point),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+            if answer.as_ref().ok() != Some(&is) {
+                wrong.push(format!(
+                    "{point:?} after the {rule:?}: {answer:?}, not {is:?}"
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
     /// The frustum of the cone `r = z / 2` between heights 4 and 8, and the
     /// key of its skin, after `rule` with a prism over the quarter where `x`
     /// and `y` are both positive: its skin between the angles 0 and π/2 after
