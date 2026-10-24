@@ -5221,12 +5221,12 @@ impl Assembly {
     /// meets of three planes it is cut at can then round to points that wind
     /// it either way. A sound pyramid placed and cut by a wedge through its
     /// apex keeps a speck of a side face `3e−16` to `2e−14` across within
-    /// `7e−15` of the apex, and under tolerant(100) 17 of 672 such fuses were
+    /// `7e−15` of the apex, and under tolerant(100) 15 of 672 such fuses were
     /// refused for a speck whose stored corners wound `Neg`, one `Zero` (queue
     /// row Q2583). With one or two of its corners a rounding further on, each
     /// speck winds with its normal and the whole answer validates
     /// (`a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_every_rule_under_tolerant`,
-    /// queue row Q2642, `docs/decisions.md` §294.21).
+    /// queue row Q2642, `docs/decisions.md` §294.26).
     ///
     /// **Only a corner the fuse solved for, and only one every face round is
     /// flat with straight edges.** An input vertex's `f64` is the corner

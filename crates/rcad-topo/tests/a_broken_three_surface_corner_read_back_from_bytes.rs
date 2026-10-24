@@ -1,7 +1,7 @@
 //! A box whose top corner, where three planes meet, a pyramid whose apex,
 //! where four planes meet, and a half bar whose corner, where a cap, a round
 //! wall and a cut meet, are moved in their file, read back, and fused.
-//! `docs/decisions.md` §294.16 to §294.21 are the record
+//! `docs/decisions.md` §294.16 to §294.21 and §294.26 are the record
 //! and this file is their measurement.
 //!
 //! §294 moved a round bar's top corner, which has only two surfaces round it,
@@ -37,9 +37,11 @@
 //! answers where it stands. Placed, its four side planes cut the cut's face
 //! into specks a rounding across by the apex, and the half pyramid built round
 //! them keeps an edge a rounding long, which `certified` refuses and
-//! `tolerant(100)` mostly takes: a defect of its own, pinned here as it stands
-//! (§294.21). Cut where it was built and placed after, it answers half of
-//! itself at every placement (§448.7).
+//! `tolerant(100)` takes: a defect of its own, pinned here as it stands
+//! (§294.21). Where that half holds a speck whose corners, as they were
+//! solved, wind against its normal, the fuse moves one or two of them a
+//! rounding so that it winds with it (§294.26). Cut where it was built and
+//! placed after, it answers half of itself at every placement (§448.7).
 //!
 //! A wedge whose edge runs up through the apex answers too, where the pyramid
 //! stands and cut there and placed after. Placed first, it was refused
@@ -62,17 +64,18 @@
 //! Turned a tenth of a radian about `(0.3, −1, 2)`, the wedge
 //! round the `x` axis keeps an edge a rounding long by the apex, as the cut
 //! through it does: `certified` refuses every rule for it, and
-//! `tolerant(100)` answers the difference and the union and is refused the
-//! intersection for a triangle a rounding across. The union panicked there
-//! until the fuse left out a stretch of a wedge face's outline that the other
-//! wedge face walks back. Turned 0.4 about `x`, the wedge over the `+y` edge
-//! cuts the `−x` side face into a triangle a rounding across by the apex that
-//! no point could be placed in, and every rule was refused `Undecidable` under
-//! both policies until the fuse read the triangle's corner at the apex where
-//! the lines of its two sides cross. Now `certified` refuses it at the range
-//! check, and so it does at the two shifts after a turn where the same wedge
-//! was refused `Undecidable` too; `tolerant(100)` answers at the turn about
-//! `x`.
+//! `tolerant(100)` answers every rule. The intersection keeps a triangle a
+//! rounding across on a side face, and was refused until the fuse moved two
+//! of its corners a rounding: as they were solved, they wound against the
+//! face's normal (Q2642). The union panicked there until the fuse left out a
+//! stretch of a wedge face's outline that the other wedge face walks back.
+//! Turned 0.4 about `x`, the wedge over the `+y` edge cuts the `−x` side face
+//! into a triangle a rounding across by the apex that no point could be
+//! placed in, and every rule was refused `Undecidable` under both policies
+//! until the fuse read the triangle's corner at the apex where the lines of
+//! its two sides cross. Now `certified` refuses it at the range check, and so
+//! it does at two shifts after a turn, at one of which the same wedge was
+//! refused `Undecidable` too; `tolerant(100)` answers at the turn about `x`.
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -490,7 +493,7 @@ fn a_sound_pyramid_cut_through_its_apex_where_it_stands_answers_half_of_it() {
 ///   speck face's three corners within `5e−15` of one another wind against
 ///   its normal as they are solved: on one line for the first, the wrong way
 ///   round for the second. The fuse moves one or two of them a rounding, which
-///   winds the speck with its normal (Q2642, §294.21). Until then it refused
+///   winds the speck with its normal (Q2642, §294.26). Until then it refused
 ///   both and wrote nothing.
 ///
 /// Before Q1936, all twelve refused `Undecidable`, "a point inside a piece of a
@@ -916,8 +919,9 @@ fn a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_is_refused_for_an_
 /// Q2332). The intersection was refused `TheFuseWroteABrokenAnswer`, its
 /// outline winding against its normal (queue row Q2583): a triangle on a side
 /// of the pyramid whose three corners are within `4e−15` of one another by the
-/// apex, whose stored corners wound `Neg`. Moved a rounding, one of them winds
-/// it with its normal, and the fuse now writes that (Q2642, §294.21).
+/// apex, whose stored corners wound `Neg`. With two of them moved a rounding
+/// each it winds with its normal, and the fuse now writes that (Q2642,
+/// §294.26).
 #[test]
 fn a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_every_rule_under_tolerant() {
     for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
@@ -974,11 +978,14 @@ fn a_sound_pyramid_turned_about_x_and_cut_by_a_wedge_over_the_plus_y_edge_reache
 /// **Shifted after the turn 0.1 about `(1, 2, 3)`, or after the turn 0.7
 /// about `(0.3, −1, 2)`, the sound pyramid and the wedge over the `+y` edge
 /// built there are refused at the range check by every rule under
-/// `certified`.** Queue row Q2576 found the difference refused `Undecidable`
-/// at each. With `by_a_plane` reading a corner of the input with four planes
-/// round it where the lines of the piece's two sides there cross (Q2334), each
-/// rule comes to the limit §448.7 settled for the cut through the apex, as at
-/// the turn about `x` in the test above.
+/// `certified`.** Queue row Q2576 said the difference was refused
+/// `Undecidable` at each, but only the shift after the turn 0.1 was: after the
+/// turn 0.7 it was already refused at the range check before Q2334 (Q2583's
+/// sweep at `89230085`, and Q2334's `a8dba1a28`). With `by_a_plane` reading a
+/// corner of the input with four planes round it where the lines of the
+/// piece's two sides there cross (Q2334), each rule comes to the limit §448.7
+/// settled for the cut through the apex, as at the turn about `x` in the test
+/// above.
 #[test]
 fn a_sound_pyramid_shifted_after_a_turn_and_cut_by_a_wedge_over_the_plus_y_edge_is_refused_at_the_range_check()
  {
