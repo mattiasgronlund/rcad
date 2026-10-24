@@ -260,3 +260,31 @@ change, not the fork's.
   sooner. A row.
 - Nothing for the fork in rcad's queue: its fix belongs in the fork's
   repository, and moving the pin waits on that.
+
+### 465.9 Why `inari`'s own edges need not steer libFuzzer
+
+267.3's first finding was why `rcad-fuzz-timing`'s edges were safe to drop
+from coverage: that crate decided nothing the fuzz target's own behavior
+turned on. `inari` looks different on its face, since the target's whole
+geometric computation runs through it, but the one place its own code forks
+on the 16 slow inputs — `mul_ru`'s AVX fast path against the one-lane
+`mul1_ru_slow` fallback (465.3) — is a seam with no say over the answer.
+465.3's stream replay ran every recorded call through both the fork and
+2.0.0, which take that fork oppositely (2.0.0 has no fallback to fall into),
+and "the two versions gave bit-identical results on every call". Whichever
+path a product takes inside `inari`, rcad gets the same `Interval` back, and
+every branch rcad's own code takes on that interval — every `Decision`,
+every certified-or-not split — is instrumented regardless, since the stand-in
+catches only `rcad-fuzz-timing` and `inari`. Two inputs that differ only in
+which of `inari`'s internal paths they take cannot differ in which of rcad's
+edges they reach, so an edge inside `inari`'s dispatch cannot mark a corpus
+input "new" in a way no rcad edge already marks it.
+
+What this does not rule out: an input that reaches a magnitude new to
+`inari`'s dispatch while every rcad-level branch it passes through is one
+already seen at other magnitudes, so no rcad edge marks it new either — the
+case where coverage-guided search would have kept the input for `inari`'s
+sake alone, not rcad's. No measurement here says how often that happens on
+this target; 465.7's "whether rcad's own tests see any of it" is the nearest
+existing measurement, and it is about test medians, not corpus growth, so it
+does not answer this either. Unmeasured, not argued away.
