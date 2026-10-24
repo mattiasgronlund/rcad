@@ -1234,15 +1234,18 @@ fn refused_on_the_order_along_a_crossing_at<'a>(
 /// The plane and the cone of a pointed cone's two faces, as the model places
 /// them.
 fn the_cap_and_the_side(model: &Model, solid: SolidKey) -> (Plane, Cone) {
-    let (mut cap, mut side) = (None, None);
-    for face in model.solid(solid).expect("a solid of this model").faces() {
-        match face.surface() {
-            Surface::Plane(plane) => cap = Some(plane),
-            Surface::Cone(cone) => side = Some(cone),
-            other => panic!("a pointed cone has a plane and a cone, and not {other:?}"),
-        }
-    }
-    (cap.expect("a cap"), side.expect("a side"))
+    let surfaces: Vec<Surface> = model
+        .solid(solid)
+        .expect("a solid of this model")
+        .faces()
+        .map(|face| face.surface())
+        .collect();
+    let ([Surface::Plane(cap), Surface::Cone(side)] | [Surface::Cone(side), Surface::Plane(cap)]) =
+        surfaces[..]
+    else {
+        panic!("a pointed cone has a plane and a cone, and not {surfaces:?}");
+    };
+    (cap, side)
 }
 
 /// The sign of `|w|² − 1`, decided exactly, and its value to a rounding.
