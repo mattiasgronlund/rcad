@@ -65,15 +65,23 @@
 //! union and both differences were refused `AWireWillNotLieFlatOnItsFace`. It
 //! now reads the way with the fuse's own certified function.
 //!
-//! # What is still refused
+//! # A quarter a rounding below the far rim's first corner (Q2725)
 //!
-//! - Turned 4.0 or 5.5, and at some turns leaning 0.6, the union and one
-//!   difference are refused `CurvedFaceWithAHoleGoesTooFarRound`. At 4.0 the
-//!   fuse reads the way against the upright pipe rather than the leaning one
-//!   ([`the_same_pair_turned_four_radians_is_refused_its_union`]). Leaning 0.6
-//!   and turned 2.9 the union and the leaning bar less the upright one are
-//!   refused the same way
-//!   ([`the_union_where_the_dot_rounds_to_nothing_is_refused`]).
+//! Turned 4.0 or 5.5 at every lean, and leaning 0.6 at turns 0.3, 2.0 and
+//! 2.9, the union and one difference were refused
+//! `CurvedFaceWithAHoleGoesTooFarRound`. The mesher cuts a pipe's ring into
+//! four patches at quarters of a turn from the near rim's first corner, and
+//! lands each cut on the far rim's corner nearest its quarter. It took that
+//! corner by moving the quarter whole turns into the far rim's own turn, and a
+//! quarter that rounds just below that rim's first corner went a whole turn
+//! on, to the corner farthest round before the first
+//! ([`turned_four_radians_the_two_bars_answer_all_three_either_way_round`]).
+//! The far rim's corners are now read the short way round.
+//!
+//! At 4.0 the fuse reads the way against the upright pipe rather than the
+//! leaning one, but that was not why it refused: leaning 0.6 and turned 0.3
+//! it reads the leaning pipe and was refused the same way
+//! ([`leaning_0_6_and_turned_0_3_the_two_bars_answer_all_three_either_way_round`]).
 //!
 //! The fuses run certified, in a model of 100 mm.
 
@@ -81,7 +89,7 @@ use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::{Decision, Policy, ProvenanceLog};
-use rcad_topo::{Error, Model, Rule, SolidKey};
+use rcad_topo::{Model, Rule, SolidKey};
 
 /// How far Q2571's leaning bar's axis leans down from `x`, in radians.
 const LEAN: f64 = 0.3;
@@ -144,41 +152,30 @@ fn with_the_leaning_bar_rolled_the_two_bars_answer_all_three_either_way_round() 
     all_three_answer_either_way_round(&TwoBars::turned(0.6, 2.0, 1.3));
 }
 
-/// Leaning 0.6 and turned to 2.9, the dot rounds to exactly `0.0` in `f64`,
-/// and the piece the two share still answers right either way round.
+/// Leaning 0.6 and turned to 2.9, where the dot rounds to exactly `0.0` in
+/// `f64`, all three answer either way round.
+///
+/// The union and both differences were refused `AWireWillNotLieFlatOnItsFace`
+/// while the mesher read the way the closed edge is stored running in plain
+/// `f64`: it got `0.0` against the longitude where the fuse's certified reading
+/// is negative, fell to the latitude, and stored the edge the other way from
+/// the fuse (Q2706). Then the union and the leaning bar less the upright one
+/// were refused `CurvedFaceWithAHoleGoesTooFarRound` until the mesher read a
+/// ring's far rim the short way round (Q2725).
 #[test]
-fn the_piece_two_bars_share_where_the_dot_rounds_to_nothing_is_the_same_either_way_round() {
-    let bars = TwoBars::turned(0.6, 2.9, 0.0);
-    let shared = what_the_two_bars_share(bars.lean);
-    let upright_first = answer(&bars, Rule::Intersection, true, shared, 2);
-    let leaning_first = answer(&bars, Rule::Intersection, false, shared, 2);
-    the_same_volume(upright_first, leaning_first, "the intersection");
+fn leaning_0_6_and_turned_2_9_the_two_bars_answer_all_three_either_way_round() {
+    all_three_answer_either_way_round(&TwoBars::turned(0.6, 2.9, 0.0));
 }
 
-/// The same shape's upright bar less the leaning one answers, and its union
-/// either way round and the leaning bar less the upright one are refused
-/// `CurvedFaceWithAHoleGoesTooFarRound`, as at the turn of four radians.
+/// Leaning 0.6 and turned to 0.3, all three answer either way round.
 ///
-/// All four were refused `AWireWillNotLieFlatOnItsFace` while the mesher read
-/// the way the closed edge is stored running in plain `f64`: it got `0.0`
-/// against the longitude where the fuse's certified reading is negative, fell
-/// to the latitude, and stored the edge the other way from the fuse (Q2706).
+/// The union and one difference were refused
+/// `CurvedFaceWithAHoleGoesTooFarRound` here, as at the turn of four radians,
+/// though here the fuse reads the way against the leaning pipe and there
+/// against the upright one: which pipe it reads against was never the cause.
 #[test]
-fn the_union_where_the_dot_rounds_to_nothing_is_refused() {
-    let bars = TwoBars::turned(0.6, 2.9, 0.0);
-    let shared = what_the_two_bars_share(bars.lean);
-    answer(&bars, Rule::Difference, true, UPRIGHT - shared, 4);
-    for (rule, upright_first) in [
-        (Rule::Union, true),
-        (Rule::Union, false),
-        (Rule::Difference, false),
-    ] {
-        let why = refused(&bars, rule, upright_first);
-        assert!(
-            matches!(why, Error::CurvedFaceWithAHoleGoesTooFarRound { .. }),
-            "{rule:?}, upright bar first: {upright_first}: {why:?}"
-        );
-    }
+fn leaning_0_6_and_turned_0_3_the_two_bars_answer_all_three_either_way_round() {
+    all_three_answer_either_way_round(&TwoBars::turned(0.6, 0.3, 0.0));
 }
 
 /// Leaning 0.4 and turned to 2.0, all three answer either way round.
@@ -194,28 +191,18 @@ fn leaning_0_4_and_turned_2_the_two_bars_answer_all_three_either_way_round() {
 }
 
 /// Q2571's two bars turned 4.0 about the upright bar's axis, rather than a
-/// quarter turn, answer the piece they share and the leaning bar less the
-/// upright one, and are refused the union either way round and the upright
-/// bar less the leaning one.
+/// quarter turn, answer all three either way round.
+///
+/// The union either way round and the upright bar less the leaning one were
+/// refused `CurvedFaceWithAHoleGoesTooFarRound`. The mesher cuts the upright
+/// pipe's ring across at four quarters of a turn, and the second quarter,
+/// `−0.7123889803846901`, rounded below the top rim's first corner at
+/// `−0.7123889803846897`. Moved a whole turn on into that rim's own turn, the
+/// corner nearest it was the seam corner a quarter turn back, so the cut ran
+/// slanted across the hole the seam's cut already met (Q2723, Q2725).
 #[test]
-fn the_same_pair_turned_four_radians_is_refused_its_union() {
-    let bars = TwoBars::turned(LEAN, 4.0, 0.0);
-    let shared = what_the_two_bars_share(bars.lean);
-    let upright_first = answer(&bars, Rule::Intersection, true, shared, 2);
-    let leaning_first = answer(&bars, Rule::Intersection, false, shared, 2);
-    the_same_volume(upright_first, leaning_first, "the intersection");
-    answer(&bars, Rule::Difference, false, LEANING - shared, 4);
-    for (rule, upright_first) in [
-        (Rule::Union, true),
-        (Rule::Union, false),
-        (Rule::Difference, true),
-    ] {
-        let why = refused(&bars, rule, upright_first);
-        assert!(
-            matches!(why, Error::CurvedFaceWithAHoleGoesTooFarRound { .. }),
-            "{rule:?}, upright bar first: {upright_first}: {why:?}"
-        );
-    }
+fn turned_four_radians_the_two_bars_answer_all_three_either_way_round() {
+    all_three_answer_either_way_round(&TwoBars::turned(LEAN, 4.0, 0.0));
 }
 
 /// At each turned shape pinned above but the one turned four radians, the way
@@ -385,19 +372,6 @@ fn answer(bars: &TwoBars, rule: Rule, upright_first: bool, volume: f64, faces: u
         "{what}: measured {measured:?} against {volume}"
     );
     measured
-}
-
-/// What the fuse `rule` of the two bars is refused with, the upright one
-/// first or not.
-fn refused(bars: &TwoBars, rule: Rule, upright_first: bool) -> Error {
-    let (_, fused) = the_fuse(bars, rule, upright_first, &Policy::certified());
-    let Err(why) = fused else {
-        panic!(
-            "{} bars, {rule:?}, upright bar first: {upright_first}: answered {fused:?}",
-            bars.said
-        );
-    };
-    why
 }
 
 /// The model holding the two bars, and what fusing them by `rule` gave.
