@@ -4712,6 +4712,24 @@ fn lies_between_seen_down_the_axis(
 /// sign read of `P` after that is certified in interval arithmetic, with `w`
 /// multiplied through: intervals here neither divide nor take roots.
 ///
+/// # A point with no sign of a side's line
+///
+/// **A point whose side of a side's line, seen from `P`, has no sign is not
+/// refused for it when the half-line is aimed at a corner with both of that
+/// side's corners strictly on one side of the half-line's line**, as
+/// [`what_a_cone_face_seen_down_its_axis_holds`] reads a cone face (rows Q2563
+/// and Q2633). Then the half-line does not cross that side's chord and the
+/// point is not on it, wherever the point is across its line. A corner `c`'s
+/// sign is that of `(at − c) · ((aim − c) × (P − c))`, the volume `c`, `at`,
+/// `aim` and `P` span, which is affine in `c` and zero with `at` in `c`'s
+/// place, so [`is_wholly_on_one_side_of_the_half_line`]'s argument holds for
+/// it. Where the point is on `P`'s side of `Q`, it is outside the arc's circle
+/// as seen and in the arc's piece on neither side of the chord, so the side
+/// counts nothing. On the far side of `Q` or on it, the point is refused: the
+/// inside of the circle is convex, so the point is across the chord between
+/// its ends or at one, where no half-line leaves both of them strictly on one
+/// side.
+///
 /// # A side right round a circle
 ///
 /// A [`WholeCurve`] is all of the circle a plane `W` cuts the sphere in, so it
@@ -4828,9 +4846,6 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
     for (index, (side, &(left, own_placed))) in sides.iter().zip(&arcs).enumerate() {
         let [from, to] = [side.start.placed, side.end.placed];
         let beside = pole.sees(from, to, at);
-        if let Decision::Undecidable { enclosure } = beside {
-            return Err(gave_up_seeing(enclosure));
-        }
         along.push(beside);
         let poles_side = poles_sides[index];
         let on_the_left = left == (poles_side == Decision::Neg);
@@ -4849,6 +4864,11 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
         } else {
             read
         };
+        if let Decision::Undecidable { enclosure } = beside
+            && matches!(inside, Decision::Zero | Decision::Neg)
+        {
+            return Err(gave_up_seeing(enclosure));
+        }
         match inside {
             Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
                 return Ok(OnAFace::OnItsBoundary);
@@ -4868,33 +4888,55 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
         }
     }
 
-    let mut corners = sides.iter().map(|side| side.start.placed);
-    let aim = match on_a_chord {
-        None => corners.next(),
-        Some((chord, _)) => {
-            let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
-            corners.find(|corner| {
+    let seen_from = |side: &Side, aim: Point| {
+        [side.start.placed, side.end.placed].map(|corner| {
+            if corner == aim {
+                Decision::Zero
+            } else {
+                pole.sees(corner, aim, at)
+            }
+        })
+    };
+    let unseen = along.iter().find_map(|&beside| {
+        if let Decision::Undecidable { enclosure } = beside {
+            Some(enclosure)
+        } else {
+            None
+        }
+    });
+    let aim = sides
+        .iter()
+        .map(|side| side.start.placed)
+        .find(|&corner| {
+            on_a_chord.is_none_or(|(chord, _)| {
+                let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
                 matches!(
                     pole.sees(from, to, exactly(corner.coordinates())),
                     Decision::Pos | Decision::Neg
                 )
+            }) && sides.iter().zip(&along).all(|(side, beside)| {
+                !matches!(beside, Decision::Undecidable { .. }) || {
+                    let [from, to] = seen_from(side, corner);
+                    is_wholly_on_one_side_of_the_half_line(from, to)
+                }
             })
-        }
-    }
-    .ok_or_else(cannot)?;
+        })
+        .ok_or_else(|| unseen.map_or_else(cannot, gave_up_seeing))?;
 
     for (index, side) in sides.iter().enumerate() {
         let along = match on_a_chord {
             Some((chord, away)) if chord == index => away,
             _ => along[index],
         };
-        let [from, to] = [side.start.placed, side.end.placed].map(|corner| {
-            if corner == aim {
-                Decision::Zero
-            } else {
-                pole.sees(corner, aim, at)
-            }
-        });
+        let [from, to] = seen_from(side, aim);
+        if let Decision::Undecidable { .. } = along {
+            assert!(
+                is_wholly_on_one_side_of_the_half_line(from, to),
+                "the half-line was aimed with every side the point has no sign of wholly on one \
+                 side of it, and this one is not: {from:?} and {to:?}"
+            );
+            continue;
+        }
         winding += crossing(from, to, along)
             .ok_or_else(|| gave_up_seeing(whichever_of_them_was_not_read(from, to)))?;
     }
