@@ -38,7 +38,7 @@ use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 mod cones;
 mod rings;
 
-use std::f64::consts::PI;
+use std::f64::consts::{PI, SQRT_2};
 
 type Pair = fn(&mut Model) -> [SolidKey; 2];
 
@@ -400,6 +400,142 @@ fn a_thinner_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_ans
             [&[7], &[3], &[4], &[3, 3]],
             corner,
         );
+    }
+}
+
+/// The bar of radius 1 from `(1, 0, −3)` up `z`, 6 long, through the bar of
+/// radius 2 up `z` from `−2` to 2. The thin pipe rests on the inside of the
+/// thick one along the line `x = 2`, `y = 0`, where both seams run, and
+/// `intersect` names that one line. Turned the least bit about `x`, it crosses
+/// in two curves that meet
+/// ([`a_thin_bar_turned_a_hair_inside_a_thick_one_is_refused_at_the_first_face_a_fuse_cuts_that_refuses`]).
+///
+/// What they share is the thin bar between the thick bar's caps, `4π`.
+#[test]
+fn a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_fuse_answers() {
+    let mut model = a_model();
+    let [thick, thin] =
+        a_thin_bar_up_the_inside_of_a_thick_one(&mut model).map(|solid| the_wall(&model, solid));
+    assert_eq!(curves(&thick, &thin), Ok(1));
+    assert_eq!(curves(&thin, &thick), Ok(1));
+    every_fuse_answers(
+        a_thin_bar_up_the_inside_of_a_thick_one,
+        [16.0 * PI, 6.0 * PI, 4.0 * PI],
+        [&[7], &[3], &[4], &[3, 3]],
+    );
+}
+
+/// [`a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_fuse_answers`]
+/// with the thin bar turned `lean` about `x`: `4e−16`, `1e−15`, `1e−14` and
+/// `1e−8`. Its axis then runs `(x, −lean·z)`, so the thin pipe touches the
+/// thick one at `(2, 0, 0)` alone and pokes out of it a little above and
+/// below. `intersect` names two curves both ways round, and they cross at
+/// that point, at angles `−lean·z (1 ± 1/√2)` round the thick axis. Two
+/// placements: the thin bar at `x = 1`, whose seam runs along the thick wall,
+/// and at `x = −1`, where it touches the thick wall opposite its seam. Every
+/// fuse is refused, at every lean, and which refusal depends on which bar
+/// comes first. Both refusals are a limit up to `1e−14` and a gap at `1e−8`
+/// (§16.10). The places below are worked out to first order in the lean.
+///
+/// **The order.** A fuse cuts every face of its first solid before any face of
+/// its second, and stops at the first face that refuses
+/// (`Scratch::split_both_groups` in `fuse/mod.rs`). With the thick bar first
+/// the first face cut is its floor, and that is refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. With the thin bar first at
+/// `x = 1` it is the thin floor, refused `side of cylinder` at its seam corner
+/// `(2, 3·lean, −3)`. At `x = −1` the thin floor has no corner on the thick
+/// wall, the thin floor and roof are cut, and the thin wall is refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Before any face is cut,
+/// `tell_each_edge_what_its_neighbour_leaves_out` in `fuse/cuts.rs` asks the
+/// same side of both thin caps and drops the refusal, as its doc says it does.
+///
+/// **`WhereThreeSurfacesMeetNeedsTwoOfThemFlat`** is asked where a thick cap
+/// meets both walls. It meets them in two points `4√2·lean` apart, beside
+/// coordinates of 3: a spread past
+/// [`DynamicRange::LARGEST_SUPPORTED_RATIO`] up to `1e−14`, a limit, and of
+/// `5.3e7` at `1e−8`, where the two points are there to find, a gap. That gap
+/// is Q2202's family, a plane and two round surfaces that Q2196's mirror road
+/// does not take.
+///
+/// **`side of cylinder`** is asked of the thin floor's seam corner, which is a
+/// sample of its rim (§17.1). The rim is `(1 + cos t, 3·lean + sin t, −3)`,
+/// which lies outside the thick wall where `−t² + 6·lean·t + 9·lean² > 0`,
+/// between the two crossings `t = 3·lean (1 ± √2)`, at `y = 3·lean (2 ± √2)`.
+/// The corner is `t = 0`, outside by `(3·lean)²/4`, too little for its box to
+/// show. Up to `1e−14` the corner's box holds both crossings, so rim points in
+/// it lie on both sides, and the crossings are too close for the supported
+/// spread: a limit. At `1e−8` the box lies between the crossings, so every rim
+/// point in it is outside and the answer is there: a gap.
+/// `a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve` in
+/// `fuse/arrange.rs` would read the corner on its rim, and does not, since
+/// the meet of the floor and both walls is refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` too.
+#[test]
+fn a_thin_bar_turned_a_hair_inside_a_thick_one_is_refused_at_the_first_face_a_fuse_cuts_that_refuses()
+ {
+    for (x, seam_on_the_thick_wall) in [(1.0, true), (-1.0, false)] {
+        for (lean, answer_is_there) in
+            [(4e-16, false), (1e-15, false), (1e-14, false), (1e-8, true)]
+        {
+            let build =
+                move |model: &mut Model| a_thin_bar_turned_inside_a_thick_one(model, x, lean);
+            let mut model = a_model();
+            let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
+            assert_eq!(curves(&thick, &thin), Ok(2), "x {x}, lean {lean}");
+            assert_eq!(curves(&thin, &thick), Ok(2), "x {x}, lean {lean}");
+            let caps_meet_the_walls =
+                DynamicRange::measure(3.0, 4.0 * SQRT_2 * lean).expect("two points apart");
+            assert_eq!(
+                caps_meet_the_walls.is_within_supported_range(),
+                answer_is_there,
+                "x {x}, lean {lean}: a cap meets both walls at a spread of {}",
+                caps_meet_the_walls.ratio()
+            );
+            let [low, high] = [2.0 - SQRT_2, 2.0 + SQRT_2].map(|k| 3.0 * lean * k);
+            let crossings = DynamicRange::measure(3.0, high - low).expect("two points apart");
+            assert_eq!(
+                crossings.is_within_supported_range(),
+                answer_is_there,
+                "x {x}, lean {lean}: the rim crosses the thick wall at a spread of {}",
+                crossings.ratio()
+            );
+            for (rule, thick_first) in six_fuses() {
+                let what = format!("x {x}, lean {lean}: {rule:?} (thick first: {thick_first})");
+                let said = fuse(&mut a_model(), build, rule, thick_first);
+                if seam_on_the_thick_wall && !thick_first {
+                    let refused = refused_on_one_question_at(
+                        &said,
+                        "side of cylinder",
+                        [2.0, 3.0 * lean, -3.0],
+                        &what,
+                    );
+                    let [corner] = refused.inputs() else {
+                        panic!("{what}: one corner is asked about: {refused:#?}");
+                    };
+                    let y = corner.enclosure()[1];
+                    assert_eq!(
+                        y.lo() < low && high < y.hi(),
+                        !answer_is_there,
+                        "{what}: the box {y:?} holds both crossings {low} and {high}"
+                    );
+                    assert_eq!(
+                        low < y.lo() && y.hi() < high,
+                        answer_is_there,
+                        "{what}: the box {y:?} lies between the crossings {low} and {high}"
+                    );
+                } else {
+                    assert!(
+                        matches!(
+                            said,
+                            Err(rcad_topo::Error::Geometry(
+                                rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
+                            ))
+                        ),
+                        "{what}: {said:?}"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -840,8 +976,9 @@ fn two_cones_on_one_apex_leaning_apart_meet_both_rims_in_corners_too_close_for_a
             rule,
             first_first,
         );
-        refused_on_the_order_along_a_crossing_at(
+        refused_on_one_question_at(
             &said,
+            "order along a crossing",
             [3.812888843803106, -1.2090817444663618, 8.0],
             &format!("{rule:?} (first first: {first_first})"),
         );
@@ -1095,7 +1232,7 @@ fn a_model() -> Model {
 
 fn fuse(
     model: &mut Model,
-    build: Pair,
+    build: impl Fn(&mut Model) -> [SolidKey; 2],
     rule: Rule,
     first_first: bool,
 ) -> rcad_topo::Result<Vec<SolidKey>> {
@@ -1104,7 +1241,7 @@ fn fuse(
 
 fn fuse_under(
     model: &mut Model,
-    build: Pair,
+    build: impl Fn(&mut Model) -> [SolidKey; 2],
     rule: Rule,
     first_first: bool,
     policy: &Policy,
@@ -1182,11 +1319,12 @@ fn measures_under(
     (solids, measured, error)
 }
 
-/// Assert that `said` is refused `Undecidable` on one question, the order
-/// along a crossing, asked of points that all lie within `1e-9` of `place`,
+/// Assert that `said` is refused `Undecidable` on one question, the predicate
+/// named `question`, asked of points that all lie within `1e-9` of `place`,
 /// and hand back its record. `what` names the fuse for every message.
-fn refused_on_the_order_along_a_crossing_at<'a>(
+fn refused_on_one_question_at<'a>(
     said: &'a rcad_topo::Result<Vec<SolidKey>>,
+    question: &str,
     place: [f64; 3],
     what: &str,
 ) -> &'a Record {
@@ -1196,11 +1334,7 @@ fn refused_on_the_order_along_a_crossing_at<'a>(
     let [refused] = records.records() else {
         panic!("{what}: should be refused on one question: {records:#?}");
     };
-    assert_eq!(
-        refused.predicate(),
-        "order along a crossing",
-        "{what}: {refused:#?}"
-    );
+    assert_eq!(refused.predicate(), question, "{what}: {refused:#?}");
     for input in refused.inputs() {
         let sides = input.enclosure();
         let far = (0..3)
@@ -1233,6 +1367,17 @@ fn the_cap_and_the_side(model: &Model, solid: SolidKey) -> (Plane, Cone) {
         panic!("a pointed cone has a plane and a cone, and not {surfaces:?}");
     };
     (cap, side)
+}
+
+/// The pipe of a bar's wall, as the model places it.
+fn the_wall(model: &Model, solid: SolidKey) -> Surface {
+    model
+        .solid(solid)
+        .expect("a solid of this model")
+        .faces()
+        .map(|face| face.surface())
+        .find(|surface| matches!(surface, Surface::Cylinder(_)))
+        .expect("a bar's wall is a pipe")
 }
 
 /// The sign of `|w|² − 1`, decided exactly, and its value to a rounding.
@@ -1364,6 +1509,27 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one(model: &mut Model) -> [SolidK
         a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
         a_bar_along_x(model, 1.0, [-4.0, 1.0, 0.0], 8.0),
     ]
+}
+
+fn a_thin_bar_up_the_inside_of_a_thick_one(model: &mut Model) -> [SolidKey; 2] {
+    [
+        a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+        a_bar(model, 1.0, [1.0, 0.0, -3.0], 6.0),
+    ]
+}
+
+/// The bar of radius 2 up `z` from `−2` to 2, and the bar of radius 1 up `z`
+/// from `(x, 0, −3)`, 6 long, turned `lean` about `x`.
+fn a_thin_bar_turned_inside_a_thick_one(model: &mut Model, x: f64, lean: f64) -> [SolidKey; 2] {
+    let thick = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
+    let thin = a_bar(model, 1.0, [x, 0.0, -3.0], 6.0);
+    model
+        .place_solid(
+            thin,
+            &Isometry::rotation(&Axis::x(), lean).expect("a finite turn"),
+        )
+        .expect("this model made the key");
+    [thick, thin]
 }
 
 fn a_half_ring_cut_by_a_round_plate(model: &mut Model) -> [SolidKey; 2] {
