@@ -1598,3 +1598,135 @@ fn ball_in_the_side_of_a_bar(steps: u32) -> f64 {
     }
     sum * step
 }
+
+#[test]
+fn probe_q2662_lean() {
+    for lean in [4e-16, 1e-15, 1e-14] {
+        let mut model = a_model();
+        let fat = a_bar(&mut model, 2.0, [0.0, 0.0, -2.0], 4.0);
+        let thin = a_bar(&mut model, 1.0, [1.0, 0.0, -3.0], 6.0);
+        model
+            .place_solid(thin, &Isometry::rotation(&Axis::x(), lean).expect("a turn"))
+            .expect("placed");
+        let pipe = |key: SolidKey| {
+            model
+                .solid(key)
+                .expect("a solid")
+                .faces()
+                .map(|face| face.surface())
+                .find(|s| matches!(s, Surface::Cylinder(_)))
+                .expect("a pipe")
+        };
+        let (f, t) = (pipe(fat), pipe(thin));
+        println!("lean {lean}: fat {f:?}\n thin {t:?}");
+        for (a, b, name) in [(&f, &t, "fat first"), (&t, &f, "thin first")] {
+            let said = intersect(a, b, &Policy::certified(), &mut ProvenanceLog::new());
+            println!(" intersect {name}: {said:?}");
+        }
+        for (rule, first_first) in six_fuses() {
+            let mut model = a_model();
+            let said = fuse(
+                &mut model,
+                match lean {
+                    4e-16 => |m: &mut Model| probe_pair(m, 4e-16),
+                    1e-15 => |m: &mut Model| probe_pair(m, 1e-15),
+                    _ => |m: &mut Model| probe_pair(m, 1e-14),
+                },
+                rule,
+                first_first,
+            );
+            match said {
+                Ok(solids) => {
+                    let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                    let faces: Vec<usize> = solids
+                        .iter()
+                        .map(|&s| model.solid(s).expect("solid").faces().count())
+                        .collect();
+                    println!(
+                        " {rule:?} fat first {first_first}: answers {faces:?}, validate {valid:?}"
+                    );
+                }
+                Err(why) => println!(" {rule:?} fat first {first_first}: refused {why:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn probe_q2662_generic() {
+    let pairs: [(f64, Pair); 5] = [
+        (0.0, |m| probe_generic(m, 0.0)),
+        (2.2e-16, |m| probe_generic(m, 2.2e-16)),
+        (4.4e-16, |m| probe_generic(m, 4.4e-16)),
+        (1e-15, |m| probe_generic(m, 1e-15)),
+        (1e-14, |m| probe_generic(m, 1e-14)),
+    ];
+    for (lean, build) in pairs {
+        let mut model = a_model();
+        let [fat, thin] = build(&mut model);
+        let pipe = |key: SolidKey| {
+            model
+                .solid(key)
+                .expect("a solid")
+                .faces()
+                .map(|face| face.surface())
+                .find(|s| matches!(s, Surface::Cylinder(_)))
+                .expect("a pipe")
+        };
+        let (f, t) = (pipe(fat), pipe(thin));
+        println!("lean {lean}: fat {f:?}\n thin {t:?}");
+        for (a, b, name) in [(&f, &t, "fat first"), (&t, &f, "thin first")] {
+            let said = intersect(a, b, &Policy::certified(), &mut ProvenanceLog::new());
+            match said {
+                Ok(SurfaceMeet::Curves(runs)) => {
+                    println!(" intersect {name}: {} curves", runs.len());
+                    for run in runs {
+                        println!("   {:?}", run.run());
+                    }
+                }
+                other => println!(" intersect {name}: {other:?}"),
+            }
+        }
+        for (rule, first_first) in six_fuses() {
+            let mut model = a_model();
+            let said = fuse(&mut model, build, rule, first_first);
+            match said {
+                Ok(solids) => {
+                    let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                    let faces: Vec<usize> = solids
+                        .iter()
+                        .map(|&s| model.solid(s).expect("solid").faces().count())
+                        .collect();
+                    println!(
+                        " {rule:?} fat first {first_first}: answers {faces:?}, validate {valid:?}"
+                    );
+                }
+                Err(why) => println!(" {rule:?} fat first {first_first}: refused {why:?}"),
+            }
+        }
+    }
+}
+
+fn probe_generic(model: &mut Model, lean: f64) -> [SolidKey; 2] {
+    let fat = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
+    let thin = a_bar(model, 1.0, [1.0, 0.0, -3.0], 6.0);
+    model
+        .place_solid(fat, &Isometry::rotation(&Axis::x(), 1.0).expect("a turn"))
+        .expect("placed");
+    model
+        .place_solid(
+            thin,
+            &Isometry::rotation(&Axis::x(), 1.0 + lean).expect("a turn"),
+        )
+        .expect("placed");
+    [fat, thin]
+}
+
+fn probe_pair(model: &mut Model, lean: f64) -> [SolidKey; 2] {
+    let fat = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
+    let thin = a_bar(model, 1.0, [1.0, 0.0, -3.0], 6.0);
+    model
+        .place_solid(thin, &Isometry::rotation(&Axis::x(), lean).expect("a turn"))
+        .expect("placed");
+    [fat, thin]
+}
