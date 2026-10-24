@@ -693,17 +693,21 @@ pub enum Error {
     /// Four kinds of those quartic loops are ordered all the same, and never
     /// get this: the two loops a ball off a pipe's axis crosses it in where it
     /// swallows the pipe's whole cross-section (Q1554), and the two a fat pipe
-    /// crosses a thin one it swallows in (Q1483), each read down the pipe's
-    /// axis; and the one loop a ball off a pipe's axis crosses it in where it
-    /// reaches into its side (Q1767), and the one loop two pipes cross in where
-    /// neither swallows the other (Q1880), as a thin pipe reaching out of a fat
-    /// one's side leaves, each read round a line.
+    /// crosses a thin one it swallows in (Q1483), or that a thin pipe resting
+    /// on its inside crosses it in, which meet where the two touch (Q2709),
+    /// each read down the pipe's axis; and the one loop a ball off a pipe's
+    /// axis crosses it in where it reaches into its side (Q1767), and the one
+    /// loop two pipes cross in where neither swallows the other (Q1880), as a
+    /// thin pipe reaching out of a fat one's side leaves, each read round a
+    /// line.
     ///
     /// A **limit** for the straight cases — the question is a different one and
     /// the arrangement's dominant-axis rule already answers it. A ball off a
-    /// pipe's axis that touches the pipe from inside, and a thin pipe that
-    /// touches a fat one from inside, cross in a figure of eight and are
-    /// refused too; which of the two that is has not been argued.
+    /// pipe's axis that touches the pipe from inside crosses it in a figure of
+    /// eight and is refused too; which of the two that is has not been argued.
+    /// A thin pipe touching a fat one from inside was refused the same way
+    /// until Q2709, and was a gap: each of its two loops still runs once round
+    /// the thin pipe's axis, so it is ordered as a swallowed pipe's loops are.
     #[error("these two surfaces do not cross in one closed curve lying in a plane")]
     TheseTwoSurfacesDoNotCrossInAConic,
 
