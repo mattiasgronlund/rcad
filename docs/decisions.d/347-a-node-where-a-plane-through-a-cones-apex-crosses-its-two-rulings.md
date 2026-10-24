@@ -516,6 +516,15 @@ The pins, pair by pair, the answer first and the limit after:
 > what this section settles about `place_the_meets` stands: nothing yet hands
 > it two loops that meet.
 
+> **2026-10-24 note (Q2649): the bar touching the ball from inside answers
+> too.** The pin above, `a_bar_touching_a_ball_from_inside_is_refused_before_any_arrangement`,
+> no longer holds under that name. Since Q2649 `place_the_meets` puts a node
+> where the two loops meet, at `(2, 0, 0)`, and every fuse answers, each held
+> to a corner there:
+> `a_bar_touching_a_ball_from_inside_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`
+> in `two_curves_of_one_pair_that_meet.rs`. So `place_the_meets` is now handed
+> two loops that meet, for this pair.
+
 **The coaxial pairs 347.5 leaves out.** A ring with a pipe, a ball or a cone
 on its axis, a cone and a ball, and two cones, each on one axis, cross in
 circles round the axis at heights apart.
@@ -722,4 +731,11 @@ test's doc comment. Relay 1's quartic probe is described here and not kept.
 > `place_the_meets` puts no node where they meet, so the arrangement refuses
 > the two loops rather than `intersect` refusing them by name. The pin is now
 > `a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet`
+> in `two_curves_of_one_pair_that_meet.rs`.
+
+> **2026-10-24 note (Q2649): the pin above is renamed again, to the pair
+> answering.** `place_the_meets` now puts a node where the two loops meet, so
+> the pin above no longer holds under that name either. Every fuse answers,
+> held to a corner at `(0, 2, 0)`:
+> `a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`
 > in `two_curves_of_one_pair_that_meet.rs`.
