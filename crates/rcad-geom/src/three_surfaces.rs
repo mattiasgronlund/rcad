@@ -4987,8 +4987,9 @@ fn where_a_ball_on_the_axis_meets_it(ball: &Surface, round: &Surface) -> Option<
 ///
 /// **Where they are.** From `h = 0`, `μ = (−q − h₀)/|g|`, and from `Q₁ = 0`,
 /// `λ² = (−Q₁(c) − f₁·v + β₁(w₁·v)²)/W₁ − μ²`. Each holds at the point, so
-/// each turns a box that holds the point into one that holds it too, and a
-/// few rounds of both shrink the box the strip starts to a rounding or two.
+/// each turns a box that holds the point into one that holds it too. Rounds
+/// of both, until one narrows neither side, shrink the box the strip starts to
+/// a few roundings ([`MOST_ROUNDS_ROUND_A_CROSSING`]).
 ///
 /// **The numbers.** `k(c − oᵢ)` is `k(o₁ − oᵢ) + m w₁` for `k` and `m` of the
 /// band, so `k²Qᵢ(c)` and `k∇Qᵢ(c)` are worked out exactly, and so are `k²h₀`
@@ -5088,7 +5089,7 @@ fn two_points_or_nowhere(flat: &Plane, mine: &Surface, theirs: &Surface) -> Opti
         let sign = Interval::exactly(sign);
         let mut sideways = sign * across;
         let mut upwards = strip;
-        for _ in 0..8 {
+        for _ in 0..MOST_ROUNDS_ROUND_A_CROSSING {
             let widths = (sideways.width(), upwards.width());
             let mine_along = squared(my_axis_across * sideways + my_axis_up * upwards);
             let theirs_along = squared(their_axis_across * sideways + their_axis_up * upwards);
@@ -5118,6 +5119,18 @@ fn two_points_or_nowhere(flat: &Plane, mine: &Surface, theirs: &Surface) -> Opti
     };
     Some(MeetOfThree::At(smallvec![crossing(-1.0), crossing(1.0)]))
 }
+
+/// The most rounds [`two_points_or_nowhere`] takes to narrow the box round one
+/// crossing. It stops at the first round that narrows neither side, so this
+/// only says how long it may go on.
+///
+/// A box as wide as the curve shrinks to a rounding of it, `2⁻⁵²` as wide, in
+/// 52 rounds that each halve it. The cap of a cone of slope ½ up `z`, across
+/// one turned 0.3 about `x` on the same apex, narrows about 22 times a round
+/// and stops after 13. Eight rounds, the count before Q2741, left that box
+/// `1.9e−11` across, and a tolerant fuse of the two cones at a working size
+/// of 100 could not read the corners where their rims meet as one.
+const MOST_ROUNDS_ROUND_A_CROSSING: usize = 64;
 
 /// A ball, a pipe or a cone written as
 /// `W|p − o|² − β((p − o)·w)² − γ`, the same surface its own sign expression
