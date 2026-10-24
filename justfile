@@ -17145,6 +17145,38 @@ check-queue-api-selftest:
     got=$(q "$hub" running 2>&1) || fail "running failed with a stale hold"
     grep -q "^lane-stale  .*no tree yet" <<<"$got" || fail "a hold on a branch already on main, which no tree left, was not counted"
 
+    # Q692 (§299.5): a landed-but-still-held row's own leftover detached tree,
+    # if still locked, must be claimed too -- not left for `spare` to hand to
+    # an unrelated branch-gone row that has no tree anywhere at all, which
+    # would drop that row's own "no tree yet" fallback line.
+    landed="$lanes/landed-work"
+    g "$hub" worktree add -q -b lane-landed "$landed" main
+    g "$landed" commit -q --allow-empty -m "lane-landed's own commit"
+    landed_tip=$(g "$landed" rev-parse HEAD)
+    g "$hub" worktree remove --force "$landed"
+    g "$hub" merge -q --no-edit lane-landed
+    verify_landed="$lanes/verify-landed"
+    g "$hub" worktree add -q --detach "$verify_landed" "$landed_tip" && lock "$verify_landed"
+    got=$(q "$hub" add 3 opus - "from/- a row already landed but still held, with its detached tree still locked §230" 2>&1) \
+        || fail "add for the landed-but-held row failed"
+    q_landed=$got
+    got=$(q "$hub" take "$q_landed" lane-landed 2>&1) || fail "take could not hold $q_landed on lane-landed"
+
+    gone5="$lanes/gone-work-5"
+    g "$hub" worktree add -q -b lane-gone-5 "$gone5" main
+    g "$gone5" commit -q --allow-empty -m "lane-gone-5's own commit"
+    g "$hub" worktree remove --force "$gone5"
+    g "$hub" branch -D lane-gone-5 >/dev/null
+    got=$(q "$hub" add 3 opus - "from/- a row whose branch is deleted outright with no tree left anywhere §230" 2>&1) \
+        || fail "add for the fully-gone row failed"
+    q_gone5=$got
+    got=$(q "$hub" take "$q_gone5" lane-gone-5 2>&1) || fail "take could not hold $q_gone5 on a branch about to be deleted with no tree ever kept"
+
+    got=$(q "$hub" running 2>&1) || fail "running failed with a landed-but-held row's tree beside a branch-gone row with no tree at all"
+    grep -q "^lane-landed  .*no tree yet" <<<"$got" || fail "the landed-but-held row was not flagged as a stale hold"
+    grep -q "^lane-gone-5  .*no tree yet" <<<"$got" \
+        || fail "§299.5: a branch-gone row with no tree anywhere lost its fallback line to a landed row's leftover detached tree"
+
     # Q2215 (§263.4): a lander's own tree, run for a row held on lane-<label>,
     # switches to merge-<label> once it holds the land lock, before the lane's
     # own tree is unlocked. `has_a_tree`'s `merge-<label>` arm already covered
