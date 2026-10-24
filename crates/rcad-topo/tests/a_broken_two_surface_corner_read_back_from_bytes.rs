@@ -380,7 +380,6 @@ enum Outcome {
     /// `Error::Undecidable`, with a record naming this predicate.
     Undecidable(&'static str),
     CannotTellTheCellsOfAFaceApart,
-    TwoCurvesTouchWithoutCrossing,
     ResultIsNotManifold,
 }
 
@@ -1615,7 +1614,6 @@ fn check(
         }
         Outcome::Undecidable(_)
         | Outcome::CannotTellTheCellsOfAFaceApart
-        | Outcome::TwoCurvesTouchWithoutCrossing
         | Outcome::ResultIsNotManifold => {
             refuses_as(shape, moved_to, partner, rule, policy, outcome);
         }
@@ -1646,9 +1644,6 @@ fn refuses_as(
         ),
         Outcome::CannotTellTheCellsOfAFaceApart => {
             matches!(refused, Error::CannotTellTheCellsOfAFaceApart { .. })
-        }
-        Outcome::TwoCurvesTouchWithoutCrossing => {
-            matches!(refused, Error::TwoCurvesTouchWithoutCrossing { .. })
         }
         Outcome::ResultIsNotManifold => matches!(refused, Error::ResultIsNotManifold { .. }),
         Outcome::ItBlamesItself | Outcome::TheSoundAnswer => {
