@@ -17,7 +17,8 @@ Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
 `*_ROUNDOFF` constants. 464.10 is Q2661, which proves block 1's hints in Coq
 and settles how the scripts join the tree and what notices the Rust moving
 under them. 464.11 is Q2675, which runs the branches where one of the nine
-differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.*
+differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
+464.13 is Q2678, on the side of a flat surface through a point.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -31,6 +32,7 @@ differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.*
   464.10  Whether the scripts join the tree and the gate
   464.11  One of the nine differences at zero
   464.12  The sphere of surface.rs' tests
+  464.13  The side of a flat surface through a point
 
 ### 464.1 The bugs a bound prover is for
 
@@ -239,14 +241,15 @@ stamp recorded.
 `on_floats` whose `error_bound` is a constant times a permanent:
 `ORIENT2D_ERROR_BOUND` and `surface.rs`' `ERROR_BOUND` (a test's, 464.12) in
 `rcad-predicates`, and `SIDE_OF_PLANE`,
-`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT`, `SIDE_OF_SPHERE`, `SIDE_OF_CYLINDER`,
-`SIDE_OF_CONE` and `SIDE_OF_TORUS` in `rcad-geom`. Block 1's pattern should
-carry over to them: one ratio hint per rounding, the error split into one term
-per product of the permanent so that Gappa can average them, block 2 for the
-closed normal end, and `-Eprecision=200`. That is Q2659. The eleven `*_ROUNDOFF` constants were not
-read for this. Two of them, `EVALUATION_ROUNDOFF` and `REFINEMENT_ROUNDOFF`,
-hold per de Boor pass at any degree, and a Gappa script states one fixed
-expression, so it could only do them one degree at a time. That is Q2660. The
+`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT` (464.13), `SIDE_OF_SPHERE`,
+`SIDE_OF_CYLINDER`, `SIDE_OF_CONE` and `SIDE_OF_TORUS` in `rcad-geom`. Block
+1's pattern should carry over to them: one ratio hint per rounding, the error
+split into one term per product of the permanent so that Gappa can average
+them, block 2 for the closed normal end, and `-Eprecision=200`. That is Q2659.
+The eleven `*_ROUNDOFF` constants were not read for this. Two of them,
+`EVALUATION_ROUNDOFF` and `REFINEMENT_ROUNDOFF`, hold per de Boor pass at any
+degree, and a Gappa script states one fixed expression, so it could only do
+them one degree at a time. That is Q2660. The
 machine's part costs little: seconds for Gappa, under ten for `coqc`. The cost
 is in finding the hints, which took orient3d three relays and this write-up;
 with the pattern known, each of the eight should take less.
@@ -543,7 +546,8 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   was. Done for two, in 464.8: `ORIENT2D_ERROR_BOUND` and
   `SIDE_OF_PLANE_ERROR_BOUND` are proved at the code's constants, orient2d's
   with its products below the normals too, and each of the other six is a row
-  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12.
+  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12, and
+  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those. Done, in 464.9: three are proved at the code's
   constants, two of them false when every number is below `2⁻¹⁰²²`, and each
@@ -1837,8 +1841,8 @@ for byte as they were run.
 
 - Six rows, one for each bound 464.6 named that is not proved yet:
   `surface.rs`' `ERROR_BOUND` in `rcad-predicates` (Q2677, done in 464.12),
-  and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND`,
-  `SIDE_OF_SPHERE_ERROR_BOUND`, `SIDE_OF_CYLINDER_ERROR_BOUND`,
+  and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` (Q2678, done in
+  464.13), `SIDE_OF_SPHERE_ERROR_BOUND`, `SIDE_OF_CYLINDER_ERROR_BOUND`,
   `SIDE_OF_CONE_ERROR_BOUND` and `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
   Each is to be proved as 1 to 5 here prove orient2d and the side of a plane:
   `on_floats` line for line, the lemma for each product it checks is normal, a
