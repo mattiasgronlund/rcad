@@ -14804,9 +14804,9 @@ check-queue-page-selftest:
     grep -q 'id="qp-by-tier"' "$out/index.html" || fail "the by-tier chart is missing from the page"
     grep -q 'id="qp-progress"' "$out/index.html" || fail "the progress chart is missing from the page"
     has() { grep -qF -- "$1" "$out/index.html" || fail "$2"; }
-    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Running rows|Pinned|Rows the fill will not take now|Families|Queue)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
-    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Families</h2> <h2>Queue</h2> ' ] \
-        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Running rows, Pinned, Rows the fill will not take now, Families, then Queue: $order"
+    order=$(grep -oE '<h[12]>(Pace|rcad queue|Queue statistics|Open rows|Running rows|Pinned|Rows the fill will not take now|Families|Queue)</h[12]>|id="qp-(added-closed|by-tier)"' "$out/index.html" | tr '\n' ' ')
+    [ "$order" = '<h2>Pace</h2> id="qp-added-closed" <h1>rcad queue</h1> id="qp-by-tier" <h2>Queue statistics</h2> <h2>Open rows</h2> <h2>Running rows</h2> <h2>Pinned</h2> <h2>Rows the fill will not take now</h2> <h2>Families</h2> <h2>Queue</h2> ' ] \
+        || fail "Pace and its chart should come first, then the header and its charts, then Queue statistics, Open rows, Running rows, Pinned, Rows the fill will not take now, Families, then Queue: $order"
     # Each line: the row, the tier its take was taken from, the agent whose tree it runs in, the dispatcher's tree.
     # A row main's copy holds is linked to its page; Q8, Q9, Q17 and Q23 are in no copy of main, so they have none.
     has '<tr><th><code><a href="rows/Q2.html">Q2</a></code></th><td>2</td><td><code>wf_page-1</code></td><td><code>dispatch-a</code></td></tr>' \
@@ -14884,6 +14884,37 @@ check-queue-page-selftest:
     ! grep -qF 'not worked out' <<<"$queue" || fail "the Queue section says the third group is not worked out, and it is"
     grep -qE '<p class="qp-sub">as of [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z, when this page was last rendered</p>' "$out/index.html" \
         || fail "the running table does not say when the page was rendered"
+    # §352.6/§352.7: the measure line `just queue`'s awk prints at its own end,
+    # and each open row's age since the commit that added it. Q2 was added at
+    # commit A and Q4 at commit C (still open at D, Q4 now parked), so their
+    # ages are worked out here from the rendered-at stamp the page itself
+    # reports, never from a second read of the wall clock, which could
+    # straddle a UTC midnight the page's own read did not.
+    rendered_at=$(grep -oE 'as of [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$out/index.html" | head -1 | sed -E 's/as of //')
+    [ -n "$rendered_at" ] || fail "could not read the rendered-at stamp off the page, so the open rows' ages cannot be checked"
+    age_days() {
+        python3 -c "
+    from datetime import datetime, timezone
+    now = datetime.strptime('$rendered_at', '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+    added = datetime.fromisoformat('$1')
+    print((now - added).days)"
+    }
+    day_word() { [ "$1" = 1 ] && echo day || echo days; }
+    q2_days=$(age_days '2026-09-01T10:00:00+00:00')
+    q4_days=$(age_days '2026-09-03T10:00:00+00:00')
+    has "<p class=\"qp-sub\">tier 1, open and not parked: 0 in A or B (0 wrong, 0 crash, 0 refuses), 5 with no class; tier 5: 2 in C, 0 in D, 0 with no class; 0 small rows ready, and a bundle is 5 (§352.6)</p>" \
+        "the Open rows section's measure line: no row at commit D is tagged, so all five tier-1 rows (Q19, Q20, Q2, Q18, Q21) are unclassed and both tier-5 rows (Q6, Q33) are wrong/C"
+    has "<tr><th><code><a href=\"rows/Q2.html\">Q2</a></code></th><td>1</td><td class=\"n\">${q2_days} $(day_word "$q2_days")</td></tr>" \
+        "Q2's open-rows line: added at commit A, tier 1, aged against the page's own rendered-at stamp"
+    has "<tr><th><code><a href=\"rows/Q4.html\">Q4</a></code></th><td>1</td><td class=\"n\">${q4_days} $(day_word "$q4_days")</td></tr>" \
+        "Q4's open-rows line: added at commit C, still open though parked now, so it still gets an age"
+    open_rows_list=$(between 'Open rows' 'Running rows' | row_heads)
+    q2_pos=$(tr ' ' '\n' <<<"$open_rows_list" | grep -n -x Q2 | cut -d: -f1)
+    q4_pos=$(tr ' ' '\n' <<<"$open_rows_list" | grep -n -x Q4 | cut -d: -f1)
+    [ -n "$q2_pos" ] && [ -n "$q4_pos" ] && [ "$q2_pos" -lt "$q4_pos" ] \
+        || fail "Q2 (added at commit A) should come before Q4 (added at commit C) in the open-rows table, oldest first: $open_rows_list"
+    ! grep -qE ' Q1 | Q3 ' <<<" $open_rows_list " \
+        || fail "a closed row (Q1 or Q3) should not appear in the open-rows table: $open_rows_list"
     # Each row: added and closed that day, open by tier 1 2 2.2 2.5 3 4 5, parked, all open, closed so far.
     # A and B share 09-01, so its row is B's shape, not A's; 09-02 has no commit, so it keeps B's shape.
     has '<tr><th>2026-09-03</th><td class="n">3</td><td class="n">1</td><td class="n">1</td><td class="n">0</td><td class="n">1</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td class="n">1</td><td class="n">1</td><td class="n">4</td><td class="n">2</td></tr>' \
