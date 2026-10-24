@@ -246,5 +246,11 @@ Its JSON holds the `verdictSchema` fields it can decide, and two of its own:
   estimates from the same transcripts but writes only §383 and §384.
 - **A verifier sent by a `claude` process started before this merge** may
   read the old `verifier.md`, if agent files load when the process starts, as
-  a new type does (§384.3). Not tested. Its `VERIFY` prompt still names the
-  recipe and says to take its fields, so it runs the recipe all the same.
+  a new type does (§384.3). Checked, against every recorded `lanes` run on
+  this machine: 952 verifier agents have a run record that starts after
+  Q793's merge (2026-10-03 15:23:06 UTC), from 215 distinct top-level
+  sessions, and every one of those sessions itself started after that time
+  too — the earliest by 5061 s (about 84 minutes). No run of the kind this
+  item asks about happened. Its `VERIFY` prompt still names the recipe and
+  says to take its fields, so a verifier that did read the old file would run
+  the recipe all the same.
