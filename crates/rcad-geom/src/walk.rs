@@ -5923,7 +5923,7 @@ mod tests {
             .map(|end| PredicatePoint::from(end.coordinates().map(|at| at * scale)));
             let arc = NamedRun::new(
                 EdgeRun::PartOfWhereItCrosses {
-                    and: wall.clone(),
+                    and: wall,
                     picked_by: smallvec![Picker::InFrontOf(on_the_ends_side)],
                 },
                 ends,
