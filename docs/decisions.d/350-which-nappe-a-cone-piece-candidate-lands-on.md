@@ -205,7 +205,7 @@ count in the table was the same on all three runs.
   Q2046 (Q2040, §354.7):** the table's 2 `CannotMeshAFace`, leaned `1` and
   unturned, crossing `0`'s union and cone less the block, now answer right too,
   as `a_plane_cut_along_a_cones_other_nappe.rs`'s pins say.
-- **Round the unit cone**, the leaning block is 169 right of 192, the cube 88 of
+- **Round the unit cone**, the leaning block is 169 right of 192, the cube 94 of
   96 and the slab 80 of 80 (Q1733, §35.6; was 68 of 80, naming 12 `a point
   inside a piece of a face` in the slab from `−8`). The leaning block refuses 8
   `order along a crossing` and 2 `AWireWillNotLieFlatOnItsFace`, 5 answers do not measure (4
@@ -226,7 +226,12 @@ count in the table was the same on all three runs.
 - **The unit cone's `a point inside a piece of a face`** are 8 in the cube
   (side `2`, middle `1`, both turns). An untraced lead. **2026-10-11, Q1742
   (Q1733, §35.6):** the 12 that used to be in the slab (from `−8`, turned
-  `0.5`, `1` and `1.5`) are gone; the slab is 80 of 80 now.
+  `0.5`, `1` and `1.5`) are gone; the slab is 80 of 80 now. **2026-10-24, Q2631
+  (Q2563):** side `2`, middle `1` no longer refuses `a point inside a piece of
+  a face` on either turn. Unturned, case `0`'s union and cone less the block
+  now refuse `ACurvedFaceGoesRightRoundWithNoSeam` instead (Q2635); turned
+  `0.7`, all 12 answer right. `a_plane_cut_along_a_cones_other_nappe.rs`'s pins
+  say so.
 - **Leaned `1` at crossing `0`, the face touches the unit cone along the ruling
   `x = z`.** Turned `1`, the face as the model stores it passes `4.4e−16` beyond
   the apex, so it cuts a real sliver from the cone, at most `6e−8` across
