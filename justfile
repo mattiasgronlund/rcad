@@ -937,6 +937,18 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     fi
     # The gates a selftest runs inside this one are calls, not runs.
     unset RCAD_GATE_RUN
+    # `setsid` above made this bash the leader of its own process group, and
+    # every step it starts below shares that group, since nothing it runs
+    # starts a session of its own. A bare SIGTERM straight to this one pid —
+    # the case `follow`'s own INT trap, above, does not cover, since that
+    # trap only runs in the caller that is following the run, never in the
+    # run itself — kills this bash and leaves the steps orphaned rather than
+    # stopped, and a chained one left running holds the cargo lock into the
+    # next gate (§372.9). So this bash answers its own SIGTERM by resetting
+    # the trap to the default disposition first, so the forwarded signal
+    # below does not re-enter this handler, then sending it to its whole
+    # group, itself included, which is what ends the steps still running.
+    trap 'trap - TERM; kill -TERM -- -$$ 2>/dev/null; exit 143' TERM
     mkdir -p "$(dirname "$log")"
     : >"$log"
     # One log a step, so that a failing step's tail is its own however many
@@ -1688,6 +1700,42 @@ check-gate-summary-selftest:
     got=$($j --set gate_steps list --set gate_log "$dir/jobs.log" gate quiet reuse many 2>&1) \
         && fail "a gate told to run 'many' steps at once ran anyway"
     grep -q "not 'many'" <<<"$got" || fail "a gate given a bad count did not say what it was given"
+
+    # A bare SIGTERM straight to the run's own bash — not to its process group,
+    # which is how a session's own kill reaches it and `follow`'s INT trap,
+    # above, does not, since that trap runs in the caller following the run
+    # and never in the run itself — must not leave the steps it started
+    # running behind it: left running, a chained one holds the cargo lock
+    # into the next gate (§372.9).
+    hold="$dir/kill-hold"
+    touch "$hold"
+    export GATE_SELFTEST_HOLD="$hold"
+    "$j" --set gate_steps '_gate-selftest-sleep _gate-selftest-sleep' \
+        --set gate_log "$dir/kill.log" gate quiet reuse 2 >"$dir/kill-out" 2>&1 &
+    killed=$!
+    for _ in $(seq 100); do
+        started=0
+        [ -e "$hold.ran" ] && started=$(grep -c . "$hold.ran")
+        [ "$started" -lt 2 ] || break
+        sleep 0.1
+    done
+    [ "$started" -eq 2 ] || fail "the two steps meant to be killed mid-run never both started"
+    run_pid=$(cat "$dir/kill.log.run/pid")
+    steps=$(cat "$hold.ran")
+    kill -TERM "$run_pid"
+    for _ in $(seq 50); do
+        kill -0 "$run_pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    kill -0 "$run_pid" 2>/dev/null && fail "the run's own bash outlived a bare SIGTERM sent straight to it"
+    sleep 0.2
+    for step_pid in $steps; do
+        kill -0 "$step_pid" 2>/dev/null \
+            && fail "a step (pid $step_pid) was still running after a bare SIGTERM to the run that started it"
+    done
+    rm -f "$hold" "$hold.ran"
+    wait "$killed" 2>/dev/null || true
+    unset GATE_SELFTEST_HOLD
 
     # A quiet pass. The step still runs and the log still gets everything; what
     # must not appear on stdout is the step's own output.
