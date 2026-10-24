@@ -907,51 +907,26 @@ fn the_union_of_a_short_cone_on_the_apex_of_a_tall_one_is_refused_when_a_block_c
 
 /// The two cones of
 /// [`two_cones_on_one_apex_leaning_apart_meet_both_rims_in_corners_too_close_for_a_certified_answer`],
-/// under a tolerant policy for the model's own working size of 100, are
-/// refused on the same order. That policy may read the four meets of a cap
-/// with the other three surfaces as one corner, but only once it knows them to
-/// lie within 64 roundings of 100 of one another, `1.4e−12`, and the box the
-/// kernel puts round the meet of the upright cap and both cones is `1.3e−11`
-/// across.
+/// under a tolerant policy for the model's own working size of 100, and for
+/// one ten times coarser: every fuse answers, and the answers add up. Such a
+/// policy may read the four meets of a cap with the other three surfaces as
+/// one corner once it knows them to lie within 64 roundings of the working
+/// size of one another, `1.4e−12` at 100.
+///
+/// At 100 every fuse was refused on the order along a crossing at
+/// `(3.8129, −1.2091, 8)` until Q2741: the road for bands that cross put a
+/// box `1.9e−11` across round the meet of the upright cap and both cones,
+/// since it stopped after eight rounds while its boxes still shrank.
 #[test]
-fn two_cones_on_one_apex_leaning_apart_are_refused_under_a_tolerant_policy_for_the_box_where_a_cap_and_both_cones_meet()
- {
-    let policy = Policy::tolerant(100.0);
-    for (rule, first_first) in six_fuses() {
-        let mut model = a_model();
-        let said = fuse_under(
-            &mut model,
+fn two_cones_on_one_apex_leaning_apart_answer_every_fuse_under_a_tolerant_policy() {
+    for working_size in [100.0, 1000.0] {
+        every_fuse_adds_up_under(
             two_cones_on_one_apex_leaning_apart,
-            rule,
-            first_first,
-            &policy,
-        );
-        let what = format!("{rule:?} (first first: {first_first})");
-        let refused = refused_on_the_order_along_a_crossing_at(
-            &said,
-            [3.812888843803106, -1.2090817444663618, 8.0],
-            &what,
-        );
-        assert!(
-            refused.wobble(100.0) > policy.max_wobble(),
-            "{what}: {refused:#?}"
+            [128.0 * PI / 3.0, 128.0 * PI / 3.0],
+            [&[8], &[4], &[3, 3], &[3, 3]],
+            &Policy::tolerant(working_size),
         );
     }
-}
-
-/// The same at a working size of 1000, where a point may move `1.4e−11`:
-/// every fuse answers, and the answers add up. So the width of the box round
-/// the meet of a cap and both cones is all that keeps the tolerant fuse at 100
-/// from answering.
-#[test]
-fn two_cones_on_one_apex_leaning_apart_answer_every_fuse_under_a_tolerant_policy_ten_times_coarser()
-{
-    every_fuse_adds_up_under(
-        two_cones_on_one_apex_leaning_apart,
-        [128.0 * PI / 3.0, 128.0 * PI / 3.0],
-        [&[8], &[4], &[3, 3], &[3, 3]],
-        &Policy::tolerant(1000.0),
-    );
 }
 
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {

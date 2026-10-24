@@ -7324,6 +7324,29 @@ mod tests {
         assert_eq!(meet([&ball, &leaning, &bar]), Ok(answer), "in any order");
     }
 
+    /// Two cones of slope ½ on one apex at the origin, one up `z` and one
+    /// turned 0.3 about `x`, and the first one's cap `z = 8`. The cap cuts the
+    /// first in the circle of radius 4, and both cones hold the points `8`
+    /// along the turned axis, so the three meet where `y = 8(cos 0.3 − 1) /
+    /// sin 0.3` and `x = ±√(16 − y²)`. The road for bands that cross narrows
+    /// its boxes here by a factor of about 22 a round, and stopped at eight
+    /// rounds they were `1.9e−11` wide, which kept a tolerant fuse of the two
+    /// cones at a working size of 100 from reading the corners where the rims
+    /// meet as one (Q2741).
+    #[test]
+    fn a_cap_across_two_cones_on_one_apex_leaning_apart_meets_them_in_narrow_boxes() {
+        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 8.0]);
+        let upright = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 0.5);
+        let (sine, cosine) = 0.3_f64.sin_cos();
+        let turned = a_cone([0.0, 0.0, 0.0], [0.0, -sine, cosine], 0.5);
+        let answer = meet([&cap, &upright, &turned]).expect("two bands that cross are answered");
+        on_all_three([&cap, &upright, &turned], &answer);
+        let y = 8.0 * (cosine - 1.0) / sine;
+        let x = (16.0 - y * y).sqrt();
+        narrow_boxes_near(&answer, &[[x, y, 8.0], [-x, y, 8.0]]);
+        assert_eq!(meet([&turned, &cap, &upright]), Ok(answer), "in any order");
+    }
+
     /// `-0.0 == 0.0`, so no pin that compares corners sees which zero a corner
     /// carries, but a corner keyed on its bits does: `(-0.0, 3, 0)` and
     /// `(0, 3, 0)` are one point and two keys. The floor across a bar of
