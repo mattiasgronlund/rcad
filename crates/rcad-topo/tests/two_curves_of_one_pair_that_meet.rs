@@ -27,10 +27,11 @@
 //! The fuses run three rules both ways round, certified, in a model of 100 mm.
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Deflection, Isometry, Plane, Point, Sphere, Surface, SurfaceMeet, Torus,
-    Vector, intersect,
+    Axis, Cone, Cylinder, Deflection, DynamicRange, Isometry, Plane, Point, Sphere, Surface,
+    SurfaceMeet, Torus, Vector, intersect,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::expansion::{expansion_sign, expansion_sum, scale_expansion};
+use rcad_predicates::{Decision, Policy, ProvenanceLog, Record};
 use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
@@ -779,14 +780,57 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
 /// turned 0.3 about `x`. Their sides cross in the two rulings of the plane
 /// half way between the axes, and these meet at the apex: §347.1's node,
 /// between two cones rather than a plane and a cone. Each ruling runs up to
-/// `z = 8` and so reaches both rims at once, where both caps meet the two sides.
+/// `z = 8` and so reaches both rims, where both caps meet the two sides, at
+/// once or very nearly.
 ///
-/// `intersect` names the two rulings, but every fuse is refused where the
-/// ruling at `x > 0` meets both rims: the order along a crossing there cannot
-/// be told. Turned 0.25 or 0.4 rather than 0.3, the two are refused the same
-/// way where their rulings reach the rims.
+/// **Very nearly, and so under the certified policy every fuse is refused, and
+/// that is a limit.** The turned cap's normal and the turned cone's axis are
+/// one stored vector `w`, a rounding short of length one: `|w|² − 1` is
+/// `−9.1e−17`, decided exactly. A plane holds the points with `w · p = 8`
+/// whatever `|w|`, and a cone is exact about the line its axis names, so the
+/// turned rim lies on the sphere about the apex of radius `√80 / |w|`, and the
+/// upright rim on the one of radius `√80`. The two rims never meet. The
+/// upright rim runs into the turned cone through its cap, where `w · p = 8`,
+/// and out through its side, where `w · p = 8|w|`, `1.3e−15` further round.
+/// Every fuse keeps both points as corners: the union and the upright cone
+/// less the turned one keep the rim outside the turned cone, and the
+/// intersection and the turned cone less the upright one keep the stretch
+/// inside. Two corners that close, beside a corner 8 from the origin, span
+/// more than [`DynamicRange::LARGEST_SUPPORTED_RATIO`], so there is no
+/// certified answer to find. What refuses is the order along a rim, which the
+/// boxes round the two corners cannot tell: where a cap and both cones meet,
+/// the box is `1.3e−11` across.
+///
+/// Turned 0.25 or 0.4 rather than 0.3, the two are refused the same way where
+/// their rulings reach the rims. The tolerant policy is
+/// [`two_cones_on_one_apex_leaning_apart_are_refused_under_a_tolerant_policy_for_the_box_where_a_cap_and_both_cones_meet`]'s.
 #[test]
-fn two_cones_on_one_apex_leaning_apart_are_refused_where_each_ruling_meets_both_rims() {
+fn two_cones_on_one_apex_leaning_apart_meet_both_rims_in_corners_too_close_for_a_certified_answer()
+{
+    let mut model = a_model();
+    let [upright, turned] = two_cones_on_one_apex_leaning_apart(&mut model);
+    let [(upright_cap, upright_side), (turned_cap, turned_side)] =
+        [upright, turned].map(|solid| the_cap_and_the_side(&model, solid));
+    for (cap, side) in [(upright_cap, upright_side), (turned_cap, turned_side)] {
+        assert_eq!(cap.offset(), 8.0, "{cap:?}");
+        assert_eq!(cap.normal(), side.axis().direction(), "{cap:?} {side:?}");
+        assert_eq!(side.axis().origin(), Point::origin(), "{side:?}");
+        assert_eq!(side.slope(), 0.5, "{side:?}");
+    }
+    assert_eq!(upright_cap.normal(), Vector::new(0.0, 0.0, 1.0));
+    let w = turned_cap.normal();
+    assert_eq!(w.x(), 0.0, "{w:?}");
+    let (sign, short) = squared_length_less_one(w);
+    assert_eq!(sign, Decision::Neg, "|w|² − 1 is {short}");
+    let sin_where_the_rim_meets_the_turned_cap = 2.0 * (1.0 - w.z()) / w.y();
+    let apart = 4.0 * short.abs()
+        / (w.y().abs() * (1.0 - sin_where_the_rim_meets_the_turned_cap.powi(2)).sqrt());
+    let range = DynamicRange::measure(8.0, apart).expect("two corners apart");
+    assert!(
+        !range.is_within_supported_range(),
+        "corners {apart} apart beside one 8 from the origin span {}",
+        range.ratio()
+    );
     for (rule, first_first) in six_fuses() {
         let mut model = a_model();
         let said = fuse(
@@ -860,6 +904,55 @@ fn the_union_of_a_short_cone_on_the_apex_of_a_tall_one_is_refused_when_a_block_c
     }
 }
 
+/// The two cones of
+/// [`two_cones_on_one_apex_leaning_apart_meet_both_rims_in_corners_too_close_for_a_certified_answer`],
+/// under a tolerant policy for the model's own working size of 100, are
+/// refused on the same order. That policy may read the four meets of a cap
+/// with the other three surfaces as one corner, but only once it knows them to
+/// lie within 64 roundings of 100 of one another, `1.4e−12`, and the box the
+/// kernel puts round the meet of the upright cap and both cones is `1.3e−11`
+/// across.
+#[test]
+fn two_cones_on_one_apex_leaning_apart_are_refused_under_a_tolerant_policy_for_the_box_where_a_cap_and_both_cones_meet()
+ {
+    let policy = Policy::tolerant(100.0);
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse_under(
+            &mut model,
+            two_cones_on_one_apex_leaning_apart,
+            rule,
+            first_first,
+            &policy,
+        );
+        let what = format!("{rule:?} (first first: {first_first})");
+        let refused = refused_on_the_order_along_a_crossing_at(
+            &said,
+            [3.812888843803106, -1.2090817444663618, 8.0],
+            &what,
+        );
+        assert!(
+            refused.wobble(100.0) > policy.max_wobble(),
+            "{what}: {refused:#?}"
+        );
+    }
+}
+
+/// The same at a working size of 1000, where a point may move `1.4e−11`:
+/// every fuse answers, and the answers add up. So the width of the box round
+/// the meet of a cap and both cones is all that keeps the tolerant fuse at 100
+/// from answering.
+#[test]
+fn two_cones_on_one_apex_leaning_apart_answer_every_fuse_under_a_tolerant_policy_ten_times_coarser()
+{
+    every_fuse_adds_up_under(
+        two_cones_on_one_apex_leaning_apart,
+        [128.0 * PI / 3.0, 128.0 * PI / 3.0],
+        [&[8], &[4], &[3, 3], &[3, 3]],
+        &Policy::tolerant(1000.0),
+    );
+}
+
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
     for one in six_fuses() {
         the_fuse_answers(build, one, volumes, faces);
@@ -872,17 +965,27 @@ fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
 /// second`, the first less the second and the intersection to `first`, and the
 /// second less the first and the intersection to `second`, each within what
 /// the two meshes may miss by together.
-fn every_fuse_adds_up(build: Pair, [first, second]: [f64; 2], faces: [&[usize]; 4]) {
+fn every_fuse_adds_up(build: Pair, volumes: [f64; 2], faces: [&[usize]; 4]) {
+    every_fuse_adds_up_under(build, volumes, faces, &Policy::certified());
+}
+
+/// [`every_fuse_adds_up`], with every fuse, check and measure under `policy`.
+fn every_fuse_adds_up_under(
+    build: Pair,
+    [first, second]: [f64; 2],
+    faces: [&[usize]; 4],
+    policy: &Policy,
+) {
     let mut measured: [Vec<(String, f64, f64)>; 4] = Default::default();
     for (rule, first_first) in six_fuses() {
         let which = which_answer(rule, first_first);
         let mut model = a_model();
-        let said = fuse(&mut model, build, rule, first_first);
+        let said = fuse_under(&mut model, build, rule, first_first, policy);
         let what = format!(
             "{rule:?} (first first: {first_first}), solids of {:?} faces",
             faces[which]
         );
-        let (_, volume, error) = measures(&mut model, said, faces[which], &what);
+        let (_, volume, error) = measures_under(&mut model, said, faces[which], &what, policy);
         measured[which].push((what, volume, error));
     }
     let [unions, shared, first_less, second_less] = &measured;
@@ -1008,6 +1111,16 @@ fn fuse(
     rule: Rule,
     first_first: bool,
 ) -> rcad_topo::Result<Vec<SolidKey>> {
+    fuse_under(model, build, rule, first_first, &Policy::certified())
+}
+
+fn fuse_under(
+    model: &mut Model,
+    build: Pair,
+    rule: Rule,
+    first_first: bool,
+    policy: &Policy,
+) -> rcad_topo::Result<Vec<SolidKey>> {
     let [first, second] = build(model);
     let (arguments, tools) = if first_first {
         ([first], [second])
@@ -1015,13 +1128,7 @@ fn fuse(
         ([second], [first])
     };
     model
-        .fuse(
-            &arguments,
-            &tools,
-            rule,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
+        .fuse(&arguments, &tools, rule, policy, &mut ProvenanceLog::new())
         .map(|answer| answer.solids().to_vec())
 }
 
@@ -1053,10 +1160,20 @@ fn measures(
     faces: &[usize],
     what: &str,
 ) -> (Vec<SolidKey>, f64, f64) {
-    let policy = Policy::certified();
+    measures_under(model, said, faces, what, &Policy::certified())
+}
+
+/// [`measures`], with the check and the measure under `policy`.
+fn measures_under(
+    model: &mut Model,
+    said: rcad_topo::Result<Vec<SolidKey>>,
+    faces: &[usize],
+    what: &str,
+    policy: &Policy,
+) -> (Vec<SolidKey>, f64, f64) {
     let solids = said.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
     model
-        .validate(&policy, &mut ProvenanceLog::new())
+        .validate(policy, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{what}: the answer does not validate: {why:?}"));
     let mut counted = Vec::with_capacity(solids.len());
     let (mut measured, mut error) = (0.0, 0.0);
@@ -1066,7 +1183,7 @@ fn measures(
         let measure = view
             .measure(
                 Deflection::of(0.01).expect("a positive length"),
-                &policy,
+                policy,
                 &mut ProvenanceLog::new(),
             )
             .unwrap_or_else(|why| panic!("{what}: the answer does not measure: {why:?}"));
@@ -1078,13 +1195,13 @@ fn measures(
 }
 
 /// Assert that `said` is refused `Undecidable` on one question, the order
-/// along a crossing, asked of points that all lie within `1e-9` of `place`.
-/// `what` names the fuse for every message.
-fn refused_on_the_order_along_a_crossing_at(
-    said: &rcad_topo::Result<Vec<SolidKey>>,
+/// along a crossing, asked of points that all lie within `1e-9` of `place`,
+/// and hand back its record. `what` names the fuse for every message.
+fn refused_on_the_order_along_a_crossing_at<'a>(
+    said: &'a rcad_topo::Result<Vec<SolidKey>>,
     place: [f64; 3],
     what: &str,
-) {
+) -> &'a Record {
     let Err(rcad_topo::Error::Undecidable { records }) = said else {
         panic!("{what}: should be refused Undecidable, and said {said:?}");
     };
@@ -1110,6 +1227,35 @@ fn refused_on_the_order_along_a_crossing_at(
             "{what}: an input reaches {far} from {place:?}: {refused:#?}"
         );
     }
+    refused
+}
+
+/// The plane and the cone of a pointed cone's two faces, as the model places
+/// them.
+fn the_cap_and_the_side(model: &Model, solid: SolidKey) -> (Plane, Cone) {
+    let (mut cap, mut side) = (None, None);
+    for face in model.solid(solid).expect("a solid of this model").faces() {
+        match face.surface() {
+            Surface::Plane(plane) => cap = Some(plane),
+            Surface::Cone(cone) => side = Some(cone),
+            other => panic!("a pointed cone has a plane and a cone, and not {other:?}"),
+        }
+    }
+    (cap.expect("a cap"), side.expect("a side"))
+}
+
+/// The sign of `|w|² − 1`, decided exactly, and its value to a rounding.
+fn squared_length_less_one(w: Vector) -> (Decision, f64) {
+    let mut sum = vec![-1.0];
+    for x in [w.x(), w.y(), w.z()] {
+        let mut square = [0.0; 2];
+        let squared = scale_expansion(&[x], x, &mut square);
+        let mut wider = vec![0.0; sum.len() + squared];
+        let len = expansion_sum(&sum, &square[..squared], &mut wider);
+        wider.truncate(len);
+        sum = wider;
+    }
+    (expansion_sign(&sum), sum.iter().sum())
 }
 
 /// How many curves `intersect` names where the two cross, `0` for a touch at
