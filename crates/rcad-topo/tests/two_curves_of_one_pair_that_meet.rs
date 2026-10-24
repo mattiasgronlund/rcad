@@ -287,6 +287,73 @@ fn a_thin_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_answer
     }
 }
 
+/// The thin bar of
+/// `a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`
+/// at other radii, each 8 long and resting on the inside of the bar of radius
+/// 2: of `3/4` along `y` at `x = 5/4` and along `x` at `y = 5/4`, and of `1/2`
+/// along `y` at `x = −3/2` and along `x` at `y = −3/2`.
+#[test]
+fn a_thin_bar_resting_inside_a_thick_one_at_any_radius_answers_every_fuse() {
+    let placements: [(Pair, f64, f64, [f64; 3]); 4] = [
+        (
+            |model| {
+                [
+                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+                    a_bar_along_y(model, 0.75, [1.25, -4.0, 0.0], 8.0),
+                ]
+            },
+            0.75,
+            1.25,
+            [2.0, 0.0, 0.0],
+        ),
+        (
+            |model| {
+                [
+                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+                    a_bar_along_x(model, 0.75, [-4.0, 1.25, 0.0], 8.0),
+                ]
+            },
+            0.75,
+            1.25,
+            [0.0, 2.0, 0.0],
+        ),
+        (
+            |model| {
+                [
+                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+                    a_bar_along_y(model, 0.5, [-1.5, -4.0, 0.0], 8.0),
+                ]
+            },
+            0.5,
+            1.5,
+            [-2.0, 0.0, 0.0],
+        ),
+        (
+            |model| {
+                [
+                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+                    a_bar_along_x(model, 0.5, [-4.0, -1.5, 0.0], 8.0),
+                ]
+            },
+            0.5,
+            1.5,
+            [0.0, -2.0, 0.0],
+        ),
+    ];
+    for (build, radius, off, corner) in placements {
+        every_fuse_answers_with_a_corner_at(
+            build,
+            [
+                16.0 * PI,
+                8.0 * PI * radius * radius,
+                bar_through_bar(2.0, radius, off),
+            ],
+            [&[7], &[3], &[4], &[3, 3]],
+            corner,
+        );
+    }
+}
+
 /// A ball of radius 2 with a bar from `z = −3` to 3 through it off its axis,
 /// so that the pipe crosses the ball in two loops apart, one above `z = 0` and
 /// one below. They come together only where the bar touches the ball from
