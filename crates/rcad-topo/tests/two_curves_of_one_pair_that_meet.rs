@@ -661,9 +661,79 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
     );
 }
 
+/// Two pointed cones of slope ½ up to 8 on one apex at the origin, the second
+/// turned 0.3 about `x`. Their sides cross in the two rulings of the plane
+/// half way between the axes, and these meet at the apex: §347.1's node,
+/// between two cones rather than a plane and a cone. Each ruling runs up to
+/// `z = 8` and so reaches both rims at once, where both caps meet the two sides.
+///
+/// What the two share has no closed form here, so the fuses are checked
+/// against one another: the union and the shared part add up to both cones,
+/// and each difference and the shared part to its first cone.
+#[test]
+fn two_cones_on_one_apex_leaning_apart_cross_in_two_rulings_and_every_fuse_answers() {
+    let one = 128.0 * PI / 3.0;
+    every_fuse_adds_up(
+        two_cones_on_one_apex_leaning_apart,
+        [one, one],
+        [&[8], &[4], &[6], &[6]],
+    );
+}
+
+/// The cones of the test above with the turned one cut short at 6. Its
+/// rulings now end on the short cone's rim alone, so no point there lies on
+/// all four faces.
+#[test]
+fn a_short_cone_on_the_apex_of_a_tall_one_leaning_apart_crosses_it_in_two_rulings_and_every_fuse_answers()
+ {
+    every_fuse_adds_up(
+        a_short_cone_on_the_apex_of_a_tall_one_leaning_apart,
+        [128.0 * PI / 3.0, 54.0 * PI / 3.0],
+        [&[4], &[3], &[4], &[3]],
+    );
+}
+
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
     for one in six_fuses() {
         the_fuse_answers(build, one, volumes, faces);
+    }
+}
+
+/// Every fuse of `build`'s two solids, of volumes `first` and `second`,
+/// answers with the faces `faces` holds for it in `every_fuse_answers`'s
+/// order, and the answers add up: the union and the intersection to `first +
+/// second`, the first less the second and the intersection to `first`, and the
+/// second less the first and the intersection to `second`, each within what
+/// the two meshes may miss by together.
+fn every_fuse_adds_up(build: Pair, [first, second]: [f64; 2], faces: [&[usize]; 4]) {
+    let mut measured: [Vec<(String, f64, f64)>; 4] = Default::default();
+    for (rule, first_first) in six_fuses() {
+        let which = which_answer(rule, first_first);
+        let mut model = a_model();
+        let said = fuse(&mut model, build, rule, first_first);
+        let what = format!(
+            "{rule:?} (first first: {first_first}), solids of {:?} faces",
+            faces[which]
+        );
+        let (_, volume, error) = measures(&mut model, said, faces[which], &what);
+        measured[which].push((what, volume, error));
+    }
+    let [unions, shared, first_less, second_less] = &measured;
+    for (with, whole) in [
+        (unions, first + second),
+        (first_less, first),
+        (second_less, second),
+    ] {
+        for (what, volume, error) in with {
+            for (what_shared, shared, shared_error) in shared {
+                assert!(
+                    (volume + shared - whole).abs() <= error + shared_error,
+                    "{what} measured {volume} and {what_shared} measured {shared}, \
+                     which should add up to {whole} within {}",
+                    error + shared_error
+                );
+            }
+        }
     }
 }
 
@@ -676,13 +746,14 @@ fn the_fuse_answers(
     [first, second, shared]: [f64; 3],
     faces: [&[usize]; 4],
 ) -> (Model, Vec<SolidKey>) {
-    let (volume, faces) = match (rule, first_first) {
-        (Rule::Union, _) => (first + second - shared, faces[0]),
-        (Rule::Intersection, _) => (shared, faces[1]),
-        (Rule::Difference, true) => (first - shared, faces[2]),
-        (Rule::Difference, false) => (second - shared, faces[3]),
-        (other, _) => panic!("{other:?} is not one of the six"),
-    };
+    let which = which_answer(rule, first_first);
+    let volume = [
+        first + second - shared,
+        shared,
+        first - shared,
+        second - shared,
+    ][which];
+    let faces = faces[which];
     let mut model = a_model();
     let said = fuse(&mut model, build, rule, first_first);
     let what = format!(
@@ -690,6 +761,19 @@ fn the_fuse_answers(
     );
     let solids = answers(&mut model, said, volume, faces, &what);
     (model, solids)
+}
+
+/// Where the answer of the fuse `rule`, the first first or not, stands in
+/// `every_fuse_answers`'s four: the union, the intersection, the first less the
+/// second, and the second less the first.
+fn which_answer(rule: Rule, first_first: bool) -> usize {
+    match (rule, first_first) {
+        (Rule::Union, _) => 0,
+        (Rule::Intersection, _) => 1,
+        (Rule::Difference, true) => 2,
+        (Rule::Difference, false) => 3,
+        (other, _) => panic!("{other:?} is not one of the six"),
+    }
 }
 
 /// [`every_fuse_answers`], with every solid of every answer holding a corner
@@ -762,10 +846,9 @@ fn fuse(
         .map(|answer| answer.solids().to_vec())
 }
 
-/// Assert that `said` is one solid for each of `faces`, each with that many
-/// faces, that the model validates, and that together they measure `volume`
-/// to within the mesh's own error, and hand the solids back. `what` is the
-/// right answer, which is what every message carries.
+/// Assert what [`measures`] does, and that together the solids measure
+/// `volume` to within the mesh's own error, and hand the solids back. `what` is
+/// the right answer, which is what every message carries.
 fn answers(
     model: &mut Model,
     said: rcad_topo::Result<Vec<SolidKey>>,
@@ -773,6 +856,24 @@ fn answers(
     faces: &[usize],
     what: &str,
 ) -> Vec<SolidKey> {
+    let (solids, measured, error) = measures(model, said, faces, what);
+    assert!(
+        (measured - volume).abs() <= error,
+        "{what}: measured {measured} and the mesh may miss by {error}"
+    );
+    solids
+}
+
+/// Assert that `said` is one solid for each of `faces`, each with that many
+/// faces, and that the model validates, and hand the solids back with the
+/// volume they measure together and how far the mesh may miss it by. `what`
+/// names the answer for every message.
+fn measures(
+    model: &mut Model,
+    said: rcad_topo::Result<Vec<SolidKey>>,
+    faces: &[usize],
+    what: &str,
+) -> (Vec<SolidKey>, f64, f64) {
     let policy = Policy::certified();
     let solids = said.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
     model
@@ -794,11 +895,7 @@ fn answers(
         error += measure.volume_error();
     }
     assert_eq!(counted, faces, "{what}: faces of each solid");
-    assert!(
-        (measured - volume).abs() <= error,
-        "{what}: measured {measured} and the mesh may miss by {error}"
-    );
-    solids
+    (solids, measured, error)
 }
 
 /// How many curves `intersect` names where the two cross, `0` for a touch at
@@ -985,6 +1082,28 @@ fn a_bar_seamed_up_y_and_a_ball_in_its_side(model: &mut Model) -> [SolidKey; 2] 
         )
         .expect("a ball");
     [bar, ball]
+}
+
+fn two_cones_on_one_apex_leaning_apart(model: &mut Model) -> [SolidKey; 2] {
+    two_cones_on_one_apex_turned_apart(model, 8.0)
+}
+
+fn a_short_cone_on_the_apex_of_a_tall_one_leaning_apart(model: &mut Model) -> [SolidKey; 2] {
+    two_cones_on_one_apex_turned_apart(model, 6.0)
+}
+
+/// A pointed cone of slope ½ up `z` to 8, and one up to `far` turned 0.3 about
+/// `x` through the apex the two share at the origin.
+fn two_cones_on_one_apex_turned_apart(model: &mut Model, far: f64) -> [SolidKey; 2] {
+    let upright = cones::a_pointed_cone(model, 0.5, 8.0);
+    let turned = cones::a_pointed_cone(model, 0.5, far);
+    model
+        .place_solid(
+            turned,
+            &Isometry::rotation(&Axis::x(), 0.3).expect("a finite turn"),
+        )
+        .expect("this model made the key");
+    [upright, turned]
 }
 
 fn a_block(model: &mut Model, from: [f64; 3], to: [f64; 3]) -> SolidKey {
