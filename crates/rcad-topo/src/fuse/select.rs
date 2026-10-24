@@ -231,7 +231,8 @@ use crate::validate::side_of_surface;
 use crate::{Containment, Error, FaceKey, FaceView, Model, Result, SolidView, VertexKey};
 
 use super::arrange::{
-    Piece, a_plane_rests_along_a_pipe, agreement_of_two_planes, name_of_surface_bits,
+    ACornerReadAsOnePoint, ANodeReadRoundACorner, Piece, a_plane_rests_along_a_pipe,
+    agreement_of_two_planes, name_of_surface_bits,
 };
 use super::assemble::{
     NamedSide, the_edge_each_side_of_every_piece_is, the_pieces_of_each_flat_shell_of_both_groups,
@@ -1460,13 +1461,30 @@ fn is_flat_with_a_curved_side(face: FaceView<'_>) -> bool {
 /// the block's face, where the triangle is the cube's tip cut off by the face,
 /// inside the cube: each of its corners is on two of the cube's planes there
 /// and strictly behind the third.
+///
+/// **A piece all inside the room of a corner of the input whose planes miss
+/// one point is read as the arrangement drew it** (Q2575). Placed by a shift,
+/// a square pyramid's four side planes meet three by three in four apexes a
+/// rounding apart, and the arrangement draws the face round such a corner with
+/// every plane round it moved through the point `bake` solved
+/// ([`ACornerReadAsOnePoint`]). A wedge plane run between two of the apexes
+/// then cuts a side face into a speck with the corner as one corner: a real
+/// triangle as drawn, but read in the true planes its corners lie on both
+/// sides of the wedge plane, and nothing placed it. Read as drawn, the corner
+/// is the point `bake` solved, each meet of the piece is where its third plane
+/// crosses the line through that point along the other two, and each plane of
+/// the other solid that is not round the corner is where it is. Those are real
+/// points and real planes, so the argument above holds of the speck as drawn,
+/// which is the piece the fuse keeps or drops. A plane of the other solid
+/// that is round the corner is moved in the reading and not in that solid, so
+/// it places nothing here.
 fn by_a_plane(
     solids: &[&BakedSolid],
     against: &[usize],
     mine: usize,
     piece: &Piece,
 ) -> Option<Placement> {
-    let corners = the_planes_meeting_at_each_corner_of_a_piece(piece, solids[mine])?;
+    let corners = TheCornersOfAPiece::of(piece, solids[mine])?;
     let mut outside_every_one = true;
     for &index in against {
         match placed_by_the_planes_of(solids[index], &corners) {
@@ -1476,6 +1494,100 @@ fn by_a_plane(
         }
     }
     outside_every_one.then_some(Placement::Outside)
+}
+
+/// The corners of a flat piece with straight sides, as [`by_a_plane`] asks
+/// which side of a plane each lies on, exactly.
+enum TheCornersOfAPiece {
+    /// Each corner the one meeting point of three planes, as coefficients.
+    Meets(Vec<[[f64; 4]; 3]>),
+    /// Each corner read as the arrangement read it round a corner of the input
+    /// whose planes miss one point.
+    ReadRoundACorner(Box<ACornerReadAsOnePoint>, Vec<ANodeReadRoundACorner>),
+}
+
+impl TheCornersOfAPiece {
+    /// The corners of `piece`, cut from a face of `own`, read round a corner
+    /// of the input where every one of them lies inside its room, and as the
+    /// meets of three planes otherwise; `None` where neither reads them all.
+    fn of(piece: &Piece, own: &BakedSolid) -> Option<Self> {
+        the_corners_of_a_piece_read_round_a_corner(piece, own)
+            .or_else(|| the_planes_meeting_at_each_corner_of_a_piece(piece, own).map(Self::Meets))
+    }
+
+    /// Which side of `plane` each corner lies on; `None` for a corner where
+    /// that cannot be told exactly, and for every corner where `plane` is one
+    /// the reading moves.
+    fn sides_of(&self, plane: Plane) -> Vec<Option<Decision>> {
+        match self {
+            Self::Meets(corners) => corners
+                .iter()
+                .map(|three| {
+                    side_of_a_plane_where_three_planes_meet(*three, plane.coefficients()).ok()
+                })
+                .collect(),
+            Self::ReadRoundACorner(reading, corners) => {
+                let moved = reading
+                    .around
+                    .iter()
+                    .any(|around| is_one_plane_either_way(*around, plane));
+                corners
+                    .iter()
+                    .map(|corner| (!moved).then(|| reading.side_of(corner, plane)).flatten())
+                    .collect()
+            }
+        }
+    }
+}
+
+/// The corners of a flat piece with straight sides read round a corner of
+/// `own` whose planes miss one point ([`ACornerReadAsOnePoint`]), or `None`
+/// unless `own` has such a corner with the piece's plane round it and every
+/// corner of the piece inside its room, each that corner or a meet of three
+/// planes, one the piece's. The corner need not be one of the piece's: the
+/// wedge round the `x` axis cuts a placed pyramid's side face into a speck
+/// with four corners, each where a wedge plane crosses a side plane's line,
+/// and the arrangement read all four round the apex.
+fn the_corners_of_a_piece_read_round_a_corner(
+    piece: &Piece,
+    own: &BakedSolid,
+) -> Option<TheCornersOfAPiece> {
+    let flat = *piece.surface.as_plane()?;
+    let sides: Vec<&FaceMeet> = piece.wires.iter().flatten().collect();
+    if !sides.iter().all(|side| is_straight(side)) {
+        return None;
+    }
+    own.faces
+        .iter()
+        .flat_map(|face| face.wires.iter().flatten())
+        .find_map(|edge| {
+            let reading = ACornerReadAsOnePoint::of(&edge.start)?;
+            if !reading.around.contains(&flat) {
+                return None;
+            }
+            let corners = sides
+                .iter()
+                .map(|side| match &side.ends[0] {
+                    MeetPoint::Existing { vertex, point } => (*vertex == edge.start.vertex
+                        && reading.holds(*point))
+                    .then_some(ANodeReadRoundACorner::TheCorner),
+                    MeetPoint::OfThreeSurfaces {
+                        surfaces, point, ..
+                    } => {
+                        let three = three_planes(surfaces)?;
+                        (three.contains(&flat) && reading.holds(*point))
+                            .then_some(ANodeReadRoundACorner::AMeet(three))
+                    }
+                    MeetPoint::WhereAClosedCurveStarts { .. }
+                    | MeetPoint::HalfWayRoundAClosedCurve { .. }
+                    | MeetPoint::APoleOfAClosedSurface { .. } => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(TheCornersOfAPiece::ReadRoundACorner(
+                Box::new(reading),
+                corners,
+            ))
+        })
 }
 
 /// The three planes each corner of a flat piece with straight sides is the
@@ -1573,19 +1685,19 @@ fn the_planes_meeting_at(end: &MeetPoint, own: &BakedSolid, flat: Plane) -> Opti
 /// of `corners` on or in front of it, and one of `corners` strictly in front.
 /// Inside: every plane has every corner of the solid on or behind it, every
 /// one of `corners` on or behind it, and one of `corners` strictly behind.
-fn placed_by_the_planes_of(solid: &BakedSolid, corners: &[[[f64; 4]; 3]]) -> Option<bool> {
+fn placed_by_the_planes_of(solid: &BakedSolid, corners: &TheCornersOfAPiece) -> Option<bool> {
     let its_own = the_planes_meeting_at_each_corner_of_a_solid(solid)?;
     let mut inside_every_one = true;
     for face in &solid.faces {
         let outward = outward_plane_of_face(face)
-            .expect("every face of a solid whose corners all meet three planes is flat")
-            .coefficients();
-        let side =
-            |three: &[[f64; 4]; 3]| side_of_a_plane_where_three_planes_meet(*three, outward).ok();
-        let solid_behind = its_own
-            .iter()
-            .all(|three| matches!(side(three), Some(Decision::Neg | Decision::Zero)));
-        let piece: Vec<Option<Decision>> = corners.iter().map(side).collect();
+            .expect("every face of a solid whose corners all meet three planes is flat");
+        let solid_behind = its_own.iter().all(|three| {
+            matches!(
+                side_of_a_plane_where_three_planes_meet(*three, outward.coefficients()),
+                Ok(Decision::Neg | Decision::Zero)
+            )
+        });
+        let piece = corners.sides_of(outward);
         let piece_in_front = piece
             .iter()
             .all(|side| matches!(side, Some(Decision::Pos | Decision::Zero)))
@@ -5770,14 +5882,15 @@ mod tests {
     };
     use rcad_predicates::{
         Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
+        side_of_a_plane_where_three_planes_meet,
     };
     use smallvec::SmallVec;
 
     use super::{
-        InPlane, Piece, Rule, a_face_of_the_input_holds, by_the_one_face_its_box_meets,
-        candidate_points, choose, corners_of, every_picker_keeps, midway_between,
-        the_meridian_circle_each_side_runs_round, the_middles_of_a_round_wire,
-        the_pickers_of_the_meridian_circle_through, the_piece_holds,
+        ACornerReadAsOnePoint, ANodeReadRoundACorner, InPlane, Piece, Rule,
+        a_face_of_the_input_holds, by_the_one_face_its_box_meets, candidate_points, choose,
+        corners_of, every_picker_keeps, midway_between, the_meridian_circle_each_side_runs_round,
+        the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
     use crate::fuse::bake::{BakedEdge, BakedFace, BakedSolid, bake};
@@ -7566,6 +7679,117 @@ mod tests {
             wrong.is_empty(),
             "{} of {asked} points answered against the neighbours' planes: {wrong:#?}",
             wrong.len()
+        );
+    }
+
+    /// The apex of a pyramid whose four side planes miss one point is read on
+    /// all four, and off them where it truly is (Q2575).
+    ///
+    /// The face near the origin of
+    /// [`a_far_pyramid_whose_near_face_misses_its_apex`] misses the apex by
+    /// `1e-8`, so some side plane is off the point `bake` solved the apex at,
+    /// and [`ACornerReadAsOnePoint`] reads every side plane moved through it.
+    /// Every other plane is read where it is, so the side of it the apex is
+    /// read on is the side the point `bake` solved is truly on, and so is the
+    /// side of it the meet of three others is read on: the planes here run
+    /// through points a few roundings round the apex, every way, so their
+    /// sides are the close calls the reading has to get exactly.
+    #[test]
+    fn a_far_apex_whose_side_planes_miss_one_point_is_read_on_every_side_plane_and_off_the_rest_as_it_is()
+     {
+        let (_model, solid) = a_far_pyramid_whose_near_face_misses_its_apex(1e-8);
+        let corners: Vec<_> = solid
+            .faces
+            .iter()
+            .flat_map(|face| face.wires.iter().flatten())
+            .map(|edge| &edge.start)
+            .collect();
+        assert!(
+            corners
+                .iter()
+                .filter(|corner| corner.around.len() < 4)
+                .all(|corner| ACornerReadAsOnePoint::of(corner).is_none()),
+            "a base corner has three planes round it, and nothing to read"
+        );
+        let apex = corners
+            .iter()
+            .find(|corner| corner.around.len() == 4)
+            .expect("the apex has the four side planes round it");
+        let reading =
+            ACornerReadAsOnePoint::of(apex).expect("a side plane misses the point bake solved");
+        assert!(reading.holds(apex.point));
+        let solved_from = apex
+            .solved_from
+            .expect("bake solved the apex")
+            .map(|surface| surface.as_plane().expect("a side plane").coefficients());
+        let truly = |plane: Plane| {
+            side_of_a_plane_where_three_planes_meet(solved_from, plane.coefficients())
+                .expect("four planes in f64 always answer")
+        };
+        assert!(
+            reading
+                .around
+                .iter()
+                .any(|side| matches!(truly(*side), Decision::Pos | Decision::Neg)),
+            "a side plane truly misses the apex"
+        );
+        for side in &reading.around {
+            assert_eq!(
+                reading.side_of(&ANodeReadRoundACorner::TheCorner, *side),
+                Some(Decision::Zero),
+                "{side:?} is read through the apex"
+            );
+        }
+
+        let [x, y, z] = crate::fuse::middle_of(apex.point).coordinates();
+        let ulp = f64::EPSILON * x.abs().max(y.abs()).max(z.abs());
+        let normals = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 2.0, 3.0],
+            [-3.0, 1.0, 2.0],
+        ];
+        let mut planes = Vec::new();
+        for normal in normals {
+            for off_by in [-3.0, -1.0, 0.0, 1.0, 3.0] {
+                let near = Point::new(x + off_by * ulp, y - off_by * ulp, z + off_by * ulp);
+                planes.push(
+                    Plane::from_point_and_normal(near, Vector::from(normal))
+                        .expect("a plane through a point near the apex"),
+                );
+            }
+        }
+        let mut sides = Vec::new();
+        for &plane in &planes {
+            let truth = truly(plane);
+            sides.push(truth);
+            assert_eq!(
+                reading.side_of(&ANodeReadRoundACorner::TheCorner, plane),
+                Some(truth),
+                "the apex against {plane:?}"
+            );
+        }
+        let mut asked = 0;
+        for (index, &fourth) in planes.iter().enumerate() {
+            let three = [0, 5, 10].map(|start| planes[(index + start + 1) % planes.len()]);
+            let Ok(truth) = side_of_a_plane_where_three_planes_meet(
+                three.map(|plane| plane.coefficients()),
+                fourth.coefficients(),
+            ) else {
+                continue;
+            };
+            asked += 1;
+            assert_eq!(
+                reading.side_of(&ANodeReadRoundACorner::AMeet(three), fourth),
+                Some(truth),
+                "the meet of {three:?} against {fourth:?}"
+            );
+        }
+        assert!(asked >= 20, "only {asked} meets of three are points");
+        assert!(
+            sides.contains(&Decision::Pos) && sides.contains(&Decision::Neg),
+            "the planes run either side of the apex: {sides:?}"
         );
     }
 
