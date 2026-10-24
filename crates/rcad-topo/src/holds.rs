@@ -4284,6 +4284,18 @@ fn is_on_the_other_nappe_from_the_arc(
 /// curve bounds is convex, so the point is across the chord between its ends
 /// or at one, where no half-line leaves both of them strictly on one side.
 ///
+/// # A corner on the half-line's line
+///
+/// **A point with no sign of which side of the half-line's line a corner is
+/// seen on is read again towards the next corner that may be aimed at**, as
+/// [`what_a_flat_face_holds`] reads a flat face (row Q2634). A box across the
+/// line from the corner aimed at through another corner is such a point, even
+/// with a sign of every side's own line, and the sides that corner ends cannot
+/// be counted from there. A count from any one corner that reads every sign it
+/// needs is the whole answer, so the first is kept, and the point is refused
+/// only when every corner that may be aimed at leaves a sign unread, with the
+/// first of those signs.
+///
 /// # A side right round a closed curve
 ///
 /// A [`WholeCurve`] is all of the curve a plane `P` cuts the cone in, from one
@@ -4477,45 +4489,59 @@ fn what_a_cone_face_seen_down_its_axis_holds(
             None
         }
     });
-    let aim = sides
+    let may_be_aimed_at = |corner: Point| {
+        chords.iter().all(|chord| {
+            matches!(
+                the_aims_side_of(chord, corner),
+                Decision::Pos | Decision::Neg
+            )
+        }) && sides.iter().zip(&along).all(|(side, beside)| {
+            !matches!(beside, Decision::Undecidable { .. }) || {
+                let [from, to] = seen_from(side, corner);
+                is_wholly_on_one_side_of_the_half_line(from, to)
+            }
+        })
+    };
+    let how_often_it_winds_seen_towards = |aim: Point| -> Result<i64, f64> {
+        let mut winding = winding;
+        let mut along = along.clone();
+        for chord in &chords {
+            let toward = the_aims_side_of(chord, aim);
+            along[chord.index] = toward;
+            if toward == chord.arcs_side {
+                winding += chord.piece;
+            }
+        }
+        for (side, &beside) in sides.iter().zip(&along) {
+            let [from, to] = seen_from(side, aim);
+            if let Decision::Undecidable { .. } = beside {
+                assert!(
+                    is_wholly_on_one_side_of_the_half_line(from, to),
+                    "the half-line was aimed with every side the point has no sign of wholly on \
+                     one side of it, and this one is not: {from:?} and {to:?}"
+                );
+                continue;
+            }
+            winding += crossing(from, to, beside)
+                .ok_or_else(|| whichever_of_them_was_not_read(from, to))?;
+        }
+        Ok(winding)
+    };
+
+    let mut first_refusal = None;
+    for aim in sides
         .iter()
         .map(|side| side.start.placed)
-        .find(|&corner| {
-            chords.iter().all(|chord| {
-                matches!(
-                    the_aims_side_of(chord, corner),
-                    Decision::Pos | Decision::Neg
-                )
-            }) && sides.iter().zip(&along).all(|(side, beside)| {
-                !matches!(beside, Decision::Undecidable { .. }) || {
-                    let [from, to] = seen_from(side, corner);
-                    is_wholly_on_one_side_of_the_half_line(from, to)
-                }
-            })
-        })
-        .ok_or_else(|| unseen.map_or_else(cannot, gave_up_seeing))?;
-    for chord in &chords {
-        let toward = the_aims_side_of(chord, aim);
-        along[chord.index] = toward;
-        if toward == chord.arcs_side {
-            winding += chord.piece;
+        .filter(|&corner| may_be_aimed_at(corner))
+    {
+        match how_often_it_winds_seen_towards(aim) {
+            Ok(winding) => return Ok(held_where_it_winds(winding)),
+            Err(enclosure) => {
+                first_refusal.get_or_insert(enclosure);
+            }
         }
     }
-
-    for (side, &beside) in sides.iter().zip(&along) {
-        let [from, to] = seen_from(side, aim);
-        if let Decision::Undecidable { .. } = beside {
-            assert!(
-                is_wholly_on_one_side_of_the_half_line(from, to),
-                "the half-line was aimed with every side the point has no sign of wholly on one \
-                 side of it, and this one is not: {from:?} and {to:?}"
-            );
-            continue;
-        }
-        winding += crossing(from, to, beside)
-            .ok_or_else(|| gave_up_seeing(whichever_of_them_was_not_read(from, to)))?;
-    }
-    Ok(held_where_it_winds(winding))
+    Err(first_refusal.or(unseen).map_or_else(cannot, gave_up_seeing))
 }
 
 /// Which side of `curve`'s plane a cone face keeps, read off every corner of
