@@ -680,10 +680,12 @@ fn a_ring_of_a_ball_less_a_bar_on_its_axis_builds_wherever_its_two_corners_stand
 
 /// What a bar of radius 1 along `x` at `y = 1` shares with a bar of radius 2 up
 /// `z`, built round its one corner `(0, 2, 0)`, where the thin pipe rests on the
-/// inside of the thick one and its two loops meet (row Q2561). The fuse refuses
-/// that pair where the loops meet
-/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_is_refused_where_its_two_loops_meet`,
-/// row Q2637), so it is built by hand.
+/// inside of the thick one and its two loops meet (row Q2561). Since Q2649 the
+/// fuse crosses that pair in two loops that meet and every fuse answers, with
+/// a node at the corner
+/// (`a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`,
+/// row Q2649). This builds the same pair by hand, round the corner alone with
+/// no node, to show what the public API does without one.
 ///
 /// Each loop is one closed edge from the corner back to it, as `intersect`
 /// names it, and such an edge closes no wire of its own: a lobe of the thick
