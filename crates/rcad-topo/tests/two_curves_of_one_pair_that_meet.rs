@@ -840,8 +840,9 @@ fn two_cones_on_one_apex_leaning_apart_meet_both_rims_in_corners_too_close_for_a
             rule,
             first_first,
         );
-        refused_on_the_order_along_a_crossing_at(
+        refused_on_one_question_at(
             &said,
+            "order along a crossing",
             [3.812888843803106, -1.2090817444663618, 8.0],
             &format!("{rule:?} (first first: {first_first})"),
         );
@@ -1095,7 +1096,7 @@ fn a_model() -> Model {
 
 fn fuse(
     model: &mut Model,
-    build: Pair,
+    build: impl Fn(&mut Model) -> [SolidKey; 2],
     rule: Rule,
     first_first: bool,
 ) -> rcad_topo::Result<Vec<SolidKey>> {
@@ -1104,7 +1105,7 @@ fn fuse(
 
 fn fuse_under(
     model: &mut Model,
-    build: Pair,
+    build: impl Fn(&mut Model) -> [SolidKey; 2],
     rule: Rule,
     first_first: bool,
     policy: &Policy,
@@ -1182,11 +1183,12 @@ fn measures_under(
     (solids, measured, error)
 }
 
-/// Assert that `said` is refused `Undecidable` on one question, the order
-/// along a crossing, asked of points that all lie within `1e-9` of `place`,
+/// Assert that `said` is refused `Undecidable` on one question, the predicate
+/// named `question`, asked of points that all lie within `1e-9` of `place`,
 /// and hand back its record. `what` names the fuse for every message.
-fn refused_on_the_order_along_a_crossing_at<'a>(
+fn refused_on_one_question_at<'a>(
     said: &'a rcad_topo::Result<Vec<SolidKey>>,
+    question: &str,
     place: [f64; 3],
     what: &str,
 ) -> &'a Record {
@@ -1196,11 +1198,7 @@ fn refused_on_the_order_along_a_crossing_at<'a>(
     let [refused] = records.records() else {
         panic!("{what}: should be refused on one question: {records:#?}");
     };
-    assert_eq!(
-        refused.predicate(),
-        "order along a crossing",
-        "{what}: {refused:#?}"
-    );
+    assert_eq!(refused.predicate(), question, "{what}: {refused:#?}");
     for input in refused.inputs() {
         let sides = input.enclosure();
         let far = (0..3)
@@ -1597,129 +1595,4 @@ fn ball_in_the_side_of_a_bar(steps: u32) -> f64 {
         sum += top * (squared - top * top).sqrt() + squared * (top / c).asin() + squared * PI / 2.0;
     }
     sum * step
-}
-
-#[test]
-fn probe_q2662_all() {
-    let shapes: Vec<(String, Box<dyn Fn(&mut Model) -> [SolidKey; 2]>)> = {
-        let mut shapes: Vec<(String, Box<dyn Fn(&mut Model) -> [SolidKey; 2]>)> = Vec::new();
-        for x in [1.0, -1.0] {
-            for lean in [0.0, 4e-16, 1e-15, 1e-14, 1e-8] {
-                shapes.push((
-                    format!("z-up x {x} lean {lean}"),
-                    Box::new(move |model: &mut Model| {
-                        let fat = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
-                        let thin = a_bar(model, 1.0, [x, 0.0, -3.0], 6.0);
-                        if lean != 0.0 {
-                            model
-                                .place_solid(
-                                    thin,
-                                    &Isometry::rotation(&Axis::x(), lean).expect("a turn"),
-                                )
-                                .expect("placed");
-                        }
-                        [fat, thin]
-                    }),
-                ));
-            }
-        }
-        shapes.push((
-            "Q2710".to_string(),
-            Box::new(|model: &mut Model| {
-                let fat = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
-                let thin = a_bar_along_x(model, 1.0, [-4.0, 1.0, 0.0], 8.0);
-                let turn = Isometry::rotation(&Axis::z(), 1.0).expect("a turn");
-                model.place_solid(fat, &turn).expect("placed");
-                model.place_solid(thin, &turn).expect("placed");
-                [fat, thin]
-            }),
-        ));
-        shapes
-    };
-    for (name, build) in &shapes {
-        println!("{name}");
-        {
-            let mut model = a_model();
-            let [fat, thin] = build(&mut model);
-            let pipe = |solid: SolidKey| {
-                model
-                    .solid(solid)
-                    .expect("solid")
-                    .faces()
-                    .map(|face| face.surface())
-                    .find(|s| matches!(s, Surface::Cylinder(_)))
-                    .expect("a pipe")
-            };
-            let [fat_pipe, thin_pipe] = [pipe(fat), pipe(thin)];
-            println!("  fat {fat_pipe:?}\n  thin {thin_pipe:?}");
-            for [one, other] in [[&fat_pipe, &thin_pipe], [&thin_pipe, &fat_pipe]] {
-                let met = intersect(one, other, &Policy::certified(), &mut ProvenanceLog::new());
-                match met {
-                    Ok(SurfaceMeet::Curves(runs)) => {
-                        println!("  intersect: {} curves", runs.len());
-                        for run in &runs {
-                            println!("    {run:?}");
-                        }
-                    }
-                    other => println!("  intersect: {other:?}"),
-                }
-            }
-        }
-        for (rule, fat_first) in six_fuses() {
-            let mut model = a_model();
-            let [fat, thin] = build(&mut model);
-            let (arguments, tools) = if fat_first {
-                ([fat], [thin])
-            } else {
-                ([thin], [fat])
-            };
-            let said = model
-                .fuse(
-                    &arguments,
-                    &tools,
-                    rule,
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new(),
-                )
-                .map(|answer| answer.solids().to_vec());
-            match said {
-                Ok(solids) => {
-                    let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                    let faces: Vec<usize> = solids
-                        .iter()
-                        .map(|&s| model.solid(s).expect("solid").faces().count())
-                        .collect();
-                    println!(
-                        "  {rule:?} fat first {fat_first}: answers {faces:?}, validate {:?}",
-                        valid.is_ok()
-                    );
-                }
-                Err(rcad_topo::Error::Undecidable { records }) => {
-                    for record in records.records() {
-                        let places: Vec<[f64; 3]> = record
-                            .inputs()
-                            .iter()
-                            .map(|input| {
-                                let e = input.enclosure();
-                                [0, 1, 2].map(|i| (e[i].lo() + e[i].hi()) / 2.0)
-                            })
-                            .collect();
-                        let widths: Vec<f64> = record
-                            .inputs()
-                            .iter()
-                            .map(|input| {
-                                let e = input.enclosure();
-                                (0..3).map(|i| e[i].hi() - e[i].lo()).fold(0.0, f64::max)
-                            })
-                            .collect();
-                        println!(
-                            "  {rule:?} fat first {fat_first}: Undecidable {} at {places:?} widths {widths:?}",
-                            record.predicate()
-                        );
-                    }
-                }
-                Err(why) => println!("  {rule:?} fat first {fat_first}: refused {why:?}"),
-            }
-        }
-    }
 }
