@@ -1619,6 +1619,21 @@ fn probe_q2662_lean() {
         };
         let (f, t) = (pipe(fat), pipe(thin));
         println!("lean {lean}: fat {f:?}\n thin {t:?}");
+        for key in [fat, thin] {
+            for face in model.solid(key).expect("a solid").faces() {
+                let plane = face.surface();
+                if !matches!(plane, Surface::Plane(_)) {
+                    continue;
+                }
+                let said = rcad_geom::meet_of_three_surfaces(
+                    [&plane, &f, &t],
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                let text = format!("{said:?}");
+                println!(" three {plane:?}: {}", &text[..text.len().min(300)]);
+            }
+        }
         for (a, b, name) in [(&f, &t, "fat first"), (&t, &f, "thin first")] {
             let said = intersect(a, b, &Policy::certified(), &mut ProvenanceLog::new());
             println!(" intersect {name}: {said:?}");
@@ -1709,7 +1724,7 @@ fn probe_q2662_generic() {
 
 fn probe_generic(model: &mut Model, lean: f64) -> [SolidKey; 2] {
     let fat = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
-    let thin = a_bar(model, 1.0, [1.0, 0.0, -3.0], 6.0);
+    let thin = a_bar(model, 1.0, [-1.0, 0.0, -3.0], 6.0);
     model
         .place_solid(fat, &Isometry::rotation(&Axis::x(), 1.0).expect("a turn"))
         .expect("placed");
@@ -1724,7 +1739,7 @@ fn probe_generic(model: &mut Model, lean: f64) -> [SolidKey; 2] {
 
 fn probe_pair(model: &mut Model, lean: f64) -> [SolidKey; 2] {
     let fat = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
-    let thin = a_bar(model, 1.0, [1.0, 0.0, -3.0], 6.0);
+    let thin = a_bar(model, 1.0, [-1.0, 0.0, -3.0], 6.0);
     model
         .place_solid(thin, &Isometry::rotation(&Axis::x(), lean).expect("a turn"))
         .expect("placed");
