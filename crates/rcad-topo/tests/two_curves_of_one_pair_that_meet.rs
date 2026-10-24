@@ -667,17 +667,26 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
 /// between two cones rather than a plane and a cone. Each ruling runs up to
 /// `z = 8` and so reaches both rims at once, where both caps meet the two sides.
 ///
-/// What the two share has no closed form here, so the fuses are checked
-/// against one another: the union and the shared part add up to both cones,
-/// and each difference and the shared part to its first cone.
+/// `intersect` names the two rulings, but every fuse is refused where the
+/// ruling at `x > 0` meets both rims: the order along a crossing there cannot
+/// be told. Turned 0.25 or 0.4 rather than 0.3, the two are refused the same
+/// way where their rulings reach the rims.
 #[test]
-fn two_cones_on_one_apex_leaning_apart_cross_in_two_rulings_and_every_fuse_answers() {
-    let one = 128.0 * PI / 3.0;
-    every_fuse_adds_up(
-        two_cones_on_one_apex_leaning_apart,
-        [one, one],
-        [&[8], &[4], &[6], &[6]],
-    );
+fn two_cones_on_one_apex_leaning_apart_are_refused_where_each_ruling_meets_both_rims() {
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse(
+            &mut model,
+            two_cones_on_one_apex_leaning_apart,
+            rule,
+            first_first,
+        );
+        refused_on_the_order_along_a_crossing_at(
+            &said,
+            [3.812888843803106, -1.2090817444663618, 8.0],
+            &format!("{rule:?} (first first: {first_first})"),
+        );
+    }
 }
 
 /// The cones of the test above with the turned one cut short at 6. Its
@@ -697,6 +706,44 @@ fn a_short_cone_on_the_apex_of_a_tall_one_leaning_apart_crosses_it_in_two_ruling
         [128.0 * PI / 3.0, 54.0 * PI / 3.0],
         [&[6], &[3], &[6], &[3]],
     );
+}
+
+/// The union of the test above, fused again with a block over its top, is
+/// refused by every rule. The refusal is the order along a crossing at the
+/// corner the union keeps on the tall rim, where the turned cone's ruling is
+/// cut on up to `z = 8`.
+#[test]
+fn the_union_of_a_short_cone_on_the_apex_of_a_tall_one_is_refused_when_a_block_cuts_it_again() {
+    for (rule, union_first) in six_fuses() {
+        let mut model = a_model();
+        let union = fuse(
+            &mut model,
+            a_short_cone_on_the_apex_of_a_tall_one_leaning_apart,
+            Rule::Union,
+            true,
+        )
+        .expect("the union answers");
+        let block = vec![a_block(&mut model, [-10.0, -10.0, 7.0], [10.0, 10.0, 10.0])];
+        let (arguments, tools) = if union_first {
+            (union, block)
+        } else {
+            (block, union)
+        };
+        let said = model
+            .fuse(
+                &arguments,
+                &tools,
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .map(|answer| answer.solids().to_vec());
+        refused_on_the_order_along_a_crossing_at(
+            &said,
+            [3.8128888438034316, -1.2090817444653312, 8.0],
+            &format!("{rule:?} (the union first: {union_first})"),
+        );
+    }
 }
 
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
@@ -902,6 +949,41 @@ fn measures(
     }
     assert_eq!(counted, faces, "{what}: faces of each solid");
     (solids, measured, error)
+}
+
+/// Assert that `said` is refused `Undecidable` on one question, the order
+/// along a crossing, asked of points that all lie within `1e-9` of `place`.
+/// `what` names the fuse for every message.
+fn refused_on_the_order_along_a_crossing_at(
+    said: &rcad_topo::Result<Vec<SolidKey>>,
+    place: [f64; 3],
+    what: &str,
+) {
+    let Err(rcad_topo::Error::Undecidable { records }) = said else {
+        panic!("{what}: should be refused Undecidable, and said {said:?}");
+    };
+    let [refused] = records.records() else {
+        panic!("{what}: should be refused on one question: {records:#?}");
+    };
+    assert_eq!(
+        refused.predicate(),
+        "order along a crossing",
+        "{what}: {refused:#?}"
+    );
+    for input in refused.inputs() {
+        let sides = input.enclosure();
+        let far = (0..3)
+            .map(|i| {
+                (sides[i].lo() - place[i])
+                    .abs()
+                    .max((sides[i].hi() - place[i]).abs())
+            })
+            .fold(0.0, f64::max);
+        assert!(
+            far <= 1e-9,
+            "{what}: an input reaches {far} from {place:?}: {refused:#?}"
+        );
+    }
 }
 
 /// How many curves `intersect` names where the two cross, `0` for a touch at
