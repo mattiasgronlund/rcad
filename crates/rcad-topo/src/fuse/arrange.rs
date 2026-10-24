@@ -13683,14 +13683,19 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// `[0, 5.6e-17]`. The node where they touch across the ellipse is clear of
 /// it, and the two were refused on the order until this arm.
 ///
-/// **Every arm but the sweep, and but the overlap arm below, answers as wide
-/// as a box**, which is a length:
-/// [`one_point_if_both_are_exact`], [`the_one_the_start_is`] and the
-/// [`the_one_ahead_of_the_start`] behind it each hand back the wider of the two
-/// boxes' longest sides. Filed as a volume, as all of them were until Q706, a
-/// box's width was divided by the working size twice, so a tolerant policy
-/// merged two nodes whose boxes were up to `s²` times wider than its budget
-/// for a length: 625 times at 25 mm (§318.5).
+/// **Every arm but the sweep that cannot decide answers as far apart as a
+/// point of one box may be from a point of the other**, a length, for the
+/// reason the overlap arm below gives: [`one_point_if_both_are_exact`],
+/// [`the_one_the_start_is`] and the [`the_one_ahead_of_the_start`] behind it
+/// each hand back `how_far_apart_two_boxes_may_be` of the two. Until Q2144
+/// those three handed back the wider of the two boxes' longest sides, which
+/// for two exact points is `0`: a round bar whose top corner a file moved a
+/// millimetre up its wall, cut along its seam, had the moved corner and the
+/// fuse's own corner below it taken as one point by a tolerant policy at
+/// 100 mm. Filed as a volume, as all of them were until Q706, a box's width
+/// was divided by the working size twice, so a tolerant policy merged two
+/// nodes whose boxes were up to `s²` times wider than its budget for a
+/// length: 625 times at 25 mm (§318.5).
 ///
 /// **The sweep is filed as `rcad-geom` says**
 /// ([`Surface::which_comes_first_round_a_crossing_and_what_it_measures`]). It
@@ -14405,14 +14410,17 @@ fn the_lower_meet_first_round_the_loop(
 /// Two boxes of no width that share a point are both that point, which is a
 /// proof, and the answer is [`Decision::Zero`]. Where either box has width it
 /// can hold a point the other does not, so nothing here says the two are one,
-/// and the answer is [`Decision::Undecidable`] as wide as the wider box: the
-/// policy merges them or the operation refuses (§17.4).
+/// and the answer is [`Decision::Undecidable`] as far apart as a point of one
+/// box may be from a point of the other, which is how far a merge of the two
+/// moves a point: the policy merges them or the operation refuses (§17.4,
+/// §417.7).
 fn one_point_if_both_are_exact(one: PredicatePoint, other: PredicatePoint) -> Decision {
-    let widest = one.uncertainty().max(other.uncertainty());
-    if widest == 0.0 {
+    if one.uncertainty().max(other.uncertainty()) == 0.0 {
         Decision::Zero
     } else {
-        Decision::Undecidable { enclosure: widest }
+        Decision::Undecidable {
+            enclosure: how_far_apart_two_boxes_may_be(one, other),
+        }
     }
 }
 
@@ -14428,7 +14436,8 @@ fn one_point_if_both_are_exact(one: PredicatePoint, other: PredicatePoint) -> De
 /// `other`, which is what the named start already answers.
 ///
 /// Where both boxes hold the start, nothing here says which of the two is the
-/// start, and the answer is [`Decision::Undecidable`] as wide as the wider box.
+/// start, and the answer is [`Decision::Undecidable`] as far apart as a point
+/// of one box may be from a point of the other.
 ///
 /// **Where neither does, the start is off the conic**, which a walked start
 /// can be by a rounding, and then neither point is the start: a point the start
@@ -14450,7 +14459,7 @@ fn the_one_the_start_is(
         (false, true) => Decision::Neg,
         (false, false) => the_one_ahead_of_the_start(pair, from, one, other),
         (true, true) => Decision::Undecidable {
-            enclosure: one.uncertainty().max(other.uncertainty()),
+            enclosure: how_far_apart_two_boxes_may_be(one, other),
         },
     }
 }
@@ -14498,8 +14507,9 @@ fn the_one_the_start_is(
 /// touch (§244.3).
 ///
 /// Only [`Decision::Pos`] for one and [`Decision::Neg`] for the other says
-/// which. Every other pair of answers is [`Decision::Undecidable`] as wide as
-/// the wider box, as this was before it asked.
+/// which. Every other pair of answers is [`Decision::Undecidable`] as far
+/// apart as a point of one box may be from a point of the other
+/// ([`round_a_closed_crossing_and_what_it_measures`] says why).
 fn the_one_ahead_of_the_start(
     pair: [&Surface; 2],
     from: PredicatePoint,
@@ -14526,7 +14536,7 @@ fn the_one_ahead_of_the_start(
         return Decision::Neg;
     }
     Decision::Undecidable {
-        enclosure: one.uncertainty().max(other.uncertainty()),
+        enclosure: how_far_apart_two_boxes_may_be(one, other),
     }
 }
 

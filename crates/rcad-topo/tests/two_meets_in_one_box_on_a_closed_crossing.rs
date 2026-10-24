@@ -26,8 +26,10 @@
 //! # What this pins
 //!
 //! Every fuse of this ball and block refuses by name, under both policies, on
-//! the order of the two places, a box `1.3e-5` wide. The tolerant policy's
-//! budget at a 25 mm working size does not stretch that far, so it refuses too.
+//! the order of the two places, a box `1.3e-5` wide along its longest side and
+//! `2.0e-5` corner to corner, which is how far apart two points in it may be.
+//! The tolerant policy's budget at a 25 mm working size does not stretch that
+//! far, so it refuses too.
 //!
 //! **What is right:** a refusal, though not this one alone. The order of two
 //! different points exists, and a box this wide cannot give it. Before §244.5
@@ -107,7 +109,9 @@ fn the_two_places_the_edge_cuts_the_ball_are_one_box() {
 }
 
 /// The regression: every fuse of the ball and the block refuses on the order of
-/// the two places, whose inputs are the one box twice, as wide as that box.
+/// the two places, whose inputs are the one box twice, filed as how far apart
+/// two points of that box may be, its diagonal, rounded up. Until Q2144 it was
+/// filed as the box's longest side.
 ///
 /// Before §244.5 the two were folded into one node here, and every fuse went
 /// on to refuse on `orient3d`, the turn between the top's circle and the
@@ -122,6 +126,7 @@ fn every_fuse_refuses_on_the_order_of_the_two_places_in_one_box() {
             let [top, wall] = the_top_and_the_leaning_wall(&model, block);
             let skin = the_only_surface_of(&model, ball);
             let place = the_one_box_the_two_places_share([top, wall], skin);
+            let diagonal = the_diagonal_of(place);
             let mut log = ProvenanceLog::new();
             let fused = model.fuse(&[ball], &[block], rule, &policy, &mut log);
             let Err(Error::Undecidable { records }) = fused else {
@@ -136,13 +141,24 @@ fn every_fuse_refuses_on_the_order_of_the_two_places_in_one_box() {
             assert_eq!(refused.predicate(), ALONG_A_CROSSING, "{rule:?} {policy:?}");
             assert_eq!(refused.level(), Level::Interval, "{rule:?} {policy:?}");
             assert_eq!(refused.inputs(), [place, place], "{rule:?} {policy:?}");
-            assert_eq!(
-                refused.enclosure(),
-                place.uncertainty(),
-                "{rule:?} {policy:?}"
+            assert!(
+                diagonal <= refused.enclosure()
+                    && refused.enclosure() <= diagonal * (1.0 + 8.0 * f64::EPSILON),
+                "{rule:?} {policy:?}: {} against {diagonal}",
+                refused.enclosure()
             );
         }
     }
+}
+
+/// How far apart two points of one box may be: corner to opposite corner.
+fn the_diagonal_of(place: PredicatePoint) -> f64 {
+    place
+        .enclosure()
+        .iter()
+        .map(|side| (side.hi() - side.lo()) * (side.hi() - side.lo()))
+        .sum::<f64>()
+        .sqrt()
 }
 
 fn the_one_box_the_two_places_share(planes: [Surface; 2], skin: Surface) -> PredicatePoint {
