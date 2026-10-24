@@ -32,11 +32,13 @@
 //! point to look at decides nothing (§5).
 //!
 //! **A point placed with a decision the policy would refuse the fuse for is
-//! held back while the next one is tried.** A ray thrown away where it grazed
-//! a face can leave what it could not decide in the point's log, though the
-//! next ray placed the point. The first point that places the piece with
-//! nothing the policy refuses places it, and only where none does is the point
-//! held back taken, and the fuse refused for it as before (§35.6, Q2267).
+//! held back while the next one is tried.** Since Q2489 a ray
+//! [`SolidView::classify_uncertain_point`] throws away leaves no record, so a
+//! graze that does not place the point leaves nothing behind for it; what is
+//! held back now is a point placed with a record of its own that the policy
+//! would refuse. The first point that places the piece with nothing the
+//! policy refuses places it, and only where none does is the point held back
+//! taken, and the fuse refused for it as before (§35.6, Q2267, Q2489).
 //!
 //! The one predicate this needs is which way three points on the face turn about
 //! its normal, and that is [`orient3d_of_points`] against a fourth point off the
