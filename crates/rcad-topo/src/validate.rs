@@ -2931,9 +2931,11 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// the same way [`the_coarsest_mesh_whose_sides_do_not_cross`] is, at
 /// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] below its own top, or, once a rung's
 /// mesh has strayed past the thinnest bend, at an eighth of that bend's radius
-/// when that is lower (row Q2368, below). The bar's pipe is meshed `0.667` of
-/// its radius off at every rung and charged a finite amount, so it never
-/// strays: the cap ends the bar's ladder at rung 13 and the same call takes 11 ms
+/// when that is lower (row Q2368, below), and one halving lower for each rung
+/// whose mesh repeats the one before it (row Q2615, below). The bar's pipe is
+/// meshed `0.667` of its radius off at every rung and charged a finite amount,
+/// so it never strays, and its mesh grows at every rung, so none repeats: the
+/// cap ends the bar's ladder at rung 13 and the same call takes 11 ms
 /// (`a_bar_leaning_hard_is_sound_in_a_fraction_of_a_second_at_the_ladders_last_rung`
 /// in `a_mesh_that_folds_at_one_deflection_and_not_the_next.rs`).
 ///
@@ -2986,19 +2988,60 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// back on `43.4` against `49.3`
 /// (`a_bend_round_a_ring_ten_thousand_times_its_tube_answers_one_rung_past_the_cap`).
 ///
-/// **What that costs.** Every room asked after a rung that strayed lies
-/// between an eighth of the bend's radius and eight radii, since the skip
-/// above leaves the room under eight radii, so the ladder asks at most six
-/// rungs under the old floor. A ladder that never strays keeps Q2060's cap as
-/// it was. The rungs down to the old floor are cheap since Q2536: ring 1000
-/// tube 0.1 is meshed at `0.488`, `0.244`, `0.122` and `0.061` into 554, 1108,
-/// 1852 and 3424 triangles, in about 2, 3, 6 and 12 ms. The rungs past it are
-/// not: that bend's answer at `0.0305` is 46 116 triangles in about `0.2` s,
-/// and ring 1000 tube 0.01's at `0.0019` is 1 679 930 triangles, a mesh that
-/// took 42 to 67 s on this machine, where that bend's whole ladder took 7 ms
-/// before, with no answer. The cost is the mesh's: meshed under about 0.4
-/// tubes off, a wide ring's torus face gains 11 to 18 times its triangles a
-/// halving, which is a row of its own.
+/// **What that costs.** Every room asked after a rung that strayed lies under
+/// eight radii, since the skip above leaves it there, and, but for the repeats
+/// below, above an eighth of the bend's radius. So the ladder asks at most six
+/// rungs under the old floor, and one more for each rung whose mesh repeats the
+/// one before it (row Q2615, below). A ladder that never strays and never
+/// repeats a mesh keeps Q2060's cap as it was. The rungs down to the old floor
+/// are cheap since Q2536: ring 1000 tube 0.1 is meshed at `0.488`, `0.244`,
+/// `0.122` and `0.061` into 554, 1108, 1852 and 3424 triangles, in about 2, 3,
+/// 6 and 12 ms. The rungs past it are not: that bend's answer at `0.0305` is
+/// 46 116 triangles in about `0.2` s, and ring 1000 tube 0.01's at `0.0019` is
+/// 1 679 930 triangles, a mesh that took 42 to 67 s on this machine, where
+/// that bend's whole ladder took 7 ms before, with no answer. The cost is the
+/// mesh's: meshed under about 0.4 tubes off, a wide ring's torus face gains 11
+/// to 18 times its triangles a halving, which is a row of its own.
+///
+/// **A rung whose mesh repeats the one before it moves the floor down one
+/// halving** (row Q2615), at most [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] times.
+/// The cap is there for meshes that grow at every halving. A mesh that comes
+/// back the same was not held by the room it was asked at, and its rung asked
+/// nothing new. A straight round bar a hundred thousand radii long has its top
+/// at `5e4` radii and its old floor at `6.1`, and every rung down to `3.05`
+/// meshes it into the same 12 triangles: a square bar `0.667` radii off its
+/// pipe, enclosing `2.0e5` and charged `1.63e6`. That charge is finite, so no
+/// mesh strays and Q2368's floor never moves, and the ladder fell back on
+/// `2.0e5` where the bar holds `π · 1e5`. Now the rungs at `1.53` and `0.763`
+/// radii mesh it into 16 and 20 triangles, and the one at `0.381` into 32,
+/// which answers `2.89e5`, charged `1.15e5`
+/// (`a_round_bar_a_hundred_thousand_radii_long_is_answered_past_the_cap`). The
+/// bar leaning at `1e9` above is meshed `0.667` radii off at every rung too,
+/// but its mesh grows at each, from 16 triangles to 1196 over its 14 rungs, so
+/// none repeats and its cap holds
+/// (`a_bar_leaning_hard_asks_no_more_than_the_ladders_cap_lets_it`). How far
+/// off the two bars are meshed does not tell them apart, nor does a finite
+/// charge; whether halving the room changed the mesh does.
+///
+/// **A repeat counts only when the mesh is no further off than the room it was
+/// asked at.** Under a certified policy that always holds ([`Mesh::deviation`]).
+/// A tolerant policy may cut a mesh coarser than it was asked for when the
+/// arithmetic cannot reach the room, and a finer room does not help there.
+///
+/// **What a repeat costs.** Each one buys one rung, so the ladder asks no more
+/// rungs that mesh something new than it did before, and at most thirteen that
+/// mesh again what it has already meshed. The new rungs can sit lower, though:
+/// the bar's answering mesh is four rungs past the old floor. With a probe
+/// logging every ladder, the `rcad-topo`, `rcad-step` and `rcad` suites, 2955
+/// tests, ran 204 278 ladders, and 35 657 had a repeat. 38 asked a rung under
+/// the old floor. Three answered there: the two bars of the test above, and
+/// `rcad-step`'s
+/// `a_half_ball_on_a_long_thin_bar_placed_far_out_and_turned_is_read_back`,
+/// whose mesh repeats at 13 of its 14 rungs down to the old floor and which now
+/// answers at `0.0298` on 88 triangles. The other 35, in six tests, still fall
+/// back, and no rung any of them asked under the old floor meshed anything new,
+/// so they fall back on the same sum as before. Their meshes are 4 to 12
+/// triangles, and none of those ladders took more than 11 ms.
 ///
 /// # Errors
 ///
@@ -3157,15 +3200,19 @@ const ROOMS_THIS_MANY_RADII_WIDE_ARE_SKIPPED: f64 = 8.0;
 /// radius, under every one of those. With the floor at a quarter, ring 1000
 /// tube 0.01 would have stopped one rung short of its answer.
 ///
-/// **Two tests ask under the old floor.** With a probe logging every ladder
-/// that went under it, the `rcad-topo`, `rcad-step` and `rcad` suites, 2901
-/// tests, found two:
+/// **Two tests asked under the old floor when it was set.** With a probe
+/// logging every ladder that went under it, the `rcad-topo`, `rcad-step` and
+/// `rcad` suites, 2901 tests, found two:
 /// `a_bend_round_a_ring_ten_thousand_times_its_tube_answers_one_rung_past_the_cap`,
 /// and `rcad-step`'s
 /// `a_half_ball_on_a_long_thin_bar_placed_far_out_and_turned_is_read_back`,
-/// whose thinnest bend is `0.125` and old floor `0.119`. That one now answers
-/// at `0.0298` on 94 triangles in about 6 ms, where no rung down to the old
-/// floor answered.
+/// whose thinnest bend is `0.125` and old floor `0.119`. That one answered at
+/// `0.0298` on 94 triangles in about 6 ms, where no rung down to the old floor
+/// answered. Measured again at Q2615, none of its rungs strays past that bend
+/// any more, so this floor no longer moves for it. What takes it under the old
+/// floor now is its mesh repeating at 13 of its 14 rungs down to there, and it
+/// answers at `0.0298` on 88 triangles: see "A rung whose mesh repeats" in
+/// [`how_much_space_a_curved_solid_encloses`].
 ///
 /// **It can cost a minute.** A ring 1000 tube 0.01 bend's answering mesh is
 /// 1 679 930 triangles, 42 to 67 s, where its ladder took 7 ms before, with
@@ -4091,7 +4138,11 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
 /// halvings below its own top (Q2060, §199.4) — see that function's "What
 /// stops it". Once one of its rungs has strayed past the thinnest bend, its
 /// cap goes down to [`TIMES_UNDER_A_BEND_A_MESH_STRAYED_PAST_THE_FLOOR_GOES`]
-/// times under that bend's radius when that is lower (Q2368).
+/// times under that bend's radius when that is lower (Q2368). Each rung whose
+/// mesh repeats the one before it takes that cap down one halving more, at
+/// most this many times again (Q2615): a repeat asks nothing new, so until a
+/// mesh strays the ladder still asks at most this many rungs plus one that
+/// mesh something new.
 const HALVINGS_A_FOLD_IS_ASKED_DOWN_TO: i32 = 13;
 
 /// Whether a finer mesh may clear what refused this one, because it is about
