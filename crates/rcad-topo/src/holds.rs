@@ -74,8 +74,8 @@
 //! rather than off a corner, because every corner sits on every cut.
 
 use rcad_geom::{
-    EdgeRun, HalfSpace, Orientation, Picker, Plane, Point, SIDE_OF_A_HALF_SPACE, Surface,
-    SurfaceMeet, Vector, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS,
+    EdgeRun, HalfSpace, Orientation, Picker, Plane, PlaneAgreement, Point, SIDE_OF_A_HALF_SPACE,
+    Surface, SurfaceMeet, Vector, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS,
     how_a_plane_leans_against_a_cone, intersect, where_a_cones_apex_stands_against_a_plane,
     which_two_surfaces_a_run_is_between,
 };
@@ -182,6 +182,147 @@ impl<'m> SolidView<'m> {
             .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
         what_a_flat_face_holds(self, face, point, aim, policy, log)
     }
+
+    /// `point`'s box grown along each axis by as far as a corner of `face`, as
+    /// [`SolidView::what_this_face_holds`] reads it, can be from where the
+    /// face's stored planes put that corner; `None` where that cannot be
+    /// bounded. Asked of a flat face whose every side is straight.
+    ///
+    /// **The walk reads the stored corners, and the face is where its planes
+    /// meet** (`docs/decisions.md` §17.1). A turn leaves each corner a rounding
+    /// off where the face's plane meets the planes across its two sides there
+    /// (§75.6), so the face those planes bound can reach a rounding past the
+    /// outline its corners draw. A point a rounding past a turned cube's corner
+    /// has its box, stretched to a face's plane, past that face's corners and
+    /// on the face its planes bound, and where the walk said the face holds
+    /// none of it the ray counted the point by the corners, `Outside`, where
+    /// every stored plane puts it inside (Q1156, Q2631).
+    ///
+    /// The walk turns each corner about a point off the plane
+    /// ([`a_point_off_the_plane`]), so it reads the outline its corners draw on
+    /// the plane as seen from there. Along each axis, each corner of that
+    /// outline is at most as far from where the three planes meet as the
+    /// stored corner is from the meet, plus how far being seen from that point
+    /// moves the stored corner onto the plane. Call the largest of those over
+    /// every corner `e` for that axis. Slide each corner of the face the
+    /// planes bound in a straight line to the corner the walk reads: a point
+    /// that face holds and the walk's outline does not is crossed by a side on
+    /// the way, so it is within `e` along each axis of a point on a side of the
+    /// walk's outline, and the walk never says a face holds none of a box that
+    /// takes in a point on its side. So where the walk says
+    /// [`OnAFace::NotHeld`] of the box grown by `e`, the face its planes bound
+    /// holds no point of `point`'s box on its plane.
+    ///
+    /// **A corner where three planes do not meet is taken where the walk reads
+    /// it**: one whose sides run on across one plane, one beside a curved face
+    /// across a straight side, and one whose face across is this face. Nothing
+    /// here says where the face its planes bound has such a corner, as
+    /// `SolidView::box_opened_out_to_where_its_planes_meet` does not either.
+    /// Where three planes cannot be shown to meet in a point, or a corner
+    /// cannot be shown to move onto the plane, the answer is `None`.
+    pub(crate) fn grown_to_where_its_planes_put_its_corners(
+        self,
+        face: FaceView<'_>,
+        point: PredicatePoint,
+    ) -> Option<PredicatePoint> {
+        let flat = face.plane();
+        let seen_from = a_point_off_the_plane(face, &flat)?;
+        let plane_across = |coedge: &CoedgeView<'_>| -> Option<Plane> {
+            let edge = coedge.edge();
+            if *edge.stored_run() != EdgeRun::Straight {
+                return None;
+            }
+            let across = edge
+                .neighbouring_faces()
+                .find(|&other| other != face.key())?;
+            self.faces()
+                .find(|used| used.key() == across)?
+                .surface()
+                .as_plane()
+                .copied()
+        };
+        let mut reach = [0.0f64; 3];
+        for wire in face.wires() {
+            let coedges: Vec<CoedgeView<'_>> = wire.coedges().collect();
+            let across: Vec<Option<Plane>> = coedges.iter().map(plane_across).collect();
+            for (index, coedge) in coedges.iter().enumerate() {
+                let before = (index + coedges.len() - 1) % coedges.len();
+                let (Some(into), Some(out_of)) = (across[before], across[index]) else {
+                    continue;
+                };
+                let one_plane = |one: &Plane, other: &Plane| {
+                    matches!(
+                        one.agreement_with(other),
+                        PlaneAgreement::SameWay | PlaneAgreement::OppositeWay
+                    )
+                };
+                if one_plane(&into, &out_of) || one_plane(&flat, &into) || one_plane(&flat, &out_of)
+                {
+                    continue;
+                }
+                let meet = Plane::meet_of_three(&flat, &into, &out_of).ok()?;
+                let off = how_far_the_walk_reads_a_corner_from(
+                    coedge.start().point(),
+                    meet,
+                    &flat,
+                    seen_from,
+                )?;
+                for axis in 0..3 {
+                    reach[axis] = reach[axis].max(off[axis]);
+                }
+            }
+        }
+        if reach == [0.0; 3] {
+            return Some(point);
+        }
+        let enclosure = point.enclosure();
+        Some(PredicatePoint::Constructed(core::array::from_fn(|axis| {
+            enclosure[axis]
+                + Interval::new(-reach[axis], reach[axis])
+                    .expect("a reach is finite and not below zero")
+        })))
+    }
+}
+
+/// How far, along each axis, the corner at `stored` is from where three
+/// planes `meet`, as a walk that sees it from `seen_from` reads it on `flat`:
+/// the furthest of `meet`'s box from `stored`, plus how far seeing `stored`
+/// from `seen_from` moves it onto `flat`. Each is rounded up. `None` where
+/// that cannot be bounded.
+///
+/// Seen from `t`, a corner `b` lands on the plane `s(x) = 0` at `t + (b − t) ·
+/// s(t) / (s(t) − s(b))`, which is `b` moved by `(b − t) · s(b) / (s(t) −
+/// s(b))`. `seen_from` is a point the plane certifies is in front of it, so
+/// `s(t)` is above zero, and the move is bounded wherever `s(t)` is shown to be
+/// further from zero than `s(b)` is.
+fn how_far_the_walk_reads_a_corner_from(
+    stored: Point,
+    meet: PredicatePoint,
+    flat: &Plane,
+    seen_from: Point,
+) -> Option<[f64; 3]> {
+    let [a, b, c, d] = flat.coefficients().map(Interval::exactly);
+    let on_the_plane = |at: [Interval; 3]| a * at[0] + b * at[1] + c * at[2] + d;
+    let stored = stored.coordinates().map(Interval::exactly);
+    let seen_from = seen_from.coordinates().map(Interval::exactly);
+    let biggest = |range: Interval| (-range.lo()).max(range.hi());
+    let off_the_plane = biggest(on_the_plane(stored));
+    let clear = (on_the_plane(seen_from) - Interval::exactly(off_the_plane)).lo();
+    if !(clear > 0.0) {
+        return None;
+    }
+    let meet = meet.enclosure();
+    let mut reach = [0.0; 3];
+    for axis in 0..3 {
+        let to_the_meet = biggest(meet[axis] - stored[axis]);
+        let leaning = biggest((stored[axis] - seen_from[axis]) * Interval::exactly(off_the_plane));
+        let moved = (leaning / clear).next_up();
+        reach[axis] = (to_the_meet + moved).next_up();
+        if !reach[axis].is_finite() {
+            return None;
+        }
+    }
+    Some(reach)
 }
 
 /// A point far enough off `plane` that the plane itself certifies it is off it.

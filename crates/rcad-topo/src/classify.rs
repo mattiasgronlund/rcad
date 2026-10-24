@@ -387,6 +387,16 @@ impl SolidView<'_> {
 
     /// Whether `face` may hold a point of `point`'s box stretched to its plane:
     /// anything short of a proof that it holds none.
+    ///
+    /// **The proof is about the face its stored planes bound, not the outline
+    /// its corners draw**, which a turn leaves a rounding inside it at a
+    /// corner. So the stretched box is grown first by as far as that can be
+    /// (`SolidView::grown_to_where_its_planes_put_its_corners`), and only the
+    /// outline's holding none of the grown box is taken as the proof. Asked of
+    /// the stretched box alone, a point a rounding past a turned cube's corner,
+    /// which every stored plane puts inside, was not beside a face whose
+    /// corners stop short of it, and the ray counted it `Outside` by the
+    /// corners (Q1156, Q2631).
     fn is_beside(
         self,
         face: FaceView<'_>,
@@ -394,7 +404,9 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> bool {
-        let Some(reach) = stretched_to_the_plane(&face.plane(), point) else {
+        let Some(reach) = stretched_to_the_plane(&face.plane(), point)
+            .and_then(|reach| self.grown_to_where_its_planes_put_its_corners(face, reach))
+        else {
             return true;
         };
         !matches!(
