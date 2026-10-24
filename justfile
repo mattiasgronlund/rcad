@@ -16754,7 +16754,10 @@ check-queue-merge-driver:
 # freeing a row whose `after:` already names a row closed before `sweep` ever
 # ran, then refusing once nothing is left stale; and `reword` setting an open
 # row's wording, refusing a closed row, a pinned first word, a no-op, and a
-# class the row's own tier does not allow. The
+# class the row's own tier does not allow. Q983's: `header` replacing the
+# file's own title and prose above its first heading, landing the new text
+# and reporting it, refusing a no-op, and refusing a replacement holding a
+# fenced block or a `## ` heading of its own. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -17742,6 +17745,30 @@ check-queue-api-selftest:
     grep -qF "the class wrong/B ranks tier 1 and tier 5 rows only, and this row is tier 2" <<<"$got" \
         || fail "reword did not carry check-queue's reason for the class/tier mismatch"
     got=$(check "$reword_wt") || fail "the file reword wrote fails check-queue"
+
+    # Q983: `header` replaces the file's own title and the prose above its
+    # first heading -- the one text in docs/queue.md no other verb reaches,
+    # since `reword` above only ever replaces one row's own wording. This is
+    # the checked way to say the file is in seven tiers, not five, and to
+    # name the §352.2 tag convention (§307.7, §352.7).
+    header_wt="$root/rcad-worktrees/header"
+    g "$hub" worktree add -q -b header "$header_wt" main
+    new_header=$'# Queue\n\nchanged for Q983\n'
+    got=$(q "$header_wt" apply header "$new_header" 2>&1) || fail "header refused to replace the file's own header"
+    grep -qxF "header: replaced" <<<"$got" || fail "header did not report the replacement"
+    got=$(head -n 4 "$header_wt/docs/queue.md")
+    [ "$got" = "# Queue"$'\n\n'"changed for Q983" ] || fail "header did not land the new text in the file"
+    got=$(check "$header_wt") || fail "the file header wrote fails check-queue"
+    got=$(q "$header_wt" apply header "$new_header" 2>&1) && fail "header accepted the text the file already carries"
+    grep -qF "the header reads this already" <<<"$got" || fail "header did not refuse a no-op"
+    fenced_header=$'# Queue\n\n```\nnot allowed\n```\n'
+    got=$(q "$header_wt" apply header "$fenced_header" 2>&1) && fail "header accepted a replacement with a fenced block"
+    grep -qF "the new header may hold no fenced block and no '## ' heading of its own" <<<"$got" \
+        || fail "header did not refuse a fenced block in the new text"
+    heading_header=$'# Queue\n\n## Tier 9\n'
+    got=$(q "$header_wt" apply header "$heading_header" 2>&1) && fail "header accepted a replacement with its own '## ' heading"
+    grep -qF "the new header may hold no fenced block and no '## ' heading of its own" <<<"$got" \
+        || fail "header did not refuse a heading in the new text"
 
     # §309.3: the lock must stay held for the whole batch, not only within
     # each step. The §309.3.2 case above shows a batch's own claims events
