@@ -343,45 +343,121 @@ fn two_cones_on_one_apex_leaning_apart_cross_in_the_four_halves_of_two_rulings()
     let off_the_bisector = (0.5_f64.atan().cos() / (turn / 2.0).cos()).acos();
     let [up, across] = [off_the_bisector.cos(), off_the_bisector.sin()];
     let bisector = [0.0, -(turn / 2.0).sin(), (turn / 2.0).cos()];
+    let mut halves = Vec::new();
     for way in [1.0, -1.0] {
         for side in [1.0, -1.0] {
-            let out = Point::new(
+            halves.push(Point::new(
                 way * side * across,
                 way * up * bisector[1],
                 way * up * bisector[2],
-            );
-            for cone in [&upright, &turned] {
-                let off = how_far_off(cone, out);
-                assert!(off <= 1e-15, "{out:?} is {off:e} off {cone:?}");
-            }
-            let holding: Vec<&NamedRun> = runs
-                .iter()
-                .filter(|run| {
-                    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
-                        panic!("a piece of the crossing: {run:?}");
-                    };
-                    let sides: Vec<Decision> = picked_by
-                        .iter()
-                        .map(|picker| {
-                            assert!(
-                                matches!(picker, Picker::InFrontOf(_)),
-                                "a flat surface: {picker:?}"
-                            );
-                            picker.side_of_point(PredicatePoint::from(out.coordinates()))
-                        })
-                        .collect();
-                    assert!(
-                        sides.iter().all(|sign| *sign == Decision::Pos)
-                            || sides.contains(&Decision::Neg),
-                        "{out:?} is held strictly or ruled out: {sides:?}"
-                    );
-                    sides.iter().all(|sign| *sign == Decision::Pos)
-                })
-                .collect();
-            assert_eq!(holding.len(), 1, "one half holds {out:?}");
+            ));
         }
     }
+    assert_these_are_the_halves_of_the_rulings(runs, &halves, [&upright, &turned]);
+}
 
+/// Two cones of slope two on one apex, about `z` and about `x`, are wide
+/// enough that both flat surfaces the crossing lies in cut them, so they share
+/// four rulings and the namer names the eight halves the apex cuts them into.
+///
+/// `x² + y² = 4z²` and `y² + z² = 4x²` take `x² = z²` between them, and then
+/// `y² = 3x²`, so the eight halves leave the apex along `(±1, ±√3, ±1)`, each
+/// sign on its own.
+#[test]
+fn two_wide_cones_on_one_apex_at_a_right_angle_cross_in_the_eight_halves_of_four_rulings() {
+    let upright = a_cone([0.0; 3], [0.0, 0.0, 1.0], 2.0);
+    let lying = a_cone([0.0; 3], [1.0, 0.0, 0.0], 2.0);
+    let met = named(&upright, &lying);
+    let Ok(SurfaceMeet::Curves(runs)) = &met else {
+        panic!("the four rulings are named: {met:?}");
+    };
+    assert_eq!(runs.len(), 8, "the eight halves of four rulings: {runs:?}");
+
+    let mut halves = Vec::new();
+    for x in [1.0, -1.0] {
+        for y in [3.0_f64.sqrt(), -3.0_f64.sqrt()] {
+            for z in [1.0, -1.0] {
+                halves.push(Point::new(x, y, z));
+            }
+        }
+    }
+    assert_these_are_the_halves_of_the_rulings(runs, &halves, [&upright, &lying]);
+}
+
+/// Two cones of slope one half on one apex at a right angle are each a quarter
+/// turn wide and stand a quarter turn apart, so they share the apex and no
+/// ruling at all.
+#[test]
+fn two_narrow_cones_on_one_apex_at_a_right_angle_touch_there_and_nowhere_else() {
+    assert_eq!(
+        named(
+            &a_cone([0.0; 3], [0.0, 0.0, 1.0], 0.5),
+            &a_cone([0.0; 3], [1.0, 0.0, 0.0], 0.5),
+        ),
+        Ok(SurfaceMeet::TouchAtOnePoint {
+            at: PredicatePoint::from([0.0; 3])
+        })
+    );
+}
+
+/// Two cones of slope one on one apex at a right angle touch along the two
+/// rulings `(1, 0, ±1)`: `x² + y² = z²` and `y² + z² = x²` take `y² = 0`, a
+/// double root. The enclosure of how far apart the two rulings of that flat
+/// surface spread holds nothing, so the pair is refused rather than named as
+/// four halves that are really two — a **gap**: the two touching rulings are
+/// there.
+#[test]
+fn two_cones_on_one_apex_that_touch_along_two_rulings_are_refused() {
+    assert_eq!(
+        named(
+            &a_cone([0.0; 3], [0.0, 0.0, 1.0], 1.0),
+            &a_cone([0.0; 3], [1.0, 0.0, 0.0], 1.0),
+        ),
+        Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+    );
+}
+
+/// Each of `halves` is a way out of the apex on both of `pair`, held by exactly
+/// one of `runs`, every picker of which is a flat surface through the apex, and
+/// ruled out by every other run; and every run is walked as a straight line.
+fn assert_these_are_the_halves_of_the_rulings(
+    runs: &[NamedRun],
+    halves: &[Point],
+    pair: [&Surface; 2],
+) {
+    for &out in halves {
+        for cone in pair {
+            let off = how_far_off(cone, out);
+            assert!(off <= 1e-15, "{out:?} is {off:e} off {cone:?}");
+        }
+        let holding: Vec<&NamedRun> = runs
+            .iter()
+            .filter(|run| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("a piece of the crossing: {run:?}");
+                };
+                let sides: Vec<Decision> = picked_by
+                    .iter()
+                    .map(|picker| {
+                        assert!(
+                            matches!(picker, Picker::InFrontOf(_)),
+                            "a flat surface: {picker:?}"
+                        );
+                        picker.side_of_point(PredicatePoint::from(out.coordinates()))
+                    })
+                    .collect();
+                assert!(
+                    sides.iter().all(|sign| *sign == Decision::Pos)
+                        || sides.contains(&Decision::Neg),
+                    "{out:?} is held strictly or ruled out: {sides:?}"
+                );
+                sides.iter().all(|sign| *sign == Decision::Pos)
+            })
+            .collect();
+        assert_eq!(holding.len(), 1, "one half holds {out:?}");
+    }
+
+    let [one, other] = pair;
     for run in runs {
         let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
             panic!("a piece of the crossing: {run:?}");
@@ -400,7 +476,7 @@ fn two_cones_on_one_apex_leaning_apart_cross_in_the_four_halves_of_two_rulings()
             ],
         )
         .expect("two ends that name places");
-        for along in [[&upright, &turned], [&turned, &upright]] {
+        for along in [[one, other], [other, one]] {
             let walked = walk(
                 &from_the_apex,
                 along,
