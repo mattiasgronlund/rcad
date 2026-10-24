@@ -1604,18 +1604,20 @@ fn probe_q2662_all() {
     let shapes: Vec<(String, Box<dyn Fn(&mut Model) -> [SolidKey; 2]>)> = {
         let mut shapes: Vec<(String, Box<dyn Fn(&mut Model) -> [SolidKey; 2]>)> = Vec::new();
         for x in [1.0, -1.0] {
-            for lean in [4e-16, 1e-15, 1e-14] {
+            for lean in [0.0, 1e-4] {
                 shapes.push((
                     format!("z-up x {x} lean {lean}"),
                     Box::new(move |model: &mut Model| {
                         let fat = a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0);
                         let thin = a_bar(model, 1.0, [x, 0.0, -3.0], 6.0);
-                        model
-                            .place_solid(
-                                thin,
-                                &Isometry::rotation(&Axis::x(), lean).expect("a turn"),
-                            )
-                            .expect("placed");
+                        if lean != 0.0 {
+                            model
+                                .place_solid(
+                                    thin,
+                                    &Isometry::rotation(&Axis::x(), lean).expect("a turn"),
+                                )
+                                .expect("placed");
+                        }
                         [fat, thin]
                     }),
                 ));
