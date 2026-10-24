@@ -1,6 +1,6 @@
 # Queue
 
-Every open item in rcad, one row each, in five tiers. `docs/decisions.md` §230
+Every open item in rcad, one row each, in seven tiers. `docs/decisions.md` §230
 is the argument for the shape and the grammar below. The dispatcher edits this
 file — to `lane:` when it dispatches a row, to `done:` when it merges one — and
 a lane never writes it, so no two lanes conflict over it.
@@ -12,7 +12,7 @@ fenced line as a row, so a fenced template would be a row nobody ranked.
 
 - **id** — `T<n>`, `D<n>` or `Q<n>`, unique in the file. `T` and `D` numbers are
   carried over from the retired `docs/test-plan.md`.
-- **tier** — `1`, `2`, `2.5`, `3` or `4` (§230.1).
+- **tier** — `1`, `2`, `2.2`, `2.5`, `3`, `4` or `5` (§230.1, §307, §403).
 - **state** — `todo`; `lane:<branch>`; `after:<id>[,<id>]`; `done:<sha>`;
   `dropped:§N`; or `parked:§N`.
 - **model** — `opus` or `sonnet`; `-` only on a closed row that never recorded one.
@@ -20,7 +20,14 @@ fenced line as a row, so a fenced template would be a row nobody ranked.
   `path#item`; `-` means the lane writes no tracked file but a new section of
   its own.
 - **what** — ends in at least one `§N`/`§N.M`; on a `done` row the last one is
-  the section that records the result.
+  the section that records the result. The first word may be a tag: a class,
+  `wrong`, `crash` or `refuses` then `/A` to `/D`, naming a defect's tier 1 row
+  (A or B) or tier 5 row (C or D); or `small`, on a row of any tier (§352.2).
+  The word after the tag, or the first word where there is none, says where the
+  row came from: `from/<id>`, `was/<id>` for a row filed again, `from/-` when
+  nothing led to it (§432.2), or `from/fuzz:<target>` or `from/step:<file>` for
+  a fault a crash file or a corpus file shows (§433.2). `add` refuses a new row
+  without it.
 
 A row is **ready** when its state is `todo`, or `after:` names only `done` rows.
 
@@ -172,7 +179,6 @@ Q2713 2    todo    opus    crates/rcad-topo/src/fuse/arrange.rs   from/Q2655 Uni
 ## Tier 2.2
 
 ```
-Q983 2.2  lane:lane-q983-b-the-header-verb-without-its-first-use    sonnet  tooling/queue/queue.py,tooling/queue/guard.py,justfile#check-queue-api-selftest   The queue file header still says five tiers and names no tags, and the write guard refuses every hand edit to docs/queue.md, its prose included: give `just queue` a checked way to change the header, then use it to name the seven tiers of §307 and §403 and the tags of §352.2. Replaces Q500. §352.7 §403.10
 Q501 2.2  after:Q982    sonnet  tooling/queue-page/,justfile#check-queue-page-selftest   The queue page shows the measure line of §352.6, and each open row with its age since the commit that added it, so the count of tier 1 rows in A and B is watched rather than felt. §352.6 §352.7
 Q692 2.2  todo    sonnet  tooling/queue/queue.py,justfile#check-queue-api-selftest   Reproduce §299.5's gap, reasoned from the code and never run: a row whose branch is gone can be matched to a leftover detached tree of a row that already landed but is still held, so running counts one too few. Add a selftest case, and fix it if it is real. §299.5
 Q733 2.2  todo    sonnet  docs/decisions.d/372-three-lane-slots-and-a-gate-that-runs-its-steps-at-once.md,cores:all   Measure the four-core case of §372.12, which it says is argued and not measured: a fresh quiet gate pinned to four cores with taskset -c 0-3, on a warm tree, beside a 24-core run of the same tree, each with uptime read just before, and write both into §372.12. Say too which bash ubuntu-latest ships: wait -n -p in the gate recipe needs bash 5.1 or later, and only the 5.2.21 on this machine was checked. §372.12
@@ -2701,4 +2707,5 @@ Q2590 1    done:ae975756    opus    crates/rcad-topo/src/fuse/assemble.rs,crates
 Q298 2.2  done:8d2abe67    sonnet  tooling/queue/queue.py,justfile#check-queue-api-selftest   check-queue-api-selftest's §309.3 lock case (one 3-step apply batch beside 40 back-to-back adds from a second worktree, whose three claims lines must be consecutive) was never shown to fail: Q287's lane mutation-tested only the byte-identical case. apply appends the batch's claims events together after its last step, still under the lock, so the case may pass even with the lock released and retaken between steps. Mutate apply that way, run the case, restore it, and if it passes under the mutation give it a check that does fail, such as two batches racing for add ids. §309.3
 Q2655 1    done:603396d7    opus    crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/src/fuse/bake.rs,crates/rcad-topo/tests/a_bar_flush_with_an_l_plates_inner_side_turned.rs   refuses/B from/Q2629 The round bar r 0.5 z -1..2.5 in the L plate (0,0)(4,0)(4,2)(2,2)(2,4)(0,4) z 0..1 of a_bar_flush_with_an_l_plates_inner_side_turned.rs, its axis at (1.5,1) and both turned pi/2 about z, is refused by all six certified fuses: Undecidable side of plane with the bar first, order along a crossing with the plate first. Unturned, the side's plane x = 2 touches the pipe along its seam. Turned, it is stored with normal (2^-52,1,0) offset 2, and the bar's seam lies 1.09e-47 past it on the stored numbers, between the two lines it cuts the pipe in. Bar first: Arrangement::passes_through in fuse/arrange.rs asks whether the seam's corner on the bar's floor z = -1 is on that plane. The corner sits round the floor and the pipe (origin (-1,1.5+2^-52), solved_from None, seam_plane normal (-1,2^-52,0) offset 1+2^-51), and its box, 1.14e-13 wide, holds both places the plane crosses the floor's circle, so side_of_a_plane_crossing_a_cap_circle and every other route give None. Plate first: the_lower_meet_first_round_the_loop gives None on the top z = 1, since the loop starts at the seam, (-1,2,1) in a box 2.3e-13 wide that overlaps both meets. Decide exactly which side of a plane the meet of a pipe's seam plane, the pipe and a plane square to its axis lies on, read it in both places, and move the pi/2 pin to answers. Q2109's pair is the same passes_through step §191.5
 Q2600 1    done:25785cf0    opus    crates/rcad-topo/src/fuse/assemble.rs   from/Q2408 A guess nobody has run, so no class (§360.5): is_a_stretch_of_an_open_input_edge_off_its_own_end in fuse/assemble.rs (Q2594, from Q2408's branch) leaves a side with no length out where an open input edge's two ends are further apart than twice how_far_apart_two_boxes_may_be, which keeps the whole stretch beside the edge's own end on a circle. Its doc says that on a curve of another shape it holds unless the curve comes back within that distance of the end elsewhere along the edge, a face pinched narrower than a box, and nobody has built one. Build through the public API an open input edge that is not an arc of a circle, such as an ellipse arc where a slanted cap meets a bar or a hyperbola arc on a cone, whose curve comes back near its own end, fuse something that leaves a stretch off that end, and say whether the side is left out wrongly: refuse there if so, or pin that it cannot be reached §16.10
+Q983 2.2  done:5a9dcae346eca8ac4ac20ea973f6ce114b9dc552    sonnet  tooling/queue/queue.py,tooling/queue/guard.py,justfile#check-queue-api-selftest   The queue file header still says five tiers and names no tags, and the write guard refuses every hand edit to docs/queue.md, its prose included: give `just queue` a checked way to change the header, then use it to name the seven tiers of §307 and §403 and the tags of §352.2. Replaces Q500. §352.7 §403.10
 ```

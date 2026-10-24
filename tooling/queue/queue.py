@@ -92,6 +92,11 @@ just queue sweep                           the same, over every row already left
 just queue reword <id> <what, ending in §N>   replace what an open row's description says, past the pin, kept to
                                             the same shape add checks for a new row; the write guard refuses a
                                             hand edit of this, so drop and add under a new id was the only way out
+just queue apply header <text>             replace the file's own header -- the title and the prose above its
+                                            first heading -- with <text>, one shell argument so its line breaks
+                                            survive quoting untouched; refuses a fenced block or a '## ' heading
+                                            inside it, since either would start the rows the file ranks, and a
+                                            no-op (§307.7, §352.7)
 just queue drop <id> <§N>                  state dropped:§N, moved under ## Closed
 just queue park <id> <§N>                  state parked:§N, left in its tier
 just queue after <id> <id|date>[,<id|date>...]   state after:<ids,date>; each id must exist in some copy, branch
@@ -629,6 +634,36 @@ def reword_step(queue, claims, here, args, batch):
         raise Refused(f"{row_id} reads this already")
     queue.replace(row, reworded)
     return queue, f"{row_id}: reworded", None
+
+
+def header_step(queue, claims, here, args, batch):
+    """Replace the file's header -- the title and the prose above its first heading -- with new text (§307.7, §352.7).
+
+    The write guard refuses a hand edit of docs/queue.md, its prose included,
+    so the header had no checked way to catch up once the rows themselves grew
+    past what it said: five tiers where §307 and §403 made seven, and no word
+    of the tag a row's description can start with (§352.2). `<text>` is the
+    whole replacement, one shell argument so the line breaks inside it survive
+    quoting untouched -- joining several the way `add` joins a description
+    would collapse the header's own paragraphs onto one line. It may hold no
+    fenced block and no `## ` heading of its own, since either would start the
+    rows the rest of the file ranks, and this verb only ever touches the part
+    above them.
+    """
+    need(args, 1, "header <text>")
+    text = args[0]
+    refuse_conflicted(here, queue)
+    if not queue.headings:
+        raise Refused("the file has no heading at all, so there is no header to replace")
+    boundary = queue.headings[0][0]
+    for line in text.split("\n"):
+        if line.startswith("```") or line.startswith("## "):
+            raise Refused("the new header may hold no fenced block and no '## ' heading of its own")
+    if text == "\n".join(queue.lines[:boundary]):
+        raise Refused("the header reads this already")
+    queue.lines[:boundary] = text.split("\n")
+    queue.parse()
+    return queue, "header: replaced", None
 
 
 TOPO_TESTS_DIR = "crates/rcad-topo/tests/"
@@ -1397,7 +1432,7 @@ STEP_FUNCS = {
     "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
     "after": after_step, "cores": cores_step, "rank": rank_step, "tier": tier_step, "tag": tag_step,
     "pick": pick_step, "pin": pin_step, "unpin": unpin_step, "give": give_step, "sweep": sweep_step,
-    "reword": reword_step,
+    "reword": reword_step, "header": header_step,
 }
 
 

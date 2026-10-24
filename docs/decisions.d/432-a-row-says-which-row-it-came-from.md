@@ -107,7 +107,9 @@ row. The queue file is in git and travels with every copy.
 - **The header of `docs/queue.md`** still describes **what** without the word.
   The write guard refuses every hand edit to that file, its prose included: an
   `Edit` adding the bullet was refused on 2026-10-11. Open row Q983 is the verb
-  that would let the header change; the bullet waits for it.
+  that would let the header change; the bullet waits for it. *2026-10-24: Q983
+  landed `just queue apply header`, and the merge that closed it used the verb
+  to add the word to the header's **what** bullet.*
 - **A recipe that prints the growth**: for each first row, how many rows it led
   to and how many are open, reading the word on rows filed since this section
   and §432.1's commit inference on older ones. Filed as Q1692, `from/-`, the
