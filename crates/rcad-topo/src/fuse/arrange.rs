@@ -25909,13 +25909,16 @@ mod two_loops_of_two_leaning_pipes {
     //! A pipe of radius 2 up `z` and a pipe of radius 1 along `x` at
     //! `y = apart`, crossed by [`intersect`] with each pipe first, and asked
     //! whether the curves it names may meet
-    //! ([`the_two_loops_of_two_pipes_may_meet`]); and the same two pipes both
-    //! up `z`, which cross in lines.
+    //! ([`the_two_loops_of_two_pipes_may_meet`]); the same two pipes both up
+    //! `z`, which cross in lines; and the two leaning by a last bit, which
+    //! intervals cannot tell from two running one way.
 
-    use rcad_geom::{Axis, Cylinder, EdgeRun, Point, Surface, SurfaceMeet, Vector, intersect};
+    use rcad_geom::{
+        Axis, Cylinder, EdgeRun, NamedRun, Point, Surface, SurfaceMeet, Vector, intersect,
+    };
     use rcad_predicates::{Policy, ProvenanceLog};
 
-    use super::the_two_loops_of_two_pipes_may_meet;
+    use super::{the_two_loops_of_two_pipes_may_meet, where_two_loops_of_two_pipes_meet};
 
     /// Resting on the inside, at `y = ±1`, the two loops meet where the walls
     /// touch, at `(0, ±2, 0)`. Half a unit further in, at `y = ±1/2`, they
@@ -26011,6 +26014,91 @@ mod two_loops_of_two_leaning_pipes {
                 "{face:?} first"
             );
         }
+    }
+
+    /// The bar of radius 2 and the bar of radius 1 a unit off it along `x`,
+    /// both turned a radian about `x`, the thin one by the next `f64` above a
+    /// radian: its direction is a last bit or two off the fat one's in `y` and
+    /// `z`. A turn about `x` keeps `x`, so the axes are exactly a unit apart, the
+    /// difference of the widths, and the two loops meet at `(2, 0, 0)`. But
+    /// `t × w` is one difference of two rounded products, which intervals
+    /// cannot tell from nothing. Until Q2662 the two loops were taken for the
+    /// two lines of two pipes down one direction there, and let through
+    /// without a node where they meet. Asked exactly, they may meet; and
+    /// where they meet cannot be put in a box by intervals that cannot tell the
+    /// lean from nothing, so it is not placed.
+    #[test]
+    fn two_loops_of_two_pipes_leaning_by_a_last_bit_meet_where_the_axes_are_the_widths_apart() {
+        for [face, partner] in the_two_pipes_leaning_by_a_last_bit(1.0) {
+            let [first, second] = the_two_loops_named(&face, &partner);
+            assert!(
+                the_two_loops_of_two_pipes_may_meet(&face, &partner, [&first, &second]),
+                "{face:?} first"
+            );
+            assert!(
+                where_two_loops_of_two_pipes_meet(&face, &partner).is_none(),
+                "{face:?} first"
+            );
+        }
+    }
+
+    /// [`two_loops_of_two_pipes_leaning_by_a_last_bit_meet_where_the_axes_are_the_widths_apart`]
+    /// with the thin axis half a unit off the fat one: the thin pipe is deep
+    /// inside the fat one, and its loops are apart, which is asked exactly
+    /// where intervals cannot tell the lean from nothing. [`intersect`]
+    /// refuses to name these loops, `CannotNameWhichPieceOfACrossingThisIs`,
+    /// so the two it names a unit off stand for them: the answer reads no more
+    /// of them than that each is picked out of the crossing.
+    #[test]
+    fn two_loops_of_two_pipes_leaning_by_a_last_bit_half_a_unit_apart_do_not_meet() {
+        let named = the_two_pipes_leaning_by_a_last_bit(1.0);
+        let inside = the_two_pipes_leaning_by_a_last_bit(0.5);
+        for ([face, partner], [deep, around]) in named.into_iter().zip(inside) {
+            let [first, second] = the_two_loops_named(&face, &partner);
+            assert!(
+                !the_two_loops_of_two_pipes_may_meet(&deep, &around, [&first, &second]),
+                "{deep:?} first"
+            );
+        }
+    }
+
+    fn the_two_loops_named(face: &Surface, partner: &Surface) -> [NamedRun; 2] {
+        let SurfaceMeet::Curves(runs) = intersect(
+            face,
+            partner,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("two loops are named") else {
+            panic!("two leaning pipes that cross cross in curves");
+        };
+        let Ok(two) = <[NamedRun; 2]>::try_from(runs) else {
+            panic!("{face:?} first: two loops");
+        };
+        two
+    }
+
+    /// A pipe of radius 2 through the origin and one of radius 1 through
+    /// `(apart, 0, 0)`, with the directions `Isometry::rotation` about `x`
+    /// gives `z` for a radian and for a radian and a last bit.
+    fn the_two_pipes_leaning_by_a_last_bit(apart: f64) -> [[Surface; 2]; 2] {
+        let pipe = |origin: Point, direction: Vector, radius: f64| {
+            Surface::Cylinder(
+                Cylinder::new(Axis::new(origin, direction).expect("an axis"), radius)
+                    .expect("a radius"),
+            )
+        };
+        let fat = pipe(
+            Point::new(0.0, 0.0, 0.0),
+            Vector::new(0.0, -0.841_470_984_807_896_5, 0.540_302_305_868_139_8),
+            2.0,
+        );
+        let thin = pipe(
+            Point::new(apart, 0.0, 0.0),
+            Vector::new(0.0, -0.841_470_984_807_896_6, 0.540_302_305_868_139_5),
+            1.0,
+        );
+        [[thin, fat], [fat, thin]]
     }
 
     fn the_two_pipes_each_way(apart: f64) -> [[Surface; 2]; 2] {
