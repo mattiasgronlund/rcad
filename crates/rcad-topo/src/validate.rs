@@ -9058,6 +9058,64 @@ mod tests {
         );
     }
 
+    /// A straight round bar a hundred thousand radii long is answered by
+    /// [`how_much_space_a_curved_solid_encloses`]'s own ladder four rungs past
+    /// [`HALVINGS_A_FOLD_IS_ASKED_DOWN_TO`] halvings below its top (row Q2615).
+    ///
+    /// The top is `5e4` radii, so thirteen halvings under it is `6.1` radii.
+    /// Every rung down to `3.05` radii meshes the bar into the same 12
+    /// triangles, a square bar `0.667` radii off its pipe that encloses
+    /// `2.0e5` and is charged `1.63e6`, a finite charge, so no mesh strays
+    /// past the pipe and Q2368's lower floor never applies. Until Q2615 the
+    /// ladder stopped at `6.1` radii and fell back on `2.0e5`, where the bar
+    /// holds `π · 1e5`. The rungs at `1.53` and `0.763` radii are meshed
+    /// finer and still do not answer; the one at `0.381` radii is 32
+    /// triangles enclosing `2.89e5`, charged `1.15e5`. A bar a hundredth as
+    /// thick and a hundredth as long is the same ladder at a hundredth the
+    /// size.
+    #[test]
+    fn a_round_bar_a_hundred_thousand_radii_long_is_answered_past_the_cap() {
+        for (radius, high) in [(1.0, 1e5), (0.01, 1000.0)] {
+            let mut model = an_empty_model();
+            let bar = model
+                .add_round_bar(radius, high, &Isometry::identity())
+                .expect("a round bar");
+            let view = model.solid(bar).expect("this model made the key");
+            let policy = Policy::certified();
+            let enclosed =
+                how_much_space_a_curved_solid_encloses(view, &policy, &mut ProvenanceLog::new())
+                    .expect("a bar encloses some space");
+            let coarsest = the_coarsest_mesh_whose_sides_do_not_cross(
+                view,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar has a coarsest mesh");
+            let answering = how_far_across(&coarsest)
+                / 2.0
+                / f64::powi(2.0, HALVINGS_A_FOLD_IS_ASKED_DOWN_TO + 4);
+            let mesh = view
+                .mesh(
+                    Deflection::of(answering).expect("a room above zero"),
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("the bar meshes a third of a radius off");
+            let (there, rounding) = signed_volume_over_and_how_far_it_rounded(&mesh);
+            let off = how_far_the_sum_can_be_off(view, &mesh, rounding);
+            let volume = core::f64::consts::PI * radius * radius * high;
+            assert!(
+                the_sum_answers(there, off) && (there - volume).abs() <= off,
+                "radius {radius}: a mesh {answering} off encloses {there}, off by {off}, \
+                 where the bar holds {volume}"
+            );
+            assert_eq!(
+                enclosed, there,
+                "radius {radius}: the ladder answers four rungs past the cap, {answering} off"
+            );
+        }
+    }
+
     /// A quarter of the ring of radius `ring` about `+z`, its tube `tube`
     /// wide, from the cap on `y = 0` to the cap on `x = 0`: the bend
     /// `tests/rings/mod.rs` describes, through the same builder.
