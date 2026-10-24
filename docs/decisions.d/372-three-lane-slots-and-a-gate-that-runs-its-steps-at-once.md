@@ -252,6 +252,34 @@ turn instead adds their whole wall time, and that includes
 covers both machines and needs no threshold. A 1-core machine gets 1 slot,
 which means running in turn.
 
+**Amended 2026-10-24: the four-core case, measured.** Still not on a runner,
+but on this machine, pinned: `taskset -c 0-3 mise exec -- just gate quiet
+fresh 4` (the `taskset` matters — `jobs=4` only caps the recipe's own
+step-slots, not which physical cores cargo's own threads land on) took
+`real 43m2.138s` on a warm tree. `uptime` just before it read `load average:
+65.18, 42.78, 34.64`, and three other lanes (Q2711, Q2633 and Q2665) were
+building and testing rcad in their own worktrees on this machine for the whole
+run — confirmed by `ps`, not assumed. The same tree, same commit, run again
+fresh with every core instead (`mise exec -- just gate quiet fresh 24`, no
+`taskset`) took `real 15m43.195s`; `uptime` just before read `load average:
+12.91, 32.05, 34.14`, with the same three lanes still running. So four cores
+cost about 2.7x the wall of 24 here — consistent with the case above, that
+cargo already saturates every core for the chain and the rest mostly wait —
+but the two runs did not hold the machine's own load fixed (it fell from 65 to
+13 in the gap, for a reason not traced here), so the 2.7x is this machine's
+figure, not a bound for `ubuntu-latest`'s dedicated 4. What the runs do settle
+is that four job-slots finish and pass rather than deadlock or time out:
+`gate: PASS` both times.
+
+On `wait -n -p` (§372's recipe, and a fixture at `justfile:680`): this
+machine's bash is `5.2.21(1)-release` (`bash --version`), the only version
+checked until now. `ubuntu-latest` was mid-migration on the day of this
+measurement — GitHub's changelog has it rolling from Ubuntu 24.04 to 26.04
+between 2026-10-19 and 2026-11-19, so either image could answer the label.
+`actions/runner-images`'s own readme for each lists Bash `5.2.21(1)-release`
+for 24.04 and `5.3.9(1)-release` for 26.04. Both are past 5.1, so `wait -n -p`
+runs on either.
+
 ### 372.13 A busy machine
 
 The gate limits how many steps run at once to the number of cores, and only
