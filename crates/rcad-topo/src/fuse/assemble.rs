@@ -101,8 +101,8 @@ use crate::{
 
 use super::arrange::{
     a_plane_cuts_a_cone_in_rulings, a_plane_lies_along_a_pipes_axis, agreement_of_two_planes,
-    name_of_surface_bits, name_of_the_surface_either_way_round, two_pipes_run_along_one_line,
-    where_the_crossing_starts, where_two_halves_meet,
+    name_of_surface_bits, name_of_the_surface_either_way_round, two_cones_cross_in_rulings,
+    two_pipes_run_along_one_line, where_the_crossing_starts, where_two_halves_meet,
 };
 use super::bake::{grown_by, what_writing_the_corner_down_cost};
 use super::select::Chosen;
@@ -10632,12 +10632,13 @@ fn a_pair_of_pipes(carried_by: &[Surface; 2]) -> Option<[[u64; 9]; 2]> {
 /// exact wrong answer is what commit `4b62fd0` records having gone out for the
 /// whole cone row for three units, under the same blanket verdict.
 ///
-/// **Three rows are the other `None`, and all three are arithmetic rather than
+/// **Four rows are the other `None`, and all four are arithmetic rather than
 /// a missing row.** Whether two pipes' axes run along one line is
 /// [`two_pipes_run_along_one_line`], whether a plane holds a pipe's axis is
-/// [`a_plane_lies_along_a_pipes_axis`], and whether a plane cuts a cone in
-/// rulings is [`a_plane_cuts_a_cone_in_rulings`]; each proves its answer or says
-/// it cannot. They used to be `w₁.cross(w₂) == Vector::zero()`,
+/// [`a_plane_lies_along_a_pipes_axis`], whether a plane cuts a cone in
+/// rulings is [`a_plane_cuts_a_cone_in_rulings`], and whether two cones on one
+/// apex lean apart is [`two_cones_cross_in_rulings`]; each proves its answer or
+/// says it cannot. The first three used to be `w₁.cross(w₂) == Vector::zero()`,
 /// `n.dot(w) == 0.0` and a pair of rounded comparisons about a cone's apex and
 /// how the plane leans against it — and neither an `f64` cross product, nor an
 /// `f64` sum of three products, nor an `f64` degree-six `E` rounding to nothing
@@ -10687,8 +10688,16 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         // above were in, and its own doc carries the pair of numbers.
         [Surface::Plane(flat), Surface::Cone(cone)]
         | [Surface::Cone(cone), Surface::Plane(flat)] => a_plane_cuts_a_cone_in_rulings(flat, cone),
-        // A cone against a ball, a pipe or another cone; the ring row below
-        // covers the fourth. The three do not rest on the same thing.
+        // Two cones on one apex leaning apart cross in rulings through it, and
+        // `where_two_cones_cross` in `rcad-geom` names them for exactly the pair
+        // this asks about (§50.2 item 4). Two on one axis meet in circles — two,
+        // or one halfway between the apexes for one slope — or at their one apex
+        // and nowhere else, which `intersect` answers as touching and builds no
+        // run for, and none of that holds a line. Every other two cones are
+        // refused by `intersect` by name.
+        [Surface::Cone(one), Surface::Cone(other)] => two_cones_cross_in_rulings(one, other),
+        // A cone against a ball or a pipe; the ring row below covers the
+        // third. The two do not rest on the same thing.
         //
         // **A ball is bounded and a straight line is not**, so a cone against a
         // ball holds no line for the reason the ball row below gives.
@@ -10709,25 +10718,11 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         // and `a_pipe_alongside_one_of_a_cones_rulings_holds_it` are the two
         // demonstrations.
         //
-        // **Cone against cone is half the geometry and half `intersect`.** Two
-        // cones on one axis meet in circles — two, or one halfway between the
-        // apexes for one slope — or at their one apex and nowhere else, which
-        // `intersect` answers as touching and builds no run for. None of that
-        // holds a line, so `false` is about the geometry there. Two cones that
-        // share an apex with their axes leaning apart *do* meet along rulings,
-        // which are lines (§50.2 item 4), and what keeps the arm right for them
-        // is that `intersect` refuses every cone-and-cone off one axis by name.
-        // `where_two_cones_cross` in `rcad-geom` carries the table.
-        //
-        // So **two** of the three rows here are right only for as long as
-        // those refusals stand, and both are rows to revisit the day one
-        // lifts: a cone against a cone or a pipe it is not coaxial with. The
-        // ball, the coaxial pipe and the coaxial cone answer out of the shapes
-        // themselves.
-        [
-            Surface::Cone(_),
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
-        ]
+        // So **one** of the two rows here is right only for as long as its
+        // refusal stands, and is the row to revisit the day it lifts: a cone
+        // against a pipe it is not coaxial with. The ball and the coaxial pipe
+        // answer out of the shapes themselves.
+        [Surface::Cone(_), Surface::Sphere(_) | Surface::Cylinder(_)]
         | [Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)] => Some(false),
         // **A ball's skin and a ring's skin are bounded, and a straight line is
         // not, so no line lies on either** — which settles every remaining pair

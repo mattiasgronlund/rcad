@@ -43,9 +43,9 @@ use crate::exact::Exact;
 use crate::intersect::{
     Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS,
     ask, how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_cone,
-    one_cone_either_way_round, whether_a_ball_runs_through_a_cones_apex,
-    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
-    whether_two_cones_share_an_axis,
+    one_cone_either_way_round, two_cones_lean_apart_on_one_apex,
+    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
+    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
 use crate::march::{Marched, march, settled_with_a_bound, settled_with_a_bound_where_they_bend};
 use crate::meet::nowhere_in_particular;
@@ -442,7 +442,8 @@ impl PointsAlongACrossing {
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a run between a
 /// cone or a torus and another curved surface — the same two refusals
 /// [`intersect`](crate::intersect) gives those pairs, and a cone against a pipe,
-/// a ball or a second cone that shares its axis, or a torus against a pipe, a
+/// a ball or a second cone that shares its axis, a second cone that shares only
+/// its apex, or a torus against a pipe, a
 /// ball or a cone on its axis, is drawn here exactly as it is named there. The
 /// torus's refusal also covers a whole circle such a partner shares with it
 /// that the run names by the two faces alone, which
@@ -594,8 +595,8 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// # Errors
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a pair that crosses
-/// in straight lines: two planes, a plane down a pipe's own axis, and two pipes
-/// pointing the same way.
+/// in straight lines: two planes, a plane down a pipe's own axis, two pipes
+/// pointing the same way, and two cones on one apex with their axes apart.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on a
 /// degree-four run pick both loops or neither, and
@@ -853,6 +854,12 @@ impl TwoLoopsHeldApartBy {
 /// cone's apex is refused under the cone's name in both halves too, for the
 /// reason `intersect`'s cone-and-ball arm gives.
 ///
+/// **Two cones on one apex with their axes proved apart are straight lines**,
+/// asked exactly as `intersect` asks it: whatever they share is rulings through
+/// that apex. That holds where `intersect` finds no ruling, or cannot tell the
+/// halves of a ruling the two touch along apart, too, since a run on either
+/// still has nothing between its ends.
+///
 /// **One pair is refused here under that name and answered there**: two cones
 /// on one axis with one apex and two slopes, which `intersect` answers as
 /// touching at the apex. A closed run stated on them names nothing, and the
@@ -1049,6 +1056,14 @@ fn what_a_run_between_these_two_lies_on(
                 Ordering::Less | Ordering::Equal => one,
             };
             the_circle_a_closed_run_round_one_cone_lies_on(&first, run).map(WhatARunLiesOn::Conic)
+        }
+        // Two cones on one apex with their axes apart cross in rulings through
+        // it, each picked out by flat surfaces rather than being `Straight`, so
+        // it reaches here.
+        [Surface::Cone(one), Surface::Cone(other)]
+            if two_cones_lean_apart_on_one_apex(&one, &other) =>
+        {
+            Ok(WhatARunLiesOn::StraightLine)
         }
         // Two cones on one axis cross in one circle or two, and a ball on a
         // cone's axis in none, one or two; which one this run is, is its ends'

@@ -360,7 +360,8 @@ pub enum Error {
     CannotNameWhichPieceOfACrossingThisIs,
 
     /// A cone against a pipe, a ball or a second cone that does not share its
-    /// axis, and a ball on the axis whose skin runs through the apex.
+    /// axis — a second cone that shares its apex aside — and a ball on the axis
+    /// whose skin runs through the apex.
     ///
     /// Off the axis a **gap** and the same one two leaning pipes have (§29): the
     /// crossing is a degree-four space curve, naming which of its shapes it
@@ -383,13 +384,13 @@ pub enum Error {
     /// `where_a_cone_and_a_ball_cross`. (c) **A second cone on the axis is
     /// done**: `s₁·|h| = s₂·|h − d|` is two circles, one halfway between the
     /// apexes for one slope, or the apex alone for one apex —
-    /// `where_two_cones_cross`. `rcad-topo`'s `assemble.rs` answers *this
-    /// crossing holds no straight line* for the whole cone-and-cone row, and
-    /// that was held out on the strength of this refusal, because two cones
-    /// that share an apex meet along rulings (§50.2 item 4). It stays right for
-    /// a reason of its own now: two cones on one axis meet in circles or at a
-    /// point and never along a ruling, and two that share an apex with their
-    /// axes leaning apart are still refused here. (d) The general case wants
+    /// `where_two_cones_cross`. (c′) **Two cones that share an apex with their
+    /// axes leaning apart are done**, and are not refused here any more: they
+    /// meet in two or four rulings through it, or at it alone, which
+    /// `the_rulings_two_cones_on_one_apex_share` names as the halves the apex
+    /// cuts them into. `rcad-topo`'s `assemble.rs` answers *this crossing holds
+    /// a straight line* for that pair and for no other cone-and-cone pair
+    /// (§50.2 item 4). (d) The general case wants
     /// the marcher taught a cone and an eighth-degree discriminant derived,
     /// which is §29's whole second stage over again.
     ///
