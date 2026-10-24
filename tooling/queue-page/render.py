@@ -121,7 +121,7 @@ def main(argv):
     fuzz, fuzz_cache = fuzz_section.section(fuzz_root, read_json(fuzz_cache_path))
     write_atomically(fuzz_cache_path, json.dumps(fuzz_cache, sort_keys=True))
     rendered_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    page = render_page(points, current_state(tip, tip_text), fuzz, rendered_at, Links(tip, "rows/"))
+    page = render_page(points, current_state(tip, tip_text, graph, rendered_at), fuzz, rendered_at, Links(tip, "rows/"))
     write_row_pages(os.path.join(out_dir, "rows"), tip, graph)
     write_atomically(os.path.join(out_dir, "index.html"), page)
     return 0
@@ -216,7 +216,7 @@ def tally(text):
     return {"by_tier": by_tier, "parked": parked, "closed": closed}
 
 
-def current_state(tip, tip_text):
+def current_state(tip, tip_text, graph, rendered_at):
     verbs = load_queue_verbs()
     here = verbs.Here(QUEUE_PATH)
     running = running_rows(verbs, here, tip)
@@ -228,7 +228,74 @@ def current_state(tip, tip_text):
         "not_taken": not_taken,
         "families": family_rows.families(tip),
         "closed": closed_rows(tip),
+        "measure": measure_line(tip, running),
+        "ages": rows_by_age(tip, graph, rendered_at),
     }
+
+
+def rows_by_age(tip, graph, rendered_at):
+    """Every open row, oldest first, with its age since the commit that added it (§352.7).
+
+    A row no commit on main's first-parent line added — a `D` row, which
+    lineage does not follow, or one carried over from before the history
+    `graph` walks — gets no age, and sorts last rather than being left out,
+    so the table still says it is open.
+    """
+    now = datetime.strptime(rendered_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    rows = []
+    for row in tip.rows:
+        if row.is_closed():
+            continue
+        commit = graph.added_at.get(row.id)
+        rows.append((row, (now - commit.date).days if commit else None))
+    return sorted(rows, key=lambda pair: (pair[1] is None, -pair[1] if pair[1] is not None else 0))
+
+
+def measure_line(tip, running):
+    """The line `just queue`'s awk block prints at its end, worked out the same way here (§352.6).
+
+    A class only ever sits on a tier-1 or tier-5 row (`rows.py`'s `cl` is "-"
+    everywhere else), so a row of any other tier counts in neither tally, the
+    same way the awk's printf names only tiers 1 and 5.
+    """
+    ab = 0
+    by_class = Counter()
+    unclassed = 0
+    in_c = 0
+    in_d = 0
+    unclassed5 = 0
+    for row in tip.rows:
+        if row.is_closed() or row.state.startswith("parked:"):
+            continue
+        if row.has_class():
+            bad, likely = row.tag.split("/")
+            if likely in ("A", "B"):
+                ab += 1
+                by_class[bad] += 1
+            elif likely == "C":
+                in_c += 1
+            else:
+                in_d += 1
+        elif row.tier == "1":
+            unclassed += 1
+        elif row.tier == "5":
+            unclassed5 += 1
+    held = {row["id"] for row in running}
+    small_ready = sum(1 for row in tip.rows if row.tag == SMALL and is_ready(row, tip, held))
+    return (
+        f"tier 1, open and not parked: {ab} in A or B ({by_class['wrong']} wrong, {by_class['crash']} crash, "
+        f"{by_class['refuses']} refuses), {unclassed} with no class; tier 5: {in_c} in C, {in_d} in D, "
+        f"{unclassed5} with no class; {small_ready} small row{'' if small_ready == 1 else 's'} ready, "
+        f"and a bundle is {queue_bundle()}"
+    )
+
+
+def queue_bundle():
+    result = subprocess.run(
+        [os.environ["QUEUE_JUST"], "--justfile", os.environ["QUEUE_JUSTFILE"], "--evaluate", "queue_bundle"],
+        capture_output=True, text=True)
+    assert result.returncode == 0, f"`just --evaluate queue_bundle` failed: {result.stderr.strip()}"
+    return int(result.stdout.strip())
 
 
 def load_queue_verbs():
@@ -371,6 +438,20 @@ def rows_not_taken(tip, tip_text, trees):
             elif row.state.startswith("parked:"):
                 parked.append(row)
     return {"waiting": waiting, "parked": parked, "meeting": meeting_a_running_lane(tip_text, trees)}
+
+
+def is_ready(row, tip, held):
+    """Whether `just queue`'s walk would count this row ready (justfile's `kind[i] == "ready"`, §352.6).
+
+    A row the claims file holds is ready in its own text but held elsewhere
+    in fact, so it does not count: `held` is the set `running_rows` already
+    worked out from that file.
+    """
+    if row.is_closed() or row.state.startswith(("parked:", "lane:")) or row.id in held:
+        return False
+    if row.state.startswith("after:"):
+        return not not_yet_done(tip, row)
+    return True
 
 
 def not_yet_done(tip, row):
@@ -557,6 +638,8 @@ def render_page(points, state, fuzz, rendered_at, links):
         progress_chart=progress_chart,
         added_closed_chart=added_closed_chart,
         statistics_table=statistics_table(days),
+        measure_line=html.escape(state["measure"]),
+        age_table=age_table(state["ages"], links),
         running_table=running_table(state["running"], rendered_at, links),
         pinned_table=pinned_table(state["pinned"], state["running"], state["not_taken"], links),
         not_taken_table=not_taken_table(state["not_taken"], links),
@@ -691,6 +774,28 @@ def statistics_table(days):
 <thead><tr><th rowspan="2">Date</th><th colspan="2">Pace</th>
 <th colspan="{len(TIERS_IN_ORDER) + 2}">Open at the day's end</th><th rowspan="2" class="n">Closed so far</th></tr>
 <tr><th class="n">Added</th><th class="n">Closed</th>{tier_heads}<th class="n">Parked</th><th class="n">All open</th></tr></thead>
+<tbody>
+{body}
+</tbody>
+</table>"""
+
+
+def age_table(rows_with_age, links):
+    """One line per open row, oldest first: its tier and its age since the commit that added it.
+
+    A row with no age — no commit on the history `rows_by_age` walked added
+    it — sorts last and says so, rather than being left off a table meant to
+    show every open row.
+    """
+    if not rows_with_age:
+        return "<p>nothing open</p>"
+    lines = []
+    for row, age_days in rows_with_age:
+        age = "age not known" if age_days is None else f'{age_days} day{"" if age_days == 1 else "s"}'
+        lines.append(f'<tr><th>{links.ref(row.id)}</th><td>{html.escape(row.tier)}</td><td class="n">{age}</td></tr>')
+    body = "\n".join(lines)
+    return f"""<table class="qp-stats">
+<thead><tr><th>Row</th><th>Tier</th><th class="n">Age</th></tr></thead>
 <tbody>
 {body}
 </tbody>
@@ -1294,6 +1399,10 @@ table.qp-stats .n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 
 <h2>Queue statistics</h2>
 {statistics_table}
+
+<h2>Open rows</h2>
+<p class="qp-sub">{measure_line} (§352.6)</p>
+{age_table}
 
 <h2>Running rows</h2>
 {running_table}
