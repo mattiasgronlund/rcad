@@ -232,6 +232,61 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_
     );
 }
 
+/// [`a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`]
+/// turned by quarter turns: the thin bar along `y` at `x = 1` and at `x = −1`,
+/// and along `x` at `y = −1`, so its two loops meet at `(2, 0, 0)`,
+/// `(−2, 0, 0)` and `(0, −2, 0)`. The thick bar's wall between its caps is a
+/// ring with two windows in it that touch there, and the mesh cuts a ring
+/// across at four quarter turns. Here one of the four runs exactly through
+/// where the windows touch; with the thin bar at `y = 1` that cut misses the
+/// point by an ulp.
+///
+/// Until Q2649 a cut that met two windows was refused, and so was every Union
+/// and the Difference thick bar first, `CurvedFaceWithAHoleGoesTooFarRound`.
+/// Then a cut through where they touch went round the first window it met, and
+/// along `y` at `x = 1` that was the window no other cut met: no patch took
+/// either side of it, and the Union thin bar first went on being refused.
+#[test]
+fn a_thin_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_answers_every_fuse() {
+    let placements: [(Pair, [f64; 3]); 3] = [
+        (
+            |model| {
+                [
+                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+                    a_bar_along_y(model, 1.0, [1.0, -4.0, 0.0], 8.0),
+                ]
+            },
+            [2.0, 0.0, 0.0],
+        ),
+        (
+            |model| {
+                [
+                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+                    a_bar_along_y(model, 1.0, [-1.0, -4.0, 0.0], 8.0),
+                ]
+            },
+            [-2.0, 0.0, 0.0],
+        ),
+        (
+            |model| {
+                [
+                    a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+                    a_bar_along_x(model, 1.0, [-4.0, -1.0, 0.0], 8.0),
+                ]
+            },
+            [0.0, -2.0, 0.0],
+        ),
+    ];
+    for (build, corner) in placements {
+        every_fuse_answers_with_a_corner_at(
+            build,
+            [16.0 * PI, 8.0 * PI, bar_through_bar(2.0, 1.0, 1.0)],
+            [&[7], &[3], &[4], &[3, 3]],
+            corner,
+        );
+    }
+}
+
 /// A ball of radius 2 with a bar from `z = −3` to 3 through it off its axis,
 /// so that the pipe crosses the ball in two loops apart, one above `z = 0` and
 /// one below. They come together only where the bar touches the ball from
@@ -957,6 +1012,16 @@ fn a_bar(model: &mut Model, radius: f64, at: [f64; 3], height: f64) -> SolidKey 
 /// exact quarter turn about `y`.
 fn a_bar_along_x(model: &mut Model, radius: f64, at: [f64; 3], length: f64) -> SolidKey {
     let turned = Isometry::quarter_turns(&Axis::y(), 1).expect("a turn about y");
+    let placed = Isometry::translation(Vector::new(at[0], at[1], at[2]))
+        .expect("a finite move")
+        .compose(&turned);
+    model.add_round_bar(radius, length, &placed).expect("a bar")
+}
+
+/// A bar of `radius` and `length` along `+y` from `at`, turned onto `y` by
+/// three exact quarter turns about `x`.
+fn a_bar_along_y(model: &mut Model, radius: f64, at: [f64; 3], length: f64) -> SolidKey {
+    let turned = Isometry::quarter_turns(&Axis::x(), 3).expect("a turn about x");
     let placed = Isometry::translation(Vector::new(at[0], at[1], at[2]))
         .expect("a finite move")
         .compose(&turned);
