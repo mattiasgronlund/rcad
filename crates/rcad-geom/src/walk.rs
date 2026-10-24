@@ -1540,6 +1540,15 @@ fn begun_beside(
 /// corners, settled onto the crossing. Every point handed back is a point the
 /// march settled and bounded, so the march's bound holds of them all.
 ///
+/// **What the points of either arc could not decide goes into `log` only when
+/// this refuses.** The arc handed back is the one whose other arc has a point
+/// decided behind a half-space, and only a certified sign decides one, so a
+/// point of the held arc left undecided decided nothing. The bars of Q2649
+/// march points within `1e-7` of the plane `x = 0` that parts their two
+/// loops where they meet, at `(0, 2, 0)`; each box straddles it, and their
+/// records refused the certified Union, thin bar first, though the other arc
+/// was ruled out outright.
+///
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the two corners sit at
@@ -1611,7 +1620,7 @@ fn the_arc_between(
         [true, false] => Ok(onwards),
         [false, true] => Ok(backwards),
         [true, true] | [false, false] => {
-            for asked in asked {
+            for mut asked in asked {
                 asked.drain_into(log);
             }
             Err(Error::CannotNameWhichPieceOfACrossingThisIs)
