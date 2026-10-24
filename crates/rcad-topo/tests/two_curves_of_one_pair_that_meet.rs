@@ -24,7 +24,8 @@
 //! without being pushed there: that is the Steinmetz cross, which gets its
 //! nodes, and every fuse of it answers.
 //!
-//! The fuses run three rules both ways round, certified, in a model of 100 mm.
+//! The fuses run three rules both ways round, certified unless a test names a
+//! tolerant policy, in a model of 100 mm.
 
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, DynamicRange, Isometry, Plane, Point, Sphere, Surface,
