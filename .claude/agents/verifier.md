@@ -58,7 +58,7 @@ decide, and each item of it is yours.
 
 The reading is yours whatever it printed:
 
-- what the branch takes out of a test (step 1);
+- what the branch's test-code-removed section shows (step 1);
 - the section's claims, under §16.10 (step 5);
 - each number in `number_mismatches`, and each it did not run: read the print
   and the lane's claim, then keep it as a mismatch or drop it;
@@ -87,16 +87,17 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
    outside the write set in `files_outside_write_set`. Then run the
    lines-that-run command your brief gives, once, exactly as written, and
    report it as `lines_that_run_command` and what it prints, verbatim, as
-   `lines_that_run`. It prints the first ten changed lines that could change
-   what runs, none from `.md` files, comment lines or test code, and then how
-   many there are, `lines that run: N`. Run it here, before step 2 checks the
-   branch out, so the recipe that judges the branch is not one the branch
-   changed. Its print is the evidence (§375), not your reading of the diff: a
-   line it misses is a defect in the command, so say so in `notes`, and never
-   drop a line it printed. It
-   skips test code whole, so read what the branch takes out of a test: a test
-   or an assertion removed or weakened with no word from the lane on why is a
-   `fix_first`.
+   `lines_that_run`. It prints two sections: first the test code the branch
+   takes out, up to ten lines, then how many there are, `test code lines
+   removed: N`; then the first ten changed lines that could change what runs,
+   none from `.md` files, comment lines or test code, and then how many there
+   are, `lines that run: N`. Run it here, before step 2 checks the branch out,
+   so the recipe that judges the branch is not one the branch changed. Its
+   print is the evidence (§375), not your reading of the diff: a line it
+   misses is a defect in the command, so say so in `notes`, and never drop a
+   line it printed. Read the first section instead of the diff by eye: a test
+   or an assertion it shows removed or weakened with no word from the lane on
+   why is a `fix_first`.
 2. `git checkout --detach <branch>`.
 3. `mise exec -- just gate-lane` on the branch tip, including any docs commit —
    one plain Bash call, `timeout` 600000, no redirect and no pipe through `tail`.

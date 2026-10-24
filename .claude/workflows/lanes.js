@@ -529,9 +529,18 @@ function unproven(lane, kind, check) {
       if (!mutationCaught(check.mutation_caught)) why.push('no mutation of the changed lines was seen to fail a test that reaches them')
     }
   } else if (runs) {
-    why.push(`the branch changes ${runs} lines that run and names no test that fails without them (a row that keeps what they compute goes again marked sameBehaviour, §399), starting with: ${check.lines_that_run.trim().split('\n')[0]}`)
+    why.push(`the branch changes ${runs} lines that run and names no test that fails without them (a row that keeps what they compute goes again marked sameBehaviour, §399), starting with: ${firstRunLine(check.lines_that_run)}`)
   }
   return why
+}
+
+// The print's second section starts right after its first count line,
+// `test code lines removed: N`; a print with no such line is the old,
+// one-section shape, so its own first line is already the one wanted.
+function firstRunLine(print) {
+  const lines = print.trim().split('\n')
+  const i = lines.findIndex((line) => /^test code lines removed: [0-9]+$/.test(line))
+  return i === -1 ? lines[0] : lines[i + 1]
 }
 
 // The count the `lines-that-run` recipe ends its print with, or null when the
@@ -1077,7 +1086,7 @@ While its last line says the run is still going, run this the same way, as often
 Its last line is then one line of JSON. Take every field it holds as it stands and do not run its steps again: skipped says what it skipped and why, for your notes, and left_to_you is what it could not decide, which is yours, beside the reading verifier.md names.${unsent}
 If your tree's just has no verify-lane recipe, do verifier.md's steps by hand.
 
-Lines that run -- just verify-lane runs this once, before it checks the branch out, and its JSON holds the command as lines_that_run_command and all it prints as lines_that_run. By hand, in step 1, before you check the branch out, run it once in your own tree, exactly as written, and report it the same way. It prints at most eleven lines, and the last is always lines that run: N:
+Lines that run -- just verify-lane runs this once, before it checks the branch out, and its JSON holds the command as lines_that_run_command and all it prints as lines_that_run. By hand, in step 1, before you check the branch out, run it once in your own tree, exactly as written, and report it the same way. It prints two sections, each capped at ten lines and followed by its own count: first the test code the branch takes out, ending test code lines removed: N, then the lines that could change what runs, ending lines that run: N -- at most 22 lines in all, and the last is always lines that run: N:
   ${linesThatRunCommand(lane)}
 When N is 0, nothing that runs changed (§375): skip the revert below, say so in notes, and report tests_fail_without_fix: false with no reproduced_mutation if your steps are the tests ones, or no tests_pass_without_change and no mutation_caught if they are the same behaviour ones.
 ${kind === 'same_behaviour' ? sameBehaviourProof() : revertProof()}
