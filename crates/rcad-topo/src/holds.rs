@@ -4712,6 +4712,24 @@ fn lies_between_seen_down_the_axis(
 /// sign read of `P` after that is certified in interval arithmetic, with `w`
 /// multiplied through: intervals here neither divide nor take roots.
 ///
+/// # A point with no sign of a side's line
+///
+/// **A point whose side of a side's line, seen from `P`, has no sign is not
+/// refused for it when the half-line is aimed at a corner with both of that
+/// side's corners strictly on one side of the half-line's line**, as
+/// [`what_a_cone_face_seen_down_its_axis_holds`] reads a cone face (rows Q2563
+/// and Q2633). Then the half-line does not cross that side's chord and the
+/// point is not on it, wherever the point is across its line. A corner `c`'s
+/// sign is that of `(at − c) · ((aim − c) × (P − c))`, the volume `c`, `at`,
+/// `aim` and `P` span, which is affine in `c` and zero with `at` in `c`'s
+/// place, so [`is_wholly_on_one_side_of_the_half_line`]'s argument holds for
+/// it. Where the point is on `P`'s side of `Q`, it is outside the arc's circle
+/// as seen and in the arc's piece on neither side of the chord, so the side
+/// counts nothing. On the far side of `Q` or on it, the point is refused: the
+/// inside of the circle is convex, so the point is across the chord between
+/// its ends or at one, where no half-line leaves both of them strictly on one
+/// side.
+///
 /// # A side right round a circle
 ///
 /// A [`WholeCurve`] is all of the circle a plane `W` cuts the sphere in, so it
@@ -4828,9 +4846,6 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
     for (index, (side, &(left, own_placed))) in sides.iter().zip(&arcs).enumerate() {
         let [from, to] = [side.start.placed, side.end.placed];
         let beside = pole.sees(from, to, at);
-        if let Decision::Undecidable { enclosure } = beside {
-            return Err(gave_up_seeing(enclosure));
-        }
         along.push(beside);
         let poles_side = poles_sides[index];
         let on_the_left = left == (poles_side == Decision::Neg);
@@ -4849,6 +4864,11 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
         } else {
             read
         };
+        if let Decision::Undecidable { enclosure } = beside
+            && matches!(inside, Decision::Zero | Decision::Neg)
+        {
+            return Err(gave_up_seeing(enclosure));
+        }
         match inside {
             Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
                 return Ok(OnAFace::OnItsBoundary);
@@ -4868,33 +4888,55 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
         }
     }
 
-    let mut corners = sides.iter().map(|side| side.start.placed);
-    let aim = match on_a_chord {
-        None => corners.next(),
-        Some((chord, _)) => {
-            let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
-            corners.find(|corner| {
+    let seen_from = |side: &Side, aim: Point| {
+        [side.start.placed, side.end.placed].map(|corner| {
+            if corner == aim {
+                Decision::Zero
+            } else {
+                pole.sees(corner, aim, at)
+            }
+        })
+    };
+    let unseen = along.iter().find_map(|&beside| {
+        if let Decision::Undecidable { enclosure } = beside {
+            Some(enclosure)
+        } else {
+            None
+        }
+    });
+    let aim = sides
+        .iter()
+        .map(|side| side.start.placed)
+        .find(|&corner| {
+            on_a_chord.is_none_or(|(chord, _)| {
+                let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
                 matches!(
                     pole.sees(from, to, exactly(corner.coordinates())),
                     Decision::Pos | Decision::Neg
                 )
+            }) && sides.iter().zip(&along).all(|(side, beside)| {
+                !matches!(beside, Decision::Undecidable { .. }) || {
+                    let [from, to] = seen_from(side, corner);
+                    is_wholly_on_one_side_of_the_half_line(from, to)
+                }
             })
-        }
-    }
-    .ok_or_else(cannot)?;
+        })
+        .ok_or_else(|| unseen.map_or_else(cannot, gave_up_seeing))?;
 
     for (index, side) in sides.iter().enumerate() {
         let along = match on_a_chord {
             Some((chord, away)) if chord == index => away,
             _ => along[index],
         };
-        let [from, to] = [side.start.placed, side.end.placed].map(|corner| {
-            if corner == aim {
-                Decision::Zero
-            } else {
-                pole.sees(corner, aim, at)
-            }
-        });
+        let [from, to] = seen_from(side, aim);
+        if let Decision::Undecidable { .. } = along {
+            assert!(
+                is_wholly_on_one_side_of_the_half_line(from, to),
+                "the half-line was aimed with every side the point has no sign of wholly on one \
+                 side of it, and this one is not: {from:?} and {to:?}"
+            );
+            continue;
+        }
         winding += crossing(from, to, along)
             .ok_or_else(|| gave_up_seeing(whichever_of_them_was_not_read(from, to)))?;
     }
@@ -14525,6 +14567,134 @@ mod tests {
         builder
             .build(model, &Policy::certified(), &mut ProvenanceLog::new())
             .expect("a frustum")
+    }
+
+    /// **A box across the line a ball face's side is seen on, past that side's
+    /// ends and outside its arc's circle, is placed by the other sides** (row
+    /// Q2633). The skin of [`a_lens_of_a_ball_notched_at_a_corner`] is read
+    /// from `(−3, 0, 0)`, the point of the ball behind its side on `x = 0.5`.
+    /// Each point asked is a point of the sphere on the plane through
+    /// `(−3, 0, 0)` and the ends of the side on `x = 1.2`, or of the side on
+    /// `z = 0.3`, found by solving for it at the `x` given, and it is given as
+    /// a box 1e-9 wide across that plane, so it has no sign of the line the
+    /// side is seen on. Each is on the same side of the side's own plane as
+    /// `(−3, 0, 0)`, so outside the arc's circle as seen, and past the side's
+    /// ends. Past the corner the two sides meet at the skin holds it, and past
+    /// their other ends, below `y = 1.5`, it does not.
+    #[test]
+    fn a_box_across_the_line_a_ball_faces_side_is_seen_on_past_its_ends_is_placed_by_the_other_sides()
+     {
+        let across = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        let on = Interval::exactly;
+        let (model, solid, skin) = a_lens_of_a_ball_notched_at_a_corner();
+        for (point, is) in [
+            (
+                [
+                    on(1.1),
+                    across(2.789_419_738_102_304_3),
+                    on(0.095_590_400_591_655_02),
+                ],
+                OnAFace::Held,
+            ),
+            (
+                [
+                    on(1.1),
+                    on(2.775_123_198_001_604),
+                    across(0.297_810_738_411_751_9),
+                ],
+                OnAFace::Held,
+            ),
+            (
+                [
+                    on(1.0),
+                    across(1.204_227_062_529_945_4),
+                    on(2.559_264_969_062_504),
+                ],
+                OnAFace::NotHeld,
+            ),
+            (
+                [
+                    on(2.7),
+                    on(1.274_081_272_613_270_2),
+                    across(0.294_477_351_890_004_4),
+                ],
+                OnAFace::NotHeld,
+            ),
+        ] {
+            let answer = model
+                .solid(solid)
+                .expect("this model made the key")
+                .face_holds_the_point(
+                    skin,
+                    PredicatePoint::Constructed(point),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{point:?}: {refused:?}"));
+            assert_eq!(answer, is, "{point:?}");
+        }
+    }
+
+    /// A ball of radius 3 at the origin kept to the corner of a block where
+    /// `x ≥ 0.5` and `y ≥ 1.5`, less the corner of another where `x ≥ 1.2`
+    /// and `z ≥ 0.3`, and the key of its one face on the ball. That face has
+    /// five sides, on `x = 0.5`, `y = 1.5`, `x = 1.2`, `z = 0.3` and `y = 1.5`
+    /// again, and the corner where the sides on `x = 1.2` and `z = 0.3` meet
+    /// points into it.
+    fn a_lens_of_a_ball_notched_at_a_corner() -> (Model, SolidKey, FaceKey) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let ball = model
+            .add_ball(3.0, &Isometry::identity())
+            .expect("a positive radius");
+        let corner = a_block_up_to_nine(&mut model, [0.5, 1.5, -9.0]);
+        let notch = a_block_up_to_nine(&mut model, [1.2, -9.0, 0.3]);
+        let mut fused = |argument, tool, rule| {
+            let answer = model
+                .fuse(
+                    &[argument],
+                    &[tool],
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("the {rule:?} refused: {refused:?}"));
+            let &[solid] = answer.solids() else {
+                panic!("one solid, not {:?}", answer.solids());
+            };
+            solid
+        };
+        let lens = fused(ball, corner, crate::Rule::Intersection);
+        let solid = fused(lens, notch, crate::Rule::Difference);
+        let skins: Vec<FaceKey> = model
+            .solid(solid)
+            .expect("the fuse made the key")
+            .faces()
+            .filter(|face| matches!(face.surface(), Surface::Sphere(_)))
+            .map(|face| face.key())
+            .collect();
+        let &[skin] = skins.as_slice() else {
+            panic!("one face on the ball, not {skins:?}");
+        };
+        (model, solid, skin)
+    }
+
+    /// A block from `low` up to 9 along every axis.
+    fn a_block_up_to_nine(model: &mut Model, low: [f64; 3]) -> SolidKey {
+        let rectangle = crate::ProfileBuilder::new(vec![
+            [low[0], low[1]],
+            [9.0, low[1]],
+            [9.0, 9.0],
+            [low[0], 9.0],
+        ])
+        .build(&Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a rectangle");
+        model
+            .add_extrusion(
+                &rectangle,
+                9.0 - low[2],
+                &Isometry::translation(Vector::new(0.0, 0.0, low[2])).expect("a finite shift"),
+            )
+            .expect("a block")
     }
 
     /// An L ten by ten and ten high, the square five by five at `(10, 10)` cut
