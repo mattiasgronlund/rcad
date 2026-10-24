@@ -175,22 +175,20 @@ fn the_turned_cube_a_little_short_of_a_half_turn_less_the_block_is_the_turned_cu
 /// `DynamicRangeTooWide` already. Each other was refused
 /// `ResultIsNotManifold`, for an edge more than two faces claimed whose two
 /// corners were less than a rounding apart. That is a range past what `f64`
-/// resolves, and that is what each is refused for now. The union with the
-/// block first at the turn leaning `0.002` is left out: it answers since Q2555,
-/// and the next test pins that.
+/// resolves, and that is what each is refused for now. The turn leaning
+/// `0.002` is left out: its fuses answer, and the next two tests pin that.
 #[test]
 fn certified_the_same_fuses_are_refused_for_two_corners_less_than_a_rounding_apart() {
+    let refused = |turn: &&[f64; 4]| **turn != A_LITTLE_SHORT_OF_A_HALF_TURN[1];
     let unions = A_HALF_TURN
         .iter()
-        .chain(&A_LITTLE_SHORT_OF_A_HALF_TURN)
+        .chain(A_LITTLE_SHORT_OF_A_HALF_TURN.iter().filter(refused))
         .flat_map(|&turn| {
             [Order::BlockFirst, Order::TurnedFirst].map(|order| (turn, Rule::Union, order))
-        })
-        .filter(|&(turn, _, order)| {
-            !(turn == A_LITTLE_SHORT_OF_A_HALF_TURN[1] && matches!(order, Order::BlockFirst))
         });
     let less_the_block = A_LITTLE_SHORT_OF_A_HALF_TURN
         .iter()
+        .filter(refused)
         .map(|&turn| (turn, Rule::Difference, Order::TurnedFirst));
     for (turn, rule, order) in unions.chain(less_the_block) {
         let asked = format!("{turn:?}, {rule:?}, {order:?}");
@@ -205,20 +203,42 @@ fn certified_the_same_fuses_are_refused_for_two_corners_less_than_a_rounding_apa
     }
 }
 
-/// Under `Policy::certified()`, the union with the block first at the turn
-/// leaning `0.002` is both cubes since Q2555: the corners less than a rounding
-/// apart there share one plane, and exact arithmetic proves them apart
-/// (`docs/decisions.md` §365.7). The union with the turned cube first still
-/// refuses, so the two orders disagree.
+/// Under `Policy::certified()`, the union at the turn leaning `0.002` is both
+/// cubes, whichever comes first. Three meets of planes land on the block's
+/// top corner's own `f64` triple, `(0, 0, 10)`: the block's corner, and where
+/// the turned cube's edges along `−x` and `+z` cross the block's side `y = 0`.
+/// The two crossings share two planes, `y = 0` and the turned cube's side, and
+/// the meet of those two with the block's top `z = 10` lies between them on
+/// the line they cross in, on another triple. Joined, the two crossings left
+/// the two sides either side of that meet one edge that four faces claimed.
+/// Since Q2555 the block first kept them apart, since each was asked only
+/// against the block's corner, which they share one plane with; the turned
+/// cube first joined them and was refused `DynamicRangeTooWide` (Q2565).
 #[test]
-fn certified_the_union_with_the_block_first_at_the_turn_leaning_two_thousandths_is_both_cubes() {
+fn certified_the_union_at_the_turn_leaning_two_thousandths_is_both_cubes_either_way_round() {
     let turn = A_LITTLE_SHORT_OF_A_HALF_TURN[1];
-    let asked = format!("{turn:?}, union, block first, certified");
     let policy = Policy::certified();
-    let (model, answer) = fused(turn, Rule::Union, Order::BlockFirst, &policy);
+    for order in [Order::BlockFirst, Order::TurnedFirst] {
+        let asked = format!("{turn:?}, union, {order:?}, certified");
+        let (model, answer) = fused(turn, Rule::Union, order, &policy);
+        let answer = answer.unwrap_or_else(|why| panic!("{asked}: {why}"));
+        assert_eq!(answer.solids().len(), 2, "{asked}: one solid for each cube");
+        assert_about(volume_of(&model, &answer, &policy, &asked), 2000.0, &asked);
+    }
+}
+
+/// The same turn's turned cube less the block is the turned cube under
+/// `Policy::certified()`, for the same two crossings kept apart (Q2565).
+#[test]
+fn certified_the_turned_cube_less_the_block_at_the_turn_leaning_two_thousandths_is_the_turned_cube()
+{
+    let turn = A_LITTLE_SHORT_OF_A_HALF_TURN[1];
+    let asked = format!("{turn:?}, the turned cube less the block, certified");
+    let policy = Policy::certified();
+    let (model, answer) = fused(turn, Rule::Difference, Order::TurnedFirst, &policy);
     let answer = answer.unwrap_or_else(|why| panic!("{asked}: {why}"));
-    assert_eq!(answer.solids().len(), 2, "{asked}: one solid for each cube");
-    assert_about(volume_of(&model, &answer, &policy, &asked), 2000.0, &asked);
+    assert_eq!(answer.solids().len(), 1, "{asked}: the turned cube");
+    assert_about(volume_of(&model, &answer, &policy, &asked), 1000.0, &asked);
 }
 
 #[test]
