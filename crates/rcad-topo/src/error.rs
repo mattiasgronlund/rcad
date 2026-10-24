@@ -709,6 +709,11 @@ pub enum Error {
     /// refused here fused with a block nowhere near it (Q2408,
     /// `tests/a_plate_with_a_round_corner_tab_turned.rs`). A crossing the fuse
     /// made runs along no input edge, and either arc of it can be the long one.
+    /// This is left out only where the curve is a circle — a plane crossing a
+    /// ball, or a plane exactly square to a pipe's or a cone's axis — and
+    /// refused on any other curve, as
+    /// `is_a_stretch_of_an_open_input_edge_off_its_own_end` in
+    /// `fuse/assemble.rs` has said since Q2600.
     ///
     /// **A limit where the two places are closer than `f64` writes apart.** A
     /// ball of radius `1 + 2⁻⁵¹` grazed by a block's edge at `x = 16` needs
