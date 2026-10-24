@@ -4029,7 +4029,8 @@ check-lanes-workflow:
     old_md_rule='6. If any changed file does not end in `.md`, the verdict cannot be `merge`: a'
     runs_want=$(printf '%s\n' \
         'crates/k/tests/pins.rs: -fn pinned() {}' \
-        'test code lines removed: 1' \
+        'justfile: -    echo "fine"' \
+        'test code lines removed: 2' \
         'crates/k/src/lib.rs: -        2' \
         'crates/k/src/lib.rs: +        3' \
         'crates/k/src/lib.rs: +pub fn three() -> u32 {' \
@@ -4150,6 +4151,7 @@ check-lanes-workflow:
     resolve="  git rev-parse --verify '\${BASE}^{commit}'"
     resolve_blocked='never substitute a prefix or another sha for the base'
     resolve_why='because a base can be written from memory'
+    removed_section='Read the first section instead of the diff by eye'
     settings=.claude/settings.json
     script=tooling/verify-lane/verify_lane.py
     dir=$(mktemp -d)
@@ -4611,6 +4613,10 @@ check-lanes-workflow:
             echo "$1 does not have a lane resolve its base before it branches ('$resolve' want once, found $n, and above '$create'), or stop as blocked when it does not resolve ('$resolve_blocked'), or $2/lane.md does not say why ('$resolve_why'); a base whose tail was written from memory would go to a lane that falls back on the prefix by itself, as Q660's did (Q2548, §237)"
             [ "$failed" != 0 ] || failed=42
         fi
+        if ! grep -qF -- "$removed_section" "$2/verifier.md"; then
+            echo "$2/verifier.md does not tell the verifier to read lines-that-run's test-code-removed section instead of the diff by eye ('$removed_section'); a test or an assertion a branch takes out would go back to being caught only by an eyeball read of the whole diff, as it was before this print's second section existed (Q787, §375.5)"
+            [ "$failed" != 0 ] || failed=43
+        fi
         return "$failed"
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
@@ -4720,13 +4726,15 @@ check-lanes-workflow:
     fresh runs-nothing-is-silent
     swap "$recipes" 'if (!seen) { print "git diff printed nothing, so it shows nothing"; exit 1 } ' '' > "$dir/runs-nothing-is-silent/justfile"
     fresh runs-uncounted
-    swap "$recipes" ' print "lines that run: " (shown + 0)' '' > "$dir/runs-uncounted/justfile"
+    swap "$recipes" ' print "lines that run: " (run_shown + 0)' '' > "$dir/runs-uncounted/justfile"
     fresh runs-count-loose
     swap "$file" "$runs_count" '  const count = /([0-9]+)$/.exec(last)' > "$dir/runs-count-loose/lanes.js"
     fresh runs-diff-narrow
     swap "$recipes" '-U1000000 "$1" "$2"' '"$1" "$2"' > "$dir/runs-diff-narrow/justfile"
     fresh runs-uncapped
-    swap "$recipes" 'if (++shown <= 10) print line' '++shown; print line' > "$dir/runs-uncapped/justfile"
+    swap "$recipes" 'if (run_shown <= 10) run_buf[run_shown] = line' 'run_buf[run_shown] = line' > "$dir/runs-uncapped/justfile.1"
+    swap "$dir/runs-uncapped/justfile.1" ' && i <= 10; i++) print run_buf[i]' '; i++) print run_buf[i]' > "$dir/runs-uncapped/justfile"
+    rm "$dir/runs-uncapped/justfile.1"
     fresh notes-unbounded
     swap "$file" 'at most five lines, ' '' > "$dir/notes-unbounded/lanes.js"
     fresh notes-unsaid
@@ -4941,7 +4949,9 @@ check-lanes-workflow:
     swap "$file" "$resolve_blocked" '' > "$dir/resolve-unblocked/lanes.js"
     fresh resolve-why-unsaid
     grep -vF -- "$resolve_why" "$agents/lane.md" > "$dir/resolve-why-unsaid/agents/lane.md"
-    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-from-prep:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33 dnr-rows-ignored:34 dnr-blocked-unsaid:34 nothing-after-verify-false:35 nothing-not-shared:35 nothing-not-whole:35 nothing-flag-unset:35 nothing-fn-missing:35 landed-optional:36 runs-note-unbound:37 runs-note-unsaid:37 relay-check-not-run:38 relay-check-ignored:38 relay-check-untyped:38 relay-handoff-no-fallback:39 relay-handoff-unlogged:39 pins-unnamed-verified:40 pins-unnamed-after-kind:40 pins-note-unsaid:40 pins-note-unused:40 crate-dir-unread:41 crate-dir-unused:41 crate-dir-unsaid:41 resolve-skipped:42 resolve-after-switch:42 resolve-unblocked:42 resolve-why-unsaid:42)
+    fresh removed-section-unsaid
+    grep -vF -- "$removed_section" "$agents/verifier.md" > "$dir/removed-section-unsaid/agents/verifier.md"
+    cuts=(reset-instead:1 reset-as-well:2 no-refusal:3 untyped-verifier:4 no-merger-file:4 merges-at-once:5 push-unchecked:6 lane-pushes:6 missing-claude-rule:7 duplicate-rule:7 no-own-tree-script:8 no-own-tree-doc:8 no-mutation-verdict:9 pins-inferred:10 pins-no-refusal:10 pins-no-conflict:10 pins-verify-missing:10 no-foreground-rule:11 merger-backgrounds:11 prune-unguarded:12 prune-command-drifts:12 no-mark-line:12 no-verified-def:13 verified-merge-only:13 verified-not-returned:13 no-docs-diff:14 no-docs-constant:14 no-docs-bound:14 no-docs-field:14 docs-count-optional:14 no-pass-rule:15 no-pass-rule-doc:15 runs-not-handed:16 runs-waive-any:16 runs-no-refusal:16 runs-unreported-ok:16 runs-any-command:16 runs-optional:16 runs-old-md-rule:16 runs-no-md-rule:16 runs-src-is-test:16 runs-test-never-ends:16 runs-shebang-is-comment:16 runs-nothing-is-silent:16 runs-uncounted:16 runs-count-loose:16 runs-diff-narrow:16 runs-uncapped:17 notes-unbounded:17 notes-unsaid:17 untyped-lander:4 no-lander-file:4 lander-pushes:6 lander-backgrounds:11 lands-a-fix-first:18 lands-everything:18 stop-ends-the-row:18 throw-ends-the-row:18 merger-takes-the-landers-branch:18 merges-twice:18 merges-twice-doc:18 land-command-drifts:18 verify-not-handed:19 verify-no-wait:19 value-unsaid:19 lane-value-unsaid:19 verifier-by-hand:19 record-renamed:19 same-record-unread:19 same-inferred:20 same-with-pins:20 same-names-a-failing-test:20 same-names-nothing:20 same-no-revert:20 same-no-mutation:20 same-any-mutation:20 same-no-steps:20 same-unpointed:20 gate-ignored:18 gate-check-missing:21 gate-reason-missing:21 relay-unbounded:22 relay-no-bound:22 relay-past-the-bound-verified:22 relay-refusal-ignored:22 relay-from-anywhere:22 relay-not-switched:22 relay-trees-forgotten:22 relay-not-an-outcome:22 relay-unsaid:22 relay-holds-the-branch:22 test-not-first:22 hand-over-left-to-lane-md:22 hand-over-unsaid:22 no-prep-file:4 untyped-prep:4 prep-writes:23 prep-on-opus:23 prep-skipped:24 needs-starts-a-lane:24 needs-read-as-ok:24 needs-not-returned:24 model-from-lane:25 write-set-from-prep:25 model-unchecked:25 both-marks-from-prep:25 both-forms-allowed:26 no-rows-note:27 no-tests-note:27 no-tests-note-recipe:27 no-report-default:27 dnr-not-an-outcome:28 dnr-unsaid:28 dnr-skips-verifier:29 dnr-after-verify-false:29 dnr-lands:29 dnr-no-steps:29 dnr-refused-merges:30 dnr-close-unsaid:30 readonly-no-rows:31 share-guard-missing:32 share-message-missing:32 answers-not-landed:33 answers-unconfirmed:33 answers-not-asked:33 answers-not-told:33 answers-lane-unsaid:33 answers-prep-unsaid:33 answers-verifier-unsaid:33 answers-merger-unsaid:33 dnr-rows-ignored:34 dnr-blocked-unsaid:34 nothing-after-verify-false:35 nothing-not-shared:35 nothing-not-whole:35 nothing-flag-unset:35 nothing-fn-missing:35 landed-optional:36 runs-note-unbound:37 runs-note-unsaid:37 relay-check-not-run:38 relay-check-ignored:38 relay-check-untyped:38 relay-handoff-no-fallback:39 relay-handoff-unlogged:39 pins-unnamed-verified:40 pins-unnamed-after-kind:40 pins-note-unsaid:40 pins-note-unused:40 crate-dir-unread:41 crate-dir-unused:41 crate-dir-unsaid:41 resolve-skipped:42 resolve-after-switch:42 resolve-unblocked:42 resolve-why-unsaid:42 removed-section-unsaid:43)
     for cut in "${cuts[@]}"; do
         name=${cut%:*}
         want=${cut#*:}
@@ -4958,7 +4968,7 @@ check-lanes-workflow:
             exit 1
         fi
     done
-    echo "lanes.js has each lane resolve its base and make its branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, relays a lane past its budget to a fresh one, briefs a short-form lane through prep and starts no lane on anything but ok, closes a row whose fault no longer shows only on its verifier's confirm, closes the rows a fix lane also answers only on its verifier's word, hands a writing lane's report back whole, as a read-only lane's, when its branch is its base for a reason other than does_not_reproduce, stops a pinsOnly lane that names no test it pins, reverts a whole crate's src/, and prunes only what merged; ${#cuts[@]} cuts, each caught"
+    echo "lanes.js has each lane resolve its base and make its branch with switch -c and resets none, types every agent, merges one lane at a time, lands through the lander only a merge with rows, hands the verifier just verify-lane, relays a lane past its budget to a fresh one, briefs a short-form lane through prep and starts no lane on anything but ok, closes a row whose fault no longer shows only on its verifier's confirm, closes the rows a fix lane also answers only on its verifier's word, hands a writing lane's report back whole, as a read-only lane's, when its branch is its base for a reason other than does_not_reproduce, stops a pinsOnly lane that names no test it pins, reverts a whole crate's src/, prunes only what merged, and tells the verifier to read lines-that-run's test-code-removed section rather than eyeball the diff; ${#cuts[@]} cuts, each caught"
 
 # Print the changed lines between two commits that could change what runs:
 # everything but `.md` files, comment lines, and test code -- files under
