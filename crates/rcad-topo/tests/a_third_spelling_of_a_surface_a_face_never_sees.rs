@@ -32,6 +32,14 @@
 //! what it does, and left its own curve out, so their edge was split on the
 //! lower face's side alone, and three of the six fuses were refused
 //! `ResultIsNotManifold`.
+//!
+//! **Two more cases Q2382 left unbuilt** (Q2541). Two spellings of the bars'
+//! pipe beside the raised step or climbing top answer every rule, so a face
+//! that weighs one spelling at the node alone answers as the face across
+//! does. A rim crossing that is also a listed cut, drawn on past the rim, is
+//! not reached: three slabs and blocks with a D-shaped hole beside a bar on
+//! the hole's pipe answer every rule, and none has a face that lists the pipe
+//! and draws it along its rim.
 
 use core::f64::consts::PI;
 
@@ -322,24 +330,57 @@ fn a_rim_drawn_on_past_the_hole_beside_a_d_shaped_bar_on_its_pipe_answers_every_
 /// behind. The slab's two long sides and the hole's flat side do list it.
 #[test]
 fn a_slab_with_a_d_shaped_hole_over_a_bar_on_its_pipe_cut_on_a_slant_answers_every_rule() {
-    let holed = 6.0 * 1.8 - a_slice_of_the_disc(1.3);
     let bar = PI * THE_PIPES_RADIUS * THE_PIPES_RADIUS * (3.0 + 1.2 - 2.0 * THE_PIPES_AXIS_AT);
+    let failed = every_rule_for_a_holed_slab_over([2.0, 3.0], a_bar_on_the_pipe_under_a_slant, bar);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The slab of
+/// [`a_slab_with_a_d_shaped_hole_over_a_bar_on_its_pipe_cut_on_a_slant_answers_every_rule`],
+/// from `z = 2.3`, over a wedge cut from a bar on the same pipe by
+/// `z = 0.5 + t` above and `z = 0.5 - 3t` below, with `t = y - 0.5 ≥ 0` the
+/// way along the pipe's radius, every rule both ways round (Q2541). The two
+/// share nothing: the wedge stays below `z = 2`.
+///
+/// Meant as the shape of Q2541's second case. **It does not reach it**: the
+/// box round the wedge's wall runs up to `z = 5` from the whole ellipse its
+/// lower edge is an arc of, so the wedge is within reach of the slab, but its
+/// wall's two edges are arcs and not closed curves, so the wall lies in no
+/// side of a plane and no face of the slab lists the pipe.
+#[test]
+fn a_slab_with_a_d_shaped_hole_over_a_wedge_cut_from_a_bar_on_its_pipe_answers_every_rule() {
+    let wedge = 8.0 / 3.0 * THE_PIPES_RADIUS.powi(3);
+    let failed =
+        every_rule_for_a_holed_slab_over([2.3, 3.0], a_wedge_cut_from_a_bar_on_the_pipe, wedge);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// What goes wrong fusing a slab over `x ∈ [-3, 3]`, `y ∈ [-0.3, 1.5]` and
+/// `z`, with the part of the pipe's disc with `x ≤ -1.3` cut through it, with
+/// what `bar` makes, of volume `bar_volume` and sharing nothing with the slab,
+/// every rule both ways round, as the fuses' names.
+fn every_rule_for_a_holed_slab_over(
+    z: [f64; 2],
+    bar: fn(&mut Model) -> SolidKey,
+    bar_volume: f64,
+) -> Vec<String> {
+    let holed = (6.0 * 1.8 - a_slice_of_the_disc(1.3)) * (z[1] - z[0]);
     let mut failed = Vec::new();
     let mut ran = 0;
     for rule in EVERY_RULE {
         for bar_first in [true, false] {
             let by_hand = match (rule, bar_first) {
-                (Rule::Union, _) => bar + holed,
+                (Rule::Union, _) => bar_volume + holed,
                 (Rule::Intersection, _) => 0.0,
-                (Rule::Difference, true) => bar,
+                (Rule::Difference, true) => bar_volume,
                 (Rule::Difference, false) => holed,
                 _ => unreachable!(),
             };
             let mut model = Model::new(Scale::millimetres(100.0).expect("a size"));
-            let the_slab = a_box(&mut model, [[-3.0, 3.0], [-0.3, 1.5], [2.0, 3.0]]);
+            let the_slab = a_box(&mut model, [[-3.0, 3.0], [-0.3, 1.5], z]);
             let the_hole = a_part_of_the_pipes_bar(&mut model, [[-2.0, -1.3], [-1.5, 2.5]]);
             let holed_slab = one_solid(&mut model, &[the_slab], &[the_hole], Rule::Difference);
-            let the_bar = a_bar_on_the_pipe_under_a_slant(&mut model);
+            let the_bar = bar(&mut model);
             let (arguments, tools) = if bar_first {
                 (vec![the_bar], vec![holed_slab])
             } else {
@@ -354,7 +395,21 @@ fn a_slab_with_a_d_shaped_hole_over_a_bar_on_its_pipe_cut_on_a_slant_answers_eve
         }
     }
     println!("ran {ran}, failed {}", failed.len());
-    assert!(failed.is_empty(), "{failed:#?}");
+    failed
+}
+
+/// A bar of radius [`THE_PIPES_RADIUS`] about the pipe's axis from `z = -5`
+/// up `8`, cut to the wedge between `z = 0.5 + t` and `z = 0.5 - 3t`, with
+/// `t = y - 0.5`, drawn in `y` and `z` as the triangle those two planes make
+/// with `y = 3`.
+fn a_wedge_cut_from_a_bar_on_the_pipe(model: &mut Model) -> SolidKey {
+    let placed =
+        Isometry::translation(Vector::new(0.0, THE_PIPES_AXIS_AT, -5.0)).expect("a finite shift");
+    let bar = model
+        .add_round_bar(THE_PIPES_RADIUS, 8.0, &placed)
+        .expect("a bar");
+    let the_wedge = a_block_across_x(model, &[[0.5, 0.5], [3.0, -7.0], [3.0, 3.0]]);
+    one_solid(model, &[bar], &[the_wedge], Rule::Intersection)
 }
 
 /// A bar of radius [`THE_PIPES_RADIUS`] about the pipe's axis from `z = -3`
