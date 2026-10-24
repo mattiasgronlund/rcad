@@ -1604,7 +1604,7 @@ fn probe_q2662_all() {
     let shapes: Vec<(String, Box<dyn Fn(&mut Model) -> [SolidKey; 2]>)> = {
         let mut shapes: Vec<(String, Box<dyn Fn(&mut Model) -> [SolidKey; 2]>)> = Vec::new();
         for x in [1.0, -1.0] {
-            for lean in [0.0, 1e-4] {
+            for lean in [0.0, 4e-16, 1e-15, 1e-14, 1e-8] {
                 shapes.push((
                     format!("z-up x {x} lean {lean}"),
                     Box::new(move |model: &mut Model| {
@@ -1638,6 +1638,33 @@ fn probe_q2662_all() {
     };
     for (name, build) in &shapes {
         println!("{name}");
+        {
+            let mut model = a_model();
+            let [fat, thin] = build(&mut model);
+            let pipe = |solid: SolidKey| {
+                model
+                    .solid(solid)
+                    .expect("solid")
+                    .faces()
+                    .map(|face| face.surface())
+                    .find(|s| matches!(s, Surface::Cylinder(_)))
+                    .expect("a pipe")
+            };
+            let [fat_pipe, thin_pipe] = [pipe(fat), pipe(thin)];
+            println!("  fat {fat_pipe:?}\n  thin {thin_pipe:?}");
+            for [one, other] in [[&fat_pipe, &thin_pipe], [&thin_pipe, &fat_pipe]] {
+                let met = intersect(one, other, &Policy::certified(), &mut ProvenanceLog::new());
+                match met {
+                    Ok(SurfaceMeet::Curves(runs)) => {
+                        println!("  intersect: {} curves", runs.len());
+                        for run in &runs {
+                            println!("    {run:?}");
+                        }
+                    }
+                    other => println!("  intersect: {other:?}"),
+                }
+            }
+        }
         for (rule, fat_first) in six_fuses() {
             let mut model = a_model();
             let [fat, thin] = build(&mut model);
