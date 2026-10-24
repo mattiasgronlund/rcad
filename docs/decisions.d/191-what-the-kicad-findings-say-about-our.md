@@ -409,6 +409,15 @@ whole, `where_curved_pieces_met_off_a_run_that_closes_up` in
 instead of keeping the other line's ends as corners, so every fuse of the two
 as they stand answers.
 
+**2026-10-24 note (Q2655): the `(1.5, 1)` turned bullet above is fixed too.**
+`every_fuse_of_the_bar_by_the_other_side_turned_a_quarter_turn_answers_the_two_as_they_stand`
+in `a_bar_flush_with_an_l_plates_inner_side_turned.rs` now passes. Which side
+of the plane the seam's corner is on is read by
+`side_of_a_plane_at_a_seam_corner`, as `as_a_corner_between_the_two_meets_of_one_cut_says`
+and `as_the_two_meets_of_one_cut_alone_on_the_loop_say` in `fuse/arrange.rs`
+and `which_side_of_a_wall_back_along_the_chord` in `fuse/select.rs` say, in
+place of the "side of plane" and "order along a crossing" refusals above.
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which
