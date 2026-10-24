@@ -176,6 +176,69 @@ fn a_top_climbing_past_a_bar_in_two_leaning_faces_answers_every_rule_either_way_
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// Two bars of radius 2 stacked on one pipe over `z ∈ [0, 4]`, the upper
+/// one's wall spelled four ways, and the blocks of [`A_STEP`] and
+/// [`A_TOP_CLIMBING_IN_TWO_LEANING_FACES`] raised by 2, every rule both ways
+/// round (Q2541).
+///
+/// The raised blocks stand from `z = 1` and their lowest top is at `z = 4.2`,
+/// so each top, the step's riser and the two leaning faces are wholly above
+/// both bars, and each lists both spellings of the pipe. The riser and the
+/// lower leaning face cross the pipe in curves drawn by both spellings at
+/// once, so a face weighs each spelling apart where it asks whether the face
+/// across places a node alone. What the bars and a block share is the part of
+/// the bars' disc with `|y| ≤ 1.5`, from `z = 1` to `z = 4`.
+#[test]
+fn two_spellings_of_the_bars_pipe_beside_a_raised_step_or_climbing_top_answer_every_rule() {
+    let shared =
+        3.0 * 2.0 * (1.5 * (RADIUS * RADIUS - 2.25).sqrt() + RADIUS * RADIUS * 0.75f64.asin());
+    let bars = PI * RADIUS * RADIUS * 2.0 * MEETING;
+    let walls = [
+        Wall::SpelledOnce,
+        Wall::OriginSlidUp,
+        Wall::AxisTurnedRound,
+        Wall::TwoRoundBars,
+    ];
+    let mut failed = Vec::new();
+    let mut ran = 0;
+    for (named, profile) in [
+        ("step", &A_STEP[..]),
+        ("climbing top", &A_TOP_CLIMBING_IN_TWO_LEANING_FACES[..]),
+    ] {
+        let raised: Vec<[f64; 2]> = profile.iter().map(|&[x, z]| [x, z + 2.0]).collect();
+        let block = 3.0 * area_inside(&raised);
+        for wall in walls {
+            for rule in EVERY_RULE {
+                for bars_first in [true, false] {
+                    let by_hand = match (rule, bars_first) {
+                        (Rule::Union, _) => bars + block - shared,
+                        (Rule::Intersection, _) => shared,
+                        (Rule::Difference, true) => bars - shared,
+                        (Rule::Difference, false) => block - shared,
+                        _ => unreachable!(),
+                    };
+                    let mut model = Model::new(Scale::millimetres(100.0).expect("a size"));
+                    let [lower, upper] = the_two_bars(&mut model, wall);
+                    let the_block = a_block_across_y(&mut model, &raised);
+                    let (arguments, tools) = if bars_first {
+                        (vec![lower, upper], vec![the_block])
+                    } else {
+                        (vec![the_block], vec![lower, upper])
+                    };
+                    let asked = format!("{named} {wall:?} {rule:?} bars_first={bars_first}");
+                    ran += 1;
+                    if let Some(wrong) = check(&mut model, &arguments, &tools, rule, by_hand) {
+                        println!("{asked}: {wrong}");
+                        failed.push(asked);
+                    }
+                }
+            }
+        }
+    }
+    println!("ran {ran}, failed {}", failed.len());
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// What goes wrong fusing a bar of radius 2 on `z ∈ [0, 2]` with the block
 /// of `profile` across `y ∈ [-1.5, 1.5]`, every rule both ways round, as the
 /// fuses' names: the block covers `z ∈ [-1, 2.2]` over `x ∈ [-3, 3]` at
