@@ -5195,12 +5195,14 @@ impl<'f> Arrangement<'f> {
             if !reading.around.contains(&flat) {
                 return None;
             }
+            // Each node read, with the plane of its three that is neither the
+            // face's nor the partner's: none for the corner.
             let read = |node: usize| {
                 if node == corner {
                     return reading
                         .around
                         .contains(&partner)
-                        .then_some(ANodeReadRoundACorner::TheCorner);
+                        .then_some((ANodeReadRoundACorner::TheCorner, None));
                 }
                 if self.nodes[node].vertex.is_some() {
                     return None;
@@ -5214,19 +5216,15 @@ impl<'f> Arrangement<'f> {
                 };
                 reading
                     .holds(self.nodes[node].point)
-                    .then_some(ANodeReadRoundACorner::AMeet { three, third })
+                    .then_some((ANodeReadRoundACorner::AMeet(three), Some(third)))
             };
-            let (mine, theirs) = (read(first)?, read(second)?);
-            match (&mine, &theirs) {
-                (_, ANodeReadRoundACorner::AMeet { third, .. }) => {
-                    reading.which_comes_first([flat, partner], &mine, *third)
-                }
-                (ANodeReadRoundACorner::AMeet { third, .. }, ANodeReadRoundACorner::TheCorner) => {
-                    reading
-                        .which_comes_first([flat, partner], &theirs, *third)
-                        .map(the_other_way)
-                }
-                (ANodeReadRoundACorner::TheCorner, ANodeReadRoundACorner::TheCorner) => None,
+            let ((mine, my_third), (theirs, their_third)) = (read(first)?, read(second)?);
+            match (my_third, their_third) {
+                (_, Some(third)) => reading.which_comes_first([flat, partner], &mine, third),
+                (Some(third), None) => reading
+                    .which_comes_first([flat, partner], &theirs, third)
+                    .map(the_other_way),
+                (None, None) => None,
             }
         })
     }
@@ -15787,6 +15785,8 @@ fn the_way_a_picker_leans(normal: [f64; 3], ways: [[f64; 3]; 2]) -> Option<[Opti
 
 /// A corner of a face with four or more planes round it, read as the one
 /// point all of them run through ([`Arrangement::as_read_round_a_corner`]).
+/// `by_a_plane` in `fuse/select.rs` reads a piece's corners inside the
+/// corner's room the same way, so it places the piece the arrangement drew.
 ///
 /// **Worked in the corner's own frame, so every sign is exact.** Write `K`
 /// for the point `bake` solved the corner at, where its three
@@ -15797,9 +15797,9 @@ fn the_way_a_picker_leans(normal: [f64; 3], ways: [[f64; 3]; 2]) -> Option<[Opti
 /// ([`three_planes_against_a_fourth`]), exact in [`rcad_predicates::expansion`].
 /// A plane round the corner is read with `ω = 0`, through `K`, and every other
 /// plane with its own.
-struct ACornerReadAsOnePoint {
+pub(super) struct ACornerReadAsOnePoint {
     solved_from: [Plane; 3],
-    around: Vec<Plane>,
+    pub(super) around: Vec<Plane>,
     /// The sign of `D`, which turns a side in the frame into a side in space.
     handed: Decision,
     /// The corner's box grown by the room `bake` asked each plane round it
@@ -15808,11 +15808,10 @@ struct ACornerReadAsOnePoint {
 }
 
 /// A node [`ACornerReadAsOnePoint`] reads: the corner, or the meet of three
-/// planes, `third` the one of them that is neither the face's nor the
-/// crossing's partner.
-enum ANodeReadRoundACorner {
+/// planes.
+pub(super) enum ANodeReadRoundACorner {
     TheCorner,
-    AMeet { three: [Plane; 3], third: Plane },
+    AMeet([Plane; 3]),
 }
 
 impl ACornerReadAsOnePoint {
@@ -15820,7 +15819,10 @@ impl ACornerReadAsOnePoint {
     /// round it, one that is not a plane, or every one of them running through
     /// the point `bake` solved it at exactly, where the reading is the
     /// corner's own.
-    fn of(corner: &BakedCorner) -> Option<Self> {
+    pub(super) fn of(corner: &BakedCorner) -> Option<Self> {
+        if corner.around.len() < 4 {
+            return None;
+        }
         let solved_from =
             Arrangement::the_three_planes_a_point_is_the_meet_of(corner.solved_from.as_ref()?)?;
         let around = corner
@@ -15838,7 +15840,7 @@ impl ACornerReadAsOnePoint {
             handed,
             room,
         };
-        if reading.around.len() < 4 || !matches!(handed, Decision::Pos | Decision::Neg) {
+        if !matches!(handed, Decision::Pos | Decision::Neg) {
             return None;
         }
         let mut one_misses = false;
@@ -15850,7 +15852,7 @@ impl ACornerReadAsOnePoint {
     }
 
     /// Whether every point of `point`'s box lies inside the corner's room.
-    fn holds(&self, point: PredicatePoint) -> bool {
+    pub(super) fn holds(&self, point: PredicatePoint) -> bool {
         let (point, room) = (point.enclosure(), self.room.enclosure());
         (0..3)
             .all(|axis| room[axis].lo() <= point[axis].lo() && point[axis].hi() <= room[axis].hi())
@@ -15882,10 +15884,10 @@ impl ACornerReadAsOnePoint {
     }
 
     /// Which side of `plane`, as read, the point `node` is read at lies on.
-    fn side_of(&self, node: &ANodeReadRoundACorner, plane: Plane) -> Option<Decision> {
+    pub(super) fn side_of(&self, node: &ANodeReadRoundACorner, plane: Plane) -> Option<Decision> {
         let (value, turned) = match node {
             ANodeReadRoundACorner::TheCorner => (self.where_it_runs(&plane)?, Decision::Pos),
-            ANodeReadRoundACorner::AMeet { three, .. } => {
+            ANodeReadRoundACorner::AMeet(three) => {
                 let [one, two, three] = *three;
                 let offsets = [
                     self.where_it_runs(&one)?,
