@@ -1129,7 +1129,23 @@ fn the_way_a_loop_round_a_thin_pipe_winds(
     let wider = Exact::of(fat.radius()).minus(&Exact::of(thin.radius()));
     match apart.closer_than(&wider) {
         Some(Decision::Pos) => {}
-        Some(Decision::Zero) => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        // `(R − r)² K = T²`. Two pipes running the same way, `K` nothing, cross
+        // in lines, and two of one radius whose axes meet, `R − r` and `T`
+        // nothing, in two ellipses. Otherwise the thin pipe touches the fat one
+        // from inside, `δ = R − r`, and its two loops meet where it touches.
+        Some(Decision::Zero) => match (apart.squared_across.sign(), wider.sign()) {
+            (Decision::Pos, Decision::Pos) => {}
+            (Decision::Zero, _) | (_, Decision::Zero) => {
+                return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+            }
+            (Decision::Undecidable { .. }, _) | (_, Decision::Undecidable { .. }) => {
+                return Ok(WhichWayItWinds::CannotTell);
+            }
+            other => unreachable!(
+                "a sum of squares, and the fat pipe's radius less the thin one's, are never \
+                 below nothing: {other:?}"
+            ),
+        },
         Some(Decision::Neg) => {
             return the_way_the_one_loop_two_pipes_cross_in_winds(thin, fat, &apart);
         }
