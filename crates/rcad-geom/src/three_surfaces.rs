@@ -90,9 +90,11 @@
 //! curve is a line bent by little across the other, and it crosses it once
 //! on each side of where that one's axis crosses the plane. A sign at each
 //! end of each arc says a crossing is there, a bound on how the line turns
-//! says it is the only one, and a few rounds of two equations shrink a box
-//! round each — the same cap with a bar and a cone it cuts in one circle on
-//! paper, or a cap leaning a hundredth to a bar and its chamfer cone. A ball
+//! says it is the only one, and rounds of two equations shrink a box round
+//! each until a round narrows it no more ([`MOST_ROUNDS_ROUND_A_CROSSING`]) —
+//! the same cap with a bar and a cone it cuts in one circle on paper, a cap
+//! leaning a hundredth to a bar and its chamfer cone, or the cap of one of two
+//! cones on one apex leaning apart. A ball
 //! whose centre is on a pipe's or a cone's axis is taken first, since the two
 //! touch along a circle on a plane known exactly: a slanted cut through where
 //! a rod's round end meets it.
@@ -4987,8 +4989,9 @@ fn where_a_ball_on_the_axis_meets_it(ball: &Surface, round: &Surface) -> Option<
 ///
 /// **Where they are.** From `h = 0`, `μ = (−q − h₀)/|g|`, and from `Q₁ = 0`,
 /// `λ² = (−Q₁(c) − f₁·v + β₁(w₁·v)²)/W₁ − μ²`. Each holds at the point, so
-/// each turns a box that holds the point into one that holds it too, and a
-/// few rounds of both shrink the box the strip starts to a rounding or two.
+/// each turns a box that holds the point into one that holds it too. Rounds
+/// of both, until one narrows neither side, shrink the box the strip starts to
+/// a few roundings ([`MOST_ROUNDS_ROUND_A_CROSSING`]).
 ///
 /// **The numbers.** `k(c − oᵢ)` is `k(o₁ − oᵢ) + m w₁` for `k` and `m` of the
 /// band, so `k²Qᵢ(c)` and `k∇Qᵢ(c)` are worked out exactly, and so are `k²h₀`
@@ -5088,7 +5091,7 @@ fn two_points_or_nowhere(flat: &Plane, mine: &Surface, theirs: &Surface) -> Opti
         let sign = Interval::exactly(sign);
         let mut sideways = sign * across;
         let mut upwards = strip;
-        for _ in 0..8 {
+        for _ in 0..MOST_ROUNDS_ROUND_A_CROSSING {
             let widths = (sideways.width(), upwards.width());
             let mine_along = squared(my_axis_across * sideways + my_axis_up * upwards);
             let theirs_along = squared(their_axis_across * sideways + their_axis_up * upwards);
@@ -5118,6 +5121,18 @@ fn two_points_or_nowhere(flat: &Plane, mine: &Surface, theirs: &Surface) -> Opti
     };
     Some(MeetOfThree::At(smallvec![crossing(-1.0), crossing(1.0)]))
 }
+
+/// The most rounds [`two_points_or_nowhere`] takes to narrow the box round one
+/// crossing. It stops at the first round that narrows neither side, so this
+/// only says how long it may go on.
+///
+/// A box as wide as the curve shrinks to a rounding of it, `2⁻⁵²` as wide, in
+/// 52 rounds that each halve it. The cap of a cone of slope ½ up `z`, across
+/// one turned 0.3 about `x` on the same apex, narrows about 22 times a round
+/// and stops after 13. Eight rounds, the count before Q2741, left that box
+/// `1.9e−11` across, and a tolerant fuse of the two cones at a working size
+/// of 100 could not read the corners where their rims meet as one.
+const MOST_ROUNDS_ROUND_A_CROSSING: usize = 64;
 
 /// A ball, a pipe or a cone written as
 /// `W|p − o|² − β((p − o)·w)² − γ`, the same surface its own sign expression
@@ -7322,6 +7337,29 @@ mod tests {
         let z = 5.0 - 0.75 * y;
         narrow_boxes_near(&answer, &[[-x, y, z], [x, y, z]]);
         assert_eq!(meet([&ball, &leaning, &bar]), Ok(answer), "in any order");
+    }
+
+    /// Two cones of slope ½ on one apex at the origin, one up `z` and one
+    /// turned 0.3 about `x`, and the first one's cap `z = 8`. The cap cuts the
+    /// first in the circle of radius 4, and both cones hold the points `8`
+    /// along the turned axis, so the three meet where `y = 8(cos 0.3 − 1) /
+    /// sin 0.3` and `x = ±√(16 − y²)`. The road for bands that cross narrows
+    /// its boxes here by a factor of about 22 a round, and stopped at eight
+    /// rounds they were `1.9e−11` wide, which kept a tolerant fuse of the two
+    /// cones at a working size of 100 from reading the corners where the rims
+    /// meet as one (Q2741).
+    #[test]
+    fn a_cap_across_two_cones_on_one_apex_leaning_apart_meets_them_in_narrow_boxes() {
+        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 8.0]);
+        let upright = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 0.5);
+        let (sine, cosine) = 0.3_f64.sin_cos();
+        let turned = a_cone([0.0, 0.0, 0.0], [0.0, -sine, cosine], 0.5);
+        let answer = meet([&cap, &upright, &turned]).expect("two bands that cross are answered");
+        on_all_three([&cap, &upright, &turned], &answer);
+        let y = 8.0 * (cosine - 1.0) / sine;
+        let x = (16.0 - y * y).sqrt();
+        narrow_boxes_near(&answer, &[[x, y, 8.0], [-x, y, 8.0]]);
+        assert_eq!(meet([&turned, &cap, &upright]), Ok(answer), "in any order");
     }
 
     /// `-0.0 == 0.0`, so no pin that compares corners sees which zero a corner
