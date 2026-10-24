@@ -156,7 +156,7 @@ fn turning_a_pair_of_surfaces_names_the_same_kind_of_crossing() {
 /// Two pipes resting against each other from outside touch at one point and
 /// nowhere else, which is the tangency a plane resting on a ball is, and
 /// [`is_on_a_knife_edge`] skips those as well (see
-/// [`a_thin_pipe_resting_on_the_outside_of_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves_the_axes`]).
+/// [`a_thin_pipe_resting_outside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves_the_axes`]).
 #[test]
 fn turning_a_quartic_pair_of_surfaces_names_the_same_kind_of_crossing() {
     the_same_kind_before_and_after(
@@ -273,7 +273,8 @@ fn the_490_skipped_quartic_pairs_split_by_which_clause_skips_them() {
                                     one, other
                                 ),
                                 Decision::Zero,
-                                "is_on_a_knife_edge has no fourth clause for two pipes"
+                                "resting from outside is the one clause left that two pipes can \
+                                 have met"
                             );
                             two_pipes_resting_against_each_other_from_outside
                                 .set(two_pipes_resting_against_each_other_from_outside.get() + 1);
@@ -506,8 +507,7 @@ fn a_thin_pipe_resting_inside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves
 /// Further, the two miss and cross in nothing; nearer, each bites into the
 /// other and the two cross in one loop, and that is what this turn gives.
 #[test]
-fn a_thin_pipe_resting_on_the_outside_of_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves_the_axes()
- {
+fn a_thin_pipe_resting_outside_a_fat_one_crosses_it_in_one_loop_once_a_turn_moves_the_axes() {
     let resting = Crossing {
         first: Piece::Pipe {
             along: [-1, 0, 0],
