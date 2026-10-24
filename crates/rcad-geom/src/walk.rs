@@ -5825,14 +5825,18 @@ mod tests {
         );
     }
 
-    /// A parabola about `4e-303` across is walked into as many points as the
-    /// same parabola written `2^1006` times larger (Q2733).
+    /// A parabola about `4e-303` across, and one about `4e-201` across, are
+    /// walked into as many points as the same parabola written `2^1006` times
+    /// larger (Q2733).
     ///
     /// The pair is the fuzz corpus's `70fbff12`: a cone of slope one with its
     /// apex at the origin and its axis along `(0, 1, 1)`, cut by the plane
     /// `z = -1.950951127282395e-303`. Counted from `√(room / ‖bend‖)`, a length
     /// squared about `1e-305` over `1e302`, every step came out `2^-1022` wide
     /// and the tiny one drew 350 723 points at the fuzz harness's deflection.
+    /// Written `2^340` times larger the steps were as wide, and the walk was
+    /// refused [`Error::TooManyPointsAlongOneCrossing`]: that happened to every
+    /// such parabola under about `1e-161` across and over about `2^-1002`.
     ///
     /// **The deflection is `1e-305` scaled with the pair, and not the
     /// harness's.** The harness reads its deflection off a coarse walk's
@@ -5871,20 +5875,18 @@ mod tests {
                 &Policy::certified(),
                 &mut log,
             )
-            .expect("a parabola is walked")
-            .points()
-            .len()
+            .map(|along_it| along_it.points().len())
         };
 
-        let large = walked(2.0_f64.powi(1006));
+        let large = walked(2.0_f64.powi(1006)).expect("an ordinary parabola is walked");
         assert!(
             large < 100,
             "the parabola written large is walked into {large} points"
         );
         assert_eq!(
-            walked(1.0),
-            large,
-            "the same parabola written 2^1006 times smaller is walked into as many points"
+            [walked(1.0), walked(2.0_f64.powi(340))],
+            [Ok(large), Ok(large)],
+            "the same parabola written 2^1006 and 2^666 times smaller is walked into as many points"
         );
     }
 
