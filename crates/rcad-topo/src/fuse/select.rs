@@ -1503,7 +1503,7 @@ enum TheCornersOfAPiece {
     Meets(Vec<[[f64; 4]; 3]>),
     /// Each corner read as the arrangement read it round a corner of the input
     /// whose planes miss one point.
-    ReadRoundACorner(ACornerReadAsOnePoint, Vec<ANodeReadRoundACorner>),
+    ReadRoundACorner(Box<ACornerReadAsOnePoint>, Vec<ANodeReadRoundACorner>),
 }
 
 impl TheCornersOfAPiece {
@@ -1583,7 +1583,10 @@ fn the_corners_of_a_piece_read_round_a_corner(
                     | MeetPoint::APoleOfAClosedSurface { .. } => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(TheCornersOfAPiece::ReadRoundACorner(reading, corners))
+            Some(TheCornersOfAPiece::ReadRoundACorner(
+                Box::new(reading),
+                corners,
+            ))
         })
 }
 
