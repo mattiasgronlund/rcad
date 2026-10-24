@@ -1432,7 +1432,7 @@ STEP_FUNCS = {
     "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
     "after": after_step, "cores": cores_step, "rank": rank_step, "tier": tier_step, "tag": tag_step,
     "pick": pick_step, "pin": pin_step, "unpin": unpin_step, "give": give_step, "sweep": sweep_step,
-    "reword": reword_step,
+    "reword": reword_step, "header": header_step,
 }
 
 

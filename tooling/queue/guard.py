@@ -47,8 +47,9 @@ REASON = (
     "`just queue take <id> <branch>`, `add <tier> <model> <write set> from/<id> <what>` (§432; from/fuzz:<target> or "
     "from/step:<file> for a fault a crash file or a corpus file shows, §433), `done <id> <sha>`, "
     "`drop <id> §N`, `park <id> §N`, `after <id> <id>[,<id>]`, `tier <id> <tier>`, `tag <id> <class|small|->`, "
-    "`give <id>` to give a take back, and `pick <id> ours|theirs` after a "
-    "merge conflict. Reading it is fine: grep, git show, a read-only script. This call was refused because {why}."
+    "`give <id>` to give a take back, `pick <id> ours|theirs` after a "
+    "merge conflict, and `apply header <text>` to replace the file's own header (§307.7, §352.7). "
+    "Reading it is fine: grep, git show, a read-only script. This call was refused because {why}."
 )
 PIN_REASON = (
     "Pinning a queue row is Mattias's call (docs/decisions.md §430): a pinned row goes first in the fill, "
