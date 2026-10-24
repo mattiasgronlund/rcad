@@ -309,6 +309,69 @@ fn a_rim_drawn_on_past_the_hole_beside_a_d_shaped_bar_on_its_pipe_answers_every_
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// A slab over `x ∈ [-3, 3]`, `y ∈ [-0.3, 1.5]`, `z ∈ [2, 3]` with the D-shaped
+/// hole of [`a_rim_drawn_on_past_the_hole_beside_a_d_shaped_bar_on_its_pipe_answers_every_rule`]
+/// through it, beside a bar on the same pipe from `z = -3` up to a slanting
+/// cut along `y + z/2 = 0.6`, every rule both ways round (Q2541). The two
+/// share nothing: the slab is wholly past the cut.
+///
+/// Meant as the shape of Q2541's second case. **It does not reach it**: a
+/// probe in `gather` found that the slab's top and bottom do not list the
+/// pipe. Their boxes run over the whole circle the hole's arc is on, `y` from
+/// `-1` to `2`, so neither is strictly past the cut the bar's wall lies
+/// behind. The slab's two long sides and the hole's flat side do list it.
+#[test]
+fn a_slab_with_a_d_shaped_hole_over_a_bar_on_its_pipe_cut_on_a_slant_answers_every_rule() {
+    let holed = 6.0 * 1.8 - a_slice_of_the_disc(1.3);
+    let bar = PI * THE_PIPES_RADIUS * THE_PIPES_RADIUS * (3.0 + 1.2 - 2.0 * THE_PIPES_AXIS_AT);
+    let mut failed = Vec::new();
+    let mut ran = 0;
+    for rule in EVERY_RULE {
+        for bar_first in [true, false] {
+            let by_hand = match (rule, bar_first) {
+                (Rule::Union, _) => bar + holed,
+                (Rule::Intersection, _) => 0.0,
+                (Rule::Difference, true) => bar,
+                (Rule::Difference, false) => holed,
+                _ => unreachable!(),
+            };
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a size"));
+            let the_slab = a_box(&mut model, [[-3.0, 3.0], [-0.3, 1.5], [2.0, 3.0]]);
+            let the_hole = a_part_of_the_pipes_bar(&mut model, [[-2.0, -1.3], [-1.5, 2.5]]);
+            let holed_slab = one_solid(&mut model, &[the_slab], &[the_hole], Rule::Difference);
+            let the_bar = a_bar_on_the_pipe_under_a_slant(&mut model);
+            let (arguments, tools) = if bar_first {
+                (vec![the_bar], vec![holed_slab])
+            } else {
+                (vec![holed_slab], vec![the_bar])
+            };
+            let asked = format!("{rule:?} bar_first={bar_first}");
+            ran += 1;
+            if let Some(wrong) = check(&mut model, &arguments, &tools, rule, by_hand) {
+                println!("{asked}: {wrong}");
+                failed.push(asked);
+            }
+        }
+    }
+    println!("ran {ran}, failed {}", failed.len());
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A bar of radius [`THE_PIPES_RADIUS`] about the pipe's axis from `z = -3`
+/// up to where it crosses `y + z/2 = 0.6`, which is `z = 1.2 - 2y`.
+fn a_bar_on_the_pipe_under_a_slant(model: &mut Model) -> SolidKey {
+    let placed =
+        Isometry::translation(Vector::new(0.0, THE_PIPES_AXIS_AT, -3.0)).expect("a finite shift");
+    let bar = model
+        .add_round_bar(THE_PIPES_RADIUS, 7.0, &placed)
+        .expect("a bar");
+    let under_the_slant = a_block_across_x(
+        model,
+        &[[-2.0, -4.0], [2.6, -4.0], [-1.9, 5.0], [-2.0, 5.0]],
+    );
+    one_solid(model, &[bar], &[under_the_slant], Rule::Intersection)
+}
+
 /// The area of the part of the pipe's disc further than `apart` from its
 /// centre along one direction.
 fn a_slice_of_the_disc(apart: f64) -> f64 {
