@@ -5879,14 +5879,15 @@ mod tests {
     };
     use rcad_predicates::{
         Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
+        side_of_a_plane_where_three_planes_meet,
     };
     use smallvec::SmallVec;
 
     use super::{
-        InPlane, Piece, Rule, a_face_of_the_input_holds, by_the_one_face_its_box_meets,
-        candidate_points, choose, corners_of, every_picker_keeps, midway_between,
-        the_meridian_circle_each_side_runs_round, the_middles_of_a_round_wire,
-        the_pickers_of_the_meridian_circle_through, the_piece_holds,
+        ACornerReadAsOnePoint, ANodeReadRoundACorner, InPlane, Piece, Rule,
+        a_face_of_the_input_holds, by_the_one_face_its_box_meets, candidate_points, choose,
+        corners_of, every_picker_keeps, midway_between, the_meridian_circle_each_side_runs_round,
+        the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
     use crate::fuse::bake::{BakedEdge, BakedFace, BakedSolid, bake};
@@ -7675,6 +7676,117 @@ mod tests {
             wrong.is_empty(),
             "{} of {asked} points answered against the neighbours' planes: {wrong:#?}",
             wrong.len()
+        );
+    }
+
+    /// The apex of a pyramid whose four side planes miss one point is read on
+    /// all four, and off them where it truly is (Q2575).
+    ///
+    /// The face near the origin of
+    /// [`a_far_pyramid_whose_near_face_misses_its_apex`] misses the apex by
+    /// `1e-8`, so some side plane is off the point `bake` solved the apex at,
+    /// and [`ACornerReadAsOnePoint`] reads every side plane moved through it.
+    /// Every other plane is read where it is, so the side of it the apex is
+    /// read on is the side the point `bake` solved is truly on, and so is the
+    /// side of it the meet of three others is read on: the planes here run
+    /// through points a few roundings round the apex, every way, so their
+    /// sides are the close calls the reading has to get exactly.
+    #[test]
+    fn a_far_apex_whose_side_planes_miss_one_point_is_read_on_every_side_plane_and_off_the_rest_as_it_is()
+     {
+        let (_model, solid) = a_far_pyramid_whose_near_face_misses_its_apex(1e-8);
+        let corners: Vec<_> = solid
+            .faces
+            .iter()
+            .flat_map(|face| face.wires.iter().flatten())
+            .map(|edge| &edge.start)
+            .collect();
+        assert!(
+            corners
+                .iter()
+                .filter(|corner| corner.around.len() < 4)
+                .all(|corner| ACornerReadAsOnePoint::of(corner).is_none()),
+            "a base corner has three planes round it, and nothing to read"
+        );
+        let apex = corners
+            .iter()
+            .find(|corner| corner.around.len() == 4)
+            .expect("the apex has the four side planes round it");
+        let reading =
+            ACornerReadAsOnePoint::of(apex).expect("a side plane misses the point bake solved");
+        assert!(reading.holds(apex.point));
+        let solved_from = apex
+            .solved_from
+            .expect("bake solved the apex")
+            .map(|surface| surface.as_plane().expect("a side plane").coefficients());
+        let truly = |plane: Plane| {
+            side_of_a_plane_where_three_planes_meet(solved_from, plane.coefficients())
+                .expect("four planes in f64 always answer")
+        };
+        assert!(
+            reading
+                .around
+                .iter()
+                .any(|side| matches!(truly(*side), Decision::Pos | Decision::Neg)),
+            "a side plane truly misses the apex"
+        );
+        for side in &reading.around {
+            assert_eq!(
+                reading.side_of(&ANodeReadRoundACorner::TheCorner, *side),
+                Some(Decision::Zero),
+                "{side:?} is read through the apex"
+            );
+        }
+
+        let [x, y, z] = crate::fuse::middle_of(apex.point).coordinates();
+        let ulp = f64::EPSILON * x.abs().max(y.abs()).max(z.abs());
+        let normals = [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 2.0, 3.0],
+            [-3.0, 1.0, 2.0],
+        ];
+        let mut planes = Vec::new();
+        for normal in normals {
+            for off_by in [-3.0, -1.0, 0.0, 1.0, 3.0] {
+                let near = Point::new(x + off_by * ulp, y - off_by * ulp, z + off_by * ulp);
+                planes.push(
+                    Plane::from_point_and_normal(near, Vector::from(normal))
+                        .expect("a plane through a point near the apex"),
+                );
+            }
+        }
+        let mut sides = Vec::new();
+        for &plane in &planes {
+            let truth = truly(plane);
+            sides.push(truth);
+            assert_eq!(
+                reading.side_of(&ANodeReadRoundACorner::TheCorner, plane),
+                Some(truth),
+                "the apex against {plane:?}"
+            );
+        }
+        let mut asked = 0;
+        for (index, &fourth) in planes.iter().enumerate() {
+            let three = [0, 5, 10].map(|start| planes[(index + start + 1) % planes.len()]);
+            let Ok(truth) = side_of_a_plane_where_three_planes_meet(
+                three.map(|plane| plane.coefficients()),
+                fourth.coefficients(),
+            ) else {
+                continue;
+            };
+            asked += 1;
+            assert_eq!(
+                reading.side_of(&ANodeReadRoundACorner::AMeet(three), fourth),
+                Some(truth),
+                "the meet of {three:?} against {fourth:?}"
+            );
+        }
+        assert!(asked >= 20, "only {asked} meets of three are points");
+        assert!(
+            sides.contains(&Decision::Pos) && sides.contains(&Decision::Neg),
+            "the planes run either side of the apex: {sides:?}"
         );
     }
 
