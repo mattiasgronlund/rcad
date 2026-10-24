@@ -3724,8 +3724,62 @@ print(f"smallest: {a}u + {hi}u^2 proves, {a}u + {lo}u^2 fails")
 
 ### 464.13 The side of a flat surface through a point
 
-*Unfinished: Q2678's first lane relayed here. What follows is its draft. The
-lane after it runs the rest and writes this up in 464.12's form.*
+*Unfinished: Q2678's first lane relayed here, and its second after every run
+below. What follows is their draft; the lane after them writes it up in
+464.12's form.*
+
+The second lane's runs, on 2026-10-25, all under 464.4's pin at
+`-Eprecision=200`, by `one.sh`:
+
+- All 283 scripts that must prove exit 0, Gappa in 0.02 to 23.58 s on a
+  loaded machine, and each one's `gappa -Bcoq` and `coqc` exit 0, in 1.3 to
+  41.07 s together. Their Coq files are 177 to 5829 lines with 0 to 28 hints:
+  `flat.v` 4926 lines and 27 hints, `flatv.v` 5198 and 28, `flat_z012345.v`
+  177 and 0. No warning but "assumed to be nonzero" in any `.out` or `-Bcoq`
+  print; `flat.g`'s `-Bcoq` prints 112 of those and `flatv.g`'s 127.
+- With `n` products left and `c` sums cancelling, Gappa prints `(y − Ex) /
+  Phat` within `(n − 1 − c) u` and `(value − Ex) / Phat` within `(n − c) u`,
+  to the digits it prints, and `P −/ Phat` within `(n − 1) u`. So `flat.g`
+  `5u`, `flatv.g` `6.66134e-16`, `6u`. One product left: `(−t5 − Ex) / |t5|`
+  within `u` and `|t5| −/ |t5|` in `[0, 0]`. `flat_z012345.g`: "remaining
+  results are pointless, anything can be proved".
+- All 285 controls but `c_flat_noeb.g` exit 1, each at `u / 2` with a best
+  of its case's printed bound over `u / 2`: `c_flat_half.g` `[-10, 10]`,
+  `c_flatv_half.g` `[-12, 12]`, down to `[-2, 2]`. `c_flat_nonormal.g` best
+  `[-1.93499e+909, 1.93499e+909]`; `c_flat_z012345_noeb.g` best `[-inf,
+  inf]`, printing `eb in [0, 0]`. `c_flat_noeb.g` proves, as
+  `c_plane_noeb.g` and `c_sphere_noeb.g` did.
+- 464.12's `why.py` with `sphere` read `flat` and `rpx in ? /\ rpr in ?` read
+  `rp0 in ?`: `c_flat_nonormal_why.g` exit 1, `rp0` within `±2^(4142)`,
+  neither `REL(P, Phat)` nor `BND((y - Ex) / Phat)` found;
+  `c_flat_noeb_why.g` exit 0, `P` at least `3b-1021` and `eb` at least
+  `9b-1073`; `c_flat_noeb_rel.g` exit 1 on `REL(eb, B * P)`.
+- 464.12's `bisect.py` with `B_CODE = "B = 6b-53 + 1b-99;"` and the `gappa`
+  store path for `NIX`: `python3 bisect.py flat.g 5 128` prints "smallest:
+  5u + 38u^2 proves, 5u + 37u^2 fails", and `python3 bisect.py flatv.g 6 128`
+  "smallest: 6u + 48u^2 proves, 6u + 47u^2 fails".
+- `flatcases.py` and `why.py` run again in a fresh directory write all 571
+  files byte for byte as they were run.
+
+`addzero.g`, whole, exits 0, and its `-Bcoq` and `coqc` exit 0 (309 lines, 3
+hints). Written as `rnd(0 + x) - x in [0, 0]` with no hints, Gappa ran 151 s
+without an answer and was stopped; `a = rnd(x + z)` with `z = 0` ran past 30 s
+the same way.
+
+```gappa
+# addzero.g: adding the double 0 to a double, on either side, or taking 0
+# from it, gives that double back. That is the fold's first addition, 0.0
+# plus the first product, and each zero product the fold adds.
+@rnd = float<ieee_64, ne>;
+x = rnd(x_);
+z = 0;
+L = z + x; R = x + z; D = x - z;
+{ |x| <= 1b1024 -> rnd(L) - x in [0, 0] /\ rnd(R) - x in [0, 0] /\ rnd(D) - x in [0, 0] }
+# Without these three, Gappa ran rnd(x + z) for 30 s and more and did not stop.
+L -> x;
+R -> x;
+D -> x;
+```
 
 Q2678 takes up `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND`
 (`plane.rs:1054-1057` at `8c943dfd`), `B = 6u + 128u²`, written `B = 6b-53 +
