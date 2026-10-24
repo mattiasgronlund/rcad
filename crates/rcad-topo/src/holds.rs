@@ -4284,6 +4284,18 @@ fn is_on_the_other_nappe_from_the_arc(
 /// curve bounds is convex, so the point is across the chord between its ends
 /// or at one, where no half-line leaves both of them strictly on one side.
 ///
+/// # A corner on the half-line's line
+///
+/// **A point with no sign of which side of the half-line's line a corner is
+/// seen on is read again towards the next corner that may be aimed at**, as
+/// [`what_a_flat_face_holds`] reads a flat face (row Q2634). A box across the
+/// line from the corner aimed at through another corner is such a point, even
+/// with a sign of every side's own line, and the sides that corner ends cannot
+/// be counted from there. A count from any one corner that reads every sign it
+/// needs is the whole answer, so the first is kept, and the point is refused
+/// only when every corner that may be aimed at leaves a sign unread, with the
+/// first of those signs.
+///
 /// # A side right round a closed curve
 ///
 /// A [`WholeCurve`] is all of the curve a plane `P` cuts the cone in, from one
@@ -4477,45 +4489,59 @@ fn what_a_cone_face_seen_down_its_axis_holds(
             None
         }
     });
-    let aim = sides
+    let may_be_aimed_at = |corner: Point| {
+        chords.iter().all(|chord| {
+            matches!(
+                the_aims_side_of(chord, corner),
+                Decision::Pos | Decision::Neg
+            )
+        }) && sides.iter().zip(&along).all(|(side, beside)| {
+            !matches!(beside, Decision::Undecidable { .. }) || {
+                let [from, to] = seen_from(side, corner);
+                is_wholly_on_one_side_of_the_half_line(from, to)
+            }
+        })
+    };
+    let how_often_it_winds_seen_towards = |aim: Point| -> Result<i64, f64> {
+        let mut winding = winding;
+        let mut along = along.clone();
+        for chord in &chords {
+            let toward = the_aims_side_of(chord, aim);
+            along[chord.index] = toward;
+            if toward == chord.arcs_side {
+                winding += chord.piece;
+            }
+        }
+        for (side, &beside) in sides.iter().zip(&along) {
+            let [from, to] = seen_from(side, aim);
+            if let Decision::Undecidable { .. } = beside {
+                assert!(
+                    is_wholly_on_one_side_of_the_half_line(from, to),
+                    "the half-line was aimed with every side the point has no sign of wholly on \
+                     one side of it, and this one is not: {from:?} and {to:?}"
+                );
+                continue;
+            }
+            winding += crossing(from, to, beside)
+                .ok_or_else(|| whichever_of_them_was_not_read(from, to))?;
+        }
+        Ok(winding)
+    };
+
+    let mut first_refusal = None;
+    for aim in sides
         .iter()
         .map(|side| side.start.placed)
-        .find(|&corner| {
-            chords.iter().all(|chord| {
-                matches!(
-                    the_aims_side_of(chord, corner),
-                    Decision::Pos | Decision::Neg
-                )
-            }) && sides.iter().zip(&along).all(|(side, beside)| {
-                !matches!(beside, Decision::Undecidable { .. }) || {
-                    let [from, to] = seen_from(side, corner);
-                    is_wholly_on_one_side_of_the_half_line(from, to)
-                }
-            })
-        })
-        .ok_or_else(|| unseen.map_or_else(cannot, gave_up_seeing))?;
-    for chord in &chords {
-        let toward = the_aims_side_of(chord, aim);
-        along[chord.index] = toward;
-        if toward == chord.arcs_side {
-            winding += chord.piece;
+        .filter(|&corner| may_be_aimed_at(corner))
+    {
+        match how_often_it_winds_seen_towards(aim) {
+            Ok(winding) => return Ok(held_where_it_winds(winding)),
+            Err(enclosure) => {
+                first_refusal.get_or_insert(enclosure);
+            }
         }
     }
-
-    for (side, &beside) in sides.iter().zip(&along) {
-        let [from, to] = seen_from(side, aim);
-        if let Decision::Undecidable { .. } = beside {
-            assert!(
-                is_wholly_on_one_side_of_the_half_line(from, to),
-                "the half-line was aimed with every side the point has no sign of wholly on one \
-                 side of it, and this one is not: {from:?} and {to:?}"
-            );
-            continue;
-        }
-        winding += crossing(from, to, beside)
-            .ok_or_else(|| gave_up_seeing(whichever_of_them_was_not_read(from, to)))?;
-    }
-    Ok(held_where_it_winds(winding))
+    Err(first_refusal.or(unseen).map_or_else(cannot, gave_up_seeing))
 }
 
 /// Which side of `curve`'s plane a cone face keeps, read off every corner of
@@ -14452,6 +14478,65 @@ mod tests {
                 assert_eq!(answer, is, "{point:?} after the {rule:?}");
             }
         }
+    }
+
+    /// **A box across the line from the corner the half-line is aimed at
+    /// through another corner is placed from the next corner** (row Q2634).
+    /// Seen down the axis, such a box has no sign of which side of the
+    /// half-line's line that other corner is, so the sides it ends cannot be
+    /// counted from there, though the point has a sign of every side's own
+    /// line. The quarter's skin is aimed at its corner `(2, 0, 4)`, and its
+    /// corner `(0, 4, 8)` is seen on the line `2x + y = 4` through it; the
+    /// three quarters' skin is aimed at `(0, −2, 4)`, and its corner
+    /// `(−4, 0, 8)` is seen on the line `x + 2y = −4` through it. Each point
+    /// is on the cone, at the distance from the axis its `x` and `y` give, and
+    /// is held where it is seen inside the face: between the caps, and in the
+    /// part of the turn the face keeps.
+    #[test]
+    fn a_box_across_the_line_from_the_corner_aimed_at_through_another_is_placed_from_the_next() {
+        let across = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        let on = Interval::exactly;
+        let on_the_cone = |x: f64, y: f64| on(2.0 * x.hypot(y));
+        let mut wrong = Vec::new();
+        for (rule, point, is) in [
+            (
+                crate::Rule::Intersection,
+                [on(1.0), across(2.0), on_the_cone(1.0, 2.0)],
+                OnAFace::Held,
+            ),
+            (
+                crate::Rule::Intersection,
+                [on(3.0), across(-2.0), on_the_cone(3.0, -2.0)],
+                OnAFace::NotHeld,
+            ),
+            (
+                crate::Rule::Intersection,
+                [on(-1.0), across(6.0), on_the_cone(-1.0, 6.0)],
+                OnAFace::NotHeld,
+            ),
+            (
+                crate::Rule::Difference,
+                [on(-2.0), across(-1.0), on_the_cone(-2.0, -1.0)],
+                OnAFace::Held,
+            ),
+        ] {
+            let (model, solid, skin) = the_skin_of_a_frustum_cut_by_a_quarter(rule);
+            let answer = model
+                .solid(solid)
+                .expect("this model made the key")
+                .face_holds_the_point(
+                    skin,
+                    PredicatePoint::Constructed(point),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+            if answer.as_ref().ok() != Some(&is) {
+                wrong.push(format!(
+                    "{point:?} after the {rule:?}: {answer:?}, not {is:?}"
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     /// The frustum of the cone `r = z / 2` between heights 4 and 8, and the
