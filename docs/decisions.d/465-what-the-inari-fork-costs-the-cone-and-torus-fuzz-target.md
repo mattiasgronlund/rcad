@@ -10,7 +10,9 @@ take the fork's one-lane fallback, which in a benchmark with no rcad code costs
 three times what 2.0.0's multiplication does (465.3). rcad's release build pays
 nothing for it on a core to itself, and 21% when the core's other hardware
 thread is busy (465.4). The fuzz build pays most, because it instruments that
-fallback (465.5). What went to the fork's maintainer is in 465.6.
+fallback (465.5). What went to the fork's maintainer is in 465.6. The products
+are that small because one step count in rcad's walk underflows, and a parabola
+smaller than about 1e-161 is walked in steps 2^-1022 wide (465.10).
 
 ### 465.1 What the nights show
 
@@ -177,7 +179,9 @@ run `nproc / 5`, 4 workers for each of five targets, 20 on 24 hardware threads,
 so most of them share a core.
 
 70fbff12, 8453cc06, c0ec6b28 and ddb9a9a0 make identical counts of every call
-and every fallback, from different operands. Paired, 70fbff12 was 1.02 and
+and every fallback. They are not different operands, as this said first: three
+of the files decode to the same cone and plane, and the fourth moves the plane
+in its last bits (465.10). Paired, 70fbff12 was 1.02 and
 ddb9a9a0 1.18; on a core to themselves they are 1.00 and 1.01, and their
 streams bench alike (`a * b` 3.05 and 3.02). The spread was the core, not the
 stream.
@@ -245,8 +249,8 @@ change, not the fork's.
 - **Why a busy sibling thread costs the fork 27% and 2.0.0 2%.**
 - **How much of the nights' drop this is.** The fuzz-build ratios of 465.5 were
   taken with the sibling threads unwatched, and the nights run with them busy.
-- **Which rcad loop makes the tiny products.** Four inputs with identical counts
-  point at a loop with a fixed cap.
+- **Which rcad loop makes the tiny products.** Answered in 465.10: the fuzz
+  target's own loop over walked points, and not a loop with a fixed cap.
 - 481232f8's `a * b` is 1.23 times 2.0.0's even with every exponent set to 0.
 - Whether rcad's own tests see any of it. Daytime `just t` medians did not rise
   after 10-21 (`just row-time --since 2026-10-15 --json`), but those tests seldom
@@ -255,9 +259,11 @@ change, not the fork's.
 ### 465.8 What this leaves
 
 - Build `inari` in the fuzz builds without coverage counters, debug assertions
-  or overflow checks, through `fuzz/rustc-stand-in.sh`. A row.
+  or overflow checks, through `fuzz/rustc-stand-in.sh`. Q2731, merged at
+  8f5eafa8 with `check-rustc-stand-in-selftest` to hold it.
 - Find which rcad loop makes the tiny products, and whether it should stop
-  sooner. A row.
+  sooner. Q2732 found it and says it should (465.10); the fix is Q2733, and
+  Q2734 replays the other slow inputs after it.
 - Nothing for the fork in rcad's queue: its fix belongs in the fork's
   repository, and moving the pin waits on that.
 
@@ -288,3 +294,39 @@ sake alone, not rcad's. No measurement here says how often that happens on
 this target; 465.7's "whether rcad's own tests see any of it" is the nearest
 existing measurement, and it is about test medians, not corpus growth, so it
 does not answer this either. Unmeasured, not argued away.
+
+### 465.10 Which loop makes the tiny products
+
+Q2732, read-only, at 422b5468. A scratch copy of rcad counted every `Interval`
+product, sampled the call stack of one tiny product in 2000, and replayed the
+fuzz target's body on one corpus file at a time.
+
+- **The products come from the fuzz target's own loop over walked points**,
+  `how_every_crossing_was_walked_keeping_the_provenance` in
+  `crates/rcad-geom/tests/fuzzing/mod.rs` (lines 465-478 at the base). For each
+  point the walk draws, it asks both surfaces which side the point is on: the
+  cone through `on_intervals` (`cone.rs:409`) and the plane (`plane.rs:622`).
+  That is 24 products and 3 `wid()` calls a point. All 2630 stacks sampled on
+  70fbff12 were in that loop.
+- **The four inputs with identical counts are one shape, not a cap.** A cone
+  of slope 1 with its apex at the origin and its axis along (0, 1, 1), cut by
+  the plane z = -1.950951127282395e-303. Three of the files decode to those
+  bits; ddb9a9a0's plane is at -1.9509509219834527e-303. The crossing is a
+  parabola about 4e-303 across.
+- **The walk is long because a step count underflows.**
+  `how_many_pieces_an_endless_bend_takes` (`walk.rs:2293-2294`) takes
+  `(room / stands_off_a_chord).sqrt()`. For a parabola `room` is a length and
+  `stands_off_a_chord` is one over a length, so the ratio is a length squared:
+  about 1e-305 over 6e301, which is 0 in f64. `widest.max(f64::MIN_POSITIVE)`
+  then makes every step 2^-1022 wide. `ceil(2*linear_term/2^-1022)+1` gives
+  350 723 points for the four inputs and 170 693 for 0228ef21 (its plane at
+  z = -9.495e-304), and the walks printed exactly those. Each of the four makes
+  1 052 175 `wid()` calls in `counts-slow16.txt` (465.3), which is 3 × 350 723
+  + 6. `MOST_POINTS_ALONG_ONE_CROSSING`
+  is never reached, and the march never ran on 70fbff12.
+- **It should stop much sooner.** About 20 points would meet the deflection,
+  by the lane's working, which it did not run. Q2733 works the count out from
+  ratios of like lengths and checks the walk's two arc callers of the same
+  function for the same underflow. Q2734, after it, replays the other 11 slow
+  inputs: Q2732 traced only these five, and 481232f8's counts are shaped
+  differently.
