@@ -683,13 +683,19 @@ fn two_cones_on_one_apex_leaning_apart_cross_in_two_rulings_and_every_fuse_answe
 /// The cones of the test above with the turned one cut short at 6. Its
 /// rulings now end on the short cone's rim alone, so no point there lies on
 /// all four faces.
+///
+/// The tall cone's side comes back in three faces, not one. The arrangement
+/// cuts it along the turned cone's two rulings, run on past the short rim at
+/// `z = 6` up to the tall rim at `z = 8`, and along the whole ellipse where the
+/// short cap's plane crosses it. The three pieces are not joined up again, so
+/// the union and the tall cone less the short one have six faces each.
 #[test]
 fn a_short_cone_on_the_apex_of_a_tall_one_leaning_apart_crosses_it_in_two_rulings_and_every_fuse_answers()
  {
     every_fuse_adds_up(
         a_short_cone_on_the_apex_of_a_tall_one_leaning_apart,
         [128.0 * PI / 3.0, 54.0 * PI / 3.0],
-        [&[4], &[3], &[4], &[3]],
+        [&[6], &[3], &[6], &[3]],
     );
 }
 
