@@ -2042,7 +2042,30 @@ impl<'f> Arrangement<'f> {
         if !nothing_rules_the_point_out(picked_by, point) {
             return Ok(false);
         }
-        let side = match (side_of_surface(&partner, point), partner.as_plane()) {
+        let settled = must_decide(
+            self.side_of_a_corner(corner, &partner),
+            name_of_surface(&partner),
+            &[point],
+            Measures::Length,
+            policy,
+            log,
+        )?;
+        Ok(settled == Decision::Zero)
+    }
+
+    /// Which side of `partner` a corner of the face is on, asked without a
+    /// policy: its box first, and where `partner` is a plane the box cannot
+    /// place it against, each of the exact readings of the corner below in
+    /// turn ([`Arrangement::passes_through`] says why the planes come first).
+    ///
+    /// **Kept apart so that the one reading is asked wherever the side is**:
+    /// [`Arrangement::as_a_corner_between_the_two_meets_of_one_cut_says`]
+    /// orders the corner round a loop by this side, so the face that keeps the
+    /// corner off `partner` and the order that puts it beside the two places
+    /// `partner` cuts the loop cannot disagree.
+    fn side_of_a_corner(&self, corner: &BakedCorner, partner: &Surface) -> Decision {
+        let point = corner.point;
+        match (side_of_surface(partner, point), partner.as_plane()) {
             (undecided @ Decision::Undecidable { .. }, Some(plane)) => {
                 match corner
                     .solved_from
@@ -2079,27 +2102,23 @@ impl<'f> Arrangement<'f> {
                             .or_else(|| Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane))
                             .or_else(|| {
                                 Self::side_of_one_of_a_plane_a_pipe_and_a_cone_on_one_axis(
-                                    &on, point, &partner,
+                                    &on, point, partner,
                                 )
                             })
                             .or_else(|| {
                                 Self::side_of_a_plane_crossing_a_cap_circle(&on, point, plane)
+                            })
+                            .or_else(|| {
+                                corner.seam_plane.and_then(|seam| {
+                                    Self::side_of_a_plane_at_a_seam_corner(&on, point, &seam, plane)
+                                })
                             })
                             .unwrap_or(undecided)
                     }
                 }
             }
             (side, _) => side,
-        };
-        let settled = must_decide(
-            side,
-            name_of_surface(&partner),
-            &[point],
-            Measures::Length,
-            policy,
-            log,
-        )?;
-        Ok(settled == Decision::Zero)
+        }
     }
 
     /// The three planes a point of the arrangement is the one meeting point of,
@@ -4891,7 +4910,9 @@ impl<'f> Arrangement<'f> {
     /// **Where two planes through one corner cut it
     /// ([`Arrangement::as_two_cuts_through_one_corner_say`]), and where a plane
     /// cuts it beside a corner on it
-    /// ([`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`]),
+    /// ([`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`])
+    /// or either side of one
+    /// ([`Arrangement::as_a_corner_between_the_two_meets_of_one_cut_says`]),
     /// is asked only where the policy would refuse.** Asked before the policy,
     /// the second kept a tolerant fuse of a cube whose edges run through a
     /// frustum's far rim from answering: it put the corner and the meet a
@@ -4925,6 +4946,44 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Decision> {
+        let (decided, measures) = self.as_proved_before_any_policy(crossing, first, second)?;
+        let Decision::Undecidable { .. } = decided else {
+            return Ok(decided);
+        };
+        let nodes = [self.nodes[first].point, self.nodes[second].point];
+        let mut read_as_one_point = ProvenanceLog::new();
+        if let Ok(settled) = must_decide(
+            decided,
+            ALONG_A_CROSSING,
+            &nodes,
+            measures,
+            policy,
+            &mut read_as_one_point,
+        ) {
+            read_as_one_point.drain_into(log);
+            return Ok(settled);
+        }
+        if let Some(proved) = self
+            .as_a_reading_asked_after_the_policy_says(crossing, first, second)
+            .or_else(|| {
+                self.as_the_two_meets_of_one_cut_alone_on_the_loop_say(crossing, first, second)
+            })
+        {
+            return Ok(proved);
+        }
+        must_decide(decided, ALONG_A_CROSSING, &nodes, measures, policy, log)
+    }
+
+    /// Which of two nodes on a crossing comes first along it, by every reading
+    /// [`Arrangement::order_along`] asks before a policy, and what the boxes'
+    /// enclosure measures: [`Decision::Undecidable`] where none of them can
+    /// say.
+    fn as_proved_before_any_policy(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> rcad_geom::Result<(Decision, Measures)> {
         let (mut decided, measures) = self.as_the_boxes_say(crossing, first, second)?;
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_planes_say(crossing, first, second)
@@ -4957,34 +5016,27 @@ impl<'f> Arrangement<'f> {
         {
             decided = proved;
         }
-        let Decision::Undecidable { .. } = decided else {
-            return Ok(decided);
-        };
-        let nodes = [self.nodes[first].point, self.nodes[second].point];
-        let mut read_as_one_point = ProvenanceLog::new();
-        if let Ok(settled) = must_decide(
-            decided,
-            ALONG_A_CROSSING,
-            &nodes,
-            measures,
-            policy,
-            &mut read_as_one_point,
-        ) {
-            read_as_one_point.drain_into(log);
-            return Ok(settled);
-        }
-        if let Some(proved) = self.as_two_cuts_through_one_corner_say(crossing, first, second) {
-            return Ok(proved);
-        }
-        if let Some(proved) = self.as_two_cuts_through_the_axis_say(crossing, first, second) {
-            return Ok(proved);
-        }
-        if let Some(proved) =
-            self.as_a_corner_beside_a_flat_cut_through_the_loop_says(crossing, first, second)
-        {
-            return Ok(proved);
-        }
-        must_decide(decided, ALONG_A_CROSSING, &nodes, measures, policy, log)
+        Ok((decided, measures))
+    }
+
+    /// Which of two nodes on a crossing comes first along it, by the readings
+    /// [`Arrangement::order_along`] asks only where the policy would refuse,
+    /// all but [`Arrangement::as_the_two_meets_of_one_cut_alone_on_the_loop_say`],
+    /// which asks these of the other pairs on its loop.
+    fn as_a_reading_asked_after_the_policy_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        self.as_two_cuts_through_one_corner_say(crossing, first, second)
+            .or_else(|| self.as_two_cuts_through_the_axis_say(crossing, first, second))
+            .or_else(|| {
+                self.as_a_corner_beside_a_flat_cut_through_the_loop_says(crossing, first, second)
+            })
+            .or_else(|| {
+                self.as_a_corner_between_the_two_meets_of_one_cut_says(crossing, first, second)
+            })
     }
 
     /// Which of two nodes on a crossing comes first along it, from their boxes
@@ -6008,6 +6060,286 @@ impl<'f> Arrangement<'f> {
         } else {
             Decision::Neg
         })
+    }
+
+    /// Which of two nodes on the loop a plane cuts a ball, a pipe or a cone in
+    /// comes first, where one is a corner of the face and the other is one of
+    /// the two places a second plane `P` cuts the loop: the same as which of
+    /// those two places comes first, wherever the corner is proved on one side
+    /// of `P` and both starts on the other. `None` everywhere else.
+    ///
+    /// **`P` cuts the loop at those two places and nowhere else.** It cuts the
+    /// loop's plane in a line, and a line meets the ball, the pipe or the cone
+    /// twice at most, or lies in it, which a loop that closes cannot hold. So
+    /// the two places cut the loop into two arcs, each on one side of `P`.
+    /// Going round from a start on the side the corner is not on, the loop
+    /// reaches one of the two places, runs along the arc the corner is on and
+    /// past the corner, and leaves through the other. The place that comes
+    /// before the other comes before the corner too, and the other after it.
+    /// Which of the two comes first is asked of every reading the policy is
+    /// not asked for ([`Arrangement::as_proved_before_any_policy`]).
+    ///
+    /// **The corner's side of `P` is the one [`Arrangement::passes_through`]
+    /// reads** ([`Arrangement::side_of_a_corner`]), so the face that keeps the
+    /// corner off `P` and the order that puts it between the two places cannot
+    /// disagree. The corner is on the loop by the model's word, as every corner
+    /// of the face a crossing runs through is ([`BakedCorner::around`]), and
+    /// that word is checked against the loop's plane
+    /// ([`Arrangement::is_proved_off_the_loops_plane`]), as
+    /// [`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`]
+    /// checks it (§286).
+    ///
+    /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
+    /// whose inner side lies along `x = 2`, both turned `π/2` about `z`: the
+    /// side's plane cuts the bar's floor circle at two places `2.2e−16` apart,
+    /// and the bar's seam corner on the floor lies between them, `1.09e−47`
+    /// past the plane, in a box `1.1e−13` wide that holds both. With the bar
+    /// first every certified fuse of the two was refused on which of the
+    /// corner and the nearer place comes first, going round from the far side
+    /// of the circle (Q2655,
+    /// `tests/a_bar_flush_with_an_l_plates_inner_side_turned.rs`).
+    fn as_a_corner_between_the_two_meets_of_one_cut_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve {
+            from,
+            node,
+            named_the_start,
+            ref wound_as,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let round = |surface: &Surface| {
+            matches!(
+                surface,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            )
+        };
+        let flat = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) if round(&wound_as[1]) => flat,
+            (None, Some(flat)) if round(&wound_as[0]) => flat,
+            (Some(_) | None, Some(_) | None) => return None,
+        };
+        let (corner, meet, corner_is_first) =
+            match [first, second].map(|at| self.nodes[at].vertex.is_some()) {
+                [true, false] => (first, second, true),
+                [false, true] => (second, first, false),
+                [true, true] | [false, false] => return None,
+            };
+        if self.is_proved_off_the_loops_plane(corner, flat) {
+            return None;
+        }
+        let (surfaces, which) = self.the_one_meet_it_stands_for(meet)?;
+        if which > 1 {
+            return None;
+        }
+        let cut = Surface::Plane(self.the_cut_through_the_loop_at(meet, wound_as)?);
+        let the_other_meet = Some((surfaces, 1 - which));
+        let other = (0..self.nodes.len()).find(|&at| {
+            self.nodes[at].crossings.contains(&crossing)
+                && self.the_one_meet_it_stands_for(at) == the_other_meet
+        })?;
+        let corner_is_on =
+            self.side_of_a_corner(self.the_baked_corner_of(&self.nodes[corner]), &cut);
+        if !(corner_is_on == Decision::Pos || corner_is_on == Decision::Neg) {
+            return None;
+        }
+        let on_the_other_side = |start: PredicatePoint| {
+            let side = side_of_surface(&cut, start);
+            (side == Decision::Pos || side == Decision::Neg) && side != corner_is_on
+        };
+        if !(on_the_other_side(from) && on_the_other_side(named_the_start.unwrap_or(node))) {
+            return None;
+        }
+        let (the_two_in_order, _) = self
+            .as_proved_before_any_policy(crossing, meet, other)
+            .ok()?;
+        if !(the_two_in_order == Decision::Pos || the_two_in_order == Decision::Neg) {
+            return None;
+        }
+        let meet_comes_first = the_two_in_order == Decision::Pos;
+        Some(if meet_comes_first == corner_is_first {
+            Decision::Neg
+        } else {
+            Decision::Pos
+        })
+    }
+
+    /// Which of two nodes on the loop a plane cuts a ball or a pipe in comes
+    /// first, where the loop holds no node but the two places a second plane
+    /// `P` cuts it and at most one corner of the face, proved off `P`: an order
+    /// that is a turn of the true one round the loop, wherever the loop starts.
+    /// `None` everywhere else.
+    ///
+    /// **Only the order round the loop matters, not where it is counted
+    /// from.** Arcs join each node to the next and the last back to the first
+    /// ([`Arrangement::cut_the_crossings_into_arcs`]), so any turn of the true
+    /// order cuts the same arcs. Two places have one order round a loop, so
+    /// either is first. With the corner, the loop enters the side of `P` the
+    /// corner is on through one place, runs past the corner, and leaves
+    /// through the other, so `[enters, corner, leaves]` is a turn of the true
+    /// order wherever the start is. The corner is on the loop by the model's
+    /// word, and that word is checked against the loop's plane first
+    /// ([`Arrangement::is_proved_off_the_loops_plane`]).
+    ///
+    /// **Which place it enters by is read off which meet of the line is the
+    /// lower** ([`the_lower_meet_first_round_the_loop`]): with the loop's plane
+    /// wound first, the loop runs off the side `n × d` points to at the lower
+    /// meet, for `n` its plane's normal and `d` the way the line runs, and with
+    /// the ball or pipe first, onto it. The corner's side of the line in those
+    /// terms is its side of `P` times the sign of `n_P · (n × d)`, since `P`
+    /// holds the line and the corner is on the loop's plane.
+    ///
+    /// **Every other pair keeps what another reading proves of it.** Those
+    /// readings count from the true start, so its turn agrees with all of
+    /// them, and the first of the three turns that does is the one read. A
+    /// turn that disagreed with one would sort the three into an order that is
+    /// no turn of the true one.
+    ///
+    /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
+    /// whose inner side lies along `x = 2`, both turned `π/2` about `z`: the
+    /// side's plane cuts the plate's top and the bar's top circles at two
+    /// places `2.2e−16` apart, and the bar's seam corner on its top lies
+    /// between them. Each circle is walked from the seam, in a box `2.8e−13`
+    /// wide that holds every node on it, so no reading counted from the start
+    /// orders any two of them, and every certified fuse of the two was refused
+    /// (Q2655, `tests/a_bar_flush_with_an_l_plates_inner_side_turned.rs`).
+    fn as_the_two_meets_of_one_cut_alone_on_the_loop_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve { ref wound_as, .. } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let (flat, plane_first) = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) => (flat, true),
+            (None, Some(flat)) => (flat, false),
+            (Some(_), Some(_)) | (None, None) => return None,
+        };
+        let quadric = &wound_as[usize::from(plane_first)];
+        if !matches!(quadric, Surface::Sphere(_) | Surface::Cylinder(_)) {
+            return None;
+        }
+        let mut meets: [Option<(usize, [Surface; 3])>; 2] = [None, None];
+        let mut corner = None;
+        for at in (0..self.nodes.len()).filter(|&at| self.nodes[at].crossings.contains(&crossing)) {
+            match (self.nodes[at].vertex, self.the_one_meet_it_stands_for(at)) {
+                (None, Some((three, which @ (0 | 1)))) if meets[usize::from(which)].is_none() => {
+                    meets[usize::from(which)] = Some((at, three));
+                }
+                (Some(_), None) if corner.is_none() => corner = Some(at),
+                (Some(_) | None, Some(_) | None) => return None,
+            }
+        }
+        let [Some((lower, three)), Some((higher, also))] = meets else {
+            return None;
+        };
+        if three != also {
+            return None;
+        }
+        let Some(corner) = corner else {
+            return Some(if first == lower {
+                Decision::Pos
+            } else {
+                Decision::Neg
+            });
+        };
+        if self.is_proved_off_the_loops_plane(corner, flat) {
+            return None;
+        }
+        let cut = self.the_cut_through_the_loop_at(lower, wound_as)?;
+        let mut planes = three.iter().filter_map(Surface::as_plane);
+        let (Some(one), Some(other), None) = (planes.next(), planes.next(), planes.next()) else {
+            return None;
+        };
+        let (way, _) = the_way_two_planes_line_runs(one, other)?;
+        let across = cross_of_intervals(
+            one.normal().components().map(Interval::exactly),
+            other.normal().components().map(Interval::exactly),
+        );
+        let along = if way == Decision::Pos {
+            across
+        } else {
+            across.map(|component| -component)
+        };
+        let facing = dot_of(
+            cut.normal().components().map(Interval::exactly),
+            cross_of_intervals(flat.normal().components().map(Interval::exactly), along),
+        )
+        .sign();
+        let side = self.side_of_a_corner(
+            self.the_baked_corner_of(&self.nodes[corner]),
+            &Surface::Plane(cut),
+        );
+        let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
+        if !(proved(facing) && proved(side)) {
+            return None;
+        }
+        let corner_past_the_line = side == facing;
+        let lower_enters = corner_past_the_line != plane_first;
+        let (enters, leaves) = if lower_enters {
+            (lower, higher)
+        } else {
+            (higher, lower)
+        };
+        let read = |one: usize, other: usize| match self
+            .as_proved_before_any_policy(crossing, one, other)
+        {
+            Ok((Decision::Undecidable { .. }, _)) => {
+                Ok(self.as_a_reading_asked_after_the_policy_says(crossing, one, other))
+            }
+            Ok((decided, _)) => Ok(Some(decided)),
+            Err(why) => Err(why),
+        };
+        let turns = [
+            [enters, corner, leaves],
+            [corner, leaves, enters],
+            [leaves, enters, corner],
+        ];
+        let mut agreed = None;
+        for turn in turns {
+            let mut agrees = true;
+            for (before, after) in [(0, 1), (0, 2), (1, 2)] {
+                let said = read(turn[before], turn[after]).ok()?;
+                agrees &= said.is_none() || said == Some(Decision::Pos);
+            }
+            if agrees {
+                agreed = Some(turn);
+                break;
+            }
+        }
+        let turn = agreed?;
+        let place = |node: usize| turn.iter().position(|&each| each == node);
+        Some(if place(first)? < place(second)? {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
+    }
+
+    /// Whether the plane a loop runs round proves the corner `node` off it by
+    /// more than writing the corner down costs
+    /// ([`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost)).
+    ///
+    /// A corner of the face a loop runs through is on the loop by the model's
+    /// word ([`BakedCorner::around`]), and a corner read out of the model with
+    /// two surfaces round it was asked about neither (§286). One this far off
+    /// the plane is not on the loop, whatever the model says, so no order round
+    /// the loop is read off where it lies.
+    fn is_proved_off_the_loops_plane(&self, node: usize, flat: &Plane) -> bool {
+        let as_written = self.nodes[node].point;
+        let side = flat.side_of_point(super::bake::grown_by(
+            as_written,
+            super::bake::what_writing_the_corner_down_cost(as_written.enclosure()),
+        ));
+        matches!(side, Decision::Pos | Decision::Neg)
     }
 
     /// Which of two nodes on the loop a plane `S` cuts a ball or a pipe `Q` in
@@ -11329,6 +11661,168 @@ impl<'f> Arrangement<'f> {
         Some([k, a])
     }
 
+    /// Which side of `partner` a seam corner lies, on a pipe and on a plane
+    /// square to the pipe's axis, both among the surfaces it is `on`: read as
+    /// the point where its `seam` plane crosses the circle the two meet in, the
+    /// crossing whose box is `at` ([`BakedCorner::seam_plane`], §294.9).
+    /// `None` where it is not that shape, where the box does not say which of
+    /// the two crossings it is, or where a product would round.
+    ///
+    /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
+    /// whose inner side lies along `x = 2`, both turned `π/2` about `z`, has
+    /// the side's plane stored with the normal `(2⁻⁵², 1, 0)` and the offset
+    /// `2`. That plane cuts the bar's floor circle at two points `2.2e−16`
+    /// apart, and the bar's seam corner on the floor is between them,
+    /// `1.09e−47` past the plane, in a box `1.1e−13` wide that holds both.
+    /// [`Arrangement::side_of_a_plane_crossing_a_cap_circle`] needs a box
+    /// between the two, and every fuse with the bar first was refused
+    /// `Undecidable` "side of plane" (Q2655).
+    ///
+    /// **The corner is where the line the cap and the seam plane share crosses
+    /// the circle.** Let the cap be `n_c·p = d_c`, the seam plane
+    /// `n_s·p = d_s` and `partner` `n·p = d`, and let the axis run through `o`
+    /// along `w`. The line runs along `e = n_c × n_s`, and `e·w` is exactly
+    /// nought, since `n_c` lies along `w`. Let `Y` be where the line meets
+    /// `partner`, so `Y` is the meet of the three planes, and `D = n·e`, which
+    /// is not nought or the line never meets `partner`. A point `Y + t·e` of
+    /// the line is `t·D` off `partner`, so the side is the sign of `t·D` at the
+    /// corner.
+    ///
+    /// - **The pipe along the line** is `f(t) = |b|²·t² + 2·B·t + C`, for
+    ///   `b = e × w`, `B = ((Y − o) × w)·b` and `C = |(Y − o) × w|² − r²·|w|²`,
+    ///   since `e` is square to `w`. Its two roots are the two crossings.
+    /// - **The box says which root the corner is**: `e·(p − o)` is nought at
+    ///   the middle of the chord and grows along `e`, so its sign over the box
+    ///   is `Pos` at the root with the larger `t` and `Neg` at the other. The
+    ///   middle of the chord is the foot of the circle's centre on the line,
+    ///   and `e·(c − o)` is nought for every point `c` of the axis.
+    /// - **Where `C < 0`**, `Y` is inside the pipe, so the two roots lie either
+    ///   side of `t = 0` and the corner's `t` has the box's sign.
+    /// - **Where `C > 0`**, both roots lie on the side of `t = 0` that `−B`
+    ///   points to.
+    /// - **Where `C = 0`**, `Y` is a root, the larger one where `B > 0`. If it
+    ///   is the corner, the corner is on `partner`; if not, the corner is on
+    ///   the side `−B` points to.
+    ///
+    /// Every quantity is worked out exactly and never divided: `Y` as
+    /// `D·Y = d_c·(n_s × n) + d_s·(n × n_c) + d·(n_c × n_s)`, then `C` times
+    /// `D²`, which keeps the sign of `C`, and `B` times `D`, which does not keep
+    /// the sign of `B`. So the side where `C > 0` is the sign of `−B·D`, which
+    /// is the sign of `t·D` there, and where `C = 0` the larger root is `Y`
+    /// where `B·D` and `D` have one sign.
+    fn side_of_a_plane_at_a_seam_corner(
+        on: &[Surface],
+        at: PredicatePoint,
+        seam: &Plane,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        on.iter().find_map(|pipe| {
+            let Surface::Cylinder(pipe) = pipe else {
+                return None;
+            };
+            on.iter().find_map(|cap| {
+                let Surface::Plane(cap) = cap else {
+                    return None;
+                };
+                if !lie_along_one_line(
+                    cap.normal().components(),
+                    pipe.axis().direction().components(),
+                ) {
+                    return None;
+                }
+                Self::side_of_a_plane_where_a_line_crosses_a_cap_circle(
+                    partner, cap, seam, pipe, at,
+                )
+            })
+        })
+    }
+
+    /// The side of `partner` at the point whose box is `at` where the line
+    /// `cap` and `through` share crosses the circle `cap` meets `pipe` in, for
+    /// a `cap` square to the pipe's axis; `None` where the box does not say
+    /// which crossing, `partner` runs along the line, or a product would round
+    /// ([`Arrangement::side_of_a_plane_at_a_seam_corner`] says how).
+    fn side_of_a_plane_where_a_line_crosses_a_cap_circle(
+        partner: &Plane,
+        cap: &Plane,
+        through: &Plane,
+        pipe: &Cylinder,
+        at: PredicatePoint,
+    ) -> Option<Decision> {
+        let exact = |vector: [f64; 3]| vector.map(|component| vec![component]);
+        let [cap_normal, its_normal, normal] =
+            [cap, through, partner].map(|flat| exact(flat.normal().components()));
+        let (origin, along) = (
+            pipe.axis().origin().coordinates(),
+            exact(pipe.axis().direction().components()),
+        );
+        let line = exactly_crossed(&cap_normal, &its_normal)?;
+        let box_ = at.enclosure();
+        let which_root = dot_of(
+            line.each_ref()
+                .map(|component| held_as_an_interval(component)),
+            core::array::from_fn(|axis| box_[axis] - Interval::exactly(origin[axis])),
+        )
+        .sign();
+        if !matches!(which_root, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        let along_the_line = exactly_dotted_across(&normal, &line)?;
+        let way = expansion_sign(&along_the_line);
+        if !matches!(way, Decision::Pos | Decision::Neg) {
+            return None;
+        }
+        let meet = exactly_added_across(
+            &exactly_added_across(
+                &exactly_scaled_across(&exactly_crossed(&its_normal, &normal)?, &[cap.offset()])?,
+                &exactly_scaled_across(
+                    &exactly_crossed(&normal, &cap_normal)?,
+                    &[through.offset()],
+                )?,
+            ),
+            &exactly_scaled_across(&line, &[partner.offset()])?,
+        );
+        let off_the_axis = exactly_added_across(
+            &meet,
+            &exactly_scaled_across(&exact(origin), &negated(&along_the_line))?,
+        );
+        let square_to_the_axis = exactly_crossed(&off_the_axis, &along)?;
+        let radius_squared = exactly_scaled(&[pipe.radius()], pipe.radius())?;
+        let pipe_at_the_meet = expansion_sign(&exactly_added(
+            &exactly_dotted_across(&square_to_the_axis, &square_to_the_axis)?,
+            &negated(&exactly_multiplied(
+                &exactly_multiplied(&radius_squared, &exactly_dotted_across(&along, &along)?)?,
+                &exactly_multiplied(&along_the_line, &along_the_line)?,
+            )?),
+        ));
+        let lean = expansion_sign(&exactly_dotted_across(
+            &square_to_the_axis,
+            &exactly_crossed(&line, &along)?,
+        )?);
+        let times = |one: Decision, other: Decision| {
+            if one == other {
+                Decision::Pos
+            } else {
+                Decision::Neg
+            }
+        };
+        if pipe_at_the_meet == Decision::Neg {
+            return Some(times(which_root, way));
+        }
+        if !matches!(pipe_at_the_meet, Decision::Pos | Decision::Zero)
+            || !matches!(lean, Decision::Pos | Decision::Neg)
+        {
+            return None;
+        }
+        let the_meet_is_the_corner =
+            pipe_at_the_meet == Decision::Zero && times(lean, way) == which_root;
+        Some(if the_meet_is_the_corner {
+            Decision::Zero
+        } else {
+            the_other_way(lean)
+        })
+    }
+
     /// How many times the face's boundary winds round each walk, counting only
     /// what one lump of the drawing can say on its own.
     ///
@@ -13838,9 +14332,11 @@ fn the_way_a_plane_and_a_pipe_wind(pair: &[Surface; 2], across: Decision) -> Dec
 /// so no sign read over it says which arc it is on. A round bar through
 /// `(1.5, 1)` in an L plate turned `π/2` about `z` starts the loop on the
 /// plate's top at the bar's seam, which the stored numbers put `1.09e−47` past
-/// the line, and the box counted from is `2.3e−13` wide. Every certified fuse
-/// of the two with the plate first is refused for it
-/// (`a_bar_flush_with_an_l_plates_inner_side_turned.rs`, Q2629).
+/// the line, and the box counted from is `2.3e−13` wide. That loop holds no
+/// node but the two meets and at most one corner, so
+/// [`Arrangement::as_the_two_meets_of_one_cut_alone_on_the_loop_say`] orders
+/// it without reading the start, and the fuses with the plate first answer
+/// (`a_bar_flush_with_an_l_plates_inner_side_turned.rs`, Q2629, Q2655).
 fn the_lower_meet_first_round_the_loop(
     wound_as: &[Surface; 2],
     starts: [PredicatePoint; 2],
@@ -14947,6 +15443,44 @@ fn exactly_dotted(one: [f64; 3], other: [f64; 3]) -> Option<Vec<f64>> {
 /// `expansion` turned round, which is exact: no entry changes but its sign.
 fn negated(expansion: &[f64]) -> Vec<f64> {
     expansion.iter().map(|entry| -entry).collect()
+}
+
+/// `one × other` for two vectors whose components are expansions, exactly;
+/// `None` where a product would round.
+fn exactly_crossed(one: &[Vec<f64>; 3], other: &[Vec<f64>; 3]) -> Option<[Vec<f64>; 3]> {
+    let [x, y, z] = [0, 1, 2].map(|axis| {
+        let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
+        Some(exactly_added(
+            &exactly_multiplied(&one[next], &other[last])?,
+            &negated(&exactly_multiplied(&one[last], &other[next])?),
+        ))
+    });
+    Some([x?, y?, z?])
+}
+
+/// `one·other` for two vectors whose components are expansions, exactly;
+/// `None` where a product would round.
+fn exactly_dotted_across(one: &[Vec<f64>; 3], other: &[Vec<f64>; 3]) -> Option<Vec<f64>> {
+    (0..3).try_fold(Vec::new(), |total, axis| {
+        Some(exactly_added(
+            &total,
+            &exactly_multiplied(&one[axis], &other[axis])?,
+        ))
+    })
+}
+
+/// Each component of `vector` times the expansion `factor`, exactly; `None`
+/// where a product would round.
+fn exactly_scaled_across(vector: &[Vec<f64>; 3], factor: &[f64]) -> Option<[Vec<f64>; 3]> {
+    let [x, y, z] = vector
+        .each_ref()
+        .map(|component| exactly_multiplied(component, factor));
+    Some([x?, y?, z?])
+}
+
+/// `one + other` for two vectors whose components are expansions, exactly.
+fn exactly_added_across(one: &[Vec<f64>; 3], other: &[Vec<f64>; 3]) -> [Vec<f64>; 3] {
+    core::array::from_fn(|axis| exactly_added(&one[axis], &other[axis]))
 }
 
 /// An interval holding what `expansion` adds up to. Each entry is exact and
@@ -17181,8 +17715,8 @@ mod tests {
     use core::cmp::Ordering;
 
     use rcad_geom::{
-        Axis, Cone, HalfSpace, Isometry, MeetOfThree, Plane, Point, Scale, Surface, Vector,
-        meet_of_three_surfaces,
+        Axis, Cone, Cylinder, HalfSpace, Isometry, MeetOfThree, Plane, Point, Scale, Surface,
+        Vector, meet_of_three_surfaces,
     };
     use rcad_predicates::{
         Decision, Interval, Point as PredicatePoint, Policy, ProvenanceLog, orient3d,
@@ -17430,6 +17964,69 @@ mod tests {
             Arrangement::side_of_a_plane_parallel_to_one_it_is_on(&three, &leaning),
             None,
             "parallel to none of the three"
+        );
+    }
+
+    /// The pipe of radius one about the `z` axis, its cap `z = 0` and the
+    /// plane `y = 0` through its axis: the line the two planes share is the `x`
+    /// axis, which crosses the cap's circle at `(1, 0, 0)` and `(−1, 0, 0)`,
+    /// both `f64` points, so the stored partner's own predicate says which
+    /// side of it each crossing is on. Each partner runs through `(a, 0, 0)`
+    /// exactly, leaning off the `x` axis a different way each time and turned
+    /// round too, so the three planes meet at `(a, 0, 0)` on the stored
+    /// numbers: inside the pipe for `|a| < 1`, outside it for `|a| > 1`, which
+    /// puts both crossings on one side, and on it for `|a| = 1`, where the
+    /// crossing at the meet is on the partner. A box holding both crossings,
+    /// and a partner along the line, say nothing (Q2655).
+    #[test]
+    fn a_plane_puts_each_place_a_line_crosses_a_cap_circle_on_the_side_its_own_sign_says() {
+        let pipe = Cylinder::new(Axis::z(), 1.0).expect("a positive radius");
+        let cap = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a normal");
+        let through = Plane::from_coefficients([0.0, 1.0, 0.0, 0.0]).expect("a normal");
+        let round = |x: f64, width: f64| {
+            PredicatePoint::Constructed([
+                Interval::new(x - width, x + width).expect("an interval"),
+                Interval::new(-1e-9, 1e-9).expect("an interval"),
+                Interval::exactly(0.0),
+            ])
+        };
+        let side = |partner: &Plane, at: PredicatePoint| {
+            Arrangement::side_of_a_plane_where_a_line_crosses_a_cap_circle(
+                partner, &cap, &through, &pipe, at,
+            )
+        };
+        let mut on_the_partner = 0;
+        for a in [0.5, -0.5, 2.0, -2.0, 1.0, -1.0] {
+            for [k, m] in [[0.0, 0.0], [3.0, 0.0], [0.0, 1.0], [-2.0, 5.0]] {
+                for facing in [1.0, -1.0] {
+                    let partner = Plane::from_point_and_normal(
+                        Point::from([a, 0.0, 0.0]),
+                        Vector::new(facing, facing * k, facing * m),
+                    )
+                    .expect("a plane");
+                    for x in [1.0, -1.0] {
+                        let truly = partner.side_of_point(PredicatePoint::from([x, 0.0, 0.0]));
+                        on_the_partner += usize::from(truly == Decision::Zero);
+                        assert_eq!(
+                            side(&partner, round(x, 1e-9)),
+                            Some(truly),
+                            "through ({a}, 0, 0) facing ({facing}, {k}, {m}), at ({x}, 0, 0)"
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            on_the_partner, 16,
+            "every partner through (±1, 0, 0) holds that crossing exactly"
+        );
+        let partner = Plane::from_coefficients([1.0, 0.0, 0.0, -0.5]).expect("a normal");
+        assert_eq!(side(&partner, round(0.0, 1.5)), None, "a box holding both");
+        let along = Plane::from_coefficients([0.0, 1.0, 1.0, 0.0]).expect("a normal");
+        assert_eq!(
+            side(&along, round(1.0, 1e-9)),
+            None,
+            "a partner along the line"
         );
     }
 
