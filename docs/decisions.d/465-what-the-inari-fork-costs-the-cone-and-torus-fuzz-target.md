@@ -330,3 +330,13 @@ fuzz target's body on one corpus file at a time.
   function for the same underflow. Q2734, after it, replays the other 11 slow
   inputs: Q2732 traced only these five, and 481232f8's counts are shaped
   differently.
+- **Since Q2733 it walks 21 points** (merged at ca9b6493). `mise exec --
+  cargo run -q --profile test -p rcad-fuzz-explain --
+  where_a_cone_or_a_torus_crosses <corpus file>` prints `Asked { points: 21,
+  orders: 1, scalings: 2 }` for 70fbff12 and for 0228ef21, where the base
+  printed 350 723 and 170 693. The same parabola written 2^340 larger, about
+  4e-201 across, was refused `TooManyPointsAlongOneCrossing` by the old count
+  and now walks 21 too; `walk::tests::a_parabola_written_tiny_is_walked_into_as_many_points_as_the_same_one_written_large`
+  pins both sizes. Scaled by 2^1006 the pair walked 21 points even on the
+  old count, so the fault needed a tiny size, not a wide spread: class C, and
+  fixed.
