@@ -2842,7 +2842,8 @@ impl BuildingAMesh {
     ///
     /// `None` when the face is not a ring: two loops is not enough, they both
     /// have to go right round, or there is nothing across to cut to. `None` as
-    /// well when a cut meets two islands, a leg round an island meets a loop,
+    /// well when a cut meets two islands but where they touch, a leg round an
+    /// island meets a loop,
     /// another island or another cut, the patches do not take each side of an
     /// island once, or an island lies in no patch.
     #[expect(
@@ -5939,8 +5940,15 @@ fn the_sides_of_a_rim(cap: &WalkedLoop, whole: f64) -> impl Iterator<Item = [[f6
 /// thirds of the way round it, which more than one of the four cuts meets
 /// (Q1858).
 ///
-/// `None` overall when a cut meets two islands, a cut that meets one runs
-/// level across the chart, where neither loop is the nearer to any corner, or
+/// **A cut that meets two islands where they touch goes round the first
+/// through that point alone** ([`where_a_cut_meets_islands_that_touch`]). A
+/// thin bar resting on the inside of a fat one leaves two windows in the fat
+/// bar's wall that meet where its two loops do, and a cut at a quarter can run
+/// exactly through there (Q2649).
+///
+/// `None` overall when a cut meets two islands anywhere else, a cut that meets
+/// an island runs level across the chart, where neither loop is the nearer to
+/// any corner, or
 /// a cut that meets an island another cut meets as well crosses no side of it
 /// in the turn it is taken in.
 fn where_a_rings_cuts_go_round_islands(
@@ -5950,28 +5958,37 @@ fn where_a_rings_cuts_go_round_islands(
 ) -> Option<Vec<Option<ARingsCutRoundAnIsland>>> {
     let mut meeting = Vec::with_capacity(ends.len());
     for &[leaving, arriving] in ends {
+        let cut = [leaving, arriving];
         let meets: Vec<usize> = (0..islands.len())
-            .filter(|&at| a_leg_meets_an_island(&islands[at], [leaving, arriving], None, whole))
+            .filter(|&at| a_leg_meets_an_island(&islands[at], cut, None, whole))
             .collect();
         meeting.push(match meets[..] {
             [] => None,
-            [which] if leaving[1] != arriving[1] => Some(which),
-            _ => return None,
+            _ if leaving[1] == arriving[1] => return None,
+            [which] => Some((which, None)),
+            [which, ..] => Some((
+                which,
+                Some(where_a_cut_meets_islands_that_touch(
+                    &meets, islands, cut, whole,
+                )?),
+            )),
         });
     }
     ends.iter()
         .zip(&meeting)
-        .map(|(&[leaving, arriving], &which)| {
-            let Some(which) = which else {
+        .map(|(&[leaving, arriving], &met)| {
+            let Some((which, through)) = met else {
                 return Some(None);
             };
             let island = in_the_turn_nearest(&islands[which], leaving[0], whole);
             let alone = meeting
                 .iter()
-                .filter(|&&other| other == Some(which))
+                .filter(|other| other.is_some_and(|(at, _)| at == which))
                 .count()
                 == 1;
-            let corners = if alone {
+            let corners = if let Some(corner) = through {
+                [corner, corner]
+            } else if alone {
                 let towards_leaving = (leaving[1] - arriving[1]).signum();
                 [
                     the_corner_furthest(&island, towards_leaving),
@@ -5988,6 +6005,29 @@ fn where_a_rings_cuts_go_round_islands(
             }))
         })
         .collect()
+}
+
+/// The corner of the first of the islands `meets` that each of them passes,
+/// where the straight `cut` meets them all and meets none of them anywhere
+/// else, or `None` when there is no such corner. The cut then goes round the
+/// first of them through that corner alone, and touches the others there.
+fn where_a_cut_meets_islands_that_touch(
+    meets: &[usize],
+    islands: &[WalkedLoop],
+    cut: [[f64; 2]; 2],
+    whole: f64,
+) -> Option<usize> {
+    let first = &islands[*meets.first()?];
+    (0..first.points.len()).find(|&corner| {
+        meets.iter().all(|&which| {
+            let island = &islands[which];
+            island
+                .points
+                .iter()
+                .position(|&point| point == first.points[corner])
+                .is_some_and(|shared| !a_leg_meets_an_island(island, cut, Some(shared), whole))
+        })
+    })
 }
 
 /// The island's corners a cut from `leaving` to `arriving` reaches it at and
