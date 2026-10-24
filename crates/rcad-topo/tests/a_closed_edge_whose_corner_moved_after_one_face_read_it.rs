@@ -47,8 +47,9 @@
 //! The pins below are the same two bars at other leans, with the pair turned
 //! about the upright bar's axis and the leaning bar rolled about its own. At
 //! each, the loop runs along the leaning pipe's ruling where it crosses the
-//! upright seam, and the rounding comes out positive at some and negative at
-//! others ([`the_shapes_here_read_the_way_off_rounding_and_get_both_signs`]).
+//! upright seam. At each but the turn of four radians the fuse reads the way
+//! against the leaning pipe, and the rounding comes out positive at some and
+//! negative at others ([`the_shapes_here_read_the_way_off_rounding_and_get_both_signs`]).
 //! Every answer measures what the formula says either way round. The lane
 //! that ran this swept 89 shapes, at leans from 0.1 to 0.6, eight turns, two
 //! rolls and three pairs of radii, with all three rules either way round: 534
@@ -63,9 +64,9 @@
 //!   from the fuse. The intersection meshes all the same; the union and both
 //!   differences are refused `AWireWillNotLieFlatOnItsFace`
 //!   ([`the_union_where_the_dot_rounds_to_nothing_is_refused`]).
-//! - Turned 4.0 or 5.5, where the upright pipe names the way rather than the
-//!   leaning one, and at some turns leaning 0.6, the union and one difference
-//!   are refused `CurvedFaceWithAHoleGoesTooFarRound`
+//! - Turned 4.0 or 5.5, and at some turns leaning 0.6, the union and one
+//!   difference are refused `CurvedFaceWithAHoleGoesTooFarRound`. At 4.0 the
+//!   fuse reads the way against the upright pipe rather than the leaning one
 //!   ([`the_same_pair_turned_four_radians_is_refused_its_union`]).
 //!
 //! The fuses run certified, in a model of 100 mm.
@@ -192,15 +193,20 @@ fn the_same_pair_turned_four_radians_is_refused_its_union() {
     }
 }
 
-/// At every shape the pins above answer at, the way the closed edge is stored
-/// running is read off a dot product that is zero but for its rounding, and
-/// that rounding is positive at some shapes and negative at others. So the
-/// pins have a right answer with the edge stored either way, and not only the
-/// one the sign happened to give at Q2571's shape.
+/// At each turned shape pinned above but the one turned four radians, the way
+/// the closed edge is stored running is read off a dot product that is zero
+/// but for its rounding, and that rounding is positive at some shapes and
+/// negative at others. So the pins have a right answer with the edge stored
+/// either way, and not only the one the sign happened to give at Q2571's shape.
 ///
 /// It is read as the fuse reads it: off the answer's own two pipes at the
 /// edge's corner, the loop's direction `∇S × ∇T` against the leaning pipe's
 /// longitude `axis × ∇T`, with each gradient as `Model::validate` spells it.
+/// The pipe the fuse reads against is whichever sorts first by its bits
+/// (`the_curved_one_of` in `validate.rs`), not always the leaning one. A print
+/// in the fuse, since removed, showed it reading the leaning pipe at these five
+/// shapes, at the corner read here and to the sign read here, and the upright
+/// pipe at the turn of four radians.
 #[test]
 fn the_shapes_here_read_the_way_off_rounding_and_get_both_signs() {
     let read: Vec<Decision> = [
@@ -405,8 +411,9 @@ fn the_same_volume(upright_first: Measured, leaning_first: Measured, what: &str)
 }
 
 /// Which way the one closed edge of the piece the two bars share is stored
-/// running, read as the fuse reads it, after asserting that the dot product
-/// it is read off is zero but for rounding.
+/// running, read against the leaning pipe as the fuse reads it at the shapes
+/// this is handed, after asserting that the dot product it is read off is zero
+/// but for rounding.
 ///
 /// That dot is `(∇U × ∇L) · (axis × ∇L)` for `U` the upright pipe and `L` the
 /// leaning one, both gradients of length 2 or 3 and the axis of length one,
