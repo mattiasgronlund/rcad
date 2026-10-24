@@ -308,7 +308,7 @@ fn how_far_the_walk_reads_a_corner_from(
     let biggest = |range: Interval| (-range.lo()).max(range.hi());
     let off_the_plane = biggest(on_the_plane(stored));
     let clear = (on_the_plane(seen_from) - Interval::exactly(off_the_plane)).lo();
-    if !(clear > 0.0) {
+    if clear.is_nan() || clear <= 0.0 {
         return None;
     }
     let meet = meet.enclosure();
