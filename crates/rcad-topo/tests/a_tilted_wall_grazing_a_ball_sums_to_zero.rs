@@ -155,12 +155,15 @@ fn round_either_walls_circle_the_two_places_sweep_exactly_zero() {
 /// places, by name, with nothing else in its log.
 ///
 /// With the ball first, the ball's face is split first, and the order asked is
-/// round a wall's circle: the arm §244.5 changed, as wide as the wider box.
-/// Before §244.5 the two were folded into one node there, and every fuse went
-/// on to refuse on `orient3d`, the turn between the two walls' circles at that
-/// node. With the prism first, a wall's face is split first, and the order
-/// asked is along the edge the two walls share, a length, which the policy
-/// was always asked about.
+/// round a wall's circle: the arm §244.5 changed, filed as how far apart a
+/// point of one box may be from a point of the other, rounded up. Until Q2144
+/// it was filed as the wider box's width, which here is the same distance
+/// before the round-up. Before §244.5 the two were folded into one node there,
+/// and every fuse went on to refuse on `orient3d`, the turn between the two
+/// walls' circles at that node. With the prism first, a wall's face is split
+/// first, and the order asked is along the edge the two walls share, a length,
+/// which the policy was always asked about. It is filed at `4.4e-14`, wider
+/// than the two boxes let the places be apart.
 #[test]
 fn a_certified_fuse_refuses_on_the_order_of_the_two_places() {
     let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
@@ -170,7 +173,7 @@ fn a_certified_fuse_refuses_on_the_order_of_the_two_places() {
         the_walls_through_the_z_axis(&model, prism),
         the_only_surface_of(&model, ball),
     );
-    let widest = places[0].uncertainty().max(places[1].uncertainty());
+    let apart = how_far_apart_the_two_may_be(places);
     for rule in EVERY_RULE {
         for ball_first in [true, false] {
             let refused = match fuse(rule, ball_first, &Policy::certified()) {
@@ -187,14 +190,28 @@ fn a_certified_fuse_refuses_on_the_order_of_the_two_places() {
                 is_the_order_of(refused, places),
                 "{rule:?}, ball first {ball_first}: {refused:#?}"
             );
-            if ball_first {
-                assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
-                assert_eq!(refused.enclosure(), widest, "{rule:?}");
-            } else {
-                assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
-            }
+            assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
+            let rounded_up = apart * (1.0 + 8.0 * f64::EPSILON);
+            assert!(
+                apart <= refused.enclosure() && (!ball_first || refused.enclosure() <= rounded_up),
+                "{rule:?}, ball first {ball_first}: {} against {apart}",
+                refused.enclosure()
+            );
         }
     }
+}
+
+/// How far apart a point of one box may be from a point of the other.
+fn how_far_apart_the_two_may_be([one, other]: [PredicatePoint; 2]) -> f64 {
+    let (mine, theirs) = (one.enclosure(), other.enclosure());
+    (0..3)
+        .map(|axis| {
+            let furthest =
+                (mine[axis].hi() - theirs[axis].lo()).max(theirs[axis].hi() - mine[axis].lo());
+            furthest * furthest
+        })
+        .sum::<f64>()
+        .sqrt()
 }
 
 /// A tolerant policy merges the two places, which are `2⁻⁵⁰` apart, and the

@@ -57,10 +57,11 @@
 //!   because a corner moved by a shift that rounds nothing is handed on exact
 //!   (Q509). Before Q509 it refused `side of plane` there as well.
 //! - **A tolerant policy**, `Policy::tolerant(100.0)`, on the bar at no
-//!   placement: every fuse as under `certified`, except the corner moved off
-//!   the cap in a cut along the seam. That one refuses with
-//!   `TwoCurvesTouchWithoutCrossing` where `certified` finds the order along a
-//!   crossing `Undecidable`.
+//!   placement: every fuse as under `certified`. Until Q2144 the corner moved
+//!   off the cap in a cut along the seam refused with
+//!   `TwoCurvesTouchWithoutCrossing` instead: the order along a crossing
+//!   `certified` cannot decide was filed as `0` long, and the policy took the
+//!   moved corner and the one below it as one point.
 //! - **A ball's south pole** `(0, 0, -3)`, moved to five places. `validate`
 //!   refuses four with `VertexOffItsFaceSurface`, and the one moved onto the
 //!   equator at `(3, 0, 0)` with `APoleStandsWhereTheSurfaceDoesNotPinch`.
@@ -141,7 +142,7 @@ use rcad_geom::{
     SurfaceMeet, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
     intersect, walk, where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
 };
-use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Decision, Measures, Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 mod cones;
@@ -379,7 +380,6 @@ enum Outcome {
     /// `Error::Undecidable`, with a record naming this predicate.
     Undecidable(&'static str),
     CannotTellTheCellsOfAFaceApart,
-    TwoCurvesTouchWithoutCrossing,
     ResultIsNotManifold,
 }
 
@@ -551,10 +551,16 @@ fn a_cut_along_the_seam_refuses_a_corner_moved_in_the_cut_and_answers_one_moved_
     }
 }
 
-/// Under a tolerant policy the corner moved off the cap is not an order it
-/// cannot decide but a circle that touches the seam without crossing it.
+/// Under a tolerant policy the corner moved off the cap refuses as it does
+/// under `certified`: on the order of it and the fuse's own corner below it
+/// round the top circle, filed as how far apart the two are, a millimetre
+/// rounded up, which is past the policy's budget.
+///
+/// Until Q2144 that order was filed as the wider of the two boxes' widths,
+/// `0` for two exact points, so the policy took the two as one point and the
+/// fuse refused `TwoCurvesTouchWithoutCrossing` further on.
 #[test]
-fn under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_touches_without_crossing()
+fn under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_is_not_taken_as_the_corner_below_it()
  {
     let policy = Policy::tolerant(100.0);
     let bar = Shape::Bar(Isometry::identity());
@@ -570,10 +576,32 @@ fn under_a_tolerant_policy_a_corner_moved_off_the_cap_in_a_cut_along_the_seam_to
             );
         };
         cut(OFF_THE_WALL, Outcome::CannotTellTheCellsOfAFaceApart);
-        cut(OFF_THE_CAP, Outcome::TwoCurvesTouchWithoutCrossing);
         cut(
             A_QUARTER_TURN_ROUND_AND_OFF_THE_WALL,
             Outcome::TheSoundAnswer,
+        );
+
+        let records = match fuse(bar, OFF_THE_CAP, THE_HALF_PAST_THE_SEAM, rule, &policy) {
+            Err(Error::Undecidable { records }) => records,
+            Err(other) => panic!("{rule:?}: {other:?}"),
+            Ok(answer) => panic!("{rule:?}: {} solids", answer.solids.len()),
+        };
+        let [refused] = records.records() else {
+            panic!("{rule:?}: {records:#?}");
+        };
+        assert_eq!(refused.predicate(), "order along a crossing", "{rule:?}");
+        assert_eq!(refused.measures(), Measures::Length, "{rule:?}");
+        assert_eq!(
+            refused.inputs(),
+            [
+                PredicatePoint::from(WHERE_THE_BAR_PUTS_IT),
+                PredicatePoint::from(OFF_THE_CAP)
+            ],
+            "{rule:?}"
+        );
+        assert!(
+            1.0 <= refused.enclosure() && refused.enclosure() <= 1.0 + 8.0 * f64::EPSILON,
+            "{rule:?}: {refused:#?}"
         );
     }
 }
@@ -1586,7 +1614,6 @@ fn check(
         }
         Outcome::Undecidable(_)
         | Outcome::CannotTellTheCellsOfAFaceApart
-        | Outcome::TwoCurvesTouchWithoutCrossing
         | Outcome::ResultIsNotManifold => {
             refuses_as(shape, moved_to, partner, rule, policy, outcome);
         }
@@ -1617,9 +1644,6 @@ fn refuses_as(
         ),
         Outcome::CannotTellTheCellsOfAFaceApart => {
             matches!(refused, Error::CannotTellTheCellsOfAFaceApart { .. })
-        }
-        Outcome::TwoCurvesTouchWithoutCrossing => {
-            matches!(refused, Error::TwoCurvesTouchWithoutCrossing { .. })
         }
         Outcome::ResultIsNotManifold => matches!(refused, Error::ResultIsNotManifold { .. }),
         Outcome::ItBlamesItself | Outcome::TheSoundAnswer => {
