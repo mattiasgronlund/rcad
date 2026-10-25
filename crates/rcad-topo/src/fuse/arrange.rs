@@ -73,11 +73,12 @@
 use core::cmp::Ordering;
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, EdgeRun, HalfSpace, MeetOfThree, NamedRun, Orientation,
-    POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere, Surface,
-    SurfaceMeet, Torus, Vector, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
-    intersect, meet_of_three_surfaces, root_enclosing, where_a_closed_crossing_starts,
-    where_a_cones_apex_stands_against_a_plane, which_comes_first_round_a_crossing,
+    Axis, Cone, Cylinder, EdgeRun, HalfSpace, HalfSpaceThroughAPoint, MeetOfThree, NamedRun,
+    Orientation, POINT_ALONG_A_CROSSING_ROUNDOFF, Picker, Plane, PlaneAgreement, Point, Sphere,
+    Surface, SurfaceMeet, Torus, Vector, how_a_plane_leans_against_a_cone,
+    how_a_plane_leans_against_a_pipe, intersect, meet_of_three_surfaces, root_enclosing,
+    where_a_closed_crossing_starts, where_a_cones_apex_stands_against_a_plane,
+    which_comes_first_round_a_crossing,
 };
 use rcad_predicates::expansion::{
     compress, difference_of_two_products, expansion_sign, expansion_sum, product_is_exact,
@@ -11008,6 +11009,13 @@ impl<'f> Arrangement<'f> {
                 at,
             );
         }
+        if let (Surface::Cone(cone), Surface::Cylinder(pipe)) = (self.surface, partner)
+            && let [Picker::InFrontOfAFlatThrough(picker)] = self.crossings[crossing].picked_by()
+        {
+            return Self::whether_past_the_flat_surface_through_a_cones_apex(
+                picker, &cone, &pipe, at,
+            );
+        }
         let axis = match (self.surface, partner) {
             (Surface::Cylinder(pipe), _) => pipe.axis(),
             (Surface::Cone(cone), _) | (Surface::Sphere(_), Surface::Cone(cone)) => cone.axis(),
@@ -11193,6 +11201,70 @@ impl<'f> Arrangement<'f> {
                 PastThePicker::Yes(towards_the_flat_surface)
             }
             Decision::Undecidable { .. } | _ => PastThePicker::CannotTell,
+        }
+    }
+
+    /// On a cone a pipe off its axis cuts in two loops: whether a point is past
+    /// the flat half-space through the apex that picks one loop out, and if it
+    /// is, which side of the pipe that loop has towards it.
+    ///
+    /// The half-space is one `rcad_geom`'s `a_cone_and_a_pipe_off_one_axis`
+    /// builds, and it holds the two crossings of every straight line of the
+    /// pipe, inside it as well as on its skin, one each side of its flat
+    /// surface. Facing along the cone's axis for a pipe steeper than the cone,
+    /// the two loops are one on each nappe. Facing along the slant `n` for a
+    /// shallower pipe, they are both on one nappe: a line meeting both nappes
+    /// runs between two points of the solid double cone, so it is no shallower
+    /// than the cone.
+    ///
+    /// **Each loop is the edge of the cone's points inside the pipe on its
+    /// side**, one crossing of each line inside, and so all of them are in
+    /// front of the half-space that picks it. A point past that half-space is
+    /// never inside that piece, so where the pipe's inside meets the cone in two
+    /// pieces it is on the outside of the loop: the pipe's positive side, even
+    /// inside the other loop, where the pipe's sign is negative. That is a
+    /// shallower pipe, whose lines meet the cone twice each, so none of them
+    /// runs through the apex and the apex is outside the pipe; and a steeper
+    /// pipe whose inside misses the apex.
+    ///
+    /// **A steeper pipe whose inside holds the apex** has one line meeting the
+    /// cone at the apex alone, and its inside meets the cone in one piece
+    /// joining the two loops through the apex. Past either half-space is the
+    /// other nappe, wholly on that piece's side of the loop in front: the pipe's
+    /// negative side, even outside the other loop. So the side past it is
+    /// the pipe's sign at the apex either way, and an apex on the pipe's skin,
+    /// which `intersect` refuses, says nothing here.
+    ///
+    /// On or in front of the half-space the pipe cuts the cone in that loop
+    /// alone, so the pipe's sign is the side there, and [`PastThePicker::No`]
+    /// says so. A point whose box straddles the flat
+    /// surface is answered where the two readings agree. Read without this, the
+    /// walks round one loop on a tapered shaft a pin runs through said nothing
+    /// about the other: every node of either is on the pipe, and each loop's
+    /// outside was put with the other's inside (Q2789).
+    fn whether_past_the_flat_surface_through_a_cones_apex(
+        picker: &HalfSpaceThroughAPoint,
+        cone: &Cone,
+        pipe: &Cylinder,
+        at: PredicatePoint,
+    ) -> PastThePicker {
+        let side_of_the_pipe = |point| side_of_surface(&Surface::Cylinder(*pipe), point);
+        let known_to_be_past = match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => return PastThePicker::No,
+            Decision::Neg => true,
+            Decision::Undecidable { .. } | _ => false,
+        };
+        let towards_the_flat_surface =
+            match side_of_the_pipe(PredicatePoint::from(cone.apex().coordinates())) {
+                side @ (Decision::Pos | Decision::Neg) => side,
+                Decision::Zero | Decision::Undecidable { .. } | _ => {
+                    return PastThePicker::CannotTell;
+                }
+            };
+        if known_to_be_past || side_of_the_pipe(at) == towards_the_flat_surface {
+            PastThePicker::Yes(towards_the_flat_surface)
+        } else {
+            PastThePicker::CannotTell
         }
     }
 
