@@ -2661,14 +2661,25 @@ mod tests {
         let ball_beside =
             Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 5.0).expect("a radius"));
         let cone = Surface::Cone(crate::Cone::new(Axis::z(), 1.0).expect("a slope"));
-        // Its apex one unit off the others' axis, which crosses each of them in
-        // a quartic. On the axis they are ordered, below.
+        // Its apex one unit off the others' axis, which crosses the ball and
+        // the cone in a quartic. On the axis they are ordered, above, and so is
+        // the pipe, which is steeper than its skin.
         let cone_beside = Surface::Cone(
             crate::Cone::new(
                 Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
                 1.0,
             )
             .expect("a slope"),
+        );
+        // A pipe along one of the cone's straight lines, whose two stored
+        // components round to one `f64`, so it is exactly as steep as the
+        // cone's skin and each line of it meets the cone once or all along.
+        let pipe_along_a_line_of_the_cone = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::origin(), Vector::new(1.0, 0.0, 1.0)).expect("an axis"),
+                1.0,
+            )
+            .expect("a radius"),
         );
         let steeper_of_one_apex = Surface::Cone(crate::Cone::new(Axis::z(), 2.0).expect("a slope"));
         // A ball on the cone's axis whose skin runs through the apex: one circle
@@ -2701,13 +2712,13 @@ mod tests {
             [&pipe, &pipe],
             // Two balls with the same centre have no line between them.
             [&ball, &ball],
-            // A cone against a pipe, a ball or a second cone off its axis,
-            // which `intersect` refuses to name a crossing for at all.
+            // A cone against a ball or a second cone off its axis, or a pipe
+            // no steeper than its skin.
             [&cone_beside, &ball],
             [&ball, &cone_beside],
-            [&cone_beside, &pipe],
-            [&pipe, &cone_beside],
             [&cone, &cone_beside],
+            [&cone, &pipe_along_a_line_of_the_cone],
+            [&pipe_along_a_line_of_the_cone, &cone],
             // Two cones of one apex meet there and nowhere else, and one cone
             // twice is one surface.
             [&cone, &steeper_of_one_apex],
