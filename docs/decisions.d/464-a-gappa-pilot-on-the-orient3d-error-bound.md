@@ -18,7 +18,8 @@ Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
 and settles how the scripts join the tree and what notices the Rust moving
 under them. 464.11 is Q2675, which runs the branches where one of the nine
 differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
-464.13 is Q2678, on the side of a flat surface through a point.*
+464.13 is Q2678, on the side of a flat surface through a point. 464.14 is
+Q2679, on the side of rcad-geom's sphere.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -33,6 +34,7 @@ differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
   464.11  One of the nine differences at zero
   464.12  The sphere of surface.rs' tests
   464.13  The side of a flat surface through a point
+  464.14  The side of rcad-geom's sphere
 
 ### 464.1 The bugs a bound prover is for
 
@@ -241,7 +243,7 @@ stamp recorded.
 `on_floats` whose `error_bound` is a constant times a permanent:
 `ORIENT2D_ERROR_BOUND` and `surface.rs`' `ERROR_BOUND` (a test's, 464.12) in
 `rcad-predicates`, and `SIDE_OF_PLANE`,
-`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT` (464.13), `SIDE_OF_SPHERE`,
+`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT` (464.13), `SIDE_OF_SPHERE` (464.14),
 `SIDE_OF_CYLINDER`, `SIDE_OF_CONE` and `SIDE_OF_TORUS` in `rcad-geom`. Block
 1's pattern should carry over to them: one ratio hint per rounding, the error
 split into one term per product of the permanent so that Gappa can average
@@ -546,8 +548,9 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   was. Done for two, in 464.8: `ORIENT2D_ERROR_BOUND` and
   `SIDE_OF_PLANE_ERROR_BOUND` are proved at the code's constants, orient2d's
   with its products below the normals too, and each of the other six is a row
-  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12, and
-  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13.
+  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12,
+  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13, and
+  `SIDE_OF_SPHERE_ERROR_BOUND` in 464.14.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those. Done, in 464.9: three are proved at the code's
   constants, two of them false when every number is below `2⁻¹⁰²²`, and each
@@ -1842,8 +1845,9 @@ for byte as they were run.
 - Six rows, one for each bound 464.6 named that is not proved yet:
   `surface.rs`' `ERROR_BOUND` in `rcad-predicates` (Q2677, done in 464.12),
   and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` (Q2678, done in
-  464.13), `SIDE_OF_SPHERE_ERROR_BOUND`, `SIDE_OF_CYLINDER_ERROR_BOUND`,
-  `SIDE_OF_CONE_ERROR_BOUND` and `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
+  464.13), `SIDE_OF_SPHERE_ERROR_BOUND` (Q2679, done in 464.14),
+  `SIDE_OF_CYLINDER_ERROR_BOUND`, `SIDE_OF_CONE_ERROR_BOUND` and
+  `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
   Each is to be proved as 1 to 5 here prove orient2d and the side of a plane:
   `on_floats` line for line, the lemma for each product it checks is normal, a
   case split for each product it does not, a run below the code's constant,
@@ -3168,7 +3172,10 @@ check's hypotheses. Whether the code needs the check, a square below the
 normals with the other three normal as 464.8's 4 ran for plane's products, was
 not run. With the check in place `on_floats` never meets that case, and
 `HowFarOut` is a test's demo, so it is not a row. `rcad-geom`'s sphere, Q2679,
-is where that question has a user behind it.
+is where that question has a user behind it. 464.14's 6 ran it there, on an
+`on_floats` that is this one operation for operation at a smaller `B`, `6u +
+48u²`: the bound holds with any of the squares below the normals while one
+square is normal. It was not run here, at `8u + 64u²`.
 
 **6. The zeros `product_is_normal` lets through.** 464.8's `o2s.g` splits on
 a product that `on_floats` does not check. Here there is none, since
@@ -3722,6 +3729,8 @@ print(f"smallest: {a}u + {hi}u^2 proves, {a}u + {lo}u^2 fails")
   with the others that rows of 464 appended.
 - A square below the normals with the other three normal (5) was not run.
   `on_floats` never meets it while its check stands, so it is not a row here.
+  464.14's 6 ran it on `rcad-geom`'s sphere, the same arithmetic at a smaller
+  `B`.
 - How `c_sphere_noeb.g` gets past `eb`'s rounding (7) was not traced, as with
   plane's.
 - `field` on these scripts' hints (464.10).
@@ -4523,31 +4532,30 @@ And what is not a row:
 
 ### 464.14 The side of rcad-geom's sphere
 
-*Unfinished: the third lane wrote 1 to 5, ran every script and both
-bisections, and relayed past its budget before writing 6 to 10. What follows 5
-is the second lane's draft and the third lane's results, still to be written
-up as 6 to 10.*
-
 Q2679 took up `SIDE_OF_SPHERE_ERROR_BOUND` in `crates/rcad-geom/src/sphere.rs`,
-in three lanes on 2026-10-25. The first read the code, proved `tinysq.g` and
+in six lanes on 2026-10-25. The first read the code, proved `tinysq.g` and
 planned the cases. The second wrote `skincases.py` and `tinyzero.g`, checked
 the generator against 464.12's and ran twelve of its scripts. The third ran
-every proof, control, bisection and `coqc`, and wrote this up. The bound is
-proved at the code's constant, on the sum before `value`'s last rounding and
-on `value` too, in every case where `on_floats` hands `decide` a number. It is
-proved as well in every case `on_floats`' check refuses, a square below the
-normals: with another square normal the bound still holds, and with none
-normal `eb` is not normal, so `decide` does not compare. Coq checks each
-proof, modulo its hints. So the comment on the check, which says one square in
-the subnormals makes this level certify a wrong sign, is false, and the doc
-comment on the constant writes `15ε` where it means `ε²` and miscounts its own
-terms. Both are in `sphere.rs`, and fixing them is a row (10).
+every proof, control, bisection and `coqc`, and wrote 1 to 5. The fourth ran
+`tinyzero_nohint.g` and checked the figures. The fifth wrote 6 to 8 and began
+9, and the sixth finished 9 and wrote 10. The bound is proved at the code's
+constant, on the sum before `value`'s last rounding and on `value` too, in
+every case where `on_floats` hands `decide` a number. It is proved as well in
+every case `on_floats`' check refuses, a square below the normals: with
+another square normal the bound still holds, and with none normal `eb` is not
+normal, so `decide` does not compare. Coq checks each proof, modulo its hints.
+So the comment on the check, which says one square in the subnormals makes
+this level certify a wrong sign, is false, and the doc comment on the constant
+writes `15ε` where it means `15ε²` and miscounts its own terms. Both are in
+`sphere.rs`, and fixing them is two rows (10).
 
 Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
 `sphere.rs`, `point.rs` and `cascade.rs` at `05d44c66`. `git log --oneline
 3d60b0de..05d44c66` on the three prints nothing, so the last two are as
-464.12 read them. `u` is `2⁻⁵³`, and the code's `B = 6u + 48u²` is written `B
-= 6b-53 + 3b-102;`. Each script follows 464.8's pattern: one ratio hint per
+464.12 read them, and `git log --oneline 05d44c66..48cbcbde3` on them prints
+nothing too, so all three are as they stand at `48cbcbde3`, where this
+write-up was finished. `u` is `2⁻⁵³`, and the code's `B = 6u + 48u²` is
+written `B = 6b-53 + 3b-102;`. Each script follows 464.8's pattern: one ratio hint per
 rounding, the error split into one term per square of the permanent so that
 Gappa averages them, 464.5's lemma for each square `on_floats` checks is
 normal, and the step from `y`, the sum before `value`'s last rounding, to the
