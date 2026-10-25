@@ -41,6 +41,7 @@ python reads the whole file before it runs, bash reads a script as it goes.
 
 import fcntl
 import glob
+import hashlib
 import json
 import os
 import re
@@ -59,10 +60,11 @@ WAIT = float(os.environ.get("LAND_WAIT", "540"))
 STATE = os.path.join("target", "land")
 ROW = re.compile(r"^[TDQ][0-9]+$")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
+STEPS_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 JUST_OWN_ERROR = re.compile(r"^error: Recipe `[^`]*` failed(?: on line [0-9]+)? with exit code [0-9]+$")
 CLASS_TAG = re.compile(r"^(wrong|crash|refuses)/[ABCD]$")
 STEP_ARGS = {"add": 4, "after": 2, "tag": 2}
-USAGE = ("usage: just land [--steps <file>] [--answers <row>[,<row>...]] "
+USAGE = ("usage: just land [--steps <file> --steps-sha256 <hex>] [--answers <row>[,<row>...]] "
          "[--left-undone <row>[,<row>...]] <row>[,<row>...] <lane branch> "
          "<lane sha> <merge branch> [<tree to unlock and mark finished>...], then just land wait for as long as "
          "its last line says it is still running")
@@ -127,7 +129,7 @@ def start(argv):
         try:
             args = parsed(argv)
             report["merge_branch"] = args["merge_branch"]
-            args["steps"] = read_steps(args["steps"])
+            args["steps"] = read_steps(args["steps"], args["steps_sha256"])
             args["start_sha"] = report["start_sha"] = output("git", "rev-parse", "HEAD")
             refuse_unless_a_clean_linked_tree()
         except Stop:
@@ -156,12 +158,16 @@ def ended(report, stop):
 
 def parsed(argv):
     argv = list(argv)
-    flags = {"--steps": None, "--answers": None, "--left-undone": None}
+    flags = {"--steps": None, "--steps-sha256": None, "--answers": None, "--left-undone": None}
     while argv[:1] and argv[0] in flags:
         if len(argv) < 2 or flags[argv[0]] is not None:
             raise Stop("usage", f"{argv[0]} wants one value and comes at most once. {USAGE}")
         flags[argv[0]] = argv[1]
         argv = argv[2:]
+    if (flags["--steps"] is None) != (flags["--steps-sha256"] is None):
+        raise Stop("usage", f"--steps and --steps-sha256 come together or not at all. {USAGE}")
+    if flags["--steps-sha256"] is not None and not STEPS_SHA256.match(flags["--steps-sha256"]):
+        raise Stop("usage", f"'{flags['--steps-sha256']}' is not a sha256 digest: 64 lowercase hex digits. {USAGE}")
     if len(argv) < 4:
         raise Stop("usage", USAGE)
     rows, branch, sha, merge_branch, *trees = argv
@@ -183,26 +189,37 @@ def parsed(argv):
                             f"just land to close. {USAGE}")
     if not SHA.match(sha):
         raise Stop("usage", f"'{sha}' is not a sha: 7 to 40 lowercase hex digits. {USAGE}")
-    return {"steps": flags["--steps"], "answers": answers, "left_undone": left_undone, "rows": rows,
-            "branch": branch, "sha": sha, "merge_branch": merge_branch, "trees": trees}
+    return {"steps": flags["--steps"], "steps_sha256": flags["--steps-sha256"], "answers": answers,
+            "left_undone": left_undone, "rows": rows, "branch": branch, "sha": sha,
+            "merge_branch": merge_branch, "trees": trees}
 
 
-def read_steps(path):
+def read_steps(path, expected_sha256):
     """The lane's steps, one word to a line and a `+` line between steps, as the lander wrote them.
 
     One word to a line is so that no word is ever quoted: a row's text holds
     quotes, backticks and `§`, and the lander copies it into a file rather than
-    into a shell command (§384.2).
+    into a shell command (§384.2). `expected_sha256` is the hash `lanes.js`
+    computed from the text it told the lander to write; checked before this
+    branches on the file at all, so a file the lander wrote differently from
+    what it was told -- a comma turned into a line break, one id swapped for
+    another the same length -- stops here instead of reaching `queue apply`
+    with the wrong row (Q1409).
     """
     if path is None:
         return []
     try:
         with open(path, encoding="utf-8") as f:
-            lines = [line.rstrip() for line in f.read().split("\n")]
+            text = f.read()
     except OSError as error:
         raise Stop("steps", f"cannot read the steps file {path}: {error}")
+    lines = [line.rstrip() for line in text.split("\n")]
     while lines and lines[-1] == "":
         lines.pop()
+    actual_sha256 = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise Stop("steps-sha", f"{path} hashes to {actual_sha256}, not the {expected_sha256} lanes.js "
+                                f"computed; what it read: {text!r}")
     if not lines:
         return []
     steps = [[]]

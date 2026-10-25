@@ -19593,6 +19593,14 @@ land *args:
 # usage stop; and a spool entry with no `answers`, as a `land.py` from before
 # it wrote them, still lands beside one that has them.
 #
+# Two arms pin `--steps-sha256` (Q1409). One writes a file with a comma split
+# into a line break and a `+` line pushed in front of the text, as a lander
+# once did to a write set; the other swaps one row id in the file for another
+# of the same length, as a lander once did to an `after` step. Both carry the
+# sha256 of the text the lane actually meant, so each stops at `steps-sha`
+# before it branches, naming the hash it read and the file's own text, rather
+# than reaching `queue apply` with the wrong row.
+#
 # **A stub stands where `just` would run a recipe**, on `LAND_JUST`, the way the
 # fuzz selftests put a stub `cargo` on `PATH`. The real `gate` would gate this
 # repository, `ff-main` and `mark-finished` act on real trees, and `queue apply`
@@ -19758,6 +19766,9 @@ check-land-selftest:
             >"$at/lander/target/land-steps.txt"
         lane_sha=$(git -C "$at/lane" rev-parse HEAD)
     }
+    steps_sha() {
+        python3 -c 'import hashlib, sys; lines = [line.rstrip() for line in open(sys.argv[1], encoding="utf-8").read().split("\n")]; last = max([i for i, l in enumerate(lines) if l != ""], default=-1); print(hashlib.sha256("\n".join(lines[: last + 1]).encode("utf-8")).hexdigest())' "$at/lander/target/land-steps.txt"
+    }
     second_lane() {
         git -C "$at/hub" worktree add -q -b lane-y "$at/lane2" origin/main
         printf 'fn lane2() {}\n' >"$at/lane2/lane2.rs"
@@ -19901,7 +19912,7 @@ check-land-selftest:
     }
 
     fixture clean
-    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    run --steps target/land-steps.txt --steps-sha256 "$(steps_sha)" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     [ "$rc" -eq 0 ] || fail "a clean merge exited $rc"
     [ "$(field merged)" = true ] || fail "a clean merge did not say it merged"
     [ "$(field stop)" = "" ] || fail "a clean merge named a stop"
@@ -19958,7 +19969,7 @@ check-land-selftest:
 
     fixture queue-apply
     touch "$at/stub/refuse-apply"
-    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    run --steps target/land-steps.txt --steps-sha256 "$(steps_sha)" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped queue-apply
     [ "$(field not_merged_because)" = "just queue apply refused the batch: queue apply: step 1 (done Q1) is refused: Q1 is closed already" ] \
         || fail "the queue-apply stop names just's own wrapper line instead of the recipe's reason: $(field not_merged_because)"
@@ -19966,21 +19977,21 @@ check-land-selftest:
     fixture tier-readback
     touch "$at/stub/tier-differs"
     printf '%s\n' add 2.2 sonnet justfile 'small a row the lane left, ending in §384' >"$at/lander/target/land-steps.txt"
-    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    run --steps target/land-steps.txt --steps-sha256 "$(steps_sha)" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lane whose added row lands at another tier did not merge"
     [ "$(field rows_added)" = '["Q900 tier 5 sonnet: small from/Q1 a row the lane left, ending in §384"]' ] \
         || fail "rows_added is $(field rows_added), not the row's own tier 5 read back from docs/queue.md"
 
     fixture class-first
     printf '%s\n' add 5 sonnet justfile 'refuses/C a row the lane found, ending in §432' >"$at/lander/target/land-steps.txt"
-    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    run --steps target/land-steps.txt --steps-sha256 "$(steps_sha)" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lane whose add text opens with a class word did not merge"
     [ "$(field rows_added)" = '["Q900 tier 5 sonnet: refuses/C from/Q1 a row the lane found, ending in §432"]' ] \
         || fail "rows_added is $(field rows_added), and from/Q1 should land right after the leading class word refuses/C, not in front of it, where the fill reads it (§432.3)"
 
     fixture check-queue
     touch "$at/stub/check-queue-fails"
-    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    run --steps target/land-steps.txt --steps-sha256 "$(steps_sha)" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped check-queue
 
     fixture gate
@@ -20019,14 +20030,32 @@ check-land-selftest:
 
     fixture steps
     printf '%s\n' done Q5 abcdef1 >"$at/lander/target/land-steps.txt"
-    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    run --steps target/land-steps.txt --steps-sha256 "$(steps_sha)" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped steps
     ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it read the steps"
+
+    fixture steps-sha-comma
+    good_sha=$(printf '%s' "$(printf '%s\n' add 2.2 sonnet a,b 'small a row the lane left, ending in §384')" | sha256sum | cut -d' ' -f1)
+    printf '%s\n' add 2.2 sonnet a b + 'small a row the lane left, ending in §384' >"$at/lander/target/land-steps.txt"
+    run --steps target/land-steps.txt --steps-sha256 "$good_sha" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped steps-sha
+    grep -qF "$good_sha" <<<"$(field not_merged_because)" || fail "the steps-sha stop does not name the hash lanes.js computed"
+    grep -qF 'small a row the lane left' <<<"$(field not_merged_because)" || fail "the steps-sha stop does not print the file it read, so a comma written as a line break is invisible in the stop"
+    ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it checked the steps file's hash"
+
+    fixture steps-sha-id-swap
+    good_sha=$(printf '%s' "$(printf '%s\n' after @1 Q1195)" | sha256sum | cut -d' ' -f1)
+    printf '%s\n' after @1 Q1405 >"$at/lander/target/land-steps.txt"
+    run --steps target/land-steps.txt --steps-sha256 "$good_sha" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped steps-sha
+    grep -qF "$good_sha" <<<"$(field not_merged_because)" || fail "the steps-sha stop does not name the hash lanes.js computed"
+    grep -qF 'Q1405' <<<"$(field not_merged_because)" || fail "the steps-sha stop does not print the file it read, so an id swapped for another of the same length is invisible in the stop"
+    ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it checked the steps file's hash"
 
     fixture shared
     second_lane
     hold_lock
-    start_in lander --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    start_in lander --steps target/land-steps.txt --steps-sha256 "$(steps_sha)" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
     release_lock
     wait_for lander
