@@ -70,12 +70,24 @@ impl Isometry {
     ///   at most `√3·L`. Adding the shift rounds on `(√3 + 1)·L`.
     ///
     /// Added up, `(8√2 + 21 + 2√3)·u·L ≈ 35.78·u·L`, which is under
-    /// `18 · f64::EPSILON · L`. The 0.6% left over covers the second-order
-    /// terms — a rounding is a relative slip of the *computed* value, not of
-    /// the true one — and the fact that a stored rotation has length one only
-    /// to within rounding.
+    /// `18 · f64::EPSILON · L`. The 0.6% left over was meant to cover the
+    /// second-order terms — a rounding is a relative slip of the *computed*
+    /// value, not of the true one — and the fact that a stored rotation has
+    /// length one only to within rounding, without saying how far.
     ///
-    /// Every step of that is a relative argument, so it holds only while
+    /// Gappa proves the 18 (`docs/decisions.md` §464.19): each coordinate lands
+    /// within `18 · f64::EPSILON · L` while the turn's `q·q`, worked out
+    /// exactly, is within `6 · f64::EPSILON` of one, the nine products are
+    /// normal numbers, no factor is zero and no sum cancels to zero. The count
+    /// above charges each stage at its own worst case, and those cannot all
+    /// happen at once: `|w| = 1` forces `v = 0`, and so `k = 0`. Charged
+    /// together, the proof reaches `24.80·u·L`, which leaves `11.2·u·L` of room
+    /// where the count left `0.22·u·L`. A turn of a cube is one addition per
+    /// coordinate, within `2u·L`. The zero factors, the sums that cancel, the
+    /// products below the normals and a turn further than `6 · f64::EPSILON`
+    /// from length one have not been run.
+    ///
+    /// Every step of the count is a relative argument, so it holds only while
     /// nothing overflows and nothing falls into the subnormals.
     ///
     /// # What this bounds, and what it does not

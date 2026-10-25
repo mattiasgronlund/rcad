@@ -653,14 +653,37 @@ fn cross_component(
 /// tenth and eleventh. Subtracting it from the cross-product sum is a twelfth.
 /// `(1 + epsilon)^12 − 1 ≤ 12·epsilon + 66·epsilon² + …` times the permanent.
 ///
-/// The `96·epsilon²` covers the higher-order terms and the rounding of the
-/// permanent itself; what it has to beat is about `66·epsilon`.
+/// The `96·epsilon²` was meant to cover the higher-order terms and the
+/// rounding of the permanent itself, and by that count it falls short. The
+/// higher-order terms start at `66·epsilon²`. The permanent's own roundings can
+/// put it up to about `7·epsilon` under its true value, which costs
+/// `84·epsilon²` against the `12·epsilon`, and multiplying it by this constant
+/// rounds once more, which costs `epsilon` of the bound and so `12·epsilon²` of
+/// the permanent: `66 + 84 + 12 = 162`, above the `96`.
+///
+/// That count is loose, and the constant holds where `decide` needs it: on the
+/// sum before `value`'s last rounding, whose longest chain is eleven roundings
+/// rather than twelve. Gappa proves the bound there at this constant
+/// (`docs/decisions.md` §464.16), whether or not a component of the cross
+/// product or the dot product down the axis cancels, but for the one case
+/// below. With nothing cancelling the least constant it proves is
+/// `11·epsilon + 99·epsilon²`. Nobody has tried the claim on `value` itself.
+/// The proof covers no zero difference or direction component, which have not
+/// been run.
 ///
 /// Every step of that argument is a *relative* one, so as with every bound of
 /// this shape it holds only while nothing overflows or falls into the
-/// subnormals. [`HowFarFromTheSkin::on_floats`] enforces the bottom end product
-/// by product through [`product_is_normal`], and `decide` the top end by
-/// refusing a bound that is not itself a normal number.
+/// subnormals. `decide` keeps out the top end by refusing a bound that is not
+/// itself a normal number. [`HowFarFromTheSkin::on_floats`] checks the bottom
+/// end through [`product_is_normal`] for the products of `value`, but for none
+/// of the permanent's own: not the reach squares, not `up_reach` squared, and
+/// not `slope²` times that. A check passes on a zero, so a component of the
+/// cross product that cancels to zero lets its reach square fall below the
+/// normals or round to zero, and where the dot product down the axis cancels to
+/// zero, `up_reach` squared and `slope²` times it can too. The bound on the sum
+/// holds in each of those but one: where `up_reach` squared rounds to zero,
+/// level 1 certifies a wrong sign. A probe at a slope of `2⁵¹¹` shows one, and
+/// by hand the shape needs a slope of about `2⁷⁸` or more (§464.16's 6).
 const SIDE_OF_CONE_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (12.0 + 96.0 * epsilon) * epsilon

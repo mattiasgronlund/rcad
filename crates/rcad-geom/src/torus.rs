@@ -487,24 +487,50 @@ fn cross_product_halves<T: Copy + core::ops::Mul<Output = T>>(
 /// `epsilon` is the `f64` unit roundoff, 2⁻⁵³.
 ///
 /// The chain, counted step by step. `point − centre` is one rounding; squaring a
-/// component is a second and a third; the two sums that fold the three squares
-/// are a fourth and fifth; `R²`, `r²` and their difference are a sixth, and
-/// adding that on is a seventh. Squaring the total doubles what it carries, so
-/// it sits at `(1 + epsilon)^15`; `w·w` is three roundings of its own and
-/// multiplying it in is a sixteenth and seventeenth. The other side is shorter —
-/// a cross-product component is three roundings, its square a seventh, the two
-/// sums a ninth, and `4R²` times it an eleventh — so the final subtraction, the
-/// eighteenth, is what the whole thing is charged at.
+/// component carries it twice and rounds, a third; the two sums that fold the
+/// three squares are a fourth and fifth. `R²`, `r²` and their difference run
+/// beside that sum rather than after it, so adding them on is a sixth. Squaring
+/// the total doubles what it carries and rounds, so it sits at
+/// `(1 + epsilon)^13`. `w·w` is three roundings of its own, and multiplying it
+/// in carries those three and rounds once more, a seventeenth. The other side
+/// is shorter — a cross-product component is three roundings, its square a
+/// seventh, the two sums a ninth, and `4R²` times it an eleventh, `R²` carrying
+/// one and the `4` exact — so the final subtraction, the eighteenth, is what
+/// the whole thing is charged at.
 ///
 /// `(1 + epsilon)^18 − 1 ≤ 18·epsilon + 153·epsilon² + …` times the permanent.
-/// The `220·epsilon²` covers the higher-order terms and the rounding of the
-/// permanent itself; what it has to beat is about `153·epsilon`.
+/// The `220·epsilon²`, which the constant's own sum rounds up to
+/// `224·epsilon²`, was meant to cover the higher-order terms and the rounding of
+/// the permanent itself, and by that count it falls short. The higher-order
+/// terms start at `153·epsilon²`. The permanent's own roundings can put it up
+/// to about `7·epsilon` under its true value, which costs `126·epsilon²` against
+/// the `18·epsilon`, and multiplying it by this constant rounds once more, which
+/// costs `epsilon` of the bound and so `18·epsilon²` of the permanent:
+/// `153 + 126 + 18 = 297`, above the `224`.
+///
+/// That count is loose, and the constant holds where `decide` needs it: on the
+/// sum before `value`'s last rounding, seventeen roundings deep. Gappa proves
+/// the bound there at this constant (`docs/decisions.md` §464.17), whether or
+/// not a component of the cross product cancels, whatever its reach square
+/// rounds to, and whether `R² − r²` is normal or below the normals. That sum is
+/// within `17·epsilon + 95·epsilon²` of the permanent with no rounding of its
+/// own, and with nothing cancelling the least constant it proves is
+/// `17·epsilon + 232·epsilon²`. Nobody has tried the claim on `value` itself.
+/// The proof covers no zero difference or direction component, which have not
+/// been run; a point on the axis of a torus whose axis is a coordinate axis is
+/// one.
 ///
 /// Every step of that argument is a *relative* one, so as with every bound of
 /// this shape it holds only while nothing overflows or falls into the
-/// subnormals. [`HowFarFromTheRing::on_floats`] enforces the bottom end product
-/// by product through [`product_is_normal`], and `decide` the top end by
-/// refusing a bound that is not itself a normal number.
+/// subnormals. `decide` keeps out the top end by refusing a bound that is not
+/// itself a normal number. [`HowFarFromTheRing::on_floats`] checks the bottom
+/// end through [`product_is_normal`] for the products of `value`, but for none
+/// of the permanent's own: not the reach squares, not `bulge_reach` squared,
+/// and neither of the two products the permanent adds. `bulge_reach` squared
+/// and `w·w` times it stay normal all the same. But a check passes on a zero,
+/// so a component that cancels to zero lets its reach square fall below the
+/// normals or round to zero, and where all three cancel, `4R²` times their sum
+/// can too. The bound on the sum holds in each of those (§464.17's 6).
 const SIDE_OF_TORUS_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (18.0 + 220.0 * epsilon) * epsilon

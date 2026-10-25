@@ -528,12 +528,13 @@ a tilted plane one at a time.
 ### 448.8 A corner whose planes miss one point, read as the point they all run through — 2026-10-25
 
 *Queue row Q2746, from Q2575, which built the reading (merged at
-`955f07d6`). Written down from the code at `2fbc7423`. This is the reading
-before Q2744 widened it (lane tip `1c5a029b1`): a face that a face of another
-solid cuts is read round that face's crowded corners too, and `by_a_plane`
-reads a piece inside the room of such a corner of the solid it is placed
-against. The doc comments of `as_read_round_a_corner`,
-`ACornerReadAsOnePoint` and `by_a_plane` say how.*
+`955f07d6`). Written down from the code at `2fbc7423`. Amended by Q2777, read
+at `d89061f2`, for what Q2744 changed (lane tip `1c5a029b1`, merged at
+`615ef838`): a face that a face of another solid cuts is read round that
+face's crowded corners too, and `by_a_plane` reads a piece inside the room of
+such a corner of the solid it is placed against. The doc comments of
+`as_read_round_a_corner`, `ACornerReadAsOnePoint`, `by_a_plane` and
+`BakedFace::corners_of_the_solids_cutting_it` say how.*
 
 **What the reading is.** Take a corner of the input with four or more planes
 round it (`BakedCorner::around`), one of which misses the point `bake` solved
@@ -564,6 +565,36 @@ among them, no `solved_from` or no room (a corner read out of the model), a
 determinant of the three solved-from normals not proved nonzero, or every
 plane round it running exactly through the point solved.
 
+**Since Q2744, a face of the other solid is read round the corner too.**
+`gather` in `fuse/cuts.rs` hands each face that a face of another solid cuts
+every corner of that face with four or more surfaces round it
+(`hand_on_its_crowded_corners`), and the face keeps them as
+`BakedFace::corners_of_the_solids_cutting_it`. A wedge whose edge runs up
+through the placed pyramid's apex has no corner there, but each wedge face
+that a side face cuts is handed the apex. The same two places read it:
+
+- `as_read_round_a_corner` tries the face's own corners first, then the ones
+  handed on. Round a corner handed on, the face's own plane is not round it,
+  so it is read where it is, and no node is the corner: each must be the meet
+  of the crossing's two planes and a third, inside the corner's room. The room
+  is asked before the reading is made, so a face whose nodes all lie far from
+  the corner never reads it
+  (`a_cube_top_a_pyramid_pokes_through_is_split_without_reading_the_apex_far_above_it`,
+  in `fuse/arrange.rs`).
+- `TheCornersOfAPiece::of` tries such a corner of the piece's own solid
+  first, then one of the solid the piece is placed against (`theirs`), and
+  only then the meets of three planes in the true planes. Round a corner of
+  the solid placed against, every corner of the piece must be a meet of three
+  planes, the piece's among them, inside the room, and the piece's plane need
+  not be round the corner. That solid is read as moved too:
+  `placed_by_the_planes_of` reads each of its corners as the meet of the three
+  planes `bake` solved it from, with the planes round the corner moved, and a
+  plane of it round the corner places the piece as moved.
+
+So the speck by the apex that the lines where side planes cross a wedge face
+cut out of it is drawn with the side planes moved, as the side faces are, and
+placed against the pyramid as drawn.
+
 **Why.** Four planes written in `f64` need not meet in one point (§294.19).
 Placed by a shift, the sound pyramid of
 `a_broken_three_surface_corner_read_back_from_bytes.rs` has its four side
@@ -592,9 +623,11 @@ At `2fbc7423` none of the 39 is refused that way. Of the 27 with a wedge
 plane between two apexes, 21 are refused at the range check 448.7 settled for
 the cut through the apex, 4 answer, and 2 are refused `Undecidable` on a
 speck of a wedge face (below). Of the 12 with none, 9 are refused at the range
-check and 3 answer. `mise exec -- just t -p rcad-topo -E
-'test(/a_placed_pyramid_reaches_the_range_check_where_a_wedge_plane_runs_between_two_apexes|a_far_apex_whose_side_planes_miss_one_point|keeps_a_speck_of_the_cut$/)'`:
-3 tests run, 3 passed. The second of these is the reading's own pin, in
+check and 3 answer. At `d89061f2`, since Q2744, the test's doc says those 2
+are refused at the range check, and its tally is 21 refused there and 6
+answering of the 27, and 9 and 3 of the 12. `mise exec -- just t -p rcad-topo -E
+'test(/a_placed_pyramid_reaches_the_range_check_where_a_wedge_plane_runs_between_two_apexes|a_far_apex_whose_side_planes_miss_one_point|keeps_a_speck_of_the_cut$|tells_its_cells_apart$/)'`:
+4 tests run, 4 passed. The second of these is the reading's own pin, in
 `fuse/select.rs`. It reads the apex of a far pyramid whose near face misses
 it by `1e-8`, against planes a few roundings round it in every direction.
 
@@ -634,7 +667,10 @@ proves the corner off it.
   plane, so each node read is a real point. The corner is `K`, and the meet of
   two planes round the corner and a third is where the third crosses the line
   through `K` along the two. So the orders along every crossing of a face
-  round the corner are the orders of one straight drawing. No sign of a stored
+  round the corner are the orders of one straight drawing. On a face of the
+  other solid read round the corner, the face's own plane is not moved, and
+  each node is the meet of it and two other real planes, moved or not, so a
+  real point too. No sign of a stored
   plane is taken as near enough to be another sign. Inside the room, a stored
   plane round the corner is asked only once, in `of`, to find whether it
   misses `K`.
@@ -662,35 +698,54 @@ faces round the corner are cut in. The fact comes from how the shape was
 built: one vertex with four faces round it, the pyramid's apex, which the
 outline of each of those faces states. The placement rounded each plane's
 offset on its own, and the reading carries the one vertex past that rounding.
-It comes from the solid's own faces, so it is (a) and not (c). It needs no
+It comes from the solid's own faces, so it is (a) and not (c). Read on a face
+of the other solid since Q2744, it still carries only that fact of the
+pyramid's: the face's own plane is not moved, and nothing says it runs
+through `K`. It needs no
 movement kept apart, which 448.7 settled the kernel does not keep. Its answer
 is a certified answer and adds no provenance record (448.3), and the rounding
 in the stored offsets stays representation wobble (§17.3).
 
-**What it leaves.** Only the faces round the corner are read this way. The
-other solid's faces through the room are still drawn in the true planes. A
-plane of the other solid that is one of the planes round the corner, either
-way round, places nothing in `by_a_plane`, since the reading moves it and the
-other solid does not (`TheCornersOfAPiece::sides_of`, and the last paragraph
-of `by_a_plane`'s doc). Each of the following already has an open row or a
-settled place, so this section files nothing:
+**What Q2744 closed.** Two items this section first left are done, both at
+`1c5a029b1`:
 
-- The cut through the apex, Q1936's shape. Its speck lies on the block's face,
-  which belongs to the other solid, and the four side planes cross that face
-  a rounding apart in the true planes. So it stays where 448.7 settled it.
-  Under `certified` it is refused at the range check for the numbers the
-  kernel is handed, and under `tolerant(100)` it answers
-  (`a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut`,
-  run above).
-- The 2 of the 39 that are refused `Undecidable` on a speck of a wedge face by
-  the apex. That face has no corner there, so it is drawn in the true planes:
-  Q2744, which draws it round the apex; both are refused at the range check
+- The 2 of the 39 that were refused `Undecidable` on a speck of a wedge face
+  by the apex. That face had no corner there, so it was drawn in the true
+  planes. Q2744 draws it round the apex and places the speck against the
+  pyramid read round it, as above, and both are refused at the range check
   under `certified` now.
 - The 5 of the 8 placements where the order looped by the apex that
-  `tolerant(100)` refuses `ResultIsNotManifold`: Q2745. Since Q2744 all five
-  answer by every rule. The `−y` wedge shifted after the turn 0.7 about
-  `(0.3, −1, 2)` is refused `TheFuseWroteABrokenAnswer` by the difference and
-  the union under `tolerant(100)` now: Q2783.
+  `tolerant(100)` refused `ResultIsNotManifold`: Q2745, which closed with
+  Q2744. Since Q2744 all five answer by every rule
+  (`a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_tells_its_cells_apart`,
+  run above).
+
+**What it leaves.** A face of the other solid is read round a corner only
+where a face round that corner cuts it. Read round a corner of the piece's own
+solid, a plane of the solid it is placed against that is one of the planes
+round the corner, either way round, places nothing in `by_a_plane`, since the
+reading moves it and that solid as read does not
+(`TheCornersOfAPiece::sides_of`, and the Q2575 paragraph of `by_a_plane`'s
+doc). Read round a corner of the solid it is placed against, that solid is
+read as moved too, so its planes round the corner do place it. Each of the
+following already has an open row or a settled place, so this section files
+nothing:
+
+- The cut through the apex, Q1936's shape. Its speck lies on the block's face,
+  which belongs to the other solid. Since Q2744 the side faces that cut that
+  face hand it the apex, but the apex `bake` solved is a rounding off the cut
+  (the test's doc), so the side planes, moved through it or as they stand,
+  cross the block's face in lines that do not all meet in one point. So it
+  stays where 448.7 settled it. Under `certified` it is refused at the range
+  check for the numbers the kernel is handed, and under `tolerant(100)` it
+  answers
+  (`a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut`,
+  run above).
+- The second of Q2744's two, the `−y` wedge shifted after the turn 0.7 about
+  `(0.3, −1, 2)`, one of the 8 placements: `certified` refuses it at the range
+  check by every rule, and `tolerant(100)` answers the intersection and
+  refuses the difference and the union `TheFuseWroteABrokenAnswer`, a face
+  whose outline winds against its normal: Q2783.
 - An order along a crossing by a node outside every corner's room, or by a
   corner with exactly three planes round it a rounding off the crossing's
   line, is still asked by `as_the_planes_say`, against each cut by that cut's
