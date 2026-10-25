@@ -76,6 +76,15 @@
 //! its two sides cross. Now `certified` refuses it at the range check, and so
 //! it does at two shifts after a turn, at one of which the same wedge was
 //! refused `Undecidable` too; `tolerant(100)` answers at the turn about `x`.
+//! At seven more wedges and placements, where a sweep of 672 fuses found
+//! every rule refused under `tolerant(100)`, `tolerant(100)` now answers every
+//! rule and `certified` refuses every rule at the range check. At one of them,
+//! the wedge on one side of the `x` axis turned a tenth of a radian about
+//! `(−2, 1, 0.5)`, `certified` answered the difference and the intersection
+//! before the fuse read the apex as one point. Read so, the side plane the
+//! apex was not solved from moves across the point where the wedge's edge
+//! crosses the `+x` side plane, and cuts off the speck `certified` refuses: a
+//! gap, since the true planes make no speck.
 //!
 //! The half bar is a round bar of radius 3 and height 10 less the block that
 //! takes its `y > 0` half. Its corner at `(−3, 0, 10)` has the cap's plane,
@@ -1033,6 +1042,143 @@ fn a_sound_pyramid_shifted_after_a_turn_and_cut_by_a_wedge_over_the_plus_y_edge_
     }
 }
 
+/// **At the seven wedges and placements where Q2583's sweep found every rule
+/// refused under `tolerant(100)`, `tolerant(100)` now answers every rule past
+/// the range check, and `certified` refuses every rule at it.** The sweep fused
+/// the placed pyramid with each of four wedges at `every_placement` and at the
+/// turns 0.1, 0.7, 1.3 and 2.9 about `(1, 2, 3)`, `(−2, 1, 0.5)` and
+/// `(0.3, −1, 2)`, each also shifted to `(7, −5, 2.5)` after, 672 fuses in
+/// all. At `f7bde708` 19 of these 21 `tolerant(100)` fuses answered holding
+/// what the two hold, and the intersections of the fourth and the fifth were
+/// refused `TheFuseWroteABrokenAnswer`, a face winding against its normal. At
+/// `5afdb494`, and still at `ca80f2982`, all 21 were refused: those of the
+/// wedge round the `x` axis
+/// turned 1.3 about `(0.3, −1, 2)`, and of the wedge on one side of it there,
+/// `Undecidable`, "a point inside a piece of a face", and the other 15
+/// `ResultIsNotManifold { count: 1 }`. A bisect of one of them, the
+/// difference with the wedge round the `x` axis at the plain shift, found
+/// Q2744's merge `4be293a5e` the first to answer it again.
+///
+/// Under `certified`, two of the 21 answered at `f7bde708` with nothing in the
+/// log and are refused at the range check since Q2575's merge `955f07d66`, by
+/// bisect: the difference and the intersection with the wedge on one side of
+/// the `x` axis turned a tenth of a radian about `(−2, 1, 0.5)`. That refusal
+/// is a gap, and the test below says why. The other 19 are refused at the
+/// range check, as they were at `f7bde708`; they are not traced.
+#[test]
+fn a_placed_pyramid_cut_by_a_wedge_through_its_apex_answers_under_tolerant_where_q2583_found_it_refused()
+ {
+    use Came::{AnsweredPastTheRangeCheck, RefusedAtTheRangeCheck};
+    for (wedge, placement) in where_q2583_found_the_wedge_through_the_apex_refused() {
+        for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+            for (policy, came) in [
+                (Policy::certified(), RefusedAtTheRangeCheck),
+                (Policy::tolerant(100.0), AnsweredPastTheRangeCheck),
+            ] {
+                let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
+                assert_eq!(
+                    what_the_wedge_through_the_apex_came_to(wedge, placement, rule, &policy),
+                    came,
+                    "{case}"
+                );
+            }
+        }
+    }
+}
+
+/// **Turned a tenth of a radian about `(−2, 1, 0.5)`, the sound pyramid and
+/// the wedge on one side of the `x` axis built there answer with a speck on
+/// the `+y` side face that the true planes do not make.** Before Q2575, at
+/// `a6e9e5d5b`, `certified` answered the intersection in 4 faces and 12 sides
+/// and the difference in 7 faces and 28 sides, with nothing in the log.
+///
+/// The wedge's edge crosses the `+x` side plane at a point which, worked out
+/// exactly, is behind each of the other three side planes, as the test
+/// checks. Exact fractions on the printed planes put it behind `+y` by
+/// `1.8e−17` of that plane's value. So in the true planes the intersection is
+/// four faces whose top corner is that point. A print put in `derive_a_corner` in `fuse/bake.rs` and taken out
+/// found the apex solved from the `−y`, `+x` and `−x` planes, so
+/// `ACornerReadAsOnePoint` in `fuse/arrange.rs` reads `+y` as moved through
+/// that apex (§448.8). The same fractions put the point `2.6e−16` in front of
+/// the moved `+y`, so the moved plane cuts off the top a triangle whose
+/// corners are within `2e−15` of one another. The intersection keeps it as a
+/// fifth face, 5 faces and 18 sides under `tolerant(100)`, the difference
+/// keeps a stretch of it in its `+y` face, 8 faces and 34 sides, and
+/// `certified` refuses both at the range check for it. Moved through the apex
+/// the other three meet in instead, `−y`, `+x` or `−x` would leave the point
+/// behind every other side plane, so whether the speck is made rests on which
+/// three planes `bake` solved the apex from. The answer of the true planes
+/// exists, so this is a gap and not the limit §448.7 settled: Q2758 filed a
+/// row for it.
+#[test]
+fn a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_keeps_a_speck_the_true_planes_do_not_make() {
+    let wedge = A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS;
+    let placement = the_turn_that_keeps_a_speck_on_the_plus_y_face();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let pyramid = a_pyramid(&mut model);
+    model
+        .place_solid(pyramid, &placement)
+        .expect("this model made the key");
+    let cut = a_wedge(&mut model, wedge, &placement);
+    // A point on a side face or a wedge face, placed, is a rounding off its
+    // plane and millimetres off every other.
+    let planes_through = |solid: SolidKey, [x, y, z]: [f64; 3]| -> Vec<[f64; 4]> {
+        let [x, y, z] = placement.apply_to_point(Point::new(x, y, z)).coordinates();
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .filter_map(|face| face.surface().as_plane().map(Plane::coefficients))
+            .filter(|[a, b, c, d]| (a * x + b * y + c * z + d).abs() < 1e-9)
+            .collect()
+    };
+    let the_side_plane_through = |point: [f64; 3]| {
+        let &[plane] = planes_through(pyramid, point).as_slice() else {
+            panic!("one side plane runs through {point:?}");
+        };
+        plane
+    };
+    let plus_x = the_side_plane_through([1.5, 0.0, 5.0]);
+    let &[one, other] = planes_through(cut, WHERE_THE_PYRAMID_PUTS_ITS_APEX).as_slice() else {
+        panic!("two wedge planes run through the apex");
+    };
+    let sides = [[0.0, -1.5, 5.0], [0.0, 1.5, 5.0], [-1.5, 0.0, 5.0]].map(|point| {
+        side_of_a_plane_where_three_planes_meet([plus_x, one, other], the_side_plane_through(point))
+            .expect("the wedge's edge crosses the +x side plane")
+    });
+    assert_eq!(sides, [Decision::Neg, Decision::Neg, Decision::Neg]);
+    for (rule, left) in [
+        (
+            Rule::Intersection,
+            FacesAndSides {
+                faces: 5,
+                sides: 18,
+            },
+        ),
+        (
+            Rule::Difference,
+            FacesAndSides {
+                faces: 8,
+                sides: 34,
+            },
+        ),
+    ] {
+        let case = format!("{wedge:?} {rule:?}");
+        match the_wedge_through_the_apex_and_its_faces(
+            wedge,
+            placement,
+            rule,
+            &Policy::tolerant(100.0),
+        ) {
+            Ok((named, faces)) => {
+                assert_eq!(named, [DYNAMIC_RANGE_CHECK], "{case}");
+                assert_eq!(faces, left, "{case}");
+            }
+            Err(refused) => panic!("{case} came back {refused:?}"),
+        }
+    }
+}
+
 /// **Every partner, every rule, every placement and both policies give the
 /// box's refusal** for every move of the apex, the cut through the apex among
 /// them. Each three of the four side planes cross at the apex alone, so no
@@ -1333,17 +1479,28 @@ fn the_cut_through_the_apex(
     }
 }
 
-/// The sound pyramid built where it stands and moved by `placement`, fused
-/// under `rule` with `wedge` built at `placement`. An answer has to validate
-/// and hold what the pyramid and the wedge hold, and comes back as the
-/// predicates the fuse's log names. A refusal has to leave the model byte for
-/// byte as it was, and comes back as it is.
+/// [`the_wedge_through_the_apex_and_its_faces`], without the faces.
 fn the_wedge_through_the_apex(
     wedge: Wedge,
     placement: Isometry,
     rule: Rule,
     policy: &Policy,
 ) -> Result<Vec<&'static str>, Error> {
+    the_wedge_through_the_apex_and_its_faces(wedge, placement, rule, policy).map(|(named, _)| named)
+}
+
+/// The sound pyramid built where it stands and moved by `placement`, fused
+/// under `rule` with `wedge` built at `placement`. An answer has to validate
+/// and hold what the pyramid and the wedge hold, and comes back as the
+/// predicates the fuse's log names and how many faces and sides it has. A
+/// refusal has to leave the model byte for byte as it was, and comes back as
+/// it is.
+fn the_wedge_through_the_apex_and_its_faces(
+    wedge: Wedge,
+    placement: Isometry,
+    rule: Rule,
+    policy: &Policy,
+) -> Result<(Vec<&'static str>, FacesAndSides), Error> {
     let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let pyramid = a_pyramid(&mut model);
@@ -1362,11 +1519,12 @@ fn the_wedge_through_the_apex(
                 policy,
                 &case,
             );
-            Ok(log
+            let named = log
                 .records()
                 .iter()
                 .map(|record| record.predicate())
-                .collect())
+                .collect();
+            Ok((named, the_faces_and_sides_of(&model, &answer)))
         }
         Err(refused) => {
             assert_eq!(
@@ -1449,6 +1607,44 @@ fn where_the_orders_loop_by_the_apex() -> [(Wedge, Isometry); 8] {
             shift.compose(&turn([-2.0, 1.0, 0.5], 1.3)),
         ),
     ]
+}
+
+/// The seven wedges and placements of Q2583's sweep where every rule was
+/// refused under `tolerant(100)` at `5afdb494`, built as the sweep built them.
+/// The sixth is [`the_turn_that_keeps_a_speck_on_the_plus_y_face`].
+fn where_q2583_found_the_wedge_through_the_apex_refused() -> [(Wedge, Isometry); 7] {
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
+    let turn = |[x, y, z]: [f64; 3], angle: f64| {
+        let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(x, y, z)).expect("an axis");
+        Isometry::rotation(&axis, angle).expect("a turn")
+    };
+    [
+        (A_WEDGE_ROUND_THE_X_AXIS, shift),
+        (A_WEDGE_ROUND_THE_X_AXIS, turn([0.3, -1.0, 2.0], 1.3)),
+        (
+            A_WEDGE_OVER_THE_MINUS_Y_EDGE,
+            shift.compose(&turn([-2.0, 1.0, 0.5], 1.3)),
+        ),
+        (A_WEDGE_OVER_THE_MINUS_Y_EDGE, turn([0.3, -1.0, 2.0], 0.1)),
+        (
+            A_WEDGE_OVER_THE_MINUS_Y_EDGE,
+            shift.compose(&turn([0.3, -1.0, 2.0], 1.3)),
+        ),
+        (
+            A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS,
+            the_turn_that_keeps_a_speck_on_the_plus_y_face(),
+        ),
+        (
+            A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS,
+            turn([0.3, -1.0, 2.0], 1.3),
+        ),
+    ]
+}
+
+/// A tenth of a radian about `(−2, 1, 0.5)`.
+fn the_turn_that_keeps_a_speck_on_the_plus_y_face() -> Isometry {
+    let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(-2.0, 1.0, 0.5)).expect("an axis");
+    Isometry::rotation(&axis, 0.1).expect("a turn")
 }
 
 /// The turn under which the wedge round the `x` axis keeps three corners a
@@ -2012,182 +2208,4 @@ fn what_a_solid_and_a_block_hold(
 
 fn overlap(one: [f64; 2], other: [f64; 2]) -> f64 {
     (one[1].min(other[1]) - one[0].max(other[0])).max(0.0)
-}
-
-#[test]
-fn probe_q2758_the_seven_shapes() {
-    let placements = q2758_placements();
-    let shapes: [(Wedge, usize); 7] = [
-        (A_WEDGE_ROUND_THE_X_AXIS, 1),
-        (A_WEDGE_ROUND_THE_X_AXIS, 24),
-        (A_WEDGE_OVER_THE_MINUS_Y_EDGE, 17),
-        (A_WEDGE_OVER_THE_MINUS_Y_EDGE, 20),
-        (A_WEDGE_OVER_THE_MINUS_Y_EDGE, 25),
-        (A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS, 12),
-        (A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS, 24),
-    ];
-    for (wedge, index) in shapes {
-        let (name, placement) = &placements[index];
-        for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
-            for (policy_name, policy) in [
-                ("certified", Policy::certified()),
-                ("tolerant", Policy::tolerant(100.0)),
-            ] {
-                let case = format!(
-                    "wedge ({}, {}) placement {index} [{name}] {rule:?} {policy_name}",
-                    wedge.low, wedge.high
-                );
-                let mut model =
-                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-                let pyramid = a_pyramid(&mut model);
-                model
-                    .place_solid(pyramid, placement)
-                    .expect("this model made the key");
-                let cut = a_wedge(&mut model, wedge, placement);
-                let mut log = ProvenanceLog::new();
-                let fused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    model.fuse(&[pyramid], &[cut], rule, &policy, &mut log)
-                }));
-                let outcome = match fused {
-                    Err(_) => "PANICKED".to_string(),
-                    Ok(Ok(answer)) => {
-                        let (solids, expected) = what_the_pyramid_and_a_wedge_hold(wedge, rule);
-                        let valid = model.validate(&policy, &mut ProvenanceLog::new());
-                        let named: Vec<&str> =
-                            log.records().iter().map(|r| r.predicate()).collect();
-                        match valid {
-                            Err(invalid) => format!("Ok but INVALID {invalid:?} log {named:?}"),
-                            Ok(()) => {
-                                let (volume, bound) =
-                                    the_volume_of(&model, &answer, &policy, &case);
-                                let holds = answer.solids().len() == solids
-                                    && (volume - expected).abs() <= 1e-12 * expected + bound;
-                                format!(
-                                    "Ok {} solids {} volume {volume} expected {expected} log {named:?}",
-                                    if holds { "HOLDS" } else { "WRONG" },
-                                    answer.solids().len(),
-                                )
-                            }
-                        }
-                    }
-                    Ok(Err(Error::Undecidable { records })) => {
-                        let named: Vec<&str> =
-                            records.records().iter().map(|r| r.predicate()).collect();
-                        format!("Err Undecidable {named:?}")
-                    }
-                    Ok(Err(other)) => format!("Err {other:?}"),
-                };
-                eprintln!("Q2758 OUTCOME {case}: {outcome}");
-            }
-        }
-    }
-}
-
-#[test]
-fn probe_q2758_trace_placement_12() {
-    let placement = q2758_placements()[12].1;
-    let wedge = A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS;
-    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
-    let pyramid = a_pyramid(&mut model);
-    model
-        .place_solid(pyramid, &placement)
-        .expect("this model made the key");
-    let cut = a_wedge(&mut model, wedge, &placement);
-    let [x, y, z] = placement
-        .apply_to_point(Point::new(0.0, 0.0, HEIGHT))
-        .coordinates();
-    let planes_of = |solid: SolidKey| -> Vec<[f64; 4]> {
-        model
-            .solid(solid)
-            .expect("key")
-            .faces()
-            .filter_map(|face| face.surface().as_plane().map(Plane::coefficients))
-            .collect()
-    };
-    let side_planes: Vec<[f64; 4]> = planes_of(pyramid)
-        .into_iter()
-        .filter(|[a, b, c, d]| (a * x + b * y + c * z + d).abs() < 1e-9)
-        .collect();
-    let wedge_planes: Vec<[f64; 4]> = planes_of(cut)
-        .into_iter()
-        .filter(|[a, b, c, d]| (a * x + b * y + c * z + d).abs() < 1e-9)
-        .collect();
-    let names = ["-y", "+x", "+y", "-x"];
-    for (name, plane) in names.iter().zip(&side_planes) {
-        eprintln!("Q2758 TRACE side plane {name} {plane:?}");
-    }
-    for plane in &wedge_planes {
-        eprintln!("Q2758 TRACE wedge plane {plane:?}");
-    }
-    let side = |three: [[f64; 4]; 3], plane: [f64; 4]| {
-        side_of_a_plane_where_three_planes_meet(three, plane).expect("meet")
-    };
-    let p = [side_planes[1], wedge_planes[0], wedge_planes[1]];
-    for (name, plane) in names.iter().zip(&side_planes) {
-        eprintln!(
-            "Q2758 TRACE side of {name} at meet(+x, a, b): {:?}",
-            side(p, *plane)
-        );
-    }
-    for skip in 0..4 {
-        let three: Vec<[f64; 4]> = (0..4)
-            .filter(|&i| i != skip)
-            .map(|i| side_planes[i])
-            .collect();
-        let three = [three[0], three[1], three[2]];
-        eprintln!(
-            "Q2758 TRACE apex without {}: side of {} {:?}, of wedge a {:?}, of wedge b {:?}",
-            names[skip],
-            names[skip],
-            side(three, side_planes[skip]),
-            side(three, wedge_planes[0]),
-            side(three, wedge_planes[1]),
-        );
-    }
-    for rule in [Rule::Intersection, Rule::Difference] {
-        let mut model = model.clone();
-        let mut log = ProvenanceLog::new();
-        let answer = model
-            .fuse(&[pyramid], &[cut], rule, &Policy::tolerant(100.0), &mut log)
-            .expect("tolerant answers");
-        for &solid in answer.solids() {
-            for face in model.solid(solid).expect("key").faces() {
-                let normal = face.outward_normal();
-                for wire in face.wires() {
-                    let points: Vec<[f64; 3]> =
-                        wire.points().map(|point| point.coordinates()).collect();
-                    let shortest = wire
-                        .coedges()
-                        .map(|coedge| coedge.edge().distance_between_its_ends())
-                        .fold(f64::INFINITY, f64::min);
-                    eprintln!(
-                        "Q2758 TRACE {rule:?} face normal {normal:?} shortest {shortest:e} corners {points:?}"
-                    );
-                }
-            }
-        }
-    }
-}
-
-fn q2758_placements() -> Vec<(String, Isometry)> {
-    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a translation");
-    let mut placements: Vec<(String, Isometry)> = vec![
-        ("identity".to_string(), Isometry::identity()),
-        ("shift".to_string(), shift),
-        ("turn x 0.4".to_string(), every_placement()[2]),
-        ("shift . turn x 0.4".to_string(), every_placement()[3]),
-    ];
-    for direction in [[1.0, 2.0, 3.0], [-2.0, 1.0, 0.5], [0.3, -1.0, 2.0]] {
-        let [x, y, z] = direction;
-        let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(x, y, z)).expect("an axis");
-        for angle in [0.1, 0.7, 1.3, 2.9] {
-            let turn = Isometry::rotation(&axis, angle).expect("a turn");
-            placements.push((format!("turn {direction:?} {angle}"), turn));
-            placements.push((
-                format!("shift . turn {direction:?} {angle}"),
-                shift.compose(&turn),
-            ));
-        }
-    }
-    placements
 }
