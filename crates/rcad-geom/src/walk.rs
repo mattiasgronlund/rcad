@@ -1914,12 +1914,10 @@ fn the_two_corners_of_an_open_run(run: &NamedRun) -> Option<[PredicatePoint; 2]>
 /// first seed walked a ball `0.1` off a pipe's axis with its corner at
 /// `z = −3.9` round the loop at `z = +3.9` (Q1262).
 ///
-/// **Which of the two a run with no corner is, is `intersect`'s to say**
-/// ([`the_crossing_is_one_loop`]), not the run's: a caller states any run it
-/// likes. Taken on its word, a whole run stated on a countersink met by a pipe
-/// across it, which crosses it in a loop each side of its axis, was walked
-/// round the first loop, and so was the same run on a ball off a pipe's axis
-/// that swallows it (Q2788).
+/// **A run with no corner stated on a crossing of two loops**, which
+/// `intersect` never names, is walked round the first seed's loop: a thin pipe
+/// through a fat one, Viviani's figure of eight, and a countersink met by a
+/// pipe across it alike (Q2649, Q2788).
 ///
 /// **A run between two corners starts on its corners' loop the same way**, and
 /// its half-spaces are not asked: they pick which of the two arcs between the
@@ -1946,11 +1944,10 @@ fn the_two_corners_of_an_open_run(run: &NamedRun) -> Option<[PredicatePoint; 2]>
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces pick
 /// both loops or neither, when a run's two corners are on different seeds'
-/// sides of a crossing of two loops, when a run with no corner and nothing
-/// picking it is on a crossing `intersect` does not name as one whole loop, and
-/// whatever [`the_seed_on_the_loop_a_corner_is_on`] refuses. Whatever
+/// sides of a crossing of two loops, and whatever
+/// [`the_seed_on_the_loop_a_corner_is_on`] refuses. Whatever
 /// [`intersect`](crate::intersect) refuses for the pair, for a run whose two
-/// corners are on different seeds' sides and for a run with no corner.
+/// corners are on different seeds' sides.
 fn the_seed_this_run_is_picked_up_at(
     run: &NamedRun,
     pair: &[Surface; 2],
@@ -1994,8 +1991,7 @@ fn the_seed_this_run_is_picked_up_at(
             Some(corner) => {
                 the_seed_on_the_loop_a_corner_is_on(corner, held_apart_by, settled, policy, log)
             }
-            None if the_crossing_is_one_loop(pair, policy, log)? => Ok(settled[0].0),
-            None => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+            None => Ok(settled[0].0),
         };
     }
     let mut picked = SmallVec::<[Point; 2]>::new();
