@@ -512,7 +512,48 @@ pub(crate) fn choose(
             placed[piece] = Some(placement);
         }
     }
+    if std::env::var_os("Q2744B").is_some() {
+        let kept = kept_by(selection, &placed, scratch);
+        for (index, (piece, place)) in scratch.pieces.iter().zip(&placed).enumerate() {
+            let is_kept = kept.iter().any(|chosen| chosen.piece == index);
+            eprintln!(
+                "B PIECE {index} of {} on {} {place:?} kept {is_kept}: {}",
+                scratch.cut_from[index],
+                q2744b_plane(&piece.surface),
+                piece
+                    .wires
+                    .iter()
+                    .flatten()
+                    .map(|side| q2744b_end(&side.ends[0]))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+    }
     Ok(kept_by(selection, &placed, scratch))
+}
+
+pub(crate) fn q2744b_plane(surface: &Surface) -> String {
+    match surface.as_plane() {
+        Some(plane) => {
+            let [a, b, c, d] = plane.coefficients();
+            format!("({a:.3},{b:.3},{c:.3},{d:.3})")
+        }
+        None => "curved".to_string(),
+    }
+}
+
+pub(crate) fn q2744b_end(end: &MeetPoint) -> String {
+    match end {
+        MeetPoint::Existing { vertex, .. } => format!("V{vertex:?}"),
+        MeetPoint::OfThreeSurfaces { surfaces, .. } => format!(
+            "[{} {} {}]",
+            q2744b_plane(&surfaces[0]),
+            q2744b_plane(&surfaces[1]),
+            q2744b_plane(&surfaces[2])
+        ),
+        other => format!("{other:?}"),
+    }
 }
 
 /// The pieces `selection` keeps, from where each piece sits against the other

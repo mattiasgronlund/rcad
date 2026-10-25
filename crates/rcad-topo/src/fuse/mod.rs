@@ -666,6 +666,31 @@ impl Scratch {
                 policy,
                 &mut input_corners_together.log,
             );
+        if std::env::var_os("Q2744B").is_some() {
+            for (what, names) in [
+                ("ARRANGED", &scratch.names_of_one_point),
+                ("INPUT", &taken_as_input_corners),
+                ("ENDS", &ends_of_edges.names),
+                ("TOGETHER", &input_corners_together.names),
+            ] {
+                for name in names {
+                    eprintln!(
+                        "B NAMES {what} {} <- {}",
+                        select::q2744b_end(&name.kept),
+                        name.folded
+                            .iter()
+                            .map(|(surfaces, which)| format!(
+                                "[{} {} {}]#{which}",
+                                select::q2744b_plane(&surfaces[0]),
+                                select::q2744b_plane(&surfaces[1]),
+                                select::q2744b_plane(&surfaces[2])
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    );
+                }
+            }
+        }
         scratch.names_of_one_point.extend(taken_as_input_corners);
         scratch.ends_of_edges = ends_of_edges;
         scratch.input_corners_together = input_corners_together;

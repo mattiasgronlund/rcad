@@ -889,6 +889,13 @@ fn probe_q2744() {
                 {
                     continue;
                 }
+                if let Some(only) = std::env::var_os("Q2744B") {
+                    let only = only.into_string().expect("ascii");
+                    if only != format!("{at}{rule:?}") {
+                        continue;
+                    }
+                    eprintln!("B START {at} {name} {rule:?}");
+                }
                 let came = the_wedge_through_the_apex(wedge, placement, rule, policy);
                 eprintln!("PROBE LOOP {at} {name} {rule:?}: {}", short(came));
             }
