@@ -1396,28 +1396,28 @@ impl BuildingAMesh {
             .collect();
         // **A wire that winds is only allowed beside wires that wind too**, or
         // as the rim of a cap on a ball beside islands, or as one of the two
-        // rims of a ring on a pipe beside islands. The loops of a face cut the
-        // chart into stretches, and the one the face is has every one of its
-        // wires in its boundary. Two that go right round bound the band between
-        // them and [`BuildingAMesh::cut_a_ring_across`] cuts it. One that goes
-        // right round beside others that do not is a cap with islands in it
-        // when the surface is a ball and every other wire is a hole: the cap's
-        // side of its rim is the side holding the pole the walk keeps on its
-        // left, and each hole lies on the face, so on that side
-        // ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). Two that go right
-        // round a pipe beside holes are a ring with islands in it, the band
-        // between the two with each hole on it, and the ring is cut across as
-        // a ring is, round the islands its cuts meet. Anything else of that
-        // kind is refused the way a wire that will not lie flat has always been
-        // refused. On a torus that is asked of each way round, the tube and the
-        // ring, and a wire that went right round both was refused in
-        // [`WalkingAWire::finish`].
+        // rims of a ring on a pipe or a cone beside islands. The loops of a
+        // face cut the chart into stretches, and the one the face is has every
+        // one of its wires in its boundary. Two that go right round bound the
+        // band between them and [`BuildingAMesh::cut_a_ring_across`] cuts it.
+        // One that goes right round beside others that do not is a cap with
+        // islands in it when the surface is a ball and every other wire is a
+        // hole: the cap's side of its rim is the side holding the pole the
+        // walk keeps on its left, and each hole lies on the face, so on that
+        // side ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). Two that go
+        // right round a pipe, or a cone clear of its apex, beside holes are a
+        // ring with islands in it, the band between the two with each hole on
+        // it, and the ring is cut across as a ring is, round the islands its
+        // cuts meet. Anything else of that kind is refused the way a wire that
+        // will not lie flat has always been refused. On a torus that is asked
+        // of each way round, the tube and the ring, and a wire that went right
+        // round both was refused in [`WalkingAWire::finish`].
         let winding_round =
             |way: fn(&WalkedLoop) -> bool| walked.iter().filter(|&around| way(around)).count();
         let round_the_first_way = winding_round(|around| around.goes_right_round);
         let round_the_second_way = winding_round(|around| around.goes_right_round_the_second_way);
         if !a_cap_on_a_ball_with_islands_in_it(&surface, &walked)
-            && !a_ring_on_a_pipe_with_islands_in_it(&surface, &walked)
+            && !a_ring_on_a_pipe_or_a_cone_with_islands_in_it(&surface, &walked)
             && [round_the_first_way, round_the_second_way]
                 .iter()
                 .any(|&winding| winding > 0 && winding < walked.len())
@@ -1720,7 +1720,8 @@ impl BuildingAMesh {
         // meets an island going round it, and each island no cut meets put
         // whole into the one patch it lies in. A thin bar through a fat one
         // off its axis leaves the fat bar's wall this shape, with a window
-        // where the thin bar goes in and one where it comes out (Q1494). Asked
+        // where the thin bar goes in and one where it comes out (Q1494), and a
+        // pin through a tapered shaft leaves the shaft's wall so (Q2810). Asked
         // before anything reads `walked[0]` as the outline, since an island
         // may be stored first. Two islands may touch at a point: a thin bar
         // resting on the inside of a fat one leaves two windows that meet
@@ -1730,7 +1731,7 @@ impl BuildingAMesh {
         // through the point goes round that one and touches the other there,
         // and a patch that passes the point twice is cut apart there, as a
         // strip of a ball is.
-        if a_ring_on_a_pipe_with_islands_in_it(stored, &walked) {
+        if a_ring_on_a_pipe_or_a_cone_with_islands_in_it(stored, &walked) {
             let (rims, islands): (Vec<WalkedLoop>, Vec<WalkedLoop>) = walked
                 .into_iter()
                 .partition(|around| around.goes_right_round);
@@ -1802,13 +1803,12 @@ impl BuildingAMesh {
         // whose outer loop reaches both poles and whose hole reaches neither,
         // which a half ball cut again leaves, is cut from the hole up to each
         // pole instead. A ball's skin with only holes was opened into strips
-        // above, a cap on a ball with islands in it
-        // was cut up to its pole, and a ring on a pipe with islands in it was
-        // cut across round them. Any other face with one loop right round and
-        // another that is not has already been refused in
-        // [`BuildingAMesh::cut_up`]. `Model` is `Deserialize` and `validate`
-        // is the untrusted-import boundary (§16.11), so that is a refusal
-        // rather than an assert.
+        // above, a cap on a ball with islands in it was cut up to its pole,
+        // and a ring on a pipe or a cone with islands in it was cut across
+        // round them. Any other face with one loop right round and another
+        // that is not has already been refused in [`BuildingAMesh::cut_up`].
+        // `Model` is `Deserialize` and `validate` is the untrusted-import
+        // boundary (§16.11), so that is a refusal rather than an assert.
         //
         // **The two curves need not be one closed curve each.** A frustum's
         // band between its own near cap circle and a ring of arcs a cube's
@@ -5540,22 +5540,27 @@ fn a_cap_on_a_ball_with_islands_in_it(stored: &Surface, walked: &[WalkedLoop]) -
         })
 }
 
-/// Whether a face's loops are a ring on a pipe with islands in it: two loops
-/// right round, and at least one more, each passing each of its points once
-/// with the material outside it.
+/// Whether a face's loops are a ring on a pipe or a cone with islands in it:
+/// two loops right round, and at least one more, each passing each of its
+/// points once with the material outside it.
 ///
-/// **Only on a pipe**, a surface whose longitude wraps and which pinches
-/// nowhere, where this was reached and measured. A band on a ball or a cone
-/// beside an island is the same shape and is still refused, for want of a
-/// solid that reaches it, and so is one on a torus.
-fn a_ring_on_a_pipe_with_islands_in_it(stored: &Surface, walked: &[WalkedLoop]) -> bool {
+/// **On a pipe, and on a cone clear of its apex**, where this was reached and
+/// measured. A cone's band whose loops keep to one side of the apex is a
+/// pipe's ring in the chart
+/// ([`the_loops_keep_clear_of_where_it_pinches`]): a tapered shaft with a pin
+/// pushed through it square to its axis leaves one in the union and in the
+/// shaft less the pin, its two cap circles round it and a window either side
+/// where the pin goes through, and those were refused as a wire that will not
+/// lie flat until row Q2810 (`a_tapered_shaft_with_a_cross_hole.rs`). A band
+/// on a ball beside an island is the same shape and is still refused, for want
+/// of a solid that reaches it, and so is one on a torus.
+fn a_ring_on_a_pipe_or_a_cone_with_islands_in_it(stored: &Surface, walked: &[WalkedLoop]) -> bool {
     let (rims, islands): (Vec<&WalkedLoop>, Vec<&WalkedLoop>) =
         walked.iter().partition(|around| around.goes_right_round);
     rims.len() == 2
         && !islands.is_empty()
-        && how_far_the_longitude_wraps(stored).is_some()
-        && stored.where_it_pinches().is_none()
-        && how_far_the_second_coordinate_wraps(stored).is_none()
+        && matches!(stored, Surface::Cylinder(_) | Surface::Cone(_))
+        && the_loops_keep_clear_of_where_it_pinches(stored, walked)
         && islands.iter().all(|island| {
             it_passes_each_of_its_points_once(island)
                 && how_much_of_the_chart_this_loop_encloses(island) < 0.0
@@ -7625,10 +7630,10 @@ fn how_far_round(around: &WalkedLoop) -> f64 {
 /// of this sum would read backwards there. It never gets the chance: a call
 /// site whose sign matters either runs only on a surface that pinches
 /// ([`Surface::where_it_pinches`]), and a torus pinches nowhere, or asks
-/// [`how_far_the_second_coordinate_wraps`] that it is not a torus, as
-/// [`a_ring_on_a_pipe_with_islands_in_it`] does on a pipe and
-/// [`BuildingAMesh::cut_a_hole_out_to_its_outline`] on a pipe, a cone or a
-/// ball.
+/// that it is not a torus: [`a_ring_on_a_pipe_or_a_cone_with_islands_in_it`]
+/// runs only on a pipe or a cone, and
+/// [`BuildingAMesh::cut_a_hole_out_to_its_outline`] asks
+/// [`how_far_the_second_coordinate_wraps`] on a pipe, a cone or a ball.
 /// `every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
 /// in `rcad-geom` is the measurement, over all five surfaces.
 fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
