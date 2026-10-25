@@ -37,8 +37,7 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::enclosure::{
-    cross_enclosing, dot_enclosing, exactly, gap_enclosing, quotient_or_everything, root_enclosing,
-    squared_length_enclosing,
+    cross_enclosing, dot_enclosing, exactly, gap_enclosing, squared_length_enclosing,
 };
 use crate::exact::Exact;
 use crate::intersect::{
@@ -51,7 +50,10 @@ use crate::intersect::{
     whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
     whether_two_cones_share_an_axis,
 };
-use crate::march::{Marched, march, settled_with_a_bound, settled_with_a_bound_where_they_bend};
+use crate::march::{
+    Marched, how_tightly_a_cone_bends_at, march, settled_with_a_bound,
+    settled_with_a_bound_where_they_bend,
+};
 use crate::meet::nowhere_in_particular;
 use crate::{
     Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
@@ -865,23 +867,6 @@ impl TwoLoopsHeldApartBy {
             other => panic!("a side of a surface came back as {other:?}"),
         })
     }
-}
-
-/// A lower end on how far `at` is from `cone`'s axis and from the flat
-/// surface through its apex square to that axis, the nearer of the two, and
-/// nothing where either cannot be put above nothing.
-fn how_tightly_a_cone_bends_at(cone: &Cone, at: Point) -> f64 {
-    let along = exactly(cone.axis().direction().components());
-    let length = root_enclosing(squared_length_enclosing(along));
-    let out = gap_enclosing(cone.apex().coordinates(), at.coordinates());
-    let off_the_axis = quotient_or_everything(
-        root_enclosing(squared_length_enclosing(cross_enclosing(out, along))),
-        length,
-    );
-    let past_the_apex = quotient_or_everything(dot_enclosing(out, along), length);
-    let past_the_apex = past_the_apex.lo().max(-past_the_apex.hi());
-    let nearer = off_the_axis.lo().min(past_the_apex);
-    if nearer > 0.0 { nearer } else { 0.0 }
 }
 
 /// Which of those three the crossing of these two surfaces is, and the thing
