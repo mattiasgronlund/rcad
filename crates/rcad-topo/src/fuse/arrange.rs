@@ -5104,6 +5104,21 @@ impl<'f> Arrangement<'f> {
             policy,
             &mut read_as_one_point,
         ) {
+            if std::env::var_os("Q2744_EDGES").is_some() {
+                eprintln!(
+                    "SETTLED {settled:?} on {:?} handed {} crossing {:?} nodes {:?} {:?} read {:?}",
+                    self.surface.as_plane().map(|p| p.coefficients()),
+                    self.face.corners_of_the_solids_cutting_it.len(),
+                    self.crossings[crossing]
+                        .partner
+                        .as_plane()
+                        .map(|p| p.coefficients()),
+                    self.nodes[first].point.enclosure().map(|i| i.lo()),
+                    self.nodes[second].point.enclosure().map(|i| i.lo()),
+                    self.as_read_round_a_corner(crossing, first, second)
+                        .is_some()
+                );
+            }
             read_as_one_point.drain_into(log);
             return Ok(settled);
         }
@@ -5207,43 +5222,56 @@ impl<'f> Arrangement<'f> {
     ) -> Option<Decision> {
         let flat = *self.surface.as_plane()?;
         let partner = *self.crossings[crossing].partner.as_plane()?;
-        self.node_of_corner.iter().flatten().find_map(|&corner| {
-            let reading = ACornerReadAsOnePoint::of(self.the_baked_corner_of(&self.nodes[corner]))?;
-            if !reading.around.contains(&flat) {
-                return None;
-            }
-            // Each node read, with the plane of its three that is neither the
-            // face's nor the partner's: none for the corner.
-            let read = |node: usize| {
-                if node == corner {
-                    return reading
-                        .around
-                        .contains(&partner)
-                        .then_some((ANodeReadRoundACorner::TheCorner, None));
-                }
-                if self.nodes[node].vertex.is_some() {
+        let its_own = self
+            .node_of_corner
+            .iter()
+            .flatten()
+            .map(|&corner| (self.the_baked_corner_of(&self.nodes[corner]), Some(corner)));
+        let of_the_solids_cutting_it = self
+            .face
+            .corners_of_the_solids_cutting_it
+            .iter()
+            .filter(|_| std::env::var_os("Q2744_NO_HANDED").is_none())
+            .map(|corner| (corner, None));
+        its_own
+            .chain(of_the_solids_cutting_it)
+            .find_map(|(baked, corner)| {
+                let reading = ACornerReadAsOnePoint::of(baked)?;
+                if corner.is_some() && !reading.around.contains(&flat) {
                     return None;
                 }
-                let three = self.the_three_planes_a_node_is_the_meet_of(node)?;
-                let mut others = three
-                    .into_iter()
-                    .filter(|plane| *plane != flat && *plane != partner);
-                let (Some(third), None) = (others.next(), others.next()) else {
-                    return None;
+                // Each node read, with the plane of its three that is neither the
+                // face's nor the partner's: none for the corner.
+                let read = |node: usize| {
+                    if Some(node) == corner {
+                        return reading
+                            .around
+                            .contains(&partner)
+                            .then_some((ANodeReadRoundACorner::TheCorner, None));
+                    }
+                    if self.nodes[node].vertex.is_some() {
+                        return None;
+                    }
+                    let three = self.the_three_planes_a_node_is_the_meet_of(node)?;
+                    let mut others = three
+                        .into_iter()
+                        .filter(|plane| *plane != flat && *plane != partner);
+                    let (Some(third), None) = (others.next(), others.next()) else {
+                        return None;
+                    };
+                    reading
+                        .holds(self.nodes[node].point)
+                        .then_some((ANodeReadRoundACorner::AMeet(three), Some(third)))
                 };
-                reading
-                    .holds(self.nodes[node].point)
-                    .then_some((ANodeReadRoundACorner::AMeet(three), Some(third)))
-            };
-            let ((mine, my_third), (theirs, their_third)) = (read(first)?, read(second)?);
-            match (my_third, their_third) {
-                (_, Some(third)) => reading.which_comes_first([flat, partner], &mine, third),
-                (Some(third), None) => reading
-                    .which_comes_first([flat, partner], &theirs, third)
-                    .map(the_other_way),
-                (None, None) => None,
-            }
-        })
+                let ((mine, my_third), (theirs, their_third)) = (read(first)?, read(second)?);
+                match (my_third, their_third) {
+                    (_, Some(third)) => reading.which_comes_first([flat, partner], &mine, third),
+                    (Some(third), None) => reading
+                        .which_comes_first([flat, partner], &theirs, third)
+                        .map(the_other_way),
+                    (None, None) => None,
+                }
+            })
     }
 
     /// Which of two nodes on a crossing comes first along it, by the readings

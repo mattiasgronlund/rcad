@@ -856,6 +856,67 @@ fn a_placed_pyramid_reaches_the_range_check_where_a_wedge_plane_runs_between_two
     );
 }
 
+#[test]
+fn probe_q2744() {
+    let short = |came: Result<Vec<&'static str>, Error>| match came {
+        Ok(named) => format!("Ok{named:?}"),
+        Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => format!("Range {ratio:e}"),
+        Err(Error::Undecidable { records }) => format!(
+            "Undecidable {:?}",
+            records
+                .records()
+                .iter()
+                .map(|record| record.predicate())
+                .collect::<Vec<_>>()
+        ),
+        Err(other) => format!("{other:?}"),
+    };
+    let policies = [
+        ("cert", Policy::certified()),
+        ("tol", Policy::tolerant(100.0)),
+    ];
+    for (at, (wedge, placement)) in where_the_orders_loop_by_the_apex().into_iter().enumerate() {
+        if at != 2 && at != 4 {
+            continue;
+        }
+        if std::env::var_os("Q2744_EDGES").is_some() && at != 2 {
+            continue;
+        }
+        for (name, policy) in &policies {
+            for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+                if std::env::var_os("Q2744_EDGES").is_some()
+                    && (rule != Rule::Union || *name != "tol")
+                {
+                    continue;
+                }
+                let came = the_wedge_through_the_apex(wedge, placement, rule, policy);
+                eprintln!("PROBE LOOP {at} {name} {rule:?}: {}", short(came));
+            }
+        }
+    }
+    let placements = every_placement()
+        .into_iter()
+        .chain(where_the_orders_loop_by_the_apex().map(|(_, placement)| placement))
+        .chain([a_tenth_of_a_radian_about_a_tilted_axis()]);
+    for (at, placement) in placements.enumerate() {
+        if std::env::var_os("PROBE_TALLY").is_none() {
+            break;
+        }
+        for (which, wedge) in EVERY_WEDGE.into_iter().enumerate() {
+            let between = a_wedge_plane_runs_between_two_apexes(wedge, placement);
+            for (name, policy) in &policies {
+                for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+                    let came = the_wedge_through_the_apex(wedge, placement, rule, policy);
+                    eprintln!(
+                        "PROBE TALLY {at} wedge {which} between {between} {name} {rule:?}: {}",
+                        short(came)
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// **Shifted to `(7, −5, 2.5)`, the sound pyramid cut by the wedge over its
 /// `+y` edge built there is refused at the range check under `certified`**,
 /// the limit §448.7 settled for the cut through the apex, and leaves the
