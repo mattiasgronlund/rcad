@@ -7668,3 +7668,130 @@ And what is not a row:
 - `cyl.g`'s first `restates` line needs no row: `just src on_floats
   crates/rcad-geom/src/cylinder.rs` prints the one item, at `cylinder.rs:300`.
 - `field` on these scripts' hints (464.10).
+
+### 464.16 The side of rcad-geom's cone
+
+*Draft, by Q2681's first lane, which handed over at its budget. The proof is
+not run yet; what is here is the wrong sign the first lane found reading
+`on_floats`, and its demonstration.*
+
+Q2681 took up `SIDE_OF_CONE_ERROR_BOUND` in `crates/rcad-geom/src/cone.rs`,
+against `cone.rs` and `cascade.rs` at `2538ee89`. `u` is `2⁻⁵³`, and the code's
+`B = (12 + 96ε) ε` (`cone.rs:664-667`) is `12u + 96u²`, written `B = 12b-53 +
+3b-101;`: `96ε` is `3 · 2⁻⁴⁸`, a multiple of the ulp of 12, so the Rust's sum
+and product are exact.
+
+**What `on_floats` checks and what it does not.** `HowFarFromTheSkin::on_floats`
+(`cone.rs:424-469`) is the cylinder's with `skin` replaced by the axial term
+`along = rnd(rnd(slope²) · rnd(up²))`, where `up = rnd(rnd(u0 + u1) + u2)` and
+each `ui = rnd(fi · di)`. It checks `product_is_normal` on the six halves, the
+three components squared, the three `ui`, the slope squared, `up` squared and
+`slope² · up²` (`cone.rs:435-448`). Its permanent's axial term is
+`A = rnd(ss · R2)`, `ss = rnd(slope²)`, `R2 = rnd(R · R)` and `R =
+rnd(rnd(|u0| + |u1|) + |u2|)` (`cone.rs:462-463`), and nothing checks `R2` or
+`A`. Where `up` does not cancel, `|up| ≤ R` by monotone rounding, so `R2 ≥ w`
+and `A ≥ along`, both normal. Where `up` cancels to zero, `w` and `along` are
+zero, both checks pass on the zero (`cascade.rs:67-69`), and `R2` can round to
+zero while the true `slope² · (x · w)²` it stood for is not small against the
+rest.
+
+**A wrong sign.** The probe below, run once with `mise exec -- just t
+probe_q2681_axial_reach_square_rounding_to_zero --no-capture` and then
+removed, builds that shape: the apex at the origin, the direction `(2⁻⁶⁰ (1 +
+2⁻²⁶), 1, 0)`, which `Axis::new` keeps as the bits `3c30000004000000`,
+`3ff0000000000000` and `0`, the slope `2⁵¹¹`, and the point `(f0, −rnd(f0 ·
+d0), 0)` with `f0 = 2⁻⁴⁸⁰ (1 + 2⁻²⁸)`. `u0` and `u1` cancel exactly, `R =
+2⁻⁵³⁹`, `R²` rounds to zero, and so does `A`. It printed:
+
+```text
+on_floats value 1.0261342079698896e-289 error_bound 1.3670853888524055e-304
+on_intervals [-2.220446049250313e-16, 1.0261342079698903e-289]
+exactly None
+decide Pos at Float
+side_of Pos
+```
+
+`truth.py` below works the same doubles in exact rationals and printed:
+
+```text
+dot = 1.542348713665846e-179 = 2^ -594
+cross squared = 1.0261342079698896e-289
+slope^2 dot^2 = 1.0691058840368783e-50
+true value = -1.0691058840368783e-50 sign -1
+```
+
+So `Cone::side_of` certifies `Pos`, outside, at level 1, for a point whose
+true sign is `Neg`, inside. Class `wrong/D`: on paper, not run, it needs `R² ≤
+2⁻¹⁰⁷⁵`, so every `|fi · di|` below about `2⁻⁵³⁷`, and a slope of at least
+about `2⁷⁸` so that `slope² · (x · w)²`, at most about `9u² R² slope²`, can pass
+`eb ≥ 2⁻¹⁰²²`. A slope of `2⁷⁸` is a cone within `2⁻⁷⁸` of a flat plane, a
+ratio far past §3.5's `1e11`, and `Cone::from_half_angle` cannot make one:
+`tan` of the double below `π/2` is about `1.6e16`. The probe, whole, as it
+stood at the top of `cone.rs`'s `mod tests`:
+
+```rust
+#[test]
+fn probe_q2681_axial_reach_square_rounding_to_zero() {
+    let d0_wanted = 2f64.powi(-60) * (1.0 + 2f64.powi(-26));
+    let axis = Axis::new(Point::origin(), Vector::new(d0_wanted, 1.0, 0.0)).unwrap();
+    let d = axis.direction().components();
+    let f0 = 2f64.powi(-480) * (1.0 + 2f64.powi(-28));
+    let u0 = f0 * d[0];
+    let f1 = -u0 / d[1];
+    let slope = 2f64.powi(511);
+    let cone = Cone::new(axis, slope).unwrap();
+    let point = PredicatePoint::from([f0, f1, 0.0]);
+    let pred = HowFarFromTheSkin { cone, point };
+    let filtered = pred.on_floats();
+    println!("d = {:?} bits {:x} {:x} {:x}", d, d[0].to_bits(), d[1].to_bits(), d[2].to_bits());
+    println!("f = {:?} bits {:x} {:x}", [f0, f1], f0.to_bits(), f1.to_bits());
+    println!("slope bits {:x}", slope.to_bits());
+    match filtered {
+        Some(Filtered { value, error_bound }) => println!("on_floats value {value:e} error_bound {error_bound:e}"),
+        None => println!("on_floats None"),
+    }
+    println!("on_intervals {:?}", pred.on_intervals());
+    println!("exactly {:?}", pred.exactly());
+    let (decision, level) = decide(&pred);
+    println!("decide {decision:?} at {level:?}");
+    println!("side_of {:?}", cone.side_of(point));
+}
+```
+
+It also printed `f = [3.203332964226307e-145, -2.778448488608982e-163] bits
+21f0000001000000 9e30000005000000` and `slope bits 5fe0000000000000`, which
+`truth.py` reads:
+
+```python
+"""The true sign of the cone probe's input, in exact rationals."""
+import struct
+from fractions import Fraction
+
+
+def f(bits):
+    return Fraction(struct.unpack(">d", bytes.fromhex(bits))[0])
+
+
+d = [f("3c30000004000000"), f("3ff0000000000000"), Fraction(0)]
+p = [f("21f0000001000000"), f("9e30000005000000"), Fraction(0)]
+s = f("5fe0000000000000")
+c = [p[1] * d[2] - p[2] * d[1], p[2] * d[0] - p[0] * d[2], p[0] * d[1] - p[1] * d[0]]
+dot = sum(a * b for a, b in zip(p, d))
+cross2 = sum(x * x for x in c)
+axial = s * s * dot * dot
+value = cross2 - axial
+print("dot =", float(dot), "= 2^", dot.numerator.bit_length() - dot.denominator.bit_length())
+print("cross squared =", float(cross2))
+print("slope^2 dot^2 =", float(axial))
+print("true value =", float(value), "sign", (value > 0) - (value < 0))
+```
+
+**Still to do**, in order: run `cone.g`, the case where nothing cancels and
+nothing is zero, at the code's `B`, bisect `m` in `B = 12u + m u²` and run it
+through `coqc`; split the cases `on_floats` does not check, the cross
+product's as `cylsplit.py` does and the axial term's (`up` cancelling with
+`R2` normal, below the normals or zero, and `A` the same, and `u01 = rnd(u0 +
+u1)` below the normals, where it is exact and the hint `u01 / U01` has nothing
+to divide by); the controls at `u / 2`; what the doc comment at
+`cone.rs:643-663` claims against what is proved; the scripts whole; and what
+this leaves.
