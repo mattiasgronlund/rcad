@@ -272,8 +272,10 @@ inside your write set is not a row: fix it, under §352.5 above.
 
 **A brief naming several rows is a bundle of small rows** (§352.4): one branch,
 one report. Do each, and commit each on its own so its verifier and merger can
-tell them apart. One that turns out not to be small you leave undone, and say so
-in `remaining` with its id and why.
+tell them apart. One that turns out not to be small you leave undone: name its
+id in `rows_left_undone` too, so `just land` closes only the rest and leaves
+that one `lane:<branch>` for the dispatcher to take again, and say why in
+`remaining`.
 
 Budget about 45 minutes. If the work is bigger, commit what is done, report
 what is left, and stop.

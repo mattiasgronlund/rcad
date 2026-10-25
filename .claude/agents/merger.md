@@ -106,9 +106,10 @@ below, and settle what the stop line names.
    step and every `add` step below, in one call. The lane's tip, not the merge
    commit: the merge commit carries the row and cannot name itself. Q140, Q141
    and Q145 were closed the same way. A bundle of small rows (§352.4) gets one
-   `done` step per row, every one with the same lane tip. A row of it the lane
-   left undone stays open under its hold: name it in `needs_judgement`, and the
-   dispatcher takes it again. A row your brief says the verifier confirmed the
+   `done` step per row, every one with the same lane tip. A row the lane names
+   in its report's `rows_left_undone` (§352.4) gets no `done` step: it stays
+   open under its hold; name it in `needs_judgement`, and the dispatcher takes
+   it again. A row your brief says the verifier confirmed the
    branch also answers (§450.3 rule 4) gets a `done` step too, with the same
    lane tip, in the same call, while `docs/queue.md` shows it `todo` or
    `after:`. One a lane holds, parked or closed goes in `needs_judgement`

@@ -20091,6 +20091,26 @@ check-land-selftest:
     run --answers Q1 Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped usage
 
+    fixture left-undone
+    run --left-undone Q2 Q1,Q2 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a bundle that leaves one row undone did not merge"
+    git -C "$at/origin.git" show main:docs/queue.md | grep -qxF "apply done Q1 ${lane_sha:0:8}" \
+        || fail "the merge commit's queue apply closes Q2 too, though the lane left it undone"
+    [ "$(field rows_closed)" = "[\"Q1 done:${lane_sha:0:8}\"]" ] \
+        || fail "rows_closed is $(field rows_closed), and should not name Q2"
+    grep -qF '"Q2 is left undone by this bundle' <<<"$(field needs_judgement)" \
+        || fail "needs_judgement does not say Q2 was left undone, held lane:lane-x, for the dispatcher to give back"
+    [ "$(git -C "$at/origin.git" log -1 --format=%s main)" = 'Merge lane-x: Q1 done, leaving Q2 open under its hold, by just land' ] \
+        || fail "the merge commit's subject is '$(git -C "$at/origin.git" log -1 --format=%s main)'"
+
+    fixture left-undone-not-in-bundle
+    run --left-undone Q9 Q1,Q2 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped usage
+
+    fixture left-undone-all
+    run --left-undone Q1,Q2 Q1,Q2 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped usage
+
     fixture old-entry
     second_lane
     hold_lock
