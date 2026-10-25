@@ -4520,3 +4520,98 @@ And what is not a row:
 - How `c_flat_noeb.g` gets past `eb`'s rounding (7) was not traced, as with
   plane's and the sphere's.
 - `field` on these scripts' hints (464.10).
+
+### 464.14 The side of rcad-geom's sphere
+
+*Unfinished: Q2679's first lane relayed here, past its budget before any
+script but two had run. What follows is its draft and its plan. The lane after
+it writes `skincases.py`, runs it, and writes this up in 464.12's form.*
+
+Q2679 takes up `SIDE_OF_SPHERE_ERROR_BOUND` in `crates/rcad-geom/src/sphere.rs`
+at `05d44c66`. `git log --oneline 3d60b0de..05d44c66` on `sphere.rs`,
+`cascade.rs` and `point.rs` prints nothing, so the last two are as 464.12
+read them. `just src on_floats crates/rcad-geom/src/sphere.rs`
+prints one item, so a `restates` line naming it is not 464.13's two-item case.
+
+**What the proof guards.** `Sphere::side_of` (`sphere.rs:216-227`) runs the
+cascade on `HowFarFromTheSkin`, and `Surface::Sphere` reaches it from
+`three_surfaces.rs:3294` and `validate.rs:4497`, so unlike 464.12's this is a
+predicate a user reaches.
+
+**`on_floats`, line for line** (`sphere.rs:241-269`). It is 464.12's
+`HowFarOut` operation for operation: three gaps, `None` unless
+`product_is_normal` holds for each gap with itself and the radius with itself
+(`sphere.rs:251-254`), the four squares, `value = s0 + s1 + s2 − rr` and
+`permanent = s0 + s1 + s2 + rr`, whose first two sums are `value`'s. So
+464.12's `sphere.g` is this `on_floats` with only `B` changed. The constant
+(`sphere.rs:425-428`) is `(6 + 48ε) ε` with `ε = f64::EPSILON / 2`, which is
+`u`: `6u + 48u²`, written `B = 6b-53 + 3b-102;`. Each step the Rust takes is
+exact, since `48ε` is a multiple of `2⁻⁵⁰`, the ulp of 6.
+
+**What the comments claim, to be checked against the runs.**
+
+- `sphere.rs:247-250`, on the check: "One of them in the subnormals and this
+  level certifies a wrong sign." It is the sentence 464.8's 4 found false for
+  one product of `SideOfAFlatSurface`, and the case 464.12's 5 left to this
+  row: a square below the normals with the others normal.
+- `sphere.rs:401-424`, on the constant: six roundings to `value`, which
+  464.12's 4 found Gappa prints as `6u` for the same arithmetic. "The `48ε²`
+  covers the higher-order terms and the rounding of the permanent itself, with
+  room to spare: what it has to beat is about `15ε`." That is `ε²`, not `ε`,
+  and by the comment's own terms it is `15ε²` from `(1 + ε)⁶`, `18ε²` from the
+  permanent's three additions against the `6ε`, and `6ε²` from rounding `B ·
+  P`: 39, not 15. Both are under 48, and under 464.12's smallest `B`s for this
+  arithmetic, `5u + 28u²` on `y` and `6u + 30u²` on `value`, to be run again
+  here with `bisect.py`.
+- "It holds only while nothing overflows or falls into the subnormals": a zero
+  square is not a subnormal, so 464.12's zero cases do not contradict it; the
+  cases below the normals answer it.
+
+**Run so far**, Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, with
+464.13's `one.sh`:
+
+- `tinysq.g` exits 0, and its `gappa -Bcoq` and `coqc` exit 0, a proof of 397
+  lines with no hints:
+
+  ```gappa
+  # tinysq.g: a square of two doubles at or below 2^-1075 rounds to zero, and
+  # one above it rounds to at least 2^-1074, the smallest subnormal.
+  @rnd = float<ieee_64, ne>;
+  g = rnd(g_);
+  X = g * g;
+  { |g| <= 1b1024 /\ |g| >= 1b-1074
+    -> (X <= 1b-1075 -> rnd(X) in [0, 0]) /\ (X >= 1b-1075 /\ X <= 1b-1022 -> rnd(X) in [0, 1b-1022]) }
+  ```
+
+- A probe, `gx = rnd(px − cx)` with `|gx|` in `[2⁻¹⁰⁷⁴, 2⁻⁵¹¹]`, prints
+  `gx −/ Gx` within `±2⁻⁵³` with no split at `2⁻¹⁰²²`: a difference of two
+  doubles that lands below the normals is exact, and Gappa finds that itself,
+  as 464.9 found for a sum. So a gap whose square is below the normals keeps a
+  ratio hint.
+
+**The plan.** `skincases.py` is 464.12's `spherecases.py` with the
+`restates` lines naming `sphere.rs` `on_floats` and
+`SIDE_OF_SPHERE_ERROR_BOUND` at `05d44c66`, `B_CODE` the line above, and the
+prefix `skin`, plus two more states for each of the four squares besides
+normal (`n`) and zero (`z`):
+
+- `s`, below the normals and rounding to a double that is not zero: `X = g *
+  g` in `[2⁻²¹⁴⁸, 2⁻¹⁰²²]`, `s = rnd(X)`, `|s| ≥ 2⁻¹⁰⁷⁴`. Its rounding is
+  carried as an amount, `d = (s − X) · carry`, as `planecases.py` carries
+  `dk`, and `e = X · W` with `W = carry − 1 / (rg · rg)`; for the radius `d =
+  −(rr − X) · carry` and `W = 1 − carry`.
+- `u`, rounding to zero: `X` in `[2⁻²¹⁴⁸, 2⁻¹⁰⁷⁵]` and `s = 0;` by
+  `tinysq.g`. Its whole true square is the error, `−G · G` for a gap (with
+  the hint `G * G -> X / (rg * rg);`) and `r · r` for the radius, and it is
+  treated as a zero in the sums, with 464.12's hints such as `sx + sy -> sy;`.
+
+With no `s` or `u` term the script is 464.12's form. With one, the step is
+`planecases.py`'s: `(out − Ex) / eb -> ((Σ e) / Phatx) · (Phatx / P) · (P /
+eb) + (Σ d) / eb`, `Phatx` being `Phat` with `X` in place of each `s` term's
+square, `Phatx / P -> Phat / P + (Σ (X − s)) / P`, and `P -> eb / (B · (1 +
+(eb − B · P) / (B · P)));`. Each sum then has every addend zero (written
+unrounded) or one that is not zero, so no sum needs 464.13's cancelling split.
+A case with no `n` term has `P` at most `4 · 2⁻¹⁰²²`, so `eb` is not normal,
+and it should prove only from that contradiction, as `sphere_zxyzr.g` does;
+its control drops `eb` normal, and every other case's control is at `B = u /
+2`. All `4⁴` states on `y`, and those with an `n` term on `value`.
