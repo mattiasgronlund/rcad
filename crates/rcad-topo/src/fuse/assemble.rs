@@ -9916,27 +9916,6 @@ impl Corners {
                         policy,
                     )
             });
-        if std::env::var_os("Q2744B").is_some() {
-            let show = |three: Option<[Plane; 3]>| match three {
-                Some(three) => three
-                    .map(|plane| {
-                        let [a, b, c, d] = plane.coefficients();
-                        format!("({a:.3},{b:.3},{c:.3},{d:.3})")
-                    })
-                    .join(" "),
-                None => "-".to_string(),
-            };
-            let on_triple = self.at.get(&exactly_at(corner.point)).copied();
-            eprintln!(
-                "B CORNER {:?} planes [{}] triple-has {:?} (made on [{}]) landed {:?} new-index {}",
-                corner.point,
-                show(planes),
-                on_triple,
-                show(on_triple.and_then(|at| self.made_on_three_planes.get(&at).copied())),
-                landed_on,
-                self.made.len()
-            );
-        }
         let index = match landed_on {
             Some(already) => {
                 self.made[already].wobble = self.made[already].wobble.max(corner.wobble);

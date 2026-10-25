@@ -5104,21 +5104,6 @@ impl<'f> Arrangement<'f> {
             policy,
             &mut read_as_one_point,
         ) {
-            if std::env::var_os("Q2744_EDGES").is_some() {
-                eprintln!(
-                    "SETTLED {settled:?} on {:?} handed {} crossing {:?} nodes {:?} {:?} read {:?}",
-                    self.surface.as_plane().map(|p| p.coefficients()),
-                    self.face.corners_of_the_solids_cutting_it.len(),
-                    self.crossings[crossing]
-                        .partner
-                        .as_plane()
-                        .map(|p| p.coefficients()),
-                    self.nodes[first].point.enclosure().map(|i| i.lo()),
-                    self.nodes[second].point.enclosure().map(|i| i.lo()),
-                    self.as_read_round_a_corner(crossing, first, second)
-                        .is_some()
-                );
-            }
             read_as_one_point.drain_into(log);
             return Ok(settled);
         }
@@ -5231,7 +5216,6 @@ impl<'f> Arrangement<'f> {
             .face
             .corners_of_the_solids_cutting_it
             .iter()
-            .filter(|_| std::env::var_os("Q2744_NO_HANDED").is_none())
             .map(|corner| (corner, None));
         its_own
             .chain(of_the_solids_cutting_it)
