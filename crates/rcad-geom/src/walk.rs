@@ -1079,7 +1079,7 @@ fn what_a_run_between_these_two_lies_on(
                 Decision::Zero => where_a_coaxial_cone_and_pipe_cut(&cone, &pipe, run, policy, log)
                     .map(WhatARunLiesOn::Conic),
                 Decision::Pos => {
-                    crate::intersect::intersect(&pair[0], &pair[1], policy, log)?;
+                    refused_unless_intersect_names_a_curve(&pair, policy, log)?;
                     a_quartic_picked_up_at(
                         where_a_pipe_reaches_across_a_cone(&cone, &pipe),
                         TwoLoopsHeldApartBy::AConesSlantPlane { cone, pipe },
@@ -1139,7 +1139,7 @@ fn what_a_run_between_these_two_lies_on(
                         .map(WhatARunLiesOn::Conic)
                 }
                 Decision::Pos => {
-                    crate::intersect::intersect(&pair[0], &pair[1], policy, log)?;
+                    refused_unless_intersect_names_a_curve(&pair, policy, log)?;
                     a_quartic_picked_up_at(
                         where_a_ball_reaches_across_a_cone(&cone, &ball),
                         TwoLoopsHeldApartBy::AConesApex { cone, ball },
@@ -1188,6 +1188,37 @@ fn what_a_run_between_these_two_lies_on(
         return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
     }
     Ok(lies_on)
+}
+
+/// Nothing, where [`intersect`](crate::intersect) names a cone and a partner
+/// off its axis as crossing in a curve, so the walk refuses exactly what the
+/// namer refuses, and a run on a crossing that is not there is refused as one.
+///
+/// **A ball inside one nappe that misses the cone is the shape this is for.**
+/// The two seeds of a degree-four crossing are worked out whether or not it
+/// has a point, so a whole run stated on that pair was handed a seed off the
+/// ball by [`where_a_closed_crossing_starts`], and [`walk`] said the crossing
+/// was too small for a point to sit on (Q2788).
+///
+/// # Errors
+///
+/// Whatever `intersect` refuses for the pair, and
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where it names nothing or one
+/// point, as for a ball on a cone's axis that misses the cone.
+fn refused_unless_intersect_names_a_curve(
+    pair: &[Surface; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<()> {
+    match crate::intersect::intersect(&pair[0], &pair[1], policy, log)? {
+        SurfaceMeet::Curves(_) => Ok(()),
+        SurfaceMeet::Nothing | SurfaceMeet::TouchAtOnePoint { .. } => {
+            Err(Error::TheseTwoSurfacesDoNotCrossInAConic)
+        }
+        SurfaceMeet::SameSurface => {
+            panic!("a cone and a partner off its axis were named one surface: {pair:?}")
+        }
+    }
 }
 
 /// The two seeds of a degree-four crossing, once they have been checked for
@@ -1883,6 +1914,13 @@ fn the_two_corners_of_an_open_run(run: &NamedRun) -> Option<[PredicatePoint; 2]>
 /// first seed walked a ball `0.1` off a pipe's axis with its corner at
 /// `z = −3.9` round the loop at `z = +3.9` (Q1262).
 ///
+/// **Which of the two a run with no corner is, is `intersect`'s to say**
+/// ([`the_crossing_is_one_loop`]), not the run's: a caller states any run it
+/// likes. Taken on its word, a whole run stated on a countersink met by a pipe
+/// across it, which crosses it in a loop each side of its axis, was walked
+/// round the first loop, and so was the same run on a ball off a pipe's axis
+/// that swallows it (Q2788).
+///
 /// **A run between two corners starts on its corners' loop the same way**, and
 /// its half-spaces are not asked: they pick which of the two arcs between the
 /// corners the run is, not which loop. A wall through both axes of a thin bar
@@ -1908,10 +1946,11 @@ fn the_two_corners_of_an_open_run(run: &NamedRun) -> Option<[PredicatePoint; 2]>
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces pick
 /// both loops or neither, when a run's two corners are on different seeds'
-/// sides of a crossing of two loops, and whatever
-/// [`the_seed_on_the_loop_a_corner_is_on`] refuses. Whatever
+/// sides of a crossing of two loops, when a run with no corner and nothing
+/// picking it is on a crossing `intersect` does not name as one whole loop, and
+/// whatever [`the_seed_on_the_loop_a_corner_is_on`] refuses. Whatever
 /// [`intersect`](crate::intersect) refuses for the pair, for a run whose two
-/// corners are on different seeds' sides.
+/// corners are on different seeds' sides and for a run with no corner.
 fn the_seed_this_run_is_picked_up_at(
     run: &NamedRun,
     pair: &[Surface; 2],
@@ -1955,7 +1994,8 @@ fn the_seed_this_run_is_picked_up_at(
             Some(corner) => {
                 the_seed_on_the_loop_a_corner_is_on(corner, held_apart_by, settled, policy, log)
             }
-            None => Ok(settled[0].0),
+            None if the_crossing_is_one_loop(pair, policy, log)? => Ok(settled[0].0),
+            None => Err(Error::CannotNameWhichPieceOfACrossingThisIs),
         };
     }
     let mut picked = SmallVec::<[Point; 2]>::new();
