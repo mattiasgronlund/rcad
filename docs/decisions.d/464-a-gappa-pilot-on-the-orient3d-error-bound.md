@@ -20,7 +20,8 @@ under them. 464.11 is Q2675, which runs the branches where one of the nine
 differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
 464.13 is Q2678, on the side of a flat surface through a point. 464.14 is
 Q2679, on the side of rcad-geom's sphere. 464.15 is Q2680, on the side of
-rcad-geom's cylinder.*
+rcad-geom's cylinder. 464.16 is Q2681, on the side of rcad-geom's cone, and
+464.17 is Q2682, on the side of rcad-geom's torus.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -37,6 +38,8 @@ rcad-geom's cylinder.*
   464.13  The side of a flat surface through a point
   464.14  The side of rcad-geom's sphere
   464.15  The side of rcad-geom's cylinder
+  464.16  The side of rcad-geom's cone
+  464.17  The side of rcad-geom's torus
 
 ### 464.1 The bugs a bound prover is for
 
@@ -9477,4 +9480,1862 @@ And what is not a row:
   holds: a product below the normals, `R2`, fed into a relative bound makes
   level 1 certify a wrong sign. That is what Q2767 asks for, and Q2767 waits
   on Q2782 already.
+- `field` on these scripts' hints (464.10).
+
+### 464.17 The side of rcad-geom's torus
+
+Q2682 took up `SIDE_OF_TORUS_ERROR_BOUND` in `crates/rcad-geom/src/torus.rs`,
+in seven lanes on 2026-10-25. The first four were the first lane and its three
+relays. The first wrote `tor.g`. The second ran it, its bisection of 3 and its
+controls of 7. The third wrote `torsplit.py`. The fourth ran the split of 6
+and its controls, and wrote and ran `shapes.py` and `same.py`. The fifth, the
+second lane, merged the first lane's branch and ran the second `-Bcoq` of 8.
+The sixth, its first relay, checked the comments and wrote 1 to 9. The
+seventh, its second, ran `same.py` again and wrote 10. The bound is
+proved on `y`, the sum before `value`'s last rounding, at the code's constant
+wherever no factor is zero. That covers any of the three components of the
+cross product cancelling, whatever its reach square rounds to; `R² − r²`
+normal or below the normals; and the permanent's cross product term normal,
+below the normals or zero. Coq checks each proof, modulo its hints, one of
+them only at its second certificate (8). On `y` the bound needs about a `u`
+less than the code's `18u` (3). The claim on `value` itself was not tried, and
+`decide` does not need it (4). The branches where a difference or a direction
+component is zero, which `product_is_normal` lets through, are not run, and a
+point on the axis of an axis-aligned torus is one. And the comments claim more
+than is proved. The doc comment on the constant writes `153ε` where it means
+`153ε²`, miscounts its own terms, and reaches its seventeen roundings by two
+slips that cancel. It also says `on_floats` enforces the bottom end product by
+product, which is false: it checks none of the permanent's own products. Unlike
+the cone's, no case the split runs gives a wrong sign there (5, 6). Restating
+the comment and running what is not run is three rows (10).
+
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
+`torus.rs` and `cascade.rs` at `4be293a5`. `git log --oneline
+4be293a5e..cb850cc2b` on `torus.rs`, `cascade.rs`, `three_surfaces.rs`,
+`rcad-topo`'s `validate.rs`, `rcad-step`'s `brep.rs` and `rcad-geom`'s
+`lib.rs` prints nothing, so each is as it stands at `cb850cc2b`, `main` when
+this write-up was finished. `u` is `2⁻⁵³`, and the code's `B = (18 + 220ε) ε`
+(`torus.rs:508-511`) is, as a double, `18u + 224u²`, written `B = 18b-53 +
+7b-101;`. Unlike the cone's `96ε`, `220ε` is `55 · 2⁻⁵¹`, not a multiple of
+`2⁻⁴⁸`, the ulp of 18, so the Rust's sum rounds, up, to `18 + 7 · 2⁻⁴⁸`, and
+the product by `ε` is exact. `python3 -c` on `(18.0 + 220.0 * 2.0**-53) *
+2.0**-53` printed `0x1.2000000000007p-49 224`, the second figure `(B − 18u) /
+u²` in exact rationals. Each script follows 464.8's pattern: one ratio hint
+per rounding; the error split into one term per piece of the permanent, so
+that Gappa averages them; 464.5's lemma for each product `on_floats` checks is
+normal, and for each of the permanent's products that monotone rounding keeps
+normal (2); and the step from `y` to the sign as 464.4 gives it.
+
+**1. What the proof guards.** `Torus::side_of` (`torus.rs:309-323`), the
+torus's `SideOfSurface`, runs the cascade on `HowFarFromTheRing`, once a guard
+has refused a point or a torus that is not real numbers. `Surface::Torus`
+reaches it from `three_surfaces.rs:3297`, from `rcad-topo`'s
+`validate.rs:4500` and from `rcad-step`'s `brep.rs:3049`, and `lib.rs:126`
+exports `Torus` and `SIDE_OF_TORUS`. A user makes a torus with `Torus::new`
+(`torus.rs:101`), which takes an axis of finite numbers and two finite
+positive radii, and refuses a tube as wide as the ring or wider. So, like
+464.15's and 464.16's, this proof guards a predicate a user reaches.
+
+**2. `on_floats`, line for line.** `HowFarFromTheRing::on_floats`
+(`torus.rs:336-398`) returns `None` for a point that is not exact `f64`s
+(`torus.rs:337`) and takes the three differences `fi` from the centre to the
+point (`torus.rs:343`). It forms the six halves of their cross product with the
+direction (`cross_product_halves`, `torus.rs:474-483`, called at 344) and the
+three components `h − k`, `sideways` (`torus.rs:345`). It returns `None`
+unless `product_is_normal` holds for each difference, each direction component
+and each component with itself, for each half's two factors, and for each
+radius with itself (`stays_accurate`, `torus.rs:350-359`). It forms
+`out_and_back`, the sum of the three squares of `fi` (`torus.rs:364-365`),
+`hollow = R² − r²` (`torus.rs:366`), `bulge = out_and_back + hollow`
+(`torus.rs:367`), `axis_squared`, the direction's `w·w` (`torus.rs:368-369`),
+`across`, the sum of the components' squares (`torus.rs:370-371`), and `4R²`
+(`torus.rs:372`). It returns `None` unless `product_is_normal` holds for
+`bulge` with itself, `w·w` with `bulge²`, and `4R²` with `across`
+(`torus.rs:373-377`). Last it returns `value = w·w · bulge² − 4R² · across` and
+`error_bound = SIDE_OF_TORUS_ERROR_BOUND * permanent` (`torus.rs:394-397`).
+The permanent is `w·w · bulge_reach² + 4R² · spread` (`torus.rs:392`), with
+`bulge_reach = out_and_back + R² + r²` (`torus.rs:391`) and `spread` the sum of
+each half pair's reach squared, `(|h| + |k|)²` (`torus.rs:384-390`).
+
+`tor.g` (below) writes that operation for operation. The cross product is
+`cyl.g`'s (464.15's 2): `hx = rnd(fy · dz)`, `kx = rnd(fz · dy)`, `qx = rnd(hx
+− kx)` and the like. Then `gi = rnd(fi · fi)`, `oab = rnd(rnd(gx + gy) + gz)`,
+`RR = rnd(R · R)`, `rr = rnd(r · r)`, `hollow = rnd(RR − rr)`, `bulge = rnd(oab
++ hollow)`, `W = rnd(rnd(tx + ty) + tz)` with `ti = rnd(di · di)`, `across =
+rnd(rnd(sx + sy) + sz)` with `si = rnd(qi · qi)`, `F4 = rnd(4 · RR)`, `bb =
+rnd(bulge · bulge)`, `left = rnd(W · bb)`, `right = rnd(F4 · across)`, `y = left
+− right` and `value = rnd(y)`. The permanent is `P = rnd(P1 + P2)`, with `P1 =
+rnd(W · brr)`, `brr = rnd(br · br)`, `br = rnd(rnd(oab + RR) + rr)`, `P2 = rnd(F4
+· spread)`, `spread = rnd(rnd(vx + vy) + vz)`, `vi = rnd(ni · ni)` and `ni =
+rnd(|hi| + |ki|)`. `spread` is a `sum()` from zero, and adding the first square
+to zero is exact.
+
+On the longest chain, `fx`'s, that is seventeen roundings to `y` and eighteen
+to `value`. `fx` and its square `gx` are three, `fx` counting twice; the two
+sums of `out_and_back` make five; `bulge` six, since `RR` and `hollow` run
+beside `out_and_back`; `bb` doubles that and adds its own, thirteen; `W`'s
+three on `tx` make sixteen, and `left` seventeen. The `4R²` side is eleven:
+`f`, the half and `q` are three, `q`'s square seven, the two sums of `across`
+nine, and `RR` and `right`'s own rounding make eleven, since `4 · RR` is
+exact.
+
+Nothing checks the permanent's own products: the three reach squares `vi`,
+`brr`, `P1` and `P2`. Where nothing cancels, each is at least a checked product
+by monotone rounding: `vi ≥ si` as in 464.15's 2; `br ≥ bulge`, since `hollow ≤
+RR`, so `brr ≥ bb` and `P1 ≥ left`; and `spread ≥ across`, so `P2 ≥ right`.
+`brr` and `P1` stay normal in every case, since `bulge` is never zero (below),
+so `bb` and `left` are checked on factors that are not zero. The others do not.
+Where a component cancels to zero, its `si` is zero, its check passes on the
+zero (`cascade.rs:67-69`), and its `vi` is unchecked, as the cylinder's. Where
+all three cancel, `across` and `right` are zero too, and `P2` is unchecked: a
+point on the axis, a shape a designer makes. Those are the split of 6.
+
+`hollow` is never zero, on paper. `Torus::new` keeps `r < R`, and `on_floats`
+checks that both squares are normal. Write `r = m · 2ᵉ`, `m` a whole number in
+`[2⁵², 2⁵³)`. If `R` is in the same binade, `R ≥ (m + 1) 2ᵉ`, so `R² − r² ≥
+(2m + 1) 2²ᵉ`. That is more than an ulp of the squares, `2²ᵉ⁺⁵²` while `m² <
+2¹⁰⁵` and `2²ᵉ⁺⁵³` above it, so the two cannot round to one double. Where `R²`
+reaches `2²ᵉ⁺¹⁰⁶`, or `R` is in a binade above, `RR ≥ 2²ᵉ⁺¹⁰⁶`, while `r² ≤
+(2⁵³ − 1)² 2²ᵉ` is more than half an ulp below it and rounds below it. So `RR >
+rr`, and a difference of two different doubles is never rounded to zero. So
+`bulge = rnd(oab + hollow)` is positive too. `hollow` can be below
+the normals, where it is exact, as 464.16's `sumexact.g` shows; `tor.g` takes it
+normal, and the split takes the other. A zero difference or direction component
+is in no script here (10).
+
+**How the error splits.** Two blocks, one for each of the permanent's two
+products. The `4R²` block is the cylinder's nine pieces (464.15's 2), each
+times `F4`, with `right`'s rounding in `K` and `F4`'s and `RR`'s in `m`. The
+`w·w · bulge²` block is six pieces, `W · a · b` for each pair of `oab`, `RR` and
+`rr`, which sum to `W · (oab + RR + rr)²`. Each piece's error is its pair's
+factor as `y` carries it less its true one, and `om` and `Z`, which are `w·w /
+W` and `|x|² / oab`, are each averaged over three pieces of their own. So the
+error is averaged over fifteen pieces, `Phat2`, in the two blocks. A first
+form averaged `bulge / (oab + RR + rr)` over its three parts instead; it was
+dropped before it ran, since `rr`'s part is off by about `−2`, and 464.15's 4
+found Gappa does not average a sum whose relative error reaches `−1`.
+
+`tor.g`, whole, as every run of 3, 7 and 8 ran it:
+
+```gappa
+# restates: crates/rcad-geom/src/torus.rs on_floats at 4be293a5
+# restates: crates/rcad-geom/src/torus.rs cross_product_halves at 4be293a5
+# restates: crates/rcad-geom/src/torus.rs SIDE_OF_TORUS_ERROR_BOUND at 4be293a5
+# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 4be293a5
+# restates: crates/rcad-predicates/src/cascade.rs decide at 4be293a5
+# HowFarFromTheRing::on_floats and SIDE_OF_TORUS_ERROR_BOUND, rcad-geom's torus.
+@rnd = float<ieee_64, ne>;
+
+# The point, the centre, the axis direction and the two radii, each an f64.
+px = rnd(px_); py = rnd(py_); pz = rnd(pz_);
+ox = rnd(ox_); oy = rnd(oy_); oz = rnd(oz_);
+dx = rnd(dx_); dy = rnd(dy_); dz = rnd(dz_);
+rg = rnd(rg_); tb = rnd(tb_);
+
+# What on_floats computes, line for line.
+Fx = px - ox; Fy = py - oy; Fz = pz - oz;
+fx = rnd(Fx); fy = rnd(Fy); fz = rnd(Fz);
+
+# cross_product_halves: h is each component's left half, k its right half.
+hx = rnd(fy * dz); kx = rnd(fz * dy);
+hy = rnd(fz * dx); ky = rnd(fx * dz);
+hz = rnd(fx * dy); kz = rnd(fy * dx);
+Qx = hx - kx; Qy = hy - ky; Qz = hz - kz;
+qx = rnd(Qx); qy = rnd(Qy); qz = rnd(Qz);
+
+# squares and out_and_back, left to right as Rust adds them.
+gx = rnd(fx * fx); gy = rnd(fy * fy); gz = rnd(fz * fz);
+O01 = gx + gy; o01 = rnd(O01);
+O = o01 + gz; oab = rnd(O);
+
+RR = rnd(rg * rg); rr = rnd(tb * tb);
+H = RR - rr; hollow = rnd(H);
+Bu = oab + hollow; bulge = rnd(Bu);
+
+# axis_squared.
+tx = rnd(dx * dx); ty = rnd(dy * dy); tz = rnd(dz * dz);
+T01 = tx + ty; t01 = rnd(T01);
+T = t01 + tz; W = rnd(T);
+
+# across.
+sx = rnd(qx * qx); sy = rnd(qy * qy); sz = rnd(qz * qz);
+S01 = sx + sy; s01 = rnd(S01);
+S = s01 + sz; across = rnd(S);
+
+F4 = rnd(4 * RR);
+bb = rnd(bulge * bulge);
+left = rnd(W * bb);
+right = rnd(F4 * across);
+y = left - right;
+value = rnd(y);
+
+# The permanent. spread is a sum() from zero, and adding the first square to
+# zero is exact.
+nx = rnd(|hx| + |kx|); ny = rnd(|hy| + |ky|); nz = rnd(|hz| + |kz|);
+vx = rnd(nx * nx); vy = rnd(ny * ny); vz = rnd(nz * nz);
+spread = rnd(rnd(vx + vy) + vz);
+br = rnd(rnd(oab + RR) + rr);
+brr = rnd(br * br);
+P1 = rnd(W * brr);
+P2 = rnd(F4 * spread);
+P = rnd(P1 + P2);
+
+B = 18b-53 + 7b-101;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Cx = Fy * dz - Fz * dy; Cy = Fz * dx - Fx * dz; Cz = Fx * dy - Fy * dx;
+Wt = dx * dx + dy * dy + dz * dz;
+G2 = Fx * Fx + Fy * Fy + Fz * Fz;
+Bt = G2 + rg * rg - tb * tb;
+Lt = Wt * (Bt * Bt);
+Rt = 4 * (rg * rg) * (Cx * Cx + Cy * Cy + Cz * Cz);
+Ex = Lt - Rt;
+
+# The permanent with no rounding of its own.
+Rc = oab + RR + rr;
+Phat = W * (Rc * Rc)
+     + F4 * ((|hx| + |kx|) * (|hx| + |kx|) + (|hy| + |ky|) * (|hy| + |ky|)
+             + (|hz| + |kz|) * (|hz| + |kz|));
+
+# What each rounding multiplied its argument by.
+rfx = fx / Fx; rfy = fy / Fy; rfz = fz / Fz;
+rhx = hx / (fy * dz); rkx = kx / (fz * dy);
+rhy = hy / (fz * dx); rky = ky / (fx * dz);
+rhz = hz / (fx * dy); rkz = kz / (fy * dx);
+rqx = qx / Qx; rqy = qy / Qy; rqz = qz / Qz;
+rgx = gx / (fx * fx); rgy = gy / (fy * fy); rgz = gz / (fz * fz);
+ro01 = o01 / O01; ro = oab / O;
+rRR = RR / (rg * rg); rrr = rr / (tb * tb);
+rH = hollow / H; rBu = bulge / Bu;
+rtx = tx / (dx * dx); rty = ty / (dy * dy); rtz = tz / (dz * dz);
+rt01 = t01 / T01; rW = W / T;
+rsx = sx / (qx * qx); rsy = sy / (qy * qy); rsz = sz / (qz * qz);
+rs01 = s01 / S01; rS = across / S;
+rF4 = F4 / (4 * RR); rbb = bb / (bulge * bulge);
+rL = left / (W * bb); rR = right / (F4 * across);
+
+# The w.w bulge^2 block. W and oab as their three pieces, which sum to them.
+Wx = rW * rt01 * tx; Wy = rW * rt01 * ty; Wz = rW * tz;
+W3 = Wx + Wy + Wz;
+jx = 1 / (rW * rt01 * rtx) - 1; jy = 1 / (rW * rt01 * rty) - 1; jz = 1 / (rW * rtz) - 1;
+om = Wt / W;
+Ox = ro * ro01 * gx; Oy = ro * ro01 * gy; Oz = ro * gz;
+O3 = Ox + Oy + Oz;
+zx = 1 / (ro * ro01 * rgx * rfx * rfx) - 1;
+zy = 1 / (ro * ro01 * rgy * rfy * rfy) - 1;
+zz = 1 / (ro * rgz * rfz * rfz) - 1;
+Z = G2 / oab;
+
+# bulge as y carries it is rBu (oab + rH (RR - rr)); the true one is
+# Z oab + RR / rRR - rr / rrr. Squared and times W, that is six pieces, one
+# for each pair of oab, RR and rr; W is each piece's error over the piece.
+KL = rL * rbb * rBu * rBu;
+WOO = KL - om * Z * Z;
+WRR = KL * rH * rH - om / (rRR * rRR);
+Wrr = KL * rH * rH - om / (rrr * rrr);
+WOR = KL * rH - om * Z / rRR;
+WOr = KL * rH - om * Z / rrr;
+WRr = KL * rH * rH - om / (rRR * rrr);
+cOO = W * oab * oab; cRR = W * RR * RR; crr = W * rr * rr;
+cOR = 2 * W * oab * RR; cOr = 2 * W * oab * rr; cRr = 2 * W * RR * rr;
+eOO = cOO * WOO; eRR = cRR * WRR; err = crr * Wrr;
+eOR = cOR * WOR; eOr = -(cOr * WOr); eRr = -(cRr * WRr);
+A6 = cOO + cRR + crr + cOR + cOr + cRr;
+
+# The 4 R^2 block, as 464.15's cylinder, times F4. K folds in right's
+# rounding, m undoes F4's and RR's.
+Kx = rR * rS * rs01 * rsx * rqx * rqx;
+Ky = rR * rS * rs01 * rsy * rqy * rqy;
+Kz = rR * rS * rsz * rqz * rqz;
+m = 1 / (rF4 * rRR);
+ax = 1 / (rfy * rhx); bx = 1 / (rfz * rkx);
+ay = 1 / (rfz * rhy); by = 1 / (rfx * rky);
+az = 1 / (rfx * rhz); bz = 1 / (rfy * rkz);
+WHx = Kx - m * ax * ax; WKx = Kx - m * bx * bx; WXx = Kx - m * ax * bx;
+WHy = Ky - m * ay * ay; WKy = Ky - m * by * by; WXy = Ky - m * ay * by;
+WHz = Kz - m * az * az; WKz = Kz - m * bz * bz; WXz = Kz - m * az * bz;
+cHx = F4 * |hx| * |hx|; cKx = F4 * |kx| * |kx|; cXx = 2 * F4 * |hx| * |kx|;
+cHy = F4 * |hy| * |hy|; cKy = F4 * |ky| * |ky|; cXy = 2 * F4 * |hy| * |ky|;
+cHz = F4 * |hz| * |hz|; cKz = F4 * |kz| * |kz|; cXz = 2 * F4 * |hz| * |kz|;
+eHx = -(F4 * hx * hx * WHx); eKx = -(F4 * kx * kx * WKx); eXx = 2 * F4 * hx * kx * WXx;
+eHy = -(F4 * hy * hy * WHy); eKy = -(F4 * ky * ky * WKy); eXy = 2 * F4 * hy * ky * WXy;
+eHz = -(F4 * hz * hz * WHz); eKz = -(F4 * kz * kz * WKz); eXz = 2 * F4 * hz * kz * WXz;
+C3x = cHx + cKx + cXx; C3y = cHy + cKy + cXy; C3z = cHz + cKz + cXz;
+C9 = C3x + C3y + C3z;
+Yx = F4 * Kx * Qx * Qx; Yy = F4 * Ky * Qy * Qy; Yz = F4 * Kz * Qz * Qz;
+Zx = F4 * m * (Cx * Cx); Zy = F4 * m * (Cy * Cy); Zz = F4 * m * (Cz * Cz);
+
+# The same permanent as the two blocks.
+Phat2 = A6 + C9;
+
+{
+  # Every input is a finite f64.
+     |px| <= 1b1024 /\ |py| <= 1b1024 /\ |pz| <= 1b1024
+  /\ |ox| <= 1b1024 /\ |oy| <= 1b1024 /\ |oz| <= 1b1024
+  /\ |dx| <= 1b1024 /\ |dy| <= 1b1024 /\ |dz| <= 1b1024
+  /\ |rg| <= 1b1024 /\ |tb| <= 1b1024
+  # No factor is zero, and no component cancels to zero. For an f64 that is
+  # the same as being at least the smallest subnormal.
+  /\ |fx| >= 1b-1074 /\ |fy| >= 1b-1074 /\ |fz| >= 1b-1074
+  /\ |dx| >= 1b-1074 /\ |dy| >= 1b-1074 /\ |dz| >= 1b-1074
+  /\ |rg| >= 1b-1074 /\ |tb| >= 1b-1074
+  /\ |qx| >= 1b-1074 /\ |qy| >= 1b-1074 /\ |qz| >= 1b-1074
+  # hollow is a normal number; below the normals it is exact, and that is
+  # another case.
+  /\ |hollow| >= 1b-1022
+  # product_is_normal on the three squares of from_centre, of direction and
+  # of sideways, the six halves, R^2, r^2, bulge^2, axis_squared bulge^2 and
+  # 4 R^2 across (stays_accurate and the check after it).
+  /\ |gx| >= 1b-1022 /\ |gy| >= 1b-1022 /\ |gz| >= 1b-1022
+  /\ |tx| >= 1b-1022 /\ |ty| >= 1b-1022 /\ |tz| >= 1b-1022
+  /\ |sx| >= 1b-1022 /\ |sy| >= 1b-1022 /\ |sz| >= 1b-1022
+  /\ |hx| >= 1b-1022 /\ |kx| >= 1b-1022 /\ |hy| >= 1b-1022
+  /\ |ky| >= 1b-1022 /\ |hz| >= 1b-1022 /\ |kz| >= 1b-1022
+  /\ |RR| >= 1b-1022 /\ |rr| >= 1b-1022
+  /\ |bb| >= 1b-1022 /\ |left| >= 1b-1022 /\ |right| >= 1b-1022
+  # The permanent's products are normal too, since nothing cancels here, by
+  # monotone rounding: v >= s, as no component is zero; br >= bulge, as
+  # hollow <= RR, so brr >= bb and P1 >= left; spread >= across, so
+  # P2 >= right.
+  /\ |vx| >= 1b-1022 /\ |vy| >= 1b-1022 /\ |vz| >= 1b-1022
+  /\ |brr| >= 1b-1022 /\ |P1| >= 1b-1022 /\ |P2| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those gives.
+  /\ hollow -/ H in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ gx -/ fx * fx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ gy -/ fy * fy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ gz -/ fz * fz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ tx -/ dx * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ ty -/ dy * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ tz -/ dz * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sx -/ qx * qx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sy -/ qy * qy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sz -/ qz * qz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hx -/ fy * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ kx -/ fz * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hy -/ fz * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ ky -/ fx * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hz -/ fx * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ kz -/ fy * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ RR -/ rg * rg in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ rr -/ tb * tb in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ bb -/ bulge * bulge in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ left -/ W * bb in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ right -/ F4 * across in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vx -/ nx * nx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vy -/ ny * ny in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vz -/ nz * nz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ brr -/ br * br in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ P1 -/ W * brr in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ P2 -/ F4 * spread in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ hx / |hx| in [-1, 1] /\ kx / |kx| in [-1, 1]
+  /\ hy / |hy| in [-1, 1] /\ ky / |ky| in [-1, 1]
+  /\ hz / |hz| in [-1, 1] /\ kz / |kz| in [-1, 1]
+->
+  (y - Ex) / Phat2 in ? /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+fx / Fx -> 1 + (fx - Fx) / Fx;
+fy / Fy -> 1 + (fy - Fy) / Fy;
+fz / Fz -> 1 + (fz - Fz) / Fz;
+hx / (fy * dz) -> 1 + (hx - fy * dz) / (fy * dz);
+kx / (fz * dy) -> 1 + (kx - fz * dy) / (fz * dy);
+hy / (fz * dx) -> 1 + (hy - fz * dx) / (fz * dx);
+ky / (fx * dz) -> 1 + (ky - fx * dz) / (fx * dz);
+hz / (fx * dy) -> 1 + (hz - fx * dy) / (fx * dy);
+kz / (fy * dx) -> 1 + (kz - fy * dx) / (fy * dx);
+qx / Qx -> 1 + (qx - Qx) / Qx;
+qy / Qy -> 1 + (qy - Qy) / Qy;
+qz / Qz -> 1 + (qz - Qz) / Qz;
+gx / (fx * fx) -> 1 + (gx - fx * fx) / (fx * fx);
+gy / (fy * fy) -> 1 + (gy - fy * fy) / (fy * fy);
+gz / (fz * fz) -> 1 + (gz - fz * fz) / (fz * fz);
+o01 / O01 -> 1 + (o01 - O01) / O01;
+oab / O -> 1 + (oab - O) / O;
+RR / (rg * rg) -> 1 + (RR - rg * rg) / (rg * rg);
+rr / (tb * tb) -> 1 + (rr - tb * tb) / (tb * tb);
+hollow / H -> 1 + (hollow - H) / H;
+bulge / Bu -> 1 + (bulge - Bu) / Bu;
+tx / (dx * dx) -> 1 + (tx - dx * dx) / (dx * dx);
+ty / (dy * dy) -> 1 + (ty - dy * dy) / (dy * dy);
+tz / (dz * dz) -> 1 + (tz - dz * dz) / (dz * dz);
+t01 / T01 -> 1 + (t01 - T01) / T01;
+W / T -> 1 + (W - T) / T;
+sx / (qx * qx) -> 1 + (sx - qx * qx) / (qx * qx);
+sy / (qy * qy) -> 1 + (sy - qy * qy) / (qy * qy);
+sz / (qz * qz) -> 1 + (sz - qz * qz) / (qz * qz);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+across / S -> 1 + (across - S) / S;
+F4 / (4 * RR) -> 1 + (F4 - 4 * RR) / (4 * RR);
+bb / (bulge * bulge) -> 1 + (bb - bulge * bulge) / (bulge * bulge);
+left / (W * bb) -> 1 + (left - W * bb) / (W * bb);
+right / (F4 * across) -> 1 + (right - F4 * across) / (F4 * across);
+
+# w.w over W, and |x|^2 over oab, each averaged over three pieces.
+Wt / W -> 1 + ((W3 + (Wt - W)) - W3) / W3;
+W3 + (Wt - W) -> (Wx + Wx * jx) + (Wy + Wy * jy) + (Wz + Wz * jz);
+(Wx + Wx * jx) - Wx -> Wx * jx;
+(Wy + Wy * jy) - Wy -> Wy * jy;
+(Wz + Wz * jz) - Wz -> Wz * jz;
+G2 / oab -> 1 + ((O3 + (G2 - oab)) - O3) / O3;
+O3 + (G2 - oab) -> (Ox + Ox * zx) + (Oy + Oy * zy) + (Oz + Oz * zz);
+(Ox + Ox * zx) - Ox -> Ox * zx;
+(Oy + Oy * zy) - Oy -> Oy * zy;
+(Oz + Oz * zz) - Oz -> Oz * zz;
+
+# The error is the sum of the two blocks' errors, each the sum of its
+# pieces' errors, each a fraction of its own piece of the permanent; add_rr
+# then averages them.
+(y - Ex) / Phat2 -> ((Phat2 + (y - Ex)) - Phat2) / Phat2;
+Phat2 + (y - Ex) -> (A6 + (left - Lt)) + (C9 + (Rt - right));
+A6 + (left - Lt) -> (cOO + eOO) + (cRR + eRR) + (crr + err) + (cOR + eOR) + (cOr + eOr) + (cRr + eRr);
+(cOO + eOO) - cOO -> eOO;
+(cRR + eRR) - cRR -> eRR;
+(crr + err) - crr -> err;
+(cOR + eOR) - cOR -> eOR;
+(cOr + eOr) - cOr -> eOr;
+(cRr + eRr) - cRr -> eRr;
+eOr / cOr -> -WOr;
+eRr / cRr -> -WRr;
+C9 + (Rt - right) -> (C3x + (Zx - Yx)) + (C3y + (Zy - Yy)) + (C3z + (Zz - Yz));
+C3x + (Zx - Yx) -> (cHx + eHx) + (cKx + eKx) + (cXx + eXx);
+C3y + (Zy - Yy) -> (cHy + eHy) + (cKy + eKy) + (cXy + eXy);
+C3z + (Zz - Yz) -> (cHz + eHz) + (cKz + eKz) + (cXz + eXz);
+(cHx + eHx) - cHx -> eHx;
+(cKx + eKx) - cKx -> eKx;
+(cXx + eXx) - cXx -> eXx;
+(cHy + eHy) - cHy -> eHy;
+(cKy + eKy) - cKy -> eKy;
+(cXy + eXy) - cXy -> eXy;
+(cHz + eHz) - cHz -> eHz;
+(cKz + eKz) - cKz -> eKz;
+(cXz + eXz) - cXz -> eXz;
+eHx / cHx -> -((hx / |hx|) * (hx / |hx|) * WHx);
+eKx / cKx -> -((kx / |kx|) * (kx / |kx|) * WKx);
+eXx / cXx -> (hx / |hx|) * (kx / |kx|) * WXx;
+eHy / cHy -> -((hy / |hy|) * (hy / |hy|) * WHy);
+eKy / cKy -> -((ky / |ky|) * (ky / |ky|) * WKy);
+eXy / cXy -> (hy / |hy|) * (ky / |ky|) * WXy;
+eHz / cHz -> -((hz / |hz|) * (hz / |hz|) * WHz);
+eKz / cKz -> -((kz / |kz|) * (kz / |kz|) * WKz);
+eXz / cXz -> (hz / |hz|) * (kz / |kz|) * WXz;
+
+# From the two blocks to the permanent on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / Phat2) * (Phat / P) * (P / eb);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+**3. The bound on `y`.** `tor.g` proves `|y − Ex| ≤ eb` at the code's `B`. In
+`run0.sh` (9) it exits 0 in `20.02s`, printing `(y − Ex) / Phat2` within
+`1.88738e-15` and `P −/ Phat` within `7.77156e-16`. `ku.py` (9) writes those
+exact bounds as `17u + 95u²` and `7u + 22u²`. `Phat` is the permanent with no
+rounding of its own, and `Phat2` the same sum as the two blocks of 2. Its
+`.out` and `.bcoq` have no line but their results and 492 "assumed to be
+nonzero" warnings each. The bisection: `run1.sh` (9) ran the `b_tor_<m>.g` and
+`b17_tor_<m>.g` that `torcases.py` (9) writes, `tor.g` at `B = 18u + m u²` and
+at `17u + m u²`. At `18u`, every `m` run proves: 0, 100, 200, 228, 230, 231,
+232, 233, 236 and 300. At `17u`, 232, 233, 236 and 300 prove, and 231, 230,
+228, 200, 100 and 0 fail, best `[-1, 1]`. By hand, `(17u + 95u²)(1 + 7u +
+22u²)(1 + u)` (`y`'s bound taken through the permanent's `7u + 22u²` and
+through `eb`'s own rounding) is `17u + 231u²` and a `u³`, so the line falls
+where that count puts it. So on `y`, where nothing cancels, the bound needs
+about a `u` less than the code's `18u`, as the count of 2 says.
+
+A first form of `tor.g`, run through `one1.sh`, exited 0 in `15.34s`, but Gappa
+called ten of its hints unneeded ("no need for the rewriting ... if ... `Wx !=
+0`"): the three last steps of each of the two averages over three pieces, and
+the ratio hints of four of the six pair pieces, `OO`, `RR`, `rr` and `OR`. Its
+two block goals, `(left − Lt) / A6` and `(Rt − right) / C9`, printed bounds of
+about `1e2773`, which say nothing. All twelve were dropped, and `tor.g` is the
+script after that.
+
+**4. The claim on `value`.** Not tried. `decide` does not need it: the doc on
+`Filtered::error_bound` (`cascade.rs:25-35`) asks only for the bound on the
+sum before `value`'s last rounding, which 3 proves, as in 464.14's 4, 464.15's
+4 and 464.16's 4.
+
+**5. What the comments claim.** The doc comment on the constant,
+`torus.rs:485-507`, says:
+
+> The chain, counted step by step. `point − centre` is one rounding; squaring
+> a component is a second and a third; the two sums that fold the three
+> squares are a fourth and fifth; `R²`, `r²` and their difference are a sixth,
+> and adding that on is a seventh. Squaring the total doubles what it carries,
+> so it sits at `(1 + epsilon)^15`; `w·w` is three roundings of its own and
+> multiplying it in is a sixteenth and seventeenth. The other side is shorter
+> — a cross-product component is three roundings, its square a seventh, the
+> two sums a ninth, and `4R²` times it an eleventh — so the final subtraction,
+> the eighteenth, is what the whole thing is charged at.
+>
+> `(1 + epsilon)^18 − 1 ≤ 18·epsilon + 153·epsilon² + …` times the permanent.
+> The `220·epsilon²` covers the higher-order terms and the rounding of the
+> permanent itself; what it has to beat is about `153·epsilon`.
+>
+> Every step of that argument is a *relative* one, so as with every bound of
+> this shape it holds only while nothing overflows or falls into the
+> subnormals. [`HowFarFromTheRing::on_floats`] enforces the bottom end product
+> by product through [`product_is_normal`], and `decide` the top end by
+> refusing a bound that is not itself a normal number.
+
+The comment above the check, at `torus.rs:347-349`, says:
+
+> The bound below is a fraction of the permanent, which only bounds anything
+> while every product keeps its relative accuracy. One of them in the
+> subnormals and this level certifies a wrong sign.
+
+Against what is proved:
+
+- Eighteen roundings to `value` and seventeen to `y` agree with `tor.g`'s `17u`
+  on `y` (3), but the chain reaches them by two slips that cancel. It puts
+  `bulge` at seven roundings, counting `R²`, `r²` and their difference after
+  `out_and_back`'s five, where they run beside it and `bulge` carries six (2).
+  So its square sits at fifteen where it is thirteen. Then it counts `w·w`'s
+  three roundings and the product's own as two, the sixteenth and seventeenth,
+  where they are four. Its `4R²` side at eleven is right (2).
+- "About `153·epsilon`" is the `ε²` term of `(1 + ε)¹⁸ − 1`, so it gives the
+  wrong power, as 464.15's 5 found the cylinder's `45` does and 464.16's 5 the
+  cone's `66`. It also leaves out what the same sentence says the `220ε²`
+  covers. The permanent's rounding, `7u` (3), taken against `18ε`, costs
+  `126ε²`. The rounding of `B · P` costs `ε` of `eb`, which is `18ε²`. So by
+  the comment's own terms the count is `153 + 126 + 18 = 297`, above its `220`
+  and above the `224` the double holds. On `y` that costs nothing, since `y`
+  proves at `17u + 232u²` and at `18u + 0u²` (3).
+- "Enforces the bottom end product by product" is false. `on_floats` checks
+  none of the permanent's own products, the reach squares `vi`, `brr`, `P1` and
+  `P2`, and `product_is_normal` lets a zero through (`cascade.rs:67-69`). `brr`
+  and `P1` stay normal (2). But where a component cancels, its check passes on
+  the zero and its `vi` can fall below the normals or round to zero, and where
+  all three cancel, `P2` can too. Unlike the cone's, the bound holds in each of
+  those (6). The branches where a difference or a direction component is zero
+  are not run (10).
+- "One of them in the subnormals and this level certifies a wrong sign" is
+  false of each reach square `vi` and of `P2`, below the normals or zero: by 6
+  each of those proves. `brr` and `P1` never fall there (2). For the products
+  `on_floats` checks it was not run, as 464.14's 6 ran the sphere's squares
+  (10).
+
+So the comments claim more than is proved, which is what the row asks. Unlike
+the cone's, the claim that the bottom end is enforced gives no wrong sign in
+any case the split runs. Restating them is a row (10).
+
+**6. The components that cancel, `hollow` and `P2`.** `torsplit.py` (9) splits
+`tor.g` as 464.15's `cylsplit.py` splits `cyl.g`, with two more letters. Each
+component of the cross product is `n`, `c`, `s` or `u`, as in 464.15's 6: it
+does not cancel; it cancels and its reach square is normal; it cancels and its
+reach square is below the normals and not zero; or it cancels and its reach
+square rounds to zero. The fourth letter is `hollow`'s: `n`, normal, or `e`,
+below the normals, where it is exact (464.16's `sumexact.g`) and is written
+unrounded. The fifth is `P2`'s:
+
+- `n`: `P2` is normal. Where a component does not cancel, `spread ≥ across`,
+  so `P2 ≥ right`, which `on_floats` checks, and `n` is the only state.
+- `b`: all three components cancel, so `right` is zero, and `P2` is below the
+  normals or zero. Where all three reach squares round to zero, `uuu`, `spread`
+  and `P2` are zero and `P` is `P1`, and `b` is the only state.
+
+That makes `37 · 2 + 26 · 2 · 2 + 2 = 180` cases: the 37 with a component `n`
+take either `hollow`, the 26 others but `uuu` take either `hollow` and either
+`P2`, and `uuu` takes either `hollow`. They are written `tor_<case>.g`, and
+`tor_nnnnn.g` is `tor.g` byte for byte, which `same.py` (9) checks. A
+component that cancels has no square in `y`, so its error is the whole of its
+true term, `4R² C²`. That error is averaged over the piece `2W · oab · RR` of
+the `w·w · bulge²` block rather than over its own reach square, so that what
+`vi` or `P2` rounds to does not matter to it.
+
+What they print. `trial.sh` (9) first ran eight cases, `cnnnn`, `cccnn`,
+`nnnen`, `uuueb`, `cccnb`, `scnnn`, `ssuen` and `uuunb`, and their `u / 2`
+controls, all at once through `one1.sh`. Each case exited 0, in 18.22 to 29.59
+s, and each control exited 1, best `[-34, 34]`, so no hint of `torsplit.py`
+needed changing. `run3.sh` (9) then ran all 180 with `coq`, and the 179
+controls, 20 at a time on a load of about 40 over 24 cores, and `tally3.py`
+(9) counts them. After its line for each case it prints:
+
+```text
+cases exit 0: 180 of 180
+controls exit 1: 179 of 179
+pointless: []
+y bounds by live components and hollow and P2 letters:
+   (0, 'eb', '[-1.88738e-15, 1.88738e-15]') 27
+   (0, 'en', '[-1.88738e-15, 1.88738e-15]') 26
+   (0, 'nb', '[-1.88738e-15, 1.88738e-15]') 27
+   (0, 'nn', '[-1.88738e-15, 1.88738e-15]') 26
+   (1, 'en', '[-1.88738e-15, 1.88738e-15]') 27
+   (1, 'nn', '[-1.88738e-15, 1.88738e-15]') 27
+   (2, 'en', '[-1.88738e-15, 1.88738e-15]') 9
+   (2, 'nn', '[-1.88738e-15, 1.88738e-15]') 9
+   (3, 'en', '[-1.88738e-15, 1.88738e-15]') 1
+   (3, 'nn', '[-1.88738e-15, 1.88738e-15]') 1
+P bounds: {'[-7.77156e-16, 7.77156e-16]': 178, '[-6.66134e-16, 6.66134e-16]': 2}
+control exits by live components and hollow and P2 letters:
+   (0, 'eb', '1') 27
+   (0, 'en', '1') 26
+   (0, 'nb', '1') 27
+   (0, 'nn', '1') 26
+   (1, 'en', '1') 27
+   (1, 'nn', '1') 27
+   (2, 'en', '1') 9
+   (2, 'nn', '1') 9
+   (3, 'en', '1') 1
+control exits and bests: {('1', '[-34, 34]'): 179}
+times (15.5, 'cucnn') (61.65, 'nnsen')
+coq ok: 179 of 180
+coq smallest (14324, 67, 'uuunb') largest (22872, 81, 'nnnnn') hints 66 81 times 24.62 99.14
+files with a line other than results and 'assumed to be nonzero': ['tor_cusen.coqc']
+```
+
+- Each of the 180 exits 0 at the code's `B`, in 15.5 s (`tor_cucnn.g`) to
+  61.65 s (`tor_nnsen.g`), and Gappa calls none of them pointless.
+- `(y − Ex) / Phat2` is within `1.88738e-15` in all 180, whichever components
+  cancel and whatever `hollow` and `P2` are, and `ku.py` writes each of the
+  180 exact bounds as `17u + 95u²`. A component that cancels costs `y`
+  nothing, since its longest chain is on `left` (2).
+- `P` against the permanent with no rounding of its own, `Phat`, or `Phatx` as
+  a case that splits writes it, is within `7u` (`7.77156e-16`) in 178 cases:
+  `7u + 22u²` in 126 and `7u + 21u²` in 52, by `ku.py`. It is within `6u +
+  15u²` (`6.66134e-16`) in the two `uuu` cases, where `P` is `P1`.
+- 90 of the 180, `27 + 26 + 27 + 9 + 1`, have `hollow` below the normals.
+- No `.out`, `.bcoq` or `.coqc` of the 180 has a line other than its results
+  and "assumed to be nonzero" warnings, but `tor_cusen.coqc`, whose certificate
+  `coqc` refused (8).
+
+So on `y` the bound holds at the code's constant wherever no factor is zero.
+
+The shapes. `shapes.py` (9) works three shapes in Python's doubles, which
+round as Rust's do. A point on the axis of a torus whose axis is `(1, 1, 1)` is
+`cccnn`, and one off it at `(1, 1, 2)` is `nncnn`: shapes a designer makes, and
+both are proved. A point on the axis of the axis-aligned torus whose axis is
+`(1, 0, 0)` has four zero factors, which no case takes, and passes every check
+`on_floats` makes (10). It prints:
+
+```text
+on the axis (1, 0, 0): direction [1.0, 0.0, 0.0], from_centre [2.0, 0.0, 0.0], halves [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+  zero factors ['fy', 'fz', 'dy', 'dz']; case uuunb; on_floats' checks pass: True
+on the axis (1, 1, 1): direction [0.5773502691896257, 0.5773502691896257, 0.5773502691896257], from_centre [1.0, 1.0, 1.0], halves [(0.5773502691896257, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257)]
+  zero factors none; case cccnn; on_floats' checks pass: True
+off the axis (1, 1, 1), one component cancelling: direction [0.5773502691896257, 0.5773502691896257, 0.5773502691896257], from_centre [1.0, 1.0, 2.0], halves [(0.5773502691896257, 1.1547005383792515), (1.1547005383792515, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257)]
+  zero factors none; case nncnn; on_floats' checks pass: True
+```
+
+The letters `uuunb` of the first line are what the classifier reads off its
+zeros; `torsplit.py`'s `uuunb` assumes no factor is zero, so it is not that
+shape.
+
+**7. The controls.** At `B = 1b-54;`, `u / 2`, each must fail:
+
+- `c_tor_half.g` exits 1, best `[-34, 34]`, `tor.g`'s `17u` over `u / 2`.
+- Each of the 179 `c_tor_<case>_half.g` exits 1, best `[-34, 34]`, so none
+  needs a `u²` control, as 108 of the cone's did.
+
+Together with the failures at `17u + 231u²` (3), that says none of the proofs
+came from a contradiction in its hypotheses. Two more controls take a
+hypothesis away:
+
+- `c_tor_nonormal.g` is `tor.g` without every `1b-1022` hypothesis but
+  `|eb|`'s, and without the lemma line each of those gives. It exits 1, best
+  `[-7.69054e+2159, 7.69054e+2159]`, and fails `REL(P, Phat)` and `BND((y -
+  Ex) / Phat2)` too.
+- `c_tor_noeb.g`, `tor.g` without `eb` normal, exits 1 in `82.44s`, best
+  `[-2.78435e+1080, 3.94239e+1124]`.
+
+**8. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0 from 464.5's nix block, accept
+each script that proves and was run through them:
+
+- `tor.g`: 23062 lines with 81 hints, in `35.83s` (`run0.sh`).
+- The 180 cases of 6: 14324 (`tor_uuunb`) to 22872 lines (`tor_nnnnn`), with
+  66 to 81 hints, in 24.62 to 99.14 s each (`run3.sh`). `coqc` accepted 179
+  of them at their first certificate, and printed nothing.
+- `tor_cusen.g` at its second, below.
+
+`tor_cusen.g`'s first certificate, 16904 lines, `coqc` refused. `tor_cusen.coqc`
+ends `The term "eq_refl" has type "true = true" while it is expected to have
+type "intersect_helper (upper i96) (lower i96) i9 = true".`, at `tor_cusen.v`
+line 6766, `apply intersect with (1 := h1) (2 := h2)`, where `h1` and `h2` are
+the same lemma, `l337 h0`. Gappa's certificate there is wrong, not its bound:
+the same script's Gappa run exited 0. Q2682's second lane then ran `run4.sh`
+(9) through 464.16's `launch.sh`. It runs `one.sh` with `coq` on
+`tor_cusen2.g`, a copy of `tor_cusen.g`, so that `tor_cusen.coqc`, which
+`tally3.py` reads, stays as `run3.sh` left it. It printed:
+
+```text
+tor_cusen2.g is tor_cusen.g
+tor_cusen2 exit 0 20.99s
+tor_cusen2 coq -Bcoq exit 0 coqc exit 0 29.78s lines 16899 hints 68
+coqc printed:
+done
+```
+
+So `coqc` accepts the second certificate, 16899 lines with 68 hints from the
+same bytes, and printed nothing, and it accepts a certificate for each of the
+180. `ku.py` writes the two bounds of `tor_cusen2.out` as `17u + 95u²` and
+`7u + 22u²`, the same as `tor_cusen.out`'s.
+
+Gappa does not write the same proof each run (464.4). That is why
+`tor_nnnnn.g`, the same bytes as `tor.g`, gave 22872 lines against 23062, and
+why `tor_cusen.v` and `tor_cusen2.v` first differ at line 976. Each hint enters
+the Coq file as a hypothesis with no condition, as in 464.4. The controls and
+the bisection scripts were not run through `coqc`. `field` has not been run on
+these hints (464.10).
+
+**9. The scripts.** `torcases.py` writes the controls of 7 and the bisection
+scripts of 3 from `tor.g`, and `torsplit.py` writes the 180 cases of 6 and
+their controls. To run them again, save the nix block of 464.5 as
+`gappalib18.nix` and `tor.g` and the two generators beside it, and then:
+
+```sh
+python3 torcases.py 0 100 200 228 230 231 232 233 236 300; python3 torsplit.py
+nx="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
+pin=github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe
+$nx shell $pin#gappa --command gappa -Eprecision=200 tor.g
+$nx shell $pin#gappa --command gappa -Eprecision=200 -Bcoq tor.g > tor.v
+gl=$($nx build --impure --no-link --print-out-paths -f gappalib18.nix)
+fl=$($nx build --no-link --print-out-paths $pin#coqPackages_8_20.flocq)
+COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+  $nx shell $pin#coqPackages_8_20.coq --command coqc tor.v
+```
+
+and the same for every other file they write. A script that proves exits 0; a
+control must exit 1. What the lanes ran is `run0.sh`, `run1.sh`, `trial.sh`,
+`run3.sh` and `run4.sh` (below), in a scratch directory, each through 464.13's
+`one.sh`, the same bytes, or through 464.16's `one1.sh`, which is `one.sh`
+with the timeout taken from `T` and no `coq`. `ku.py` writes Gappa's bounds as
+`k u + r u²`, `tally3.py` counts what `run3.sh` printed, and `shapes.py` reads
+the shapes of 6. `same.py` (below) checks every script appended here byte for
+byte against the file that was run; that `one.sh` is 464.13's block and
+`one1.sh` and `launch.sh` 464.16's; that `tally3.py` and `shapes.py`, run
+again, print what 6 gives; and that the two generators, run again from the
+text here, write what was run. Its print and what its 383 files are end this
+part.
+
+`run0.sh`, whole:
+
+```sh
+#!/bin/bash
+# tor.g, the case where nothing cancels, through one.sh with coq, and then
+# every line of its output, its -Bcoq print and its coqc print that is not an
+# "assumed to be nonzero" warning. Prints to run0.txt.
+cd "$(dirname "$0")"
+{
+  ./one.sh tor.g coq
+  for x in tor.out tor.bcoq tor.coqc; do
+    echo "== $x: $(grep -c 'assumed to be nonzero' "$x") nonzero warnings"
+    grep -v 'assumed to be nonzero' "$x"
+  done
+  echo done
+} > run0.txt 2>&1
+```
+
+`torcases.py`, whole:
+
+```python
+"""Write the scripts of 464.17 from tor.g beside it: the controls c_tor_half.g
+at B = u / 2, c_tor_nonormal.g without product_is_normal, and c_tor_noeb.g
+without eb normal; and b_tor_<m>.g and b17_tor_<m>.g, tor.g at B = 18u + m u^2
+and 17u + m u^2, for the bisection. Each change is a text replacement that
+must match exactly once. Run as: python3 torcases.py [m ...]."""
+import os
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+TOR = open("tor.g").read()
+B_CODE = "B = 18b-53 + 7b-101;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+TITLE = "# HowFarFromTheRing::on_floats and SIDE_OF_TORUS_ERROR_BOUND, rcad-geom's torus.\n"
+
+
+def sub(text, old, new):
+    assert text.count(old) == 1, old
+    return text.replace(old, new)
+
+
+def at(text, b):
+    return sub(text, B_CODE, b)
+
+
+def without_normal(text):
+    keep = []
+    for line in text.split("\n"):
+        if "1b-1022" in line and "|eb|" not in line:
+            continue
+        if line.startswith("  /\\ ") and LEMMA in line and not line.startswith("  /\\ eb -/"):
+            continue
+        keep.append(line)
+    text = "\n".join(keep)
+    text = sub(text, "  # hollow is a normal number; below the normals it is exact, and that is\n"
+               "  # another case.\n", "")
+    text = sub(text, "  # product_is_normal on the three squares of from_centre, of direction and\n"
+               "  # of sideways, the six halves, R^2, r^2, bulge^2, axis_squared bulge^2 and\n"
+               "  # 4 R^2 across (stays_accurate and the check after it).\n", "")
+    text = sub(text, "  # The permanent's products are normal too, since nothing cancels here, by\n"
+               "  # monotone rounding: v >= s, as no component is zero; br >= bulge, as\n"
+               "  # hollow <= RR, so brr >= bb and P1 >= left; spread >= across, so\n"
+               "  # P2 >= right.\n", "")
+    return sub(text, TITLE, TITLE + "# A control: without product_is_normal and the lemma lines it gives.\n")
+
+
+def without_eb(text):
+    text = sub(text, "  # The bound is normal, which decide checks.\n  /\\ |eb| >= 1b-1022\n", "")
+    text = sub(text, f"  /\\ eb -/ B * P {LEMMA}\n", "")
+    return sub(text, TITLE, TITLE + "# A control: without eb normal and the lemma line it gives.\n")
+
+
+def write(name, text):
+    with open(name, "w") as out:
+        out.write(text)
+
+
+write("c_tor_half.g", at(TOR, B_HALF))
+write("c_tor_nonormal.g", without_normal(TOR))
+write("c_tor_noeb.g", without_eb(TOR))
+for m in sys.argv[1:]:
+    write(f"b_tor_{m}.g", at(TOR, f"B = 18b-53 + {m}b-106;"))
+    write(f"b17_tor_{m}.g", at(TOR, f"B = 17b-53 + {m}b-106;"))
+```
+
+`run1.sh`, whole:
+
+```sh
+#!/bin/bash
+# tor.g's controls and its bisection, B = 18u + m u^2 and 17u + m u^2, all
+# at once through one1.sh with a 600 s timeout. Prints to run1.txt.
+cd "$(dirname "$0")"
+{
+  python3 torcases.py 0 100 200 228 230 231 232 233 236 300
+  for f in c_tor_half.g c_tor_nonormal.g c_tor_noeb.g b_tor_*.g b17_tor_*.g; do
+    T=600 ./one1.sh "$f" &
+  done
+  wait
+  echo done
+} > run1.txt 2>&1
+```
+
+`ku.py`, whole:
+
+```python
+"""Print each result of the named .out files as k u + r u^2, u = 2^-53, with
+k the whole number of u at or below the bound's larger end. Run as:
+python3 ku.py <file.out> ..."""
+import re
+import sys
+from fractions import Fraction
+
+U = Fraction(1, 2**53)
+
+
+def num(text):
+    m = re.fullmatch(r"(-?\d+)(?:b(-?\d+))?", text)
+    e = int(m.group(2) or 0)
+    return Fraction(int(m.group(1))) * (Fraction(2) ** e)
+
+
+for path in sys.argv[1:]:
+    for line in open(path):
+        m = re.match(r"\s+(.*) in \[(\S+) \{[^}]*\}, (\S+) \{[^}]*\}\]", line)
+        if not m:
+            continue
+        lo, hi = num(m.group(2)), num(m.group(3))
+        top = max(abs(lo), abs(hi))
+        k = top // U
+        r = (top - k * U) / (U * U)
+        print(f"{path}: {m.group(1)}: {k}u + {float(r):.4g}u^2")
+```
+
+`torsplit.py`, whole, as `trial.sh` and `run3.sh` ran it:
+
+```python
+"""Write tor.g's case split, one script per case and a control at B = u / 2
+beside each. A case is five letters. The first three are the components x, y
+and z of the cross product, as cylsplit.py (464.15) has them:
+
+n  it does not cancel: q = rnd(h - k) is not zero, so its square s is
+   normal (stays_accurate), and so is its reach square v, which is never
+   below s;
+c  it cancels to zero, h == k, and its reach square v = rnd(4 h^2) is
+   normal;
+s  it cancels, and v is below the normals and does not round to zero;
+u  it cancels, and v rounds to zero.
+
+The fourth is hollow = rnd(RR - rr):
+
+n  it is normal;
+e  it is below the normals, where it is exact (464.16's sumexact.g), so it
+   is written unrounded.
+
+The fifth is the permanent's P2 = rnd(F4 * spread):
+
+n  it is normal. Where a component does not cancel, spread >= across, so
+   P2 >= right, which is normal (stays_accurate), and n is the only state;
+b  all three components cancel, so right is zero, and P2 is below the
+   normals or zero. Where all three reach squares round to zero, uuu, spread
+   and P2 are zero and P is P1, and b is the only state.
+
+That is 37 * 2 + 26 * 2 * 2 + 2 = 180 cases, and tor_nnnnn.g is tor.g, byte
+for byte. A component that cancels has no square in y, so its error is the
+whole of its true term, eC = 4 R^2 C^2. It is averaged over the piece
+cOR = 2 W oab RR of the w.w bulge^2 block rather than over its own reach
+square, so that what v or P2 rounds to does not matter to it. The names are
+tor_<case>.g and c_tor_<case>_half.g.
+Run as: python3 torsplit.py
+"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+AXES = "xyz"
+B_CODE = "B = 18b-53 + 7b-101;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+HALVES = {"x": ("fy * dz", "fz * dy"), "y": ("fz * dx", "fx * dz"), "z": ("fx * dy", "fy * dx")}
+STATE = {"n": "does not cancel", "c": "cancels, its reach square normal",
+         "s": "cancels, its reach square below the normals and not zero",
+         "u": "cancels, its reach square rounding to zero"}
+HOLLOW = {"n": "hollow normal", "e": "hollow below the normals"}
+SPREAD = {"n": "P2 normal", "b": "P2 below the normals or zero"}
+
+
+def reach(a):
+    return f"(|h{a}| + |k{a}|) * (|h{a}| + |k{a}|)"
+
+
+def left_sum(terms):
+    """Sum terms left to right as Rust adds them, each sum rounded."""
+    acc = None
+    for t in terms:
+        acc = t if acc is None else f"rnd({acc} + {t})"
+    return acc
+
+
+def over_sum(v, a, r1, r2, total):
+    """v_a / total as 1 over total / v_a, total being r2 (r1 (vx + vy) + vz)."""
+    xy = " + ".join("1" if b == a else f"{v}{b} / {v}{a}" for b in "xy")
+    z = "1" if a == "z" else f"{v}z / {v}{a}"
+    return f"{v}{a} / {total} -> 1 / ({r2} * ({r1} * ({xy}) + {z}));"
+
+
+def make(case, b=B_CODE):
+    st = dict(zip(AXES, case[:3]))
+    hol = case[3] == "n"
+    p2 = case[4]
+    live = [a for a in AXES if st[a] == "n"]
+    dead = [a for a in AXES if st[a] != "n"]
+    small = [a for a in AXES if st[a] in "su"]
+    kept = [a for a in AXES if st[a] != "u"]
+    vdead = [a for a in dead if st[a] in "cs"]
+    live01 = [a for a in "xy" if a in live]
+    s01_rounds = len(live01) == 2
+    s_rounds = bool(live01) and "z" in live
+    split = case != "nnnnn"
+    src = [
+        "# restates: crates/rcad-geom/src/torus.rs on_floats at 4be293a5",
+        "# restates: crates/rcad-geom/src/torus.rs cross_product_halves at 4be293a5",
+        "# restates: crates/rcad-geom/src/torus.rs SIDE_OF_TORUS_ERROR_BOUND at 4be293a5",
+        "# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 4be293a5",
+        "# restates: crates/rcad-predicates/src/cascade.rs decide at 4be293a5",
+        "# HowFarFromTheRing::on_floats and SIDE_OF_TORUS_ERROR_BOUND, rcad-geom's torus.",
+    ]
+    if split:
+        src.append(f"# The case {case}: " + "; ".join(f"{a} {STATE[st[a]]}" for a in AXES)
+                   + f"; {HOLLOW[case[3]]}; {SPREAD[p2]}.")
+    src += [
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The point, the centre, the axis direction and the two radii, each an f64.",
+        "px = rnd(px_); py = rnd(py_); pz = rnd(pz_);",
+        "ox = rnd(ox_); oy = rnd(oy_); oz = rnd(oz_);",
+        "dx = rnd(dx_); dy = rnd(dy_); dz = rnd(dz_);",
+        "rg = rnd(rg_); tb = rnd(tb_);",
+        "",
+        "# What on_floats computes, line for line.",
+        "Fx = px - ox; Fy = py - oy; Fz = pz - oz;",
+        "fx = rnd(Fx); fy = rnd(Fy); fz = rnd(Fz);",
+        "",
+        "# cross_product_halves: h is each component's left half, k its right half.",
+    ]
+    if dead:
+        src += ["# A component that cancels has the same double for both halves, so k",
+                "# is written h, and its q and s are zero and drop out."]
+    for a in AXES:
+        left, right = HALVES[a]
+        src.append(f"h{a} = rnd({left}); k{a} = " + (f"h{a};" if a in dead else f"rnd({right});"))
+    if live:
+        src.append(" ".join(f"Q{a} = h{a} - k{a};" for a in live))
+        src.append(" ".join(f"q{a} = rnd(Q{a});" for a in live))
+    src += [
+        "",
+        "# squares and out_and_back, left to right as Rust adds them.",
+        "gx = rnd(fx * fx); gy = rnd(fy * fy); gz = rnd(fz * fz);",
+        "O01 = gx + gy; o01 = rnd(O01);",
+        "O = o01 + gz; oab = rnd(O);",
+        "",
+        "RR = rnd(rg * rg); rr = rnd(tb * tb);",
+    ]
+    if hol:
+        src.append("H = RR - rr; hollow = rnd(H);")
+    else:
+        src += ["# hollow is below the normals, where it is exact (464.16's sumexact.g).",
+                "H = RR - rr; hollow = H;"]
+    src += [
+        "Bu = oab + hollow; bulge = rnd(Bu);",
+        "",
+        "# axis_squared.",
+        "tx = rnd(dx * dx); ty = rnd(dy * dy); tz = rnd(dz * dz);",
+        "T01 = tx + ty; t01 = rnd(T01);",
+        "T = t01 + tz; W = rnd(T);",
+        "",
+        "# across.",
+    ]
+    if dead:
+        src += ["# A zero square added to a double leaves that double, which then",
+                "# rounds to itself, so a sum is written without its zero squares."]
+    if live:
+        src.append(" ".join(f"s{a} = rnd(q{a} * q{a});" for a in live))
+    if s01_rounds:
+        src.append("S01 = sx + sy; s01 = rnd(S01);")
+    elif live01:
+        src.append(f"s01 = s{live01[0]};")
+    if s_rounds:
+        src.append("S = s01 + sz; across = rnd(S);")
+    elif live01:
+        src.append("across = s01;")
+    elif live:
+        src.append("across = sz;")
+    else:
+        src.append("# All three cancel, so across and right are zero, and y is left.")
+    src += [
+        "",
+        "F4 = rnd(4 * RR);",
+        "bb = rnd(bulge * bulge);",
+        "left = rnd(W * bb);",
+    ]
+    if live:
+        src += ["right = rnd(F4 * across);", "y = left - right;"]
+    else:
+        src.append("y = left;")
+    src += [
+        "value = rnd(y);",
+        "",
+        "# The permanent. spread is a sum() from zero, and adding the first square to",
+        "# zero is exact.",
+    ]
+    if dead:
+        src += ["# A reach of two equal halves is twice one of them, which a double",
+                "# holds (464.15's dbl.g), so it is written unrounded."]
+    src.append(" ".join(f"n{a} = rnd(|h{a}| + |k{a}|);" if a in live else f"n{a} = |h{a}| + |k{a}|;"
+                        for a in AXES))
+    if small:
+        src.append(" ".join(f"Xv{a} = n{a} * n{a};" for a in small))
+    if "u" in case[:3]:
+        src += ["# A reach square that rounds to zero is written as the 0 it rounds to",
+                "# (464.14's tinysq.g), and the sums leave it out."]
+    vs = []
+    for a in AXES:
+        if st[a] in "nc":
+            vs.append(f"v{a} = rnd(n{a} * n{a});")
+        elif st[a] == "s":
+            vs.append(f"v{a} = rnd(Xv{a});")
+    if vs:
+        src.append(" ".join(vs))
+    if kept:
+        src.append(f"spread = {left_sum([f'v{a}' for a in kept])};")
+    src += [
+        "br = rnd(rnd(oab + RR) + rr);",
+        "brr = rnd(br * br);",
+        "P1 = rnd(W * brr);",
+    ]
+    if not kept:
+        src.append("# spread and P2 are zero, and adding zero to P1 leaves it.")
+        src.append("P = P1;")
+    else:
+        src.append("P2 = rnd(F4 * spread);" if p2 == "n" else "XP2 = F4 * spread; P2 = rnd(XP2);")
+        src.append("P = rnd(P1 + P2);")
+    src += [
+        "",
+        b,
+        "eb = rnd(B * P);",
+        "",
+        "# The true value of the same inputs.",
+        "Cx = Fy * dz - Fz * dy; Cy = Fz * dx - Fx * dz; Cz = Fx * dy - Fy * dx;",
+        "Wt = dx * dx + dy * dy + dz * dz;",
+        "G2 = Fx * Fx + Fy * Fy + Fz * Fz;",
+        "Bt = G2 + rg * rg - tb * tb;",
+        "Lt = Wt * (Bt * Bt);",
+        "Rt = 4 * (rg * rg) * (Cx * Cx + Cy * Cy + Cz * Cz);",
+        "Ex = Lt - Rt;",
+        "",
+        "# The permanent with no rounding of its own.",
+        "Rc = oab + RR + rr;",
+        "Phat = W * (Rc * Rc)",
+        "     + F4 * ((|hx| + |kx|) * (|hx| + |kx|) + (|hy| + |ky|) * (|hy| + |ky|)",
+        "             + (|hz| + |kz|) * (|hz| + |kz|));",
+    ]
+    dx_terms = None
+    if split:
+        if p2 == "b" and kept:
+            src += ["# The same with P2 in place of the 4 R^2 product, as P adds them; Dx is",
+                    "# what that adds to the two blocks below."]
+            src.append("Phatx = W * (Rc * Rc) + P2;")
+            dx_terms = "P2"
+        elif p2 == "b":
+            src.append("# The same with no 4 R^2 product, as P is P1.")
+            src.append("Phatx = W * (Rc * Rc);")
+        else:
+            src += ["# The same with v in place of the reach square of each component that",
+                    "# cancels, and without each that rounds to zero; Dx is what that adds",
+                    "# to the two blocks below."]
+            terms = [reach(a) if a in live else f"v{a}" for a in AXES if st[a] != "u"]
+            src.append(f"Phatx = W * (Rc * Rc) + F4 * ({' + '.join(terms)});")
+            if vdead:
+                dx_terms = f"F4 * ({' + '.join(f'v{a}' for a in vdead)})"
+        if dx_terms:
+            src.append(f"Dx = {dx_terms};")
+    src += [
+        "",
+        "# What each rounding multiplied its argument by.",
+        "rfx = fx / Fx; rfy = fy / Fy; rfz = fz / Fz;",
+        "rhx = hx / (fy * dz); rkx = kx / (fz * dy);",
+        "rhy = hy / (fz * dx); rky = ky / (fx * dz);",
+        "rhz = hz / (fx * dy); rkz = kz / (fy * dx);",
+    ]
+    if live:
+        src.append(" ".join(f"rq{a} = q{a} / Q{a};" for a in live))
+    src += [
+        "rgx = gx / (fx * fx); rgy = gy / (fy * fy); rgz = gz / (fz * fz);",
+        "ro01 = o01 / O01; ro = oab / O;",
+        "rRR = RR / (rg * rg); rrr = rr / (tb * tb);",
+        "rH = hollow / H; rBu = bulge / Bu;" if hol else "rBu = bulge / Bu;",
+        "rtx = tx / (dx * dx); rty = ty / (dy * dy); rtz = tz / (dz * dz);",
+        "rt01 = t01 / T01; rW = W / T;",
+    ]
+    if live:
+        src.append(" ".join(f"rs{a} = s{a} / (q{a} * q{a});" for a in live))
+    rs = (["rs01 = s01 / S01;"] if s01_rounds else []) + (["rS = across / S;"] if s_rounds else [])
+    if rs:
+        src.append(" ".join(rs))
+    src.append("rF4 = F4 / (4 * RR); rbb = bb / (bulge * bulge);")
+    src.append("rL = left / (W * bb); rR = right / (F4 * across);" if live else "rL = left / (W * bb);")
+    src += [
+        "",
+        "# The w.w bulge^2 block. W and oab as their three pieces, which sum to them.",
+        "Wx = rW * rt01 * tx; Wy = rW * rt01 * ty; Wz = rW * tz;",
+        "W3 = Wx + Wy + Wz;",
+        "jx = 1 / (rW * rt01 * rtx) - 1; jy = 1 / (rW * rt01 * rty) - 1; jz = 1 / (rW * rtz) - 1;",
+        "om = Wt / W;",
+        "Ox = ro * ro01 * gx; Oy = ro * ro01 * gy; Oz = ro * gz;",
+        "O3 = Ox + Oy + Oz;",
+        "zx = 1 / (ro * ro01 * rgx * rfx * rfx) - 1;",
+        "zy = 1 / (ro * ro01 * rgy * rfy * rfy) - 1;",
+        "zz = 1 / (ro * rgz * rfz * rfz) - 1;",
+        "Z = G2 / oab;",
+        "",
+        "# bulge as y carries it is rBu (oab + rH (RR - rr)); the true one is",
+        "# Z oab + RR / rRR - rr / rrr. Squared and times W, that is six pieces, one",
+        "# for each pair of oab, RR and rr; W is each piece's error over the piece.",
+    ]
+    if not hol:
+        src.append("# hollow is exact here, so rH is 1 and is left out.")
+    six = [
+        "KL = rL * rbb * rBu * rBu;",
+        "WOO = KL - om * Z * Z;",
+        "WRR = KL * rH * rH - om / (rRR * rRR);",
+        "Wrr = KL * rH * rH - om / (rrr * rrr);",
+        "WOR = KL * rH - om * Z / rRR;",
+        "WOr = KL * rH - om * Z / rrr;",
+        "WRr = KL * rH * rH - om / (rRR * rrr);",
+    ]
+    if not hol:
+        six = [line.replace(" * rH * rH", "").replace(" * rH", "") for line in six]
+    src += six
+    src += [
+        "cOO = W * oab * oab; cRR = W * RR * RR; crr = W * rr * rr;",
+        "cOR = 2 * W * oab * RR; cOr = 2 * W * oab * rr; cRr = 2 * W * RR * rr;",
+        "eOO = cOO * WOO; eRR = cRR * WRR; err = crr * Wrr;",
+        "eOR = cOR * WOR; eOr = -(cOr * WOr); eRr = -(cRr * WRr);",
+        "A6 = cOO + cRR + crr + cOR + cOr + cRr;",
+        "",
+        "# The 4 R^2 block, as 464.15's cylinder, times F4. K folds in right's",
+        "# rounding, m undoes F4's and RR's.",
+    ]
+    if dead:
+        src.append("# A component that cancels has no square in y, and is not in it.")
+    for a in live:
+        carry = ["rR"] + (["rS"] if s_rounds else []) + (["rs01"] if a in "xy" and s01_rounds else [])
+        src.append(f"K{a} = " + " * ".join(carry + [f"rs{a}", f"rq{a}", f"rq{a}"]) + ";")
+    src.append("m = 1 / (rF4 * rRR);")
+    for a in AXES:
+        src.append(f"a{a} = 1 / (rf{HALVES[a][0][1]} * rh{a}); b{a} = 1 / (rf{HALVES[a][1][1]} * rk{a});")
+    for a in live:
+        src.append(f"WH{a} = K{a} - m * a{a} * a{a}; WK{a} = K{a} - m * b{a} * b{a}; WX{a} = K{a} - m * a{a} * b{a};")
+    for a in live:
+        src.append(f"cH{a} = F4 * |h{a}| * |h{a}|; cK{a} = F4 * |k{a}| * |k{a}|; cX{a} = 2 * F4 * |h{a}| * |k{a}|;")
+    for a in live:
+        src.append(f"eH{a} = -(F4 * h{a} * h{a} * WH{a}); eK{a} = -(F4 * k{a} * k{a} * WK{a}); "
+                   f"eX{a} = 2 * F4 * h{a} * k{a} * WX{a};")
+    if live:
+        src.append(" ".join(f"C3{a} = cH{a} + cK{a} + cX{a};" for a in live))
+        src.append(f"C9 = {' + '.join(f'C3{a}' for a in live)};")
+        src.append(" ".join(f"Y{a} = F4 * K{a} * Q{a} * Q{a};" for a in live))
+        src.append(" ".join(f"Z{a} = F4 * m * (C{a} * C{a});" for a in live))
+    if dead:
+        src += ["# What y misses of a component that cancels is its whole true term, and",
+                "# EC is their sum."]
+        src.append(" ".join(f"eC{a} = F4 * m * (C{a} * C{a});" for a in dead))
+        ec = f"eC{dead[0]}"
+        if len(dead) > 1:
+            src.append(f"EC = {' + '.join(f'eC{a}' for a in dead)};")
+            ec = "EC"
+    src += [
+        "",
+        "# The same permanent as the two blocks.",
+        "Phat2 = A6 + C9;" if live else "Phat2 = A6;",
+        "",
+        "{",
+        "  # Every input is a finite f64.",
+        "     |px| <= 1b1024 /\\ |py| <= 1b1024 /\\ |pz| <= 1b1024",
+        "  /\\ |ox| <= 1b1024 /\\ |oy| <= 1b1024 /\\ |oz| <= 1b1024",
+        "  /\\ |dx| <= 1b1024 /\\ |dy| <= 1b1024 /\\ |dz| <= 1b1024",
+        "  /\\ |rg| <= 1b1024 /\\ |tb| <= 1b1024",
+    ]
+    if dead:
+        src += ["  # No factor is zero, and no component but those the case names cancels to",
+                "  # zero. For an f64 that is the same as being at least the smallest",
+                "  # subnormal."]
+    else:
+        src += ["  # No factor is zero, and no component cancels to zero. For an f64 that is",
+                "  # the same as being at least the smallest subnormal."]
+    src += [
+        "  /\\ |fx| >= 1b-1074 /\\ |fy| >= 1b-1074 /\\ |fz| >= 1b-1074",
+        "  /\\ |dx| >= 1b-1074 /\\ |dy| >= 1b-1074 /\\ |dz| >= 1b-1074",
+        "  /\\ |rg| >= 1b-1074 /\\ |tb| >= 1b-1074",
+    ]
+    if live:
+        src.append("  /\\ " + " /\\ ".join(f"|q{a}| >= 1b-1074" for a in live))
+    if hol:
+        src += ["  # hollow is a normal number; below the normals it is exact, and that is",
+                "  # another case.",
+                "  /\\ |hollow| >= 1b-1022"]
+    else:
+        src += ["  # hollow is below the normals, where it is exact.",
+                "  /\\ |hollow| <= 1b-1022"]
+    src += [
+        "  # product_is_normal on the three squares of from_centre, of direction and",
+        "  # of sideways, the six halves, R^2, r^2, bulge^2, axis_squared bulge^2 and",
+        "  # 4 R^2 across (stays_accurate and the check after it).",
+        "  /\\ |gx| >= 1b-1022 /\\ |gy| >= 1b-1022 /\\ |gz| >= 1b-1022",
+        "  /\\ |tx| >= 1b-1022 /\\ |ty| >= 1b-1022 /\\ |tz| >= 1b-1022",
+    ]
+    if live:
+        src.append("  /\\ " + " /\\ ".join(f"|s{a}| >= 1b-1022" for a in live))
+    src += [
+        "  /\\ |hx| >= 1b-1022 /\\ |kx| >= 1b-1022 /\\ |hy| >= 1b-1022",
+        "  /\\ |ky| >= 1b-1022 /\\ |hz| >= 1b-1022 /\\ |kz| >= 1b-1022",
+        "  /\\ |RR| >= 1b-1022 /\\ |rr| >= 1b-1022",
+        "  /\\ |bb| >= 1b-1022 /\\ |left| >= 1b-1022 /\\ |right| >= 1b-1022" if live
+        else "  /\\ |bb| >= 1b-1022 /\\ |left| >= 1b-1022",
+    ]
+    if not dead:
+        src += [
+            "  # The permanent's products are normal too, since nothing cancels here, by",
+            "  # monotone rounding: v >= s, as no component is zero; br >= bulge, as",
+            "  # hollow <= RR, so brr >= bb and P1 >= left; spread >= across, so",
+            "  # P2 >= right.",
+            "  /\\ |vx| >= 1b-1022 /\\ |vy| >= 1b-1022 /\\ |vz| >= 1b-1022",
+            "  /\\ |brr| >= 1b-1022 /\\ |P1| >= 1b-1022 /\\ |P2| >= 1b-1022",
+        ]
+    else:
+        src += [
+            "  # The permanent's products, by monotone rounding: v >= s for a component",
+            "  # that does not cancel; for one that does the case says which v is, and",
+            "  # 464.14's tinysq.g and tinyzero.g split them at 2^-1075. br >= bulge, as",
+            "  # hollow <= RR, so brr >= bb and P1 >= left. "
+            + ("spread >= across, so P2 >= right." if live else "The case says what P2 is."),
+        ]
+        rows = []
+        for a in AXES:
+            if st[a] in "nc":
+                rows.append(f"|v{a}| >= 1b-1022")
+            elif st[a] == "s":
+                rows.append(f"Xv{a} <= 1b-1022 /\\ v{a} >= 1b-1074")
+            else:
+                rows.append(f"Xv{a} <= 1b-1075")
+        src.append("  /\\ " + " /\\ ".join(rows))
+        tail = {"n": " /\\ |P2| >= 1b-1022", "b": " /\\ XP2 <= 1b-1022" if kept else ""}[p2]
+        src.append("  /\\ |brr| >= 1b-1022 /\\ |P1| >= 1b-1022" + tail)
+    src += [
+        "  # The bound is normal, which decide checks.",
+        "  /\\ |eb| >= 1b-1022",
+        "  # What lemma.g proves each of those gives.",
+    ]
+    if dead:
+        src.append("  # k is h in a component that cancels, so its line is h's against k's product.")
+    if hol:
+        src.append(f"  /\\ hollow -/ H {LEMMA}")
+    for p in ("gx -/ fx * fx", "gy -/ fy * fy", "gz -/ fz * fz",
+              "tx -/ dx * dx", "ty -/ dy * dy", "tz -/ dz * dz"):
+        src.append(f"  /\\ {p} {LEMMA}")
+    for a in live:
+        src.append(f"  /\\ s{a} -/ q{a} * q{a} {LEMMA}")
+    for a in AXES:
+        left, right = HALVES[a]
+        src.append(f"  /\\ h{a} -/ {left} {LEMMA}")
+        src.append(f"  /\\ k{a} -/ {right} {LEMMA}")
+    for p in ("RR -/ rg * rg", "rr -/ tb * tb", "bb -/ bulge * bulge", "left -/ W * bb"):
+        src.append(f"  /\\ {p} {LEMMA}")
+    if live:
+        src.append(f"  /\\ right -/ F4 * across {LEMMA}")
+    for a in AXES:
+        if st[a] in "nc":
+            src.append(f"  /\\ v{a} -/ n{a} * n{a} {LEMMA}")
+    src.append(f"  /\\ brr -/ br * br {LEMMA}")
+    src.append(f"  /\\ P1 -/ W * brr {LEMMA}")
+    if p2 == "n":
+        src.append(f"  /\\ P2 -/ F4 * spread {LEMMA}")
+    src.append(f"  /\\ eb -/ B * P {LEMMA}")
+    if live:
+        src.append("  # x / |x| is in [-1, 1] for any x that is not zero.")
+        for a in live:
+            src.append(f"  /\\ h{a} / |h{a}| in [-1, 1] /\\ k{a} / |k{a}| in [-1, 1]")
+    src += [
+        "->",
+        "  (y - Ex) / Phat2 in ? /\\ P -/ " + ("Phatx" if split else "Phat") + " in ?",
+        "  /\\ (y - Ex) / eb in [-1, 1]",
+        "}",
+        "",
+        "# How far each rounding is from the identity.",
+        "fx / Fx -> 1 + (fx - Fx) / Fx;",
+        "fy / Fy -> 1 + (fy - Fy) / Fy;",
+        "fz / Fz -> 1 + (fz - Fz) / Fz;",
+    ]
+    for a in AXES:
+        for h, prod in zip("hk", HALVES[a]):
+            src.append(f"{h}{a} / ({prod}) -> 1 + ({h}{a} - {prod}) / ({prod});")
+    for a in live:
+        src.append(f"q{a} / Q{a} -> 1 + (q{a} - Q{a}) / Q{a};")
+    src += [
+        "gx / (fx * fx) -> 1 + (gx - fx * fx) / (fx * fx);",
+        "gy / (fy * fy) -> 1 + (gy - fy * fy) / (fy * fy);",
+        "gz / (fz * fz) -> 1 + (gz - fz * fz) / (fz * fz);",
+        "o01 / O01 -> 1 + (o01 - O01) / O01;",
+        "oab / O -> 1 + (oab - O) / O;",
+        "RR / (rg * rg) -> 1 + (RR - rg * rg) / (rg * rg);",
+        "rr / (tb * tb) -> 1 + (rr - tb * tb) / (tb * tb);",
+    ]
+    if hol:
+        src.append("hollow / H -> 1 + (hollow - H) / H;")
+    src += [
+        "bulge / Bu -> 1 + (bulge - Bu) / Bu;",
+        "tx / (dx * dx) -> 1 + (tx - dx * dx) / (dx * dx);",
+        "ty / (dy * dy) -> 1 + (ty - dy * dy) / (dy * dy);",
+        "tz / (dz * dz) -> 1 + (tz - dz * dz) / (dz * dz);",
+        "t01 / T01 -> 1 + (t01 - T01) / T01;",
+        "W / T -> 1 + (W - T) / T;",
+    ]
+    for a in live:
+        src.append(f"s{a} / (q{a} * q{a}) -> 1 + (s{a} - q{a} * q{a}) / (q{a} * q{a});")
+    if s01_rounds:
+        src.append("s01 / S01 -> 1 + (s01 - S01) / S01;")
+    if s_rounds:
+        src.append("across / S -> 1 + (across - S) / S;")
+    src += [
+        "F4 / (4 * RR) -> 1 + (F4 - 4 * RR) / (4 * RR);",
+        "bb / (bulge * bulge) -> 1 + (bb - bulge * bulge) / (bulge * bulge);",
+        "left / (W * bb) -> 1 + (left - W * bb) / (W * bb);",
+    ]
+    if live:
+        src.append("right / (F4 * across) -> 1 + (right - F4 * across) / (F4 * across);")
+    src += [
+        "",
+        "# w.w over W, and |x|^2 over oab, each averaged over three pieces.",
+        "Wt / W -> 1 + ((W3 + (Wt - W)) - W3) / W3;",
+        "W3 + (Wt - W) -> (Wx + Wx * jx) + (Wy + Wy * jy) + (Wz + Wz * jz);",
+        "(Wx + Wx * jx) - Wx -> Wx * jx;",
+        "(Wy + Wy * jy) - Wy -> Wy * jy;",
+        "(Wz + Wz * jz) - Wz -> Wz * jz;",
+        "G2 / oab -> 1 + ((O3 + (G2 - oab)) - O3) / O3;",
+        "O3 + (G2 - oab) -> (Ox + Ox * zx) + (Oy + Oy * zy) + (Oz + Oz * zz);",
+        "(Ox + Ox * zx) - Ox -> Ox * zx;",
+        "(Oy + Oy * zy) - Oy -> Oy * zy;",
+        "(Oz + Oz * zz) - Oz -> Oz * zz;",
+        "",
+        "# The error is the sum of the two blocks' errors, each the sum of its",
+        "# pieces' errors, each a fraction of its own piece of the permanent; add_rr",
+        "# then averages them.",
+    ]
+    if dead:
+        src += ["# What y misses of a component that cancels goes with the piece cOR, and",
+                "# is at most a u^2 of it."]
+    src.append("(y - Ex) / Phat2 -> ((Phat2 + (y - Ex)) - Phat2) / Phat2;")
+    oor = "(cOR + eOR)"
+    if dead:
+        oor = f"(cOR + (eOR + {ec}))"
+        a6 = f"(A6 + ((left - Lt) + {ec}))"
+        src.append("Phat2 + (y - Ex) -> " + (f"{a6} + (C9 + (Rt - right - {ec}));" if live else f"{a6};"))
+        src.append(f"A6 + ((left - Lt) + {ec}) -> (cOO + eOO) + (cRR + eRR) + (crr + err) + {oor} "
+                   "+ (cOr + eOr) + (cRr + eRr);")
+    else:
+        src.append("Phat2 + (y - Ex) -> (A6 + (left - Lt)) + (C9 + (Rt - right));")
+        src.append("A6 + (left - Lt) -> (cOO + eOO) + (cRR + eRR) + (crr + err) + (cOR + eOR) "
+                   "+ (cOr + eOr) + (cRr + eRr);")
+    src += [
+        "(cOO + eOO) - cOO -> eOO;",
+        "(cRR + eRR) - cRR -> eRR;",
+        "(crr + err) - crr -> err;",
+        f"(cOR + (eOR + {ec})) - cOR -> eOR + {ec};" if dead else "(cOR + eOR) - cOR -> eOR;",
+        "(cOr + eOr) - cOr -> eOr;",
+        "(cRr + eRr) - cRr -> eRr;",
+        "eOr / cOr -> -WOr;",
+        "eRr / cRr -> -WRr;",
+    ]
+    if dead:
+        src.append(f"(eOR + {ec}) / cOR -> WOR + {ec} / cOR;")
+        if len(dead) > 1:
+            src.append(f"EC / cOR -> {' + '.join(f'eC{a} / cOR' for a in dead)};")
+        for a in dead:
+            f_, d_ = HALVES[a][0][1], HALVES[a][0][-1]
+            src += [
+                f"eC{a} / cOR -> 2 * rF4 * m * (a{a} - b{a}) * (a{a} - b{a}) * rh{a} * rh{a}"
+                f" * (f{f_} * f{f_} / oab) * (d{d_} * d{d_} / W);",
+                f"f{f_} * f{f_} / oab -> (g{f_} / oab) / rg{f_};",
+                over_sum("g", f_, "ro01", "ro", "oab"),
+                f"d{d_} * d{d_} / W -> (t{d_} / W) / rt{d_};",
+                over_sum("t", d_, "rt01", "rW", "W"),
+            ]
+    if live:
+        rest = f"C9 + (Rt - right - {ec})" if dead else "C9 + (Rt - right)"
+        src.append(f"{rest} -> " + " + ".join(f"(C3{a} + (Z{a} - Y{a}))" for a in live) + ";")
+        for a in live:
+            src.append(f"C3{a} + (Z{a} - Y{a}) -> (cH{a} + eH{a}) + (cK{a} + eK{a}) + (cX{a} + eX{a});")
+        for a in live:
+            for p in "HKX":
+                src.append(f"(c{p}{a} + e{p}{a}) - c{p}{a} -> e{p}{a};")
+        for a in live:
+            src += [f"eH{a} / cH{a} -> -((h{a} / |h{a}|) * (h{a} / |h{a}|) * WH{a});",
+                    f"eK{a} / cK{a} -> -((k{a} / |k{a}|) * (k{a} / |k{a}|) * WK{a});",
+                    f"eX{a} / cX{a} -> (h{a} / |h{a}|) * (k{a} / |k{a}|) * WX{a};"]
+    src += ["", "# From the two blocks to the permanent on_floats rounds, and on to eb."]
+    if not split:
+        src += ["(y - Ex) / eb -> ((y - Ex) / Phat2) * (Phat / P) * (P / eb);",
+                "Phat / P -> 1 / (1 + (P - Phat) / Phat);"]
+    elif dx_terms:
+        src += ["(y - Ex) / eb -> ((y - Ex) / Phat2) * (Phat2 / P) * (P / eb);",
+                "Phat2 / P -> (Phat2 / Phatx) * (Phatx / P);",
+                "Phat2 / Phatx -> 1 / (1 + Dx / Phat2);",
+                "Phatx / P -> 1 / (1 + (P - Phatx) / Phatx);"]
+    else:
+        src += ["(y - Ex) / eb -> ((y - Ex) / Phat2) * (Phatx / P) * (P / eb);",
+                "Phatx / P -> 1 / (1 + (P - Phatx) / Phatx);"]
+    src.append("P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));")
+    return "\n".join(src) + "\n"
+
+
+def write(name, text):
+    with open(name, "w") as out:
+        out.write(text)
+
+
+def cases():
+    for cross in map("".join, itertools.product("ncsu", repeat=3)):
+        for hollow in "ne":
+            if "n" in cross:
+                yield cross + hollow + "n"
+            elif cross == "uuu":
+                yield cross + hollow + "b"
+            else:
+                yield cross + hollow + "n"
+                yield cross + hollow + "b"
+
+
+for case in cases():
+    write(f"tor_{case}.g", make(case))
+    if case != "nnnnn":
+        write(f"c_tor_{case}_half.g", make(case, B_HALF))
+```
+
+`trial.sh`, whole:
+
+```sh
+#!/bin/bash
+# Trial runs of torsplit.py's cases, each with its u/2 control, all at once
+# through one1.sh. Prints to trial.txt.
+cd "$(dirname "$0")"
+{
+  for c in cnnnn cccnn nnnen uuueb cccnb scnnn ssuen uuunb; do
+    T=600 ./one1.sh "tor_$c.g" &
+    T=600 ./one1.sh "c_tor_${c}_half.g" &
+  done
+  wait
+  echo done
+} > trial.txt 2>&1
+```
+
+`run3.sh`, whole:
+
+```sh
+#!/bin/bash
+# torsplit.py's 180 cases, each with gappa -Bcoq and coqc when it proves,
+# and their 179 controls at u/2, 20 at a time: the cases first, since they
+# take longest. Writes run3.txt.
+cd "$(dirname "$0")"
+python3 torsplit.py
+{
+  for f in tor_?????.g; do
+    echo "./one.sh $f coq"
+  done
+  for f in c_tor_?????_half.g; do
+    echo "./one1.sh $f"
+  done
+} > run3.jobs
+{
+  wc -l < run3.jobs
+  xargs -P 20 -L 1 env < run3.jobs
+} > run3.txt 2>&1
+echo done >> run3.txt
+```
+
+`run4.sh`, whole:
+
+```sh
+#!/bin/bash
+# gappa -Bcoq and coqc again on tor_cusen.g, the one case whose certificate
+# coqc refused in run3.txt. It runs on a copy, tor_cusen2.g, so that
+# tor_cusen.coqc, which tally3.py reads, stays as run3.sh left it. Writes
+# run4.txt.
+cd "$(dirname "$0")"
+cp tor_cusen.g tor_cusen2.g
+{
+  cmp tor_cusen.g tor_cusen2.g && echo "tor_cusen2.g is tor_cusen.g"
+  ./one.sh tor_cusen2.g coq
+  echo "coqc printed:"
+  cat tor_cusen2.coqc
+  echo done
+} > run4.txt 2>&1
+```
+
+`tally3.py`, whole:
+
+```python
+"""Tally run3.txt and the .out files of torsplit.py's 180 cases: for each case
+its exit, the bound on (y - Ex) / Phat2 and on P against the permanent with
+no rounding of its own that it prints, and its coqc line; for each control its
+exit and best. Prints one line per case, then counts, grouped by how many
+components of the cross product do not cancel and by the hollow and P2
+letters. Run as: python3 tally3.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+run = open("run3.txt").read()
+cases = sorted(f[4:9] for f in os.listdir(".") if re.fullmatch(r"tor_\w{5}\.g", f))
+RESULT = re.compile(r"^  (.*) in \[[^{]*\{([^,]*),[^}]*\}, [^{]*\{([^,]*),", re.M)
+
+
+def bounds(out):
+    """The y goal's and the P goal's printed ranges, as [lo, hi]. Where y is
+    left, Gappa prints the goal with left and Phat2 written out."""
+    y = p = "-"
+    for expr, lo, hi in RESULT.findall(out):
+        if " -/ " in expr:
+            p = f"[{lo}, {hi}]"
+        elif "- Ex) / " in expr:
+            y = f"[{lo}, {hi}]"
+    return y, p
+
+
+ybounds = collections.Counter()
+pbounds = collections.Counter()
+bests = collections.Counter()
+ctl_exits = collections.Counter()
+pointless = []
+times = []
+coq = []
+for c in cases:
+    out = open(f"tor_{c}.out").read()
+    ex = re.search(rf"^tor_{c} exit (\d+) ([\d.]+)s$", run, re.M)
+    cq = re.search(rf"^tor_{c} coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$", run, re.M)
+    live = sum(1 for s in c[:3] if s == "n")
+    y, p = bounds(out)
+    if "pointless" in out:
+        pointless.append(c)
+        y = p = "pointless"
+    ybounds[(live, c[3:], y)] += 1
+    pbounds[p] += 1
+    times.append((float(ex.group(2)), c))
+    if cq:
+        coq.append((int(cq.group(4)), int(cq.group(5)), c, cq.group(1), cq.group(2), float(cq.group(3))))
+    line = [c, "exit", ex.group(1), ex.group(2), "y", y, "P", p, "coq", cq.groups() if cq else "-"]
+    if c != "nnnnn":
+        ctl = re.search(rf"^c_tor_{c}_half exit (\d+) ([\d.]+)s$", run, re.M)
+        cout = open(f"c_tor_{c}_half.out").read()
+        best = re.search(r"best: (\[[^\]]*\])", cout)
+        bests[(ctl.group(1), best.group(1) if best else "pointless" if "pointless" in cout else "-")] += 1
+        ctl_exits[(live, c[3:], ctl.group(1))] += 1
+        line += ["ctl", ctl.group(1), best.group(1) if best else "-"]
+    print(*line)
+print("cases exit 0:", len(re.findall(r"^tor_\w{5} exit 0 ", run, re.M)), "of", len(cases))
+print("controls exit 1:", len(re.findall(r"^c_tor_\w{5}_half exit 1 ", run, re.M)), "of", len(cases) - 1)
+print("pointless:", pointless)
+print("y bounds by live components and hollow and P2 letters:")
+for k in sorted(ybounds):
+    print("  ", k, ybounds[k])
+print("P bounds:", dict(pbounds))
+print("control exits by live components and hollow and P2 letters:")
+for k in sorted(ctl_exits):
+    print("  ", k, ctl_exits[k])
+print("control exits and bests:", dict(bests))
+times.sort()
+print("times", times[0], times[-1])
+print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(coq))
+coq.sort()
+print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "hints", min(x[1] for x in coq), max(x[1] for x in coq),
+      "times", min(x[5] for x in coq), max(x[5] for x in coq))
+
+
+def other_lines(f):
+    return [line for line in open(f).read().split("\n")
+            if line and "assumed to be nonzero" not in line and not line.startswith(("Results:", "  "))]
+
+
+warn = [f for f in os.listdir(".") if re.fullmatch(r"tor_\w{5}\.(out|bcoq|coqc)", f) and other_lines(f)]
+print("files with a line other than results and 'assumed to be nonzero':", sorted(warn))
+```
+
+`shapes.py`, whole:
+
+```python
+"""Which case of torsplit.py a shape falls in: on_floats' doubles, worked in
+Python's, which are IEEE doubles rounded to nearest even as Rust's are. The
+direction is the nearest double to each component over the exact length,
+which is what Axis::new gives above 2^-1012. Prints, for each shape, the
+from_centre and direction components that are zero, each cross product
+component's letter, hollow's and P2's, and whether on_floats' checks pass.
+Run as: python3 shapes.py"""
+from decimal import Decimal, getcontext
+
+getcontext().prec = 60
+NORMAL = 2.0 ** -1022
+
+
+def unit(v):
+    length = sum(Decimal(c) * Decimal(c) for c in v).sqrt()
+    return [float(Decimal(c) / length) for c in v]
+
+
+def normal(a, b):
+    return a == 0.0 or b == 0.0 or abs(a * b) >= NORMAL
+
+
+def case(name, origin, direction, ring, tube, point):
+    d = unit(direction)
+    f = [point[i] - origin[i] for i in range(3)]
+    halves = [(f[1] * d[2], f[2] * d[1]), (f[2] * d[0], f[0] * d[2]), (f[0] * d[1], f[1] * d[0])]
+    q = [h - k for h, k in halves]
+    checks = all(normal(f[i], f[i]) and normal(d[i], d[i]) and normal(q[i], q[i]) for i in range(3))
+    checks = checks and all(normal(f[(i + 1) % 3], d[(i + 2) % 3]) and normal(f[(i + 2) % 3], d[(i + 1) % 3])
+                            for i in range(3))
+    checks = checks and normal(ring, ring) and normal(tube, tube)
+    oab = f[0] * f[0] + f[1] * f[1] + f[2] * f[2]
+    hollow = ring * ring - tube * tube
+    bulge = oab + hollow
+    w = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+    across = q[0] * q[0] + q[1] * q[1] + q[2] * q[2]
+    f4 = 4.0 * (ring * ring)
+    checks = checks and normal(bulge, bulge) and normal(w, bulge * bulge) and normal(f4, across)
+    letters = ""
+    spread = 0.0
+    for (h, k), qa in zip(halves, q):
+        v = (abs(h) + abs(k)) * (abs(h) + abs(k))
+        spread += v
+        letters += "n" if qa != 0.0 else "c" if v >= NORMAL else "s" if v > 0.0 else "u"
+    letters += "n" if abs(hollow) >= NORMAL else "e"
+    letters += "n" if f4 * spread >= NORMAL else "b"
+    zeros = [f"f{'xyz'[i]}" for i in range(3) if f[i] == 0.0] + [f"d{'xyz'[i]}" for i in range(3) if d[i] == 0.0]
+    print(f"{name}: direction {d}, from_centre {f}, halves {halves}")
+    print(f"  zero factors {zeros or 'none'}; case {letters}; on_floats' checks pass: {checks}")
+
+
+case("on the axis (1, 0, 0)", [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 2.0, 1.0, [2.0, 0.0, 0.0])
+case("on the axis (1, 1, 1)", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 2.0, 1.0, [1.0, 1.0, 1.0])
+case("off the axis (1, 1, 1), one component cancelling", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 2.0, 1.0,
+     [1.0, 1.0, 2.0])
+```
+
+`same.py`, whole:
+
+```python
+"""Check that each script 464.17 appends whole is byte for byte the file that
+was run, in tor/; that one.sh is 464.13's block and one1.sh and launch.sh
+464.16's; that tally3.py and shapes.py, run again there, print what 464.17
+gives; and that torsplit.py and torcases.py, run again in a fresh directory
+from the appended text with the arguments of run1.sh, write what was run.
+Run as: python3 same.py <doc> <tor dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, tor = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+sec = section(17)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.17:", len(blocks))
+assert len(re.findall(r"^```", sec, re.M)) == 2 * len(blocks)
+
+# Which appended block is which file: by its first lines.
+marks = {
+    "tor.g": "# restates: crates/rcad-geom/src/torus.rs on_floats at 4be293a5\n",
+    "torcases.py": '"""Write the scripts of 464.17 from tor.g',
+    "torsplit.py": '"""Write tor.g\'s case split',
+    "run0.sh": "#!/bin/bash\n# tor.g, the case where nothing cancels",
+    "run1.sh": "#!/bin/bash\n# tor.g's controls and its bisection",
+    "trial.sh": "#!/bin/bash\n# Trial runs of torsplit.py's cases",
+    "run3.sh": "#!/bin/bash\n# torsplit.py's 180 cases",
+    "run4.sh": "#!/bin/bash\n# gappa -Bcoq and coqc again",
+    "ku.py": '"""Print each result of the named .out files as k u + r u^2',
+    "tally3.py": '"""Tally run3.txt and the .out files of torsplit',
+    "shapes.py": '"""Which case of torsplit.py a shape falls in',
+    "same.py": '"""Check that each script 464.17 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "same.py" else os.path.join(tor, name)
+    if not os.path.exists(path):
+        print(name, "appended, no file to compare")
+        continue
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+print("one.sh is 464.13's block:", open(os.path.join(tor, "one.sh")).read()
+      == block_of(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"))
+print("one1.sh is 464.16's block:", open(os.path.join(tor, "one1.sh")).read()
+      == block_of(16, "#!/bin/bash\n# one.sh with the timeout taken from T"))
+print("launch.sh is 464.16's block:", open(os.path.join(tor, "launch.sh")).read()
+      == block_of(16, "#!/bin/bash\n# Start the script named by the first argument detached"))
+
+for script, first in (("tally3.py", "cases exit 0: "), ("shapes.py", "on the axis (1, 0, 0): ")):
+    printed = [body for lang, body in blocks if lang == "text" and body.startswith(first)]
+    assert len(printed) == 1, (script, len(printed))
+    again = subprocess.run(["python3", os.path.join(tor, script)], capture_output=True, text=True,
+                           check=True).stdout
+    print(script, "run again ends with what 464.17 gives:", again.endswith(printed[0]))
+
+
+def compare(fresh, ran):
+    written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+    same = [f for f in written if os.path.exists(os.path.join(ran, f))
+            and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+    differ = [f for f in written if os.path.exists(os.path.join(ran, f)) and f not in same]
+    absent = [f for f in written if not os.path.exists(os.path.join(ran, f))]
+    return written, same, differ, absent
+
+
+fresh = tempfile.mkdtemp()
+for name in ("tor.g", "torcases.py", "torsplit.py"):
+    open(os.path.join(fresh, name), "w").write(found[name])
+subprocess.run(["python3", "torsplit.py"], cwd=fresh, check=True)
+subprocess.run(["python3", "torcases.py", "0", "100", "200", "228", "230", "231", "232", "233", "236", "300"],
+               cwd=fresh, check=True)
+written, same, differ, absent = compare(fresh, tor)
+print("written again:", len(written), "same as run:", len(same), "differ:", differ, "not in tor:", absent)
+print("tor_nnnnn.g is tor.g:", filecmp.cmp(os.path.join(fresh, "tor_nnnnn.g"), os.path.join(fresh, "tor.g"),
+                                           shallow=False))
+ran = sorted(f for f in os.listdir(tor) if f.endswith(".g"))
+print(".g files in tor not written again:", [f for f in ran if f not in written])
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+code blocks in 464.17: 17
+tor.g same
+torcases.py same
+torsplit.py same
+run0.sh same
+run1.sh same
+trial.sh same
+run3.sh same
+run4.sh same
+ku.py same
+tally3.py same
+shapes.py same
+same.py same
+one.sh is 464.13's block: True
+one1.sh is 464.16's block: True
+launch.sh is 464.16's block: True
+tally3.py run again ends with what 464.17 gives: True
+shapes.py run again ends with what 464.17 gives: True
+written again: 383 same as run: 383 differ: [] not in tor: []
+tor_nnnnn.g is tor.g: True
+.g files in tor not written again: ['tor_cusen2.g']
+```
+
+The 383 are `tor.g` itself, the 180 cases, their 179 controls at `u / 2`, the
+three controls of 7, and the ten scripts each of `b_tor_` and `b17_tor_`.
+Neither generator writes `tor_cusen2.g`; `run4.sh` makes it with `cp`, and
+checks it with `cmp`.
+
+**10. What this leaves.** Three rows, filed from this write-up when it merges,
+each from Q2682:
+
+- Small: restate `torus.rs:485-507` by 5. What the `220ε²` has to beat is
+  `ε²`, not `ε`, and by the comment's own terms `153 + 126 + 18` make 297,
+  against 220, which is 224 as a double. The chain reaches seventeen roundings
+  to `y` by two slips that cancel, where Gappa proves `17u + 95u²` on a chain
+  where nothing cancels. And `on_floats` does not enforce the bottom end
+  product by product, since it checks none of the permanent's own products.
+- Prove the bound where a difference or a direction component is zero, the
+  axis-aligned torus among them, as Q2771 does for the cylinder and Q2781 for
+  the cone. `product_is_normal(a, b)` is true when `a` or `b` is zero
+  (`cascade.rs:67-69`), so these cases pass every check `on_floats` makes, as
+  `shapes.py`'s first shape does, and no script here covers them. Not run, so
+  no class (§360.5).
+- Run `torsplit.py` with one, two and three of the products `on_floats` checks
+  below the normals, as 464.14's 6 ran the sphere's squares. Then say whether
+  `on_floats` needs its `product_is_normal` checks, and restate
+  `torus.rs:347-349` by what that shows. Not run, so no class. Q2767 waits on
+  it, as well as on Q2684, Q2760, Q2773 and Q2782.
+
+And what is not a row:
+
+- Q2700 already waits on Q2682, and moves these scripts into `proofs/gappa/`
+  with the others that rows of 464 appended.
+- `tor_cusen.g`'s first certificate, which `coqc` refused (8). Gappa wrote a
+  certificate that does not check, for a bound its own run proved, and a
+  second certificate for the same bytes checks.
+- The claim on `value` (4): `decide` needs only `y`.
 - `field` on these scripts' hints (464.10).
