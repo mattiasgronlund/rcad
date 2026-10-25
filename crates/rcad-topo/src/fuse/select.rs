@@ -1478,6 +1478,21 @@ fn is_flat_with_a_curved_side(face: FaceView<'_>) -> bool {
 /// which is the piece the fuse keeps or drops. A plane of the other solid
 /// that is round the corner is moved in the reading and not in that solid, so
 /// it places nothing here.
+///
+/// **So is a piece all inside the room of such a corner of the solid it is
+/// placed against** (Q2744). A face that a face of another solid cuts is drawn
+/// round each corner of that face with four or more planes round it, as the
+/// faces round the corner are (`BakedFace::corners_of_the_solids_cutting_it`).
+/// A wedge whose edge runs up through the placed pyramid's apex has no corner
+/// there, and the lines where side planes cross a wedge face cut a speck by
+/// the apex out of it. Drawn in the true planes no rule placed the speck, and
+/// the fuse was refused `Undecidable`. Read round the apex, each corner of the
+/// speck is where a side plane moved through the apex crosses the line along
+/// the wedge face and another, each plane of the pyramid round the apex is
+/// moved through it in the solid too, and each corner of the pyramid is the
+/// meet of its three planes as moved. Those are real points and the real
+/// planes of the pyramid as drawn, so the argument above holds of the speck
+/// and the pyramid as drawn.
 fn by_a_plane(
     solids: &[&BakedSolid],
     against: &[usize],

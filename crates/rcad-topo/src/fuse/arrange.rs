@@ -5174,10 +5174,11 @@ impl<'f> Arrangement<'f> {
 
     /// Which of two nodes on a crossing between the face's plane and a
     /// partner plane comes first along it, with every plane round a corner of
-    /// the face read as running through that corner: `None` unless the corner
-    /// has four or more planes round it and one of them misses the point
-    /// `bake` solved it at, and each node is that corner or a meet of the
-    /// crossing's two planes and a third that lies inside the corner's room.
+    /// the face, or of a face of another solid cutting it, read as running
+    /// through that corner: `None` unless the corner has four or more planes
+    /// round it and one of them misses the point `bake` solved it at, and each
+    /// node is a meet of the crossing's two planes and a third that lies inside
+    /// the corner's room, or, for a corner of the face, that corner.
     ///
     /// **Four planes written down in `f64` need not meet in one point.** A
     /// square pyramid placed by a shift has its four side planes meet three by
@@ -5199,6 +5200,15 @@ impl<'f> Arrangement<'f> {
     /// of them about the corner with, so only nodes inside that room are read
     /// so. A node further off is put in order by its true point, and is as far
     /// from every node read so as the room is wide.
+    ///
+    /// **A face cut by a face with such a corner is read round it too**
+    /// (Q2744, [`BakedFace::corners_of_the_solids_cutting_it`]). A wedge whose
+    /// edge runs up through the placed pyramid's apex has no corner there, and
+    /// drawn in the true planes the lines where side planes cross a wedge face
+    /// cut a speck by the apex out of it that the side faces as drawn do not
+    /// have. Read round the apex, the wedge face is drawn with the side planes
+    /// where the side faces are drawn with them. Its own plane is not round the
+    /// corner, so it is where it is, and no node of it is the corner.
     fn as_read_round_a_corner(
         &self,
         crossing: usize,
@@ -16013,10 +16023,12 @@ fn the_way_a_picker_leans(normal: [f64; 3], ways: [[f64; 3]; 2]) -> Option<[Opti
     )
 }
 
-/// A corner of a face with four or more planes round it, read as the one
-/// point all of them run through ([`Arrangement::as_read_round_a_corner`]).
-/// `by_a_plane` in `fuse/select.rs` reads a piece's corners inside the
-/// corner's room the same way, so it places the piece the arrangement drew.
+/// A corner of a face, or of a face of another solid cutting it, with four or
+/// more planes round it, read as the one point all of them run through
+/// ([`Arrangement::as_read_round_a_corner`]). `by_a_plane` in
+/// `fuse/select.rs` reads a piece's corners inside the corner's room the same
+/// way, round a corner of the piece's own solid or of the solid it is placed
+/// against, so it places the piece the arrangement drew.
 ///
 /// **Worked in the corner's own frame, so every sign is exact.** Write `K`
 /// for the point `bake` solved the corner at, where its three
