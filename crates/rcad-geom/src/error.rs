@@ -404,8 +404,12 @@ pub enum Error {
     /// shape is proved**, and it took no eighth-degree discriminant: a pipe is
     /// read along its own straight lines and a ball along the cone's, so each
     /// shape is a few signs of quadratics, and the marcher was taught a cone to
-    /// draw the loops. (e) Two cones that share neither axis nor apex are the
-    /// general case left, and nothing tells their loops apart yet (Q2667).
+    /// draw the loops. (e) **Two cones that share neither axis nor apex are done
+    /// where their crossing is proved two loops** (Q2667), read along the
+    /// straight lines of one of them as a pipe is: `two_cones_off_one_axis_in_two_loops`
+    /// says which. What stays refused is two cones whose own directions
+    /// overlap, which cross in branches that run off for ever, and every pair
+    /// its enclosures are too loose for.
     ///
     /// **A ball through the apex is the one coaxial pair left here**, and it is
     /// not a degree-four curve: the crossing is one circle and the apex apart

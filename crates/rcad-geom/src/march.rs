@@ -1,9 +1,10 @@
 //! Following a crossing that no conic stands in for.
 //!
-//! Four of the six pairs cross in a curve that lies in a plane, and
+//! Most pairs of surfaces cross in a curve that lies in a plane, and
 //! [`walk`](crate::walk) parametrizes those in closed form. A ball crossing a
-//! pipe off its axis, and two pipes leaning across each other, cross in a
-//! degree-four space curve instead. This is what draws one.
+//! pipe off its axis, two pipes leaning across each other, and a pipe, a ball
+//! or a second cone off a cone's axis, cross in a degree-four space curve
+//! instead. This is what draws one.
 //!
 //! # Why a marcher at all, when the answer is already named
 //!
@@ -176,12 +177,22 @@ pub(crate) struct Marched {
 ///
 /// # The first ask
 ///
-/// The first trial is asked `room` or the smaller of the two surfaces' radii,
-/// whichever is shorter ([`the_smaller_radius`]), with the radius never taken
-/// below one step of the grid at the seed. Each step after it is asked
+/// The first trial is asked `room` or the smaller of the two surfaces' radii
+/// near the seed, whichever is shorter ([`the_smaller_radius`]), with the
+/// radius never taken below one step of the grid at the seed. A cone's radius
+/// there is how tightly it bends at the seed. Each step after it is asked
 /// twice what the one before covered, so the first step kept sets the scale the
 /// walk starts at, and that has to come from the two surfaces rather than from
 /// wherever a trial asked far too much happened to settle.
+///
+/// **A cone is not read as having no radius**, as it was until Q2667. Two cones
+/// off one axis then had no radius between them, and a coarse walk asked its
+/// first trial the whole room: a funnel of slope one half and a spout of slope
+/// one eighth leaning `0.8` across it, walked at a deflection of the largest
+/// `f64`, had the first of their two loops refused as a crossing it could not
+/// work out the size of. Asked how far the seed is from the cones' axes and
+/// apexes, it walks in 15 points, the same as at a deflection of one
+/// (`a_narrow_cone_leaning_across_a_wide_one_crosses_it_in_two_loops`).
 ///
 /// **Asked the whole room, it came from such a trial.** A coarse walk asks a
 /// room of `1.7e307` to find out how big a crossing is. Measured at `bb1f44fe`,
@@ -260,22 +271,46 @@ pub(crate) fn march(
     room: f64,
     most: usize,
 ) -> Result<Marched> {
-    let first = room.min(the_smaller_radius(surfaces).max(one_step_of_the_grid_at(seed)));
+    let first = room.min(the_smaller_radius(surfaces, seed).max(one_step_of_the_grid_at(seed)));
     march_with_a_first_ask(surfaces, seed, first, room, most)
 }
 
-/// The smaller of the two surfaces' own radii: a ball's or a pipe's, and a
-/// ring's tube. A plane and a cone have none, and stand for infinity here.
-fn the_smaller_radius(surfaces: [&Surface; 2]) -> f64 {
+/// The smaller of the two surfaces' own radii near `seed`: a ball's or a
+/// pipe's, a ring's tube, and for a cone how tightly it bends there
+/// ([`how_tightly_a_cone_bends_at`]). A plane has none, and stands for infinity
+/// here.
+fn the_smaller_radius(surfaces: [&Surface; 2], seed: Point) -> f64 {
     surfaces
         .map(|surface| match surface {
-            Surface::Plane(_) | Surface::Cone(_) => f64::INFINITY,
+            Surface::Plane(_) => f64::INFINITY,
+            Surface::Cone(cone) => how_tightly_a_cone_bends_at(cone, seed),
             Surface::Sphere(ball) => ball.radius(),
             Surface::Cylinder(pipe) => pipe.radius(),
             Surface::Torus(ring) => ring.tube_radius(),
         })
         .into_iter()
         .fold(f64::INFINITY, f64::min)
+}
+
+/// A lower end on how far `at` is from `cone`'s axis and from the flat
+/// surface through its apex square to that axis, the nearer of the two, and
+/// nothing where either cannot be put above nothing.
+///
+/// A cone bends no tighter than how far `at` is from its axis, and the flat
+/// surface through the apex is where the way the marcher reads its normal
+/// flips from one nappe to the other.
+pub(crate) fn how_tightly_a_cone_bends_at(cone: &Cone, at: Point) -> f64 {
+    let along = exactly(cone.axis().direction().components());
+    let length = root_enclosing(squared_length_enclosing(along));
+    let out = gap_enclosing(cone.apex().coordinates(), at.coordinates());
+    let off_the_axis = quotient_or_everything(
+        root_enclosing(squared_length_enclosing(cross_enclosing(out, along))),
+        length,
+    );
+    let past_the_apex = quotient_or_everything(dot_enclosing(out, along), length);
+    let past_the_apex = past_the_apex.lo().max(-past_the_apex.hi());
+    let nearer = off_the_axis.lo().min(past_the_apex);
+    if nearer > 0.0 { nearer } else { 0.0 }
 }
 
 /// How far apart two neighbouring `f64` are at `at`'s largest coordinate, which

@@ -235,6 +235,8 @@ pub mod a_frustum_cut_in_half_down_its_axis;
 pub mod a_frustum_sharpened_to_a_speck;
 #[path = "a_frustums_wall_cut_below_a_blocks_floor.rs"]
 pub mod a_frustums_wall_cut_below_a_blocks_floor;
+#[path = "a_funnel_with_a_leaning_spout.rs"]
+pub mod a_funnel_with_a_leaning_spout;
 #[path = "a_fuse_is_not_blamed_for_a_solid_it_never_touched.rs"]
 pub mod a_fuse_is_not_blamed_for_a_solid_it_never_touched;
 #[path = "a_fuse_that_builds_a_sliver.rs"]
