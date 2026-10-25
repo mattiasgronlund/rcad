@@ -858,28 +858,52 @@ fn a_placed_pyramid_reaches_the_range_check_where_a_wedge_plane_runs_between_two
 
 #[test]
 fn probe_q2744() {
-    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
-    let turn = |[x, y, z]: [f64; 3], angle: f64| {
-        let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(x, y, z)).expect("an axis");
-        Isometry::rotation(&axis, angle).expect("a turn")
+    let short = |came: Result<Vec<&'static str>, Error>| match came {
+        Ok(named) => format!("Ok{named:?}"),
+        Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => format!("Range {ratio:e}"),
+        Err(Error::Undecidable { records }) => format!(
+            "Undecidable {:?}",
+            records
+                .records()
+                .iter()
+                .map(|record| record.predicate())
+                .collect::<Vec<_>>()
+        ),
+        Err(other) => format!("{other:?}"),
     };
-    for (name, wedge, placement) in [
-        (
-            "plus y turn 2.9",
-            A_WEDGE_OVER_THE_PLUS_Y_EDGE,
-            turn([-2.0, 1.0, 0.5], 2.9),
-        ),
-        (
-            "minus y shift turn 0.7",
-            A_WEDGE_OVER_THE_MINUS_Y_EDGE,
-            shift.compose(&turn([0.3, -1.0, 2.0], 0.7)),
-        ),
-    ] {
-        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+    let policies = [
+        ("cert", Policy::certified()),
+        ("tol", Policy::tolerant(100.0)),
+    ];
+    for (at, (wedge, placement)) in where_the_orders_loop_by_the_apex().into_iter().enumerate() {
+        if at != 2 && at != 4 {
+            continue;
+        }
+        for (name, policy) in &policies {
             for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
-                eprintln!("PROBE CASE {name} {policy:?} {rule:?}");
-                let came = the_wedge_through_the_apex(wedge, placement, rule, &policy);
-                eprintln!("PROBE CAME {name} {policy:?} {rule:?}: {came:?}");
+                let came = the_wedge_through_the_apex(wedge, placement, rule, policy);
+                eprintln!("PROBE LOOP {at} {name} {rule:?}: {}", short(came));
+            }
+        }
+    }
+    let placements = every_placement()
+        .into_iter()
+        .chain(where_the_orders_loop_by_the_apex().map(|(_, placement)| placement))
+        .chain([a_tenth_of_a_radian_about_a_tilted_axis()]);
+    for (at, placement) in placements.enumerate() {
+        if std::env::var_os("PROBE_TALLY").is_none() {
+            break;
+        }
+        for (which, wedge) in EVERY_WEDGE.into_iter().enumerate() {
+            let between = a_wedge_plane_runs_between_two_apexes(wedge, placement);
+            for (name, policy) in &policies {
+                for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+                    let came = the_wedge_through_the_apex(wedge, placement, rule, policy);
+                    eprintln!(
+                        "PROBE TALLY {at} wedge {which} between {between} {name} {rule:?}: {}",
+                        short(came)
+                    );
+                }
             }
         }
     }

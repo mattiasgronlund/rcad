@@ -209,7 +209,9 @@ use crate::{EdgeKey, Error, Result};
 
 use super::Sameness;
 use super::arrange::{stretches_of_a_line_inside, the_listed_cuts_it_still_draws};
-use super::bake::{ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedEdge, BakedFace, BakedSolid};
+use super::bake::{
+    ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedCorner, BakedEdge, BakedFace, BakedSolid,
+};
 
 /// Work out every cut line, and hang each on the face it cuts.
 ///
@@ -256,6 +258,10 @@ pub(crate) fn gather(
         .iter()
         .map(|solid| vec![Vec::new(); solid.faces.len()])
         .collect();
+    let mut corners_cutting: Vec<Vec<Vec<BakedCorner>>> = solids
+        .iter()
+        .map(|solid| vec![Vec::new(); solid.faces.len()])
+        .collect();
     let mut how_they_meet = HowFacesMeetBySurface::new();
     for one in 0..solids.len() {
         for other in one..solids.len() {
@@ -275,6 +281,14 @@ pub(crate) fn gather(
                     if !onto_against.is_empty() {
                         told[other][theirs].extend(&face.caps_through_the_start_of_their_axis);
                     }
+                    if one != other {
+                        if !onto_face.is_empty() {
+                            hand_on_its_crowded_corners(against, &mut corners_cutting[one][mine]);
+                        }
+                        if !onto_against.is_empty() {
+                            hand_on_its_crowded_corners(face, &mut corners_cutting[other][theirs]);
+                        }
+                    }
                     found[one][mine].extend(found_on(face, against, onto_face));
                     found[other][theirs].extend(found_on(against, face, onto_against));
                 }
@@ -282,8 +296,12 @@ pub(crate) fn gather(
         }
     }
 
-    for (solid, (faces, told)) in found.into_iter().zip(told).enumerate() {
-        for (face, (cuts, told)) in faces.into_iter().zip(told).enumerate() {
+    for (solid, ((faces, told), corners_cutting)) in
+        found.into_iter().zip(told).zip(corners_cutting).enumerate()
+    {
+        for (face, ((cuts, told), corners_cutting)) in
+            faces.into_iter().zip(told).zip(corners_cutting).enumerate()
+        {
             let own =
                 the_sides_every_face_on_its_surface_lies_in(solids, &within_reach, solid, face);
             let face = &mut solids[solid].faces[face];
@@ -308,12 +326,28 @@ pub(crate) fn gather(
                     face.caps_through_the_start_of_their_axis.push(cap);
                 }
             }
+            face.corners_of_the_solids_cutting_it = corners_cutting;
         }
     }
     for solid in solids.iter_mut() {
         tell_each_edge_what_its_neighbour_leaves_out(solid, policy);
     }
     Ok(())
+}
+
+/// Puts each corner of `face` with four or more surfaces round it onto
+/// `corners`, unless one at its vertex is there already
+/// ([`BakedFace::corners_of_the_solids_cutting_it`]).
+fn hand_on_its_crowded_corners(face: &BakedFace, corners: &mut Vec<BakedCorner>) {
+    for edge in face.wires.iter().flatten() {
+        if edge.start.around.len() >= 4
+            && !corners
+                .iter()
+                .any(|corner| corner.vertex == edge.start.vertex)
+        {
+            corners.push(edge.start.clone());
+        }
+    }
 }
 
 #[cfg(test)]
