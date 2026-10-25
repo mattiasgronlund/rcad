@@ -3178,7 +3178,14 @@ check-fuzz-builds:
 # centre's distance off the axis, which a turn rounds, is the whole question.
 # The match now names `Sphere` beside `Plane` and `Cylinder`, so its `_ =>
 # false` leaves two of `Surface`'s variants unnamed where it left three.
-wildcard_arms := "99"
+#
+#     Q2788's lane  99 -> 103
+#
+# Four more, all in `intersect.rs`, where a cone and a pipe or a ball off one
+# axis are now named: four `other => unreachable!("a sign question answers
+# with a sign: ...")` arms on the non_exhaustive `Decision`, after the arms
+# that name `Pos`, `Neg` and `Zero` — the same shape as that file's older ones.
+wildcard_arms := "103"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:

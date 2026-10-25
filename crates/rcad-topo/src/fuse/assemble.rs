@@ -11200,23 +11200,25 @@ fn the_crossing_of_these_runs_straight(carried_by: &[Surface; 2]) -> Option<bool
         // **A cone coaxial with a pipe crosses it in exactly two circles**, and a
         // circle holds no line. `slope·|h| = ρ` has two roots and never one and
         // never none, because a cone is both its nappes and a pipe's radius is
-        // above zero (§50.11) — so `false` is about the geometry **for a
-        // coaxial pair**, and about what `intersect` will hand over for every
-        // other one. This arm is `Cone × Cylinder` whatever the two axes do,
-        // and a cone and a pipe that are not coaxial genuinely can share a
-        // line: a pipe of radius 2 about `(1, 0, 1)` through `(0, 2, 0)` holds
-        // the ruling `(t, 0, t)` of `Cone::new(Axis::z(), 1.0)`, since
-        // `‖(p − o) × d‖² = 8 = 4‖d‖²`. What keeps the arm right is that no
-        // such pair reaches here: `intersect` refuses a cone against a pipe
-        // that is not coaxial with it by name.
+        // above zero (§50.11).
+        //
+        // **Off the axis a pipe can hold a whole ruling of the cone**: a pipe
+        // of radius 2 about `(1, 0, 1)` through `(0, 2, 0)` holds the ruling
+        // `(t, 0, t)` of `Cone::new(Axis::z(), 1.0)`, since
+        // `‖(p − o) × d‖² = 8 = 4‖d‖²`. The only straight lines on a pipe run
+        // along its axis, so a pipe that holds a ruling points along it, and
+        // that is the one pipe off the axis `intersect` refuses by name rather
+        // than names (Q2788). Every other pipe's straight lines each meet the
+        // cone at most twice, so the loops `intersect` names off the axis hold
+        // no line either.
         // `a_cone_coaxial_with_a_pipe_crosses_it_in_circles_which_hold_no_line`
         // and `a_pipe_alongside_one_of_a_cones_rulings_holds_it` are the two
         // demonstrations.
         //
-        // So **one** of the two rows here is right only for as long as its
-        // refusal stands, and is the row to revisit the day it lifts: a cone
-        // against a pipe it is not coaxial with. The ball and the coaxial pipe
-        // answer out of the shapes themselves.
+        // So **one** case here is right only for as long as its refusal
+        // stands, and is the case to revisit the day it lifts: a pipe along one
+        // of the cone's rulings. The ball, the coaxial pipe and every other
+        // pipe off the axis answer out of the shapes themselves.
         [Surface::Cone(_), Surface::Sphere(_) | Surface::Cylinder(_)]
         | [Surface::Sphere(_) | Surface::Cylinder(_), Surface::Cone(_)] => Some(false),
         // **A ball's skin and a ring's skin are bounded, and a straight line is
@@ -11765,9 +11767,11 @@ type WhichCurveOfThePair = Option<[u64; 10]>;
 /// [`which_of_the_pairs_closed_crossings_it_is`] writes one: a cone or a pipe
 /// spelled with its axis turned round hands back the half-space holding a given
 /// curve as the reverse of the one picking the other, which is the same four
-/// numbers but for the sign of a zero. A curved picker is written as the surface named
-/// either way round ([`name_of_the_surface_either_way_round`]) and which side
-/// of it it keeps. The slot ahead of the numbers says which kind of picker it
+/// numbers but for the sign of a zero. A flat picker through a point is written
+/// the same way as its point and its facing, which is what the two loops a cone
+/// crosses a pipe or a ball off its axis in are picked by. A curved picker is
+/// written as the surface named either way round
+/// ([`name_of_the_surface_either_way_round`]) and which side of it it keeps. The slot ahead of the numbers says which kind of picker it
 /// is, so a ball and a pipe never share a name.
 ///
 /// # Panics
@@ -11792,12 +11796,22 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
             }
             return Some(name);
         }
+        Picker::InFrontOfAFlatThrough(half_space) => {
+            name[0] = 4;
+            let numbers = half_space
+                .through()
+                .coordinates()
+                .into_iter()
+                .chain(half_space.facing().components());
+            for (slot, number) in name[1..].iter_mut().zip(numbers) {
+                *slot = (number + 0.0).to_bits();
+            }
+            return Some(name);
+        }
         Picker::OutsideABall(ball) => (1, Surface::Sphere(*ball)),
         Picker::OutsideAPipe(pipe) => (2, Surface::Cylinder(*pipe)),
         Picker::InsideAPipe(pipe) => (3, Surface::Cylinder(*pipe)),
-        Picker::InFrontOfAFlatThrough(_) | _ => {
-            panic!("a picker nothing here can name: {picker:?}")
-        }
+        _ => panic!("a picker nothing here can name: {picker:?}"),
     };
     name[0] = kind;
     name[1..].copy_from_slice(&name_of_the_surface_either_way_round(&surface));
@@ -13996,8 +14010,8 @@ mod tests {
     }
 
     /// A pipe that is not coaxial with a cone can hold one of the cone's
-    /// rulings, which is why `intersect` still refuses every cone and pipe but
-    /// the coaxial one.
+    /// rulings, which is why `intersect` still refuses a pipe that points along
+    /// one, while it names the other pipes off a cone's axis.
     ///
     /// The ruling `(t, 0, t)` of a cone leaning one lies on a pipe of radius two
     /// whose axis runs the same way two units off it: every point of the ruling

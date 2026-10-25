@@ -205,18 +205,33 @@ fn where_each_circle_starts_is_on_both_surfaces_and_does_not_move_when_the_pair_
     }
 }
 
-/// The walker refuses the pairs the namer refuses, and it works the question out
-/// rather than trusting the run it was handed.
+/// The walker works the question out rather than trusting the run it was
+/// handed, and a whole run stated on a pair off one axis is refused under the
+/// name of what is wrong with it, or walked round one loop.
 ///
 /// A caller can state any run at all between two surfaces — `walk` is public and
-/// a file read in states runs this crate never named. So a leaning cone and pipe
-/// handed over as a closed run has to come back with the row's own refusal and
-/// not with a circle worked out from numbers that do not describe one.
+/// a file read in states runs this crate never named. So a cone and a partner
+/// off its axis handed over as one closed run with nothing picking it has to
+/// come back with the answer that pair has, and never with a circle worked out
+/// from numbers that do not describe one:
 ///
-/// The ball stands one to the side of the axis. On it, a ball is drawn the way
-/// the pipe is, and `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` walks it.
+/// - The pipe leaning along one of the cone's own straight lines is the
+///   refusal `intersect` gives that pair.
+/// - The ball stands one to the side of the axis inside the upper nappe and
+///   misses the cone, so the run names a crossing that is not there, refused
+///   as a ball on the axis that misses the cone is. Until row Q2788 the walk
+///   called it too small to sit on and its start was a point off the ball.
+/// - The pipe standing one to the side of the axis goes through both nappes
+///   and crosses the cone in a loop round each, which `intersect` names as two
+///   pieces. A run naming neither is walked round one of them, as it is on a
+///   thin pipe through a fat one, and starts at the same place whichever face
+///   asks. The coaxial pair's run below is refused instead: its two circles
+///   are not marched from seeds.
+///
+/// On the axis, a ball is drawn the way the pipe is, and
+/// `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` walks it.
 #[test]
-fn a_run_stated_on_a_pair_that_does_not_share_an_axis_is_refused_by_name() {
+fn a_whole_run_stated_on_a_pair_off_one_axis_is_refused_by_name_or_walked_round_one_loop() {
     let cone = Cone::new(Axis::z(), 1.0).expect("a slope above zero");
     let leaning = Cylinder::new(
         Axis::new(Point::new(0.0, 2.0, 0.0), Vector::new(1.0, 0.0, 1.0)).expect("a direction"),
@@ -233,10 +248,15 @@ fn a_run_stated_on_a_pair_that_does_not_share_an_axis_is_refused_by_name() {
     let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a closed curve is never a piece with nothing picking it");
     let cone = Surface::Cone(cone);
-    for partner in [
-        Surface::Cylinder(leaning),
-        Surface::Cylinder(beside_it),
-        Surface::Sphere(ball),
+    for (partner, refused) in [
+        (
+            Surface::Cylinder(leaning),
+            Error::ACrossingBetweenAConeAndAnotherCurvedSurface,
+        ),
+        (
+            Surface::Sphere(ball),
+            Error::TheseTwoSurfacesDoNotCrossInAConic,
+        ),
     ] {
         for pair in [[&cone, &partner], [&partner, &cone]] {
             assert_eq!(
@@ -247,14 +267,45 @@ fn a_run_stated_on_a_pair_that_does_not_share_an_axis_is_refused_by_name() {
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
                 )
-                .err(),
-                Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+                .map(|walked| walked.points().len()),
+                Err(refused.clone()),
                 "{pair:?}"
             );
             assert_eq!(
-                where_a_closed_crossing_starts(&stated, pair, &mut ProvenanceLog::new()).err(),
-                Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+                where_a_closed_crossing_starts(&stated, pair, &mut ProvenanceLog::new()),
+                Err(refused.clone()),
                 "{pair:?}"
+            );
+        }
+    }
+
+    let beside_it = Surface::Cylinder(beside_it);
+    let start = |pair: [&Surface; 2]| {
+        where_a_closed_crossing_starts(&stated, pair, &mut ProvenanceLog::new())
+            .expect("the first loop has a seed")
+    };
+    assert_eq!(start([&cone, &beside_it]), start([&beside_it, &cone]));
+    for pair in [[&cone, &beside_it], [&beside_it, &cone]] {
+        let walked = walk(
+            &stated,
+            pair,
+            Deflection::of(0.01).expect("a length above zero"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the run is walked round the first loop");
+        let way = walked.points()[0].z().signum();
+        assert!(walked.points().len() > 8, "{pair:?}");
+        for point in walked.points() {
+            let [x, y, z] = point.coordinates();
+            assert!(z * way > 0.0, "{pair:?}: {point:?} is on the first loop");
+            assert!(
+                (x.hypot(y) - z.abs()).abs() < 1e-12,
+                "{point:?} is on the cone"
+            );
+            assert!(
+                ((x - 1.0).hypot(y) - 2.0).abs() < 1e-12,
+                "{point:?} is on the pipe"
             );
         }
     }

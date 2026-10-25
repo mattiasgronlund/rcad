@@ -348,7 +348,9 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 
 /// `seed` settled onto both surfaces, with an upper bound on how far off the
 /// crossing it still is that holds however the two surfaces bend, so long as
-/// neither bends tighter than a ball of the smaller of `radii`.
+/// neither bends tighter than a ball of the smaller of the `radii` read at the
+/// settled point. Read there because a cone's bend is how far the point is
+/// from its axis.
 ///
 /// # Why the bound [`settled_with_a_bound`] gives is not enough
 ///
@@ -391,7 +393,7 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 pub(crate) fn settled_with_a_bound_where_they_bend(
     surfaces: [&Surface; 2],
     seed: Point,
-    radii: [f64; 2],
+    radii: impl Fn(Point) -> [f64; 2],
 ) -> Result<(Point, f64)> {
     let settled = settled(surfaces, seed)?;
     let (flat, further_off, leaning) = the_flat_bound_and_what_it_is_made_of(surfaces, settled)?;
@@ -404,7 +406,7 @@ pub(crate) fn settled_with_a_bound_where_they_bend(
     let two = Interval::exactly(2.0);
     let reach = two * flat;
     let mut turning = Interval::exactly(0.0);
-    for radius in radii {
+    for radius in radii(settled) {
         let left = Interval::exactly(radius) - further_off - reach;
         if left.lo() <= 0.0 {
             return Err(cannot_bound());
@@ -1038,15 +1040,10 @@ fn how_far_off_and_which_way(surface: &Surface, at: Point) -> (f64, Vector) {
             let reach = sideways.length();
             (reach - pipe.radius(), sideways * reach.recip())
         }
-        // Nothing in this crate marches a crossing with a cone on it — every
-        // pair that reaches the marcher is a quartic, and
-        // `Error::ACrossingBetweenAConeAndAnotherCurvedSurface` refuses those
-        // before a run exists to follow. The arm is here because a `match` on a
-        // growing enum with a wildcard in it is where the next variant goes to
-        // be ignored (§40), and it does the arithmetic rather than panicking so
-        // that the day a cone reaches the marcher the answer is right rather
-        // than absent. The distance is `(‖x_perp‖ - slope*x_along) / hypot(1, slope)`,
-        // which is the honest distance to the nappe the point stands over.
+        // A cone reaches the marcher crossed off its axis by a pipe or a ball,
+        // in the loops `intersect` names for those pairs (Q2788). The distance
+        // is `(‖x_perp‖ - slope*|x_along|) / hypot(1, slope)`, which is the
+        // honest distance to the nappe the point stands over.
         Surface::Cone(cone) => {
             let along = cone.axis().direction();
             let out = at - cone.apex();
@@ -1061,14 +1058,17 @@ fn how_far_off_and_which_way(surface: &Surface, at: Point) -> (f64, Vector) {
                     * steepness.recip(),
             )
         }
-        // Nothing in this crate marches a crossing with a torus on it either;
+        // Nothing in this crate marches a crossing with a torus on it;
         // `Error::ACrossingBetweenAPlaneAndATorusThatIsAQuartic` and
         // `Error::ACrossingBetweenATorusAndAnotherCurvedSurface` refuse those
-        // before a run exists to follow. The arm does the arithmetic for the
-        // same reason the cone's does, and here it is worth more: a torus's
-        // distance function is **exact and everywhere finite**, `‖(s − R, a)‖ −
-        // r` with `s` the distance from the axis and `a` the distance along it,
-        // so the day a seed exists the marcher can already settle onto one.
+        // before a run exists to follow. The arm is here because a `match` on a
+        // growing enum with a wildcard in it is where the next variant goes to
+        // be ignored (§40), and it does the arithmetic rather than panicking so
+        // that the day a torus reaches the marcher the answer is right rather
+        // than absent. A torus's distance function is **exact and everywhere
+        // finite**, `‖(s − R, a)‖ − r` with `s` the distance from the axis and
+        // `a` the distance along it, so the day a seed exists the marcher can
+        // already settle onto one.
         Surface::Torus(ring) => {
             let along = ring.axis().direction();
             let out = at - ring.centre();
@@ -1149,9 +1149,8 @@ fn how_far_off_a_pipe_enclosing(pipe: &Cylinder, at: Point) -> (Interval, [Inter
 /// `(‖(p − apex)_perp‖ − slope·|(p − apex)_along|) / √(1 + slope²)`, and the
 /// unit normal there.
 ///
-/// Unreachable from anything this crate marches, for the reason
-/// [`how_far_off_and_which_way`]'s cone arm gives; written out rather than
-/// stubbed for the same reason.
+/// Reached by the loops a cone crosses a pipe or a ball in off its axis, as
+/// [`how_far_off_and_which_way`]'s cone arm says.
 fn how_far_off_a_cone_enclosing(cone: &Cone, at: Point) -> (Interval, [Interval; 3]) {
     let along = exactly(cone.axis().direction().components());
     let squared_direction = squared_length_enclosing(along);
@@ -1487,7 +1486,7 @@ mod tests {
             Point::new(0.6, 0.8, 1.5 * up),
         ] {
             let (settled, bent) =
-                settled_with_a_bound_where_they_bend([&ball, &pipe], seed, [1.0, thinner])
+                settled_with_a_bound_where_they_bend([&ball, &pipe], seed, |_| [1.0, thinner])
                     .expect("the two lean far enough apart for a bound");
             let (_, flat) = settled_with_a_bound([&ball, &pipe], seed).expect("a bound");
             let off = f64::hypot(

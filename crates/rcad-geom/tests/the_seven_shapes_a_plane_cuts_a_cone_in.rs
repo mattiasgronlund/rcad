@@ -30,8 +30,8 @@
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, Isometry, NamedRun,
-    POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF, Plane, Point, PointsAlongACrossing, Sphere, Surface,
-    SurfaceMeet, Vector, intersect, walk, where_a_closed_crossing_starts,
+    POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF, Picker, Plane, Point, PointsAlongACrossing, Sphere,
+    Surface, SurfaceMeet, Vector, intersect, walk, where_a_closed_crossing_starts,
 };
 use rcad_predicates::expansion::{two_product, two_sum};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, SideOfSurface};
@@ -590,19 +590,28 @@ fn a_run_along_a_cones_ruling_is_walked_as_a_straight_line_from_both_public_door
     }
 }
 
-/// A cone against a ball, a pipe or another cone that does not share its axis
-/// is refused by name, in both orders.
+/// Off a cone's axis, a ball and a pipe beside it are named, and a pipe along
+/// one of the cone's own lines and a second cone are refused by name, in both
+/// orders.
 ///
-/// A partner that *does* share the axis is no longer on this list: they cross
-/// in circles square to it and `intersect` names them —
+/// A partner that shares the axis crosses in circles square to it —
 /// [`a_ball_and_a_cone_on_the_cone_s_axis_are_named_not_refused`] is that half.
 /// So the ball and the second cone stand one to the side of it here, and the
 /// pipe appears twice, once for each way of not sharing the axis — leaning
 /// against it, and running parallel to it but off to one side — because those
-/// are the two signs `where_a_cone_and_a_pipe_cross` asks and either one alone
-/// would leave half the refusal unpinned.
+/// are the two signs `where_a_cone_and_a_pipe_cross` asks.
+///
+/// - The ball of radius two centred four up and one across sits inside the
+///   upper nappe, as its twin on the axis below does, so the two miss.
+/// - The pipe beside the axis goes through both nappes, and crosses the cone
+///   in a loop round each, picked out by the flat through the apex facing up
+///   and down.
+/// - The leaning pipe runs along `(1, 0, 1)`, one of the right-angled cone's
+///   own lines, which is still refused (row Q2788 named the rest).
+/// - Two cones off one axis are still refused.
 #[test]
-fn a_cone_against_a_ball_a_pipe_off_its_axis_or_another_cone_is_refused_by_name() {
+fn off_its_axis_a_cone_names_a_ball_and_a_pipe_beside_it_and_refuses_a_pipe_along_its_line_and_another_cone()
+ {
     let cone = Surface::Cone(a_right_angled_cone());
     let ball = Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 4.0), 2.0).expect("a radius"));
     let leaning_pipe = Surface::Cylinder(
@@ -630,15 +639,46 @@ fn a_cone_against_a_ball_a_pipe_off_its_axis_or_another_cone_is_refused_by_name(
         .expect("a positive slope"),
     );
 
-    for partner in [ball, leaning_pipe, pipe_beside_it, other_cone] {
+    let crossing = |pair: [&Surface; 2]| {
+        intersect(
+            pair[0],
+            pair[1],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+    };
+    for pair in [[&cone, &ball], [&ball, &cone]] {
+        assert_eq!(crossing(pair), Ok(SurfaceMeet::Nothing), "{pair:?}");
+    }
+    for pair in [[&cone, &pipe_beside_it], [&pipe_beside_it, &cone]] {
+        let Ok(SurfaceMeet::Curves(runs)) = crossing(pair) else {
+            panic!("{pair:?} cross in two loops");
+        };
+        let facings: Vec<Option<Vector>> = runs
+            .iter()
+            .map(|run| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("{pair:?}: each loop is a piece of the crossing, not {run:?}");
+                };
+                let [picker @ Picker::InFrontOfAFlatThrough(_)] = picked_by.as_slice() else {
+                    panic!("{pair:?}: one flat picks each loop, not {picked_by:?}");
+                };
+                picker.facing_of_a_flat()
+            })
+            .collect();
+        assert_eq!(
+            facings,
+            [
+                Some(Vector::new(0.0, 0.0, 1.0)),
+                Some(Vector::new(0.0, 0.0, -1.0))
+            ],
+            "{pair:?}"
+        );
+    }
+    for partner in [leaning_pipe, other_cone] {
         for pair in [[&cone, &partner], [&partner, &cone]] {
             assert_eq!(
-                intersect(
-                    pair[0],
-                    pair[1],
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new()
-                ),
+                crossing(pair),
                 Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
                 "{pair:?}"
             );

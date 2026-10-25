@@ -359,14 +359,24 @@ pub enum Error {
     )]
     CannotNameWhichPieceOfACrossingThisIs,
 
-    /// A cone against a pipe, a ball or a second cone that does not share its
-    /// axis — a second cone that shares its apex aside — and a ball on the axis
-    /// whose skin runs through the apex.
+    /// A cone against a second cone that shares neither its axis nor its apex,
+    /// a ball whose skin runs through the apex, on the axis or off it, and the
+    /// shapes off the axis that a pipe or a ball is not proved to cross it in.
     ///
-    /// Off the axis a **gap** and the same one two leaning pipes have (§29): the
-    /// crossing is a degree-four space curve, naming which of its shapes it
-    /// takes is an eighth-degree discriminant, and drawing it needs the
-    /// marcher. None of that is built for a cone.
+    /// Off the axis a pipe or a ball is **named where its shape is proved**
+    /// (Q2788): two loops held apart by a flat surface through the apex, one
+    /// loop round a nappe, or nothing for a ball that misses the cone, and the
+    /// marcher draws them. What stays refused off the axis is each a **gap**,
+    /// since the crossing is there: a pipe along one of the cone's own straight
+    /// lines; a pipe steeper than the cone whose skin runs through the apex; a
+    /// shallower pipe not proved to meet the cone twice along every one of its
+    /// own straight lines; and a ball that touches the cone, or that every
+    /// straight line of a nappe meets. `intersect.rs`'s
+    /// `a_cone_and_a_pipe_off_one_axis` and `a_ball_off_a_cones_axis` say why
+    /// each is refused. The first of them is not only unfinished work: a pipe
+    /// along a straight line of the cone can hold that whole line, and
+    /// `rcad-topo`'s `assemble.rs` answers *this crossing holds no straight
+    /// line* for every cone against a pipe.
     ///
     /// The family of fixes, shortest first. (a) **A cone and a pipe on one axis
     /// is done**, and it was neither planar nor one sign question. There is no
@@ -390,14 +400,19 @@ pub enum Error {
     /// `the_rulings_two_cones_on_one_apex_share` names as the halves the apex
     /// cuts them into. `rcad-topo`'s `assemble.rs` answers *this crossing holds
     /// a straight line* for that pair and for no other cone-and-cone pair
-    /// (§50.2 item 4). (d) The general case wants
-    /// the marcher taught a cone and an eighth-degree discriminant derived,
-    /// which is §29's whole second stage over again.
+    /// (§50.2 item 4). (d) **A pipe or a ball off the axis is done where its
+    /// shape is proved**, and it took no eighth-degree discriminant: a pipe is
+    /// read along its own straight lines and a ball along the cone's, so each
+    /// shape is a few signs of quadratics, and the marcher was taught a cone to
+    /// draw the loops. (e) Two cones that share neither axis nor apex are the
+    /// general case left, and nothing tells their loops apart yet (Q2667).
     ///
     /// **A ball through the apex is the one coaxial pair left here**, and it is
     /// not a degree-four curve: the crossing is one circle and the apex apart
     /// from it, and `SurfaceMeet` has no answer that says a curve and a point
-    /// at once. A gap of the vocabulary rather than of the arithmetic. `walk`
+    /// at once. A gap of the vocabulary rather than of the arithmetic. Off the
+    /// axis a ball through the apex is refused too, before any shape is asked:
+    /// `a_ball_off_a_cones_axis` asks where the apex stands first. `walk`
     /// also refuses under this name a closed run stated on two cones on one
     /// axis with one apex, which touch only there — a pair `intersect` answers,
     /// and a name that is wrong for it: `walk.rs`'s `where_two_coaxial_cones_cut`
