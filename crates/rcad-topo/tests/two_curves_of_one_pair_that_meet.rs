@@ -465,6 +465,9 @@ fn a_thinner_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_ans
 /// Both bars turned a radian about `z`, the turn rounds the thin axis off the
 /// circle of radius 1, and the two pipes cross in two lines
 /// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_answers_every_fuse`]).
+/// Turned 0.7, 2.5 or 3, it rounds the axis inside that circle, and they
+/// cross nowhere
+/// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_refused_only_meshing_a_face`]).
 ///
 /// What they share is the thin bar between the thick bar's caps, `4π`.
 #[test]
@@ -503,8 +506,8 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_
 #[test]
 fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_answers_every_fuse()
 {
-    let along_the_seams: Pair = |model| both_bars_turned_a_radian_about_z(model, 1.0);
-    let opposite_the_seam: Pair = |model| both_bars_turned_a_radian_about_z(model, -1.0);
+    let along_the_seams: Pair = |model| both_bars_turned_about_z(model, 1.0, 1.0);
+    let opposite_the_seam: Pair = |model| both_bars_turned_about_z(model, -1.0, 1.0);
     for build in [opposite_the_seam, along_the_seams] {
         let mut model = a_model();
         let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
@@ -515,6 +518,79 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_a
             [16.0 * PI, 6.0 * PI, 4.0 * PI],
             [&[10], &[4], &[4], &[10]],
         );
+    }
+}
+
+/// [`a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_fuse_answers`]
+/// with both bars turned 0.7, 2.5 and 3 about `z`. At these turns the thin
+/// axis lands at `(c, s)` with `c² + s² − 1` below zero, where at 1 it is
+/// above
+/// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_answers_every_fuse`]).
+/// So the thin pipe lies a rounding inside the thick one, and `intersect`
+/// names no curve either way round.
+///
+/// Every fuse was refused `Undecidable` "side of cylinder" at the thick
+/// floor's seam corner `(2c, 2s, −2)`, in a box `1.1e−13` wide, asked of the
+/// thin pipe (Q2763). `Arrangement::passes_through` in `fuse/arrange.rs`
+/// reads that corner where its seam plane crosses the circle the floor meets
+/// the wall in, which is outside the thin pipe, and so leaves it off the
+/// circle the thin pipe cuts the floor in. Then
+/// `Arrangement::which_side_of_everything` asked the corner's box alone which
+/// side of that circle the floor's rim lies on. It now reads a corner the way
+/// `passes_through` does.
+///
+/// What they share and the thin bar less the thick one answer as the unturned
+/// bars' do. The union both ways round and the thick bar less the thin one are
+/// refused `CannotMeshAFace` with `BoundaryCrossesItself`, as they are with
+/// the thin bar at `x = −1` at these turns (Q2764).
+#[test]
+fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_refused_only_meshing_a_face()
+ {
+    let turned: [(f64, Pair); 3] = [
+        (0.7, |model| both_bars_turned_about_z(model, 1.0, 0.7)),
+        (2.5, |model| both_bars_turned_about_z(model, 1.0, 2.5)),
+        (3.0, |model| both_bars_turned_about_z(model, 1.0, 3.0)),
+    ];
+    for (angle, build) in turned {
+        let mut model = a_model();
+        let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
+        let Surface::Cylinder(pipe) = thin else {
+            panic!("a bar's wall is a pipe: {thin:?}");
+        };
+        let axis = pipe.axis().origin();
+        let (sign, short) = squared_length_less_one(Vector::new(axis.x(), axis.y(), 0.0));
+        assert_eq!(sign, Decision::Neg, "turn {angle}: c² + s² − 1 is {short}");
+        assert_eq!(curves(&thick, &thin), Ok(0), "turn {angle}");
+        assert_eq!(curves(&thin, &thick), Ok(0), "turn {angle}");
+        for one in [
+            (Rule::Intersection, true),
+            (Rule::Intersection, false),
+            (Rule::Difference, false),
+        ] {
+            the_fuse_answers(
+                build,
+                one,
+                [16.0 * PI, 6.0 * PI, 4.0 * PI],
+                [&[], &[3], &[], &[3, 3]],
+            );
+        }
+        for (rule, thick_first) in [
+            (Rule::Union, true),
+            (Rule::Union, false),
+            (Rule::Difference, true),
+        ] {
+            let said = fuse(&mut a_model(), build, rule, thick_first);
+            assert!(
+                matches!(
+                    said,
+                    Err(rcad_topo::Error::CannotMeshAFace {
+                        why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
+                        ..
+                    })
+                ),
+                "turn {angle}: {rule:?} (thick first: {thick_first}): {said:?}"
+            );
+        }
     }
 }
 
@@ -1627,9 +1703,9 @@ fn a_thin_bar_up_the_inside_of_a_thick_one(model: &mut Model) -> [SolidKey; 2] {
 }
 
 /// The bar of radius 2 up `z` from `−2` to 2, and the bar of radius 1 up `z`
-/// from `(x, 0, −3)`, 6 long, both turned 1 about `z`.
-fn both_bars_turned_a_radian_about_z(model: &mut Model, x: f64) -> [SolidKey; 2] {
-    let turn = Isometry::rotation(&Axis::z(), 1.0).expect("a finite turn");
+/// from `(x, 0, −3)`, 6 long, both turned `angle` about `z`.
+fn both_bars_turned_about_z(model: &mut Model, x: f64, angle: f64) -> [SolidKey; 2] {
+    let turn = Isometry::rotation(&Axis::z(), angle).expect("a finite turn");
     let bars = [
         a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
         a_bar(model, 1.0, [x, 0.0, -3.0], 6.0),
