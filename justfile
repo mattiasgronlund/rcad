@@ -9394,6 +9394,25 @@ check-fuzz-overnight-selftest:
     # `RCAD_FUZZ_MERGE_TIMEOUT` overrides the real 120 s bound for exactly this
     # arm; nothing else in this file sets it, so every other arm's merge keeps
     # the real one.
+    #
+    # **This arm needs the night to reach the merge at all, and `left` is one
+    # value shared by every target** (set once, above the for-loop that starts
+    # them, and never refreshed inside it) — so a setup slow enough to eat a
+    # whole eight-second window skips every one of the five targets, the
+    # reader included, and the merge this arm means to test never runs. That
+    # is exactly what a gate run of 2026-10-05 hit, with three lanes compiling
+    # beside it (§295.7): the stub's own log ends at `+nightly fuzz build`,
+    # the one-time step before the per-target loop, with no `fuzz run` line
+    # after it — proof the loop took the `left<1` skip for all five, not that
+    # the merge ran and its failure path broke. The old assertions below could
+    # not tell the two apart: both leave the reader's persistent corpus
+    # untouched and no `-scratch-failed-` directory, so "skipped before it
+    # started" read as "a merge killed by its own timeout did not move
+    # tonight's scratch directory aside" — true of the symptom, false of the
+    # cause. Twenty seconds instead of eight is headroom against the same
+    # setup, not a cure for it: nothing bounds how long a machine can be
+    # starved, so the check right after `run` below is what turns a future
+    # skip into its own clear failure instead of this one's misleading echo.
     twenty_one() {
     : >"$dir/log"
     reader_persistent="$dir/corpus/no_step_file_makes_the_reader_panic"
@@ -9401,7 +9420,9 @@ check-fuzz-overnight-selftest:
     mkdir -p "$reader_persistent"
     echo "kept before the hang" >"$reader_persistent/kept-from-before"
     status=0
-    RCAD_FUZZ_MERGE_TIMEOUT=1 STUB_MERGE_HANG=5 run 8 || status=$?
+    RCAD_FUZZ_MERGE_TIMEOUT=1 STUB_MERGE_HANG=5 run 20 || status=$?
+    grep -q 'fuzz run no_step_file_makes_the_reader_panic .*max_total_time' "$dir/log" \
+        || fail "the night never started the reader target, so this arm proves nothing about the merge: $(cat "$dir/out")"
     [ "$status" -ne 0 ] \
         || fail "a merge that hung past its bound did not fail the night"
     [ "$(cat "$reader_persistent/kept-from-before")" = "kept before the hang" ] \
