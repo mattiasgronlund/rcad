@@ -55,14 +55,15 @@ fn a_post_cut_on_a_slant(model: &mut Model, upright: SolidKey) -> SolidKey {
 }
 
 /// The same with a bar of radius `1.5` along `z` through `y = 0.5`, cut on
-/// top by `z = 0.5 + y`, and a slab over `x ∈ [-3, 3]`, `y ∈ [-0.3, 1.5]`,
+/// top by `z = 0.5 + y`, and a slab over `x ∈ [-3, 3]`, `y ∈ [-0.5, 1.5]`,
 /// `z ∈ [2, 3]` whose edge `y = 1.5`, `z = 2` lies on that cut and meets the
-/// bar's pipe at `x = ±√1.25` (Q2722).
+/// bar's pipe at `x = ±√1.25` (Q2722). Q2722's slab started at `y = −0.3`,
+/// whose volume `6 × 1.8` no `f64` holds.
 #[test]
 fn a_round_bar_cut_on_a_slant_under_a_slabs_edge_answers_every_rule_either_way_round() {
     let failed = every_rule_on_two_apart(
-        |model| a_box(model, [[-3.0, 3.0], [-0.3, 1.5], [2.0, 3.0]]),
-        6.0 * 1.8,
+        |model| a_box(model, [[-3.0, 3.0], [-0.5, 1.5], [2.0, 3.0]]),
+        12.0,
         a_bar_cut_by_z_half_plus_y,
         PI * 1.5 * 1.5 * 4.0,
     );
@@ -77,7 +78,7 @@ fn a_round_bar_cut_on_a_slant_under_a_holed_slabs_edge_answers_every_rule_either
     let the_hole_across = r * r * (1.3 / r).acos() - 1.3 * (r * r - 1.3 * 1.3).sqrt();
     let failed = every_rule_on_two_apart(
         |model| {
-            let the_slab = a_box(model, [[-3.0, 3.0], [-0.3, 1.5], [2.0, 3.0]]);
+            let the_slab = a_box(model, [[-3.0, 3.0], [-0.5, 1.5], [2.0, 3.0]]);
             let placed =
                 Isometry::translation(Vector::new(0.0, 0.5, -2.0)).expect("a finite shift");
             let bar = model.add_round_bar(1.5, 6.0, &placed).expect("a bar");
@@ -85,7 +86,7 @@ fn a_round_bar_cut_on_a_slant_under_a_holed_slabs_edge_answers_every_rule_either
             let the_hole = one_solid(model, &[bar], &[the_box], Rule::Intersection);
             one_solid(model, &[the_slab], &[the_hole], Rule::Difference)
         },
-        6.0 * 1.8 - the_hole_across,
+        12.0 - the_hole_across,
         a_bar_cut_by_z_half_plus_y,
         PI * 1.5 * 1.5 * 4.0,
     );
