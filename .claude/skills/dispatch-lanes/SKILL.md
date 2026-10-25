@@ -223,7 +223,12 @@ For every row the fill took:
    only. A take left on your branch meets that flip at your next merge of
    `main` as a row changed on both sides, and costs a `just queue pick`. A
    bundle is one `take` step per row, every one onto the same branch, in the
-   same `apply`. A take that never started a lane, or started one that died
+   same `apply`. A row waiting on another, `after:`, can be bundled with the
+   row it waits on the same way: `take` accepts the wait once the row it
+   still names is `lane:<that same branch>`, set by that earlier `take` step
+   of the same `apply`, so a fix and the row that answers it go out together
+   instead of being closed by hand with `done` (Q945, §309). A take that
+   never started a lane, or started one that died
    before it committed, leaves a hold with nothing running under it —
    `just queue give <id>` releases it and puts the row back to the state
    `take` replaced (todo, or its `after:` list). It refuses while the
