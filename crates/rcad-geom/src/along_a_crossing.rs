@@ -40,6 +40,8 @@
 //! | a ball off a pipe's axis that reaches into its side, the one loop | the step from the ball's centre back to the axis, going round the line along that step |
 //! | a cone and a pipe, a shallower cone or a ball on its axis, the circle ahead of the picker | the cone's stored axis direction negated |
 //! | the same, the circle behind the picker | the cone's stored axis direction |
+//! | a cone and a pipe steeper than its skin off its axis, the loop ahead of the apex along the cone's axis | the pipe's stored axis direction, turned to lean along the cone's, negated |
+//! | the same, the loop behind the apex | the pipe's stored axis direction, turned to lean along the cone's |
 //! | any of those the other way round | the same answer negated |
 //! | two balls | the second centre minus the first |
 //! | two cones of one slope on one axis | the first apex minus the second |
@@ -104,6 +106,15 @@
 //! `the_way_a_circle_round_a_cones_axis_winds` has the product. Two cones of
 //! one slope cross in one circle halfway between their apexes and need no
 //! picker.
+//!
+//! A pipe steeper than a cone's skin and off its axis crosses it in two quartic
+//! loops instead, one on each nappe, and each runs once round the pipe's axis,
+//! so the determinant reads three points of one down the pipe's axis, as it
+//! does for two pipes below. Which way a loop runs is read off `from` against
+//! the same half-space through the apex, and comes out as the circles' reading
+//! with the pipe's direction in place of the cone's (Q2789).
+//! `the_way_a_loop_round_a_pipe_steeper_than_a_cone_winds` has the argument.
+//! Whether the pipe is steeper is asked exactly.
 //!
 //! # Two pipes are not a conic and still order
 //!
@@ -178,14 +189,15 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// its inside, nor one of the two loops a ball crosses a pipe it swallows
 /// whole in, nor the one loop a ball off a pipe's axis crosses it in where it
 /// reaches into its side, nor the one loop two pipes cross in where neither
-/// swallows the other: two planes, a plane along a pipe's axis, two pipes of
-/// one radius whose axes meet, two running the same way, two that miss each
-/// other or touch at one point from outside, a ball off a pipe's axis that
-/// misses it, touches it at one point, or touches it from inside in a figure
-/// of eight, a plane cutting a torus in a quartic, every pair with a torus on
-/// it but a plane, a cone against a pipe, a second cone or a ball off its
-/// axis, two cones of one apex, and a ball on a cone's axis that misses it or
-/// runs through its apex.
+/// swallows the other, nor one of the two loops a pipe steeper than a cone's
+/// skin crosses it in off its axis: two planes, a plane along a pipe's axis,
+/// two pipes of one radius whose axes meet, two running the same way, two that
+/// miss each other or touch at one point from outside, a ball off a pipe's
+/// axis that misses it, touches it at one point, or touches it from inside in
+/// a figure of eight, a plane cutting a torus in a quartic, every pair with a
+/// torus on it but a plane, a cone against a pipe no steeper than its skin, a
+/// second cone or a ball off its axis, two cones of one apex, and a ball on a
+/// cone's axis that misses it or runs through its apex.
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube, which touches it all the way round one circle
@@ -374,17 +386,19 @@ enum WhichLine {
 /// `from` is a point on the crossing, and only the rows with two curves read
 /// it: a plane square to a torus's axis, a ball on a pipe's axis, and a cone on
 /// one axis with a pipe, a cone or a ball each cut two circles that wind
-/// opposite ways, and a fat pipe cuts a thin one it swallows, and a ball a pipe
-/// it swallows off its axis, in two loops that do, and which one this is is not
-/// a fact about the pair.
+/// opposite ways, and a fat pipe cuts a thin one it swallows, a ball a pipe
+/// it swallows off its axis, and a cone a pipe steeper than its skin off its
+/// axis, in two loops that do, and which one this is is not a fact about the
+/// pair.
 ///
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair that does not cross
 /// in one closed curve lying in a plane, in one of the two loops round a
-/// pipe's axis that a fat pipe or a ball swallowing it crosses it in, or in
-/// the one loop round a line that a ball off a pipe's axis reaching into its
-/// side, or two pipes neither of which swallows the other, cross in, and
+/// pipe's axis that a fat pipe, a ball swallowing it, or a cone it is steeper
+/// than crosses it in, or in the one loop round a line that a ball off a
+/// pipe's axis reaching into its side, or two pipes neither of which swallows
+/// the other, cross in, and
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube and a ball inscribed in a pipe or a cone.
 ///
@@ -441,15 +455,15 @@ fn the_way_this_crossing_winds(
             return Ok(the_way_a_circle_round_a_pipes_axis_winds(ball, pipe, from)?.the_other_way());
         }
         // A cone against a pipe, a second cone or a ball on its axis crosses it
-        // in circles square to that axis, and off the axis in a quartic,
-        // refused inside.
+        // in circles square to that axis, and off the axis in a quartic. A pipe
+        // steeper than the cone's skin crosses it there in two loops, each
+        // once round the pipe's axis, and every other quartic is refused
+        // inside.
         [Surface::Cone(cone), Surface::Cylinder(pipe)] => {
-            return the_way_a_cone_and_a_pipe_on_its_axis_wind(cone, pipe, from);
+            return the_way_a_cone_and_a_pipe_wind(cone, pipe, from);
         }
         [Surface::Cylinder(pipe), Surface::Cone(cone)] => {
-            return Ok(
-                the_way_a_cone_and_a_pipe_on_its_axis_wind(cone, pipe, from)?.the_other_way(),
-            );
+            return Ok(the_way_a_cone_and_a_pipe_wind(cone, pipe, from)?.the_other_way());
         }
         [Surface::Cone(one), Surface::Cone(other)] => {
             return the_way_two_cones_on_one_axis_wind(one, other, from);
@@ -880,31 +894,135 @@ fn whether_a_balls_equator_misses_a_pipes_circle(
 }
 
 /// Which way one of the two circles a cone and a pipe on its axis cross in
-/// runs, for the pair taken cone first.
+/// runs, or one of the two loops a pipe steeper than the cone's skin crosses it
+/// in off its axis, for the pair taken cone first.
 ///
-/// The pipe is a cone of slope nothing in the argument on
+/// On one axis the pipe is a cone of slope nothing in the argument on
 /// [`the_way_a_circle_round_a_cones_axis_winds`], so the circle ahead of the
 /// apex along the cone's axis winds about the axis direction negated, and the
 /// one behind about the direction itself. The picker is the half-space through
 /// the apex facing along the cone's axis, which is the one
-/// [`intersect`](crate::intersect) hands back on these two runs.
+/// [`intersect`](crate::intersect) hands back on these two runs. Off it,
+/// [`the_way_a_loop_round_a_pipe_steeper_than_a_cone_winds`] orders the loops.
 ///
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the two are proved not
-/// to share an axis: they cross in a quartic. Asked by the same exact question
-/// `walk` asks before it draws the two circles.
-fn the_way_a_cone_and_a_pipe_on_its_axis_wind(
+/// to share an axis and the pipe is proved no steeper than the cone's skin.
+/// Whether they share an axis is asked by the same exact question `walk` asks
+/// before it draws the two circles.
+fn the_way_a_cone_and_a_pipe_wind(
     cone: &Cone,
     pipe: &Cylinder,
     from: PredicatePoint,
 ) -> Result<WhichWayItWinds> {
-    if let Some(not_a_circle) =
-        unless_proved_on_one_axis(whether_a_cone_and_a_pipe_share_an_axis(cone, pipe))
-    {
-        return not_a_circle;
+    match whether_a_cone_and_a_pipe_share_an_axis(cone, pipe) {
+        Decision::Zero => the_way_a_circle_round_a_cones_axis_winds(cone, cone.apex(), from),
+        Decision::Pos => the_way_a_loop_round_a_pipe_steeper_than_a_cone_winds(cone, pipe, from),
+        Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
+        Decision::Neg => {
+            unreachable!("how far off an axis is a sum of squares, never below nothing")
+        }
+        other => unreachable!("unhandled decision: {other:?}"),
     }
-    the_way_a_circle_round_a_cones_axis_winds(cone, cone.apex(), from)
+}
+
+/// Which way the loop `from` is on runs, of the two a pipe steeper than a
+/// cone's skin crosses it in off its axis, for the pair taken cone first.
+///
+/// # Each loop runs once round the pipe's axis
+///
+/// Write `â` for the cone's unit axis, `s` for its slope, and `w` for the
+/// pipe's direction. The pipe is steeper than the cone's skin where
+/// `‖w × â‖² < s² (w · â)²`, which puts `w` inside the cone's own directions.
+/// Along a line of the pipe's wall, `‖ρ‖² − s²h²`, for `ρ` the step out from
+/// the cone's axis and `h` how far up it, is a quadratic whose `t²` is taken
+/// `‖w × â‖² − s² (w · â)²` times, below nothing. So it is below nothing at
+/// both ends of the line, which are inside the two nappes, and where the line
+/// crosses the flat surface through the apex square to `â` it is `‖ρ‖²`,
+/// above nothing unless the line runs through the apex. So the line crosses
+/// the cone twice, once on each nappe, and crosses rather than touches there.
+/// Each loop meets each line of the wall once, and going round it goes once
+/// round the pipe's axis: three points of it, looked at down `w`, are three
+/// points of the pipe's circle in the same order, and the module's determinant
+/// reads them down `w`, as round a thin pipe in a fat one.
+///
+/// # Which way round
+///
+/// The cone's way out is `∇S = ρ − s²h â` and the pipe's `ρ_p`, the step out
+/// from its axis, square to `w`. Against `w × ρ_p`, which runs anticlockwise
+/// about `w`, the crossing runs `(∇S × ρ_p) · (w × ρ_p) = r² (∇S · w)`. Turn
+/// `w` to `u`, the one of `±w` with `u · â` above nothing. On the nappe `â`
+/// points into, `h` is above nothing and `∇S · u ≤ s h ‖u × â‖ − s²h (u · â)`,
+/// below nothing because the pipe is steeper; on the other, `h` is below
+/// nothing and the same sum turns over. So the loop ahead of the apex along
+/// `â` winds about `−u` and the one behind about `u`. On one axis `u` is `â`,
+/// and that is the circles' reading. Which loop `from` is on is read against
+/// the half-space through the apex facing along the cone's axis, which is the
+/// picker [`intersect`](crate::intersect) hands back on these two runs.
+///
+/// # Errors
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the pipe is proved no
+/// steeper than the cone's skin: along one of the cone's own straight lines
+/// a line of the pipe meets it once or along the whole of it, and a shallower
+/// pipe's lines meet it twice, once or not at all, so its crossing need not run
+/// once round the pipe's axis.
+fn the_way_a_loop_round_a_pipe_steeper_than_a_cone_winds(
+    cone: &Cone,
+    pipe: &Cylinder,
+    from: PredicatePoint,
+) -> Result<WhichWayItWinds> {
+    let up = cone.axis().direction().components();
+    let along = pipe.axis().direction().components();
+    let (Some(upward), Some(steepness)) = (
+        Exact::dot_of(along, up),
+        how_much_shallower_than_a_cone_a_pipe_runs(cone, along, up),
+    ) else {
+        return Ok(WhichWayItWinds::CannotTell);
+    };
+    match steepness.sign() {
+        Decision::Neg => {}
+        Decision::Zero | Decision::Pos => return Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
+        Decision::Undecidable { .. } => return Ok(WhichWayItWinds::CannotTell),
+        other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    }
+    let leaning_up = match upward.sign() {
+        Decision::Pos => pipe.axis().direction(),
+        Decision::Neg => -pipe.axis().direction(),
+        Decision::Undecidable { .. } => return Ok(WhichWayItWinds::CannotTell),
+        // `‖w × â‖²` is nothing or more, so a pipe square to the cone's axis is
+        // never steeper than its skin.
+        Decision::Zero => unreachable!("a pipe steeper than a cone runs along its axis"),
+        other => unreachable!("unhandled decision from exact arithmetic: {other:?}"),
+    };
+    let between = HalfSpace::through_a_point_facing(cone.apex(), cone.axis().direction())?;
+    match between.side_of_point(from) {
+        Decision::Pos => Ok(WhichWayItWinds::About(-leaning_up)),
+        Decision::Neg => Ok(WhichWayItWinds::About(leaning_up)),
+        // The flat surface through the apex holds no point of either loop but
+        // the apex, where the two meet if the pipe's skin runs through it, and
+        // which loop `from` is on cannot be told there.
+        Decision::Zero | Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
+        other => unreachable!("which side of a half-space a point is on is a sign: {other:?}"),
+    }
+}
+
+/// `‖w × â‖² − s² (w · â)²`, exactly: below nothing where the pipe running
+/// along `along` is steeper than the cone's skin, nothing where it runs along
+/// one of the cone's straight lines, and above nothing where it is shallower.
+/// `None` where a product leaves what [`Exact`] can hold.
+fn how_much_shallower_than_a_cone_a_pipe_runs(
+    cone: &Cone,
+    along: [f64; 3],
+    up: [f64; 3],
+) -> Option<Exact> {
+    let across = Exact::squared_length_of(&Exact::cross_of(&Exact::of_each(along), up)?)?;
+    let upward = Exact::dot_of(along, up)?;
+    Some(
+        across
+            .minus(&Exact::product_of(cone.slope(), cone.slope())?.times(&upward.times(&upward)?)?),
+    )
 }
 
 /// Which way the circle two cones on one axis cross in runs, for the pair in
