@@ -310,8 +310,15 @@ impl Predicate for HowFarFromTheSkin {
         // in the subnormals and this level certifies a wrong sign.
         //
         // The permanent squares `|left| + |right|` where the value squares
-        // `left - right`, and the first is never below the second, so checking
-        // the components here covers the permanent's squares too.
+        // `left - right`, and the first is never below the second, so where a
+        // component does not cancel, checking it here covers its reach square
+        // too. One that cancels to zero, `left == right`, passes the check,
+        // since `product_is_normal` passes a zero, and its reach square
+        // `4 left²` is checked by nothing and can fall below the normals or
+        // round to zero. The bound holds there all the same
+        // (`docs/decisions.md` §464.15), so a wrong sign does not follow from
+        // a reach square in the subnormals. Whether one follows from a product
+        // checked here has not been run.
         let halves = cross_product_halves_if_normal(from_origin, direction)?;
         let components = halves.map(|(left, right)| left - right);
         let direction_squared =
@@ -548,14 +555,33 @@ fn cross_component(
 /// own; multiplying those two carries both and adds a rounding, which is five;
 /// and the subtraction that made ten on the cross-product side makes six here.
 ///
-/// The `80*epsilon^2` covers the higher-order terms and the rounding of the
-/// permanent itself; what it has to beat is about `45*epsilon`.
+/// The `80*epsilon^2` was meant to cover the higher-order terms and the
+/// rounding of the permanent itself, and by that count it falls short. The
+/// higher-order terms start at `45*epsilon^2`. The permanent's own roundings
+/// can put it up to about `6*epsilon` under its true value, which costs
+/// `60*epsilon^2` against the `10*epsilon`, and multiplying it by this constant
+/// rounds once more, which costs `epsilon` of the bound and so `10*epsilon^2`
+/// of the permanent: `45 + 60 + 10 = 115`, above the `80`.
+///
+/// That count is loose, and the constant holds where `decide` needs it: on the
+/// sum before `value`'s last rounding, whose longest chain is nine roundings
+/// rather than ten. Gappa proves the bound there at this constant
+/// (`docs/decisions.md` §464.15), whether or not a component of the cross
+/// product cancels, and with none cancelling the least constant it proves is
+/// `9*epsilon + 70*epsilon^2`. On `value` itself the two forms tried prove the
+/// bound only at
+/// `10*epsilon + 82*epsilon^2`, two `epsilon^2` above this constant, and nobody
+/// has looked for an input where `value` lands past it. Neither proof covers a
+/// zero difference, direction component or radius, which have not been run.
 ///
 /// Every step of that argument is a *relative* one, so as with every bound of
 /// this shape it holds only while nothing overflows or falls into the
 /// subnormals. [`HowFarFromTheSkin::on_floats`] enforces the bottom end product
 /// by product through [`product_is_normal`], and `decide` the top end by
-/// refusing a bound that is not itself a normal number.
+/// refusing a bound that is not itself a normal number. The permanent's reach
+/// squares are not checked one by one, and where a component cancels its reach
+/// square can fall below the normals or round to zero; the bound on the sum
+/// holds there all the same (§464.15).
 const SIDE_OF_CYLINDER_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (10.0 + 80.0 * epsilon) * epsilon
