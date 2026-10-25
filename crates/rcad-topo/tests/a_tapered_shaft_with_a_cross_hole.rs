@@ -83,19 +83,16 @@ fn a_pointed_cone_fused_with_a_bar_leaning_through_it_answers_three_rules_of_six
 /// two and sits one out from the axis at height five, where the cone has radius
 /// two and a half.
 ///
-/// The intersection answers both ways round, and so does the ball less the
-/// cone. The union both ways and the cone less the ball keep the cone's face
-/// with its rim right round and the ball's loop as an island in it, which the
-/// mesher refuses as a wire that will not lie flat: row Q2811.
+/// Every fuse answers, both ways round. The union both ways and the cone less
+/// the ball keep the cone's face with its rim right round and the ball's loop
+/// as an island in it, a cap of the cone round its apex, and the mesher cuts it
+/// up to the apex as it cuts a cap on a ball with islands in it. It refused
+/// that face as a wire that will not lie flat until row Q2811.
 #[test]
-fn a_pointed_cone_fused_with_a_ball_poking_out_of_its_side_answers_three_rules_of_six() {
+fn a_pointed_cone_fused_with_a_ball_poking_out_of_its_side_answers_every_rule() {
     assert_eq!(
         every_fuse_of(cone_and_ball).refusals(),
-        [
-            [Some(NOT_FLAT), Some(NOT_FLAT)],
-            [None, None],
-            [Some(NOT_FLAT), None]
-        ]
+        [[None, None], [None, None], [None, None]]
     );
 }
 
