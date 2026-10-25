@@ -7786,12 +7786,34 @@ print("slope^2 dot^2 =", float(axial))
 print("true value =", float(value), "sign", (value > 0) - (value < 0))
 ```
 
-**Still to do**, in order: run `cone.g`, the case where nothing cancels and
-nothing is zero, at the code's `B`, bisect `m` in `B = 12u + m u²` and run it
-through `coqc`; split the cases `on_floats` does not check, the cross
-product's as `cylsplit.py` does and the axial term's (`up` cancelling with
-`R2` normal, below the normals or zero, and `A` the same, and `u01 = rnd(u0 +
-u1)` below the normals, where it is exact and the hint `u01 / U01` has nothing
-to divide by); the controls at `u / 2`; what the doc comment at
-`cone.rs:643-663` claims against what is proved; the scripts whole; and what
-this leaves.
+**Measured so far, by Q2681's first two lanes**, in the scratchpad's `q2681/`,
+not yet written up:
+
+- `cone.g`, the case where nothing cancels and nothing is zero, exits 0 at the
+  code's `B` in `9.23s`, and `gappa -Bcoq` and `coqc` exit 0 on its 18049
+  lines with 64 hints (`run0.sh`). It prints `(y − Ex) / P15` within
+  `1.22125e-15`, which is `11u + 10u²`, and `P −/ Phat` within `7.77156e-16`,
+  `7u + 22u²`.
+- The bisection (`conecases.py`, `run1.sh`, `run2.sh`): `B = 12u + m u²`
+  proves for every `m` of 0, 40, 60, 80, 100 and 120, and `B = 11u + m u²`
+  proves at 99 and fails at 98, 97, 96, 90, 50 and 0. By hand, `(11u + 10u²)(1 +
+  7u)(1 + u)` is `11u + 98u²` and a `u³`, so the line falls where the count
+  puts it.
+- The controls: `c_cone_half.g` exits 1, best `[-22, 22]`, `11u` over `u / 2`;
+  `c_cone_nonormal.g` exits 1, best `[-3.80599e+2143, 3.80599e+2143]`, and fails
+  `REL(P, Phat)` and `BND((y - Ex) / P15)` too; `c_cone_noeb.g` exits 1 in
+  `121.00s`, best `[-3.76818e+1267, 3.99163e+1402]`.
+- `sumexact.g`, that a sum of two doubles at most `2⁻¹⁰²²` is a double, exits 0
+  and `coqc` passes, 150 lines, no hints.
+- `conesplit.py` is written, not run: cylsplit's four cross states and six axial
+  ones, `n` and `e` where `up` is not zero (`u01` normal, or below the normals
+  and so exact), and `c`, `a`, `s`, `t` where `up` cancels (`R2` normal or
+  below the normals and not zero, times `A` normal or below the normals). Where
+  `up` cancels it averages the axial error over `XA = ss · R2` and not `ss ·
+  G²`, since `R2` below the normals need not stay near `G²`. `R2` rounding to
+  zero is the wrong sign above and gets no script.
+
+**Still to do**, in order: run `conesplit.py`'s 384 cases and their controls
+through `coqc`; what the doc comment at `cone.rs:643-663` and the comment at
+`432-434` claim against what is proved; the scripts whole; and what this
+leaves.
