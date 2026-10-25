@@ -413,13 +413,18 @@ pub(crate) fn choose(
                         name(&side.carried_by[1])
                     );
                 }
-                let read = TheCornersOfAPiece::of(piece, solids[mine]);
-                eprintln!(
-                    "PROBE   read round a corner: {:?}",
-                    matches!(read, Some(TheCornersOfAPiece::ReadRoundACorner(..)))
-                );
-                if let Some(read) = &read {
-                    for &index in against {
+                for &index in against {
+                    let read = TheCornersOfAPiece::of(piece, &solids, mine, index);
+                    eprintln!(
+                        "PROBE   read against {index}: {:?}",
+                        match &read {
+                            Some(TheCornersOfAPiece::ReadRoundACorner { theirs, .. }) =>
+                                format!("round a corner, theirs {theirs}"),
+                            Some(TheCornersOfAPiece::Meets(_)) => "meets".to_string(),
+                            None => "none".to_string(),
+                        }
+                    );
+                    if let Some(read) = &read {
                         for face in &solids[index].faces {
                             if let Some(outward) = outward_plane_of_face(face) {
                                 eprintln!(
@@ -429,6 +434,10 @@ pub(crate) fn choose(
                                 );
                             }
                         }
+                        eprintln!(
+                            "PROBE   placed by the planes of {index}: {:?}",
+                            placed_by_the_planes_of(solids[index], read)
+                        );
                     }
                 }
             }
@@ -1536,10 +1545,11 @@ fn by_a_plane(
     mine: usize,
     piece: &Piece,
 ) -> Option<Placement> {
-    let corners = TheCornersOfAPiece::of(piece, solids[mine])?;
     let mut outside_every_one = true;
     for &index in against {
-        match placed_by_the_planes_of(solids[index], &corners) {
+        let placed = TheCornersOfAPiece::of(piece, solids, mine, index)
+            .and_then(|corners| placed_by_the_planes_of(solids[index], &corners));
+        match placed {
             Some(true) => return Some(Placement::Inside),
             Some(false) => (),
             None => outside_every_one = false,
@@ -1555,21 +1565,33 @@ enum TheCornersOfAPiece {
     Meets(Vec<[[f64; 4]; 3]>),
     /// Each corner read as the arrangement read it round a corner of the input
     /// whose planes miss one point.
-    ReadRoundACorner(Box<ACornerReadAsOnePoint>, Vec<ANodeReadRoundACorner>),
+    ReadRoundACorner {
+        reading: Box<ACornerReadAsOnePoint>,
+        /// Whether the corner is one of the solid the piece is placed
+        /// against, and not one of the piece's own solid.
+        theirs: bool,
+        corners: Vec<ANodeReadRoundACorner>,
+    },
 }
 
 impl TheCornersOfAPiece {
-    /// The corners of `piece`, cut from a face of `own`, read round a corner
-    /// of the input where every one of them lies inside its room, and as the
-    /// meets of three planes otherwise; `None` where neither reads them all.
-    fn of(piece: &Piece, own: &BakedSolid) -> Option<Self> {
-        the_corners_of_a_piece_read_round_a_corner(piece, own)
-            .or_else(|| the_planes_meeting_at_each_corner_of_a_piece(piece, own).map(Self::Meets))
+    /// The corners of `piece`, cut from a face of `solids[mine]`, as they are
+    /// placed against `solids[against]`: read round a corner of its own solid
+    /// where every one of them lies inside its room, else round such a corner
+    /// of `solids[against]`, and as the meets of three planes otherwise; `None`
+    /// where none of these reads them all.
+    fn of(piece: &Piece, solids: &[&BakedSolid], mine: usize, against: usize) -> Option<Self> {
+        the_corners_of_a_piece_read_round_a_corner(piece, solids[mine], false)
+            .or_else(|| the_corners_of_a_piece_read_round_a_corner(piece, solids[against], true))
+            .or_else(|| {
+                the_planes_meeting_at_each_corner_of_a_piece(piece, solids[mine]).map(Self::Meets)
+            })
     }
 
-    /// Which side of `plane` each corner lies on; `None` for a corner where
-    /// that cannot be told exactly, and for every corner where `plane` is one
-    /// the reading moves.
+    /// Which side of `plane`, a plane of the solid the piece is placed
+    /// against, each corner lies on; `None` for a corner where that cannot be
+    /// told exactly, and for every corner where `plane` is one a reading round
+    /// a corner of the piece's own solid moves.
     fn sides_of(&self, plane: Plane) -> Vec<Option<Decision>> {
         match self {
             Self::Meets(corners) => corners
@@ -1578,51 +1600,81 @@ impl TheCornersOfAPiece {
                     side_of_a_plane_where_three_planes_meet(*three, plane.coefficients()).ok()
                 })
                 .collect(),
-            Self::ReadRoundACorner(reading, corners) => {
-                let moved = reading
-                    .around
-                    .iter()
-                    .any(|around| is_one_plane_either_way(*around, plane));
+            Self::ReadRoundACorner {
+                reading,
+                theirs,
+                corners,
+            } => {
+                let moved = !theirs
+                    && reading
+                        .around
+                        .iter()
+                        .any(|around| is_one_plane_either_way(*around, plane));
                 corners
                     .iter()
-                    .map(|corner| (!moved).then(|| reading.side_of(corner, plane)).flatten())
+                    .map(|corner| {
+                        (!moved)
+                            .then(|| side_as_read(reading, corner, plane))
+                            .flatten()
+                    })
                     .collect()
             }
         }
     }
 }
 
+/// Which side of `plane` `node` lies on as `reading` reads it, with a plane
+/// round the corner that faces the other way read as moved too, where
+/// [`ACornerReadAsOnePoint::side_of`] moves only a plane as it is stored.
+fn side_as_read(
+    reading: &ACornerReadAsOnePoint,
+    node: &ANodeReadRoundACorner,
+    plane: Plane,
+) -> Option<Decision> {
+    if reading.around.contains(&plane.reversed()) {
+        reading
+            .side_of(node, plane.reversed())
+            .map(super::the_other_way)
+    } else {
+        reading.side_of(node, plane)
+    }
+}
+
 /// The corners of a flat piece with straight sides read round a corner of
-/// `own` whose planes miss one point ([`ACornerReadAsOnePoint`]), or `None`
-/// unless `own` has such a corner with the piece's plane round it and every
-/// corner of the piece inside its room, each that corner or a meet of three
-/// planes, one the piece's. The corner need not be one of the piece's: the
-/// wedge round the `x` axis cuts a placed pyramid's side face into a speck
-/// with four corners, each where a wedge plane crosses a side plane's line,
-/// and the arrangement read all four round the apex.
+/// `solid` whose planes miss one point ([`ACornerReadAsOnePoint`]), or `None`
+/// unless `solid` has such a corner with every corner of the piece inside its
+/// room, each a meet of three planes, one the piece's, or, where `solid` is
+/// the piece's own (`theirs` false), that corner itself, and the piece's plane
+/// then round it. The corner need not be one of the piece's: the wedge round
+/// the `x` axis cuts a placed pyramid's side face into a speck with four
+/// corners, each where a wedge plane crosses a side plane's line, and the
+/// arrangement read all four round the apex.
 fn the_corners_of_a_piece_read_round_a_corner(
     piece: &Piece,
-    own: &BakedSolid,
+    solid: &BakedSolid,
+    theirs: bool,
 ) -> Option<TheCornersOfAPiece> {
     let flat = *piece.surface.as_plane()?;
     let sides: Vec<&FaceMeet> = piece.wires.iter().flatten().collect();
     if !sides.iter().all(|side| is_straight(side)) {
         return None;
     }
-    own.faces
+    solid
+        .faces
         .iter()
         .flat_map(|face| face.wires.iter().flatten())
         .find_map(|edge| {
             let reading = ACornerReadAsOnePoint::of(&edge.start)?;
-            if !reading.around.contains(&flat) {
+            if !theirs && !reading.around.contains(&flat) {
                 return None;
             }
             let corners = sides
                 .iter()
                 .map(|side| match &side.ends[0] {
-                    MeetPoint::Existing { vertex, point } => (*vertex == edge.start.vertex
-                        && reading.holds(*point))
-                    .then_some(ANodeReadRoundACorner::TheCorner),
+                    MeetPoint::Existing { vertex, point } => {
+                        (!theirs && *vertex == edge.start.vertex && reading.holds(*point))
+                            .then_some(ANodeReadRoundACorner::TheCorner)
+                    }
                     MeetPoint::OfThreeSurfaces {
                         surfaces, point, ..
                     } => {
@@ -1635,10 +1687,11 @@ fn the_corners_of_a_piece_read_round_a_corner(
                     | MeetPoint::APoleOfAClosedSurface { .. } => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(TheCornersOfAPiece::ReadRoundACorner(
-                Box::new(reading),
+            Some(TheCornersOfAPiece::ReadRoundACorner {
+                reading: Box::new(reading),
+                theirs,
                 corners,
-            ))
+            })
         })
 }
 
@@ -1737,16 +1790,32 @@ fn the_planes_meeting_at(end: &MeetPoint, own: &BakedSolid, flat: Plane) -> Opti
 /// of `corners` on or in front of it, and one of `corners` strictly in front.
 /// Inside: every plane has every corner of the solid on or behind it, every
 /// one of `corners` on or behind it, and one of `corners` strictly behind.
+///
+/// Where `corners` are read round a corner of `solid`, so are the solid's
+/// own, each as the meet of the three planes `bake` solved it from.
 fn placed_by_the_planes_of(solid: &BakedSolid, corners: &TheCornersOfAPiece) -> Option<bool> {
     let its_own = the_planes_meeting_at_each_corner_of_a_solid(solid)?;
     let mut inside_every_one = true;
     for face in &solid.faces {
         let outward = outward_plane_of_face(face)
             .expect("every face of a solid whose corners all meet three planes is flat");
+        let side_of_its_corner = |three: [Plane; 3]| match corners {
+            TheCornersOfAPiece::ReadRoundACorner {
+                reading,
+                theirs: true,
+                ..
+            } => side_as_read(reading, &ANodeReadRoundACorner::AMeet(three), outward),
+            TheCornersOfAPiece::ReadRoundACorner { theirs: false, .. }
+            | TheCornersOfAPiece::Meets(_) => side_of_a_plane_where_three_planes_meet(
+                three.map(|plane| plane.coefficients()),
+                outward.coefficients(),
+            )
+            .ok(),
+        };
         let solid_behind = its_own.iter().all(|three| {
             matches!(
-                side_of_a_plane_where_three_planes_meet(*three, outward.coefficients()),
-                Ok(Decision::Neg | Decision::Zero)
+                side_of_its_corner(*three),
+                Some(Decision::Neg | Decision::Zero)
             )
         });
         let piece = corners.sides_of(outward);
@@ -1766,10 +1835,10 @@ fn placed_by_the_planes_of(solid: &BakedSolid, corners: &TheCornersOfAPiece) -> 
     inside_every_one.then_some(true)
 }
 
-/// The three planes bake solved each corner of every face of `solid` from, as
-/// coefficients, or `None` where a face is curved or a corner was read out of
-/// the model and not solved, or solved from a curved surface.
-fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Vec<[[f64; 4]; 3]>> {
+/// The three planes bake solved each corner of every face of `solid` from, or
+/// `None` where a face is curved or a corner was read out of the model and not
+/// solved, or solved from a curved surface.
+fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Vec<[Plane; 3]>> {
     if solid
         .faces
         .iter()
@@ -1781,9 +1850,7 @@ fn the_planes_meeting_at_each_corner_of_a_solid(solid: &BakedSolid) -> Option<Ve
         .faces
         .iter()
         .flat_map(|face| face.wires.iter().flatten())
-        .map(|edge| {
-            Some(three_planes(edge.start.solved_from.as_ref()?)?.map(|plane| plane.coefficients()))
-        })
+        .map(|edge| three_planes(edge.start.solved_from.as_ref()?))
         .collect()
 }
 
