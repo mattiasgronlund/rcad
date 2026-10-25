@@ -18,7 +18,7 @@ rcad-step = { path = "crates/rcad-step", version = "0.0.0" }
 rcad-topo = { path = "crates/rcad-topo", version = "0.0.0" }
 
 # Mattias's fork, which rounds without switching MXCSR. decisions.md §460.
-inari = { git = "https://github.com/mattiasgronlund/inari", rev = "a6650cbef99a64424ddfa1ac9cc9090471e0fc4d", default-features = false }
+inari = { git = "https://github.com/mattiasgronlund/inari", rev = "63f2237ef642f9d7719873fa19105fd695270d74", default-features = false }
 nalgebra = "0.35"
 serde = { version = "1", features = ["derive"] }
 slotmap = { version = "1.1", features = ["serde"] }

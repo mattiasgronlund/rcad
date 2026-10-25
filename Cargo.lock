@@ -395,7 +395,7 @@ dependencies = [
 [[package]]
 name = "inari"
 version = "2.0.0"
-source = "git+https://github.com/mattiasgronlund/inari?rev=a6650cbef99a64424ddfa1ac9cc9090471e0fc4d#a6650cbef99a64424ddfa1ac9cc9090471e0fc4d"
+source = "git+https://github.com/mattiasgronlund/inari?rev=63f2237ef642f9d7719873fa19105fd695270d74#63f2237ef642f9d7719873fa19105fd695270d74"
 dependencies = [
  "cfg-if",
  "forward_ref",
