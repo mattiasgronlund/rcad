@@ -5430,13 +5430,14 @@ fn where_every_line_of_one_cone_dips_inside_another(
     let most = a_cones_form_enclosing(crossed, centre)
         + Interval::exactly(2.0) * reach * root_enclosing(squared_length_enclosing(stretched))
         + reach * reach * squared_up;
-    if !(most.hi() < 0.0) {
-        return Ok(None);
+    if most.hi() < 0.0 {
+        Ok(Some(HalfSpaceThroughAPoint::new(
+            through,
+            ruled.axis().direction(),
+        )?))
+    } else {
+        Ok(None)
     }
-    Ok(Some(HalfSpaceThroughAPoint::new(
-        through,
-        ruled.axis().direction(),
-    )?))
 }
 
 /// `Q(p − a)` for `cone`'s form `Q`: below zero where `point` is inside the
