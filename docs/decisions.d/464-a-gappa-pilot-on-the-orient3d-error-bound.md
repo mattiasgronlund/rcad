@@ -9481,66 +9481,137 @@ And what is not a row:
 
 ### 464.17 The side of rcad-geom's torus
 
-*Draft. Q2682's first lane wrote `tor.g` and handed over at its budget; its
-first relay ran `tor.g`, its bisection and its three controls (below, "What
-ran") and handed over at its own. Its second relay wrote `torsplit.py`
-(below), which writes `tor_nnnnn.g` as `tor.g` byte for byte, and handed
-over before running it. Its third relay ran the split and its controls (below,
-"What the split printed") and wrote and ran `shapes.py` and `same.py`. Q2682's
-second lane ran the second `-Bcoq` of `tor_cusen` (below, "The second `-Bcoq`
-of `tor_cusen`"), and `coqc` accepted it. The comment check and the write-up in
-464.15's and 464.16's form are left; this paragraph and the word "draft" then
-go.*
+Q2682 took up `SIDE_OF_TORUS_ERROR_BOUND` in `crates/rcad-geom/src/torus.rs`,
+in six lanes on 2026-10-25. The first four were the first lane and its three
+relays. The first wrote `tor.g`. The second ran it, its bisection of 3 and its
+controls of 7. The third wrote `torsplit.py`. The fourth ran the split of 6
+and its controls, and wrote and ran `shapes.py` and `same.py`. The fifth, the
+second lane, merged the first lane's branch and ran the second `-Bcoq` of 8.
+The sixth, its relay, checked the comments and wrote 1 to 10. The bound is
+proved on `y`, the sum before `value`'s last rounding, at the code's constant
+wherever no factor is zero. That covers any of the three components of the
+cross product cancelling, whatever its reach square rounds to; `R² − r²`
+normal or below the normals; and the permanent's cross product term normal,
+below the normals or zero. Coq checks each proof, modulo its hints, one of
+them only at its second certificate (8). On `y` the bound needs about a `u`
+less than the code's `18u` (3). The claim on `value` itself was not tried, and
+`decide` does not need it (4). The branches where a difference or a direction
+component is zero, which `product_is_normal` lets through, are not run, and a
+point on the axis of an axis-aligned torus is one. And the comments claim more
+than is proved. The doc comment on the constant writes `153ε` where it means
+`153ε²`, miscounts its own terms, and reaches its seventeen roundings by two
+slips that cancel. It also says `on_floats` enforces the bottom end product by
+product, which is false: it checks none of the permanent's own products. Unlike
+the cone's, no case the split runs gives a wrong sign there (5, 6). Restating
+the comment and running what is not run is three rows (10).
 
-Read at `4be293a5`, against `torus.rs:336-398` (`on_floats`), `torus.rs:474-483`
-(`cross_product_halves`), `torus.rs:485-511` (the constant) and
-`cascade.rs:67-69` (`product_is_normal`).
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
+`torus.rs` and `cascade.rs` at `4be293a5`. `git log --oneline
+4be293a5e..4cfcb294b` on `torus.rs`, `cascade.rs`, `three_surfaces.rs`,
+`rcad-topo`'s `validate.rs`, `rcad-step`'s `brep.rs` and `rcad-geom`'s
+`lib.rs` prints nothing, so each is as it stands at `4cfcb294b`, where this
+write-up was finished. `u` is `2⁻⁵³`, and the code's `B = (18 + 220ε) ε`
+(`torus.rs:508-511`) is, as a double, `18u + 224u²`, written `B = 18b-53 +
+7b-101;`. Unlike the cone's `96ε`, `220ε` is `55 · 2⁻⁵¹`, not a multiple of
+`2⁻⁴⁸`, the ulp of 18, so the Rust's sum rounds, up, to `18 + 7 · 2⁻⁴⁸`, and
+the product by `ε` is exact. `python3 -c` on `(18.0 + 220.0 * 2.0**-53) *
+2.0**-53` printed `0x1.2000000000007p-49 224`, the second figure `(B − 18u) /
+u²` in exact rationals. Each script follows 464.8's pattern: one ratio hint
+per rounding; the error split into one term per piece of the permanent, so
+that Gappa averages them; 464.5's lemma for each product `on_floats` checks is
+normal, and for each of the permanent's products that monotone rounding keeps
+normal (2); and the step from `y` to the sign as 464.4 gives it.
 
-**The constant as a double is `18u + 224u²`, not `18u + 220u²`.** `220ε` is
-`55 · 2⁻⁵¹`, which is not a multiple of `2⁻⁴⁸`, the ulp of 18, so `18.0 +
-220.0 * epsilon` rounds, up, to `18 + 7 · 2⁻⁴⁸`. `python3 -c` on `(18.0 +
-220.0 * 2.0**-53) * 2.0**-53` printed `0x1.2000000000007p-49 224`, the second
-figure `(B − 18u) / u²` in exact rationals. `tor.g` writes the double, `B =
-18b-53 + 7b-101;`.
+**1. What the proof guards.** `Torus::side_of` (`torus.rs:309-323`), the
+torus's `SideOfSurface`, runs the cascade on `HowFarFromTheRing`, once a guard
+has refused a point or a torus that is not real numbers. `Surface::Torus`
+reaches it from `three_surfaces.rs:3297`, from `rcad-topo`'s
+`validate.rs:4500` and from `rcad-step`'s `brep.rs:3049`, and `lib.rs:126`
+exports `Torus` and `SIDE_OF_TORUS`. A user makes a torus with `Torus::new`
+(`torus.rs:101`), which takes an axis of finite numbers and two finite
+positive radii, and refuses a tube as wide as the ring or wider. So, like
+464.15's and 464.16's, this proof guards a predicate a user reaches.
 
-**The count, on paper.** On the longest chain, `fx`'s, `y` takes 17
-roundings and `value` 18: `f` and the square `g` (`3u` with `f` counted
-twice), the two sums of `out_and_back` (`5u`), `bulge` (`6u`), doubled by `bb
-= bulge²` and its own rounding (`13u`), `W`'s three on `tx` (`16u`), and
-`left` (`17u`). The `4R²` side is shorter, about `10u`. The permanent is about
-`7u` from its value with no rounding of its own on either product. So `y`
-should prove at the code's `B` with about a `u` to spare.
+**2. `on_floats`, line for line.** `HowFarFromTheRing::on_floats`
+(`torus.rs:336-398`) returns `None` for a point that is not exact `f64`s
+(`torus.rs:337`) and takes the three differences `fi` from the centre to the
+point (`torus.rs:343`). It forms the six halves of their cross product with the
+direction (`cross_product_halves`, `torus.rs:474-483`, called at 344) and the
+three components `h − k`, `sideways` (`torus.rs:345`). It returns `None`
+unless `product_is_normal` holds for each difference, each direction component
+and each component with itself, for each half's two factors, and for each
+radius with itself (`stays_accurate`, `torus.rs:350-359`). It forms
+`out_and_back`, the sum of the three squares of `fi` (`torus.rs:364-365`),
+`hollow = R² − r²` (`torus.rs:366`), `bulge = out_and_back + hollow`
+(`torus.rs:367`), `axis_squared`, the direction's `w·w` (`torus.rs:368-369`),
+`across`, the sum of the components' squares (`torus.rs:370-371`), and `4R²`
+(`torus.rs:372`). It returns `None` unless `product_is_normal` holds for
+`bulge` with itself, `w·w` with `bulge²`, and `4R²` with `across`
+(`torus.rs:373-377`). Last it returns `value = w·w · bulge² − 4R² · across` and
+`error_bound = SIDE_OF_TORUS_ERROR_BOUND * permanent` (`torus.rs:394-397`).
+The permanent is `w·w · bulge_reach² + 4R² · spread` (`torus.rs:392`), with
+`bulge_reach = out_and_back + R² + r²` (`torus.rs:391`) and `spread` the sum of
+each half pair's reach squared, `(|h| + |k|)²` (`torus.rs:384-390`).
 
-**What `on_floats` does not check.** It checks every product of `value`: the
-three squares of `from_centre`, of `direction` and of `sideways`, the six
-halves, `R²`, `r²`, `bulge²`, `axis_squared · bulge²` and `4R² · across`. It
-does not check the permanent's own products: the three reach squares `v`,
-`brr = bulge_reach²`, `P1 = axis_squared · brr` and `P2 = 4R² · spread`. Where
-nothing cancels each is at least a checked product, by monotone rounding: `v ≥
-s` as in 464.15's 2, `br ≥ bulge` since `hollow ≤ RR`, so `brr ≥ bb` and `P1 ≥
-left`, and `spread ≥ across`, so `P2 ≥ right`. That fails where a component of
-the cross product cancels (`v` unchecked, as the cylinder's), and where all
-three cancel, `right` is zero, its check passes, and `P2` is unchecked: a
-point on the axis, a shape a designer makes. Those are the split, as
-464.15's 6.
+`tor.g` (below) writes that operation for operation. The cross product is
+`cyl.g`'s (464.15's 2): `hx = rnd(fy · dz)`, `kx = rnd(fz · dy)`, `qx = rnd(hx
+− kx)` and the like. Then `gi = rnd(fi · fi)`, `oab = rnd(rnd(gx + gy) + gz)`,
+`RR = rnd(R · R)`, `rr = rnd(r · r)`, `hollow = rnd(RR − rr)`, `bulge = rnd(oab
++ hollow)`, `W = rnd(rnd(tx + ty) + tz)` with `ti = rnd(di · di)`, `across =
+rnd(rnd(sx + sy) + sz)` with `si = rnd(qi · qi)`, `F4 = rnd(4 · RR)`, `bb =
+rnd(bulge · bulge)`, `left = rnd(W · bb)`, `right = rnd(F4 · across)`, `y = left
+− right` and `value = rnd(y)`. The permanent is `P = rnd(P1 + P2)`, with `P1 =
+rnd(W · brr)`, `brr = rnd(br · br)`, `br = rnd(rnd(oab + RR) + rr)`, `P2 = rnd(F4
+· spread)`, `spread = rnd(rnd(vx + vy) + vz)`, `vi = rnd(ni · ni)` and `ni =
+rnd(|hi| + |ki|)`. `spread` is a `sum()` from zero, and adding the first square
+to zero is exact.
 
-**Other branches.** `hollow = rnd(R² − r²)` is not zero where `r < R`, which
-`Torus::new` refuses otherwise: the squares of two different doubles differ by
-more than an ulp of either square, so they round apart. That is on paper.
-`hollow` can be below the normals, where it is exact, as 464.16's
-`sumexact.g`; `tor.g` takes it normal and that is another case. A zero
-difference or direction component is not in `tor.g`.
+On the longest chain, `fx`'s, that is seventeen roundings to `y` and eighteen
+to `value`. `fx` and its square `gx` are three, `fx` counting twice; the two
+sums of `out_and_back` make five; `bulge` six, since `RR` and `hollow` run
+beside `out_and_back`; `bb` doubles that and adds its own, thirteen; `W`'s
+three on `tx` make sixteen, and `left` seventeen. The `4R²` side is eleven:
+`f`, the half and `q` are three, `q`'s square seven, the two sums of `across`
+nine, and `RR` and `right`'s own rounding make eleven, since `4 · RR` is
+exact.
 
-**How `tor.g` splits the error.** Two blocks, the permanent's two products.
-The `4R²` block is the cylinder's nine pieces (464.15's 2) times `F4`, with
-`right`'s rounding and `4R²`'s in `K` and `m`. The `w·w · bulge²` block is six
-pieces, `W · a · b` for the pairs of `oab`, `RR` and `rr`, which sum to `W ·
-(oab + RR + rr)²`; each piece's error is its pair's carried factor less its
-true one, `om` and `Z` being `w·w / W` and `|x|² / oab`, each averaged over
-three pieces of its own. A first form averaged `bulge / (oab + RR + rr)` over
-its three parts instead; it was dropped before it ran, since `rr`'s part is
-off by about `−2` and 464.15's 4 found Gappa does not average a sum whose
-relative error reaches `−1`.
+Nothing checks the permanent's own products: the three reach squares `vi`,
+`brr`, `P1` and `P2`. Where nothing cancels, each is at least a checked product
+by monotone rounding: `vi ≥ si` as in 464.15's 2; `br ≥ bulge`, since `hollow ≤
+RR`, so `brr ≥ bb` and `P1 ≥ left`; and `spread ≥ across`, so `P2 ≥ right`.
+`brr` and `P1` stay normal in every case, since `bulge` is never zero (below),
+so `bb` and `left` are checked on factors that are not zero. The others do not.
+Where a component cancels to zero, its `si` is zero, its check passes on the
+zero (`cascade.rs:67-69`), and its `vi` is unchecked, as the cylinder's. Where
+all three cancel, `across` and `right` are zero too, and `P2` is unchecked: a
+point on the axis, a shape a designer makes. Those are the split of 6.
+
+`hollow` is never zero, on paper. `Torus::new` keeps `r < R`, and `on_floats`
+checks that both squares are normal. Write `r = m · 2ᵉ`, `m` a whole number in
+`[2⁵², 2⁵³)`. If `R` is in the same binade, `R ≥ (m + 1) 2ᵉ`, so `R² − r² ≥
+(2m + 1) 2²ᵉ`. That is more than an ulp of the squares, `2²ᵉ⁺⁵²` while `m² <
+2¹⁰⁵` and `2²ᵉ⁺⁵³` above it, so the two cannot round to one double. Where `R²`
+reaches `2²ᵉ⁺¹⁰⁶`, or `R` is in a binade above, `RR ≥ 2²ᵉ⁺¹⁰⁶`, while `r² ≤
+(2⁵³ − 1)² 2²ᵉ` is more than half an ulp below it and rounds below it. So `RR >
+rr`, and a difference of two different doubles is never rounded to zero. So
+`bulge = rnd(oab + hollow)` is positive too. `hollow` can be below
+the normals, where it is exact, as 464.16's `sumexact.g` shows; `tor.g` takes it
+normal, and the split takes the other. A zero difference or direction component
+is in no script here (10).
+
+**How the error splits.** Two blocks, one for each of the permanent's two
+products. The `4R²` block is the cylinder's nine pieces (464.15's 2), each
+times `F4`, with `right`'s rounding in `K` and `F4`'s and `RR`'s in `m`. The
+`w·w · bulge²` block is six pieces, `W · a · b` for each pair of `oab`, `RR` and
+`rr`, which sum to `W · (oab + RR + rr)²`. Each piece's error is its pair's
+factor as `y` carries it less its true one, and `om` and `Z`, which are `w·w /
+W` and `|x|² / oab`, are each averaged over three pieces of their own. So the
+error is averaged over fifteen pieces, `Phat2`, in the two blocks. A first
+form averaged `bulge / (oab + RR + rr)` over its three parts instead; it was
+dropped before it ran, since `rr`'s part is off by about `−2`, and 464.15's 4
+found Gappa does not average a sum whose relative error reaches `−1`.
+
+`tor.g`, whole, as every run of 3, 7 and 8 ran it:
 
 ```gappa
 # restates: crates/rcad-geom/src/torus.rs on_floats at 4be293a5
