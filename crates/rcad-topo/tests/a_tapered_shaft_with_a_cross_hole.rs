@@ -1,4 +1,5 @@
-//! **A cone against a pipe or a ball off its axis**, queue row Q2666.
+//! **A cone against a pipe or a ball off its axis**, queue rows Q2666 and
+//! Q2788.
 //!
 //! The two cross in a curve of degree four, and `intersect` used to refuse
 //! every such pair `ACrossingBetweenAConeAndAnotherCurvedSurface`, so every
@@ -12,11 +13,15 @@
 //! - a pointed cone with a ball beside its axis poking out through its wall,
 //!   which crosses it in one loop.
 //!
-//! Each is fused here under every rule both ways round, and each answer is
-//! certified, sound, and measures as the others say it must: the union and the
-//! intersection together hold each solid once, and each solid less the other
-//! is that solid less the intersection. The shaft's intersection with the pin
-//! is checked against a sum worked out here without the kernel.
+//! Since row Q2788 `intersect` names those loops and `walk` marches them, and
+//! the fuses get further. **What each fuse gives now is pinned here**, under
+//! every rule both ways round, for the row after Q2788 to turn round: the shaft
+//! and the pin are not a solid by any rule, the leaning bar is refused where a
+//! crossing is asked to be a conic, and the ball answers three of its six
+//! fuses. Each answer that comes back is certified, sound, and measures as the
+//! others that came back say it must: the union and the intersection together
+//! hold each solid once, and each solid less the other is that solid less the
+//! intersection.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -26,38 +31,60 @@ mod cones;
 
 use cones::{a_frustum, a_pointed_cone};
 
+/// What `fuse` says where an edge of what it built has one face along it.
+const NOT_A_SOLID: &str = "the result would not be a solid: an edge would have 1 faces along it";
+
+/// What `fuse` says where a crossing it needs as a conic is not one.
+const NOT_A_CONIC: &str =
+    "geometry: these two surfaces do not cross in one closed curve lying in a plane";
+
+/// What `fuse` says where a face's wire will not lie flat in its coordinates.
+const NOT_FLAT: &str = "a wire of this face will not lie flat in the face's own two coordinates";
+
 /// **A tapered shaft with a cross pin.** The shaft is a frustum of slope a
 /// quarter, of radius one at its narrow end and four at its wide end. The pin
 /// has radius a half and runs along `y` at height ten, where the shaft has
 /// radius two and a half, so it pokes out six minus that each side.
+///
+/// Every fuse builds an edge with one face along it.
 #[test]
-fn a_tapered_shaft_fused_with_a_pin_through_it_answers_every_rule() {
-    let fused = every_fuse_of(shaft_and_pin);
-    let slope = 0.25;
-    let (radius, height) = (0.5, 10.0);
-    let worked_out = the_pin_inside_the_shaft(slope, radius, height);
-    let (inside, error) = fused.intersection;
-    assert!(
-        (inside - worked_out).abs() <= error + 1e-6,
-        "the pin inside the shaft measures {inside} give or take {error}, \
-         and the sum worked out without the kernel is {worked_out}"
+fn a_tapered_shaft_fused_with_a_pin_through_it_is_not_a_solid_by_any_rule() {
+    assert_eq!(
+        every_fuse_of(shaft_and_pin).refusals(),
+        [[Some(NOT_A_SOLID); 2]; 3]
     );
 }
 
 /// **A pointed cone with a bar leaning through it.** The cone has slope a
 /// half, so its half-angle is about 0.46 radians, and the bar leans 0.3
 /// radians about the `x` axis through the point four up the cone's axis.
+///
+/// Every fuse is refused where it asks for a crossing as a conic.
 #[test]
-fn a_pointed_cone_fused_with_a_bar_leaning_through_it_answers_every_rule() {
-    every_fuse_of(cone_and_leaning_bar);
+fn a_pointed_cone_fused_with_a_bar_leaning_through_it_is_refused_by_every_rule() {
+    assert_eq!(
+        every_fuse_of(cone_and_leaning_bar).refusals(),
+        [[Some(NOT_A_CONIC); 2]; 3]
+    );
 }
 
 /// **A pointed cone with a ball poking out of its side.** The ball has radius
 /// two and sits one out from the axis at height five, where the cone has radius
 /// two and a half.
+///
+/// The intersection answers both ways round, and so does the ball less the
+/// cone. The union both ways and the cone less the ball build a face whose wire
+/// will not lie flat.
 #[test]
-fn a_pointed_cone_fused_with_a_ball_poking_out_of_its_side_answers_every_rule() {
-    every_fuse_of(cone_and_ball);
+fn a_pointed_cone_fused_with_a_ball_poking_out_of_its_side_answers_three_rules_of_six() {
+    assert_eq!(
+        every_fuse_of(cone_and_ball).refusals(),
+        [
+            [Some(NOT_FLAT), Some(NOT_FLAT)],
+            [None, None],
+            [Some(NOT_FLAT), None]
+        ]
+    );
 }
 
 fn shaft_and_pin(model: &mut Model) -> (SolidKey, SolidKey) {
@@ -95,26 +122,37 @@ fn cone_and_ball(model: &mut Model) -> (SolidKey, SolidKey) {
     (cone, ball)
 }
 
-/// What [`every_fuse_of`] measured: the intersection's volume and the error
-/// `measure` publishes with it.
+/// What [`every_fuse_of`] got: for the union, the intersection and the
+/// difference, in that order, cone first and then the other first, the volume
+/// and the error `measure` publishes with it, or the words of the refusal.
 struct Fused {
-    intersection: (f64, f64),
+    answers: [[Result<(f64, f64), String>; 2]; 3],
+}
+
+impl Fused {
+    /// The words of each refusal, and `None` for each fuse that answered.
+    fn refusals(&self) -> [[Option<&str>; 2]; 3] {
+        self.answers.each_ref().map(|rule| {
+            rule.each_ref()
+                .map(|answer| answer.as_ref().err().map(String::as_str))
+        })
+    }
 }
 
 /// Fuses the two solids `shape` builds under every rule both ways round, and
-/// checks that each answer is certified, sound, and measures as the others say
-/// it must.
+/// checks that each answer that comes back is certified, sound, and measures
+/// as the others that came back say it must.
 fn every_fuse_of(shape: fn(&mut Model) -> (SolidKey, SolidKey)) -> Fused {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let (cone, other) = shape(&mut model);
     let alone = |solid: SolidKey| what_they_measure(&model, &[solid]);
-    let fuse = |rule: Rule, argument: SolidKey, tool: SolidKey| {
+    let fuse = |rule: Rule, argument: SolidKey, tool: SolidKey| -> Result<(f64, f64), String> {
         let mut answer = model.clone();
         let mut log = ProvenanceLog::new();
         let fused = answer
             .fuse(&[argument], &[tool], rule, &policy, &mut log)
-            .unwrap_or_else(|why| panic!("{rule:?}, cone first {}: {why}", argument == cone));
+            .map_err(|why| why.to_string())?;
         assert!(log.is_empty(), "a certified fuse logs nothing: {log:?}");
         answer
             .validate(&policy, &mut ProvenanceLog::new())
@@ -124,45 +162,56 @@ fn every_fuse_of(shape: fn(&mut Model) -> (SolidKey, SolidKey)) -> Fused {
                     argument == cone
                 )
             });
-        what_they_measure(&answer, fused.solids())
+        Ok(what_they_measure(&answer, fused.solids()))
     };
+    let both_ways = |rule: Rule| [fuse(rule, cone, other), fuse(rule, other, cone)];
+    let answers = [
+        both_ways(Rule::Union),
+        both_ways(Rule::Intersection),
+        both_ways(Rule::Difference),
+    ];
 
-    let (cone_alone, other_alone) = (alone(cone), alone(other));
-    let intersection = fuse(Rule::Intersection, cone, other);
-    for (argument, tool) in [(cone, other), (other, cone)] {
-        let union = fuse(Rule::Union, argument, tool);
-        let the_other_way = fuse(Rule::Intersection, argument, tool);
-        let less = fuse(Rule::Difference, argument, tool);
-        let argument_alone = if argument == cone {
-            cone_alone
-        } else {
-            other_alone
-        };
-        let order = format!("cone first {}", argument == cone);
-        about_the_same(
-            the_other_way,
-            intersection,
-            &format!("{order}: the intersection against the cone's"),
-        );
-        about_the_same(
-            (union.0 + intersection.0, union.1 + intersection.1),
-            (cone_alone.0 + other_alone.0, cone_alone.1 + other_alone.1),
-            &format!("{order}: the union and the intersection against the two alone"),
-        );
-        about_the_same(
-            less,
-            (
-                argument_alone.0 - intersection.0,
-                argument_alone.1 + intersection.1,
-            ),
-            &format!("{order}: the difference against the argument less the intersection"),
-        );
-    }
-    assert!(
-        intersection.0 > intersection.1,
-        "the two overlap, so the intersection holds something: {intersection:?}"
+    let [unions, intersections, differences] = &answers;
+    let both_alone = [alone(cone), alone(other)];
+    let together = (
+        both_alone[0].0 + both_alone[1].0,
+        both_alone[0].1 + both_alone[1].1,
     );
-    Fused { intersection }
+    for (way, order) in ["cone first", "the other first"].into_iter().enumerate() {
+        let Ok(&intersection) = intersections[way].as_ref() else {
+            continue;
+        };
+        assert!(
+            intersection.0 > intersection.1,
+            "{order}: the two overlap, so the intersection holds something: {intersection:?}"
+        );
+        if let Ok(&the_other_way) = intersections[1 - way].as_ref() {
+            about_the_same(
+                the_other_way,
+                intersection,
+                &format!("{order}: the intersection against its other order's"),
+            );
+        }
+        if let Ok(&union) = unions[way].as_ref() {
+            about_the_same(
+                (union.0 + intersection.0, union.1 + intersection.1),
+                together,
+                &format!("{order}: the union and the intersection against the two alone"),
+            );
+        }
+        if let Ok(&less) = differences[way].as_ref() {
+            let argument_alone = both_alone[way];
+            about_the_same(
+                less,
+                (
+                    argument_alone.0 - intersection.0,
+                    argument_alone.1 + intersection.1,
+                ),
+                &format!("{order}: the difference against the argument less the intersection"),
+            );
+        }
+    }
+    Fused { answers }
 }
 
 /// Fails unless `got` and `want`, each a volume and the error published with
@@ -192,24 +241,4 @@ fn what_they_measure(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
             .expect("a cone, a pipe and a ball measure");
         (volume + measured.volume(), error + measured.volume_error())
     })
-}
-
-/// The volume of a pin of `radius` along `y` at `height` inside a shaft of
-/// `slope` about `z`, summed in polar steps over the pin's cross-section: at
-/// `(x, z)` the pin is inside the shaft for a length `2 √(slope² z² − x²)`.
-fn the_pin_inside_the_shaft(slope: f64, radius: f64, height: f64) -> f64 {
-    let steps = 2000;
-    let (out, round) = (
-        radius / f64::from(steps),
-        std::f64::consts::TAU / f64::from(steps),
-    );
-    (0..steps)
-        .flat_map(|i| (0..steps).map(move |j| (i, j)))
-        .map(|(i, j)| {
-            let rho = (f64::from(i) + 0.5) * out;
-            let phi = (f64::from(j) + 0.5) * round;
-            let (x, z) = (rho * phi.cos(), height + rho * phi.sin());
-            2.0 * (slope * slope * z * z - x * x).sqrt() * rho * out * round
-        })
-        .sum()
 }
