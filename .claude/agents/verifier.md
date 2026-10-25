@@ -327,6 +327,14 @@ left the merger to work out the edits from a red land gate (§414.1). A pin the
 lane names in the slow tier is a fix the same way, though step 3 could not
 show it red: `gate-lane` leaves out `test-slow`, and the land gate does not.
 
+A fix that moves a test's expected value names the value it becomes and the
+evidence it is right — an exact sign, a closed form, or the one corpus file
+that moved — so the merger can judge whether to re-pin it outside the write
+set (`merger.md` step 2, §391). When you have not measured that the new value
+is right, say so instead of naming one: an unmeasured pin is not the merger's
+to re-pin, and goes to a landing row rather than a merge, as Q453's did
+(Q920).
+
 `notes` is at most five lines, for the merger: what it must act on and what no
 other field says. Never an account of the steps you ran: the other fields
 already hold those, and writing them out again was about a third of a
