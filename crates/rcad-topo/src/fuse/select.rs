@@ -380,6 +380,58 @@ pub(crate) fn choose(
                         model, &solids, against, piece, policy, log,
                     )
                 });
+            if placed.is_none() {
+                let name = |s: &Surface| match s.as_plane() {
+                    Some(p) => format!("{:?}", p.coefficients()),
+                    None => "curved".to_string(),
+                };
+                eprintln!(
+                    "PROBE unplaced piece of solid {mine} against {against:?} on {}",
+                    name(&piece.surface)
+                );
+                for side in piece.wires.iter().flatten() {
+                    let end = match &side.ends[0] {
+                        MeetPoint::Existing { vertex, point } => {
+                            format!(
+                                "vertex {vertex:?} at {:?}",
+                                point.enclosure().map(|i| (i.lo() + i.hi()) / 2.0)
+                            )
+                        }
+                        MeetPoint::OfThreeSurfaces {
+                            surfaces, point, ..
+                        } => format!(
+                            "meet [{}, {}, {}] at {:?}",
+                            name(&surfaces[0]),
+                            name(&surfaces[1]),
+                            name(&surfaces[2]),
+                            point.enclosure().map(|i| (i.lo() + i.hi()) / 2.0)
+                        ),
+                        other => format!("{other:?}"),
+                    };
+                    eprintln!(
+                        "PROBE   side along {} from {end}",
+                        name(&side.carried_by[1])
+                    );
+                }
+                let read = TheCornersOfAPiece::of(piece, solids[mine]);
+                eprintln!(
+                    "PROBE   read round a corner: {:?}",
+                    matches!(read, Some(TheCornersOfAPiece::ReadRoundACorner(..)))
+                );
+                if let Some(read) = &read {
+                    for &index in against {
+                        for face in &solids[index].faces {
+                            if let Some(outward) = outward_plane_of_face(face) {
+                                eprintln!(
+                                    "PROBE   against {index} plane {:?}: {:?}",
+                                    outward.coefficients(),
+                                    read.sides_of(outward)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),

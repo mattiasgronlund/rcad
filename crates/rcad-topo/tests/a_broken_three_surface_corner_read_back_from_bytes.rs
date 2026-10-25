@@ -856,6 +856,35 @@ fn a_placed_pyramid_reaches_the_range_check_where_a_wedge_plane_runs_between_two
     );
 }
 
+#[test]
+fn probe_q2744() {
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
+    let turn = |[x, y, z]: [f64; 3], angle: f64| {
+        let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(x, y, z)).expect("an axis");
+        Isometry::rotation(&axis, angle).expect("a turn")
+    };
+    for (name, wedge, placement) in [
+        (
+            "plus y turn 2.9",
+            A_WEDGE_OVER_THE_PLUS_Y_EDGE,
+            turn([-2.0, 1.0, 0.5], 2.9),
+        ),
+        (
+            "minus y shift turn 0.7",
+            A_WEDGE_OVER_THE_MINUS_Y_EDGE,
+            shift.compose(&turn([0.3, -1.0, 2.0], 0.7)),
+        ),
+    ] {
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+                eprintln!("PROBE CASE {name} {policy:?} {rule:?}");
+                let came = the_wedge_through_the_apex(wedge, placement, rule, &policy);
+                eprintln!("PROBE CAME {name} {policy:?} {rule:?}: {came:?}");
+            }
+        }
+    }
+}
+
 /// **Shifted to `(7, −5, 2.5)`, the sound pyramid cut by the wedge over its
 /// `+y` edge built there is refused at the range check under `certified`**,
 /// the limit §448.7 settled for the cut through the apex, and leaves the
