@@ -12450,6 +12450,25 @@ And what is not a row:
 here. The script below proves its goal; its controls, `gappa -Bcoq` and
 `coqc` have not been run, and the write-up is to come.*
 
+*Q2689's second lane, the same day, ran the rest and handed over before the
+write-up. Its files are in `target/q2689/` of the tree
+`wf_55e45f42-180-3`, which is gitignored, and are to be pasted here whole:
+`point.g` changed three ways from the one below, five `restates` lines at
+its top (464.10), `t0 = c0 * 2;` written without its rounding, and `rt0` to
+`rt2` with their three hints dropped; `doubling.g`, which proves `rnd(c * 2)
+- c * 2 in [0, 0]` for every `f64` with `|c| <= 1b1023`; `controls.py`;
+`turn.py`, which writes `point1.g` and `point2.g`, the moved point's `y` and
+`z`, by turning every index `0 → 1 → 2 → 0`; `all.sh`, which runs them all
+through 464.13's `one.sh`. Its run printed `point exit 0`, `point coq -Bcoq
+exit 0 coqc exit 0 44.93s lines 8257 hints 34`, `doubling exit 0`,
+`doubling coq -Bcoq exit 0 coqc exit 0 0.59s lines 149 hints 0`, `point1
+exit 0`, `point2 exit 0`, and `exit 1` for each control: at `24.75u`, best
+`±2.75335e-15`, which is `24.80u`; without `N4`, best `±2.87033e+602`;
+without the nine products normal, best `±1.06019e+633`. `point.g` now
+prints `W1` within `±6.66134e-16` (`6u`), `W3` within `±7.77156e-16` (`7u`),
+`D / L` in `[3, 24.8]` and `(out − Ex) / D` within `±1.11022e-16` (`u`), so
+the proof reaches `24.80u` where the doc counts `35.78u`.*
+
 `point.g` restates `Isometry::apply_to_point` (`isometry.rs:296-307`) on the
 `None` arm of `turned_by` (`isometry.rs:513-520`), which is nalgebra 0.35's
 `UnitQuaternion * Vector3` (`src/geometry/quaternion_ops.rs:377-388`): `t =
