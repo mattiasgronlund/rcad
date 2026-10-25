@@ -18,7 +18,8 @@ Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
 and settles how the scripts join the tree and what notices the Rust moving
 under them. 464.11 is Q2675, which runs the branches where one of the nine
 differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
-464.13 is Q2678, on the side of a flat surface through a point.*
+464.13 is Q2678, on the side of a flat surface through a point. 464.14 is
+Q2679, on the side of rcad-geom's sphere.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -33,6 +34,7 @@ differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
   464.11  One of the nine differences at zero
   464.12  The sphere of surface.rs' tests
   464.13  The side of a flat surface through a point
+  464.14  The side of rcad-geom's sphere
 
 ### 464.1 The bugs a bound prover is for
 
@@ -241,7 +243,7 @@ stamp recorded.
 `on_floats` whose `error_bound` is a constant times a permanent:
 `ORIENT2D_ERROR_BOUND` and `surface.rs`' `ERROR_BOUND` (a test's, 464.12) in
 `rcad-predicates`, and `SIDE_OF_PLANE`,
-`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT` (464.13), `SIDE_OF_SPHERE`,
+`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT` (464.13), `SIDE_OF_SPHERE` (464.14),
 `SIDE_OF_CYLINDER`, `SIDE_OF_CONE` and `SIDE_OF_TORUS` in `rcad-geom`. Block
 1's pattern should carry over to them: one ratio hint per rounding, the error
 split into one term per product of the permanent so that Gappa can average
@@ -546,8 +548,9 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   was. Done for two, in 464.8: `ORIENT2D_ERROR_BOUND` and
   `SIDE_OF_PLANE_ERROR_BOUND` are proved at the code's constants, orient2d's
   with its products below the normals too, and each of the other six is a row
-  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12, and
-  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13.
+  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12,
+  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13, and
+  `SIDE_OF_SPHERE_ERROR_BOUND` in 464.14.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those. Done, in 464.9: three are proved at the code's
   constants, two of them false when every number is below `2⁻¹⁰²²`, and each
@@ -1842,8 +1845,9 @@ for byte as they were run.
 - Six rows, one for each bound 464.6 named that is not proved yet:
   `surface.rs`' `ERROR_BOUND` in `rcad-predicates` (Q2677, done in 464.12),
   and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` (Q2678, done in
-  464.13), `SIDE_OF_SPHERE_ERROR_BOUND`, `SIDE_OF_CYLINDER_ERROR_BOUND`,
-  `SIDE_OF_CONE_ERROR_BOUND` and `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
+  464.13), `SIDE_OF_SPHERE_ERROR_BOUND` (Q2679, done in 464.14),
+  `SIDE_OF_CYLINDER_ERROR_BOUND`, `SIDE_OF_CONE_ERROR_BOUND` and
+  `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
   Each is to be proved as 1 to 5 here prove orient2d and the side of a plane:
   `on_floats` line for line, the lemma for each product it checks is normal, a
   case split for each product it does not, a run below the code's constant,
@@ -3168,7 +3172,10 @@ check's hypotheses. Whether the code needs the check, a square below the
 normals with the other three normal as 464.8's 4 ran for plane's products, was
 not run. With the check in place `on_floats` never meets that case, and
 `HowFarOut` is a test's demo, so it is not a row. `rcad-geom`'s sphere, Q2679,
-is where that question has a user behind it.
+is where that question has a user behind it. 464.14's 6 ran it there, on an
+`on_floats` that is this one operation for operation at a smaller `B`, `6u +
+48u²`: the bound holds with any of the squares below the normals while one
+square is normal. It was not run here, at `8u + 64u²`.
 
 **6. The zeros `product_is_normal` lets through.** 464.8's `o2s.g` splits on
 a product that `on_floats` does not check. Here there is none, since
@@ -3722,6 +3729,8 @@ print(f"smallest: {a}u + {hi}u^2 proves, {a}u + {lo}u^2 fails")
   with the others that rows of 464 appended.
 - A square below the normals with the other three normal (5) was not run.
   `on_floats` never meets it while its check stands, so it is not a row here.
+  464.14's 6 ran it on `rcad-geom`'s sphere, the same arithmetic at a smaller
+  `B`.
 - How `c_sphere_noeb.g` gets past `eb`'s rounding (7) was not traced, as with
   plane's.
 - `field` on these scripts' hints (464.10).
@@ -4519,4 +4528,1421 @@ And what is not a row:
   with the others that rows of 464 appended.
 - How `c_flat_noeb.g` gets past `eb`'s rounding (7) was not traced, as with
   plane's and the sphere's.
+- `field` on these scripts' hints (464.10).
+
+### 464.14 The side of rcad-geom's sphere
+
+Q2679 took up `SIDE_OF_SPHERE_ERROR_BOUND` in `crates/rcad-geom/src/sphere.rs`,
+in six lanes on 2026-10-25. The first read the code, proved `tinysq.g` and
+planned the cases. The second wrote `skincases.py` and `tinyzero.g`, checked
+the generator against 464.12's and ran twelve of its scripts. The third ran
+every proof, control, bisection and `coqc`, and wrote 1 to 5. The fourth ran
+`tinyzero_nohint.g` and checked the figures. The fifth wrote 6 to 8 and began
+9, and the sixth finished 9 and wrote 10. The bound is proved at the code's
+constant, on the sum before `value`'s last rounding and on `value` too, in
+every case where `on_floats` hands `decide` a number. It is proved as well in
+every case `on_floats`' check refuses, a square below the normals: with
+another square normal the bound still holds, and with none normal `eb` is not
+normal, so `decide` does not compare. Coq checks each proof, modulo its hints.
+So the comment on the check, which says one square in the subnormals makes
+this level certify a wrong sign, is false, and the doc comment on the constant
+writes `15ε` where it means `15ε²` and miscounts its own terms. Both are in
+`sphere.rs`, and fixing them is two rows (10).
+
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
+`sphere.rs`, `point.rs` and `cascade.rs` at `05d44c66`. `git log --oneline
+3d60b0de..05d44c66` on the three prints nothing, so the last two are as
+464.12 read them, and `git log --oneline 05d44c66..48cbcbde3` on them prints
+nothing too, so all three are as they stand at `48cbcbde3`, where this
+write-up was finished. `u` is `2⁻⁵³`, and the code's `B = 6u + 48u²` is
+written `B = 6b-53 + 3b-102;`. Each script follows 464.8's pattern: one ratio hint per
+rounding, the error split into one term per square of the permanent so that
+Gappa averages them, 464.5's lemma for each square `on_floats` checks is
+normal, and the step from `y`, the sum before `value`'s last rounding, to the
+sign as 464.4 gives it.
+
+**1. What the proof guards.** `Sphere::side_of` (`sphere.rs:216-227`) runs
+the cascade on `HowFarFromTheSkin`, once a guard has refused a point or a
+sphere that is not real numbers. `Surface::Sphere` reaches it from
+`three_surfaces.rs:3294` and from `validate.rs:4497`, and `lib.rs:120` exports
+`Sphere`, whose `side_of` is `rcad-predicates`' `SideOfSurface` trait. So
+unlike 464.12's, this proof guards a predicate a user reaches.
+
+**2. `on_floats`, line for line.** `HowFarFromTheSkin::on_floats`
+(`sphere.rs:241-269`) returns `None` for a point that is not exact `f64`s
+(`sphere.rs:242`), takes the three gaps from the centre to the point
+(`sphere.rs:245`), and returns `None` unless `product_is_normal` holds for
+each gap with itself and for the radius with itself (`sphere.rs:251-254`).
+Then it squares the four (`sphere.rs:257-258`) and returns `value = s0 + s1 +
+s2 − rr` and `error_bound = SIDE_OF_SPHERE_ERROR_BOUND * permanent`, with
+`permanent = s0 + s1 + s2 + rr` (`sphere.rs:263-268`). That is 464.12's
+`HowFarOut::on_floats` operation for operation, and `skin.g` writes it as
+`sphere.g` does: ten roundings, the three gaps, the three squares, `rr`,
+`s01`, `s012` and `value`, `y` taking the first nine, and `P = rnd(s012 +
+rr)`, since the permanent's first two sums are `value`'s. `sameas.py` (9)
+checks that each script of 6 for a case of normal and zero squares alone is
+464.12's for the same zero set, once the `restates` lines, the title line and
+the `B` line are dropped. It prints `64 pairs, 0 differ`.
+
+The constant (`sphere.rs:425-428`) is `(6 + 48ε) ε` with `ε = f64::EPSILON /
+2`, which is `u`. That is `6u + 48u²`, which a double holds exactly, and so
+does each step the Rust takes to it, since `48ε` is a multiple of `2⁻⁵⁰`, the
+ulp of 6.
+
+**3. The bound on `y`.** `skin.g` (9 below) proves `|y − Ex| ≤ eb` at the
+code's `B`, printing `(y − Ex) / Phat` within `5.55112e-16` and `P −/ Phat`
+within `3.33067e-16`, `5u` and `3u` to the digits Gappa prints, as `sphere.g`
+did. `Phat` is the permanent with no rounding of its own. The smallest `B` it
+proves, by bisection over `m` in `B = 5u + m u²`, is `5u + 28u²`, as in
+464.12's 3: `5u + 27u²` fails, best `[-1, 1]` as Gappa prints it, rounded,
+and so does `5u`.
+
+**4. The claim on `value`.** `skinv.g` makes the same claim on `value`, the
+double `on_floats` returns. It proves at the code's `B`, printing `(value −
+Ex) / Phat` within `6.66134e-16`, `6u` to the digits printed. Its smallest
+`B`, by the same bisection over `B = 6u + m u²`, is `6u + 30u²`, as in
+464.12's 4: `6u + 29u²` fails, and so does `6u`. So here `value` itself stays
+within `eb`, as the other sphere's does. `decide` does not need it to: the doc
+on `Filtered::error_bound` (`cascade.rs:25-35`) asks only for the bound on
+the sum before `value`'s last rounding, which 3 proves.
+
+**5. What the comments claim.** The doc comment on the constant,
+`sphere.rs:401-424`, counts the roundings and then says:
+
+> Six roundings, each costing at most a factor of `(1 + epsilon)`, come to
+> `(1 + epsilon)^6 - 1 <= 6*epsilon + 15*epsilon^2 + ...` times the permanent.
+>
+> The radius term travels a shorter chain — one rounding to square it and one
+> to subtract it — so the six covers it too. The `48*epsilon^2` covers the
+> higher-order terms and the rounding of the permanent itself, with room to
+> spare: what it has to beat is about `15*epsilon`.
+>
+> Every step of that argument is a *relative* one, so like every bound of this
+> shape it holds only while nothing overflows or falls into the subnormals.
+> [`HowFarFromTheSkin::on_floats`] enforces the bottom end product by product
+> through [`product_is_normal`], and `decide` the top end by refusing a bound
+> that is not itself a normal number.
+
+- Six roundings to `value`, the gap's counted twice since it is squared,
+  agrees with the `6u` of 4. On `y` the same count is five, and 3 prints `5u`.
+- "What it has to beat is about `15*epsilon`": that is `ε²`, the term of `(1 +
+  ε)⁶ − 1` the sentence before names, and it leaves out the two things the
+  same sentence says the `48ε²` covers. The permanent's own rounding is its
+  three additions, which 3 prints as `P −/ Phat` within `3u`, and that `3ε`
+  taken against the `6ε` of the bound costs `18ε²`. The last rounding, of `B ·
+  P`, costs `ε` of `eb`, which is `6ε²` of the permanent. So by the comment's
+  own terms the count is `15 + 18 + 6 = 39`. `48` is above 39, and above both
+  smallest `B`s, `5u + 28u²` and `6u + 30u²`, so the slip costs nothing, but
+  the sentence gives the wrong power and the wrong number.
+- "It holds only while nothing ... falls into the subnormals", which
+  `on_floats` enforces "product by product through `product_is_normal`".
+  `product_is_normal(a, b)` is true when `a` or `b` is zero
+  (`cascade.rs:67-69`), so a zero square gets through, and the bound holds for
+  it (6). A square below the normals, which the check refuses, keeps the bound
+  too (6): with another square normal it proves at the code's `B`, and with
+  none normal `eb` is not normal. So the bound does not need what "only" says
+  it needs.
+- The comment on the check, `sphere.rs:248-250`: "The bound below is a
+  fraction of the permanent, which only bounds anything while every product
+  keeps its relative accuracy. One of them in the subnormals and this level
+  certifies a wrong sign." That is the sentence 464.8's 4 found false for one
+  product of `SideOfAFlatSurface`. Here it is false for any of the four
+  squares, alone or together, by 6: without the check `on_floats` would hand
+  `decide` a number in those cases, and `decide` would certify no wrong sign
+  from it. What the check does is send them on to level 2. Whether
+  `on_floats` keeps it is a row (10).
+
+**6. The squares below the normals.** 464.8's `o2s.g` splits on a product
+that `on_floats` does not check. Here there is none, since `on_floats` checks
+all four squares before it computes anything, and what the check lets through
+is a zero, as in 464.12's 6. What 5 asks about is what the check refuses: a
+square below the normals, which the comment on the check says makes this level
+certify a wrong sign. So each of the four squares is run in each of four
+states, and each case is a script:
+
+- `n`, normal: the square as `on_floats` rounds it is at least `2⁻¹⁰²²`;
+- `z`, of a zero factor, which the check lets through;
+- `s`, below the normals and rounding to a double that is not zero;
+- `u`, below the normals and rounding to zero.
+
+Those four cover every square. Write `X = g · g` for the square of a gap or
+the radius `g` before its rounding. If `g` is zero, the square is `z`.
+Otherwise `X ≥ 2⁻²¹⁴⁸`. If `rnd(X) ≥ 2⁻¹⁰²²` it is `n`. If not, `X <
+2⁻¹⁰²²`, since rounding is monotone and `2⁻¹⁰²²` is a double, and then `|g| <
+2⁻⁵¹¹`. Then `rnd(X)` is zero or, being a double that is not zero, at least
+`2⁻¹⁰⁷⁴`, which is `s`. `tinyzero.g` proves that a square below the normals
+that rounds to zero is at most `2⁻¹⁰⁷⁵`, which is the range a `u` script
+assumes. The other way round, `tinysq.g`'s first goal proves that every
+square at or below `2⁻¹⁰⁷⁵` rounds to zero. So the `0` a `u` script writes
+for the square is `rnd(X)` over the script's whole range of `X`, and the
+script is a claim about the code for every square in it.
+
+`tinysq.g`, whole, as the first lane ran it, exits 0, and its `gappa -Bcoq` and
+`coqc` exit 0, a proof of 397 lines with no hints:
+
+```gappa
+# tinysq.g: a square of two doubles at or below 2^-1075 rounds to zero, and
+# one above it rounds to at least 2^-1074, the smallest subnormal.
+@rnd = float<ieee_64, ne>;
+g = rnd(g_);
+X = g * g;
+{ |g| <= 1b1024 /\ |g| >= 1b-1074
+  -> (X <= 1b-1075 -> rnd(X) in [0, 0]) /\ (X >= 1b-1075 /\ X <= 1b-1022 -> rnd(X) in [0, 1b-1022]) }
+```
+
+Its comment claims more than its second goal proves. "One above it rounds to
+at least `2^-1074`" is true, but the second goal proves only `rnd(X)` in `[0,
+2⁻¹⁰²²]`. What makes the comment true is `tinyzero.g` read the other way
+round, and that no double lies between zero and `2⁻¹⁰⁷⁴`. The cover above
+does not use the second goal, and the comment the scripts of 9 carry on their
+squares below the normals, "tinysq.g and tinyzero.g split it at 2^-1075", is
+true read with both. The script is kept here as it was run.
+
+`tinyzero.g`, whole, as the second lane ran it, exits 0, and its `gappa -Bcoq`
+and `coqc` exit 0, a proof of 190 lines with 1 hint:
+
+```gappa
+# tinyzero.g: a square of two doubles below the normals that rounds to zero
+# is at most 2^-1075. With tinysq.g that splits the squares below the normals
+# in two at 2^-1075: at or below it they round to zero, above it they do not.
+@rnd = float<ieee_64, ne>;
+g = rnd(g_);
+X = g * g;
+s = rnd(X);
+{ |g| <= 1b1024 /\ |g| >= 1b-1074 /\ X <= 1b-1022 /\ s in [0, 0] -> X in [0, 1b-1075] }
+X -> s - (s - X);
+```
+
+Gappa warns "no need for the rewriting at line 9 column 17" on it, in its
+output and in its `-Bcoq` print. Line 9 is its one hint, and column 17 is that
+line's `;`. `tinyzero_nohint.g`, the same script without the hint, exits 0,
+and its `gappa -Bcoq` and `coqc` exit 0, a proof of 175 lines with no hints.
+So the warning is right, and the hint is not needed. `tinyzero.g` is kept here
+as it was run.
+
+```gappa
+# tinyzero.g without its one hint, to read what Gappa's warning on that hint means.
+@rnd = float<ieee_64, ne>;
+g = rnd(g_);
+X = g * g;
+s = rnd(X);
+{ |g| <= 1b1024 /\ |g| >= 1b-1074 /\ X <= 1b-1022 /\ s in [0, 0] -> X in [0, 1b-1075] }
+```
+
+A gap whose square is below the normals still keeps a ratio hint.
+`relgap.g`, the first lane's probe, whole, prints `gx −/ Gx` within `±2⁻⁵³`
+with no split at `2⁻¹⁰²²`: a difference of two doubles that lands below the
+normals is exact, and Gappa finds that itself, as 464.9 found for a sum.
+
+```gappa
+@rnd = float<ieee_64, ne>;
+px = rnd(px_); cx = rnd(cx_);
+Gx = px - cx;
+gx = rnd(Gx);
+{ |px| <= 1b1024 /\ |cx| <= 1b1024 /\ |gx| >= 1b-1074 /\ |gx| <= 1b-511
+  -> gx -/ Gx in ? /\ (gx - Gx) / Gx in ? }
+```
+
+**How `skincases.py` writes a case.** `skincases.py` (9 below) is 464.12's
+`spherecases.py` with the `restates` lines naming `sphere.rs` `on_floats` and
+`SIDE_OF_SPHERE_ERROR_BOUND` at `05d44c66`, `B_CODE` the code's `B`, the
+prefix `skin`, and the states `s` and `u`. A case is named by four letters,
+one for each of the `x`, `y` and `z` gaps and the radius, so `skin.g` is
+`nnnn`, and 464.12's `sphere_zxr.g` is `skin_zznz.g` here.
+
+- An `s` square is `X = g * g` in `[2⁻²¹⁴⁸, 2⁻¹⁰²²]`, with `s = rnd(X)` at
+  least `2⁻¹⁰⁷⁴`. What its rounding cost is carried as an amount, `d = (s −
+  X) · carry`, as 464.8's `planecases.py` carries `dk`, and the rest as a
+  fraction, `e = X · W` with `W = carry − 1 / (rg · rg)`. For the radius `d =
+  −(rr − X) · carry` and `W = 1 − carry`.
+- A `u` square is `X` in `[2⁻²¹⁴⁸, 2⁻¹⁰⁷⁵]`, and the script writes `s = 0;`
+  for it, by `tinysq.g`. Its whole true square is its `d`, `−G · G` for a gap,
+  with the hint `G * G -> X / (rg * rg);`, and `r · r` for the radius. In the
+  sums it is a zero, with 464.12's hints such as `sx + sy -> sy;`.
+- Either kind also gets `|g| ≤ 2⁻⁵¹¹`, which follows from `X ≤ 2⁻¹⁰²²`, as
+  `relgap.g` has it.
+
+With no `s` or `u` square the script is 464.12's for the same zero set, which
+`sameas.py` checks (2). With one, the step is `planecases.py`'s: `(out − Ex) /
+eb -> ((Σ e) / Phatx) · (Phatx / P) · (P / eb) + (Σ d) / eb`, `Phatx` being
+`Phat` with `X` in place of each `s` square and without each `u` one, `Phatx /
+P -> Phat / P + (Σ (X − s)) / P`, and `P -> eb / (B · (1 + (eb − B · P) / (B
+· P)));`. `skin_snnu.g`, whole in 9, is that form. Every square is at least
+zero, so a sum of them is zero only when each of its addends is, and the
+script then writes it unrounded. So no sum needs 464.13's split for a sum
+that cancels. That makes 256 cases on `y`, 175 with an `n` square and 81
+without, and the 175 with one again on `value`.
+
+**What they print.** Each of the 431 proves at the code's `B`, and its `gappa
+-Bcoq` and `coqc` exit 0 (8).
+
+- The 15 cases of `n` and `z` alone print, on `y` and on `value`, what 464.12's
+  6 lists for the same zero sets, line for line. `skin_zzzz.g` prints
+  "remaining results are pointless", as `sphere_zxyzr.g` did.
+- The 160 cases on `y` with an `s` or `u` square and at least one `n`, 104 of
+  them with one `n`, 48 with two and 8 with three, print the relative part `(e)
+  / Phatx` within `u`, `3u`, `4u` or `5u` to the digits Gappa prints,
+  `1.11022e-16` to `5.55112e-16`. They print `P` at least `2^(-971.585)`, the
+  least `P` that `eb` normal allows, as 464.8's planes printed, and the `d` sum
+  within `±2^(-1073.41)` at the widest, which is `3 · 2⁻¹⁰⁷⁵`: three squares,
+  each moved at most `2⁻¹⁰⁷⁵` by its rounding. Where the `x` and `y` squares
+  are the only ones left, as in `skin_nnuu.g`, Gappa names `Phatx` by its sum
+  and prints `(ex + ey) / (sx + sy)` within `4.44089e-16`.
+- The same 160 on `value` print `(e) / Phatx` within each of `u` to `6u`,
+  `1.11022e-16` to `6.66134e-16`, and the same `P` and `d`.
+- The 80 cases with an `s` or `u` square and no `n` print "remaining results
+  are pointless, anything can be proved". With no square normal, `P` is at
+  most `4 · 2⁻¹⁰²²`, so `eb` is not normal and `decide` does not compare, and
+  the script proves from that contradiction alone (7).
+
+So with at least one square normal the bound holds at the code's `B`,
+whatever the other three are: normal, zero, or below the normals either way.
+On `y` there is room. The relative part takes at most `5u` of the permanent,
+against an `eb` of `6u` of it and more. `eb` normal makes `eb` at least
+`2⁻¹⁰²²`, so the `d` sum is at most `3 · 2⁻¹⁰⁷⁵ / 2⁻¹⁰²²`, which is `3u`, of
+`eb`, about `18u²` of the permanent. On `value` the relative part takes up to
+`6u` of the `6u + 48u²`, and the room the `d` sum leaves there was not argued:
+Gappa proves each case at the code's `B`, and the cases with an `s` or `u`
+square were not bisected. With no square normal, `eb` is not normal, and
+`decide` refuses whatever `on_floats` returns.
+
+So without its check `on_floats` would hand `decide` a number in each case the
+check now refuses, and `decide` would certify no wrong sign from it: either
+`|y − Ex| ≤ eb`, and 464.4's step from `y` gives the sign, or `eb` is not
+normal and `decide` does not compare. The comment on the check (5) is false
+for any of the four squares, alone or together. What the check does is send
+those cases on to level 2. Whether `on_floats` keeps it is Q2766 (10).
+
+**The shapes.** Which shapes reach these cases was not run. On paper: a
+square below the normals needs a gap or the radius under `2⁻⁵¹¹`, and two
+different doubles that close are both under `2⁻⁴⁵⁸`, since a double of at
+least `2⁻⁴⁵⁸` has no other double within `2⁻⁵¹¹` of it. So the point and the
+centre are both under `2⁻⁴⁵⁸` on that axis, or the radius is under `2⁻⁵¹¹`. No
+input was built, since every case proves and there is no wrong sign to find
+either way. The queue holds one such shape, Q2518 (refuses/D), a ball of
+radius `2⁻⁵²⁸` that `Sphere::side_of` refuses. Each of its squares is zero or
+near `2⁻¹⁰⁵⁶`, so it is a case with no `n`: `eb` is not normal, and dropping
+the check would not answer it.
+
+**7. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each of the 350 scripts of 6 with an `n` square
+was run again at `B = u / 2`, written `B = 1b-54;`, as `c_<name>_half.g`. Each
+fails, exit 1, with a best that is the relative bound it printed in 6 over `u
+/ 2`. `pairs.py` (9) checks each and prints `350 controls at u/2, 0 whose best
+is not the relative bound over u/2`. For the 30 of `n` and `z` alone the bests
+are 464.12's 7. On `y` with an `s` or `u` they are `[-2, 2]`, `[-6, 6]`, `[-8,
+8]` and `[-10, 10]`, and on `value` every even width from `[-2, 2]` to `[-12,
+12]`. These controls print `P` at least `2^(-968)`, since `eb` normal asks
+more of `P` at a smaller `B`. With 3 and 4's failures at `5u` and `6u`, that
+shows none of them proved from a contradiction.
+
+- The 81 `_noeb` controls, `c_skin_zzzz_noeb.g` and one for each of the 80
+  cases with an `s` or `u` and no `n`, drop `eb` normal and the lemma line it
+  gives. Each fails, best `[-inf, inf]`, printing `eb` in `[0, 0]`, `[0,
+  3b-1074]`, `[0, 3b-1073]`, `[0, 3b-1072]` or `[0, 9b-1074]`, so at most `12
+  · 2⁻¹⁰⁷⁴`. What proves those 81 is the contradiction with `eb` normal and
+  nothing else, as with `sphere_zxyzr.g`.
+- `c_skin_nonormal.g` is `skin.g` with the four `product_is_normal`
+  hypotheses dropped, and the four lemma lines they give. It fails, best
+  `[-4.2731e+909, 4.2731e+909]`. So a script of this kind catches a missing
+  check, as 464.4's 3, 464.8's 4, 464.12's 7 and 464.13's 7 did. That does not
+  undo 6: without those hypotheses the script has no case split, and 6 shows
+  that with one each case proves.
+- `c_skin_noeb.g` is `skin.g` without `eb` normal and without the lemma line
+  it gives. It proves, printing `(y − Ex) / Phat` within `5u` and `P −/ Phat`
+  within `3u`, as `c_sphere_noeb.g` did, and how Gappa gets past `eb`'s
+  rounding was not traced. 464.12's 7 argues it on paper, and the same
+  argument here is not run either: four squares each at least `2⁻¹⁰²²` put
+  `P` at least `2⁻¹⁰²⁰` and `B · P` at least `6 · 2⁻¹⁰⁷³`, which is `24 ·
+  2⁻¹⁰⁷⁵`. Rounding moves that by at most `2⁻¹⁰⁷⁵`, a twenty-fourth of it, and
+  `5u` of the permanent over twenty-three twenty-fourths of `6u` of it is about
+  `0.87`. `decide` still checks that `eb` is normal, and 464.12's 7 argues on
+  paper that this check keeps every intermediate finite. `on_floats` is the
+  same arithmetic (2), so that carries over.
+
+**8. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0 from 464.5's nix block, accept
+each of the 431 scripts that prove, and `tinysq.g`, `tinyzero.g` and
+`tinyzero_nohint.g`: exit 0 each, the two together in 1.20 to 54.56 s on each
+of the 431 in the third lane's run, on a load of 40 to 55 over 24 cores. Gappa
+does not write the same proof each run (464.4), so the sizes are that run's.
+`skin.g`'s proof is 4047 lines with 18 hints, `skinv.g`'s 4186 with 19, and
+`skin_zzzz.g`'s 366 with 2, as `sphere_zxyzr.g`'s was. The others are 301 to
+6111 lines with 0 to 21 hints, the smallest `skin_uuuu.v` with 2 and the
+largest `skin_snus.v` with 18; `skin_ssss.v` is 567 lines with none.
+`tinysq.g`'s is 397 lines with none, `tinyzero.g`'s 190 with 1 and
+`tinyzero_nohint.g`'s 175 with none. Each hint enters the Coq file as a
+hypothesis with no condition attached, as in 464.4, so each proof stands on
+its hints and on what Gappa took to be nonzero: `skin.g`'s `gappa -Bcoq`
+prints 59 lines of the form "has been assumed to be nonzero when checking a
+rewriting rule", and `skinv.g`'s 66, as `sphere.g`'s and `spherev.g`'s did.
+The one other line in any output or `-Bcoq` print is `tinyzero.g`'s warning
+that its hint is not needed (6). None says "not trivially equal", which
+464.12's 6 met without its hints for a zero, and no `coqc` printed anything.
+`field` has not been run on these hints (464.10).
+
+**9. The scripts.** `skincases.py` writes 864 scripts: `skin.g`, `skinv.g`,
+the 429 other cases of 6, the 350 controls at `u / 2`, the 81 `_noeb`
+controls and the two other controls of 7. After the runs, the fifth lane ran
+it again in a fresh directory, and it wrote all 864 byte for byte as they were
+run. To run them again, save the nix block of 464.5 as `gappalib18.nix` and
+`skincases.py` beside it, and then:
+
+```sh
+python3 skincases.py
+nx="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
+pin=github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe
+$nx shell $pin#gappa --command gappa -Eprecision=200 skin.g
+$nx shell $pin#gappa --command gappa -Eprecision=200 -Bcoq skin.g > skin.v
+gl=$($nx build --impure --no-link --print-out-paths -f gappalib18.nix)
+fl=$($nx build --no-link --print-out-paths $pin#coqPackages_8_20.flocq)
+COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+  $nx shell $pin#coqPackages_8_20.coq --command coqc skin.v
+```
+
+and the same for every other file it writes, and for the four scripts of 6.
+A script that proves exits 0; a control must exit 1. What the third lane ran
+is `runall.sh` (below), which runs each through 464.13's `one.sh`, the same
+bytes as 464.13's 9 holds, 16 at a time. In that run Gappa took 0.07 to 48.00
+s on each script that proves and 0.08 to 155.79 s on each control.
+
+`collect.py`, `brief.py`, `summarize.py` and `pairs.py`, below, read
+`run.log` and the outputs, and print the figures 6 to 8 give: `collect.py`
+the counts, the exits, the times and the sizes, `brief.py` and `summarize.py`
+the groups of 6, and `pairs.py` the check of 7 and the lines of 8 that are not
+a result. `sameas.py`, below, checks 2's claim, with 464.12's
+`spherecases.py`'s scripts in `ref/`, and prints `64 pairs, 0 differ`.
+
+The smallest `B`s of 3 and 4 come from `bisect.py`, which is 464.13's with
+one line changed, `B_CODE` the code's `B` here. `bisects.sh` ran it as
+`python3 bisect.py skin.g 5 48` and `python3 bisect.py skinv.g 6 48`. Both
+are whole at the end of this part.
+
+`skincases.py`, whole, as the second lane wrote it and the third ran it:
+
+```python
+"""Write skin.g, HowFarFromTheSkin::on_floats and SIDE_OF_SPHERE_ERROR_BOUND
+line for line, and its cases and controls beside it. A case is four letters,
+one for each of the gaps x, y, z and the radius r, saying what its square is:
+n normal; z of a zero factor, which product_is_normal lets through; s below
+the normals and rounding to a double that is not zero, and u below the
+normals and rounding to zero, both of which product_is_normal refuses. skin.g
+is the case nnnn. It writes:
+
+- skinv.g, the claim on value, the double on_floats returns, not on y;
+- skin_<case>.g for every other case, and skinv_<case>.g for each with an n;
+- c_<name>_half.g, each script with an n at B = u / 2, which must fail;
+- c_skin_<case>_noeb.g, each case with no n without eb normal. With no normal
+  square P is too small for eb to be normal, so such a case proves from that
+  contradiction, as 464.12's sphere_zxyzr.g does, and without it must fail;
+- c_skin_nonormal.g, skin.g without product_is_normal, and c_skin_noeb.g,
+  skin.g without eb normal.
+
+A case of n and z alone is 464.12's script for the same zero set, but for its
+first lines and B. A case with an s or a u carries what rounding that square
+cost as an amount, as 464.8's planecases.py does.
+
+Run as: python3 skincases.py; it writes beside itself.
+"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+AXES = ("x", "y", "z")
+TERMS = AXES + ("r",)
+B_CODE = "B = 6b-53 + 3b-102;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+SAYS = {"z": "is zero",
+        "s": "has a square below the normals that rounds to a double, not to zero",
+        "u": "has a square below the normals that rounds to zero"}
+
+
+def make(case="nnnn", on_value=False, b=B_CODE, normal=True, eb_normal=True):
+    st = dict(zip(TERMS, case))
+    gaps = [a for a in AXES if st[a] != "z"]
+    radius = st["r"] != "z"
+    flat = [a for a in TERMS if st[a] in "zu"]
+    live = [a for a in TERMS if st[a] in "ns"]
+    small = [a for a in TERMS if st[a] in "su"]
+    norm = [a for a in TERMS if st[a] == "n"]
+    out = "value" if on_value else "y"
+    sq = {a: f"s{a}" for a in AXES}
+    sq["r"] = "rr"
+    part = {a: f"X{a}" if st[a] == "s" else sq[a] for a in TERMS}
+
+    src = [
+        "# restates: crates/rcad-geom/src/sphere.rs on_floats at 05d44c66",
+        "# restates: crates/rcad-geom/src/sphere.rs SIDE_OF_SPHERE_ERROR_BOUND at 05d44c66",
+        "# restates: crates/rcad-predicates/src/point.rs exact_coordinates at 05d44c66",
+        "# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 05d44c66",
+        "# restates: crates/rcad-predicates/src/cascade.rs decide at 05d44c66",
+        "# HowFarFromTheSkin::on_floats and SIDE_OF_SPHERE_ERROR_BOUND, rcad-geom's sphere.",
+    ]
+    if on_value:
+        src.append("# The claim is on value, the double on_floats returns, not on y.")
+    if small:
+        src.append("# A case product_is_normal refuses, which on_floats meets only without")
+        src.append("# its check. Here:")
+        for a in TERMS:
+            if st[a] != "n":
+                who = "the radius" if a == "r" else f"the {a} gap"
+                src.append(f"#   {who} {SAYS[st[a]]};")
+        src[-1] = src[-1][:-1] + "."
+    elif case != "nnnn":
+        names = [f"the {a} gap" for a in AXES if st[a] == "z"] + (["the radius"] if not radius else [])
+        src.append(f"# The case where {' and '.join(names)} {'is' if len(names) == 1 else 'are'} zero.")
+    src += [
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The point, the centre and the radius, each an f64. A gap is zero when",
+        "# the centre's coordinate is the same double as the point's (464.11's",
+        "# diffzero.g), and a zero radius is the double 0.",
+        "px = rnd(px_); py = rnd(py_); pz = rnd(pz_);",
+        " ".join(f"c{a} = rnd(c{a}_);" if a in gaps else f"c{a} = p{a};" for a in AXES),
+        "r = rnd(r_);" if radius else "r = 0;",
+        "",
+        "# What on_floats computes, line for line. A zero, a square of one and a",
+        "# sum of two round to themselves (464.11's refl.g), so they are left",
+        "# unrounded.",
+    ]
+    if small:
+        src += ["# A square below the normals is X. One that rounds to zero is written 0,",
+                "# which tinysq.g proves rnd(X) is."]
+    src.append(" ".join(f"G{a} = p{a} - c{a};" for a in AXES))
+    src.append(" ".join(f"g{a} = rnd(G{a});" if a in gaps else f"g{a} = G{a};" for a in AXES))
+    xs = [f"X{a} = g{a} * g{a};" for a in AXES if st[a] in "su"]
+    if xs:
+        src.append(" ".join(xs))
+    square = {"n": "rnd(g{a} * g{a})", "z": "g{a} * g{a}", "s": "rnd(X{a})", "u": "0"}
+    src.append(" ".join(f"s{a} = {square[st[a]].format(a=a)};" for a in AXES))
+    src.append({"n": "rr = rnd(r * r);", "z": "rr = r * r;",
+                "s": "Xr = r * r; rr = rnd(Xr);", "u": "Xr = r * r; rr = 0;"}[st["r"]])
+    s01_rounds = not ("x" in flat and "y" in flat)
+    s012_rounds = not all(a in flat for a in AXES)
+    src += [
+        "S01 = sx + sy;",
+        "s01 = rnd(S01);" if s01_rounds else "s01 = S01;",
+        "S012 = s01 + sz;",
+        "s012 = rnd(S012);" if s012_rounds else "s012 = S012;",
+        "y = s012 - rr;",
+        "value = rnd(y);",
+        "",
+        "# The permanent sums the same three squares in the same order as value",
+        "# does, so its first two sums are s01 and s012.",
+        "P = rnd(s012 + rr);",
+        "",
+        b,
+        "eb = rnd(B * P);",
+        "",
+        "# The true value of the same inputs.",
+        "Ex = Gx * Gx + Gy * Gy + Gz * Gz - r * r;",
+        "",
+        "# The permanent with no rounding of its own.",
+        "Phat = sx + sy + sz + rr;",
+    ]
+    if small and norm:
+        src += ["# The same with X in place of each square below the normals that does",
+                "# not round to zero, and without those that do.",
+                "Phatx = " + " + ".join(part[a] for a in live) + ";"]
+    if norm:
+        src += ["", "# What each rounding multiplied its argument by."]
+        if gaps:
+            src.append(" ".join(f"rg{a} = g{a} / G{a};" for a in gaps))
+        if [a for a in AXES if st[a] == "n"]:
+            src.append(" ".join(f"rp{a} = s{a} / (g{a} * g{a});" for a in AXES if st[a] == "n"))
+        if st["r"] == "n":
+            src.append("rpr = rr / (r * r);")
+        rs = (["rs01 = s01 / S01;"] if s01_rounds else []) + (["rs012 = s012 / S012;"] if s012_rounds else [])
+        if rs:
+            src.append(" ".join(rs))
+        if on_value:
+            src.append("rv = value / y;")
+        v = " * rv" if on_value else ""
+        carry = {"x": "rs01 * rs012" + v, "y": "rs01 * rs012" + v, "z": "rs012" + v,
+                 "r": "rv" if on_value else "1"}
+        src += ["", f"# What each of the four terms, as {out} carries it, is off by: e is that",
+                "# amount and W the same over the term's square. The radius's term is",
+                "# subtracted, so its W is the other way round."]
+        if small:
+            src += ["# For a square below the normals e and W are of X, and d is what",
+                    "# rounding X cost, as an amount. One that rounds to zero is off by",
+                    "# its whole true square, which is its d."]
+        for a in AXES:
+            if st[a] == "n":
+                src.append(f"W{a} = {carry[a]} - 1 / (rg{a} * rg{a} * rp{a});")
+            elif st[a] == "s":
+                src.append(f"W{a} = {carry[a]} - 1 / (rg{a} * rg{a});")
+        if st["r"] == "n":
+            src.append(f"Wr = 1 / rpr - {carry['r']};")
+        elif st["r"] == "s":
+            src.append(f"Wr = 1 - {carry['r']};")
+        src.append(" ".join(f"e{a} = {part[a]} * W{a};" for a in live))
+        ds = []
+        for a in AXES:
+            if st[a] == "s":
+                ds.append(f"d{a} = (s{a} - X{a}) * " + (f"({carry[a]});" if " " in carry[a] else f"{carry[a]};"))
+            elif st[a] == "u":
+                ds.append(f"d{a} = -(G{a} * G{a});")
+        if st["r"] == "s":
+            ds.append("dr = Xr - rr;" if carry["r"] == "1" else f"dr = (Xr - rr) * {carry['r']};")
+        elif st["r"] == "u":
+            ds.append("dr = Xr;")
+        if ds:
+            src.append(" ".join(ds))
+
+    hyps = []
+    finite = [f"|p{a}| <= 1b1024" for a in AXES] + [f"|c{a}| <= 1b1024" for a in gaps]
+    if radius:
+        finite.append("|r| <= 1b1024")
+    hyps.append(("Every input is a finite f64.", [finite[:3], finite[3:]]))
+    if gaps or radius:
+        nonzero = [f"|g{a}| >= 1b-1074" for a in gaps] + (["|r| >= 1b-1074"] if radius else [])
+        hyps.append(("No factor of the squares left is zero. For an f64 that is the same\n"
+                     "  # as being at least the smallest subnormal.", [nonzero]))
+        if normal and norm:
+            hyps.append(("product_is_normal on the squares that pass it." if small else
+                         "product_is_normal on the squares left.",
+                         [[f"|{sq[a]}| >= 1b-1022" for a in norm]]))
+    if small:
+        rows = []
+        for a in small:
+            factor = "r" if a == "r" else f"g{a}"
+            if st[a] == "s":
+                rows.append([f"X{a} in [1b-2148, 1b-1022]", f"{sq[a]} >= 1b-1074", f"|{factor}| <= 1b-511"])
+            else:
+                rows.append([f"X{a} in [1b-2148, 1b-1075]", f"|{factor}| <= 1b-511"])
+        hyps.append(("Each square below the normals. Of two doubles that are not zero it is\n"
+                     "  # at least 2^-2148, and its factor is at most 2^-511. tinysq.g and\n"
+                     "  # tinyzero.g split it at 2^-1075: at or below, it rounds to zero, and\n"
+                     "  # above, to at least 2^-1074.", rows))
+    if eb_normal:
+        hyps.append(("The bound is normal, which decide checks.", [["|eb| >= 1b-1022"]]))
+    lemma = []
+    if normal:
+        lemma += [[f"s{a} -/ g{a} * g{a} {LEMMA}"] for a in AXES if st[a] == "n"]
+        if st["r"] == "n":
+            lemma.append([f"rr -/ r * r {LEMMA}"])
+    if eb_normal:
+        lemma.append([f"eb -/ B * P {LEMMA}"])
+    if lemma:
+        hyps.append(("What lemma.g proves each of those gives.", lemma))
+    if on_value and norm:
+        hyps.append(("y is not zero. Where it is, value is zero too, and the claim on y is\n"
+                     "  # the claim on value.", [["|y| >= 1b-1074"]]))
+
+    src += ["", "{"]
+    first = True
+    for comment, rows in hyps:
+        src.append(f"  # {comment}")
+        for row in rows:
+            if not row:
+                continue
+            src.append(("     " if first else "  /\\ ") + " /\\ ".join(row))
+            first = False
+    src.append("->")
+    es = " + ".join(f"e{a}" for a in live)
+    dsum = " + ".join(f"d{a}" for a in small)
+    if not norm:
+        src.append(f"  eb in ? /\\ ({out} - Ex) / eb in [-1, 1]")
+    elif not small:
+        src += [f"  ({out} - Ex) / Phat in ? /\\ P -/ Phat in ?",
+                f"  /\\ ({out} - Ex) / eb in [-1, 1]"]
+    else:
+        src += [f"  ({es}) / Phatx in ? /\\ ({dsum}) in ? /\\ P in ?",
+                f"  /\\ ({out} - Ex) / eb in [-1, 1]"]
+    src += ["}", ""]
+
+    if norm:
+        src.append("# How far each rounding is from the identity.")
+        for a in gaps:
+            src.append(f"g{a} / G{a} -> 1 + (g{a} - G{a}) / G{a};")
+        for a in AXES:
+            if st[a] == "n":
+                src.append(f"s{a} / (g{a} * g{a}) -> 1 + (s{a} - g{a} * g{a}) / (g{a} * g{a});")
+        if st["r"] == "n":
+            src.append("rr / (r * r) -> 1 + (rr - r * r) / (r * r);")
+        if s01_rounds:
+            src.append("s01 / S01 -> 1 + (s01 - S01) / S01;")
+        if s012_rounds:
+            src.append("s012 / S012 -> 1 + (s012 - S012) / S012;")
+        if on_value:
+            src.append("value / y -> 1 + (value - y) / y;")
+        if not small:
+            split = " + ".join(f"({sq[a]} + e{a})" if a in live else sq[a] for a in TERMS)
+            src += [
+                "",
+                "# The error is the sum of the terms' errors, each a fraction of its own",
+                "# piece of the permanent; add_rr then averages them.",
+                f"({out} - Ex) / Phat -> ((Phat + ({out} - Ex)) - Phat) / Phat;",
+                f"Phat + ({out} - Ex) -> {split};",
+            ]
+            for a in live:
+                src.append(f"({sq[a]} + e{a}) - {sq[a]} -> e{a};")
+            src += [
+                "",
+                "# From the permanent to the one on_floats rounds, and on to eb.",
+                f"({out} - Ex) / eb -> (({out} - Ex) / Phat) * (Phat / P) * (P / eb);",
+                "Phat / P -> 1 / (1 + (P - Phat) / Phat);",
+                "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));",
+            ]
+        else:
+            for a in AXES:
+                if st[a] == "u":
+                    src.append(f"G{a} * G{a} -> X{a} / (rg{a} * rg{a});")
+            shifts = [f"(X{a} - {sq[a]})" for a in small if st[a] == "s"]
+            shift = shifts[0] if len(shifts) == 1 else f"({' + '.join(shifts)})"
+            src += [
+                "",
+                "# The relative part is averaged over Phatx as in skin.g. What rounding a",
+                "# square below the normals cost is an amount, and eb being normal keeps",
+                "# P large enough that it is small against eb.",
+                f"({out} - Ex) / eb -> (({es}) / Phatx) * (Phatx / P) * (P / eb) + ({dsum}) / eb;",
+                f"({es}) / Phatx -> ((Phatx + ({es})) - Phatx) / Phatx;",
+                f"Phatx + ({es}) -> " + " + ".join(f"({part[a]} + e{a})" for a in live) + ";",
+            ]
+            for a in live:
+                src.append(f"({part[a]} + e{a}) - {part[a]} -> e{a};")
+            src += [
+                f"Phatx / P -> Phat / P + {shift} / P;" if shifts else "Phatx / P -> Phat / P;",
+                "Phat / P -> 1 / (1 + (P - Phat) / Phat);",
+                "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));",
+                "P -> eb / (B * (1 + (eb - B * P) / (B * P)));",
+            ]
+    zh = []
+    if "x" in flat and "y" not in flat:
+        zh.append("sx + sy -> sy;")
+    if "y" in flat and "x" not in flat:
+        zh.append("sx + sy -> sx;")
+    if "z" in flat:
+        zh.append("s01 + sz -> s01;")
+    elif "x" in flat and "y" in flat:
+        zh.append("s01 + sz -> sz;")
+    if "r" in flat:
+        zh.append("s012 + rr -> s012;")
+        if on_value:
+            zh.append("s012 - rr -> s012;")
+    elif not s012_rounds:
+        zh.append("s012 + rr -> rr;")
+        if on_value:
+            zh.append("s012 - rr -> -rr;")
+    if zh:
+        src += ["", "# A zero square added to a double leaves that double, which then rounds",
+                "# to itself."] + zh
+    return "\n".join(src) + "\n"
+
+
+def write(name, text):
+    open(name, "w").write(text)
+
+
+for case in map("".join, itertools.product("nzsu", repeat=4)):
+    tag = "" if case == "nnnn" else f"_{case}"
+    if "n" in case:
+        for on_value in (False, True):
+            name = f"skin{'v' if on_value else ''}{tag}"
+            write(f"{name}.g", make(case, on_value))
+            write(f"c_{name}_half.g", make(case, on_value, b=B_HALF))
+    else:
+        write(f"skin{tag}.g", make(case))
+        write(f"c_skin{tag}_noeb.g", make(case, eb_normal=False))
+write("c_skin_nonormal.g", make(normal=False))
+write("c_skin_noeb.g", make(eb_normal=False))
+```
+
+`skin.g`, whole, as `skincases.py` writes it:
+
+```gappa
+# restates: crates/rcad-geom/src/sphere.rs on_floats at 05d44c66
+# restates: crates/rcad-geom/src/sphere.rs SIDE_OF_SPHERE_ERROR_BOUND at 05d44c66
+# restates: crates/rcad-predicates/src/point.rs exact_coordinates at 05d44c66
+# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 05d44c66
+# restates: crates/rcad-predicates/src/cascade.rs decide at 05d44c66
+# HowFarFromTheSkin::on_floats and SIDE_OF_SPHERE_ERROR_BOUND, rcad-geom's sphere.
+@rnd = float<ieee_64, ne>;
+
+# The point, the centre and the radius, each an f64. A gap is zero when
+# the centre's coordinate is the same double as the point's (464.11's
+# diffzero.g), and a zero radius is the double 0.
+px = rnd(px_); py = rnd(py_); pz = rnd(pz_);
+cx = rnd(cx_); cy = rnd(cy_); cz = rnd(cz_);
+r = rnd(r_);
+
+# What on_floats computes, line for line. A zero, a square of one and a
+# sum of two round to themselves (464.11's refl.g), so they are left
+# unrounded.
+Gx = px - cx; Gy = py - cy; Gz = pz - cz;
+gx = rnd(Gx); gy = rnd(Gy); gz = rnd(Gz);
+sx = rnd(gx * gx); sy = rnd(gy * gy); sz = rnd(gz * gz);
+rr = rnd(r * r);
+S01 = sx + sy;
+s01 = rnd(S01);
+S012 = s01 + sz;
+s012 = rnd(S012);
+y = s012 - rr;
+value = rnd(y);
+
+# The permanent sums the same three squares in the same order as value
+# does, so its first two sums are s01 and s012.
+P = rnd(s012 + rr);
+
+B = 6b-53 + 3b-102;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Ex = Gx * Gx + Gy * Gy + Gz * Gz - r * r;
+
+# The permanent with no rounding of its own.
+Phat = sx + sy + sz + rr;
+
+# What each rounding multiplied its argument by.
+rgx = gx / Gx; rgy = gy / Gy; rgz = gz / Gz;
+rpx = sx / (gx * gx); rpy = sy / (gy * gy); rpz = sz / (gz * gz);
+rpr = rr / (r * r);
+rs01 = s01 / S01; rs012 = s012 / S012;
+
+# What each of the four terms, as y carries it, is off by: e is that
+# amount and W the same over the term's square. The radius's term is
+# subtracted, so its W is the other way round.
+Wx = rs01 * rs012 - 1 / (rgx * rgx * rpx);
+Wy = rs01 * rs012 - 1 / (rgy * rgy * rpy);
+Wz = rs012 - 1 / (rgz * rgz * rpz);
+Wr = 1 / rpr - 1;
+ex = sx * Wx; ey = sy * Wy; ez = sz * Wz; er = rr * Wr;
+
+{
+  # Every input is a finite f64.
+     |px| <= 1b1024 /\ |py| <= 1b1024 /\ |pz| <= 1b1024
+  /\ |cx| <= 1b1024 /\ |cy| <= 1b1024 /\ |cz| <= 1b1024 /\ |r| <= 1b1024
+  # No factor of the squares left is zero. For an f64 that is the same
+  # as being at least the smallest subnormal.
+  /\ |gx| >= 1b-1074 /\ |gy| >= 1b-1074 /\ |gz| >= 1b-1074 /\ |r| >= 1b-1074
+  # product_is_normal on the squares left.
+  /\ |sx| >= 1b-1022 /\ |sy| >= 1b-1022 /\ |sz| >= 1b-1022 /\ |rr| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those gives.
+  /\ sx -/ gx * gx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sy -/ gy * gy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sz -/ gz * gz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ rr -/ r * r in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+->
+  (y - Ex) / Phat in ? /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+gx / Gx -> 1 + (gx - Gx) / Gx;
+gy / Gy -> 1 + (gy - Gy) / Gy;
+gz / Gz -> 1 + (gz - Gz) / Gz;
+sx / (gx * gx) -> 1 + (sx - gx * gx) / (gx * gx);
+sy / (gy * gy) -> 1 + (sy - gy * gy) / (gy * gy);
+sz / (gz * gz) -> 1 + (sz - gz * gz) / (gz * gz);
+rr / (r * r) -> 1 + (rr - r * r) / (r * r);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+s012 / S012 -> 1 + (s012 - S012) / S012;
+
+# The error is the sum of the terms' errors, each a fraction of its own
+# piece of the permanent; add_rr then averages them.
+(y - Ex) / Phat -> ((Phat + (y - Ex)) - Phat) / Phat;
+Phat + (y - Ex) -> (sx + ex) + (sy + ey) + (sz + ez) + (rr + er);
+(sx + ex) - sx -> ex;
+(sy + ey) - sy -> ey;
+(sz + ez) - sz -> ez;
+(rr + er) - rr -> er;
+
+# From the permanent to the one on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / Phat) * (Phat / P) * (P / eb);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+`skin_snnu.g`, whole, the form of a case with a square below the normals:
+
+```gappa
+# restates: crates/rcad-geom/src/sphere.rs on_floats at 05d44c66
+# restates: crates/rcad-geom/src/sphere.rs SIDE_OF_SPHERE_ERROR_BOUND at 05d44c66
+# restates: crates/rcad-predicates/src/point.rs exact_coordinates at 05d44c66
+# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 05d44c66
+# restates: crates/rcad-predicates/src/cascade.rs decide at 05d44c66
+# HowFarFromTheSkin::on_floats and SIDE_OF_SPHERE_ERROR_BOUND, rcad-geom's sphere.
+# A case product_is_normal refuses, which on_floats meets only without
+# its check. Here:
+#   the x gap has a square below the normals that rounds to a double, not to zero;
+#   the radius has a square below the normals that rounds to zero.
+@rnd = float<ieee_64, ne>;
+
+# The point, the centre and the radius, each an f64. A gap is zero when
+# the centre's coordinate is the same double as the point's (464.11's
+# diffzero.g), and a zero radius is the double 0.
+px = rnd(px_); py = rnd(py_); pz = rnd(pz_);
+cx = rnd(cx_); cy = rnd(cy_); cz = rnd(cz_);
+r = rnd(r_);
+
+# What on_floats computes, line for line. A zero, a square of one and a
+# sum of two round to themselves (464.11's refl.g), so they are left
+# unrounded.
+# A square below the normals is X. One that rounds to zero is written 0,
+# which tinysq.g proves rnd(X) is.
+Gx = px - cx; Gy = py - cy; Gz = pz - cz;
+gx = rnd(Gx); gy = rnd(Gy); gz = rnd(Gz);
+Xx = gx * gx;
+sx = rnd(Xx); sy = rnd(gy * gy); sz = rnd(gz * gz);
+Xr = r * r; rr = 0;
+S01 = sx + sy;
+s01 = rnd(S01);
+S012 = s01 + sz;
+s012 = rnd(S012);
+y = s012 - rr;
+value = rnd(y);
+
+# The permanent sums the same three squares in the same order as value
+# does, so its first two sums are s01 and s012.
+P = rnd(s012 + rr);
+
+B = 6b-53 + 3b-102;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Ex = Gx * Gx + Gy * Gy + Gz * Gz - r * r;
+
+# The permanent with no rounding of its own.
+Phat = sx + sy + sz + rr;
+# The same with X in place of each square below the normals that does
+# not round to zero, and without those that do.
+Phatx = Xx + sy + sz;
+
+# What each rounding multiplied its argument by.
+rgx = gx / Gx; rgy = gy / Gy; rgz = gz / Gz;
+rpy = sy / (gy * gy); rpz = sz / (gz * gz);
+rs01 = s01 / S01; rs012 = s012 / S012;
+
+# What each of the four terms, as y carries it, is off by: e is that
+# amount and W the same over the term's square. The radius's term is
+# subtracted, so its W is the other way round.
+# For a square below the normals e and W are of X, and d is what
+# rounding X cost, as an amount. One that rounds to zero is off by
+# its whole true square, which is its d.
+Wx = rs01 * rs012 - 1 / (rgx * rgx);
+Wy = rs01 * rs012 - 1 / (rgy * rgy * rpy);
+Wz = rs012 - 1 / (rgz * rgz * rpz);
+ex = Xx * Wx; ey = sy * Wy; ez = sz * Wz;
+dx = (sx - Xx) * (rs01 * rs012); dr = Xr;
+
+{
+  # Every input is a finite f64.
+     |px| <= 1b1024 /\ |py| <= 1b1024 /\ |pz| <= 1b1024
+  /\ |cx| <= 1b1024 /\ |cy| <= 1b1024 /\ |cz| <= 1b1024 /\ |r| <= 1b1024
+  # No factor of the squares left is zero. For an f64 that is the same
+  # as being at least the smallest subnormal.
+  /\ |gx| >= 1b-1074 /\ |gy| >= 1b-1074 /\ |gz| >= 1b-1074 /\ |r| >= 1b-1074
+  # product_is_normal on the squares that pass it.
+  /\ |sy| >= 1b-1022 /\ |sz| >= 1b-1022
+  # Each square below the normals. Of two doubles that are not zero it is
+  # at least 2^-2148, and its factor is at most 2^-511. tinysq.g and
+  # tinyzero.g split it at 2^-1075: at or below, it rounds to zero, and
+  # above, to at least 2^-1074.
+  /\ Xx in [1b-2148, 1b-1022] /\ sx >= 1b-1074 /\ |gx| <= 1b-511
+  /\ Xr in [1b-2148, 1b-1075] /\ |r| <= 1b-511
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those gives.
+  /\ sy -/ gy * gy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sz -/ gz * gz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+->
+  (ex + ey + ez) / Phatx in ? /\ (dx + dr) in ? /\ P in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+gx / Gx -> 1 + (gx - Gx) / Gx;
+gy / Gy -> 1 + (gy - Gy) / Gy;
+gz / Gz -> 1 + (gz - Gz) / Gz;
+sy / (gy * gy) -> 1 + (sy - gy * gy) / (gy * gy);
+sz / (gz * gz) -> 1 + (sz - gz * gz) / (gz * gz);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+s012 / S012 -> 1 + (s012 - S012) / S012;
+
+# The relative part is averaged over Phatx as in skin.g. What rounding a
+# square below the normals cost is an amount, and eb being normal keeps
+# P large enough that it is small against eb.
+(y - Ex) / eb -> ((ex + ey + ez) / Phatx) * (Phatx / P) * (P / eb) + (dx + dr) / eb;
+(ex + ey + ez) / Phatx -> ((Phatx + (ex + ey + ez)) - Phatx) / Phatx;
+Phatx + (ex + ey + ez) -> (Xx + ex) + (sy + ey) + (sz + ez);
+(Xx + ex) - Xx -> ex;
+(sy + ey) - sy -> ey;
+(sz + ez) - sz -> ez;
+Phatx / P -> Phat / P + (Xx - sx) / P;
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+P -> eb / (B * (1 + (eb - B * P) / (B * P)));
+
+# A zero square added to a double leaves that double, which then rounds
+# to itself.
+s012 + rr -> s012;
+```
+
+`sameas.py`, whole:
+
+```python
+"""Check that each script skincases.py writes for a case of n and z alone is
+464.12's spherecases.py script for the same zero set, but for its first lines
+and B. Run beside skincases.py's output, with spherecases.py's in ref/."""
+import itertools
+import os
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+TERMS = "xyzr"
+
+
+def strip(text, b):
+    keep = [l for l in text.splitlines()
+            if not l.startswith("# restates:") and not l.startswith("# HowFar")]
+    assert keep.count(b) == 1, b
+    return [("B" if l == b else l) for l in keep]
+
+
+bad = 0
+pairs = 0
+for n in range(len(TERMS) + 1):
+    for zero in itertools.combinations(TERMS, n):
+        zero = "".join(zero)
+        case = "".join("z" if a in zero else "n" for a in TERMS)
+        for v in ("", "v"):
+            for half in (False, True):
+                if zero == "xyzr" and (v or half):
+                    continue
+                ref = f"sphere{v}{'_z' + zero if zero else ''}"
+                new = f"skin{v}{'_' + case if case != 'nnnn' else ''}"
+                if half:
+                    ref, new = f"c_{ref}_half", f"c_{new}_half"
+                a = strip(open(f"ref/{ref}.g").read(), "B = 1b-54;" if half else "B = 8b-53 + 1b-100;")
+                b = strip(open(f"{new}.g").read(), "B = 1b-54;" if half else "B = 6b-53 + 3b-102;")
+                pairs += 1
+                if a != b:
+                    bad += 1
+                    print(f"differ: {ref}.g {new}.g")
+for ref, new, b_ref, b_new in (("c_sphere_nonormal", "c_skin_nonormal", "B = 8b-53 + 1b-100;", "B = 6b-53 + 3b-102;"),
+                               ("c_sphere_noeb", "c_skin_noeb", "B = 8b-53 + 1b-100;", "B = 6b-53 + 3b-102;"),
+                               ("c_sphere_zxyzr_noeb", "c_skin_zzzz_noeb", "B = 8b-53 + 1b-100;", "B = 6b-53 + 3b-102;")):
+    pairs += 1
+    if strip(open(f"ref/{ref}.g").read(), b_ref) != strip(open(f"{new}.g").read(), b_new):
+        bad += 1
+        print(f"differ: {ref}.g {new}.g")
+print(f"{pairs} pairs, {bad} differ")
+sys.exit(1 if bad else 0)
+```
+
+`runall.sh`, whole:
+
+```sh
+#!/bin/bash
+# Run every script skincases.py writes, 16 at a time: each skin*.g with coq
+# after it, each c_*.g without, into run.log.
+cd "$(dirname "$0")"
+{ ls c_*.g; ls skin*.g | grep -v '_b[0-9]*_[0-9]*\.g$' | sed 's/$/ coq/'; } \
+  | xargs -P 16 -L 1 bash one.sh > run.log 2>&1
+echo done > runall.done
+```
+
+`collect.py`, whole:
+
+```python
+"""Read run.log and every skin*.out and c_*.out skincases.py's scripts wrote,
+check each proof and control came out as it must, and group the cases by what
+Gappa printed. Run as: python3 collect.py, beside the outputs."""
+import collections
+import glob
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+log = open("run.log").read().splitlines()
+runs = {}
+coq = {}
+for line in log:
+    m = re.fullmatch(r"(\S+) exit (\d+) ([0-9.]+)s", line)
+    if m:
+        runs[m[1]] = (int(m[2]), float(m[3]))
+        continue
+    m = re.fullmatch(r"(\S+) coq -Bcoq exit (\d+) coqc exit (\d+) ([0-9.]+)s lines (\d+) hints (\d+)", line)
+    if m:
+        coq[m[1]] = (int(m[2]), int(m[3]), float(m[4]), int(m[5]), int(m[6]))
+        continue
+    print("unread line:", line)
+
+proofs = sorted(n[:-2] for n in glob.glob("skin*.g") if not re.search(r"_b\d+_\d+\.g$", n))
+controls = sorted(n[:-2] for n in glob.glob("c_*.g"))
+print(f"{len(proofs)} proofs, {len(controls)} controls, {len(runs)} runs in run.log, {len(coq)} coq lines")
+bad = [n for n in proofs if runs.get(n, (None,))[0] != 0]
+print("proofs not exit 0:", bad)
+bad = [n for n in proofs if coq.get(n, (None, None))[:2] != (0, 0)]
+print("proofs without -Bcoq 0 and coqc 0:", bad)
+bad = [n for n in controls if runs.get(n, (None,))[0] != 1]
+print("controls not exit 1:", bad)
+
+warn = collections.Counter()
+for n in proofs + controls:
+    for line in open(f"{n}.out").read().splitlines():
+        if "assumed to be nonzero" in line:
+            warn["assumed to be nonzero"] += 1
+        elif line.startswith("Warning"):
+            warn[line] += 1
+print("warnings:", dict(warn))
+
+t = [runs[n][1] for n in proofs if n in runs]
+print(f"gappa on proofs {min(t):.2f} to {max(t):.2f} s")
+t = [runs[n][1] for n in controls if n in runs]
+print(f"gappa on controls {min(t):.2f} to {max(t):.2f} s")
+t = [coq[n][2] for n in proofs if n in coq]
+print(f"-Bcoq and coqc {min(t):.2f} to {max(t):.2f} s")
+for n in ("skin", "skinv", "skin_zzzz", "skin_ssss", "skin_uuuu"):
+    if n in coq:
+        print(f"{n}.v: {coq[n][3]} lines, {coq[n][4]} hints")
+lines = [(coq[n][3], coq[n][4], n) for n in proofs if n in coq]
+print("smallest proof:", min(lines), "largest:", max(lines))
+print("hints from", min(h for _, h, _ in lines), "to", max(h for _, h, _ in lines))
+
+
+def results(n):
+    text = open(f"{n}.out").read()
+    out = []
+    for line in text.splitlines():
+        m = re.match(r"\s+(.*) in \[.*?\{([^,]+), [^}]+\}, .*?\{([^,]+), [^}]+\}\]$", line)
+        if m:
+            out.append(f"{m[1]} [{m[2]}, {m[3]}]")
+        elif "in [" in line:
+            out.append(line.strip())
+        elif "pointless" in line:
+            out.append("pointless")
+        elif "best:" in line:
+            out.append(line.strip())
+    return out
+
+
+groups = collections.defaultdict(list)
+for n in proofs + controls:
+    key = tuple(results(n))
+    case = n.split("_")[1] if n.count("_") and n.split("_")[1] not in ("half", "noeb") else "nnnn"
+    if n.startswith("c_"):
+        parts = n.split("_")
+        case = parts[2] if len(parts) > 3 else "nnnn"
+    kind = ("c" if n.startswith("c_") else "") + ("v" if "skinv" in n else "y") + ("_noeb" if n.endswith("noeb") else "")
+    groups[(kind, key)].append(n)
+for (kind, key), names in sorted(groups.items()):
+    print(f"\n{kind}: {len(names)}: {' '.join(names[:12])}{' ...' if len(names) > 12 else ''}")
+    for k in key:
+        print("   ", k)
+```
+
+Its print starts with these 15 lines. `c_skin_noeb` is the one control that
+proves (7), and the 43108 warnings are the "assumed to be nonzero" lines of 8,
+counted over every proof's and control's output:
+
+```text
+431 proofs, 433 controls, 864 runs in run.log, 431 coq lines
+proofs not exit 0: []
+proofs without -Bcoq 0 and coqc 0: []
+controls not exit 1: ['c_skin_noeb']
+warnings: {'assumed to be nonzero': 43108}
+gappa on proofs 0.07 to 48.00 s
+gappa on controls 0.08 to 155.79 s
+-Bcoq and coqc 1.20 to 54.56 s
+skin.v: 4047 lines, 18 hints
+skinv.v: 4186 lines, 19 hints
+skin_zzzz.v: 366 lines, 2 hints
+skin_ssss.v: 567 lines, 0 hints
+skin_uuuu.v: 301 lines, 2 hints
+smallest proof: (301, 2, 'skin_uuuu') largest: (6111, 18, 'skin_snus')
+hints from 0 to 21
+```
+
+The rest of its print, 117054 bytes in all, is each group of outputs that
+print the same results, with the names in it and the results, and is not
+appended here.
+
+`brief.py`, whole:
+
+```python
+"""One line per group of summarize.py's: for each kind and number of normal
+squares, with or without a square below the normals, the distinct relative
+bounds, the least P, the widest d, the distinct bests and the run count.
+Run as: python3 brief.py, beside the outputs."""
+import collections
+import glob
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def case_of(name):
+    m = re.search(r"_([nzsu]{4})(_|$)", name)
+    return m[1] if m else "nnnn"
+
+
+names = sorted(n[:-2] for n in glob.glob("skin*.g") + glob.glob("c_*.g") if not re.search(r"_b\d+_\d+\.g$", n))
+g = collections.defaultdict(lambda: {"n": 0, "rel": set(), "pp": set(), "P": set(), "d": set(), "best": set(), "other": set()})
+for n in names:
+    case = case_of(n)
+    kind = ("c_" if n.startswith("c_") else "") + ("v" if "skinv" in n else "y") + ("_noeb" if n.endswith("_noeb") else "") + ("_nonormal" if "nonormal" in n else "")
+    small = "small" if set(case) & set("su") else "nz"
+    key = (kind, small, case.count("n"))
+    e = g[key]
+    e["n"] += 1
+    for line in open(f"{n}.out").read().splitlines():
+        m = re.match(r"\s+(.*) in \[.*?\{([^,]+), ([^}]+)\}, .*?\{([^,]+), ([^}]+)\}\]$", line)
+        if m:
+            what = m[1]
+            if what == "P":
+                e["P"].add(m[3])
+            elif what == "P -/ Phat":
+                e["pp"].add(m[4])
+            elif "Ex" in what or "Phatx" in what or what.startswith("e") and "/" in what:
+                e["rel"].add(m[4])
+            elif what.startswith("d") or what == "r * r" or what.endswith("r * r"):
+                e["d"].add(f"{m[3]}..{m[5]}")
+            else:
+                e["other"].add(f"{what} {m[2]}..{m[4]}")
+        elif "in [0, 0]" in line:
+            e["other"].add(line.strip())
+        elif "pointless" in line:
+            e["other"].add("pointless")
+        elif "best:" in line:
+            e["best"].add(line.strip().split("best: ")[1])
+        elif "in [" in line:
+            e["other"].add(line.strip()[:80])
+for key in sorted(g):
+    e = g[key]
+    parts = [f"{key[0]} {key[1]} {key[2]}n: {e['n']}"]
+    for k in ("rel", "pp", "P", "d", "best", "other"):
+        if e[k]:
+            parts.append(f"{k}={sorted(e[k])}")
+    print("  ".join(parts))
+```
+
+Its print is 34 lines, one for each kind of script, with or without a square
+below the normals, and count of `n` squares, and its longest is 533
+characters, so it is given here in words and not appended. 6 reads its counts,
+relative bounds, least `P` and widest `d` from it, such as `y small 1n: 104`
+with `P` at least `2^(-971.585)`, and `y small 0n: 80`, each "pointless"; 7
+reads the controls' bests from it.
+
+`summarize.py`, whole:
+
+```python
+"""Group what each of skincases.py's proofs and controls printed by how many of
+its four squares are n, z, s and u, and print each group's distinct prints.
+Run as: python3 summarize.py, beside the outputs, after collect.py."""
+import collections
+import glob
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def case_of(name):
+    m = re.search(r"_([nzsu]{4})(_|$)", name)
+    return m[1] if m else "nnnn"
+
+
+def prints(name):
+    out = []
+    for line in open(f"{name}.out").read().splitlines():
+        m = re.match(r"\s+(.*) in \[.*?\{([^,]+), [^}]+\}, .*?\{([^,]+), [^}]+\}\]$", line)
+        if m:
+            what = m[1]
+            what = re.sub(r"^\(e[xyzr]( \+ e[xyzr])*\) / Phatx$", "(e) / Phatx", what)
+            what = re.sub(r"^d[xyzr].*|^r \* r$", "d", what) if what != "P" else what
+            if what in ("P",):
+                out.append(f"P from {m[2]}")
+            else:
+                out.append(f"{what} [{m[2]}, {m[3]}]")
+        elif "in [" in line:
+            out.append(line.strip())
+        elif "pointless" in line:
+            out.append("pointless")
+        elif "best:" in line:
+            out.append(line.strip().split("best: ")[1])
+    return tuple(out)
+
+
+names = sorted(n[:-2] for n in glob.glob("skin*.g") + glob.glob("c_*.g") if not re.search(r"_b\d+_\d+\.g$", n))
+groups = collections.defaultdict(lambda: collections.defaultdict(list))
+for n in names:
+    case = case_of(n)
+    counts = "".join(f"{case.count(k)}{k}" for k in "nzsu")
+    kind = ("c_" if n.startswith("c_") else "") + ("v" if "skinv" in n else "y") + ("_noeb" if n.endswith("_noeb") else "") + ("_nonormal" if "nonormal" in n else "")
+    groups[(kind, counts)][prints(n)].append(n)
+for (kind, counts), by in sorted(groups.items()):
+    total = sum(len(v) for v in by.values())
+    print(f"{kind} {counts}: {total}")
+    for p, ns in by.items():
+        print(f"    {len(ns)}x {' | '.join(p)}   e.g. {ns[0]}")
+```
+
+Its print, 380 lines and 35435 bytes, is each group's distinct prints, and is
+not appended here.
+
+`pairs.py`, whole:
+
+```python
+"""Check each control at u / 2 fails with a best that is its proof's relative
+bound over u / 2, and list every line of any output or -Bcoq print that is not
+a result, a best or an 'assumed to be nonzero' warning. Run as: python3
+pairs.py, beside the outputs."""
+import glob
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+U = 2.0 ** -53
+bad = 0
+count = 0
+for c in sorted(glob.glob("c_*_half.g")):
+    name = c[2:-len("_half.g")]
+    rel = None
+    for line in open(f"{name}.out").read().splitlines():
+        m = re.match(r"\s+(.*) in \[.*?\{([^,]+), [^}]+\}, .*?\{([^,]+), [^}]+\}\]$", line)
+        if m and ("Ex" in m[1] or "Phatx" in m[1] or "/ (s" in m[1] or "/ float" in m[1]):
+            rel = float(m[3])
+    best = re.search(r"best: \[(-?[0-9.e+]+), ([0-9.e+]+)\]", open(f"c_{name}_half.out").read())
+    count += 1
+    want = round(rel / (U / 2))
+    if best is None or float(best[2]) != want:
+        bad += 1
+        print(f"c_{name}_half: best {best[0] if best else None}, relative bound {rel} is {want} of u/2")
+print(f"{count} controls at u/2, {bad} whose best is not the relative bound over u/2")
+
+odd = set()
+for f in glob.glob("*.out") + glob.glob("*.bcoq"):
+    if re.search(r"_b\d+_\d+\.", f):
+        continue
+    for line in open(f).read().splitlines():
+        if ("assumed to be nonzero" in line or line.startswith("Results:") or line.startswith("  ")
+                or line.startswith("Error: some properties were not satisfied")):
+            continue
+        odd.add(line[:120])
+print("other lines:", sorted(odd))
+for n in ("skin", "skinv"):
+    print(n, "-Bcoq nonzero warnings:", open(f"{n}.bcoq").read().count("assumed to be nonzero"))
+for f in sorted(glob.glob("*.coqc")):
+    text = open(f).read().strip()
+    if text:
+        odd.add(f)
+        print("coqc printed something:", f, text[:200])
+```
+
+It prints:
+
+```text
+350 controls at u/2, 0 whose best is not the relative bound over u/2
+other lines: ['Warning: no need for the rewriting at line 9 column 17']
+skin -Bcoq nonzero warnings: 59
+skinv -Bcoq nonzero warnings: 66
+```
+
+`bisect.py`, whole, as run. It is 464.13's with one line changed, `B_CODE`,
+and as there its `best` line is never read:
+
+```python
+"""Find the smallest B = a u + m u^2 a script proves at, in steps of u^2, by
+bisection on m, as 464.8 did. Run as: python3 bisect.py <file.g> <a> <hi m>.
+Writes <name>_b<a>_<m>.g beside itself for each B tried, and prints each run's
+exit and the goal's best bound when it fails."""
+import os
+import re
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+B_CODE = "B = 6b-53 + 3b-102;"
+NIX = ["/nix/store/0ihij0570a325g02l4wnf0idk8vqxr9b-gappa-1.8.0/bin/gappa", "-Eprecision=200"]
+
+name, a, hi = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+text = open(name).read()
+assert text.count(B_CODE) == 1, f"no single B line in {name}"
+
+
+def proves(m):
+    b = f"B = {a}b-53 + {m}b-106;" if m else f"B = {a}b-53;"
+    out_name = f"{name[:-2]}_b{a}_{m}.g"
+    open(out_name, "w").write(text.replace(B_CODE, b))
+    run = subprocess.run(NIX + [out_name], capture_output=True, text=True, timeout=600)
+    best = re.findall(r"best: \[[^\]]*\]|\{[-0-9.e+]+, [-0-9.e+^()]+\}\]", run.stderr + run.stdout)
+    fail = [l for l in (run.stderr + run.stdout).splitlines() if "best" in l or "failed" in l.lower()]
+    print(f"{out_name}: {b} exit {run.returncode}; {' | '.join(fail[:3])}", flush=True)
+    return run.returncode == 0
+
+
+lo = 0
+assert not proves(lo), "proves with no u^2 term"
+assert proves(hi), "does not prove at the top of the range"
+while hi - lo > 1:
+    mid = (lo + hi) // 2
+    if proves(mid):
+        hi = mid
+    else:
+        lo = mid
+print(f"smallest: {a}u + {hi}u^2 proves, {a}u + {lo}u^2 fails")
+```
+
+`bisects.sh`, whole:
+
+```sh
+#!/bin/bash
+# Run the two bisections of 464.14's 3 and 4 side by side, each into its own
+# log, then write bisects.done.
+cd "$(dirname "$0")"
+rm -f bisects.done
+python3 bisect.py skin.g 5 48 > bisect_skin.log 2>&1 &
+python3 bisect.py skinv.g 6 48 > bisect_skinv.log 2>&1 &
+wait
+echo done > bisects.done
+```
+
+`skin.g`'s run printed, in order, `5u` failing, `5u + 48u²` proving, `24`
+failing, `36` and `30` proving, `27` failing and `28` proving, and ended
+`smallest: 5u + 28u^2 proves, 5u + 27u^2 fails`. `skinv.g`'s printed `6u`
+failing, `6u + 48u²` proving, `24` failing, `36` and `30` proving, and `27`,
+`28` and `29` failing, and ended `smallest: 6u + 30u^2 proves, 6u + 29u^2
+fails`. Each failure was at best `[-1, 1]`.
+
+`one.sh` is 464.13's, whole in its 9.
+
+**10. What this leaves.** The rows filed from this write-up while it was
+written:
+
+- Q2765: restate `sphere.rs:416-418` by 5. What the `48ε²` has to beat is
+  `ε²`, not `ε`, and by the comment's own terms `15 + 18 + 6` make 39.
+- Q2766, after it: restate `sphere.rs:248-250` and `420-424` by 6, which
+  proves the bound at the code's constant with any of the four squares below
+  the normals while one is normal, and finds `eb` below the normals when none
+  is. Then say whether `on_floats` needs its four `product_is_normal` checks.
+- Q2767: the doc of `product_is_normal` (`cascade.rs:46-49`) says that a
+  product below the normals fed into a relative bound makes the filter certify
+  a sign it has not earned, sometimes the wrong one. 464.8's 4 and 6 here
+  found that false for their predicates while one product stays normal. That
+  the doc holds for some other predicate is a guess nobody has run, so the
+  row has no class (§360.5). It waits on Q2684, Q2760 and Q2766.
+
+And what is not a row:
+
+- Q2700 already waits on Q2679, and moves these scripts into `proofs/gappa/`
+  with the others that rows of 464 appended.
+- Q2518 (refuses/D) is already open. By 6 it is a case with no normal square,
+  so `eb` is not normal, and level 1 cannot decide it with the check or
+  without it.
+- How `c_skin_noeb.g` gets past `eb`'s rounding (7) was not traced, as with
+  464.12's `c_sphere_noeb.g`.
+- `skin.g`'s first `restates` line needs no row, unlike `flat.g`'s in 464.13's
+  10: `just src on_floats crates/rcad-geom/src/sphere.rs` prints the one item,
+  at `sphere.rs:241`.
 - `field` on these scripts' hints (464.10).
