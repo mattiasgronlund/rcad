@@ -245,9 +245,11 @@ impl Predicate for HowFarFromTheSkin {
         let gaps = [0, 1, 2].map(|axis| point[axis] - centre[axis]);
         let radius = self.sphere.radius;
 
-        // The bound below is a fraction of the permanent, which only bounds
-        // anything while every product keeps its relative accuracy. One of them
-        // in the subnormals and this level certifies a wrong sign.
+        // Not needed for a right sign, as the doc on
+        // `SIDE_OF_SPHERE_ERROR_BOUND` says. What this does is send a square
+        // below the normals on to level 2, so that every sign this level gives
+        // rests on the relative argument in that doc and not on Gappa's case
+        // split alone.
         if !(gaps.iter().all(|&gap| product_is_normal(gap, gap))
             && product_is_normal(radius, radius))
         {
@@ -426,11 +428,19 @@ pub(crate) fn squared(value: Interval) -> Interval {
 /// `value`'s last rounding, which is all `decide` needs, and
 /// `6*epsilon + 30*epsilon^2` on `value`.
 ///
-/// Every step of that argument is a *relative* one, so like every bound of this
-/// shape it holds only while nothing overflows or falls into the subnormals.
-/// [`HowFarFromTheSkin::on_floats`] enforces the bottom end product by product
-/// through [`product_is_normal`], and `decide` the top end by refusing a bound
-/// that is not itself a normal number.
+/// Every step of that argument is a *relative* one, so it covers only squares
+/// that are normal or zero, and nothing that overflows.
+/// [`HowFarFromTheSkin::on_floats`] returns a number only for those, square by
+/// square through [`product_is_normal`], and `decide` keeps out the top end by
+/// refusing a bound that is not itself a normal number.
+///
+/// The bound holds further down than that argument reaches, though. Gappa
+/// proves it at this constant, case by case, with any of the four squares below
+/// the normals so long as one square is normal; with none normal the bound is
+/// not a normal number, so `decide` refuses it (`docs/decisions.md` §464.14).
+/// So `on_floats` does not need its [`product_is_normal`] check to give a right
+/// sign. It keeps it so that level 1 answers only where the argument above
+/// holds.
 const SIDE_OF_SPHERE_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (6.0 + 48.0 * epsilon) * epsilon
