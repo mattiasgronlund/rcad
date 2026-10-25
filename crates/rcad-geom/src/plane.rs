@@ -935,12 +935,12 @@ impl Predicate for SideOfAFlatSurface {
 /// cancelling to zero (`docs/decisions.md` §464.18). A product below the
 /// normals loses at most 2⁻¹⁰⁷⁵ when it rounds, and a bound that is a normal
 /// number, the only kind `decide` compares against, is 2⁻¹⁰²² or more and puts
-/// the permanent at 2⁻⁹⁷¹ or more. A few such losses fit in the constant
-/// beside the relative part. With no product normal, the offset is what makes
-/// the bound normal, and the whole error is then at most 5 · 2⁻¹⁰⁷⁵. So
-/// `on_floats` does not need its [`product_is_normal`] check to give a right
-/// sign. It keeps it so that level 1 answers only where the argument above
-/// holds.
+/// the permanent at (2⁵⁰ − 1) · 2⁻¹⁰²¹, just under 2⁻⁹⁷¹, or more. A few such
+/// losses fit in the constant beside the relative part. With no product
+/// normal, the offset is what makes the bound normal, and the whole error is
+/// then at most 5 · 2⁻¹⁰⁷⁵. So `on_floats` does not need its
+/// [`product_is_normal`] check to give a right sign. It keeps it so that
+/// level 1 answers only where the argument above holds.
 const SIDE_OF_PLANE_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (4.0 + 32.0 * epsilon) * epsilon
