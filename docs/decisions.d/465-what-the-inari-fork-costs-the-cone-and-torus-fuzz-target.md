@@ -265,7 +265,8 @@ change, not the fork's.
   sooner. Q2732 found it and says it should (465.10); the fix is Q2733, and
   Q2734 replays the other slow inputs after it.
 - Nothing for the fork in rcad's queue: its fix belongs in the fork's
-  repository, and moving the pin waits on that.
+  repository, and moving the pin waits on that. The fix is the fork's
+  f2dec45, and §467 moved the pin to it.
 
 ### 465.9 Why `inari`'s own edges need not steer libFuzzer
 

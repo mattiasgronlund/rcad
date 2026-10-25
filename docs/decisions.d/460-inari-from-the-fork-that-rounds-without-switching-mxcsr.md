@@ -85,6 +85,7 @@ the IEEE 1788 test vectors, and nothing in rcad builds from it.
 
 To move to a newer commit of the fork, change `rev` in `Cargo.toml`. Then run
 `cargo update -p inari`, and run it again with `--manifest-path fuzz/Cargo.toml`.
+The first move, to 63f2237, is §467.
 
 ### 460.5 Haswell stays the floor
 
