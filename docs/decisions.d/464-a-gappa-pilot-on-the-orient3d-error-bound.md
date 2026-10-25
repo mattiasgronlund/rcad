@@ -4523,9 +4523,10 @@ And what is not a row:
 
 ### 464.14 The side of rcad-geom's sphere
 
-*Unfinished: the third lane's run of every script was still going when 1 to
-5 were written, from the second lane's trial and the third's bisections. What
-follows 5 is the second lane's draft until that run is in.*
+*Unfinished: the third lane wrote 1 to 5, ran every script and both
+bisections, and relayed past its budget before writing 6 to 10. What follows 5
+is the second lane's draft and the third lane's results, still to be written
+up as 6 to 10.*
 
 Q2679 took up `SIDE_OF_SPHERE_ERROR_BOUND` in `crates/rcad-geom/src/sphere.rs`,
 in three lanes on 2026-10-25. The first read the code, proved `tinysq.g` and
@@ -4734,6 +4735,36 @@ on each (567 to 5362 lines, 0 to 21 hints); `c_skin_ssss_noeb.g`,
 control fails with `eb in [0, 3b-1072]`, best `[-inf, inf]`. No output in the
 trial says "not trivially equal"; each has only "assumed to be nonzero"
 warnings, as 464.12's did.
+
+**The third lane's run, not yet written up.** `runall.sh` ran all 864
+scripts through `one.sh`, 16 at a time, at a load of 40 to 55 over 24 cores,
+and `collect.py`, `summarize.py`, `brief.py` and `pairs.py` read the outputs
+(all four in the scratch directory the report names, to be appended in 9):
+
+- `431 proofs, 433 controls, 864 runs in run.log, 431 coq lines`. Every proof
+  exits 0, with `gappa -Bcoq` and `coqc` exit 0. Every control exits 1 but
+  `c_skin_noeb.g`, which proves, as 464.12's `c_sphere_noeb.g` did.
+- The 15 cases of `n` and `z` alone on `y`, and on `value`, print what
+  464.12's 6 lists for the same zero sets; `skin_zzzz.g` and the 80 other
+  cases with no `n` print "remaining results are pointless".
+- The 160 cases on `y` with an `s` or `u` and at least one `n` print `(e) /
+  Phatx` within `1.11022e-16` to `5.55112e-16`, `P` at least `2^(-971.585)`,
+  and the `d` sum within `±2^(-1073.41)` at the widest, `3 · 2⁻¹⁰⁷⁵`. The 160
+  on `value` print `(e) / Phatx` within `1.11022e-16` to `6.66134e-16`, the
+  same `P` and `d`.
+- `pairs.py`: `350 controls at u/2, 0 whose best is not the relative bound
+  over u/2`. The 80 `_noeb` controls with an `s` or `u` and no `n` fail with
+  best `[-inf, inf]`, printing `eb` within `[0, 0]` up to `[0, 9b-1074]`.
+  `c_skin_nonormal.g` fails with best `[-4.2731e+909, 4.2731e+909]`.
+- Gappa took 0.07 to 48.00 s on a proof and 0.08 to 155.79 s on a control;
+  `gappa -Bcoq` and `coqc` together 1.20 to 54.56 s. `skin.v` is 4047 lines
+  with 18 hints, `skinv.v` 4186 with 19, `skin_zzzz.v` 366 with 2,
+  `skin_uuuu.v` 301 with 2, the largest `skin_snus.v`, 6111 lines; 0 to 21
+  hints. `skin.g`'s `gappa -Bcoq` prints 59 "assumed to be nonzero" lines and
+  `skinv.g`'s 66. The one other line in any output is "Warning: no need for
+  the rewriting at line 9 column 17", in a file not yet named.
+- `bisect.py`: `smallest: 5u + 28u^2 proves, 5u + 27u^2 fails` and
+  `smallest: 6u + 30u^2 proves, 6u + 29u^2 fails`.
 
 `skincases.py`, as the second lane left it:
 
