@@ -235,6 +235,59 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_
 }
 
 /// [`a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`]
+/// with the thin bar turned 1 about `z`, so that it would rest on the thick
+/// wall at `(−2 sin 1, 2 cos 1, 0)`. Turned in `f64`, its axis runs a hair less
+/// than 1 from the thick one's, so the thin pipe stays inside the thick one
+/// there, and its two loops pass each other rather than meet: the thick wall's
+/// two windows end `3.6e−8` round `z` apart, `7e−8` along the wall. Each answer
+/// has the faces of the unturned pair's.
+///
+/// Every fuse was refused `CannotNameWhichPieceOfACrossingThisIs` until Q2710.
+/// `two_loops_either_side_of_a_pipe` in `intersect.rs` read the plane that
+/// tells the two loops apart as leaning `3.9e−8` off the way across, where the
+/// loops are `2.6e−8` clear of it, though that plane lies exactly in the flat
+/// of the two axes and so leans not at all.
+///
+/// The thick bar less the thin one is refused
+/// `CurvedFaceWithAHoleGoesTooFarRound` meshing the thick wall, which the
+/// union keeps too and meshes. That fuse's mesh walks the wall's two rims with
+/// a corner every fifth of a turn, and `cut_a_ring_across` in `mesh.rs` moves
+/// each of its four cuts from a quarter to the rims' nearest corner. The cut at
+/// `π` moves to `4π/5`, short of where the windows pass, and meets the window
+/// the cut at `2π/5` meets too, and `cut_a_ring_across` gives up at
+/// `the_legs_round_islands_stay_inside_a_ring`. A gap (§16.10): the solid is
+/// there, and cuts at `π/2` and `π`, each meeting one window, as the union's
+/// mesh cut it, would reach it.
+#[test]
+fn a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z_answers_every_fuse_but_the_thick_bar_less_the_thin()
+ {
+    let build: Pair = a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z;
+    let mut model = a_model();
+    let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
+    assert_eq!(curves(&thick, &thin), Ok(2));
+    assert_eq!(curves(&thin, &thick), Ok(2));
+    for one in six_fuses() {
+        if matches!(one, (Rule::Difference, true)) {
+            let said = fuse(&mut a_model(), build, Rule::Difference, true);
+            assert!(
+                matches!(
+                    said,
+                    Err(rcad_topo::Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
+                ),
+                "the thick bar less the thin one: {said:?}"
+            );
+        } else {
+            the_fuse_answers(
+                build,
+                one,
+                [16.0 * PI, 8.0 * PI, bar_through_bar(2.0, 1.0, 1.0)],
+                [&[7], &[3], &[4], &[3, 3]],
+            );
+        }
+    }
+}
+
+/// [`a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`]
 /// turned by quarter turns: the thin bar along `y` at `x = 1` and at `x = −1`,
 /// and along `x` at `y = −1`, so its two loops meet at `(2, 0, 0)`,
 /// `(−2, 0, 0)` and `(0, −2, 0)`. The thick bar's wall between its caps is a
@@ -1549,6 +1602,21 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one(model: &mut Model) -> [SolidK
         a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
         a_bar_along_x(model, 1.0, [-4.0, 1.0, 0.0], 8.0),
     ]
+}
+
+/// [`a_thin_bar_resting_on_the_inside_of_a_thick_one`] with the thin bar
+/// turned 1 about `z`.
+fn a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z(
+    model: &mut Model,
+) -> [SolidKey; 2] {
+    let [thick, thin] = a_thin_bar_resting_on_the_inside_of_a_thick_one(model);
+    model
+        .place_solid(
+            thin,
+            &Isometry::rotation(&Axis::z(), 1.0).expect("a finite turn"),
+        )
+        .expect("this model made the key");
+    [thick, thin]
 }
 
 fn a_thin_bar_up_the_inside_of_a_thick_one(model: &mut Model) -> [SolidKey; 2] {
