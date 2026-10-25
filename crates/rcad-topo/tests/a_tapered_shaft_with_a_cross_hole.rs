@@ -17,18 +17,21 @@
 //! since row Q2789 the walks are ordered round a loop off the cone's axis and
 //! each loop's side is read past the flat surface through the apex that picks
 //! it, on the cone and on the pipe alike. **What each fuse gives now is pinned
-//! here**, under every rule both ways round. The union both ways and the cone
-//! less the other solid keep the cone's face with the loops as islands in it.
-//! On the tapered shaft that face is a band clear of the apex between two rims
-//! right round, which the mesher cuts across as it cuts a ring on a pipe, and
-//! every fuse answers since row Q2810. On the two pointed cones it is a cap
-//! round the apex, which the mesher refuses as a wire that will not lie flat,
-//! since it lets islands into a ball's cap alone, so each answers three of its
-//! six fuses: the intersection both ways round, and the other solid less the
-//! cone. Row Q2811 turns those round. Each answer that comes back is
-//! certified, sound, and measures as the others that came back say it must:
-//! the union and the intersection together hold each solid once, and each
-//! solid less the other is that solid less the intersection.
+//! here**, under every rule both ways round, and for a fourth shape since row
+//! Q2811: a pointed cone with a pin pushed through it as the tapered shaft's
+//! is. The union both ways and the cone less the other solid keep the cone's
+//! face with the loops as islands in it. On the tapered shaft that face is a
+//! band clear of the apex between two rims right round, which the mesher cuts
+//! across as it cuts a ring on a pipe, and every fuse answers since row Q2810.
+//! On the pointed cones it is a cap round the apex, which the mesher cuts up
+//! to the apex as it cuts a cap on a ball, and every fuse answers since row
+//! Q2811. Until then the mesher let islands into a ball's cap alone and
+//! refused the cone's as a wire that will not lie flat, so the leaning bar and
+//! the ball each answered three of their six fuses: the intersection both
+//! ways round, and the other solid less the cone. Each answer is certified,
+//! sound, and measures as the others say it must: the union and the
+//! intersection together hold each solid once, and each solid less the other
+//! is that solid less the intersection.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -63,19 +66,16 @@ fn a_tapered_shaft_fused_with_a_pin_through_it_answers_every_rule() {
 /// half, so its half-angle is about 0.46 radians, and the bar leans 0.3
 /// radians about the `x` axis through the point four up the cone's axis.
 ///
-/// The intersection answers both ways round, and so does the bar less the
-/// cone. The union both ways and the cone less the bar keep the cone's face
-/// with its rim right round and the loop on the upper nappe as an island in
-/// it, which the mesher refuses as a wire that will not lie flat: row Q2811.
+/// Every fuse answers, both ways round. The union both ways and the cone less
+/// the bar keep the cone's face with its rim right round and the loop on the
+/// upper nappe as an island in it, a cap of the cone round its apex, and the
+/// mesher cuts it up to the apex as it cuts a cap on a ball with islands in
+/// it. It refused that face as a wire that will not lie flat until row Q2811.
 #[test]
-fn a_pointed_cone_fused_with_a_bar_leaning_through_it_answers_three_rules_of_six() {
+fn a_pointed_cone_fused_with_a_bar_leaning_through_it_answers_every_rule() {
     assert_eq!(
         every_fuse_of(cone_and_leaning_bar).refusals(),
-        [
-            [Some(NOT_FLAT), Some(NOT_FLAT)],
-            [None, None],
-            [Some(NOT_FLAT), None]
-        ]
+        [[None, None], [None, None], [None, None]]
     );
 }
 
@@ -92,6 +92,24 @@ fn a_pointed_cone_fused_with_a_bar_leaning_through_it_answers_three_rules_of_six
 fn a_pointed_cone_fused_with_a_ball_poking_out_of_its_side_answers_every_rule() {
     assert_eq!(
         every_fuse_of(cone_and_ball).refusals(),
+        [[None, None], [None, None], [None, None]]
+    );
+}
+
+/// **A pointed cone with a cross pin through it.** The pin has radius a half
+/// and runs along `y` at height five, where the cone has radius two and a
+/// half, so it pokes out each side, as a hole drilled across a conical point.
+///
+/// Every fuse answers, both ways round. The union both ways and the cone less
+/// the pin keep the cone's face with its rim right round and two islands in
+/// it, one where the pin goes in and one where it comes out, a cap of the cone
+/// round its apex, and the mesher cuts it up to the apex as it cuts a cap on a
+/// ball with islands in it. It refused that face as a wire that will not lie
+/// flat until row Q2811.
+#[test]
+fn a_pointed_cone_fused_with_a_pin_through_it_answers_every_rule() {
+    assert_eq!(
+        every_fuse_of(cone_and_pin).refusals(),
         [[None, None], [None, None], [None, None]]
     );
 }
@@ -129,6 +147,17 @@ fn cone_and_ball(model: &mut Model) -> (SolidKey, SolidKey) {
         )
         .expect("a ball of radius two");
     (cone, ball)
+}
+
+fn cone_and_pin(model: &mut Model) -> (SolidKey, SolidKey) {
+    let cone = a_pointed_cone(model, 0.5, 8.0);
+    let along_y = Isometry::translation(Vector::new(0.0, -6.0, 5.0))
+        .expect("a shift")
+        .compose(&Isometry::quarter_turns(&Axis::x(), -1).expect("a quarter turn"));
+    let pin = model
+        .add_round_bar(0.5, 12.0, &along_y)
+        .expect("a bar of radius a half");
+    (cone, pin)
 }
 
 /// What [`every_fuse_of`] got: for the union, the intersection and the
