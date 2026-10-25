@@ -14720,6 +14720,95 @@ mod tests {
         }
     }
 
+    /// **A box across the line from the corner a ball face's half-line is
+    /// aimed at through another corner is placed from the next corner** (row
+    /// Q2738), as a cone face's is (row Q2634). The skin of
+    /// [`a_lens_of_a_ball_notched_at_a_corner`] is read from `(−3, 0, 0)`, and
+    /// its half-line is aimed first at its first corner, `(0.5, 1.5, −√6.5)`.
+    /// Each point asked is a point of the sphere on the plane through
+    /// `(−3, 0, 0)`, that corner and the corner `(1.2, 1.5, √5.31)` or
+    /// `(1.2, √7.47, 0.3)`, found by solving for it at the `x` given, and it is
+    /// given as a box 1e-9 wide across that plane. So it has no sign of which
+    /// side of the half-line's line that other corner is seen on, though it has
+    /// a sign of every side's own line. Inside the face the skin holds it, and
+    /// in the notch and below `y = 1.5` it does not.
+    #[test]
+    fn a_box_across_the_line_from_the_corner_a_ball_face_is_aimed_at_through_another_is_placed_from_the_next()
+     {
+        let across = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        let on = Interval::exactly;
+        let (model, solid, skin) = a_lens_of_a_ball_notched_at_a_corner();
+        let first = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .find(|face| face.key() == skin)
+            .and_then(|face| face.wires().flat_map(WireView::points).next())
+            .expect("a corner")
+            .coordinates();
+        assert!(
+            first[0] == 0.5 && first[1] == 1.5 && first[2] < 0.0,
+            "the half-line aims first at the corner below the ball's middle, not at {first:?}"
+        );
+        let mut wrong = Vec::new();
+        for (point, is) in [
+            (
+                [
+                    on(1.5),
+                    across(1.847_406_065_973_128),
+                    on(-1.826_770_600_651_787_2),
+                ],
+                OnAFace::Held,
+            ),
+            (
+                [
+                    on(1.0),
+                    across(1.956_175_667_449_774_3),
+                    on(-2.042_884_421_125_539_7),
+                ],
+                OnAFace::Held,
+            ),
+            (
+                [
+                    on(1.0),
+                    across(2.729_541_612_378_405),
+                    on(0.741_351_864_025_912_7),
+                ],
+                OnAFace::Held,
+            ),
+            (
+                [
+                    on(1.8),
+                    across(1.770_987_494_198_324_4),
+                    on(1.619_754_084_851_506),
+                ],
+                OnAFace::NotHeld,
+            ),
+            (
+                [
+                    on(0.6),
+                    across(1.247_319_746_770_685),
+                    on(2.661_614_819_863_294),
+                ],
+                OnAFace::NotHeld,
+            ),
+        ] {
+            let answer = model
+                .solid(solid)
+                .expect("this model made the key")
+                .face_holds_the_point(
+                    skin,
+                    PredicatePoint::Constructed(point),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+            if answer.as_ref().ok() != Some(&is) {
+                wrong.push(format!("{point:?}: {answer:?}, not {is:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
     /// A ball of radius 3 at the origin kept to the corner of a block where
     /// `x ≥ 0.5` and `y ≥ 1.5`, less the corner of another where `x ≥ 1.2`
     /// and `z ≥ 0.3`, and the key of its one face on the ball. That face has
