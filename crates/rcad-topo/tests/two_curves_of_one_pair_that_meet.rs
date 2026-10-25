@@ -409,6 +409,9 @@ fn a_thinner_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_ans
 /// `intersect` names that one line. Turned the least bit about `x`, it crosses
 /// in two curves that meet
 /// ([`a_thin_bar_turned_a_hair_inside_a_thick_one_is_refused_at_the_first_face_a_fuse_cuts_that_refuses`]).
+/// Both bars turned a radian about `z`, the turn rounds the thin axis off the
+/// circle of radius 1, and the two pipes cross in two lines
+/// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_answers_every_fuse`]).
 ///
 /// What they share is the thin bar between the thick bar's caps, `4π`.
 #[test]
@@ -423,6 +426,43 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_
         [16.0 * PI, 6.0 * PI, 4.0 * PI],
         [&[7], &[3], &[4], &[3, 3]],
     );
+}
+
+/// [`a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_fuse_answers`]
+/// with both bars turned 1 about `z`, and again with the thin bar at `x = −1`,
+/// where it touches the thick wall opposite its own seam and nowhere near the
+/// thick one's. The turn puts the thin axis at `(c, s)`, the cosine and sine
+/// of 1 as `f64`, and `c² + s² − 1` is `4.8e−17`, so the thin pipe pokes out
+/// of the thick one by `2.4e−17` and `intersect` names two lines, `1e−8`
+/// either side of where they touch. At `x = 1` both seams run between them.
+/// The thin wall outside the thick one between the lines is a strip `2e−8`
+/// wide, so the union has 10 faces where the unturned bars' has 7, what they
+/// share 4 where it has 3, and the thin bar less the thick one is one solid of
+/// 10 faces where it is two of 3: the strip joins its two ends.
+///
+/// Every fuse was refused `Undecidable` "side of cylinder" at a seam corner on
+/// that line: the thick floor's at `(2c, 2s, −2)` with the thick bar first,
+/// asked of the thin pipe, and the thin floor's at `(2c, 2s, −3)` with the
+/// thin bar first, asked of the thick one (Q2756). Read as the point where
+/// its seam plane crosses the circle its cap meets its wall in, the thick
+/// corner is `2.4e−17` inside the thin pipe and the thin corner as far
+/// outside the thick one.
+#[test]
+fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_answers_every_fuse()
+{
+    let along_the_seams: Pair = |model| both_bars_turned_a_radian_about_z(model, 1.0);
+    let opposite_the_seam: Pair = |model| both_bars_turned_a_radian_about_z(model, -1.0);
+    for build in [opposite_the_seam, along_the_seams] {
+        let mut model = a_model();
+        let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
+        assert_eq!(curves(&thick, &thin), Ok(2));
+        assert_eq!(curves(&thin, &thick), Ok(2));
+        every_fuse_answers(
+            build,
+            [16.0 * PI, 6.0 * PI, 4.0 * PI],
+            [&[10], &[4], &[4], &[10]],
+        );
+    }
 }
 
 /// [`a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_fuse_answers`]
@@ -1516,6 +1556,22 @@ fn a_thin_bar_up_the_inside_of_a_thick_one(model: &mut Model) -> [SolidKey; 2] {
         a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
         a_bar(model, 1.0, [1.0, 0.0, -3.0], 6.0),
     ]
+}
+
+/// The bar of radius 2 up `z` from `−2` to 2, and the bar of radius 1 up `z`
+/// from `(x, 0, −3)`, 6 long, both turned 1 about `z`.
+fn both_bars_turned_a_radian_about_z(model: &mut Model, x: f64) -> [SolidKey; 2] {
+    let turn = Isometry::rotation(&Axis::z(), 1.0).expect("a finite turn");
+    let bars = [
+        a_bar(model, 2.0, [0.0, 0.0, -2.0], 4.0),
+        a_bar(model, 1.0, [x, 0.0, -3.0], 6.0),
+    ];
+    for bar in bars {
+        model
+            .place_solid(bar, &turn)
+            .expect("this model made the key");
+    }
+    bars
 }
 
 /// The bar of radius 2 up `z` from `−2` to 2, and the bar of radius 1 up `z`
