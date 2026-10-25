@@ -6042,42 +6042,272 @@ three terms, one for each piece of the reach squared, `h²`, `k²` and `2|h||k|`
 The radius term is three pieces that sum to `skin`, one for each direction
 square, each true piece `r² d²`. So the error is averaged over twelve pieces.
 
-**What the first two lanes ran.** The first lane's `cyl.g`, with every
-product normal and nothing zero and all twelve pieces in one hint, did not
-finish: `one.sh` (464.13's 9, the same bytes) printed `cyl exit 124 620.51s`,
-Gappa killed at its 600 s timeout, on a load of about 24 over 24 cores. The
-second lane found where the time goes. With the goal replaced by `px in ?` and
-every hint kept, Gappa still did not finish in 90 s (`t_triv exit 124
-94.80s`), and with that goal and the twelve-piece hint dropped it finished in
-`16.64s`. So what is slow is checking that one hint's identity, over twelve
-pieces at once, before any goal is tried. `t_axis.g`, one component alone with
-its three pieces, proves in `0.58s` and prints the component's square within
-`7.77156e-16`, `7u`. The permanent alone (`t_perm2.g`: six normal halves and a
-normal `skin` as free doubles) proves in `0.22s`, printing `P −/ Phat` within
-`6.66134e-16`, `6u`.
+**3. The bound on `y`.** `cyl.g` (9) proves `|y − Ex| ≤ eb` at the code's
+`B`. In `run1.sh` (9), 24 Gappa runs at once on a load of about 30 over 24
+cores, it exits 0 in `213.82s`, printing `(y − Ex) / P12` within
+`9.99201e-16` and `P −/ Phat` within `6.66134e-16`, `9u` and `6u` to the
+digits Gappa prints. `Phat` is the permanent with no rounding of its own, and
+`P12` is the same quantity written as its twelve pieces. The smallest `B` it
+proves, over `m` in `B = 9u + m u²`, is `9u + 70u²`. `run1.sh` ran `m` of 0,
+40, 60, 70, 80, 90, 100, 120 and 160: 0, 40 and 60 fail, best `[-1, 1]` as
+Gappa prints it, rounded, and the rest prove. `par.sh` (9) then ran the nine
+`b_cyl_<m>.g` that `python3 cylcases.py 61 62 63 64 65 66 67 68 69` writes,
+and each exits 1, best `[-1, 1]`, printing the same `9u` and `6u`.
 
-`cyl.g`, below, whole, is the first lane's with that hint split in four, one
-per block: the three components' reaches squared and the radius term, with one
-hint over the blocks and one over each block's pieces. It also drops three
-hints `eG / cG -> WG` that Gappa warned it did not need. Its first form, the
-same but with those three hints kept, exits 0 in `94.33s` on a load of about
-30 over 24 cores, printing `(y − Ex) / P12` within `9.99201e-16`, `9u` to the
-digits printed, and `P −/ Phat` within `6.66134e-16`, `6u`, and proving `(y −
-Ex) / eb` in `[−1, 1]` at the code's `B`. The second lane then ran
-`run1.sh` (below), 24 Gappa runs at once on a load of about 30 over 24 cores,
-which printed:
+How `cyl.g` got its form. The first lane's `cyl.g`, with every product normal
+and nothing zero and all twelve pieces in one hint, did not finish: `one.sh`
+(464.13's 9, the same bytes) printed `cyl exit 124 620.51s`, Gappa killed at
+its 600 s timeout, on a load of about 24 over 24 cores. The second of the nine
+lanes found where the time goes. With the goal replaced by `px in ?` and every
+hint kept, Gappa still did not finish in 90 s (`t_triv exit 124 94.80s`), and
+with that goal and the twelve-piece hint dropped it finished in `16.64s`. So
+what is slow is checking that one hint's identity, over twelve pieces at once,
+before any goal is tried. `t_axis.g` (9), one component alone with its three
+pieces, proves in `0.58s` and prints the component's square within
+`7.77156e-16`, `7u`. The permanent alone (`t_perm2.g` (9): six normal halves
+and a normal `skin` as free doubles) proves in `0.22s`, printing `P −/ Phat`
+within `6.66134e-16`, `6u`. `cyl.g` as it stands is the first lane's with that
+hint split in four, one per block: the three components' reaches squared and
+the radius term, with one hint over the blocks and one over each block's
+pieces. It also drops three hints `eG / cG -> WG` that Gappa warned it did not
+need. Its first form, the same but with those three hints kept, exits 0 in
+`94.33s` on a load of about 30 over 24 cores, printing the same two figures
+and proving `(y − Ex) / eb` in `[−1, 1]` at the code's `B`.
 
-- `cyl exit 0 213.82s`, the same two figures, and `cyl coq -Bcoq exit 0 coqc
-  exit 0 339.29s lines 14703 hints 54`.
-- The bisection over `m` in `B = 9u + m u²`: `m` = 0, 40 and 60 fail, best
-  `[-1, 1]` as Gappa prints it, rounded; 70, 80, 90, 100, 120 and 160 prove.
-  So the smallest `m` is 61 to 70, not yet bisected further.
-- `c_cyl_half exit 1`, best `[-18, 18]`, which is the `9u` over `u / 2`.
-- `c_cyl_nonormal exit 1`, best `[-1.16728e+1527, 1.16728e+1527]`, failing
-  `REL(P, Phat)` and `BND((y - Ex) / P12)` too.
-- `c_cyl_noeb exit 124 600.84s`, and `cylv.g`, `c_cylv_half.g` and each
-  `b_cylv_<m>.g` exit 124 at 600 s too. Where the claim on `value` spends its
-  time was not found.
+**4. The claim on `value`.** Two forms were tried, and neither proves at the
+code's `B`.
+
+- `cylv.g`, which `cylcases.py` (9) writes from `cyl.g` with `rv = value / y`
+  on every carry, exits 124 at `run1.sh`'s 600 s. With `T=1800` in `run2.sh`
+  (9) it exits 1 in `541.97s`, best `[-1, 1]`, printing `(value − Ex) / P12`
+  within `1.11022e-15`, `10u`, and the same `6u`. `t_vtriv.g` (`vgen.py`, 9),
+  `cylv.g` with its goal replaced by `px in ?` and every hint kept, exits 0 in
+  `334.59s` on a load of about 29 over 24 cores. So in this form Gappa spends
+  335 s checking the hints before it tries any goal. Which hint costs that was
+  not split.
+- `cylv2.g` keeps `cyl.g`'s blocks for `y` and takes `value`'s own rounding as
+  a fraction of `y`, and `y` as a fraction of the permanent: `(value − Ex) /
+  eb -> (y − Ex) / eb + (value − y) / eb;` and `(value − y) / eb -> ((value −
+  y) / y) · (y / P12) · (Phat / P) · (P / eb);`, with `y / P12` averaged over
+  the same four blocks. Its first form exits 1 in `131.20s`, printing `(value
+  − y) / y` within `1b-53` and the same `9u` and `6u`, but `y / P12` only in
+  `[-3b5118, 3b5122]`. `m2.g` (9), one component and `skin` alone, shows why:
+  the piece `K h²` over `h²` reaches `−1` once Gappa takes `(h / |h|)²` as
+  `[−1, 1]`, and with a relative error that reaches `−1` Gappa does not
+  average a sum. `m3.g` (9), the same with every piece doubled so that each
+  such ratio is at most about a half, prints `y / P12` within `[-1, 1]` as
+  Gappa rounds it, in `0.22s`. `vgen.py` writes `cylv2.g` in that doubled
+  form. It exits 1 at the code's `B` in `332.03s`, best `[-1, 1]`, printing `y
+  / P12` within `[-1, 1]`, `(value − y) / y` within `1b-53` and the same `9u`
+  and `6u`. Over `m` in `B = 10u + m u²`, 81 fails (`b_cylv2_81 exit 1
+  542.42s`, best `[-1, 1]`), and 82 (`447.87s`), 83 (`447.09s`), 84, 88, 96,
+  112 and 144 (182.63 to 186.20 s each) prove. So the doubled form proves
+  `|value − Ex| ≤ eb` at `10u + 82u²`, two `u²` above the code's `10u +
+  80u²`.
+
+The third lane had worked that out on paper before the run: the doubled form
+costs `u (1 + 5u)` of the permanent on top of `y`'s `9u + (63 + c) u²`, and
+with `(Phat / P) (P / eb) ≈ (1 + 7u) / B` and `c` between 6 and 7 by the
+bisection of 3, that is about `10u + 82u²`. So these forms lose `u²`s, and it
+is not shown that `value` is ever past the bound at the code's `B`: nobody
+searched for an input where it is. `decide` does not need it: the doc on
+`Filtered::error_bound` (`cascade.rs:25-35`) asks only for the bound on the
+sum before `value`'s last rounding, which 3 proves, as in 464.14's 4.
+
+**5. What the comments claim.** The doc comment on the constant,
+`cylinder.rs:529-558`, counts ten roundings on the longest chain to `value`
+and six on the radius term's, and then says:
+
+> `(1 + epsilon)^10 - 1 <= 10*epsilon + 45*epsilon^2 + ...` times the
+> permanent.
+>
+> [...]
+>
+> The `80*epsilon^2` covers the higher-order terms and the rounding of the
+> permanent itself; what it has to beat is about `45*epsilon`.
+>
+> Every step of that argument is a *relative* one, so as with every bound of
+> this shape it holds only while nothing overflows or falls into the
+> subnormals. [`HowFarFromTheSkin::on_floats`] enforces the bottom end product
+> by product through [`product_is_normal`], and `decide` the top end by
+> refusing a bound that is not itself a normal number.
+
+The comment above the check, at `cylinder.rs:308-314`, says:
+
+> The bound below is a fraction of the permanent, which only bounds anything
+> while every product keeps its relative accuracy. One of them in the
+> subnormals and this level certifies a wrong sign.
+>
+> The permanent squares `|left| + |right|` where the value squares `left -
+> right`, and the first is never below the second, so checking the components
+> here covers the permanent's squares too.
+
+Against what is proved:
+
+- The ten roundings to `value` agree with `cylv.g`'s `10u` (4). On `y` the
+  count is nine, and `cyl.g` prints `9u` (3).
+- "About `45*epsilon`" is the `ε²` term of `(1 + ε)¹⁰ − 1`, and it leaves out
+  what the same sentence says the `80ε²` covers. The permanent's rounding,
+  `6u` (`cyl.g`, `t_perm2.g`), taken against `10ε` costs `60ε²`. The rounding
+  of `B · P` costs `ε` of `eb`, which is `10ε²`. So by the comment's own terms
+  the count is `45 + 60 + 10 = 115`, above its `80`. On `y` that costs
+  nothing, since `y` proves at `9u + 70u²`, about a `u` below `10u`. On
+  `value` the doubled form proves only at `82`, and the count says nothing
+  either way at `80`. So the sentence gives the wrong power and the wrong
+  number.
+- "Only while nothing ... falls into the subnormals", enforced "product by
+  product": `product_is_normal` lets a zero through (`cascade.rs:67-69`), and
+  the branches where a difference, a direction component or the radius is
+  zero are not run (10). A cancelling component gets through too, and its
+  reach square, which nothing checks, can then fall below the normals or
+  round to zero, and the bound holds there (6). So the reach squares do not
+  need what "only" says.
+- "One of them in the subnormals and this level certifies a wrong sign" is
+  false for the reach squares: by 6, one, two or three of them below the
+  normals or rounding to zero, and the bound still holds. For the products
+  `on_floats` checks it was not run, as 464.14's 6 ran the sphere's squares
+  (10).
+- "Checking the components here covers the permanent's squares too" is true
+  where the component does not cancel, and `cyl.g` writes the argument beside
+  its `v` hypothesis. It is false where the component cancels: its square is
+  0, which the check passes, and `v = rnd(4h²)` can be below the normals with
+  nothing checking it. The bound holds anyway (6).
+
+So the comments claim more than is proved, which is what the row asks.
+Restating them is a row (10).
+
+**6. The components that cancel.** As 464.8's `o2s.g` split on the product
+its predicate does not check, `cylsplit.py` (9) splits `cyl.g` on the reach
+squares `v` (2). Each component of the cross product is in one of four
+states:
+
+- `n`: it does not cancel. `q = rnd(h − k)` is not zero, so its square `s` is
+  normal, which `on_floats` checks, and so is its reach square `v`, which is
+  never below `s`.
+- `c`: it cancels to zero, `h == k`, and its reach square `v = rnd(4h²)` is
+  normal.
+- `s`: it cancels, and `v` is below the normals and does not round to zero.
+- `u`: it cancels, and `v` rounds to zero.
+
+The four cover every component whose halves are normal, which
+`cross_product_halves_if_normal` checks: `q` is zero exactly when `h == k`,
+and for `n`, `|q| ≤ n`, so `v ≥ s`. That makes 64 cases, written
+`cyl_<case>.g`, and `cyl_nnn.g` is `cyl.g`. A component that cancels writes
+`k` as `h`, drops `Q`, `q`, `s` and their ratios, writes each sum without its
+zero squares, writes its reach `|h| + |h|` unrounded, and is one block off by
+`eC = −C²`, with `eC / P3 -> −((h / |h|)² (a − b)² / 4)`. A reach square in
+`s` or `u` takes 464.14's step through `Phatx`: `Phat` with `v` in place of
+each `s` reach square and without each `u` one, added as `P` adds.
+
+The unrounded reach stands on a double added to itself rounding to itself,
+and `dbl.g` (9) shows that: it exits 0 in `0.03s`. Overflow is outside it:
+`2|h|` overflows only when `|h| ≥ 2¹⁰²³`, and then `v`, `P` and `eb` are
+infinite and `decide` refuses `eb` as not normal, which is 464.12's 7
+argument on paper and was not run here.
+
+What they print. `run3.sh` (9) ran the 63 cases other than `nnn` on a load of
+about 47 over 24 cores, and `tally3.py` (9) counts them:
+
+- Each of the 63 exits 0 at the code's `B`, in 65.74 s (`cyl_ucc.g`) to
+  190.10 s (`cyl_snn.g`).
+- Each prints `(y − Ex) / P12` within `8.88178e-16` in the 9 cases with two
+  components `n`, `7.77156e-16` in the 27 with one and `5.55112e-16` in the
+  27 with none: `8u`, `7u` and `5u`, all below `cyl.g`'s `9u`.
+- `P −/ Phat`, or `P −/ Phatx` where a reach square is `s` or `u`, is within
+  `6u` in 14 cases, `5u` in 19, `4u` in 9, `3u` in 10, `2u` in 3 and `u` in 7.
+  `cyl_uuu.g`, whose `P` is `skin`, prints `skin` against itself in `[0, 0]`.
+- No `.out`, `.bcoq` or `.coqc` of the 63 has a line other than its results
+  and "assumed to be nonzero" warnings: no "not trivially equal" and no hint
+  Gappa calls unneeded.
+
+So on `y` the bound holds at the code's constant wherever no factor is zero:
+with no component cancelling, and with any of them cancelling, its reach
+square normal, below the normals, or rounding to zero. The comment at
+`cylinder.rs:312-314` is false when a component cancels, and nothing wrong
+follows from it.
+
+The shapes. None of these cases was run as Rust input. By hand arithmetic,
+not run: with the axis origin at 0, the direction `(1, 2, 3)` and the point
+`(2, 4, 6)`, a point on the axis, the halves are `(12, 12)`, `(6, 6)` and
+`(4, 4)`, each product exact, so that is `ccc`. With the direction `(1, 1,
+1)` and the point `(1, 2, 2)`, `x`'s halves `(2, 2)` cancel, `y`'s are `(2,
+1)` and `z`'s `(1, 2)`, so that is `cnn`. Both are shapes a designer makes. A
+reach square below the normals needs `|h| < 2⁻⁵¹²`, since `rnd(4h²) <
+2⁻¹⁰²²`. Every case proves, so there is no wrong sign to look for.
+
+**7. The controls.** At `B = 1b-54;`, `u / 2`, each must fail, and does:
+
+- `c_cyl_half.g` exits 1, best `[-18, 18]`, `cyl.g`'s `9u` over `u / 2`.
+- `c_cylv_half.g` exits 1 in `379.28s` under `T=1800`, best `[-20, 20]`, and
+  `c_cylv2_half.g` exits 1, best `[-20, 20]`: the `10u` of the claim on
+  `value` over `u / 2`.
+- The 63 `c_cyl_<case>_half.g` exit 1, best `[-16, 16]` in 9, `[-14, 14]` in
+  27 and `[-10, 10]` in 27, each case's own bound over `u / 2`.
+
+Together with the failures at `9u + 69u²` on `y` and at `10u + 81u²` on
+`value`, that says none of the proofs came from a contradiction in its
+hypotheses. Two more controls take a hypothesis away:
+
+- `c_cyl_nonormal.g`, `cyl.g` without every `1b-1022` hypothesis but `|eb|`'s
+  and without the lemma line each of those products gives, the reach squares'
+  among them, exits 1, best `[-1.16728e+1527, 1.16728e+1527]`, and fails
+  `REL(P, Phat)` and `BND((y - Ex) / P12)` too. So a script of this kind catches a
+  missing check, as 464.14's 7 found.
+- `c_cyl_noeb.g`, `cyl.g` without `eb` normal, exits 124 in `600.84s`. Where
+  it spends its time was not traced.
+
+**8. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0 from 464.5's nix block, accept
+each script that proves and was run through them, and no `coqc` printed
+anything:
+
+- `cyl.g`: 14703 lines with 54 hints, in `339.29s` (`run1.sh`).
+- `dbl.g`: 217 lines with 1 hint, in `12.62s` (`run3.sh`).
+- The 63 cases of 6: 8908 (`cyl_uuc`) to 13908 lines (`cyl_nns`), with 31
+  (`cyl_ccc`) to 48 hints, in 145.5 to 194.2 s each (`run3.sh`).
+- `b_cylv2_82.g`: 19054 lines with 81 hints, in `105.45s` (`run4.sh`, each
+  step's timeout at 1500 s, since the Gappa run alone took 447.87 s).
+
+Gappa does not write the same proof each run (464.4), so the sizes are those
+runs'. Each hint enters the Coq file as a hypothesis with no condition
+attached, as in 464.4, so each proof stands on its hints and on what Gappa
+took to be nonzero: `cyl.g`'s `gappa -Bcoq` prints 292 lines of the form "has
+been assumed to be nonzero when checking a rewriting rule" and, besides them,
+only its results. `cylv.g`, the controls and the other bisection scripts were
+not run through `coqc`. `field` has not been run on these hints (464.10).
+
+**9. The scripts.** `cylcases.py` writes `cylv.g`, the controls of 7 and the
+bisection scripts of 3 from `cyl.g`; `vgen.py` writes the second form of 4
+and its probes; and `cylsplit.py` writes the 63 cases of 6 and their
+controls. To run them again, save the nix block of 464.5 as `gappalib18.nix`
+and `cyl.g` and the three generators beside it, and then:
+
+```sh
+python3 cylcases.py; python3 cylsplit.py; python3 vgen.py
+nx="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
+pin=github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe
+$nx shell $pin#gappa --command gappa -Eprecision=200 cyl.g
+$nx shell $pin#gappa --command gappa -Eprecision=200 -Bcoq cyl.g > cyl.v
+gl=$($nx build --impure --no-link --print-out-paths -f gappalib18.nix)
+fl=$($nx build --no-link --print-out-paths $pin#coqPackages_8_20.flocq)
+COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+  $nx shell $pin#coqPackages_8_20.coq --command coqc cyl.v
+```
+
+and the same for every other file they write, and for `dbl.g`. A script that
+proves exits 0; a control must exit 1. What the lanes ran is `run1.sh` to
+`run4.sh` and `par.sh` (below), each through 464.13's `one.sh`, the same bytes,
+or through `one1.sh`, which is `one.sh` with the timeout taken from `T` and no
+`coq`. `same.py` (below) checks every script appended here byte for byte
+against the file that was run, and that the three generators, run again from
+the text here, write what was run; its print ends this part. Three files the
+lanes wrote are not appended, since no figure here comes from them:
+`cyl_first.g`, the first lane's `cyl.g` with one hint over all twelve pieces;
+`t_triv.g`, `cyl_first.g` with its goal replaced by `px in ?`; and `m1.g`, an
+eight-line probe of the hint `((G - t) - G) / G`.
+
+`cyl.g`, whole, as the second of the nine lanes split it and every later run
+ran it:
 
 ```gappa
 # restates: crates/rcad-geom/src/cylinder.rs on_floats at 2a7ca9e7
