@@ -5954,15 +5954,16 @@ And what is not a row:
 ### 464.15 The side of rcad-geom's cylinder
 
 Q2680 took up `SIDE_OF_CYLINDER_ERROR_BOUND` in
-`crates/rcad-geom/src/cylinder.rs`, in nine lanes on 2026-10-25. The first
+`crates/rcad-geom/src/cylinder.rs`, in ten lanes on 2026-10-25. The first
 four were the first lane and its three relays. The first wrote `cyl.g`. The
 second split its hint, wrote `cylcases.py` and ran `run1.sh`. The third ran
 the bisection from 61 to 69, wrote `m2.g`, `m3.g`, `vgen.py` and
 `cylsplit.py`, and ran `run2.sh`. The fourth wrote `dbl.g` and ran `run3.sh`.
 The fifth to the eighth were the second lane and its three relays: they
 merged the first lane's branch, fixed `tally3.py`'s block, ran `run4.sh`,
-fixed `same.py`, checked every figure and drafted 1 to 8. The ninth, the third
-lane, wrote 1 to 10. The bound is proved on `y`, the sum before `value`'s last
+fixed `same.py`, checked every figure and drafted 1 to 8. The ninth and the
+tenth were the third lane and its relay: they merged the second lane's branch
+and wrote 1 to 10. The bound is proved on `y`, the sum before `value`'s last
 rounding, at the code's constant wherever no factor is zero: with no component
 of the cross product cancelling, and with any of them cancelling, whatever its
 reach square rounds to. Coq checks each proof, modulo its hints. The claim on
@@ -7609,3 +7610,61 @@ written, same, differ, absent = compare(fresh, cyl2)
 print("run1.sh's written again:", len(written), "same as run:", len(same), "differ:", differ, "not in cyl2:", absent)
 shutil.rmtree(fresh)
 ```
+
+It prints:
+
+```text
+code blocks in 464.15: 20
+cyl.g same
+cylcases.py same
+run1.sh same
+vgen.py same
+cylsplit.py same
+run2.sh same
+run3.sh same
+tally3.py same
+dbl.g same
+m2.g same
+m3.g same
+one1.sh same
+par.sh same
+run4.sh same
+same.py same
+t_axis.g same
+t_perm2.g same
+one.sh is 464.13's block: True
+written again: 164 same as run: 164 differ: [] not in cyl3: []
+cyl_nnn.g is cyl.g: True
+run1.sh's written again: 24 same as run: 24 differ: [] not in cyl2: []
+```
+
+**10. What this leaves.** The rows filed from this write-up while it was
+written:
+
+- Q2771: prove the bound where a difference, a direction component or the
+  radius is zero, the axis-aligned cylinder among them. `product_is_normal(a,
+  b)` is true when `a` or `b` is zero (`cascade.rs:67-69`), so these cases pass
+  every check `on_floats` makes, and no script here covers them. Not run, so no
+  class (§360.5).
+- Q2772: restate `cylinder.rs:541-552` and `312-314` by 5. What the `80ε²` has
+  to beat is `ε²`, not `ε`, and by the comment's own terms `45 + 60 + 10` make
+  115. Checking the components does not cover the permanent's reach squares
+  when a component cancels, though the bound holds there (6).
+- Q2773: run `cylsplit.py` with one, two and three of the products `on_floats`
+  checks below the normals, as 464.14's 6 ran the sphere's squares. Then say
+  whether `on_floats` needs its `product_is_normal` checks, and restate
+  `cylinder.rs:308-310` by what that shows. Not run, so no class. Q2767 waits
+  on it, as well as on Q2684, Q2760 and Q2766.
+
+And what is not a row:
+
+- Q2700 already waits on Q2680, and moves these scripts into `proofs/gappa/`
+  with the others that rows of 464 appended.
+- The claim on `value` at `10u + 82u²` against the code's `80` (4) is a limit
+  of the two forms as run, not a wrong answer: nobody found an input where
+  `value` lands past `eb`, and `decide` needs only `y`. Q2772 restates the
+  comment.
+- How `c_cyl_noeb.g` runs past 600 s (7) was not traced.
+- `cyl.g`'s first `restates` line needs no row: `just src on_floats
+  crates/rcad-geom/src/cylinder.rs` prints the one item, at `cylinder.rs:300`.
+- `field` on these scripts' hints (464.10).
