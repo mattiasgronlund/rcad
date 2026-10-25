@@ -4523,52 +4523,125 @@ And what is not a row:
 
 ### 464.14 The side of rcad-geom's sphere
 
-*Unfinished: Q2679's first lane relayed here, past its budget before any
-script but two had run. What follows is its draft and its plan. The second
-lane wrote `skincases.py` (at the end of this draft), checked it against
-464.12's, ran `tinyzero.g` and a trial of twelve scripts, and relayed before
-the full run. The lane after it runs everything, bisects, and writes this up
-in 464.12's form.*
+*Unfinished: the third lane's run of every script was still going when 1 to
+5 were written, from the second lane's trial and the third's bisections. What
+follows 5 is the second lane's draft until that run is in.*
 
-Q2679 takes up `SIDE_OF_SPHERE_ERROR_BOUND` in `crates/rcad-geom/src/sphere.rs`
-at `05d44c66`. `git log --oneline 3d60b0de..05d44c66` on `sphere.rs`,
-`cascade.rs` and `point.rs` prints nothing, so the last two are as 464.12
-read them. `just src on_floats crates/rcad-geom/src/sphere.rs`
-prints one item, so a `restates` line naming it is not 464.13's two-item case.
+Q2679 took up `SIDE_OF_SPHERE_ERROR_BOUND` in `crates/rcad-geom/src/sphere.rs`,
+in three lanes on 2026-10-25. The first read the code, proved `tinysq.g` and
+planned the cases. The second wrote `skincases.py` and `tinyzero.g`, checked
+the generator against 464.12's and ran twelve of its scripts. The third ran
+every proof, control, bisection and `coqc`, and wrote this up. The bound is
+proved at the code's constant, on the sum before `value`'s last rounding and
+on `value` too, in every case where `on_floats` hands `decide` a number. It is
+proved as well in every case `on_floats`' check refuses, a square below the
+normals: with another square normal the bound still holds, and with none
+normal `eb` is not normal, so `decide` does not compare. Coq checks each
+proof, modulo its hints. So the comment on the check, which says one square in
+the subnormals makes this level certify a wrong sign, is false, and the doc
+comment on the constant writes `15ε` where it means `ε²` and miscounts its own
+terms. Both are in `sphere.rs`, and fixing them is a row (10).
 
-**What the proof guards.** `Sphere::side_of` (`sphere.rs:216-227`) runs the
-cascade on `HowFarFromTheSkin`, and `Surface::Sphere` reaches it from
-`three_surfaces.rs:3294` and `validate.rs:4497`, so unlike 464.12's this is a
-predicate a user reaches.
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
+`sphere.rs`, `point.rs` and `cascade.rs` at `05d44c66`. `git log --oneline
+3d60b0de..05d44c66` on the three prints nothing, so the last two are as
+464.12 read them. `u` is `2⁻⁵³`, and the code's `B = 6u + 48u²` is written `B
+= 6b-53 + 3b-102;`. Each script follows 464.8's pattern: one ratio hint per
+rounding, the error split into one term per square of the permanent so that
+Gappa averages them, 464.5's lemma for each square `on_floats` checks is
+normal, and the step from `y`, the sum before `value`'s last rounding, to the
+sign as 464.4 gives it.
 
-**`on_floats`, line for line** (`sphere.rs:241-269`). It is 464.12's
-`HowFarOut` operation for operation: three gaps, `None` unless
-`product_is_normal` holds for each gap with itself and the radius with itself
-(`sphere.rs:251-254`), the four squares, `value = s0 + s1 + s2 − rr` and
-`permanent = s0 + s1 + s2 + rr`, whose first two sums are `value`'s. So
-464.12's `sphere.g` is this `on_floats` with only `B` changed. The constant
-(`sphere.rs:425-428`) is `(6 + 48ε) ε` with `ε = f64::EPSILON / 2`, which is
-`u`: `6u + 48u²`, written `B = 6b-53 + 3b-102;`. Each step the Rust takes is
-exact, since `48ε` is a multiple of `2⁻⁵⁰`, the ulp of 6.
+**1. What the proof guards.** `Sphere::side_of` (`sphere.rs:216-227`) runs
+the cascade on `HowFarFromTheSkin`, once a guard has refused a point or a
+sphere that is not real numbers. `Surface::Sphere` reaches it from
+`three_surfaces.rs:3294` and from `validate.rs:4497`, and `lib.rs:120` exports
+`Sphere`, whose `side_of` is `rcad-predicates`' `SideOfSurface` trait. So
+unlike 464.12's, this proof guards a predicate a user reaches.
 
-**What the comments claim, to be checked against the runs.**
+**2. `on_floats`, line for line.** `HowFarFromTheSkin::on_floats`
+(`sphere.rs:241-269`) returns `None` for a point that is not exact `f64`s
+(`sphere.rs:242`), takes the three gaps from the centre to the point
+(`sphere.rs:245`), and returns `None` unless `product_is_normal` holds for
+each gap with itself and for the radius with itself (`sphere.rs:251-254`).
+Then it squares the four (`sphere.rs:257-258`) and returns `value = s0 + s1 +
+s2 − rr` and `error_bound = SIDE_OF_SPHERE_ERROR_BOUND * permanent`, with
+`permanent = s0 + s1 + s2 + rr` (`sphere.rs:263-268`). That is 464.12's
+`HowFarOut::on_floats` operation for operation, and `skin.g` writes it as
+`sphere.g` does: ten roundings, the three gaps, the three squares, `rr`,
+`s01`, `s012` and `value`, `y` taking the first nine, and `P = rnd(s012 +
+rr)`, since the permanent's first two sums are `value`'s. `sameas.py` (9)
+checks that each script of 6 for a case of normal and zero squares alone is
+464.12's for the same zero set, once the `restates` lines, the title line and
+the `B` line are dropped. It prints `64 pairs, 0 differ`.
 
-- `sphere.rs:247-250`, on the check: "One of them in the subnormals and this
-  level certifies a wrong sign." It is the sentence 464.8's 4 found false for
-  one product of `SideOfAFlatSurface`, and the case 464.12's 5 left to this
-  row: a square below the normals with the others normal.
-- `sphere.rs:401-424`, on the constant: six roundings to `value`, which
-  464.12's 4 found Gappa prints as `6u` for the same arithmetic. "The `48ε²`
-  covers the higher-order terms and the rounding of the permanent itself, with
-  room to spare: what it has to beat is about `15ε`." That is `ε²`, not `ε`,
-  and by the comment's own terms it is `15ε²` from `(1 + ε)⁶`, `18ε²` from the
-  permanent's three additions against the `6ε`, and `6ε²` from rounding `B ·
-  P`: 39, not 15. Both are under 48, and under 464.12's smallest `B`s for this
-  arithmetic, `5u + 28u²` on `y` and `6u + 30u²` on `value`, to be run again
-  here with `bisect.py`.
-- "It holds only while nothing overflows or falls into the subnormals": a zero
-  square is not a subnormal, so 464.12's zero cases do not contradict it; the
-  cases below the normals answer it.
+The constant (`sphere.rs:425-428`) is `(6 + 48ε) ε` with `ε = f64::EPSILON /
+2`, which is `u`. That is `6u + 48u²`, which a double holds exactly, and so
+does each step the Rust takes to it, since `48ε` is a multiple of `2⁻⁵⁰`, the
+ulp of 6.
+
+**3. The bound on `y`.** `skin.g` (9 below) proves `|y − Ex| ≤ eb` at the
+code's `B`, printing `(y − Ex) / Phat` within `5.55112e-16` and `P −/ Phat`
+within `3.33067e-16`, `5u` and `3u` to the digits Gappa prints, as `sphere.g`
+did. `Phat` is the permanent with no rounding of its own. The smallest `B` it
+proves, by bisection over `m` in `B = 5u + m u²`, is `5u + 28u²`, as in
+464.12's 3: `5u + 27u²` fails, best `[-1, 1]` as Gappa prints it, rounded,
+and so does `5u`.
+
+**4. The claim on `value`.** `skinv.g` makes the same claim on `value`, the
+double `on_floats` returns. It proves at the code's `B`, printing `(value −
+Ex) / Phat` within `6.66134e-16`, `6u` to the digits printed. Its smallest
+`B`, by the same bisection over `B = 6u + m u²`, is `6u + 30u²`, as in
+464.12's 4: `6u + 29u²` fails, and so does `6u`. So here `value` itself stays
+within `eb`, as the other sphere's does. `decide` does not need it to: the doc
+on `Filtered::error_bound` (`cascade.rs:25-35`) asks only for the bound on
+the sum before `value`'s last rounding, which 3 proves.
+
+**5. What the comments claim.** The doc comment on the constant,
+`sphere.rs:401-424`, counts the roundings and then says:
+
+> Six roundings, each costing at most a factor of `(1 + epsilon)`, come to
+> `(1 + epsilon)^6 - 1 <= 6*epsilon + 15*epsilon^2 + ...` times the permanent.
+>
+> The radius term travels a shorter chain — one rounding to square it and one
+> to subtract it — so the six covers it too. The `48*epsilon^2` covers the
+> higher-order terms and the rounding of the permanent itself, with room to
+> spare: what it has to beat is about `15*epsilon`.
+>
+> Every step of that argument is a *relative* one, so like every bound of this
+> shape it holds only while nothing overflows or falls into the subnormals.
+> [`HowFarFromTheSkin::on_floats`] enforces the bottom end product by product
+> through [`product_is_normal`], and `decide` the top end by refusing a bound
+> that is not itself a normal number.
+
+- Six roundings to `value`, the gap's counted twice since it is squared,
+  agrees with the `6u` of 4. On `y` the same count is five, and 3 prints `5u`.
+- "What it has to beat is about `15*epsilon`": that is `ε²`, the term of `(1 +
+  ε)⁶ − 1` the sentence before names, and it leaves out the two things the
+  same sentence says the `48ε²` covers. The permanent's own rounding is its
+  three additions, which 3 prints as `P −/ Phat` within `3u`, and that `3ε`
+  taken against the `6ε` of the bound costs `18ε²`. The last rounding, of `B ·
+  P`, costs `ε` of `eb`, which is `6ε²` of the permanent. So by the comment's
+  own terms the count is `15 + 18 + 6 = 39`. `48` is above 39, and above both
+  smallest `B`s, `5u + 28u²` and `6u + 30u²`, so the slip costs nothing, but
+  the sentence gives the wrong power and the wrong number.
+- "It holds only while nothing ... falls into the subnormals", which
+  `on_floats` enforces "product by product through `product_is_normal`".
+  `product_is_normal(a, b)` is true when `a` or `b` is zero
+  (`cascade.rs:67-69`), so a zero square gets through, and the bound holds for
+  it (6). A square below the normals, which the check refuses, keeps the bound
+  too (6): with another square normal it proves at the code's `B`, and with
+  none normal `eb` is not normal. So the bound does not need what "only" says
+  it needs.
+- The comment on the check, `sphere.rs:248-250`: "The bound below is a
+  fraction of the permanent, which only bounds anything while every product
+  keeps its relative accuracy. One of them in the subnormals and this level
+  certifies a wrong sign." That is the sentence 464.8's 4 found false for one
+  product of `SideOfAFlatSurface`. Here it is false for any of the four
+  squares, alone or together, by 6: without the check `on_floats` would hand
+  `decide` a number in those cases, and `decide` would certify no wrong sign
+  from it. What the check does is send them on to level 2. Whether
+  `on_floats` keeps it is a row (10).
 
 **Run so far**, Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, with
 464.13's `one.sh`:
