@@ -164,9 +164,9 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`a_ball_off_a_cones_axis`] for which shapes stay refused. A second cone
 /// that shares neither its axis nor its apex is not named at all: the crossing
 /// is a degree-four space curve and nothing tells its loops apart. Two cones
-/// with one apex, one slope
-/// and their axes along one line are the same surface and come back as one,
-/// **whichever way each axis points** — see [`one_cone_either_way_round`].
+/// with one apex, one slope and their axes along one line are the same surface
+/// and come back as one, **whichever way each axis points** — see
+/// [`one_cone_either_way_round`].
 ///
 /// # Errors
 ///

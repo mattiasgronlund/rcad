@@ -233,9 +233,18 @@ fn the_flats_that_pick(answer: Result<SurfaceMeet, Error>) -> Vec<Option<Vector>
         .collect()
 }
 
-/// A cone leaning against a pipe is refused, which is the row's standing gap.
+/// A pipe along `x` through a cone's apex, square across its axis, is refused,
+/// though it crosses the cone in two loops, one above the apex and one below.
+///
+/// A **gap** (§43.6). The pipe is shallower than the cone, so it is read along
+/// its own straight lines, and named only where every one of them is proved to
+/// meet the cone twice. Here they do not all: the line `(t, 2, 0)` misses the
+/// cone, since `t² + 4 = 0` has no root, while `(t, 0, 2)` meets it at
+/// `t = ±2`. So each loop runs across the flat surface through the apex square
+/// to the pipe, `x = 0`, which picks a shallower pipe's loops, and what holds
+/// these two apart is `z = 0`, which nothing asks for this pipe.
 #[test]
-fn a_cone_leaning_against_a_pipe_is_still_refused() {
+fn a_pipe_across_a_cones_axis_through_its_apex_is_refused() {
     let cone = a_cone_about_z(1.0);
     let pipe = Cylinder::new(
         Axis::new(Point::origin(), Vector::new(1.0, 0.0, 0.0)).expect("a direction"),
@@ -254,12 +263,13 @@ fn a_cone_leaning_against_a_pipe_is_still_refused() {
 /// A pipe laid along one of a cone's rulings holds a **straight line**, and it
 /// is refused.
 ///
-/// **The reason the coaxial pair is the whole of what was named.** `rcad-topo`'s
+/// **The one pipe off the axis that has to stay refused.** `rcad-topo`'s
 /// `assemble.rs` answers *this crossing holds no straight line* for every cone
 /// against a pipe, and that answer is right only for as long as `intersect`
-/// refuses the leaning ones. Naming any of them turns it into a wrong answer —
-/// the same trap §50.2 item 4 spotted for two cones sharing an apex, in a second
-/// family.
+/// refuses this one. Naming it turns that into a wrong answer — the same trap
+/// §50.2 item 4 spotted for two cones sharing an apex, in a second family. The
+/// only straight lines on a pipe run along its axis, so a pipe holding a ruling
+/// points along it, and every other pipe's lines meet the cone at most twice.
 ///
 /// The pair is written on whole numbers so that the ruling really is on the
 /// pipe and not nearly on it. For the cone of slope one about `+z` and the ruling
