@@ -20,7 +20,8 @@ under them. 464.11 is Q2675, which runs the branches where one of the nine
 differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
 464.13 is Q2678, on the side of a flat surface through a point. 464.14 is
 Q2679, on the side of rcad-geom's sphere. 464.15 is Q2680, on the side of
-rcad-geom's cylinder.*
+rcad-geom's cylinder. 464.16 is Q2681, on the side of rcad-geom's cone, and
+464.17 is Q2682, on the side of rcad-geom's torus.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -37,6 +38,8 @@ rcad-geom's cylinder.*
   464.13  The side of a flat surface through a point
   464.14  The side of rcad-geom's sphere
   464.15  The side of rcad-geom's cylinder
+  464.16  The side of rcad-geom's cone
+  464.17  The side of rcad-geom's torus
 
 ### 464.1 The bugs a bound prover is for
 
@@ -9482,12 +9485,13 @@ And what is not a row:
 ### 464.17 The side of rcad-geom's torus
 
 Q2682 took up `SIDE_OF_TORUS_ERROR_BOUND` in `crates/rcad-geom/src/torus.rs`,
-in six lanes on 2026-10-25. The first four were the first lane and its three
+in seven lanes on 2026-10-25. The first four were the first lane and its three
 relays. The first wrote `tor.g`. The second ran it, its bisection of 3 and its
 controls of 7. The third wrote `torsplit.py`. The fourth ran the split of 6
 and its controls, and wrote and ran `shapes.py` and `same.py`. The fifth, the
 second lane, merged the first lane's branch and ran the second `-Bcoq` of 8.
-The sixth, its relay, checked the comments and wrote 1 to 10. The bound is
+The sixth, its first relay, checked the comments and wrote 1 to 9. The
+seventh, its second, ran `same.py` again and wrote 10. The bound is
 proved on `y`, the sum before `value`'s last rounding, at the code's constant
 wherever no factor is zero. That covers any of the three components of the
 cross product cancelling, whatever its reach square rounds to; `R² − r²`
@@ -9507,10 +9511,10 @@ the comment and running what is not run is three rows (10).
 
 Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
 `torus.rs` and `cascade.rs` at `4be293a5`. `git log --oneline
-4be293a5e..4cfcb294b` on `torus.rs`, `cascade.rs`, `three_surfaces.rs`,
+4be293a5e..cb850cc2b` on `torus.rs`, `cascade.rs`, `three_surfaces.rs`,
 `rcad-topo`'s `validate.rs`, `rcad-step`'s `brep.rs` and `rcad-geom`'s
-`lib.rs` prints nothing, so each is as it stands at `4cfcb294b`, where this
-write-up was finished. `u` is `2⁻⁵³`, and the code's `B = (18 + 220ε) ε`
+`lib.rs` prints nothing, so each is as it stands at `cb850cc2b`, `main` when
+this write-up was finished. `u` is `2⁻⁵³`, and the code's `B = (18 + 220ε) ε`
 (`torus.rs:508-511`) is, as a double, `18u + 224u²`, written `B = 18b-53 +
 7b-101;`. Unlike the cone's `96ε`, `220ε` is `55 · 2⁻⁵¹`, not a multiple of
 `2⁻⁴⁸`, the ulp of 18, so the Rust's sum rounds, up, to `18 + 7 · 2⁻⁴⁸`, and
@@ -10344,12 +10348,6 @@ for path in sys.argv[1:]:
         print(f"{path}: {m.group(1)}: {k}u + {float(r):.4g}u^2")
 ```
 
-**The split.** Q2682's second relay wrote `torsplit.py` (below), the split
-on the components that cancel, on `hollow` below the normals and on `P2`
-below the normals. `python3 torsplit.py` wrote 180 cases and 179 controls,
-and `cmp tor_nnnnn.g tor.g` found them the same. Its third relay ran them
-unchanged (below, "What the split printed").
-
 `torsplit.py`, whole, as `trial.sh` and `run3.sh` ran it:
 
 ```python
@@ -10960,83 +10958,6 @@ for case in cases():
         write(f"c_tor_{case}_half.g", make(case, B_HALF))
 ```
 
-**What the split printed.** Q2682's third relay, on 2026-10-25, in the same
-scratch directory, with `torsplit.py` as above.
-
-- `trial.sh` (below) ran eight cases, `cnnnn`, `cccnn`, `nnnen`, `uuueb`,
-  `cccnb`, `scnnn`, `ssuen` and `uuunb`, and their `u / 2` controls, all at
-  once through `one1.sh`. Each case exited 0, in 18.22 to 29.59 s, with `(y −
-  Ex) / Phat2` within `1.88738e-15` and no line in its `.out` but its results
-  and "assumed to be nonzero" warnings. Each control exited 1, best `[-34,
-  34]`. So no hint of `torsplit.py` needed changing.
-- `run3.sh` (below) then ran all 180 with `coq` and the 179 controls, 20 at a
-  time on a load of about 40 over 24 cores. `tally3.py` (below) counts what it
-  printed; after its line for each case it prints the block below. Every case
-  proves at the code's `B`, `y`'s error within `17u + 95u²` (`1.88738e-15`) in
-  each, and `P −/ Phatx` within `7u` in 178 and `6u` (`6.66134e-16`) in the two
-  `uuu` cases, where `P` is `P1`. Gappa called no case pointless. Every control
-  fails at `17u` over `u / 2`, so none needs a `u²` control.
-- One `coqc` failed: `tor_cusen.coqc` ends `The term "eq_refl" has type "true =
-  true" while it is expected to have type "intersect_helper (upper i96) (lower
-  i96) i9 = true".`, at `tor_cusen.v` line 6766, `apply intersect with (1 :=
-  h1) (2 := h2)`, where `h1` and `h2` are the same lemma, `l337 h0`. Gappa's
-  certificate there is wrong, not its bound: the same script's Gappa run
-  exited 0. Not yet run again: 464.4 found Gappa does not write the same proof
-  each run, so a second `-Bcoq` may give one `coqc` accepts.
-- `shapes.py` (below) works three shapes in Python's doubles, which round as
-  Rust's do. A point on the axis of a torus whose axis is `(1, 1, 1)` is
-  `cccnn`, and one off it at `(1, 1, 2)` is `nncnn`: shapes a designer makes,
-  and both proved. A point on the axis `(1, 0, 0)` has four zero factors,
-  which no case takes (the zero branches).
-
-```text
-cases exit 0: 180 of 180
-controls exit 1: 179 of 179
-pointless: []
-y bounds by live components and hollow and P2 letters:
-   (0, 'eb', '[-1.88738e-15, 1.88738e-15]') 27
-   (0, 'en', '[-1.88738e-15, 1.88738e-15]') 26
-   (0, 'nb', '[-1.88738e-15, 1.88738e-15]') 27
-   (0, 'nn', '[-1.88738e-15, 1.88738e-15]') 26
-   (1, 'en', '[-1.88738e-15, 1.88738e-15]') 27
-   (1, 'nn', '[-1.88738e-15, 1.88738e-15]') 27
-   (2, 'en', '[-1.88738e-15, 1.88738e-15]') 9
-   (2, 'nn', '[-1.88738e-15, 1.88738e-15]') 9
-   (3, 'en', '[-1.88738e-15, 1.88738e-15]') 1
-   (3, 'nn', '[-1.88738e-15, 1.88738e-15]') 1
-P bounds: {'[-7.77156e-16, 7.77156e-16]': 178, '[-6.66134e-16, 6.66134e-16]': 2}
-control exits by live components and hollow and P2 letters:
-   (0, 'eb', '1') 27
-   (0, 'en', '1') 26
-   (0, 'nb', '1') 27
-   (0, 'nn', '1') 26
-   (1, 'en', '1') 27
-   (1, 'nn', '1') 27
-   (2, 'en', '1') 9
-   (2, 'nn', '1') 9
-   (3, 'en', '1') 1
-control exits and bests: {('1', '[-34, 34]'): 179}
-times (15.5, 'cucnn') (61.65, 'nnsen')
-coq ok: 179 of 180
-coq smallest (14324, 67, 'uuunb') largest (22872, 81, 'nnnnn') hints 66 81 times 24.62 99.14
-files with a line other than results and 'assumed to be nonzero': ['tor_cusen.coqc']
-```
-
-`shapes.py` prints:
-
-```text
-on the axis (1, 0, 0): direction [1.0, 0.0, 0.0], from_centre [2.0, 0.0, 0.0], halves [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
-  zero factors ['fy', 'fz', 'dy', 'dz']; case uuunb; on_floats' checks pass: True
-on the axis (1, 1, 1): direction [0.5773502691896257, 0.5773502691896257, 0.5773502691896257], from_centre [1.0, 1.0, 1.0], halves [(0.5773502691896257, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257)]
-  zero factors none; case cccnn; on_floats' checks pass: True
-off the axis (1, 1, 1), one component cancelling: direction [0.5773502691896257, 0.5773502691896257, 0.5773502691896257], from_centre [1.0, 1.0, 2.0], halves [(0.5773502691896257, 1.1547005383792515), (1.1547005383792515, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257)]
-  zero factors none; case nncnn; on_floats' checks pass: True
-```
-
-The letters `uuunb` of the first line are what the classifier reads off its
-zeros; `torsplit.py`'s `uuunb` assumes no factor is zero, so it is not that
-shape.
-
 `trial.sh`, whole:
 
 ```sh
@@ -11077,27 +10998,6 @@ python3 torsplit.py
 } > run3.txt 2>&1
 echo done >> run3.txt
 ```
-
-**The second `-Bcoq` of `tor_cusen`.** Q2682's second lane, on 2026-10-25, in
-the same scratch directory, ran `run4.sh` (below) through `launch.sh`. It runs
-`one.sh` with `coq` on `tor_cusen2.g`, a copy of `tor_cusen.g`, so that
-`tor_cusen.coqc`, which `tally3.py` reads, stays as `run3.sh` left it. It
-printed:
-
-```text
-tor_cusen2.g is tor_cusen.g
-tor_cusen2 exit 0 20.99s
-tor_cusen2 coq -Bcoq exit 0 coqc exit 0 29.78s lines 16899 hints 68
-coqc printed:
-done
-```
-
-So the first certificate, 16904 lines, failed at an intersect step, and the
-second, 16899 lines from the same bytes, was accepted: Gappa does not write the
-same proof each run (464.4). `tor_cusen.v` and `tor_cusen2.v` first differ at
-line 976. Its `.out` gives the same two bounds as `tor_cusen.out`, `17u + 95u²`
-and `7u + 22u²` by `ku.py`. `same.py`'s "not written again" list will name
-`tor_cusen2.g`, since neither generator writes it.
 
 `run4.sh`, whole:
 
@@ -11267,13 +11167,7 @@ case("off the axis (1, 1, 1), one component cancelling", [0.0, 0.0, 0.0], [1.0, 
      [1.0, 1.0, 2.0])
 ```
 
-`same.py`, whole. It marks a `run4.sh`, for the second `-Bcoq` of
-`tor_cusen`, which is not written yet. The third relay ran it once, as
-`python3 same.py <doc> <scratch dir>`, and it printed `code blocks in 464.17:
-13`, `run4.sh not appended`, `same` or `True` on every other line, and
-`written again: 383 same as run: 383 differ: [] not in tor: []`: `tor.g`, the
-180 cases, their 179 controls, the three controls of `torcases.py` and its 20
-bisection scripts.
+`same.py`, whole:
 
 ```python
 """Check that each script 464.17 appends whole is byte for byte the file that
@@ -11383,3 +11277,65 @@ ran = sorted(f for f in os.listdir(tor) if f.endswith(".g"))
 print(".g files in tor not written again:", [f for f in ran if f not in written])
 shutil.rmtree(fresh)
 ```
+
+It prints:
+
+```text
+code blocks in 464.17: 17
+tor.g same
+torcases.py same
+torsplit.py same
+run0.sh same
+run1.sh same
+trial.sh same
+run3.sh same
+run4.sh same
+ku.py same
+tally3.py same
+shapes.py same
+same.py same
+one.sh is 464.13's block: True
+one1.sh is 464.16's block: True
+launch.sh is 464.16's block: True
+tally3.py run again ends with what 464.17 gives: True
+shapes.py run again ends with what 464.17 gives: True
+written again: 383 same as run: 383 differ: [] not in tor: []
+tor_nnnnn.g is tor.g: True
+.g files in tor not written again: ['tor_cusen2.g']
+```
+
+The 383 are `tor.g` itself, the 180 cases, their 179 controls at `u / 2`, the
+three controls of 7, and the ten scripts each of `b_tor_` and `b17_tor_`.
+Neither generator writes `tor_cusen2.g`; `run4.sh` makes it with `cp`, and
+checks it with `cmp`.
+
+**10. What this leaves.** Three rows, filed from this write-up when it merges,
+each from Q2682:
+
+- Small: restate `torus.rs:485-507` by 5. What the `220ε²` has to beat is
+  `ε²`, not `ε`, and by the comment's own terms `153 + 126 + 18` make 297,
+  against 220, which is 224 as a double. The chain reaches seventeen roundings
+  to `y` by two slips that cancel, where Gappa proves `17u + 95u²` on a chain
+  where nothing cancels. And `on_floats` does not enforce the bottom end
+  product by product, since it checks none of the permanent's own products.
+- Prove the bound where a difference or a direction component is zero, the
+  axis-aligned torus among them, as Q2771 does for the cylinder and Q2781 for
+  the cone. `product_is_normal(a, b)` is true when `a` or `b` is zero
+  (`cascade.rs:67-69`), so these cases pass every check `on_floats` makes, as
+  `shapes.py`'s first shape does, and no script here covers them. Not run, so
+  no class (§360.5).
+- Run `torsplit.py` with one, two and three of the products `on_floats` checks
+  below the normals, as 464.14's 6 ran the sphere's squares. Then say whether
+  `on_floats` needs its `product_is_normal` checks, and restate
+  `torus.rs:347-349` by what that shows. Not run, so no class. Q2767 waits on
+  it, as well as on Q2684, Q2760, Q2773 and Q2782.
+
+And what is not a row:
+
+- Q2700 already waits on Q2682, and moves these scripts into `proofs/gappa/`
+  with the others that rows of 464 appended.
+- `tor_cusen.g`'s first certificate, which `coqc` refused (8). Gappa wrote a
+  certificate that does not check, for a bound its own run proved, and a
+  second certificate for the same bytes checks.
+- The claim on `value` (4): `decide` needs only `y`.
+- `field` on these scripts' hints (464.10).
