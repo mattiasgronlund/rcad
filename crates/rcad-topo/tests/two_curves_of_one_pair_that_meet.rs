@@ -259,32 +259,18 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_
 /// there, and cuts at `π/2` and `π`, each meeting one window, as the union's
 /// mesh cut it, would reach it.
 #[test]
-fn a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z_answers_every_fuse_but_the_thick_bar_less_the_thin()
+fn a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z_crosses_it_in_two_loops_that_pass_and_every_fuse_answers()
  {
     let build: Pair = a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z;
     let mut model = a_model();
     let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
     assert_eq!(curves(&thick, &thin), Ok(2));
     assert_eq!(curves(&thin, &thick), Ok(2));
-    for one in six_fuses() {
-        if matches!(one, (Rule::Difference, true)) {
-            let said = fuse(&mut a_model(), build, Rule::Difference, true);
-            assert!(
-                matches!(
-                    said,
-                    Err(rcad_topo::Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
-                ),
-                "the thick bar less the thin one: {said:?}"
-            );
-        } else {
-            the_fuse_answers(
-                build,
-                one,
-                [16.0 * PI, 8.0 * PI, bar_through_bar(2.0, 1.0, 1.0)],
-                [&[7], &[3], &[4], &[3, 3]],
-            );
-        }
-    }
+    every_fuse_answers(
+        build,
+        [16.0 * PI, 8.0 * PI, bar_through_bar(2.0, 1.0, 1.0)],
+        [&[7], &[3], &[4], &[3, 3]],
+    );
 }
 
 /// [`a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`]
