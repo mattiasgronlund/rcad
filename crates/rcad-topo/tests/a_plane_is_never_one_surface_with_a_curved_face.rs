@@ -24,10 +24,10 @@
 //! that pair yet.
 //!
 //! **Two curved faces of different kinds**, Q463: `intersect` refuses a ring
-//! against a ball, a pipe or a cone, and a cone against a ball. A ball twenty
-//! units from a bend refused all six fuses of the pair for it, and so did a
-//! ball twenty units from a frustum; each now answers with the two solids as
-//! they were. For each of the six pairs of curved kinds a test below builds,
+//! against a ball, a pipe or a cone, and until Q2788 it refused a cone against
+//! a ball off its axis too. A ball twenty units from a bend refused all six
+//! fuses of the pair for it, and so did a ball twenty units from a frustum;
+//! each now answers with the two solids as they were. For each of the six pairs of curved kinds a test below builds,
 //! from any two surfaces of those kinds, one plane that `intersect` cuts the
 //! two in differently, and runs it over drawn pairs and over the pairs most
 //! alike. One plane cuts one surface in one way.
@@ -249,18 +249,20 @@ fn no_curved_surface_can_be_built_flat() {
 fn a_ball_far_from_a_bend_fuses_to_the_two_as_they_were() {
     every_fuse_of_a_ball_far_from(
         |model| a_quarter_bend(model, 4.0, 1.0),
-        &rcad_geom::Error::ACrossingBetweenATorusAndAnotherCurvedSurface,
+        &Err(rcad_geom::Error::ACrossingBetweenATorusAndAnotherCurvedSurface),
     );
 }
 
 /// **The same for a frustum**, which the row that found the bend's case named
-/// and did not run. `intersect` refuses a cone against a ball, and all six
-/// fuses refused, `ACrossingBetweenAConeAndAnotherCurvedSurface`.
+/// and did not run. All six fuses used to refuse,
+/// `ACrossingBetweenAConeAndAnotherCurvedSurface`, when `intersect` refused
+/// every cone against a ball off its axis. Since Q2788 it names this one: the
+/// ball meets neither nappe of the cone the frustum's wall is cut from.
 #[test]
 fn a_ball_far_from_a_frustum_fuses_to_the_two_as_they_were() {
     every_fuse_of_a_ball_far_from(
         |model| a_frustum(model, 0.5, 2.0, 4.0),
-        &rcad_geom::Error::ACrossingBetweenAConeAndAnotherCurvedSurface,
+        &Ok(SurfaceMeet::Nothing),
     );
 }
 
@@ -269,11 +271,11 @@ fn a_ball_far_from_a_frustum_fuses_to_the_two_as_they_were() {
 /// sound, and holds the solids it should keep, each measuring as that solid
 /// did on its own.
 ///
-/// `refused_by_intersect` is what `intersect` says to the ball against the
-/// partner's curved wall: the question the fuse no longer asks.
+/// `said_by_intersect` is what `intersect` says to the ball against the
+/// partner's curved wall, whether it refuses or not: the fuse no longer asks.
 fn every_fuse_of_a_ball_far_from(
     partner: fn(&mut Model) -> SolidKey,
-    refused_by_intersect: &rcad_geom::Error,
+    said_by_intersect: &Result<SurfaceMeet, rcad_geom::Error>,
 ) {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -300,11 +302,7 @@ fn every_fuse_of_a_ball_far_from(
         &policy,
         &mut ProvenanceLog::new(),
     );
-    assert_eq!(
-        asked.as_ref().err(),
-        Some(refused_by_intersect),
-        "{asked:?}"
-    );
+    assert_eq!(&asked, said_by_intersect);
 
     for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
         for (argument, tool) in [(ball, other), (other, ball)] {
