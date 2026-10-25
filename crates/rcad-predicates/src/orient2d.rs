@@ -354,10 +354,13 @@ impl Predicate for Orient2d {
 /// proves the bound at the code's constant in every case of where the two
 /// products can land: both normal, one normal and one subnormal of either
 /// sign, and both too small for the bound to be a normal number at all, where
-/// the claim is vacuous.
+/// the claim is vacuous. A zero difference, which makes one product the double
+/// 0, proves too, or leaves the bound too small to be a normal number
+/// (decisions.md §464.18).
 ///
-/// The bound itself still holds only while nothing overflows or falls into the
-/// subnormals, and [`decide`] refuses a bound that is not a normal number.
+/// So the bound holds whether or not the products fall into the subnormals.
+/// What it still needs is that nothing overflows, and [`decide`] refuses a
+/// bound that is not a normal number.
 const ORIENT2D_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (3.0 + 16.0 * epsilon) * epsilon
