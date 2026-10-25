@@ -759,13 +759,13 @@ fn a_narrower_cone_leaned_less_than_the_wider_ones_half_angle_crosses_it_in_a_lo
                 .expect("a facing of length one");
             let picked_by: Vec<Picker> = pickers
                 .iter()
-                .cloned()
+                .copied()
                 .chain([Picker::from(half)])
                 .collect();
             let arc = NamedRun::new(
                 EdgeRun::PartOfWhereItCrosses {
-                    and: and.clone(),
-                    picked_by: picked_by.iter().cloned().collect(),
+                    and: *and,
+                    picked_by: picked_by.iter().copied().collect(),
                 },
                 across_the_loop,
             )
