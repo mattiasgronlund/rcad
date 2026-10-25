@@ -141,6 +141,8 @@ use super::{
 /// corner or two moved a rounding first, where that winds it with the normal**
 /// ([`Assembly::wind_each_flat_face_with_its_normal`]), so the range, how each
 /// edge runs and the nesting are all asked of the corners as they are written.
+/// The range is asked of the corners as they were solved too, before any
+/// moves, so an answer it refuses is refused as it was without the move.
 ///
 /// **Which shell is a void of which is left to
 /// [`Assembly::nest_the_shells`]**, which the fuse asks after this: nesting
@@ -179,7 +181,7 @@ pub(crate) fn assemble(
     let mut assembly =
         Assembly::joined_into_shells(model, scratch, chosen, names_of_one_point, policy, log)?;
     assembly.leave_out_each_shell_thinner_than_the_wobble(policy, log)?;
-    assembly.wind_each_flat_face_with_its_normal();
+    assembly.wind_each_flat_face_with_its_normal(inputs_reach, policy)?;
     let still_to_measure = match inputs_reach {
         Some(inputs_reach) => assembly.check_dynamic_range(inputs_reach, policy, range_warning)?,
         None => None,
@@ -5257,7 +5259,31 @@ impl Assembly {
     /// and so is one wound so far the wrong way that no rounding of every
     /// corner could turn it ([`a_rounding_could_turn_it`]): a big face wound
     /// wrong for some other reason costs no search.
-    fn wind_each_flat_face_with_its_normal(&mut self) {
+    ///
+    /// **The range is asked first, of the corners as they were solved**, once
+    /// a face is found wound wrong and before anything moves, so an answer
+    /// [`Assembly::check_dynamic_range`] refuses is refused with the ratio it
+    /// had without the move. A speck is a feature a rounding across, and every
+    /// fuse of queue row Q2583's sweep this moved a corner in was refused at
+    /// the range check under `certified`. Moved first, a corner a rounding
+    /// further off made the shortest edge longer or shorter, and the ratio
+    /// with it: two skewed combs touching along one line had their
+    /// intersection refused at `1.91e16`, where every other fuse of the two is
+    /// refused at `2.70e16` (`two_skewed_combs_touching_along_one_line.rs`,
+    /// `docs/decisions.md` §294.26). The warning this first ask gives under
+    /// `tolerant` is thrown away, since the range is asked again of the
+    /// corners as they are written, and that warning is the one that stands.
+    /// `inputs_reach` and `policy` are what [`assemble`] asks the range with.
+    ///
+    /// # Errors
+    ///
+    /// What [`Assembly::check_dynamic_range`] refuses, of the corners as they
+    /// were solved.
+    fn wind_each_flat_face_with_its_normal(
+        &mut self,
+        inputs_reach: Option<f64>,
+        policy: &Policy,
+    ) -> Result<()> {
         let flat: Vec<bool> = (0..self.faces.len())
             .map(|face| self.is_flat_with_straight_edges(face))
             .collect();
@@ -5265,7 +5291,10 @@ impl Assembly {
             .filter(|&face| flat[face] && !self.winds_as_it_should(face, 0, &[]))
             .collect();
         if wound_wrong.is_empty() {
-            return;
+            return Ok(());
+        }
+        if let Some(inputs_reach) = inputs_reach {
+            self.check_dynamic_range(inputs_reach, policy, &mut ProvenanceLog::new())?;
         }
         let mut rings_through: Vec<Vec<[usize; 2]>> = vec![Vec::new(); self.corners.len()];
         for face in 0..self.faces.len() {
@@ -5309,6 +5338,7 @@ impl Assembly {
                 moved.point = point;
             }
         }
+        Ok(())
     }
 
     /// Whether `face` is flat and every edge round it runs straight between
