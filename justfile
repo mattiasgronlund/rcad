@@ -19633,7 +19633,7 @@ check-land-selftest:
     checks_at=$(grep -m1 -nxF '  git merge-base --is-ancestor ${branchOf(lane)} origin/main' .claude/workflows/lanes.js | cut -d: -f1 || true)
     [ -n "$waits_at" ] && [ -n "$checks_at" ] && [ "$waits_at" -lt "$checks_at" ] \
         || { echo "the merger's brief in .claude/workflows/lanes.js does not run just land wait-for ahead of its ancestor check (lines '$waits_at' and '$checks_at'), so it can read origin/main while the lander's run still lands the lane (§397.5)"; exit 1; }
-    steps_line='add 2.2 sonnet justfile from/Q1 small a row the lane left, ending in §384 + tag @1 small + add 3 sonnet - small was/Q7 a row the lane filed again, ending in §384'
+    steps_line='add 2.2 sonnet justfile small from/Q1 a row the lane left, ending in §384 + tag @1 small + add 3 sonnet - small was/Q7 a row the lane filed again, ending in §384'
     arm=""
     at=""
     got=""
@@ -19835,7 +19835,7 @@ check-land-selftest:
     git -C "$at/origin.git" show main:docs/queue.md | grep -qxF "apply done Q1 ${lane_sha:0:8} + $steps_line" \
         || fail "the merge commit does not carry one queue apply: the done step, then the lane's own steps"
     [ "$(field rows_closed)" = "[\"Q1 done:${lane_sha:0:8}\"]" ] || fail "rows_closed is $(field rows_closed)"
-    [ "$(field rows_added)" = '["Q900 tier 2.2 sonnet: from/Q1 small a row the lane left, ending in §384", "Q901 tier 3 sonnet: small was/Q7 a row the lane filed again, ending in §384"]' ] \
+    [ "$(field rows_added)" = '["Q900 tier 2.2 sonnet: small from/Q1 a row the lane left, ending in §384", "Q901 tier 3 sonnet: small was/Q7 a row the lane filed again, ending in §384"]' ] \
         || fail "rows_added is $(field rows_added), and a row the lane named no source for comes from Q1, the row it ran (§432)"
     [ "$(field push_attempts) $(field docs_catch_ups)" = "1 0" ] || fail "a first push that went through is not attempt 1 with no catch-ups"
     [ "$(field gate_pass_line)" = "gate: PASS" ] || fail "gate_pass_line is '$(field gate_pass_line)'"
@@ -19893,7 +19893,7 @@ check-land-selftest:
     printf '%s\n' add 2.2 sonnet justfile 'small a row the lane left, ending in §384' >"$at/lander/target/land-steps.txt"
     run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lane whose added row lands at another tier did not merge"
-    [ "$(field rows_added)" = '["Q900 tier 5 sonnet: from/Q1 small a row the lane left, ending in §384"]' ] \
+    [ "$(field rows_added)" = '["Q900 tier 5 sonnet: small from/Q1 a row the lane left, ending in §384"]' ] \
         || fail "rows_added is $(field rows_added), not the row's own tier 5 read back from docs/queue.md"
 
     fixture class-first

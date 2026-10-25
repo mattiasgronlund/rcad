@@ -60,6 +60,7 @@ STATE = os.path.join("target", "land")
 ROW = re.compile(r"^[TDQ][0-9]+$")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
 JUST_OWN_ERROR = re.compile(r"^error: Recipe `[^`]*` failed(?: on line [0-9]+)? with exit code [0-9]+$")
+CLASS_TAG = re.compile(r"^(wrong|crash|refuses)/[ABCD]$")
 STEP_ARGS = {"add": 4, "after": 2, "tag": 2}
 USAGE = ("usage: just land [--steps <file>] [--answers <row>[,<row>...]] "
          "[--left-undone <row>[,<row>...]] <row>[,<row>...] <lane branch> "
@@ -608,9 +609,21 @@ def said_where_from(step, row):
     from the row it ran, so a lane need not know. A lane that names its own
     source, `from/<id>` or `was/<id>` as the first word or the one after the
     tag, keeps it; a bundle's lane does that for a row that is not its first.
+
+    `from/<row>` goes after the pin and the tag (§432.3), and a lane may open
+    its add text with the bare tag itself, `wrong/B ...`, rather than a
+    separate `tag` step (`lane.md`). So a leading class word or `small` is
+    kept first and `from/<row>` is inserted right after it, not in front of
+    it: the fill reads a class or `small` only in that position, and a word
+    found after `from/` there is itself refused.
     """
     if step[0] != "add" or any(word.startswith(("from/", "was/")) for word in step[4].split()[:2]):
         return step
+    words = step[4].split()
+    if words and (words[0] == "small" or CLASS_TAG.match(words[0])):
+        tag, rest = words[0], step[4][len(words[0]) :].lstrip()
+        text = f"{tag} from/{row} {rest}" if rest else f"{tag} from/{row}"
+        return [*step[:4], text]
     return [*step[:4], f"from/{row} {step[4]}"]
 
 
