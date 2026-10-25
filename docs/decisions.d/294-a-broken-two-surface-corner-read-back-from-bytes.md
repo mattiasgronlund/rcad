@@ -2105,9 +2105,12 @@ crossing whose start is refused can make a tolerant fuse answer wrong.
 *Queue row Q2642, from Q2583. Lane
 `lane-q2642-wind-the-pyramids-specks-with-their-normal`, base `5afdb494`,
 carried on by three relays (§416), and finished by a second lane,
-`lane-q2642-b-write-down-the-wound-specks`, which merged it. Code changed in
-`fuse/assemble.rs`; pinned in
-`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`.
+`lane-q2642-b-write-down-the-wound-specks`, which merged it and, in its own
+relay, kept the change to specks. Code changed in `fuse/assemble.rs`; pinned
+in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`,
+and kept off the strip §417.9 folds by
+`crates/rcad-topo/tests/a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`.
 Corrects §294.21.*
 
 **What refused.** Queue row Q2583 swept 672 fuses of the sound pyramid placed
@@ -2157,6 +2160,8 @@ check refuses an edge between two corners at one point.
   `a_rounding_could_turn_it` works out, is not searched, so a big face wound
   wrong for another reason costs nothing. It is left for `commit`'s sweep to
   refuse, as is one no move of two corners winds.
+- A face more than 64 roundings across is not searched either
+  (`is_a_speck`, below).
 
 **Why it is not a tolerance.** No two points are taken as one: a move that
 lands on a corner already there is passed over. A moved corner is a rounding
@@ -2164,6 +2169,43 @@ from where it was solved and its wobble says so, so the range check and the
 wobble check after it ask where it is. And nothing moves unless a face winds
 against its normal, which `commit`'s sweep refuses under every policy, so the
 change reaches only answers that were refused.
+
+**Only a speck, since a refusal there is not the fuse's last word.** As the
+first lane left it, the change failed the gate of the second lane's first run:
+`a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`'s
+`every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_only_where_refused_without`
+found no fold record for the intersection at `t = 0.024`, block first. An
+answer `assemble` refuses goes back to `Model::fused_under`, which tries it
+again with §417.9's fold of the ends of an edge a plane runs beside, and the
+strip that fold closes is a face winding `Zero`. The change wound it first.
+`probe_q2642_floor_fold`, a probe at the end of the cube file that ran all 90
+of its `tolerant(100)` fuses and was taken out after (`mise exec -- just t
+probe_q2642_floor_fold --no-capture`), found it at exactly the 8
+intersections of `TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`,
+either way round. In each, one corner of the strip, `(0, 5, 0)`, moved to
+`y = 5.000000000000001`, and the answer kept the strip as an eighth face, a
+sliver five long with a range check's record, where with the change switched
+off the fold leaves it out: 7 faces, the two fold records, and the same
+volume. The other 82 fuses came out the same both ways.
+
+So `Assembly::wind_each_flat_face_with_its_normal` now winds only a speck:
+`is_a_speck` asks that every corner of the outline lie within 64 roundings of
+the first in each coordinate, a rounding being one of the largest coordinate.
+A speck's other roundings are as near the meets it was cut at as the ones
+stored. A strip a rounding wide and an edge long is the face §417.9's fold is
+for. Measured with a print of each face's width in roundings, since taken out:
+
+- The strip the floor cuts is `4503599627370496` roundings across, `5 / 5ε`.
+- Of the 30 faces moved over Q2583's 672 fuses, the widest is `5.83`
+  roundings across, and the narrowest `0.1`.
+- With the narrowing, the cube file's 90 fuses come out exactly as with the
+  change switched off, and Q2583's 672 exactly as in `branch-run.log`, the
+  run before it (both probes pasted in, run as `mise exec -- just t -E
+  'test(/probe_q2583_every_wedge_at_every_placement|probe_q2642_floor_fold/)'
+  --no-capture`, and taken out after).
+
+The 64 is ten times the widest speck and far below any strip an edge long. A
+face between the two is left refused, or to the folds, as before the change.
 
 **What it gives.** The first lane's third relay ran Q2583's sweep three ways:
 on the branch, on the branch with a print wherever the change moves a corner,

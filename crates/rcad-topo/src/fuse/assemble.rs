@@ -137,8 +137,8 @@ use super::{
 /// warns once at most. Its warning goes into `range_warning`, so the caller
 /// can hold it back from the wobble check.
 ///
-/// **A flat face whose outline winds against its normal has a corner or two
-/// moved a rounding first, where that winds it with the normal**
+/// **A speck of a flat face whose outline winds against its normal has a
+/// corner or two moved a rounding first, where that winds it with the normal**
 /// ([`Assembly::wind_each_flat_face_with_its_normal`]), so the range, how each
 /// edge runs and the nesting are all asked of the corners as they are written.
 ///
@@ -5213,9 +5213,10 @@ impl Assembly {
         Some(far)
     }
 
-    /// Move a corner or two of each flat face whose outline winds against its
-    /// normal by a rounding, where that winds the outline with its normal and
-    /// leaves every other ring through the corners it moves wound as it was.
+    /// Move a corner or two of each speck of a flat face whose outline winds
+    /// against its normal by a rounding, where that winds the outline with its
+    /// normal and leaves every other ring through the corners it moves wound
+    /// as it was.
     ///
     /// **A face the fuse builds can be a triangle a rounding across**, and the
     /// meets of three planes it is cut at can then round to points that wind
@@ -5245,13 +5246,17 @@ impl Assembly {
     /// since [`Assembly::check_dynamic_range`] refuses an edge between two
     /// corners on one triple.
     ///
-    /// **This changes only an answer that was refused.** Nothing moves unless
-    /// a face's outline does not wind with its normal, and the sweep in
-    /// [`Assembly::commit`] refuses such a face under any policy. A face no
-    /// move of two corners winds is left for that sweep to refuse, and so is
-    /// one wound so far the wrong way that no rounding of every corner could
-    /// turn it ([`a_rounding_could_turn_it`]): a big face wound wrong for some
-    /// other reason costs no search.
+    /// **This changes only an answer that was refused, and only a speck of
+    /// it.** Nothing moves unless a face's outline does not wind with its
+    /// normal, and the sweep in [`Assembly::commit`] refuses such a face under
+    /// any policy. That refusal is not always the fuse's last word:
+    /// `Model::fused_under` tries the answer again with the folds of
+    /// `docs/decisions.md` §417.9, and a strip one of them closes has to reach
+    /// it refused. So a face more than a speck across ([`is_a_speck`]) is left
+    /// for that sweep to refuse, so is a face no move of two corners winds,
+    /// and so is one wound so far the wrong way that no rounding of every
+    /// corner could turn it ([`a_rounding_could_turn_it`]): a big face wound
+    /// wrong for some other reason costs no search.
     fn wind_each_flat_face_with_its_normal(&mut self) {
         let flat: Vec<bool> = (0..self.faces.len())
             .map(|face| self.is_flat_with_straight_edges(face))
@@ -5382,7 +5387,7 @@ impl Assembly {
             .iter()
             .map(|&corner| self.corners[corner].point.coordinates())
             .collect();
-        if !a_rounding_could_turn_it(&points, plane.normal().components()) {
+        if !is_a_speck(&points) || !a_rounding_could_turn_it(&points, plane.normal().components()) {
             return None;
         }
         let mut movable = outline;
@@ -6337,6 +6342,41 @@ fn a_rounding_could_turn_it(ring: &[[f64; 3]], normal: [f64; 3]) -> bool {
             swept = swept + Interval::exactly(normal[axis]) * minor;
         }
     }
+    let (step, across) = its_rounding_and_how_far_across(ring);
+    let along: f64 = normal.iter().map(|component| component.abs()).sum();
+    let reach = 4.0 * ring.len() as f64 * along * step * (2.0 * across + step);
+    swept.hi() + reach > 0.0
+}
+
+/// How many roundings across, at most, a face
+/// [`Assembly::wind_each_flat_face_with_its_normal`] moves a corner of.
+const A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS: f64 = 64.0;
+
+/// Whether every corner of `ring` lies within
+/// [`A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS`] roundings of its first in
+/// each coordinate, a rounding being one of its largest coordinate.
+///
+/// **Only a speck is wound by moving a corner.** Each corner of a speck is a
+/// meet of planes rounded, and its other roundings are as near the meet as the
+/// one stored, so a move keeps the face where it was. A strip a rounding wide
+/// and an edge long is another face: where a plane runs beside an edge a
+/// rounding off it, the fold of `docs/decisions.md` §417.9 closes it, and the
+/// fuse tries that fold only once the answer is refused without it. With a
+/// corner of it moved instead, the strip the floor cuts from a cube tipped
+/// onto its edge, five long, `4.5e15` roundings across, was kept as a sliver
+/// the range check warned of, where the fold leaves it out
+/// (`a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`, queue row
+/// Q2642, §294.26). Of the 30 faces moved over queue row Q2583's 672 fuses of
+/// a pyramid and a wedge, the widest is `5.8` roundings across.
+fn is_a_speck(ring: &[[f64; 3]]) -> bool {
+    let (step, across) = its_rounding_and_how_far_across(ring);
+    across <= A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS * step
+}
+
+/// One rounding of the largest coordinate of `ring`, and how far its corners
+/// lie from its first in any one coordinate, at most.
+fn its_rounding_and_how_far_across(ring: &[[f64; 3]]) -> (f64, f64) {
+    let first = ring[0];
     let largest = ring
         .iter()
         .flatten()
@@ -6346,9 +6386,7 @@ fn a_rounding_could_turn_it(ring: &[[f64; 3]], normal: [f64; 3]) -> bool {
         .iter()
         .flat_map(|corner| corner.iter().zip(first).map(|(at, from)| (at - from).abs()))
         .fold(0.0, f64::max);
-    let along: f64 = normal.iter().map(|component| component.abs()).sum();
-    let reach = 4.0 * ring.len() as f64 * along * step * (2.0 * across + step);
-    swept.hi() + reach > 0.0
+    (step, across)
 }
 
 /// The 26 points a rounding from `point` in one, two or three coordinates,
