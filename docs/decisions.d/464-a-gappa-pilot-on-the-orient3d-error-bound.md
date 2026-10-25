@@ -9486,9 +9486,11 @@ first relay ran `tor.g`, its bisection and its three controls (below, "What
 ran") and handed over at its own. Its second relay wrote `torsplit.py`
 (below), which writes `tor_nnnnn.g` as `tor.g` byte for byte, and handed
 over before running it. Its third relay ran the split and its controls (below,
-"What the split printed") and wrote and ran `shapes.py` and `same.py`. The
-second `-Bcoq` of `tor_cusen`, the comment check and the write-up in 464.15's
-and 464.16's form are left; this paragraph and the word "draft" then go.*
+"What the split printed") and wrote and ran `shapes.py` and `same.py`. Q2682's
+second lane ran the second `-Bcoq` of `tor_cusen` (below, "The second `-Bcoq`
+of `tor_cusen`"), and `coqc` accepted it. The comment check and the write-up in
+464.15's and 464.16's form are left; this paragraph and the word "draft" then
+go.*
 
 Read at `4be293a5`, against `torus.rs:336-398` (`on_floats`), `torus.rs:474-483`
 (`cross_product_halves`), `torus.rs:485-511` (the constant) and
@@ -10749,6 +10751,46 @@ python3 torsplit.py
   xargs -P 20 -L 1 env < run3.jobs
 } > run3.txt 2>&1
 echo done >> run3.txt
+```
+
+**The second `-Bcoq` of `tor_cusen`.** Q2682's second lane, on 2026-10-25, in
+the same scratch directory, ran `run4.sh` (below) through `launch.sh`. It runs
+`one.sh` with `coq` on `tor_cusen2.g`, a copy of `tor_cusen.g`, so that
+`tor_cusen.coqc`, which `tally3.py` reads, stays as `run3.sh` left it. It
+printed:
+
+```text
+tor_cusen2.g is tor_cusen.g
+tor_cusen2 exit 0 20.99s
+tor_cusen2 coq -Bcoq exit 0 coqc exit 0 29.78s lines 16899 hints 68
+coqc printed:
+done
+```
+
+So the first certificate, 16904 lines, failed at an intersect step, and the
+second, 16899 lines from the same bytes, was accepted: Gappa does not write the
+same proof each run (464.4). `tor_cusen.v` and `tor_cusen2.v` first differ at
+line 976. Its `.out` gives the same two bounds as `tor_cusen.out`, `17u + 95u²`
+and `7u + 22u²` by `ku.py`. `same.py`'s "not written again" list will name
+`tor_cusen2.g`, since neither generator writes it.
+
+`run4.sh`, whole:
+
+```sh
+#!/bin/bash
+# gappa -Bcoq and coqc again on tor_cusen.g, the one case whose certificate
+# coqc refused in run3.txt. It runs on a copy, tor_cusen2.g, so that
+# tor_cusen.coqc, which tally3.py reads, stays as run3.sh left it. Writes
+# run4.txt.
+cd "$(dirname "$0")"
+cp tor_cusen.g tor_cusen2.g
+{
+  cmp tor_cusen.g tor_cusen2.g && echo "tor_cusen2.g is tor_cusen.g"
+  ./one.sh tor_cusen2.g coq
+  echo "coqc printed:"
+  cat tor_cusen2.coqc
+  echo done
+} > run4.txt 2>&1
 ```
 
 `tally3.py`, whole:
