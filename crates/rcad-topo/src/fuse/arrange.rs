@@ -5174,10 +5174,11 @@ impl<'f> Arrangement<'f> {
 
     /// Which of two nodes on a crossing between the face's plane and a
     /// partner plane comes first along it, with every plane round a corner of
-    /// the face read as running through that corner: `None` unless the corner
-    /// has four or more planes round it and one of them misses the point
-    /// `bake` solved it at, and each node is that corner or a meet of the
-    /// crossing's two planes and a third that lies inside the corner's room.
+    /// the face, or of a face of another solid cutting it, read as running
+    /// through that corner: `None` unless the corner has four or more planes
+    /// round it and one of them misses the point `bake` solved it at, and each
+    /// node is a meet of the crossing's two planes and a third that lies inside
+    /// the corner's room, or, for a corner of the face, that corner.
     ///
     /// **Four planes written down in `f64` need not meet in one point.** A
     /// square pyramid placed by a shift has its four side planes meet three by
@@ -5199,6 +5200,15 @@ impl<'f> Arrangement<'f> {
     /// of them about the corner with, so only nodes inside that room are read
     /// so. A node further off is put in order by its true point, and is as far
     /// from every node read so as the room is wide.
+    ///
+    /// **A face cut by a face with such a corner is read round it too**
+    /// (Q2744, [`BakedFace::corners_of_the_solids_cutting_it`]). A wedge whose
+    /// edge runs up through the placed pyramid's apex has no corner there, and
+    /// drawn in the true planes the lines where side planes cross a wedge face
+    /// cut a speck by the apex out of it that the side faces as drawn do not
+    /// have. Read round the apex, the wedge face is drawn with the side planes
+    /// where the side faces are drawn with them. Its own plane is not round the
+    /// corner, so it is where it is, and no node of it is the corner.
     fn as_read_round_a_corner(
         &self,
         crossing: usize,
@@ -5207,43 +5217,55 @@ impl<'f> Arrangement<'f> {
     ) -> Option<Decision> {
         let flat = *self.surface.as_plane()?;
         let partner = *self.crossings[crossing].partner.as_plane()?;
-        self.node_of_corner.iter().flatten().find_map(|&corner| {
-            let reading = ACornerReadAsOnePoint::of(self.the_baked_corner_of(&self.nodes[corner]))?;
-            if !reading.around.contains(&flat) {
-                return None;
-            }
-            // Each node read, with the plane of its three that is neither the
-            // face's nor the partner's: none for the corner.
-            let read = |node: usize| {
-                if node == corner {
-                    return reading
-                        .around
-                        .contains(&partner)
-                        .then_some((ANodeReadRoundACorner::TheCorner, None));
-                }
-                if self.nodes[node].vertex.is_some() {
+        let its_own = self
+            .node_of_corner
+            .iter()
+            .flatten()
+            .map(|&corner| (self.the_baked_corner_of(&self.nodes[corner]), Some(corner)));
+        let of_the_solids_cutting_it = self
+            .face
+            .corners_of_the_solids_cutting_it
+            .iter()
+            .map(|corner| (corner, None));
+        its_own
+            .chain(of_the_solids_cutting_it)
+            .find_map(|(baked, corner)| {
+                let reading = ACornerReadAsOnePoint::of(baked)?;
+                if corner.is_some() && !reading.around.contains(&flat) {
                     return None;
                 }
-                let three = self.the_three_planes_a_node_is_the_meet_of(node)?;
-                let mut others = three
-                    .into_iter()
-                    .filter(|plane| *plane != flat && *plane != partner);
-                let (Some(third), None) = (others.next(), others.next()) else {
-                    return None;
+                // Each node read, with the plane of its three that is neither the
+                // face's nor the partner's: none for the corner.
+                let read = |node: usize| {
+                    if Some(node) == corner {
+                        return reading
+                            .around
+                            .contains(&partner)
+                            .then_some((ANodeReadRoundACorner::TheCorner, None));
+                    }
+                    if self.nodes[node].vertex.is_some() {
+                        return None;
+                    }
+                    let three = self.the_three_planes_a_node_is_the_meet_of(node)?;
+                    let mut others = three
+                        .into_iter()
+                        .filter(|plane| *plane != flat && *plane != partner);
+                    let (Some(third), None) = (others.next(), others.next()) else {
+                        return None;
+                    };
+                    reading
+                        .holds(self.nodes[node].point)
+                        .then_some((ANodeReadRoundACorner::AMeet(three), Some(third)))
                 };
-                reading
-                    .holds(self.nodes[node].point)
-                    .then_some((ANodeReadRoundACorner::AMeet(three), Some(third)))
-            };
-            let ((mine, my_third), (theirs, their_third)) = (read(first)?, read(second)?);
-            match (my_third, their_third) {
-                (_, Some(third)) => reading.which_comes_first([flat, partner], &mine, third),
-                (Some(third), None) => reading
-                    .which_comes_first([flat, partner], &theirs, third)
-                    .map(the_other_way),
-                (None, None) => None,
-            }
-        })
+                let ((mine, my_third), (theirs, their_third)) = (read(first)?, read(second)?);
+                match (my_third, their_third) {
+                    (_, Some(third)) => reading.which_comes_first([flat, partner], &mine, third),
+                    (Some(third), None) => reading
+                        .which_comes_first([flat, partner], &theirs, third)
+                        .map(the_other_way),
+                    (None, None) => None,
+                }
+            })
     }
 
     /// Which of two nodes on a crossing comes first along it, by the readings
@@ -16001,10 +16023,12 @@ fn the_way_a_picker_leans(normal: [f64; 3], ways: [[f64; 3]; 2]) -> Option<[Opti
     )
 }
 
-/// A corner of a face with four or more planes round it, read as the one
-/// point all of them run through ([`Arrangement::as_read_round_a_corner`]).
-/// `by_a_plane` in `fuse/select.rs` reads a piece's corners inside the
-/// corner's room the same way, so it places the piece the arrangement drew.
+/// A corner of a face, or of a face of another solid cutting it, with four or
+/// more planes round it, read as the one point all of them run through
+/// ([`Arrangement::as_read_round_a_corner`]). `by_a_plane` in
+/// `fuse/select.rs` reads a piece's corners inside the corner's room the same
+/// way, round a corner of the piece's own solid or of the solid it is placed
+/// against, so it places the piece the arrangement drew.
 ///
 /// **Worked in the corner's own frame, so every sign is exact.** Write `K`
 /// for the point `bake` solved the corner at, where its three

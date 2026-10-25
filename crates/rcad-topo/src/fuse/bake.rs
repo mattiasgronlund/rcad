@@ -197,6 +197,18 @@ pub(crate) struct BakedFace {
     /// start exactly, and a move keeps every incidence, so the arrangement may
     /// take the moved cap through the moved start.
     pub(crate) caps_through_the_start_of_their_axis: Vec<ACapThroughTheStartOfItsAxis>,
+    /// Each corner with four or more surfaces round it that a face of another
+    /// solid cutting this one starts an edge at, one for each vertex. Empty
+    /// until `gather` in `fuse/cuts.rs` fills it in.
+    ///
+    /// **Carried so this face is drawn round such a corner as the faces round
+    /// it are** (`Arrangement::as_read_round_a_corner`). A placed square
+    /// pyramid's four side planes miss one point by a rounding, and each face
+    /// round its apex is drawn with all four moved through the point `bake`
+    /// solved. A wedge face through the apex was drawn in the true planes, and
+    /// cut a speck out of itself that the side faces as drawn do not have, so
+    /// no rule placed it (Q2744).
+    pub(crate) corners_of_the_solids_cutting_it: Vec<BakedCorner>,
 }
 
 /// A cap square to its pipe's axis and through where the axis starts, as
@@ -816,6 +828,7 @@ fn bake_the_joined_faces(
             cuts_that_reach_only_its_boundary: Vec::new(),
             sides_the_faces_of_each_cut_lie_in: Vec::new(),
             caps_through_the_start_of_their_axis: Vec::new(),
+            corners_of_the_solids_cutting_it: Vec::new(),
         });
     }
     Ok(BakedSolid { key, faces, bounds })
@@ -1531,6 +1544,7 @@ fn bake_one_face(
         cuts_that_reach_only_its_boundary: Vec::new(),
         sides_the_faces_of_each_cut_lie_in: Vec::new(),
         caps_through_the_start_of_their_axis: caps,
+        corners_of_the_solids_cutting_it: Vec::new(),
     };
     baked.lies_in = the_sides_of_planes_it_lies_in(&baked);
     Ok(baked)
