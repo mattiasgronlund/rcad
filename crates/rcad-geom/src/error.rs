@@ -406,18 +406,20 @@ pub enum Error {
     /// shape is a few signs of quadratics, and the marcher was taught a cone to
     /// draw the loops. (e) **Two cones that share neither axis nor apex are done
     /// where their crossing is proved two loops** (Q2667), read along the
-    /// straight lines of one of them as a pipe is: `two_cones_off_one_axis_in_two_loops`
-    /// says which. What stays refused is two cones whose own directions
-    /// overlap, which cross in branches that run off for ever, and every pair
-    /// its enclosures are too loose for. Two such pairs are not alike. A cone
-    /// of slope a half about `z` and one of slope a quarter leaned `0.3` about
-    /// `x` through `(0, 0, 4)` only overlap: up to eight along both axes they
-    /// cross at an angle whose sine is never below `0.49`. Two cones of **one
-    /// slope**, one turned about a line through a point of the other's axis,
-    /// are mirror images across the flat surface halfway between their apexes,
-    /// and can **touch** at two points, where their crossing runs through
-    /// itself. `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins one of
-    /// each, the second a pair whose numbers are exact and which touch. Where
+    /// straight lines of one of them as a pipe is: `how_two_cones_off_one_axis_cross`
+    /// says which. Two cones whose own directions overlap, with the apex of
+    /// one outside the other, are done where their crossing is proved one loop
+    /// and two branches that run off for ever (Q2812): a cone of slope a half
+    /// about `z` and one of slope a quarter leaned `0.3` about `x` through
+    /// `(0, 0, 4)` are named so, and `walk` marches the loop and refuses a run
+    /// on either branch with this, since a march follows only a closed loop.
+    /// What stays refused is every other overlap, and every pair the
+    /// enclosures are too loose for. Two cones of **one slope**, one turned
+    /// about a line through a point of the other's axis, are mirror images
+    /// across the flat surface halfway between their apexes, and can **touch**
+    /// at two points, where their crossing runs through itself.
+    /// `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins one of each, the
+    /// second a pair whose numbers are exact and which touch. Where
     /// the turn's `sin` and `cos` are rounded, as for `rcad-topo`'s funnel with
     /// a leaning spout, the two are not quite mirror images, and the branches
     /// pass about `3e-8` apart instead of through each other, so that pair

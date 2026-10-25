@@ -34,19 +34,19 @@ use rcad_predicates::{
     Approximation, Cause, Decision, Filtered, Interval, Level, Measures, Point as PredicatePoint,
     Policy, Predicate, ProvenanceLog, Record, SideOfSurface, decide, resolve_under_policy,
 };
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 
 use crate::enclosure::{
     cross_enclosing, dot_enclosing, exactly, gap_enclosing, squared_length_enclosing,
 };
 use crate::exact::Exact;
 use crate::intersect::{
-    Question, TwoConesInTwoLoops, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_CONE_AND_A_BALL_CROSS,
+    Question, TwoConesOffOneAxis, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_CONE_AND_A_BALL_CROSS,
     WHERE_A_CONE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_CONES_CROSS,
     WHERE_TWO_PIPES_CROSS, a_cones_slant_against_a_pipe_enclosing,
     a_cones_slant_against_a_pipe_exactly, ask, how_a_ball_on_a_cones_axis_meets_it,
-    how_a_plane_leans_against_a_cone, one_cone_either_way_round, two_cones_lean_apart_on_one_apex,
-    two_cones_off_one_axis_in_two_loops, whether_a_ball_runs_through_a_cones_apex,
+    how_a_plane_leans_against_a_cone, how_two_cones_off_one_axis_cross, one_cone_either_way_round,
+    two_cones_lean_apart_on_one_apex, whether_a_ball_runs_through_a_cones_apex,
     whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
     whether_two_cones_share_an_axis,
 };
@@ -56,8 +56,8 @@ use crate::march::{
 };
 use crate::meet::nowhere_in_particular;
 use crate::{
-    Cone, Cylinder, Deflection, EdgeRun, Error, NamedRun, Picker, Plane, Point, Result, Sphere,
-    Surface, SurfaceMeet, Torus, Vector,
+    Cone, Cylinder, Deflection, EdgeRun, Error, HalfSpaceThroughAPoint, NamedRun, Picker, Plane,
+    Point, Result, Sphere, Surface, SurfaceMeet, Torus, Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -816,10 +816,12 @@ enum TwoLoopsHeldApartBy {
     /// The one through a cone's apex square to its axis, for a ball off the
     /// axis, which `intersect` picks the two loops by as it stores it.
     ConesApex { cone: Cone, ball: Sphere },
-    /// The one `intersect`'s `two_cones_off_one_axis_in_two_loops` proves
-    /// every straight line of one cone crosses between its two crossings of
-    /// the other, for two cones off one axis, as it stores it.
-    TwoConesAcross(TwoConesInTwoLoops),
+    /// The one `intersect`'s `how_two_cones_off_one_axis_cross` proves every
+    /// straight line of one cone crosses between its two crossings of the
+    /// other, for two cones off one axis, as it stores it. Where those cross in
+    /// one loop and two branches, it holds the loop apart from the branch
+    /// beyond it, and only the loop is marched.
+    TwoConesAcross(TwoConesOffOneAxis),
 }
 
 impl TwoLoopsHeldApartBy {
@@ -1129,16 +1131,34 @@ fn what_a_run_between_these_two_lies_on(
             Ok(WhatARunLiesOn::StraightLine)
         }
         // Two cones off one axis cross in a degree-four curve that is marched
-        // where it is proved two loops, by the one function `intersect` names
-        // them with, so the walk refuses exactly what the namer refuses.
+        // where it is proved two loops, or one loop and two branches, by the
+        // one function `intersect` names them with, so the walk refuses
+        // exactly what the namer refuses, and a run on a branch besides.
         [Surface::Cone(one), Surface::Cone(other)]
             if whether_two_cones_share_an_axis(&one, &other) == Decision::Pos =>
         {
-            let loops = two_cones_off_one_axis_in_two_loops(&one, &other, policy, log)?;
-            a_quartic_picked_up_at(
-                where_one_cone_reaches_across_another(&loops.ruled, &loops.crossed),
-                TwoLoopsHeldApartBy::TwoConesAcross(loops),
-            )
+            let crossing = how_two_cones_off_one_axis_cross(&one, &other, policy, log)?;
+            let seeds = match crossing.apex {
+                None => where_one_cone_reaches_across_another(
+                    &crossing.ruled,
+                    &crossing.crossed,
+                    crossing.ruled.basis().0,
+                ),
+                Some(apex) => {
+                    let [near, far, back] =
+                        where_a_loop_and_two_branches_are_seeded(&crossing, apex);
+                    refused_unless_the_run_is_on_the_loop(
+                        run,
+                        [&Surface::Cone(one), &Surface::Cone(other)],
+                        [apex, crossing.across],
+                        [far, back],
+                        policy,
+                        log,
+                    )?;
+                    [near, far]
+                }
+            };
+            a_quartic_picked_up_at(seeds, TwoLoopsHeldApartBy::TwoConesAcross(crossing))
         }
         // Two cones on one axis cross in one circle or two, and a ball on a
         // cone's axis in none, one or two; which one this run is, is its ends'
@@ -2703,21 +2723,112 @@ fn where_a_pipe_reaches_across_a_cone(cone: &Cone, pipe: &Cylinder) -> [Point; 2
     ]
 }
 
-/// The two places one straight line of `ruled` out of its apex meets
-/// `crossed`, one on each of the two loops `intersect` names them in.
+/// The seeds of a loop and two branches: where the straight line of `ruled`
+/// leaning furthest from `crossed`'s axis meets the loop and the branch beyond
+/// `across`, and where the one leaning least meets the branch behind `apex`.
+///
+/// `Q(d)` is largest on the first and least on the second, since `d·w` is one
+/// sign, which `how_two_cones_off_one_axis_cross` proved, so the first has
+/// `Q(d) > 0` and both its roots ahead of the apex, and the nearer is on the
+/// loop; the second has `Q(d) < 0` and one root each side of the apex.
+fn where_a_loop_and_two_branches_are_seeded(
+    crossing: &TwoConesOffOneAxis,
+    apex: HalfSpaceThroughAPoint,
+) -> [Point; 3] {
+    let up = crossing.crossed.axis().direction();
+    let along = crossing.ruled.axis().direction();
+    let leaning = (up - along * (up.dot(along) / along.length_squared())).normalized();
+    let leaning = leaning.expect("the two axes are not along one line, so the cones lean apart");
+    let away = -leaning * up.dot(along).signum();
+    let [far, near] =
+        where_one_cone_reaches_across_another(&crossing.ruled, &crossing.crossed, away);
+    let behind = where_one_cone_reaches_across_another(&crossing.ruled, &crossing.crossed, -away);
+    let back = if (behind[0] - crossing.ruled.apex()).dot(apex.facing()) < 0.0 {
+        behind[0]
+    } else {
+        behind[1]
+    };
+    [near, far, back]
+}
+
+/// `Err` unless `run` is on the loop of a loop and two branches, which is the
+/// one piece a march follows.
+///
+/// A run with corners has each of them in front of both `loop_flats`, the
+/// flat surface through `ruled`'s apex and the one `across` reversed. A run
+/// with none but its half-spaces holds neither `branch_seeds`, the seeds of
+/// the branch beyond `across` and the one behind the apex.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a run on a
+/// branch, which runs off for ever where a march follows only a closed loop.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] for a corner on either
+/// flat surface or too close to tell. Whatever settling a seed refuses.
+fn refused_unless_the_run_is_on_the_loop(
+    run: &NamedRun,
+    surfaces: [&Surface; 2],
+    [apex, across]: [HalfSpaceThroughAPoint; 2],
+    branch_seeds: [Point; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<()> {
+    let loop_flats = [Picker::from(apex), Picker::from(across.reversed())];
+    let corners: SmallVec<[PredicatePoint; 2]> = match (
+        the_two_corners_of_an_open_run(run),
+        the_corner_a_closed_run_starts_at(run),
+    ) {
+        (Some(both), _) => SmallVec::from(both),
+        (None, Some(one)) => smallvec![one],
+        (None, None) => SmallVec::new(),
+    };
+    for corner in &corners {
+        for flat in &loop_flats {
+            match which_side_of(flat, *corner, policy, log) {
+                Decision::Pos => (),
+                Decision::Neg => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+                Decision::Zero | Decision::Undecidable { .. } => {
+                    return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+                }
+                other => panic!("a side of a flat surface came back as {other:?}"),
+            }
+        }
+    }
+    let picked_by = the_half_spaces_that_pick(run);
+    if !corners.is_empty() || picked_by.is_empty() {
+        return Ok(());
+    }
+    for seed in branch_seeds {
+        let (settled, off) = settled_with_a_bound(surfaces, seed)?;
+        if every_half_space_holds(picked_by, settled, off, policy, log)? {
+            return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+        }
+    }
+    Ok(())
+}
+
+/// The two places the straight line of `ruled` out of its apex leaning along
+/// `towards` meets `crossed`, one on each of the two loops `intersect` names
+/// them in, or, for a loop and two branches on a line with `Q(d) > 0`, the one
+/// on the branch beyond the loop first.
 ///
 /// Along `y = z + t·d` from `crossed`'s apex, with `z` the gap between the two
 /// apexes, `crossed` is `Q(d)t² + 2B(d, z)t + Q(z) = 0`, and
-/// [`two_cones_off_one_axis_in_two_loops`] proved that every such line has two
+/// [`how_two_cones_off_one_axis_cross`] proved that every such line has two
 /// roots with the flat surface holding the loops apart between them. Solved as
-/// [`where_a_pipe_reaches_across_a_cone`] solves its line.
-fn where_one_cone_reaches_across_another(ruled: &Cone, crossed: &Cone) -> [Point; 2] {
+/// [`where_a_pipe_reaches_across_a_cone`] solves its line, so the root further
+/// from the apex comes first.
+fn where_one_cone_reaches_across_another(
+    ruled: &Cone,
+    crossed: &Cone,
+    towards: Vector,
+) -> [Point; 2] {
     let up = crossed.axis().direction();
     let along = ruled.axis().direction();
     let widening = 1.0 + crossed.slope() * crossed.slope();
     let form =
         |v: Vector| up.length_squared() * v.length_squared() - widening * v.dot(up) * v.dot(up);
-    let ruling = along + ruled.basis().0 * (ruled.slope() * along.length());
+    let ruling = along + towards * (ruled.slope() * along.length());
     let from_the_apex = ruled.apex() - crossed.apex();
     let half = up.length_squared() * ruling.dot(from_the_apex)
         - widening * ruling.dot(up) * from_the_apex.dot(up);

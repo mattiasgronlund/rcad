@@ -164,8 +164,9 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`a_ball_off_a_cones_axis`] for which shapes stay refused. **So is a second
 /// cone that shares neither its axis nor its apex** (Q2667): two loops held
 /// apart by a flat surface, where every straight line of one cone is proved to
-/// cross the other twice, once each side of it — see
-/// [`two_cones_off_one_axis_in_two_loops`] for which shapes stay refused. Two cones
+/// cross the other twice, once each side of it, or one loop and two branches
+/// that run off for ever, held apart by two flat surfaces (Q2812) — see
+/// [`how_two_cones_off_one_axis_cross`] for which shapes stay refused. Two cones
 /// with one apex, one slope and their axes along one line are the same surface
 /// and come back as one, **whichever way each axis points** — see
 /// [`one_cone_either_way_round`].
@@ -5084,8 +5085,9 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 }
 
 /// Two cones: circles or the apex where they share an axis, rulings through the
-/// apex where they share only that, two loops where they share neither and
-/// [`two_cones_off_one_axis_in_two_loops`] proves it, refused everywhere else.
+/// apex where they share only that, two loops, or a loop and two branches that
+/// run off for ever, where they share neither and
+/// [`how_two_cones_off_one_axis_cross`] proves it, refused everywhere else.
 ///
 /// # On one axis it is a table of four, and no row of it is a line
 ///
@@ -5124,8 +5126,8 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 /// # Errors
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two share
-/// neither an axis nor an apex and [`two_cones_off_one_axis_in_two_loops`]
-/// does not prove their crossing two loops.
+/// neither an axis nor an apex and [`how_two_cones_off_one_axis_cross`] proves
+/// their crossing neither two loops nor one loop and two branches.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where two circles are not
 /// held apart by more than the picking half-space's own rounding, and where
@@ -5155,7 +5157,9 @@ fn where_two_cones_cross(
         Decision::Pos if one.apex() == other.apex() => {
             return the_rulings_two_cones_on_one_apex_share(one, other);
         }
-        Decision::Pos => return the_two_loops_of_two_cones_off_one_axis(one, other, policy, log),
+        Decision::Pos => {
+            return the_pieces_two_cones_off_one_axis_cross_in(one, other, policy, log);
+        }
         Decision::Neg | Decision::Undecidable { .. } | _ => {
             unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
         }
@@ -5168,45 +5172,75 @@ fn where_two_cones_cross(
         log,
     )? {
         Decision::Zero => two_cones_on_one_axis(one, other),
-        Decision::Pos => the_two_loops_of_two_cones_off_one_axis(one, other, policy, log),
+        Decision::Pos => the_pieces_two_cones_off_one_axis_cross_in(one, other, policy, log),
         Decision::Neg | Decision::Undecidable { .. } | _ => {
             unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
         }
     }
 }
 
-/// The two loops of [`two_cones_off_one_axis_in_two_loops`], each named as the
-/// part of the crossing one side of the flat surface that holds them apart.
+/// The pieces of [`how_two_cones_off_one_axis_cross`]: two loops, each named
+/// as the part of the crossing one side of the flat surface that holds them
+/// apart, or one loop and two branches that run off for ever, each named by the
+/// flat surfaces it lies beyond.
 ///
 /// # Errors
 ///
-/// What [`two_cones_off_one_axis_in_two_loops`] refuses.
-fn the_two_loops_of_two_cones_off_one_axis(
+/// What [`how_two_cones_off_one_axis_cross`] refuses.
+fn the_pieces_two_cones_off_one_axis_cross_in(
     one: &Cone,
     other: &Cone,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<SurfaceMeet> {
-    let loops = two_cones_off_one_axis_in_two_loops(one, other, policy, log)?;
-    two_loops_picked_either_side_of(Picker::from(loops.across), &loops.ruled)
+    let crossing = how_two_cones_off_one_axis_cross(one, other, policy, log)?;
+    let Some(apex) = crossing.apex else {
+        return two_loops_picked_either_side_of(Picker::from(crossing.across), &crossing.ruled);
+    };
+    let across = crossing.across;
+    let and = Surface::Cone(crossing.ruled);
+    let pieces: [SmallVec<[Picker; 1]>; 3] = [
+        smallvec![Picker::from(apex), Picker::from(across.reversed())],
+        smallvec![Picker::from(across)],
+        smallvec![Picker::from(apex.reversed())],
+    ];
+    Ok(SurfaceMeet::Curves(
+        pieces
+            .into_iter()
+            .map(|picked_by| {
+                NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses { and, picked_by })
+                    .expect("picked_by always holds the flat pickers just built")
+            })
+            .collect(),
+    ))
 }
 
-/// Two cones off one axis whose crossing is proved to be two loops.
+/// Two cones off one axis whose crossing is proved two loops, or one loop and
+/// two branches that run off for ever.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TwoConesInTwoLoops {
+pub(crate) struct TwoConesOffOneAxis {
     /// The cone each of whose straight lines out of its apex crosses the other
-    /// cone twice, once on each loop.
+    /// cone twice: once on each loop, or once on the one loop and once on a
+    /// branch, or, for the lines leaning as the other cone's own straight lines
+    /// do, once on the loop alone.
     pub(crate) ruled: Cone,
     /// The cone those straight lines cross.
     pub(crate) crossed: Cone,
     /// The flat surface every one of those straight lines crosses between its
-    /// two crossings, which holds the two loops apart.
+    /// two crossings, which holds the two loops apart, or the loop and the
+    /// branches.
     pub(crate) across: HalfSpaceThroughAPoint,
+    /// Nothing where the crossing is two loops. Where it is one loop and two
+    /// branches, the flat surface through `ruled`'s apex facing as `across`
+    /// does: the loop is in front of it and behind `across`, one branch is in
+    /// front of `across` and the other behind this.
+    pub(crate) apex: Option<HalfSpaceThroughAPoint>,
 }
 
-/// Whether two cones off one axis, on two apexes, cross in two loops, and what
-/// holds them apart. `intersect` names the loops by it and `walk` marches them
-/// by it, so the namer and the walker cannot drift apart.
+/// Whether two cones off one axis, on two apexes, cross in two loops, or in
+/// one loop and two branches that run off for ever, and what holds the pieces
+/// apart. `intersect` names the pieces by it and `walk` marches the loops by
+/// it, so the namer and the walker cannot drift apart.
 ///
 /// # Read along the straight lines of one cone
 ///
@@ -5225,7 +5259,7 @@ pub(crate) struct TwoConesInTwoLoops {
 /// `U = k_Y·W·V − k(|c| − sS)²`. Both are enclosures, since `S` is a root, and
 /// a pair neither proves is refused.
 ///
-/// # Three ways the roots are proved two and held apart
+/// # Four ways the roots are proved two and held apart
 ///
 /// - **`L > 0` with `Y`'s apex inside `X`**, `Q(z) < 0` asked exactly: every
 ///   line of `Y` runs outside `X`'s own directions and starts inside it, so it
@@ -5243,11 +5277,27 @@ pub(crate) struct TwoConesInTwoLoops {
 ///   zero unless the line runs through `a`, and has one root each side of it.
 ///   Asked with `Q(z) ≠ 0` and `Y`'s own form at `a − b` not zero, both
 ///   exactly: neither apex is on the other cone.
+/// - **`L < 0 < U` with `Y`'s apex outside `X`**, `Q(z) > 0` asked exactly,
+///   and the bound of the second way below zero at some `t'`: the directions
+///   overlap, and every line of `Y` has `q(0) > 0 > q(t')`, so one root
+///   strictly between its apex and `t'`, and those roots are one loop. A line
+///   with `Q(d) > 0` has its other root beyond `t'`, and one with `Q(d) < 0`
+///   behind the apex, on the side away from `t'`; one with `Q(d) = 0` has no
+///   other. With `d·w` one sign, which `U` being finite proves, `Q(d)` changes
+///   sign at just two lines, so the lines of each sign are one arc of them,
+///   and each of the two kinds of other root is one branch, running off for
+///   ever where `Q(d)` nears zero. The loop is held apart from both by two flat
+///   surfaces square to `v`, one through `b` and one through `t'`. Along `Y`'s
+///   axis `q` need not have a lowest point here, since the axis itself can
+///   lean outside `X`'s directions, so `t'` is instead where the circle of `Y`
+///   there has the most room left inside `X`: where `s_X·h − ρ − √k·s‖v‖t`,
+///   for `h` how far up `X`'s axis and `ρ` how far off it the point of `Y`'s
+///   axis is, is largest, which is one formula.
 ///
-/// In all three the roots are simple, since `q` is below zero between them, so
-/// each line crosses `X` there rather than touching it, the two loops are
-/// smooth, and neither runs through `X`'s apex, where a root would be a double
-/// one. Neither runs through `Y`'s apex either, since `Q(z)` is not zero.
+/// In all four the roots are simple, since `q` changes sign at each, so each
+/// line crosses `X` there rather than touching it, the pieces are smooth, and
+/// none runs through `X`'s apex, where a root would be a double one. None runs
+/// through `Y`'s apex either, since `Q(z)` is not zero.
 ///
 /// **The pair is sorted first**, by [`Surface::how_it_sorts_against`], and
 /// then tried as `X` and `Y` both ways round, so which cone is ruled is the
@@ -5256,43 +5306,41 @@ pub(crate) struct TwoConesInTwoLoops {
 /// # Errors
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where none of the
-/// three proves two loops either way round: two cones whose own directions
-/// overlap, which cross in branches that run off for ever, and every pair the
-/// enclosures above are too loose for. A **gap** where the crossing is two
-/// loops, and the curve is there whatever its shape. Among the pairs refused
-/// are two cones of one slope, one turned about a line through a point of the
-/// other's axis: mirror images, which can touch at two points, as
-/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] says.
+/// four proves the crossing either way round: two cones whose own directions
+/// overlap with `Y`'s apex inside `X`, or with `d·w` taking both signs, where
+/// each kind of branch may come in two, and every pair the enclosures above
+/// are too loose for. A **gap** where the crossing is two loops, or a loop and
+/// two branches, and the curve is there whatever its shape. Among the pairs
+/// refused are two cones of one slope, one turned about a line through a point
+/// of the other's axis: mirror images, which can touch at two points, as
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] says. A touch is a
+/// double root on some line, which `q(0) > 0 > q(t')` rules out.
 ///
 /// [`Error::Undecidable`] where a sign asked exactly could not be settled.
-pub(crate) fn two_cones_off_one_axis_in_two_loops(
+pub(crate) fn how_two_cones_off_one_axis_cross(
     one: &Cone,
     other: &Cone,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<TwoConesInTwoLoops> {
+) -> Result<TwoConesOffOneAxis> {
     let (first, second) = match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
         Ordering::Greater => (other, one),
         Ordering::Less | Ordering::Equal => (one, other),
     };
     let at = [first.apex(), second.apex()].map(|apex| PredicatePoint::from(apex.coordinates()));
     for (crossed, ruled) in [(first, second), (second, first)] {
-        if let Some(across) = what_holds_apart_where_each_line_of_one_cone_crosses_another(
+        if let Some(crossing) = what_holds_apart_where_each_line_of_one_cone_crosses_another(
             crossed, ruled, &at, policy, log,
         )? {
-            return Ok(TwoConesInTwoLoops {
-                ruled: *ruled,
-                crossed: *crossed,
-                across,
-            });
+            return Ok(crossing);
         }
     }
     Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
 }
 
-/// The flat surface between the two places every straight line of `ruled`
-/// crosses `crossed`, where one of the three ways
-/// [`two_cones_off_one_axis_in_two_loops`] gives proves it, and nothing where
+/// The flat surfaces between the places every straight line of `ruled`
+/// crosses `crossed`, where one of the four ways
+/// [`how_two_cones_off_one_axis_cross`] gives proves them, and nothing where
 /// none does.
 ///
 /// # Errors
@@ -5304,9 +5352,15 @@ fn what_holds_apart_where_each_line_of_one_cone_crosses_another(
     at: &[PredicatePoint; 2],
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<Option<HalfSpaceThroughAPoint>> {
+) -> Result<Option<TwoConesOffOneAxis>> {
+    let two_loops = |across| TwoConesOffOneAxis {
+        ruled: *ruled,
+        crossed: *crossed,
+        across,
+        apex: None,
+    };
     let [least, most] = how_a_cones_form_reads_along_another_cones_lines(crossed, ruled);
-    if least > 0.0 {
+    if least.lo() > 0.0 {
         return match ask(
             &where_a_point_stands_against_a_cone(ruled.apex(), crossed),
             Measures::Area,
@@ -5314,16 +5368,31 @@ fn what_holds_apart_where_each_line_of_one_cone_crosses_another(
             policy,
             log,
         )? {
-            Decision::Neg => Ok(Some(HalfSpaceThroughAPoint::new(
+            Decision::Neg => Ok(Some(two_loops(HalfSpaceThroughAPoint::new(
                 ruled.apex(),
                 ruled.axis().direction(),
-            )?)),
-            Decision::Pos => where_every_line_of_one_cone_dips_inside_another(crossed, ruled),
+            )?))),
+            Decision::Pos => Ok(
+                where_every_line_of_one_cone_dips_inside_another(crossed, ruled)?.map(two_loops),
+            ),
             Decision::Zero => Ok(None),
             Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
         };
     }
-    if most < 0.0 {
+    if least.hi() < 0.0 && most.lo() > 0.0 {
+        return match ask(
+            &where_a_point_stands_against_a_cone(ruled.apex(), crossed),
+            Measures::Area,
+            at,
+            policy,
+            log,
+        )? {
+            Decision::Pos => a_loop_and_two_branches(crossed, ruled),
+            Decision::Neg | Decision::Zero => Ok(None),
+            Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
+        };
+    }
+    if most.hi() < 0.0 {
         for (point, cone) in [(ruled.apex(), crossed), (crossed.apex(), ruled)] {
             match ask(
                 &where_a_point_stands_against_a_cone(point, cone),
@@ -5339,20 +5408,21 @@ fn what_holds_apart_where_each_line_of_one_cone_crosses_another(
                 }
             }
         }
-        return Ok(Some(HalfSpaceThroughAPoint::new(
+        return Ok(Some(two_loops(HalfSpaceThroughAPoint::new(
             crossed.apex(),
             crossed.axis().direction(),
-        )?));
+        )?)));
     }
     Ok(None)
 }
 
-/// A lower end on the least and an upper end on the most that `crossed`'s
-/// form `Q` reads along the straight lines of `ruled`, `L` and `U` of
-/// [`two_cones_off_one_axis_in_two_loops`]. The most is infinite where the
-/// lines' leaning against `crossed`'s axis is not proved one sign, and both are
-/// `NaN` where an enclosure is.
-fn how_a_cones_form_reads_along_another_cones_lines(crossed: &Cone, ruled: &Cone) -> [f64; 2] {
+/// An enclosure of the least and one of the most that `crossed`'s form `Q`
+/// reads along the straight lines of `ruled`, so `L` and `U` of
+/// [`how_two_cones_off_one_axis_cross`] are the least's lower end and the
+/// most's upper end. The most is everything where the lines' leaning against
+/// `crossed`'s axis is not proved one sign, and both are where an enclosure
+/// is `NaN`.
+fn how_a_cones_form_reads_along_another_cones_lines(crossed: &Cone, ruled: &Cone) -> [Interval; 2] {
     let up = exactly(crossed.axis().direction().components());
     let along = exactly(ruled.axis().direction().components());
     let leaning = dot_enclosing(up, along);
@@ -5364,30 +5434,35 @@ fn how_a_cones_form_reads_along_another_cones_lines(crossed: &Cone, ruled: &Cone
         .iter()
         .any(|square| square.lo().is_nan() || square.hi().is_nan())
     {
-        return [f64::NAN; 2];
+        return [Interval::ENTIRE; 2];
     }
     let widening = Interval::exactly(1.0) + squared_enclosing(crossed.slope());
     let length = (Interval::exactly(1.0) + squared_enclosing(ruled.slope()))
         * squared_length_enclosing(up)
         * squared_length_enclosing(along);
-    let widest = squares[0].hi().max(squares[1].hi());
-    let least = (length - widening * Interval::exactly(widest)).lo();
-    let narrowest = if ends[0].lo() > 0.0 {
-        squares[0].lo()
-    } else if ends[1].hi() < 0.0 {
-        squares[1].lo()
-    } else {
-        return [least, f64::INFINITY];
+    // The most `(d·w)²` reaches is at one end of `d·w`'s range whatever their
+    // signs, so it lies between the larger of the two lower ends and the
+    // larger of the two upper ones.
+    let Ok(widest) = Interval::new(
+        squares[0].lo().max(squares[1].lo()),
+        squares[0].hi().max(squares[1].hi()),
+    ) else {
+        return [Interval::ENTIRE; 2];
     };
-    [
-        least,
-        (length - widening * Interval::exactly(narrowest)).hi(),
-    ]
+    let least = length - widening * widest;
+    let most = if ends[0].lo() > 0.0 {
+        length - widening * squares[0]
+    } else if ends[1].hi() < 0.0 {
+        length - widening * squares[1]
+    } else {
+        Interval::ENTIRE
+    };
+    [least, most]
 }
 
 /// The flat surface square to `ruled`'s axis where every straight line of
 /// `ruled` is inside `crossed`, the second way
-/// [`two_cones_off_one_axis_in_two_loops`] gives, and nothing where that bound
+/// [`how_two_cones_off_one_axis_cross`] gives, and nothing where that bound
 /// is not proved below zero.
 ///
 /// # Errors
@@ -5407,12 +5482,105 @@ fn where_every_line_of_one_cone_dips_inside_another(
     let half = up.length_squared() * along.dot(from_the_apex)
         - widening * along.dot(up) * from_the_apex.dot(up);
     let through = ruled.apex() + along * (-half / steepness);
-    if !through.is_finite() {
+    if !through.is_finite()
+        || where_every_line_crosses_a_flat_inside(crossed, ruled, through).is_none()
+    {
         return Ok(None);
     }
+    Ok(Some(HalfSpaceThroughAPoint::new(
+        through,
+        ruled.axis().direction(),
+    )?))
+}
 
-    let up = exactly(up.components());
-    let along = exactly(along.components());
+/// The loop and the two branches of the fourth way
+/// [`how_two_cones_off_one_axis_cross`] gives, held apart by the flat
+/// surfaces square to `ruled`'s axis through its apex and through a point of
+/// that axis where every straight line of `ruled` is inside `crossed`, tried
+/// on both sides of the apex, and nothing where neither side proves it.
+///
+/// # Errors
+///
+/// Whatever [`HalfSpaceThroughAPoint::new`] refuses, which a finite point and
+/// a cone's axis never are.
+fn a_loop_and_two_branches(crossed: &Cone, ruled: &Cone) -> Result<Option<TwoConesOffOneAxis>> {
+    for side in [1.0, -1.0] {
+        let Some(through) =
+            where_a_circle_of_one_cone_has_most_room_inside_another(crossed, ruled, side)
+        else {
+            continue;
+        };
+        let Some(meets) = where_every_line_crosses_a_flat_inside(crossed, ruled, through) else {
+            continue;
+        };
+        let facing = if meets.lo() > 0.0 {
+            ruled.axis().direction()
+        } else if meets.hi() < 0.0 {
+            -ruled.axis().direction()
+        } else {
+            continue;
+        };
+        return Ok(Some(TwoConesOffOneAxis {
+            ruled: *ruled,
+            crossed: *crossed,
+            across: HalfSpaceThroughAPoint::new(through, facing)?,
+            apex: Some(HalfSpaceThroughAPoint::new(ruled.apex(), facing)?),
+        }));
+    }
+    Ok(None)
+}
+
+/// The point of `ruled`'s axis, `side` of its apex, where the circle of
+/// `ruled` round it has the most room left inside `crossed`, or nothing where
+/// that room only grows on along the axis or the point is not finite.
+///
+/// With `up` the unit axis of `crossed` facing as the axis direction `along =
+/// side·v` does, and `o = b − a`, the point `b + t·along` is `h = (o +
+/// t·along)·up` up `crossed`'s axis and `ρ = ‖m + t·n‖` off it, for `m = o ×
+/// up` and `n = along × up`, and the circle round it is `s_Y·t·‖along‖` wide.
+/// The room is `(s_X·h − ρ)/√k` less that width, which is `κ·t − ρ` and a part
+/// that does not move, over `√k`, for `κ = s_X·(along·up) −
+/// s_Y·‖along‖·√k`. That is concave, and largest where `n·(m + t·n) =
+/// κ·ρ`, at `t = (−m·n + κ·√(D/(n·n − κ²)))/(n·n)` with `D = (n·n)(m·m) −
+/// (m·n)²`. It only grows on for ever where `κ² ≥ n·n`. Rounding moves the
+/// point, which is harmless: the bound that follows asks of the point as
+/// rounded.
+fn where_a_circle_of_one_cone_has_most_room_inside_another(
+    crossed: &Cone,
+    ruled: &Cone,
+    side: f64,
+) -> Option<Point> {
+    let along = ruled.axis().direction() * side;
+    let up = crossed.axis().direction()
+        * (along.dot(crossed.axis().direction()).signum() / crossed.axis().direction().length());
+    let from_the_apex = ruled.apex() - crossed.apex();
+    let [off, leaning] = [from_the_apex, along].map(|towards| towards.cross(up));
+    let leaning_squared = leaning.length_squared();
+    let straight_on = off.dot(leaning);
+    let room = crossed.slope() * along.dot(up)
+        - ruled.slope() * along.length() * (1.0 + crossed.slope() * crossed.slope()).sqrt();
+    let spare = leaning_squared - room * room;
+    if spare <= 0.0 {
+        return None;
+    }
+    let unlined = (leaning_squared * off.length_squared() - straight_on * straight_on).max(0.0);
+    let t = (-straight_on + room * (unlined / spare).sqrt()) / leaning_squared;
+    let through = ruled.apex() + along * t;
+    (t > 0.0 && through.is_finite()).then_some(through)
+}
+
+/// An enclosure of where along `ruled`'s axis, in lengths of its stored
+/// direction, the flat surface square to it through `through` crosses it,
+/// where every straight line of `ruled` is proved inside `crossed` at that
+/// flat surface, and nothing where it is not: the bound of the second way
+/// [`how_two_cones_off_one_axis_cross`] gives.
+fn where_every_line_crosses_a_flat_inside(
+    crossed: &Cone,
+    ruled: &Cone,
+    through: Point,
+) -> Option<Interval> {
+    let up = exactly(crossed.axis().direction().components());
+    let along = exactly(ruled.axis().direction().components());
     let squared_along = squared_length_enclosing(along);
     let meets = quotient_or_everything(
         dot_enclosing(
@@ -5435,14 +5603,7 @@ fn where_every_line_of_one_cone_dips_inside_another(
     let most = a_cones_form_enclosing(crossed, centre)
         + Interval::exactly(2.0) * reach * root_enclosing(squared_length_enclosing(stretched))
         + reach * reach * squared_up;
-    if most.hi() < 0.0 {
-        Ok(Some(HalfSpaceThroughAPoint::new(
-            through,
-            ruled.axis().direction(),
-        )?))
-    } else {
-        Ok(None)
-    }
+    (most.hi() < 0.0).then_some(meets)
 }
 
 /// `Q(p − a)` for `cone`'s form `Q`: below zero where `point` is inside the
