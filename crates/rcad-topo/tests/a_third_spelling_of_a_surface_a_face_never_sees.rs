@@ -33,13 +33,16 @@
 //! lower face's side alone, and three of the six fuses were refused
 //! `ResultIsNotManifold`.
 //!
-//! **Two more cases Q2382 left unbuilt** (Q2541). Two spellings of the bars'
-//! pipe beside the raised step or climbing top answer every rule, so a face
-//! that weighs one spelling at the node alone answers as the face across
-//! does. A rim crossing that is also a listed cut, drawn on past the rim, is
-//! not reached: three slabs and blocks with a D-shaped hole beside a bar on
-//! the hole's pipe answer every rule, and none has a face that lists the pipe
-//! and draws it along its rim.
+//! **Two more cases Q2382 left unbuilt** (Q2541, Q2722). Two spellings of the
+//! bars' pipe beside the raised step or climbing top answer every rule, so a
+//! face that weighs one spelling at the node alone answers as the face across
+//! does. A rim crossing that is also a listed cut, drawn on past the rim,
+//! answers too. Three slabs and blocks with a D-shaped hole beside a bar on
+//! the hole's pipe did not reach it, since none has a face that lists the pipe
+//! and draws it along its rim. A fourth does: its top lists the spelling of
+//! the bar under it, crosses the pipe only in the circle its rim along the
+//! hole is an arc of, and leaves the bar's spelling out, and every rule
+//! answers both ways round.
 
 use core::f64::consts::PI;
 
@@ -274,8 +277,10 @@ const THE_PIPES_AXIS_AT: f64 = 0.5;
 /// hole is an arc of the circle the pipe crosses it in, and the rest of that
 /// circle runs on through the upper top, across its edge with the leaning
 /// side at `x = ±√1.25` and its edge with the riser at `x = ±√2.21`. **It does
-/// not reach that case yet**: a probe in `the_listed_cuts_it_still_draws`
-/// found no face here that lists the pipe and draws it only along its rim.
+/// not reach that case**: a probe in `the_listed_cuts_it_still_draws` found no
+/// face here that lists the pipe and draws it only along its rim.
+/// [`a_slab_whose_top_lists_the_bars_pipe_and_meets_it_only_in_its_rims_circle_answers_every_rule`]
+/// does.
 /// What the two share is the bar's part of the disc, from `z = -1` to `z = 2`.
 #[test]
 fn a_rim_drawn_on_past_the_hole_beside_a_d_shaped_bar_on_its_pipe_answers_every_rule() {
@@ -355,6 +360,40 @@ fn a_slab_with_a_d_shaped_hole_over_a_wedge_cut_from_a_bar_on_its_pipe_answers_e
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// The slab of
+/// [`a_slab_with_a_d_shaped_hole_over_a_bar_on_its_pipe_cut_on_a_slant_answers_every_rule`]
+/// over a bar on the same pipe from `z = -3` up to where it crosses
+/// `z = 0.4 + y`, every rule both ways round (Q2722). The two share nothing:
+/// under the slab, which stops at `y = 1.5`, the bar's top is at most at
+/// `z = 1.9`.
+///
+/// This is Q2541's second case, and it answers. The bar's top is an ellipse
+/// whose box reaches `z = 2.4`, so the bar is within reach of the slab, and the
+/// slab's top at `z = 3` is strictly past it, so the top lists the bar's
+/// spelling of the pipe. The top crosses the pipe in one circle, and its rim
+/// along the hole is an arc of it. Probes in `gather` and
+/// `the_listed_cuts_it_still_draws` found that circle drawn by the hole's
+/// spelling and by the bar's, and counted it as a crossing the rim runs along,
+/// so the top draws no crossing of what it lists and leaves the bar's
+/// spelling out. The two long sides list the bar's spelling too, but each
+/// crosses the pipe in two lines its rim does not run along, so they keep it.
+///
+/// The plane is `z = 0.4 + y` and not the `z = 0.5 + y` Q2722 named. That one
+/// runs through the slab's bottom edge along `y = 1.5`, `z = 2`, and a bar's
+/// slanted top touching a block's edge is refused `Undecidable` at `order
+/// along a crossing` on its own, with the hole or without it, in a row filed
+/// from Q2722.
+#[test]
+fn a_slab_whose_top_lists_the_bars_pipe_and_meets_it_only_in_its_rims_circle_answers_every_rule() {
+    let bar = PI * THE_PIPES_RADIUS * THE_PIPES_RADIUS * (3.0 + 0.4 + THE_PIPES_AXIS_AT);
+    let failed = every_rule_for_a_holed_slab_over(
+        [2.0, 3.0],
+        a_bar_on_the_pipe_under_a_plane_rising_along_y,
+        bar,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// What goes wrong fusing a slab over `x ∈ [-3, 3]`, `y ∈ [-0.3, 1.5]` and
 /// `z`, with the part of the pipe's disc with `x ≤ -1.3` cut through it, with
 /// what `bar` makes, of volume `bar_volume` and sharing nothing with the slab,
@@ -425,6 +464,21 @@ fn a_bar_on_the_pipe_under_a_slant(model: &mut Model) -> SolidKey {
         &[[-2.0, -4.0], [2.6, -4.0], [-1.9, 5.0], [-2.0, 5.0]],
     );
     one_solid(model, &[bar], &[under_the_slant], Rule::Intersection)
+}
+
+/// A bar of radius [`THE_PIPES_RADIUS`] about the pipe's axis from `z = -3`
+/// up to where it crosses `z = 0.4 + y`.
+fn a_bar_on_the_pipe_under_a_plane_rising_along_y(model: &mut Model) -> SolidKey {
+    let placed =
+        Isometry::translation(Vector::new(0.0, THE_PIPES_AXIS_AT, -3.0)).expect("a finite shift");
+    let bar = model
+        .add_round_bar(THE_PIPES_RADIUS, 7.0, &placed)
+        .expect("a bar");
+    let under_the_plane = a_block_across_x(
+        model,
+        &[[-2.0, -4.0], [3.0, -4.0], [3.0, 3.4], [-2.0, -1.6]],
+    );
+    one_solid(model, &[bar], &[under_the_plane], Rule::Intersection)
 }
 
 /// The area of the part of the pipe's disc further than `apart` from its
