@@ -9543,7 +9543,6 @@ relative error reaches `−1`.
 # restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 4be293a5
 # restates: crates/rcad-predicates/src/cascade.rs decide at 4be293a5
 # HowFarFromTheRing::on_floats and SIDE_OF_TORUS_ERROR_BOUND, rcad-geom's torus.
-# DRAFT: not yet run.
 @rnd = float<ieee_64, ne>;
 
 # The point, the centre, the axis direction and the two radii, each an f64.
@@ -9756,8 +9755,7 @@ Phat2 = A6 + C9;
   /\ hy / |hy| in [-1, 1] /\ ky / |ky| in [-1, 1]
   /\ hz / |hz| in [-1, 1] /\ kz / |kz| in [-1, 1]
 ->
-  (y - Ex) / Phat2 in ? /\ (left - Lt) / A6 in ? /\ (Rt - right) / C9 in ?
-  /\ P -/ Phat in ?
+  (y - Ex) / Phat2 in ? /\ P -/ Phat in ?
   /\ (y - Ex) / eb in [-1, 1]
 }
 
@@ -9804,17 +9802,11 @@ W3 + (Wt - W) -> (Wx + Wx * jx) + (Wy + Wy * jy) + (Wz + Wz * jz);
 (Wx + Wx * jx) - Wx -> Wx * jx;
 (Wy + Wy * jy) - Wy -> Wy * jy;
 (Wz + Wz * jz) - Wz -> Wz * jz;
-(Wx * jx) / Wx -> jx;
-(Wy * jy) / Wy -> jy;
-(Wz * jz) / Wz -> jz;
 G2 / oab -> 1 + ((O3 + (G2 - oab)) - O3) / O3;
 O3 + (G2 - oab) -> (Ox + Ox * zx) + (Oy + Oy * zy) + (Oz + Oz * zz);
 (Ox + Ox * zx) - Ox -> Ox * zx;
 (Oy + Oy * zy) - Oy -> Oy * zy;
 (Oz + Oz * zz) - Oz -> Oz * zz;
-(Ox * zx) / Ox -> zx;
-(Oy * zy) / Oy -> zy;
-(Oz * zz) / Oz -> zz;
 
 # The error is the sum of the two blocks' errors, each the sum of its
 # pieces' errors, each a fraction of its own piece of the permanent; add_rr
@@ -9828,10 +9820,6 @@ A6 + (left - Lt) -> (cOO + eOO) + (cRR + eRR) + (crr + err) + (cOR + eOR) + (cOr
 (cOR + eOR) - cOR -> eOR;
 (cOr + eOr) - cOr -> eOr;
 (cRr + eRr) - cRr -> eRr;
-eOO / cOO -> WOO;
-eRR / cRR -> WRR;
-err / crr -> Wrr;
-eOR / cOR -> WOR;
 eOr / cOr -> -WOr;
 eRr / cRr -> -WRr;
 C9 + (Rt - right) -> (C3x + (Zx - Yx)) + (C3y + (Zy - Yy)) + (C3z + (Zz - Yz));
