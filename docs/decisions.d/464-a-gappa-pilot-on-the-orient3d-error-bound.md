@@ -551,8 +551,9 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   `SIDE_OF_PLANE_ERROR_BOUND` are proved at the code's constants, orient2d's
   with its products below the normals too, and each of the other six is a row
   of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12,
-  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13, and
-  `SIDE_OF_SPHERE_ERROR_BOUND` in 464.14.
+  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13,
+  `SIDE_OF_SPHERE_ERROR_BOUND` in 464.14, and `SIDE_OF_CYLINDER_ERROR_BOUND`
+  in 464.15 where no factor is zero.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those. Done, in 464.9: three are proved at the code's
   constants, two of them false when every number is below `2⁻¹⁰²²`, and each
@@ -1848,7 +1849,8 @@ for byte as they were run.
   `surface.rs`' `ERROR_BOUND` in `rcad-predicates` (Q2677, done in 464.12),
   and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` (Q2678, done in
   464.13), `SIDE_OF_SPHERE_ERROR_BOUND` (Q2679, done in 464.14),
-  `SIDE_OF_CYLINDER_ERROR_BOUND`, `SIDE_OF_CONE_ERROR_BOUND` and
+  `SIDE_OF_CYLINDER_ERROR_BOUND` (Q2680, done in 464.15 where no factor is
+  zero), `SIDE_OF_CONE_ERROR_BOUND` and
   `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
   Each is to be proved as 1 to 5 here prove orient2d and the side of a plane:
   `on_floats` line for line, the lemma for each product it checks is normal, a
