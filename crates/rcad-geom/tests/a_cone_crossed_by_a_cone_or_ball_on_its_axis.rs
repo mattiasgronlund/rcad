@@ -18,9 +18,9 @@
 //! each side of one flat surface. What stays refused is a second cone off the
 //! axis whose directions overlap the first's, and a ball whose skin runs
 //! through the apex, which crosses the cone in a circle and the apex apart
-//! from it. A second cone of the same slope turned about a point of the first's
-//! axis is more than an overlap: the two are mirror images, and touch at two
-//! points.
+//! from it. A second cone of the same slope turned about a line through a point
+//! of the first's axis is more than an overlap: the two are mirror images, and
+//! can touch at two points.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, NamedRun, Picker, Point, Sphere, Surface, SurfaceMeet,

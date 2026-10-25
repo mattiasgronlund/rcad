@@ -5259,7 +5259,10 @@ pub(crate) struct TwoConesInTwoLoops {
 /// three proves two loops either way round: two cones whose own directions
 /// overlap, which cross in branches that run off for ever, and every pair the
 /// enclosures above are too loose for. A **gap** where the crossing is two
-/// loops, and the curve is there whatever its shape.
+/// loops, and the curve is there whatever its shape. Among the pairs refused
+/// are two cones of one slope, one turned about a line through a point of the
+/// other's axis: mirror images, which can touch at two points, as
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] says.
 ///
 /// [`Error::Undecidable`] where a sign asked exactly could not be settled.
 pub(crate) fn two_cones_off_one_axis_in_two_loops(
