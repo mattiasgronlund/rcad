@@ -5410,7 +5410,7 @@ fn where_a_cone_and_a_ball_cross(
         log,
     )? {
         Decision::Zero => (),
-        Decision::Pos => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        Decision::Pos => return a_ball_off_a_cones_axis(cone, ball, &at, policy, log),
         Decision::Neg | Decision::Undecidable { .. } | _ => {
             unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
         }
@@ -5446,6 +5446,206 @@ fn where_a_cone_and_a_ball_cross(
         }
         Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
     }
+}
+
+/// A cone and a ball whose centre is off the cone's axis, which cross in a
+/// degree-four curve: one loop or two named, and the rest refused.
+///
+/// # A ball round the apex crosses each nappe once all the way round
+///
+/// With the apex inside the ball every straight line out of it leaves the
+/// ball once, so each nappe is crossed in one loop round the axis, and the
+/// flat surface through the apex square to the axis holds the two apart. A
+/// ball whose skin runs through the apex is refused, as it is on the axis.
+///
+/// # A ball clear of the apex is read along the two lines nearest its centre
+///
+/// With the apex outside, a straight line out of it meets the ball twice or
+/// not at all, and the nearer its direction leans toward the centre the more
+/// surely it meets it. So on each nappe the lines that meet the ball are a run
+/// of them either side of the one leaning most toward the centre, and the run
+/// is the whole nappe exactly when the line leaning furthest away meets it too.
+/// Those two lines lie in the flat surface through the axis and the centre,
+/// along `d± = û ± s·ê` with `û` the unit axis and `ê` the unit direction from
+/// the axis out to the centre, and `d+` read forward and `d−` read backward
+/// are the nearest lines on the two nappes.
+///
+/// Along `a + t·d±` the ball is `(1 + s²)t² − 2(d±·y)t + P = 0`, with
+/// `y = c − a` and `P = |y|² − R²` above zero, so both roots lie on the side
+/// `d±·y` points to, and they are there when `(d±·y)² > (1 + s²)P`. Scaled by
+/// `W = w·w` so nothing is divided or rooted, with `h = y·w` and
+/// `A = ‖y × w‖²`:
+///
+/// - `d+·y` has the sign of `h + s√A`: above zero where `h > 0` or
+///   `G = h² − s²A < 0`, and below where `h ≤ 0` and `G > 0`. `d−·y` likewise
+///   has the sign of `h − s√A`.
+/// - `W((d±·y)² − (1 + s²)P)` is `E± = V ± 2s·h√A` with
+///   `V = h² + s²A − W(1 + s²)P`, and `E+·E− = Δ = V² − 4s²h²A`. With `Δ`
+///   above zero both take `V`'s sign; below it they differ, and `E+` is the
+///   larger exactly when `h > 0`.
+///
+/// A nappe with its nearest line met and its furthest not holds one loop. One
+/// such nappe is the whole crossing, and two are held apart by the flat surface
+/// through the apex square to the axis.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the ball's
+/// skin runs through the apex, where `Δ` is zero, which is a ball touching the
+/// cone or about to wrap a whole nappe, and where a nappe is met by every one
+/// of its lines, which crosses it in two loops round the axis. Each is a
+/// **gap**: the crossing is there.
+///
+/// [`Error::Undecidable`] where a sign could not be settled.
+fn a_ball_off_a_cones_axis(
+    cone: &Cone,
+    ball: &Sphere,
+    at: &[PredicatePoint; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<SurfaceMeet> {
+    match ask(
+        &where_a_ball_stands_against_a_cones_apex(cone, ball),
+        Measures::Area,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Zero => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        Decision::Neg => return two_loops_either_side_of_a_cones_apex(cone),
+        Decision::Pos => (),
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+
+    let mut sign_of = |which: usize, measures: Measures| -> Result<Ordering> {
+        Ok(
+            match ask(
+                &how_a_ball_leans_against_a_cone(cone, ball, which),
+                measures,
+                at,
+                policy,
+                log,
+            )? {
+                Decision::Neg => Ordering::Less,
+                Decision::Zero => Ordering::Equal,
+                Decision::Pos => Ordering::Greater,
+                other => unreachable!("a sign question answers with a sign: {other:?}"),
+            },
+        )
+    };
+    let up = sign_of(UP, Measures::Length)?;
+    let leaning = sign_of(LEANING, Measures::Area)?;
+    let spread = sign_of(SPREAD, Measures::Area)?;
+    let either_way = sign_of(EITHER_WAY, Measures::ManyLengths { how_many: 4 })?;
+
+    let toward = if up == Ordering::Greater {
+        Ordering::Greater
+    } else {
+        leaning.reverse()
+    };
+    let away = if up == Ordering::Less {
+        Ordering::Less
+    } else {
+        leaning
+    };
+    let (reaches_toward, reaches_away) = match either_way {
+        Ordering::Equal => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        Ordering::Greater => (spread, spread),
+        Ordering::Less => match up {
+            Ordering::Greater => (Ordering::Greater, Ordering::Less),
+            Ordering::Less => (Ordering::Less, Ordering::Greater),
+            Ordering::Equal => unreachable!("Δ = V² when h = 0, which is never below zero"),
+        },
+    };
+    let met = |side: Ordering, along: Ordering, reaches: Ordering| {
+        along == side && reaches == Ordering::Greater
+    };
+    let upper = [
+        met(Ordering::Greater, toward, reaches_toward),
+        met(Ordering::Greater, away, reaches_away),
+    ];
+    let lower = [
+        met(Ordering::Less, away, reaches_away),
+        met(Ordering::Less, toward, reaches_toward),
+    ];
+    if [upper, lower].iter().any(|[_, furthest]| *furthest) {
+        return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+    }
+    match [upper[0], lower[0]] {
+        [false, false] => Ok(SurfaceMeet::Nothing),
+        [true, false] | [false, true] => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )?])),
+        [true, true] => two_loops_either_side_of_a_cones_apex(cone),
+    }
+}
+
+/// Which of [`a_ball_off_a_cones_axis`]'s four numbers a question asks.
+const UP: usize = 0;
+const LEANING: usize = 1;
+const SPREAD: usize = 2;
+const EITHER_WAY: usize = 3;
+
+/// One of `h = (c − a)·w`, `G = h² − s²A`, `V = h² + s²A − W(1 + s²)P` and
+/// `Δ = V² − 4s²h²A`, as a question, `which` naming it.
+fn how_a_ball_leans_against_a_cone(cone: &Cone, ball: &Sphere, which: usize) -> impl Predicate {
+    let (cone, ball) = (*cone, *ball);
+    Question {
+        named: WHERE_A_CONE_AND_A_BALL_CROSS,
+        enclosing: move || how_a_ball_leans_against_a_cone_enclosing(&cone, &ball)[which],
+        exactly: move || {
+            how_a_ball_leans_against_a_cone_exactly(&cone, &ball)
+                .map(|numbers| numbers[which].clone())
+        },
+    }
+}
+
+/// `[h, G, V, Δ]` as enclosures.
+fn how_a_ball_leans_against_a_cone_enclosing(cone: &Cone, ball: &Sphere) -> [Interval; 4] {
+    let apex = cone.apex().coordinates();
+    let centre = ball.centre().coordinates();
+    let along = cone.axis().direction().components();
+    let up = dot_enclosing(gap_enclosing(apex, centre), exactly(along));
+    let off = how_far_off_an_axis_enclosing(centre, apex, along);
+    let outside =
+        squared_length_enclosing(gap_enclosing(apex, centre)) - squared_enclosing(ball.radius());
+    let squared_slope = squared_enclosing(cone.slope());
+    let squared_up = up * up;
+    let leaning_off = squared_slope * off;
+    let spread = squared_up + leaning_off
+        - squared_length_enclosing(exactly(along))
+            * (Interval::exactly(1.0) + squared_slope)
+            * outside;
+    [
+        up,
+        squared_up - leaning_off,
+        spread,
+        spread * spread - Interval::exactly(4.0) * leaning_off * squared_up,
+    ]
+}
+
+/// `[h, G, V, Δ]`, exactly.
+fn how_a_ball_leans_against_a_cone_exactly(cone: &Cone, ball: &Sphere) -> Option<[Exact; 4]> {
+    let apex = cone.apex().coordinates();
+    let centre = ball.centre().coordinates();
+    let along = cone.axis().direction().components();
+    let up = Exact::dot_of_two_exact(&Exact::gap_between(apex, centre), &Exact::of_each(along))?;
+    let off = how_far_off_an_axis_exactly(centre, apex, along)?;
+    let outside =
+        squared_gap_exactly(apex, centre)?.minus(&Exact::product_of(ball.radius(), ball.radius())?);
+    let squared_slope = Exact::product_of(cone.slope(), cone.slope())?;
+    let squared_along = Exact::dot_of(along, along)?;
+    let squared_up = up.times(&up)?;
+    let leaning_off = squared_slope.times(&off)?;
+    let spread = squared_up.plus(&leaning_off).minus(
+        &squared_along
+            .plus(&squared_along.times(&squared_slope)?)
+            .times(&outside)?,
+    );
+    let either_way = spread
+        .times(&spread)?
+        .minus(&Exact::of(4.0).times(&leaning_off)?.times(&squared_up)?);
+    Some([up, squared_up.minus(&leaning_off), spread, either_way])
 }
 
 /// The two circles a ball on a cone's axis cuts it in, told apart by the flat
