@@ -9478,3 +9478,387 @@ And what is not a row:
   level 1 certify a wrong sign. That is what Q2767 asks for, and Q2767 waits
   on Q2782 already.
 - `field` on these scripts' hints (464.10).
+
+### 464.17 The side of rcad-geom's torus
+
+*Draft, Q2682's first lane, handed over at its budget. Nothing below has been
+run through Gappa yet. The lane after it runs `tor.g`, fixes what fails, and
+writes this section up in 464.15's and 464.16's form; this paragraph and the
+word "draft" then go.*
+
+Read at `4be293a5`, against `torus.rs:336-398` (`on_floats`), `torus.rs:474-483`
+(`cross_product_halves`), `torus.rs:485-511` (the constant) and
+`cascade.rs:67-69` (`product_is_normal`).
+
+**The constant as a double is `18u + 224u²`, not `18u + 220u²`.** `220ε` is
+`55 · 2⁻⁵¹`, which is not a multiple of `2⁻⁴⁸`, the ulp of 18, so `18.0 +
+220.0 * epsilon` rounds, up, to `18 + 7 · 2⁻⁴⁸`. `python3 -c` on `(18.0 +
+220.0 * 2.0**-53) * 2.0**-53` printed `0x1.2000000000007p-49 224`, the second
+figure `(B − 18u) / u²` in exact rationals. `tor.g` writes the double, `B =
+18b-53 + 7b-101;`.
+
+**The count, on paper.** On the longest chain, `fx`'s, `y` takes 17
+roundings and `value` 18: `f` and the square `g` (`3u` with `f` counted
+twice), the two sums of `out_and_back` (`5u`), `bulge` (`6u`), doubled by `bb
+= bulge²` and its own rounding (`13u`), `W`'s three on `tx` (`16u`), and
+`left` (`17u`). The `4R²` side is shorter, about `10u`. The permanent is about
+`7u` from its value with no rounding of its own on either product. So `y`
+should prove at the code's `B` with about a `u` to spare.
+
+**What `on_floats` does not check.** It checks every product of `value`: the
+three squares of `from_centre`, of `direction` and of `sideways`, the six
+halves, `R²`, `r²`, `bulge²`, `axis_squared · bulge²` and `4R² · across`. It
+does not check the permanent's own products: the three reach squares `v`,
+`brr = bulge_reach²`, `P1 = axis_squared · brr` and `P2 = 4R² · spread`. Where
+nothing cancels each is at least a checked product, by monotone rounding: `v ≥
+s` as in 464.15's 2, `br ≥ bulge` since `hollow ≤ RR`, so `brr ≥ bb` and `P1 ≥
+left`, and `spread ≥ across`, so `P2 ≥ right`. That fails where a component of
+the cross product cancels (`v` unchecked, as the cylinder's), and where all
+three cancel, `right` is zero, its check passes, and `P2` is unchecked: a
+point on the axis, a shape a designer makes. Those are the split, as
+464.15's 6.
+
+**Other branches.** `hollow = rnd(R² − r²)` is not zero where `r < R`, which
+`Torus::new` refuses otherwise: the squares of two different doubles differ by
+more than an ulp of either square, so they round apart. That is on paper.
+`hollow` can be below the normals, where it is exact, as 464.16's
+`sumexact.g`; `tor.g` takes it normal and that is another case. A zero
+difference or direction component is not in `tor.g`.
+
+**How `tor.g` splits the error.** Two blocks, the permanent's two products.
+The `4R²` block is the cylinder's nine pieces (464.15's 2) times `F4`, with
+`right`'s rounding and `4R²`'s in `K` and `m`. The `w·w · bulge²` block is six
+pieces, `W · a · b` for the pairs of `oab`, `RR` and `rr`, which sum to `W ·
+(oab + RR + rr)²`; each piece's error is its pair's carried factor less its
+true one, `om` and `Z` being `w·w / W` and `|x|² / oab`, each averaged over
+three pieces of its own. A first form averaged `bulge / (oab + RR + rr)` over
+its three parts instead; it was dropped before it ran, since `rr`'s part is
+off by about `−2` and 464.15's 4 found Gappa does not average a sum whose
+relative error reaches `−1`.
+
+```gappa
+# restates: crates/rcad-geom/src/torus.rs on_floats at 4be293a5
+# restates: crates/rcad-geom/src/torus.rs cross_product_halves at 4be293a5
+# restates: crates/rcad-geom/src/torus.rs SIDE_OF_TORUS_ERROR_BOUND at 4be293a5
+# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 4be293a5
+# restates: crates/rcad-predicates/src/cascade.rs decide at 4be293a5
+# HowFarFromTheRing::on_floats and SIDE_OF_TORUS_ERROR_BOUND, rcad-geom's torus.
+# DRAFT: not yet run.
+@rnd = float<ieee_64, ne>;
+
+# The point, the centre, the axis direction and the two radii, each an f64.
+px = rnd(px_); py = rnd(py_); pz = rnd(pz_);
+ox = rnd(ox_); oy = rnd(oy_); oz = rnd(oz_);
+dx = rnd(dx_); dy = rnd(dy_); dz = rnd(dz_);
+rg = rnd(rg_); tb = rnd(tb_);
+
+# What on_floats computes, line for line.
+Fx = px - ox; Fy = py - oy; Fz = pz - oz;
+fx = rnd(Fx); fy = rnd(Fy); fz = rnd(Fz);
+
+# cross_product_halves: h is each component's left half, k its right half.
+hx = rnd(fy * dz); kx = rnd(fz * dy);
+hy = rnd(fz * dx); ky = rnd(fx * dz);
+hz = rnd(fx * dy); kz = rnd(fy * dx);
+Qx = hx - kx; Qy = hy - ky; Qz = hz - kz;
+qx = rnd(Qx); qy = rnd(Qy); qz = rnd(Qz);
+
+# squares and out_and_back, left to right as Rust adds them.
+gx = rnd(fx * fx); gy = rnd(fy * fy); gz = rnd(fz * fz);
+O01 = gx + gy; o01 = rnd(O01);
+O = o01 + gz; oab = rnd(O);
+
+RR = rnd(rg * rg); rr = rnd(tb * tb);
+H = RR - rr; hollow = rnd(H);
+Bu = oab + hollow; bulge = rnd(Bu);
+
+# axis_squared.
+tx = rnd(dx * dx); ty = rnd(dy * dy); tz = rnd(dz * dz);
+T01 = tx + ty; t01 = rnd(T01);
+T = t01 + tz; W = rnd(T);
+
+# across.
+sx = rnd(qx * qx); sy = rnd(qy * qy); sz = rnd(qz * qz);
+S01 = sx + sy; s01 = rnd(S01);
+S = s01 + sz; across = rnd(S);
+
+F4 = rnd(4 * RR);
+bb = rnd(bulge * bulge);
+left = rnd(W * bb);
+right = rnd(F4 * across);
+y = left - right;
+value = rnd(y);
+
+# The permanent. spread is a sum() from zero, and adding the first square to
+# zero is exact.
+nx = rnd(|hx| + |kx|); ny = rnd(|hy| + |ky|); nz = rnd(|hz| + |kz|);
+vx = rnd(nx * nx); vy = rnd(ny * ny); vz = rnd(nz * nz);
+spread = rnd(rnd(vx + vy) + vz);
+br = rnd(rnd(oab + RR) + rr);
+brr = rnd(br * br);
+P1 = rnd(W * brr);
+P2 = rnd(F4 * spread);
+P = rnd(P1 + P2);
+
+B = 18b-53 + 7b-101;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Cx = Fy * dz - Fz * dy; Cy = Fz * dx - Fx * dz; Cz = Fx * dy - Fy * dx;
+Wt = dx * dx + dy * dy + dz * dz;
+G2 = Fx * Fx + Fy * Fy + Fz * Fz;
+Bt = G2 + rg * rg - tb * tb;
+Lt = Wt * (Bt * Bt);
+Rt = 4 * (rg * rg) * (Cx * Cx + Cy * Cy + Cz * Cz);
+Ex = Lt - Rt;
+
+# The permanent with no rounding of its own.
+Rc = oab + RR + rr;
+Phat = W * (Rc * Rc)
+     + F4 * ((|hx| + |kx|) * (|hx| + |kx|) + (|hy| + |ky|) * (|hy| + |ky|)
+             + (|hz| + |kz|) * (|hz| + |kz|));
+
+# What each rounding multiplied its argument by.
+rfx = fx / Fx; rfy = fy / Fy; rfz = fz / Fz;
+rhx = hx / (fy * dz); rkx = kx / (fz * dy);
+rhy = hy / (fz * dx); rky = ky / (fx * dz);
+rhz = hz / (fx * dy); rkz = kz / (fy * dx);
+rqx = qx / Qx; rqy = qy / Qy; rqz = qz / Qz;
+rgx = gx / (fx * fx); rgy = gy / (fy * fy); rgz = gz / (fz * fz);
+ro01 = o01 / O01; ro = oab / O;
+rRR = RR / (rg * rg); rrr = rr / (tb * tb);
+rH = hollow / H; rBu = bulge / Bu;
+rtx = tx / (dx * dx); rty = ty / (dy * dy); rtz = tz / (dz * dz);
+rt01 = t01 / T01; rW = W / T;
+rsx = sx / (qx * qx); rsy = sy / (qy * qy); rsz = sz / (qz * qz);
+rs01 = s01 / S01; rS = across / S;
+rF4 = F4 / (4 * RR); rbb = bb / (bulge * bulge);
+rL = left / (W * bb); rR = right / (F4 * across);
+
+# The w.w bulge^2 block. W and oab as their three pieces, which sum to them.
+Wx = rW * rt01 * tx; Wy = rW * rt01 * ty; Wz = rW * tz;
+W3 = Wx + Wy + Wz;
+jx = 1 / (rW * rt01 * rtx) - 1; jy = 1 / (rW * rt01 * rty) - 1; jz = 1 / (rW * rtz) - 1;
+om = Wt / W;
+Ox = ro * ro01 * gx; Oy = ro * ro01 * gy; Oz = ro * gz;
+O3 = Ox + Oy + Oz;
+zx = 1 / (ro * ro01 * rgx * rfx * rfx) - 1;
+zy = 1 / (ro * ro01 * rgy * rfy * rfy) - 1;
+zz = 1 / (ro * rgz * rfz * rfz) - 1;
+Z = G2 / oab;
+
+# bulge as y carries it is rBu (oab + rH (RR - rr)); the true one is
+# Z oab + RR / rRR - rr / rrr. Squared and times W, that is six pieces, one
+# for each pair of oab, RR and rr; W is each piece's error over the piece.
+KL = rL * rbb * rBu * rBu;
+WOO = KL - om * Z * Z;
+WRR = KL * rH * rH - om / (rRR * rRR);
+Wrr = KL * rH * rH - om / (rrr * rrr);
+WOR = KL * rH - om * Z / rRR;
+WOr = KL * rH - om * Z / rrr;
+WRr = KL * rH * rH - om / (rRR * rrr);
+cOO = W * oab * oab; cRR = W * RR * RR; crr = W * rr * rr;
+cOR = 2 * W * oab * RR; cOr = 2 * W * oab * rr; cRr = 2 * W * RR * rr;
+eOO = cOO * WOO; eRR = cRR * WRR; err = crr * Wrr;
+eOR = cOR * WOR; eOr = -(cOr * WOr); eRr = -(cRr * WRr);
+A6 = cOO + cRR + crr + cOR + cOr + cRr;
+
+# The 4 R^2 block, as 464.15's cylinder, times F4. K folds in right's
+# rounding, m undoes F4's and RR's.
+Kx = rR * rS * rs01 * rsx * rqx * rqx;
+Ky = rR * rS * rs01 * rsy * rqy * rqy;
+Kz = rR * rS * rsz * rqz * rqz;
+m = 1 / (rF4 * rRR);
+ax = 1 / (rfy * rhx); bx = 1 / (rfz * rkx);
+ay = 1 / (rfz * rhy); by = 1 / (rfx * rky);
+az = 1 / (rfx * rhz); bz = 1 / (rfy * rkz);
+WHx = Kx - m * ax * ax; WKx = Kx - m * bx * bx; WXx = Kx - m * ax * bx;
+WHy = Ky - m * ay * ay; WKy = Ky - m * by * by; WXy = Ky - m * ay * by;
+WHz = Kz - m * az * az; WKz = Kz - m * bz * bz; WXz = Kz - m * az * bz;
+cHx = F4 * |hx| * |hx|; cKx = F4 * |kx| * |kx|; cXx = 2 * F4 * |hx| * |kx|;
+cHy = F4 * |hy| * |hy|; cKy = F4 * |ky| * |ky|; cXy = 2 * F4 * |hy| * |ky|;
+cHz = F4 * |hz| * |hz|; cKz = F4 * |kz| * |kz|; cXz = 2 * F4 * |hz| * |kz|;
+eHx = -(F4 * hx * hx * WHx); eKx = -(F4 * kx * kx * WKx); eXx = 2 * F4 * hx * kx * WXx;
+eHy = -(F4 * hy * hy * WHy); eKy = -(F4 * ky * ky * WKy); eXy = 2 * F4 * hy * ky * WXy;
+eHz = -(F4 * hz * hz * WHz); eKz = -(F4 * kz * kz * WKz); eXz = 2 * F4 * hz * kz * WXz;
+C3x = cHx + cKx + cXx; C3y = cHy + cKy + cXy; C3z = cHz + cKz + cXz;
+C9 = C3x + C3y + C3z;
+Yx = F4 * Kx * Qx * Qx; Yy = F4 * Ky * Qy * Qy; Yz = F4 * Kz * Qz * Qz;
+Zx = F4 * m * (Cx * Cx); Zy = F4 * m * (Cy * Cy); Zz = F4 * m * (Cz * Cz);
+
+# The same permanent as the two blocks.
+Phat2 = A6 + C9;
+
+{
+  # Every input is a finite f64.
+     |px| <= 1b1024 /\ |py| <= 1b1024 /\ |pz| <= 1b1024
+  /\ |ox| <= 1b1024 /\ |oy| <= 1b1024 /\ |oz| <= 1b1024
+  /\ |dx| <= 1b1024 /\ |dy| <= 1b1024 /\ |dz| <= 1b1024
+  /\ |rg| <= 1b1024 /\ |tb| <= 1b1024
+  # No factor is zero, and no component cancels to zero. For an f64 that is
+  # the same as being at least the smallest subnormal.
+  /\ |fx| >= 1b-1074 /\ |fy| >= 1b-1074 /\ |fz| >= 1b-1074
+  /\ |dx| >= 1b-1074 /\ |dy| >= 1b-1074 /\ |dz| >= 1b-1074
+  /\ |rg| >= 1b-1074 /\ |tb| >= 1b-1074
+  /\ |qx| >= 1b-1074 /\ |qy| >= 1b-1074 /\ |qz| >= 1b-1074
+  # hollow is a normal number; below the normals it is exact, and that is
+  # another case.
+  /\ |hollow| >= 1b-1022
+  # product_is_normal on the three squares of from_centre, of direction and
+  # of sideways, the six halves, R^2, r^2, bulge^2, axis_squared bulge^2 and
+  # 4 R^2 across (stays_accurate and the check after it).
+  /\ |gx| >= 1b-1022 /\ |gy| >= 1b-1022 /\ |gz| >= 1b-1022
+  /\ |tx| >= 1b-1022 /\ |ty| >= 1b-1022 /\ |tz| >= 1b-1022
+  /\ |sx| >= 1b-1022 /\ |sy| >= 1b-1022 /\ |sz| >= 1b-1022
+  /\ |hx| >= 1b-1022 /\ |kx| >= 1b-1022 /\ |hy| >= 1b-1022
+  /\ |ky| >= 1b-1022 /\ |hz| >= 1b-1022 /\ |kz| >= 1b-1022
+  /\ |RR| >= 1b-1022 /\ |rr| >= 1b-1022
+  /\ |bb| >= 1b-1022 /\ |left| >= 1b-1022 /\ |right| >= 1b-1022
+  # The permanent's products are normal too, since nothing cancels here, by
+  # monotone rounding: v >= s, as no component is zero; br >= bulge, as
+  # hollow <= RR, so brr >= bb and P1 >= left; spread >= across, so
+  # P2 >= right.
+  /\ |vx| >= 1b-1022 /\ |vy| >= 1b-1022 /\ |vz| >= 1b-1022
+  /\ |brr| >= 1b-1022 /\ |P1| >= 1b-1022 /\ |P2| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those gives.
+  /\ hollow -/ H in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ gx -/ fx * fx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ gy -/ fy * fy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ gz -/ fz * fz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ tx -/ dx * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ ty -/ dy * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ tz -/ dz * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sx -/ qx * qx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sy -/ qy * qy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sz -/ qz * qz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hx -/ fy * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ kx -/ fz * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hy -/ fz * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ ky -/ fx * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hz -/ fx * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ kz -/ fy * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ RR -/ rg * rg in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ rr -/ tb * tb in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ bb -/ bulge * bulge in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ left -/ W * bb in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ right -/ F4 * across in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vx -/ nx * nx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vy -/ ny * ny in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vz -/ nz * nz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ brr -/ br * br in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ P1 -/ W * brr in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ P2 -/ F4 * spread in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ hx / |hx| in [-1, 1] /\ kx / |kx| in [-1, 1]
+  /\ hy / |hy| in [-1, 1] /\ ky / |ky| in [-1, 1]
+  /\ hz / |hz| in [-1, 1] /\ kz / |kz| in [-1, 1]
+->
+  (y - Ex) / Phat2 in ? /\ (left - Lt) / A6 in ? /\ (Rt - right) / C9 in ?
+  /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+fx / Fx -> 1 + (fx - Fx) / Fx;
+fy / Fy -> 1 + (fy - Fy) / Fy;
+fz / Fz -> 1 + (fz - Fz) / Fz;
+hx / (fy * dz) -> 1 + (hx - fy * dz) / (fy * dz);
+kx / (fz * dy) -> 1 + (kx - fz * dy) / (fz * dy);
+hy / (fz * dx) -> 1 + (hy - fz * dx) / (fz * dx);
+ky / (fx * dz) -> 1 + (ky - fx * dz) / (fx * dz);
+hz / (fx * dy) -> 1 + (hz - fx * dy) / (fx * dy);
+kz / (fy * dx) -> 1 + (kz - fy * dx) / (fy * dx);
+qx / Qx -> 1 + (qx - Qx) / Qx;
+qy / Qy -> 1 + (qy - Qy) / Qy;
+qz / Qz -> 1 + (qz - Qz) / Qz;
+gx / (fx * fx) -> 1 + (gx - fx * fx) / (fx * fx);
+gy / (fy * fy) -> 1 + (gy - fy * fy) / (fy * fy);
+gz / (fz * fz) -> 1 + (gz - fz * fz) / (fz * fz);
+o01 / O01 -> 1 + (o01 - O01) / O01;
+oab / O -> 1 + (oab - O) / O;
+RR / (rg * rg) -> 1 + (RR - rg * rg) / (rg * rg);
+rr / (tb * tb) -> 1 + (rr - tb * tb) / (tb * tb);
+hollow / H -> 1 + (hollow - H) / H;
+bulge / Bu -> 1 + (bulge - Bu) / Bu;
+tx / (dx * dx) -> 1 + (tx - dx * dx) / (dx * dx);
+ty / (dy * dy) -> 1 + (ty - dy * dy) / (dy * dy);
+tz / (dz * dz) -> 1 + (tz - dz * dz) / (dz * dz);
+t01 / T01 -> 1 + (t01 - T01) / T01;
+W / T -> 1 + (W - T) / T;
+sx / (qx * qx) -> 1 + (sx - qx * qx) / (qx * qx);
+sy / (qy * qy) -> 1 + (sy - qy * qy) / (qy * qy);
+sz / (qz * qz) -> 1 + (sz - qz * qz) / (qz * qz);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+across / S -> 1 + (across - S) / S;
+F4 / (4 * RR) -> 1 + (F4 - 4 * RR) / (4 * RR);
+bb / (bulge * bulge) -> 1 + (bb - bulge * bulge) / (bulge * bulge);
+left / (W * bb) -> 1 + (left - W * bb) / (W * bb);
+right / (F4 * across) -> 1 + (right - F4 * across) / (F4 * across);
+
+# w.w over W, and |x|^2 over oab, each averaged over three pieces.
+Wt / W -> 1 + ((W3 + (Wt - W)) - W3) / W3;
+W3 + (Wt - W) -> (Wx + Wx * jx) + (Wy + Wy * jy) + (Wz + Wz * jz);
+(Wx + Wx * jx) - Wx -> Wx * jx;
+(Wy + Wy * jy) - Wy -> Wy * jy;
+(Wz + Wz * jz) - Wz -> Wz * jz;
+(Wx * jx) / Wx -> jx;
+(Wy * jy) / Wy -> jy;
+(Wz * jz) / Wz -> jz;
+G2 / oab -> 1 + ((O3 + (G2 - oab)) - O3) / O3;
+O3 + (G2 - oab) -> (Ox + Ox * zx) + (Oy + Oy * zy) + (Oz + Oz * zz);
+(Ox + Ox * zx) - Ox -> Ox * zx;
+(Oy + Oy * zy) - Oy -> Oy * zy;
+(Oz + Oz * zz) - Oz -> Oz * zz;
+(Ox * zx) / Ox -> zx;
+(Oy * zy) / Oy -> zy;
+(Oz * zz) / Oz -> zz;
+
+# The error is the sum of the two blocks' errors, each the sum of its
+# pieces' errors, each a fraction of its own piece of the permanent; add_rr
+# then averages them.
+(y - Ex) / Phat2 -> ((Phat2 + (y - Ex)) - Phat2) / Phat2;
+Phat2 + (y - Ex) -> (A6 + (left - Lt)) + (C9 + (Rt - right));
+A6 + (left - Lt) -> (cOO + eOO) + (cRR + eRR) + (crr + err) + (cOR + eOR) + (cOr + eOr) + (cRr + eRr);
+(cOO + eOO) - cOO -> eOO;
+(cRR + eRR) - cRR -> eRR;
+(crr + err) - crr -> err;
+(cOR + eOR) - cOR -> eOR;
+(cOr + eOr) - cOr -> eOr;
+(cRr + eRr) - cRr -> eRr;
+eOO / cOO -> WOO;
+eRR / cRR -> WRR;
+err / crr -> Wrr;
+eOR / cOR -> WOR;
+eOr / cOr -> -WOr;
+eRr / cRr -> -WRr;
+C9 + (Rt - right) -> (C3x + (Zx - Yx)) + (C3y + (Zy - Yy)) + (C3z + (Zz - Yz));
+C3x + (Zx - Yx) -> (cHx + eHx) + (cKx + eKx) + (cXx + eXx);
+C3y + (Zy - Yy) -> (cHy + eHy) + (cKy + eKy) + (cXy + eXy);
+C3z + (Zz - Yz) -> (cHz + eHz) + (cKz + eKz) + (cXz + eXz);
+(cHx + eHx) - cHx -> eHx;
+(cKx + eKx) - cKx -> eKx;
+(cXx + eXx) - cXx -> eXx;
+(cHy + eHy) - cHy -> eHy;
+(cKy + eKy) - cKy -> eKy;
+(cXy + eXy) - cXy -> eXy;
+(cHz + eHz) - cHz -> eHz;
+(cKz + eKz) - cKz -> eKz;
+(cXz + eXz) - cXz -> eXz;
+eHx / cHx -> -((hx / |hx|) * (hx / |hx|) * WHx);
+eKx / cKx -> -((kx / |kx|) * (kx / |kx|) * WKx);
+eXx / cXx -> (hx / |hx|) * (kx / |kx|) * WXx;
+eHy / cHy -> -((hy / |hy|) * (hy / |hy|) * WHy);
+eKy / cKy -> -((ky / |ky|) * (ky / |ky|) * WKy);
+eXy / cXy -> (hy / |hy|) * (ky / |ky|) * WXy;
+eHz / cHz -> -((hz / |hz|) * (hz / |hz|) * WHz);
+eKz / cKz -> -((kz / |kz|) * (kz / |kz|) * WKz);
+eXz / cXz -> (hz / |hz|) * (kz / |kz|) * WXz;
+
+# From the two blocks to the permanent on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / Phat2) * (Phat / P) * (P / eb);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
