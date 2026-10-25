@@ -20664,7 +20664,46 @@ check-verify-lane-selftest:
     call target/verify-lane.txt
     [ "$rc" -eq 2 ] && grep -qF 'both pinsOnly and sameBehaviour' <<<"$got" || fail "an input marking the lane both pinsOnly and sameBehaviour did not refuse"
     [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input marking the lane both pinsOnly and sameBehaviour"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 18 arms"
+
+    arm="exit-write-is-atomic"
+    cat >"$dir/exit_atomic_probe.py" <<'PY'
+    import importlib.util
+    import os
+    import sys
+    import tempfile
+    import threading
+    import time
+
+    spec = importlib.util.spec_from_file_location("verify_lane", sys.argv[1])
+    verify_lane = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verify_lane)
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "exit")
+        result = []
+
+        def poll():
+            while not os.path.exists(path):
+                time.sleep(0.001)
+            with open(path, encoding="utf-8") as f:
+                result.append(f.read())
+
+        reader = threading.Thread(target=poll, daemon=True)
+        reader.start()
+        time.sleep(0.05)
+        try:
+            verify_lane.write_exit_atomically(path, 0, delay=0.3)
+        except Exception as error:
+            print(f"BAD:writer raised {type(error).__name__}: {error}")
+            sys.exit(0)
+        reader.join(timeout=5)
+        content = result[0] if result else None
+        print("OK" if content == "0\n" else f"BAD:{content!r}")
+    PY
+    got=$(python3 "$dir/exit_atomic_probe.py" "{{ justfile_directory() }}/tooling/verify-lane/verify_lane.py")
+    [ "$got" = "OK" ] \
+        || fail "a reader polling os.path.exists while the exit file was written with an artificial 0.3 s delay saw $got instead of a complete line"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 19 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #
