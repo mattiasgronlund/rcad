@@ -141,6 +141,15 @@ answers validates, and its `measure` is refused
   roof. One pair was counted out, the triangle of no area in 466.1. The plate
   alone measured `242.37853869946048 ± 0.132` against `242.4115`.
 
+**2026-10-25, Q2792:** the plate's area above, `338.64737793344216`, is wrong.
+`a_block_cornered_twice_united_under_the_plates_floor_has_the_two_skins_less_its_roof_twice`
+works it out as `268 + 22.5π = 338.68583470577033`, which the round tab's own
+shape confirms: three quarters of its disc, top and bottom, and three quarters
+of its wall, added outside the square. That puts the total at
+`338.68583470577033 + 51.36 − 2 × 17.28 = 355.48583470577034`, still inside the
+measured `355.44894103826437 ± 1.2791889237486007`, so the sentence above still
+holds: no face is doubled.
+
 ### 466.7 Q2262 needs no name of its own
 
 Q2262 asked whether, under `tolerant`, a fin whose points round onto one plane
@@ -151,6 +160,10 @@ under `certified`, as before. Nothing refuses it as a fold now, so it needs no
 name. Its `measure` refusal is 466.8's row.
 `every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the_block`
 pins it.
+
+**2026-10-25, Q2792:** the pin is `every_fuse_with_the_tilted_block_answers_its_closed_form`:
+Q2790 renamed it once the bar less the block also answered its closed form
+under `tolerant`, instead of being refused.
 
 ### 466.8 What this leaves
 

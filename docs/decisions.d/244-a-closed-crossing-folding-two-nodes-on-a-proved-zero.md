@@ -619,6 +619,10 @@ A probe of the lane's, never committed, ran the same fuses at other radii:
   the box `(−1, ±0, ±8.9e-16)`. Under `tolerant(25.0)` every fuse answers one
   solid with five `orient3d` records.
 
+**2026-10-25, Q2792:** the pin above is `every_fuse_with_the_tilted_block_answers_its_closed_form`:
+Q2790 renamed it once the bar less the block also answered its closed form
+under `tolerant`, instead of being refused.
+
 **2026-10-15, Q2042: the flush bar's refusal below is closed.** Q1854 found
 that refusal a gap, closed by `a_plane_rests_along_a_pipe` in
 `turns_anticlockwise`, `crates/rcad-topo/src/fuse/arrange.rs`, which asks
