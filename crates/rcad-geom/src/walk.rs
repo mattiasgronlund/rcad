@@ -892,13 +892,12 @@ impl TwoLoopsHeldApartBy {
 /// cone's arms against a pipe, a ball and a second cone ask whether the two
 /// share an axis rather than taking the caller's word for it, and why the
 /// cone's arms off an axis and the torus's arms ask `intersect` itself. Both
-/// refusals are gaps: the crossing is there. For a pipe or a ball off a cone's
-/// axis it is a degree-four curve whose loops `intersect` could not prove it
-/// names, since the marcher draws the ones it does (Q2788); for a second cone
-/// off the axis and the apex, and for a torus, the machinery is not built. A
-/// ball through a cone's apex is refused under
-/// the cone's name in both halves too, for the reason `intersect`'s
-/// cone-and-ball arm gives.
+/// refusals are gaps: the crossing is there. For a pipe, a ball or a second
+/// cone off a cone's axis it is a degree-four curve whose loops `intersect`
+/// could not prove it names, since the marcher draws the ones it does (Q2788,
+/// Q2667); for a torus, the machinery is not built. A ball through a cone's
+/// apex is refused under the cone's name in both halves too, for the reason
+/// `intersect`'s cone-and-ball arm gives.
 ///
 /// **Two cones on one apex with their axes proved apart are straight lines**,
 /// asked exactly as `intersect` asks it: whatever they share is rulings through

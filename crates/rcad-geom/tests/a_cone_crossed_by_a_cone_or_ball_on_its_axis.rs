@@ -13,9 +13,12 @@
 //! shared axis that is named: they cross in straight lines through the apex.
 //!
 //! A ball off the axis with the apex inside it crosses each nappe in a
-//! degree-four loop, which `walk` marches. What stays refused is a second cone
-//! off the axis, and a ball whose skin runs through the apex, which crosses the
-//! cone in a circle and the apex apart from it.
+//! degree-four loop, which `walk` marches. So does a second cone off the axis
+//! where every straight line of one of the two crosses the other twice, once
+//! each side of one flat surface. What stays refused is a second cone off the
+//! axis whose directions overlap the first's, and a ball whose skin runs
+//! through the apex, which crosses the cone in a circle and the apex apart
+//! from it.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, NamedRun, Picker, Point, Sphere, Surface, SurfaceMeet,

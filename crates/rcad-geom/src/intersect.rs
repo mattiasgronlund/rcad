@@ -161,9 +161,11 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// shape is proved** (Q2788): two loops held apart by a flat surface through
 /// the apex, one loop round a nappe, or nothing for a ball that misses the
 /// cone — see [`a_cone_and_a_pipe_off_one_axis`] and
-/// [`a_ball_off_a_cones_axis`] for which shapes stay refused. A second cone
-/// that shares neither its axis nor its apex is not named at all: the crossing
-/// is a degree-four space curve and nothing tells its loops apart. Two cones
+/// [`a_ball_off_a_cones_axis`] for which shapes stay refused. **So is a second
+/// cone that shares neither its axis nor its apex** (Q2667): two loops held
+/// apart by a flat surface, where every straight line of one cone is proved to
+/// cross the other twice, once each side of it — see
+/// [`two_cones_off_one_axis_in_two_loops`] for which shapes stay refused. Two cones
 /// with one apex, one slope and their axes along one line are the same surface
 /// and come back as one, **whichever way each axis points** — see
 /// [`one_cone_either_way_round`].
@@ -5082,7 +5084,8 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 }
 
 /// Two cones: circles or the apex where they share an axis, rulings through the
-/// apex where they share only that, refused everywhere else.
+/// apex where they share only that, two loops where they share neither and
+/// [`two_cones_off_one_axis_in_two_loops`] proves it, refused everywhere else.
 ///
 /// # On one axis it is a table of four, and no row of it is a line
 ///
@@ -5121,7 +5124,8 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 /// # Errors
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two share
-/// neither an axis nor an apex.
+/// neither an axis nor an apex and [`two_cones_off_one_axis_in_two_loops`]
+/// does not prove their crossing two loops.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where two circles are not
 /// held apart by more than the picking half-space's own rounding, and where
