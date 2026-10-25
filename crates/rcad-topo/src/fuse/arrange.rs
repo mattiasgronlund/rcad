@@ -5010,10 +5010,12 @@ impl<'f> Arrangement<'f> {
     /// two nodes on it a rounding apart: two cuts, which the planes order
     /// (Q992), and a cut and a bar's edge, which the bar orders (Q1484).
     ///
-    /// A pipe's axis ([`Arrangement::as_the_pipes_axis_says`]) and which of a
+    /// A pipe's axis ([`Arrangement::as_the_pipes_axis_says`]), which of a
     /// line's two meets each node is
-    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]) are not asked: no
-    /// ray here has been shown to need either.
+    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]) and the same meet
+    /// of a line two pairs of planes name
+    /// ([`Arrangement::as_three_planes_through_one_line_say`]) are not asked:
+    /// no ray here has been shown to need any of them.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         if let Some(read) = self.as_read_round_a_corner(crossing, first, second) {
             return Some(read);
@@ -5043,7 +5045,9 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_the_quadric_says`]), a pipe's axis
     /// ([`Arrangement::as_the_pipes_axis_says`]), which of a line's two
     /// meets with a ball or a pipe each is
-    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]), where a second
+    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]), the same meet of
+    /// a line with a ball or a pipe named by two pairs of planes through it
+    /// ([`Arrangement::as_three_planes_through_one_line_say`]), where a second
     /// plane cuts a plane's loop
     /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) and where two
     /// parallel planes cut it
@@ -5968,7 +5972,10 @@ impl<'f> Arrangement<'f> {
     /// node's two planes cross in that line too. A line meets a ball or a pipe
     /// in at most two places, numbered along the way it runs
     /// ([`the_way_two_planes_line_runs`]), so where both pairs run it the same
-    /// way the same number is the same place.
+    /// way the same number is the same place. Both pairs cut one quadratic out
+    /// of the line, up to a factor and a shift along it, so the sign that says
+    /// whether the line meets the surface twice or once is the same for both
+    /// wherever it is worked out exactly, as a certified fuse needs it to be.
     ///
     /// **Two pairs that run the line opposite ways are not read.** There the
     /// first of one pair is the second of the other where the line meets the
@@ -15695,9 +15702,9 @@ fn two_planes_and_a_ball_or_a_pipe(surfaces: &[Surface; 3]) -> Option<([Plane; 2
 ///
 /// The two of `line` must cross, so neither row is a multiple of the other,
 /// and a third row that leaves every minor nothing is a sum of multiples of
-/// those two, which is nothing wherever both are. Each minor is a determinant of exact numbers,
-/// asked of [`orient3d`] with the fourth point at the origin, so only a minor
-/// that is nothing answers [`Decision::Zero`].
+/// those two, which is nothing wherever both are. Each minor is a
+/// determinant of exact numbers, asked of [`orient3d`] with the fourth point
+/// at the origin, so only a minor that is nothing answers [`Decision::Zero`].
 fn holds_the_line_of(line: [Plane; 2], plane: &Plane) -> bool {
     let rows = [
         line[0].coefficients(),
