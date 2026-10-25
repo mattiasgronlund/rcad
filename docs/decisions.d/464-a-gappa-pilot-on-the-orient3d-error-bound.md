@@ -6537,13 +6537,9 @@ Phat / P -> 1 / (1 + (P - Phat) / Phat);
 P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
 ```
 
-`cylcases.py`, whole, as the second lane wrote it, writes the rest from
-`cyl.g` beside it. It covers the case with nothing zero alone; the case split
-for a component that cancels (`kx = hx;` written in, `qx` and `sx` written as
-zero, the block's error `−Cx²` against `P3x = 4hx²` with the hint `Cx -> hx *
-(ax − bx)`, and the reach square `v` in three states, normal, below the
-normals and not zero, and zero, as 464.14's `n`, `s` and `u`) is not in it
-yet.
+`cylcases.py`, whole, as the second of the nine lanes wrote it. It writes the
+rest of 3, 4 and 7 from `cyl.g` beside it, for the case with no component
+cancelling; `cylsplit.py` writes the others:
 
 ```python
 """Write the scripts of 464.15 from cyl.g beside it: cylv.g, the claim on
@@ -6640,12 +6636,12 @@ for m in sys.argv[1:]:
     write(f"b_cylv_{m}.g", at(CYLV, f"B = 10b-53 + {m}b-106;"))
 ```
 
-`run1.sh`, which the second lane started detached, runs `cyl.g` and `cylv.g`
-through `one.sh` with `coq`, and the controls and the bisection grid through
-`one1.sh`, the first lane's `one.sh` with the timeout taken from `T` and no
-`coq`, all at once:
+`run1.sh`, whole, which the second of the nine lanes started detached:
 
 ```sh
+#!/bin/bash
+# First batch of 464.15: cyl.g and cylv.g with coq, the controls, and a grid
+# of B for the bisection, all at once. Prints to run1.txt.
 cd "$(dirname "$0")"
 python3 cylcases.py 0 40 60 70 80 90 100 120 160
 {
@@ -6659,62 +6655,7 @@ python3 cylcases.py 0 40 60 70 80 90 100 120 160
 echo done >> run1.txt
 ```
 
-**What the third lane ran.** `python3 cylcases.py 61 62 63 64 65 66 67 68
-69`, and the nine `b_cyl_<m>.g` run at once through `par.sh` (the second
-lane's, `one1.sh` on each named script at once with the timeout given): each
-exits 1, best `[-1, 1]`, printing the same `9u` and `6u`. With `m = 70`
-proving, the smallest `B` on `y` over `9u + m u²` is `9u + 70u²`.
-
-In the same run, on a load of about 29 over 24 cores, `t_vtriv.g`, which is
-`cylv.g` with its goal replaced by `px in ?` and every hint kept, exits 0 in
-`334.59s`. So on the claim on `value` as `cylcases.py` writes it, with `rv =
-value / y` on every carry, Gappa spends 335 s checking the hints before it
-tries any goal. Which hint costs it was not split.
-
-`cylv2.g`, first form, keeps `cyl.g`'s blocks for `y` and takes `value`'s own
-rounding as a fraction of `y`, and `y` as a fraction of the permanent:
-`(value − Ex) / eb -> (y − Ex) / eb + (value − y) / eb;` and `(value − y) / eb
--> ((value − y) / y) · (y / P12) · (Phat / P) · (P / eb);`, with `y / P12`
-averaged over the same four blocks. It exits 1 in `131.20s`, printing `(value
-− y) / y` within `1b-53` and the same `9u` and `6u`, but `y / P12` only in
-`[-3b5118, 3b5122]`. `m2.g`, one component and `skin` alone, shows why: the
-piece `K h²` over `h²` reaches `−1` once Gappa takes `(h / |h|)²` as `[−1,
-1]`, and with a relative error that reaches `−1` Gappa does not average a sum.
-`m3.g`, the same with every piece doubled, so that each such ratio is at most
-about a half, prints `y / P12` within `[-1, 1]` as Gappa rounds it, in
-`0.22s`. `vgen.py` (below) writes `cylv2.g` in that doubled form. On paper,
-not run: the doubled form costs `u (1 + 5u)` of the permanent on top of `y`'s
-`9u + c u²`, and with `(Phat / P) (P / eb) ≈ (1 + 7u) / B` and `c` between 6
-and 7 by the bisection above, that is about `10u + 82u²` against the code's
-`10u + 80u²`. So the doubled form may fail at the code's `B` by a hair
-without `value` being past it.
-
-`run2.sh` (below) was started detached after those, on a load of about 38
-over 24 cores, and printed into `run2.txt`. `cylv2.g` doubled exits 1 in
-`332.03s`, best `[-1, 1]`, printing `y / P12` within `[-1, 1]`, `(value − y)
-/ y` within `1b-53`, and the same `9u` and `6u`. So it fails at the code's
-`B` by a hair, as on paper. `b_cylv2_<m>.g` at `B = 10u + m u²` exits 0 for
-each `m` of 84, 88, 96, 112 and 144, in 182.63 to 186.20 s. `c_cylv2_half.g`
-exits 1, best `[-20, 20]`, the `10u` over `u / 2`. So this form proves
-`|value − Ex| ≤ eb` at `10u + 84u²` and not at the code's `10u + 80u²`, which
-says the form loses `u²`s and not that `value` is past the bound. `decide`
-needs only the bound on `y` (464.14's 4). `cylv.g` and `c_cylv_half.g`, with
-the 1800 s timeout, had run 6 min 18 s and not finished when the third lane
-handed over.
-
-`cylsplit.py` (below) writes the case split for a component that cancels,
-in the four states its docstring names. `python3
-cylsplit.py` writes 64 cases, `cyl_nnn.g` among them, and `diff cyl.g
-cyl_nnn.g` prints nothing. None of the 63 others has been run yet. A
-component that cancels writes `k` as `h`, drops `Q`, `q`, `s` and their
-ratios, writes each sum without its zero squares, writes its reach `|h| +
-|h|` unrounded, and is one block off by `eC = −C²`, with `eC / P3 ->
-−((h / |h|)² (a − b)² / 4)`. A reach square in `s` or `u` takes 464.14's
-step through `Phatx`. That a double added to itself rounds to itself, which
-the unrounded reach stands on, is to be shown by a `dbl.g` that is not yet
-written.
-
-`m2.g`:
+`m2.g`, whole, one component and `skin` alone (4):
 
 ```gappa
 @rnd = float<ieee_64, ne>;
@@ -6751,15 +6692,48 @@ Yx / P3x -> ((P3x + Yx) - P3x) / P3x;
 ```
 
 It prints `y / P12` in `[-1b2046, 1b3072]`, `Yx / P3x` in `[-2^(4092),
-2^(4092)]` and `fHx / cHx` in `[-1, 1]`. `m3.g` is `m2.g` with `dHx = 2 *
-cHx; dKx = 2 * cKx; dXx = 2 * cXx; P3dx = dHx + dKx + dXx; SGd = 2 * SG;
-P12d = P3dx + SGd;` defined, the goal `y / P12 in ? /\ ((P3dx + Yx) - P3dx)
-/ P3dx in ? /\ fHx / dHx in ?`, and the hints after the first two written
-on the doubled pieces: `y / P12 -> 2 * (((P12d + y) - P12d) / P12d);`, `P12d
-+ y -> (P3dx + Yx) + (SGd - skin);`, the same three-piece split, `fHx / dHx
--> Kx * (hx / |hx|) * (hx / |hx|) / 2;` and the like, `((SGd - skin) - SGd)
-/ SGd -> -(skin / SGd);` and `skin / SGd -> 1 / 2;`. It prints the block in
-`[-0.5, 0.5]` and `y / P12` in `[-1, 1]`, rounded.
+2^(4092)]` and `fHx / cHx` in `[-1, 1]`.
+
+`m3.g`, whole, `m2.g` with every piece doubled:
+
+```gappa
+@rnd = float<ieee_64, ne>;
+hx = rnd(hx_); kx = rnd(kx_); skin = rnd(sk_);
+Qx = hx - kx; qx = rnd(Qx); sx = rnd(qx * qx);
+rqx = qx / Qx; rsx = sx / (qx * qx);
+Kx = rqx * rqx * rsx;
+Yx = Kx * Qx * Qx;
+y = sx - skin;
+cHx = |hx| * |hx|; cKx = |kx| * |kx|; cXx = 2 * |hx| * |kx|;
+P3x = cHx + cKx + cXx;
+SG = skin * 1;
+P12 = P3x + SG;
+fHx = Kx * hx * hx; fKx = Kx * kx * kx; fXx = -(2 * Kx * hx * kx);
+dHx = 2 * cHx; dKx = 2 * cKx; dXx = 2 * cXx;
+P3dx = dHx + dKx + dXx; SGd = 2 * SG;
+P12d = P3dx + SGd;
+{ |hx| in [1b-1022, 1b1024] /\ |kx| in [1b-1022, 1b1024] /\ skin in [1b-1022, 1b1024]
+  /\ |qx| >= 1b-1074 /\ |sx| >= 1b-1022
+  /\ sx -/ qx * qx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hx / |hx| in [-1, 1] /\ kx / |kx| in [-1, 1]
+  -> y / P12 in ? /\ ((P3dx + Yx) - P3dx) / P3dx in ? /\ fHx / dHx in ? }
+qx / Qx -> 1 + (qx - Qx) / Qx;
+sx / (qx * qx) -> 1 + (sx - qx * qx) / (qx * qx);
+y / P12 -> 2 * (((P12d + y) - P12d) / P12d);
+P12d + y -> (P3dx + Yx) + (SGd - skin);
+P3dx + Yx -> (dHx + fHx) + (dKx + fKx) + (dXx + fXx);
+(dHx + fHx) - dHx -> fHx;
+(dKx + fKx) - dKx -> fKx;
+(dXx + fXx) - dXx -> fXx;
+fHx / dHx -> Kx * (hx / |hx|) * (hx / |hx|) / 2;
+fKx / dKx -> Kx * (kx / |kx|) * (kx / |kx|) / 2;
+fXx / dXx -> -(Kx * (hx / |hx|) * (kx / |kx|)) / 2;
+((SGd - skin) - SGd) / SGd -> -(skin / SGd);
+skin / SGd -> 1 / 2;
+```
+
+It prints `y / P12` within `[-1, 1]`, the block `(P3dx + Yx - P3dx) / P3dx`
+within `[-0.5, 0.5]` and `fHx / dHx` within `[-0.5, 0.5]`, rounded.
 
 `vgen.py`, whole, beside `cyl.g` and the second lane's `cylv.g`:
 
@@ -6864,7 +6838,7 @@ python3 vgen.py
 echo done >> run2.txt
 ```
 
-`cylsplit.py`, whole, not yet run past writing its scripts:
+`cylsplit.py`, whole:
 
 ```python
 """Write cyl.g's case split, one script per case and a control at B = u / 2
@@ -7259,16 +7233,7 @@ for case in map("".join, itertools.product("ncsu", repeat=3)):
         write(f"c_{name}_half.g", make(case, B_HALF))
 ```
 
-**What the fourth lane ran.** `cylv.g` and `c_cylv_half.g` from `run2.sh`
-finished after the handover, on a load of about 43. `cylv.g` exits 1 in
-`541.97s`, best `[-1, 1]`, printing `(value − Ex) / P12` within
-`1.11022e-15`, `10u`, and the same `6u`. `c_cylv_half.g` exits 1 in
-`379.28s`, best `[-20, 20]`. So neither form of the claim on `value` proves at
-the code's `B`. `cylv2.g` doubled proves at `10u + 84u²`, and `m` of 81, 82 and
-83 were started in `run3.sh` and had not finished at this lane's handover.
-
-`dbl.g`, whole, exits 0 in `0.03s`, and its `gappa -Bcoq` and `coqc` exit 0, a
-proof of 217 lines with 1 hint. It prints nothing else:
+`dbl.g`, whole:
 
 ```gappa
 # dbl.g: a double added to itself rounds to itself, so the reach |h| + |k| of
@@ -7279,33 +7244,6 @@ h = rnd(h_);
 { |h| <= 1b1024 /\ |h| >= 1b-1074 -> rnd(|h| + |h|) - (|h| + |h|) in [0, 0] }
 |h| + |h| -> 2 * |h|;
 ```
-
-Overflow is outside it: `2|h|` overflows only when `|h| ≥ 2¹⁰²³`, and then
-`v`, `P` and `eb` are infinite and `decide` refuses `eb` as not normal, which
-is 464.12's 7 argument on paper and was not run here.
-
-`run3.sh` (below) was started detached on a load of about 47 over 24 cores.
-`tally3.py` (below) read its output at 06:24, with the run not finished:
-
-- Each of the 63 cases other than `nnn` exits 0, in 65.74 to 190.10 s, at the
-  code's `B`. Each prints `(y − Ex) / P12` within `8.88178e-16` (9 cases),
-  `7.77156e-16` (27) or `5.55112e-16` (27), `8u`, `7u` or `5u`, all below
-  `cyl.g`'s `9u`. `P −/ Phat`, or `P −/ Phatx` where a reach square is `s` or
-  `u`, is within `u` to `6u`; `cyl_uuu.g`, whose `P` is `skin`, prints `skin`
-  against itself in `[0, 0]`.
-- No `.out` or `.bcoq` of the 63 has a line other than its results and
-  "assumed to be nonzero" warnings: no "not trivially equal" and no hint Gappa
-  calls unneeded.
-- 44 of the 63 controls at `u / 2` had finished, each exit 1, with bests
-  `[-16, 16]`, `[-14, 14]` or `[-10, 10]`, the relative bound over `u / 2`.
-- 18 of the 63 had run `gappa -Bcoq` and `coqc`, each exit 0, 8908 to 10580
-  lines with 33 hints, in 145.5 to 167.87 s each.
-
-So on `y` the bound holds at the code's constant wherever no factor is zero:
-with no component cancelling, and with any of them cancelling, its reach
-square normal, below the normals, or rounding to zero. The comment at
-`cylinder.rs:312-314` is false when a component cancels, and nothing wrong
-follows from it.
 
 `run3.sh`, whole:
 
