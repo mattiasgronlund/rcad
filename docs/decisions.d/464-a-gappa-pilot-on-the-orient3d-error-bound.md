@@ -7672,13 +7672,15 @@ And what is not a row:
 ### 464.16 The side of rcad-geom's cone
 
 Q2681 took up `SIDE_OF_CONE_ERROR_BOUND` in `crates/rcad-geom/src/cone.rs`,
-in five lanes on 2026-10-25. The first four were the first lane and its three
+in six lanes on 2026-10-25. The first four were the first lane and its three
 relays. The first wrote and started `cone.g`, and found the wrong sign of 6
 reading `on_floats`. The second ran the bisection of 3 and the controls of 7,
 and wrote `sumexact.g` and `conesplit.py`. The third ran the split of 6. The
 fourth checked every place and figure here against the source and the logs,
 and drafted 1 to 10. The fifth, the second lane, merged the first lane's
-branch, wrote 1 to 10 and appended the scripts. The bound is proved on `y`,
+branch, wrote 1 to 10 and appended `cone.g`, `sumexact.g` and the two
+generators. The sixth, its relay, appended the other scripts and wrote and
+ran `same.py`. The bound is proved on `y`,
 the sum before `value`'s last rounding, at the code's constant wherever no
 factor is zero and the permanent's axial square `R2` does not round to zero.
 That covers no component of the cross product cancelling, any of them
