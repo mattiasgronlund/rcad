@@ -250,14 +250,22 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_
 ///
 /// The thick bar less the thin one is the one answer that keeps both the thick
 /// wall's strip between the two windows and the thin wall inside it, and those
-/// two faces bound the same narrow strip from the same two loops. Every mesh
-/// `Model::validate` asks of it from room `1.19` down to `0.037` draws the two
-/// faces' triangles there on the same three points, back to back, and is
-/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`. The
-/// strip they fold on shrinks towards where the windows pass, to `0.12` high
-/// at `0.037`, and is there at each of them. The meshes at `2.38` and `0.0186` cross on
-/// the thick wall instead, and the second ends the ladder, so the fuse is
-/// refused `CannotMeshAFace` with `BoundaryCrossesItself`.
+/// two faces bound the same narrow strip from the same two loops. The mesh
+/// draws the two faces' triangles there on the same three points, back to
+/// back. Since Q2774 the sum `Model::validate` reads keeps such a pair
+/// (`docs/decisions.md` §466), and the fuse answers one solid of the four
+/// faces the unturned pair's has, which validates. Its `measure` is still
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide`, since `SolidView::measure`
+/// meshes with `SolidView::mesh`, which refuses the pair. A probe on Q2774's
+/// branch that made `measure` sum over the mesh `validate` sums over found the
+/// answer within its error bar of `16π` less what the two bars share.
+///
+/// Until Q2774 every mesh `Model::validate` asked of it from room `1.19` down
+/// to `0.037` was refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4,
+/// used: 4 }` on that strip, which shrinks towards where the windows pass, to
+/// `0.12` high at `0.037`. The meshes at `2.38` and `0.0186` crossed on the
+/// thick wall instead, and the second ended the ladder, so the fuse was refused
+/// `CannotMeshAFace` with `BoundaryCrossesItself`.
 ///
 /// Until Q2768 it was refused `CurvedFaceWithAHoleGoesTooFarRound` on the
 /// thick wall, at every mesh. That fuse's mesh walks the wall's two rims with a
@@ -267,7 +275,7 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_
 /// cut at `2π/5` met too, and the cut gave up. It now moves a cut that cannot
 /// go round the windows to the corner the other side of its quarter.
 #[test]
-fn a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z_answers_every_fuse_but_the_thick_bar_less_the_thin()
+fn a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z_answers_every_fuse_but_the_thick_bar_less_the_thin_does_not_measure()
  {
     let build: Pair = a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z;
     let mut model = a_model();
@@ -276,16 +284,30 @@ fn a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z_answers_every_f
     assert_eq!(curves(&thin, &thick), Ok(2));
     for one in six_fuses() {
         if matches!(one, (Rule::Difference, true)) {
-            let said = fuse(&mut a_model(), build, Rule::Difference, true);
+            let what = "the thick bar less the thin one";
+            let mut model = a_model();
+            let said = fuse(&mut model, build, Rule::Difference, true);
+            let solids = said.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: the answer does not validate: {why:?}"));
+            let views: Vec<_> = solids
+                .iter()
+                .map(|&solid| model.solid(solid).expect("a solid the fuse made"))
+                .collect();
+            let faces: Vec<usize> = views.iter().map(|view| view.faces().count()).collect();
+            assert_eq!(faces, [4], "{what}: faces of each solid");
+            let measured = views[0].measure(
+                Deflection::of(0.01).expect("a positive length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
             assert!(
                 matches!(
-                    said,
-                    Err(rcad_topo::Error::CannotMeshAFace {
-                        why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
-                        ..
-                    })
+                    measured,
+                    Err(rcad_topo::Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
                 ),
-                "the thick bar less the thin one: {said:?}"
+                "{what}: {measured:?}"
             );
         } else {
             the_fuse_answers(

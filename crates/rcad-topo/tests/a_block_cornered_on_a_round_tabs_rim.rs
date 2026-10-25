@@ -36,10 +36,14 @@
 //! - **The union, a limit.** It holds the sliver of the block's floor or roof
 //!   outside the rim, a face thinner than a rounding of its own coordinates,
 //!   so it is refused `DynamicRangeTooWide`.
-//! - **That block's union under a tolerant policy, not yet traced.** The mesh
-//!   refuses it, a wire that does not fan into a loop with the block on the
-//!   plate's top and two patches drawing the same side with it under the
-//!   floor. Q2478 traces it and says whether it is a gap.
+//! - **That block's union on the plate's top under a tolerant policy, not yet
+//!   traced.** The mesh refuses it, a wire that does not fan into a loop.
+//!   Q2478 traces it and says whether it is a gap.
+//! - **Its measure under the floor.** There the tolerant union answers one
+//!   solid that validates, but a sliver of the block's roof and the tab's wall
+//!   are drawn back to back, which the sum `Model::validate` reads keeps and
+//!   `SolidView::mesh`, which `measure` meshes with, refuses
+//!   (`docs/decisions.md` §466).
 
 use rcad_geom::{Deflection, Isometry, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -154,9 +158,11 @@ fn a_block_cornered_on_a_round_tabs_rim_answers_with_its_volume_when_the_corner_
 ///   for a point a rounding from `(7.6, 11.8, 2)`, over the records of a ray
 ///   the classification threw away, until Q2489 kept those out of the log
 ///   (Q2477).
-/// - Under a tolerant policy the union is refused by the mesh: a wire that
-///   does not fan into a loop on the plate's top, and two patches drawing the
-///   same side under its floor (Q2478). The rest answer.
+/// - Under a tolerant policy the union on the plate's top is refused by the
+///   mesh, a wire that does not fan into a loop (Q2478). Under its floor it
+///   answers one solid that validates, and its `measure` is refused
+///   `TwoPatchesOfTheMeshDrewTheSameSide` (`docs/decisions.md` §466). Until
+///   Q2774 the fuse itself was refused that way. The rest answer.
 ///
 /// Until Q2405 every one of them was refused at the sliver of the block's face
 /// at `(7.6, 11.8)`, under either policy. The ray from that corner meets the
@@ -192,7 +198,7 @@ fn what_each_fuse_of_a_block_cornered_twice_on_a_round_tabs_rim_comes_to() {
             &tolerant,
             &THE_UNIONS[..],
             Should::BeRefusedForAWireThatDoesNotFanIntoALoop,
-            Should::BeRefusedForTwoPatchesOfTheMeshDrawingTheSameSide,
+            Should::AnswerButNotMeasureForTwoPatchesOfTheMeshDrawingTheSameSide,
         ),
         (
             &tolerant,
@@ -221,8 +227,9 @@ enum Should {
     BeRefusedAsTooWideARangeToComputeIn,
     /// `AWireDoesNotFanIntoALoopToMesh`.
     BeRefusedForAWireThatDoesNotFanIntoALoop,
+    /// One solid that validates, whose `measure` is refused
     /// `TwoPatchesOfTheMeshDrewTheSameSide`.
-    BeRefusedForTwoPatchesOfTheMeshDrawingTheSameSide,
+    AnswerButNotMeasureForTwoPatchesOfTheMeshDrawingTheSameSide,
 }
 
 /// Each of `blocks`, set on the plate's top or under its floor, fused with the
@@ -276,10 +283,11 @@ fn what_the_fuses_get_wrong(
                         Err(Error::AWireDoesNotFanIntoALoopToMesh { .. }) => Ok(()),
                         other => Err(what_it_came_to_instead(other)),
                     },
-                    Should::BeRefusedForTwoPatchesOfTheMeshDrawingTheSameSide => match &fused {
-                        Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => Ok(()),
-                        other => Err(what_it_came_to_instead(other)),
-                    },
+                    Should::AnswerButNotMeasureForTwoPatchesOfTheMeshDrawingTheSameSide => fused
+                        .map_err(|why| format!("refused {why:?}"))
+                        .and_then(|fused| {
+                            validates_but_does_not_measure(&model, fused.solids(), policy)
+                        }),
                 };
                 if let Err(why) = what {
                     wrong.push(format!(
@@ -352,6 +360,37 @@ fn what_it_holds(
         ));
     }
     Ok(())
+}
+
+/// Whether `solids` is one solid that validates and whose `measure` is refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide`: two faces' triangles drawn back to
+/// back, which the sum `Model::validate` reads keeps and `SolidView::mesh`
+/// refuses (`docs/decisions.md` §466).
+fn validates_but_does_not_measure(
+    model: &Model,
+    solids: &[SolidKey],
+    policy: &Policy,
+) -> Result<(), String> {
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .map_err(|why| format!("does not validate: {why:?}"))?;
+    let &[solid] = solids else {
+        return Err(format!("{} solids", solids.len()));
+    };
+    let measured = model.solid(solid).expect("the fuse made the key").measure(
+        Deflection::of(0.01).expect("a length"),
+        policy,
+        &mut ProvenanceLog::new(),
+    );
+    match measured {
+        Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. }) => Ok(()),
+        Err(why) => Err(format!("does not measure: {why:?}")),
+        Ok(measured) => Err(format!(
+            "measured {} ± {}",
+            measured.volume(),
+            measured.volume_error()
+        )),
+    }
 }
 
 fn a_plate_with_a_round_tab(model: &mut Model) -> SolidKey {

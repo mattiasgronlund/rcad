@@ -415,7 +415,10 @@ impl SolidView<'_> {
     /// [`Error::Undecidable`] when a
     /// predicate inside a triangulation could not settle a sign.
     /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] when two patches folded
-    /// onto each other and a side would be used more than twice.
+    /// onto each other and a side would be used more than twice. That includes
+    /// two faces whose triangles lie back to back on the same three points,
+    /// which a sum over the mesh may keep and this mesh may not
+    /// (`docs/decisions.md` §466).
     /// [`Error::AMeshCoveredTheWrongSideOfALoop`] when one loop of a face fell
     /// wholly outside another's chords, and the triangulator covered what lies
     /// inside the hole; a deflection under the gap between the two clears it.
@@ -461,17 +464,33 @@ impl SolidView<'_> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Mesh> {
-        self.mesh_or_how_it_folded(deflection, policy, log)
+        self.mesh_or_how_it_folded(deflection, TrianglesBackToBack::Refused, policy, log)
             .map_err(|refused| refused.why)
     }
 
-    /// [`SolidView::mesh`], and when it is refused because two patches drew the
+    /// [`SolidView::mesh`] with two faces' triangles back to back on the same
+    /// three points kept rather than refused, for a sum over the mesh to read
+    /// and never for a caller: such a mesh is no one closed surface
+    /// (`docs/decisions.md` §466).
+    pub(crate) fn a_mesh_to_sum_over(
+        self,
+        deflection: Deflection,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
+    ) -> Result<Mesh> {
+        self.mesh_or_how_it_folded(deflection, TrianglesBackToBack::Kept, policy, log)
+            .map_err(|refused| refused.why)
+    }
+
+    /// [`SolidView::mesh`], or [`SolidView::a_mesh_to_sum_over`] as
+    /// `back_to_back` says, and when it is refused because two patches drew the
     /// same side, how long the shortest such side is, which
     /// `the_coarsest_mesh_whose_sides_do_not_cross` in `validate.rs` reads a
     /// fold's floor off.
     pub(crate) fn mesh_or_how_it_folded(
         self,
         deflection: Deflection,
+        back_to_back: TrianglesBackToBack,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> core::result::Result<Mesh, MeshRefused> {
@@ -485,7 +504,7 @@ impl SolidView<'_> {
             let why = match building.walk_and_cut_up(self, policy, &mut said) {
                 Ok(()) => {
                     let made = core::mem::take(&mut building.made);
-                    let meshed = building.finish().and_then(|mesh| {
+                    let meshed = building.finish(self, back_to_back).and_then(|mesh| {
                         if self
                             .faces()
                             .all(|face| face.location() == Isometry::identity())
@@ -804,6 +823,20 @@ impl From<Error> for MeshRefused {
     }
 }
 
+/// What [`BuildingAMesh::finish`] does with a triangle of one face that lies
+/// on the same three points as one of another face's, turned the other way,
+/// where the two faces sit on different surfaces (`docs/decisions.md` §466).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrianglesBackToBack {
+    /// A fold like any other, for a mesh a caller is handed: it is no one
+    /// closed surface.
+    Refused,
+    /// Both kept, and left out of the count of how often each side is used,
+    /// for a sum over the mesh: the two add nothing to which way each side is
+    /// used and about nothing to the space it encloses.
+    Kept,
+}
+
 /// A mesh part way through being built.
 struct BuildingAMesh {
     deflection: Deflection,
@@ -811,9 +844,10 @@ struct BuildingAMesh {
     at_vertex: HashMap<VertexKey, u32>,
     along_edge: HashMap<EdgeKey, Vec<u32>>,
     triangles: Vec<MeshTriangle>,
-    /// How many triangles use each side that is not along the boundary of the
+    /// For each triangle of `triangles`, whether each of its sides, first to
+    /// second, second to third and third to first, runs along no loop of the
     /// patch it was drawn in — see [`BuildingAMesh::finish`].
-    drawn_inside_a_patch: HashMap<(u32, u32), u32>,
+    inside_its_patch: Vec<[bool; 3]>,
     /// The points where a face was cut into pieces, ends included.
     on_a_cut: HashSet<u32>,
     worst: f64,
@@ -844,7 +878,7 @@ impl BuildingAMesh {
             at_vertex: HashMap::new(),
             along_edge: HashMap::new(),
             triangles: Vec::new(),
-            drawn_inside_a_patch: HashMap::new(),
+            inside_its_patch: Vec::new(),
             on_a_cut: HashSet::new(),
             worst: 0.0,
             along_each_edge,
@@ -4139,8 +4173,8 @@ impl BuildingAMesh {
     }
 
     /// Put the triangle `corners` of `face` in the mesh, turned the way its
-    /// three table entries run, and count each of its sides that no loop of
-    /// the patch runs along — see [`BuildingAMesh::finish`].
+    /// three table entries run, and mark each of its sides that no loop of the
+    /// patch runs along — see [`BuildingAMesh::finish`].
     fn draw(&mut self, face: FaceView<'_>, corners: [u32; 3], along_a_loop: &HashSet<(u32, u32)>) {
         let [first, second, third] = corners;
         // A pole is a *side* of the patch whose two corners are one point in
@@ -4151,12 +4185,10 @@ impl BuildingAMesh {
         if first == second || second == third || third == first {
             return;
         }
-        for (from, to) in [(first, second), (second, third), (third, first)] {
-            let side = a_side(from, to);
-            if !along_a_loop.contains(&side) {
-                *self.drawn_inside_a_patch.entry(side).or_default() += 1;
-            }
-        }
+        self.inside_its_patch.push(
+            [(first, second), (second, third), (third, first)]
+                .map(|(from, to)| !along_a_loop.contains(&a_side(from, to))),
+        );
         self.triangles.push(MeshTriangle {
             corners,
             face: face.key(),
@@ -4440,20 +4472,35 @@ impl BuildingAMesh {
     /// The side reported is the lowest-numbered one, so the same model is
     /// refused the same way every time. Beside it goes the length of the
     /// shortest side so drawn, the finest feature the fold shows.
-    fn finish(self) -> core::result::Result<Mesh, MeshRefused> {
-        let mut times_used: HashMap<(u32, u32), u32> = HashMap::new();
-        for triangle in &self.triangles {
-            let [first, second, third] = triangle.corners;
-            for (from, to) in [(first, second), (second, third), (third, first)] {
-                *times_used.entry(a_side(from, to)).or_default() += 1;
-            }
+    ///
+    /// **Under [`TrianglesBackToBack::Kept`], two faces' triangles back to back
+    /// are counted out first**, and what is asked is whether the rest folds.
+    /// Such a pair is a triangle on the same three points as a triangle of a
+    /// face on another surface, turned the other way. The pairs are only looked
+    /// for once a fold is found, so a mesh that does not fold costs nothing
+    /// more, and both triangles of each stay in the mesh: each face's area is
+    /// its own triangles' (`docs/decisions.md` §466).
+    ///
+    /// **A side of a pair is held to being used twice, and not to being drawn
+    /// inside twice.** One face may draw it inside its patch where the other
+    /// runs along a loop. Counted out, the pair takes one of the two triangles
+    /// the first face drew there, and what is left on that side is the first
+    /// face's other one and the triangle across the second face's loop, which
+    /// meet there as two faces along an edge do.
+    fn finish(
+        self,
+        solid: SolidView<'_>,
+        back_to_back: TrianglesBackToBack,
+    ) -> core::result::Result<Mesh, MeshRefused> {
+        let mut folded = self.the_sides_that_fold(&vec![false; self.triangles.len()]);
+        if !folded.is_empty() && back_to_back == TrianglesBackToBack::Kept {
+            let surface_of: HashMap<FaceKey, Surface> = solid
+                .faces()
+                .map(|face| (face.key(), face.surface()))
+                .collect();
+            let paired = back_to_back_with_another_faces(&self.triangles, &surface_of);
+            folded = self.the_sides_that_fold(&paired);
         }
-        let folded: Vec<((u32, u32), u32, u32)> = self
-            .drawn_inside_a_patch
-            .iter()
-            .map(|(&side, &drawn)| (side, drawn, times_used[&side]))
-            .filter(|&(_, drawn, used)| drawn != 2 || used != 2)
-            .collect();
         if let Some(&(_, drawn, used)) = folded.iter().min_by_key(|&&(side, _, _)| side) {
             let shortest = folded
                 .iter()
@@ -4474,6 +4521,87 @@ impl BuildingAMesh {
             deviation: Approximation::new(self.worst, Cause::FlatStandIn),
         })
     }
+
+    /// Each side that a triangle left out of `paired` drew inside its patch and
+    /// that is not used by exactly two of them, both drawing it inside unless
+    /// it is a side of a paired triangle: the side, how many drew it inside,
+    /// and how many use it. `paired` runs with `triangles`.
+    fn the_sides_that_fold(&self, paired: &[bool]) -> Vec<((u32, u32), u32, u32)> {
+        let mut times_used: HashMap<(u32, u32), u32> = HashMap::new();
+        let mut drawn_inside: HashMap<(u32, u32), u32> = HashMap::new();
+        let mut of_a_pair: HashSet<(u32, u32)> = HashSet::new();
+        assert_eq!(
+            paired.len(),
+            self.triangles.len(),
+            "one mark for each triangle"
+        );
+        let drawn = self.triangles.iter().zip(&self.inside_its_patch);
+        for ((triangle, inside), &counted_out) in drawn.zip(paired) {
+            let [first, second, third] = triangle.corners;
+            let sides = [(first, second), (second, third), (third, first)];
+            for ((from, to), &inside) in sides.into_iter().zip(inside) {
+                let side = a_side(from, to);
+                if counted_out {
+                    of_a_pair.insert(side);
+                    continue;
+                }
+                *times_used.entry(side).or_default() += 1;
+                if inside {
+                    *drawn_inside.entry(side).or_default() += 1;
+                }
+            }
+        }
+        drawn_inside
+            .into_iter()
+            .map(|(side, drawn)| (side, drawn, times_used[&side]))
+            .filter(|&(side, drawn, used)| used != 2 || (drawn != 2 && !of_a_pair.contains(&side)))
+            .collect()
+    }
+}
+
+/// Which of `triangles` lie back to back with a triangle of another face: on
+/// the same three points, turned the other way, and drawn on a face whose
+/// surface, as it sits, is another than this one's.
+///
+/// **Another surface, and not only another face.** Two faces of one surface
+/// back to back on the same three points are a fin with nothing on either side
+/// of it, and that stays a fold. Each triangle is paired at most once, with the
+/// first one after it in `triangles` that is not paired yet, so the same mesh
+/// is paired the same way every time.
+fn back_to_back_with_another_faces(
+    triangles: &[MeshTriangle],
+    surface_of: &HashMap<FaceKey, Surface>,
+) -> Vec<bool> {
+    let mut on_the_same_points: HashMap<[u32; 3], Vec<usize>> = HashMap::new();
+    for (at, triangle) in triangles.iter().enumerate() {
+        let mut corners = triangle.corners;
+        corners.sort_unstable();
+        on_the_same_points.entry(corners).or_default().push(at);
+    }
+    let mut paired = vec![false; triangles.len()];
+    for group in on_the_same_points.values() {
+        for (place, &one) in group.iter().enumerate() {
+            if paired[one] {
+                continue;
+            }
+            let [first, second, third] = triangles[one].corners;
+            let turned = [
+                [first, third, second],
+                [third, second, first],
+                [second, first, third],
+            ];
+            let partner = group[place + 1..].iter().copied().find(|&other| {
+                !paired[other]
+                    && turned.contains(&triangles[other].corners)
+                    && surface_of[&triangles[one].face] != surface_of[&triangles[other].face]
+            });
+            if let Some(other) = partner {
+                paired[one] = true;
+                paired[other] = true;
+            }
+        }
+    }
+    paired
 }
 
 /// A fan from the first corner of each loop, `[first, next, next + 1]` in the
