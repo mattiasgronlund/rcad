@@ -4129,10 +4129,11 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
     Ok(held_where_it_winds(winding))
 }
 
-/// An arc of a flat face, or of a cone face seen down its axis, whose chord
-/// `point` is on, strictly inside the arc's curve, so strictly between the
-/// chord's ends: which side of the chord the arc is on, and what its piece adds
-/// to the count where the point is in it.
+/// An arc of a flat face, of a cone face seen down its axis, or of a ball face
+/// seen from a point of its sphere, whose chord `point` is on, strictly inside
+/// the arc's curve, so strictly between the chord's ends: which side of the
+/// chord the arc is on, and what its piece adds to the count where the point is
+/// in it.
 struct AChordThrough {
     index: usize,
     arcs_side: Decision,
@@ -4738,6 +4739,21 @@ fn lies_between_seen_down_the_axis(
 /// sign read of `P` after that is certified in interval arithmetic, with `w`
 /// multiplied through: intervals here neither divide nor take roots.
 ///
+/// # A point on the chords of arcs
+///
+/// A point seen on the chord of an arc whose circle it is strictly inside, on
+/// the far side of `Q` from `P`, is read as
+/// [`what_a_cone_face_seen_down_its_axis_holds`] reads one (row Q2770): a
+/// little way from it towards a corner seen off the line of every such chord,
+/// and the half-line the count runs along is aimed at that corner. Every
+/// corner keeps its side of the line to that corner, since the point read is
+/// on that line, and the point read is on the corner's side of each such
+/// chord, so in that arc's piece where that is the arc's side. Any number of
+/// chords through the point are read so. The skin of a ball kept to a block's
+/// corner and dented by another block's corner has two sides between the same
+/// two corners, whose chords are seen as one piece, and points of it are read
+/// towards a corner of the dent.
+///
 /// # A point with no sign of a side's line
 ///
 /// **A point whose side of a side's line, seen from `P`, has no sign is not
@@ -4796,8 +4812,9 @@ fn lies_between_seen_down_the_axis(
 /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] for a face with no sides, a
 /// side that is straight or across anything but a plane, two sides along one
 /// plane keeping different sides of it, a whole circle whose side no corner
-/// settles, no cut to see the face from behind, and `point` on two chords at
-/// once; [`Error::Undecidable`] when a sign could not be settled, and whatever
+/// settles, no cut to see the face from behind, and `point` on chords whose
+/// lines every corner is seen on one of; [`Error::Undecidable`] when a sign
+/// could not be settled, and whatever
 /// [`which_side_of_its_neighbour_a_side_keeps`] refuses.
 fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
     face: FaceView<'_>,
@@ -4879,7 +4896,7 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
     };
 
     let mut winding = 0i64;
-    let mut on_a_chord: Option<(usize, Decision)> = None;
+    let mut chords = Vec::new();
     let mut along = Vec::with_capacity(sides.len());
     for (index, (side, &(left, own_placed))) in sides.iter().zip(&arcs).enumerate() {
         let [from, to] = [side.start.placed, side.end.placed];
@@ -4887,11 +4904,12 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
         along.push(beside);
         let poles_side = poles_sides[index];
         let on_the_left = left == (poles_side == Decision::Neg);
-        let [arcs_side, away] = if on_the_left {
-            [Decision::Pos, Decision::Neg]
+        let arcs_side = if on_the_left {
+            Decision::Pos
         } else {
-            [Decision::Neg, Decision::Pos]
+            Decision::Neg
         };
+        let piece = if on_the_left { -1 } else { 1 };
         let read = own_placed.side_of_point(point);
         let inside = if poles_side == Decision::Pos {
             read
@@ -4911,13 +4929,12 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
             Decision::Zero if beside == arcs_side || beside == Decision::Zero => {
                 return Ok(OnAFace::OnItsBoundary);
             }
-            Decision::Neg if beside == arcs_side => winding += if on_the_left { -1 } else { 1 },
-            Decision::Neg if beside == Decision::Zero => {
-                if on_a_chord.is_some() {
-                    return Err(cannot());
-                }
-                on_a_chord = Some((index, away));
-            }
+            Decision::Neg if beside == arcs_side => winding += piece,
+            Decision::Neg if beside == Decision::Zero => chords.push(AChordThrough {
+                index,
+                arcs_side,
+                piece,
+            }),
             Decision::Zero | Decision::Neg | Decision::Pos => (),
             Decision::Undecidable { enclosure } => {
                 return Err(gave_up_on_a_side(&side.across_placed, point, enclosure));
@@ -4926,6 +4943,14 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
         }
     }
 
+    let the_aims_side_of = |chord: &AChordThrough, aim: Point| {
+        let side = &sides[chord.index];
+        pole.sees(
+            side.start.placed,
+            side.end.placed,
+            exactly(aim.coordinates()),
+        )
+    };
     let seen_from = |side: &Side, aim: Point| {
         [side.start.placed, side.end.placed].map(|corner| {
             if corner == aim {
@@ -4943,10 +4968,9 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
         }
     });
     let may_be_aimed_at = |corner: Point| {
-        on_a_chord.is_none_or(|(chord, _)| {
-            let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
+        chords.iter().all(|chord| {
             matches!(
-                pole.sees(from, to, exactly(corner.coordinates())),
+                the_aims_side_of(chord, corner),
                 Decision::Pos | Decision::Neg
             )
         }) && sides.iter().zip(&along).all(|(side, beside)| {
@@ -4958,13 +4982,17 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
     };
     let how_often_it_winds_seen_towards = |aim: Point| -> Result<i64, f64> {
         let mut winding = winding;
-        for (index, side) in sides.iter().enumerate() {
-            let along = match on_a_chord {
-                Some((chord, away)) if chord == index => away,
-                _ => along[index],
-            };
+        let mut along = along.clone();
+        for chord in &chords {
+            let toward = the_aims_side_of(chord, aim);
+            along[chord.index] = toward;
+            if toward == chord.arcs_side {
+                winding += chord.piece;
+            }
+        }
+        for (side, &beside) in sides.iter().zip(&along) {
             let [from, to] = seen_from(side, aim);
-            if let Decision::Undecidable { .. } = along {
+            if let Decision::Undecidable { .. } = beside {
                 assert!(
                     is_wholly_on_one_side_of_the_half_line(from, to),
                     "the half-line was aimed with every side the point has no sign of wholly on \
@@ -4972,7 +5000,7 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
                 );
                 continue;
             }
-            winding += crossing(from, to, along)
+            winding += crossing(from, to, beside)
                 .ok_or_else(|| whichever_of_them_was_not_read(from, to))?;
         }
         Ok(winding)
