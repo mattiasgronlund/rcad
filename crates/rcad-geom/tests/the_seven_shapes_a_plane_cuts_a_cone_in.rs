@@ -1130,15 +1130,15 @@ fn the_two_branches_a_steeper_plane_cuts_are_walked_one_per_nappe() {
 ///   |---|---|
 ///   | the slope-and-height sweep and the parabola row alone | 0.0392 |
 ///   | + the deflection over 21 octaves, which those two pin at `1/64` | 0.0424 |
-///   | + slopes off the eighths grid, so `slope²` is not a stored square | 0.0438 |
+///   | + slopes off the eighths grid, so `slope²` is not a stored square | 0.0424 |
 ///   | + planes nudged either side of a ruling, so it is barely a hyperbola | 0.0458 |
 ///   | + scales that are not powers of two | 0.0458 |
-///   | + 120,000 random plane-and-cone pairs | **0.0713** |
+///   | + 120,000 random plane-and-cone pairs | **0.0750** |
 ///
 ///   Each line is printed as the test runs, so the table is checkable and not a
-///   remembered number. Five untried families moved the worst by **1.8x**
+///   remembered number. Five untried families moved the worst by **1.9x**
 ///   between them, and the one that moved it most is the one that holds nothing
-///   still. The constant would have to come down by a factor of **14** before
+///   still. The constant would have to come down by a factor of **13** before
 ///   this test could fail, so **halving it would not fail this test** — what
 ///   makes `64 · ε` a bound is the derivation, and what this test does is stop
 ///   the derivation being fiction. That is a different claim from the
