@@ -18,7 +18,9 @@
 //! each side of one flat surface. What stays refused is a second cone off the
 //! axis whose directions overlap the first's, and a ball whose skin runs
 //! through the apex, which crosses the cone in a circle and the apex apart
-//! from it.
+//! from it. A second cone of the same slope turned about a line through a point
+//! of the first's axis is more than an overlap: the two are mirror images, and
+//! can touch at two points.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, NamedRun, Picker, Point, Sphere, Surface, SurfaceMeet,
@@ -668,6 +670,88 @@ fn a_second_cone_off_the_axis_is_refused_by_name_in_both_halves() {
             Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
         );
     }
+}
+
+/// A cone of slope a half about `z` and one of slope a quarter leaned `0.3`
+/// about `x` through `(0, 0, 4)`. The leaned cone's straight lines run from
+/// `0.055` to `0.545` off `z`, either side of the first cone's half-angle of
+/// `0.46`, so their directions overlap and nothing proves the crossing two
+/// loops. Up to eight along both axes every straight line of the leaned cone
+/// crosses the other once, at an angle whose sine is never below `0.49`, so
+/// this is the overlap alone and not the touch of the pair below. It is
+/// refused by name.
+#[test]
+fn a_narrower_cone_leaned_less_than_the_wider_ones_half_angle_is_refused_by_name() {
+    let turn = 0.3_f64;
+    let funnel = a_cone([0.0; 3], [0.0, 0.0, 1.0], 0.5);
+    let spout = a_cone(
+        [0.0, 4.0 * turn.sin(), 4.0 - 4.0 * turn.cos()],
+        [0.0, -turn.sin(), turn.cos()],
+        0.25,
+    );
+    assert_eq!(
+        named(&funnel, &spout),
+        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+    );
+}
+
+/// Two cones of slope one, the second the first turned `atan(15/8)` about the
+/// line along `x` through `(0, 0, 170)`, which puts its apex at `(0, 150, 90)`
+/// and its axis along `(0, -15, 8)`, every number exact.
+///
+/// **A turn about a line that meets a cone's axis makes a mirror image of
+/// it.** The turn is a mirror across the flat surface holding both lines, which
+/// leaves the cone where it was, and then a mirror across a second flat surface
+/// through the line. So two cones of one slope, one turned so, are mirror
+/// images across the flat surface halfway between their apexes. Their crossing
+/// is where that flat surface cuts either cone and where a second flat surface,
+/// square to the first, cuts it, and the two cuts meet where the cones
+/// **touch**: here `(±68, 51, 85)`, where both pass and their normals are one
+/// direction. The crossing runs through itself at both.
+///
+/// The two pointed cones of `rcad-topo`'s `a_funnel_with_a_leaning_spout.rs`
+/// are such a pair, turned `0.3` about a point four up, and touch at
+/// `(±1.5954, 0.1209, 3.2)`, inside both faces. There the turn's `sin` and
+/// `cos` are rounded, so they are no longer exact mirror images, and the two
+/// branches pass about `3e-8` apart instead of through each other.
+///
+/// Their directions overlap, since the turn is less than a right angle, and
+/// the pair is refused as a degree-four curve.
+#[test]
+fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points() {
+    let upright = ([0, 0, 0], [0, 0, 1]);
+    let turned = ([0, 150, 90], [0, -15, 8]);
+    for x in [68, -68] {
+        let [one, other] = [upright, turned].map(|(apex, along)| {
+            let off: [i64; 3] = std::array::from_fn(|i| [x, 51, 85][i] - apex[i]);
+            let dot = |a: [i64; 3], b: [i64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+            let how_far_along = dot(off, along);
+            assert_eq!(
+                dot(along, along) * dot(off, off),
+                2 * how_far_along * how_far_along,
+                "({x}, 51, 85) is on the cone of slope one about {along:?} from {apex:?}"
+            );
+            std::array::from_fn::<i64, 3, _>(|i| {
+                dot(along, along) * off[i] - 2 * how_far_along * along[i]
+            })
+        });
+        assert_eq!(
+            [
+                one[1] * other[2] - one[2] * other[1],
+                one[2] * other[0] - one[0] * other[2],
+                one[0] * other[1] - one[1] * other[0],
+            ],
+            [0; 3],
+            "the two cones are square to one direction at ({x}, 51, 85): {one:?} and {other:?}"
+        );
+    }
+    assert_eq!(
+        named(
+            &the_right_angled_cone(),
+            &a_cone([0.0, 150.0, 90.0], [0.0, -15.0, 8.0], 1.0)
+        ),
+        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+    );
 }
 
 /// Two apexes one ulp apart along the diagonal, `1e150` out: the nearer circle

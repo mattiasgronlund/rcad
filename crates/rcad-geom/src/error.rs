@@ -409,7 +409,21 @@ pub enum Error {
     /// straight lines of one of them as a pipe is: `two_cones_off_one_axis_in_two_loops`
     /// says which. What stays refused is two cones whose own directions
     /// overlap, which cross in branches that run off for ever, and every pair
-    /// its enclosures are too loose for.
+    /// its enclosures are too loose for. Two such pairs are not alike. A cone
+    /// of slope a half about `z` and one of slope a quarter leaned `0.3` about
+    /// `x` through `(0, 0, 4)` only overlap: up to eight along both axes they
+    /// cross at an angle whose sine is never below `0.49`. Two cones of **one
+    /// slope**, one turned about a line through a point of the other's axis,
+    /// are mirror images across the flat surface halfway between their apexes,
+    /// and can **touch** at two points, where their crossing runs through
+    /// itself. `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins one of
+    /// each, the second a pair whose numbers are exact and which touch. Where
+    /// the turn's `sin` and `cos` are rounded, as for `rcad-topo`'s funnel with
+    /// a leaning spout, the two are not quite mirror images, and the branches
+    /// pass about `3e-8` apart instead of through each other, so that pair
+    /// needs more than the branches that run off for ever walked: something
+    /// that tells two branches that close apart, or names where they nearly
+    /// meet.
     ///
     /// **A ball through the apex is the one coaxial pair left here**, and it is
     /// not a degree-four curve: the crossing is one circle and the apex apart
