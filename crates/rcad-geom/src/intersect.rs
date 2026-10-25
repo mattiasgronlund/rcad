@@ -5317,7 +5317,7 @@ fn what_holds_apart_where_each_line_of_one_cone_crosses_another(
             )?)),
             Decision::Pos => where_every_line_of_one_cone_dips_inside_another(crossed, ruled),
             Decision::Zero => Ok(None),
-            other => unreachable!("a sign question answers with a sign: {other:?}"),
+            Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
         };
     }
     if most < 0.0 {
@@ -5331,7 +5331,9 @@ fn what_holds_apart_where_each_line_of_one_cone_crosses_another(
             )? {
                 Decision::Zero => return Ok(None),
                 Decision::Pos | Decision::Neg => (),
-                other => unreachable!("a sign question answers with a sign: {other:?}"),
+                Decision::Undecidable { .. } | _ => {
+                    unreachable!("`ask` hands back a sign or an error")
+                }
             }
         }
         return Ok(Some(HalfSpaceThroughAPoint::new(
