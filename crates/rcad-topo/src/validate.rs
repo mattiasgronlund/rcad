@@ -2873,6 +2873,14 @@ fn slop_is_a_length(entity: &'static str, claimed: Option<Approximation>) -> Res
 /// mesh came back flat and whose next mesh folded, so the bulge a third mesh
 /// would have found was never asked for.
 ///
+/// **Two faces' triangles drawn back to back are not a fold here.** Every
+/// rung, the coarsest included, meshes with [`SolidView::a_mesh_to_sum_over`],
+/// which keeps a triangle of one face on the same three points as one of a
+/// face on another surface, turned the other way. The two add nothing to which
+/// way each side is used, and their volumes cancel. A thin strip that two such
+/// faces bound from the same two loops is drawn that way at every mesh when its
+/// edges are straight, so no rung would clear it (`docs/decisions.md` §466).
+///
 /// **Every other refusal but one is still the stopping condition and not a
 /// failure**: the coarsest mesh was built and checked, and what this is looking
 /// for is a point off the flat that no mesh of this solid holds. Handing the
@@ -3825,6 +3833,14 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// first mesh. It is asked down to a floor of its own, for the reasons under
 /// "What stops a fold".
 ///
+/// **Two faces' triangles back to back are kept, and are not asked again.**
+/// Every mesh here is asked with [`TrianglesBackToBack::Kept`]: a triangle of
+/// one face on the same three points as one of a face on another surface,
+/// turned the other way, is left out of the count of how often each side is
+/// used, and what is asked again is whether the rest folds. The mesh this
+/// hands back is read by validation alone and never reaches a caller of the
+/// crate (`docs/decisions.md` §466).
+///
 /// # Why this is not a fixed finer deflection
 ///
 /// Any constant has a solid its chords still cut across — a hole half as far
@@ -3985,8 +4001,12 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// `(−17, 1.35e-6, 2.558)`. The floor above put the last rung some 53 halvings
 /// below the top. The fold was the same at every rung from 5 down to `1.2e-3`
 /// and 24672 points, each rung cost 2.5 to 5 times the last, and both policies
-/// were still meshing after 465 s (Q1869). With the cap the last rung is
-/// `6.1e-4`, and both are refused within 1.8 s.
+/// were still meshing after 465 s (Q1869). With the cap the last rung was
+/// `6.1e-4`, and both were refused within 1.8 s. Since Q2774 that strip and
+/// the wall over it are two faces' triangles back to back, which this ladder
+/// keeps (`docs/decisions.md` §466), so the fin no longer folds: under
+/// `tolerant` the fuse answers, and under `certified` it is refused for its
+/// range before any mesh.
 ///
 /// The cap is **a cost bound and not a proof**: a fold that only a mesh finer
 /// than the fourteenth rung would split is refused, and nothing here says no
@@ -3996,7 +4016,8 @@ fn hand_on_a_refusal_that_found_the_space(why: Error) -> Result<()> {
 /// `7.8e-3` under a top room of `2`, in
 /// `every_answer_over_a_block_turned_against_a_bar_is_a_solid_that_validates`
 /// — at `1d3cd744`, and the same again on `bb8f67d6` with the cap merged in,
-/// where the cap ended a ladder on the fin and nowhere else. Thirteen halvings
+/// where the cap ended a ladder on the fin and nowhere else. No run has looked
+/// for a ladder it ends since the fin stopped folding (Q2774). Thirteen halvings
 /// is five rungs past the ninth, so the cap refuses no fold those two suites
 /// saw cleared. Of a solid outside them it says nothing.
 ///
@@ -4152,7 +4173,10 @@ const HALVINGS_A_FOLD_IS_ASKED_DOWN_TO: i32 = 13;
 /// Whether a finer mesh may clear what refused this one, because it is about
 /// where the mesh's own chords and cuts fell and not about the solid: its sides
 /// crossing, one loop's chords falling on the wrong side of another's, or two
-/// of its patches drawing one side through their insides.
+/// of its patches drawing one side through their insides. The ladders here
+/// count two faces' triangles drawn back to back out before they ask the
+/// last, so a fold that reaches this is one that pair does not explain
+/// (`docs/decisions.md` §466).
 fn a_finer_mesh_may_clear(why: &Error) -> bool {
     its_sides_cross(why)
         || its_loops_lie_the_wrong_side_of_each_other(why)

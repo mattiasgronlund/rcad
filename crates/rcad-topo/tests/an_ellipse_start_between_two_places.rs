@@ -191,10 +191,17 @@ fn the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_
 /// the same under `certified` (§68).
 ///
 /// **The bar less the block**, `10 π r²` less what they share, `23.380`, and
-/// the fin, is refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`
-/// under `tolerant`, at the last rung of the fold ladder (Q1869): the fin's
-/// wall and the block's side both draw one side of the mesh. A probe took
-/// 0.48 s for it. That refusal is Q1972's.
+/// the fin, answers one solid under `tolerant` that validates under `tolerant`
+/// alone, but its `measure` is refused `TwoPatchesOfTheMeshDrewTheSameSide`.
+/// The fin's wall and the block's side are drawn on the same three points,
+/// back to back. The sum `Model::validate` reads keeps such a pair and
+/// `SolidView::mesh`, which `measure` meshes with, refuses it
+/// (`docs/decisions.md` §466). A probe on Q2774's branch that made `measure`
+/// sum over the mesh `validate` sums over found it within its error bar of
+/// `23.380`, the bar under half of what they share. Until Q2774 the fuse was
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` at the
+/// last rung of the fold ladder (Q1869), which was Q1972's refusal and then
+/// Q2262's.
 ///
 /// **Why this says the arm gave an order.** Every fuse here goes through
 /// `the_one_ahead_of_the_start`, and goes there from `the_one_the_start_is`'s
@@ -249,15 +256,12 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
                     (Rule::Intersection, _) => shared,
                     (Rule::Difference, false) => block - shared,
                     (Rule::Difference, true) => {
-                        assert!(
-                            matches!(
-                                fused,
-                                Err(Error::TwoPatchesOfTheMeshDrewTheSameSide {
-                                    drawn: 4,
-                                    used: 4
-                                })
-                            ),
-                            "{case}: {fused:?}"
+                        assert_one_solid_that_validates_but_does_not_measure(
+                            &model, &fused, &policy, &case,
+                        );
+                        assert_refused_for_the_fin(
+                            &model.validate(&Policy::certified(), &mut ProvenanceLog::new()),
+                            &case,
                         );
                         continue;
                     }
@@ -507,32 +511,40 @@ fn assert_one_solid_holding(
         .unwrap_or_else(|why| panic!("{case}: {why:?}"));
 }
 
-/// A bar `2⁻⁴⁰` wider than `1`, less the tilted block, reaches the ladder in
-/// `validate.rs` with or without Q1860's walk fix: the ellipse's start is
-/// `−17 − 2⁻⁴⁰`, off the block's side, so the walk was not refused. The fin it
-/// leaves outside `x = −17` is `2⁻⁴⁰` thick and `2.7e-6` across, and its
-/// coarsest mesh folds `drawn 4, used 4` on the side from
-/// `(−17, −1.3486991523489155e-6, 0)` to `(−17, 1.3486991523489157e-6, 2.558)`:
-/// the bar's wall and the block's flat strip of side between those two corners
-/// both draw it (Q1869).
+/// A bar `2⁻⁴⁰` wider than `1`, less the tilted block, leaves a fin outside
+/// `x = −17` that is `2⁻⁴⁰` thick and `2.7e-6` across. Under `tolerant` the
+/// fuse answers one solid that validates, within 30 s; under `certified` it is
+/// refused `DynamicRangeTooWide`. The ellipse's start is `−17 − 2⁻⁴⁰`, off the
+/// block's side, so the walk is not refused with or without Q1860's walk fix.
 ///
-/// The strip's edges are all straight. Before Q1869 the ladder asked mesh after
-/// mesh, down to a floor some 53 halvings under its top: on `main` at
+/// **The fin is too thin for the mesh to split.** The block's flat strip of
+/// side between the fin's two corners and the bar's wall over it are drawn on
+/// the same three points, back to back, on the side from
+/// `(−17, −1.3486991523489155e-6, 0)` to `(−17, 1.3486991523489157e-6, 2.558)`
+/// (Q1869). Until Q2774 that was a fold like any other, `drawn 4, used 4`.
+/// The strip's edges are all straight, so no finer mesh split it: before Q1869
+/// the ladder in `validate.rs` asked mesh after mesh, and on `main` at
 /// `a14d3018` both policies were still walking it after 465 s, the fold the
-/// same at every rung from 5 down to `1.2e-3` and 24672 points. Q1869 ends a
-/// fold's ladder thirteen halvings under its top, at `6.1e-4` here, and refuses
-/// the fold that mesh draws. That is a cost bound and not a claim that no finer
-/// mesh would clear the fold; `validate.rs` says why under "What stops a fold".
-/// This bounds the wait well under the old one, rather than timing it.
+/// same at every rung from 5 down to `1.2e-3` and 24672 points. From Q1869 the
+/// ladder ended thirteen halvings under its top, at `6.1e-4` here, and the
+/// fuse was refused that fold. Since Q2774 the sum `Model::validate` reads
+/// keeps two faces' triangles drawn back to back (`docs/decisions.md` §466),
+/// and the fuse answers. The 30 s bound stays, so that the old wait cannot
+/// come back unseen.
 ///
-/// **Only the tolerant fuse reaches the ladder.** The fin's piece of the bar's
+/// **Its measure is still refused**, `TwoPatchesOfTheMeshDrewTheSameSide`:
+/// `SolidView::measure` meshes with `SolidView::mesh`, which refuses the pair.
+/// A probe on Q2774's branch that made `measure` sum over the mesh `validate`
+/// sums over measured `23.3387 ± 0.472`, where `10 π r²` less what the bar and
+/// the block share, worked out as the test above works it, is `23.3798`.
+///
+/// **Only the tolerant fuse gets a mesh.** The fin's piece of the bar's
 /// bottom cap bows `2⁻⁴⁰` off its chord, a spread of `17 / 2⁻⁴⁰`, `1.87e13`,
 /// past §3.5's `10¹¹`, so under `certified` the fuse is refused
 /// `DynamicRangeTooWide` before any mesh is asked for (queue rows Q2237 and
-/// Q2257). Under `tolerant` that spread is a warning, and the fold is refused
-/// as before.
+/// Q2257). Under `tolerant` that spread is a warning.
 #[test]
-fn a_fold_across_a_thin_fin_is_refused_in_seconds_at_the_ladders_last_rung() {
+fn a_fin_too_thin_for_the_mesh_to_split_answers_in_seconds_under_tolerant() {
     for (policy, certified) in [(Policy::certified(), true), (Policy::tolerant(25.0), false)] {
         let (answer, answered) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -544,27 +556,65 @@ fn a_fold_across_a_thin_fin_is_refused_in_seconds_at_the_ladders_last_rung() {
                 &policy,
                 &mut ProvenanceLog::new(),
             );
-            let as_it_should = if certified {
+            answer
+                .send((model, fused))
+                .expect("the test waits for the answer");
+        });
+        let (model, fused) = answered
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .unwrap_or_else(|_| panic!("{policy:?}: still meshing after 30 s"));
+        if certified {
+            assert!(
                 matches!(
                     fused,
                     Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio }))
                         if ratio > DynamicRange::LARGEST_SUPPORTED_RATIO
-                )
-            } else {
-                matches!(
-                    fused,
-                    Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 })
-                )
-            };
-            answer
-                .send((as_it_should, format!("{fused:?}")))
-                .expect("the test waits for the answer");
-        });
-        let (as_it_should, fused) = answered
-            .recv_timeout(std::time::Duration::from_secs(30))
-            .unwrap_or_else(|_| panic!("{policy:?}: still meshing after 30 s"));
-        assert!(as_it_should, "{policy:?}: {fused}");
+                ),
+                "{policy:?}: {fused:?}"
+            );
+        } else {
+            assert_one_solid_that_validates_but_does_not_measure(
+                &model,
+                &fused,
+                &policy,
+                &format!("{policy:?}"),
+            );
+        }
     }
+}
+
+/// Checks that `fused` is one solid, that the model validates under `policy`,
+/// and that `measure` is refused `TwoPatchesOfTheMeshDrewTheSameSide`: the
+/// fin's wall and the block's side drawn back to back, which the sum
+/// `Model::validate` reads keeps and `SolidView::mesh` refuses
+/// (`docs/decisions.md` §466).
+fn assert_one_solid_that_validates_but_does_not_measure(
+    model: &Model,
+    fused: &rcad_topo::Result<Fused>,
+    policy: &Policy,
+    case: &str,
+) {
+    let fused = fused
+        .as_ref()
+        .unwrap_or_else(|why| panic!("{case}: {why:?}"));
+    let [solid] = fused.solids()[..] else {
+        panic!("{case}: {:?}", fused.solids())
+    };
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{case}: {why:?}"));
+    let measured = model.solid(solid).expect("the fuse made it").measure(
+        Deflection::of(0.01).expect("a positive deflection"),
+        policy,
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(
+            measured,
+            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
+        ),
+        "{case}: {measured:?}"
+    );
 }
 
 fn fuse_the_bar_and_a_block(
