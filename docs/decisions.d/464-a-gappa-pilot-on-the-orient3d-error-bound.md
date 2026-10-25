@@ -17,7 +17,8 @@ Q2659, which proved two more of the bounds. 464.9 is Q2660, on the eleven
 `*_ROUNDOFF` constants. 464.10 is Q2661, which proves block 1's hints in Coq
 and settles how the scripts join the tree and what notices the Rust moving
 under them. 464.11 is Q2675, which runs the branches where one of the nine
-differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.*
+differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
+464.13 is Q2678, on the side of a flat surface through a point.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -31,6 +32,7 @@ differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.*
   464.10  Whether the scripts join the tree and the gate
   464.11  One of the nine differences at zero
   464.12  The sphere of surface.rs' tests
+  464.13  The side of a flat surface through a point
 
 ### 464.1 The bugs a bound prover is for
 
@@ -239,14 +241,15 @@ stamp recorded.
 `on_floats` whose `error_bound` is a constant times a permanent:
 `ORIENT2D_ERROR_BOUND` and `surface.rs`' `ERROR_BOUND` (a test's, 464.12) in
 `rcad-predicates`, and `SIDE_OF_PLANE`,
-`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT`, `SIDE_OF_SPHERE`, `SIDE_OF_CYLINDER`,
-`SIDE_OF_CONE` and `SIDE_OF_TORUS` in `rcad-geom`. Block 1's pattern should
-carry over to them: one ratio hint per rounding, the error split into one term
-per product of the permanent so that Gappa can average them, block 2 for the
-closed normal end, and `-Eprecision=200`. That is Q2659. The eleven `*_ROUNDOFF` constants were not
-read for this. Two of them, `EVALUATION_ROUNDOFF` and `REFINEMENT_ROUNDOFF`,
-hold per de Boor pass at any degree, and a Gappa script states one fixed
-expression, so it could only do them one degree at a time. That is Q2660. The
+`SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT` (464.13), `SIDE_OF_SPHERE`,
+`SIDE_OF_CYLINDER`, `SIDE_OF_CONE` and `SIDE_OF_TORUS` in `rcad-geom`. Block
+1's pattern should carry over to them: one ratio hint per rounding, the error
+split into one term per product of the permanent so that Gappa can average
+them, block 2 for the closed normal end, and `-Eprecision=200`. That is Q2659.
+The eleven `*_ROUNDOFF` constants were not read for this. Two of them,
+`EVALUATION_ROUNDOFF` and `REFINEMENT_ROUNDOFF`, hold per de Boor pass at any
+degree, and a Gappa script states one fixed expression, so it could only do
+them one degree at a time. That is Q2660. The
 machine's part costs little: seconds for Gappa, under ten for `coqc`. The cost
 is in finding the hints, which took orient3d three relays and this write-up;
 with the pattern known, each of the eight should take less.
@@ -543,7 +546,8 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   was. Done for two, in 464.8: `ORIENT2D_ERROR_BOUND` and
   `SIDE_OF_PLANE_ERROR_BOUND` are proved at the code's constants, orient2d's
   with its products below the normals too, and each of the other six is a row
-  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12.
+  of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12, and
+  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those. Done, in 464.9: three are proved at the code's
   constants, two of them false when every number is below `2⁻¹⁰²²`, and each
@@ -1837,8 +1841,8 @@ for byte as they were run.
 
 - Six rows, one for each bound 464.6 named that is not proved yet:
   `surface.rs`' `ERROR_BOUND` in `rcad-predicates` (Q2677, done in 464.12),
-  and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND`,
-  `SIDE_OF_SPHERE_ERROR_BOUND`, `SIDE_OF_CYLINDER_ERROR_BOUND`,
+  and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` (Q2678, done in
+  464.13), `SIDE_OF_SPHERE_ERROR_BOUND`, `SIDE_OF_CYLINDER_ERROR_BOUND`,
   `SIDE_OF_CONE_ERROR_BOUND` and `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
   Each is to be proved as 1 to 5 here prove orient2d and the side of a plane:
   `on_floats` line for line, the lemma for each product it checks is normal, a
@@ -3720,4 +3724,799 @@ print(f"smallest: {a}u + {hi}u^2 proves, {a}u + {lo}u^2 fails")
   `on_floats` never meets it while its check stands, so it is not a row here.
 - How `c_sphere_noeb.g` gets past `eb`'s rounding (7) was not traced, as with
   plane's.
+- `field` on these scripts' hints (464.10).
+
+### 464.13 The side of a flat surface through a point
+
+Q2678 took up `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in
+`crates/rcad-geom/src/plane.rs`, in three lanes on 2026-10-25. The first wrote
+the generator and ran `flat.g`. The second ran every proof, control, bisection
+and `coqc`, and wrote every script again from its generators, with the same
+bytes. The third wrote this up. The bound is proved at the code's constant, on
+the sum before `value`'s last rounding and on `value` too, in every case where
+`on_floats` hands `decide` a number: every product normal, any of them zero,
+and any of the sums cancelling to zero. Coq checks each proof, modulo its
+hints. The doc comment on the constant miscounts its own terms, and says the
+bound needs every product normal, when `on_floats` lets zero products through
+and the bound holds for them. That comment is in `plane.rs`, and fixing it is
+a row (10).
+
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
+`plane.rs`, `point.rs` and `cascade.rs` at `8c943dfd`. `u` is `2⁻⁵³`, and the
+code's `B = 6u + 128u²` is written `B = 6b-53 + 1b-99;`. Each script follows
+464.8's pattern: one ratio hint per rounding, the error split into one term
+per product of the permanent so that Gappa averages them, 464.5's lemma for
+each product `on_floats` checks is normal, and the step from `y`, the sum
+before `value`'s last rounding, to the sign as 464.4 gives it.
+
+**1. What the proof guards.** `which_side_of_a_flat_surface_through`
+(`plane.rs:945-961`) runs the cascade on `SideOfAFlatSurfaceThroughAPoint`.
+Its one caller is `HalfSpaceThroughAPoint::side_of_point`
+(`half_space.rs:668-675`), and `lib.rs:101` exports `HalfSpaceThroughAPoint`.
+So unlike 464.12's, this proof guards a predicate a user reaches.
+
+**2. `on_floats`, line for line.**
+`SideOfAFlatSurfaceThroughAPoint::on_floats` (`plane.rs:976-998`) returns
+`None` unless `product_is_normal` holds for each of the facing's coordinates
+with the point's and with the through point's (`plane.rs:980-985`). Then it
+takes six products: the facing times the point on each axis, and the facing
+times the through point on each axis, negated (`plane.rs:987-990`). It folds
+them from `(0.0, 0.0)`, adding each product to `value` and its magnitude to
+`permanent` (`plane.rs:991-993`), and returns `error_bound =
+SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND * permanent`
+(`plane.rs:997`).
+
+Negating a product is exact, so adding it negated is subtracting it, and
+`flat.g` writes it that way. The fold's first addition is `0.0` plus the first
+product, which gives the product back (`addzero.g` below), so five of the
+fold's six additions round. `flat.g` names the products `t0` to `t5`, the
+rounded sums `s1` to `s4`, `y = s4 − t5` and `value = rnd(y)`. The first
+product's term goes through six roundings on its way to `value`, its own and
+five sums, and through five on its way to `y`. The permanent folds the
+products' magnitudes in the same order, its first addition exact too, so `P`
+is five nested roundings, and `eb = rnd(B * P)`. The constant
+(`plane.rs:1054-1057`) is `(6 + 128ε) ε` with `ε = f64::EPSILON / 2`, which is
+`u`. That is `6u + 2⁻⁹⁹`, which a double holds exactly, and so does each step
+the Rust takes to it.
+
+`addzero.g`, whole, exits 0, and its `gappa -Bcoq` and `coqc` exit 0, a proof
+of 309 lines with 3 hints. Each hint reads a sum or difference with `z = 0` as
+`x`, which is true of real numbers. Written as `rnd(0 + x) - x in [0, 0]` with
+no hints, Gappa ran 151 s without an answer and was stopped; `a = rnd(x + z)`
+with `z = 0` ran past 30 s the same way.
+
+```gappa
+# addzero.g: adding the double 0 to a double, on either side, or taking 0
+# from it, gives that double back. That is the fold's first addition, 0.0
+# plus the first product, and each zero product the fold adds.
+@rnd = float<ieee_64, ne>;
+x = rnd(x_);
+z = 0;
+L = z + x; R = x + z; D = x - z;
+{ |x| <= 1b1024 -> rnd(L) - x in [0, 0] /\ rnd(R) - x in [0, 0] /\ rnd(D) - x in [0, 0] }
+# Without these three, Gappa ran rnd(x + z) for 30 s and more and did not stop.
+L -> x;
+R -> x;
+D -> x;
+```
+
+**3. The bound on `y`.** `flat.g` (9 below) proves `|y − Ex| ≤ eb` at the
+code's `B`, in 5.02 s in the first lane's run and 18.43 s in the second's, on
+a loaded machine. It prints `(y − Ex) / Phat` within `5u + 7u²` and `P −/
+Phat` within `5u + 10u²`, each with a little more, under `10⁻⁴ u²`, read
+exactly off the fraction Gappa prints. `Phat` is the permanent with no
+rounding of its own. The smallest `B` it proves, by bisection over `m` in `B =
+5u + m u²`, is `5u + 38u²`: `5u + 37u²` fails, best `[-1, 1]` as Gappa prints
+it, rounded, and so does `5u`.
+
+**4. The claim on `value`.** `flatv.g` makes the same claim on `value`, the
+double `on_floats` returns. It proves at the code's `B`, printing `(value −
+Ex) / Phat` within `6u + 11u²`, read the same way. Its smallest `B`, by the
+same bisection over `B = 6u + m u²`, is `6u + 48u²`: `6u + 47u²` fails, and so
+does `6u`. So here `value` itself stays within `eb`, as plane's does (464.8's
+3) and the sphere's (464.12's 4). `decide` does not need it to: the doc on
+`Filtered::error_bound` (`cascade.rs:25-35`) asks only for the bound on the
+sum before `value`'s last rounding, which 3 proves.
+
+**5. What the comment claims.** The doc comment on the constant,
+`plane.rs:1045-1053`:
+
+> The longest chain of roundings from an input to `value` is one product and
+> then the five additions of the fold, six in all, so the first-order term is
+> `6ε` times the permanent and the higher-order terms of `(1 + ε)⁶ − 1` are
+> `15ε²` and less. The permanent is itself folded from six rounded numbers in
+> five additions, so the computed one can sit up to about `6ε` under the true
+> one, which costs another `36ε²` against the `6ε`, and multiplying by this
+> constant rounds once more. The `128ε²` covers those 52 and change with room.
+> The same relative argument as [`SIDE_OF_PLANE_ERROR_BOUND`], so it holds only
+> while every product is a normal number, which `on_floats` checks.
+
+- "Five additions of the fold, six in all": the fold makes six additions, but
+  the first is exact (2), so five round, and six roundings to `value` agrees
+  with the `6u` of 4. On `y` the same count is five, and 3 prints `5u`.
+- `15ε²` is the `ε²` term of `(1 + ε)⁶ − 1`, six choose two.
+- `36ε²` is the permanent's `6ε` taken against the `6ε` of the bound.
+- The last rounding, of `B · P`, costs `ε` of `eb`, which is `6ε²` of the
+  permanent. So by the comment's own terms the count is `15 + 36 + 6 = 57`,
+  not 52. `128` is above 57, and above both smallest `B`s, `5u + 38u²` and
+  `6u + 48u²`, so the slip costs nothing, but the sentence gives the wrong
+  number.
+- "It holds only while every product is a normal number, which `on_floats`
+  checks." `on_floats` does not check that. `product_is_normal(a, b)` is true
+  when `a` or `b` is zero (`cascade.rs:67-69`), so a zero product gets
+  through, and zero is not a normal number. The bound holds for those: 6
+  proves it at the code's `B` for every set of zero products. "Only" also
+  says that a product below the normals breaks the bound. That was not run
+  here. 464.8's 4 found the same sentence false for one product of
+  `SideOfAFlatSurface`, because `eb` normal keeps a product below the normals
+  small against `eb`. Whether it is false here too is a row (10).
+
+**6. The zeros and the cancelling sums.** 464.8's `o2s.g` splits on a product
+that `on_floats` does not check. Here there is none, since `on_floats` checks
+all six before it computes anything. What the check lets through instead is a
+zero product, and a rounded sum can also cancel to zero. Both come from shapes
+designers make. The floor through the origin, facing `(0, 0, 1)`, has the
+facing's `x` and `y` zero, which makes four of the six products zero, and the
+through point's `z` zero makes a fifth. A facing of `(1, 1, 0)` with the point
+`(1, −1, 0)` makes the first two products `1` and `−1`, and the first rounded
+sum zero.
+
+`flatcases.py` (9 below) writes a script for each case: `flat_z<set>.g` on `y`
+and `flatv_z<set>.g` on `value` for each set of products that are zero,
+`<set>` naming them (`0` to `2` the facing times the point, `3` to `5` the
+facing times the through point), and each of those again as `_c<set>` for each
+set of rounded sums that cancel, `<set>` naming the product each such sum
+adds. Where the facing's coordinate is the zero, both its products are zero,
+and the script with the point's and the through point's coordinates zero
+computes the same numbers. A zero product is left out of both folds, since
+adding it gives the sum back (`addzero.g`). Each rounded sum is a sum of two
+doubles, so it is either zero or at least `2⁻¹⁰⁷⁴`: the script for the first
+writes it unrounded, `s = S`, since zero rounds to itself, and the script for
+the second assumes `|S| ≥ 2⁻¹⁰⁷⁴` and rounds it. Two cancelling sums are never
+next to each other, since the sum after a cancelled one is one product, which
+is not zero. That makes 145 scripts on `y` and 138 on `value`, `flat.g` and
+`flatv.g` among them. With one product left there is no script on `value`,
+since `value` is then `y`.
+
+Each of the 283 proves at the code's `B`. With `n` products left and `c` sums
+cancelling, Gappa prints `(y − Ex) / Phat` within `(n − 1 − c) u`, `(value −
+Ex) / Phat` within `(n − c) u` and `P −/ Phat` within `(n − 1) u`, each to the
+digits it prints:
+
+- six products: on `y` `5u` with no sum cancelling (`flat.g`), `4u` with one
+  (4 scripts) and `3u` with two (3); on `value` `6u`, `5u` and `4u`; `P −/
+  Phat` `5u`.
+- five products, 6 sets: on `y` `4u`, `3u` with one sum cancelling (18
+  scripts) and `2u` with two (6); on `value` `5u`, `4u` and `3u`; `P −/ Phat`
+  `4u`.
+- four products, 15 sets: on `y` `3u`, and `2u` with one sum cancelling (30
+  scripts); on `value` `4u` and `3u`; `P −/ Phat` `3u`.
+- three products, 20 sets: on `y` `2u`, and `u` with one sum cancelling (20
+  scripts); on `value` `3u` and `2u`; `P −/ Phat` `2u`.
+- two products, 15 sets: `u` on `y`, `2u` on `value`, `u` for `P −/ Phat`.
+- one product, 6 sets, such as `flat_z01234.g`: `(−t5 − Ex) / |t5|` within
+  `u`, and `|t5| −/ |t5|` in `[0, 0]`.
+- none, `flat_z012345.g`: "remaining results are pointless, anything can be
+  proved." `eb` is then zero, so it is not normal, and `decide` does not
+  compare.
+
+464.12's zero squares were written into its sums, and each needed a hint
+saying the sum was the other term. Here no zero product is written into a
+fold. It stays only in `Ex`, as its factors, such as `f0 * p0` with `p0 = 0;`,
+and Gappa's check that each hint is an identity took that with no warning. So
+no script needs a hint for a zero. No print warned of anything but divisors
+taken to be nonzero (8).
+
+**7. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each of the 283 scripts above but `flat_z012345.g`
+was run again at `B = u / 2`, written `B = 1b-54;`, as `c_<name>_half.g`. Each
+of the 282 fails, exit 1, with a best that is what it printed in 6 over `u /
+2`:
+
+- on `y`: six products `[-10, 10]`, `[-8, 8]` with one sum cancelling and
+  `[-6, 6]` with two; five `[-8, 8]`, `[-6, 6]` and `[-4, 4]`; four `[-6, 6]`
+  and `[-4, 4]`; three `[-4, 4]` and `[-2, 2]`; two and one `[-2, 2]`.
+- on `value`: six products `[-12, 12]`, `[-10, 10]` and `[-8, 8]`; five
+  `[-10, 10]`, `[-8, 8]` and `[-6, 6]`; four `[-8, 8]` and `[-6, 6]`; three
+  `[-6, 6]` and `[-4, 4]`; two `[-4, 4]`.
+
+With 3 and 4's failures at `5u` and `6u`, that shows none of them proved from
+a contradiction.
+
+- `c_flat_nonormal.g` is `flat.g` with the six `product_is_normal` hypotheses
+  dropped, and the six lemma lines they give. It fails, best `[-1.93499e+909,
+  1.93499e+909]`. Gappa finds neither `REL(P, Phat)` nor `BND((y - Ex) /
+  Phat)`. `c_flat_nonormal_why.g` asks for `rp0` as well, what rounding
+  multiplied `f0 * p0` by, and gets it only within `±2^(4142)`. So a script of
+  this kind catches a missing check, as 464.4's 3, 464.8's 4 and 464.12's 7
+  did.
+- `c_flat_z012345_noeb.g` is `flat_z012345.g` without `eb` normal. It fails,
+  best `[-inf, inf]`, printing `eb in [0, 0]`. What proves `flat_z012345.g` is
+  the contradiction with `eb` normal and nothing else, which is what it is
+  meant to show.
+- `c_flat_noeb.g` is `flat.g` without `eb` normal and without the lemma line
+  it gives. It proves, as `c_plane_noeb.g` and `c_sphere_noeb.g` did.
+  `c_flat_noeb_why.g` prints `P` at least `3b-1021`, which is `6 · 2⁻¹⁰²²`,
+  and `eb` at least `9b-1073`, which is `36 · 2⁻¹⁰⁷⁵`. `c_flat_noeb_rel.g`,
+  whose only goal is `eb -/ B * P in ?`, fails on `REL(eb, B * P)`, so how
+  Gappa gets past `eb`'s rounding was not traced. On paper, and not run: six
+  products each at least `2⁻¹⁰²²` put `P` at least `6 · 2⁻¹⁰²²` and `B · P`
+  at least `36 · 2⁻¹⁰⁷⁵`. Rounding moves that by at most `2⁻¹⁰⁷⁵`, a
+  thirty-sixth of it, and `5u + 7u²` of the permanent over thirty-five
+  thirty-sixths of `6u` of it is about `0.86`. `decide` still checks that
+  `eb` is normal, and that check is what keeps every intermediate finite.
+
+464.4's argument for that carries over, on paper. Each product's magnitude is
+a term of the permanent, and every term is non-negative, so a product that
+rounds to infinity or is not a number makes `P` so too. Each of `value`'s
+partial sums is at most the permanent's partial sum in magnitude, by monotone
+rounding, so `|value|` is at most `P`. So where `decide` compares, nothing
+rounded to infinity.
+
+**8. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0 from 464.5's nix block, accept
+each of the 283 scripts that prove: exit 0 each, the two together in 1.3 to
+41.07 s in the second lane's run, on a load of 25 to 50 over 24 cores. Gappa
+does not write the same proof each run (464.4), so the sizes are the second
+lane's. `flat.g`'s proof is 4926 lines with 27 hints, `flatv.g`'s 5198 with
+28, and `flat_z012345.g`'s 177 with none. The others are 177 to 5829 lines,
+the largest `flatv_c24.v` with 26 hints. Each hint enters the Coq file as a
+hypothesis with no condition attached, as in 464.4, so each proof stands on
+its hints and on what Gappa took to be nonzero: `flat.g`'s `gappa -Bcoq`
+prints 112 lines of the form "the expression (f0) * (p0) has been assumed to
+be nonzero when checking a rewriting rule", and `flatv.g`'s 127. It printed
+no other warning. `field` has not been run on these hints (464.10).
+
+**9. The scripts.** `flatcases.py` writes 568 scripts: `flat.g`, `flatv.g`,
+the 280 other cases of 6 and `flat_z012345.g`, the 282 controls at `u / 2` and
+the three other controls of 7. `why.py` writes the three `_why` and `_rel`
+controls of 7 from two of them. After the runs, the second lane ran both again
+in a fresh directory, and they wrote all 571 files byte for byte as they were
+run. To run them again, save the nix block of 464.5 as `gappalib18.nix` and
+these two files beside it, and then:
+
+```sh
+python3 flatcases.py
+python3 why.py
+nx="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
+pin=github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe
+$nx shell $pin#gappa --command gappa -Eprecision=200 flat.g
+$nx shell $pin#gappa --command gappa -Eprecision=200 -Bcoq flat.g > flat.v
+gl=$($nx build --impure --no-link --print-out-paths -f gappalib18.nix)
+fl=$($nx build --no-link --print-out-paths $pin#coqPackages_8_20.flocq)
+COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+  $nx shell $pin#coqPackages_8_20.coq --command coqc flat.v
+```
+
+and the same for every other file the two write, and for `addzero.g`. A
+script that proves exits 0; a control must exit 1. What the lanes ran is
+`one.sh` (below), the same three steps with the store paths written in, as
+`bash one.sh flat.g coq`. In the second lane's run Gappa took 0.02 to 23.58 s
+on each script that proves and 0.04 to 131.32 s on each control.
+
+The smallest `B`s of 3 and 4 come from 464.12's `bisect.py`, with its `B_CODE`
+line the code's `B` here and its `NIX` the `gappa` store path, run as `python3
+bisect.py flat.g 5 128` and `python3 bisect.py flatv.g 6 128`. It is whole
+after `why.py` below.
+
+`flatcases.py`, whole:
+
+```python
+"""Write flat.g, SideOfAFlatSurfaceThroughAPoint::on_floats and
+SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND line for line, and its cases
+and controls beside it:
+
+- flatv.g, the claim on value, the double on_floats returns, not on y;
+- flat_z<set>.g and flatv_z<set>.g for each set of the six products that are
+  zero, which product_is_normal lets through: <set> names the products, 0 to 2
+  the facing times the point and 3 to 5 the facing times the through point;
+- each of those again with _c<set> for each set of its rounded sums that may
+  cancel to zero, <set> naming the product each such sum adds;
+- c_<name>_half.g, each of those at B = u / 2, which must fail;
+- c_flat_nonormal.g, flat.g without product_is_normal, c_flat_noeb.g, flat.g
+  without eb normal, and c_flat_z012345_noeb.g, every product zero without eb
+  normal.
+
+Run as: python3 flatcases.py; it writes beside itself.
+"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+TERMS = range(6)
+SIGN = "+++---"
+FACTORS = [("f0", "p0"), ("f1", "p1"), ("f2", "p2"), ("f0", "q0"), ("f1", "q1"), ("f2", "q2")]
+B_CODE = "B = 6b-53 + 1b-99;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+
+
+def product(k):
+    f, x = FACTORS[k]
+    return f"{f} * {x}"
+
+
+def make(zero=(), cancel=(), on_value=False, b=B_CODE, normal=True, eb_normal=True):
+    live = [k for k in TERMS if k not in zero]
+    out = "value" if on_value else "y"
+    used = sorted({name for k in live for name in FACTORS[k]})
+
+    src = [
+        "# restates: crates/rcad-geom/src/plane.rs on_floats at 8c943dfd",
+        "# restates: crates/rcad-geom/src/plane.rs SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND at 8c943dfd",
+        "# restates: crates/rcad-predicates/src/point.rs exact_coordinates at 8c943dfd",
+        "# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 8c943dfd",
+        "# restates: crates/rcad-predicates/src/cascade.rs decide at 8c943dfd",
+        "# SideOfAFlatSurfaceThroughAPoint::on_floats and its error bound: the sign",
+        "# of facing . point - facing . through.",
+    ]
+    if on_value:
+        src.append("# The claim is on value, the double on_floats returns, not on y.")
+    if zero:
+        src.append(f"# The case where product{'s' if len(zero) > 1 else ''} "
+                   f"{', '.join(str(k) for k in zero)} {'are' if len(zero) > 1 else 'is'} zero.")
+    if cancel:
+        src.append(f"# The sum{'s' if len(cancel) > 1 else ''} adding product"
+                   f"{'s' if len(cancel) > 1 else ''} {', '.join(str(k) for k in cancel)} "
+                   f"may cancel to zero, which rounds to itself.")
+    src += [
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The facing, the point and the through point, each an f64. A product that",
+        "# is zero has the double 0 for its point's or its through point's",
+        "# coordinate; where the facing's coordinate is the zero, both its products",
+        "# are zero, and every number below is the same as with both of those",
+        "# coordinates zero.",
+        "f0 = rnd(f0_); f1 = rnd(f1_); f2 = rnd(f2_);",
+        " ".join(f"p{i} = 0;" if i in zero else f"p{i} = rnd(p{i}_);" for i in range(3)),
+        " ".join(f"q{i} = 0;" if i + 3 in zero else f"q{i} = rnd(q{i}_);" for i in range(3)),
+        "",
+        "# What on_floats computes, line for line. The fold starts at 0.0, and",
+        "# adding 0.0 or a zero product to a double gives that double back",
+        "# (addzero.g), so the zero products and the first addition are left out.",
+    ]
+    if live:
+        src.append(" ".join(f"t{k} = rnd({product(k)});" for k in live))
+
+    rounded = []
+    if not live:
+        src.append("y = 0;")
+    else:
+        first = live[0]
+        running = f"t{first}" if SIGN[first] == "+" else f"-t{first}"
+        for k in live[1:-1]:
+            src.append(f"S{k} = {running} {SIGN[k]} t{k};")
+            if k in cancel:
+                src.append(f"s{k} = S{k};")
+            else:
+                src.append(f"s{k} = rnd(S{k});")
+                rounded.append(k)
+            running = f"s{k}"
+        if len(live) == 1:
+            src.append(f"y = {running};")
+        else:
+            src.append(f"y = {running} {SIGN[live[-1]]} t{live[-1]};")
+    value_rounded = len(live) >= 2
+    src.append("value = rnd(y);" if value_rounded else "value = y;")
+
+    src += ["", "# The permanent folds the same products' magnitudes in the same order."]
+    if not live:
+        src.append("P = 0;")
+    else:
+        perm = f"|t{live[0]}|"
+        for k in live[1:]:
+            perm = f"rnd({perm} + |t{k}|)"
+        src.append(f"P = {perm};")
+    src += ["", b, "eb = rnd(B * P);", "", "# The true value of the same inputs."]
+    src.append("Ex = " + " + ".join(product(k) for k in (0, 1, 2)) + " - "
+               + " - ".join(product(k) for k in (3, 4, 5)) + ";")
+    src += ["", "# The permanent with no rounding of its own."]
+    src.append("Phat = " + (" + ".join(f"|t{k}|" for k in live) if live else "0") + ";")
+
+    if live:
+        src += ["", "# What each rounding multiplied its argument by."]
+        src.append(" ".join(f"rp{k} = t{k} / ({product(k)});" for k in live))
+        if rounded:
+            src.append(" ".join(f"rs{k} = s{k} / S{k};" for k in rounded))
+        if on_value and value_rounded:
+            src.append("rv = value / y;")
+        src += ["", f"# Each product's term, as {out} carries it, less the term itself: e is",
+                "# that amount and W the same over the product as on_floats rounds it.",
+                "# The through point's terms are subtracted, so their e is the other way",
+                "# round."]
+        for k in live:
+            carry = [f"rs{j}" for j in rounded if j >= k]
+            if on_value and value_rounded:
+                carry.append("rv")
+            src.append(f"W{k} = {' * '.join(carry) if carry else '1'} - 1 / rp{k};")
+        src.append(" ".join(f"e{k} = t{k} * W{k};" if SIGN[k] == "+" else f"e{k} = -(t{k} * W{k});"
+                            for k in live))
+        src.append(" ".join(f"c{k} = |t{k}|;" for k in live))
+
+    hyps = []
+    finite = ["|f0| <= 1b1024", "|f1| <= 1b1024", "|f2| <= 1b1024"]
+    coords = [f"|p{i}| <= 1b1024" for i in range(3) if i not in zero] + \
+             [f"|q{i}| <= 1b1024" for i in range(3) if i + 3 not in zero]
+    hyps.append(("Every input is a finite f64.", [finite, coords]))
+    if live:
+        hyps.append(("No factor of a product left is zero. For an f64 that is the same as\n"
+                     "  # being at least the smallest subnormal.",
+                     [[f"|{n}| >= 1b-1074" for n in used if n[0] == "f"],
+                      [f"|{n}| >= 1b-1074" for n in used if n[0] != "f"]]))
+        if rounded:
+            hyps.append(("No rounded sum cancels to zero.", [[f"|S{k}| >= 1b-1074" for k in rounded]]))
+        if normal:
+            hyps.append(("product_is_normal on the products left.",
+                         [[f"|t{k}| >= 1b-1022" for k in live]]))
+    if eb_normal:
+        hyps.append(("The bound is normal, which decide checks.", [["|eb| >= 1b-1022"]]))
+    lemma = []
+    if normal:
+        lemma += [[f"t{k} -/ {product(k)} {LEMMA}"] for k in live]
+    if eb_normal:
+        lemma.append([f"eb -/ B * P {LEMMA}"])
+    if lemma:
+        hyps.append(("What lemma.g proves each of those gives.", lemma))
+    if live:
+        hyps.append(("x / |x| is in [-1, 1] for any x that is not zero.",
+                     [[f"t{k} / |t{k}| in [-1, 1]" for k in live]]))
+    if on_value and value_rounded:
+        hyps.append(("y is not zero. Where it is, value is zero too, and the claim on y is\n"
+                     "  # the claim on value.", [["|y| >= 1b-1074"]]))
+
+    src += ["", "{"]
+    first_line = True
+    for comment, rows in hyps:
+        src.append(f"  # {comment}")
+        for row in rows:
+            if not row:
+                continue
+            src.append(("     " if first_line else "  /\\ ") + " /\\ ".join(row))
+            first_line = False
+    src.append("->")
+    if live:
+        src += [f"  ({out} - Ex) / Phat in ? /\\ P -/ Phat in ?",
+                f"  /\\ ({out} - Ex) / eb in [-1, 1]"]
+    else:
+        src.append(f"  eb in ? /\\ ({out} - Ex) / eb in [-1, 1]")
+    src += ["}", ""]
+
+    if live:
+        src.append("# How far each rounding is from the identity.")
+        for k in live:
+            src.append(f"t{k} / ({product(k)}) -> 1 + (t{k} - {product(k)}) / ({product(k)});")
+        for k in rounded:
+            src.append(f"s{k} / S{k} -> 1 + (s{k} - S{k}) / S{k};")
+        if on_value and value_rounded:
+            src.append("value / y -> 1 + (value - y) / y;")
+        src += [
+            "",
+            "# The error is the sum of the products' errors, each a fraction of its",
+            "# own piece of the permanent; add_rr then averages them.",
+            f"({out} - Ex) / Phat -> ((Phat + ({out} - Ex)) - Phat) / Phat;",
+            f"Phat + ({out} - Ex) -> " + " + ".join(f"(c{k} + e{k})" for k in live) + ";",
+        ]
+        for k in live:
+            src.append(f"(c{k} + e{k}) - c{k} -> e{k};")
+        for k in live:
+            src.append(f"e{k} / c{k} -> (t{k} / |t{k}|) * W{k};" if SIGN[k] == "+"
+                       else f"e{k} / c{k} -> -((t{k} / |t{k}|) * W{k});")
+        src += [
+            "",
+            "# From the permanent to the one on_floats rounds, and on to eb.",
+            f"({out} - Ex) / eb -> (({out} - Ex) / Phat) * (Phat / P) * (P / eb);",
+            "Phat / P -> 1 / (1 + (P - Phat) / Phat);",
+            "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));",
+        ]
+    return "\n".join(src) + "\n"
+
+
+def cancellable(live):
+    """The sets of rounded sums that can cancel to zero together. A sum that
+    cancels leaves the running sum zero, so the next rounded sum is the next
+    product alone, which is not zero."""
+    sums = live[1:-1]
+    for n in range(len(sums) + 1):
+        for c in itertools.combinations(sums, n):
+            if all(sums.index(b) - sums.index(a) > 1 for a, b in zip(c, c[1:])):
+                yield c
+
+
+def write(name, text):
+    open(name, "w").write(text)
+
+
+def name_of(prefix, zero, cancel):
+    tag = (f"_z{''.join(map(str, zero))}" if zero else "") + \
+          (f"_c{''.join(map(str, cancel))}" if cancel else "")
+    return prefix + tag
+
+
+if __name__ == "__main__":
+    proving = []
+    for n in range(6):
+        for zero in itertools.combinations(TERMS, n):
+            live = [k for k in TERMS if k not in zero]
+            for cancel in cancellable(live):
+                for on_value in (False, True):
+                    if on_value and len(live) < 2:
+                        continue
+                    name = name_of("flatv" if on_value else "flat", zero, cancel)
+                    write(f"{name}.g", make(zero, cancel, on_value))
+                    write(f"c_{name}_half.g", make(zero, cancel, on_value, b=B_HALF))
+                    proving.append(name)
+    # Every product zero: then eb is zero, so decide does not compare, and
+    # Gappa proves the goal from the contradiction. Its control drops eb normal.
+    write("flat_z012345.g", make(tuple(TERMS)))
+    write("c_flat_z012345_noeb.g", make(tuple(TERMS), eb_normal=False))
+    write("c_flat_nonormal.g", make(normal=False))
+    write("c_flat_noeb.g", make(eb_normal=False))
+    print(f"{len(proving)} scripts that must prove with a control at u / 2 each, and flat_z012345.g")
+```
+
+`flat.g`, whole, as `flatcases.py` writes it:
+
+```gappa
+# restates: crates/rcad-geom/src/plane.rs on_floats at 8c943dfd
+# restates: crates/rcad-geom/src/plane.rs SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND at 8c943dfd
+# restates: crates/rcad-predicates/src/point.rs exact_coordinates at 8c943dfd
+# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 8c943dfd
+# restates: crates/rcad-predicates/src/cascade.rs decide at 8c943dfd
+# SideOfAFlatSurfaceThroughAPoint::on_floats and its error bound: the sign
+# of facing . point - facing . through.
+@rnd = float<ieee_64, ne>;
+
+# The facing, the point and the through point, each an f64. A product that
+# is zero has the double 0 for its point's or its through point's
+# coordinate; where the facing's coordinate is the zero, both its products
+# are zero, and every number below is the same as with both of those
+# coordinates zero.
+f0 = rnd(f0_); f1 = rnd(f1_); f2 = rnd(f2_);
+p0 = rnd(p0_); p1 = rnd(p1_); p2 = rnd(p2_);
+q0 = rnd(q0_); q1 = rnd(q1_); q2 = rnd(q2_);
+
+# What on_floats computes, line for line. The fold starts at 0.0, and
+# adding 0.0 or a zero product to a double gives that double back
+# (addzero.g), so the zero products and the first addition are left out.
+t0 = rnd(f0 * p0); t1 = rnd(f1 * p1); t2 = rnd(f2 * p2); t3 = rnd(f0 * q0); t4 = rnd(f1 * q1); t5 = rnd(f2 * q2);
+S1 = t0 + t1;
+s1 = rnd(S1);
+S2 = s1 + t2;
+s2 = rnd(S2);
+S3 = s2 - t3;
+s3 = rnd(S3);
+S4 = s3 - t4;
+s4 = rnd(S4);
+y = s4 - t5;
+value = rnd(y);
+
+# The permanent folds the same products' magnitudes in the same order.
+P = rnd(rnd(rnd(rnd(rnd(|t0| + |t1|) + |t2|) + |t3|) + |t4|) + |t5|);
+
+B = 6b-53 + 1b-99;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Ex = f0 * p0 + f1 * p1 + f2 * p2 - f0 * q0 - f1 * q1 - f2 * q2;
+
+# The permanent with no rounding of its own.
+Phat = |t0| + |t1| + |t2| + |t3| + |t4| + |t5|;
+
+# What each rounding multiplied its argument by.
+rp0 = t0 / (f0 * p0); rp1 = t1 / (f1 * p1); rp2 = t2 / (f2 * p2); rp3 = t3 / (f0 * q0); rp4 = t4 / (f1 * q1); rp5 = t5 / (f2 * q2);
+rs1 = s1 / S1; rs2 = s2 / S2; rs3 = s3 / S3; rs4 = s4 / S4;
+
+# Each product's term, as y carries it, less the term itself: e is
+# that amount and W the same over the product as on_floats rounds it.
+# The through point's terms are subtracted, so their e is the other way
+# round.
+W0 = rs1 * rs2 * rs3 * rs4 - 1 / rp0;
+W1 = rs1 * rs2 * rs3 * rs4 - 1 / rp1;
+W2 = rs2 * rs3 * rs4 - 1 / rp2;
+W3 = rs3 * rs4 - 1 / rp3;
+W4 = rs4 - 1 / rp4;
+W5 = 1 - 1 / rp5;
+e0 = t0 * W0; e1 = t1 * W1; e2 = t2 * W2; e3 = -(t3 * W3); e4 = -(t4 * W4); e5 = -(t5 * W5);
+c0 = |t0|; c1 = |t1|; c2 = |t2|; c3 = |t3|; c4 = |t4|; c5 = |t5|;
+
+{
+  # Every input is a finite f64.
+     |f0| <= 1b1024 /\ |f1| <= 1b1024 /\ |f2| <= 1b1024
+  /\ |p0| <= 1b1024 /\ |p1| <= 1b1024 /\ |p2| <= 1b1024 /\ |q0| <= 1b1024 /\ |q1| <= 1b1024 /\ |q2| <= 1b1024
+  # No factor of a product left is zero. For an f64 that is the same as
+  # being at least the smallest subnormal.
+  /\ |f0| >= 1b-1074 /\ |f1| >= 1b-1074 /\ |f2| >= 1b-1074
+  /\ |p0| >= 1b-1074 /\ |p1| >= 1b-1074 /\ |p2| >= 1b-1074 /\ |q0| >= 1b-1074 /\ |q1| >= 1b-1074 /\ |q2| >= 1b-1074
+  # No rounded sum cancels to zero.
+  /\ |S1| >= 1b-1074 /\ |S2| >= 1b-1074 /\ |S3| >= 1b-1074 /\ |S4| >= 1b-1074
+  # product_is_normal on the products left.
+  /\ |t0| >= 1b-1022 /\ |t1| >= 1b-1022 /\ |t2| >= 1b-1022 /\ |t3| >= 1b-1022 /\ |t4| >= 1b-1022 /\ |t5| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those gives.
+  /\ t0 -/ f0 * p0 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t1 -/ f1 * p1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t2 -/ f2 * p2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t3 -/ f0 * q0 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t4 -/ f1 * q1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ t5 -/ f2 * q2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ t0 / |t0| in [-1, 1] /\ t1 / |t1| in [-1, 1] /\ t2 / |t2| in [-1, 1] /\ t3 / |t3| in [-1, 1] /\ t4 / |t4| in [-1, 1] /\ t5 / |t5| in [-1, 1]
+->
+  (y - Ex) / Phat in ? /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+t0 / (f0 * p0) -> 1 + (t0 - f0 * p0) / (f0 * p0);
+t1 / (f1 * p1) -> 1 + (t1 - f1 * p1) / (f1 * p1);
+t2 / (f2 * p2) -> 1 + (t2 - f2 * p2) / (f2 * p2);
+t3 / (f0 * q0) -> 1 + (t3 - f0 * q0) / (f0 * q0);
+t4 / (f1 * q1) -> 1 + (t4 - f1 * q1) / (f1 * q1);
+t5 / (f2 * q2) -> 1 + (t5 - f2 * q2) / (f2 * q2);
+s1 / S1 -> 1 + (s1 - S1) / S1;
+s2 / S2 -> 1 + (s2 - S2) / S2;
+s3 / S3 -> 1 + (s3 - S3) / S3;
+s4 / S4 -> 1 + (s4 - S4) / S4;
+
+# The error is the sum of the products' errors, each a fraction of its
+# own piece of the permanent; add_rr then averages them.
+(y - Ex) / Phat -> ((Phat + (y - Ex)) - Phat) / Phat;
+Phat + (y - Ex) -> (c0 + e0) + (c1 + e1) + (c2 + e2) + (c3 + e3) + (c4 + e4) + (c5 + e5);
+(c0 + e0) - c0 -> e0;
+(c1 + e1) - c1 -> e1;
+(c2 + e2) - c2 -> e2;
+(c3 + e3) - c3 -> e3;
+(c4 + e4) - c4 -> e4;
+(c5 + e5) - c5 -> e5;
+e0 / c0 -> (t0 / |t0|) * W0;
+e1 / c1 -> (t1 / |t1|) * W1;
+e2 / c2 -> (t2 / |t2|) * W2;
+e3 / c3 -> -((t3 / |t3|) * W3);
+e4 / c4 -> -((t4 / |t4|) * W4);
+e5 / c5 -> -((t5 / |t5|) * W5);
+
+# From the permanent to the one on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / Phat) * (Phat / P) * (P / eb);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+`why.py`, whole. It is 464.12's with `sphere` read as `flat`, and the goal
+`rpx in ? /\ rpr in ?` read as `rp0 in ?`:
+
+```python
+"""Write two controls again with more goals, to name where each breaks or how
+it gets through: c_flat_nonormal_why.g asks for what the rounding of the first
+product multiplied it by; c_flat_noeb_why.g asks for P and eb, and
+c_flat_noeb_rel.g for eb's relative error alone."""
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+GOAL = "  (y - Ex) / Phat in ? /\\ P -/ Phat in ?\n"
+
+
+def rewrite(src, dst, goal):
+    text = open(src).read()
+    assert text.count(GOAL) == 1, src
+    open(dst, "w").write(text.replace(GOAL, goal))
+
+
+rewrite("c_flat_nonormal.g", "c_flat_nonormal_why.g",
+        "  (y - Ex) / Phat in ? /\\ P -/ Phat in ? /\\ rp0 in ?\n")
+rewrite("c_flat_noeb.g", "c_flat_noeb_why.g",
+        "  (y - Ex) / Phat in ? /\\ P -/ Phat in ? /\\ P in ? /\\ eb in ?\n")
+text = open("c_flat_noeb.g").read()
+head, rest = text.split("->\n", 1)
+_, hints = rest.split("}\n", 1)
+open("c_flat_noeb_rel.g", "w").write(head + "->\n  eb -/ B * P in ?\n}\n" + hints)
+```
+
+`bisect.py`, whole, as run. It is 464.12's with three lines changed: `B_CODE`
+is the code's `B` here, `NIX` is the `gappa` store path from 464.4's pin
+rather than `nix shell`, and the timeout is 600 s rather than 200. Its `best`
+line is never read; the line after it is what prints a failing run's best:
+
+```python
+"""Find the smallest B = a u + m u^2 a script proves at, in steps of u^2, by
+bisection on m, as 464.8 did. Run as: python3 bisect.py <file.g> <a> <hi m>.
+Writes <name>_b<a>_<m>.g beside itself for each B tried, and prints each run's
+exit and the goal's best bound when it fails."""
+import os
+import re
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+B_CODE = "B = 6b-53 + 1b-99;"
+NIX = ["/nix/store/0ihij0570a325g02l4wnf0idk8vqxr9b-gappa-1.8.0/bin/gappa", "-Eprecision=200"]
+
+name, a, hi = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+text = open(name).read()
+assert text.count(B_CODE) == 1, f"no single B line in {name}"
+
+
+def proves(m):
+    b = f"B = {a}b-53 + {m}b-106;" if m else f"B = {a}b-53;"
+    out_name = f"{name[:-2]}_b{a}_{m}.g"
+    open(out_name, "w").write(text.replace(B_CODE, b))
+    run = subprocess.run(NIX + [out_name], capture_output=True, text=True, timeout=600)
+    best = re.findall(r"best: \[[^\]]*\]|\{[-0-9.e+]+, [-0-9.e+^()]+\}\]", run.stderr + run.stdout)
+    fail = [l for l in (run.stderr + run.stdout).splitlines() if "best" in l or "failed" in l.lower()]
+    print(f"{out_name}: {b} exit {run.returncode}; {' | '.join(fail[:3])}", flush=True)
+    return run.returncode == 0
+
+
+lo = 0
+assert not proves(lo), "proves with no u^2 term"
+assert proves(hi), "does not prove at the top of the range"
+while hi - lo > 1:
+    mid = (lo + hi) // 2
+    if proves(mid):
+        hi = mid
+    else:
+        lo = mid
+print(f"smallest: {a}u + {hi}u^2 proves, {a}u + {lo}u^2 fails")
+```
+
+`flat.g`'s run printed, in order, `5u + 128u²`, `64`, `48`, `40` and `38`
+proving and `5u`, `32`, `36` and `37` failing, each at best `[-1, 1]`;
+`flatv.g`'s `6u + 128u²`, `64` and `48` proving and `6u`, `32`, `40`, `44`,
+`46` and `47` failing, the same way.
+
+`one.sh`, whole:
+
+```sh
+#!/bin/bash
+# Run one Gappa script under 464.4's pin (the store path nix build gives for
+# it), writing <name>.out and printing "<name> exit <code> <seconds>s".
+# With "coq" as the second argument, also write <name>.v with -Bcoq and check
+# it with coqc against gappalib 1.8.0 and flocq 4.2.2, printing that too.
+cd "$(dirname "$0")"
+g=/nix/store/0ihij0570a325g02l4wnf0idk8vqxr9b-gappa-1.8.0/bin/gappa
+coqc=/nix/store/cgfd855dwk38jxngg5wdvysdjjn2wv3i-coq-8.20.1/bin/coqc
+export COQPATH=/nix/store/1rqb30ra496k5zpw9aji329zn00rjggv-coq8.20-gappalib-1.8.0/lib/coq/8.20/user-contrib:/nix/store/p3ka5vy0zshbknhc9pphsffxxwfkcwq4-coq8.20-flocq-4.2.2/lib/coq/8.20/user-contrib
+f=$1
+n=${f%.g}
+start=$(date +%s.%N)
+timeout 600 "$g" -Eprecision=200 "$f" > "$n.out" 2>&1
+code=$?
+end=$(date +%s.%N)
+printf '%s exit %d %.2fs\n' "$n" "$code" "$(echo "$end - $start" | bc)"
+if [ "$2" = coq ] && [ "$code" = 0 ]; then
+  start=$(date +%s.%N)
+  timeout 600 "$g" -Eprecision=200 -Bcoq "$f" > "$n.v" 2> "$n.bcoq"
+  bcode=$?
+  timeout 600 "$coqc" "$n.v" > "$n.coqc" 2>&1
+  ccode=$?
+  end=$(date +%s.%N)
+  printf '%s coq -Bcoq exit %d coqc exit %d %.2fs lines %d hints %d\n' "$n" "$bcode" "$ccode" \
+    "$(echo "$end - $start" | bc)" "$(wc -l < "$n.v")" "$(grep -c '^Hypothesis a[0-9]' "$n.v")"
+fi
+```
+
+**10. What this leaves.** The rows filed with this write-up:
+
+- A row to restate `plane.rs:1050-1053` by 5: by its own terms the count is
+  57, not 52, and `on_floats` lets zero products through, for which 6 proves
+  the bound at the code's constant.
+- A row, after that one, to run `flatcases.py` with one, two and three of the
+  six products below the normals, as 464.8's `planecases.py` does for
+  `SideOfAFlatSurface`, and then to say whether `on_floats` needs its six
+  `product_is_normal` checks and to restate `plane.rs:1052-1053` by what that
+  shows. Q2684 asks the same of `SideOfAFlatSurface`, not of this predicate.
+- A row for `flat.g`'s first `restates` line. 464.10's b names the item "as
+  `just src` takes it", and `just src on_floats crates/rcad-geom/src/plane.rs`
+  lists two, `SideOfAFlatSurface`'s at `plane.rs:847` and this one's at
+  `plane.rs:976`, rather than printing one. So the line names both, and
+  464.8's `plane.g` would name the same two.
+
+And what is not a row:
+
+- Q2700 already waits on Q2678, and moves these scripts into `proofs/gappa/`
+  with the others that rows of 464 appended.
+- How `c_flat_noeb.g` gets past `eb`'s rounding (7) was not traced, as with
+  plane's and the sphere's.
 - `field` on these scripts' hints (464.10).
