@@ -137,6 +137,13 @@ use super::{
 /// warns once at most. Its warning goes into `range_warning`, so the caller
 /// can hold it back from the wobble check.
 ///
+/// **A speck of a flat face whose outline winds against its normal has a
+/// corner or two moved a rounding first, where that winds it with the normal**
+/// ([`Assembly::wind_each_flat_face_with_its_normal`]), so the range, how each
+/// edge runs and the nesting are all asked of the corners as they are written.
+/// The range is asked of the corners as they were solved too, before any
+/// moves, so an answer it refuses is refused as it was without the move.
+///
 /// **Which shell is a void of which is left to
 /// [`Assembly::nest_the_shells`]**, which the fuse asks after this: nesting
 /// measures each shell's volume, and a sliver too thin for `f64` can measure
@@ -174,6 +181,7 @@ pub(crate) fn assemble(
     let mut assembly =
         Assembly::joined_into_shells(model, scratch, chosen, names_of_one_point, policy, log)?;
     assembly.leave_out_each_shell_thinner_than_the_wobble(policy, log)?;
+    assembly.wind_each_flat_face_with_its_normal(inputs_reach, policy)?;
     let still_to_measure = match inputs_reach {
         Some(inputs_reach) => assembly.check_dynamic_range(inputs_reach, policy, range_warning)?,
         None => None,
@@ -5207,6 +5215,288 @@ impl Assembly {
         Some(far)
     }
 
+    /// Move a corner or two of each speck of a flat face whose outline winds
+    /// against its normal by a rounding, where that winds the outline with its
+    /// normal and leaves every other ring through the corners it moves wound
+    /// as it was.
+    ///
+    /// **A face the fuse builds can be a triangle a rounding across**, and the
+    /// meets of three planes it is cut at can then round to points that wind
+    /// it either way. A sound pyramid placed and cut by a wedge through its
+    /// apex keeps a speck of a side face `3e−16` to `2e−14` across within
+    /// `7e−15` of the apex, and under tolerant(100) 15 of 672 such fuses were
+    /// refused for a speck whose stored corners wound `Neg`, one `Zero` (queue
+    /// row Q2583). With one or two of its corners a rounding further on, each
+    /// speck winds with its normal and the whole answer validates
+    /// (`a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_every_rule_under_tolerant`,
+    /// queue row Q2642, `docs/decisions.md` §294.26).
+    ///
+    /// **Only a corner the fuse solved for, and only one every face round is
+    /// flat with straight edges.** An input vertex's `f64` is the corner
+    /// itself. A curved face or edge reads where its corners are, and a corner
+    /// with only flat faces round it answers to nothing but their windings and
+    /// their planes, whose wobble a rounding is far inside. The move is added
+    /// to [`Corner::wobble`], since the corner is that much further from where
+    /// it was solved.
+    ///
+    /// **One corner first, then two**, each coordinate to the `f64` below, the
+    /// same or the one above, fewest coordinates moved first, and the first
+    /// move that winds the face is taken. The faces go in the order of their
+    /// corners and the corners in [`the_order_of_two_roundings`], so the same
+    /// answer fused from its arguments the other way round moves the same
+    /// corners. A move onto a triple a corner already holds is passed over,
+    /// since [`Assembly::check_dynamic_range`] refuses an edge between two
+    /// corners on one triple.
+    ///
+    /// **This changes only an answer that was refused, and only a speck of
+    /// it.** Nothing moves unless a face's outline does not wind with its
+    /// normal, and the sweep in [`Assembly::commit`] refuses such a face under
+    /// any policy. That refusal is not always the fuse's last word:
+    /// `Model::fused_under` tries the answer again with the folds of
+    /// `docs/decisions.md` §417.9, and a strip one of them closes has to reach
+    /// it refused. So a face more than a speck across ([`is_a_speck`]) is left
+    /// for that sweep to refuse, so is a face no move of two corners winds,
+    /// and so is one wound so far the wrong way that no rounding of every
+    /// corner could turn it ([`a_rounding_could_turn_it`]): a big face wound
+    /// wrong for some other reason costs no search.
+    ///
+    /// **The range is asked first, of the corners as they were solved**, once
+    /// a face is found wound wrong and before anything moves, so an answer
+    /// [`Assembly::check_dynamic_range`] refuses is refused with the ratio it
+    /// had without the move. A speck is a feature a rounding across, and every
+    /// fuse of queue row Q2583's sweep this moved a corner in was refused at
+    /// the range check under `certified`. Moved first, a corner a rounding
+    /// further off made the shortest edge longer or shorter, and the ratio
+    /// with it: two skewed combs touching along one line had their
+    /// intersection refused at `1.91e16`, where every other fuse of the two is
+    /// refused at `2.70e16` (`two_skewed_combs_touching_along_one_line.rs`,
+    /// `docs/decisions.md` §294.26). The warning this first ask gives under
+    /// `tolerant` is thrown away, since the range is asked again of the
+    /// corners as they are written, and that warning is the one that stands.
+    /// `inputs_reach` and `policy` are what [`assemble`] asks the range with.
+    ///
+    /// # Errors
+    ///
+    /// What [`Assembly::check_dynamic_range`] refuses, of the corners as they
+    /// were solved.
+    fn wind_each_flat_face_with_its_normal(
+        &mut self,
+        inputs_reach: Option<f64>,
+        policy: &Policy,
+    ) -> Result<()> {
+        let flat: Vec<bool> = (0..self.faces.len())
+            .map(|face| self.is_flat_with_straight_edges(face))
+            .collect();
+        let wound_wrong: Vec<usize> = (0..self.faces.len())
+            .filter(|&face| flat[face] && !self.winds_as_it_should(face, 0, &[]))
+            .collect();
+        if wound_wrong.is_empty() {
+            return Ok(());
+        }
+        if let Some(inputs_reach) = inputs_reach {
+            self.check_dynamic_range(inputs_reach, policy, &mut ProvenanceLog::new())?;
+        }
+        let mut rings_through: Vec<Vec<[usize; 2]>> = vec![Vec::new(); self.corners.len()];
+        for face in 0..self.faces.len() {
+            for wire in 0..self.faces[face].wires.len() {
+                for corner in self.corners_round(face, wire) {
+                    if !rings_through[corner].contains(&[face, wire]) {
+                        rings_through[corner].push([face, wire]);
+                    }
+                }
+            }
+        }
+        let mut in_order: Vec<(Vec<Point>, usize)> = wound_wrong
+            .into_iter()
+            .map(|face| {
+                let mut points: Vec<Point> = self
+                    .corners_round(face, 0)
+                    .into_iter()
+                    .map(|corner| self.corners[corner].point)
+                    .collect();
+                points.sort_by(|one, other| the_order_of_two_roundings(*one, *other));
+                (points, face)
+            })
+            .collect();
+        in_order.sort_by(|(one, _), (other, _)| {
+            one.iter()
+                .zip(other)
+                .map(|(mine, theirs)| the_order_of_two_roundings(*mine, *theirs))
+                .find(|order| order.is_ne())
+                .unwrap_or_else(|| one.len().cmp(&other.len()))
+        });
+        for (_, face) in in_order {
+            if self.winds_as_it_should(face, 0, &[]) {
+                continue;
+            }
+            let Some(moves) = self.a_rounding_that_winds(face, &flat, &rings_through) else {
+                continue;
+            };
+            for (corner, point) in moves {
+                let moved = &mut self.corners[corner];
+                moved.wobble += how_far_apart(moved.point, point);
+                moved.point = point;
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether `face` is flat and every edge round it runs straight between
+    /// two corners, as [`Assembly::how_far_a_shell_of_flat_faces_is_from_flat`]
+    /// asks of every face of a shell.
+    fn is_flat_with_straight_edges(&self, face: usize) -> bool {
+        let face = &self.faces[face];
+        face.surface.as_plane().is_some()
+            && face.wires.iter().flatten().all(|side| {
+                let edge = &self.edges[side.edge];
+                edge.lies_on_two_planes() && edge.ends[0] != edge.ends[1]
+            })
+    }
+
+    /// Whether ring `wire` of the flat `face` winds as `check_flat_face` wants
+    /// it, with the outline round the normal and a hole against it, once each
+    /// corner of `moves` is at its point there.
+    ///
+    /// A ring of fewer than three corners winds as it should, since
+    /// `check_flat_face` asks nothing of it. A winding [`winding_round`]
+    /// refuses does not.
+    fn winds_as_it_should(&self, face: usize, wire: usize, moves: &[(usize, Point)]) -> bool {
+        let ring = self.corners_round(face, wire);
+        if ring.len() < 3 {
+            return true;
+        }
+        let plane = self.faces[face]
+            .surface
+            .as_plane()
+            .expect("only a flat face is asked which way its rings wind");
+        let points: Vec<[f64; 3]> = ring
+            .iter()
+            .map(|&corner| {
+                moves
+                    .iter()
+                    .find(|(moved, _)| *moved == corner)
+                    .map_or(self.corners[corner].point, |&(_, point)| point)
+                    .coordinates()
+            })
+            .collect();
+        let should = if wire == 0 {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        };
+        winding_round(&points, plane.normal().components()).is_ok_and(|wound| wound == should)
+    }
+
+    /// The corner each side of ring `wire` of `face` leaves, in the order the
+    /// written wire's points come.
+    fn corners_round(&self, face: usize, wire: usize) -> Vec<usize> {
+        self.faces[face].wires[wire]
+            .iter()
+            .map(|side| self.edges[side.edge].ends[usize::from(!side.forward)])
+            .collect()
+    }
+
+    /// The corners of the outline of `face` to move, and the points to move
+    /// them to, that wind it with its normal: one corner first, then two
+    /// (see [`Assembly::wind_each_flat_face_with_its_normal`]).
+    ///
+    /// `flat` says which faces are flat with straight edges, and
+    /// `rings_through` which rings each corner is on, as `[face, wire]`.
+    fn a_rounding_that_winds(
+        &self,
+        face: usize,
+        flat: &[bool],
+        rings_through: &[Vec<[usize; 2]>],
+    ) -> Option<Vec<(usize, Point)>> {
+        let outline = self.corners_round(face, 0);
+        let plane = self.faces[face]
+            .surface
+            .as_plane()
+            .expect("only a flat face is wound");
+        let points: Vec<[f64; 3]> = outline
+            .iter()
+            .map(|&corner| self.corners[corner].point.coordinates())
+            .collect();
+        if !is_a_speck(&points) || !a_rounding_could_turn_it(&points, plane.normal().components()) {
+            return None;
+        }
+        let mut movable = outline;
+        movable.sort_unstable();
+        movable.dedup();
+        movable.retain(|&corner| {
+            self.corners[corner].from.is_none()
+                && rings_through[corner].iter().all(|&[round, _]| flat[round])
+        });
+        movable.sort_by(|&one, &other| {
+            the_order_of_two_roundings(self.corners[one].point, self.corners[other].point)
+        });
+        let wound_right: BTreeSet<[usize; 2]> = movable
+            .iter()
+            .flat_map(|&corner| rings_through[corner].iter().copied())
+            .filter(|&[round, wire]| {
+                [round, wire] != [face, 0] && self.winds_as_it_should(round, wire, &[])
+            })
+            .collect();
+        let winds = |moves: &[(usize, Point)]| {
+            self.the_moves_wind_it(face, moves, &wound_right, rings_through)
+        };
+        let roundings: Vec<Vec<Point>> = movable
+            .iter()
+            .map(|&corner| the_roundings_round(self.corners[corner].point))
+            .collect();
+        for (&corner, points) in movable.iter().zip(&roundings) {
+            for &point in points {
+                if winds(&[(corner, point)]) {
+                    return Some(vec![(corner, point)]);
+                }
+            }
+        }
+        for (first, (&one, its)) in movable.iter().zip(&roundings).enumerate() {
+            for (&other, theirs) in movable.iter().zip(&roundings).skip(first + 1) {
+                for &at in its {
+                    for &there in theirs {
+                        let moves = [(one, at), (other, there)];
+                        if winds(&moves) {
+                            return Some(moves.to_vec());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Whether `moves` wind the outline of `face` with its normal, leave each
+    /// ring of `wound_right` through a corner they move wound as it should,
+    /// and put no corner on a triple a corner holds already.
+    fn the_moves_wind_it(
+        &self,
+        face: usize,
+        moves: &[(usize, Point)],
+        wound_right: &BTreeSet<[usize; 2]>,
+        rings_through: &[Vec<[usize; 2]>],
+    ) -> bool {
+        if !self.winds_as_it_should(face, 0, moves) {
+            return false;
+        }
+        let still_wound_right = moves
+            .iter()
+            .flat_map(|&(corner, _)| rings_through[corner].iter())
+            .filter(|ring| wound_right.contains(*ring))
+            .all(|&[round, wire]| self.winds_as_it_should(round, wire, moves));
+        if !still_wound_right {
+            return false;
+        }
+        let landing: Vec<[u64; 3]> = moves.iter().map(|&(_, point)| exactly_at(point)).collect();
+        if landing.windows(2).any(|pair| pair[0] == pair[1]) {
+            return false;
+        }
+        !self
+            .corners
+            .iter()
+            .any(|corner| landing.contains(&exactly_at(corner.point)))
+    }
+
     /// Sort the shells into solids: each one that encloses space, with the ones
     /// that hollow it out.
     ///
@@ -6046,6 +6336,113 @@ impl Assembly {
         }
         worst.max(inherited.magnitude())
     }
+}
+
+/// Whether moving each corner of `ring` by a rounding could make the sum
+/// [`winding_round`] decides the sign of, `Σ (p × q) · n` over its sides, come
+/// out above zero.
+///
+/// **The sum is the same measured from any point**, since the ring closes, so
+/// it is enclosed here from the first corner, over the differences to it, and
+/// moving corner `k` by `δ` changes it by `(δ × (q₊ − q₋)) · n`, with `q₋`
+/// and `q₊` the corners either side, plus `(δ × δ′) · n` where the next corner
+/// moves by `δ′` too. With every `|δ|` at most `step`, one rounding of the
+/// largest coordinate, every corner within `across` of the first in each
+/// coordinate, and `|(u × v) · n| ≤ 2 |u|∞ |v|∞ |n|₁`, each corner moves the
+/// sum by at most `2 |n|₁ step (2 across + step)`. Twice that for every
+/// corner covers the rounding of the bound itself.
+///
+/// For a triangle with coordinates about ten, `step` is `2.2e−15`, so a speck
+/// `1e−14` across, whose sum is about `1e−28`, can be moved about `1e−27` and
+/// is searched, and a triangle ten across, whose sum is about a hundred, about
+/// `1e−12` and is not.
+fn a_rounding_could_turn_it(ring: &[[f64; 3]], normal: [f64; 3]) -> bool {
+    let first = ring[0];
+    let from_the_first = |corner: [f64; 3]| -> [Interval; 3] {
+        core::array::from_fn(|axis| {
+            Interval::exactly(corner[axis]) - Interval::exactly(first[axis])
+        })
+    };
+    let mut swept = Interval::exactly(0.0);
+    for (index, &corner) in ring.iter().enumerate() {
+        let start = from_the_first(corner);
+        let end = from_the_first(ring[(index + 1) % ring.len()]);
+        for (axis, (one, other)) in [(1, 2), (2, 0), (0, 1)].into_iter().enumerate() {
+            let minor = start[one] * end[other] - start[other] * end[one];
+            swept = swept + Interval::exactly(normal[axis]) * minor;
+        }
+    }
+    let (step, across) = its_rounding_and_how_far_across(ring);
+    let along: f64 = normal.iter().map(|component| component.abs()).sum();
+    let reach = 4.0 * ring.len() as f64 * along * step * (2.0 * across + step);
+    swept.hi() + reach > 0.0
+}
+
+/// How many roundings across, at most, a face
+/// [`Assembly::wind_each_flat_face_with_its_normal`] moves a corner of.
+const A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS: f64 = 64.0;
+
+/// Whether every corner of `ring` lies within
+/// [`A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS`] roundings of its first in
+/// each coordinate, a rounding being one of its largest coordinate.
+///
+/// **Only a speck is wound by moving a corner.** Each corner of a speck is a
+/// meet of planes rounded, and its other roundings are as near the meet as the
+/// one stored, so a move keeps the face where it was. A strip a rounding wide
+/// and an edge long is another face: where a plane runs beside an edge a
+/// rounding off it, the fold of `docs/decisions.md` §417.9 closes it, and the
+/// fuse tries that fold only once the answer is refused without it. With a
+/// corner of it moved instead, the strip the floor cuts from a cube tipped
+/// onto its edge, five long, `4.5e15` roundings across, was kept as a sliver
+/// the range check warned of, where the fold leaves it out
+/// (`a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`, queue row
+/// Q2642, §294.26). Of the 30 faces moved over queue row Q2583's 672 fuses of
+/// a pyramid and a wedge, the widest is `5.8` roundings across.
+fn is_a_speck(ring: &[[f64; 3]]) -> bool {
+    let (step, across) = its_rounding_and_how_far_across(ring);
+    across <= A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS * step
+}
+
+/// One rounding of the largest coordinate of `ring`, and how far its corners
+/// lie from its first in any one coordinate, at most.
+fn its_rounding_and_how_far_across(ring: &[[f64; 3]]) -> (f64, f64) {
+    let first = ring[0];
+    let largest = ring
+        .iter()
+        .flatten()
+        .fold(0.0, |far: f64, at| far.max(at.abs()));
+    let step = f64::EPSILON * largest + f64::from_bits(1);
+    let across = ring
+        .iter()
+        .flat_map(|corner| corner.iter().zip(first).map(|(at, from)| (at - from).abs()))
+        .fold(0.0, f64::max);
+    (step, across)
+}
+
+/// The 26 points a rounding from `point` in one, two or three coordinates,
+/// each to the `f64` below or above, fewest coordinates moved first.
+fn the_roundings_round(point: Point) -> Vec<Point> {
+    const WAYS: [Ordering; 3] = [Ordering::Less, Ordering::Equal, Ordering::Greater];
+    let mut steps: Vec<[Ordering; 3]> = WAYS
+        .iter()
+        .flat_map(|&x| {
+            WAYS.iter()
+                .flat_map(move |&y| WAYS.iter().map(move |&z| [x, y, z]))
+        })
+        .filter(|step| step.iter().any(|way| way.is_ne()))
+        .collect();
+    steps.sort_by_key(|step| step.iter().filter(|way| way.is_ne()).count());
+    let at = point.coordinates();
+    steps
+        .iter()
+        .map(|step| {
+            Point::from(core::array::from_fn(|axis| match step[axis] {
+                Ordering::Less => at[axis].next_down(),
+                Ordering::Equal => at[axis],
+                Ordering::Greater => at[axis].next_up(),
+            }))
+        })
+        .collect()
 }
 
 /// What the first half of the range check measured and let through without a
@@ -9842,12 +10239,18 @@ fn the_planes_keep_them_apart(
 /// [`Corners::settle_on_the_lower_rounding`] picks: by `x`, then `y`, then
 /// `z`, in [`f64::total_cmp`]'s order.
 fn is_the_lower_rounding(one: Point, other: Point) -> bool {
+    the_order_of_two_roundings(one, other).is_lt()
+}
+
+/// The order [`is_the_lower_rounding`] puts two points in: by `x`, then `y`,
+/// then `z`, in [`f64::total_cmp`]'s order.
+fn the_order_of_two_roundings(one: Point, other: Point) -> Ordering {
     one.coordinates()
         .iter()
         .zip(other.coordinates().iter())
         .map(|(mine, theirs)| mine.total_cmp(theirs))
         .find(|order| order.is_ne())
-        .is_some_and(Ordering::is_lt)
+        .unwrap_or(Ordering::Equal)
 }
 
 /// For every name `joined` links to another, directly or along a chain of

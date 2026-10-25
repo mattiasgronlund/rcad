@@ -1554,6 +1554,11 @@ put it. The pin counts each answer's faces and the sides of their outlines.
 | `certified` | range | range | range | range | range | range |
 | `tolerant(100)` | 60, 5 and 18 | 60, 6 and 22 | broken | broken | 60, 5 and 18 | 60, 5 and 18 |
 
+*Since Q2642 both "broken" cells answer 60, 6 and 22, with the range check
+in the log: the fuse moves one or two corners of the speck a rounding, which
+winds it with its normal (§294.26). The table and the two paragraphs under it
+are as they were measured here.*
+
 "range" is `Invalid::DynamicRangeTooWide`, a ratio of `5.1e15` to `1.5e16`,
 which `Assembly::check_dynamic_range` raises on the answer's shortest edge
 before anything is written. "60" is `Ok`, one solid holding 60 to `1e−12`
@@ -1587,20 +1592,29 @@ the right one. The three planes bake solved the apex from put it a rounding
 off the cut, and the half pyramids above are what a pyramid with its apex
 there holds: an edge a rounding long, and on the side holding the apex a
 triangle a rounding across. Neither fits beside coordinates near 10 in an
-`f64`. `DynamicRangeTooWide` is a limit of that answer by `LimitOrGap`, and
-a triangle whose three corners are a rounding apart has no winding its
-stored corners can carry, so `tolerant` taking the range check meets the
-same limit one step on. Half the pyramid with nothing small in it is the
-answer of the shape the designer meant, with the cut through the apex, and
-the placed numbers do not say that. What would say it is how the two were
-built: one movement placed both solids, and before it the cut ran through
-the apex exactly. Q1954 traces that kind of fact, carried from how a shape
-was built, for Q1936 among other rows. So folding the specks where the cut
-meets two side planes within a rounding of the apex, which this section's
-first draft named as the next thing to try, takes them as near enough: a
-tolerance, which the theory Q1954 measures rules out. The next step is
-Q1954's trace, and then carrying the coincidence if it finds it in hand. It
-stays `refuses/B`: a shape designers make.
+`f64`. `DynamicRangeTooWide` is a limit of that answer by `LimitOrGap`.
+Under `tolerant`, which takes the range check, the triangle a rounding
+across is written with one or two of its corners a rounding from where they
+were solved, so that it winds with its normal (§294.26). Half the pyramid
+with nothing small in it is the answer of the shape the designer meant, with
+the cut through the apex, and the placed numbers do not say that. What would
+say it is how the two were built: one movement placed both solids, and
+before it the cut ran through the apex exactly. Q1954 traces that kind of
+fact, carried from how a shape was built, for Q1936 among other rows. So
+folding the specks where the cut meets two side planes within a rounding of
+the apex, which this section's first draft named as the next thing to try,
+takes them as near enough: a tolerance, which the theory Q1954 measures
+rules out. The next step is Q1954's trace, and then carrying the coincidence
+if it finds it in hand. It stays `refuses/B`: a shape designers make.
+
+*Corrected by §294.26. This paragraph said that a triangle whose three
+corners are a rounding apart has no winding its stored corners can carry,
+so that `tolerant` taking the range check met the same limit one step on.
+That was false, and nobody had tried it: queue row Q2583 moved one or two
+corners a rounding in each of 17 such specks, left where a wedge cuts
+through the placed apex, and each then wound with its normal and its whole
+answer validated. The two "broken" cells were the same gap, not a limit,
+and the fuse now writes the moved corners for them too.*
 
 The pin: `a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut`,
 which replaces §294.20's
@@ -1612,7 +1626,8 @@ which replaces §294.20's
 **What this leaves.**
 
 - The pyramid placed and cut through its apex keeping an edge a rounding
-  long, refused by `certified` and twice by `tolerant(100)`, above. A row,
+  long, refused by `certified` and twice by `tolerant(100)`, above (the two
+  `tolerant(100)` refusals answer since §294.26). A row,
   tier 1, `refuses/B`, after Q1954: carry the fact that one movement placed
   both solids and the cut ran through the apex before it, if Q1954 finds it
   in hand, so the cut meets the apex.
@@ -2084,3 +2099,221 @@ it stands.
 
 **What this leaves.** Nothing new. Q2588, already filed, asks whether a closed
 crossing whose start is refused can make a tolerant fuse answer wrong.
+
+### 294.26 Q2642: a speck's corners moved a rounding wind it with its normal — 2026-10-24
+
+*Queue row Q2642, from Q2583. Lane
+`lane-q2642-wind-the-pyramids-specks-with-their-normal`, base `5afdb494`,
+carried on by three relays (§416), and finished by a second lane,
+`lane-q2642-b-write-down-the-wound-specks`, which merged it and, in its own
+relays, kept the change to specks and had the range asked before it. Code
+changed in `fuse/assemble.rs`; pinned in
+`crates/rcad-topo/tests/a_broken_three_surface_corner_read_back_from_bytes.rs`,
+kept off the strip §417.9 folds by
+`crates/rcad-topo/tests/a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`,
+and kept from moving a refusal at the range check by
+`crates/rcad-topo/tests/two_skewed_combs_touching_along_one_line.rs`.
+Corrects §294.21.*
+
+**What refused.** Queue row Q2583 swept 672 fuses of the sound pyramid placed
+and cut through its apex by a wedge: the file's three wedges and the one from
+`0.25` to `0.75`, at `every_placement` and at the turns 0.1, 0.7, 1.3 and 2.9
+about `(1, 2, 3)`, `(−2, 1, 0.5)` and `(0.3, −1, 2)`, each also shifted by
+`(7, −5, 2.5)`, by every rule under both policies. At `5afdb494`, 15 of them
+under `tolerant(100)` were refused `TheFuseWroteABrokenAnswer` with
+`OuterWireWindsAgainstTheNormal`. At `f7bde708` it was 17; the other two are
+refused `ResultIsNotManifold` at `5afdb494`, before any face winds wrong. The
+pinned intersection of the wedge round the `x` axis at the turn 0.1 about
+`(0.3, −1, 2)` is among the 15, and §294.21's two "broken" cells, the block
+cut through the apex, failed the same way. Each of the 15 broken faces is a
+speck of a pyramid side face, `3e−16` to `2e−14` across and within `7e−15`
+of the placed apex, whose stored corners wind `Neg`, one of them `Zero`. The
+log holds only the range check, and `certified` refuses each fuse
+`DynamicRangeTooWide`.
+
+**A gap, not a limit.** §294.21 said a triangle whose three corners are a
+rounding apart has no winding its stored corners can carry. Nobody had tried
+it. Q2583 let the fuse write each answer anyway and moved one or two of the
+speck's corners by one rounding in each coordinate, and all 17 then validated
+under `tolerant(100)`, with only the range check in the log, holding what the
+two solids hold. The answer is there in `f64`: the roundings the corners were
+solved to happen to wind the speck the wrong way.
+
+**The change.** `assemble` now calls
+`Assembly::wind_each_flat_face_with_its_normal` after it leaves out the shells
+thinner than the wobble and before the range check, so the range, how each
+edge runs and the nesting are all asked of the corners as they are written.
+For each flat face with straight edges whose outline does not wind with its
+normal, it tries moving one corner of the outline, then two, each coordinate
+to the `f64` below, the same or the one above (`the_roundings_round`), fewest
+coordinates moved first. It takes the first move that winds the outline with
+its normal, leaves every other ring through the moved corners wound as it
+was, and puts no corner on a point another corner holds, since the range
+check refuses an edge between two corners at one point.
+
+- Only a corner the fuse solved moves, never an input's vertex, and only one
+  with nothing but flat faces with straight edges round it: those ask nothing
+  of a corner but their windings and their planes. The move is added to the
+  corner's wobble, since it is that much further from where it was solved.
+- The faces and their corners are tried in `the_order_of_two_roundings`, so
+  an answer fused from its arguments the other way round moves the same
+  corners.
+- A face that no rounding of every corner could turn, by the bound
+  `a_rounding_could_turn_it` works out, is not searched, so a big face wound
+  wrong for another reason costs nothing. It is left for `commit`'s sweep to
+  refuse, as is one no move of two corners winds.
+- A face more than 64 roundings across is not searched either
+  (`is_a_speck`, below).
+- Once a face is found wound wrong, and before any corner moves, the range
+  is asked of the corners as they were solved, by the same
+  `check_dynamic_range` that follows, and that first ask's log is thrown
+  away. An answer it refuses is refused as it was without the change, ratio
+  and all (below).
+
+**Why it is not a tolerance.** No two points are taken as one: a move that
+lands on a corner already there is passed over. A moved corner is a rounding
+from where it was solved and its wobble says so, so the range check and the
+wobble check after it ask where it is. And nothing moves unless a face winds
+against its normal, which `commit`'s sweep refuses under every policy, so the
+change reaches only answers that were refused.
+
+**Only a speck, since a refusal there is not the fuse's last word.** As the
+first lane left it, the change failed the gate of the second lane's first run:
+`a_cube_tipped_onto_one_edge_along_another_cubes_floor.rs`'s
+`every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_only_where_refused_without`
+found no fold record for the intersection at `t = 0.024`, block first. An
+answer `assemble` refuses goes back to `Model::fused_under`, which tries it
+again with §417.9's fold of the ends of an edge a plane runs beside, and the
+strip that fold closes is a face winding `Zero`. The change wound it first.
+`probe_q2642_floor_fold`, a probe at the end of the cube file that ran all 90
+of its `tolerant(100)` fuses and was taken out after (`mise exec -- just t
+probe_q2642_floor_fold --no-capture`), found it at exactly the 8
+intersections of `TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`,
+either way round. In each, one corner of the strip, `(0, 5, 0)`, moved to
+`y = 5.000000000000001`, and the answer kept the strip as an eighth face, a
+sliver five long with a range check's record, where with the change switched
+off the fold leaves it out: 7 faces, the two fold records, and the same
+volume. The other 82 fuses came out the same both ways.
+
+So `Assembly::wind_each_flat_face_with_its_normal` now winds only a speck:
+`is_a_speck` asks that every corner of the outline lie within 64 roundings of
+the first in each coordinate, a rounding being one of the largest coordinate.
+A speck's other roundings are as near the meets it was cut at as the ones
+stored. A strip a rounding wide and an edge long is the face §417.9's fold is
+for. Measured with a print of each face's width in roundings, since taken out:
+
+- The strip the floor cuts is `4503599627370496` roundings across, `5 / 5ε`.
+- Of the 30 faces moved over Q2583's 672 fuses, before the range was asked
+  first (below), the widest is `5.83` roundings across, and the narrowest
+  `0.1`.
+- With the narrowing, the cube file's 90 fuses come out exactly as with the
+  change switched off, and Q2583's 672 exactly as in `branch-run.log`, the
+  run before it (both probes pasted in, run as `mise exec -- just t -E
+  'test(/probe_q2583_every_wedge_at_every_placement|probe_q2642_floor_fold/)'
+  --no-capture`, and taken out after).
+
+The 64 is ten times the widest speck and far below any strip an edge long. A
+face between the two is left refused, or to the folds, as before the change.
+
+**The range asked first, so a refusal there names its old ratio.** Kept to
+specks, the change failed the gate of the second lane's next relay, on
+`9c8fc7110`, at one test:
+`two_skewed_combs_touching_along_one_line.rs`'s
+`every_certified_fuse_of_the_two_combs_is_refused_for_the_range`, which wants
+every `certified` fuse of the two combs refused `DynamicRangeTooWide` at
+`2.7021597764222976e16`, and got `1.9107155017577316e16` (`mise exec -- just t
+every_certified_fuse_of_the_two_combs_is_refused_for_the_range`). A probe that
+printed each `certified` fuse of the combs and each corner moved, taken out
+after, found why. Under `certified` the prism the two combs close is kept,
+and its two end caps are specks, such as `(−1.0000000000000004, 2, 1)`,
+`(−1.0000000000000002, 2, 1)`, `(−0.9999999999999998, 2, 1)`, whose three
+corners all round onto `y = 2`, so they wind `Zero`. The change moved one
+corner of each to `y = 2.0000000000000004` or `1.9999999999999998`. That made
+the shortest edge longer or shorter, and the ratio with it: both
+intersections and the second difference were refused at `1.91e16`, the union
+and the first difference at `2.70e16`, as before.
+
+A speck is a feature a rounding across, so an answer holding one is already
+close to what the range check refuses: every fuse of Q2583's sweep the change
+moved a corner in was refused there under `certified`. So
+`Assembly::wind_each_flat_face_with_its_normal` now asks
+`check_dynamic_range` of the corners as they were solved, once it finds a
+face wound wrong and before it moves anything. That is the question the fuse
+asked of exactly those corners before the change, so a refusal there is the
+old refusal, ratio and all, and so is one for an edge between two corners at
+one point. Under `tolerant` a ratio too wide only warns, and the first ask's
+warning is thrown away: the range is asked again of the corners as written,
+and that warning is the one that stands. With it the probe found all six
+`certified` fuses of the combs refused at `2.70e16`.
+
+Two other ways were set aside. Moving the change after the range check
+would leave a move that shortened an edge never asked of the range, and
+`Model::validate`'s fold over the range would later meet an answer the fuse
+never checked. Writing the comb pin's ratio down as `1.91e16` would let the
+change move a refusal it cannot rescue, which is no part of what it is for.
+
+**What it gives.** The first lane's third relay ran Q2583's sweep three ways:
+on the branch, on the branch with a print wherever the change moves a corner,
+and at `5afdb494`. The second lane's last relay ran it once more, with the
+range asked first. Each run had Q2583's probe pasted at the end of the test
+file and taken out after, and ran as `mise exec -- just t --no-capture -p
+rcad-topo --test merged probe_q2583_every_wedge_at_every_placement`.
+
+- All 15 answer under `tolerant(100)`, holding what the two hold, with only
+  the range check in the log. No fuse of the 672 has a face left winding
+  against its normal, and no speck needed an input's vertex moved.
+- The change moves corners in the 15 `tolerant(100)` fuses. Under
+  `certified` the range check now refuses the same 15 before any corner
+  moves; before the range was asked first, the change moved corners in them
+  too, 30 fuses in all. In the pinned intersection it moves two corners of
+  the speck.
+- 657 of the 672 come out exactly as at `5afdb494`; the other 15 are those
+  that now answer. The run with the range asked first has the `certified`
+  fuses the same as the base: 336 of 336, the `tolerant(100)` ones the same
+  as the base: 321 of 336, and the same as the run before it: 336 of 336.
+  Before the range was asked first it was 649 of the 672: 8 `certified`
+  refusals at the range check had their ratio moved, to between `5.8e15` and
+  `3.2e16`, and all 8 are back.
+
+While `/tmp` lasts, the logs and the scripts that count them are in the
+dispatcher's scratchpad's `q2583/`: `branch-run.log`, `branch-traced.log`,
+`base-5afdb494-run.log` and `relay5-precheck-run.log`, counted by
+`q2642-traced.py`, `q2642-base.py` and `relay5-compare.py`.
+
+**The pins.**
+`a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_every_rule_under_tolerant`,
+which replaces
+`a_sound_pyramid_turned_and_cut_by_a_wedge_round_the_x_axis_answers_tolerant_but_for_the_intersection`,
+expects every rule answered with the range check in the log.
+`a_sound_pyramid_placed_and_cut_through_its_apex_keeps_a_speck_of_the_cut`
+expects all six `tolerant(100)` fuses answered, the two that were broken as
+6 faces and 22 sides. Both fail without the change. `mise exec -- just t -E
+'test(/^a_broken_three_surface_corner_read_back_from_bytes::/)'` prints `24
+tests run: 24 passed`.
+
+Two pins from before this row keep the change where it belongs.
+`every_tolerant_fuse_is_one_solid_and_takes_the_floor_through_the_edges_ends_only_where_refused_without`,
+in the cube file, keeps it to specks: at `f2f484dd6`, before `is_a_speck`, it
+fails with `left: 0` where it wants `right: 2`.
+`every_certified_fuse_of_the_two_combs_is_refused_for_the_range`, in the comb
+file, keeps it from moving a refusal at the range check: at `9c8fc7110`,
+before the range was asked first, it fails with `1.9107155017577316e16` where
+it wants `2.7021597764222976e16`.
+
+**Q2576's sentence.** The pin of the wedge over the `+y` edge shifted after a
+turn said queue row Q2576 found the difference refused `Undecidable` at both
+shifts. Only the shift after the turn 0.1 about `(1, 2, 3)` was. At
+`89230085`, before Q2334, Q2583's sweep has the difference at the shift after
+the turn 0.7 about `(0.3, −1, 2)` refused `DynamicRangeTooWide` under
+`certified`, and Q2334's `a8dba1a28` does not count it among the three it
+moved from `Undecidable`. The pin's doc and the file's top comment say so now.
+
+**What this leaves.**
+
+- Q2758, filed from this row's sweep: 21 fuses that answered at `f7bde708`
+  and are refused at `5afdb494`, and the two of the 17 that are refused
+  `ResultIsNotManifold` now.
+- §294.21's refusals at the range check under `certified` stand as the limit
+  it settled, with Q1954's trace as the next step.
+- Q2744 and Q2745 are not answered: the change moves no corner in any fuse
+  they name.
