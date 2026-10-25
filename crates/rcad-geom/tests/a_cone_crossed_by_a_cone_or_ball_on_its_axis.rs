@@ -25,8 +25,8 @@
 //! more than an overlap: the two are mirror images, and can touch at two points.
 
 use rcad_geom::{
-    Axis, Cone, Deflection, EdgeRun, Error, NamedRun, Picker, Point, Sphere, Surface, SurfaceMeet,
-    Vector, intersect, walk, where_a_closed_crossing_starts,
+    Axis, Cone, Deflection, EdgeRun, Error, HalfSpaceThroughAPoint, NamedRun, Picker, Point,
+    Sphere, Surface, SurfaceMeet, Vector, intersect, walk, where_a_closed_crossing_starts,
 };
 use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog};
 
@@ -690,8 +690,9 @@ fn a_second_cone_off_the_axis_is_refused_by_name_in_both_halves() {
 /// `intersect` names all three pieces, the loop between two flat surfaces
 /// square to the leaned cone's axis, one through its apex and one through
 /// `(0, 0, 4)`, and each branch on the far side of one of them. `walk` marches
-/// the loop, and refuses a run on a branch by name, whole or between two
-/// corners on it, since a march follows only a closed loop.
+/// the loop, whole and each half of it between its two corners on `x = 0`, and
+/// refuses a run on a branch by name, whole or between two corners on it,
+/// since a march follows only a closed loop.
 #[test]
 fn a_narrower_cone_leaned_less_than_the_wider_ones_half_angle_crosses_it_in_a_loop_and_two_endless_branches()
  {
@@ -699,21 +700,27 @@ fn a_narrower_cone_leaned_less_than_the_wider_ones_half_angle_crosses_it_in_a_lo
     let [sin, cos] = [turn.sin(), turn.cos()];
     let funnel = a_cone([0.0; 3], [0.0, 0.0, 1.0], 0.5);
     let apex = [0.0, 4.0 * sin, 4.0 - 4.0 * cos];
+    let a_spout_line = |toward: f64, aside: f64| {
+        let e = [
+            aside.sin(),
+            toward * cos * aside.cos(),
+            toward * sin * aside.cos(),
+        ];
+        [0.25 * e[0], -sin + 0.25 * e[1], cos + 0.25 * e[2]]
+    };
     let far_and_back = [-1.0, 1.0].map(|toward| {
-        [1.0, -1.0].map(|side| {
-            let e = [
-                side * 0.5_f64.sin(),
-                toward * cos * 0.5_f64.cos(),
-                toward * sin * 0.5_f64.cos(),
-            ];
-            let d = [0.25 * e[0], -sin + 0.25 * e[1], cos + 0.25 * e[2]];
+        [0.5, -0.5].map(|aside| {
             where_a_spout_line_meets_the_funnel(
                 apex,
-                d,
+                a_spout_line(toward, aside),
                 if toward < 0.0 { f64::max } else { f64::min },
             )
         })
     });
+    let across_the_loop = [
+        where_a_spout_line_meets_the_funnel(apex, a_spout_line(-1.0, 0.0), f64::min),
+        where_a_spout_line_meets_the_funnel(apex, a_spout_line(1.0, 0.0), f64::max),
+    ];
     for way in [1.0, -1.0] {
         let spout = a_cone(apex, [0.0, -way * sin, way * cos], 0.25);
         let met = named(&funnel, &spout);
@@ -742,6 +749,29 @@ fn a_narrower_cone_leaned_less_than_the_wider_ones_half_angle_crosses_it_in_a_lo
                     more_points_than,
                     pickers,
                 );
+            }
+        }
+        let EdgeRun::PartOfWhereItCrosses { and, .. } = the_loop.run() else {
+            panic!("a piece picked out, and not {the_loop:?}");
+        };
+        for facing in [1.0, -1.0] {
+            let half = HalfSpaceThroughAPoint::new(Point::origin(), Vector::new(facing, 0.0, 0.0))
+                .expect("a facing of length one");
+            let picked_by: Vec<Picker> = pickers
+                .iter()
+                .cloned()
+                .chain([Picker::from(half)])
+                .collect();
+            let arc = NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: and.clone(),
+                    picked_by: picked_by.iter().cloned().collect(),
+                },
+                across_the_loop,
+            )
+            .expect("two ends that name places");
+            for along in [[&funnel, &spout], [&spout, &funnel]] {
+                assert_marched_on_both_and_on_its_side(&arc, along, 0.01, 4, &picked_by);
             }
         }
         assert_eq!(branches.len(), 2, "{runs:?}");
