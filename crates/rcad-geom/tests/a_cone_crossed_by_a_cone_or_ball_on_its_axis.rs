@@ -546,30 +546,97 @@ fn a_ball_off_the_axis_round_the_apex_crosses_each_nappe_in_one_loop() {
     assert!(sides[0] * sides[1] < 0.0, "one loop each side: {sides:?}");
 }
 
-/// A second cone one to the side of the axis, or leaning off it, crosses the
-/// first in a degree-four curve and is refused by name, by the namer and by
-/// the walker.
+/// A funnel of slope one half about `z` and a spout of slope one eighth whose
+/// axis leans `0.8` about `x` through `(0, 0, 4)`: every straight line of the
+/// spout runs into the funnel's skin and out again, so the two cross in two
+/// degree-four loops, which `intersect` names as the pieces either side of one
+/// flat surface and `walk` marches.
+#[test]
+fn a_narrow_cone_leaning_across_a_wide_one_crosses_it_in_two_loops() {
+    let turn = 0.8_f64;
+    let funnel = a_cone([0.0; 3], [0.0, 0.0, 1.0], 0.5);
+    let spout = a_cone(
+        [0.0, 4.0 * turn.sin(), 4.0 - 4.0 * turn.cos()],
+        [0.0, -turn.sin(), turn.cos()],
+        0.125,
+    );
+    assert_two_loops_either_side_of_one_flat_surface(&funnel, &spout);
+}
+
+/// A steeper cone one to the side of the axis, with its apex nine up inside
+/// the first cone, crosses it in two loops, one on each of its own nappes,
+/// held apart by the flat surface through its apex square to the axis they
+/// both point along.
+#[test]
+fn a_steeper_cone_beside_the_axis_with_its_apex_inside_crosses_in_two_loops() {
+    let partner = a_cone([1.0, 0.0, 9.0], [0.0, 0.0, 1.0], 2.0);
+    assert_two_loops_either_side_of_one_flat_surface(&the_right_angled_cone(), &partner);
+}
+
+/// The two loops a pair crosses in, each picked by one flat surface, and each
+/// marched both ways round with every point on both surfaces, within the
+/// published deviation, and on its own side of that flat surface.
+fn assert_two_loops_either_side_of_one_flat_surface(one: &Surface, other: &Surface) {
+    let met = named(one, other);
+    let Ok(SurfaceMeet::Curves(runs)) = &met else {
+        panic!("two loops, and not {met:?}");
+    };
+    assert_eq!(runs.len(), 2, "{runs:?}");
+    for run in runs {
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+            panic!("a piece picked out, and not {run:?}");
+        };
+        let [picker @ Picker::InFrontOfAFlatThrough(_)] = picked_by.as_slice() else {
+            panic!("one flat surface, and not {picked_by:?}");
+        };
+        for along in [[one, other], [other, one]] {
+            let walked = walk(
+                run,
+                along,
+                Deflection::of(0.01).expect("a length above zero"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a loop is marched without complaint");
+            assert!(walked.points().len() > 8, "{run:?}");
+            let room = walked.deviation().magnitude();
+            for point in walked.points() {
+                for surface in along {
+                    let off = how_far_off(surface, *point);
+                    assert!(
+                        off <= room,
+                        "{point:?} is {off:e} off {surface:?}, past the published {room:e}"
+                    );
+                }
+                assert_eq!(
+                    picker.side_of_point(PredicatePoint::from(point.coordinates())),
+                    Decision::Pos,
+                    "{point:?} is on its own side of {picker:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A second cone of slope two leaning half a right angle off the axis has
+/// straight lines both steeper and shallower than the first cone's skin, the
+/// other way round too, so its crossing runs off for ever and nothing proves
+/// it two loops. It is refused by name, by the namer and by the walker.
 #[test]
 fn a_second_cone_off_the_axis_is_refused_by_name_in_both_halves() {
     let cone = the_right_angled_cone();
+    let partner = a_cone([0.0, 0.0, 9.0], [1.0, 0.0, 1.0], 2.0);
     let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a whole circle needs nothing picking it");
-    for partner in [
-        a_cone([1.0, 0.0, 9.0], [0.0, 0.0, 1.0], 2.0),
-        a_cone([0.0, 0.0, 9.0], [1.0, 0.0, 1.0], 2.0),
-    ] {
+    assert_eq!(
+        named(&cone, &partner),
+        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+    );
+    for along in [[&cone, &partner], [&partner, &cone]] {
         assert_eq!(
-            named(&cone, &partner),
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-            "{partner:?}"
+            where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+            Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
         );
-        for along in [[&cone, &partner], [&partner, &cone]] {
-            assert_eq!(
-                where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
-                Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-                "{partner:?}"
-            );
-        }
     }
 }
 
