@@ -434,7 +434,8 @@ impl PointsAlongACrossing {
 /// named against, or touches it at one point, leaves a circle of no radius, and
 /// there is no angle to walk round one. Two balls round one centre with two
 /// radii get it too, for the same reason and one surface up, and so does a ball
-/// on a cone's axis that misses the cone. A **limit** and not
+/// that misses a cone, on its axis or off it, which
+/// [`intersect`](crate::intersect) names `Nothing`. A **limit** and not
 /// a gap (§16.10) — the curve the run names does not exist at any precision.
 ///
 /// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
@@ -446,7 +447,8 @@ impl PointsAlongACrossing {
 /// cone or a torus and another curved surface — the same two refusals
 /// [`intersect`](crate::intersect) gives those pairs, and a cone against a pipe,
 /// a ball or a second cone that shares its axis, a second cone that shares only
-/// its apex, or a torus against a pipe, a
+/// its apex, a pipe or a ball off a cone's axis that `intersect` names as loops,
+/// or a torus against a pipe, a
 /// ball or a cone on its axis, is drawn here exactly as it is named there. The
 /// torus's refusal also covers a whole circle such a partner shares with it
 /// that the run names by the two faces alone, which
@@ -610,7 +612,9 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] for a pair whose conic is not a
 /// curve — a plane that misses or grazes the ball it is named against — exactly
 /// as [`walk`] does, and for the same reason: there is nowhere on a circle of no
-/// radius that the pair alone picks out.
+/// radius that the pair alone picks out. A ball that misses a cone off its axis
+/// gets it too, as in [`walk`]: the two seeds of that crossing are worked out
+/// whether or not it is there, and one would be handed back off the ball.
 ///
 /// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
 /// one centre with one radius, exactly as [`walk`] does.
@@ -889,12 +893,15 @@ fn how_tightly_a_cone_bends_at(cone: &Cone, at: Point) -> f64 {
 /// so the namer and the evaluator never disagree about what a pair is called.
 /// **The evaluator refuses exactly what the namer refuses**, which is why the
 /// cone's arms against a pipe, a ball and a second cone ask whether the two
-/// share an axis rather than taking the caller's word for it, and the torus's
-/// arms against them ask `intersect` itself. Both refusals are gaps: the
-/// crossing is there and none of the machinery for a degree-four or
-/// degree-eight curve with a cone or a torus in it exists. A ball through a
-/// cone's apex is refused under the cone's name in both halves too, for the
-/// reason `intersect`'s cone-and-ball arm gives.
+/// share an axis rather than taking the caller's word for it, and why the
+/// cone's arms off an axis and the torus's arms ask `intersect` itself. Both
+/// refusals are gaps: the crossing is there. For a pipe or a ball off a cone's
+/// axis it is a degree-four curve whose loops `intersect` could not prove it
+/// names, since the marcher draws the ones it does (Q2788); for a second cone
+/// off the axis and the apex, and for a torus, the machinery is not built. A
+/// ball through a cone's apex is refused under
+/// the cone's name in both halves too, for the reason `intersect`'s
+/// cone-and-ball arm gives.
 ///
 /// **Two cones on one apex with their axes proved apart are straight lines**,
 /// asked exactly as `intersect` asks it: whatever they share is rulings through
@@ -932,7 +939,9 @@ fn how_tightly_a_cone_bends_at(cone: &Cone, at: Point) -> f64 {
 /// reached this by. See [`Conic::has_an_angle_round_it`]. Two balls round one
 /// centre with two radii are the same thing one surface up, refused by
 /// [`where_two_balls_cut`] before a conic is built at all, and so is a ball on
-/// a cone's axis that misses the cone.
+/// a cone's axis that misses the cone. A ball off a cone's axis that misses it
+/// has no conic, and gets the same refusal from
+/// [`refused_unless_intersect_names_a_curve`] before its seeds are handed on.
 ///
 /// [`Error::TheseTwoSurfacesAreOneSurfaceAndNameNoCrossing`] for two balls round
 /// one centre with one radius.

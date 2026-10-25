@@ -157,9 +157,14 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`where_a_cone_and_a_ball_cross`]. Two cones on one axis with one apex meet
 /// there and nowhere else. **Two cones on one apex with their axes apart are
 /// named too**, as the halves of the two or four rulings through it they share,
-/// or the apex alone. Every other pair that does not share an axis is not named
-/// at all: the crossing is a degree-four space curve and none of the machinery
-/// §29 built for two pipes exists for a cone. Two cones with one apex, one slope
+/// or the apex alone. **A pipe or a ball off a cone's axis is named where its
+/// shape is proved** (Q2788): two loops held apart by a flat surface through
+/// the apex, one loop round a nappe, or nothing for a ball that misses the
+/// cone — see [`a_cone_and_a_pipe_off_one_axis`] and
+/// [`a_ball_off_a_cones_axis`] for which shapes stay refused. A second cone
+/// that shares neither its axis nor its apex is not named at all: the crossing
+/// is a degree-four space curve and nothing tells its loops apart. Two cones
+/// with one apex, one slope
 /// and their axes along one line are the same surface and come back as one,
 /// **whichever way each axis points** — see [`one_cone_either_way_round`].
 ///
@@ -182,9 +187,13 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// through that point.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against a
-/// pipe, a ball or a second cone that does not share its axis — a second cone
-/// on its apex aside — and for a ball on
-/// the axis whose skin runs through the apex. **All seven shapes of a plane
+/// second cone that shares neither its axis nor its apex, for a ball whose skin
+/// runs through the apex, on the axis or off it, and for the shapes off the axis
+/// a pipe or a ball is not proved to cross it in: a pipe along one of the cone's
+/// straight lines, a pipe steeper than the cone whose skin runs through the
+/// apex, a shallower one not proved to meet the cone twice along every one of
+/// its own straight lines, and a ball that touches the cone or that every
+/// straight line of a nappe meets. **All seven shapes of a plane
 /// against a cone are named**, including the parabola and the two branches of
 /// the hyperbola, which used to be refused under names of their own.
 ///
@@ -4540,8 +4549,8 @@ fn it_passes_exactly_through(surface: &HalfSpace, point: Point) -> bool {
     )
 }
 
-/// A cone and a pipe: two circles where they share an axis, refused where they
-/// do not.
+/// A cone and a pipe: two circles where they share an axis, and where they do
+/// not, the loops [`a_cone_and_a_pipe_off_one_axis`] names or its refusal.
 ///
 /// # There is no shape question at all
 ///
@@ -4563,48 +4572,54 @@ fn it_passes_exactly_through(surface: &HalfSpace, point: Point) -> bool {
 /// [`where_two_pipes_cross`] asks the first and [`where_a_ball_and_a_pipe_cross`]
 /// the second.
 ///
-/// # What stays refused is one gap, reached down two roads
+/// # Off one axis, and the straight line that stays refused
 ///
-/// A cone and a pipe whose axes lean against each other cross in a genuine
-/// degree-four space curve and are refused, which is the row's standing **gap**.
+/// A cone and a pipe whose axes are not one line cross in a genuine degree-four
+/// space curve, named as loops where [`a_cone_and_a_pipe_off_one_axis`] proves
+/// what they are and refused where it does not (Q2788).
 ///
-/// **That refusal is load-bearing and not only unfinished work.** `rcad-topo`'s
-/// `assemble.rs` answers *this crossing holds no straight line* for every cone
-/// against a pipe, and a leaning pipe can hold a whole ruling: the pipe of
-/// radius two about `(1, 0, 1)` through `(0, 2, 0)` holds the ruling `(t, 0, t)`
-/// of the cone of slope one about `+z`, exactly and on whole numbers. Naming any
-/// such pair turns that arm into a wrong answer, which is §50.2 item 4's trap in
-/// a second family. Two circles hold no line, so the coaxial pair leaves it
-/// right.
+/// **One of those refusals is load-bearing and not only unfinished work.**
+/// `rcad-topo`'s `assemble.rs` answers *this crossing holds no straight line*
+/// for every cone against a pipe, and a pipe can hold a whole ruling: the pipe
+/// of radius two about `(1, 0, 1)` through `(0, 2, 0)` holds the ruling
+/// `(t, 0, t)` of the cone of slope one about `+z`, exactly and on whole
+/// numbers. Naming such a pair turns that arm into a wrong answer, which is
+/// §50.2 item 4's trap in a second family. The only straight lines on a pipe
+/// run along its axis, so a pipe that holds a ruling points along it, which is
+/// the pipe along one of the cone's own straight lines, and that is refused.
+/// Every other pipe's straight lines meet the cone at most twice each, so
+/// neither the two circles nor the loops named off the axis hold a line.
 ///
-/// **A pair a person drew coaxial reaches that same gap down the second road,
-/// and a placement is all it takes.** Both surfaces arrive here with their
-/// locations already composed, so what the apex question reads is the *placed*
-/// pair. Turn a frustum sitting in a bore — one line, two axis origins written
-/// at different points along it, which is how a countersink met by a bore comes
-/// out of a file — about anything but a coordinate direction, and the two
-/// origins round apart: `‖(a − o_p) × w_p‖²` answers [`Decision::Pos`] and the
-/// two surfaces **as stored** genuinely are not coaxial. The coaxiality question
-/// is answered correctly and nothing is being refused there. What is refused is
-/// the quartic the placed pair really does cross in, and that is the gap booked
-/// above, reached from one more direction (§16.10).
+/// **A pair a person drew coaxial loses its axis to a placement.** Both
+/// surfaces arrive here with their locations already composed, so what the
+/// apex question reads is the *placed* pair. Turn a frustum sitting in a bore —
+/// one line, two axis origins written at different points along it, which is
+/// how a countersink met by a bore comes out of a file — about anything but a
+/// coordinate direction, and the two origins round apart: `‖(a − o_p) × w_p‖²`
+/// answers [`Decision::Pos`] and the two surfaces **as stored** genuinely are
+/// not coaxial. The coaxiality question is answered correctly, and the quartic
+/// the placed pair really does cross in is a pipe steeper than the cone, so it
+/// is named as two loops a hair off the two circles, held apart by the flat
+/// surface through the apex square to the cone's axis.
 ///
 /// **That road is not a corner of the input space.** Any coaxial pair whose two
 /// axis origins are written as different points can lose its axis to nothing
 /// but a placement, and nearly all of them do:
-/// `a_frustum_in_a_bore_stops_sharing_its_axis_as_soon_as_it_is_turned_off_the_lattice`
+/// `a_frustum_in_a_bore_turned_off_the_lattice_stops_sharing_its_axis_and_crosses_in_two_loops`
 /// finds 62 of 64 turns about the diagonal costing the pair its axis. The
 /// boundary is two origins written as **one** point, which one arithmetic sends
 /// to one place however it is turned. §50.11 reaches the same place from the
-/// corpus side — about 5% of nist's real countersinks sit on leaning axes and
-/// stay refused — and from the arithmetic side, where 20 000 of 20 000 apexes
-/// spelled `origin + t·ŵ` on a non-coordinate direction land an ulp or two off
-/// the stored line, worst miss `2.6e-14` on coordinates of order 100.
+/// corpus side — about 5% of nist's real countersinks sit on leaning axes, and
+/// were refused when it measured them, before Q2788 — and from the arithmetic
+/// side, where 20 000 of 20 000 apexes spelled `origin + t·ŵ` on a
+/// non-coordinate direction land an ulp or two off the stored line, worst miss
+/// `2.6e-14` on coordinates of order 100.
 ///
 /// # Errors
 ///
-/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two do not
-/// share an axis.
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where the two do not share
+/// an axis, as [`a_cone_and_a_pipe_off_one_axis`] gives them.
 ///
 /// [`Error::Undecidable`] where a sum of squares could not be settled, which
 /// takes a product leaving `f64`'s range.
@@ -8418,8 +8433,9 @@ mod tests {
         assert_eq!(crossing(&one, &other), SurfaceMeet::Nothing);
     }
 
-    /// **A placement is the way into the cone-and-pipe refusal, not an odd way
-    /// of writing an apex.** Both surfaces reach [`intersect`] with their
+    /// **A placement is the way off a shared axis, not an odd way of writing an
+    /// apex**, and off it the pair is named as two loops rather than two
+    /// circles (Q2788). Both surfaces reach [`intersect`] with their
     /// locations already composed, so what the coaxiality question reads is the
     /// *placed* pair.
     ///
@@ -8432,8 +8448,12 @@ mod tests {
     ///
     /// Two origins written as one point survive too, and that is the boundary:
     /// the same point through the same arithmetic lands in the same place.
+    ///
+    /// Each turned pair that lost its axis is a pipe steeper than the cone off
+    /// one axis, so it is named as one loop round each nappe.
     #[test]
-    fn a_frustum_in_a_bore_stops_sharing_its_axis_as_soon_as_it_is_turned_off_the_lattice() {
+    fn a_frustum_in_a_bore_turned_off_the_lattice_stops_sharing_its_axis_and_crosses_in_two_loops()
+    {
         let up = Axis::new(Point::from([0.0, 0.0, 0.0]), Vector::from([0.0, 0.0, 1.0]))
             .expect("z is a direction");
         let cone = Cone::new(up, 1.0).expect("a positive slope");
@@ -8474,6 +8494,18 @@ mod tests {
              has stopped reaching the apex question at all: {survivors:?}",
             survivors.len()
         );
+        for step in (1..=64).filter(|step| !survivors.contains(step)) {
+            let placement =
+                Isometry::rotation(&turn, f64::from(step) * 0.05).expect("a finite angle");
+            let named = crossing(
+                &Surface::Cone(cone.transformed(&placement)),
+                &Surface::Cylinder(bore(3.0).transformed(&placement)),
+            );
+            let SurfaceMeet::Curves(runs) = &named else {
+                panic!("turn {step}: two loops a hair off the two circles, not {named:?}");
+            };
+            assert_eq!(runs.len(), 2, "turn {step}: one loop round each nappe");
+        }
 
         for step in 1..=64 {
             let placement =

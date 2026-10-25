@@ -395,7 +395,7 @@ fn a_ball_is_named_on_a_cones_axis_and_off_it_and_a_second_cone_only_on_it() {
 /// placement rather than by an axis someone wrote leaning on purpose: §50.11
 /// measured 20 000 of 20 000 apexes drawn this way refused, worst miss
 /// `2.6e-14` on coordinates of order 100, and `intersect.rs`'s
-/// `a_frustum_in_a_bore_stops_sharing_its_axis_as_soon_as_it_is_turned_off_the_lattice`
+/// `a_frustum_in_a_bore_turned_off_the_lattice_stops_sharing_its_axis_and_crosses_in_two_loops`
 /// is the ordinary form of it.
 ///
 /// **Five of these seven, not seven of seven, land off the line.** `t = 1` and
