@@ -19,7 +19,8 @@ and settles how the scripts join the tree and what notices the Rust moving
 under them. 464.11 is Q2675, which runs the branches where one of the nine
 differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
 464.13 is Q2678, on the side of a flat surface through a point. 464.14 is
-Q2679, on the side of rcad-geom's sphere.*
+Q2679, on the side of rcad-geom's sphere. 464.15 is Q2680, on the side of
+rcad-geom's cylinder.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -35,6 +36,7 @@ Q2679, on the side of rcad-geom's sphere.*
   464.12  The sphere of surface.rs' tests
   464.13  The side of a flat surface through a point
   464.14  The side of rcad-geom's sphere
+  464.15  The side of rcad-geom's cylinder
 
 ### 464.1 The bugs a bound prover is for
 
@@ -549,8 +551,9 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   `SIDE_OF_PLANE_ERROR_BOUND` are proved at the code's constants, orient2d's
   with its products below the normals too, and each of the other six is a row
   of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12,
-  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13, and
-  `SIDE_OF_SPHERE_ERROR_BOUND` in 464.14.
+  `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13,
+  `SIDE_OF_SPHERE_ERROR_BOUND` in 464.14, and `SIDE_OF_CYLINDER_ERROR_BOUND`
+  in 464.15 where no factor is zero.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those. Done, in 464.9: three are proved at the code's
   constants, two of them false when every number is below `2⁻¹⁰²²`, and each
@@ -1846,7 +1849,8 @@ for byte as they were run.
   `surface.rs`' `ERROR_BOUND` in `rcad-predicates` (Q2677, done in 464.12),
   and `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` (Q2678, done in
   464.13), `SIDE_OF_SPHERE_ERROR_BOUND` (Q2679, done in 464.14),
-  `SIDE_OF_CYLINDER_ERROR_BOUND`, `SIDE_OF_CONE_ERROR_BOUND` and
+  `SIDE_OF_CYLINDER_ERROR_BOUND` (Q2680, done in 464.15 where no factor is
+  zero), `SIDE_OF_CONE_ERROR_BOUND` and
   `SIDE_OF_TORUS_ERROR_BOUND` in `rcad-geom`.
   Each is to be proved as 1 to 5 here prove orient2d and the side of a plane:
   `on_floats` line for line, the lemma for each product it checks is normal, a
@@ -5946,3 +5950,1204 @@ And what is not a row:
   10: `just src on_floats crates/rcad-geom/src/sphere.rs` prints the one item,
   at `sphere.rs:241`.
 - `field` on these scripts' hints (464.10).
+
+### 464.15 The side of rcad-geom's cylinder
+
+*Draft, unfinished: the first four lanes of Q2680 wrote this, and a lane
+after them carries it on. The cases with no factor zero are proved on `y`,
+and the zero branches are not run.*
+
+Q2680 takes up `SIDE_OF_CYLINDER_ERROR_BOUND` in
+`crates/rcad-geom/src/cylinder.rs`, read at `2a7ca9e7`. `u` is `2⁻⁵³`, and the
+code's `B = (10 + 80ε) ε` is `10u + 80u²`, written `B = 10b-53 + 5b-102;`.
+`80ε` is `5 · 2⁻⁴⁹`, a multiple of the ulp of 10, so the Rust's sum and
+product are exact and a double holds `B`.
+
+**What `on_floats` rounds** (`cylinder.rs:300-349`). Three differences `f =
+rnd(point − origin)`; six halves `h`, `k` of the cross product
+(`cross_product_halves`, `cylinder.rs:486-495`), each a rounded product; three
+components `q = rnd(h − k)`; three squares `s = rnd(q · q)`, summed left to
+right into `s012`; the direction's three squares `t = rnd(d · d)`, summed left
+to right into `D`; `rr = rnd(r · r)`; `skin = rnd(rr · D)`; and `value =
+rnd(s012 − skin)`. The permanent squares each component's reach, `v =
+rnd(n · n)` with `n = rnd(|h| + |k|)`, and sums `rnd(rnd(rnd(vx + vy) + vz) +
+skin)`. `product_is_normal` is checked on the six halves
+(`cross_product_halves_if_normal`, `cylinder.rs:467-480`), the three component
+squares, the three direction squares, `rr` and `skin` (`cylinder.rs:319-326`).
+It is not checked on the three reach squares `v`. The comment at
+`cylinder.rs:312-314` argues them from the components', since a reach is never
+below its component; that holds while the component is not zero, and a
+component that cancels to zero (`h == k`, both normal) leaves `v = rnd(4h²)`,
+which can be below the normals. That is the product `o2s.g`'s case split is
+for here.
+
+**How the error splits.** The square `y` carries for one component is `(h −
+k)² K`, `K` the product of the roundings of `q`, `s` and the sums after it.
+The true one is `(h a − k b)²`, `a` and `b` undoing the roundings of `f` and
+of `h` and `k`. Their difference is `h²(K − a²) + k²(K − b²) − 2hk(K − ab)`,
+three terms, one for each piece of the reach squared, `h²`, `k²` and `2|h||k|`.
+The radius term is three pieces that sum to `skin`, one for each direction
+square, each true piece `r² d²`. So the error is averaged over twelve pieces.
+
+**What the first two lanes ran.** The first lane's `cyl.g`, with every
+product normal and nothing zero and all twelve pieces in one hint, did not
+finish: `one.sh` (464.13's 9, the same bytes) printed `cyl exit 124 620.51s`,
+Gappa killed at its 600 s timeout, on a load of about 24 over 24 cores. The
+second lane found where the time goes. With the goal replaced by `px in ?` and
+every hint kept, Gappa still did not finish in 90 s (`t_triv exit 124
+94.80s`), and with that goal and the twelve-piece hint dropped it finished in
+`16.64s`. So what is slow is checking that one hint's identity, over twelve
+pieces at once, before any goal is tried. `t_axis.g`, one component alone with
+its three pieces, proves in `0.58s` and prints the component's square within
+`7.77156e-16`, `7u`. The permanent alone (`t_perm2.g`: six normal halves and a
+normal `skin` as free doubles) proves in `0.22s`, printing `P −/ Phat` within
+`6.66134e-16`, `6u`.
+
+`cyl.g`, below, whole, is the first lane's with that hint split in four, one
+per block: the three components' reaches squared and the radius term, with one
+hint over the blocks and one over each block's pieces. It also drops three
+hints `eG / cG -> WG` that Gappa warned it did not need. Its first form, the
+same but with those three hints kept, exits 0 in `94.33s` on a load of about
+30 over 24 cores, printing `(y − Ex) / P12` within `9.99201e-16`, `9u` to the
+digits printed, and `P −/ Phat` within `6.66134e-16`, `6u`, and proving `(y −
+Ex) / eb` in `[−1, 1]` at the code's `B`. The second lane then ran
+`run1.sh` (below), 24 Gappa runs at once on a load of about 30 over 24 cores,
+which printed:
+
+- `cyl exit 0 213.82s`, the same two figures, and `cyl coq -Bcoq exit 0 coqc
+  exit 0 339.29s lines 14703 hints 54`.
+- The bisection over `m` in `B = 9u + m u²`: `m` = 0, 40 and 60 fail, best
+  `[-1, 1]` as Gappa prints it, rounded; 70, 80, 90, 100, 120 and 160 prove.
+  So the smallest `m` is 61 to 70, not yet bisected further.
+- `c_cyl_half exit 1`, best `[-18, 18]`, which is the `9u` over `u / 2`.
+- `c_cyl_nonormal exit 1`, best `[-1.16728e+1527, 1.16728e+1527]`, failing
+  `REL(P, Phat)` and `BND((y - Ex) / P12)` too.
+- `c_cyl_noeb exit 124 600.84s`, and `cylv.g`, `c_cylv_half.g` and each
+  `b_cylv_<m>.g` exit 124 at 600 s too. Where the claim on `value` spends its
+  time was not found.
+
+```gappa
+# restates: crates/rcad-geom/src/cylinder.rs on_floats at 2a7ca9e7
+# restates: crates/rcad-geom/src/cylinder.rs cross_product_halves_if_normal at 2a7ca9e7
+# restates: crates/rcad-geom/src/cylinder.rs cross_product_halves at 2a7ca9e7
+# restates: crates/rcad-geom/src/cylinder.rs SIDE_OF_CYLINDER_ERROR_BOUND at 2a7ca9e7
+# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 2a7ca9e7
+# restates: crates/rcad-predicates/src/cascade.rs decide at 2a7ca9e7
+# HowFarFromTheSkin::on_floats and SIDE_OF_CYLINDER_ERROR_BOUND, rcad-geom's cylinder.
+@rnd = float<ieee_64, ne>;
+
+# The point, the axis origin, the axis direction and the radius, each an f64.
+px = rnd(px_); py = rnd(py_); pz = rnd(pz_);
+ox = rnd(ox_); oy = rnd(oy_); oz = rnd(oz_);
+dx = rnd(dx_); dy = rnd(dy_); dz = rnd(dz_);
+r = rnd(r_);
+
+# What on_floats computes, line for line.
+Fx = px - ox; Fy = py - oy; Fz = pz - oz;
+fx = rnd(Fx); fy = rnd(Fy); fz = rnd(Fz);
+
+# cross_product_halves: h is each component's left half, k its right half.
+hx = rnd(fy * dz); kx = rnd(fz * dy);
+hy = rnd(fz * dx); ky = rnd(fx * dz);
+hz = rnd(fx * dy); kz = rnd(fy * dx);
+Qx = hx - kx; Qy = hy - ky; Qz = hz - kz;
+qx = rnd(Qx); qy = rnd(Qy); qz = rnd(Qz);
+
+# direction_squared, left to right as Rust adds it.
+tx = rnd(dx * dx); ty = rnd(dy * dy); tz = rnd(dz * dz);
+T01 = tx + ty; t01 = rnd(T01);
+T = t01 + tz; D = rnd(T);
+
+rr = rnd(r * r);
+skin = rnd(rr * D);
+sx = rnd(qx * qx); sy = rnd(qy * qy); sz = rnd(qz * qz);
+S01 = sx + sy; s01 = rnd(S01);
+S012 = s01 + sz; s012 = rnd(S012);
+y = s012 - skin;
+value = rnd(y);
+
+# The permanent: each half's reach squared, then the radius term.
+nx = rnd(|hx| + |kx|); ny = rnd(|hy| + |ky|); nz = rnd(|hz| + |kz|);
+vx = rnd(nx * nx); vy = rnd(ny * ny); vz = rnd(nz * nz);
+P = rnd(rnd(rnd(vx + vy) + vz) + skin);
+
+B = 10b-53 + 5b-102;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Cx = Fy * dz - Fz * dy; Cy = Fz * dx - Fx * dz; Cz = Fx * dy - Fy * dx;
+Ex = Cx * Cx + Cy * Cy + Cz * Cz - r * r * (dx * dx + dy * dy + dz * dz);
+
+# The permanent with no rounding of its own.
+Phat = (|hx| + |kx|) * (|hx| + |kx|) + (|hy| + |ky|) * (|hy| + |ky|)
+     + (|hz| + |kz|) * (|hz| + |kz|) + skin;
+
+# What each rounding multiplied its argument by.
+rfx = fx / Fx; rfy = fy / Fy; rfz = fz / Fz;
+rhx = hx / (fy * dz); rkx = kx / (fz * dy);
+rhy = hy / (fz * dx); rky = ky / (fx * dz);
+rhz = hz / (fx * dy); rkz = kz / (fy * dx);
+rqx = qx / Qx; rqy = qy / Qy; rqz = qz / Qz;
+rsx = sx / (qx * qx); rsy = sy / (qy * qy); rsz = sz / (qz * qz);
+rs01 = s01 / S01; rs012 = s012 / S012;
+rtx = tx / (dx * dx); rty = ty / (dy * dy); rtz = tz / (dz * dz);
+rt01 = t01 / T01; rD = D / T;
+rrr = rr / (r * r); rsk = skin / (rr * D);
+
+# Each component's square, as y carries it, is (h - k)^2 times K; the true
+# one is (h a - k b)^2, a and b undoing the roundings of h and k.
+Kx = rqx * rqx * rsx * rs01 * rs012;
+Ky = rqy * rqy * rsy * rs01 * rs012;
+Kz = rqz * rqz * rsz * rs012;
+ax = 1 / (rfy * rhx); bx = 1 / (rfz * rkx);
+ay = 1 / (rfz * rhy); by = 1 / (rfx * rky);
+az = 1 / (rfx * rhz); bz = 1 / (rfy * rkz);
+
+# So each component's error is three terms, one for each piece of its
+# reach squared: h^2, k^2 and 2 |h| |k|. W is each term's error over its
+# piece.
+WHx = Kx - ax * ax; WKx = Kx - bx * bx; WXx = Kx - ax * bx;
+WHy = Ky - ay * ay; WKy = Ky - by * by; WXy = Ky - ay * by;
+WHz = Kz - az * az; WKz = Kz - bz * bz; WXz = Kz - az * bz;
+cHx = |hx| * |hx|; cKx = |kx| * |kx|; cXx = 2 * |hx| * |kx|;
+cHy = |hy| * |hy|; cKy = |ky| * |ky|; cXy = 2 * |hy| * |ky|;
+cHz = |hz| * |hz|; cKz = |kz| * |kz|; cXz = 2 * |hz| * |kz|;
+eHx = hx * hx * WHx; eKx = kx * kx * WKx; eXx = -(2 * hx * kx * WXx);
+eHy = hy * hy * WHy; eKy = ky * ky * WKy; eXy = -(2 * hy * ky * WXy);
+eHz = hz * hz * WHz; eKz = kz * kz * WKz; eXz = -(2 * hz * kz * WXz);
+
+# The radius term is three pieces, one for each direction component's
+# square, which sum to skin. Each true piece is r^2 d^2.
+cGx = rsk * rr * rD * rt01 * tx;
+cGy = rsk * rr * rD * rt01 * ty;
+cGz = rsk * rr * rD * tz;
+WGx = 1 / (rrr * rtx * rsk * rD * rt01) - 1;
+WGy = 1 / (rrr * rty * rsk * rD * rt01) - 1;
+WGz = 1 / (rrr * rtz * rsk * rD) - 1;
+eGx = cGx * WGx; eGy = cGy * WGy; eGz = cGz * WGz;
+
+# The same permanent, as four blocks of the twelve pieces the error is
+# averaged over: each component's reach squared, and the radius term.
+P3x = cHx + cKx + cXx; P3y = cHy + cKy + cXy; P3z = cHz + cKz + cXz;
+SG = cGx + cGy + cGz;
+P12 = P3x + P3y + P3z + SG;
+
+# Each component's square as y carries it, and the radius term as Ex has it.
+Yx = Kx * Qx * Qx; Yy = Ky * Qy * Qy; Yz = Kz * Qz * Qz;
+Gt = r * r * (dx * dx + dy * dy + dz * dz);
+
+{
+  # Every input is a finite f64.
+     |px| <= 1b1024 /\ |py| <= 1b1024 /\ |pz| <= 1b1024
+  /\ |ox| <= 1b1024 /\ |oy| <= 1b1024 /\ |oz| <= 1b1024
+  /\ |dx| <= 1b1024 /\ |dy| <= 1b1024 /\ |dz| <= 1b1024
+  /\ |r| <= 1b1024
+  # No factor is zero, and no component cancels to zero. For an f64 that is
+  # the same as being at least the smallest subnormal.
+  /\ |fx| >= 1b-1074 /\ |fy| >= 1b-1074 /\ |fz| >= 1b-1074
+  /\ |dx| >= 1b-1074 /\ |dy| >= 1b-1074 /\ |dz| >= 1b-1074
+  /\ |r| >= 1b-1074
+  /\ |qx| >= 1b-1074 /\ |qy| >= 1b-1074 /\ |qz| >= 1b-1074
+  # product_is_normal on the six halves (cross_product_halves_if_normal),
+  # and on the three components, the three direction components, the
+  # radius and the radius term (stays_accurate).
+  /\ |hx| >= 1b-1022 /\ |kx| >= 1b-1022 /\ |hy| >= 1b-1022
+  /\ |ky| >= 1b-1022 /\ |hz| >= 1b-1022 /\ |kz| >= 1b-1022
+  /\ |sx| >= 1b-1022 /\ |sy| >= 1b-1022 /\ |sz| >= 1b-1022
+  /\ |tx| >= 1b-1022 /\ |ty| >= 1b-1022 /\ |tz| >= 1b-1022
+  /\ |rr| >= 1b-1022 /\ |skin| >= 1b-1022
+  # The permanent's three squares are normal too, since no component is
+  # zero here: |q| <= n, rounding being monotone and |h - k| <= |h| + |k|,
+  # so v = rnd(n * n) >= rnd(q * q) = s, which is normal.
+  /\ |vx| >= 1b-1022 /\ |vy| >= 1b-1022 /\ |vz| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those gives.
+  /\ hx -/ fy * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ kx -/ fz * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hy -/ fz * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ ky -/ fx * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hz -/ fx * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ kz -/ fy * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sx -/ qx * qx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sy -/ qy * qy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sz -/ qz * qz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ tx -/ dx * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ ty -/ dy * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ tz -/ dz * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ rr -/ r * r in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ skin -/ rr * D in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vx -/ nx * nx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vy -/ ny * ny in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vz -/ nz * nz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ hx / |hx| in [-1, 1] /\ kx / |kx| in [-1, 1]
+  /\ hy / |hy| in [-1, 1] /\ ky / |ky| in [-1, 1]
+  /\ hz / |hz| in [-1, 1] /\ kz / |kz| in [-1, 1]
+->
+  (y - Ex) / P12 in ? /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+fx / Fx -> 1 + (fx - Fx) / Fx;
+fy / Fy -> 1 + (fy - Fy) / Fy;
+fz / Fz -> 1 + (fz - Fz) / Fz;
+hx / (fy * dz) -> 1 + (hx - fy * dz) / (fy * dz);
+kx / (fz * dy) -> 1 + (kx - fz * dy) / (fz * dy);
+hy / (fz * dx) -> 1 + (hy - fz * dx) / (fz * dx);
+ky / (fx * dz) -> 1 + (ky - fx * dz) / (fx * dz);
+hz / (fx * dy) -> 1 + (hz - fx * dy) / (fx * dy);
+kz / (fy * dx) -> 1 + (kz - fy * dx) / (fy * dx);
+qx / Qx -> 1 + (qx - Qx) / Qx;
+qy / Qy -> 1 + (qy - Qy) / Qy;
+qz / Qz -> 1 + (qz - Qz) / Qz;
+sx / (qx * qx) -> 1 + (sx - qx * qx) / (qx * qx);
+sy / (qy * qy) -> 1 + (sy - qy * qy) / (qy * qy);
+sz / (qz * qz) -> 1 + (sz - qz * qz) / (qz * qz);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+s012 / S012 -> 1 + (s012 - S012) / S012;
+tx / (dx * dx) -> 1 + (tx - dx * dx) / (dx * dx);
+ty / (dy * dy) -> 1 + (ty - dy * dy) / (dy * dy);
+tz / (dz * dz) -> 1 + (tz - dz * dz) / (dz * dz);
+t01 / T01 -> 1 + (t01 - T01) / T01;
+D / T -> 1 + (D - T) / T;
+rr / (r * r) -> 1 + (rr - r * r) / (r * r);
+skin / (rr * D) -> 1 + (skin - rr * D) / (rr * D);
+
+# The error is the sum of four blocks' errors, each the sum of its pieces'
+# errors, each a fraction of its own piece of the permanent; add_rr then
+# averages them. In blocks so that no hint's identity spans all twelve
+# pieces: one hint over all twelve did not finish in 600 s.
+(y - Ex) / P12 -> ((P12 + (y - Ex)) - P12) / P12;
+P12 + (y - Ex) -> (P3x + (Yx - Cx * Cx)) + (P3y + (Yy - Cy * Cy)) + (P3z + (Yz - Cz * Cz)) + (SG + (Gt - skin));
+P3x + (Yx - Cx * Cx) -> (cHx + eHx) + (cKx + eKx) + (cXx + eXx);
+P3y + (Yy - Cy * Cy) -> (cHy + eHy) + (cKy + eKy) + (cXy + eXy);
+P3z + (Yz - Cz * Cz) -> (cHz + eHz) + (cKz + eKz) + (cXz + eXz);
+SG + (Gt - skin) -> (cGx + eGx) + (cGy + eGy) + (cGz + eGz);
+(cHx + eHx) - cHx -> eHx;
+(cKx + eKx) - cKx -> eKx;
+(cXx + eXx) - cXx -> eXx;
+(cHy + eHy) - cHy -> eHy;
+(cKy + eKy) - cKy -> eKy;
+(cXy + eXy) - cXy -> eXy;
+(cHz + eHz) - cHz -> eHz;
+(cKz + eKz) - cKz -> eKz;
+(cXz + eXz) - cXz -> eXz;
+(cGx + eGx) - cGx -> eGx;
+(cGy + eGy) - cGy -> eGy;
+(cGz + eGz) - cGz -> eGz;
+eHx / cHx -> (hx / |hx|) * (hx / |hx|) * WHx;
+eKx / cKx -> (kx / |kx|) * (kx / |kx|) * WKx;
+eXx / cXx -> -((hx / |hx|) * (kx / |kx|) * WXx);
+eHy / cHy -> (hy / |hy|) * (hy / |hy|) * WHy;
+eKy / cKy -> (ky / |ky|) * (ky / |ky|) * WKy;
+eXy / cXy -> -((hy / |hy|) * (ky / |ky|) * WXy);
+eHz / cHz -> (hz / |hz|) * (hz / |hz|) * WHz;
+eKz / cKz -> (kz / |kz|) * (kz / |kz|) * WKz;
+eXz / cXz -> -((hz / |hz|) * (kz / |kz|) * WXz);
+
+# From the twelve pieces to the permanent on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / P12) * (Phat / P) * (P / eb);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+`cylcases.py`, whole, as the second lane wrote it, writes the rest from
+`cyl.g` beside it. It covers the case with nothing zero alone; the case split
+for a component that cancels (`kx = hx;` written in, `qx` and `sx` written as
+zero, the block's error `−Cx²` against `P3x = 4hx²` with the hint `Cx -> hx *
+(ax − bx)`, and the reach square `v` in three states, normal, below the
+normals and not zero, and zero, as 464.14's `n`, `s` and `u`) is not in it
+yet.
+
+```python
+"""Write the scripts of 464.15 from cyl.g beside it: cylv.g, the claim on
+value; the controls c_cyl_half.g and c_cylv_half.g at B = u / 2,
+c_cyl_nonormal.g without product_is_normal, and c_cyl_noeb.g without eb
+normal; and b_cyl_<m>.g and b_cylv_<m>.g, cyl.g and cylv.g at B = 9u + m u^2
+and 10u + m u^2, for the bisection. Each change is a text replacement that
+must match exactly once. Run as: python3 cylcases.py [m ...]."""
+import os
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+CYL = open("cyl.g").read()
+B_CODE = "B = 10b-53 + 5b-102;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+
+
+def sub(text, old, new):
+    assert text.count(old) == 1, old
+    return text.replace(old, new)
+
+
+def on_value(text):
+    text = sub(text, "# HowFarFromTheSkin::on_floats and SIDE_OF_CYLINDER_ERROR_BOUND, rcad-geom's cylinder.\n",
+               "# HowFarFromTheSkin::on_floats and SIDE_OF_CYLINDER_ERROR_BOUND, rcad-geom's cylinder.\n"
+               "# The claim is on value, the double on_floats returns, not on y.\n")
+    text = sub(text, "rrr = rr / (r * r); rsk = skin / (rr * D);\n",
+               "rrr = rr / (r * r); rsk = skin / (rr * D);\nrv = value / y;\n")
+    text = sub(text, "# Each component's square, as y carries it,", "# Each component's square, as value carries it,")
+    text = sub(text, "Kx = rqx * rqx * rsx * rs01 * rs012;", "Kx = rqx * rqx * rsx * rs01 * rs012 * rv;")
+    text = sub(text, "Ky = rqy * rqy * rsy * rs01 * rs012;", "Ky = rqy * rqy * rsy * rs01 * rs012 * rv;")
+    text = sub(text, "Kz = rqz * rqz * rsz * rs012;", "Kz = rqz * rqz * rsz * rs012 * rv;")
+    text = sub(text, "WGx = 1 / (rrr * rtx * rsk * rD * rt01) - 1;", "WGx = 1 / (rrr * rtx * rsk * rD * rt01) - rv;")
+    text = sub(text, "WGy = 1 / (rrr * rty * rsk * rD * rt01) - 1;", "WGy = 1 / (rrr * rty * rsk * rD * rt01) - rv;")
+    text = sub(text, "WGz = 1 / (rrr * rtz * rsk * rD) - 1;", "WGz = 1 / (rrr * rtz * rsk * rD) - rv;")
+    text = sub(text, "# The radius term is three pieces,", "# The radius term, as value carries it times 1 / rv, is three pieces,")
+    text = sub(text, "# Each component's square as y carries it,", "# Each component's square as value carries it,")
+    text = sub(text, "  # The bound is normal, which decide checks.\n",
+               "  # y is not zero. Where it is, value is zero too, and the claim on y is\n"
+               "  # the claim on value.\n"
+               "  /\\ |y| >= 1b-1074\n"
+               "  # The bound is normal, which decide checks.\n")
+    text = sub(text, "skin / (rr * D) -> 1 + (skin - rr * D) / (rr * D);\n",
+               "skin / (rr * D) -> 1 + (skin - rr * D) / (rr * D);\nvalue / y -> 1 + (value - y) / y;\n")
+    text = sub(text, "SG + (Gt - skin) ->", "SG + (Gt - rv * skin) ->")
+    text = sub(text, "(SG + (Gt - skin));", "(SG + (Gt - rv * skin));")
+    return text.replace("(y - Ex)", "(value - Ex)")
+
+
+def at(text, b):
+    return sub(text, B_CODE, b)
+
+
+def without_normal(text):
+    keep = []
+    lemma_of = ("hx", "kx", "hy", "ky", "hz", "kz", "sx", "sy", "sz", "tx", "ty", "tz",
+                "rr", "skin", "vx", "vy", "vz")
+    for line in text.split("\n"):
+        if "1b-1022" in line and "|eb|" not in line:
+            continue
+        if line.startswith("  /\\ ") and line.split()[1] in lemma_of and LEMMA in line:
+            continue
+        keep.append(line)
+    text = "\n".join(keep)
+    text = sub(text, "  # product_is_normal on the six halves (cross_product_halves_if_normal),\n"
+               "  # and on the three components, the three direction components, the\n"
+               "  # radius and the radius term (stays_accurate).\n", "")
+    text = sub(text, "  # The permanent's three squares are normal too, since no component is\n"
+               "  # zero here: |q| <= n, rounding being monotone and |h - k| <= |h| + |k|,\n"
+               "  # so v = rnd(n * n) >= rnd(q * q) = s, which is normal.\n", "")
+    return sub(text, ", rcad-geom's cylinder.\n", ", rcad-geom's cylinder.\n# A control: without product_is_normal and the lemma lines it gives.\n")
+
+
+def without_eb(text):
+    text = sub(text, "  # The bound is normal, which decide checks.\n  /\\ |eb| >= 1b-1022\n", "")
+    text = sub(text, f"  /\\ eb -/ B * P {LEMMA}\n", "")
+    return sub(text, ", rcad-geom's cylinder.\n", ", rcad-geom's cylinder.\n# A control: without eb normal and the lemma line it gives.\n")
+
+
+def write(name, text):
+    with open(name, "w") as out:
+        out.write(text)
+
+
+CYLV = on_value(CYL)
+write("cylv.g", CYLV)
+write("c_cyl_half.g", at(CYL, B_HALF))
+write("c_cylv_half.g", at(CYLV, B_HALF))
+write("c_cyl_nonormal.g", without_normal(CYL))
+write("c_cyl_noeb.g", without_eb(CYL))
+for m in sys.argv[1:]:
+    write(f"b_cyl_{m}.g", at(CYL, f"B = 9b-53 + {m}b-106;"))
+    write(f"b_cylv_{m}.g", at(CYLV, f"B = 10b-53 + {m}b-106;"))
+```
+
+`run1.sh`, which the second lane started detached, runs `cyl.g` and `cylv.g`
+through `one.sh` with `coq`, and the controls and the bisection grid through
+`one1.sh`, the first lane's `one.sh` with the timeout taken from `T` and no
+`coq`, all at once:
+
+```sh
+cd "$(dirname "$0")"
+python3 cylcases.py 0 40 60 70 80 90 100 120 160
+{
+  ./one.sh cyl.g coq &
+  ./one.sh cylv.g coq &
+  for f in c_cyl_half.g c_cylv_half.g c_cyl_nonormal.g c_cyl_noeb.g b_cyl_*.g b_cylv_*.g; do
+    ./one1.sh "$f" &
+  done
+  wait
+} > run1.txt 2>&1
+echo done >> run1.txt
+```
+
+**What the third lane ran.** `python3 cylcases.py 61 62 63 64 65 66 67 68
+69`, and the nine `b_cyl_<m>.g` run at once through `par.sh` (the second
+lane's, `one1.sh` on each named script at once with the timeout given): each
+exits 1, best `[-1, 1]`, printing the same `9u` and `6u`. With `m = 70`
+proving, the smallest `B` on `y` over `9u + m u²` is `9u + 70u²`.
+
+In the same run, on a load of about 29 over 24 cores, `t_vtriv.g`, which is
+`cylv.g` with its goal replaced by `px in ?` and every hint kept, exits 0 in
+`334.59s`. So on the claim on `value` as `cylcases.py` writes it, with `rv =
+value / y` on every carry, Gappa spends 335 s checking the hints before it
+tries any goal. Which hint costs it was not split.
+
+`cylv2.g`, first form, keeps `cyl.g`'s blocks for `y` and takes `value`'s own
+rounding as a fraction of `y`, and `y` as a fraction of the permanent:
+`(value − Ex) / eb -> (y − Ex) / eb + (value − y) / eb;` and `(value − y) / eb
+-> ((value − y) / y) · (y / P12) · (Phat / P) · (P / eb);`, with `y / P12`
+averaged over the same four blocks. It exits 1 in `131.20s`, printing `(value
+− y) / y` within `1b-53` and the same `9u` and `6u`, but `y / P12` only in
+`[-3b5118, 3b5122]`. `m2.g`, one component and `skin` alone, shows why: the
+piece `K h²` over `h²` reaches `−1` once Gappa takes `(h / |h|)²` as `[−1,
+1]`, and with a relative error that reaches `−1` Gappa does not average a sum.
+`m3.g`, the same with every piece doubled, so that each such ratio is at most
+about a half, prints `y / P12` within `[-1, 1]` as Gappa rounds it, in
+`0.22s`. `vgen.py` (below) writes `cylv2.g` in that doubled form. On paper,
+not run: the doubled form costs `u (1 + 5u)` of the permanent on top of `y`'s
+`9u + c u²`, and with `(Phat / P) (P / eb) ≈ (1 + 7u) / B` and `c` between 6
+and 7 by the bisection above, that is about `10u + 82u²` against the code's
+`10u + 80u²`. So the doubled form may fail at the code's `B` by a hair
+without `value` being past it.
+
+`run2.sh` (below) was started detached after those, on a load of about 38
+over 24 cores, and printed into `run2.txt`. `cylv2.g` doubled exits 1 in
+`332.03s`, best `[-1, 1]`, printing `y / P12` within `[-1, 1]`, `(value − y)
+/ y` within `1b-53`, and the same `9u` and `6u`. So it fails at the code's
+`B` by a hair, as on paper. `b_cylv2_<m>.g` at `B = 10u + m u²` exits 0 for
+each `m` of 84, 88, 96, 112 and 144, in 182.63 to 186.20 s. `c_cylv2_half.g`
+exits 1, best `[-20, 20]`, the `10u` over `u / 2`. So this form proves
+`|value − Ex| ≤ eb` at `10u + 84u²` and not at the code's `10u + 80u²`, which
+says the form loses `u²`s and not that `value` is past the bound. `decide`
+needs only the bound on `y` (464.14's 4). `cylv.g` and `c_cylv_half.g`, with
+the 1800 s timeout, had run 6 min 18 s and not finished when the third lane
+handed over.
+
+`cylsplit.py` (below) writes the case split for a component that cancels,
+in the four states its docstring names. `python3
+cylsplit.py` writes 64 cases, `cyl_nnn.g` among them, and `diff cyl.g
+cyl_nnn.g` prints nothing. None of the 63 others has been run yet. A
+component that cancels writes `k` as `h`, drops `Q`, `q`, `s` and their
+ratios, writes each sum without its zero squares, writes its reach `|h| +
+|h|` unrounded, and is one block off by `eC = −C²`, with `eC / P3 ->
+−((h / |h|)² (a − b)² / 4)`. A reach square in `s` or `u` takes 464.14's
+step through `Phatx`. That a double added to itself rounds to itself, which
+the unrounded reach stands on, is to be shown by a `dbl.g` that is not yet
+written.
+
+`m2.g`:
+
+```gappa
+@rnd = float<ieee_64, ne>;
+hx = rnd(hx_); kx = rnd(kx_); skin = rnd(sk_);
+Qx = hx - kx; qx = rnd(Qx); sx = rnd(qx * qx);
+rqx = qx / Qx; rsx = sx / (qx * qx);
+Kx = rqx * rqx * rsx;
+Yx = Kx * Qx * Qx;
+y = sx - skin;
+cHx = |hx| * |hx|; cKx = |kx| * |kx|; cXx = 2 * |hx| * |kx|;
+P3x = cHx + cKx + cXx;
+SG = skin * 1;
+P12 = P3x + SG;
+fHx = Kx * hx * hx; fKx = Kx * kx * kx; fXx = -(2 * Kx * hx * kx);
+{ |hx| in [1b-1022, 1b1024] /\ |kx| in [1b-1022, 1b1024] /\ skin in [1b-1022, 1b1024]
+  /\ |qx| >= 1b-1074 /\ |sx| >= 1b-1022
+  /\ sx -/ qx * qx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hx / |hx| in [-1, 1] /\ kx / |kx| in [-1, 1]
+  -> y / P12 in ? /\ Yx / P3x in ? /\ fHx / cHx in ? /\ ((P12 + y) - P12) / P12 in ? }
+qx / Qx -> 1 + (qx - Qx) / Qx;
+sx / (qx * qx) -> 1 + (sx - qx * qx) / (qx * qx);
+y / P12 -> ((P12 + y) - P12) / P12;
+P12 + y -> (P3x + Yx) + (SG - skin);
+P3x + Yx -> (cHx + fHx) + (cKx + fKx) + (cXx + fXx);
+(cHx + fHx) - cHx -> fHx;
+(cKx + fKx) - cKx -> fKx;
+(cXx + fXx) - cXx -> fXx;
+fHx / cHx -> Kx * (hx / |hx|) * (hx / |hx|);
+fKx / cKx -> Kx * (kx / |kx|) * (kx / |kx|);
+fXx / cXx -> -(Kx * (hx / |hx|) * (kx / |kx|));
+((SG - skin) - SG) / SG -> -(skin / SG);
+skin / SG -> 1;
+Yx / P3x -> ((P3x + Yx) - P3x) / P3x;
+```
+
+It prints `y / P12` in `[-1b2046, 1b3072]`, `Yx / P3x` in `[-2^(4092),
+2^(4092)]` and `fHx / cHx` in `[-1, 1]`. `m3.g` is `m2.g` with `dHx = 2 *
+cHx; dKx = 2 * cKx; dXx = 2 * cXx; P3dx = dHx + dKx + dXx; SGd = 2 * SG;
+P12d = P3dx + SGd;` defined, the goal `y / P12 in ? /\ ((P3dx + Yx) - P3dx)
+/ P3dx in ? /\ fHx / dHx in ?`, and the hints after the first two written
+on the doubled pieces: `y / P12 -> 2 * (((P12d + y) - P12d) / P12d);`, `P12d
++ y -> (P3dx + Yx) + (SGd - skin);`, the same three-piece split, `fHx / dHx
+-> Kx * (hx / |hx|) * (hx / |hx|) / 2;` and the like, `((SGd - skin) - SGd)
+/ SGd -> -(skin / SGd);` and `skin / SGd -> 1 / 2;`. It prints the block in
+`[-0.5, 0.5]` and `y / P12` in `[-1, 1]`, rounded.
+
+`vgen.py`, whole, beside `cyl.g` and the second lane's `cylv.g`:
+
+```python
+"""Probes for the claim on value: t_vtriv.g is the second lane's cylv.g with
+the goal px in ? and every hint kept; cylv2.g is cyl.g with value's own
+rounding taken as a fraction of y, and y as a fraction of the permanent."""
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def sub(text, old, new):
+    assert text.count(old) == 1, old
+    return text.replace(old, new)
+
+
+GOAL = "  (y - Ex) / P12 in ? /\\ P -/ Phat in ?\n  /\\ (y - Ex) / eb in [-1, 1]\n"
+VGOAL = "  (value - Ex) / P12 in ? /\\ P -/ Phat in ?\n  /\\ (value - Ex) / eb in [-1, 1]\n"
+cylv = open("cylv.g").read()
+open("t_vtriv.g", "w").write(sub(cylv, VGOAL, "  px in ?\n"))
+
+c = open("cyl.g").read()
+c = sub(c, "# HowFarFromTheSkin::on_floats and SIDE_OF_CYLINDER_ERROR_BOUND, rcad-geom's cylinder.\n",
+        "# HowFarFromTheSkin::on_floats and SIDE_OF_CYLINDER_ERROR_BOUND, rcad-geom's cylinder.\n"
+        "# The claim is on value, the double on_floats returns, not on y.\n")
+c = sub(c, "Gt = r * r * (dx * dx + dy * dy + dz * dz);\n",
+        "Gt = r * r * (dx * dx + dy * dy + dz * dz);\n\n"
+        "# y over the permanent: each component's square as y carries it is K\n"
+        "# times (h - k)^2, which is K times the three pieces of its reach\n"
+        "# squared, the third with a sign; the radius term is taken off whole.\n"
+        "fHx = Kx * hx * hx; fKx = Kx * kx * kx; fXx = -(2 * Kx * hx * kx);\n"
+        "fHy = Ky * hy * hy; fKy = Ky * ky * ky; fXy = -(2 * Ky * hy * ky);\n"
+        "fHz = Kz * hz * hz; fKz = Kz * kz * kz; fXz = -(2 * Kz * hz * kz);\n")
+c = sub(c, "  # The bound is normal, which decide checks.\n",
+        "  # y is not zero. Where it is, value is zero too, and the claim on y is\n"
+        "  # the claim on value.\n"
+        "  /\\ |y| >= 1b-1074\n"
+        "  # The bound is normal, which decide checks.\n")
+c = sub(c, GOAL,
+        "  (y - Ex) / P12 in ? /\\ y / P12 in ? /\\ (value - y) / y in ? /\\ P -/ Phat in ?\n"
+        "  /\\ (value - Ex) / eb in [-1, 1]\n")
+c = sub(c, "(y - Ex) / eb -> ((y - Ex) / P12) * (Phat / P) * (P / eb);\n",
+        "(value - Ex) / eb -> (y - Ex) / eb + (value - y) / eb;\n"
+        "(y - Ex) / eb -> ((y - Ex) / P12) * (Phat / P) * (P / eb);\n"
+        "(value - y) / eb -> ((value - y) / y) * (y / P12) * (Phat / P) * (P / eb);\n")
+c = sub(c, "fHz = Kz * hz * hz; fKz = Kz * kz * kz; fXz = -(2 * Kz * hz * kz);\n",
+        "fHz = Kz * hz * hz; fKz = Kz * kz * kz; fXz = -(2 * Kz * hz * kz);\n"
+        "# The same pieces doubled, so that each f is at most about half its\n"
+        "# piece: Gappa averages a sum's relative errors only while each is\n"
+        "# above -1, and f against the piece itself reaches -1.\n"
+        "dHx = 2 * cHx; dKx = 2 * cKx; dXx = 2 * cXx;\n"
+        "dHy = 2 * cHy; dKy = 2 * cKy; dXy = 2 * cXy;\n"
+        "dHz = 2 * cHz; dKz = 2 * cKz; dXz = 2 * cXz;\n"
+        "P3dx = dHx + dKx + dXx; P3dy = dHy + dKy + dXy; P3dz = dHz + dKz + dXz;\n"
+        "SGd = 2 * SG;\n"
+        "P12d = P3dx + P3dy + P3dz + SGd;\n")
+c += ("\n# value's own rounding is a fraction of y, and y a fraction of the\n"
+      "# permanent, averaged over the same four blocks, doubled.\n"
+      "y / P12 -> 2 * (((P12d + y) - P12d) / P12d);\n"
+      "P12d + y -> (P3dx + Yx) + (P3dy + Yy) + (P3dz + Yz) + (SGd - skin);\n")
+for a in "xyz":
+    c += f"P3d{a} + Y{a} -> (dH{a} + fH{a}) + (dK{a} + fK{a}) + (dX{a} + fX{a});\n"
+for a in "xyz":
+    for p in "HKX":
+        c += f"(d{p}{a} + f{p}{a}) - d{p}{a} -> f{p}{a};\n"
+for a in "xyz":
+    c += (f"fH{a} / dH{a} -> K{a} * (h{a} / |h{a}|) * (h{a} / |h{a}|) / 2;\n"
+          f"fK{a} / dK{a} -> K{a} * (k{a} / |k{a}|) * (k{a} / |k{a}|) / 2;\n"
+          f"fX{a} / dX{a} -> -(K{a} * (h{a} / |h{a}|) * (k{a} / |k{a}|)) / 2;\n")
+c += "((SGd - skin) - SGd) / SGd -> -(skin / SGd);\nskin / SGd -> 1 / 2;\n"
+open("cylv2.g", "w").write(c)
+open("c_cylv2_half.g", "w").write(sub(c, "B = 10b-53 + 5b-102;", "B = 1b-54;"))
+for m in (84, 88, 96, 112, 144):
+    open(f"b_cylv2_{m}.g", "w").write(sub(c, "B = 10b-53 + 5b-102;", f"B = 10b-53 + {m}b-106;"))
+open("t_v2triv.g", "w").write(sub(c, "  (y - Ex) / P12 in ? /\\ y / P12 in ? /\\ (value - y) / y in ? /\\ P -/ Phat in ?\n"
+                                    "  /\\ (value - Ex) / eb in [-1, 1]\n", "  px in ?\n"))
+```
+
+The first form of `cylv2.g` is what this writes without the `sub` that adds
+the doubled pieces, and with the hints written on `cH`, `cK`, `cX`, `P3x` and
+`SG` as `m2.g` writes them. `t_v2triv.g`, the first form's hints with the
+goal `px in ?`, exits 0 in `127.05s` in the same run.
+
+`run2.sh`, whole:
+
+```sh
+#!/bin/bash
+# The claim on value two ways, all at once: the second lane's cylv.g (rv on
+# every carry) and its control at u/2 with a timeout of 1800 s, and cylv2.g
+# (value's rounding as a fraction of y) with its control and a grid in m.
+cd "$(dirname "$0")"
+python3 vgen.py
+{
+  T=1800 ./one1.sh cylv.g &
+  T=1800 ./one1.sh c_cylv_half.g &
+  for f in cylv2.g c_cylv2_half.g b_cylv2_*.g; do
+    T=1200 ./one1.sh "$f" &
+  done
+  wait
+} > run2.txt 2>&1
+echo done >> run2.txt
+```
+
+`cylsplit.py`, whole, not yet run past writing its scripts:
+
+```python
+"""Write cyl.g's case split, one script per case and a control at B = u / 2
+beside each. A case is three letters, one for each of the components x, y
+and z of the cross product, saying what it is:
+
+n  it does not cancel: q = rnd(h - k) is not zero, so its square s is
+   normal (stays_accurate), and so is its reach square v, which is never
+   below s;
+c  it cancels to zero, h == k, and its reach square v = rnd(4 h^2) is
+   normal;
+s  it cancels, and v is below the normals and does not round to zero;
+u  it cancels, and v rounds to zero.
+
+Those four cover every component whose halves are normal, which
+cross_product_halves_if_normal checks: q is zero exactly when h == k. nnn
+is cyl.g, byte for byte. A component that cancels has no square in y, and
+its true square, (h a - h b)^2, is the whole of its block's error. The
+names are cyl_<case>.g and c_cyl_<case>_half.g. Run as: python3 cylsplit.py
+"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+AXES = "xyz"
+B_CODE = "B = 10b-53 + 5b-102;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+HALVES = {"x": ("fy * dz", "fz * dy"), "y": ("fz * dx", "fx * dz"), "z": ("fx * dy", "fy * dx")}
+STATE = {"n": "does not cancel", "c": "cancels, its reach square normal",
+         "s": "cancels, its reach square below the normals and not zero",
+         "u": "cancels, its reach square rounding to zero"}
+
+
+def reach(a):
+    return f"(|h{a}| + |k{a}|) * (|h{a}| + |k{a}|)"
+
+
+def left_sum(terms, rounded):
+    """Sum terms left to right as Rust adds them, each sum rounded or not."""
+    acc = None
+    for t in terms:
+        if acc is None:
+            acc = t
+        else:
+            acc = f"rnd({acc} + {t})" if rounded else f"({acc} + {t})"
+    return acc
+
+
+def make(case, b=B_CODE):
+    st = dict(zip(AXES, case))
+    live = [a for a in AXES if st[a] == "n"]
+    dead = [a for a in AXES if st[a] != "n"]
+    small = [a for a in AXES if st[a] in "su"]
+    live01 = [a for a in "xy" if a in live]
+    s01_rounds = len(live01) == 2
+    s012_rounds = bool(live01) and "z" in live
+    src = [
+        "# restates: crates/rcad-geom/src/cylinder.rs on_floats at 2a7ca9e7",
+        "# restates: crates/rcad-geom/src/cylinder.rs cross_product_halves_if_normal at 2a7ca9e7",
+        "# restates: crates/rcad-geom/src/cylinder.rs cross_product_halves at 2a7ca9e7",
+        "# restates: crates/rcad-geom/src/cylinder.rs SIDE_OF_CYLINDER_ERROR_BOUND at 2a7ca9e7",
+        "# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 2a7ca9e7",
+        "# restates: crates/rcad-predicates/src/cascade.rs decide at 2a7ca9e7",
+        "# HowFarFromTheSkin::on_floats and SIDE_OF_CYLINDER_ERROR_BOUND, rcad-geom's cylinder.",
+    ]
+    if dead:
+        src.append(f"# The case {case}: " + "; ".join(f"{a} {STATE[st[a]]}" for a in AXES) + ".")
+    src += [
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The point, the axis origin, the axis direction and the radius, each an f64.",
+        "px = rnd(px_); py = rnd(py_); pz = rnd(pz_);",
+        "ox = rnd(ox_); oy = rnd(oy_); oz = rnd(oz_);",
+        "dx = rnd(dx_); dy = rnd(dy_); dz = rnd(dz_);",
+        "r = rnd(r_);",
+        "",
+        "# What on_floats computes, line for line.",
+        "Fx = px - ox; Fy = py - oy; Fz = pz - oz;",
+        "fx = rnd(Fx); fy = rnd(Fy); fz = rnd(Fz);",
+        "",
+        "# cross_product_halves: h is each component's left half, k its right half.",
+    ]
+    if dead:
+        src += ["# A component that cancels has the same double for both halves, so k",
+                "# is written h, and its q and s are zero and drop out."]
+    for a in AXES:
+        left, right = HALVES[a]
+        src.append(f"h{a} = rnd({left}); k{a} = " + (f"h{a};" if a in dead else f"rnd({right});"))
+    if live:
+        src.append(" ".join(f"Q{a} = h{a} - k{a};" for a in live))
+        src.append(" ".join(f"q{a} = rnd(Q{a});" for a in live))
+    src += [
+        "",
+        "# direction_squared, left to right as Rust adds it.",
+        "tx = rnd(dx * dx); ty = rnd(dy * dy); tz = rnd(dz * dz);",
+        "T01 = tx + ty; t01 = rnd(T01);",
+        "T = t01 + tz; D = rnd(T);",
+        "",
+        "rr = rnd(r * r);",
+        "skin = rnd(rr * D);",
+    ]
+    if dead:
+        src += ["# A zero square added to a double leaves that double, which then",
+                "# rounds to itself, so a sum is written without its zero squares."]
+    if live:
+        src.append(" ".join(f"s{a} = rnd(q{a} * q{a});" for a in live))
+    if s01_rounds:
+        src.append("S01 = sx + sy; s01 = rnd(S01);")
+    elif live01:
+        src.append(f"s01 = s{live01[0]};")
+    if s012_rounds:
+        src.append("S012 = s01 + sz; s012 = rnd(S012);")
+    elif live01:
+        src.append("s012 = s01;")
+    elif live:
+        src.append("s012 = sz;")
+    src.append("y = s012 - skin;" if live else "y = -skin;")
+    src += ["value = rnd(y);", "", "# The permanent: each half's reach squared, then the radius term."]
+    if dead:
+        src += ["# A reach of two equal halves is twice one of them, which a double",
+                "# holds (dbl.g), so it is written unrounded."]
+    src.append(" ".join(f"n{a} = rnd(|h{a}| + |k{a}|);" if a in live else f"n{a} = |h{a}| + |k{a}|;"
+                        for a in AXES))
+    if small:
+        src.append(" ".join(f"Xv{a} = n{a} * n{a};" for a in small))
+        src += ["# A reach square that rounds to zero is written as the 0 it rounds to",
+                "# (464.14's tinysq.g), and the sums leave it out."]
+    vs = []
+    for a in AXES:
+        if st[a] in "nc":
+            vs.append(f"v{a} = rnd(n{a} * n{a});")
+        elif st[a] == "s":
+            vs.append(f"v{a} = rnd(Xv{a});")
+    src.append(" ".join(vs))
+    kept = [f"v{a}" for a in AXES if st[a] != "u"]
+    acc = left_sum(kept, True)
+    src.append(f"P = rnd({acc} + skin);" if acc else "P = skin;")
+    src += [
+        "",
+        b,
+        "eb = rnd(B * P);",
+        "",
+        "# The true value of the same inputs.",
+        "Cx = Fy * dz - Fz * dy; Cy = Fz * dx - Fx * dz; Cz = Fx * dy - Fy * dx;",
+        "Ex = Cx * Cx + Cy * Cy + Cz * Cz - r * r * (dx * dx + dy * dy + dz * dz);",
+        "",
+        "# The permanent with no rounding of its own.",
+        "Phat = (|hx| + |kx|) * (|hx| + |kx|) + (|hy| + |ky|) * (|hy| + |ky|)",
+        "     + (|hz| + |kz|) * (|hz| + |kz|) + skin;",
+    ]
+    if small:
+        terms = [f"v{a}" if st[a] == "s" else reach(a) for a in AXES if st[a] != "u"]
+        acc = left_sum(terms, False)
+        src += ["# The same with v in place of each reach square below the normals that",
+                "# does not round to zero, and without each that does, added as P adds.",
+                f"Phatx = {acc} + skin;" if acc else "Phatx = skin;"]
+    src += [
+        "",
+        "# What each rounding multiplied its argument by.",
+        "rfx = fx / Fx; rfy = fy / Fy; rfz = fz / Fz;",
+    ]
+    for a in AXES:
+        left, right = HALVES[a]
+        src.append(f"rh{a} = h{a} / ({left}); rk{a} = k{a} / ({right});")
+    if live:
+        src.append(" ".join(f"rq{a} = q{a} / Q{a};" for a in live))
+        src.append(" ".join(f"rs{a} = s{a} / (q{a} * q{a});" for a in live))
+    rs = (["rs01 = s01 / S01;"] if s01_rounds else []) + (["rs012 = s012 / S012;"] if s012_rounds else [])
+    if rs:
+        src.append(" ".join(rs))
+    src += [
+        "rtx = tx / (dx * dx); rty = ty / (dy * dy); rtz = tz / (dz * dz);",
+        "rt01 = t01 / T01; rD = D / T;",
+        "rrr = rr / (r * r); rsk = skin / (rr * D);",
+        "",
+        "# Each component's square, as y carries it, is (h - k)^2 times K; the true",
+        "# one is (h a - k b)^2, a and b undoing the roundings of h and k.",
+    ]
+    if dead:
+        src.append("# One that cancels has no square in y, and its true one is (h a - h b)^2.")
+    for a in live:
+        carry = [f"rq{a}", f"rq{a}", f"rs{a}"]
+        if a in "xy" and s01_rounds:
+            carry.append("rs01")
+        if s012_rounds:
+            carry.append("rs012")
+        src.append(f"K{a} = " + " * ".join(carry) + ";")
+    for a in AXES:
+        src.append(f"a{a} = 1 / (rf{HALVES[a][0][1]} * rh{a}); b{a} = 1 / (rf{HALVES[a][1][1]} * rk{a});")
+    src += [
+        "",
+        "# So each component's error is three terms, one for each piece of its",
+        "# reach squared: h^2, k^2 and 2 |h| |k|. W is each term's error over its",
+        "# piece.",
+    ]
+    if dead:
+        src.append("# One that cancels is off by its whole true square, eC.")
+    for a in live:
+        src.append(f"WH{a} = K{a} - a{a} * a{a}; WK{a} = K{a} - b{a} * b{a}; WX{a} = K{a} - a{a} * b{a};")
+    for a in AXES:
+        src.append(f"cH{a} = |h{a}| * |h{a}|; cK{a} = |k{a}| * |k{a}|; cX{a} = 2 * |h{a}| * |k{a}|;")
+    for a in AXES:
+        if a in live:
+            src.append(f"eH{a} = h{a} * h{a} * WH{a}; eK{a} = k{a} * k{a} * WK{a}; eX{a} = -(2 * h{a} * k{a} * WX{a});")
+        else:
+            src.append(f"eC{a} = -(C{a} * C{a});")
+    src += [
+        "",
+        "# The radius term is three pieces, one for each direction component's",
+        "# square, which sum to skin. Each true piece is r^2 d^2.",
+        "cGx = rsk * rr * rD * rt01 * tx;",
+        "cGy = rsk * rr * rD * rt01 * ty;",
+        "cGz = rsk * rr * rD * tz;",
+        "WGx = 1 / (rrr * rtx * rsk * rD * rt01) - 1;",
+        "WGy = 1 / (rrr * rty * rsk * rD * rt01) - 1;",
+        "WGz = 1 / (rrr * rtz * rsk * rD) - 1;",
+        "eGx = cGx * WGx; eGy = cGy * WGy; eGz = cGz * WGz;",
+        "",
+        "# The same permanent, as four blocks of the twelve pieces the error is",
+        "# averaged over: each component's reach squared, and the radius term.",
+        "P3x = cHx + cKx + cXx; P3y = cHy + cKy + cXy; P3z = cHz + cKz + cXz;",
+        "SG = cGx + cGy + cGz;",
+        "P12 = P3x + P3y + P3z + SG;",
+        "",
+        "# Each component's square as y carries it, and the radius term as Ex has it.",
+    ]
+    if live:
+        src.append(" ".join(f"Y{a} = K{a} * Q{a} * Q{a};" for a in live))
+    src.append("Gt = r * r * (dx * dx + dy * dy + dz * dz);")
+
+    nonzero = "\n  /\\ ".join([
+        "|fx| >= 1b-1074 /\\ |fy| >= 1b-1074 /\\ |fz| >= 1b-1074",
+        "|dx| >= 1b-1074 /\\ |dy| >= 1b-1074 /\\ |dz| >= 1b-1074",
+        "|r| >= 1b-1074"] + ([" /\\ ".join(f"|q{a}| >= 1b-1074" for a in live)] if live else []))
+    src += [
+        "",
+        "{",
+        "  # Every input is a finite f64.",
+        "     |px| <= 1b1024 /\\ |py| <= 1b1024 /\\ |pz| <= 1b1024",
+        "  /\\ |ox| <= 1b1024 /\\ |oy| <= 1b1024 /\\ |oz| <= 1b1024",
+        "  /\\ |dx| <= 1b1024 /\\ |dy| <= 1b1024 /\\ |dz| <= 1b1024",
+        "  /\\ |r| <= 1b1024",
+        "  # No factor is zero, and no component cancels to zero. For an f64 that is"
+        if not dead else
+        "  # No factor is zero, and no component but those the case names cancels to\n"
+        "  # zero. For an f64 that is",
+        "  # the same as being at least the smallest subnormal.",
+        "  /\\ " + nonzero,
+        "  # product_is_normal on the six halves (cross_product_halves_if_normal),",
+        "  # and on the three components, the three direction components, the",
+        "  # radius and the radius term (stays_accurate).",
+        "  /\\ |hx| >= 1b-1022 /\\ |kx| >= 1b-1022 /\\ |hy| >= 1b-1022",
+        "  /\\ |ky| >= 1b-1022 /\\ |hz| >= 1b-1022 /\\ |kz| >= 1b-1022",
+    ]
+    if live:
+        src.append("  /\\ " + " /\\ ".join(f"|s{a}| >= 1b-1022" for a in live))
+    src += [
+        "  /\\ |tx| >= 1b-1022 /\\ |ty| >= 1b-1022 /\\ |tz| >= 1b-1022",
+        "  /\\ |rr| >= 1b-1022 /\\ |skin| >= 1b-1022",
+    ]
+    if not dead:
+        src += [
+            "  # The permanent's three squares are normal too, since no component is",
+            "  # zero here: |q| <= n, rounding being monotone and |h - k| <= |h| + |k|,",
+            "  # so v = rnd(n * n) >= rnd(q * q) = s, which is normal.",
+            "  /\\ |vx| >= 1b-1022 /\\ |vy| >= 1b-1022 /\\ |vz| >= 1b-1022",
+        ]
+    else:
+        src += [
+            "  # The reach square of a component that does not cancel is normal: |q| <= n,",
+            "  # rounding being monotone and |h - k| <= |h| + |k|, so v = rnd(n * n) >=",
+            "  # rnd(q * q) = s, which is normal. For one that cancels the case says",
+            "  # which it is. One below the normals that does not round to zero is at",
+            "  # least the smallest subnormal, and tinysq.g and tinyzero.g split them",
+            "  # at 2^-1075: at or below, they round to zero.",
+        ]
+        rows = []
+        for a in AXES:
+            if st[a] in "nc":
+                rows.append(f"|v{a}| >= 1b-1022")
+            elif st[a] == "s":
+                rows.append(f"Xv{a} <= 1b-1022 /\\ v{a} >= 1b-1074")
+            else:
+                rows.append(f"Xv{a} <= 1b-1075")
+        src.append("  /\\ " + " /\\ ".join(rows))
+    src += [
+        "  # The bound is normal, which decide checks.",
+        "  /\\ |eb| >= 1b-1022",
+        "  # What lemma.g proves each of those gives.",
+    ]
+    if dead:
+        src.append("  # k is h in a component that cancels, so its line is h's against k's product.")
+    for a in AXES:
+        left, right = HALVES[a]
+        src.append(f"  /\\ h{a} -/ {left} {LEMMA}")
+        src.append(f"  /\\ k{a} -/ {right} {LEMMA}")
+    for a in live:
+        src.append(f"  /\\ s{a} -/ q{a} * q{a} {LEMMA}")
+    for p in ("tx -/ dx * dx", "ty -/ dy * dy", "tz -/ dz * dz", "rr -/ r * r", "skin -/ rr * D"):
+        src.append(f"  /\\ {p} {LEMMA}")
+    for a in AXES:
+        if st[a] in "nc":
+            src.append(f"  /\\ v{a} -/ n{a} * n{a} {LEMMA}")
+    src += [
+        f"  /\\ eb -/ B * P {LEMMA}",
+        "  # x / |x| is in [-1, 1] for any x that is not zero.",
+    ]
+    for a in AXES:
+        src.append(f"  /\\ h{a} / |h{a}| in [-1, 1]" + ("" if a in dead else f" /\\ k{a} / |k{a}| in [-1, 1]"))
+    src.append("->")
+    if small:
+        src.append("  (y - Ex) / P12 in ? /\\ P -/ Phatx in ? /\\ P in ?")
+    else:
+        src.append("  (y - Ex) / P12 in ? /\\ P -/ Phat in ?")
+    src += ["  /\\ (y - Ex) / eb in [-1, 1]", "}", "", "# How far each rounding is from the identity."]
+    src += ["fx / Fx -> 1 + (fx - Fx) / Fx;", "fy / Fy -> 1 + (fy - Fy) / Fy;", "fz / Fz -> 1 + (fz - Fz) / Fz;"]
+    for a in AXES:
+        for h, prod in zip("hk", HALVES[a]):
+            src.append(f"{h}{a} / ({prod}) -> 1 + ({h}{a} - {prod}) / ({prod});")
+    for a in live:
+        src.append(f"q{a} / Q{a} -> 1 + (q{a} - Q{a}) / Q{a};")
+    for a in live:
+        src.append(f"s{a} / (q{a} * q{a}) -> 1 + (s{a} - q{a} * q{a}) / (q{a} * q{a});")
+    if s01_rounds:
+        src.append("s01 / S01 -> 1 + (s01 - S01) / S01;")
+    if s012_rounds:
+        src.append("s012 / S012 -> 1 + (s012 - S012) / S012;")
+    src += [
+        "tx / (dx * dx) -> 1 + (tx - dx * dx) / (dx * dx);",
+        "ty / (dy * dy) -> 1 + (ty - dy * dy) / (dy * dy);",
+        "tz / (dz * dz) -> 1 + (tz - dz * dz) / (dz * dz);",
+        "t01 / T01 -> 1 + (t01 - T01) / T01;",
+        "D / T -> 1 + (D - T) / T;",
+        "rr / (r * r) -> 1 + (rr - r * r) / (r * r);",
+        "skin / (rr * D) -> 1 + (skin - rr * D) / (rr * D);",
+        "",
+        "# The error is the sum of four blocks' errors, each the sum of its pieces'",
+        "# errors, each a fraction of its own piece of the permanent; add_rr then",
+        "# averages them. In blocks so that no hint's identity spans all twelve",
+        "# pieces: one hint over all twelve did not finish in 600 s.",
+    ]
+    if dead:
+        src += ["# A component that cancels is one block, off by its true square, which is",
+                "# (a - b)^2 / 4 of its reach squared, 4 h^2."]
+    src.append("(y - Ex) / P12 -> ((P12 + (y - Ex)) - P12) / P12;")
+    blocks = [f"(P3{a} + (Y{a} - C{a} * C{a}))" if a in live else f"(P3{a} + eC{a})" for a in AXES]
+    src.append("P12 + (y - Ex) -> " + " + ".join(blocks) + " + (SG + (Gt - skin));")
+    for a in live:
+        src.append(f"P3{a} + (Y{a} - C{a} * C{a}) -> (cH{a} + eH{a}) + (cK{a} + eK{a}) + (cX{a} + eX{a});")
+    src.append("SG + (Gt - skin) -> (cGx + eGx) + (cGy + eGy) + (cGz + eGz);")
+    for a in AXES:
+        if a in live:
+            for p in "HKX":
+                src.append(f"(c{p}{a} + e{p}{a}) - c{p}{a} -> e{p}{a};")
+        else:
+            src.append(f"(P3{a} + eC{a}) - P3{a} -> eC{a};")
+    for g in AXES:
+        src.append(f"(cG{g} + eG{g}) - cG{g} -> eG{g};")
+    for a in AXES:
+        if a in live:
+            src += [f"eH{a} / cH{a} -> (h{a} / |h{a}|) * (h{a} / |h{a}|) * WH{a};",
+                    f"eK{a} / cK{a} -> (k{a} / |k{a}|) * (k{a} / |k{a}|) * WK{a};",
+                    f"eX{a} / cX{a} -> -((h{a} / |h{a}|) * (k{a} / |k{a}|) * WX{a});"]
+        else:
+            src.append(f"eC{a} / P3{a} -> -((h{a} / |h{a}|) * (h{a} / |h{a}|) * (a{a} - b{a}) * (a{a} - b{a}) / 4);")
+    src += ["", "# From the twelve pieces to the permanent on_floats rounds, and on to eb.",
+            "(y - Ex) / eb -> ((y - Ex) / P12) * (Phat / P) * (P / eb);"]
+    if small:
+        shift = " + ".join(f"(Xv{a} - v{a})" if st[a] == "s" else f"Xv{a}" for a in small)
+        src += ["# What rounding a reach square below the normals cost is an amount, and",
+                "# eb being normal keeps P large enough that it is small against eb.",
+                f"Phat / P -> Phatx / P + ({shift}) / P;",
+                "Phatx / P -> 1 / (1 + (P - Phatx) / Phatx);",
+                "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));",
+                "P -> eb / (B * (1 + (eb - B * P) / (B * P)));"]
+    else:
+        src += ["Phat / P -> 1 / (1 + (P - Phat) / Phat);",
+                "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));"]
+    return "\n".join(src) + "\n"
+
+
+def write(name, text):
+    with open(name, "w") as out:
+        out.write(text)
+
+
+for case in map("".join, itertools.product("ncsu", repeat=3)):
+    name = "cyl" if case == "nnn" else f"cyl_{case}"
+    write(f"{name}.g" if case != "nnn" else "cyl_nnn.g", make(case))
+    if case != "nnn":
+        write(f"c_{name}_half.g", make(case, B_HALF))
+```
+
+**What the fourth lane ran.** `cylv.g` and `c_cylv_half.g` from `run2.sh`
+finished after the handover, on a load of about 43. `cylv.g` exits 1 in
+`541.97s`, best `[-1, 1]`, printing `(value − Ex) / P12` within
+`1.11022e-15`, `10u`, and the same `6u`. `c_cylv_half.g` exits 1 in
+`379.28s`, best `[-20, 20]`. So neither form of the claim on `value` proves at
+the code's `B`. `cylv2.g` doubled proves at `10u + 84u²`, and `m` of 81, 82 and
+83 were started in `run3.sh` and had not finished at this lane's handover.
+
+`dbl.g`, whole, exits 0 in `0.03s`, and its `gappa -Bcoq` and `coqc` exit 0, a
+proof of 217 lines with 1 hint. It prints nothing else:
+
+```gappa
+# dbl.g: a double added to itself rounds to itself, so the reach |h| + |k| of
+# a component whose halves are the same double h is 2 |h| exactly, a double.
+# Gappa's float has no top to its exponents, so this says nothing of overflow.
+@rnd = float<ieee_64, ne>;
+h = rnd(h_);
+{ |h| <= 1b1024 /\ |h| >= 1b-1074 -> rnd(|h| + |h|) - (|h| + |h|) in [0, 0] }
+|h| + |h| -> 2 * |h|;
+```
+
+Overflow is outside it: `2|h|` overflows only when `|h| ≥ 2¹⁰²³`, and then
+`v`, `P` and `eb` are infinite and `decide` refuses `eb` as not normal, which
+is 464.12's 7 argument on paper and was not run here.
+
+`run3.sh` (below) was started detached on a load of about 47 over 24 cores.
+`tally3.py` (below) read its output at 06:24, with the run not finished:
+
+- Each of the 63 cases other than `nnn` exits 0, in 65.74 to 190.10 s, at the
+  code's `B`. Each prints `(y − Ex) / P12` within `8.88178e-16` (9 cases),
+  `7.77156e-16` (27) or `5.55112e-16` (27), `8u`, `7u` or `5u`, all below
+  `cyl.g`'s `9u`. `P −/ Phat`, or `P −/ Phatx` where a reach square is `s` or
+  `u`, is within `u` to `6u`; `cyl_uuu.g`, whose `P` is `skin`, prints `skin`
+  against itself in `[0, 0]`.
+- No `.out` or `.bcoq` of the 63 has a line other than its results and
+  "assumed to be nonzero" warnings: no "not trivially equal" and no hint Gappa
+  calls unneeded.
+- 44 of the 63 controls at `u / 2` had finished, each exit 1, with bests
+  `[-16, 16]`, `[-14, 14]` or `[-10, 10]`, the relative bound over `u / 2`.
+- 18 of the 63 had run `gappa -Bcoq` and `coqc`, each exit 0, 8908 to 10580
+  lines with 33 hints, in 145.5 to 167.87 s each.
+
+So on `y` the bound holds at the code's constant wherever no factor is zero:
+with no component cancelling, and with any of them cancelling, its reach
+square normal, below the normals, or rounding to zero. The comment at
+`cylinder.rs:312-314` is false when a component cancels, and nothing wrong
+follows from it.
+
+`run3.sh`, whole:
+
+```sh
+#!/bin/bash
+# cylsplit.py's 63 cases other than nnn, each with gappa -Bcoq and coqc when
+# it proves, their 63 controls at u/2, dbl.g with coqc, and the claim on
+# value (cylv2.g doubled) at B = 10u + m u^2 for m of 81, 82 and 83, all at
+# once.
+cd "$(dirname "$0")"
+python3 cylsplit.py
+python3 vgen.py
+for m in 81 82 83; do
+  sed "s/^B = 10b-53 + 5b-102;\$/B = 10b-53 + ${m}b-106;/" cylv2.g > "b_cylv2_$m.g"
+done
+{
+  grep -c '^B = 10b-53 + 8[123]b-106;$' b_cylv2_81.g b_cylv2_82.g b_cylv2_83.g
+  ./one.sh dbl.g coq &
+  for f in cyl_*.g; do
+    [ "$f" = cyl_nnn.g ] && continue
+    ./one.sh "$f" coq &
+  done
+  for f in c_cyl_???_half.g; do
+    ./one1.sh "$f" &
+  done
+  for m in 81 82 83; do
+    T=1200 ./one1.sh "b_cylv2_$m.g" &
+  done
+  wait
+} > run3.txt 2>&1
+echo done >> run3.txt
+```
+
+`tally3.py`, whole:
+
+```python
+"""Tally run3.txt and the .out files of cylsplit.py's 63 cases: for each case
+its exit, the relative bound on y and on P that it prints, and its coqc line;
+for each control its exit and best. Prints one line per case, then counts.
+Run as: python3 tally3.py"""
+import collections
+import itertools
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+run = open("run3.txt").read()
+cases = ["".join(c) for c in itertools.product("ncsu", repeat=3) if "".join(c) != "nnn"]
+
+
+def short(out, goal):
+    m = re.search(re.escape(goal) + r" in \[[^{]*\{([^,]*),[^}]*\}, [^{]*\{([^,]*),", out)
+    return f"[{m.group(1)}, {m.group(2)}]" if m else "-"
+
+
+ybounds = collections.Counter()
+pbounds = collections.Counter()
+bests = collections.Counter()
+coq = []
+for c in cases:
+    out = open(f"cyl_{c}.out").read()
+    ex = re.search(rf"^cyl_{c} exit (\d+) ([\d.]+)s$", run, re.M)
+    cq = re.search(rf"^cyl_{c} coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$", run, re.M)
+    ctl = re.search(rf"^c_cyl_{c}_half exit (\d+) ([\d.]+)s$", run, re.M)
+    cout = open(f"c_cyl_{c}_half.out").read() if os.path.exists(f"c_cyl_{c}_half.out") else ""
+    best = re.search(r"best: (\[[^\]]*\])", cout)
+    y = short(out, "(y - Ex) / P12")
+    p = short(out, "P -/ Phatx") if "s" in c or "u" in c else short(out, "P -/ Phat")
+    ybounds[y] += 1
+    pbounds[p] += 1
+    bests[best.group(1) if best else "-"] += 1
+    if cq:
+        coq.append((int(cq.group(4)), int(cq.group(5)), c, cq.group(1), cq.group(2), float(cq.group(3))))
+    print(c, "exit", ex.group(1) if ex else "?", ex.group(2) if ex else "", "y", y, "P", p,
+          "coq", cq.groups() if cq else "-", "ctl", ctl.group(1) if ctl else "?", best.group(1) if best else "-",
+          "pointless" if "pointless" in out else "")
+print("y bounds", dict(ybounds))
+print("P bounds", dict(pbounds))
+print("control bests", dict(bests))
+print("cases exit 0:", len(re.findall(r"^cyl_\w\w\w exit 0 ", run, re.M)), "of", len(cases))
+print("controls exit 1:", len(re.findall(r"^c_cyl_\w\w\w_half exit 1 ", run, re.M)), "of", len(cases))
+print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(coq))
+if coq:
+    coq.sort()
+    print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "times", min(x[5] for x in coq), max(x[5] for x in coq))
+def other_lines(f):
+    return [line for line in open(f).read().split("\n")
+            if line and "assumed to be nonzero" not in line and not line.startswith(("Results:", "  "))]
+
+
+warn = [f for f in os.listdir(".") if f.startswith("cyl_") and f.endswith((".out", ".bcoq", ".coqc"))
+        and other_lines(f)]
+print("files with a line other than results and 'assumed to be nonzero':", sorted(warn))
+```
+
+The block above is `tally3.py` byte for byte as it was run; an earlier copy
+here had two blank lines after the `if coq:` block that the file does not.
+
+**What the fifth lane read.** `run3.txt` ends with `done`, and `python3
+tally3.py` then prints `cases exit 0: 63 of 63`, `controls exit 1: 63 of 63`
+and `coq ok: 63 of 63`, the y bounds as above (9, 27 and 27 cases), the
+control bests `[-16, 16]` 9, `[-14, 14]` 27 and `[-10, 10]` 27, each case's
+best its own bound over `u / 2`, `coq smallest (8908, 33, 'uuc') largest
+(13908, 48, 'nns') times 145.5 194.2`, and no file with a line other than
+results and "assumed to be nonzero". The 9 cases at `8u` are those with two
+components `n`, the 27 at `7u` those with one, the 27 at `5u` those with none.
+`dbl coq -Bcoq exit 0 coqc exit 0 12.62s lines 217 hints 1`. On `value`,
+`b_cylv2_81 exit 1 542.42s`, best `[-1, 1]`; `b_cylv2_82 exit 0 447.87s` and
+`b_cylv2_83 exit 0 447.09s`, each printing `(y − Ex) / P12` within `9u`,
+`(value − y) / y` within `1b-53` and `y / P12` within `[-1, 1]`. So the
+doubled form proves the claim on `value` at `10u + 82u²` and not at `10u +
+81u²`, two `u²` above the code's `80`. The fifth lane's `run4.sh`, `one.sh`'s
+`coq` step alone with each timeout at 1500 s, prints `b_cylv2_82 coq -Bcoq
+exit 0 coqc exit 0 105.45s lines 19054 hints 81`, and its `.bcoq` and `.coqc`
+hold nothing but the results and "assumed to be nonzero" lines. `git log --oneline 2a7ca9e76..868f8c001` on
+`cylinder.rs`, `cascade.rs`, `three_surfaces.rs`, `validate.rs` and
+`rcad-geom`'s `lib.rs` prints nothing.
+
+Still to do, in order: append `run4.sh` whole; write 464.15 in 464.14's numbered
+form, 1 to 10, from the figures here and above; add 464.6's and 464.8's 7's
+lines for Q2680; and drop the Draft line.
+The rows 10 is to name: the zero branches (a difference, a direction
+component or the radius zero, the axis-aligned cylinder among them), which no
+script here covers; a restatement of `cylinder.rs:541-552`, whose `45*epsilon`
+is `ε²` and whose own terms, `45 + 60 + 10 = 115` with the permanent's `6u`
+and `eb`'s rounding, are above its `80`; a restatement of `312-314` by the
+case split; and a run of the products `on_floats` checks below the normals, to
+test `308-310`'s claim, as 464.14's 6 did for the sphere.
