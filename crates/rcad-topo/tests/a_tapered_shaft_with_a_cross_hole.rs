@@ -41,9 +41,6 @@ mod cones;
 
 use cones::{a_frustum, a_pointed_cone};
 
-/// What `fuse` says where a face's wire will not lie flat in its coordinates.
-const NOT_FLAT: &str = "a wire of this face will not lie flat in the face's own two coordinates";
-
 /// **A tapered shaft with a cross pin.** The shaft is a frustum of slope a
 /// quarter, of radius one at its narrow end and four at its wide end. The pin
 /// has radius a half and runs along `y` at height ten, where the shaft has
