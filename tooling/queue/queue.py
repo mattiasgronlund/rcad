@@ -411,13 +411,19 @@ def take_step(queue, claims, here, args, batch):
     # A lane: row this worktree holds, or dispatched by hand here, may be
     # taken again for a new branch: that is a failed lane re-dispatched.
     if not row.state.startswith("lane:"):
-        refuse_unless_ready(queue, row)
+        refuse_unless_ready(queue, row, branch)
     queue.replace(row, row.with_state(f"lane:{branch}"))
     message = f"{row_id}: {row.state} -> lane:{branch}, held for {branch} until done, drop or park"
     return queue, message, ("take", row_id, now(), here.top, branch, row.write_set, row.tier)
 
 
-def refuse_unless_ready(queue, row):
+def refuse_unless_ready(queue, row, branch):
+    """`branch` is the one this `take` is headed for: an `after:` id is also
+    ready when it is itself `lane:<branch>`, the same branch, since an
+    earlier `take` step of this same `apply` is what put it there (§309.3
+    point 2 -- a later step already sees the state an earlier one wrote).
+    Bundling a fix with the row waiting on it needs exactly this, so a
+    `take` naming the wrong branch for that id still refuses (§309)."""
     if row.state == "todo":
         return
     if row.state.startswith("after:"):
@@ -428,7 +434,10 @@ def refuse_unless_ready(queue, row):
                     waiting.append(f"{other} (not yet come)")
                 continue
             found = queue.find(other)
-            if found is None or not found.state.startswith("done:"):
+            ready = found is not None and (
+                found.state.startswith("done:") or found.state == f"lane:{branch}"
+            )
+            if not ready:
                 waiting.append(f"{other} ({found.state if found else 'not in this copy'})")
         if waiting:
             raise Refused(f"{row.id} is not ready: it waits on {', '.join(waiting)}")
