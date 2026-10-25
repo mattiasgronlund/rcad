@@ -14,14 +14,18 @@
 //!   which crosses it in one loop.
 //!
 //! Since row Q2788 `intersect` names those loops and `walk` marches them, and
-//! the fuses get further. **What each fuse gives now is pinned here**, under
-//! every rule both ways round, for the row after Q2788 to turn round: the shaft
-//! and the pin are not a solid by any rule, the leaning bar is refused where a
-//! crossing is asked to be a conic, and the ball answers three of its six
-//! fuses. Each answer that comes back is certified, sound, and measures as the
-//! others that came back say it must: the union and the intersection together
-//! hold each solid once, and each solid less the other is that solid less the
-//! intersection.
+//! since row Q2789 the walks are ordered round a loop off the cone's axis and
+//! each loop's side is read past the flat surface through the apex that picks
+//! it, on the cone and on the pipe alike. **What each fuse gives now is pinned
+//! here**, under every rule both ways round. Each shape answers three of its
+//! six fuses: the intersection both ways round, and the other solid less the
+//! cone. The union both ways and the cone less the other solid keep the cone's
+//! face with the loops as islands in it, and the mesher refuses that face as a
+//! wire that will not lie flat, since it lets islands into a ball's cap and a
+//! pipe's ring alone: rows Q2810 and Q2811 turn those round. Each answer that
+//! comes back is certified, sound, and measures as the others that came back
+//! say it must: the union and the intersection together hold each solid once,
+//! and each solid less the other is that solid less the intersection.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -31,13 +35,6 @@ mod cones;
 
 use cones::{a_frustum, a_pointed_cone};
 
-/// What `fuse` says where an edge of what it built has one face along it.
-const NOT_A_SOLID: &str = "the result would not be a solid: an edge would have 1 faces along it";
-
-/// What `fuse` says where a crossing it needs as a conic is not one.
-const NOT_A_CONIC: &str =
-    "geometry: these two surfaces do not cross in one closed curve lying in a plane";
-
 /// What `fuse` says where a face's wire will not lie flat in its coordinates.
 const NOT_FLAT: &str = "a wire of this face will not lie flat in the face's own two coordinates";
 
@@ -46,12 +43,19 @@ const NOT_FLAT: &str = "a wire of this face will not lie flat in the face's own 
 /// has radius a half and runs along `y` at height ten, where the shaft has
 /// radius two and a half, so it pokes out six minus that each side.
 ///
-/// Every fuse builds an edge with one face along it.
+/// The intersection answers both ways round, and so does the pin less the
+/// shaft. The union both ways and the shaft less the pin keep the shaft's face
+/// with its two rims right round and the two loops as islands between them,
+/// which the mesher refuses as a wire that will not lie flat: row Q2810.
 #[test]
-fn a_tapered_shaft_fused_with_a_pin_through_it_is_not_a_solid_by_any_rule() {
+fn a_tapered_shaft_fused_with_a_pin_through_it_answers_three_rules_of_six() {
     assert_eq!(
         every_fuse_of(shaft_and_pin).refusals(),
-        [[Some(NOT_A_SOLID); 2]; 3]
+        [
+            [Some(NOT_FLAT), Some(NOT_FLAT)],
+            [None, None],
+            [Some(NOT_FLAT), None]
+        ]
     );
 }
 
@@ -59,12 +63,19 @@ fn a_tapered_shaft_fused_with_a_pin_through_it_is_not_a_solid_by_any_rule() {
 /// half, so its half-angle is about 0.46 radians, and the bar leans 0.3
 /// radians about the `x` axis through the point four up the cone's axis.
 ///
-/// Every fuse is refused where it asks for a crossing as a conic.
+/// The intersection answers both ways round, and so does the bar less the
+/// cone. The union both ways and the cone less the bar keep the cone's face
+/// with its rim right round and the loop on the upper nappe as an island in
+/// it, which the mesher refuses as a wire that will not lie flat: row Q2811.
 #[test]
-fn a_pointed_cone_fused_with_a_bar_leaning_through_it_is_refused_by_every_rule() {
+fn a_pointed_cone_fused_with_a_bar_leaning_through_it_answers_three_rules_of_six() {
     assert_eq!(
         every_fuse_of(cone_and_leaning_bar).refusals(),
-        [[Some(NOT_A_CONIC); 2]; 3]
+        [
+            [Some(NOT_FLAT), Some(NOT_FLAT)],
+            [None, None],
+            [Some(NOT_FLAT), None]
+        ]
     );
 }
 
@@ -73,8 +84,9 @@ fn a_pointed_cone_fused_with_a_bar_leaning_through_it_is_refused_by_every_rule()
 /// two and a half.
 ///
 /// The intersection answers both ways round, and so does the ball less the
-/// cone. The union both ways and the cone less the ball build a face whose wire
-/// will not lie flat.
+/// cone. The union both ways and the cone less the ball keep the cone's face
+/// with its rim right round and the ball's loop as an island in it, which the
+/// mesher refuses as a wire that will not lie flat: row Q2811.
 #[test]
 fn a_pointed_cone_fused_with_a_ball_poking_out_of_its_side_answers_three_rules_of_six() {
     assert_eq!(
