@@ -7668,3 +7668,178 @@ And what is not a row:
 - `cyl.g`'s first `restates` line needs no row: `just src on_floats
   crates/rcad-geom/src/cylinder.rs` prints the one item, at `cylinder.rs:300`.
 - `field` on these scripts' hints (464.10).
+
+### 464.16 The side of rcad-geom's cone
+
+*Draft, by Q2681's first lane, which handed over at its budget. The proof is
+not run yet; what is here is the wrong sign the first lane found reading
+`on_floats`, and its demonstration.*
+
+Q2681 took up `SIDE_OF_CONE_ERROR_BOUND` in `crates/rcad-geom/src/cone.rs`,
+against `cone.rs` and `cascade.rs` at `2538ee89`. `u` is `2⁻⁵³`, and the code's
+`B = (12 + 96ε) ε` (`cone.rs:664-667`) is `12u + 96u²`, written `B = 12b-53 +
+3b-101;`: `96ε` is `3 · 2⁻⁴⁸`, a multiple of the ulp of 12, so the Rust's sum
+and product are exact.
+
+**What `on_floats` checks and what it does not.** `HowFarFromTheSkin::on_floats`
+(`cone.rs:424-469`) is the cylinder's with `skin` replaced by the axial term
+`along = rnd(rnd(slope²) · rnd(up²))`, where `up = rnd(rnd(u0 + u1) + u2)` and
+each `ui = rnd(fi · di)`. It checks `product_is_normal` on the six halves, the
+three components squared, the three `ui`, the slope squared, `up` squared and
+`slope² · up²` (`cone.rs:435-448`). Its permanent's axial term is
+`A = rnd(ss · R2)`, `ss = rnd(slope²)`, `R2 = rnd(R · R)` and `R =
+rnd(rnd(|u0| + |u1|) + |u2|)` (`cone.rs:462-463`), and nothing checks `R2` or
+`A`. Where `up` does not cancel, `|up| ≤ R` by monotone rounding, so `R2 ≥ w`
+and `A ≥ along`, both normal. Where `up` cancels to zero, `w` and `along` are
+zero, both checks pass on the zero (`cascade.rs:67-69`), and `R2` can round to
+zero while the true `slope² · (x · w)²` it stood for is not small against the
+rest.
+
+**A wrong sign.** The probe below, run once with `mise exec -- just t
+probe_q2681_axial_reach_square_rounding_to_zero --no-capture` and then
+removed, builds that shape: the apex at the origin, the direction `(2⁻⁶⁰ (1 +
+2⁻²⁶), 1, 0)`, which `Axis::new` keeps as the bits `3c30000004000000`,
+`3ff0000000000000` and `0`, the slope `2⁵¹¹`, and the point `(f0, −rnd(f0 ·
+d0), 0)` with `f0 = 2⁻⁴⁸⁰ (1 + 2⁻²⁸)`. `u0` and `u1` cancel exactly, `R =
+2⁻⁵³⁹`, `R²` rounds to zero, and so does `A`. It printed:
+
+```text
+on_floats value 1.0261342079698896e-289 error_bound 1.3670853888524055e-304
+on_intervals [-2.220446049250313e-16, 1.0261342079698903e-289]
+exactly None
+decide Pos at Float
+side_of Pos
+```
+
+`truth.py` below works the same doubles in exact rationals and printed:
+
+```text
+dot = 1.542348713665846e-179 = 2^ -594
+cross squared = 1.0261342079698896e-289
+slope^2 dot^2 = 1.0691058840368783e-50
+true value = -1.0691058840368783e-50 sign -1
+```
+
+So `Cone::side_of` certifies `Pos`, outside, at level 1, for a point whose
+true sign is `Neg`, inside. Class `wrong/D`: on paper, not run, it needs `R² ≤
+2⁻¹⁰⁷⁵`, so every `|fi · di|` below about `2⁻⁵³⁷`, and a slope of at least
+about `2⁷⁸` so that `slope² · (x · w)²`, at most about `9u² R² slope²`, can pass
+`eb ≥ 2⁻¹⁰²²`. A slope of `2⁷⁸` is a cone within `2⁻⁷⁸` of a flat plane, a
+ratio far past §3.5's `1e11`, and `Cone::from_half_angle` cannot make one:
+`tan` of the double below `π/2` is about `1.6e16`. The probe, whole, as it
+stood at the top of `cone.rs`'s `mod tests`:
+
+```rust
+#[test]
+fn probe_q2681_axial_reach_square_rounding_to_zero() {
+    let d0_wanted = 2f64.powi(-60) * (1.0 + 2f64.powi(-26));
+    let axis = Axis::new(Point::origin(), Vector::new(d0_wanted, 1.0, 0.0)).unwrap();
+    let d = axis.direction().components();
+    let f0 = 2f64.powi(-480) * (1.0 + 2f64.powi(-28));
+    let u0 = f0 * d[0];
+    let f1 = -u0 / d[1];
+    let slope = 2f64.powi(511);
+    let cone = Cone::new(axis, slope).unwrap();
+    let point = PredicatePoint::from([f0, f1, 0.0]);
+    let pred = HowFarFromTheSkin { cone, point };
+    let filtered = pred.on_floats();
+    println!("d = {:?} bits {:x} {:x} {:x}", d, d[0].to_bits(), d[1].to_bits(), d[2].to_bits());
+    println!("f = {:?} bits {:x} {:x}", [f0, f1], f0.to_bits(), f1.to_bits());
+    println!("slope bits {:x}", slope.to_bits());
+    match filtered {
+        Some(Filtered { value, error_bound }) => println!("on_floats value {value:e} error_bound {error_bound:e}"),
+        None => println!("on_floats None"),
+    }
+    println!("on_intervals {:?}", pred.on_intervals());
+    println!("exactly {:?}", pred.exactly());
+    let (decision, level) = decide(&pred);
+    println!("decide {decision:?} at {level:?}");
+    println!("side_of {:?}", cone.side_of(point));
+}
+```
+
+It also printed `f = [3.203332964226307e-145, -2.778448488608982e-163] bits
+21f0000001000000 9e30000005000000` and `slope bits 5fe0000000000000`, which
+`truth.py` reads:
+
+```python
+"""The true sign of the cone probe's input, in exact rationals."""
+import struct
+from fractions import Fraction
+
+
+def f(bits):
+    return Fraction(struct.unpack(">d", bytes.fromhex(bits))[0])
+
+
+d = [f("3c30000004000000"), f("3ff0000000000000"), Fraction(0)]
+p = [f("21f0000001000000"), f("9e30000005000000"), Fraction(0)]
+s = f("5fe0000000000000")
+c = [p[1] * d[2] - p[2] * d[1], p[2] * d[0] - p[0] * d[2], p[0] * d[1] - p[1] * d[0]]
+dot = sum(a * b for a, b in zip(p, d))
+cross2 = sum(x * x for x in c)
+axial = s * s * dot * dot
+value = cross2 - axial
+print("dot =", float(dot), "= 2^", dot.numerator.bit_length() - dot.denominator.bit_length())
+print("cross squared =", float(cross2))
+print("slope^2 dot^2 =", float(axial))
+print("true value =", float(value), "sign", (value > 0) - (value < 0))
+```
+
+**Measured so far, by Q2681's first two lanes**, in the scratchpad's `q2681/`,
+not yet written up:
+
+- `cone.g`, the case where nothing cancels and nothing is zero, exits 0 at the
+  code's `B` in `9.23s`, and `gappa -Bcoq` and `coqc` exit 0 on its 18049
+  lines with 64 hints (`run0.sh`). It prints `(y − Ex) / P15` within
+  `1.22125e-15`, which is `11u + 10u²`, and `P −/ Phat` within `7.77156e-16`,
+  `7u + 22u²`.
+- The bisection (`conecases.py`, `run1.sh`, `run2.sh`): `B = 12u + m u²`
+  proves for every `m` of 0, 40, 60, 80, 100 and 120, and `B = 11u + m u²`
+  proves at 99 and fails at 98, 97, 96, 90, 50 and 0. By hand, `(11u + 10u²)(1 +
+  7u)(1 + u)` is `11u + 98u²` and a `u³`, so the line falls where the count
+  puts it.
+- The controls: `c_cone_half.g` exits 1, best `[-22, 22]`, `11u` over `u / 2`;
+  `c_cone_nonormal.g` exits 1, best `[-3.80599e+2143, 3.80599e+2143]`, and fails
+  `REL(P, Phat)` and `BND((y - Ex) / P15)` too; `c_cone_noeb.g` exits 1 in
+  `121.00s`, best `[-3.76818e+1267, 3.99163e+1402]`.
+- `sumexact.g`, that a sum of two doubles at most `2⁻¹⁰²²` is a double, exits 0
+  and `coqc` passes, 150 lines, no hints.
+- `conesplit.py`: cylsplit's four cross states and six axial ones, `n` and `e`
+  where `up` is not zero (`u01` normal, or below the normals and so exact), and
+  `c`, `a`, `s`, `t` where `up` cancels (`R2` normal or below the normals and
+  not zero, times `A` normal or below the normals). Where `up` cancels it
+  averages the axial error over `XA = ss · R2` and not `ss · G²`, since `R2`
+  below the normals need not stay near `G²`. `R2` rounding to zero is the wrong
+  sign above and gets no script. `cone_nnnn.g` is `cone.g` byte for byte
+  (`diff` prints nothing).
+- `run3a.sh`: `cone_nnne`, `nnnc`, `nnna`, `nnns` and `nnnt` exit 0, and their
+  `u / 2` controls exit 1, with no "not trivially equal" line.
+- `run3.sh` (22 at a time, load about 43 over 24 cores), tallied by
+  `tally3.py` into `tally3.txt`: all 384 cases exit 0 at the code's `B` in 4.17
+  s (`ccuc`) to 39.13 s (`nnnt`), and `gappa -Bcoq` and `coqc` exit 0 on all
+  384, 2325 (`uuua`) to 17532 lines (`nnnn`), 37 to 64 hints, 6.68 to 51.46 s.
+  No `.out`, `.bcoq` or `.coqc` has a line but results and "assumed to be
+  nonzero".
+- What they print for `(y − Ex) / P15`: `11u` (`1.22125e-15`) in all 64 with
+  axial `n`; `9u` in all 64 with axial `e`; where `up` cancels, `9u`, `8u`,
+  `7u` with three, two, one components `n`, and with none, `y` is 0 and the
+  error is `9u²` (`c`), `13.5u²` (`s`, `1.664e-31`) or `4u²` (`a`, `t`). 16 of
+  those, `{s,u}³` times `a` or `t`, print "remaining results are pointless":
+  every reach square and `A` below the normals makes `P ≤ 2⁻¹⁰²⁰`, so `eb`
+  cannot be normal and `decide` refuses. `P −/ Phat` (or `Phatx`) is within
+  `7u` at most.
+- The controls at `u / 2`: 275 of 383 exit 1, best `[-22, 22]` in 63, `[-18,
+  18]` in 68, `[-16, 16]` in 36, `[-14, 14]` in 108. The other 108 are the
+  cases where `y` is 0, whose `u²` error `u / 2` covers. `conesplit.py` now
+  writes them a second control, `c_cone_<case>_usq.g` at `B = 1b-106;`, and
+  `run4.sh` ran it (after checking by `md5sum` that writing the split again
+  left all 767 scripts `run3.sh` ran unchanged): 92 exit 1, best 9, 13.5 or 4
+  times `u²` over `u²`, and the 16 pointless ones exit 0, pointless again.
+- `sumexact.g` again: `sumexact exit 0 0.03s`, `coqc` exit 0, 150 lines, 0
+  hints.
+
+**Still to do**, in order: rewrite these bullets as numbered paragraphs, as
+464.15's 1 to 10; what the doc comment at `cone.rs:643-663` and the comment at
+`432-434` claim against what is proved; the scripts whole and `same.py`; and
+what this leaves.
