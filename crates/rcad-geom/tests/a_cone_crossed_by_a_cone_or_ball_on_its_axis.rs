@@ -15,12 +15,14 @@
 //! A ball off the axis with the apex inside it crosses each nappe in a
 //! degree-four loop, which `walk` marches. So does a second cone off the axis
 //! where every straight line of one of the two crosses the other twice, once
-//! each side of one flat surface. What stays refused is a second cone off the
-//! axis whose directions overlap the first's, and a ball whose skin runs
-//! through the apex, which crosses the cone in a circle and the apex apart
-//! from it. A second cone of the same slope turned about a line through a point
-//! of the first's axis is more than an overlap: the two are mirror images, and
-//! can touch at two points.
+//! each side of one flat surface. A second cone off the axis whose directions
+//! overlap the first's, with its apex outside the first, can cross it in one
+//! loop and two branches that run off for ever: `intersect` names all three,
+//! and `walk` marches the loop and refuses the branches by name. What stays
+//! refused is any other overlap, and a ball whose skin runs through the apex,
+//! which crosses the cone in a circle and the apex apart from it. A second cone
+//! of the same slope turned about a line through a point of the first's axis is
+//! more than an overlap: the two are mirror images, and can touch at two points.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, NamedRun, Picker, Point, Sphere, Surface, SurfaceMeet,
@@ -605,7 +607,7 @@ fn assert_two_loops_either_side_of_one_flat_surface(one: &Surface, other: &Surfa
                     along,
                     deflection,
                     more_points_than,
-                    picker,
+                    std::slice::from_ref(picker),
                 );
             }
         }
@@ -617,7 +619,7 @@ fn assert_marched_on_both_and_on_its_side(
     along: [&Surface; 2],
     deflection: f64,
     more_points_than: usize,
-    picker: &Picker,
+    pickers: &[Picker],
 ) {
     let walked = walk(
         run,
@@ -642,11 +644,13 @@ fn assert_marched_on_both_and_on_its_side(
                 "{point:?} is {off:e} off {surface:?}, past the published {room:e}"
             );
         }
-        assert_eq!(
-            picker.side_of_point(PredicatePoint::from(point.coordinates())),
-            Decision::Pos,
-            "{point:?} is on its own side of {picker:?}"
-        );
+        for picker in pickers {
+            assert_eq!(
+                picker.side_of_point(PredicatePoint::from(point.coordinates())),
+                Decision::Pos,
+                "{point:?} is on its own side of {picker:?}"
+            );
+        }
     }
 }
 
@@ -673,26 +677,129 @@ fn a_second_cone_off_the_axis_is_refused_by_name_in_both_halves() {
 }
 
 /// A cone of slope a half about `z` and one of slope a quarter leaned `0.3`
-/// about `x` through `(0, 0, 4)`. The leaned cone's straight lines run from
-/// `0.055` to `0.545` off `z`, either side of the first cone's half-angle of
-/// `0.46`, so their directions overlap and nothing proves the crossing two
-/// loops. Up to eight along both axes every straight line of the leaned cone
-/// crosses the other once, at an angle whose sine is never below `0.49`, so
-/// this is the overlap alone and not the touch of the pair below. It is
-/// refused by name.
+/// about `x` through `(0, 0, 4)`, its apex outside the first. The leaned cone's
+/// straight lines run from `0.055` to `0.545` off `z`, either side of the first
+/// cone's half-angle of `0.46`, so their directions overlap. Every one of them
+/// crosses the first cone once between the leaned cone's apex and the point
+/// `(0, 0, 4)` where the two axes meet, and those crossings are one loop. The
+/// lines leaned further than the half-angle cross it once more beyond that
+/// point, high up the first cone's upper nappe, and the lines leaned less cross
+/// it once more behind the apex, on its lower nappe: two branches that run off
+/// for ever.
+///
+/// `intersect` names all three pieces, the loop between two flat surfaces
+/// square to the leaned cone's axis, one through its apex and one through
+/// `(0, 0, 4)`, and each branch on the far side of one of them. `walk` marches
+/// the loop, and refuses a run on a branch by name, whole or between two
+/// corners on it, since a march follows only a closed loop.
 #[test]
-fn a_narrower_cone_leaned_less_than_the_wider_ones_half_angle_is_refused_by_name() {
+fn a_narrower_cone_leaned_less_than_the_wider_ones_half_angle_crosses_it_in_a_loop_and_two_endless_branches()
+ {
     let turn = 0.3_f64;
+    let [sin, cos] = [turn.sin(), turn.cos()];
     let funnel = a_cone([0.0; 3], [0.0, 0.0, 1.0], 0.5);
-    let spout = a_cone(
-        [0.0, 4.0 * turn.sin(), 4.0 - 4.0 * turn.cos()],
-        [0.0, -turn.sin(), turn.cos()],
-        0.25,
-    );
-    assert_eq!(
-        named(&funnel, &spout),
-        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
-    );
+    let apex = [0.0, 4.0 * sin, 4.0 - 4.0 * cos];
+    let far_and_back = [-1.0, 1.0].map(|toward| {
+        [1.0, -1.0].map(|side| {
+            let e = [
+                side * 0.5_f64.sin(),
+                toward * cos * 0.5_f64.cos(),
+                toward * sin * 0.5_f64.cos(),
+            ];
+            let d = [0.25 * e[0], -sin + 0.25 * e[1], cos + 0.25 * e[2]];
+            where_a_spout_line_meets_the_funnel(
+                apex,
+                d,
+                if toward < 0.0 { f64::max } else { f64::min },
+            )
+        })
+    });
+    for way in [1.0, -1.0] {
+        let spout = a_cone(apex, [0.0, -way * sin, way * cos], 0.25);
+        let met = named(&funnel, &spout);
+        let Ok(SurfaceMeet::Curves(runs)) = &met else {
+            panic!("a loop and two branches, and not {met:?}");
+        };
+        assert_eq!(runs.len(), 3, "{runs:?}");
+        let (loops, branches): (Vec<&NamedRun>, Vec<&NamedRun>) =
+            runs.iter().partition(|run| the_pickers_of(run).len() == 2);
+        let [the_loop] = loops.as_slice() else {
+            panic!("one loop: {runs:?}");
+        };
+        let pickers = the_pickers_of(the_loop);
+        assert!(
+            pickers
+                .iter()
+                .all(|picker| matches!(picker, Picker::InFrontOfAFlatThrough(_))),
+            "{pickers:?}"
+        );
+        for (deflection, more_points_than) in [(0.01, 8), (f64::MAX, 2)] {
+            for along in [[&funnel, &spout], [&spout, &funnel]] {
+                assert_marched_on_both_and_on_its_side(
+                    the_loop,
+                    along,
+                    deflection,
+                    more_points_than,
+                    pickers,
+                );
+            }
+        }
+        assert_eq!(branches.len(), 2, "{runs:?}");
+        for branch in branches {
+            let [picker] = the_pickers_of(branch) else {
+                panic!("one flat surface: {branch:?}");
+            };
+            let on_it: Vec<&[PredicatePoint; 2]> = far_and_back
+                .iter()
+                .filter(|ends| {
+                    ends.iter()
+                        .all(|end| picker.side_of_point(*end) == Decision::Pos)
+                })
+                .collect();
+            let [corners] = on_it.as_slice() else {
+                panic!("one pair of corners on {branch:?}: {on_it:?}");
+            };
+            let between =
+                NamedRun::new(branch.run().clone(), **corners).expect("two ends that name places");
+            for run in [branch, &between] {
+                for along in [[&funnel, &spout], [&spout, &funnel]] {
+                    assert_eq!(
+                        walk(
+                            run,
+                            along,
+                            Deflection::of(0.01).expect("a length above zero"),
+                            &Policy::certified(),
+                            &mut ProvenanceLog::new()
+                        )
+                        .err(),
+                        Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+                        "{run:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn the_pickers_of(run: &NamedRun) -> &[Picker] {
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+        panic!("a piece picked out, and not {run:?}");
+    };
+    picked_by
+}
+
+/// Where the line out of `apex` along `d` meets `x² + y² = z²/4`, the funnel's
+/// form exactly, at the root `pick` takes.
+fn where_a_spout_line_meets_the_funnel(
+    apex: [f64; 3],
+    d: [f64; 3],
+    pick: fn(f64, f64) -> f64,
+) -> PredicatePoint {
+    let form = |p: [f64; 3], q: [f64; 3]| p[0] * q[0] + p[1] * q[1] - 0.25 * p[2] * q[2];
+    let [a, b, c] = [form(d, d), form(apex, d), form(apex, apex)];
+    let spread = (b * b - a * c).sqrt();
+    let t = pick((-b - spread) / a, (-b + spread) / a);
+    PredicatePoint::from(std::array::from_fn::<f64, 3, _>(|i| apex[i] + t * d[i]))
 }
 
 /// Two cones of slope one, the second the first turned `atan(15/8)` about the
