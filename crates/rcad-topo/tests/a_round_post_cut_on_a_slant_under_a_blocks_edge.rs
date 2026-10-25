@@ -1,5 +1,11 @@
 //! A round post cut on a slant, with a block's edge lying on the slant
 //! (Q2805, `docs/decisions.md` §422).
+//!
+//! The slant, the block's bottom and the block's side all hold the edge, so
+//! on the post's pipe the slant meets the pipe where the edge does twice over:
+//! once with the bottom and once with the side. Those two meets are one point,
+//! worked out two ways into one box, and every fuse was refused on their order
+//! until the three planes were read as holding one line.
 
 use core::f64::consts::PI;
 
@@ -11,67 +17,121 @@ const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference
 
 #[test]
 fn a_round_post_cut_on_a_slant_under_a_blocks_edge_answers_every_rule_either_way_round() {
-    let failed = every_rule_against_the_block(Post::Round);
+    let failed = every_rule_on_two_apart(
+        |model| a_box(model, [[-3.0, 3.0], [-3.0, 0.0], [2.0, 3.0]]),
+        6.0 * 3.0,
+        |model| {
+            let upright = model
+                .add_round_bar(1.0, 5.0, &Isometry::identity())
+                .expect("a bar");
+            a_post_cut_on_a_slant(model, upright)
+        },
+        PI * 2.0,
+    );
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
 #[test]
 fn a_square_post_cut_on_a_slant_under_a_blocks_edge_answers_every_rule_either_way_round() {
-    let failed = every_rule_against_the_block(Post::Square);
+    let failed = every_rule_on_two_apart(
+        |model| a_box(model, [[-3.0, 3.0], [-3.0, 0.0], [2.0, 3.0]]),
+        6.0 * 3.0,
+        |model| {
+            let upright = a_box(model, [[-1.0, 1.0], [-1.0, 1.0], [0.0, 5.0]]);
+            a_post_cut_on_a_slant(model, upright)
+        },
+        4.0 * 2.0,
+    );
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
-#[derive(Clone, Copy, Debug)]
-enum Post {
-    Round,
-    Square,
+/// The post standing from `z = 0`, cut on top by `z = 2 + y`, so its volume
+/// is its cross-section times 2. The block over `x ∈ [-3, 3]`, `y ∈ [-3, 0]`,
+/// `z ∈ [2, 3]` has its bottom edge `y = 0`, `z = 2` on that cut.
+fn a_post_cut_on_a_slant(model: &mut Model, upright: SolidKey) -> SolidKey {
+    let under_the_slant =
+        a_block_across_x(model, &[[-2.0, -1.0], [2.0, -1.0], [2.0, 4.0], [-2.0, 0.0]]);
+    one_solid(model, &[upright], &[under_the_slant], Rule::Intersection)
 }
 
-/// What goes wrong fusing the post with a block over `x ∈ [-3, 3]`,
-/// `y ∈ [-3, 0]`, `z ∈ [2, 3]`, every rule both ways round, as the fuses'
-/// names. The post stands from `z = 0` and is cut on top by `z = 2 + y`, so
-/// its volume is its cross-section times 2, and the block's bottom edge
-/// `y = 0`, `z = 2` lies on that cut: the two share no volume.
-fn every_rule_against_the_block(post: Post) -> Vec<String> {
-    let post_volume = match post {
-        Post::Round => PI * 2.0,
-        Post::Square => 4.0 * 2.0,
-    };
-    let block = 6.0 * 3.0;
+/// The same with a bar of radius `1.5` along `z` through `y = 0.5`, cut on
+/// top by `z = 0.5 + y`, and a slab over `x ∈ [-3, 3]`, `y ∈ [-0.3, 1.5]`,
+/// `z ∈ [2, 3]` whose edge `y = 1.5`, `z = 2` lies on that cut and meets the
+/// bar's pipe at `x = ±√1.25` (Q2722).
+#[test]
+fn a_round_bar_cut_on_a_slant_under_a_slabs_edge_answers_every_rule_either_way_round() {
+    let failed = every_rule_on_two_apart(
+        |model| a_box(model, [[-3.0, 3.0], [-0.3, 1.5], [2.0, 3.0]]),
+        6.0 * 1.8,
+        a_bar_cut_by_z_half_plus_y,
+        PI * 1.5 * 1.5 * 4.0,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The same with the part of the bar's disc with `x ≤ −1.3` cut through the
+/// slab (Q2722).
+#[test]
+fn a_round_bar_cut_on_a_slant_under_a_holed_slabs_edge_answers_every_rule_either_way_round() {
+    let r: f64 = 1.5;
+    let the_hole_across = r * r * (1.3 / r).acos() - 1.3 * (r * r - 1.3 * 1.3).sqrt();
+    let failed = every_rule_on_two_apart(
+        |model| {
+            let the_slab = a_box(model, [[-3.0, 3.0], [-0.3, 1.5], [2.0, 3.0]]);
+            let placed =
+                Isometry::translation(Vector::new(0.0, 0.5, -2.0)).expect("a finite shift");
+            let bar = model.add_round_bar(1.5, 6.0, &placed).expect("a bar");
+            let the_box = a_box(model, [[-2.0, -1.3], [-1.5, 2.5], [-3.0, 5.0]]);
+            let the_hole = one_solid(model, &[bar], &[the_box], Rule::Intersection);
+            one_solid(model, &[the_slab], &[the_hole], Rule::Difference)
+        },
+        6.0 * 1.8 - the_hole_across,
+        a_bar_cut_by_z_half_plus_y,
+        PI * 1.5 * 1.5 * 4.0,
+    );
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// A bar of radius `1.5` along `z` through `y = 0.5`, from `z = −3` up to
+/// `z = 0.5 + y`: its volume is its cross-section times `4`.
+fn a_bar_cut_by_z_half_plus_y(model: &mut Model) -> SolidKey {
+    let placed = Isometry::translation(Vector::new(0.0, 0.5, -3.0)).expect("a finite shift");
+    let bar = model.add_round_bar(1.5, 7.0, &placed).expect("a bar");
+    let under_the_slant = a_block_across_x(
+        model,
+        &[[-2.0, -4.0], [3.0, -4.0], [3.0, 3.5], [-2.0, -1.5]],
+    );
+    one_solid(model, &[bar], &[under_the_slant], Rule::Intersection)
+}
+
+/// What goes wrong fusing what `over` makes, of volume `over_volume`, with
+/// what `under` makes, of volume `under_volume`, every rule both ways round,
+/// as the fuses' names. The two share no volume.
+fn every_rule_on_two_apart(
+    over: impl Fn(&mut Model) -> SolidKey,
+    over_volume: f64,
+    under: impl Fn(&mut Model) -> SolidKey,
+    under_volume: f64,
+) -> Vec<String> {
     let mut failed = Vec::new();
     for rule in EVERY_RULE {
-        for post_first in [true, false] {
-            let by_hand = match (rule, post_first) {
-                (Rule::Union, _) => post_volume + block,
+        for under_first in [true, false] {
+            let by_hand = match (rule, under_first) {
+                (Rule::Union, _) => under_volume + over_volume,
                 (Rule::Intersection, _) => 0.0,
-                (Rule::Difference, true) => post_volume,
-                (Rule::Difference, false) => block,
+                (Rule::Difference, true) => under_volume,
+                (Rule::Difference, false) => over_volume,
                 _ => unreachable!("EVERY_RULE names three rules"),
             };
             let mut model = Model::new(Scale::millimetres(100.0).expect("a size"));
-            let the_block = a_box(&mut model, [[-3.0, 3.0], [-3.0, 0.0], [2.0, 3.0]]);
-            let upright = match post {
-                Post::Round => model
-                    .add_round_bar(1.0, 5.0, &Isometry::identity())
-                    .expect("a bar"),
-                Post::Square => a_box(&mut model, [[-1.0, 1.0], [-1.0, 1.0], [0.0, 5.0]]),
-            };
-            let under_the_slant = a_block_across_x(
-                &mut model,
-                &[[-2.0, -1.0], [2.0, -1.0], [2.0, 4.0], [-2.0, 0.0]],
-            );
-            let the_post = one_solid(
-                &mut model,
-                &[upright],
-                &[under_the_slant],
-                Rule::Intersection,
-            );
-            let (arguments, tools) = if post_first {
-                (vec![the_post], vec![the_block])
+            let the_one_over = over(&mut model);
+            let the_one_under = under(&mut model);
+            let (arguments, tools) = if under_first {
+                (vec![the_one_under], vec![the_one_over])
             } else {
-                (vec![the_block], vec![the_post])
+                (vec![the_one_over], vec![the_one_under])
             };
-            let asked = format!("{post:?} {rule:?} post_first={post_first}");
+            let asked = format!("{rule:?} under_first={under_first}");
             if let Some(wrong) = check(&mut model, &arguments, &tools, rule, by_hand) {
                 println!("{asked}: {wrong}");
                 failed.push(asked);
