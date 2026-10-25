@@ -7106,8 +7106,6 @@ print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(c
 if coq:
     coq.sort()
     print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "times", min(x[5] for x in coq), max(x[5] for x in coq))
-
-
 def other_lines(f):
     return [line for line in open(f).read().split("\n")
             if line and "assumed to be nonzero" not in line and not line.startswith(("Results:", "  "))]
@@ -7118,10 +7116,31 @@ warn = [f for f in os.listdir(".") if f.startswith("cyl_") and f.endswith((".out
 print("files with a line other than results and 'assumed to be nonzero':", sorted(warn))
 ```
 
-Still to do, in order: read `run3.txt` once it ends with `done` and run
-`tally3.py` again, for all 63 controls, all 63 `coqc` and `m` of 81 to 83;
-write 464.15 in 464.14's numbered form, 1 to 10, from the figures here and
-above; add 464.6's and 464.8's 7's lines for Q2680; and drop the Draft line.
+The block above is `tally3.py` byte for byte as it was run; an earlier copy
+here had two blank lines after the `if coq:` block that the file does not.
+
+**What the fifth lane read.** `run3.txt` ends with `done`, and `python3
+tally3.py` then prints `cases exit 0: 63 of 63`, `controls exit 1: 63 of 63`
+and `coq ok: 63 of 63`, the y bounds as above (9, 27 and 27 cases), the
+control bests `[-16, 16]` 9, `[-14, 14]` 27 and `[-10, 10]` 27, each case's
+best its own bound over `u / 2`, `coq smallest (8908, 33, 'uuc') largest
+(13908, 48, 'nns') times 145.5 194.2`, and no file with a line other than
+results and "assumed to be nonzero". The 9 cases at `8u` are those with two
+components `n`, the 27 at `7u` those with one, the 27 at `5u` those with none.
+`dbl coq -Bcoq exit 0 coqc exit 0 12.62s lines 217 hints 1`. On `value`,
+`b_cylv2_81 exit 1 542.42s`, best `[-1, 1]`; `b_cylv2_82 exit 0 447.87s` and
+`b_cylv2_83 exit 0 447.09s`, each printing `(y − Ex) / P12` within `9u`,
+`(value − y) / y` within `1b-53` and `y / P12` within `[-1, 1]`. So the
+doubled form proves the claim on `value` at `10u + 82u²` and not at `10u +
+81u²`, two `u²` above the code's `80`. The fifth lane started `gappa -Bcoq`
+and `coqc` on `b_cylv2_82.g` (its `run4.sh`, writing `cyl3/run4.txt`), and the
+budget came before it finished. `git log --oneline 2a7ca9e76..868f8c001` on
+`cylinder.rs`, `cascade.rs`, `three_surfaces.rs`, `validate.rs` and
+`rcad-geom`'s `lib.rs` prints nothing.
+
+Still to do, in order: read `run4.txt`; write 464.15 in 464.14's numbered
+form, 1 to 10, from the figures here and above; add 464.6's and 464.8's 7's
+lines for Q2680; and drop the Draft line.
 The rows 10 is to name: the zero branches (a difference, a direction
 component or the radius zero, the axis-aligned cylinder among them), which no
 script here covers; a restatement of `cylinder.rs:541-552`, whose `45*epsilon`
