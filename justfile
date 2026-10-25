@@ -19896,6 +19896,13 @@ check-land-selftest:
     [ "$(field rows_added)" = '["Q900 tier 5 sonnet: from/Q1 small a row the lane left, ending in §384"]' ] \
         || fail "rows_added is $(field rows_added), not the row's own tier 5 read back from docs/queue.md"
 
+    fixture class-first
+    printf '%s\n' add 5 sonnet justfile 'refuses/C a row the lane found, ending in §432' >"$at/lander/target/land-steps.txt"
+    run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lane whose add text opens with a class word did not merge"
+    [ "$(field rows_added)" = '["Q900 tier 5 sonnet: refuses/C from/Q1 a row the lane found, ending in §432"]' ] \
+        || fail "rows_added is $(field rows_added), and from/Q1 should land right after the leading class word refuses/C, not in front of it, where the fill reads it (§432.3)"
+
     fixture check-queue
     touch "$at/stub/check-queue-fails"
     run --steps target/land-steps.txt Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
