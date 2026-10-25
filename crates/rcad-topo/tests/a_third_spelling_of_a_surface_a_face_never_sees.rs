@@ -355,6 +355,130 @@ fn a_slab_with_a_d_shaped_hole_over_a_wedge_cut_from_a_bar_on_its_pipe_answers_e
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+#[test]
+fn probe_q2722_holed_slab_over_a_bar_cut_by_z_half_plus_y() {
+    let bar = PI * THE_PIPES_RADIUS * THE_PIPES_RADIUS * 4.0;
+    let failed = every_rule_for_a_holed_slab_over([2.0, 3.0], probe_q2722_bar, bar);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+fn probe_q2722_bar(model: &mut Model) -> SolidKey {
+    let placed =
+        Isometry::translation(Vector::new(0.0, THE_PIPES_AXIS_AT, -3.0)).expect("a finite shift");
+    let bar = model
+        .add_round_bar(THE_PIPES_RADIUS, 7.0, &placed)
+        .expect("a bar");
+    let under = a_block_across_x(
+        model,
+        &[[-2.0, -4.0], [3.0, -4.0], [3.0, 3.5], [-2.0, -1.5]],
+    );
+    one_solid(model, &[bar], &[under], Rule::Intersection)
+}
+
+#[test]
+fn probe_q2722_holed_slab_over_a_bar_cut_by_z_04_plus_y() {
+    let bar = PI * THE_PIPES_RADIUS * THE_PIPES_RADIUS * 3.9;
+    let failed = every_rule_for_a_holed_slab_over([2.0, 3.0], probe_q2722_bar_04, bar);
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+fn probe_q2722_bar_04(model: &mut Model) -> SolidKey {
+    let placed =
+        Isometry::translation(Vector::new(0.0, THE_PIPES_AXIS_AT, -3.0)).expect("a finite shift");
+    let bar = model
+        .add_round_bar(THE_PIPES_RADIUS, 7.0, &placed)
+        .expect("a bar");
+    let under = a_block_across_x(
+        model,
+        &[[-2.0, -4.0], [3.0, -4.0], [3.0, 3.4], [-2.0, -1.6]],
+    );
+    one_solid(model, &[bar], &[under], Rule::Intersection)
+}
+
+fn probe_q2722_touch(round: bool) {
+    let post = if round { PI * 2.0 } else { 4.0 * 2.0 };
+    let block = 6.0 * 3.0;
+    let mut failed = Vec::new();
+    for rule in EVERY_RULE {
+        for bar_first in [true, false] {
+            let by_hand = match (rule, bar_first) {
+                (Rule::Union, _) => post + block,
+                (Rule::Intersection, _) => 0.0,
+                (Rule::Difference, true) => post,
+                (Rule::Difference, false) => block,
+                _ => unreachable!(),
+            };
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a size"));
+            let the_block = a_box(&mut model, [[-3.0, 3.0], [-3.0, 0.0], [2.0, 3.0]]);
+            let upright = if round {
+                model
+                    .add_round_bar(1.0, 5.0, &Isometry::identity())
+                    .expect("a bar")
+            } else {
+                a_box(&mut model, [[-1.0, 1.0], [-1.0, 1.0], [0.0, 5.0]])
+            };
+            let under = a_block_across_x(
+                &mut model,
+                &[[-2.0, -1.0], [2.0, -1.0], [2.0, 4.0], [-2.0, 0.0]],
+            );
+            let the_post = one_solid(&mut model, &[upright], &[under], Rule::Intersection);
+            let (arguments, tools) = if bar_first {
+                (vec![the_post], vec![the_block])
+            } else {
+                (vec![the_block], vec![the_post])
+            };
+            let asked = format!("round={round} {rule:?} bar_first={bar_first}");
+            if let Some(wrong) = check(&mut model, &arguments, &tools, rule, by_hand) {
+                println!("{asked}: {wrong}");
+                failed.push(asked);
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+#[test]
+fn probe_q2722_touch_round() {
+    probe_q2722_touch(true);
+}
+
+#[test]
+fn probe_q2722_touch_square() {
+    probe_q2722_touch(false);
+}
+
+#[test]
+fn probe_q2722_plain_slab_over_a_bar_cut_by_z_half_plus_y() {
+    let bar = PI * THE_PIPES_RADIUS * THE_PIPES_RADIUS * 4.0;
+    let slab = 6.0 * 1.8;
+    let mut failed = Vec::new();
+    for rule in EVERY_RULE {
+        for bar_first in [true, false] {
+            let by_hand = match (rule, bar_first) {
+                (Rule::Union, _) => bar + slab,
+                (Rule::Intersection, _) => 0.0,
+                (Rule::Difference, true) => bar,
+                (Rule::Difference, false) => slab,
+                _ => unreachable!(),
+            };
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a size"));
+            let the_slab = a_box(&mut model, [[-3.0, 3.0], [-0.3, 1.5], [2.0, 3.0]]);
+            let the_bar = probe_q2722_bar(&mut model);
+            let (arguments, tools) = if bar_first {
+                (vec![the_bar], vec![the_slab])
+            } else {
+                (vec![the_slab], vec![the_bar])
+            };
+            let asked = format!("{rule:?} bar_first={bar_first}");
+            if let Some(wrong) = check(&mut model, &arguments, &tools, rule, by_hand) {
+                println!("{asked}: {wrong}");
+                failed.push(asked);
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// What goes wrong fusing a slab over `x ∈ [-3, 3]`, `y ∈ [-0.3, 1.5]` and
 /// `z`, with the part of the pipe's disc with `x ≤ -1.3` cut through it, with
 /// what `bar` makes, of volume `bar_volume` and sharing nothing with the slab,
