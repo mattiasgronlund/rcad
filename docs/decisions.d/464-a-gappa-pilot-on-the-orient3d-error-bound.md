@@ -5951,9 +5951,9 @@ And what is not a row:
 
 ### 464.15 The side of rcad-geom's cylinder
 
-*Draft, unfinished: the first three lanes of Q2680 wrote this, and a lane
-after them carries it on. Only the case with nothing zero is proved yet, on
-`y`.*
+*Draft, unfinished: the first four lanes of Q2680 wrote this, and a lane
+after them carries it on. The cases with no factor zero are proved on `y`,
+and the zero branches are not run.*
 
 Q2680 takes up `SIDE_OF_CYLINDER_ERROR_BOUND` in
 `crates/rcad-geom/src/cylinder.rs`, read at `2a7ca9e7`. `u` is `2⁻⁵³`, and the
@@ -6973,3 +6973,159 @@ for case in map("".join, itertools.product("ncsu", repeat=3)):
     if case != "nnn":
         write(f"c_{name}_half.g", make(case, B_HALF))
 ```
+
+**What the fourth lane ran.** `cylv.g` and `c_cylv_half.g` from `run2.sh`
+finished after the handover, on a load of about 43. `cylv.g` exits 1 in
+`541.97s`, best `[-1, 1]`, printing `(value − Ex) / P12` within
+`1.11022e-15`, `10u`, and the same `6u`. `c_cylv_half.g` exits 1 in
+`379.28s`, best `[-20, 20]`. So neither form of the claim on `value` proves at
+the code's `B`. `cylv2.g` doubled proves at `10u + 84u²`, and `m` of 81, 82 and
+83 were started in `run3.sh` and had not finished at this lane's handover.
+
+`dbl.g`, whole, exits 0 in `0.03s`, and its `gappa -Bcoq` and `coqc` exit 0, a
+proof of 217 lines with 1 hint. It prints nothing else:
+
+```gappa
+# dbl.g: a double added to itself rounds to itself, so the reach |h| + |k| of
+# a component whose halves are the same double h is 2 |h| exactly, a double.
+# Gappa's float has no top to its exponents, so this says nothing of overflow.
+@rnd = float<ieee_64, ne>;
+h = rnd(h_);
+{ |h| <= 1b1024 /\ |h| >= 1b-1074 -> rnd(|h| + |h|) - (|h| + |h|) in [0, 0] }
+|h| + |h| -> 2 * |h|;
+```
+
+Overflow is outside it: `2|h|` overflows only when `|h| ≥ 2¹⁰²³`, and then
+`v`, `P` and `eb` are infinite and `decide` refuses `eb` as not normal, which
+is 464.12's 7 argument on paper and was not run here.
+
+`run3.sh` (below) was started detached on a load of about 47 over 24 cores.
+`tally3.py` (below) read its output at 06:24, with the run not finished:
+
+- Each of the 63 cases other than `nnn` exits 0, in 65.74 to 190.10 s, at the
+  code's `B`. Each prints `(y − Ex) / P12` within `8.88178e-16` (9 cases),
+  `7.77156e-16` (27) or `5.55112e-16` (27), `8u`, `7u` or `5u`, all below
+  `cyl.g`'s `9u`. `P −/ Phat`, or `P −/ Phatx` where a reach square is `s` or
+  `u`, is within `u` to `6u`; `cyl_uuu.g`, whose `P` is `skin`, prints `skin`
+  against itself in `[0, 0]`.
+- No `.out` or `.bcoq` of the 63 has a line other than its results and
+  "assumed to be nonzero" warnings: no "not trivially equal" and no hint Gappa
+  calls unneeded.
+- 44 of the 63 controls at `u / 2` had finished, each exit 1, with bests
+  `[-16, 16]`, `[-14, 14]` or `[-10, 10]`, the relative bound over `u / 2`.
+- 18 of the 63 had run `gappa -Bcoq` and `coqc`, each exit 0, 8908 to 10580
+  lines with 33 hints, in 145.5 to 167.87 s each.
+
+So on `y` the bound holds at the code's constant wherever no factor is zero:
+with no component cancelling, and with any of them cancelling, its reach
+square normal, below the normals, or rounding to zero. The comment at
+`cylinder.rs:312-314` is false when a component cancels, and nothing wrong
+follows from it.
+
+`run3.sh`, whole:
+
+```sh
+#!/bin/bash
+# cylsplit.py's 63 cases other than nnn, each with gappa -Bcoq and coqc when
+# it proves, their 63 controls at u/2, dbl.g with coqc, and the claim on
+# value (cylv2.g doubled) at B = 10u + m u^2 for m of 81, 82 and 83, all at
+# once.
+cd "$(dirname "$0")"
+python3 cylsplit.py
+python3 vgen.py
+for m in 81 82 83; do
+  sed "s/^B = 10b-53 + 5b-102;\$/B = 10b-53 + ${m}b-106;/" cylv2.g > "b_cylv2_$m.g"
+done
+{
+  grep -c '^B = 10b-53 + 8[123]b-106;$' b_cylv2_81.g b_cylv2_82.g b_cylv2_83.g
+  ./one.sh dbl.g coq &
+  for f in cyl_*.g; do
+    [ "$f" = cyl_nnn.g ] && continue
+    ./one.sh "$f" coq &
+  done
+  for f in c_cyl_???_half.g; do
+    ./one1.sh "$f" &
+  done
+  for m in 81 82 83; do
+    T=1200 ./one1.sh "b_cylv2_$m.g" &
+  done
+  wait
+} > run3.txt 2>&1
+echo done >> run3.txt
+```
+
+`tally3.py`, whole:
+
+```python
+"""Tally run3.txt and the .out files of cylsplit.py's 63 cases: for each case
+its exit, the relative bound on y and on P that it prints, and its coqc line;
+for each control its exit and best. Prints one line per case, then counts.
+Run as: python3 tally3.py"""
+import collections
+import itertools
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+run = open("run3.txt").read()
+cases = ["".join(c) for c in itertools.product("ncsu", repeat=3) if "".join(c) != "nnn"]
+
+
+def short(out, goal):
+    m = re.search(re.escape(goal) + r" in \[[^{]*\{([^,]*),[^}]*\}, [^{]*\{([^,]*),", out)
+    return f"[{m.group(1)}, {m.group(2)}]" if m else "-"
+
+
+ybounds = collections.Counter()
+pbounds = collections.Counter()
+bests = collections.Counter()
+coq = []
+for c in cases:
+    out = open(f"cyl_{c}.out").read()
+    ex = re.search(rf"^cyl_{c} exit (\d+) ([\d.]+)s$", run, re.M)
+    cq = re.search(rf"^cyl_{c} coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$", run, re.M)
+    ctl = re.search(rf"^c_cyl_{c}_half exit (\d+) ([\d.]+)s$", run, re.M)
+    cout = open(f"c_cyl_{c}_half.out").read() if os.path.exists(f"c_cyl_{c}_half.out") else ""
+    best = re.search(r"best: (\[[^\]]*\])", cout)
+    y = short(out, "(y - Ex) / P12")
+    p = short(out, "P -/ Phatx") if "s" in c or "u" in c else short(out, "P -/ Phat")
+    ybounds[y] += 1
+    pbounds[p] += 1
+    bests[best.group(1) if best else "-"] += 1
+    if cq:
+        coq.append((int(cq.group(4)), int(cq.group(5)), c, cq.group(1), cq.group(2), float(cq.group(3))))
+    print(c, "exit", ex.group(1) if ex else "?", ex.group(2) if ex else "", "y", y, "P", p,
+          "coq", cq.groups() if cq else "-", "ctl", ctl.group(1) if ctl else "?", best.group(1) if best else "-",
+          "pointless" if "pointless" in out else "")
+print("y bounds", dict(ybounds))
+print("P bounds", dict(pbounds))
+print("control bests", dict(bests))
+print("cases exit 0:", len(re.findall(r"^cyl_\w\w\w exit 0 ", run, re.M)), "of", len(cases))
+print("controls exit 1:", len(re.findall(r"^c_cyl_\w\w\w_half exit 1 ", run, re.M)), "of", len(cases))
+print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(coq))
+if coq:
+    coq.sort()
+    print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "times", min(x[5] for x in coq), max(x[5] for x in coq))
+
+
+def other_lines(f):
+    return [line for line in open(f).read().split("\n")
+            if line and "assumed to be nonzero" not in line and not line.startswith(("Results:", "  "))]
+
+
+warn = [f for f in os.listdir(".") if f.startswith("cyl_") and f.endswith((".out", ".bcoq", ".coqc"))
+        and other_lines(f)]
+print("files with a line other than results and 'assumed to be nonzero':", sorted(warn))
+```
+
+Still to do, in order: read `run3.txt` once it ends with `done` and run
+`tally3.py` again, for all 63 controls, all 63 `coqc` and `m` of 81 to 83;
+write 464.15 in 464.14's numbered form, 1 to 10, from the figures here and
+above; add 464.6's and 464.8's 7's lines for Q2680; and drop the Draft line.
+The rows 10 is to name: the zero branches (a difference, a direction
+component or the radius zero, the axis-aligned cylinder among them), which no
+script here covers; a restatement of `cylinder.rs:541-552`, whose `45*epsilon`
+is `ε²` and whose own terms, `45 + 60 + 10 = 115` with the permanent's `6u`
+and `eb`'s rounding, are above its `80`; a restatement of `312-314` by the
+case split; and a run of the products `on_floats` checks below the normals, to
+test `308-310`'s claim, as 464.14's 6 did for the sphere.
