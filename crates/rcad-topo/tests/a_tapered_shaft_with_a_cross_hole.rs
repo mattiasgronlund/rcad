@@ -17,15 +17,18 @@
 //! since row Q2789 the walks are ordered round a loop off the cone's axis and
 //! each loop's side is read past the flat surface through the apex that picks
 //! it, on the cone and on the pipe alike. **What each fuse gives now is pinned
-//! here**, under every rule both ways round. Each shape answers three of its
+//! here**, under every rule both ways round. The union both ways and the cone
+//! less the other solid keep the cone's face with the loops as islands in it.
+//! On the tapered shaft that face is a band clear of the apex between two rims
+//! right round, which the mesher cuts across as it cuts a ring on a pipe, and
+//! every fuse answers since row Q2810. On the two pointed cones it is a cap
+//! round the apex, which the mesher refuses as a wire that will not lie flat,
+//! since it lets islands into a ball's cap alone, so each answers three of its
 //! six fuses: the intersection both ways round, and the other solid less the
-//! cone. The union both ways and the cone less the other solid keep the cone's
-//! face with the loops as islands in it, and the mesher refuses that face as a
-//! wire that will not lie flat, since it lets islands into a ball's cap and a
-//! pipe's ring alone: rows Q2810 and Q2811 turn those round. Each answer that
-//! comes back is certified, sound, and measures as the others that came back
-//! say it must: the union and the intersection together hold each solid once,
-//! and each solid less the other is that solid less the intersection.
+//! cone. Row Q2811 turns those round. Each answer that comes back is
+//! certified, sound, and measures as the others that came back say it must:
+//! the union and the intersection together hold each solid once, and each
+//! solid less the other is that solid less the intersection.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -43,19 +46,16 @@ const NOT_FLAT: &str = "a wire of this face will not lie flat in the face's own 
 /// has radius a half and runs along `y` at height ten, where the shaft has
 /// radius two and a half, so it pokes out six minus that each side.
 ///
-/// The intersection answers both ways round, and so does the pin less the
-/// shaft. The union both ways and the shaft less the pin keep the shaft's face
-/// with its two rims right round and the two loops as islands between them,
-/// which the mesher refuses as a wire that will not lie flat: row Q2810.
+/// Every fuse answers, both ways round. The union both ways and the shaft less
+/// the pin keep the shaft's face with its two rims right round and the two
+/// loops as islands between them, a band of the cone clear of its apex, and
+/// the mesher cuts it across as it cuts a ring on a pipe with islands in it.
+/// It refused that face as a wire that will not lie flat until row Q2810.
 #[test]
-fn a_tapered_shaft_fused_with_a_pin_through_it_answers_three_rules_of_six() {
+fn a_tapered_shaft_fused_with_a_pin_through_it_answers_every_rule() {
     assert_eq!(
         every_fuse_of(shaft_and_pin).refusals(),
-        [
-            [Some(NOT_FLAT), Some(NOT_FLAT)],
-            [None, None],
-            [Some(NOT_FLAT), None]
-        ]
+        [[None, None], [None, None], [None, None]]
     );
 }
 
