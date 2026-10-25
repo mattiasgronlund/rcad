@@ -9905,15 +9905,37 @@ impl Corners {
             .at
             .get(&exactly_at(corner.point))
             .copied()
-            .filter(|already| {
-                !the_planes_keep_them_apart(
-                    self.made_on_three_planes.get(already).copied(),
-                    planes,
-                    exactly_at(corner.point),
-                    &self.ends_on_three_planes,
-                    policy,
-                )
+            .filter(|&already| {
+                corner.moved_by_the_policy
+                    || self.made[already].moved_by_the_policy
+                    || !the_planes_keep_them_apart(
+                        self.made_on_three_planes.get(&already).copied(),
+                        planes,
+                        exactly_at(corner.point),
+                        &self.ends_on_three_planes,
+                    )
             });
+        if std::env::var_os("Q2744B").is_some() {
+            let show = |three: Option<[Plane; 3]>| match three {
+                Some(three) => three
+                    .map(|plane| {
+                        let [a, b, c, d] = plane.coefficients();
+                        format!("({a:.3},{b:.3},{c:.3},{d:.3})")
+                    })
+                    .join(" "),
+                None => "-".to_string(),
+            };
+            let on_triple = self.at.get(&exactly_at(corner.point)).copied();
+            eprintln!(
+                "B CORNER {:?} planes [{}] triple-has {:?} (made on [{}]) landed {:?} new-index {}",
+                corner.point,
+                show(planes),
+                on_triple,
+                show(on_triple.and_then(|at| self.made_on_three_planes.get(&at).copied())),
+                landed_on,
+                self.made.len()
+            );
+        }
         let index = match landed_on {
             Some(already) => {
                 self.made[already].wobble = self.made[already].wobble.max(corner.wobble);
@@ -10182,11 +10204,8 @@ fn the_planes_keep_them_apart(
     arrived: Option<[Plane; 3]>,
     landed_on: [u64; 3],
     ends_on_three_planes: &[([Plane; 3], [u64; 3])],
-    policy: &Policy,
 ) -> bool {
-    let (Some(made_on), Some(arrived), Strictness::Certified) =
-        (made_on, arrived, policy.strictness())
-    else {
+    let (Some(made_on), Some(arrived)) = (made_on, arrived) else {
         return false;
     };
     let made_on_names = made_on.map(name_of_a_plane);
