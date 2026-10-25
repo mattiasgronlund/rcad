@@ -206,7 +206,7 @@ pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 ///
 /// The half a search *can* pin is the **scaling**, and
 /// `what_an_endless_bend_strays_grows_with_the_size_it_was_worked_out_from` is
-/// that half: the same bend at four scales 32,768 apart uses the same 0.0078 of
+/// that half: the same bend at four scales 32,768 apart uses the same 0.0090 of
 /// its own bound at every one of them, which is what says the error really is
 /// proportional to `L` and not an absolute number that happens to hold once. A
 /// term dropped out of [`how_big_this_is`]'s list would pass the wide search and
@@ -2373,8 +2373,17 @@ struct Parabola {
 }
 
 impl AnEndlessBend for Parabola {
+    /// **`bend·along` is worked out before it is multiplied by `along` again**,
+    /// because it is a ratio of two lengths and `along·along` is a length
+    /// squared. An `along` under about `1e-154` squared to under `2^-1022`,
+    /// and one under about `1e-162` to nought, so a parabola that small was
+    /// walked onto the tangent at its vertex (Q2743). The ratio is no bigger
+    /// than one over the stretch [`AnEndlessBend::how_far_out_it_is_walked`]
+    /// walks, and since no coordinate of `bend` is past `f64::MAX` it
+    /// overflows only where `along` is over one and `bend·along²` is past
+    /// `f64::MAX` too.
     fn at(&self, along: f64) -> Point {
-        self.vertex + self.across * along + self.bend * (along * along)
+        self.vertex + self.across * along + (self.bend * along) * along
     }
 
     fn along_of(&self, point: Point) -> f64 {
