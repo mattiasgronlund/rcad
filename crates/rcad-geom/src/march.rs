@@ -348,7 +348,9 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 
 /// `seed` settled onto both surfaces, with an upper bound on how far off the
 /// crossing it still is that holds however the two surfaces bend, so long as
-/// neither bends tighter than a ball of the smaller of `radii`.
+/// neither bends tighter than a ball of the smaller of the `radii` read at the
+/// settled point. Read there because a cone's bend is how far the point is
+/// from its axis.
 ///
 /// # Why the bound [`settled_with_a_bound`] gives is not enough
 ///
@@ -391,7 +393,7 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 pub(crate) fn settled_with_a_bound_where_they_bend(
     surfaces: [&Surface; 2],
     seed: Point,
-    radii: [f64; 2],
+    radii: impl Fn(Point) -> [f64; 2],
 ) -> Result<(Point, f64)> {
     let settled = settled(surfaces, seed)?;
     let (flat, further_off, leaning) = the_flat_bound_and_what_it_is_made_of(surfaces, settled)?;
@@ -404,7 +406,7 @@ pub(crate) fn settled_with_a_bound_where_they_bend(
     let two = Interval::exactly(2.0);
     let reach = two * flat;
     let mut turning = Interval::exactly(0.0);
-    for radius in radii {
+    for radius in radii(settled) {
         let left = Interval::exactly(radius) - further_off - reach;
         if left.lo() <= 0.0 {
             return Err(cannot_bound());
@@ -1487,7 +1489,7 @@ mod tests {
             Point::new(0.6, 0.8, 1.5 * up),
         ] {
             let (settled, bent) =
-                settled_with_a_bound_where_they_bend([&ball, &pipe], seed, [1.0, thinner])
+                settled_with_a_bound_where_they_bend([&ball, &pipe], seed, |_| [1.0, thinner])
                     .expect("the two lean far enough apart for a bound");
             let (_, flat) = settled_with_a_bound([&ball, &pipe], seed).expect("a bound");
             let off = f64::hypot(
