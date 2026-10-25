@@ -4644,129 +4644,273 @@ the sum before `value`'s last rounding, which 3 proves.
   from it. What the check does is send them on to level 2. Whether
   `on_floats` keeps it is a row (10).
 
-**Run so far**, Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, with
-464.13's `one.sh`:
+**6. The squares below the normals.** 464.8's `o2s.g` splits on a product
+that `on_floats` does not check. Here there is none, since `on_floats` checks
+all four squares before it computes anything, and what the check lets through
+is a zero, as in 464.12's 6. What 5 asks about is what the check refuses: a
+square below the normals, which the comment on the check says makes this level
+certify a wrong sign. So each of the four squares is run in each of four
+states, and each case is a script:
 
-- `tinysq.g` exits 0, and its `gappa -Bcoq` and `coqc` exit 0, a proof of 397
-  lines with no hints:
+- `n`, normal: the square as `on_floats` rounds it is at least `2⁻¹⁰²²`;
+- `z`, of a zero factor, which the check lets through;
+- `s`, below the normals and rounding to a double that is not zero;
+- `u`, below the normals and rounding to zero.
 
-  ```gappa
-  # tinysq.g: a square of two doubles at or below 2^-1075 rounds to zero, and
-  # one above it rounds to at least 2^-1074, the smallest subnormal.
-  @rnd = float<ieee_64, ne>;
-  g = rnd(g_);
-  X = g * g;
-  { |g| <= 1b1024 /\ |g| >= 1b-1074
-    -> (X <= 1b-1075 -> rnd(X) in [0, 0]) /\ (X >= 1b-1075 /\ X <= 1b-1022 -> rnd(X) in [0, 1b-1022]) }
-  ```
+Those four cover every square. Write `X = g · g` for the square of a gap or
+the radius `g` before its rounding. If `g` is zero, the square is `z`.
+Otherwise `X ≥ 2⁻²¹⁴⁸`. If `rnd(X) ≥ 2⁻¹⁰²²` it is `n`. If not, `X <
+2⁻¹⁰²²`, since rounding is monotone and `2⁻¹⁰²²` is a double, and then `|g| <
+2⁻⁵¹¹`. Then `rnd(X)` is zero or, being a double that is not zero, at least
+`2⁻¹⁰⁷⁴`, which is `s`. `tinyzero.g` proves that a square below the normals
+that rounds to zero is at most `2⁻¹⁰⁷⁵`, which is the range a `u` script
+assumes. The other way round, `tinysq.g`'s first goal proves that every
+square at or below `2⁻¹⁰⁷⁵` rounds to zero. So the `0` a `u` script writes
+for the square is `rnd(X)` over the script's whole range of `X`, and the
+script is a claim about the code for every square in it.
 
-- A probe, `gx = rnd(px − cx)` with `|gx|` in `[2⁻¹⁰⁷⁴, 2⁻⁵¹¹]`, prints
-  `gx −/ Gx` within `±2⁻⁵³` with no split at `2⁻¹⁰²²`: a difference of two
-  doubles that lands below the normals is exact, and Gappa finds that itself,
-  as 464.9 found for a sum. So a gap whose square is below the normals keeps a
-  ratio hint.
+`tinysq.g`, whole, as the first lane ran it, exits 0, and its `gappa -Bcoq` and
+`coqc` exit 0, a proof of 397 lines with no hints:
 
-**The plan.** `skincases.py` is 464.12's `spherecases.py` with the
-`restates` lines naming `sphere.rs` `on_floats` and
-`SIDE_OF_SPHERE_ERROR_BOUND` at `05d44c66`, `B_CODE` the line above, and the
-prefix `skin`, plus two more states for each of the four squares besides
-normal (`n`) and zero (`z`):
+```gappa
+# tinysq.g: a square of two doubles at or below 2^-1075 rounds to zero, and
+# one above it rounds to at least 2^-1074, the smallest subnormal.
+@rnd = float<ieee_64, ne>;
+g = rnd(g_);
+X = g * g;
+{ |g| <= 1b1024 /\ |g| >= 1b-1074
+  -> (X <= 1b-1075 -> rnd(X) in [0, 0]) /\ (X >= 1b-1075 /\ X <= 1b-1022 -> rnd(X) in [0, 1b-1022]) }
+```
 
-- `s`, below the normals and rounding to a double that is not zero: `X = g *
-  g` in `[2⁻²¹⁴⁸, 2⁻¹⁰²²]`, `s = rnd(X)`, `|s| ≥ 2⁻¹⁰⁷⁴`. Its rounding is
-  carried as an amount, `d = (s − X) · carry`, as `planecases.py` carries
-  `dk`, and `e = X · W` with `W = carry − 1 / (rg · rg)`; for the radius `d =
+Its comment claims more than its second goal proves. "One above it rounds to
+at least `2^-1074`" is true, but the second goal proves only `rnd(X)` in `[0,
+2⁻¹⁰²²]`. What makes the comment true is `tinyzero.g` read the other way
+round, and that no double lies between zero and `2⁻¹⁰⁷⁴`. The cover above
+does not use the second goal, and the comment the scripts of 9 carry on their
+squares below the normals, "tinysq.g and tinyzero.g split it at 2^-1075", is
+true read with both. The script is kept here as it was run.
+
+`tinyzero.g`, whole, as the second lane ran it, exits 0, and its `gappa -Bcoq`
+and `coqc` exit 0, a proof of 190 lines with 1 hint:
+
+```gappa
+# tinyzero.g: a square of two doubles below the normals that rounds to zero
+# is at most 2^-1075. With tinysq.g that splits the squares below the normals
+# in two at 2^-1075: at or below it they round to zero, above it they do not.
+@rnd = float<ieee_64, ne>;
+g = rnd(g_);
+X = g * g;
+s = rnd(X);
+{ |g| <= 1b1024 /\ |g| >= 1b-1074 /\ X <= 1b-1022 /\ s in [0, 0] -> X in [0, 1b-1075] }
+X -> s - (s - X);
+```
+
+Gappa warns "no need for the rewriting at line 9 column 17" on it, in its
+output and in its `-Bcoq` print. Line 9 is its one hint, and column 17 is that
+line's `;`. `tinyzero_nohint.g`, the same script without the hint, exits 0,
+and its `gappa -Bcoq` and `coqc` exit 0, a proof of 175 lines with no hints.
+So the warning is right, and the hint is not needed. `tinyzero.g` is kept here
+as it was run.
+
+```gappa
+# tinyzero.g without its one hint, to read what Gappa's warning on that hint means.
+@rnd = float<ieee_64, ne>;
+g = rnd(g_);
+X = g * g;
+s = rnd(X);
+{ |g| <= 1b1024 /\ |g| >= 1b-1074 /\ X <= 1b-1022 /\ s in [0, 0] -> X in [0, 1b-1075] }
+```
+
+A gap whose square is below the normals still keeps a ratio hint.
+`relgap.g`, the first lane's probe, whole, prints `gx −/ Gx` within `±2⁻⁵³`
+with no split at `2⁻¹⁰²²`: a difference of two doubles that lands below the
+normals is exact, and Gappa finds that itself, as 464.9 found for a sum.
+
+```gappa
+@rnd = float<ieee_64, ne>;
+px = rnd(px_); cx = rnd(cx_);
+Gx = px - cx;
+gx = rnd(Gx);
+{ |px| <= 1b1024 /\ |cx| <= 1b1024 /\ |gx| >= 1b-1074 /\ |gx| <= 1b-511
+  -> gx -/ Gx in ? /\ (gx - Gx) / Gx in ? }
+```
+
+**How `skincases.py` writes a case.** `skincases.py` (9 below) is 464.12's
+`spherecases.py` with the `restates` lines naming `sphere.rs` `on_floats` and
+`SIDE_OF_SPHERE_ERROR_BOUND` at `05d44c66`, `B_CODE` the code's `B`, the
+prefix `skin`, and the states `s` and `u`. A case is named by four letters,
+one for each of the `x`, `y` and `z` gaps and the radius, so `skin.g` is
+`nnnn`, and 464.12's `sphere_zxr.g` is `skin_zznz.g` here.
+
+- An `s` square is `X = g * g` in `[2⁻²¹⁴⁸, 2⁻¹⁰²²]`, with `s = rnd(X)` at
+  least `2⁻¹⁰⁷⁴`. What its rounding cost is carried as an amount, `d = (s −
+  X) · carry`, as 464.8's `planecases.py` carries `dk`, and the rest as a
+  fraction, `e = X · W` with `W = carry − 1 / (rg · rg)`. For the radius `d =
   −(rr − X) · carry` and `W = 1 − carry`.
-- `u`, rounding to zero: `X` in `[2⁻²¹⁴⁸, 2⁻¹⁰⁷⁵]` and `s = 0;` by
-  `tinysq.g`. Its whole true square is the error, `−G · G` for a gap (with
-  the hint `G * G -> X / (rg * rg);`) and `r · r` for the radius, and it is
-  treated as a zero in the sums, with 464.12's hints such as `sx + sy -> sy;`.
+- A `u` square is `X` in `[2⁻²¹⁴⁸, 2⁻¹⁰⁷⁵]`, and the script writes `s = 0;`
+  for it, by `tinysq.g`. Its whole true square is its `d`, `−G · G` for a gap,
+  with the hint `G * G -> X / (rg * rg);`, and `r · r` for the radius. In the
+  sums it is a zero, with 464.12's hints such as `sx + sy -> sy;`.
+- Either kind also gets `|g| ≤ 2⁻⁵¹¹`, which follows from `X ≤ 2⁻¹⁰²²`, as
+  `relgap.g` has it.
 
-With no `s` or `u` term the script is 464.12's form. With one, the step is
-`planecases.py`'s: `(out − Ex) / eb -> ((Σ e) / Phatx) · (Phatx / P) · (P /
-eb) + (Σ d) / eb`, `Phatx` being `Phat` with `X` in place of each `s` term's
-square, `Phatx / P -> Phat / P + (Σ (X − s)) / P`, and `P -> eb / (B · (1 +
-(eb − B · P) / (B · P)));`. Each sum then has every addend zero (written
-unrounded) or one that is not zero, so no sum needs 464.13's cancelling split.
-A case with no `n` term has `P` at most `4 · 2⁻¹⁰²²`, so `eb` is not normal,
-and it should prove only from that contradiction, as `sphere_zxyzr.g` does;
-its control drops `eb` normal, and every other case's control is at `B = u /
-2`. All `4⁴` states on `y`, and those with an `n` term on `value`.
+With no `s` or `u` square the script is 464.12's for the same zero set, which
+`sameas.py` checks (2). With one, the step is `planecases.py`'s: `(out − Ex) /
+eb -> ((Σ e) / Phatx) · (Phatx / P) · (P / eb) + (Σ d) / eb`, `Phatx` being
+`Phat` with `X` in place of each `s` square and without each `u` one, `Phatx /
+P -> Phat / P + (Σ (X − s)) / P`, and `P -> eb / (B · (1 + (eb − B · P) / (B
+· P)));`. `skin_snnu.g`, whole in 9, is that form. Every square is at least
+zero, so a sum of them is zero only when each of its addends is, and the
+script then writes it unrounded. So no sum needs 464.13's split for a sum
+that cancels. That makes 256 cases on `y`, 175 with an `n` square and 81
+without, and the 175 with one again on `value`.
 
-**The second lane's draft.** `skincases.py`, below, writes 864 scripts: 256
-cases on `y` (175 with an `n`, 81 without), 175 on `value`, 350 controls at
-`u / 2`, 81 `_noeb` controls and `c_skin_nonormal.g` and `c_skin_noeb.g`. A
-case is named by four letters for `x`, `y`, `z` and `r`, so `skin.g` is
-`nnnn`, and 464.12's `sphere_zxr.g` is `skin_zznz.g` here. Two choices beyond
-the plan:
+**What they print.** Each of the 431 proves at the code's `B`, and its `gappa
+-Bcoq` and `coqc` exit 0 (8).
 
-- A gap or radius whose square is below the normals also gets `|g| <= 1b-511`,
-  which follows from `X <= 1b-1022`; `relgap.g` had it.
-- The cover of `s` and `u` needs the converse of `tinysq.g`: a square below
-  the normals that rounds to zero is at most `2⁻¹⁰⁷⁵`. `tinyzero.g` proves it,
-  and `gappa -Bcoq` and `coqc` exit 0, 190 lines, 1 hint:
+- The 15 cases of `n` and `z` alone print, on `y` and on `value`, what 464.12's
+  6 lists for the same zero sets, line for line. `skin_zzzz.g` prints
+  "remaining results are pointless", as `sphere_zxyzr.g` did.
+- The 160 cases on `y` with an `s` or `u` square and at least one `n`, 104 of
+  them with one `n`, 48 with two and 8 with three, print the relative part `(e)
+  / Phatx` within `u`, `3u`, `4u` or `5u` to the digits Gappa prints,
+  `1.11022e-16` to `5.55112e-16`. They print `P` at least `2^(-971.585)`, the
+  least `P` that `eb` normal allows, as 464.8's planes printed, and the `d` sum
+  within `±2^(-1073.41)` at the widest, which is `3 · 2⁻¹⁰⁷⁵`: three squares,
+  each moved at most `2⁻¹⁰⁷⁵` by its rounding. Where the `x` and `y` squares
+  are the only ones left, as in `skin_nnuu.g`, Gappa names `Phatx` by its sum
+  and prints `(ex + ey) / (sx + sy)` within `4.44089e-16`.
+- The same 160 on `value` print `(e) / Phatx` within each of `u` to `6u`,
+  `1.11022e-16` to `6.66134e-16`, and the same `P` and `d`.
+- The 80 cases with an `s` or `u` square and no `n` print "remaining results
+  are pointless, anything can be proved". With no square normal, `P` is at
+  most `4 · 2⁻¹⁰²²`, so `eb` is not normal and `decide` does not compare, and
+  the script proves from that contradiction alone (7).
 
-  ```gappa
-  # tinyzero.g: a square of two doubles below the normals that rounds to zero
-  # is at most 2^-1075. With tinysq.g that splits the squares below the normals
-  # in two at 2^-1075: at or below it they round to zero, above it they do not.
-  @rnd = float<ieee_64, ne>;
-  g = rnd(g_);
-  X = g * g;
-  s = rnd(X);
-  { |g| <= 1b1024 /\ |g| >= 1b-1074 /\ X <= 1b-1022 /\ s in [0, 0] -> X in [0, 1b-1075] }
-  X -> s - (s - X);
-  ```
+So with at least one square normal the bound holds at the code's `B`,
+whatever the other three are: normal, zero, or below the normals either way.
+On `y` there is room. The relative part takes at most `5u` of the permanent,
+against an `eb` of `6u` of it and more. `eb` normal makes `eb` at least
+`2⁻¹⁰²²`, so the `d` sum is at most `3 · 2⁻¹⁰⁷⁵ / 2⁻¹⁰²²`, which is `3u`, of
+`eb`, about `18u²` of the permanent. On `value` the relative part takes up to
+`6u` of the `6u + 48u²`, and the room the `d` sum leaves there was not argued:
+Gappa proves each case at the code's `B`, and the cases with an `s` or `u`
+square were not bisected. With no square normal, `eb` is not normal, and
+`decide` refuses whatever `on_floats` returns.
 
-`sameas.py` (scratch, not yet appended) checks that each of the 64 scripts
-`skincases.py` writes for a case of `n` and `z` alone is the one 464.12's
-`spherecases.py` writes for the same zero set, once the `restates` lines, the
-title line and the `B` line are dropped: it printed `64 pairs, 0 differ`.
+So without its check `on_floats` would hand `decide` a number in each case the
+check now refuses, and `decide` would certify no wrong sign from it: either
+`|y − Ex| ≤ eb`, and 464.4's step from `y` gives the sign, or `eb` is not
+normal and `decide` does not compare. The comment on the check (5) is false
+for any of the four squares, alone or together. What the check does is send
+those cases on to level 2. Whether `on_floats` keeps it is Q2766 (10).
 
-A trial of twelve, through `one.sh`, 12 at a time: `skin.g`, `skinv.g`,
-`skin_snnu.g`, `skin_nnns.g`, `skin_sssn.g`, `skinv_snnu.g`, `skin_unnn.g`,
-`skinv_nnnu.g` and `skin_ssss.g` exit 0, and `gappa -Bcoq` and `coqc` exit 0
-on each (567 to 5362 lines, 0 to 21 hints); `c_skin_ssss_noeb.g`,
-`c_skin_snnu_half.g` and `c_skinv_snnu_half.g` exit 1. `skin_snnu.g` prints
-`P` at least `375299968947541b-1020`, `2^(-971.585)` as 464.8's planes did,
-`(ex + ey + ez) / Phatx` within `5.55112e-16`, and `dx + r * r` within
-`[-2^(-1075), 2^(-1074)]`; its control fails with best `[-10, 10]`.
-`skin_ssss.g` prints "remaining results are pointless", and its `_noeb`
-control fails with `eb in [0, 3b-1072]`, best `[-inf, inf]`. No output in the
-trial says "not trivially equal"; each has only "assumed to be nonzero"
-warnings, as 464.12's did.
+**The shapes.** Which shapes reach these cases was not run. On paper: a
+square below the normals needs a gap or the radius under `2⁻⁵¹¹`, and two
+different doubles that close are both under `2⁻⁴⁵⁸`, since a double of at
+least `2⁻⁴⁵⁸` has no other double within `2⁻⁵¹¹` of it. So the point and the
+centre are both under `2⁻⁴⁵⁸` on that axis, or the radius is under `2⁻⁵¹¹`. No
+input was built, since every case proves and there is no wrong sign to find
+either way. The queue holds one such shape, Q2518 (refuses/D), a ball of
+radius `2⁻⁵²⁸` that `Sphere::side_of` refuses. Each of its squares is zero or
+near `2⁻¹⁰⁵⁶`, so it is a case with no `n`: `eb` is not normal, and dropping
+the check would not answer it.
 
-**The third lane's run, not yet written up.** `runall.sh` ran all 864
-scripts through `one.sh`, 16 at a time, at a load of 40 to 55 over 24 cores,
-and `collect.py`, `summarize.py`, `brief.py` and `pairs.py` read the outputs
-(all four in the scratch directory the report names, to be appended in 9):
+**7. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each of the 350 scripts of 6 with an `n` square
+was run again at `B = u / 2`, written `B = 1b-54;`, as `c_<name>_half.g`. Each
+fails, exit 1, with a best that is the relative bound it printed in 6 over `u
+/ 2`. `pairs.py` (9) checks each and prints `350 controls at u/2, 0 whose best
+is not the relative bound over u/2`. For the 30 of `n` and `z` alone the bests
+are 464.12's 7. On `y` with an `s` or `u` they are `[-2, 2]`, `[-6, 6]`, `[-8,
+8]` and `[-10, 10]`, and on `value` every even width from `[-2, 2]` to `[-12,
+12]`. These controls print `P` at least `2^(-968)`, since `eb` normal asks
+more of `P` at a smaller `B`. With 3 and 4's failures at `5u` and `6u`, that
+shows none of them proved from a contradiction.
 
-- `431 proofs, 433 controls, 864 runs in run.log, 431 coq lines`. Every proof
-  exits 0, with `gappa -Bcoq` and `coqc` exit 0. Every control exits 1 but
-  `c_skin_noeb.g`, which proves, as 464.12's `c_sphere_noeb.g` did.
-- The 15 cases of `n` and `z` alone on `y`, and on `value`, print what
-  464.12's 6 lists for the same zero sets; `skin_zzzz.g` and the 80 other
-  cases with no `n` print "remaining results are pointless".
-- The 160 cases on `y` with an `s` or `u` and at least one `n` print `(e) /
-  Phatx` within `1.11022e-16` to `5.55112e-16`, `P` at least `2^(-971.585)`,
-  and the `d` sum within `±2^(-1073.41)` at the widest, `3 · 2⁻¹⁰⁷⁵`. The 160
-  on `value` print `(e) / Phatx` within `1.11022e-16` to `6.66134e-16`, the
-  same `P` and `d`.
-- `pairs.py`: `350 controls at u/2, 0 whose best is not the relative bound
-  over u/2`. The 80 `_noeb` controls with an `s` or `u` and no `n` fail with
-  best `[-inf, inf]`, printing `eb` within `[0, 0]` up to `[0, 9b-1074]`.
-  `c_skin_nonormal.g` fails with best `[-4.2731e+909, 4.2731e+909]`.
-- Gappa took 0.07 to 48.00 s on a proof and 0.08 to 155.79 s on a control;
-  `gappa -Bcoq` and `coqc` together 1.20 to 54.56 s. `skin.v` is 4047 lines
-  with 18 hints, `skinv.v` 4186 with 19, `skin_zzzz.v` 366 with 2,
-  `skin_uuuu.v` 301 with 2, the largest `skin_snus.v`, 6111 lines; 0 to 21
-  hints. `skin.g`'s `gappa -Bcoq` prints 59 "assumed to be nonzero" lines and
-  `skinv.g`'s 66. The one other line in any output is "Warning: no need for
-  the rewriting at line 9 column 17", in a file not yet named.
-- `bisect.py`: `smallest: 5u + 28u^2 proves, 5u + 27u^2 fails` and
-  `smallest: 6u + 30u^2 proves, 6u + 29u^2 fails`.
+- The 81 `_noeb` controls, `c_skin_zzzz_noeb.g` and one for each of the 80
+  cases with an `s` or `u` and no `n`, drop `eb` normal and the lemma line it
+  gives. Each fails, best `[-inf, inf]`, printing `eb` in `[0, 0]`, `[0,
+  3b-1074]`, `[0, 3b-1073]`, `[0, 3b-1072]` or `[0, 9b-1074]`, so at most `12
+  · 2⁻¹⁰⁷⁴`. What proves those 81 is the contradiction with `eb` normal and
+  nothing else, as with `sphere_zxyzr.g`.
+- `c_skin_nonormal.g` is `skin.g` with the four `product_is_normal`
+  hypotheses dropped, and the four lemma lines they give. It fails, best
+  `[-4.2731e+909, 4.2731e+909]`. So a script of this kind catches a missing
+  check, as 464.4's 3, 464.8's 4, 464.12's 7 and 464.13's 7 did. That does not
+  undo 6: without those hypotheses the script has no case split, and 6 shows
+  that with one each case proves.
+- `c_skin_noeb.g` is `skin.g` without `eb` normal and without the lemma line
+  it gives. It proves, printing `(y − Ex) / Phat` within `5u` and `P −/ Phat`
+  within `3u`, as `c_sphere_noeb.g` did, and how Gappa gets past `eb`'s
+  rounding was not traced. 464.12's 7 argues it on paper, and the same
+  argument here is not run either: four squares each at least `2⁻¹⁰²²` put
+  `P` at least `2⁻¹⁰²⁰` and `B · P` at least `6 · 2⁻¹⁰⁷³`, which is `24 ·
+  2⁻¹⁰⁷⁵`. Rounding moves that by at most `2⁻¹⁰⁷⁵`, a twenty-fourth of it, and
+  `5u` of the permanent over twenty-three twenty-fourths of `6u` of it is about
+  `0.87`. `decide` still checks that `eb` is normal, and 464.12's 7 argues on
+  paper that this check keeps every intermediate finite. `on_floats` is the
+  same arithmetic (2), so that carries over.
 
-`skincases.py`, as the second lane left it:
+**8. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0 from 464.5's nix block, accept
+each of the 431 scripts that prove, and `tinysq.g`, `tinyzero.g` and
+`tinyzero_nohint.g`: exit 0 each, the two together in 1.20 to 54.56 s on each
+of the 431 in the third lane's run, on a load of 40 to 55 over 24 cores. Gappa
+does not write the same proof each run (464.4), so the sizes are that run's.
+`skin.g`'s proof is 4047 lines with 18 hints, `skinv.g`'s 4186 with 19, and
+`skin_zzzz.g`'s 366 with 2, as `sphere_zxyzr.g`'s was. The others are 301 to
+6111 lines with 0 to 21 hints, the smallest `skin_uuuu.v` with 2 and the
+largest `skin_snus.v` with 18; `skin_ssss.v` is 567 lines with none.
+`tinysq.g`'s is 397 lines with none, `tinyzero.g`'s 190 with 1 and
+`tinyzero_nohint.g`'s 175 with none. Each hint enters the Coq file as a
+hypothesis with no condition attached, as in 464.4, so each proof stands on
+its hints and on what Gappa took to be nonzero: `skin.g`'s `gappa -Bcoq`
+prints 59 lines of the form "has been assumed to be nonzero when checking a
+rewriting rule", and `skinv.g`'s 66, as `sphere.g`'s and `spherev.g`'s did.
+The one other line in any output or `-Bcoq` print is `tinyzero.g`'s warning
+that its hint is not needed (6). None says "not trivially equal", which
+464.12's 6 met without its hints for a zero, and no `coqc` printed anything.
+`field` has not been run on these hints (464.10).
+
+**9. The scripts.** `skincases.py` writes 864 scripts: `skin.g`, `skinv.g`,
+the 429 other cases of 6, the 350 controls at `u / 2`, the 81 `_noeb`
+controls and the two other controls of 7. After the runs, the fifth lane ran
+it again in a fresh directory, and it wrote all 864 byte for byte as they were
+run. To run them again, save the nix block of 464.5 as `gappalib18.nix` and
+`skincases.py` beside it, and then:
+
+```sh
+python3 skincases.py
+nx="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
+pin=github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe
+$nx shell $pin#gappa --command gappa -Eprecision=200 skin.g
+$nx shell $pin#gappa --command gappa -Eprecision=200 -Bcoq skin.g > skin.v
+gl=$($nx build --impure --no-link --print-out-paths -f gappalib18.nix)
+fl=$($nx build --no-link --print-out-paths $pin#coqPackages_8_20.flocq)
+COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+  $nx shell $pin#coqPackages_8_20.coq --command coqc skin.v
+```
+
+and the same for every other file it writes, and for the four scripts of 6.
+A script that proves exits 0; a control must exit 1. What the third lane ran
+is `runall.sh` (below), which runs each through 464.13's `one.sh`, the same
+bytes as 464.13's 9 holds, 16 at a time. In that run Gappa took 0.07 to 48.00
+s on each script that proves and 0.08 to 155.79 s on each control.
+
+`collect.py`, `brief.py`, `summarize.py` and `pairs.py`, below, read
+`run.log` and the outputs, and print the figures 6 to 8 give: `collect.py`
+the counts, the exits, the times and the sizes, `brief.py` and `summarize.py`
+the groups of 6, and `pairs.py` the check of 7 and the lines of 8 that are not
+a result. `sameas.py`, below, checks 2's claim, with 464.12's
+`spherecases.py`'s scripts in `ref/`, and prints `64 pairs, 0 differ`.
+
+The smallest `B`s of 3 and 4 come from `bisect.py`, which is 464.13's with
+one line changed, `B_CODE` the code's `B` here. `bisects.sh` ran it as
+`python3 bisect.py skin.g 5 48` and `python3 bisect.py skinv.g 6 48`. Both
+are whole at the end of this part.
+
+`skincases.py`, whole, as the second lane wrote it and the third ran it:
 
 ```python
 """Write skin.g, HowFarFromTheSkin::on_floats and SIDE_OF_SPHERE_ERROR_BOUND
