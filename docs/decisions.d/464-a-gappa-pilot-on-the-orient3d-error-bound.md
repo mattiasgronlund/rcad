@@ -7339,36 +7339,273 @@ warn = [f for f in os.listdir(".") if f.startswith("cyl_") and f.endswith((".out
 print("files with a line other than results and 'assumed to be nonzero':", sorted(warn))
 ```
 
-The block above is `tally3.py` byte for byte as it was run; an earlier copy
-here had two blank lines after the `if coq:` block that the file does not.
+After its line for each case, `python3 tally3.py` prints:
 
-**What the fifth lane read.** `run3.txt` ends with `done`, and `python3
-tally3.py` then prints `cases exit 0: 63 of 63`, `controls exit 1: 63 of 63`
-and `coq ok: 63 of 63`, the y bounds as above (9, 27 and 27 cases), the
-control bests `[-16, 16]` 9, `[-14, 14]` 27 and `[-10, 10]` 27, each case's
-best its own bound over `u / 2`, `coq smallest (8908, 33, 'uuc') largest
-(13908, 48, 'nns') times 145.5 194.2`, and no file with a line other than
-results and "assumed to be nonzero". The 9 cases at `8u` are those with two
-components `n`, the 27 at `7u` those with one, the 27 at `5u` those with none.
-`dbl coq -Bcoq exit 0 coqc exit 0 12.62s lines 217 hints 1`. On `value`,
-`b_cylv2_81 exit 1 542.42s`, best `[-1, 1]`; `b_cylv2_82 exit 0 447.87s` and
-`b_cylv2_83 exit 0 447.09s`, each printing `(y − Ex) / P12` within `9u`,
-`(value − y) / y` within `1b-53` and `y / P12` within `[-1, 1]`. So the
-doubled form proves the claim on `value` at `10u + 82u²` and not at `10u +
-81u²`, two `u²` above the code's `80`. The fifth lane's `run4.sh`, `one.sh`'s
-`coq` step alone with each timeout at 1500 s, prints `b_cylv2_82 coq -Bcoq
-exit 0 coqc exit 0 105.45s lines 19054 hints 81`, and its `.bcoq` and `.coqc`
-hold nothing but the results and "assumed to be nonzero" lines. `git log --oneline 2a7ca9e76..868f8c001` on
-`cylinder.rs`, `cascade.rs`, `three_surfaces.rs`, `validate.rs` and
-`rcad-geom`'s `lib.rs` prints nothing.
+```text
+y bounds {'[-8.88178e-16, 8.88178e-16]': 9, '[-7.77156e-16, 7.77156e-16]': 27, '[-5.55112e-16, 5.55112e-16]': 27}
+P bounds {'[-6.66134e-16, 6.66134e-16]': 14, '[-5.55112e-16, 5.55112e-16]': 19, '[-4.44089e-16, 4.44089e-16]': 9, '[-3.33067e-16, 3.33067e-16]': 10, '[-2.22045e-16, 2.22045e-16]': 3, '[-1.11022e-16, 1.11022e-16]': 7, '-': 1}
+control bests {'[-16, 16]': 9, '[-14, 14]': 27, '[-10, 10]': 27}
+cases exit 0: 63 of 63
+controls exit 1: 63 of 63
+coq ok: 63 of 63
+coq smallest (8908, 33, 'uuc') largest (13908, 48, 'nns') times 145.5 194.2
+files with a line other than results and 'assumed to be nonzero': []
+```
 
-Still to do, in order: append `run4.sh` whole; write 464.15 in 464.14's numbered
-form, 1 to 10, from the figures here and above; add 464.6's and 464.8's 7's
-lines for Q2680; and drop the Draft line.
-The rows 10 is to name: the zero branches (a difference, a direction
-component or the radius zero, the axis-aligned cylinder among them), which no
-script here covers; a restatement of `cylinder.rs:541-552`, whose `45*epsilon`
-is `ε²` and whose own terms, `45 + 60 + 10 = 115` with the permanent's `6u`
-and `eb`'s rounding, are above its `80`; a restatement of `312-314` by the
-case split; and a run of the products `on_floats` checks below the normals, to
-test `308-310`'s claim, as 464.14's 6 did for the sphere.
+The one `-` among the `P` bounds is `cyl_uuu.g`'s, whose goal is `skin`
+against itself (6).
+
+`t_axis.g`, whole:
+
+```gappa
+# One component of cyl.g alone: its square against the true one, over its
+# reach squared, to time Gappa on three pieces.
+@rnd = float<ieee_64, ne>;
+py = rnd(py_); pz = rnd(pz_);
+oy = rnd(oy_); oz = rnd(oz_);
+dy = rnd(dy_); dz = rnd(dz_);
+Fy = py - oy; Fz = pz - oz;
+fy = rnd(Fy); fz = rnd(Fz);
+hx = rnd(fy * dz); kx = rnd(fz * dy);
+Qx = hx - kx; qx = rnd(Qx);
+sx = rnd(qx * qx);
+Cx = Fy * dz - Fz * dy;
+rfy = fy / Fy; rfz = fz / Fz;
+rhx = hx / (fy * dz); rkx = kx / (fz * dy);
+rqx = qx / Qx; rsx = sx / (qx * qx);
+Kx = rqx * rqx * rsx;
+ax = 1 / (rfy * rhx); bx = 1 / (rfz * rkx);
+WHx = Kx - ax * ax; WKx = Kx - bx * bx; WXx = Kx - ax * bx;
+cHx = |hx| * |hx|; cKx = |kx| * |kx|; cXx = 2 * |hx| * |kx|;
+eHx = hx * hx * WHx; eKx = kx * kx * WKx; eXx = -(2 * hx * kx * WXx);
+P3 = cHx + cKx + cXx;
+{
+     |py| <= 1b1024 /\ |pz| <= 1b1024 /\ |oy| <= 1b1024 /\ |oz| <= 1b1024
+  /\ |dy| <= 1b1024 /\ |dz| <= 1b1024
+  /\ |fy| >= 1b-1074 /\ |fz| >= 1b-1074 /\ |dy| >= 1b-1074 /\ |dz| >= 1b-1074
+  /\ |qx| >= 1b-1074
+  /\ |hx| >= 1b-1022 /\ |kx| >= 1b-1022 /\ |sx| >= 1b-1022
+  /\ hx -/ fy * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ kx -/ fz * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sx -/ qx * qx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hx / |hx| in [-1, 1] /\ kx / |kx| in [-1, 1]
+->
+  (sx - Cx * Cx) / P3 in ?
+}
+fy / Fy -> 1 + (fy - Fy) / Fy;
+fz / Fz -> 1 + (fz - Fz) / Fz;
+hx / (fy * dz) -> 1 + (hx - fy * dz) / (fy * dz);
+kx / (fz * dy) -> 1 + (kx - fz * dy) / (fz * dy);
+qx / Qx -> 1 + (qx - Qx) / Qx;
+sx / (qx * qx) -> 1 + (sx - qx * qx) / (qx * qx);
+(sx - Cx * Cx) / P3 -> ((P3 + (sx - Cx * Cx)) - P3) / P3;
+P3 + (sx - Cx * Cx) -> (cHx + eHx) + (cKx + eKx) + (cXx + eXx);
+(cHx + eHx) - cHx -> eHx;
+(cKx + eKx) - cKx -> eKx;
+(cXx + eXx) - cXx -> eXx;
+eHx / cHx -> (hx / |hx|) * (hx / |hx|) * WHx;
+eKx / cKx -> (kx / |kx|) * (kx / |kx|) * WKx;
+eXx / cXx -> -((hx / |hx|) * (kx / |kx|) * WXx);
+```
+
+`t_perm2.g`, whole:
+
+```gappa
+# The permanent alone: six halves, each a normal double, and skin a normal
+# double; P as on_floats rounds it against Phat with no rounding of its own.
+@rnd = float<ieee_64, ne>;
+hx = rnd(hx_); kx = rnd(kx_); hy = rnd(hy_); ky = rnd(ky_); hz = rnd(hz_); kz = rnd(kz_);
+skin = rnd(skin_);
+Nx = |hx| + |kx|; Ny = |hy| + |ky|; Nz = |hz| + |kz|;
+nx = rnd(Nx); ny = rnd(Ny); nz = rnd(Nz);
+vx = rnd(nx * nx); vy = rnd(ny * ny); vz = rnd(nz * nz);
+V01 = vx + vy; v01 = rnd(V01);
+V012 = v01 + vz; v012 = rnd(V012);
+PP = v012 + skin; P = rnd(PP);
+Phat = Nx * Nx + Ny * Ny + Nz * Nz + skin;
+{
+     |hx| <= 1b1024 /\ |kx| <= 1b1024 /\ |hy| <= 1b1024
+  /\ |ky| <= 1b1024 /\ |hz| <= 1b1024 /\ |kz| <= 1b1024 /\ |skin| <= 1b1024
+  /\ |hx| >= 1b-1022 /\ |kx| >= 1b-1022 /\ |hy| >= 1b-1022
+  /\ |ky| >= 1b-1022 /\ |hz| >= 1b-1022 /\ |kz| >= 1b-1022
+  /\ skin >= 1b-1022
+  /\ vx -/ nx * nx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vy -/ ny * ny in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vz -/ nz * nz in [-4503599627370497b-105, 4503599627370497b-105]
+->
+  P -/ Phat in ?
+}
+```
+
+`one.sh` is 464.13's, whole in its 9. `one1.sh`, whole:
+
+```sh
+#!/bin/bash
+# one.sh with the timeout taken from T (default 600) and without coq, for
+# trial runs.
+cd "$(dirname "$0")"
+g=/nix/store/0ihij0570a325g02l4wnf0idk8vqxr9b-gappa-1.8.0/bin/gappa
+f=$1
+n=${f%.g}
+start=$(date +%s.%N)
+timeout "${T:-600}" "$g" -Eprecision=200 "$f" > "$n.out" 2>&1
+code=$?
+end=$(date +%s.%N)
+printf '%s exit %d %.2fs\n' "$n" "$code" "$(echo "$end - $start" | bc)"
+grep -v 'assumed to be nonzero' "$n.out" | head -40 | sed "s/^/  $n: /"
+```
+
+`par.sh`, whole, which ran the nine `b_cyl_<m>.g` of 3 for `m` of 61 to 69:
+
+```sh
+#!/bin/bash
+# Run each named script through one.sh at once, with a timeout in seconds
+# as the first argument, and wait for all of them.
+cd "$(dirname "$0")"
+t=$1
+shift
+for f in "$@"; do
+  T=$t ./one1.sh "$f" &
+done
+wait
+```
+
+`run4.sh`, whole:
+
+```sh
+#!/bin/bash
+# one.sh with coq on b_cylv2_82.g, the smallest B that proves the claim on
+# value, with each step's timeout at 1500 s instead of 600, since the Gappa
+# run alone took 447 s in run3.sh.
+cd "$(dirname "$0")"
+g=/nix/store/0ihij0570a325g02l4wnf0idk8vqxr9b-gappa-1.8.0/bin/gappa
+coqc=/nix/store/cgfd855dwk38jxngg5wdvysdjjn2wv3i-coq-8.20.1/bin/coqc
+export COQPATH=/nix/store/1rqb30ra496k5zpw9aji329zn00rjggv-coq8.20-gappalib-1.8.0/lib/coq/8.20/user-contrib:/nix/store/p3ka5vy0zshbknhc9pphsffxxwfkcwq4-coq8.20-flocq-4.2.2/lib/coq/8.20/user-contrib
+n=b_cylv2_82
+{
+  start=$(date +%s.%N)
+  timeout 1500 "$g" -Eprecision=200 -Bcoq "$n.g" > "$n.v" 2> "$n.bcoq"
+  bcode=$?
+  timeout 1500 "$coqc" "$n.v" > "$n.coqc" 2>&1
+  ccode=$?
+  end=$(date +%s.%N)
+  printf '%s coq -Bcoq exit %d coqc exit %d %.2fs lines %d hints %d\n' "$n" "$bcode" "$ccode" \
+    "$(echo "$end - $start" | bc)" "$(wc -l < "$n.v")" "$(grep -c '^Hypothesis a[0-9]' "$n.v")"
+  echo done
+} > run4.txt 2>&1
+```
+
+`same.py`, whole:
+
+```python
+"""Check that each script 464.15 appends whole is byte for byte the file that
+was run, in cyl3/ or, for run1.sh, in cyl2/ beside it, and for the first
+lane's probes t_axis.g and t_perm2.g in cyl/ beside it; that one.sh is 464.13's
+block; and that cylsplit.py, cylcases.py and vgen.py, run again in fresh
+directories from the appended text, write what was run, in cyl3/ for the third
+lane's arguments and in cyl2/ for run1.sh's.
+Run as: python3 same.py <doc> <cyl3 dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, cyl3 = sys.argv[1], sys.argv[2]
+cyl2 = os.path.join(cyl3, "..", "cyl2")
+text = open(doc).read()
+start = text.index("### 464.15")
+sec = text[start:]
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.15:", len(blocks))
+
+# Which appended block is which file: by its first lines. m2.g and m3.g share
+# their first twelve, and only m3.g defines the doubled pieces dHx.
+marks = {
+    "cyl.g": "# restates: crates/rcad-geom/src/cylinder.rs on_floats at 2a7ca9e7\n# restates: crates/rcad-geom/src/cylinder.rs cross_product_halves_if_normal",
+    "cylcases.py": '"""Write the scripts of 464.15 from cyl.g',
+    "run1.sh": "#!/bin/bash\n# First batch of 464.15",
+    "vgen.py": '"""Probes for the claim on value',
+    "cylsplit.py": '"""Write cyl.g\'s case split',
+    "run2.sh": "#!/bin/bash\n# The claim on value two ways",
+    "run3.sh": "#!/bin/bash\n# cylsplit.py's 63 cases",
+    "tally3.py": '"""Tally run3.txt',
+    "dbl.g": "# dbl.g:",
+    "m2.g": "@rnd = float<ieee_64, ne>;\nhx = rnd(hx_); kx = rnd(kx_); skin = rnd(sk_);",
+    "m3.g": "@rnd = float<ieee_64, ne>;\nhx = rnd(hx_); kx = rnd(kx_); skin = rnd(sk_);",
+    "one1.sh": "#!/bin/bash\n# one.sh with the timeout taken from T",
+    "par.sh": "#!/bin/bash\n# Run each named script through one.sh at once",
+    "run4.sh": "#!/bin/bash\n# one.sh with coq on b_cylv2_82.g",
+    "same.py": '"""Check that each script 464.15 appends whole',
+    "t_axis.g": "# One component of cyl.g alone",
+    "t_perm2.g": "# The permanent alone",
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        if name in ("m2.g", "m3.g") and (name == "m3.g") != ("dHx" in body):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    if name == "same.py":
+        path = os.path.abspath(__file__)
+    elif name == "run1.sh":
+        path = os.path.join(cyl2, name)
+    elif name.startswith("t_"):
+        path = os.path.join(cyl3, "..", "cyl", name)
+    else:
+        path = os.path.join(cyl3, name)
+    if not os.path.exists(path):
+        print(name, "appended, no file to compare")
+        continue
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+s13 = text[text.index("### 464.13"):text.index("### 464.14")]
+one = [body for lang, body in FENCED.findall(s13)
+       if body.startswith("#!/bin/bash\n# Run one Gappa script under 464.4's pin")]
+assert len(one) == 1, len(one)
+print("one.sh is 464.13's block:", open(os.path.join(cyl3, "one.sh")).read() == one[0])
+
+
+def compare(fresh, ran):
+    written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+    same = [f for f in written if os.path.exists(os.path.join(ran, f))
+            and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+    differ = [f for f in written if os.path.exists(os.path.join(ran, f)) and f not in same]
+    absent = [f for f in written if not os.path.exists(os.path.join(ran, f))]
+    return written, same, differ, absent
+
+
+fresh = tempfile.mkdtemp()
+for name in ("cyl.g", "cylcases.py", "vgen.py", "cylsplit.py", "dbl.g"):
+    if name in found:
+        open(os.path.join(fresh, name), "w").write(found[name])
+subprocess.run(["python3", "cylsplit.py"], cwd=fresh, check=True)
+subprocess.run(["python3", "cylcases.py", "61", "62", "63", "64", "65", "66", "67", "68", "69"], cwd=fresh, check=True)
+subprocess.run(["python3", "vgen.py"], cwd=fresh, check=True)
+for m in (81, 82, 83):
+    t = open(os.path.join(fresh, "cylv2.g")).read()
+    assert t.count("B = 10b-53 + 5b-102;\n") == 1
+    open(os.path.join(fresh, f"b_cylv2_{m}.g"), "w").write(t.replace("B = 10b-53 + 5b-102;\n", f"B = 10b-53 + {m}b-106;\n"))
+written, same, differ, absent = compare(fresh, cyl3)
+print("written again:", len(written), "same as run:", len(same), "differ:", differ, "not in cyl3:", absent)
+print("cyl_nnn.g is cyl.g:", filecmp.cmp(os.path.join(fresh, "cyl_nnn.g"), os.path.join(fresh, "cyl.g"), shallow=False))
+shutil.rmtree(fresh)
+
+fresh = tempfile.mkdtemp()
+for name in ("cyl.g", "cylcases.py"):
+    open(os.path.join(fresh, name), "w").write(found[name])
+subprocess.run(["python3", "cylcases.py", "0", "40", "60", "70", "80", "90", "100", "120", "160"], cwd=fresh, check=True)
+written, same, differ, absent = compare(fresh, cyl2)
+print("run1.sh's written again:", len(written), "same as run:", len(same), "differ:", differ, "not in cyl2:", absent)
+shutil.rmtree(fresh)
+```
