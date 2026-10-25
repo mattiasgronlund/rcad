@@ -876,7 +876,7 @@ fn probe_q2744() {
         ("tol", Policy::tolerant(100.0)),
     ];
     for (at, (wedge, placement)) in where_the_orders_loop_by_the_apex().into_iter().enumerate() {
-        if at != 2 && at != 4 {
+        if at != 2 && at != 4 && std::env::var_os("Q2744B").is_none() {
             continue;
         }
         if std::env::var_os("Q2744_EDGES").is_some() && at != 2 {

@@ -9913,6 +9913,7 @@ impl Corners {
                         planes,
                         exactly_at(corner.point),
                         &self.ends_on_three_planes,
+                        policy,
                     )
             });
         if std::env::var_os("Q2744B").is_some() {
@@ -10193,17 +10194,33 @@ impl Corners {
 /// either has both ends on one triple, and those are one corner whatever is
 /// proved ([`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`]).
 ///
-/// **Asked under a certified policy only.** Under a tolerant one a fold may
-/// put a corner a rounding off where its own three planes meet
-/// ([`fold_each_corner_one_plane_cuts_a_rounding_from_it`]), so the planes of
-/// the name it was made for need not say where it is. Where either is no meet
-/// of three planes, or nothing is proved, the two are one corner by their
-/// `f64` triple as they were before Q2305.
+/// **Sharing one plane or none is asked under a certified policy only.** Two
+/// points a rounding apart that `certified` keeps apart leave an edge a
+/// rounding long, refused at the range check (§448.7), and `tolerant` takes
+/// that range. Kept apart under `tolerant(100)`, the two corners the pyramid's
+/// side planes make with the wedge round the `x` axis at the apex, turned 0.7
+/// about `(1, 2, 3)`, left the union refused `ResultIsNotManifold`, which one
+/// corner answers (Q2744).
+///
+/// **Sharing two planes is asked under every policy**: the corner between them
+/// is one a kept side ends at, and no policy takes a line folded back through
+/// it. Turned 2.9 about `(−2, 1, 0.5)`, the four places the pyramid's side
+/// planes cross the wedge's edge land on two triples that take turns along it,
+/// and joined by triple under `tolerant(100)` the three sides between them
+/// were one edge six faces claimed (Q2744).
+///
+/// [`Corners::of`] asks neither where a tolerant fold moved one of the two
+/// ([`fold_each_corner_one_plane_cuts_a_rounding_from_it`]): a moved corner
+/// sits a rounding off where its own three planes meet, so the planes of the
+/// name it was made for need not say where it is. Where either is no meet of
+/// three planes, or nothing is proved, the two are one corner by their `f64`
+/// triple as they were before Q2305.
 fn the_planes_keep_them_apart(
     made_on: Option<[Plane; 3]>,
     arrived: Option<[Plane; 3]>,
     landed_on: [u64; 3],
     ends_on_three_planes: &[([Plane; 3], [u64; 3])],
+    policy: &Policy,
 ) -> bool {
     let (Some(made_on), Some(arrived)) = (made_on, arrived) else {
         return false;
@@ -10215,15 +10232,18 @@ fn the_planes_keep_them_apart(
         .filter(|name| made_on_names.contains(name))
         .collect();
     match shared.as_slice() {
-        [] | [_] => arrived.iter().any(|plane| {
-            matches!(
-                side_of_a_plane_where_three_planes_meet(
-                    made_on.map(|flat| flat.coefficients()),
-                    plane.coefficients(),
-                ),
-                Ok(Decision::Pos | Decision::Neg)
-            )
-        }),
+        [] | [_] => {
+            policy.strictness() == Strictness::Certified
+                && arrived.iter().any(|plane| {
+                    matches!(
+                        side_of_a_plane_where_three_planes_meet(
+                            made_on.map(|flat| flat.coefficients()),
+                            plane.coefficients(),
+                        ),
+                        Ok(Decision::Pos | Decision::Neg)
+                    )
+                })
+        }
         [one, other] => ends_on_three_planes
             .iter()
             .filter(|&&(_, at)| at != landed_on)
