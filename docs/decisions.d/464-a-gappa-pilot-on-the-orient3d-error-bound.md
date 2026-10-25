@@ -9013,6 +9013,150 @@ for cross in map("".join, itertools.product("ncsu", repeat=3)):
             write(f"c_cone_{case}_usq.g", make(case, B_USQ))
 ```
 
+`one1.sh`, whole:
+
+```sh
+#!/bin/bash
+# one.sh with the timeout taken from T (default 600) and without coq, for
+# trial runs.
+cd "$(dirname "$0")"
+g=/nix/store/0ihij0570a325g02l4wnf0idk8vqxr9b-gappa-1.8.0/bin/gappa
+f=$1
+n=${f%.g}
+start=$(date +%s.%N)
+timeout "${T:-600}" "$g" -Eprecision=200 "$f" > "$n.out" 2>&1
+code=$?
+end=$(date +%s.%N)
+printf '%s exit %d %.2fs\n' "$n" "$code" "$(echo "$end - $start" | bc)"
+grep -v 'assumed to be nonzero' "$n.out" | head -40 | sed "s/^/  $n: /"
+```
+
+`launch.sh`, whole:
+
+```sh
+#!/bin/bash
+# Start the script named by the first argument detached, in its own process
+# group, and print its pid.
+setsid nohup "$1" > /dev/null 2>&1 &
+echo $!
+```
+
+`run0.sh`, whole:
+
+```sh
+#!/bin/bash
+# cone.g, the case where nothing cancels and nothing is zero, at the code's
+# B, with gappa -Bcoq and coqc when it proves. Writes run0.txt.
+cd "$(dirname "$0")"
+{
+  ./one.sh cone.g coq
+} > run0.txt 2>&1
+echo done >> run0.txt
+```
+
+`run1.sh`, whole:
+
+```sh
+#!/bin/bash
+# cone.g's bisection, B = 12u + m u^2 for m of 0, 40, 60, 80, 100 and 120 and
+# B = 11u + m u^2 for m of 100, 150, 200, 300 and 400, and its three controls,
+# all at once. Writes run1.txt.
+cd "$(dirname "$0")"
+python3 conecases.py 0 40 60 80 100 120 150 200 300 400
+{
+  for m in 0 40 60 80 100 120; do
+    ./one1.sh "b_cone_$m.g" &
+  done
+  for m in 100 150 200 300 400; do
+    ./one1.sh "b11_cone_$m.g" &
+  done
+  for f in c_cone_half.g c_cone_nonormal.g c_cone_noeb.g; do
+    ./one1.sh "$f" &
+  done
+  wait
+} > run1.txt 2>&1
+echo done >> run1.txt
+```
+
+`run2.sh`, whole:
+
+```sh
+#!/bin/bash
+# cone.g's bisection, second round: B = 11u + m u^2 for m of 0, 50, 90, 96,
+# 97, 98 and 99, all at once. Writes run2.txt.
+cd "$(dirname "$0")"
+python3 conecases.py 0 50 90 96 97 98 99
+{
+  for m in 0 50 90 96 97 98 99; do
+    ./one1.sh "b11_cone_$m.g" &
+  done
+  wait
+} > run2.txt 2>&1
+echo done >> run2.txt
+```
+
+`run3a.sh`, whole:
+
+```sh
+#!/bin/bash
+# One case of each axial state but n, the cross product's three components
+# not cancelling, and the control beside each, all at once, before the whole
+# split. Writes run3a.txt.
+cd "$(dirname "$0")"
+python3 conesplit.py
+{
+  for a in e c a s t; do
+    ./one1.sh "cone_nnn$a.g" &
+    ./one1.sh "c_cone_nnn${a}_half.g" &
+  done
+  wait
+} > run3a.txt 2>&1
+echo done >> run3a.txt
+```
+
+`run3.sh`, whole:
+
+```sh
+#!/bin/bash
+# conesplit.py's 384 cases, each with gappa -Bcoq and coqc when it proves,
+# and their 383 controls at u/2, 22 at a time: the cases first, since they
+# take longest. Writes run3.txt.
+cd "$(dirname "$0")"
+python3 conesplit.py
+{
+  for f in cone_????.g; do
+    echo "./one.sh $f coq"
+  done
+  for f in c_cone_????_half.g; do
+    echo "./one1.sh $f"
+  done
+} > run3.jobs
+{
+  wc -l < run3.jobs
+  xargs -P 22 -L 1 env < run3.jobs
+} > run3.txt 2>&1
+echo done >> run3.txt
+```
+
+`run4.sh`, whole:
+
+```sh
+#!/bin/bash
+# The 108 second controls at B = u^2 that conesplit.py writes where y is 0,
+# 22 at a time, after checking that writing the split again leaves every
+# script run3.sh ran as it was. Writes run4.txt.
+cd "$(dirname "$0")"
+{
+  md5sum cone_????.g c_cone_????_half.g > run4.before
+  python3 conesplit.py
+  md5sum cone_????.g c_cone_????_half.g > run4.after
+  cmp run4.before run4.after && echo "run3.sh's scripts unchanged:" "$(wc -l < run4.after)"
+  ls c_cone_????_usq.g | wc -l
+  ls c_cone_????_usq.g | xargs -P 22 -L 1 ./one1.sh
+} > run4.txt 2>&1
+echo done >> run4.txt
+```
+
 **10. What this leaves.** Four rows, filed from this write-up, each after
 Q2681:
 
