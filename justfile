@@ -20091,6 +20091,26 @@ check-land-selftest:
     run --answers Q1 Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped usage
 
+    fixture left-undone
+    run --left-undone Q2 Q1,Q2 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a bundle that leaves one row undone did not merge"
+    git -C "$at/origin.git" show main:docs/queue.md | grep -qxF "apply done Q1 ${lane_sha:0:8}" \
+        || fail "the merge commit's queue apply closes Q2 too, though the lane left it undone"
+    [ "$(field rows_closed)" = "[\"Q1 done:${lane_sha:0:8}\"]" ] \
+        || fail "rows_closed is $(field rows_closed), and should not name Q2"
+    grep -qF '"Q2 is left undone by this bundle' <<<"$(field needs_judgement)" \
+        || fail "needs_judgement does not say Q2 was left undone, held lane:lane-x, for the dispatcher to give back"
+    [ "$(git -C "$at/origin.git" log -1 --format=%s main)" = 'Merge lane-x: Q1 done, leaving Q2 open under its hold, by just land' ] \
+        || fail "the merge commit's subject is '$(git -C "$at/origin.git" log -1 --format=%s main)'"
+
+    fixture left-undone-not-in-bundle
+    run --left-undone Q9 Q1,Q2 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped usage
+
+    fixture left-undone-all
+    run --left-undone Q1,Q2 Q1,Q2 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped usage
+
     fixture old-entry
     second_lane
     hold_lock
@@ -20106,7 +20126,7 @@ check-land-selftest:
     wait_for lander2
     [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the second lane did not land beside a spool entry with no answers"
     spool_empty
-    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, detaches to origin/main with the merge branch still holding the merge commit on a stop past it, names a stopped recipe's own reason rather than just's wrapper line, reads an added row's own tier back from docs/queue.md, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, outlives a killed follower, wait-for waits on a live entry and on a held lock, closes the open rows a lane answers in its queue apply and names the others, and lands a spool entry an older land.py wrote"
+    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, detaches to origin/main with the merge branch still holding the merge commit on a stop past it, names a stopped recipe's own reason rather than just's wrapper line, reads an added row's own tier back from docs/queue.md, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, outlives a killed follower, wait-for waits on a live entry and on a held lock, closes the open rows a lane answers in its queue apply and names the others, leaves a bundle's row it names undone open under the lane's hold and names it in needs_judgement, and lands a spool entry an older land.py wrote"
 
 # A verifier's fixed steps for one lane, run for it (§383.4 item 4, §385): unlock
 # the lane's tree, `git log` from the base to the branch, the files outside the

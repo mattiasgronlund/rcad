@@ -9,7 +9,10 @@ rows in one `queue apply`, `check-queue`, commit, gate, and the push loop with
 §367's free catch-ups over docs, then `ff-main`, unlock and `mark-finished`.
 The same `queue apply` closes each row of `--answers`, the rows the verifier
 confirmed the branch also answers (§450.3 rule 4), done at the lane's tip,
-while `docs/queue.md` still shows it open and held by no lane.
+while `docs/queue.md` still shows it open and held by no lane. A row of
+`--left-undone` is the opposite: one of the bundle's own `<row>[,<row>...]`
+that this call does not close, since the lane did not do it, left
+`lane:<branch>` for the dispatcher to give back and take again (§352.4, §384).
 
 **Anything that wants judgement is a stop, named.** The sha differs from the
 lane's report, a merge conflicts, §0 names the row, `queue apply` or
@@ -58,7 +61,8 @@ ROW = re.compile(r"^[TDQ][0-9]+$")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
 JUST_OWN_ERROR = re.compile(r"^error: Recipe `[^`]*` failed(?: on line [0-9]+)? with exit code [0-9]+$")
 STEP_ARGS = {"add": 4, "after": 2, "tag": 2}
-USAGE = ("usage: just land [--steps <file>] [--answers <row>[,<row>...]] <row>[,<row>...] <lane branch> "
+USAGE = ("usage: just land [--steps <file>] [--answers <row>[,<row>...]] "
+         "[--left-undone <row>[,<row>...]] <row>[,<row>...] <lane branch> "
          "<lane sha> <merge branch> [<tree to unlock and mark finished>...], then just land wait for as long as "
          "its last line says it is still running")
 
@@ -151,7 +155,7 @@ def ended(report, stop):
 
 def parsed(argv):
     argv = list(argv)
-    flags = {"--steps": None, "--answers": None}
+    flags = {"--steps": None, "--answers": None, "--left-undone": None}
     while argv[:1] and argv[0] in flags:
         if len(argv) < 2 or flags[argv[0]] is not None:
             raise Stop("usage", f"{argv[0]} wants one value and comes at most once. {USAGE}")
@@ -162,16 +166,24 @@ def parsed(argv):
     rows, branch, sha, merge_branch, *trees = argv
     rows = rows.split(",")
     answers = flags["--answers"].split(",") if flags["--answers"] is not None else []
-    for row in rows + answers:
+    left_undone = flags["--left-undone"].split(",") if flags["--left-undone"] is not None else []
+    for row in rows + answers + left_undone:
         if not ROW.match(row):
             raise Stop("usage", f"'{row}' is not a row id: T, D or Q and then a number. {USAGE}")
     both = [row for row in answers if row in rows]
     if both or len(set(answers)) != len(answers):
         raise Stop("usage", f"--answers names a row twice, or one the lane ran ({', '.join(both)}). {USAGE}")
+    not_in_bundle = [row for row in left_undone if row not in rows]
+    if not_in_bundle or len(set(left_undone)) != len(left_undone):
+        raise Stop("usage", f"--left-undone names a row twice, or one this bundle does not have "
+                            f"({', '.join(not_in_bundle)}). {USAGE}")
+    if left_undone and set(left_undone) == set(rows):
+        raise Stop("usage", f"--left-undone names every row of {','.join(rows)}, leaving nothing for "
+                            f"just land to close. {USAGE}")
     if not SHA.match(sha):
         raise Stop("usage", f"'{sha}' is not a sha: 7 to 40 lowercase hex digits. {USAGE}")
-    return {"steps": flags["--steps"], "answers": answers, "rows": rows, "branch": branch, "sha": sha,
-            "merge_branch": merge_branch, "trees": trees}
+    return {"steps": flags["--steps"], "answers": answers, "left_undone": left_undone, "rows": rows,
+            "branch": branch, "sha": sha, "merge_branch": merge_branch, "trees": trees}
 
 
 def read_steps(path):
@@ -476,17 +488,30 @@ def land_or_reset(entry):
 
 
 def land_one(entry):
-    """One lane's merge commit: the sha check, the merge, the §0 check, its queue apply, `check-queue` and the commit."""
+    """One lane's merge commit: the sha check, the merge, the §0 check, its queue apply, `check-queue` and the commit.
+
+    A bundle row named in `--left-undone` (§352.4, §384) is not a row this
+    call closes: it stays `lane:<branch>` in `docs/queue.md`, the way a lane
+    the Opus merger reads leaves it, for the dispatcher to give back and take
+    again.
+    """
     landing = {"rows_closed": [], "rows_added": [], "unlocked": [], "needs_judgement": []}
     tip = lane_tip(entry["branch"], entry["sha"])
     merge("conflict", "git", "merge", "--no-ff", "--no-commit", entry["branch"])
     answered = still_open(entry.get("answers", []), landing)
+    left_undone = entry.get("left_undone", [])
+    closed = [row for row in entry["rows"] if row not in left_undone]
+    for row in left_undone:
+        landing["needs_judgement"].append(
+            f"{row} is left undone by this bundle, so it stays lane:{entry['branch']} in docs/queue.md; "
+            f"give it back and the dispatcher takes it again")
     refuse_if_section_0_names(entry["rows"] + answered)
-    apply_queue(entry["rows"], answered, tip, entry["steps"], landing)
+    apply_queue(closed, answered, tip, entry["steps"], landing)
     command("check-queue", JUST, "check-queue")
     command("commit", "git", "add", "docs/queue.md")
     also = f", and {', '.join(answered)} answered by it" if answered else ""
-    message = f"Merge {entry['branch']}: {', '.join(entry['rows'])} done{also}, by just land"
+    left_note = f", leaving {', '.join(left_undone)} open under its hold" if left_undone else ""
+    message = f"Merge {entry['branch']}: {', '.join(closed)} done{also}{left_note}, by just land"
     command("commit", "git", "commit", "-q", "-m", message)
     left = output("git", "status", "--short")
     if left:

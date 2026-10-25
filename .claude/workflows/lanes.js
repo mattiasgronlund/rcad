@@ -946,6 +946,12 @@ function reportSchema(lane, relay) {
     core.files_changed = { type: 'array', items: { type: 'string' } }
     core.tests_that_fail_without_the_change = { type: 'array', items: { type: 'string' }, description: 'empty for a lane that changed only .md files and comments (§375)' }
     core.rows = rowsSchema()
+    core.rows_left_undone = {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'lane.md §352.4: each id of this bundle (your queueId list) you did not do; just land closes every other row of the bundle done and leaves these lane:<branch> in docs/queue.md for the dispatcher to give back and take again. Empty for a lane with one row, or a bundle that did every one. Say why in remaining too.',
+    }
+    required.push('rows_left_undone')
     core.also_answers = {
       type: 'array',
       description: 'lane.md and §450.3 rule 4: each open row prep listed that shares a tests/*.rs file with your row and whose every shape now answers on your branch, one entry for each shape with its run; empty when none',
@@ -1201,7 +1207,7 @@ If the switch refuses because ${branch} already exists, stop and report it as no
 ${landed}
 Push attempts: at most ${MERGE_ATTEMPTS}. A catch-up over docs alone costs no attempt; at most ${DOCS_CATCH_UPS} of those, reported as docs_catch_ups.
 The lane's rows are its add steps for your queue apply, as merger.md step 3 says.
-${answeredNote(lane, prior)}
+${answeredNote(lane, prior)}${leftUndoneNote(lane, r)}
 The lane's report (JSON): ${JSON.stringify(r)}
 
 The verifier's verdict (JSON): ${JSON.stringify(prior.check)}`
@@ -1211,6 +1217,17 @@ function answeredNote(lane, prior) {
   const answers = answeredBy(lane, prior)
   return answers.length
     ? `Its verifier confirmed the branch also answers ${answers.join(', ')}: each gets a done step with the lane's tip in the same queue apply, by merger.md step 3.\n`
+    : ''
+}
+
+// §352.4, §384: a bundle lane names in rows_left_undone the rows of its own
+// bundle it did not do. Those get no done step in your queue apply: they stay
+// lane:<branch> in docs/queue.md, and you name them in needs_judgement so the
+// dispatcher gives them back and takes them again, by merger.md step 3.
+function leftUndoneNote(lane, r) {
+  const undone = leftUndoneBy(lane, r)
+  return undone.length
+    ? `The lane leaves ${undone.join(', ')} of this bundle undone (rows_left_undone): give those no done step in your queue apply, and name them in needs_judgement instead.\n`
     : ''
 }
 
@@ -1273,7 +1290,8 @@ Its last line is then one line of JSON. Report every field of it exactly as it s
 function landCommand(lane, prior) {
   const r = prior.report
   const answers = answeredBy(lane, prior)
-  return `mise exec -- just land ${r.rows.length ? '--steps target/land-steps.txt ' : ''}${answers.length ? `--answers ${answers.join(',')} ` : ''}${lane.queueId} ${branchOf(lane)} ${r.landed_sha} ${mergeBranchOf(lane)} ${treesOf(prior).join(' ')}`
+  const undone = leftUndoneBy(lane, r)
+  return `mise exec -- just land ${r.rows.length ? '--steps target/land-steps.txt ' : ''}${answers.length ? `--answers ${answers.join(',')} ` : ''}${undone.length ? `--left-undone ${undone.join(',')} ` : ''}${lane.queueId} ${branchOf(lane)} ${r.landed_sha} ${mergeBranchOf(lane)} ${treesOf(prior).join(' ')}`
 }
 
 // §450.3 rule 4: a row closes as answered only when the lane named it and its
@@ -1284,6 +1302,17 @@ function answeredBy(lane, prior) {
   const confirmed = prior.check && Array.isArray(prior.check.also_answers_confirmed) ? prior.check.also_answers_confirmed : []
   const own = lane.queueId.split(',')
   return [...new Set(confirmed)].filter((id) => named.has(id) && /^[TDQ][0-9]+$/.test(id) && !own.includes(id))
+}
+
+// §352.4, §384: a bundle lane that leaves one of its own rows undone names it
+// in rows_left_undone, so just land's --left-undone closes only the rest and
+// leaves that one lane:<branch> for the dispatcher to take again. A row the
+// lane names that is not its own is dropped, not sent: just land would refuse
+// it, and that refusal is a stop with no row to close at all.
+function leftUndoneBy(lane, r) {
+  const own = new Set(lane.queueId.split(','))
+  const named = Array.isArray(r.rows_left_undone) ? r.rows_left_undone : []
+  return [...new Set(named)].filter((id) => own.has(id) && /^[TDQ][0-9]+$/.test(id))
 }
 
 function PRUNE(trees) {
