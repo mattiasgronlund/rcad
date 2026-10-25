@@ -590,17 +590,21 @@ would raise it here was not run. And the three meets of `x = 1.27`,
 `x + y = −0.254` and `−x + y = −2.794` on `z = 0` are `8e-18` to `1.6e-17`
 apart (Q985's `corner.py`): there is no `f64` triple to put each one at.
 
-**Since Q2305 (filed again as Q2555), two names on one triple stay two
-corners in one case, and only that one.** All of these must hold, in
-`Corners::of`: both are meets of three planes; they share one plane or none;
-exact arithmetic proves one of the later name's planes off the point where the
-first name's three meet (`the_planes_keep_them_apart`); the policy is
-certified, since a tolerant fold may put a corner a rounding off its own three
-planes; and no kept side runs between them
+**Since Q2305 (filed again as Q2555), two names on one triple can stay two
+corners, and since Q2565 in two cases.** Each needs all of these, in
+`Corners::of`: both are meets of three planes; the policy is certified, since
+a tolerant fold may put a corner a rounding off its own three planes; and no
+kept side runs between them
 (`make_one_corner_of_the_ends_of_each_side_with_no_length`, which makes the
-two ends of such a side one corner whatever their planes prove). Everywhere
-else they are one corner, as above. Every test of `rcad-step`, which reads
-this pin header, passed with the rule in.
+two ends of such a side one corner whatever their planes prove). Then, in
+`the_planes_keep_them_apart`, either they share one plane or none, and exact
+arithmetic proves one of the later name's planes off the point where the first
+name's three meet (Q2305); or they share two planes, and an end of a kept side
+that lands on another `f64` triple is a meet of those two planes and a third
+that exact arithmetic proves on one side at one name's point and on the other
+side at the other's (Q2565, below). Everywhere else they are one corner, as
+above. Every test of `rcad-step`, which reads this pin header, passed with
+Q2305's rule in.
 
 The case is `tests/two_cubes_corner_to_corner_turned_a_little.rs`: a cube set
 corner to corner on a block and turned a little short of a half turn. At
@@ -623,12 +627,13 @@ Each narrower rule was run against the whole `rcad-topo` suite:
 | that, and only where they share one plane or none (`a600ed95`) | 1 | a refusal pinned that now answers |
 
 **Two names that share two planes are one corner, whatever the third planes
-prove.** Both lie on the line the two shared planes cross in, less than a
-rounding apart along it. Kept apart, a leaning frame less a comb came back two
-solids where `tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs` pins a
-refusal, the union of two combs moved a corner that file pins, and a skew fuse
-of `tests/fuses_that_must_agree.rs` lost the not-a-solid it pins; the print
-showed every pair kept apart in those sharing two planes.
+prove, unless a kept side's corner is proved between them** (the second case
+above, since Q2565). Both lie on the line the two shared planes cross in, less
+than a rounding apart along it. Kept apart, a leaning frame less a comb came
+back two solids where `tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`
+pins a refusal, the union of two combs moved a corner that file pins, and a
+skew fuse of `tests/fuses_that_must_agree.rs` lost the not-a-solid it pins;
+the print showed every pair kept apart in those sharing two planes.
 
 The one test that `a600ed95` fails is
 `a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`'s
@@ -637,10 +642,40 @@ at the turn `[0.004999979166692708, 0.0, 0.001999973666735683,
 0.9999855000517082]`, the union, block first. That turn is this family's, the
 pairs kept apart share one plane, and the fuse now answers two solids that
 validate and measure 2000, where the test pins `DynamicRangeTooWide`. Its pin
-moves, outside Q2555's files. The same turn's union turned first and turned
-cube less the block still refuse `DynamicRangeTooWide { ratio:
-5.776005541180642e16 }`, so the two orders of that union disagree, an answer
-against a refusal. Not traced.
+moves, outside Q2555's files. With Q2305's rule alone, the same turn's union
+turned first and turned cube less the block still refused `DynamicRangeTooWide
+{ ratio: 5.776005541180642e16 }`, so the two orders of that union disagreed,
+an answer against a refusal. Not traced then.
+
+**Amended 2026-10-25 (Q2742): Q2565 traced the turned-first order and
+answers it.** At that turn three meets of planes land on the block's top
+corner's own triple, `(0, 0, 10)`: the block's corner, and where two of the
+turned cube's edges cross the block's side `y = 0`. `Corners::of` asks a new
+name only against the corner that first claimed its triple. With the block
+first, each crossing was asked against the block's corner, which it shares one
+plane with, and the rule above kept it apart. With the turned cube first, the
+second crossing was asked against the first, which it shares two planes with,
+`y = 0` and a side of the turned cube, and the rule for two shared planes
+joined them. But the meet of those two planes and the block's top `z = 10`
+lies between the two crossings on the line those planes cross in, on another
+triple, at a corner a kept side ends at. Joined, the two crossings made the
+sides either side of the block top's cut one edge that four faces claimed,
+and the fuse was refused `DynamicRangeTooWide`.
+
+Since `a0c3d348`, two names that share two planes stay two corners where an
+end of a kept side, landing on another `f64` triple, is a meet of those two
+planes and a third that exact arithmetic proves on one side at one name's
+point and on the other side at the other's (`the_planes_keep_them_apart` in
+`fuse/assemble.rs`). The third plane then cuts the line both lie on strictly
+between them, so one corner of the two would fold that line back through a
+corner the answer keeps. Two names that share two planes with nothing proved
+between them are still one corner, as above. That turn now answers under
+`Policy::certified()`: the union both orders is two solids that measure 2000
+(`certified_the_union_at_the_turn_leaning_two_thousandths_is_both_cubes_either_way_round`),
+and the turned cube less the block is one solid that measures 1000
+(`certified_the_turned_cube_less_the_block_at_the_turn_leaning_two_thousandths_is_the_turned_cube`),
+both in `a_cube_set_on_another_cubes_corner_turned_about_a_leaning_axis.rs`,
+which leaves the turn out of the test that pins the refusals.
 
 **What was built: a side with no length is left out, in `assemble.rs`.**
 `sides_of` leaves out a straight side whose ends `Corners::of` made one
