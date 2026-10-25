@@ -26,7 +26,7 @@ use crate::holds::{
 };
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over_and_how_far_it_rounded;
-use crate::mesh::Mesh;
+use crate::mesh::{Mesh, TrianglesBackToBack};
 use crate::model::{ModelData, WireData, WireStep};
 use crate::view::{CoedgeView, FaceView, SolidView, WireStepView, WireView, how_far_apart};
 use crate::{EdgeView, Error, FaceKey, Invalid, Model, Result, SolidKey};
@@ -3079,7 +3079,7 @@ pub(crate) fn how_much_space_a_curved_solid_encloses(
         #[cfg(test)]
         RUNGS_THE_SECOND_LADDER_HAS_ASKED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut this_rung = ProvenanceLog::new();
-        let strayed_past = match view.mesh(less, policy, &mut this_rung) {
+        let strayed_past = match view.a_mesh_to_sum_over(less, policy, &mut this_rung) {
             Ok(finer) => {
                 let (finer_encloses, rounding) = signed_volume_over_and_how_far_it_rounded(&finer);
                 let leaves_out = how_far_the_sum_can_be_off(view, &finer, rounding);
@@ -4054,14 +4054,18 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Mesh> {
-    let (mut finest_refusal, mut shortest_fold) =
-        match view.mesh_or_how_it_folded(as_coarse_as_a_mesh_gets(), policy, log) {
-            Ok(mesh) => return Ok(mesh),
-            Err(refused) if a_finer_mesh_may_clear(&refused.why) => {
-                (refused.why, refused.shortest_side_two_patches_drew)
-            }
-            Err(refused) => return Err(refused.why),
-        };
+    let (mut finest_refusal, mut shortest_fold) = match view.mesh_or_how_it_folded(
+        as_coarse_as_a_mesh_gets(),
+        TrianglesBackToBack::Kept,
+        policy,
+        log,
+    ) {
+        Ok(mesh) => return Ok(mesh),
+        Err(refused) if a_finer_mesh_may_clear(&refused.why) => {
+            (refused.why, refused.shortest_side_two_patches_drew)
+        }
+        Err(refused) => return Err(refused.why),
+    };
     let Some((low, high)) = view.box_around_it() else {
         return Err(finest_refusal);
     };
@@ -4098,7 +4102,7 @@ fn the_coarsest_mesh_whose_sides_do_not_cross(
         let Ok(less) = Deflection::of(room) else {
             break;
         };
-        let answer = view.mesh_or_how_it_folded(less, policy, log);
+        let answer = view.mesh_or_how_it_folded(less, TrianglesBackToBack::Kept, policy, log);
         if let Err(refused) = &answer {
             shortest_fold = [shortest_fold, refused.shortest_side_two_patches_drew]
                 .into_iter()
