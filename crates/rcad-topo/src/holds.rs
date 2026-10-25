@@ -4756,6 +4756,18 @@ fn lies_between_seen_down_the_axis(
 /// its ends or at one, where no half-line leaves both of them strictly on one
 /// side.
 ///
+/// # A corner on the half-line's line
+///
+/// **A point with no sign of which side of the half-line's line a corner is
+/// seen on is read again towards the next corner that may be aimed at**, as
+/// [`what_a_cone_face_seen_down_its_axis_holds`] reads a cone face (rows Q2634
+/// and Q2738). A box across the line from the corner aimed at through another
+/// corner is such a point, even with a sign of every side's own line, and the
+/// sides that corner ends cannot be counted from there. A count from any one
+/// corner that reads every sign it needs is the whole answer, so the first is
+/// kept, and the point is refused only when every corner that may be aimed at
+/// leaves a sign unread, with the first of those signs.
+///
 /// # A side right round a circle
 ///
 /// A [`WholeCurve`] is all of the circle a plane `W` cuts the sphere in, so it
@@ -4930,43 +4942,56 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
             None
         }
     });
-    let aim = sides
+    let may_be_aimed_at = |corner: Point| {
+        on_a_chord.is_none_or(|(chord, _)| {
+            let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
+            matches!(
+                pole.sees(from, to, exactly(corner.coordinates())),
+                Decision::Pos | Decision::Neg
+            )
+        }) && sides.iter().zip(&along).all(|(side, beside)| {
+            !matches!(beside, Decision::Undecidable { .. }) || {
+                let [from, to] = seen_from(side, corner);
+                is_wholly_on_one_side_of_the_half_line(from, to)
+            }
+        })
+    };
+    let how_often_it_winds_seen_towards = |aim: Point| -> Result<i64, f64> {
+        let mut winding = winding;
+        for (index, side) in sides.iter().enumerate() {
+            let along = match on_a_chord {
+                Some((chord, away)) if chord == index => away,
+                _ => along[index],
+            };
+            let [from, to] = seen_from(side, aim);
+            if let Decision::Undecidable { .. } = along {
+                assert!(
+                    is_wholly_on_one_side_of_the_half_line(from, to),
+                    "the half-line was aimed with every side the point has no sign of wholly on \
+                     one side of it, and this one is not: {from:?} and {to:?}"
+                );
+                continue;
+            }
+            winding += crossing(from, to, along)
+                .ok_or_else(|| whichever_of_them_was_not_read(from, to))?;
+        }
+        Ok(winding)
+    };
+
+    let mut first_refusal = None;
+    for aim in sides
         .iter()
         .map(|side| side.start.placed)
-        .find(|&corner| {
-            on_a_chord.is_none_or(|(chord, _)| {
-                let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
-                matches!(
-                    pole.sees(from, to, exactly(corner.coordinates())),
-                    Decision::Pos | Decision::Neg
-                )
-            }) && sides.iter().zip(&along).all(|(side, beside)| {
-                !matches!(beside, Decision::Undecidable { .. }) || {
-                    let [from, to] = seen_from(side, corner);
-                    is_wholly_on_one_side_of_the_half_line(from, to)
-                }
-            })
-        })
-        .ok_or_else(|| unseen.map_or_else(cannot, gave_up_seeing))?;
-
-    for (index, side) in sides.iter().enumerate() {
-        let along = match on_a_chord {
-            Some((chord, away)) if chord == index => away,
-            _ => along[index],
-        };
-        let [from, to] = seen_from(side, aim);
-        if let Decision::Undecidable { .. } = along {
-            assert!(
-                is_wholly_on_one_side_of_the_half_line(from, to),
-                "the half-line was aimed with every side the point has no sign of wholly on one \
-                 side of it, and this one is not: {from:?} and {to:?}"
-            );
-            continue;
+        .filter(|&corner| may_be_aimed_at(corner))
+    {
+        match how_often_it_winds_seen_towards(aim) {
+            Ok(winding) => return Ok(held_where_it_winds(winding)),
+            Err(enclosure) => {
+                first_refusal.get_or_insert(enclosure);
+            }
         }
-        winding += crossing(from, to, along)
-            .ok_or_else(|| gave_up_seeing(whichever_of_them_was_not_read(from, to)))?;
     }
-    Ok(held_where_it_winds(winding))
+    Err(first_refusal.or(unseen).map_or_else(cannot, gave_up_seeing))
 }
 
 /// The name a turn read from a point of a ball goes by in provenance records.
