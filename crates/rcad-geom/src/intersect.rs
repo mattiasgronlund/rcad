@@ -7735,6 +7735,71 @@ mod tests {
         }
     }
 
+    /// [`a_thin_pipe_resting_on_the_inside_of_a_fat_one_leaves_two_loops_that_meet_where_they_touch`]
+    /// with the thin pipe turned 1 about `z`, as a model reads the wall of a
+    /// bar placed along `x` from `(−4, 1, 0)` and then turned: the turn leaves
+    /// the thin axis leaning `2.2e−16` off square to `z`, and the axes
+    /// `3e−16` less than 1 apart, so the loops do not meet. They pass
+    /// `2.55e−8` either side of the flat surface through `z` facing
+    /// `(cos 1, sin 1, 0)`, rounded.
+    ///
+    /// That surface's facing is exactly square to `z` and lies exactly in the
+    /// flat of the two axes, so it is exactly the way across that tells the
+    /// loops apart. Read through roundings its cosine against that way came
+    /// out `1 − 8e−16`, and the sine charged for it `4e−8`, more than the
+    /// loops are clear of the surface: the pair was refused (Q2710).
+    #[test]
+    fn a_thin_pipe_resting_a_rounding_inside_a_fat_one_turned_a_radian_leaves_two_loops_a_hair_apart()
+     {
+        let along_x = Isometry::translation(Vector::new(-4.0, 1.0, 0.0))
+            .expect("a finite move")
+            .compose(&Isometry::quarter_turns(&Axis::y(), 1).expect("a turn about y"));
+        let turned = Isometry::rotation(&Axis::z(), 1.0)
+            .expect("a finite turn")
+            .compose(&along_x);
+        let pipe = Cylinder::new(Axis::z(), 1.0)
+            .expect("a radius")
+            .transformed(&turned);
+        assert_eq!(
+            pipe.axis().direction(),
+            Vector::new(
+                0.5403023058681399,
+                0.8414709848078966,
+                -2.220446049250313e-16
+            ),
+            "the turn leaves the thin axis leaning off square to z"
+        );
+        let thin = Surface::Cylinder(pipe);
+        let fat = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, -2.0], 2.0);
+        let SurfaceMeet::Curves(runs) = crossing(&thin, &fat) else {
+            panic!("a thin pipe a rounding inside a fat one crosses it in curves");
+        };
+        assert_eq!(runs.len(), 2, "two loops: {runs:?}");
+        let (c, s) = (1f64.cos(), 1f64.sin());
+        let sides_of = |point: [f64; 3]| -> Vec<Decision> {
+            runs.iter()
+                .map(|run| {
+                    let EdgeRun::PartOfWhereItCrosses { and, picked_by } = run.run() else {
+                        panic!("one of two loops is a piece of the crossing: {run:?}");
+                    };
+                    assert_eq!(and, &fat, "the picked run names the pipe it goes round");
+                    let [picker] = picked_by[..] else {
+                        panic!("one flat surface picks a loop: {picked_by:?}");
+                    };
+                    picker.side_of_point(PredicatePoint::from(point))
+                })
+                .collect()
+        };
+        assert_eq!(
+            sides_of([2.0 * c, 2.0 * s, 0.0]),
+            [Decision::Pos, Decision::Neg]
+        );
+        assert_eq!(
+            sides_of([-2.0 * c, -2.0 * s, 0.0]),
+            [Decision::Neg, Decision::Pos]
+        );
+    }
+
     /// Two pipes of the same thickness leaning across each other, well clear and
     /// overlapping.
     #[test]
