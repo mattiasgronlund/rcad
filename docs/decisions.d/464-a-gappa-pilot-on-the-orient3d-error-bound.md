@@ -5951,8 +5951,8 @@ And what is not a row:
 
 ### 464.15 The side of rcad-geom's cylinder
 
-*Draft, unfinished: the first lane of Q2680 wrote this, and a lane after it
-carries it on. Nothing below is proved yet.*
+*Draft, unfinished: the first two lanes of Q2680 wrote this, and a lane after
+them carries it on. Only the case with nothing zero is proved yet, on `y`.*
 
 Q2680 takes up `SIDE_OF_CYLINDER_ERROR_BOUND` in
 `crates/rcad-geom/src/cylinder.rs`, read at `2a7ca9e7`. `u` is `2⁻⁵³`, and the
@@ -5986,12 +5986,42 @@ three terms, one for each piece of the reach squared, `h²`, `k²` and `2|h||k|`
 The radius term is three pieces that sum to `skin`, one for each direction
 square, each true piece `r² d²`. So the error is averaged over twelve pieces.
 
-**What the first lane ran.** `cyl.g`, below, whole, with every product normal
-and nothing zero, did not finish: `one.sh` (464.13's 9, the same bytes) printed
-`cyl exit 124 620.51s`, Gappa killed at its 600 s timeout, on a load of about
-24 over 24 cores. Where the time goes was not found. `t_axis.g`, one component
-alone with its three pieces, was written to time Gappa on a smaller average and
-not run.
+**What the first two lanes ran.** The first lane's `cyl.g`, with every
+product normal and nothing zero and all twelve pieces in one hint, did not
+finish: `one.sh` (464.13's 9, the same bytes) printed `cyl exit 124 620.51s`,
+Gappa killed at its 600 s timeout, on a load of about 24 over 24 cores. The
+second lane found where the time goes. With the goal replaced by `px in ?` and
+every hint kept, Gappa still did not finish in 90 s (`t_triv exit 124
+94.80s`), and with that goal and the twelve-piece hint dropped it finished in
+`16.64s`. So what is slow is checking that one hint's identity, over twelve
+pieces at once, before any goal is tried. `t_axis.g`, one component alone with
+its three pieces, proves in `0.58s` and prints the component's square within
+`7.77156e-16`, `7u`. The permanent alone (`t_perm2.g`: six normal halves and a
+normal `skin` as free doubles) proves in `0.22s`, printing `P −/ Phat` within
+`6.66134e-16`, `6u`.
+
+`cyl.g`, below, whole, is the first lane's with that hint split in four, one
+per block: the three components' reaches squared and the radius term, with one
+hint over the blocks and one over each block's pieces. It also drops three
+hints `eG / cG -> WG` that Gappa warned it did not need. Its first form, the
+same but with those three hints kept, exits 0 in `94.33s` on a load of about
+30 over 24 cores, printing `(y − Ex) / P12` within `9.99201e-16`, `9u` to the
+digits printed, and `P −/ Phat` within `6.66134e-16`, `6u`, and proving `(y −
+Ex) / eb` in `[−1, 1]` at the code's `B`. The second lane then ran
+`run1.sh` (below), 24 Gappa runs at once on a load of about 30 over 24 cores,
+which printed:
+
+- `cyl exit 0 213.82s`, the same two figures, and `cyl coq -Bcoq exit 0 coqc
+  exit 0 339.29s lines 14703 hints 54`.
+- The bisection over `m` in `B = 9u + m u²`: `m` = 0, 40 and 60 fail, best
+  `[-1, 1]` as Gappa prints it, rounded; 70, 80, 90, 100, 120 and 160 prove.
+  So the smallest `m` is 61 to 70, not yet bisected further.
+- `c_cyl_half exit 1`, best `[-18, 18]`, which is the `9u` over `u / 2`.
+- `c_cyl_nonormal exit 1`, best `[-1.16728e+1527, 1.16728e+1527]`, failing
+  `REL(P, Phat)` and `BND((y - Ex) / P12)` too.
+- `c_cyl_noeb exit 124 600.84s`, and `cylv.g`, `c_cylv_half.g` and each
+  `b_cylv_<m>.g` exit 124 at 600 s too. Where the claim on `value` spends its
+  time was not found.
 
 ```gappa
 # restates: crates/rcad-geom/src/cylinder.rs on_floats at 2a7ca9e7
@@ -6093,8 +6123,15 @@ WGy = 1 / (rrr * rty * rsk * rD * rt01) - 1;
 WGz = 1 / (rrr * rtz * rsk * rD) - 1;
 eGx = cGx * WGx; eGy = cGy * WGy; eGz = cGz * WGz;
 
-# The same permanent, as the twelve pieces the error is averaged over.
-P12 = cHx + cKx + cXx + cHy + cKy + cXy + cHz + cKz + cXz + cGx + cGy + cGz;
+# The same permanent, as four blocks of the twelve pieces the error is
+# averaged over: each component's reach squared, and the radius term.
+P3x = cHx + cKx + cXx; P3y = cHy + cKy + cXy; P3z = cHz + cKz + cXz;
+SG = cGx + cGy + cGz;
+P12 = P3x + P3y + P3z + SG;
+
+# Each component's square as y carries it, and the radius term as Ex has it.
+Yx = Kx * Qx * Qx; Yy = Ky * Qy * Qy; Yz = Kz * Qz * Qz;
+Gt = r * r * (dx * dx + dy * dy + dz * dz);
 
 {
   # Every input is a finite f64.
@@ -6116,9 +6153,9 @@ P12 = cHx + cKx + cXx + cHy + cKy + cXy + cHz + cKz + cXz + cGx + cGy + cGz;
   /\ |sx| >= 1b-1022 /\ |sy| >= 1b-1022 /\ |sz| >= 1b-1022
   /\ |tx| >= 1b-1022 /\ |ty| >= 1b-1022 /\ |tz| >= 1b-1022
   /\ |rr| >= 1b-1022 /\ |skin| >= 1b-1022
-  # The permanent's three squares are normal too. The comment above
-  # stays_accurate argues it from the components': a reach is never below
-  # its component.
+  # The permanent's three squares are normal too, since no component is
+  # zero here: |q| <= n, rounding being monotone and |h - k| <= |h| + |k|,
+  # so v = rnd(n * n) >= rnd(q * q) = s, which is normal.
   /\ |vx| >= 1b-1022 /\ |vy| >= 1b-1022 /\ |vz| >= 1b-1022
   # The bound is normal, which decide checks.
   /\ |eb| >= 1b-1022
@@ -6176,10 +6213,16 @@ D / T -> 1 + (D - T) / T;
 rr / (r * r) -> 1 + (rr - r * r) / (r * r);
 skin / (rr * D) -> 1 + (skin - rr * D) / (rr * D);
 
-# The error is the sum of the twelve pieces' errors, each a fraction of its
-# own piece of the permanent; add_rr then averages them.
+# The error is the sum of four blocks' errors, each the sum of its pieces'
+# errors, each a fraction of its own piece of the permanent; add_rr then
+# averages them. In blocks so that no hint's identity spans all twelve
+# pieces: one hint over all twelve did not finish in 600 s.
 (y - Ex) / P12 -> ((P12 + (y - Ex)) - P12) / P12;
-P12 + (y - Ex) -> (cHx + eHx) + (cKx + eKx) + (cXx + eXx) + (cHy + eHy) + (cKy + eKy) + (cXy + eXy) + (cHz + eHz) + (cKz + eKz) + (cXz + eXz) + (cGx + eGx) + (cGy + eGy) + (cGz + eGz);
+P12 + (y - Ex) -> (P3x + (Yx - Cx * Cx)) + (P3y + (Yy - Cy * Cy)) + (P3z + (Yz - Cz * Cz)) + (SG + (Gt - skin));
+P3x + (Yx - Cx * Cx) -> (cHx + eHx) + (cKx + eKx) + (cXx + eXx);
+P3y + (Yy - Cy * Cy) -> (cHy + eHy) + (cKy + eKy) + (cXy + eXy);
+P3z + (Yz - Cz * Cz) -> (cHz + eHz) + (cKz + eKz) + (cXz + eXz);
+SG + (Gt - skin) -> (cGx + eGx) + (cGy + eGy) + (cGz + eGz);
 (cHx + eHx) - cHx -> eHx;
 (cKx + eKx) - cKx -> eKx;
 (cXx + eXx) - cXx -> eXx;
@@ -6201,12 +6244,131 @@ eXy / cXy -> -((hy / |hy|) * (ky / |ky|) * WXy);
 eHz / cHz -> (hz / |hz|) * (hz / |hz|) * WHz;
 eKz / cKz -> (kz / |kz|) * (kz / |kz|) * WKz;
 eXz / cXz -> -((hz / |hz|) * (kz / |kz|) * WXz);
-eGx / cGx -> WGx;
-eGy / cGy -> WGy;
-eGz / cGz -> WGz;
 
 # From the twelve pieces to the permanent on_floats rounds, and on to eb.
 (y - Ex) / eb -> ((y - Ex) / P12) * (Phat / P) * (P / eb);
 Phat / P -> 1 / (1 + (P - Phat) / Phat);
 P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+`cylcases.py`, whole, as the second lane wrote it, writes the rest from
+`cyl.g` beside it. It covers the case with nothing zero alone; the case split
+for a component that cancels (`kx = hx;` written in, `qx` and `sx` written as
+zero, the block's error `−Cx²` against `P3x = 4hx²` with the hint `Cx -> hx *
+(ax − bx)`, and the reach square `v` in three states, normal, below the
+normals and not zero, and zero, as 464.14's `n`, `s` and `u`) is not in it
+yet.
+
+```python
+"""Write the scripts of 464.15 from cyl.g beside it: cylv.g, the claim on
+value; the controls c_cyl_half.g and c_cylv_half.g at B = u / 2,
+c_cyl_nonormal.g without product_is_normal, and c_cyl_noeb.g without eb
+normal; and b_cyl_<m>.g and b_cylv_<m>.g, cyl.g and cylv.g at B = 9u + m u^2
+and 10u + m u^2, for the bisection. Each change is a text replacement that
+must match exactly once. Run as: python3 cylcases.py [m ...]."""
+import os
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+CYL = open("cyl.g").read()
+B_CODE = "B = 10b-53 + 5b-102;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+
+
+def sub(text, old, new):
+    assert text.count(old) == 1, old
+    return text.replace(old, new)
+
+
+def on_value(text):
+    text = sub(text, "# HowFarFromTheSkin::on_floats and SIDE_OF_CYLINDER_ERROR_BOUND, rcad-geom's cylinder.\n",
+               "# HowFarFromTheSkin::on_floats and SIDE_OF_CYLINDER_ERROR_BOUND, rcad-geom's cylinder.\n"
+               "# The claim is on value, the double on_floats returns, not on y.\n")
+    text = sub(text, "rrr = rr / (r * r); rsk = skin / (rr * D);\n",
+               "rrr = rr / (r * r); rsk = skin / (rr * D);\nrv = value / y;\n")
+    text = sub(text, "# Each component's square, as y carries it,", "# Each component's square, as value carries it,")
+    text = sub(text, "Kx = rqx * rqx * rsx * rs01 * rs012;", "Kx = rqx * rqx * rsx * rs01 * rs012 * rv;")
+    text = sub(text, "Ky = rqy * rqy * rsy * rs01 * rs012;", "Ky = rqy * rqy * rsy * rs01 * rs012 * rv;")
+    text = sub(text, "Kz = rqz * rqz * rsz * rs012;", "Kz = rqz * rqz * rsz * rs012 * rv;")
+    text = sub(text, "WGx = 1 / (rrr * rtx * rsk * rD * rt01) - 1;", "WGx = 1 / (rrr * rtx * rsk * rD * rt01) - rv;")
+    text = sub(text, "WGy = 1 / (rrr * rty * rsk * rD * rt01) - 1;", "WGy = 1 / (rrr * rty * rsk * rD * rt01) - rv;")
+    text = sub(text, "WGz = 1 / (rrr * rtz * rsk * rD) - 1;", "WGz = 1 / (rrr * rtz * rsk * rD) - rv;")
+    text = sub(text, "# The radius term is three pieces,", "# The radius term, as value carries it times 1 / rv, is three pieces,")
+    text = sub(text, "# Each component's square as y carries it,", "# Each component's square as value carries it,")
+    text = sub(text, "  # The bound is normal, which decide checks.\n",
+               "  # y is not zero. Where it is, value is zero too, and the claim on y is\n"
+               "  # the claim on value.\n"
+               "  /\\ |y| >= 1b-1074\n"
+               "  # The bound is normal, which decide checks.\n")
+    text = sub(text, "skin / (rr * D) -> 1 + (skin - rr * D) / (rr * D);\n",
+               "skin / (rr * D) -> 1 + (skin - rr * D) / (rr * D);\nvalue / y -> 1 + (value - y) / y;\n")
+    text = sub(text, "SG + (Gt - skin) ->", "SG + (Gt - rv * skin) ->")
+    text = sub(text, "(SG + (Gt - skin));", "(SG + (Gt - rv * skin));")
+    return text.replace("(y - Ex)", "(value - Ex)")
+
+
+def at(text, b):
+    return sub(text, B_CODE, b)
+
+
+def without_normal(text):
+    keep = []
+    lemma_of = ("hx", "kx", "hy", "ky", "hz", "kz", "sx", "sy", "sz", "tx", "ty", "tz",
+                "rr", "skin", "vx", "vy", "vz")
+    for line in text.split("\n"):
+        if "1b-1022" in line and "|eb|" not in line:
+            continue
+        if line.startswith("  /\\ ") and line.split()[1] in lemma_of and LEMMA in line:
+            continue
+        keep.append(line)
+    text = "\n".join(keep)
+    text = sub(text, "  # product_is_normal on the six halves (cross_product_halves_if_normal),\n"
+               "  # and on the three components, the three direction components, the\n"
+               "  # radius and the radius term (stays_accurate).\n", "")
+    text = sub(text, "  # The permanent's three squares are normal too, since no component is\n"
+               "  # zero here: |q| <= n, rounding being monotone and |h - k| <= |h| + |k|,\n"
+               "  # so v = rnd(n * n) >= rnd(q * q) = s, which is normal.\n", "")
+    return sub(text, ", rcad-geom's cylinder.\n", ", rcad-geom's cylinder.\n# A control: without product_is_normal and the lemma lines it gives.\n")
+
+
+def without_eb(text):
+    text = sub(text, "  # The bound is normal, which decide checks.\n  /\\ |eb| >= 1b-1022\n", "")
+    text = sub(text, f"  /\\ eb -/ B * P {LEMMA}\n", "")
+    return sub(text, ", rcad-geom's cylinder.\n", ", rcad-geom's cylinder.\n# A control: without eb normal and the lemma line it gives.\n")
+
+
+def write(name, text):
+    with open(name, "w") as out:
+        out.write(text)
+
+
+CYLV = on_value(CYL)
+write("cylv.g", CYLV)
+write("c_cyl_half.g", at(CYL, B_HALF))
+write("c_cylv_half.g", at(CYLV, B_HALF))
+write("c_cyl_nonormal.g", without_normal(CYL))
+write("c_cyl_noeb.g", without_eb(CYL))
+for m in sys.argv[1:]:
+    write(f"b_cyl_{m}.g", at(CYL, f"B = 9b-53 + {m}b-106;"))
+    write(f"b_cylv_{m}.g", at(CYLV, f"B = 10b-53 + {m}b-106;"))
+```
+
+`run1.sh`, which the second lane started detached, runs `cyl.g` and `cylv.g`
+through `one.sh` with `coq`, and the controls and the bisection grid through
+`one1.sh`, the first lane's `one.sh` with the timeout taken from `T` and no
+`coq`, all at once:
+
+```sh
+cd "$(dirname "$0")"
+python3 cylcases.py 0 40 60 70 80 90 100 120 160
+{
+  ./one.sh cyl.g coq &
+  ./one.sh cylv.g coq &
+  for f in c_cyl_half.g c_cylv_half.g c_cyl_nonormal.g c_cyl_noeb.g b_cyl_*.g b_cylv_*.g; do
+    ./one1.sh "$f" &
+  done
+  wait
+} > run1.txt 2>&1
+echo done >> run1.txt
 ```
