@@ -879,8 +879,16 @@ fn probe_q2744() {
         if at != 2 && at != 4 {
             continue;
         }
+        if std::env::var_os("Q2744_EDGES").is_some() && at != 2 {
+            continue;
+        }
         for (name, policy) in &policies {
             for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+                if std::env::var_os("Q2744_EDGES").is_some()
+                    && (rule != Rule::Union || *name != "tol")
+                {
+                    continue;
+                }
                 let came = the_wedge_through_the_apex(wedge, placement, rule, policy);
                 eprintln!("PROBE LOOP {at} {name} {rule:?}: {}", short(came));
             }

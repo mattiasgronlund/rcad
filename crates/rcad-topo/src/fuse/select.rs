@@ -1582,7 +1582,12 @@ impl TheCornersOfAPiece {
     /// where none of these reads them all.
     fn of(piece: &Piece, solids: &[&BakedSolid], mine: usize, against: usize) -> Option<Self> {
         the_corners_of_a_piece_read_round_a_corner(piece, solids[mine], false)
-            .or_else(|| the_corners_of_a_piece_read_round_a_corner(piece, solids[against], true))
+            .or_else(|| {
+                if std::env::var_os("Q2744_NO_THEIRS").is_some() {
+                    return None;
+                }
+                the_corners_of_a_piece_read_round_a_corner(piece, solids[against], true)
+            })
             .or_else(|| {
                 the_planes_meeting_at_each_corner_of_a_piece(piece, solids[mine]).map(Self::Meets)
             })
