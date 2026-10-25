@@ -16952,7 +16952,11 @@ check-queue-merge-driver:
 # class the row's own tier does not allow. Q983's: `header` replacing the
 # file's own title and prose above its first heading, landing the new text
 # and reporting it, refusing a no-op, and refusing a replacement holding a
-# fenced block or a `## ` heading of its own. The
+# fenced block or a `## ` heading of its own. Q945's: `take` accepting an
+# after: row inside one apply once every row it still waits on is
+# lane:<that same branch>, set by an earlier take step of the same apply,
+# and still refusing it when that earlier take landed on a different
+# branch. The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -17450,6 +17454,38 @@ check-queue-api-selftest:
     after_claims=$(md5sum "$claims_file" | cut -d' ' -f1)
     [ "$before_queue" = "$after_queue" ] || fail "a batch refused at its third step still changed docs/queue.md"
     [ "$before_claims" = "$after_claims" ] || fail "a batch refused at its third step still appended to the claims file"
+
+    # Q945: a take inside one apply accepts an after: row once every row it
+    # still waits on is lane:<that same branch>, set by an earlier take step
+    # of this same apply -- Q679 (after:Q686) and Q788 (after:Q756) could
+    # have been bundled with the rows they waited on this way, instead of
+    # closed by hand with done.
+    waited_q945=$(q "$batch_wt" add 2 opus - "from/- a row another row waits on, taken in the same apply §230") \
+        || fail "add for the Q945 waited-on row failed"
+    waiter_q945=$(q "$batch_wt" add 2 opus - "from/- a row that waits on it, bundled onto the same branch §230") \
+        || fail "add for the Q945 waiting row failed"
+    got=$(q "$batch_wt" after "$waiter_q945" "$waited_q945" 2>&1) \
+        || fail "after refused to set up the Q945 fixture's wait"
+    got=$(q "$batch_wt" apply take "$waited_q945" lane-q945-bundle + take "$waiter_q945" lane-q945-bundle 2>&1) \
+        || fail "take refused a row whose after: names a row being taken onto the same branch in the same apply"
+    grep -qF "$waiter_q945: after:$waited_q945 -> lane:lane-q945-bundle" <<<"$got" \
+        || fail "take did not move the waiting row onto the branch its wait was just satisfied for"
+    got=$(awk -v id="$waiter_q945" '$1 == id { print $3 }' "$batch_wt/docs/queue.md")
+    [ "$got" = "lane:lane-q945-bundle" ] || fail "take did not write the waiting row's new state to the file"
+
+    # The same wait still refuses when the earlier take lands on a different
+    # branch: "being taken onto the same branch" is the whole condition, not
+    # merely "taken somewhere in this apply".
+    other_waited_q945=$(q "$batch_wt" add 2 opus - "from/- a row taken onto a different branch in the same apply §230") \
+        || fail "add for the second Q945 waited-on row failed"
+    other_waiter_q945=$(q "$batch_wt" add 2 opus - "from/- waits on a row taken onto a different branch §230") \
+        || fail "add for the second Q945 waiting row failed"
+    got=$(q "$batch_wt" after "$other_waiter_q945" "$other_waited_q945" 2>&1) \
+        || fail "after refused to set up the Q945 different-branch fixture's wait"
+    got=$(q "$batch_wt" apply take "$other_waited_q945" lane-q945-a + take "$other_waiter_q945" lane-q945-b 2>&1) \
+        && fail "take accepted a row whose after: names a row taken onto a different branch in the same apply"
+    grep -qF "$other_waiter_q945 is not ready: it waits on $other_waited_q945 (lane:lane-q945-a)" <<<"$got" \
+        || fail "take did not refuse the different-branch case for the usual reason"
 
     got=$(q "$batch_wt" apply add 2 opus - "from/- a row an after step points at §230" + after @1 Q2 2>&1) \
         || fail "add + after @1 was refused"
