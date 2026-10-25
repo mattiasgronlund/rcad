@@ -5953,33 +5953,86 @@ And what is not a row:
 
 ### 464.15 The side of rcad-geom's cylinder
 
-*Draft, unfinished: the first four lanes of Q2680 wrote this, and a lane
-after them carries it on. The cases with no factor zero are proved on `y`,
-and the zero branches are not run.*
+Q2680 took up `SIDE_OF_CYLINDER_ERROR_BOUND` in
+`crates/rcad-geom/src/cylinder.rs`, in nine lanes on 2026-10-25. The first
+four were the first lane and its three relays. The first wrote `cyl.g`. The
+second split its hint, wrote `cylcases.py` and ran `run1.sh`. The third ran
+the bisection from 61 to 69, wrote `m2.g`, `m3.g`, `vgen.py` and
+`cylsplit.py`, and ran `run2.sh`. The fourth wrote `dbl.g` and ran `run3.sh`.
+The fifth to the eighth were the second lane and its three relays: they
+merged the first lane's branch, fixed `tally3.py`'s block, ran `run4.sh`,
+fixed `same.py`, checked every figure and drafted 1 to 8. The ninth, the third
+lane, wrote 1 to 10. The bound is proved on `y`, the sum before `value`'s last
+rounding, at the code's constant wherever no factor is zero: with no component
+of the cross product cancelling, and with any of them cancelling, whatever its
+reach square rounds to. Coq checks each proof, modulo its hints. The claim on
+`value` itself is not proved at the code's constant in either form tried, only
+at `10u + 82u²`, and `decide` does not need it (4). The branches where a
+difference, a direction component or the radius is zero, which
+`product_is_normal` lets through, are not run. And the comments claim more
+than is proved. The doc comment on the constant writes `45ε` where it means
+`45ε²` and miscounts its own terms. The comment on the check says that
+checking the components covers the permanent's squares, which is false where a
+component cancels, though the bound holds there (5). Fixing them, and running
+what is not run, is three rows (10).
 
-Q2680 takes up `SIDE_OF_CYLINDER_ERROR_BOUND` in
-`crates/rcad-geom/src/cylinder.rs`, read at `2a7ca9e7`. `u` is `2⁻⁵³`, and the
-code's `B = (10 + 80ε) ε` is `10u + 80u²`, written `B = 10b-53 + 5b-102;`.
-`80ε` is `5 · 2⁻⁴⁹`, a multiple of the ulp of 10, so the Rust's sum and
-product are exact and a double holds `B`.
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
+`cylinder.rs` and `cascade.rs` at `2a7ca9e7`. `git log --oneline
+2a7ca9e76..8e87e43e6` on `cylinder.rs`, `cascade.rs`, `three_surfaces.rs`,
+`validate.rs` and `rcad-geom`'s `lib.rs` prints nothing, so each is as it
+stands at `8e87e43e6`, where this write-up was finished. `u` is `2⁻⁵³`, and the
+code's `B = (10 + 80ε) ε` (`cylinder.rs:559-562`) is `10u + 80u²`, written `B
+= 10b-53 + 5b-102;`. `80ε` is `5 · 2⁻⁴⁹`, a multiple of the ulp of 10, so the
+Rust's sum and product are exact and a double holds `B`. Each script follows
+464.8's pattern: one ratio hint per rounding; the error split into one term
+per piece of the permanent, so that Gappa averages them; 464.5's lemma for
+each product `on_floats` checks is normal; and the step from `y` to the sign
+as 464.4 gives it.
 
-**What `on_floats` rounds** (`cylinder.rs:300-349`). Three differences `f =
-rnd(point − origin)`; six halves `h`, `k` of the cross product
-(`cross_product_halves`, `cylinder.rs:486-495`), each a rounded product; three
+**1. What the proof guards.** `Cylinder::side_of` (`cylinder.rs:272-286`)
+runs the cascade on `HowFarFromTheSkin`, once a guard has refused a point or a
+cylinder that is not real numbers. `Surface::Cylinder` reaches it from
+`three_surfaces.rs:3295` and from `validate.rs:4498`, and `lib.rs:96` exports
+`Cylinder`, whose `side_of` is `rcad-predicates`' `SideOfSurface` trait. So,
+like 464.14's, this proof guards a predicate a user reaches.
+
+**2. `on_floats`, line for line.** `HowFarFromTheSkin::on_floats`
+(`cylinder.rs:300-349`) returns `None` for a point that is not exact `f64`s
+(`cylinder.rs:301`) and takes the three differences from the axis origin to
+the point (`cylinder.rs:305`). It forms the six halves of their cross product
+with the direction, returning `None` unless `product_is_normal` holds for each
+half's two factors (`cross_product_halves_if_normal`, `cylinder.rs:467-480`,
+around
+`cross_product_halves`, `cylinder.rs:486-495`). It then takes the three
+components `h − k` and the direction's squared length
+(`cylinder.rs:316-318`), and returns `None` unless `product_is_normal` holds
+for each component with itself, each direction component with itself, the
+radius with itself, and `rr` with the squared length (`cylinder.rs:319-326`).
+Last it returns `value = s0 + s1 + s2 − skin` and `error_bound =
+SIDE_OF_CYLINDER_ERROR_BOUND * permanent` (`cylinder.rs:345-348`), where `skin
+= rr · D` (`cylinder.rs:331`), the squares are the components'
+(`cylinder.rs:332`), and the permanent is each component's reach squared,
+`(|h| + |k|)²`, summed with `skin` (`cylinder.rs:339-343`).
+
+`cyl.g` (9) writes that operation for operation: three differences `f =
+rnd(point − origin)`; six halves `h`, `k`, each a rounded product; three
 components `q = rnd(h − k)`; three squares `s = rnd(q · q)`, summed left to
 right into `s012`; the direction's three squares `t = rnd(d · d)`, summed left
 to right into `D`; `rr = rnd(r · r)`; `skin = rnd(rr · D)`; and `value =
-rnd(s012 − skin)`. The permanent squares each component's reach, `v =
-rnd(n · n)` with `n = rnd(|h| + |k|)`, and sums `rnd(rnd(rnd(vx + vy) + vz) +
-skin)`. `product_is_normal` is checked on the six halves
-(`cross_product_halves_if_normal`, `cylinder.rs:467-480`), the three component
-squares, the three direction squares, `rr` and `skin` (`cylinder.rs:319-326`).
-It is not checked on the three reach squares `v`. The comment at
-`cylinder.rs:312-314` argues them from the components', since a reach is never
-below its component; that holds while the component is not zero, and a
-component that cancels to zero (`h == k`, both normal) leaves `v = rnd(4h²)`,
-which can be below the normals. That is the product `o2s.g`'s case split is
-for here.
+rnd(s012 − skin)`. The permanent squares each component's reach, `v = rnd(n ·
+n)` with `n = rnd(|h| + |k|)`, and sums `rnd(rnd(rnd(vx + vy) + vz) + skin)`.
+On the longest chain that is ten roundings to `value`, `f`, `h` and `q`
+counted twice since the component is squared, and nine to `y`.
+
+`product_is_normal` is checked on everything but the three reach squares `v`.
+The comment at `cylinder.rs:312-314` argues them from the components', since a
+reach is never below its component. That holds while the component is not
+zero. A component that cancels to zero, `h == k` with both normal, passes the
+check, since `product_is_normal(a, b)` is true when `a` or `b` is zero
+(`cascade.rs:67-69`). It leaves `v = rnd(4h²)`, which can be below the
+normals. That is the kind of product 464.8's `o2s.g` splits on, and 6 splits
+on it. `cylsplit.py` (9) writes the case with no component cancelling,
+`cyl_nnn.g`, byte for byte as `cyl.g`, which `same.py` (9) checks.
 
 **How the error splits.** The square `y` carries for one component is `(h −
 k)² K`, `K` the product of the roundings of `q`, `s` and the sums after it.
