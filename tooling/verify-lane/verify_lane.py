@@ -227,9 +227,30 @@ def detached_run(path):
             report[own] = report.pop(own)
     say("=== verify-lane: done ===")
     print(json.dumps(report, ensure_ascii=False), flush=True)
-    with open(os.path.join(state, "exit"), "w", encoding="utf-8") as f:
-        f.write(f"{code}\n")
+    write_exit_atomically(os.path.join(state, "exit"), code)
     return code
+
+
+def write_exit_atomically(path, code, delay=0.0):
+    """Writes the exit file so `follow` never sees it exist but empty.
+
+    `open(path, "w")` truncates the file the moment it opens, before any
+    `write` runs, so a reader polling `os.path.exists` in that window finds
+    a file that is there but holds nothing. Writing to a sibling temp file
+    and renaming it over `path` moves that window off the name `follow`
+    watches: the rename only makes `path` exist once the temp file already
+    holds the whole line.
+
+    `delay` is a test seam: `check-verify-lane-selftest` passes a positive
+    one to widen the window a reader polls through, with nobody but a test
+    ever passing it.
+    """
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        if delay:
+            time.sleep(delay)
+        f.write(f"{code}\n")
+    os.replace(tmp, path)
 
 
 def verify(lane, report, full_log):
