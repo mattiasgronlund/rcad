@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use rcad_geom::{Surface, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::StepFile;
-use rcad_topo::{Model, Rule};
+use rcad_topo::{Model, Rule, WireView};
 
 // `#[path]` and not `include!`, because the shared files open with a module doc
 // comment and an inner attribute, and neither of those can be pasted into the
@@ -595,10 +595,62 @@ fn a_model_for_the_writer(bytes: &[u8]) -> Result<Explained, String> {
     };
     Ok(Explained {
         target: NO_MODEL_MAKES_THE_WRITER_PANIC.to_owned(),
-        case: format!("AModel {{ {} }}", what_one_model_holds(&model)),
+        case: format!("AModel {{ {} }}", what_walking_one_model_sees(&model)),
         rebuild: format!("one_model_decoded_and_written({})", as_a_literal(bytes)),
         outcome,
     })
+}
+
+/// What walking one model in order sees: each solid's shell placement, each
+/// face's located surface, and each coedge's two corners and the edge run
+/// between them.
+///
+/// This is the shape a writer round trip is checked against, the way
+/// `target/q1210-probe`'s `print_model` checked it by hand (§410.5) — a count
+/// of entities says nothing about which placement or which corner came out
+/// different, and that is the question a writer bug raises.
+fn what_walking_one_model_sees(model: &Model) -> String {
+    model
+        .solids()
+        .map(|solid| {
+            let shells = solid
+                .shells()
+                .map(|shell| {
+                    format!(
+                        "shell {{ loc: {:?}, orient: {:?} }}",
+                        shell.location(),
+                        shell.orientation()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let faces = solid
+                .faces()
+                .map(|face| {
+                    let coedges = face
+                        .wires()
+                        .flat_map(WireView::coedges)
+                        .map(|coedge| {
+                            format!(
+                                "coedge {{ start: {:?}, end: {:?}, run: {:?} }}",
+                                coedge.start().point(),
+                                coedge.end().point(),
+                                coedge.edge().run()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "face {{ surface: {:?}, coedges: [{coedges}] }}",
+                        face.surface()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("solid {{ shells: [{shells}], faces: [{faces}] }}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A header byte and two halves, each decoded into a `Model` and fused against
@@ -843,6 +895,7 @@ fn as_a_literal(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rcad_geom::Scale;
 
     /// A plane against a ball, written out and read back through the tool.
     #[test]
@@ -896,6 +949,39 @@ mod tests {
     fn a_bag_of_bytes_is_not_a_saved_model() {
         let why = explain(NO_MODEL_MAKES_THE_WRITER_PANIC, &[255; 64]).expect_err("no model");
         assert!(why.contains("no saved Model"), "{why}");
+    }
+
+    /// The writer's case names the numbers a round trip is checked against —
+    /// a face's surface and a coedge's corners and run — not just how many of
+    /// each entity the model holds.
+    #[test]
+    fn the_writers_case_names_a_cubes_faces_and_corners_not_just_their_count() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a cube of side 2 is a sound solid");
+        let bytes = postcard::to_allocvec(&model).expect("a Model always encodes");
+        let said = explain(NO_MODEL_MAKES_THE_WRITER_PANIC, &bytes).expect("a saved cube");
+        assert!(
+            said.case.contains("Plane"),
+            "a cube's faces are planes, lost from: {}",
+            said.case
+        );
+        assert!(
+            said.case.contains("coedge {"),
+            "a face's coedges are missing: {}",
+            said.case
+        );
+        assert!(
+            said.case.contains("run: Straight"),
+            "a cube's edges run straight, lost from: {}",
+            said.case
+        );
+        assert!(
+            !said.case.contains("solids:") && !said.case.contains("vertices:"),
+            "the old counts-only case is still here: {}",
+            said.case
+        );
     }
 
     /// Any bytes at all are a case of the reader's target, because the claim
