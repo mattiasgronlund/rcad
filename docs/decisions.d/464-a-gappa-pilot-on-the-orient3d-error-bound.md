@@ -9484,10 +9484,11 @@ And what is not a row:
 *Draft. Q2682's first lane wrote `tor.g` and handed over at its budget; its
 first relay ran `tor.g`, its bisection and its three controls (below, "What
 ran") and handed over at its own. Its second relay wrote `torsplit.py`
-(below, "Not yet run"), which writes `tor_nnnnn.g` as `tor.g` byte for byte,
-and handed over before running it. Running the split, the comment check and
-the write-up in 464.15's and 464.16's form are left; this paragraph and the
-word "draft" then go.*
+(below), which writes `tor_nnnnn.g` as `tor.g` byte for byte, and handed
+over before running it. Its third relay ran the split and its controls (below,
+"What the split printed") and wrote and ran `shapes.py` and `same.py`. The
+second `-Bcoq` of `tor_cusen`, the comment check and the write-up in 464.15's
+and 464.16's form are left; this paragraph and the word "draft" then go.*
 
 Read at `4be293a5`, against `torus.rs:336-398` (`on_floats`), `torus.rs:474-483`
 (`cross_product_halves`), `torus.rs:485-511` (the constant) and
@@ -10016,14 +10017,13 @@ for path in sys.argv[1:]:
         print(f"{path}: {m.group(1)}: {k}u + {float(r):.4g}u^2")
 ```
 
-**Not yet run.** Q2682's second relay wrote `torsplit.py` (below), the split
+**The split.** Q2682's second relay wrote `torsplit.py` (below), the split
 on the components that cancel, on `hollow` below the normals and on `P2`
 below the normals. `python3 torsplit.py` wrote 180 cases and 179 controls,
-and `cmp tor_nnnnn.g tor.g` found them the same. No case has been run through
-Gappa yet, so every hint it writes for a component that cancels is checked by
-hand only.
+and `cmp tor_nnnnn.g tor.g` found them the same. Its third relay ran them
+unchanged (below, "What the split printed").
 
-`torsplit.py`, whole, as written and not yet run:
+`torsplit.py`, whole, as `trial.sh` and `run3.sh` ran it:
 
 ```python
 """Write tor.g's case split, one script per case and a control at B = u / 2
@@ -10631,4 +10631,388 @@ for case in cases():
     write(f"tor_{case}.g", make(case))
     if case != "nnnnn":
         write(f"c_tor_{case}_half.g", make(case, B_HALF))
+```
+
+**What the split printed.** Q2682's third relay, on 2026-10-25, in the same
+scratch directory, with `torsplit.py` as above.
+
+- `trial.sh` (below) ran eight cases, `cnnnn`, `cccnn`, `nnnen`, `uuueb`,
+  `cccnb`, `scnnn`, `ssuen` and `uuunb`, and their `u / 2` controls, all at
+  once through `one1.sh`. Each case exited 0, in 18.22 to 29.59 s, with `(y −
+  Ex) / Phat2` within `1.88738e-15` and no line in its `.out` but its results
+  and "assumed to be nonzero" warnings. Each control exited 1, best `[-34,
+  34]`. So no hint of `torsplit.py` needed changing.
+- `run3.sh` (below) then ran all 180 with `coq` and the 179 controls, 20 at a
+  time on a load of about 40 over 24 cores. `tally3.py` (below) counts what it
+  printed; after its line for each case it prints the block below. Every case
+  proves at the code's `B`, `y`'s error within `17u + 95u²` (`1.88738e-15`) in
+  each, and `P −/ Phatx` within `7u` in 178 and `6u` (`6.66134e-16`) in the two
+  `uuu` cases, where `P` is `P1`. Gappa called no case pointless. Every control
+  fails at `17u` over `u / 2`, so none needs a `u²` control.
+- One `coqc` failed: `tor_cusen.coqc` ends `The term "eq_refl" has type "true =
+  true" while it is expected to have type "intersect_helper (upper i96) (lower
+  i96) i9 = true".`, at `tor_cusen.v` line 6766, `apply intersect with (1 :=
+  h1) (2 := h2)`, where `h1` and `h2` are the same lemma, `l337 h0`. Gappa's
+  certificate there is wrong, not its bound: the same script's Gappa run
+  exited 0. Not yet run again: 464.4 found Gappa does not write the same proof
+  each run, so a second `-Bcoq` may give one `coqc` accepts.
+- `shapes.py` (below) works three shapes in Python's doubles, which round as
+  Rust's do. A point on the axis of a torus whose axis is `(1, 1, 1)` is
+  `cccnn`, and one off it at `(1, 1, 2)` is `nncnn`: shapes a designer makes,
+  and both proved. A point on the axis `(1, 0, 0)` has four zero factors,
+  which no case takes (the zero branches).
+
+```text
+cases exit 0: 180 of 180
+controls exit 1: 179 of 179
+pointless: []
+y bounds by live components and hollow and P2 letters:
+   (0, 'eb', '[-1.88738e-15, 1.88738e-15]') 27
+   (0, 'en', '[-1.88738e-15, 1.88738e-15]') 26
+   (0, 'nb', '[-1.88738e-15, 1.88738e-15]') 27
+   (0, 'nn', '[-1.88738e-15, 1.88738e-15]') 26
+   (1, 'en', '[-1.88738e-15, 1.88738e-15]') 27
+   (1, 'nn', '[-1.88738e-15, 1.88738e-15]') 27
+   (2, 'en', '[-1.88738e-15, 1.88738e-15]') 9
+   (2, 'nn', '[-1.88738e-15, 1.88738e-15]') 9
+   (3, 'en', '[-1.88738e-15, 1.88738e-15]') 1
+   (3, 'nn', '[-1.88738e-15, 1.88738e-15]') 1
+P bounds: {'[-7.77156e-16, 7.77156e-16]': 178, '[-6.66134e-16, 6.66134e-16]': 2}
+control exits by live components and hollow and P2 letters:
+   (0, 'eb', '1') 27
+   (0, 'en', '1') 26
+   (0, 'nb', '1') 27
+   (0, 'nn', '1') 26
+   (1, 'en', '1') 27
+   (1, 'nn', '1') 27
+   (2, 'en', '1') 9
+   (2, 'nn', '1') 9
+   (3, 'en', '1') 1
+control exits and bests: {('1', '[-34, 34]'): 179}
+times (15.5, 'cucnn') (61.65, 'nnsen')
+coq ok: 179 of 180
+coq smallest (14324, 67, 'uuunb') largest (22872, 81, 'nnnnn') hints 66 81 times 24.62 99.14
+files with a line other than results and 'assumed to be nonzero': ['tor_cusen.coqc']
+```
+
+`shapes.py` prints:
+
+```text
+on the axis (1, 0, 0): direction [1.0, 0.0, 0.0], from_centre [2.0, 0.0, 0.0], halves [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+  zero factors ['fy', 'fz', 'dy', 'dz']; case uuunb; on_floats' checks pass: True
+on the axis (1, 1, 1): direction [0.5773502691896257, 0.5773502691896257, 0.5773502691896257], from_centre [1.0, 1.0, 1.0], halves [(0.5773502691896257, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257)]
+  zero factors none; case cccnn; on_floats' checks pass: True
+off the axis (1, 1, 1), one component cancelling: direction [0.5773502691896257, 0.5773502691896257, 0.5773502691896257], from_centre [1.0, 1.0, 2.0], halves [(0.5773502691896257, 1.1547005383792515), (1.1547005383792515, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257)]
+  zero factors none; case nncnn; on_floats' checks pass: True
+```
+
+The letters `uuunb` of the first line are what the classifier reads off its
+zeros; `torsplit.py`'s `uuunb` assumes no factor is zero, so it is not that
+shape.
+
+`trial.sh`, whole:
+
+```sh
+#!/bin/bash
+# Trial runs of torsplit.py's cases, each with its u/2 control, all at once
+# through one1.sh. Prints to trial.txt.
+cd "$(dirname "$0")"
+{
+  for c in cnnnn cccnn nnnen uuueb cccnb scnnn ssuen uuunb; do
+    T=600 ./one1.sh "tor_$c.g" &
+    T=600 ./one1.sh "c_tor_${c}_half.g" &
+  done
+  wait
+  echo done
+} > trial.txt 2>&1
+```
+
+`run3.sh`, whole:
+
+```sh
+#!/bin/bash
+# torsplit.py's 180 cases, each with gappa -Bcoq and coqc when it proves,
+# and their 179 controls at u/2, 20 at a time: the cases first, since they
+# take longest. Writes run3.txt.
+cd "$(dirname "$0")"
+python3 torsplit.py
+{
+  for f in tor_?????.g; do
+    echo "./one.sh $f coq"
+  done
+  for f in c_tor_?????_half.g; do
+    echo "./one1.sh $f"
+  done
+} > run3.jobs
+{
+  wc -l < run3.jobs
+  xargs -P 20 -L 1 env < run3.jobs
+} > run3.txt 2>&1
+echo done >> run3.txt
+```
+
+`tally3.py`, whole:
+
+```python
+"""Tally run3.txt and the .out files of torsplit.py's 180 cases: for each case
+its exit, the bound on (y - Ex) / Phat2 and on P against the permanent with
+no rounding of its own that it prints, and its coqc line; for each control its
+exit and best. Prints one line per case, then counts, grouped by how many
+components of the cross product do not cancel and by the hollow and P2
+letters. Run as: python3 tally3.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+run = open("run3.txt").read()
+cases = sorted(f[4:9] for f in os.listdir(".") if re.fullmatch(r"tor_\w{5}\.g", f))
+RESULT = re.compile(r"^  (.*) in \[[^{]*\{([^,]*),[^}]*\}, [^{]*\{([^,]*),", re.M)
+
+
+def bounds(out):
+    """The y goal's and the P goal's printed ranges, as [lo, hi]. Where y is
+    left, Gappa prints the goal with left and Phat2 written out."""
+    y = p = "-"
+    for expr, lo, hi in RESULT.findall(out):
+        if " -/ " in expr:
+            p = f"[{lo}, {hi}]"
+        elif "- Ex) / " in expr:
+            y = f"[{lo}, {hi}]"
+    return y, p
+
+
+ybounds = collections.Counter()
+pbounds = collections.Counter()
+bests = collections.Counter()
+ctl_exits = collections.Counter()
+pointless = []
+times = []
+coq = []
+for c in cases:
+    out = open(f"tor_{c}.out").read()
+    ex = re.search(rf"^tor_{c} exit (\d+) ([\d.]+)s$", run, re.M)
+    cq = re.search(rf"^tor_{c} coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$", run, re.M)
+    live = sum(1 for s in c[:3] if s == "n")
+    y, p = bounds(out)
+    if "pointless" in out:
+        pointless.append(c)
+        y = p = "pointless"
+    ybounds[(live, c[3:], y)] += 1
+    pbounds[p] += 1
+    times.append((float(ex.group(2)), c))
+    if cq:
+        coq.append((int(cq.group(4)), int(cq.group(5)), c, cq.group(1), cq.group(2), float(cq.group(3))))
+    line = [c, "exit", ex.group(1), ex.group(2), "y", y, "P", p, "coq", cq.groups() if cq else "-"]
+    if c != "nnnnn":
+        ctl = re.search(rf"^c_tor_{c}_half exit (\d+) ([\d.]+)s$", run, re.M)
+        cout = open(f"c_tor_{c}_half.out").read()
+        best = re.search(r"best: (\[[^\]]*\])", cout)
+        bests[(ctl.group(1), best.group(1) if best else "pointless" if "pointless" in cout else "-")] += 1
+        ctl_exits[(live, c[3:], ctl.group(1))] += 1
+        line += ["ctl", ctl.group(1), best.group(1) if best else "-"]
+    print(*line)
+print("cases exit 0:", len(re.findall(r"^tor_\w{5} exit 0 ", run, re.M)), "of", len(cases))
+print("controls exit 1:", len(re.findall(r"^c_tor_\w{5}_half exit 1 ", run, re.M)), "of", len(cases) - 1)
+print("pointless:", pointless)
+print("y bounds by live components and hollow and P2 letters:")
+for k in sorted(ybounds):
+    print("  ", k, ybounds[k])
+print("P bounds:", dict(pbounds))
+print("control exits by live components and hollow and P2 letters:")
+for k in sorted(ctl_exits):
+    print("  ", k, ctl_exits[k])
+print("control exits and bests:", dict(bests))
+times.sort()
+print("times", times[0], times[-1])
+print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(coq))
+coq.sort()
+print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "hints", min(x[1] for x in coq), max(x[1] for x in coq),
+      "times", min(x[5] for x in coq), max(x[5] for x in coq))
+
+
+def other_lines(f):
+    return [line for line in open(f).read().split("\n")
+            if line and "assumed to be nonzero" not in line and not line.startswith(("Results:", "  "))]
+
+
+warn = [f for f in os.listdir(".") if re.fullmatch(r"tor_\w{5}\.(out|bcoq|coqc)", f) and other_lines(f)]
+print("files with a line other than results and 'assumed to be nonzero':", sorted(warn))
+```
+
+`shapes.py`, whole:
+
+```python
+"""Which case of torsplit.py a shape falls in: on_floats' doubles, worked in
+Python's, which are IEEE doubles rounded to nearest even as Rust's are. The
+direction is the nearest double to each component over the exact length,
+which is what Axis::new gives above 2^-1012. Prints, for each shape, the
+from_centre and direction components that are zero, each cross product
+component's letter, hollow's and P2's, and whether on_floats' checks pass.
+Run as: python3 shapes.py"""
+from decimal import Decimal, getcontext
+
+getcontext().prec = 60
+NORMAL = 2.0 ** -1022
+
+
+def unit(v):
+    length = sum(Decimal(c) * Decimal(c) for c in v).sqrt()
+    return [float(Decimal(c) / length) for c in v]
+
+
+def normal(a, b):
+    return a == 0.0 or b == 0.0 or abs(a * b) >= NORMAL
+
+
+def case(name, origin, direction, ring, tube, point):
+    d = unit(direction)
+    f = [point[i] - origin[i] for i in range(3)]
+    halves = [(f[1] * d[2], f[2] * d[1]), (f[2] * d[0], f[0] * d[2]), (f[0] * d[1], f[1] * d[0])]
+    q = [h - k for h, k in halves]
+    checks = all(normal(f[i], f[i]) and normal(d[i], d[i]) and normal(q[i], q[i]) for i in range(3))
+    checks = checks and all(normal(f[(i + 1) % 3], d[(i + 2) % 3]) and normal(f[(i + 2) % 3], d[(i + 1) % 3])
+                            for i in range(3))
+    checks = checks and normal(ring, ring) and normal(tube, tube)
+    oab = f[0] * f[0] + f[1] * f[1] + f[2] * f[2]
+    hollow = ring * ring - tube * tube
+    bulge = oab + hollow
+    w = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+    across = q[0] * q[0] + q[1] * q[1] + q[2] * q[2]
+    f4 = 4.0 * (ring * ring)
+    checks = checks and normal(bulge, bulge) and normal(w, bulge * bulge) and normal(f4, across)
+    letters = ""
+    spread = 0.0
+    for (h, k), qa in zip(halves, q):
+        v = (abs(h) + abs(k)) * (abs(h) + abs(k))
+        spread += v
+        letters += "n" if qa != 0.0 else "c" if v >= NORMAL else "s" if v > 0.0 else "u"
+    letters += "n" if abs(hollow) >= NORMAL else "e"
+    letters += "n" if f4 * spread >= NORMAL else "b"
+    zeros = [f"f{'xyz'[i]}" for i in range(3) if f[i] == 0.0] + [f"d{'xyz'[i]}" for i in range(3) if d[i] == 0.0]
+    print(f"{name}: direction {d}, from_centre {f}, halves {halves}")
+    print(f"  zero factors {zeros or 'none'}; case {letters}; on_floats' checks pass: {checks}")
+
+
+case("on the axis (1, 0, 0)", [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 2.0, 1.0, [2.0, 0.0, 0.0])
+case("on the axis (1, 1, 1)", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 2.0, 1.0, [1.0, 1.0, 1.0])
+case("off the axis (1, 1, 1), one component cancelling", [0.0, 0.0, 0.0], [1.0, 1.0, 1.0], 2.0, 1.0,
+     [1.0, 1.0, 2.0])
+```
+
+`same.py`, whole. It marks a `run4.sh`, for the second `-Bcoq` of
+`tor_cusen`, which is not written yet. The third relay ran it once, as
+`python3 same.py <doc> <scratch dir>`, and it printed `code blocks in 464.17:
+13`, `run4.sh not appended`, `same` or `True` on every other line, and
+`written again: 383 same as run: 383 differ: [] not in tor: []`: `tor.g`, the
+180 cases, their 179 controls, the three controls of `torcases.py` and its 20
+bisection scripts.
+
+```python
+"""Check that each script 464.17 appends whole is byte for byte the file that
+was run, in tor/; that one.sh is 464.13's block and one1.sh and launch.sh
+464.16's; that tally3.py and shapes.py, run again there, print what 464.17
+gives; and that torsplit.py and torcases.py, run again in a fresh directory
+from the appended text with the arguments of run1.sh, write what was run.
+Run as: python3 same.py <doc> <tor dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, tor = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+sec = section(17)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.17:", len(blocks))
+assert len(re.findall(r"^```", sec, re.M)) == 2 * len(blocks)
+
+# Which appended block is which file: by its first lines.
+marks = {
+    "tor.g": "# restates: crates/rcad-geom/src/torus.rs on_floats at 4be293a5\n",
+    "torcases.py": '"""Write the scripts of 464.17 from tor.g',
+    "torsplit.py": '"""Write tor.g\'s case split',
+    "run0.sh": "#!/bin/bash\n# tor.g, the case where nothing cancels",
+    "run1.sh": "#!/bin/bash\n# tor.g's controls and its bisection",
+    "trial.sh": "#!/bin/bash\n# Trial runs of torsplit.py's cases",
+    "run3.sh": "#!/bin/bash\n# torsplit.py's 180 cases",
+    "run4.sh": "#!/bin/bash\n# gappa -Bcoq and coqc again",
+    "ku.py": '"""Print each result of the named .out files as k u + r u^2',
+    "tally3.py": '"""Tally run3.txt and the .out files of torsplit',
+    "shapes.py": '"""Which case of torsplit.py a shape falls in',
+    "same.py": '"""Check that each script 464.17 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "same.py" else os.path.join(tor, name)
+    if not os.path.exists(path):
+        print(name, "appended, no file to compare")
+        continue
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+print("one.sh is 464.13's block:", open(os.path.join(tor, "one.sh")).read()
+      == block_of(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"))
+print("one1.sh is 464.16's block:", open(os.path.join(tor, "one1.sh")).read()
+      == block_of(16, "#!/bin/bash\n# one.sh with the timeout taken from T"))
+print("launch.sh is 464.16's block:", open(os.path.join(tor, "launch.sh")).read()
+      == block_of(16, "#!/bin/bash\n# Start the script named by the first argument detached"))
+
+for script, first in (("tally3.py", "cases exit 0: "), ("shapes.py", "on the axis (1, 0, 0): ")):
+    printed = [body for lang, body in blocks if lang == "text" and body.startswith(first)]
+    assert len(printed) == 1, (script, len(printed))
+    again = subprocess.run(["python3", os.path.join(tor, script)], capture_output=True, text=True,
+                           check=True).stdout
+    print(script, "run again ends with what 464.17 gives:", again.endswith(printed[0]))
+
+
+def compare(fresh, ran):
+    written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+    same = [f for f in written if os.path.exists(os.path.join(ran, f))
+            and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+    differ = [f for f in written if os.path.exists(os.path.join(ran, f)) and f not in same]
+    absent = [f for f in written if not os.path.exists(os.path.join(ran, f))]
+    return written, same, differ, absent
+
+
+fresh = tempfile.mkdtemp()
+for name in ("tor.g", "torcases.py", "torsplit.py"):
+    open(os.path.join(fresh, name), "w").write(found[name])
+subprocess.run(["python3", "torsplit.py"], cwd=fresh, check=True)
+subprocess.run(["python3", "torcases.py", "0", "100", "200", "228", "230", "231", "232", "233", "236", "300"],
+               cwd=fresh, check=True)
+written, same, differ, absent = compare(fresh, tor)
+print("written again:", len(written), "same as run:", len(same), "differ:", differ, "not in tor:", absent)
+print("tor_nnnnn.g is tor.g:", filecmp.cmp(os.path.join(fresh, "tor_nnnnn.g"), os.path.join(fresh, "tor.g"),
+                                           shallow=False))
+ran = sorted(f for f in os.listdir(tor) if f.endswith(".g"))
+print(".g files in tor not written again:", [f for f in ran if f not in written])
+shutil.rmtree(fresh)
 ```
