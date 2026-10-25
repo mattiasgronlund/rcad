@@ -10838,6 +10838,16 @@ impl<'f> Arrangement<'f> {
     /// point above both. So a node past the flat half-space that picks the
     /// crossing out is read by [`Arrangement::whether_past_the_picker`] first.
     ///
+    /// **A corner of the face is read as [`Arrangement::passes_through`] read
+    /// it** ([`Arrangement::side_of_a_corner`]), so the side the walk is put on
+    /// is the one that left the corner off the crossing. A bar of radius 1 up
+    /// the inside of a bar of radius 2, touching it along both seams, both
+    /// turned 0.7 about `z`, has the thin pipe a rounding inside the thick one.
+    /// The thick floor's seam corner, read where its seam plane crosses its
+    /// rim, is outside the thin pipe, but its box is `1.1e−13` wide and the
+    /// thin pipe runs through it. Asked the box alone here, every fuse of the
+    /// two was refused `Undecidable` (Q2763).
+    ///
     /// **Each half of an ellipse drawn whole with its other half says which
     /// side of the ellipse's plane the walk is on**
     /// ([`Arrangement::whole_ellipses`]). No half closes, so none is drawn in
@@ -10891,7 +10901,11 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
                 let at = node.point;
-                let read = match (side_of_surface(&partner, at), partner.as_plane()) {
+                let boxed = match node.vertex {
+                    Some(_) => self.side_of_a_corner(self.the_baked_corner_of(node), &partner),
+                    None => side_of_surface(&partner, at),
+                };
+                let read = match (boxed, partner.as_plane()) {
                     (undecided @ Decision::Undecidable { .. }, plane) => {
                         let on: SmallVec<[Surface; 4]> = core::iter::once(self.surface)
                             .chain(node.crossings.iter().map(|&on| self.crossings[on].partner))
