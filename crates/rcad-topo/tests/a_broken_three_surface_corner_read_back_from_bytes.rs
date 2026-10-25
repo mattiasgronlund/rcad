@@ -2013,3 +2013,95 @@ fn what_a_solid_and_a_block_hold(
 fn overlap(one: [f64; 2], other: [f64; 2]) -> f64 {
     (one[1].min(other[1]) - one[0].max(other[0])).max(0.0)
 }
+
+#[test]
+fn probe_q2758_the_seven_shapes() {
+    let placements = q2758_placements();
+    let shapes: [(Wedge, usize); 7] = [
+        (A_WEDGE_ROUND_THE_X_AXIS, 1),
+        (A_WEDGE_ROUND_THE_X_AXIS, 24),
+        (A_WEDGE_OVER_THE_MINUS_Y_EDGE, 17),
+        (A_WEDGE_OVER_THE_MINUS_Y_EDGE, 20),
+        (A_WEDGE_OVER_THE_MINUS_Y_EDGE, 25),
+        (A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS, 12),
+        (A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS, 24),
+    ];
+    for (wedge, index) in shapes {
+        let (name, placement) = &placements[index];
+        for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+            for (policy_name, policy) in [
+                ("certified", Policy::certified()),
+                ("tolerant", Policy::tolerant(100.0)),
+            ] {
+                let case = format!(
+                    "wedge ({}, {}) placement {index} [{name}] {rule:?} {policy_name}",
+                    wedge.low, wedge.high
+                );
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let pyramid = a_pyramid(&mut model);
+                model
+                    .place_solid(pyramid, placement)
+                    .expect("this model made the key");
+                let cut = a_wedge(&mut model, wedge, placement);
+                let mut log = ProvenanceLog::new();
+                let fused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    model.fuse(&[pyramid], &[cut], rule, &policy, &mut log)
+                }));
+                let outcome = match fused {
+                    Err(_) => "PANICKED".to_string(),
+                    Ok(Ok(answer)) => {
+                        let (solids, expected) = what_the_pyramid_and_a_wedge_hold(wedge, rule);
+                        let valid = model.validate(&policy, &mut ProvenanceLog::new());
+                        let named: Vec<&str> =
+                            log.records().iter().map(|r| r.predicate()).collect();
+                        match valid {
+                            Err(invalid) => format!("Ok but INVALID {invalid:?} log {named:?}"),
+                            Ok(()) => {
+                                let (volume, bound) =
+                                    the_volume_of(&model, &answer, &policy, &case);
+                                let holds = answer.solids().len() == solids
+                                    && (volume - expected).abs() <= 1e-12 * expected + bound;
+                                format!(
+                                    "Ok {} solids {} volume {volume} expected {expected} log {named:?}",
+                                    if holds { "HOLDS" } else { "WRONG" },
+                                    answer.solids().len(),
+                                )
+                            }
+                        }
+                    }
+                    Ok(Err(Error::Undecidable { records })) => {
+                        let named: Vec<&str> =
+                            records.records().iter().map(|r| r.predicate()).collect();
+                        format!("Err Undecidable {named:?}")
+                    }
+                    Ok(Err(other)) => format!("Err {other:?}"),
+                };
+                eprintln!("Q2758 OUTCOME {case}: {outcome}");
+            }
+        }
+    }
+}
+
+fn q2758_placements() -> Vec<(String, Isometry)> {
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a translation");
+    let mut placements: Vec<(String, Isometry)> = vec![
+        ("identity".to_string(), Isometry::identity()),
+        ("shift".to_string(), shift),
+        ("turn x 0.4".to_string(), every_placement()[2]),
+        ("shift . turn x 0.4".to_string(), every_placement()[3]),
+    ];
+    for direction in [[1.0, 2.0, 3.0], [-2.0, 1.0, 0.5], [0.3, -1.0, 2.0]] {
+        let [x, y, z] = direction;
+        let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(x, y, z)).expect("an axis");
+        for angle in [0.1, 0.7, 1.3, 2.9] {
+            let turn = Isometry::rotation(&axis, angle).expect("a turn");
+            placements.push((format!("turn {direction:?} {angle}"), turn));
+            placements.push((
+                format!("shift . turn {direction:?} {angle}"),
+                shift.compose(&turn),
+            ));
+        }
+    }
+    placements
+}
