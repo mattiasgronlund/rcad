@@ -42,13 +42,14 @@ use crate::enclosure::{
 };
 use crate::exact::Exact;
 use crate::intersect::{
-    Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_CONE_AND_A_BALL_CROSS,
-    WHERE_A_CONE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS,
-    a_cones_slant_against_a_pipe_enclosing, a_cones_slant_against_a_pipe_exactly, ask,
-    how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_cone,
-    one_cone_either_way_round, two_cones_lean_apart_on_one_apex,
-    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
-    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
+    Question, TwoConesInTwoLoops, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_CONE_AND_A_BALL_CROSS,
+    WHERE_A_CONE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_CONES_CROSS,
+    WHERE_TWO_PIPES_CROSS, a_cones_slant_against_a_pipe_enclosing,
+    a_cones_slant_against_a_pipe_exactly, ask, how_a_ball_on_a_cones_axis_meets_it,
+    how_a_plane_leans_against_a_cone, one_cone_either_way_round, two_cones_lean_apart_on_one_apex,
+    two_cones_off_one_axis_in_two_loops, whether_a_ball_runs_through_a_cones_apex,
+    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
+    whether_two_cones_share_an_axis,
 };
 use crate::march::{Marched, march, settled_with_a_bound, settled_with_a_bound_where_they_bend};
 use crate::meet::nowhere_in_particular;
@@ -791,8 +792,8 @@ enum WhatARunLiesOn {
 /// as the two surfaces it comes from, so that which side of it a point is on is
 /// asked of the numbers they store and of nothing rounded from them.
 ///
-/// **Exhaustive on purpose.** These are the four pairs that are marched, and a
-/// fifth would need its own flat surface worked out before it could be.
+/// **Exhaustive on purpose.** These are the five pairs that are marched, and a
+/// sixth would need its own flat surface worked out before it could be.
 #[derive(Clone, Copy)]
 enum TwoLoopsHeldApartBy {
     /// The one through the ball's centre square to the pipe's axis, which
@@ -813,6 +814,10 @@ enum TwoLoopsHeldApartBy {
     /// The one through a cone's apex square to its axis, for a ball off the
     /// axis, which `intersect` picks the two loops by as it stores it.
     ConesApex { cone: Cone, ball: Sphere },
+    /// The one `intersect`'s `two_cones_off_one_axis_in_two_loops` proves
+    /// every straight line of one cone crosses between its two crossings of
+    /// the other, for two cones off one axis, as it stores it.
+    TwoConesAcross(TwoConesInTwoLoops),
 }
 
 impl TwoLoopsHeldApartBy {
@@ -831,6 +836,10 @@ impl TwoLoopsHeldApartBy {
             Self::ConesApex { cone, ball } => {
                 [how_tightly_a_cone_bends_at(&cone, at), ball.radius()]
             }
+            Self::TwoConesAcross(loops) => [
+                how_tightly_a_cone_bends_at(&loops.ruled, at),
+                how_tightly_a_cone_bends_at(&loops.crossed, at),
+            ],
         }
     }
 
@@ -846,6 +855,9 @@ impl TwoLoopsHeldApartBy {
             Self::FatPipesAxis { thin, fat } => [thin.side_of(corner), fat.side_of(corner)],
             Self::ConesSlantPlane { cone, pipe } => [cone.side_of(corner), pipe.side_of(corner)],
             Self::ConesApex { cone, ball } => [cone.side_of(corner), ball.side_of(corner)],
+            Self::TwoConesAcross(loops) => {
+                [loops.ruled.side_of(corner), loops.crossed.side_of(corner)]
+            }
         };
         sides.into_iter().all(|side| match side {
             Decision::Zero => true,
@@ -1131,6 +1143,18 @@ fn what_a_run_between_these_two_lies_on(
             if two_cones_lean_apart_on_one_apex(&one, &other) =>
         {
             Ok(WhatARunLiesOn::StraightLine)
+        }
+        // Two cones off one axis cross in a degree-four curve that is marched
+        // where it is proved two loops, by the one function `intersect` names
+        // them with, so the walk refuses exactly what the namer refuses.
+        [Surface::Cone(one), Surface::Cone(other)]
+            if whether_two_cones_share_an_axis(&one, &other) == Decision::Pos =>
+        {
+            let loops = two_cones_off_one_axis_in_two_loops(&one, &other, policy, log)?;
+            a_quartic_picked_up_at(
+                where_one_cone_reaches_across_another(&loops.ruled, &loops.crossed),
+                TwoLoopsHeldApartBy::TwoConesAcross(loops),
+            )
         }
         // Two cones on one axis cross in one circle or two, and a ball on a
         // cone's axis in none, one or two; which one this run is, is its ends'
@@ -2244,6 +2268,21 @@ fn which_side_of_what_holds_two_loops_apart_if_it_can_be_told(
             };
             (question.named, decide(&question))
         }
+        TwoLoopsHeldApartBy::TwoConesAcross(loops) => {
+            let through = loops.across.through().coordinates();
+            let facing = loops.across.facing().components();
+            let question = Question {
+                named: WHERE_TWO_CONES_CROSS,
+                enclosing: || dot_enclosing(exactly(facing), from(through)),
+                exactly: || {
+                    Exact::dot_of_two_exact(
+                        &Exact::of_each(facing),
+                        &Exact::gap_between(through, exact_at?),
+                    )
+                },
+            };
+            (question.named, decide(&question))
+        }
     }
 }
 
@@ -2677,6 +2716,35 @@ fn where_a_pipe_reaches_across_a_cone(cone: &Cone, pipe: &Cylinder) -> [Point; 2
     [
         start + along * (larger / steepness),
         start + along * (form(from_the_apex) / larger),
+    ]
+}
+
+/// The two places one straight line of `ruled` out of its apex meets
+/// `crossed`, one on each of the two loops `intersect` names them in.
+///
+/// Along `y = z + t·d` from `crossed`'s apex, with `z` the gap between the two
+/// apexes, `crossed` is `Q(d)t² + 2B(d, z)t + Q(z) = 0`, and
+/// [`two_cones_off_one_axis_in_two_loops`] proved that every such line has two
+/// roots with the flat surface holding the loops apart between them. Solved as
+/// [`where_a_pipe_reaches_across_a_cone`] solves its line.
+fn where_one_cone_reaches_across_another(ruled: &Cone, crossed: &Cone) -> [Point; 2] {
+    let up = crossed.axis().direction();
+    let along = ruled.axis().direction();
+    let widening = 1.0 + crossed.slope() * crossed.slope();
+    let form =
+        |v: Vector| up.length_squared() * v.length_squared() - widening * v.dot(up) * v.dot(up);
+    let ruling = along + ruled.basis().0 * (ruled.slope() * along.length());
+    let from_the_apex = ruled.apex() - crossed.apex();
+    let half = up.length_squared() * ruling.dot(from_the_apex)
+        - widening * ruling.dot(up) * from_the_apex.dot(up);
+    let steepness = form(ruling);
+    let spread = (half * half - steepness * form(from_the_apex))
+        .max(0.0)
+        .sqrt();
+    let larger = -(half + spread.copysign(half));
+    [
+        ruled.apex() + ruling * (larger / steepness),
+        ruled.apex() + ruling * (form(from_the_apex) / larger),
     ]
 }
 
