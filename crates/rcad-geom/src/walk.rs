@@ -798,21 +798,21 @@ enum TwoLoopsHeldApartBy {
     /// The one through the ball's centre square to the pipe's axis, which
     /// [`intersect`](crate::intersect)'s `two_loops_either_side_of_a_ball`
     /// picks with a rounding of.
-    ABallsCentre { ball: Sphere, pipe: Cylinder },
+    BallsCentre { ball: Sphere, pipe: Cylinder },
     /// The one through the fat pipe's axis square to the thin pipe's way across
     /// it. `two_loops_either_side_of_a_pipe` picks with one that leans off it
     /// wherever that way cannot be stored square.
-    AFatPipesAxis { thin: Cylinder, fat: Cylinder },
+    FatPipesAxis { thin: Cylinder, fat: Cylinder },
     /// The one through a cone's apex square to
     /// `n = W·w_p − (1 + slope²)(w_p·w_c)·w_c`, for a pipe off the cone's axis.
     /// Each straight line of the pipe meets the cone where `n·(x − a)` is
     /// `±√D`, so it holds the two loops apart whether the pipe is steeper than
     /// the cone, where `intersect` picks them by the flat surface square to the
     /// cone's axis, or shallower, where it picks them by `n` rounded.
-    AConesSlantPlane { cone: Cone, pipe: Cylinder },
+    ConesSlantPlane { cone: Cone, pipe: Cylinder },
     /// The one through a cone's apex square to its axis, for a ball off the
     /// axis, which `intersect` picks the two loops by as it stores it.
-    AConesApex { cone: Cone, ball: Sphere },
+    ConesApex { cone: Cone, ball: Sphere },
 }
 
 impl TwoLoopsHeldApartBy {
@@ -823,12 +823,12 @@ impl TwoLoopsHeldApartBy {
     /// flips from one nappe to the other.
     fn the_two_radii(self, at: Point) -> [f64; 2] {
         match self {
-            Self::ABallsCentre { ball, pipe } => [ball.radius(), pipe.radius()],
-            Self::AFatPipesAxis { thin, fat } => [thin.radius(), fat.radius()],
-            Self::AConesSlantPlane { cone, pipe } => {
+            Self::BallsCentre { ball, pipe } => [ball.radius(), pipe.radius()],
+            Self::FatPipesAxis { thin, fat } => [thin.radius(), fat.radius()],
+            Self::ConesSlantPlane { cone, pipe } => {
                 [how_tightly_a_cone_bends_at(&cone, at), pipe.radius()]
             }
-            Self::AConesApex { cone, ball } => {
+            Self::ConesApex { cone, ball } => {
                 [how_tightly_a_cone_bends_at(&cone, at), ball.radius()]
             }
         }
@@ -842,10 +842,10 @@ impl TwoLoopsHeldApartBy {
             return false;
         }
         let sides = match self {
-            Self::ABallsCentre { ball, pipe } => [ball.side_of(corner), pipe.side_of(corner)],
-            Self::AFatPipesAxis { thin, fat } => [thin.side_of(corner), fat.side_of(corner)],
-            Self::AConesSlantPlane { cone, pipe } => [cone.side_of(corner), pipe.side_of(corner)],
-            Self::AConesApex { cone, ball } => [cone.side_of(corner), ball.side_of(corner)],
+            Self::BallsCentre { ball, pipe } => [ball.side_of(corner), pipe.side_of(corner)],
+            Self::FatPipesAxis { thin, fat } => [thin.side_of(corner), fat.side_of(corner)],
+            Self::ConesSlantPlane { cone, pipe } => [cone.side_of(corner), pipe.side_of(corner)],
+            Self::ConesApex { cone, ball } => [cone.side_of(corner), ball.side_of(corner)],
         };
         sides.into_iter().all(|side| match side {
             Decision::Zero => true,
@@ -1032,7 +1032,7 @@ fn what_a_run_between_these_two_lies_on(
             } else {
                 a_quartic_picked_up_at(
                     where_a_ball_reaches_across_a_pipe(&ball, &pipe),
-                    TwoLoopsHeldApartBy::ABallsCentre { ball, pipe },
+                    TwoLoopsHeldApartBy::BallsCentre { ball, pipe },
                 )
             }
         }
@@ -1072,7 +1072,7 @@ fn what_a_run_between_these_two_lies_on(
             };
             a_quartic_picked_up_at(
                 where_one_pipe_reaches_across_another(&thin, &fat),
-                TwoLoopsHeldApartBy::AFatPipesAxis { thin, fat },
+                TwoLoopsHeldApartBy::FatPipesAxis { thin, fat },
             )
         }
         // A cone and a pipe on one axis cross in two circles, and this arm
@@ -1091,7 +1091,7 @@ fn what_a_run_between_these_two_lies_on(
                     refused_unless_intersect_names_a_curve(&pair, policy, log)?;
                     a_quartic_picked_up_at(
                         where_a_pipe_reaches_across_a_cone(&cone, &pipe),
-                        TwoLoopsHeldApartBy::AConesSlantPlane { cone, pipe },
+                        TwoLoopsHeldApartBy::ConesSlantPlane { cone, pipe },
                     )
                 }
                 Decision::Neg | Decision::Undecidable { .. } | _ => {
@@ -1151,7 +1151,7 @@ fn what_a_run_between_these_two_lies_on(
                     refused_unless_intersect_names_a_curve(&pair, policy, log)?;
                     a_quartic_picked_up_at(
                         where_a_ball_reaches_across_a_cone(&cone, &ball),
-                        TwoLoopsHeldApartBy::AConesApex { cone, ball },
+                        TwoLoopsHeldApartBy::ConesApex { cone, ball },
                     )
                 }
                 Decision::Neg | Decision::Undecidable { .. } | _ => {
@@ -2163,7 +2163,7 @@ fn which_side_of_what_holds_two_loops_apart_if_it_can_be_told(
         core::array::from_fn(|axis| near[axis] - Interval::exactly(here[axis]))
     };
     match held_apart_by {
-        TwoLoopsHeldApartBy::ABallsCentre { ball, pipe } => {
+        TwoLoopsHeldApartBy::BallsCentre { ball, pipe } => {
             let centre = ball.centre().coordinates();
             let along = pipe.axis().direction().components();
             let question = Question {
@@ -2178,7 +2178,7 @@ fn which_side_of_what_holds_two_loops_apart_if_it_can_be_told(
             };
             (question.named, decide(&question))
         }
-        TwoLoopsHeldApartBy::AFatPipesAxis { thin, fat } => {
+        TwoLoopsHeldApartBy::FatPipesAxis { thin, fat } => {
             let origin = fat.axis().origin().coordinates();
             let [thin_way, fat_way] = [thin, fat].map(|pipe| pipe.axis().direction().components());
             let question = Question {
@@ -2210,7 +2210,7 @@ fn which_side_of_what_holds_two_loops_apart_if_it_can_be_told(
             };
             (question.named, decide(&question))
         }
-        TwoLoopsHeldApartBy::AConesSlantPlane { cone, pipe } => {
+        TwoLoopsHeldApartBy::ConesSlantPlane { cone, pipe } => {
             let apex = cone.apex().coordinates();
             let question = Question {
                 named: WHERE_A_CONE_AND_A_PIPE_CROSS,
@@ -2229,7 +2229,7 @@ fn which_side_of_what_holds_two_loops_apart_if_it_can_be_told(
             };
             (question.named, decide(&question))
         }
-        TwoLoopsHeldApartBy::AConesApex { cone, .. } => {
+        TwoLoopsHeldApartBy::ConesApex { cone, .. } => {
             let apex = cone.apex().coordinates();
             let along = cone.axis().direction().components();
             let question = Question {
@@ -2656,7 +2656,7 @@ fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point;
 /// Along `y = y₀ + t·w_p` from the apex the cone is
 /// `Q(w_p)t² + 2(n·y₀)t + Q(y₀) = 0`, and its two roots are where `n·(x − a)`
 /// is `±√D`, so they are either side of the flat surface that holds the loops
-/// apart ([`TwoLoopsHeldApartBy::AConesSlantPlane`]). Solved the way that
+/// apart ([`TwoLoopsHeldApartBy::ConesSlantPlane`]). Solved the way that
 /// loses nothing to cancelling: the larger root first, the other from the
 /// product of the two.
 fn where_a_pipe_reaches_across_a_cone(cone: &Cone, pipe: &Cylinder) -> [Point; 2] {
@@ -7553,7 +7553,7 @@ mod tests {
     #[test]
     fn a_corner_exactly_where_two_surfaces_touch_is_no_distance_off_their_crossing() {
         let (ball, pipe) = a_ball_and_a_pipe_resting_on_its_inside();
-        let held_apart_by = TwoLoopsHeldApartBy::ABallsCentre { ball, pipe };
+        let held_apart_by = TwoLoopsHeldApartBy::BallsCentre { ball, pipe };
         let [ball, pipe] = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
         let touching = PredicatePoint::from(where_they_touch().coordinates());
         let top = PredicatePoint::from([0.0, 0.0, 2.0]);
@@ -7577,7 +7577,7 @@ mod tests {
             0.1,
         )
         .expect("a radius");
-        let held_apart_by = TwoLoopsHeldApartBy::ABallsCentre { ball, pipe };
+        let held_apart_by = TwoLoopsHeldApartBy::BallsCentre { ball, pipe };
         let [ball, pipe] = [Surface::Sphere(ball), Surface::Cylinder(pipe)];
         let off_the_crossing = PredicatePoint::from([10.15, 1.15, 16.4]);
         for surfaces in [[&ball, &pipe], [&pipe, &ball]] {
