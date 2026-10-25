@@ -361,10 +361,19 @@ impl SolidView<'_> {
     ///
     /// A solid with a curved face has no such fan — its caps fan into no
     /// triangles at all and its wall into two with no area — so it is measured
-    /// over [`SolidView::mesh`], and the three error terms say how much of the
-    /// answer the triangles could be hiding. The volume's and the centroid's
-    /// add how far their own sums over the mesh rounded, worked out as the flat
-    /// path works it out.
+    /// over a mesh, and the three error terms say how much of the answer the
+    /// triangles could be hiding. The volume's and the centroid's add how far
+    /// their own sums over the mesh rounded, worked out as the flat path works
+    /// it out.
+    ///
+    /// That mesh is the one [`SolidView::mesh`] makes, with one difference.
+    /// Where two faces bound one thin strip and the mesh puts no point inside
+    /// it, as the thick bar less a thin one resting inside it does, the two
+    /// faces' triangles lie back to back on the same three points. `mesh`
+    /// refuses them, because a mesh holding them is no one closed surface to
+    /// hand a caller. This keeps them: the two triangles' volumes and moments
+    /// are each other's negatives, so the sum does not move, and each is still
+    /// its own face's, so the area holds both faces (`docs/decisions.md` §466).
     ///
     /// # Which knob decides what
     ///
@@ -399,10 +408,12 @@ impl SolidView<'_> {
     /// side `1e300` encloses `1e900`. The solid is sound; the type is the
     /// limit, so this is bad input rather than a broken model (§4.1).
     ///
-    /// For a curved solid, whatever [`SolidView::mesh`] refuses:
+    /// For a curved solid, whatever [`SolidView::mesh`] refuses —
     /// [`Error::DeflectionBelowWhatAMeshCanReach`],
     /// [`Error::MoreMeshPointsThanASolidWillHold`], [`Error::CannotMeshAFace`]
-    /// or [`Error::Undecidable`].
+    /// or [`Error::Undecidable`] among them — but for two faces' triangles back
+    /// to back, which this keeps, as above. Any other fold is still
+    /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`].
     ///
     /// [`Invalid::VolumeIsNotPositive`] when the solid encloses a negative
     /// amount of space, or none. A wholly flat solid is refused for a sum of
@@ -444,7 +455,7 @@ impl SolidView<'_> {
         if self.is_wholly_flat() {
             return self.measured_over_its_own_fan();
         }
-        let mesh = self.mesh(deflection, policy, log)?;
+        let mesh = self.a_mesh_to_sum_over(deflection, policy, log)?;
         self.measured_over(&mesh)
     }
 
@@ -906,8 +917,10 @@ impl SolidView<'_> {
     ///
     /// Whichever path [`SolidView::measure`] takes for this solid, this takes
     /// for the face: the face's own fan when every face of the solid is flat,
-    /// exactly and with no mesh built, and otherwise the triangles of the
-    /// solid's mesh that [`MeshTriangle::face`] says are this face's. Taking the
+    /// exactly and with no mesh built, and otherwise the triangles of the mesh
+    /// [`SolidView::measure`] sums over that [`MeshTriangle::face`] says are
+    /// this face's. That mesh keeps two faces' triangles back to back where
+    /// [`SolidView::mesh`] refuses them, and so this does too. Taking the
     /// solid's path rather than one of the face's own is what makes the faces
     /// add up to the solid bit for bit; a flat face with straight sides in a
     /// curved solid is therefore measured over the mesh and charged its rim,
@@ -925,9 +938,9 @@ impl SolidView<'_> {
     /// limit and not a gap** (§16.10): the answer exists and the type cannot
     /// hold it, the refusal [`SolidView::measure`] gives for the same reason.
     ///
-    /// For a face of a curved solid, whatever [`SolidView::mesh`] refuses —
-    /// [`Error::DeflectionBelowWhatAMeshCanReach`] among them — because the
-    /// face is measured over the solid's mesh.
+    /// For a face of a curved solid, whatever [`SolidView::measure`] refuses
+    /// the solid for meshing it — [`Error::DeflectionBelowWhatAMeshCanReach`]
+    /// among them — because the face is measured over the same mesh.
     ///
     /// Whatever [`Model::validate`](crate::Model::validate) refuses, when the
     /// face comes out with no area at all. A face with no area has no centroid
@@ -937,12 +950,23 @@ impl SolidView<'_> {
     /// used by two triangles of the solid's mesh. So a face with none is a
     /// model `validate` refuses, and its refusal is the one handed back.
     ///
+    /// **But a face can have area and triangles that have none.** The sliver
+    /// of the block's roof one rounding wide, in the plate united with the
+    /// block cornered twice under its floor
+    /// (`a_block_cornered_on_a_round_tabs_rim.rs`), has one triangle in the
+    /// mesh, back to back with one of the tab's wall, and two of its three
+    /// points are at one place. Where `validate` accepts such a face it is
+    /// answered rather than refused: an area of nothing with the charge the
+    /// solid's [`Measurement::area_error`] makes for it, a corner of the face
+    /// for a centroid, and an infinite [`FaceMeasurement::centroid_wobble`],
+    /// since nothing bounds the true area away from zero.
+    ///
     /// # Panics
     ///
     /// For a face of a curved solid, everything [`SolidView::mesh`] panics on.
-    /// And on a face with no area in a model
-    /// [`Model::validate`](crate::Model::validate) accepts, which the paragraph
-    /// above says cannot happen.
+    /// And on a face with no area over its own fan, or no triangles in the
+    /// mesh at all, in a model [`Model::validate`](crate::Model::validate)
+    /// accepts, which the first of the two paragraphs above says cannot happen.
     pub fn measure_one_face(
         self,
         face: FaceKey,
@@ -957,18 +981,21 @@ impl SolidView<'_> {
         let measured = if self.is_wholly_flat() {
             one_face_measured_over_its_own_fan(view)
         } else {
-            let mesh = self.mesh(deflection, policy, log)?;
+            let mesh = self.a_mesh_to_sum_over(deflection, policy, log)?;
             self.one_face_measured_over(&mesh, face)
         };
         match measured {
             OneFace::Measured(measurement) => Ok(measurement),
             OneFace::TooLargeToMeasure => Err(Error::SurfaceAreaTooLargeToMeasure),
-            OneFace::HasNoArea => {
+            OneFace::HasNoArea(if_sound) => {
                 self.model().validate(policy, log)?;
-                panic!(
-                    "face {face:?} has no area in a model validate accepts, and every face \
-                     of a sound solid has some"
-                )
+                let Some(measurement) = if_sound else {
+                    panic!(
+                        "face {face:?} has no area in a model validate accepts, and every \
+                         face of a sound solid has some"
+                    )
+                };
+                Ok(measurement)
             }
         }
     }
@@ -976,14 +1003,23 @@ impl SolidView<'_> {
     /// One face's share of [`SolidView::measured_over`]: the area
     /// [`SolidView::skin_of`] adds for it, the charge it adds for it, and the
     /// centroid of the same triangles.
+    ///
+    /// **A face whose triangles have no area is still measured**, unlike one
+    /// with no triangles at all. Its centroid is a corner of its first
+    /// triangle, since a moment divided by nothing balances nowhere, and its
+    /// wobble is infinite, as [`FaceMeasurement::centroid_wobble`] is whenever
+    /// the area error is not smaller than the area. That is the sliver of the
+    /// block's roof one rounding wide in `a_block_cornered_on_a_round_tabs_rim.rs`:
+    /// its one triangle lies back to back with one of the tab's wall, and two of
+    /// its three points are at one place.
     fn one_face_measured_over(self, mesh: &Mesh, face: FaceKey) -> OneFace {
         let triangles = the_triangles_of(mesh, face);
+        let Some(first) = triangles.first() else {
+            return OneFace::HasNoArea(None);
+        };
         let area = area_of(mesh, triangles);
         if !area.is_finite() {
             return OneFace::TooLargeToMeasure;
-        }
-        if area <= 0.0 {
-            return OneFace::HasNoArea;
         }
 
         let bend = bend_of_each_face(self, mesh)[&face];
@@ -1016,6 +1052,14 @@ impl SolidView<'_> {
             }
         };
 
+        if area <= 0.0 {
+            return OneFace::HasNoArea(Some(FaceMeasurement {
+                area,
+                area_error,
+                centroid: corners_of(mesh, first)[0],
+                centroid_wobble: f64::INFINITY,
+            }));
+        }
         let centroid = middle_of(mesh, triangles);
         let reach = triangles
             .iter()
@@ -1042,7 +1086,9 @@ impl SolidView<'_> {
 enum OneFace {
     Measured(FaceMeasurement),
     TooLargeToMeasure,
-    HasNoArea,
+    /// No area, with what to hand back if the model is sound, or `None` when
+    /// the face has no triangles to hand anything back from.
+    HasNoArea(Option<FaceMeasurement>),
 }
 
 /// One face of a wholly flat solid, over its own fan: the area
@@ -1065,7 +1111,7 @@ fn one_face_measured_over_its_own_fan(face: FaceView<'_>) -> OneFace {
         return OneFace::TooLargeToMeasure;
     }
     if area <= 0.0 {
-        return OneFace::HasNoArea;
+        return OneFace::HasNoArea(None);
     }
 
     let mut apex = None;

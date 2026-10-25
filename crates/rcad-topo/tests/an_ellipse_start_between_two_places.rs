@@ -165,7 +165,7 @@ fn the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_
 /// keep the fin the bar leaves outside `x = −17`, which is too thin to hold
 /// beside coordinates of 17: under `certified` each is refused
 /// `DynamicRangeTooWide`, and under `tolerant` each carries one record, of the
-/// range check.
+/// range check, and answers one solid that holds its closed form.
 ///
 /// **The closed forms.** The block's side `x = −17` is `2⁻⁵¹` inside the bar's
 /// wall, its other three sides are clear of the bar, and its bottom is under
@@ -192,16 +192,13 @@ fn the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_
 ///
 /// **The bar less the block**, `10 π r²` less what they share, `23.380`, and
 /// the fin, answers one solid under `tolerant` that validates under `tolerant`
-/// alone, but its `measure` is refused `TwoPatchesOfTheMeshDrewTheSameSide`.
-/// The fin's wall and the block's side are drawn on the same three points,
-/// back to back. The sum `Model::validate` reads keeps such a pair and
-/// `SolidView::mesh`, which `measure` meshes with, refuses it
-/// (`docs/decisions.md` §466). A probe on Q2774's branch that made `measure`
-/// sum over the mesh `validate` sums over found it within its error bar of
-/// `23.380`, the bar under half of what they share. Until Q2774 the fuse was
-/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` at the
-/// last rung of the fold ladder (Q1869), which was Q1972's refusal and then
-/// Q2262's.
+/// alone. The fin's wall and the block's side are drawn on the same three
+/// points, back to back, and the sum `Model::validate` and `measure` read
+/// keeps such a pair (`docs/decisions.md` §466). Until Q2790 `measure` meshed
+/// with `SolidView::mesh`, which refuses the pair, and was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide`. Until Q2774 the fuse was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }` at the last rung
+/// of the fold ladder (Q1869), which was Q1972's refusal and then Q2262's.
 ///
 /// **Why this says the arm gave an order.** Every fuse here goes through
 /// `the_one_ahead_of_the_start`, and goes there from `the_one_the_start_is`'s
@@ -222,7 +219,7 @@ fn the_one_ahead_of_the_start_comes_before_the_point_across_the_ellipse_and_the_
 /// both arcs, the long one on the top and a sliver `2⁻⁵¹` outside the block
 /// (Q1860's trace).
 #[test]
-fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the_block() {
+fn every_fuse_with_the_tilted_block_answers_its_closed_form() {
     let shared = std::f64::consts::PI * RADIUS * RADIUS * (4.0 / 0.5_f64.cos() - 2.0);
     let bar = std::f64::consts::PI * RADIUS * RADIUS * 10.0;
     let block = 4.0 * 12.0 * 4.0;
@@ -255,16 +252,7 @@ fn every_fuse_with_the_tilted_block_answers_its_closed_form_but_the_bar_less_the
                     (Rule::Union, _) => block + bar - shared,
                     (Rule::Intersection, _) => shared,
                     (Rule::Difference, false) => block - shared,
-                    (Rule::Difference, true) => {
-                        assert_one_solid_that_validates_but_does_not_measure(
-                            &model, &fused, &policy, &case,
-                        );
-                        assert_refused_for_the_fin(
-                            &model.validate(&Policy::certified(), &mut ProvenanceLog::new()),
-                            &case,
-                        );
-                        continue;
-                    }
+                    (Rule::Difference, true) => bar - shared,
                     _ => unreachable!("{case}: EVERY_RULE names three rules"),
                 };
                 assert_one_solid_holding(&model, fused, closed_form, shared, &policy, &case);
@@ -513,9 +501,11 @@ fn assert_one_solid_holding(
 
 /// A bar `2⁻⁴⁰` wider than `1`, less the tilted block, leaves a fin outside
 /// `x = −17` that is `2⁻⁴⁰` thick and `2.7e-6` across. Under `tolerant` the
-/// fuse answers one solid that validates, within 30 s; under `certified` it is
-/// refused `DynamicRangeTooWide`. The ellipse's start is `−17 − 2⁻⁴⁰`, off the
-/// block's side, so the walk is not refused with or without Q1860's walk fix.
+/// fuse answers one solid that validates and holds `10 π r²` less what the bar
+/// and the block share, worked out as the test above works it, within 30 s;
+/// under `certified` it is refused `DynamicRangeTooWide`. The ellipse's start
+/// is `−17 − 2⁻⁴⁰`, off the block's side, so the walk is not refused with or
+/// without Q1860's walk fix.
 ///
 /// **The fin is too thin for the mesh to split.** The block's flat strip of
 /// side between the fin's two corners and the bar's wall over it are drawn on
@@ -532,11 +522,9 @@ fn assert_one_solid_holding(
 /// and the fuse answers. The 30 s bound stays, so that the old wait cannot
 /// come back unseen.
 ///
-/// **Its measure is still refused**, `TwoPatchesOfTheMeshDrewTheSameSide`:
-/// `SolidView::measure` meshes with `SolidView::mesh`, which refuses the pair.
-/// A probe on Q2774's branch that made `measure` sum over the mesh `validate`
-/// sums over measured `23.3387 ± 0.472`, where `10 π r²` less what the bar and
-/// the block share, worked out as the test above works it, is `23.3798`.
+/// **Its measure sums over the same mesh**, the pair kept, since Q2790. Until
+/// then `SolidView::measure` meshed with `SolidView::mesh`, which refuses the
+/// pair, and was refused `TwoPatchesOfTheMeshDrewTheSameSide`.
 ///
 /// **Only the tolerant fuse gets a mesh.** The fin's piece of the bar's
 /// bottom cap bows `2⁻⁴⁰` off its chord, a spread of `17 / 2⁻⁴⁰`, `1.87e13`,
@@ -545,10 +533,13 @@ fn assert_one_solid_holding(
 /// Q2257). Under `tolerant` that spread is a warning.
 #[test]
 fn a_fin_too_thin_for_the_mesh_to_split_answers_in_seconds_under_tolerant() {
+    let radius = 1.0 + f64::powi(2.0, -40);
+    let shared = std::f64::consts::PI * radius * radius * (4.0 / 0.5_f64.cos() - 2.0);
+    let the_bar_less_the_block = std::f64::consts::PI * radius * radius * 10.0 - shared;
     for (policy, certified) in [(Policy::certified(), true), (Policy::tolerant(25.0), false)] {
         let (answer, answered) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let (mut model, bar, block) = the_block_and_a_bar_of_radius(1.0 + f64::powi(2.0, -40));
+            let (mut model, bar, block) = the_block_and_a_bar_of_radius(radius);
             let fused = model.fuse(
                 &[bar],
                 &[block],
@@ -573,48 +564,16 @@ fn a_fin_too_thin_for_the_mesh_to_split_answers_in_seconds_under_tolerant() {
                 "{policy:?}: {fused:?}"
             );
         } else {
-            assert_one_solid_that_validates_but_does_not_measure(
+            assert_one_solid_holding(
                 &model,
-                &fused,
+                fused,
+                the_bar_less_the_block,
+                shared,
                 &policy,
                 &format!("{policy:?}"),
             );
         }
     }
-}
-
-/// Checks that `fused` is one solid, that the model validates under `policy`,
-/// and that `measure` is refused `TwoPatchesOfTheMeshDrewTheSameSide`: the
-/// fin's wall and the block's side drawn back to back, which the sum
-/// `Model::validate` reads keeps and `SolidView::mesh` refuses
-/// (`docs/decisions.md` §466).
-fn assert_one_solid_that_validates_but_does_not_measure(
-    model: &Model,
-    fused: &rcad_topo::Result<Fused>,
-    policy: &Policy,
-    case: &str,
-) {
-    let fused = fused
-        .as_ref()
-        .unwrap_or_else(|why| panic!("{case}: {why:?}"));
-    let [solid] = fused.solids()[..] else {
-        panic!("{case}: {:?}", fused.solids())
-    };
-    model
-        .validate(policy, &mut ProvenanceLog::new())
-        .unwrap_or_else(|why| panic!("{case}: {why:?}"));
-    let measured = model.solid(solid).expect("the fuse made it").measure(
-        Deflection::of(0.01).expect("a positive deflection"),
-        policy,
-        &mut ProvenanceLog::new(),
-    );
-    assert!(
-        matches!(
-            measured,
-            Err(Error::TwoPatchesOfTheMeshDrewTheSameSide { .. })
-        ),
-        "{case}: {measured:?}"
-    );
 }
 
 fn fuse_the_bar_and_a_block(
