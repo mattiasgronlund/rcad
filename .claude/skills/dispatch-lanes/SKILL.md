@@ -187,6 +187,16 @@ holds `merged.rs` whole only to declare its one file. `just queue families`
 counts `merged.rs` as a test file and so lists these rows as one family on it.
 They share a binary's root, not a shape: trace no family on `merged.rs`.
 
+**A row whose fix makes a corpus file import or stop importing names its two
+corpus pins in its write set**, the same way a row that moves a `check-*`
+count names the recipe that pins it: `KICAD_FILES_THAT_IMPORT` in
+`crates/rcad-step/tests/how_often_a_real_file_imports.rs` and
+`KICAD_FILES_THAT_ROUND_TRIP` in
+`crates/rcad-step/tests/a_real_file_written_out_and_read_back_is_the_same_solid.rs`,
+the KiCad corpus's only pair today. Naming them lets the row's own lane move
+both counts together; left out, they are the merger's to re-pin instead, under
+`merger.md` step 2's conditions (§391).
+
 ## 5. Dispatch: one `lanes` workflow per row
 
 A row is one run of the `lanes` workflow: its lane, then the lane's verifier,
