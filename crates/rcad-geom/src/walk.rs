@@ -37,12 +37,15 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::enclosure::{
-    cross_enclosing, dot_enclosing, exactly, gap_enclosing, squared_length_enclosing,
+    cross_enclosing, dot_enclosing, exactly, gap_enclosing, quotient_or_everything, root_enclosing,
+    squared_length_enclosing,
 };
 use crate::exact::Exact;
 use crate::intersect::{
-    Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS,
-    ask, how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_cone,
+    Question, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_CONE_AND_A_BALL_CROSS,
+    WHERE_A_CONE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_PIPES_CROSS,
+    a_cones_slant_against_a_pipe_enclosing, a_cones_slant_against_a_pipe_exactly, ask,
+    how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_cone,
     one_cone_either_way_round, two_cones_lean_apart_on_one_apex,
     whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
     whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
@@ -784,8 +787,8 @@ enum WhatARunLiesOn {
 /// as the two surfaces it comes from, so that which side of it a point is on is
 /// asked of the numbers they store and of nothing rounded from them.
 ///
-/// **Exhaustive on purpose.** These are the two pairs that are marched, and a
-/// third would need its own flat surface worked out before it could be.
+/// **Exhaustive on purpose.** These are the four pairs that are marched, and a
+/// fifth would need its own flat surface worked out before it could be.
 #[derive(Clone, Copy)]
 enum TwoLoopsHeldApartBy {
     /// The one through the ball's centre square to the pipe's axis, which
@@ -796,14 +799,34 @@ enum TwoLoopsHeldApartBy {
     /// it. `two_loops_either_side_of_a_pipe` picks with one that leans off it
     /// wherever that way cannot be stored square.
     AFatPipesAxis { thin: Cylinder, fat: Cylinder },
+    /// The one through a cone's apex square to
+    /// `n = W·w_p − (1 + slope²)(w_p·w_c)·w_c`, for a pipe off the cone's axis.
+    /// Each straight line of the pipe meets the cone where `n·(x − a)` is
+    /// `±√D`, so it holds the two loops apart whether the pipe is steeper than
+    /// the cone, where `intersect` picks them by the flat surface square to the
+    /// cone's axis, or shallower, where it picks them by `n` rounded.
+    AConesSlantPlane { cone: Cone, pipe: Cylinder },
+    /// The one through a cone's apex square to its axis, for a ball off the
+    /// axis, which `intersect` picks the two loops by as it stores it.
+    AConesApex { cone: Cone, ball: Sphere },
 }
 
 impl TwoLoopsHeldApartBy {
-    /// The radii of the two surfaces, which is as tight as either of them bends.
-    fn the_two_radii(self) -> [f64; 2] {
+    /// The radii of the two surfaces near `at`, which is as tight as either of
+    /// them bends there. A cone bends no tighter than how far `at` is from its
+    /// axis, and is taken no further from it than the flat surface through its
+    /// apex square to the axis, where the way the marcher reads its normal
+    /// flips from one nappe to the other.
+    fn the_two_radii(self, at: Point) -> [f64; 2] {
         match self {
             Self::ABallsCentre { ball, pipe } => [ball.radius(), pipe.radius()],
             Self::AFatPipesAxis { thin, fat } => [thin.radius(), fat.radius()],
+            Self::AConesSlantPlane { cone, pipe } => {
+                [how_tightly_a_cone_bends_at(&cone, at), pipe.radius()]
+            }
+            Self::AConesApex { cone, ball } => {
+                [how_tightly_a_cone_bends_at(&cone, at), ball.radius()]
+            }
         }
     }
 
@@ -817,6 +840,8 @@ impl TwoLoopsHeldApartBy {
         let sides = match self {
             Self::ABallsCentre { ball, pipe } => [ball.side_of(corner), pipe.side_of(corner)],
             Self::AFatPipesAxis { thin, fat } => [thin.side_of(corner), fat.side_of(corner)],
+            Self::AConesSlantPlane { cone, pipe } => [cone.side_of(corner), pipe.side_of(corner)],
+            Self::AConesApex { cone, ball } => [cone.side_of(corner), ball.side_of(corner)],
         };
         sides.into_iter().all(|side| match side {
             Decision::Zero => true,
@@ -824,6 +849,23 @@ impl TwoLoopsHeldApartBy {
             other => panic!("a side of a surface came back as {other:?}"),
         })
     }
+}
+
+/// A lower end on how far `at` is from `cone`'s axis and from the flat
+/// surface through its apex square to that axis, the nearer of the two, and
+/// nothing where either cannot be put above nothing.
+fn how_tightly_a_cone_bends_at(cone: &Cone, at: Point) -> f64 {
+    let along = exactly(cone.axis().direction().components());
+    let length = root_enclosing(squared_length_enclosing(along));
+    let out = gap_enclosing(cone.apex().coordinates(), at.coordinates());
+    let off_the_axis = quotient_or_everything(
+        root_enclosing(squared_length_enclosing(cross_enclosing(out, along))),
+        length,
+    );
+    let past_the_apex = quotient_or_everything(dot_enclosing(out, along), length);
+    let past_the_apex = past_the_apex.lo().max(-past_the_apex.hi());
+    let nearer = off_the_axis.lo().min(past_the_apex);
+    if nearer > 0.0 { nearer } else { 0.0 }
 }
 
 /// Which of those three the crossing of these two surfaces is, and the thing
@@ -1024,13 +1066,29 @@ fn what_a_run_between_these_two_lies_on(
                 TwoLoopsHeldApartBy::AFatPipesAxis { thin, fat },
             )
         }
-        // A cone and a pipe on one axis cross in two circles and everything
-        // else in that row is refused, so this arm reads the run: which of the
-        // two circles it is, is the picker's to say.
+        // A cone and a pipe on one axis cross in two circles, and this arm
+        // reads the run: which of the two it is, is the picker's to say. Off
+        // one axis they cross in a degree-four curve that is marched, and
+        // **`intersect` itself is asked first**, as the torus's arms ask it, so
+        // the walk refuses exactly the shapes the namer refuses and no second
+        // copy of its sign questions can drift from the first. An axis neither
+        // proved shared nor proved apart is refused, as it always was.
         [Surface::Cone(cone), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Cone(cone)] => {
-            where_a_coaxial_cone_and_pipe_cut(&cone, &pipe, run, policy, log)
-                .map(WhatARunLiesOn::Conic)
+            match whether_a_cone_and_a_pipe_share_an_axis(&cone, &pipe) {
+                Decision::Zero => where_a_coaxial_cone_and_pipe_cut(&cone, &pipe, run, policy, log)
+                    .map(WhatARunLiesOn::Conic),
+                Decision::Pos => {
+                    crate::intersect::intersect(&pair[0], &pair[1], policy, log)?;
+                    a_quartic_picked_up_at(
+                        where_a_pipe_reaches_across_a_cone(&cone, &pipe),
+                        TwoLoopsHeldApartBy::AConesSlantPlane { cone, pipe },
+                    )
+                }
+                Decision::Neg | Decision::Undecidable { .. } | _ => {
+                    Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+                }
+            }
         }
         // One cone twice, which is one surface and crosses nothing. `intersect`
         // has said so since it was written — its `SameSurface` arm — and this
@@ -1071,10 +1129,26 @@ fn what_a_run_between_these_two_lies_on(
         [Surface::Cone(one), Surface::Cone(other)] => {
             where_two_coaxial_cones_cut(&one, &other, run, policy, log).map(WhatARunLiesOn::Conic)
         }
+        // A ball off a cone's axis is marched, `intersect` asked first for
+        // the reason the cone and the pipe give.
         [Surface::Cone(cone), Surface::Sphere(ball)]
         | [Surface::Sphere(ball), Surface::Cone(cone)] => {
-            where_a_ball_on_a_cones_axis_cuts_it(&cone, &ball, run, policy, log)
-                .map(WhatARunLiesOn::Conic)
+            match whether_a_ball_sits_on_a_cones_axis(&cone, &ball) {
+                Decision::Zero => {
+                    where_a_ball_on_a_cones_axis_cuts_it(&cone, &ball, run, policy, log)
+                        .map(WhatARunLiesOn::Conic)
+                }
+                Decision::Pos => {
+                    crate::intersect::intersect(&pair[0], &pair[1], policy, log)?;
+                    a_quartic_picked_up_at(
+                        where_a_ball_reaches_across_a_cone(&cone, &ball),
+                        TwoLoopsHeldApartBy::AConesApex { cone, ball },
+                    )
+                }
+                Decision::Neg | Decision::Undecidable { .. } | _ => {
+                    Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+                }
+            }
         }
         // A ring and a ball, a pipe or a cone on its axis cross in circles
         // square to that axis, and which of them this run is, is its ends' and
@@ -1275,11 +1349,12 @@ fn how_far_off_the_crossing_a_corner_can_be(
     surfaces: [&Surface; 2],
     held_apart_by: TwoLoopsHeldApartBy,
 ) -> Result<f64> {
-    let radii = held_apart_by.the_two_radii();
     let mut furthest = 0.0_f64;
     for end in ends {
         let reach = match how_far_off_the_crossing_this_corner_can_be(end, |at| {
-            settled_with_a_bound_where_they_bend(surfaces, at, radii)
+            settled_with_a_bound_where_they_bend(surfaces, at, |settled| {
+                held_apart_by.the_two_radii(settled)
+            })
         }) {
             Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent { .. })
                 if held_apart_by.both_pass_exactly_through(end) =>
@@ -2090,6 +2165,40 @@ fn which_side_of_what_holds_two_loops_apart_if_it_can_be_told(
             };
             (question.named, decide(&question))
         }
+        TwoLoopsHeldApartBy::AConesSlantPlane { cone, pipe } => {
+            let apex = cone.apex().coordinates();
+            let question = Question {
+                named: WHERE_A_CONE_AND_A_PIPE_CROSS,
+                enclosing: || {
+                    dot_enclosing(
+                        a_cones_slant_against_a_pipe_enclosing(&cone, &pipe),
+                        from(apex),
+                    )
+                },
+                exactly: || {
+                    Exact::dot_of_two_exact(
+                        &a_cones_slant_against_a_pipe_exactly(&cone, &pipe)?,
+                        &Exact::gap_between(apex, exact_at?),
+                    )
+                },
+            };
+            (question.named, decide(&question))
+        }
+        TwoLoopsHeldApartBy::AConesApex { cone, .. } => {
+            let apex = cone.apex().coordinates();
+            let along = cone.axis().direction().components();
+            let question = Question {
+                named: WHERE_A_CONE_AND_A_BALL_CROSS,
+                enclosing: || dot_enclosing(exactly(along), from(apex)),
+                exactly: || {
+                    Exact::dot_of_two_exact(
+                        &Exact::of_each(along),
+                        &Exact::gap_between(apex, exact_at?),
+                    )
+                },
+            };
+            (question.named, decide(&question))
+        }
     }
 }
 
@@ -2494,6 +2603,79 @@ fn where_a_ball_reaches_across_a_pipe(ball: &Sphere, pipe: &Cylinder) -> [Point;
     let reach = (radius * radius - nearest * nearest).max(0.0).sqrt();
     let middle = pipe.axis().origin() + along * up + towards * skin;
     [middle + along * reach, middle - along * reach]
+}
+
+/// The two places one straight line of a pipe meets a cone off its axis, one
+/// on each of the two loops `intersect` names them in.
+///
+/// Along `y = y₀ + t·w_p` from the apex the cone is
+/// `Q(w_p)t² + 2(n·y₀)t + Q(y₀) = 0`, and its two roots are where `n·(x − a)`
+/// is `±√D`, so they are either side of the flat surface that holds the loops
+/// apart ([`TwoLoopsHeldApartBy::AConesSlantPlane`]). Solved the way that
+/// loses nothing to cancelling: the larger root first, the other from the
+/// product of the two.
+fn where_a_pipe_reaches_across_a_cone(cone: &Cone, pipe: &Cylinder) -> [Point; 2] {
+    let up = cone.axis().direction();
+    let along = pipe.axis().direction();
+    let widening = 1.0 + cone.slope() * cone.slope();
+    let form =
+        |v: Vector| up.length_squared() * v.length_squared() - widening * v.dot(up) * v.dot(up);
+    let slant = along * up.length_squared() - up * (widening * along.dot(up));
+    let start = pipe.axis().origin() + pipe.basis().0 * pipe.radius();
+    let from_the_apex = start - cone.apex();
+    let half = slant.dot(from_the_apex);
+    let steepness = form(along);
+    let spread = (half * half - steepness * form(from_the_apex))
+        .max(0.0)
+        .sqrt();
+    let larger = -(half + spread.copysign(half));
+    [
+        start + along * (larger / steepness),
+        start + along * (form(from_the_apex) / larger),
+    ]
+}
+
+/// Two places a ball off a cone's axis meets it, one on each loop where it
+/// leaves two and both on the one where it leaves one.
+///
+/// Both are on the two straight lines of the cone in the flat surface through
+/// its axis and the ball's centre, `d± = û ± s·ê` out of the apex, where along
+/// either the ball is `(1 + s²)t² − 2(d·y)t + P = 0`, as `intersect`'s
+/// `a_ball_off_a_cones_axis` reads it. A ball round the apex meets the line
+/// `d+` once ahead and once behind, one on each nappe. A ball clear of it
+/// meets `d+` ahead on the nappe the axis points to and `d−` behind on the
+/// other, twice each where it meets them at all. The part along the axis is
+/// taken off twice, as [`where_a_ball_reaches_across_a_pipe`] says why.
+fn where_a_ball_reaches_across_a_cone(cone: &Cone, ball: &Sphere) -> [Point; 2] {
+    let up = cone.axis().direction() * cone.axis().direction().length().recip();
+    let out = ball.centre() - cone.apex();
+    let sideways = out - up * out.dot(up);
+    let sideways = sideways - up * sideways.dot(up);
+    let towards = sideways.normalized().unwrap_or(cone.basis().0);
+    let widening = 1.0 + cone.slope() * cone.slope();
+    let outside = out.length_squared() - ball.radius() * ball.radius();
+    let roots = |along: Vector| {
+        let half = along.dot(out);
+        let spread = (half * half - widening * outside).max(0.0).sqrt();
+        let larger = half + spread.copysign(half);
+        [larger / widening, outside / larger]
+    };
+    let meets = |along: Vector, ahead: bool| {
+        let half = along.dot(out);
+        half * half > widening * outside && (half > 0.0) == ahead
+    };
+    let on = |along: Vector, at: f64| cone.apex() + along * at;
+    let [toward, away] = [up + towards * cone.slope(), up - towards * cone.slope()];
+    let [near, other_near] = roots(toward);
+    let [far, other_far] = roots(away);
+    if outside < 0.0 {
+        return [on(toward, near), on(toward, other_near)];
+    }
+    match (meets(toward, true), meets(away, false)) {
+        (true, true) => [on(toward, near), on(away, far)],
+        (false, true) => [on(away, far), on(away, other_far)],
+        (true, false) | (false, false) => [on(toward, near), on(toward, other_near)],
+    }
 }
 
 /// Whether a ball's centre is on a pipe's axis, **proved and not rounded**: the

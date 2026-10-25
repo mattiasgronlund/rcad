@@ -4622,14 +4622,14 @@ fn where_a_cone_and_a_pipe_cross(
     let along_one_direction = a_cone_and_a_pipe_point_along_one_direction(cone, pipe);
     match ask(&along_one_direction, Measures::Length, &at, policy, log)? {
         Decision::Zero => (),
-        Decision::Pos => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        Decision::Pos => return a_cone_and_a_pipe_off_one_axis(cone, pipe, &at, policy, log),
         other => unreachable!("a sum of squares is never below zero: {other:?}"),
     }
 
     let apex_on_the_axis = a_cones_apex_sits_on_a_pipes_axis(cone, pipe);
     match ask(&apex_on_the_axis, Measures::Area, &at, policy, log)? {
         Decision::Zero => two_circles_round_a_shared_axis(cone, pipe),
-        Decision::Pos => Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        Decision::Pos => a_cone_and_a_pipe_off_one_axis(cone, pipe, &at, policy, log),
         other => unreachable!("a sum of squares is never below zero: {other:?}"),
     }
 }
@@ -4684,6 +4684,314 @@ fn a_cones_apex_sits_on_a_pipes_axis(cone: &Cone, pipe: &Cylinder) -> impl Predi
         enclosing: move || how_far_off_an_axis_enclosing(apex, origin, along),
         exactly: move || how_far_off_an_axis_exactly(apex, origin, along),
     }
+}
+
+/// A cone and a pipe whose axes are not one line, which cross in a degree-four
+/// curve: two loops named where they are proved two and held apart, and refused
+/// where they are not.
+///
+/// # What the crossing is, read along the pipe's straight lines
+///
+/// With `y = x − a` measured from the apex, the cone is `Q(y) = 0` for
+/// `Q(y) = W|y|² − (1 + slope²)(y·w_c)²`, `W = w_c·w_c`. A straight line of the
+/// pipe is `y = z + t·w_p`, and along it `Q` is the quadratic
+/// `Q(w_p)t² + 2(n·z)t + Q(z)`, with `n = W·w_p − (1 + slope²)(w_p·w_c)·w_c`.
+/// Its two roots are where that line meets the cone, and its quarter
+/// discriminant `D(z) = (n·z)² − Q(w_p)Q(z)` says whether they are there. At a
+/// root `n·y = ±√D`, so **the flat surface through the apex square to `n`
+/// holds the two roots of every line apart**, whatever the sign of `Q(w_p)`.
+///
+/// # A pipe steeper than the cone's skin always crosses it in two loops
+///
+/// `Q(w_p) < 0` puts the pipe's direction inside the cone's own. Then `Q` is a
+/// form of one negative and two positive directions with `w_p` on the negative
+/// side, and for such a form `(n·z)² ≥ Q(w_p)Q(z)` with equality only for `z`
+/// along `w_p` — the reverse of Cauchy–Schwarz. So `D > 0` on every line of the
+/// pipe but one through the apex, which is the pipe's skin running through it,
+/// asked exactly and refused. Every line runs from inside one nappe to inside
+/// the other, so its two roots are one on each nappe, and the flat surface
+/// through the apex square to the cone's axis holds the two loops apart. It
+/// reads `w_c·(x − a)` exactly, and no point of the crossing is the apex.
+///
+/// # A shallower pipe crosses it in two loops where `D` is proved above zero
+///
+/// `Q(w_p) > 0` and a line meets the cone twice, once or not at all, so the
+/// crossing can be two loops, one loop, or nothing. It is named as two loops
+/// only where `D` is proved above zero on every line of the pipe
+/// ([`two_loops_either_side_of_a_cones_slant_plane`]), and refused otherwise.
+/// `Q(w_p) = 0` is a pipe along one of the cone's own straight lines, whose
+/// lines each meet the cone once or along the whole of it, and is refused.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for the shapes
+/// above that are refused: a pipe along a straight line of the cone, a steeper
+/// one whose skin runs through the apex, and a shallower one not proved to
+/// cross in two loops. Each is a **gap**: the crossing is there.
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where the rounded `n` a
+/// shallower pipe's loops are picked by cannot be proved to hold them apart.
+///
+/// [`Error::Undecidable`] where a sign could not be settled.
+fn a_cone_and_a_pipe_off_one_axis(
+    cone: &Cone,
+    pipe: &Cylinder,
+    at: &[PredicatePoint; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<SurfaceMeet> {
+    // Two unit directions against each other again, filed as a length.
+    match ask(
+        &how_steeply_a_pipe_runs_against_a_cone(cone, pipe),
+        Measures::Length,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Zero => Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        Decision::Neg => match ask(
+            &how_far_a_cones_apex_is_off_a_pipes_skin(cone, pipe),
+            Measures::Area,
+            at,
+            policy,
+            log,
+        )? {
+            Decision::Zero => Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+            Decision::Pos | Decision::Neg => two_loops_either_side_of_a_cones_apex(cone),
+            other => unreachable!("a sign question answers with a sign: {other:?}"),
+        },
+        Decision::Pos => two_loops_either_side_of_a_cones_slant_plane(cone, pipe),
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+}
+
+/// `Q(w_p) = W(w_p·w_p) − (1 + slope²)(w_p·w_c)²`, as a question.
+fn how_steeply_a_pipe_runs_against_a_cone(cone: &Cone, pipe: &Cylinder) -> impl Predicate {
+    let cone = *cone;
+    let along = pipe.axis().direction().components();
+    Question {
+        named: WHERE_A_CONE_AND_A_PIPE_CROSS,
+        enclosing: move || a_cones_form_enclosing(&cone, exactly(along)),
+        exactly: move || a_cones_form_exactly(&cone, &Exact::of_each(along)),
+    }
+}
+
+/// `‖(a − o_p) × w_p‖² − r²(w_p·w_p)`, zero where the pipe's skin runs through
+/// the apex, as a question.
+fn how_far_a_cones_apex_is_off_a_pipes_skin(cone: &Cone, pipe: &Cylinder) -> impl Predicate {
+    let apex = cone.apex().coordinates();
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components();
+    let skin = pipe.radius();
+    Question {
+        named: WHERE_A_CONE_AND_A_PIPE_CROSS,
+        enclosing: move || {
+            how_far_off_an_axis_enclosing(apex, origin, along)
+                - squared_enclosing(skin) * squared_length_enclosing(exactly(along))
+        },
+        exactly: move || {
+            Some(
+                how_far_off_an_axis_exactly(apex, origin, along)?
+                    .minus(&Exact::product_of(skin, skin)?.times(&Exact::dot_of(along, along)?)?),
+            )
+        },
+    }
+}
+
+/// `Q(y) = W|y|² − (1 + slope²)(y·w_c)²` as an enclosure, zero where `y`
+/// reaches from the apex to the cone.
+fn a_cones_form_enclosing(cone: &Cone, y: [Interval; 3]) -> Interval {
+    let up = exactly(cone.axis().direction().components());
+    let upward = dot_enclosing(y, up);
+    squared_length_enclosing(up) * squared_length_enclosing(y)
+        - (Interval::exactly(1.0) + squared_enclosing(cone.slope())) * upward * upward
+}
+
+/// `Q(y) = W|y|² − (1 + slope²)(y·w_c)²`, exactly.
+fn a_cones_form_exactly(cone: &Cone, y: &[Exact; 3]) -> Option<Exact> {
+    let up = cone.axis().direction().components();
+    let upward = Exact::dot_of_two_exact(y, &Exact::of_each(up))?;
+    let upward_squared = upward.times(&upward)?;
+    let slope_squared = Exact::product_of(cone.slope(), cone.slope())?;
+    Some(
+        Exact::dot_of(up, up)?
+            .times(&Exact::squared_length_of(y)?)?
+            .minus(&upward_squared)
+            .minus(&slope_squared.times(&upward_squared)?),
+    )
+}
+
+/// `n = W·w_p − (1 + slope²)(w_p·w_c)·w_c` as an enclosure: the facing of the
+/// flat surface through the apex that holds the two roots of each of the pipe's
+/// straight lines apart.
+pub(crate) fn a_cones_slant_against_a_pipe_enclosing(
+    cone: &Cone,
+    pipe: &Cylinder,
+) -> [Interval; 3] {
+    let up = exactly(cone.axis().direction().components());
+    let along = exactly(pipe.axis().direction().components());
+    let squared_up = squared_length_enclosing(up);
+    let leaning =
+        (Interval::exactly(1.0) + squared_enclosing(cone.slope())) * dot_enclosing(along, up);
+    core::array::from_fn(|axis| squared_up * along[axis] - leaning * up[axis])
+}
+
+/// `n = W·w_p − (1 + slope²)(w_p·w_c)·w_c`, exactly.
+pub(crate) fn a_cones_slant_against_a_pipe_exactly(
+    cone: &Cone,
+    pipe: &Cylinder,
+) -> Option<[Exact; 3]> {
+    let up = cone.axis().direction().components();
+    let along = pipe.axis().direction().components();
+    let upward = Exact::dot_of(along, up)?;
+    let leaning = upward.plus(&Exact::product_of(cone.slope(), cone.slope())?.times(&upward)?);
+    let squared_up = Exact::dot_of(up, up)?;
+    let part = |axis: usize| {
+        Some(
+            squared_up
+                .times(&Exact::of(along[axis]))?
+                .minus(&leaning.times(&Exact::of(up[axis]))?),
+        )
+    };
+    Some([part(0)?, part(1)?, part(2)?])
+}
+
+/// The two loops a cone crosses something in, one on each nappe, picked by the
+/// flat half-space through the apex facing along the cone's axis.
+///
+/// No margin is asked, for the reason [`a_cone_and_a_pipe_off_one_axis`]
+/// gives: the half-space reads `w_c·(x − a)` exactly, and no point of either
+/// loop is the apex.
+///
+/// # Errors
+///
+/// Whatever [`HalfSpaceThroughAPoint::new`] refuses, which a cone's finite
+/// apex and axis never are.
+fn two_loops_either_side_of_a_cones_apex(cone: &Cone) -> Result<SurfaceMeet> {
+    let picker = Picker::from(HalfSpaceThroughAPoint::new(
+        cone.apex(),
+        cone.axis().direction(),
+    )?);
+    two_loops_picked_either_side_of(picker, cone)
+}
+
+/// The two loops a shallower pipe crosses a cone in, where `D` is proved above
+/// zero on every straight line of the pipe, picked by the flat half-space
+/// through the apex facing along `n` rounded.
+///
+/// # How `D` is bounded over the whole pipe
+///
+/// `D(z) = zᵀMz` for `M = nnᵀ − Q(w_p)·(W·I − (1 + slope²)w_c w_cᵀ)`, and
+/// `M·w_p = 0`, so `D` reads only where a line of the pipe sits across the
+/// pipe's axis: `z = c + r·e` with `c = o_p − a`, `r` the radius and `e` any
+/// unit direction square to `w_p`. Then `D = cᵀMc + 2r·eᵀMc + r²·eᵀMe`, which is
+/// within `2r‖Mc‖ + r²‖M‖` of `cᵀMc`, with the Frobenius norm standing for the
+/// largest stretch `M` gives. That bound's lower end above zero puts two roots
+/// on every line, so two loops, one each side of the flat surface square to
+/// `n`.
+///
+/// # The rounded facing is proved to hold the loops apart
+///
+/// At a root `n·(x − a) = ±√D`, so a facing within `δ` of `n` reads the same
+/// sign there wherever `√D > δ·|x − a|`. `|x − a|` is at most
+/// `|c| + r + |w_p|·(|n|(|c| + r) + √D)/Q(w_p)`, from the root's own formula.
+/// A pipe square to a cone's axis of length one has `n = w_p` exactly and
+/// `δ = 0`.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where `D` is not
+/// proved above zero over the pipe.
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where the rounded facing is
+/// not proved to hold the loops apart.
+///
+/// Whatever [`HalfSpaceThroughAPoint::new`] refuses.
+fn two_loops_either_side_of_a_cones_slant_plane(
+    cone: &Cone,
+    pipe: &Cylinder,
+) -> Result<SurfaceMeet> {
+    let slant = a_cones_slant_against_a_pipe_enclosing(cone, pipe);
+    let along = exactly(pipe.axis().direction().components());
+    let steepness = a_cones_form_enclosing(cone, along);
+    let up = exactly(cone.axis().direction().components());
+    let squared_up = squared_length_enclosing(up);
+    let widening = Interval::exactly(1.0) + squared_enclosing(cone.slope());
+    let stretch: [[Interval; 3]; 3] = core::array::from_fn(|row| {
+        core::array::from_fn(|column| {
+            let diagonal = if row == column {
+                squared_up
+            } else {
+                Interval::exactly(0.0)
+            };
+            slant[row] * slant[column] - steepness * (diagonal - widening * up[row] * up[column])
+        })
+    });
+    let across = gap_enclosing(
+        cone.apex().coordinates(),
+        pipe.axis().origin().coordinates(),
+    );
+    let stretched: [Interval; 3] = core::array::from_fn(|row| dot_enclosing(stretch[row], across));
+    let at_the_axis = dot_enclosing(across, stretched);
+    let skin = Interval::exactly(pipe.radius());
+    let largest_stretch = root_enclosing(
+        stretch
+            .iter()
+            .flatten()
+            .fold(Interval::exactly(0.0), |so_far, part| {
+                so_far + *part * *part
+            }),
+    );
+    let give = Interval::exactly(2.0) * skin * root_enclosing(squared_length_enclosing(stretched))
+        + skin * skin * largest_stretch;
+    let least = (at_the_axis - give).lo();
+    let most = (at_the_axis + give).hi();
+    if least.is_nan() || least <= 0.0 {
+        return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+    }
+
+    let rounded = slant.map(|part| (part.lo() + part.hi()) / 2.0);
+    let off_by = root_enclosing(squared_length_enclosing(
+        slant.map(|part| Interval::exactly(part.width())),
+    ));
+    let reach = root_enclosing(squared_length_enclosing(across)) + skin;
+    let furthest = reach
+        + root_enclosing(squared_length_enclosing(along))
+            * quotient_or_everything(
+                root_enclosing(squared_length_enclosing(slant)) * reach
+                    + root_enclosing(Interval::exactly(most)),
+                steepness,
+            );
+    if root_enclosing(Interval::exactly(least)).lo() <= (off_by * furthest).hi() {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    }
+
+    let picker = Picker::from(HalfSpaceThroughAPoint::new(
+        cone.apex(),
+        Vector::new(rounded[0], rounded[1], rounded[2]),
+    )?);
+    two_loops_picked_either_side_of(picker, cone)
+}
+
+/// The two loops either side of `picker`'s flat surface, each named as the
+/// part of where the two surfaces cross that one side holds.
+fn two_loops_picked_either_side_of(picker: Picker, cone: &Cone) -> Result<SurfaceMeet> {
+    let other_side = picker
+        .reversed()
+        .expect("the picker is flat, so it has another side");
+    let and = Surface::Cone(*cone);
+    Ok(SurfaceMeet::Curves(
+        [picker, other_side]
+            .into_iter()
+            .map(|picker| {
+                NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
+                    and,
+                    picked_by: smallvec![picker],
+                })
+                .expect("picked_by always holds the one flat picker just built")
+            })
+            .collect(),
+    ))
 }
 
 /// The two circles a cone and a pipe on one axis cross in, told apart by the
@@ -5102,7 +5410,7 @@ fn where_a_cone_and_a_ball_cross(
         log,
     )? {
         Decision::Zero => (),
-        Decision::Pos => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        Decision::Pos => return a_ball_off_a_cones_axis(cone, ball, &at, policy, log),
         Decision::Neg | Decision::Undecidable { .. } | _ => {
             unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
         }
@@ -5138,6 +5446,206 @@ fn where_a_cone_and_a_ball_cross(
         }
         Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
     }
+}
+
+/// A cone and a ball whose centre is off the cone's axis, which cross in a
+/// degree-four curve: one loop or two named, and the rest refused.
+///
+/// # A ball round the apex crosses each nappe once all the way round
+///
+/// With the apex inside the ball every straight line out of it leaves the
+/// ball once, so each nappe is crossed in one loop round the axis, and the
+/// flat surface through the apex square to the axis holds the two apart. A
+/// ball whose skin runs through the apex is refused, as it is on the axis.
+///
+/// # A ball clear of the apex is read along the two lines nearest its centre
+///
+/// With the apex outside, a straight line out of it meets the ball twice or
+/// not at all, and the nearer its direction leans toward the centre the more
+/// surely it meets it. So on each nappe the lines that meet the ball are a run
+/// of them either side of the one leaning most toward the centre, and the run
+/// is the whole nappe exactly when the line leaning furthest away meets it too.
+/// Those two lines lie in the flat surface through the axis and the centre,
+/// along `d± = û ± s·ê` with `û` the unit axis and `ê` the unit direction from
+/// the axis out to the centre, and `d+` read forward and `d−` read backward
+/// are the nearest lines on the two nappes.
+///
+/// Along `a + t·d±` the ball is `(1 + s²)t² − 2(d±·y)t + P = 0`, with
+/// `y = c − a` and `P = |y|² − R²` above zero, so both roots lie on the side
+/// `d±·y` points to, and they are there when `(d±·y)² > (1 + s²)P`. Scaled by
+/// `W = w·w` so nothing is divided or rooted, with `h = y·w` and
+/// `A = ‖y × w‖²`:
+///
+/// - `d+·y` has the sign of `h + s√A`: above zero where `h > 0` or
+///   `G = h² − s²A < 0`, and below where `h ≤ 0` and `G > 0`. `d−·y` likewise
+///   has the sign of `h − s√A`.
+/// - `W((d±·y)² − (1 + s²)P)` is `E± = V ± 2s·h√A` with
+///   `V = h² + s²A − W(1 + s²)P`, and `E+·E− = Δ = V² − 4s²h²A`. With `Δ`
+///   above zero both take `V`'s sign; below it they differ, and `E+` is the
+///   larger exactly when `h > 0`.
+///
+/// A nappe with its nearest line met and its furthest not holds one loop. One
+/// such nappe is the whole crossing, and two are held apart by the flat surface
+/// through the apex square to the axis.
+///
+/// # Errors
+///
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the ball's
+/// skin runs through the apex, where `Δ` is zero, which is a ball touching the
+/// cone or about to wrap a whole nappe, and where a nappe is met by every one
+/// of its lines, which crosses it in two loops round the axis. Each is a
+/// **gap**: the crossing is there.
+///
+/// [`Error::Undecidable`] where a sign could not be settled.
+fn a_ball_off_a_cones_axis(
+    cone: &Cone,
+    ball: &Sphere,
+    at: &[PredicatePoint; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<SurfaceMeet> {
+    match ask(
+        &where_a_ball_stands_against_a_cones_apex(cone, ball),
+        Measures::Area,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Zero => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        Decision::Neg => return two_loops_either_side_of_a_cones_apex(cone),
+        Decision::Pos => (),
+        other => unreachable!("a sign question answers with a sign: {other:?}"),
+    }
+
+    let mut sign_of = |which: usize, measures: Measures| -> Result<Ordering> {
+        Ok(
+            match ask(
+                &how_a_ball_leans_against_a_cone(cone, ball, which),
+                measures,
+                at,
+                policy,
+                log,
+            )? {
+                Decision::Neg => Ordering::Less,
+                Decision::Zero => Ordering::Equal,
+                Decision::Pos => Ordering::Greater,
+                other => unreachable!("a sign question answers with a sign: {other:?}"),
+            },
+        )
+    };
+    let up = sign_of(UP, Measures::Length)?;
+    let leaning = sign_of(LEANING, Measures::Area)?;
+    let spread = sign_of(SPREAD, Measures::Area)?;
+    let either_way = sign_of(EITHER_WAY, Measures::ManyLengths { how_many: 4 })?;
+
+    let toward = if up == Ordering::Greater {
+        Ordering::Greater
+    } else {
+        leaning.reverse()
+    };
+    let away = if up == Ordering::Less {
+        Ordering::Less
+    } else {
+        leaning
+    };
+    let (reaches_toward, reaches_away) = match either_way {
+        Ordering::Equal => return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+        Ordering::Greater => (spread, spread),
+        Ordering::Less => match up {
+            Ordering::Greater => (Ordering::Greater, Ordering::Less),
+            Ordering::Less => (Ordering::Less, Ordering::Greater),
+            Ordering::Equal => unreachable!("Δ = V² when h = 0, which is never below zero"),
+        },
+    };
+    let met = |side: Ordering, along: Ordering, reaches: Ordering| {
+        along == side && reaches == Ordering::Greater
+    };
+    let upper = [
+        met(Ordering::Greater, toward, reaches_toward),
+        met(Ordering::Greater, away, reaches_away),
+    ];
+    let lower = [
+        met(Ordering::Less, away, reaches_away),
+        met(Ordering::Less, toward, reaches_toward),
+    ];
+    if [upper, lower].iter().any(|[_, furthest]| *furthest) {
+        return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+    }
+    match [upper[0], lower[0]] {
+        [false, false] => Ok(SurfaceMeet::Nothing),
+        [true, false] | [false, true] => Ok(SurfaceMeet::Curves(vec![NamedRun::the_whole_of(
+            EdgeRun::RightRoundWhereItsFacesCross,
+        )?])),
+        [true, true] => two_loops_either_side_of_a_cones_apex(cone),
+    }
+}
+
+/// Which of [`a_ball_off_a_cones_axis`]'s four numbers a question asks.
+const UP: usize = 0;
+const LEANING: usize = 1;
+const SPREAD: usize = 2;
+const EITHER_WAY: usize = 3;
+
+/// One of `h = (c − a)·w`, `G = h² − s²A`, `V = h² + s²A − W(1 + s²)P` and
+/// `Δ = V² − 4s²h²A`, as a question, `which` naming it.
+fn how_a_ball_leans_against_a_cone(cone: &Cone, ball: &Sphere, which: usize) -> impl Predicate {
+    let (cone, ball) = (*cone, *ball);
+    Question {
+        named: WHERE_A_CONE_AND_A_BALL_CROSS,
+        enclosing: move || how_a_ball_leans_against_a_cone_enclosing(&cone, &ball)[which],
+        exactly: move || {
+            how_a_ball_leans_against_a_cone_exactly(&cone, &ball)
+                .map(|numbers| numbers[which].clone())
+        },
+    }
+}
+
+/// `[h, G, V, Δ]` as enclosures.
+fn how_a_ball_leans_against_a_cone_enclosing(cone: &Cone, ball: &Sphere) -> [Interval; 4] {
+    let apex = cone.apex().coordinates();
+    let centre = ball.centre().coordinates();
+    let along = cone.axis().direction().components();
+    let up = dot_enclosing(gap_enclosing(apex, centre), exactly(along));
+    let off = how_far_off_an_axis_enclosing(centre, apex, along);
+    let outside =
+        squared_length_enclosing(gap_enclosing(apex, centre)) - squared_enclosing(ball.radius());
+    let squared_slope = squared_enclosing(cone.slope());
+    let squared_up = up * up;
+    let leaning_off = squared_slope * off;
+    let spread = squared_up + leaning_off
+        - squared_length_enclosing(exactly(along))
+            * (Interval::exactly(1.0) + squared_slope)
+            * outside;
+    [
+        up,
+        squared_up - leaning_off,
+        spread,
+        spread * spread - Interval::exactly(4.0) * leaning_off * squared_up,
+    ]
+}
+
+/// `[h, G, V, Δ]`, exactly.
+fn how_a_ball_leans_against_a_cone_exactly(cone: &Cone, ball: &Sphere) -> Option<[Exact; 4]> {
+    let apex = cone.apex().coordinates();
+    let centre = ball.centre().coordinates();
+    let along = cone.axis().direction().components();
+    let up = Exact::dot_of_two_exact(&Exact::gap_between(apex, centre), &Exact::of_each(along))?;
+    let off = how_far_off_an_axis_exactly(centre, apex, along)?;
+    let outside =
+        squared_gap_exactly(apex, centre)?.minus(&Exact::product_of(ball.radius(), ball.radius())?);
+    let squared_slope = Exact::product_of(cone.slope(), cone.slope())?;
+    let squared_along = Exact::dot_of(along, along)?;
+    let squared_up = up.times(&up)?;
+    let leaning_off = squared_slope.times(&off)?;
+    let spread = squared_up.plus(&leaning_off).minus(
+        &squared_along
+            .plus(&squared_along.times(&squared_slope)?)
+            .times(&outside)?,
+    );
+    let either_way = spread
+        .times(&spread)?
+        .minus(&Exact::of(4.0).times(&leaning_off)?.times(&squared_up)?);
+    Some([up, squared_up.minus(&leaning_off), spread, either_way])
 }
 
 /// The two circles a ball on a cone's axis cuts it in, told apart by the flat

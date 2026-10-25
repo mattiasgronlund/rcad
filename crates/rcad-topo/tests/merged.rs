@@ -413,6 +413,8 @@ pub mod a_solid_with_a_curved_face;
 pub mod a_solid_with_a_torus_face;
 #[path = "a_stepped_shaft_cut_in_half_and_turned.rs"]
 pub mod a_stepped_shaft_cut_in_half_and_turned;
+#[path = "a_tapered_shaft_with_a_cross_hole.rs"]
+pub mod a_tapered_shaft_with_a_cross_hole;
 #[path = "a_tetrahedron_cut_through_its_apex.rs"]
 pub mod a_tetrahedron_cut_through_its_apex;
 #[path = "a_third_spelling_of_a_surface_a_face_never_sees.rs"]

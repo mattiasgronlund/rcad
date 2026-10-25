@@ -11765,7 +11765,9 @@ type WhichCurveOfThePair = Option<[u64; 10]>;
 /// [`which_of_the_pairs_closed_crossings_it_is`] writes one: a cone or a pipe
 /// spelled with its axis turned round hands back the half-space holding a given
 /// curve as the reverse of the one picking the other, which is the same four
-/// numbers but for the sign of a zero. A curved picker is written as the surface named
+/// numbers but for the sign of a zero. A flat picker through a point is written
+/// the same way as its point and its facing, which is what the two loops a
+/// cone crosses a pipe or a ball off its axis in are picked by. A curved picker is written as the surface named
 /// either way round ([`name_of_the_surface_either_way_round`]) and which side
 /// of it it keeps. The slot ahead of the numbers says which kind of picker it
 /// is, so a ball and a pipe never share a name.
@@ -11792,12 +11794,22 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
             }
             return Some(name);
         }
+        Picker::InFrontOfAFlatThrough(half_space) => {
+            name[0] = 4;
+            let numbers = half_space
+                .through()
+                .coordinates()
+                .into_iter()
+                .chain(half_space.facing().components());
+            for (slot, number) in name[1..].iter_mut().zip(numbers) {
+                *slot = (number + 0.0).to_bits();
+            }
+            return Some(name);
+        }
         Picker::OutsideABall(ball) => (1, Surface::Sphere(*ball)),
         Picker::OutsideAPipe(pipe) => (2, Surface::Cylinder(*pipe)),
         Picker::InsideAPipe(pipe) => (3, Surface::Cylinder(*pipe)),
-        Picker::InFrontOfAFlatThrough(_) | _ => {
-            panic!("a picker nothing here can name: {picker:?}")
-        }
+        _ => panic!("a picker nothing here can name: {picker:?}"),
     };
     name[0] = kind;
     name[1..].copy_from_slice(&name_of_the_surface_either_way_round(&surface));
