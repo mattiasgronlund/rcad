@@ -7671,29 +7671,232 @@ And what is not a row:
 
 ### 464.16 The side of rcad-geom's cone
 
-*Draft, by Q2681's first lane, which handed over at its budget. The proof is
-not run yet; what is here is the wrong sign the first lane found reading
-`on_floats`, and its demonstration.*
-
 Q2681 took up `SIDE_OF_CONE_ERROR_BOUND` in `crates/rcad-geom/src/cone.rs`,
-against `cone.rs` and `cascade.rs` at `2538ee89`. `u` is `2⁻⁵³`, and the code's
-`B = (12 + 96ε) ε` (`cone.rs:664-667`) is `12u + 96u²`, written `B = 12b-53 +
-3b-101;`: `96ε` is `3 · 2⁻⁴⁸`, a multiple of the ulp of 12, so the Rust's sum
-and product are exact.
+in five lanes on 2026-10-25. The first four were the first lane and its three
+relays. The first wrote and started `cone.g`, and found the wrong sign of 6
+reading `on_floats`. The second ran the bisection of 3 and the controls of 7,
+and wrote `sumexact.g` and `conesplit.py`. The third ran the split of 6. The
+fourth checked every place and figure here against the source and the logs,
+and drafted 1 to 10. The fifth, the second lane, merged the first lane's
+branch, wrote 1 to 10 and appended the scripts. The bound is proved on `y`,
+the sum before `value`'s last rounding, at the code's constant wherever no
+factor is zero and the permanent's axial square `R2` does not round to zero.
+That covers no component of the cross product cancelling, any of them
+cancelling whatever its reach square rounds to, and the dot product down the
+axis, `up`, cancelling, so long as `R2` is not zero. Coq checks each proof,
+modulo its hints. Where `up` cancels and `R2` rounds to zero, level 1
+certifies a wrong sign, and a probe shows one at a slope of `2⁵¹¹`. By hand
+arithmetic that shape needs a slope of about `2⁷⁸` or more, so it is class
+`wrong/D` (6). The claim on `value` itself was not tried, and `decide` does
+not need it (4). The branches where a difference or a direction component is
+zero, which `product_is_normal` lets through, are not run. And the comments
+claim more than is proved. The doc comment on the constant writes `66ε` where
+it means `66ε²` and miscounts its own terms, and it says `on_floats` enforces
+the bottom end product by product, which is false: it checks neither `R2` nor
+the axial term `A`, and that is where the wrong sign lives (5). Fixing them,
+the wrong sign, and running what is not run is four rows (10).
 
-**What `on_floats` checks and what it does not.** `HowFarFromTheSkin::on_floats`
-(`cone.rs:424-469`) is the cylinder's with `skin` replaced by the axial term
-`along = rnd(rnd(slope²) · rnd(up²))`, where `up = rnd(rnd(u0 + u1) + u2)` and
-each `ui = rnd(fi · di)`. It checks `product_is_normal` on the six halves, the
-three components squared, the three `ui`, the slope squared, `up` squared and
-`slope² · up²` (`cone.rs:435-448`). Its permanent's axial term is
-`A = rnd(ss · R2)`, `ss = rnd(slope²)`, `R2 = rnd(R · R)` and `R =
-rnd(rnd(|u0| + |u1|) + |u2|)` (`cone.rs:462-463`), and nothing checks `R2` or
-`A`. Where `up` does not cancel, `|up| ≤ R` by monotone rounding, so `R2 ≥ w`
-and `A ≥ along`, both normal. Where `up` cancels to zero, `w` and `along` are
-zero, both checks pass on the zero (`cascade.rs:67-69`), and `R2` can round to
-zero while the true `slope² · (x · w)²` it stood for is not small against the
-rest.
+Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200`, against
+`cone.rs` and `cascade.rs` at `2538ee89`. `git log --oneline
+2538ee89e..61ada239e` on `cone.rs`, `cascade.rs`, `three_surfaces.rs`,
+`rcad-topo`'s `validate.rs`, `rcad-step`'s `brep.rs` and `rcad-geom`'s
+`lib.rs` prints nothing, so each is as it stands at `61ada239e`, where this
+write-up was finished. `u` is `2⁻⁵³`, and the code's `B = (12 + 96ε) ε`
+(`cone.rs:664-667`) is `12u + 96u²`, written `B = 12b-53 + 3b-101;`. `96ε` is
+`3 · 2⁻⁴⁸`, a multiple of the ulp of 12, so the Rust's sum and product are
+exact and a double holds `B`. Each script follows 464.8's pattern: one ratio
+hint per rounding; the error split into one term per piece of the permanent,
+so that Gappa averages them; 464.5's lemma for each product `on_floats`
+checks is normal; and the step from `y` to the sign as 464.4 gives it.
+
+**1. What the proof guards.** `Cone::side_of` (`cone.rs:401-411`), the cone's
+`SideOfSurface`, runs the cascade on `HowFarFromTheSkin`, once a guard has
+refused a point or a cone that is not real numbers. `Surface::Cone` reaches it
+from `three_surfaces.rs:3296`, from `rcad-topo`'s `validate.rs:4499` and from
+`rcad-step`'s `brep.rs:3048`, and `lib.rs:95` exports `Cone` and
+`SIDE_OF_CONE`. A user makes a cone with `Cone::new` (`cone.rs:87`), which
+takes any finite positive slope, or with `Cone::from_half_angle`
+(`cone.rs:114`), whose slope is the tangent of a half-angle below a right
+angle. So, like 464.15's, this proof guards a predicate a user reaches.
+
+**2. `on_floats`, line for line.** `HowFarFromTheSkin::on_floats`
+(`cone.rs:424-469`) returns `None` for a point that is not exact `f64`s
+(`cone.rs:425`) and takes the three differences `fi` from the apex to the
+point (`cone.rs:429`). It forms the six halves of their cross product with the
+direction, returning `None` unless `product_is_normal` holds for each half's
+two factors (`cross_product_halves_if_normal`, `cone.rs:584-594`). It takes
+the three components `h − k`, the three products `ui = fi · di`, and `up =
+rnd(rnd(u0 + u1) + u2)` (`cone.rs:435-438`). It returns `None` unless
+`product_is_normal` holds for each component with itself, each `fi` with `di`,
+the slope with itself, `up` with itself, and `slope²` with `up²`
+(`stays_accurate`, `cone.rs:439-448`). Last it returns `value = s0 + s1 + s2 −
+along` and `error_bound = SIDE_OF_CONE_ERROR_BOUND * permanent`
+(`cone.rs:465-468`). Here `along = rnd(rnd(slope²) · rnd(up²))`
+(`cone.rs:451`), and the permanent is each half pair's reach squared, `(|h| +
+|k|)²`, summed with the axial term `A` (`cone.rs:458-463`).
+
+`cone.g` (9) writes that operation for operation. The cross product is
+`cyl.g`'s (464.15's 2). Then `ui = rnd(fi · di)`, `u01 = rnd(u0 + u1)`, `up =
+rnd(u01 + u2)`, `ss = rnd(sl · sl)`, `w = rnd(up · up)`, `along = rnd(ss · w)`,
+`y = s012 − along` and `value = rnd(y)`. The permanent's axial term is `A =
+rnd(ss · R2)`, with `R2 = rnd(R · R)` and `R = rnd(rnd(|u0| + |u1|) + |u2|)`,
+and `P = rnd(rnd(rnd(vx + vy) + vz) + A)`. On the axial chain that is eleven
+roundings to `y` and twelve to `value`: `f`, `u`, `u01` and `up` count twice,
+since `up` is squared, then `w`, `ss` and `along`. The cross product's chain
+is nine to `y`, as the cylinder's.
+
+Nothing checks `R2` or `A`. Where `up` does not cancel, `|up| ≤ R` by monotone
+rounding, so `R2 ≥ w` and `A ≥ along`, both normal. Where `up` cancels to
+zero, `w` and `along` are zero, both checks pass on the zero
+(`cascade.rs:67-69`), and `R2` can round to zero while the true `slope² · (x ·
+w)²` it stood for is not small against the rest.
+
+**How the error splits.** Each component's square splits into three terms, as
+in 464.15. The axial term `y` carries is `ss (g0 u0 + g1 u1 + g2 u2)² KA`,
+`KA` the roundings of `w` and `along` and `g` those of the two sums. The true
+one is `sl² Dt² = ss (e0 u0 + e1 u1 + e2 u2)² / rss`, `e` undoing the roundings
+of `f` and of each product, and `rss` that of `ss`. So its error is six terms,
+one for each piece of `ss G²`, with `G = |u0| + |u1| + |u2|`: `ss ui²` for each
+`i`, and `2 ss |ui| |uj|` for each pair. With the components' nine, the error
+is averaged over fifteen pieces, `P15`. They are summed in four blocks, the
+three components and the axial term, since 464.15's 3 found one hint over
+every piece too slow.
+
+**3. The bound on `y`.** `cone.g` (9) proves `|y − Ex| ≤ eb` at the code's
+`B`. In `run0.sh` (9) it exits 0 in `9.23s`, printing `(y − Ex) / P15` within
+`1.22125e-15` and `P −/ Phat` within `7.77156e-16`. Written as `k u + r u²`,
+the exact bounds Gappa prints are `11u + 10u²` and `7u + 22u²`. `Phat` is the
+permanent with no rounding of its own. The bisection: `run1.sh` and `run2.sh`
+(9) ran the `b_cone_<m>.g` and `b11_cone_<m>.g` that `conecases.py` (9)
+writes, `cone.g` at `B = 12u + m u²` and at `11u + m u²`. At `12u`, every `m`
+run proves: 0, 40, 60, 80, 100 and 120. At `11u`, 99, 100, 150, 200, 300 and
+400 prove, and 98, 97, 96, 90, 50 and 0 fail, best `[-1, 1]`. By hand, `(11u +
+10u²)(1 + 7u)(1 + u)` (`y`'s bound taken through the permanent's `7u` and
+through `eb`'s own rounding) is `11u + 98u²` and a `u³`, so the line falls
+where that count puts it. So on `y`, where nothing cancels, the bound needs
+about a `u` less than the code's `12u`.
+
+**4. The claim on `value`.** Not tried. `decide` does not need it: the doc on
+`Filtered::error_bound` (`cascade.rs:25-35`) asks only for the bound on the
+sum before `value`'s last rounding, which 3 proves, as in 464.14's 4 and
+464.15's 4.
+
+**5. What the comments claim.** The doc comment on the constant,
+`cone.rs:643-663`, says:
+
+> The axial half is one step longer: [...] squaring that is a fifth and
+> doubles what it carries so it sits at `(1 + epsilon)^9`, and the two
+> multiplications by the slope are a tenth and eleventh. Subtracting it from
+> the cross-product sum is a twelfth. `(1 + epsilon)^12 − 1 ≤ 12·epsilon +
+> 66·epsilon² + …` times the permanent.
+>
+> The `96·epsilon²` covers the higher-order terms and the rounding of the
+> permanent itself; what it has to beat is about `66·epsilon`.
+>
+> Every step of that argument is a *relative* one, so as with every bound of
+> this shape it holds only while nothing overflows or falls into the
+> subnormals. [`HowFarFromTheSkin::on_floats`] enforces the bottom end product
+> by product through [`product_is_normal`], and `decide` the top end by
+> refusing a bound that is not itself a normal number.
+
+The comment above the check, at `cone.rs:432-434`, says:
+
+> The bound below is a fraction of the permanent, which only bounds anything
+> while every product keeps its relative accuracy. One of them in the
+> subnormals and this level certifies a wrong sign.
+
+Against what is proved:
+
+- Twelve roundings to `value` and eleven to `y` agree with `cone.g`'s `11u` on
+  `y` (3).
+- "About `66·epsilon`" is the `ε²` term of `(1 + ε)¹² − 1`, so it gives the
+  wrong power, as 464.15's 5 found the cylinder's `45` does. It also leaves
+  out what the same sentence says the `96ε²` covers. The permanent's rounding,
+  `7u` (`cone.g`), taken against `12ε`, costs `84ε²`. The rounding of `B · P`
+  costs `ε` of `eb`, which is `12ε²`. So by the comment's own terms the count
+  is `66 + 84 + 12 = 162`, above its `96`. On `y` that costs nothing, since
+  `y` proves at `11u + 99u²` and at `12u + 0u²` (3).
+- "Enforces the bottom end product by product" is false. `on_floats` checks
+  neither `R2` nor `A`, and `product_is_normal` lets a zero through
+  (`cascade.rs:67-69`). So where `up` cancels, `w` and `along` are zero, both
+  checks pass, and `R2` and `A` can fall below the normals or round to zero.
+  The bound holds in all of those but one: `R2` rounding to zero, where level
+  1 certifies a wrong sign (6). The branches where a difference or a direction
+  component is zero are not run (10).
+- "One of them in the subnormals and this level certifies a wrong sign" is
+  true of `R2` rounding to zero, the probe of 6. It is false of `R2` below the
+  normals and not zero, of `A` below the normals or zero, and of the reach
+  squares below the normals or zero: by 6 each of those proves. For the
+  products `on_floats` checks it was not run, as 464.14's 6 ran the sphere's
+  squares (10).
+
+So the comments claim more than is proved, which is what the row asks, and the
+claim that the bottom end is enforced is false in a way that gives a wrong
+sign. Restating them is a row, and the wrong sign another (10).
+
+**6. The components and the axial term that cancel.** `conesplit.py` (9)
+splits `cone.g` as 464.15's `cylsplit.py` splits `cyl.g`, with a fourth letter
+for the axial term. Each component of the cross product is `n`, `c`, `s` or
+`u`, as in 464.15's 6. The axial term is in one of six states:
+
+- `n`: `up` is not zero, and `u01` is normal. `w` and `along` are normal,
+  which `on_floats` checks, and `|up| ≤ R` by monotone rounding, so `R2 ≥ w`
+  and `A ≥ along` are normal too.
+- `e`: `up` is not zero, and `u01` is below the normals, where it is exact.
+  `sumexact.g` (9) shows that a sum of two doubles at most `2⁻¹⁰²²` is a
+  double: it exits 0 in `0.03s`.
+- `c`: `up` cancels to zero, `u01 + u2 = 0`, and `R2` and `A` are normal.
+- `a`: `up` cancels, `R2` is normal, and `A` is below the normals or zero.
+- `s`: `up` cancels, `R2` is below the normals and not zero, and `A` is
+  normal.
+- `t`: `up` cancels, `R2` is below the normals and not zero, and `A` is below
+  the normals or zero.
+
+These cover every axial term whose products are normal but one: `up` cancels
+and `R2` rounds to zero. That one gets no script, since it is where level 1
+certifies a wrong sign (below). Where `up` cancels, `y` carries no axial term,
+so its error is the whole of the true one, `sl² Dt²`, where `Dt` is what the
+roundings of `f`, of each product and of `u01` left. That error is averaged
+over `XA = ss · R2` rather than over `ss G²`, since `R2` below the normals need
+not stay near `G²`. That makes `4³ · 6 = 384` cases, written `cone_<case>.g`,
+and `cone_nnnn.g` is `cone.g` byte for byte, which `same.py` (9) checks.
+
+What they print. `run3a.sh` (9) first ran `nnne`, `nnnc`, `nnna`, `nnns` and
+`nnnt`, and each exits 0, in 8.80 to 10.88 s, and their `u / 2` controls exit
+1. `run3.sh` (9) then ran all 384, 22 at a time on a load of about 43 over 24
+cores, and `tally3.py` (9) counts them:
+
+- Each of the 384 exits 0 at the code's `B`, in 4.17 s (`cone_ccuc.g`) to
+  39.13 s (`cone_nnnt.g`).
+- `(y − Ex) / P15` is within `11u` (`1.22125e-15`) in all 64 cases with axial
+  `n`, and within `9u` (`9.99201e-16`) in all 64 with `e`. Where `up` cancels
+  it is within `9u`, `8u` and `7u` with three, two and one components `n`.
+  With none, `y` is 0 and the error is a `u²` of the permanent: within `9u²`
+  (`1.10934e-31`) for `c`, `13.5u²` (`1.664e-31`) for `s`, and `4u²`
+  (`4.93038e-32`) for `a` and `t`.
+- 16 cases, `{s,u}³` with axial `a` or `t`, print "remaining results are
+  pointless": their hypotheses contradict. With every reach square and `A` at
+  most `2⁻¹⁰²²`, `P ≤ 2⁻¹⁰²⁰`, so `eb = rnd(B · P)` cannot be normal, and
+  `decide` refuses there.
+- `P −/ Phat`, or `P −/ Phatx` where a square is below the normals, is within
+  `7u` in 126 cases, `6u` in 62, `5u` in 76, `4u` in 36, `3u` in 40, `2u` in 26
+  and `u` in 2.
+- No `.out`, `.bcoq` or `.coqc` of the 384 has a line other than its results
+  and "assumed to be nonzero" warnings.
+
+So on `y` the bound holds at the code's constant wherever no factor is zero
+and `R2` does not round to zero.
+
+The shapes. None of the 384 was run as Rust input. By hand arithmetic, not
+run: put the apex at 0 and the axis along `(1, 1, 1)`, which `Axis::new`
+scales to length one as three equal components `c`, and take the point `(1,
+1, −2)`. The products are `c`, `c` and `−2c`, each exact, `u01 = 2c` is exact,
+and `up` cancels to zero with `R2` normal. The halves are `(c, −2c)`, `(−2c,
+c)` and `(c, c)`, so the third component cancels too, with its reach square
+normal. So that is `nncc`: a point on the plane through the apex square to the
+axis, a shape a designer makes. The fourth lane's draft had the direction `(1,
+2, 3)` and the point `(1, 1, −1)` here, but `Axis::new` scales that direction
+to length one, so its products are not the `1`, `2` and `−3` that cancel.
 
 **A wrong sign.** The probe below, run once with `mise exec -- just t
 probe_q2681_axial_reach_square_rounding_to_zero --no-capture` and then
@@ -7786,60 +7989,99 @@ print("slope^2 dot^2 =", float(axial))
 print("true value =", float(value), "sign", (value > 0) - (value < 0))
 ```
 
-**Measured so far, by Q2681's first two lanes**, in the scratchpad's `q2681/`,
-not yet written up:
+**7. The controls.** At `B = 1b-54;`, `u / 2`, each must fail:
 
-- `cone.g`, the case where nothing cancels and nothing is zero, exits 0 at the
-  code's `B` in `9.23s`, and `gappa -Bcoq` and `coqc` exit 0 on its 18049
-  lines with 64 hints (`run0.sh`). It prints `(y − Ex) / P15` within
-  `1.22125e-15`, which is `11u + 10u²`, and `P −/ Phat` within `7.77156e-16`,
-  `7u + 22u²`.
-- The bisection (`conecases.py`, `run1.sh`, `run2.sh`): `B = 12u + m u²`
-  proves for every `m` of 0, 40, 60, 80, 100 and 120, and `B = 11u + m u²`
-  proves at 99 and fails at 98, 97, 96, 90, 50 and 0. By hand, `(11u + 10u²)(1 +
-  7u)(1 + u)` is `11u + 98u²` and a `u³`, so the line falls where the count
-  puts it.
-- The controls: `c_cone_half.g` exits 1, best `[-22, 22]`, `11u` over `u / 2`;
-  `c_cone_nonormal.g` exits 1, best `[-3.80599e+2143, 3.80599e+2143]`, and fails
-  `REL(P, Phat)` and `BND((y - Ex) / P15)` too; `c_cone_noeb.g` exits 1 in
-  `121.00s`, best `[-3.76818e+1267, 3.99163e+1402]`.
-- `sumexact.g`, that a sum of two doubles at most `2⁻¹⁰²²` is a double, exits 0
-  and `coqc` passes, 150 lines, no hints.
-- `conesplit.py`: cylsplit's four cross states and six axial ones, `n` and `e`
-  where `up` is not zero (`u01` normal, or below the normals and so exact), and
-  `c`, `a`, `s`, `t` where `up` cancels (`R2` normal or below the normals and
-  not zero, times `A` normal or below the normals). Where `up` cancels it
-  averages the axial error over `XA = ss · R2` and not `ss · G²`, since `R2`
-  below the normals need not stay near `G²`. `R2` rounding to zero is the wrong
-  sign above and gets no script. `cone_nnnn.g` is `cone.g` byte for byte
-  (`diff` prints nothing).
-- `run3a.sh`: `cone_nnne`, `nnnc`, `nnna`, `nnns` and `nnnt` exit 0, and their
-  `u / 2` controls exit 1, with no "not trivially equal" line.
-- `run3.sh` (22 at a time, load about 43 over 24 cores), tallied by
-  `tally3.py` into `tally3.txt`: all 384 cases exit 0 at the code's `B` in 4.17
-  s (`ccuc`) to 39.13 s (`nnnt`), and `gappa -Bcoq` and `coqc` exit 0 on all
-  384, 2325 (`uuua`) to 17532 lines (`nnnn`), 37 to 64 hints, 6.68 to 51.46 s.
-  No `.out`, `.bcoq` or `.coqc` has a line but results and "assumed to be
-  nonzero".
-- What they print for `(y − Ex) / P15`: `11u` (`1.22125e-15`) in all 64 with
-  axial `n`; `9u` in all 64 with axial `e`; where `up` cancels, `9u`, `8u`,
-  `7u` with three, two, one components `n`, and with none, `y` is 0 and the
-  error is `9u²` (`c`), `13.5u²` (`s`, `1.664e-31`) or `4u²` (`a`, `t`). 16 of
-  those, `{s,u}³` times `a` or `t`, print "remaining results are pointless":
-  every reach square and `A` below the normals makes `P ≤ 2⁻¹⁰²⁰`, so `eb`
-  cannot be normal and `decide` refuses. `P −/ Phat` (or `Phatx`) is within
-  `7u` at most.
-- The controls at `u / 2`: 275 of 383 exit 1, best `[-22, 22]` in 63, `[-18,
-  18]` in 68, `[-16, 16]` in 36, `[-14, 14]` in 108. The other 108 are the
-  cases where `y` is 0, whose `u²` error `u / 2` covers. `conesplit.py` now
-  writes them a second control, `c_cone_<case>_usq.g` at `B = 1b-106;`, and
-  `run4.sh` ran it (after checking by `md5sum` that writing the split again
-  left all 767 scripts `run3.sh` ran unchanged): 92 exit 1, best 9, 13.5 or 4
-  times `u²` over `u²`, and the 16 pointless ones exit 0, pointless again.
-- `sumexact.g` again: `sumexact exit 0 0.03s`, `coqc` exit 0, 150 lines, 0
-  hints.
+- `c_cone_half.g` exits 1, best `[-22, 22]`, `cone.g`'s `11u` over `u / 2`.
+- Of the 383 `c_cone_<case>_half.g`, 275 exit 1, each case's own bound over
+  `u / 2`: best `[-22, 22]` in 63, `[-18, 18]` in 68, `[-16, 16]` in 36 and
+  `[-14, 14]` in 108.
+- The other 108 exit 0. They are the cases with no component `n` and `up`
+  cancelling, where `y` is 0 and its error a `u²` that `u / 2` covers. So
+  `conesplit.py` writes each a second control, `c_cone_<case>_usq.g`, at `B =
+  1b-106;`, `u²`. `run4.sh` (9) first checked by `md5sum` that writing the
+  split again left the 767 scripts `run3.sh` ran unchanged. It then ran the
+  108: 92 exit 1, best `−4` or `9` or `13.5` over `u²`, and the 16 pointless
+  ones exit 0, pointless again.
 
-**Still to do**, in order: rewrite these bullets as numbered paragraphs, as
-464.15's 1 to 10; what the doc comment at `cone.rs:643-663` and the comment at
-`432-434` claim against what is proved; the scripts whole and `same.py`; and
-what this leaves.
+Together with the failures at `11u + 98u²` (3), that says none of the proofs
+came from a contradiction in its hypotheses, but for the 16 that Gappa itself
+calls pointless. Two more controls take a hypothesis away:
+
+- `c_cone_nonormal.g` is `cone.g` without every `1b-1022` hypothesis but
+  `|eb|`'s, and without the lemma line each of those gives. It exits 1, best
+  `[-3.80599e+2143, 3.80599e+2143]`, and fails `REL(P, Phat)` and `BND((y -
+  Ex) / P15)` too.
+- `c_cone_noeb.g`, `cone.g` without `eb` normal, exits 1 in `121.00s`, best
+  `[-3.76818e+1267, 3.99163e+1402]`.
+
+**8. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0 from 464.5's nix block, accept
+each script that proves and was run through them, and no `coqc` printed
+anything:
+
+- `cone.g`: 18049 lines with 64 hints, in `15.75s` (`run0.sh`).
+- The 384 cases of 6: 2325 (`cone_uuua`) to 17532 lines (`cone_nnnn`), with 37
+  to 64 hints, in 6.68 to 51.46 s each (`run3.sh`).
+- `sumexact.g`: 150 lines with no hints. The fifth lane ran it again with
+  `./one.sh sumexact.g coq`, which printed `sumexact exit 0 0.03s` and
+  `sumexact coq -Bcoq exit 0 coqc exit 0 1.12s lines 150 hints 0`.
+
+Gappa does not write the same proof each run (464.4), which is why
+`cone_nnnn.g`, the same bytes as `cone.g`, gave 17532 lines against 18049.
+Each hint enters the Coq file as a hypothesis with no condition, as in 464.4.
+The controls and the bisection scripts were not run through `coqc`. `field`
+has not been run on these hints (464.10).
+
+**9. The scripts.** `conecases.py` writes the controls of 7 and the bisection
+scripts of 3 from `cone.g`, and `conesplit.py` writes the 384 cases of 6 and
+their controls. To run them again, save the nix block of 464.5 as
+`gappalib18.nix` and `cone.g`, `sumexact.g` and the two generators beside it,
+and then:
+
+```sh
+python3 conecases.py 0 40 60 80 100 120 150 200 300 400; python3 conesplit.py
+nx="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
+pin=github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe
+$nx shell $pin#gappa --command gappa -Eprecision=200 cone.g
+$nx shell $pin#gappa --command gappa -Eprecision=200 -Bcoq cone.g > cone.v
+gl=$($nx build --impure --no-link --print-out-paths -f gappalib18.nix)
+fl=$($nx build --no-link --print-out-paths $pin#coqPackages_8_20.flocq)
+COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+  $nx shell $pin#coqPackages_8_20.coq --command coqc cone.v
+```
+
+and the same for every other file they write, and for `sumexact.g`. A script
+that proves exits 0; a control must exit 1. What the lanes ran is `run0.sh` to
+`run4.sh` and `run3a.sh` (below), each through 464.13's `one.sh`, the same
+bytes, or through `one1.sh`, which is `one.sh` with the timeout taken from `T`
+and no `coq`. `run3.sh` and `run4.sh` were started through `launch.sh`.
+`tally3.py` counts what `run3.sh` printed. `same.py` (below) checks every
+script appended here byte for byte against the file that was run, and that
+the two generators, run again from the text here, write what was run; its
+print ends this part. `truth.py` is in 6, and `same.py` checks it too. The
+probe's diff is not appended, since 6 gives the test whole.
+
+**10. What this leaves.** Four rows, filed from this write-up, each after
+Q2681:
+
+- Q2779, `wrong/D`, tier 5: the wrong sign of 6, on `cone.rs`, so that
+  `on_floats` refuses, or bounds, an `R2` that rounds to zero. The `2⁷⁸` that
+  puts it in D is hand arithmetic: no run with a slope of at most `2⁷⁷` where
+  `R2` rounds to zero has been made, and one would demonstrate the D.
+- Q2780, small: restate `cone.rs:643-663` by 5.
+- Q2781: prove the bound where a difference or a direction component is zero,
+  the axis-aligned cone among them, as Q2771 does for the cylinder. Not run,
+  so no class.
+- Q2782: run `conesplit.py` with the checked products below the normals, and
+  restate `cone.rs:432-434` by what that shows, as Q2773 does for the
+  cylinder. Not run, so no class.
+
+And what is not a row:
+
+- Q2700 already waits on Q2681, and moves these scripts into `proofs/gappa/`
+  with the others that rows of 464 appended.
+- The probe of 6 is a predicate and an input where `product_is_normal`'s doc
+  holds: a product below the normals, `R2`, fed into a relative bound makes
+  level 1 certify a wrong sign. That is what Q2767 asks for, and Q2767 waits
+  on Q2782 already.
+- `field` on these scripts' hints (464.10).
