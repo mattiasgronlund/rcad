@@ -9928,33 +9928,287 @@ Phat / P -> 1 / (1 + (P - Phat) / Phat);
 P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
 ```
 
-**What ran.** Q2682's first relay, on 2026-10-25, against `torus.rs` and
-`cascade.rs` at `4be293a5`, each script in a scratch directory beside 464.13's
-`one.sh`, 464.15's `one1.sh` and 464.16's `launch.sh`, the same bytes.
+**3. The bound on `y`.** `tor.g` proves `|y − Ex| ≤ eb` at the code's `B`. In
+`run0.sh` (9) it exits 0 in `20.02s`, printing `(y − Ex) / Phat2` within
+`1.88738e-15` and `P −/ Phat` within `7.77156e-16`. `ku.py` (9) writes those
+exact bounds as `17u + 95u²` and `7u + 22u²`. `Phat` is the permanent with no
+rounding of its own, and `Phat2` the same sum as the two blocks of 2. Its
+`.out` and `.bcoq` have no line but their results and 492 "assumed to be
+nonzero" warnings each. The bisection: `run1.sh` (9) ran the `b_tor_<m>.g` and
+`b17_tor_<m>.g` that `torcases.py` (9) writes, `tor.g` at `B = 18u + m u²` and
+at `17u + m u²`. At `18u`, every `m` run proves: 0, 100, 200, 228, 230, 231,
+232, 233, 236 and 300. At `17u`, 232, 233, 236 and 300 prove, and 231, 230,
+228, 200, 100 and 0 fail, best `[-1, 1]`. By hand, `(17u + 95u²)(1 + 7u +
+22u²)(1 + u)` (`y`'s bound taken through the permanent's `7u + 22u²` and
+through `eb`'s own rounding) is `17u + 231u²` and a `u³`, so the line falls
+where that count puts it. So on `y`, where nothing cancels, the bound needs
+about a `u` less than the code's `18u`, as the count of 2 says.
 
-- The draft's first run, through `one1.sh`, exited 0 in `15.34s`, but Gappa
-  called ten of its hints unneeded ("no need for the rewriting ... if ... `Wx
-  != 0`"): the three last steps of each of the two averages over three pieces,
-  and the ratio hints of four of the six pair pieces, `OO`, `RR`, `rr` and
-  `OR`. Its two block goals, `(left − Lt) / A6` and `(Rt − right) / C9`, printed
-  bounds of about `1e2773`, which say nothing. All twelve were dropped, and
-  `tor.g` above is the script after that.
-- `run0.sh` (below) ran `tor.g` through `one.sh` with `coq`. It printed `tor
-  exit 0 20.02s` and `tor coq -Bcoq exit 0 coqc exit 0 35.83s lines 23062 hints
-  81`, `(y − Ex) / Phat2` within `1.88738e-15` and `P −/ Phat` within
-  `7.77156e-16`. `ku.py` (below) writes those exact bounds as `17u + 95u²` and
-  `7u + 22u²`. Its `.out`, `.bcoq` and `.coqc` have no line but their results
-  and 492 "assumed to be nonzero" warnings each in the first two.
-- `run1.sh` (below) ran what `torcases.py` (below) writes. At `B = 18u + m
-  u²`, every `m` run proves: 0, 100, 200, 228, 230, 231, 232, 233, 236 and 300.
-  At `17u + m u²`, 232, 233, 236 and 300 prove, and 231, 230, 228, 200, 100 and
-  0 fail, best `[-1, 1]`. By hand, `(17u + 95u²)(1 + 7u + 22u²)(1 + u)` is `17u
-  + 231u²` and a `u³`, so the line falls where that count puts it, and `y`
-  proves with about a `u` to spare below the code's `18u + 224u²`.
-- The controls each exit 1: `c_tor_half.g`, `B = u / 2`, best `[-34, 34]`, which
-  is `17u` over `u / 2`; `c_tor_nonormal.g`, best `[-7.69054e+2159,
-  7.69054e+2159]`, failing `REL(P, Phat)` and `BND((y - Ex) / Phat2)` too; and
-  `c_tor_noeb.g`, in `82.44s`, best `[-2.78435e+1080, 3.94239e+1124]`.
+A first form of `tor.g`, run through `one1.sh`, exited 0 in `15.34s`, but Gappa
+called ten of its hints unneeded ("no need for the rewriting ... if ... `Wx !=
+0`"): the three last steps of each of the two averages over three pieces, and
+the ratio hints of four of the six pair pieces, `OO`, `RR`, `rr` and `OR`. Its
+two block goals, `(left − Lt) / A6` and `(Rt − right) / C9`, printed bounds of
+about `1e2773`, which say nothing. All twelve were dropped, and `tor.g` is the
+script after that.
+
+**4. The claim on `value`.** Not tried. `decide` does not need it: the doc on
+`Filtered::error_bound` (`cascade.rs:25-35`) asks only for the bound on the
+sum before `value`'s last rounding, which 3 proves, as in 464.14's 4, 464.15's
+4 and 464.16's 4.
+
+**5. What the comments claim.** The doc comment on the constant,
+`torus.rs:485-507`, says:
+
+> The chain, counted step by step. `point − centre` is one rounding; squaring
+> a component is a second and a third; the two sums that fold the three
+> squares are a fourth and fifth; `R²`, `r²` and their difference are a sixth,
+> and adding that on is a seventh. Squaring the total doubles what it carries,
+> so it sits at `(1 + epsilon)^15`; `w·w` is three roundings of its own and
+> multiplying it in is a sixteenth and seventeenth. The other side is shorter
+> — a cross-product component is three roundings, its square a seventh, the
+> two sums a ninth, and `4R²` times it an eleventh — so the final subtraction,
+> the eighteenth, is what the whole thing is charged at.
+>
+> `(1 + epsilon)^18 − 1 ≤ 18·epsilon + 153·epsilon² + …` times the permanent.
+> The `220·epsilon²` covers the higher-order terms and the rounding of the
+> permanent itself; what it has to beat is about `153·epsilon`.
+>
+> Every step of that argument is a *relative* one, so as with every bound of
+> this shape it holds only while nothing overflows or falls into the
+> subnormals. [`HowFarFromTheRing::on_floats`] enforces the bottom end product
+> by product through [`product_is_normal`], and `decide` the top end by
+> refusing a bound that is not itself a normal number.
+
+The comment above the check, at `torus.rs:347-349`, says:
+
+> The bound below is a fraction of the permanent, which only bounds anything
+> while every product keeps its relative accuracy. One of them in the
+> subnormals and this level certifies a wrong sign.
+
+Against what is proved:
+
+- Eighteen roundings to `value` and seventeen to `y` agree with `tor.g`'s `17u`
+  on `y` (3), but the chain reaches them by two slips that cancel. It puts
+  `bulge` at seven roundings, counting `R²`, `r²` and their difference after
+  `out_and_back`'s five, where they run beside it and `bulge` carries six (2).
+  So its square sits at fifteen where it is thirteen. Then it counts `w·w`'s
+  three roundings and the product's own as two, the sixteenth and seventeenth,
+  where they are four. Its `4R²` side at eleven is right (2).
+- "About `153·epsilon`" is the `ε²` term of `(1 + ε)¹⁸ − 1`, so it gives the
+  wrong power, as 464.15's 5 found the cylinder's `45` does and 464.16's 5 the
+  cone's `66`. It also leaves out what the same sentence says the `220ε²`
+  covers. The permanent's rounding, `7u` (3), taken against `18ε`, costs
+  `126ε²`. The rounding of `B · P` costs `ε` of `eb`, which is `18ε²`. So by
+  the comment's own terms the count is `153 + 126 + 18 = 297`, above its `220`
+  and above the `224` the double holds. On `y` that costs nothing, since `y`
+  proves at `17u + 232u²` and at `18u + 0u²` (3).
+- "Enforces the bottom end product by product" is false. `on_floats` checks
+  none of the permanent's own products, the reach squares `vi`, `brr`, `P1` and
+  `P2`, and `product_is_normal` lets a zero through (`cascade.rs:67-69`). `brr`
+  and `P1` stay normal (2). But where a component cancels, its check passes on
+  the zero and its `vi` can fall below the normals or round to zero, and where
+  all three cancel, `P2` can too. Unlike the cone's, the bound holds in each of
+  those (6). The branches where a difference or a direction component is zero
+  are not run (10).
+- "One of them in the subnormals and this level certifies a wrong sign" is
+  false of each reach square `vi` and of `P2`, below the normals or zero: by 6
+  each of those proves. `brr` and `P1` never fall there (2). For the products
+  `on_floats` checks it was not run, as 464.14's 6 ran the sphere's squares
+  (10).
+
+So the comments claim more than is proved, which is what the row asks. Unlike
+the cone's, the claim that the bottom end is enforced gives no wrong sign in
+any case the split runs. Restating them is a row (10).
+
+**6. The components that cancel, `hollow` and `P2`.** `torsplit.py` (9) splits
+`tor.g` as 464.15's `cylsplit.py` splits `cyl.g`, with two more letters. Each
+component of the cross product is `n`, `c`, `s` or `u`, as in 464.15's 6: it
+does not cancel; it cancels and its reach square is normal; it cancels and its
+reach square is below the normals and not zero; or it cancels and its reach
+square rounds to zero. The fourth letter is `hollow`'s: `n`, normal, or `e`,
+below the normals, where it is exact (464.16's `sumexact.g`) and is written
+unrounded. The fifth is `P2`'s:
+
+- `n`: `P2` is normal. Where a component does not cancel, `spread ≥ across`,
+  so `P2 ≥ right`, which `on_floats` checks, and `n` is the only state.
+- `b`: all three components cancel, so `right` is zero, and `P2` is below the
+  normals or zero. Where all three reach squares round to zero, `uuu`, `spread`
+  and `P2` are zero and `P` is `P1`, and `b` is the only state.
+
+That makes `37 · 2 + 26 · 2 · 2 + 2 = 180` cases: the 37 with a component `n`
+take either `hollow`, the 26 others but `uuu` take either `hollow` and either
+`P2`, and `uuu` takes either `hollow`. They are written `tor_<case>.g`, and
+`tor_nnnnn.g` is `tor.g` byte for byte, which `same.py` (9) checks. A
+component that cancels has no square in `y`, so its error is the whole of its
+true term, `4R² C²`. That error is averaged over the piece `2W · oab · RR` of
+the `w·w · bulge²` block rather than over its own reach square, so that what
+`vi` or `P2` rounds to does not matter to it.
+
+What they print. `trial.sh` (9) first ran eight cases, `cnnnn`, `cccnn`,
+`nnnen`, `uuueb`, `cccnb`, `scnnn`, `ssuen` and `uuunb`, and their `u / 2`
+controls, all at once through `one1.sh`. Each case exited 0, in 18.22 to 29.59
+s, and each control exited 1, best `[-34, 34]`, so no hint of `torsplit.py`
+needed changing. `run3.sh` (9) then ran all 180 with `coq`, and the 179
+controls, 20 at a time on a load of about 40 over 24 cores, and `tally3.py`
+(9) counts them. After its line for each case it prints:
+
+```text
+cases exit 0: 180 of 180
+controls exit 1: 179 of 179
+pointless: []
+y bounds by live components and hollow and P2 letters:
+   (0, 'eb', '[-1.88738e-15, 1.88738e-15]') 27
+   (0, 'en', '[-1.88738e-15, 1.88738e-15]') 26
+   (0, 'nb', '[-1.88738e-15, 1.88738e-15]') 27
+   (0, 'nn', '[-1.88738e-15, 1.88738e-15]') 26
+   (1, 'en', '[-1.88738e-15, 1.88738e-15]') 27
+   (1, 'nn', '[-1.88738e-15, 1.88738e-15]') 27
+   (2, 'en', '[-1.88738e-15, 1.88738e-15]') 9
+   (2, 'nn', '[-1.88738e-15, 1.88738e-15]') 9
+   (3, 'en', '[-1.88738e-15, 1.88738e-15]') 1
+   (3, 'nn', '[-1.88738e-15, 1.88738e-15]') 1
+P bounds: {'[-7.77156e-16, 7.77156e-16]': 178, '[-6.66134e-16, 6.66134e-16]': 2}
+control exits by live components and hollow and P2 letters:
+   (0, 'eb', '1') 27
+   (0, 'en', '1') 26
+   (0, 'nb', '1') 27
+   (0, 'nn', '1') 26
+   (1, 'en', '1') 27
+   (1, 'nn', '1') 27
+   (2, 'en', '1') 9
+   (2, 'nn', '1') 9
+   (3, 'en', '1') 1
+control exits and bests: {('1', '[-34, 34]'): 179}
+times (15.5, 'cucnn') (61.65, 'nnsen')
+coq ok: 179 of 180
+coq smallest (14324, 67, 'uuunb') largest (22872, 81, 'nnnnn') hints 66 81 times 24.62 99.14
+files with a line other than results and 'assumed to be nonzero': ['tor_cusen.coqc']
+```
+
+- Each of the 180 exits 0 at the code's `B`, in 15.5 s (`tor_cucnn.g`) to
+  61.65 s (`tor_nnsen.g`), and Gappa calls none of them pointless.
+- `(y − Ex) / Phat2` is within `1.88738e-15` in all 180, whichever components
+  cancel and whatever `hollow` and `P2` are, and `ku.py` writes each of the
+  180 exact bounds as `17u + 95u²`. A component that cancels costs `y`
+  nothing, since its longest chain is on `left` (2).
+- `P` against the permanent with no rounding of its own, `Phat`, or `Phatx` as
+  a case that splits writes it, is within `7u` (`7.77156e-16`) in 178 cases:
+  `7u + 22u²` in 126 and `7u + 21u²` in 52, by `ku.py`. It is within `6u +
+  15u²` (`6.66134e-16`) in the two `uuu` cases, where `P` is `P1`.
+- 90 of the 180, `27 + 26 + 27 + 9 + 1`, have `hollow` below the normals.
+- No `.out`, `.bcoq` or `.coqc` of the 180 has a line other than its results
+  and "assumed to be nonzero" warnings, but `tor_cusen.coqc`, whose certificate
+  `coqc` refused (8).
+
+So on `y` the bound holds at the code's constant wherever no factor is zero.
+
+The shapes. `shapes.py` (9) works three shapes in Python's doubles, which
+round as Rust's do. A point on the axis of a torus whose axis is `(1, 1, 1)` is
+`cccnn`, and one off it at `(1, 1, 2)` is `nncnn`: shapes a designer makes, and
+both are proved. A point on the axis of the axis-aligned torus whose axis is
+`(1, 0, 0)` has four zero factors, which no case takes, and passes every check
+`on_floats` makes (10). It prints:
+
+```text
+on the axis (1, 0, 0): direction [1.0, 0.0, 0.0], from_centre [2.0, 0.0, 0.0], halves [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+  zero factors ['fy', 'fz', 'dy', 'dz']; case uuunb; on_floats' checks pass: True
+on the axis (1, 1, 1): direction [0.5773502691896257, 0.5773502691896257, 0.5773502691896257], from_centre [1.0, 1.0, 1.0], halves [(0.5773502691896257, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257)]
+  zero factors none; case cccnn; on_floats' checks pass: True
+off the axis (1, 1, 1), one component cancelling: direction [0.5773502691896257, 0.5773502691896257, 0.5773502691896257], from_centre [1.0, 1.0, 2.0], halves [(0.5773502691896257, 1.1547005383792515), (1.1547005383792515, 0.5773502691896257), (0.5773502691896257, 0.5773502691896257)]
+  zero factors none; case nncnn; on_floats' checks pass: True
+```
+
+The letters `uuunb` of the first line are what the classifier reads off its
+zeros; `torsplit.py`'s `uuunb` assumes no factor is zero, so it is not that
+shape.
+
+**7. The controls.** At `B = 1b-54;`, `u / 2`, each must fail:
+
+- `c_tor_half.g` exits 1, best `[-34, 34]`, `tor.g`'s `17u` over `u / 2`.
+- Each of the 179 `c_tor_<case>_half.g` exits 1, best `[-34, 34]`, so none
+  needs a `u²` control, as 108 of the cone's did.
+
+Together with the failures at `17u + 231u²` (3), that says none of the proofs
+came from a contradiction in its hypotheses. Two more controls take a
+hypothesis away:
+
+- `c_tor_nonormal.g` is `tor.g` without every `1b-1022` hypothesis but
+  `|eb|`'s, and without the lemma line each of those gives. It exits 1, best
+  `[-7.69054e+2159, 7.69054e+2159]`, and fails `REL(P, Phat)` and `BND((y -
+  Ex) / Phat2)` too.
+- `c_tor_noeb.g`, `tor.g` without `eb` normal, exits 1 in `82.44s`, best
+  `[-2.78435e+1080, 3.94239e+1124]`.
+
+**8. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0 from 464.5's nix block, accept
+each script that proves and was run through them:
+
+- `tor.g`: 23062 lines with 81 hints, in `35.83s` (`run0.sh`).
+- The 180 cases of 6: 14324 (`tor_uuunb`) to 22872 lines (`tor_nnnnn`), with
+  66 to 81 hints, in 24.62 to 99.14 s each (`run3.sh`). `coqc` accepted 179
+  of them at their first certificate, and printed nothing.
+- `tor_cusen.g` at its second, below.
+
+`tor_cusen.g`'s first certificate, 16904 lines, `coqc` refused. `tor_cusen.coqc`
+ends `The term "eq_refl" has type "true = true" while it is expected to have
+type "intersect_helper (upper i96) (lower i96) i9 = true".`, at `tor_cusen.v`
+line 6766, `apply intersect with (1 := h1) (2 := h2)`, where `h1` and `h2` are
+the same lemma, `l337 h0`. Gappa's certificate there is wrong, not its bound:
+the same script's Gappa run exited 0. Q2682's second lane then ran `run4.sh`
+(9) through 464.16's `launch.sh`. It runs `one.sh` with `coq` on
+`tor_cusen2.g`, a copy of `tor_cusen.g`, so that `tor_cusen.coqc`, which
+`tally3.py` reads, stays as `run3.sh` left it. It printed:
+
+```text
+tor_cusen2.g is tor_cusen.g
+tor_cusen2 exit 0 20.99s
+tor_cusen2 coq -Bcoq exit 0 coqc exit 0 29.78s lines 16899 hints 68
+coqc printed:
+done
+```
+
+So `coqc` accepts the second certificate, 16899 lines with 68 hints from the
+same bytes, and printed nothing, and it accepts a certificate for each of the
+180. `ku.py` writes the two bounds of `tor_cusen2.out` as `17u + 95u²` and
+`7u + 22u²`, the same as `tor_cusen.out`'s.
+
+Gappa does not write the same proof each run (464.4). That is why
+`tor_nnnnn.g`, the same bytes as `tor.g`, gave 22872 lines against 23062, and
+why `tor_cusen.v` and `tor_cusen2.v` first differ at line 976. Each hint enters
+the Coq file as a hypothesis with no condition, as in 464.4. The controls and
+the bisection scripts were not run through `coqc`. `field` has not been run on
+these hints (464.10).
+
+**9. The scripts.** `torcases.py` writes the controls of 7 and the bisection
+scripts of 3 from `tor.g`, and `torsplit.py` writes the 180 cases of 6 and
+their controls. To run them again, save the nix block of 464.5 as
+`gappalib18.nix` and `tor.g` and the two generators beside it, and then:
+
+```sh
+python3 torcases.py 0 100 200 228 230 231 232 233 236 300; python3 torsplit.py
+nx="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
+pin=github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe
+$nx shell $pin#gappa --command gappa -Eprecision=200 tor.g
+$nx shell $pin#gappa --command gappa -Eprecision=200 -Bcoq tor.g > tor.v
+gl=$($nx build --impure --no-link --print-out-paths -f gappalib18.nix)
+fl=$($nx build --no-link --print-out-paths $pin#coqPackages_8_20.flocq)
+COQPATH="$gl/lib/coq/8.20/user-contrib:$fl/lib/coq/8.20/user-contrib" \
+  $nx shell $pin#coqPackages_8_20.coq --command coqc tor.v
+```
+
+and the same for every other file they write. A script that proves exits 0; a
+control must exit 1. What the lanes ran is `run0.sh`, `run1.sh`, `trial.sh`,
+`run3.sh` and `run4.sh` (below), in a scratch directory, each through 464.13's
+`one.sh`, the same bytes, or through 464.16's `one1.sh`, which is `one.sh`
+with the timeout taken from `T` and no `coq`. `ku.py` writes Gappa's bounds as
+`k u + r u²`, `tally3.py` counts what `run3.sh` printed, and `shapes.py` reads
+the shapes of 6. `same.py` (below) checks every script appended here byte for
+byte against the file that was run; that `one.sh` is 464.13's block and
+`one1.sh` and `launch.sh` 464.16's; that `tally3.py` and `shapes.py`, run
+again, print what 6 gives; and that the two generators, run again from the
+text here, write what was run. Its print and what its 383 files are end this
+part.
 
 `run0.sh`, whole:
 
