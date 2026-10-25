@@ -7805,15 +7805,41 @@ not yet written up:
   `121.00s`, best `[-3.76818e+1267, 3.99163e+1402]`.
 - `sumexact.g`, that a sum of two doubles at most `2⁻¹⁰²²` is a double, exits 0
   and `coqc` passes, 150 lines, no hints.
-- `conesplit.py` is written, not run: cylsplit's four cross states and six axial
-  ones, `n` and `e` where `up` is not zero (`u01` normal, or below the normals
-  and so exact), and `c`, `a`, `s`, `t` where `up` cancels (`R2` normal or
-  below the normals and not zero, times `A` normal or below the normals). Where
-  `up` cancels it averages the axial error over `XA = ss · R2` and not `ss ·
-  G²`, since `R2` below the normals need not stay near `G²`. `R2` rounding to
-  zero is the wrong sign above and gets no script.
+- `conesplit.py`: cylsplit's four cross states and six axial ones, `n` and `e`
+  where `up` is not zero (`u01` normal, or below the normals and so exact), and
+  `c`, `a`, `s`, `t` where `up` cancels (`R2` normal or below the normals and
+  not zero, times `A` normal or below the normals). Where `up` cancels it
+  averages the axial error over `XA = ss · R2` and not `ss · G²`, since `R2`
+  below the normals need not stay near `G²`. `R2` rounding to zero is the wrong
+  sign above and gets no script. `cone_nnnn.g` is `cone.g` byte for byte
+  (`diff` prints nothing).
+- `run3a.sh`: `cone_nnne`, `nnnc`, `nnna`, `nnns` and `nnnt` exit 0, and their
+  `u / 2` controls exit 1, with no "not trivially equal" line.
+- `run3.sh` (22 at a time, load about 43 over 24 cores), tallied by
+  `tally3.py` into `tally3.txt`: all 384 cases exit 0 at the code's `B` in 4.17
+  s (`ccuc`) to 39.13 s (`nnnt`), and `gappa -Bcoq` and `coqc` exit 0 on all
+  384, 2325 (`uuua`) to 17532 lines (`nnnn`), 37 to 64 hints, 6.68 to 51.46 s.
+  No `.out`, `.bcoq` or `.coqc` has a line but results and "assumed to be
+  nonzero".
+- What they print for `(y − Ex) / P15`: `11u` (`1.22125e-15`) in all 64 with
+  axial `n`; `9u` in all 64 with axial `e`; where `up` cancels, `9u`, `8u`,
+  `7u` with three, two, one components `n`, and with none, `y` is 0 and the
+  error is `9u²` (`c`), `13.5u²` (`s`, `1.664e-31`) or `4u²` (`a`, `t`). 16 of
+  those, `{s,u}³` times `a` or `t`, print "remaining results are pointless":
+  every reach square and `A` below the normals makes `P ≤ 2⁻¹⁰²⁰`, so `eb`
+  cannot be normal and `decide` refuses. `P −/ Phat` (or `Phatx`) is within
+  `7u` at most.
+- The controls at `u / 2`: 275 of 383 exit 1, best `[-22, 22]` in 63, `[-18,
+  18]` in 68, `[-16, 16]` in 36, `[-14, 14]` in 108. The other 108 are the
+  cases where `y` is 0, whose `u²` error `u / 2` covers. `conesplit.py` now
+  writes them a second control, `c_cone_<case>_usq.g` at `B = 1b-106;`, and
+  `run4.sh` ran it (after checking by `md5sum` that writing the split again
+  left all 767 scripts `run3.sh` ran unchanged): 92 exit 1, best 9, 13.5 or 4
+  times `u²` over `u²`, and the 16 pointless ones exit 0, pointless again.
+- `sumexact.g` again: `sumexact exit 0 0.03s`, `coqc` exit 0, 150 lines, 0
+  hints.
 
-**Still to do**, in order: run `conesplit.py`'s 384 cases and their controls
-through `coqc`; what the doc comment at `cone.rs:643-663` and the comment at
-`432-434` claim against what is proved; the scripts whole; and what this
-leaves.
+**Still to do**, in order: rewrite these bullets as numbered paragraphs, as
+464.15's 1 to 10; what the doc comment at `cone.rs:643-663` and the comment at
+`432-434` claim against what is proved; the scripts whole and `same.py`; and
+what this leaves.
