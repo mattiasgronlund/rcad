@@ -29,8 +29,9 @@
 //! halves said the same word. Since row Q1376 the namer no longer refuses the
 //! bend: it names the two circles the pipe's rim and the tube's share, and
 //! since row Q1396 the evaluator walks an arc of either, refusing only a whole
-//! circle named by the two faces alone. The countersink pair is unchanged,
-//! both halves still refusing it under its own name.
+//! circle named by the two faces alone. Since row Q2788 the countersink pair
+//! is named and walked too, as the two loops a pipe across it leaves, and a
+//! whole run stated on it with nothing picking a loop is refused.
 //!
 //! # Why tangency is an answer and not a band
 //!
@@ -731,28 +732,66 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
     }
 }
 
-/// The same for a cone, which the naming half refuses under its own name.
+/// The same for a cone, which both halves refused under its own name until row
+/// Q2788.
 ///
-/// A countersink met by a pipe: two faces a file can state and this crate can
-/// never name a crossing for.
+/// A countersink met by a pipe across it, half a unit thick at height two: the
+/// pipe goes into the cone on one side of its axis and out on the other, so
+/// the two cross in two loops, one each side of the flat through the apex that
+/// faces along the pipe. Each loop is named by that flat, each is walked on its
+/// own side of it and on both surfaces, and a run stated with nothing picking
+/// either is refused rather than walked round the first.
 #[test]
-fn a_countersink_meeting_a_pipe_is_refused_by_name_rather_than_crashing_the_evaluator() {
+fn a_countersink_meeting_a_pipe_across_it_crosses_it_in_two_loops_one_each_side_of_its_axis() {
     let countersink = Surface::Cone(rcad_geom::Cone::new(Axis::z(), 1.0).expect("a slope"));
     let pipe = a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 2.0], 0.5);
-
-    assert_eq!(
-        intersect(
-            &countersink,
-            &pipe,
-            &Policy::certified(),
-            &mut ProvenanceLog::new()
-        ),
-        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-    );
-
     let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a closed curve is never a piece with nothing picking it");
+
     for along in [[&countersink, &pipe], [&pipe, &countersink]] {
+        let SurfaceMeet::Curves(runs) = crossing(along[0], along[1]) else {
+            panic!("{along:?} cross in curves");
+        };
+        let facings: Vec<Option<Vector>> = runs
+            .iter()
+            .map(|run| match run.run() {
+                EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
+                    [picker @ Picker::InFrontOfAFlatThrough(_)] => picker.facing_of_a_flat(),
+                    other => panic!("{along:?}: one flat picks each loop, not {other:?}"),
+                },
+                other => panic!("{along:?}: each loop is a piece of the crossing, not {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            facings,
+            [
+                Some(Vector::new(1.0, 0.0, 0.0)),
+                Some(Vector::new(-1.0, 0.0, 0.0))
+            ],
+            "{along:?}"
+        );
+
+        for (run, way) in runs.iter().zip([1.0, -1.0]) {
+            let walked = walk(
+                run,
+                along,
+                Deflection::of(0.01).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("each loop is walked");
+            assert!(walked.points().len() > 8, "{along:?} toward {way}");
+            for point in walked.points() {
+                let [x, y, z] = point.coordinates();
+                assert!(
+                    x * way > 0.0,
+                    "{along:?}: {point:?} is on its own loop's side"
+                );
+                assert!(how_far_off(&countersink, *point) < 1e-12, "{point:?}");
+                assert!((y.hypot(z - 2.0) - 0.5).abs() < 1e-12, "{point:?}");
+            }
+        }
+
         assert_eq!(
             walk(
                 &whole,
@@ -762,11 +801,13 @@ fn a_countersink_meeting_a_pipe_is_refused_by_name_rather_than_crashing_the_eval
                 &mut ProvenanceLog::new(),
             )
             .map(|walked| walked.points().len()),
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+            "{along:?}"
         );
         assert_eq!(
             where_a_closed_crossing_starts(&whole, along, &mut ProvenanceLog::new()),
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+            "{along:?}"
         );
     }
 }
