@@ -2083,6 +2083,92 @@ fn probe_q2758_the_seven_shapes() {
     }
 }
 
+#[test]
+fn probe_q2758_trace_placement_12() {
+    let placement = q2758_placements()[12].1;
+    let wedge = A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS;
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let pyramid = a_pyramid(&mut model);
+    model
+        .place_solid(pyramid, &placement)
+        .expect("this model made the key");
+    let cut = a_wedge(&mut model, wedge, &placement);
+    let [x, y, z] = placement
+        .apply_to_point(Point::new(0.0, 0.0, HEIGHT))
+        .coordinates();
+    let planes_of = |solid: SolidKey| -> Vec<[f64; 4]> {
+        model
+            .solid(solid)
+            .expect("key")
+            .faces()
+            .filter_map(|face| face.surface().as_plane().map(Plane::coefficients))
+            .collect()
+    };
+    let side_planes: Vec<[f64; 4]> = planes_of(pyramid)
+        .into_iter()
+        .filter(|[a, b, c, d]| (a * x + b * y + c * z + d).abs() < 1e-9)
+        .collect();
+    let wedge_planes: Vec<[f64; 4]> = planes_of(cut)
+        .into_iter()
+        .filter(|[a, b, c, d]| (a * x + b * y + c * z + d).abs() < 1e-9)
+        .collect();
+    let names = ["-y", "+x", "+y", "-x"];
+    for (name, plane) in names.iter().zip(&side_planes) {
+        eprintln!("Q2758 TRACE side plane {name} {plane:?}");
+    }
+    for plane in &wedge_planes {
+        eprintln!("Q2758 TRACE wedge plane {plane:?}");
+    }
+    let side = |three: [[f64; 4]; 3], plane: [f64; 4]| {
+        side_of_a_plane_where_three_planes_meet(three, plane).expect("meet")
+    };
+    let p = [side_planes[1], wedge_planes[0], wedge_planes[1]];
+    for (name, plane) in names.iter().zip(&side_planes) {
+        eprintln!(
+            "Q2758 TRACE side of {name} at meet(+x, a, b): {:?}",
+            side(p, *plane)
+        );
+    }
+    for skip in 0..4 {
+        let three: Vec<[f64; 4]> = (0..4)
+            .filter(|&i| i != skip)
+            .map(|i| side_planes[i])
+            .collect();
+        let three = [three[0], three[1], three[2]];
+        eprintln!(
+            "Q2758 TRACE apex without {}: side of {} {:?}, of wedge a {:?}, of wedge b {:?}",
+            names[skip],
+            names[skip],
+            side(three, side_planes[skip]),
+            side(three, wedge_planes[0]),
+            side(three, wedge_planes[1]),
+        );
+    }
+    for rule in [Rule::Intersection, Rule::Difference] {
+        let mut model = model.clone();
+        let mut log = ProvenanceLog::new();
+        let answer = model
+            .fuse(&[pyramid], &[cut], rule, &Policy::tolerant(100.0), &mut log)
+            .expect("tolerant answers");
+        for &solid in answer.solids() {
+            for face in model.solid(solid).expect("key").faces() {
+                let normal = face.outward_normal();
+                for wire in face.wires() {
+                    let points: Vec<[f64; 3]> =
+                        wire.points().map(|point| point.coordinates()).collect();
+                    let shortest = wire
+                        .coedges()
+                        .map(|coedge| coedge.edge().distance_between_its_ends())
+                        .fold(f64::INFINITY, f64::min);
+                    eprintln!(
+                        "Q2758 TRACE {rule:?} face normal {normal:?} shortest {shortest:e} corners {points:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn q2758_placements() -> Vec<(String, Isometry)> {
     let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a translation");
     let mut placements: Vec<(String, Isometry)> = vec![
