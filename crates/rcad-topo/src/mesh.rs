@@ -4480,19 +4480,26 @@ impl BuildingAMesh {
     /// for once a fold is found, so a mesh that does not fold costs nothing
     /// more, and both triangles of each stay in the mesh: each face's area is
     /// its own triangles' (`docs/decisions.md` §466).
+    ///
+    /// **A side of a pair is held to being used twice, and not to being drawn
+    /// inside twice.** One face may draw it inside its patch where the other
+    /// runs along a loop. Counted out, the pair takes one of the two triangles
+    /// the first face drew there, and what is left on that side is the first
+    /// face's other one and the triangle across the second face's loop, which
+    /// meet there as two faces along an edge do.
     fn finish(
         self,
         solid: SolidView<'_>,
         back_to_back: TrianglesBackToBack,
     ) -> core::result::Result<Mesh, MeshRefused> {
-        let mut folded = self.the_sides_that_fold(|_| true);
+        let mut folded = self.the_sides_that_fold(&vec![false; self.triangles.len()]);
         if !folded.is_empty() && back_to_back == TrianglesBackToBack::Kept {
             let surface_of: HashMap<FaceKey, Surface> = solid
                 .faces()
                 .map(|face| (face.key(), face.surface()))
                 .collect();
             let paired = back_to_back_with_another_faces(&self.triangles, &surface_of);
-            folded = self.the_sides_that_fold(|at| !paired[at]);
+            folded = self.the_sides_that_fold(&paired);
         }
         if let Some(&(_, drawn, used)) = folded.iter().min_by_key(|&&(side, _, _)| side) {
             let shortest = folded
@@ -4515,21 +4522,29 @@ impl BuildingAMesh {
         })
     }
 
-    /// Each side that one of the triangles `counted` drew inside its patch and
-    /// that is not used by exactly two of them, both drawing it inside: the
-    /// side, how many drew it inside, and how many use it.
-    fn the_sides_that_fold(&self, counted: impl Fn(usize) -> bool) -> Vec<((u32, u32), u32, u32)> {
+    /// Each side that a triangle left out of `paired` drew inside its patch and
+    /// that is not used by exactly two of them, both drawing it inside unless
+    /// it is a side of a paired triangle: the side, how many drew it inside,
+    /// and how many use it. `paired` runs with `triangles`.
+    fn the_sides_that_fold(&self, paired: &[bool]) -> Vec<((u32, u32), u32, u32)> {
         let mut times_used: HashMap<(u32, u32), u32> = HashMap::new();
         let mut drawn_inside: HashMap<(u32, u32), u32> = HashMap::new();
+        let mut of_a_pair: HashSet<(u32, u32)> = HashSet::new();
+        assert_eq!(
+            paired.len(),
+            self.triangles.len(),
+            "one mark for each triangle"
+        );
         let drawn = self.triangles.iter().zip(&self.inside_its_patch);
-        for (at, (triangle, inside)) in drawn.enumerate() {
-            if !counted(at) {
-                continue;
-            }
+        for ((triangle, inside), &counted_out) in drawn.zip(paired) {
             let [first, second, third] = triangle.corners;
             let sides = [(first, second), (second, third), (third, first)];
             for ((from, to), &inside) in sides.into_iter().zip(inside) {
                 let side = a_side(from, to);
+                if counted_out {
+                    of_a_pair.insert(side);
+                    continue;
+                }
                 *times_used.entry(side).or_default() += 1;
                 if inside {
                     *drawn_inside.entry(side).or_default() += 1;
@@ -4539,7 +4554,7 @@ impl BuildingAMesh {
         drawn_inside
             .into_iter()
             .map(|(side, drawn)| (side, drawn, times_used[&side]))
-            .filter(|&(_, drawn, used)| drawn != 2 || used != 2)
+            .filter(|&(side, drawn, used)| used != 2 || (drawn != 2 && !of_a_pair.contains(&side)))
             .collect()
     }
 }
