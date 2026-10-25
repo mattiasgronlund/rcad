@@ -9481,10 +9481,11 @@ And what is not a row:
 
 ### 464.17 The side of rcad-geom's torus
 
-*Draft, Q2682's first lane, handed over at its budget. Nothing below has been
-run through Gappa yet. The lane after it runs `tor.g`, fixes what fails, and
-writes this section up in 464.15's and 464.16's form; this paragraph and the
-word "draft" then go.*
+*Draft. Q2682's first lane wrote `tor.g` and handed over at its budget; its
+first relay ran `tor.g`, its bisection and its three controls (below, "What
+ran") and handed over at its own. The split on the components that cancel,
+the comment check and the write-up in 464.15's and 464.16's form are left;
+this paragraph and the word "draft" then go.*
 
 Read at `4be293a5`, against `torus.rs:336-398` (`on_floats`), `torus.rs:474-483`
 (`cross_product_halves`), `torus.rs:485-511` (the constant) and
@@ -9849,4 +9850,166 @@ eXz / cXz -> (hz / |hz|) * (kz / |kz|) * WXz;
 (y - Ex) / eb -> ((y - Ex) / Phat2) * (Phat / P) * (P / eb);
 Phat / P -> 1 / (1 + (P - Phat) / Phat);
 P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+**What ran.** Q2682's first relay, on 2026-10-25, against `torus.rs` and
+`cascade.rs` at `4be293a5`, each script in a scratch directory beside 464.13's
+`one.sh`, 464.15's `one1.sh` and 464.16's `launch.sh`, the same bytes.
+
+- The draft's first run, through `one1.sh`, exited 0 in `15.34s`, but Gappa
+  called ten of its hints unneeded ("no need for the rewriting ... if ... `Wx
+  != 0`"): the three last steps of each of the two averages over three pieces,
+  and the ratio hints of four of the six pair pieces, `OO`, `RR`, `rr` and
+  `OR`. Its two block goals, `(left − Lt) / A6` and `(Rt − right) / C9`, printed
+  bounds of about `1e2773`, which say nothing. All twelve were dropped, and
+  `tor.g` above is the script after that.
+- `run0.sh` (below) ran `tor.g` through `one.sh` with `coq`. It printed `tor
+  exit 0 20.02s` and `tor coq -Bcoq exit 0 coqc exit 0 35.83s lines 23062 hints
+  81`, `(y − Ex) / Phat2` within `1.88738e-15` and `P −/ Phat` within
+  `7.77156e-16`. `ku.py` (below) writes those exact bounds as `17u + 95u²` and
+  `7u + 22u²`. Its `.out`, `.bcoq` and `.coqc` have no line but their results
+  and 492 "assumed to be nonzero" warnings each in the first two.
+- `run1.sh` (below) ran what `torcases.py` (below) writes. At `B = 18u + m
+  u²`, every `m` run proves: 0, 100, 200, 228, 230, 231, 232, 233, 236 and 300.
+  At `17u + m u²`, 232, 233, 236 and 300 prove, and 231, 230, 228, 200, 100 and
+  0 fail, best `[-1, 1]`. By hand, `(17u + 95u²)(1 + 7u + 22u²)(1 + u)` is `17u
+  + 231u²` and a `u³`, so the line falls where that count puts it, and `y`
+  proves with about a `u` to spare below the code's `18u + 224u²`.
+- The controls each exit 1: `c_tor_half.g`, `B = u / 2`, best `[-34, 34]`, which
+  is `17u` over `u / 2`; `c_tor_nonormal.g`, best `[-7.69054e+2159,
+  7.69054e+2159]`, failing `REL(P, Phat)` and `BND((y - Ex) / Phat2)` too; and
+  `c_tor_noeb.g`, in `82.44s`, best `[-2.78435e+1080, 3.94239e+1124]`.
+
+`run0.sh`, whole:
+
+```sh
+#!/bin/bash
+# tor.g, the case where nothing cancels, through one.sh with coq, and then
+# every line of its output, its -Bcoq print and its coqc print that is not an
+# "assumed to be nonzero" warning. Prints to run0.txt.
+cd "$(dirname "$0")"
+{
+  ./one.sh tor.g coq
+  for x in tor.out tor.bcoq tor.coqc; do
+    echo "== $x: $(grep -c 'assumed to be nonzero' "$x") nonzero warnings"
+    grep -v 'assumed to be nonzero' "$x"
+  done
+  echo done
+} > run0.txt 2>&1
+```
+
+`torcases.py`, whole:
+
+```python
+"""Write the scripts of 464.17 from tor.g beside it: the controls c_tor_half.g
+at B = u / 2, c_tor_nonormal.g without product_is_normal, and c_tor_noeb.g
+without eb normal; and b_tor_<m>.g and b17_tor_<m>.g, tor.g at B = 18u + m u^2
+and 17u + m u^2, for the bisection. Each change is a text replacement that
+must match exactly once. Run as: python3 torcases.py [m ...]."""
+import os
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+TOR = open("tor.g").read()
+B_CODE = "B = 18b-53 + 7b-101;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+TITLE = "# HowFarFromTheRing::on_floats and SIDE_OF_TORUS_ERROR_BOUND, rcad-geom's torus.\n"
+
+
+def sub(text, old, new):
+    assert text.count(old) == 1, old
+    return text.replace(old, new)
+
+
+def at(text, b):
+    return sub(text, B_CODE, b)
+
+
+def without_normal(text):
+    keep = []
+    for line in text.split("\n"):
+        if "1b-1022" in line and "|eb|" not in line:
+            continue
+        if line.startswith("  /\\ ") and LEMMA in line and not line.startswith("  /\\ eb -/"):
+            continue
+        keep.append(line)
+    text = "\n".join(keep)
+    text = sub(text, "  # hollow is a normal number; below the normals it is exact, and that is\n"
+               "  # another case.\n", "")
+    text = sub(text, "  # product_is_normal on the three squares of from_centre, of direction and\n"
+               "  # of sideways, the six halves, R^2, r^2, bulge^2, axis_squared bulge^2 and\n"
+               "  # 4 R^2 across (stays_accurate and the check after it).\n", "")
+    text = sub(text, "  # The permanent's products are normal too, since nothing cancels here, by\n"
+               "  # monotone rounding: v >= s, as no component is zero; br >= bulge, as\n"
+               "  # hollow <= RR, so brr >= bb and P1 >= left; spread >= across, so\n"
+               "  # P2 >= right.\n", "")
+    return sub(text, TITLE, TITLE + "# A control: without product_is_normal and the lemma lines it gives.\n")
+
+
+def without_eb(text):
+    text = sub(text, "  # The bound is normal, which decide checks.\n  /\\ |eb| >= 1b-1022\n", "")
+    text = sub(text, f"  /\\ eb -/ B * P {LEMMA}\n", "")
+    return sub(text, TITLE, TITLE + "# A control: without eb normal and the lemma line it gives.\n")
+
+
+def write(name, text):
+    with open(name, "w") as out:
+        out.write(text)
+
+
+write("c_tor_half.g", at(TOR, B_HALF))
+write("c_tor_nonormal.g", without_normal(TOR))
+write("c_tor_noeb.g", without_eb(TOR))
+for m in sys.argv[1:]:
+    write(f"b_tor_{m}.g", at(TOR, f"B = 18b-53 + {m}b-106;"))
+    write(f"b17_tor_{m}.g", at(TOR, f"B = 17b-53 + {m}b-106;"))
+```
+
+`run1.sh`, whole:
+
+```sh
+#!/bin/bash
+# tor.g's controls and its bisection, B = 18u + m u^2 and 17u + m u^2, all
+# at once through one1.sh with a 600 s timeout. Prints to run1.txt.
+cd "$(dirname "$0")"
+{
+  python3 torcases.py 0 100 200 228 230 231 232 233 236 300
+  for f in c_tor_half.g c_tor_nonormal.g c_tor_noeb.g b_tor_*.g b17_tor_*.g; do
+    T=600 ./one1.sh "$f" &
+  done
+  wait
+  echo done
+} > run1.txt 2>&1
+```
+
+`ku.py`, whole:
+
+```python
+"""Print each result of the named .out files as k u + r u^2, u = 2^-53, with
+k the whole number of u at or below the bound's larger end. Run as:
+python3 ku.py <file.out> ..."""
+import re
+import sys
+from fractions import Fraction
+
+U = Fraction(1, 2**53)
+
+
+def num(text):
+    m = re.fullmatch(r"(-?\d+)(?:b(-?\d+))?", text)
+    e = int(m.group(2) or 0)
+    return Fraction(int(m.group(1))) * (Fraction(2) ** e)
+
+
+for path in sys.argv[1:]:
+    for line in open(path):
+        m = re.match(r"\s+(.*) in \[(\S+) \{[^}]*\}, (\S+) \{[^}]*\}\]", line)
+        if not m:
+            continue
+        lo, hi = num(m.group(2)), num(m.group(3))
+        top = max(abs(lo), abs(hi))
+        k = top // U
+        r = (top - k * U) / (U * U)
+        print(f"{path}: {m.group(1)}: {k}u + {float(r):.4g}u^2")
 ```
