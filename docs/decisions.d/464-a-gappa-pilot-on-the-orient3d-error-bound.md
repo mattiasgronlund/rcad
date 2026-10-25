@@ -9157,6 +9157,170 @@ cd "$(dirname "$0")"
 echo done >> run4.txt
 ```
 
+`tally3.py`, whole:
+
+```python
+"""Tally run3.txt and the .out files of conesplit.py's 384 cases: for each case
+its exit, the bound on (y - Ex) / P15 and on P against the permanent with no
+rounding of its own that it prints, and its coqc line; for each control its
+exit and best. Prints one line per case, then counts, grouped by how many
+components of the cross product do not cancel and by the axial letter.
+Run as: python3 tally3.py"""
+import collections
+import itertools
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+run = open("run3.txt").read()
+cases = ["".join(c) for c in itertools.product("ncsu", repeat=3)]
+cases = [c + a for c in cases for a in "necast"]
+RESULT = re.compile(r"^  (.*) in \[[^{]*\{([^,]*),[^}]*\}, [^{]*\{([^,]*),", re.M)
+
+
+def bounds(out):
+    """The y goal's and the P goal's printed ranges, as [lo, hi]."""
+    y = p = "-"
+    for expr, lo, hi in RESULT.findall(out):
+        if expr.endswith("/ P15"):
+            y = f"[{lo}, {hi}]"
+        elif " -/ " in expr:
+            p = f"[{lo}, {hi}]"
+    return y, p
+
+
+ybounds = collections.Counter()
+pbounds = collections.Counter()
+bests = collections.Counter()
+ctl_exits = collections.Counter()
+pointless = []
+times = []
+coq = []
+for c in cases:
+    out = open(f"cone_{c}.out").read()
+    ex = re.search(rf"^cone_{c} exit (\d+) ([\d.]+)s$", run, re.M)
+    cq = re.search(rf"^cone_{c} coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$", run, re.M)
+    live = sum(1 for s in c[:3] if s == "n")
+    y, p = bounds(out)
+    if "pointless" in out:
+        pointless.append(c)
+        y = p = "pointless"
+    ybounds[(live, c[3], y)] += 1
+    pbounds[p] += 1
+    times.append((float(ex.group(2)), c))
+    if cq:
+        coq.append((int(cq.group(4)), int(cq.group(5)), c, cq.group(1), cq.group(2), float(cq.group(3))))
+    line = [c, "exit", ex.group(1), ex.group(2), "y", y, "P", p, "coq", cq.groups() if cq else "-"]
+    if c != "nnnn":
+        ctl = re.search(rf"^c_cone_{c}_half exit (\d+) ([\d.]+)s$", run, re.M)
+        cout = open(f"c_cone_{c}_half.out").read()
+        best = re.search(r"best: (\[[^\]]*\])", cout)
+        bests[(ctl.group(1), best.group(1) if best else "pointless" if "pointless" in cout else "-")] += 1
+        ctl_exits[(live, c[3], ctl.group(1))] += 1
+        line += ["ctl", ctl.group(1), best.group(1) if best else "-"]
+    print(*line)
+print("cases exit 0:", len(re.findall(r"^cone_\w{4} exit 0 ", run, re.M)), "of", len(cases))
+print("controls exit 1:", len(re.findall(r"^c_cone_\w{4}_half exit 1 ", run, re.M)), "of", len(cases) - 1)
+print("pointless:", pointless)
+print("y bounds by live components and axial letter:")
+for k in sorted(ybounds):
+    print("  ", k, ybounds[k])
+print("P bounds:", dict(pbounds))
+print("control exits by live components and axial letter:")
+for k in sorted(ctl_exits):
+    print("  ", k, ctl_exits[k])
+print("control exits and bests:", dict(bests))
+times.sort()
+print("times", times[0], times[-1])
+print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(coq))
+coq.sort()
+print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "hints", min(x[1] for x in coq), max(x[1] for x in coq),
+      "times", min(x[5] for x in coq), max(x[5] for x in coq))
+
+
+def other_lines(f):
+    return [line for line in open(f).read().split("\n")
+            if line and "assumed to be nonzero" not in line and not line.startswith(("Results:", "  "))]
+
+
+warn = [f for f in os.listdir(".") if f.startswith("cone_") and f.endswith((".out", ".bcoq", ".coqc"))
+        and other_lines(f)]
+print("files with a line other than results and 'assumed to be nonzero':", sorted(warn))
+```
+
+After its line for each case, `python3 tally3.py` prints:
+
+```text
+cases exit 0: 384 of 384
+controls exit 1: 275 of 383
+pointless: ['sssa', 'ssst', 'ssua', 'ssut', 'susa', 'sust', 'suua', 'suut', 'ussa', 'usst', 'usua', 'usut', 'uusa', 'uust', 'uuua', 'uuut']
+y bounds by live components and axial letter:
+   (0, 'a', '[-4.93038e-32, 1.47793e-46]') 19
+   (0, 'a', 'pointless') 8
+   (0, 'c', '[-2.62743e-46, 1.10934e-31]') 3
+   (0, 'c', '[-4.93038e-32, 1.10934e-31]') 19
+   (0, 'c', '[-5.25487e-46, 1.10934e-31]') 3
+   (0, 'c', '[-7.51646e-62, 1.10934e-31]') 1
+   (0, 'c', '[-7.8823e-46, 1.10934e-31]') 1
+   (0, 'e', '[-9.99201e-16, 9.99201e-16]') 27
+   (0, 'n', '[-1.22125e-15, 1.22125e-15]') 27
+   (0, 's', '[-2.62743e-46, 1.664e-31]') 3
+   (0, 's', '[-4.93038e-32, 1.664e-31]') 19
+   (0, 's', '[-5.25487e-46, 1.664e-31]') 3
+   (0, 's', '[-7.51646e-62, 1.664e-31]') 1
+   (0, 's', '[-7.8823e-46, 1.664e-31]') 1
+   (0, 't', '[-4.93038e-32, 2.2169e-46]') 19
+   (0, 't', 'pointless') 8
+   (1, 'a', '[-7.77156e-16, 7.77156e-16]') 27
+   (1, 'c', '[-7.77156e-16, 7.77156e-16]') 27
+   (1, 'e', '[-9.99201e-16, 9.99201e-16]') 27
+   (1, 'n', '[-1.22125e-15, 1.22125e-15]') 27
+   (1, 's', '[-7.77156e-16, 7.77156e-16]') 27
+   (1, 't', '[-7.77156e-16, 7.77156e-16]') 27
+   (2, 'a', '[-8.88178e-16, 8.88178e-16]') 9
+   (2, 'c', '[-8.88178e-16, 8.88178e-16]') 9
+   (2, 'e', '[-9.99201e-16, 9.99201e-16]') 9
+   (2, 'n', '[-1.22125e-15, 1.22125e-15]') 9
+   (2, 's', '[-8.88178e-16, 8.88178e-16]') 9
+   (2, 't', '[-8.88178e-16, 8.88178e-16]') 9
+   (3, 'a', '[-9.99201e-16, 9.99201e-16]') 1
+   (3, 'c', '[-9.99201e-16, 9.99201e-16]') 1
+   (3, 'e', '[-9.99201e-16, 9.99201e-16]') 1
+   (3, 'n', '[-1.22125e-15, 1.22125e-15]') 1
+   (3, 's', '[-9.99201e-16, 9.99201e-16]') 1
+   (3, 't', '[-9.99201e-16, 9.99201e-16]') 1
+P bounds: {'[-7.77156e-16, 7.77156e-16]': 126, '[-6.66134e-16, 6.66134e-16]': 62, '[-5.55112e-16, 5.55112e-16]': 76, '[-4.44089e-16, 4.44089e-16]': 36, '[-3.33067e-16, 3.33067e-16]': 40, '[-2.22045e-16, 2.22045e-16]': 26, 'pointless': 16, '[-1.11022e-16, 1.11022e-16]': 2}
+control exits by live components and axial letter:
+   (0, 'a', '0') 27
+   (0, 'c', '0') 27
+   (0, 'e', '1') 27
+   (0, 'n', '1') 27
+   (0, 's', '0') 27
+   (0, 't', '0') 27
+   (1, 'a', '1') 27
+   (1, 'c', '1') 27
+   (1, 'e', '1') 27
+   (1, 'n', '1') 27
+   (1, 's', '1') 27
+   (1, 't', '1') 27
+   (2, 'a', '1') 9
+   (2, 'c', '1') 9
+   (2, 'e', '1') 9
+   (2, 'n', '1') 9
+   (2, 's', '1') 9
+   (2, 't', '1') 9
+   (3, 'a', '1') 1
+   (3, 'c', '1') 1
+   (3, 'e', '1') 1
+   (3, 's', '1') 1
+   (3, 't', '1') 1
+control exits and bests: {('1', '[-18, 18]'): 68, ('1', '[-22, 22]'): 63, ('1', '[-16, 16]'): 36, ('1', '[-14, 14]'): 108, ('0', '-'): 92, ('0', 'pointless'): 16}
+times (4.17, 'ccuc') (39.13, 'nnnt')
+coq ok: 384 of 384
+coq smallest (2325, 39, 'uuua') largest (17532, 64, 'nnnn') hints 37 64 times 6.68 51.46
+files with a line other than results and 'assumed to be nonzero': []
+```
+
 **10. What this leaves.** Four rows, filed from this write-up, each after
 Q2681:
 
