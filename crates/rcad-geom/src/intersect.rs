@@ -3082,6 +3082,19 @@ fn how_far_the_fat_pipe_out_reaches_the_thin_one(
 ///
 /// Both the normal and the separating direction are exactly square to the fat
 /// axis, so the two live in one plane and the second number is `√(1 − α²)`.
+///
+/// # Where the normal is the separating direction itself
+///
+/// A normal square to `w` that lies in the flat of `t` and `w`, asked exactly,
+/// is `n = a·t + b·w` with `a(t·w) + b‖w‖² = 0`, so it is `a/‖w‖²` times the
+/// separating direction, and `n·t = (a/‖w‖²)·‖t × w‖²` has the sign of `a`.
+/// So where `n·t` is above zero, asked exactly, `α` is one and the second
+/// number nought, and that is what comes back. Read through roundings
+/// instead, `α` lands a few `2⁻⁵³` short of one, and the root charges
+/// `√(1 − α²)`, about `4e−8`, against loops that may be closer than that to
+/// the surface: the bar along `x` at `y = 1` inside the bar of radius 2 up `z`,
+/// turned 1 about `z`, was refused for it (Q2710). `‖t × w‖²` is above zero
+/// because the caller only asks of pipes whose axes lean.
 fn how_a_picking_half_space_lies_across_an_axis(
     picker: &HalfSpace,
     thin: &Cylinder,
@@ -3090,6 +3103,15 @@ fn how_a_picking_half_space_lies_across_an_axis(
     let normal = picker.normal().components();
     let thin_way = thin.axis().direction().components();
     let fat_way = fat.axis().direction().components();
+
+    if it_lies_exactly_in_the_flat_of(
+        picker.normal(),
+        thin.axis().direction(),
+        fat.axis().direction(),
+    ) && Exact::dot_of(normal, thin_way).is_some_and(|reach| reach.sign() == Decision::Pos)
+    {
+        return (Interval::exactly(1.0), Interval::exactly(0.0));
+    }
 
     let along = quotient_or_everything(
         root_enclosing(squared_length_enclosing(exactly(fat_way)))
