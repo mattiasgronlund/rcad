@@ -848,9 +848,11 @@ impl Predicate for SideOfAFlatSurface {
         let point = self.point.exact_coordinates()?;
         let normal = self.normal;
 
-        // The bound below is a fraction of the permanent, which only bounds
-        // anything while every product keeps its relative accuracy. One of them
-        // in the subnormals and this level certifies a wrong sign.
+        // Not needed for a right sign, as the doc on
+        // `SIDE_OF_PLANE_ERROR_BOUND` says. What this does is send a product
+        // below the normals on to level 2, so that every sign this level gives
+        // rests on the relative argument in that doc and not on Gappa's case
+        // split alone.
         if !(0..3).all(|axis| product_is_normal(normal[axis], point[axis])) {
             return None;
         }
@@ -921,11 +923,24 @@ impl Predicate for SideOfAFlatSurface {
 /// `32*epsilon^2` covers the higher-order terms and the rounding of the
 /// permanent; what it has to beat is about `6*epsilon`.
 ///
-/// Every step of that argument is a *relative* one, so the bound holds only
-/// while nothing overflows or falls into the subnormals.
-/// [`SideOfAFlatSurface::on_floats`] enforces the bottom end product by product
-/// through [`product_is_normal`], and `decide` the top end by refusing a bound
-/// that is not itself a normal number.
+/// Every step of that argument is a *relative* one, so it covers only products
+/// that are normal or zero, and nothing that overflows.
+/// [`SideOfAFlatSurface::on_floats`] returns a number only for those, product
+/// by product through [`product_is_normal`], and `decide` keeps out the top end
+/// by refusing a bound that is not itself a normal number.
+///
+/// The bound holds further down than that argument reaches, though. Gappa
+/// proves it at this constant, case by case, with one, two or all three
+/// products below the normals, any of the others zero, and any of the sums
+/// cancelling to zero (`docs/decisions.md` §464.18). A product below the
+/// normals loses at most 2⁻¹⁰⁷⁵ when it rounds, and a bound that is a normal
+/// number, the only kind `decide` compares against, is 2⁻¹⁰²² or more and puts
+/// the permanent at (2⁵⁰ − 1) · 2⁻¹⁰²¹, just under 2⁻⁹⁷¹, or more. A few such
+/// losses fit in the constant beside the relative part. With no product
+/// normal, the offset is what makes the bound normal, and the whole error is
+/// then at most 5 · 2⁻¹⁰⁷⁵. So `on_floats` does not need its
+/// [`product_is_normal`] check to give a right sign. It keeps it so that
+/// level 1 answers only where the argument above holds.
 const SIDE_OF_PLANE_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (4.0 + 32.0 * epsilon) * epsilon
