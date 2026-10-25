@@ -11342,10 +11342,10 @@ And what is not a row:
 
 ### 464.18 The side of a plane with every product anywhere
 
-**Unfinished: Q2684's first lane relayed here with nothing run.** What
-follows is the generator it wrote, whole, so that the lane after it starts
-from it. That lane runs it, writes up what it prints, and rewrites this
-subsection in the form of 464.13 and 464.14.
+**Unfinished: Q2684's first lane wrote the generator and relayed; the second
+ran every script it writes and relayed (the end of this subsection).** The
+lane after them writes the orient2d zero differences, restates `plane.rs`, and
+rewrites this subsection in the form of 464.13 and 464.14.
 
 Q2684 asks for 464.8's `planecases.py` with two and three of
 `SideOfAFlatSurface`'s products below the normals at once, the zero branches
@@ -11637,5 +11637,135 @@ if __name__ == "__main__":
 ```
 
 `python3 planeall.py` printed `172 cases, 109 controls at u / 2, 63 controls
-without eb normal, and planev_off0.g`. None of the scripts it writes has been
-run.
+without eb normal, and planev_off0.g`.
+
+**What the second lane ran, still to be written up.** Every script above, with
+464.13's `one.sh`, eight at a time, on a load of 13 to 34 over 24 cores:
+
+- Each of the 172 `plane_*.g` exits 0, and its `gappa -Bcoq` and `coqc` exit 0,
+  in 43.6 s for all 172. No `.out` says "pointless". `planev_off0.g` exits 0,
+  `coqc` too, 3168 lines with 19 hints, printing `value − y` in `[0, 0]`.
+- With a normal product and one below the normals, each prints `P` at least
+  `1125899906842623b-1021`, `(2⁵⁰ − 1) · 2⁻¹⁰²¹`, just under `2⁻⁹⁷¹`; the `d`
+  sum within `2⁻¹⁰⁷⁵` for one product below the normals and `2⁻¹⁰⁷⁴` for two,
+  each with a little more; and `(e..) / P3x` within `ku` and some `u²`, `k` the
+  rounded sums a term goes through: `3u` with no sum cancelling, `2u` with one
+  or with the two below the normals first, `u` with both. `plane_nnn.g` prints
+  464.8's `3u + 2u²` and `P −/ Phat` within `3u + 3u²`.
+- With no normal product each prints `y − Ex` within `k · 2⁻¹⁰⁷⁵`, `k` from 1 to
+  5, the products below the normals and the rounded sums; `plane_zzz.g` `[0, 0]`.
+- Each of the 109 `_half` controls exits 1, best `[−2k, 2k]` for its case's
+  `ku` (`controls.py` below checks each), and `c_planev_off0_half.g` best
+  `[−6, 6]`. Each of the 63 `_noeb` controls exits 1, best `[-inf, inf]`.
+
+A `_noeb` failure shows the case needs `eb` normal, not that its hypotheses
+do not contradict. Not yet written: a control for those 63 that keeps every
+hypothesis and asks for `(y − Ex) / eb` within `2⁻⁶⁰`, false on a real input
+(a product moved by `2⁻¹⁰⁷⁵` against `eb = 2⁻¹⁰²²` is `2⁻⁵³` of `eb`), with
+`plane_zzz.g`'s asking `off` within `2⁻⁹⁰⁰` instead, since its `y − Ex` is zero.
+
+`summary.py`, which printed the figures above from the `.out` files:
+
+```python
+"""Read every plane_*.out beside this file and print, one line per case, what
+Gappa printed for each goal: a relative goal as a u and u^2 count, an amount
+as a multiple of 2^-1075, and P's lower end as a power of two."""
+import math
+import os
+import re
+import sys
+from fractions import Fraction
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = Fraction(1, 2**53)
+NUM = re.compile(r"(-?\d+)(?:b(-?\d+))?")
+
+
+def value(text):
+    m = NUM.fullmatch(text)
+    mant, exp = int(m.group(1)), int(m.group(2) or 0)
+    return Fraction(mant) * (Fraction(2) ** exp)
+
+
+def interval(line):
+    m = re.search(r" in \[(-?\d+(?:b-?\d+)?)(?: \{[^}]*\})?, (-?\d+(?:b-?\d+)?)(?: \{[^}]*\})?\]", line)
+    return value(m.group(1)), value(m.group(2))
+
+
+def as_u(x):
+    k = math.floor(x / U)
+    rest = (x - k * U) / (U * U)
+    return f"{k}u+{float(rest):.4g}u2"
+
+
+def read(name):
+    text = open(f"{name}.out").read()
+    out = {}
+    if "Results:" not in text:
+        return {"ERR": "no results"}
+    for line in text.split("Results:", 1)[1].splitlines():
+        line = line.strip()
+        if " in " not in line:
+            continue
+        goal = line.split(" in ")[0]
+        lo, hi = interval(line)
+        if goal == "P":
+            out["P>="] = f"2^{math.log2(lo):.3f}" if lo > 0 else str(lo)
+        elif goal.startswith("y - Ex"):
+            out["y-Ex"] = f"{max(-lo, hi) * 2**1075}*2^-1075"
+        elif "/" in goal:
+            out[goal] = as_u(max(-lo, hi))
+        else:
+            out[goal] = f"{max(-lo, hi) * 2**1075}*2^-1075"
+    if "pointless" in text:
+        out["POINTLESS"] = "yes"
+    return out
+
+
+names = sys.argv[1:] or sorted(f[:-4] for f in os.listdir(".") if f.startswith("plane_") and f.endswith(".out"))
+for name in names:
+    r = read(name)
+    print(name, "  ".join(f"{k}: {v}" for k, v in r.items()))
+```
+
+`controls.py`, which printed `_half controls whose best is twice their case's
+u count: 109`, an empty list of those that are not, and `_noeb controls: 63,
+bests: ['inf']`:
+
+```python
+"""For each control beside this file, print its best and, for each _half
+control, whether that best is twice the u count its case printed: a case that
+proves at B = 4u + 2^-101 with e within k u of P3x fails at B = u / 2 with a
+best of 2k."""
+import os
+import re
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+summary = subprocess.run([sys.executable, "summary.py"], capture_output=True, text=True).stdout
+ucount = {}
+for line in summary.splitlines():
+    name = line.split()[0]
+    m = re.search(r"(?:/ P3x|/ \(c[0-9 +c]*\)|/ \|t\d\|): (\d+)u", line)
+    ucount[name] = int(m.group(1)) if m else None
+
+agree, disagree, noeb = 0, [], []
+for f in sorted(os.listdir(".")):
+    if not (f.startswith("c_plane_") and f.endswith(".out")):
+        continue
+    text = open(f).read()
+    best = re.search(r"best: \[([^,]+), ([^\]]+)\]", text).group(2)
+    name = f[2:-4]
+    if name.endswith("_half"):
+        case = name[: -len("_half")]
+        if ucount[case] is not None and float(best) == 2 * ucount[case]:
+            agree += 1
+        else:
+            disagree.append((name, best, ucount[case]))
+    else:
+        noeb.append((name, best))
+print(f"_half controls whose best is twice their case's u count: {agree}")
+print("_half controls that are not:", disagree)
+print(f"_noeb controls: {len(noeb)}, bests: {sorted(set(b for _, b in noeb))}")
+```
