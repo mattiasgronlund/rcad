@@ -5230,6 +5230,15 @@ impl<'f> Arrangement<'f> {
         its_own
             .chain(of_the_solids_cutting_it)
             .find_map(|(baked, corner)| {
+                let room = ACornerReadAsOnePoint::room_of(baked)?;
+                let read_inside_its_room = |node: usize| {
+                    Some(node) == corner
+                        || (self.nodes[node].vertex.is_none()
+                            && the_room_holds(room, self.nodes[node].point))
+                };
+                if !(read_inside_its_room(first) && read_inside_its_room(second)) {
+                    return None;
+                }
                 let reading = ACornerReadAsOnePoint::of(baked)?;
                 if corner.is_some() && !reading.around.contains(&flat) {
                     return None;
@@ -5243,9 +5252,6 @@ impl<'f> Arrangement<'f> {
                             .contains(&partner)
                             .then_some((ANodeReadRoundACorner::TheCorner, None));
                     }
-                    if self.nodes[node].vertex.is_some() {
-                        return None;
-                    }
                     let three = self.the_three_planes_a_node_is_the_meet_of(node)?;
                     let mut others = three
                         .into_iter()
@@ -5253,9 +5259,7 @@ impl<'f> Arrangement<'f> {
                     let (Some(third), None) = (others.next(), others.next()) else {
                         return None;
                     };
-                    reading
-                        .holds(self.nodes[node].point)
-                        .then_some((ANodeReadRoundACorner::AMeet(three), Some(third)))
+                    Some((ANodeReadRoundACorner::AMeet(three), Some(third)))
                 };
                 let ((mine, my_third), (theirs, their_third)) = (read(first)?, read(second)?);
                 match (my_third, their_third) {
