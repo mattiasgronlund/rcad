@@ -12,8 +12,10 @@
 //! Two cones on one apex whose axes lean apart are the one pair here off a
 //! shared axis that is named: they cross in straight lines through the apex.
 //!
-//! What stays refused is a pair off the axis, and a ball whose skin runs through
-//! the apex, which crosses the cone in a circle and the apex apart from it.
+//! A ball off the axis with the apex inside it crosses each nappe in a
+//! degree-four loop, which `walk` marches. What stays refused is a second cone
+//! off the axis, and a ball whose skin runs through the apex, which crosses the
+//! cone in a circle and the apex apart from it.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, NamedRun, Picker, Point, Sphere, Surface, SurfaceMeet,
@@ -493,17 +495,68 @@ fn assert_these_are_the_halves_of_the_rulings(
     }
 }
 
-/// A second cone and a ball one to the side of the axis cross the first in a
-/// degree-four curve and are refused by name, by the namer and by the walker.
+/// A ball one to the side of the axis with the apex inside it crosses the cone
+/// in two degree-four loops, one on each nappe, which `intersect` names as the
+/// two pieces either side of the flat surface through the apex square to the
+/// axis, and `walk` marches each one with every point on both surfaces.
 #[test]
-fn a_second_cone_or_a_ball_off_the_axis_is_refused_by_name_in_both_halves() {
+fn a_ball_off_the_axis_round_the_apex_crosses_each_nappe_in_one_loop() {
+    let cone = the_right_angled_cone();
+    let ball = a_ball([1.0, 0.0, 1.0], 3.0);
+    let Ok(SurfaceMeet::Curves(runs)) = named(&cone, &ball) else {
+        panic!("two loops, and not {:?}", named(&cone, &ball));
+    };
+    let sides: Vec<f64> = runs
+        .iter()
+        .map(|run| {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                panic!("a piece picked out, and not {run:?}");
+            };
+            let [Picker::InFrontOfAFlatThrough(half)] = picked_by.as_slice() else {
+                panic!("one flat surface through the apex, and not {picked_by:?}");
+            };
+            assert_eq!(half.through(), Point::new(0.0, 0.0, 0.0), "{half:?}");
+            let up = half.facing().components()[2];
+            for along in [[&cone, &ball], [&ball, &cone]] {
+                let walked = walk(
+                    run,
+                    along,
+                    Deflection::of(0.01).expect("a length above zero"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("a loop is marched without complaint");
+                assert!(walked.points().len() > 8, "{run:?}");
+                let room = walked.deviation().magnitude();
+                for point in walked.points() {
+                    for surface in along {
+                        let off = how_far_off(surface, *point);
+                        assert!(
+                            off <= room,
+                            "{point:?} is {off:e} off {surface:?}, past the published {room:e}"
+                        );
+                    }
+                    assert!(point.z() * up > 0.0, "{point:?} is on its own nappe");
+                }
+            }
+            up
+        })
+        .collect();
+    assert_eq!(sides.len(), 2, "{runs:?}");
+    assert!(sides[0] * sides[1] < 0.0, "one loop each side: {sides:?}");
+}
+
+/// A second cone one to the side of the axis, or leaning off it, crosses the
+/// first in a degree-four curve and is refused by name, by the namer and by
+/// the walker.
+#[test]
+fn a_second_cone_off_the_axis_is_refused_by_name_in_both_halves() {
     let cone = the_right_angled_cone();
     let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a whole circle needs nothing picking it");
     for partner in [
         a_cone([1.0, 0.0, 9.0], [0.0, 0.0, 1.0], 2.0),
         a_cone([0.0, 0.0, 9.0], [1.0, 0.0, 1.0], 2.0),
-        a_ball([1.0, 0.0, 1.0], 3.0),
     ] {
         assert_eq!(
             named(&cone, &partner),
