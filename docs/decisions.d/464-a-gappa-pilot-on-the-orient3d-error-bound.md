@@ -21,7 +21,9 @@ differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
 464.13 is Q2678, on the side of a flat surface through a point. 464.14 is
 Q2679, on the side of rcad-geom's sphere. 464.15 is Q2680, on the side of
 rcad-geom's cylinder. 464.16 is Q2681, on the side of rcad-geom's cone, and
-464.17 is Q2682, on the side of rcad-geom's torus.*
+464.17 is Q2682, on the side of rcad-geom's torus. 464.18 is Q2684, on the
+side of a plane with every product anywhere, and 464.19 is Q2689, on
+`Isometry::POINT_ROUNDOFF`.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -40,6 +42,8 @@ rcad-geom's cylinder. 464.16 is Q2681, on the side of rcad-geom's cone, and
   464.15  The side of rcad-geom's cylinder
   464.16  The side of rcad-geom's cone
   464.17  The side of rcad-geom's torus
+  464.18  The side of a plane with every product anywhere
+  464.19  Isometry::POINT_ROUNDOFF
 
 ### 464.1 The bugs a bound prover is for
 
@@ -12442,4 +12446,704 @@ And what is not a row:
 - `ORIENT2D_ERROR_BOUND`'s doc says Gappa proves the bound "in every case of
   where the two products can land" and cites 464.8 alone. With 5 that
   sentence holds as it stands.
+- `field` on these scripts' hints (464.10).
+
+### 464.19 Isometry::POINT_ROUNDOFF
+
+Q2689 proved `Isometry::POINT_ROUNDOFF` in Gappa, in four lanes on
+2026-10-25 at `ba0a654e`. The first wrote `point.g` and `sos.py` and ran
+`point.g`. The second wrote `doubling.g`, `controls.py`, `turn.py` and
+`all.sh`, took the doubling's rounding out of `point.g`, and ran them all.
+The third ran them again in a tree of its own and checked each place this
+cites in the code. The fourth wrote `same.py`, ran everything a third time,
+and wrote this.
+
+Each coordinate of a moved point is proved within the code's `18ε · L` where
+no factor is zero, no sum cancels to zero, the nine products of the
+arithmetic are normal numbers, and the turn's `q·q` is within `6ε` of one. The
+proof reaches `24.80u · L` where the doc counts `35.78u · L` (3, 4). A turn of
+a cube is one addition per coordinate, which `shiftball.g` already proved
+(6). The zero branches and the products below the normals are not run (10),
+and one public route to a movement does not hold its turn near length one
+(5). Coq checks the proof, modulo its hints (8).
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, against `isometry.rs` at `ba0a654e` and
+nalgebra 0.35.0, the version `Cargo.lock` holds. `u` is `2⁻⁵³` and `ε` is
+`f64::EPSILON = 2u`.
+
+**1. What the proof guards.** `Isometry::apply_to_point`
+(`isometry.rs:303-308`) promises each coordinate of a moved point within
+`POINT_ROUNDOFF · L` of where the movement's own numbers, worked without
+rounding, put it, `L` the largest coordinate of the point and of the shift
+(`isometry.rs:37-92`). `rcad-topo`'s mesher charges a placed face that much
+(`how_far_placing_this_face_rounds`, `mesh.rs:10360-10364`), so
+`Mesh::deviation` rests on it, and tests in `rcad-geom` and `rcad-topo`
+measure against it. Until now the 18 rested on the doc's own count (4) and
+on `a_moved_point_lands_inside_the_published_roundoff_of_the_exact_answer`
+(`isometry.rs:1002-1035`), which samples it: its worst of 3072 coordinates
+uses an eighth of the bound, and a sweep a thousand times longer a quarter
+(its doc, `isometry.rs:984-1001`).
+
+**2. `apply_to_point`, line for line.** `apply_to_point` adds the shift to
+`turned_by(rotation, p)` (`isometry.rs:515-520`). For a turn that is not one
+of a cube's 24, `turned_by` calls nalgebra's `transform_vector`
+(`src/geometry/quaternion.rs:1559`), which is `self * v`, the `UnitQuaternion
+× Vector3` of `src/geometry/quaternion_ops.rs:376-389`. Its body, 383-387, is
+`t = v.cross(p) * 2`, then `v.cross(&t)`, then `t * w + cross + p`, and
+`cross` writes component `i` as `v[i+1] · p[i+2] − v[i+2] · p[i+1]`, indices
+mod 3 (`src/base/matrix.rs:2101-2106`). So the moved point's `x` is, with
+`rnd` each rounding:
+
+- `c₀ = rnd(rnd(v₁p₂) − rnd(v₂p₁))`, and `c₁` and `c₂` the same way turned;
+- `t = c · 2`, which rounds nothing: `doubling.g` proves `rnd(c · 2) − c · 2`
+  in `[0, 0]` for every `f64` `c` with `|c| ≤ 2¹⁰²³`, so `point.g` writes `t`
+  unrounded;
+- `k₀ = rnd(rnd(v₁t₂) − rnd(v₂t₁))`;
+- `x = rnd(rnd(rnd(rnd(t₀w) + k₀) + p₀) + s₀)`: the product and the two
+  additions of `t * w + k + p`, left to right, then the shift's.
+
+That is nine products, four differences and three additions, sixteen
+roundings, and `point.g` writes each with its own `rnd` and its own hint.
+`Ex` is the same arithmetic with none. `y` and `z` are the same lines with
+every index turned `0 → 1 → 2 → 0`, once and twice, since `cross` turns its
+indices that way and the last line works each coordinate on its own; `turn.py`
+writes them as `point1.g` and `point2.g`.
+
+**3. The bound.** `out − Ex` is the sum over the eight terms of `Ex` of each
+term times the product of the roundings it passes through, less one: `W1` to
+`W8`. The two terms through `w`, `2w·v₁p₂` and `2w·v₂p₁`, pass six
+roundings; the four through `k`, such as `2v₁·v₀p₁`, seven; `p₀` two; `s₀`
+one. Each term gets a share of the bound, its size with `L` for the point's
+coordinate times the roundings it meets, as `signed.g` shares its terms
+(464.9's 2): `12|w||v_a|L` for each through `w`, `14|v_a||v_c|L` for each
+through `k`, and `3L`, `2L + L`, for `p₀` and `s₀` together, for the reason
+`point.g`'s comment gives. Each term's
+error is within `u` of its share and a little more, so the sum is within
+that of the sum of the shares,
+
+`D = L · (12|w|s + 14|v₀|s + 14(|v₁|² + |v₂|²) + 3)`, with `s = |v₁| + |v₂|`.
+
+What is left is the largest `D / L`. Its quadratic part, in `(|w|, |v₀|,
+|v₁|, |v₂|)`, has the matrix `[[0, 0, 6, 6], [0, 0, 7, 7], [6, 7, 14, 0], [6,
+7, 0, 14]]`, whose largest eigenvalue is `7 + √219 = 21.7986`, a root of `λ²
+− 14λ − 170`. `109/5 = 21.8` is just above it, so the quadratic is `109/5 ·
+q·q` less four squares with positive weights. The hint on `D / L` writes it
+that way, and Gappa bounds each square below by zero, so `D / L ≤ 109/5 · q·q
++ 3`. `sos.py` (9) checks that identity at 1000 random points in exact
+rationals, and finds the largest `D / L` on a 200-step grid of unit
+quaternions to be `24.798`, against `10 + √219 = 24.7986`.
+
+`point.g` prints, and `point1.g` and `point2.g` print the same:
+
+- `W1` within `±6.66134e-16`, `6u` and a little more, and `W3` within
+  `±7.77156e-16`, `7u`;
+- `W7` within `±2.22045e-16`, `2u`, and `W8` within `±1.11022e-16`, `u`;
+- `D / L` in `[3, 24.8]`;
+- `(out − Ex) / D` within `±1.11022e-16`, `u` and a little more.
+
+So `(out − Ex) / L` is within `24.8u`, and the goal, the code's `36u`,
+proves. Each of the three prints 163 warnings that a divisor has been
+assumed to be nonzero, and no hint is reported as not an identity.
+
+**4. What the doc's `35.78u` counts.** The doc (`isometry.rs:42-79`) charges
+each stage at its own worst case: `|c_i| ≤ √2·L`, `|t_i·w| ≤ 2√2·L` and
+`|k_i| ≤ 4L`, each from `|v_a| + |v_c| ≤ √2` or `|w| ≤ 1` on its own. It adds
+the stages to `(8√2 + 21 + 2√3)·u·L ≈ 35.78u·L`, and keeps the `0.6%` up to
+`36u` for the second-order terms and for the turn being of length one only
+to within rounding. Those worst cases cannot all happen at once: `|w| = 1`
+forces `v = 0`, and so `k = 0`. 3 bounds the sum of the shares once, with
+`q·q` near one, and gets `24.80u`, which leaves `11.2u` of room where the doc
+left `0.22u`. Gappa does not check the doc's count step by step; it proves
+the constant the count was for.
+
+**5. The hypotheses.** `point.g`'s, in its order:
+
+- every input a finite `f64`;
+- no factor of a product zero, and no sum cancelling to zero: the zero
+  branches, which 10 leaves;
+- the nine products normal, which `apply_to_point` does not check, and
+  464.5's lemma for each. The doc says its count holds only while nothing
+  falls into the subnormals, and so far so does this (10);
+- `L` at least every `|p_i|` and `|s_i|`;
+- `|q·q − 1| ≤ 6ε` worked out exactly, written `N4` in `[1 − 12u, 1 + 12u]`;
+- `x / |x|` in `[−1, 1]` for `w` and each `v_i`, so that the hint on a
+  term's share can bound its sign.
+
+The `6ε` is what the record says of each route by which a turn reaches
+`apply_to_point`, not anything the code checks there:
+
+- `compose` holds its product with `held_near_length_one`
+  (`isometry.rs:274`), whose doc (`isometry.rs:482-488`) says `|q·q − 1| ≤
+  6ε`, worked out exactly, and
+  `a_turn_composed_of_any_number_of_turns_stays_within_six_epsilon_of_length_one`
+  samples it over 200 chains of 256 turns.
+- `Isometry::rotation` (`isometry.rs:153-168`) keeps nalgebra's
+  `from_axis_angle` as it comes. `TURN_LENGTH_DRIFT`'s doc
+  (`isometry.rs:440-461`) measures that at most `2ε` off by the `f64` sum over
+  100 000 draws, and `3ε` over the 100 000 of a probe, and the sum is within
+  about `2ε` of the exact `q·q`. Measured, not proved.
+- Reading a movement back (`TryFrom`, `isometry.rs:364-382`) divides the turn
+  by its length (`from_quaternion`, at 379), about `4ε` off by
+  `held_near_length_one`'s count.
+- `inverse` (`isometry.rs:283-286`) turns by the conjugate, whose `q·q` is
+  the same.
+- `From<na::Isometry3<f64>>` (`isometry.rs:667-671`), which is public, takes
+  whatever turn the caller's nalgebra isometry holds, and nalgebra's
+  `Unit::new_unchecked` holds a quaternion of any length. Nothing in the
+  workspace calls it at `ba0a654e`. Not run (10).
+
+**6. A turn of a cube.** When the turn is one of a cube's 24, `turned_by`
+moves each coordinate onto another and negates some, rounding nothing
+(`TurnOfACube::turned`, `isometry.rs:633-641`), and `apply_to_point` is one
+addition per coordinate, `rnd(±p_j + s_i)`. That is `shiftball.g`'s shift of
+a centre with `±p_j` for the centre (464.9's 3), which proves each coordinate
+within `2u·L` with no normal-number condition, under the `36u`. Nothing new
+was run for it.
+
+**7. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so `controls.py` writes three that each change one
+thing, and each exits 1:
+
+- the goal at `24.75u` (`99b-55`), below the `24.80u` of 3: best
+  `±2.75335e-15`, which is `24.80u`. So the hypotheses do not contradict each
+  other. It does not show that any input reaches `24.80u`: that is how low
+  this averaging goes, since `D / L` reaches `10 + √219` on unit quaternions
+  (3), and the longest sweep of 1 found about a quarter of `36u`.
+- without `|q·q − 1| ≤ 6ε`: best `±2.87033e+602`, with `D / L` up to
+  `2.58536e+618`. The proof needs the turn near length one.
+- without the nine products normal and the lemma they give: best
+  `±1.06019e+633`, with `W1` and `W3` unproved and `(out − Ex) / D` within
+  `±3.53398e+632`. The proof needs the products normal, or another argument
+  for them (10).
+
+**8. Coq checks the proof, modulo its hints.** `gappa -Bcoq` and `coqc`,
+through `one.sh` against gappalib 1.8.0 and Flocq 4.2.2, exit 0 on `point.g`
+and on `doubling.g`. Gappa does not write the same proof each run (464.4):
+`point.v` came to 8257, 8158 and 8205 lines over the three runs, with 34
+hints each time, and `doubling.v` to 149 lines with none. Each hint enters
+the Coq file as a hypothesis with no condition attached, as in 464.4, so the
+proof stands on its 34 hints and on the 163 divisors Gappa took to be
+nonzero, which its warnings name. `field` has not been run on these hints
+(464.10). `point1.g` and `point2.g` ran without `-Bcoq`; they are `point.g`
+with its names turned.
+
+**9. The scripts.** `point.g` is the proof and `doubling.g` the doubling;
+`controls.py` writes the controls of 7 and `turn.py` `point1.g` and
+`point2.g`; `sos.py` checks the identity of 3; `all.sh` runs them all through
+464.13's `one.sh`; `same.py` checks this text against the files that ran. To
+run them again, save these seven and `one.sh` in one directory and run `bash
+all.sh` there, which takes about two minutes. The fourth lane ran `same.py`
+on this text: each script here is byte for byte the file that ran, and
+`controls.py` and `turn.py`, run again from the text, write the scripts that
+ran.
+
+`point.g`, whole, as it ran:
+
+```gappa
+# restates: crates/rcad-geom/src/isometry.rs apply_to_point at ba0a654e
+# restates: crates/rcad-geom/src/isometry.rs turned_by at ba0a654e
+# restates: crates/rcad-geom/src/isometry.rs POINT_ROUNDOFF at ba0a654e
+# restates: crates/rcad-geom/src/isometry.rs held_near_length_one at ba0a654e
+# restates: Cargo.lock nalgebra at ba0a654e
+# Isometry::apply_to_point and Isometry::POINT_ROUNDOFF,
+# crates/rcad-geom/src/isometry.rs at ba0a654e, through nalgebra 0.35's
+# UnitQuaternion * Vector3 (src/geometry/quaternion_ops.rs:377-388): the
+# moved point's x is within 18 * f64::EPSILON * L of what the same arithmetic
+# gives without rounding, L at least every |p_i| and |s_i|. y and z are this
+# with the indices turned 0 -> 1 -> 2 -> 0, as turn.py writes them.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v), the point and the shift's x, each an f64.
+w = rnd(w_); v0 = rnd(v0_); v1 = rnd(v1_); v2 = rnd(v2_);
+p0 = rnd(p0_); p1 = rnd(p1_); p2 = rnd(p2_);
+s0 = rnd(s0_);
+
+# c = v x p, as nalgebra's cross writes each component: a*b - c*d.
+P01 = v1 * p2; q01 = rnd(P01); P02 = v2 * p1; q02 = rnd(P02);
+C0 = q01 - q02; c0 = rnd(C0);
+P11 = v2 * p0; q11 = rnd(P11); P12 = v0 * p2; q12 = rnd(P12);
+C1 = q11 - q12; c1 = rnd(C1);
+P21 = v0 * p1; q21 = rnd(P21); P22 = v1 * p0; q22 = rnd(P22);
+C2 = q21 - q22; c2 = rnd(C2);
+
+# t = c * 2, written without its rounding: doubling.g proves rnd(c * 2) is
+# c * 2 for every f64 c that does not overflow when doubled.
+t0 = c0 * 2; t1 = c1 * 2; t2 = c2 * 2;
+
+# k = v x t, its x.
+K1 = v1 * t2; k01 = rnd(K1); K2 = v2 * t1; k02 = rnd(K2);
+KK = k01 - k02; k0 = rnd(KK);
+
+# t * w + k + p, folded left to right, then + the shift.
+M = t0 * w; m0 = rnd(M);
+A = m0 + k0; a0 = rnd(A);
+R = a0 + p0; r0 = rnd(R);
+O = r0 + s0; out = rnd(O);
+
+# The same arithmetic without rounding.
+Ex = 2 * w * (v1 * p2 - v2 * p1)
+   + v1 * (2 * (v0 * p1 - v1 * p0)) - v2 * (2 * (v2 * p0 - v0 * p2))
+   + p0 + s0;
+
+# What each rounding multiplied its argument by.
+rq01 = q01 / P01; rq02 = q02 / P02; rq11 = q11 / P11; rq12 = q12 / P12;
+rq21 = q21 / P21; rq22 = q22 / P22;
+rc0 = c0 / C0; rc1 = c1 / C1; rc2 = c2 / C2;
+rk01 = k01 / K1; rk02 = k02 / K2; rk0 = k0 / KK;
+rm = m0 / M; ra = a0 / A; rr = r0 / R; ro = out / O;
+
+# The eight terms of Ex, each as out carries it, less the term itself: six
+# roundings for the two through w, seven for the four through k, two for p0
+# and one for s0.
+W1 = ro * rr * ra * rm * rc0 * rq01 - 1;
+W2 = ro * rr * ra * rm * rc0 * rq02 - 1;
+W3 = ro * rr * ra * rk0 * rk01 * rc2 * rq21 - 1;
+W4 = ro * rr * ra * rk0 * rk01 * rc2 * rq22 - 1;
+W5 = ro * rr * ra * rk0 * rk02 * rc1 * rq11 - 1;
+W6 = ro * rr * ra * rk0 * rk02 * rc1 * rq12 - 1;
+W7 = ro * rr - 1;
+W8 = ro - 1;
+e1 = 2 * w * v1 * p2 * W1; e2 = -(2 * w * v2 * p1 * W2);
+e3 = 2 * v1 * v0 * p1 * W3; e4 = -(2 * v1 * v1 * p0 * W4);
+e5 = -(2 * v2 * v2 * p0 * W5); e6 = 2 * v2 * v0 * p2 * W6;
+e7 = p0 * W7 + s0 * W8;
+
+# Each term's share of the bound: its size with L for the point's coordinate,
+# times the roundings it meets. p0 and s0 share one, 2L + L, since Gappa
+# 1.8.0 aborts in ast.cpp printing a warning about a D that holds both.
+d1 = 12 * |w| * |v1| * L; d2 = 12 * |w| * |v2| * L;
+d3 = 14 * |v1| * |v0| * L; d4 = 14 * |v1| * |v1| * L;
+d5 = 14 * |v2| * |v2| * L; d6 = 14 * |v2| * |v0| * L;
+d7 = 3 * L;
+D = d1 + d2 + d3 + d4 + d5 + d6 + d7;
+
+# q.q, each square written as |x| * |x|, and the four squares D / L is
+# written with below.
+N4 = |w| * |w| + |v0| * |v0| + |v1| * |v1| + |v2| * |v2|;
+X = |w| - 30/109 * (|v1| + |v2|);
+Y = |v0| - 35/109 * (|v1| + |v2|);
+Z = |v1| - |v2|;
+
+{
+  # Every input is a finite f64.
+     |w| <= 1b1024 /\ |v0| <= 1b1024 /\ |v1| <= 1b1024 /\ |v2| <= 1b1024
+  /\ |p0| <= 1b1024 /\ |p1| <= 1b1024 /\ |p2| <= 1b1024 /\ |s0| <= 1b1024
+  # No factor of a product is zero.
+  /\ |w| >= 1b-1074 /\ |v0| >= 1b-1074 /\ |v1| >= 1b-1074 /\ |v2| >= 1b-1074
+  /\ |p0| >= 1b-1074 /\ |p1| >= 1b-1074 /\ |p2| >= 1b-1074
+  # No sum cancels to zero.
+  /\ |C0| >= 1b-1074 /\ |C1| >= 1b-1074 /\ |C2| >= 1b-1074 /\ |KK| >= 1b-1074
+  /\ |A| >= 1b-1074 /\ |R| >= 1b-1074 /\ |O| >= 1b-1074
+  # The nine products are normal, which apply_to_point does not check.
+  /\ |q01| >= 1b-1022 /\ |q02| >= 1b-1022 /\ |q11| >= 1b-1022
+  /\ |q12| >= 1b-1022 /\ |q21| >= 1b-1022 /\ |q22| >= 1b-1022
+  /\ |k01| >= 1b-1022 /\ |k02| >= 1b-1022 /\ |m0| >= 1b-1022
+  # What lemma.g proves each of those nine gives.
+  /\ q01 -/ P01 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q02 -/ P02 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q11 -/ P11 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q12 -/ P12 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q21 -/ P21 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q22 -/ P22 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ k01 -/ K1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ k02 -/ K2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ m0 -/ M in [-4503599627370497b-105, 4503599627370497b-105]
+  # L is at least every coordinate of the point and the shift.
+  /\ L in [1b-1074, 1b1024]
+  /\ p0 / L in [-1, 1] /\ p1 / L in [-1, 1] /\ p2 / L in [-1, 1]
+  /\ s0 / L in [-1, 1]
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53.
+  /\ N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ w / |w| in [-1, 1] /\ v0 / |v0| in [-1, 1]
+  /\ v1 / |v1| in [-1, 1] /\ v2 / |v2| in [-1, 1]
+->
+  W1 in ? /\ W3 in ? /\ W7 in ? /\ W8 in ? /\ D / L in ?
+  /\ (out - Ex) / D in ?
+  /\ (out - Ex) / L in [-36b-53, 36b-53]
+}
+
+# How far each rounding is from the identity.
+q01 / P01 -> 1 + (q01 - P01) / P01;
+q02 / P02 -> 1 + (q02 - P02) / P02;
+q11 / P11 -> 1 + (q11 - P11) / P11;
+q12 / P12 -> 1 + (q12 - P12) / P12;
+q21 / P21 -> 1 + (q21 - P21) / P21;
+q22 / P22 -> 1 + (q22 - P22) / P22;
+c0 / C0 -> 1 + (c0 - C0) / C0;
+c1 / C1 -> 1 + (c1 - C1) / C1;
+c2 / C2 -> 1 + (c2 - C2) / C2;
+k01 / K1 -> 1 + (k01 - K1) / K1;
+k02 / K2 -> 1 + (k02 - K2) / K2;
+k0 / KK -> 1 + (k0 - KK) / KK;
+m0 / M -> 1 + (m0 - M) / M;
+a0 / A -> 1 + (a0 - A) / A;
+r0 / R -> 1 + (r0 - R) / R;
+out / O -> 1 + (out - O) / O;
+
+# The error is the sum of the seven shares' errors, each a fraction of its
+# own share of D; add_rr then averages them.
+(out - Ex) / L -> ((out - Ex) / D) * (D / L);
+(out - Ex) / D -> ((D + (out - Ex)) - D) / D;
+D + (out - Ex) -> (d1 + e1) + (d2 + e2) + (d3 + e3) + (d4 + e4)
+                + (d5 + e5) + (d6 + e6) + (d7 + e7);
+(d1 + e1) - d1 -> e1;
+(d2 + e2) - d2 -> e2;
+(d3 + e3) - d3 -> e3;
+(d4 + e4) - d4 -> e4;
+(d5 + e5) - d5 -> e5;
+(d6 + e6) - d6 -> e6;
+(d7 + e7) - d7 -> e7;
+e1 / d1 -> (w / |w|) * (v1 / |v1|) * (p2 / L) * (W1 / 6);
+e2 / d2 -> -((w / |w|) * (v2 / |v2|) * (p1 / L) * (W2 / 6));
+e3 / d3 -> (v1 / |v1|) * (v0 / |v0|) * (p1 / L) * (W3 / 7);
+e4 / d4 -> -((v1 / |v1|) * (v1 / |v1|) * (p0 / L) * (W4 / 7));
+e5 / d5 -> -((v2 / |v2|) * (v2 / |v2|) * (p0 / L) * (W5 / 7));
+e6 / d6 -> (v2 / |v2|) * (v0 / |v0|) * (p2 / L) * (W6 / 7);
+e7 / d7 -> ((p0 / L) * W7 + (s0 / L) * W8) / 3;
+
+# D / L is 3 and a quadratic in |w|, |v0|, |v1|, |v2|, and that quadratic is
+# 109/5 q.q less four squares: Gappa bounds each square below by zero.
+D / L -> 109/5 * N4 - (109/5 * (X * X) + 109/5 * (Y * Y) + 425/109 * (Z * Z)
+                       + 1/545 * (|v1| * |v1| + |v2| * |v2|)) + 3;
+```
+
+`doubling.g`, which proves the doubling rounds nothing (2):
+
+```gappa
+# nalgebra's t = c * 2 rounds nothing: for any f64 c that does not overflow
+# when doubled, rnd(c * 2) is c * 2. point.g writes t without the rounding on
+# the strength of this.
+@rnd = float<ieee_64, ne>;
+
+c = rnd(c_);
+t = rnd(c * 2);
+
+{
+  |c| <= 1b1023
+->
+  t - c * 2 in [0, 0]
+}
+```
+
+`controls.py`, which writes the three controls of 7:
+
+```python
+"""Write point.g's controls. Each changes one thing in it: a smaller bound,
+to see whether it proved its goal from hypotheses that contradict each other,
+or a hypothesis dropped, to see whether the proof needs it."""
+
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def write(name, src):
+    open(name, "w").write(src)
+
+
+point = open("point.g").read()
+GOAL = "/\\ (out - Ex) / L in [-36b-53, 36b-53]"
+
+# 24.75u, below the 10 + sqrt(219) = 24.80u the averaging reaches.
+write("c_point_2475.g", sub(point, GOAL, "/\\ (out - Ex) / L in [-99b-55, 99b-55]"))
+
+# Without |q.q - 1| <= 6 epsilon.
+write("c_point_non4.g",
+      sub(point, "  /\\ N4 in [9007199254740980b-53, 9007199254741004b-53]\n", ""))
+
+# Without the nine products normal, and what lemma.g gives from them.
+start = point.index("  # The nine products are normal")
+end = point.index("  /\\ m0 -/ M in [-4503599627370497b-105, 4503599627370497b-105]\n")
+end += len("  /\\ m0 -/ M in [-4503599627370497b-105, 4503599627370497b-105]\n")
+block = point[start:end]
+assert block.count(">= 1b-1022") == 9 and block.count(" -/ ") == 9, block
+write("c_point_nonormal.g", point[:start] + point[end:])
+```
+
+`turn.py`, which writes `point1.g` and `point2.g`, the moved point's `y` and
+`z`:
+
+```python
+"""Write point1.g and point2.g, the moved point's y and z: point.g with every
+coordinate index turned 0 -> 1 -> 2 -> 0, once and twice. nalgebra's cross
+writes component i as v[i+1] * p[i+2] - v[i+2] * p[i+1], indices mod 3, and
+the last line works each coordinate on its own, so y is x with the indices
+turned once and z with them turned twice.
+
+A name whose first digit is a coordinate index is turned there and keeps any
+second digit, which counts products. W, e, d, K and N number terms, shares,
+products and the four squares, and are left alone."""
+
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+TURNED = {"v", "p", "s", "P", "q", "C", "c", "rq", "rc", "t", "k", "rk"}
+NAME = re.compile(r"\b([A-Za-z]+)(\d)(\d?)(_?)\b")
+
+
+def turn(src):
+    def one(m):
+        prefix, index, rest, under = m.groups()
+        if prefix not in TURNED:
+            return m.group(0)
+        return prefix + str((int(index) + 1) % 3) + rest + under
+
+    return NAME.sub(one, src)
+
+
+point = open("point.g").read()
+once = turn(point)
+twice = turn(once)
+assert turn(twice) == point
+X = "# moved point's x is within"
+assert point.count(X) == 1
+for name, src, axis in (("point1.g", once, "y"), ("point2.g", twice, "z")):
+    open(name, "w").write(src.replace(X, "# moved point's " + axis + " is within"))
+    print(name, "written,", len(NAME.findall(src)), "names")
+```
+
+`sos.py`, which checks the identity of 3 in exact rationals and looks for the
+largest `D / L` on a grid:
+
+```python
+"""Check the identity point.g's D / L hint rests on, in exact rationals, at
+random points: 12|w|s + 14|v0|s + 14(|v1|^2 + |v2|^2), s = |v1| + |v2|,
+equals K N4 less four squares, K = 109/5, N4 = |w|^2 + |v0|^2 + |v1|^2 + |v2|^2.
+Then the largest D / L over unit quaternions, by a grid, against K + 3."""
+
+from fractions import Fraction as F
+import math
+import random
+
+K = F(109, 5)
+random.seed(1)
+for _ in range(1000):
+    aw, a0, a1, a2 = (F(random.randint(0, 10**6), 10**6) for _ in range(4))
+    s = a1 + a2
+    lhs = 12 * aw * s + 14 * a0 * s + 14 * (a1 * a1 + a2 * a2)
+    X = aw - F(30, 109) * s
+    Y = a0 - F(35, 109) * s
+    Z = a1 - a2
+    rhs = K * (aw * aw + a0 * a0 + a1 * a1 + a2 * a2) - (
+        K * X * X + K * Y * Y + F(425, 109) * Z * Z + F(1, 545) * (a1 * a1 + a2 * a2)
+    )
+    assert lhs == rhs
+print("identity holds at 1000 random points")
+print("K =", float(K), "root of K^2 - 14K - 170:", 7 + math.sqrt(219))
+
+best = 0.0
+n = 200
+for i in range(n + 1):
+    for j in range(n + 1):
+        for k in range(n + 1):
+            aw, a1, a2 = i / n, j / n, k / n
+            r = 1 - aw * aw - a1 * a1 - a2 * a2
+            if r < 0:
+                continue
+            a0 = math.sqrt(r)
+            s = a1 + a2
+            f = 12 * aw * s + 14 * a0 * s + 14 * (a1 * a1 + a2 * a2) + 3
+            best = max(best, f)
+print("largest D / L on a 200-step grid of unit quaternions:", best)
+```
+
+It printed:
+
+```text
+identity holds at 1000 random points
+K = 21.8 root of K^2 - 14K - 170: 21.798648586948744
+largest D / L on a 200-step grid of unit quaternions: 24.798304247747573
+```
+
+`all.sh`, which writes the controls and the `y` and `z` scripts and runs
+every script at once, each through 464.13's `one.sh`, unchanged:
+
+```sh
+#!/bin/bash
+# Write the controls and the y and z scripts, then run every script at once,
+# each through 464.13's one.sh: point.g and doubling.g with coq, and the
+# controls, point1.g and point2.g without.
+cd "$(dirname "$0")"
+python3 controls.py
+python3 turn.py
+for f in point.g doubling.g; do
+  ./one.sh "$f" coq > "${f%.g}.run" 2>&1 &
+done
+for f in c_point_2475.g c_point_non4.g c_point_nonormal.g point1.g point2.g; do
+  ./one.sh "$f" > "${f%.g}.run" 2>&1 &
+done
+wait
+cat point.run doubling.run c_point_2475.run c_point_non4.run c_point_nonormal.run point1.run point2.run
+```
+
+Its third run, the last lane's, printed:
+
+```text
+point1.g written, 470 names
+point2.g written, 470 names
+point exit 0 46.04s
+point coq -Bcoq exit 0 coqc exit 0 58.58s lines 8205 hints 34
+doubling exit 0 0.01s
+doubling coq -Bcoq exit 0 coqc exit 0 0.47s lines 149 hints 0
+c_point_2475 exit 1 51.77s
+c_point_non4 exit 1 51.07s
+c_point_nonormal exit 1 43.12s
+point1 exit 0 45.42s
+point2 exit 0 43.85s
+```
+
+`same.py`, whole:
+
+```python
+"""Check that each script 464.19 appends whole is byte for byte the file that
+was run, in q2689/; that one.sh is 464.13's block; that sos.py, run again,
+prints what 464.19 gives, and that all.log is the print 464.19 gives for
+all.sh; and that controls.py and turn.py, run again in a fresh directory
+beside point.g, each from the appended text, write the scripts that ran.
+Run as: python3 same.py <doc> <q2689 dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+sec = section(19)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.19:", len(blocks))
+assert len(re.findall(r"^```", sec, re.M)) == 2 * len(blocks)
+
+# Which appended block is which file: by its first lines.
+marks = {
+    "point.g": "# restates: crates/rcad-geom/src/isometry.rs apply_to_point at ba0a654e\n",
+    "doubling.g": "# nalgebra's t = c * 2 rounds nothing",
+    "controls.py": '"""Write point.g\'s controls',
+    "turn.py": '"""Write point1.g and point2.g',
+    "sos.py": '"""Check the identity point.g\'s D / L hint',
+    "all.sh": "#!/bin/bash\n# Write the controls and the y and z scripts",
+    "same.py": '"""Check that each script 464.19 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "same.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+def printed(first):
+    got = [body for lang, body in blocks if lang == "text" and body.startswith(first)]
+    assert len(got) == 1, (first, len(got))
+    return got[0]
+
+
+print("one.sh is 464.13's block:", open(os.path.join(ran, "one.sh")).read()
+      == block_of(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"))
+again = subprocess.run(["python3", os.path.join(ran, "sos.py")], capture_output=True, text=True,
+                       check=True).stdout
+print("sos.py run again prints what 464.19 gives:", again == printed("identity holds at"))
+print("all.log is what 464.19 gives:",
+      open(os.path.join(ran, "all.log")).read() == printed("point1.g written"))
+
+fresh = tempfile.mkdtemp()
+for name in ("point.g", "controls.py", "turn.py"):
+    open(os.path.join(fresh, name), "w").write(found[name])
+subprocess.run(["python3", "controls.py"], cwd=fresh, check=True)
+subprocess.run(["python3", "turn.py"], cwd=fresh, check=True, capture_output=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g") and f not in found)
+for name in written:
+    print(name, "written again is the one that ran:",
+          filecmp.cmp(os.path.join(fresh, name), os.path.join(ran, name), shallow=False))
+print(".g files that ran and are neither appended nor written again:",
+      sorted(f for f in os.listdir(ran) if f.endswith(".g") and f not in found and f not in written))
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+code blocks in 464.19: 10
+point.g same
+doubling.g same
+controls.py same
+turn.py same
+sos.py same
+all.sh same
+same.py same
+one.sh is 464.13's block: True
+sos.py run again prints what 464.19 gives: True
+all.log is what 464.19 gives: True
+c_point_2475.g written again is the one that ran: True
+c_point_non4.g written again is the one that ran: True
+c_point_nonormal.g written again is the one that ran: True
+point1.g written again is the one that ran: True
+point2.g written again is the one that ran: True
+.g files that ran and are neither appended nor written again: []
+```
+
+**10. What this leaves.** Four rows, filed from this write-up when it merges,
+each from Q2689:
+
+- Run `point.g` in the zero branches (5): a zero factor, as a turn about a
+  coordinate axis stores two of `v` as zero and a point on a coordinate
+  plane has a zero coordinate, and each sum that may cancel to zero, as 464.11
+  and 464.18 ran the plane's. These are common inputs. Not run, so no class
+  (§360.5).
+- Run `point.g` with one or more of the nine products below the normals and
+  `L` normal, as 464.8's `planecases.py` split the plane's, and say whether
+  `POINT_ROUNDOFF` needs the products normal or only `L`, as `nearest.g` found
+  `L` normal enough (464.9's 1). Not run, so no class.
+- Whether `apply_to_point` keeps within `POINT_ROUNDOFF` on a movement that
+  came in through `From<na::Isometry3<f64>>` (5) with a turn whose `q·q` is
+  further from one than `6ε`, and if not, hold that route to the length as
+  `compose` holds its own. Not run, so no class.
+- Small: cite this subsection in `POINT_ROUNDOFF`'s doc (`isometry.rs:37-91`),
+  which says the 18 covers "the fact that a stored rotation has length one
+  only to within rounding" without saying how far: Gappa proves the 18 with
+  the turn's `q·q` within `6ε` of one and the nine products normal, and
+  reaches `24.80u` per coordinate where the doc counts `35.78u` (4).
+
+And what is not a row:
+
+- Q2690 and Q2691 wait on Q2689 and rest on `point.g`: `NORMAL_LENGTH_ROUNDOFF`
+  and `CORNER_AFTER_MOVING_ROUNDOFF` (464.9).
+- Q2700 already waits on Q2689, and moves these scripts into `proofs/gappa/`
+  with the others that rows of 464 appended.
+- Overflow, which does not reach Gappa (464.4). The doc's own condition, that
+  nothing overflows, stands as it is.
 - `field` on these scripts' hints (464.10).
