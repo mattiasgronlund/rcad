@@ -383,6 +383,8 @@ pub mod a_ring_face_bounded_by_a_circle_on_a_coaxial_surface;
 pub mod a_ring_round_an_apex_on_a_face_that_also_has_a_hole;
 #[path = "a_round_bar_notched_by_a_block_cornered_on_its_wall.rs"]
 pub mod a_round_bar_notched_by_a_block_cornered_on_its_wall;
+#[path = "a_round_post_cut_on_a_slant_under_a_blocks_edge.rs"]
+pub mod a_round_post_cut_on_a_slant_under_a_blocks_edge;
 #[path = "a_rung_whose_ray_meets_a_face_nobody_follows.rs"]
 pub mod a_rung_whose_ray_meets_a_face_nobody_follows;
 #[path = "a_shell_inside_another_names_its_refusal.rs"]
