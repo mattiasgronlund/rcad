@@ -14834,6 +14834,52 @@ mod tests {
         assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
+    /// **A point a ball face's two sides are both seen through, on the one
+    /// chord they share, is placed** (row Q2770), as a cone face's is (rows
+    /// Q1395 and Q2172). The skin of [`a_lens_of_a_ball_dented_by_a_corner`]
+    /// is read from `(−3, 0, 0)`, the point of the ball behind its side on
+    /// `x = 1`. Its sides on `x = 1` and `y = 2` both run between `(1, 2, ±2)`,
+    /// so seen from there both chords are the piece of the plane
+    /// `x − 2y + 3 = 0` between those corners, with the two arcs bulging off it
+    /// on either side. Each point asked is a point of the sphere on that plane,
+    /// with `x` and `y` exact and `z` a box 2e-12 wide round
+    /// `±√(12y − 5y²)`, so it is exactly on both chords and strictly inside
+    /// both circles. Below the dent the skin holds it, and in the dent it does
+    /// not.
+    #[test]
+    fn a_point_seen_on_the_chord_two_sides_of_a_ball_face_share_is_placed() {
+        let (model, solid, skin) = a_lens_of_a_ball_dented_by_a_corner();
+        let mut wrong = Vec::new();
+        for (x, y, up, is) in [
+            (1.5_f64, 2.25_f64, false, OnAFace::Held),
+            (1.25, 2.125, false, OnAFace::Held),
+            (1.75, 2.375, true, OnAFace::Held),
+            (1.5, 2.25, true, OnAFace::NotHeld),
+            (1.25, 2.125, true, OnAFace::NotHeld),
+        ] {
+            let height = (12.0 * y - 5.0 * y * y).sqrt();
+            let z = if up { height } else { -height };
+            let point = [
+                Interval::exactly(x),
+                Interval::exactly(y),
+                Interval::new(z - 1e-12, z + 1e-12).expect("an interval"),
+            ];
+            let answer = model
+                .solid(solid)
+                .expect("this model made the key")
+                .face_holds_the_point(
+                    skin,
+                    PredicatePoint::Constructed(point),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+            if answer.as_ref().ok() != Some(&is) {
+                wrong.push(format!("({x}, {y}, {z}): {answer:?}, not {is:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
     /// A ball of radius 3 at the origin kept to the corner of a block where
     /// `x ≥ 0.5` and `y ≥ 1.5`, less the corner of another where `x ≥ 1.2`
     /// and `z ≥ 0.3`, and the key of its one face on the ball. That face has
@@ -14841,12 +14887,32 @@ mod tests {
     /// again, and the corner where the sides on `x = 1.2` and `z = 0.3` meet
     /// points into it.
     fn a_lens_of_a_ball_notched_at_a_corner() -> (Model, SolidKey, FaceKey) {
+        a_ball_kept_to_a_corner_less_another([0.5, 1.5, -9.0], [1.2, -9.0, 0.3])
+    }
+
+    /// A ball of radius 3 at the origin kept to the corner of a block where
+    /// `x ≥ 1` and `y ≥ 2`, less the corner of another where `x ≥ 1.2`,
+    /// `y ≥ 2.1` and `z ≥ 1`, and the key of its one face on the ball. That
+    /// face has two wires: its rim, a side on `x = 1` and one on `y = 2`, both
+    /// between `(1, 2, ±2)`, and the rim of the dent, three sides on the
+    /// planes of the second corner.
+    fn a_lens_of_a_ball_dented_by_a_corner() -> (Model, SolidKey, FaceKey) {
+        a_ball_kept_to_a_corner_less_another([1.0, 2.0, -9.0], [1.2, 2.1, 1.0])
+    }
+
+    /// A ball of radius 3 at the origin kept to the block from `kept` up to 9
+    /// less the block from `less` up to 9, and the key of its one face on the
+    /// ball.
+    fn a_ball_kept_to_a_corner_less_another(
+        kept: [f64; 3],
+        less: [f64; 3],
+    ) -> (Model, SolidKey, FaceKey) {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let ball = model
             .add_ball(3.0, &Isometry::identity())
             .expect("a positive radius");
-        let corner = a_block_up_to_nine(&mut model, [0.5, 1.5, -9.0]);
-        let notch = a_block_up_to_nine(&mut model, [1.2, -9.0, 0.3]);
+        let corner = a_block_up_to_nine(&mut model, kept);
+        let notch = a_block_up_to_nine(&mut model, less);
         let mut fused = |argument, tool, rule| {
             let answer = model
                 .fuse(
