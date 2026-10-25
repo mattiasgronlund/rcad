@@ -7132,13 +7132,14 @@ components `n`, the 27 at `7u` those with one, the 27 at `5u` those with none.
 `b_cylv2_83 exit 0 447.09s`, each printing `(y − Ex) / P12` within `9u`,
 `(value − y) / y` within `1b-53` and `y / P12` within `[-1, 1]`. So the
 doubled form proves the claim on `value` at `10u + 82u²` and not at `10u +
-81u²`, two `u²` above the code's `80`. The fifth lane started `gappa -Bcoq`
-and `coqc` on `b_cylv2_82.g` (its `run4.sh`, writing `cyl3/run4.txt`), and the
-budget came before it finished. `git log --oneline 2a7ca9e76..868f8c001` on
+81u²`, two `u²` above the code's `80`. The fifth lane's `run4.sh`, `one.sh`'s
+`coq` step alone with each timeout at 1500 s, prints `b_cylv2_82 coq -Bcoq
+exit 0 coqc exit 0 105.45s lines 19054 hints 81`, and its `.bcoq` and `.coqc`
+hold nothing but the results and "assumed to be nonzero" lines. `git log --oneline 2a7ca9e76..868f8c001` on
 `cylinder.rs`, `cascade.rs`, `three_surfaces.rs`, `validate.rs` and
 `rcad-geom`'s `lib.rs` prints nothing.
 
-Still to do, in order: read `run4.txt`; write 464.15 in 464.14's numbered
+Still to do, in order: append `run4.sh` whole; write 464.15 in 464.14's numbered
 form, 1 to 10, from the figures here and above; add 464.6's and 464.8's 7's
 lines for Q2680; and drop the Draft line.
 The rows 10 is to name: the zero branches (a difference, a direction
