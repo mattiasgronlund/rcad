@@ -576,6 +576,10 @@ fn a_steeper_cone_beside_the_axis_with_its_apex_inside_crosses_in_two_loops() {
 /// The two loops a pair crosses in, each picked by one flat surface, and each
 /// marched both ways round with every point on both surfaces, within the
 /// published deviation, and on its own side of that flat surface.
+///
+/// Each loop is marched finely and as coarsely as a deflection goes, the
+/// largest `f64`, which is what a solid's check of its own enclosed space asks
+/// of every edge.
 fn assert_two_loops_either_side_of_one_flat_surface(one: &Surface, other: &Surface) {
     let met = named(one, other);
     let Ok(SurfaceMeet::Curves(runs)) = &met else {
@@ -589,32 +593,55 @@ fn assert_two_loops_either_side_of_one_flat_surface(one: &Surface, other: &Surfa
         let [picker @ Picker::InFrontOfAFlatThrough(_)] = picked_by.as_slice() else {
             panic!("one flat surface, and not {picked_by:?}");
         };
-        for along in [[one, other], [other, one]] {
-            let walked = walk(
-                run,
-                along,
-                Deflection::of(0.01).expect("a length above zero"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("a loop is marched without complaint");
-            assert!(walked.points().len() > 8, "{run:?}");
-            let room = walked.deviation().magnitude();
-            for point in walked.points() {
-                for surface in along {
-                    let off = how_far_off(surface, *point);
-                    assert!(
-                        off <= room,
-                        "{point:?} is {off:e} off {surface:?}, past the published {room:e}"
-                    );
-                }
-                assert_eq!(
-                    picker.side_of_point(PredicatePoint::from(point.coordinates())),
-                    Decision::Pos,
-                    "{point:?} is on its own side of {picker:?}"
+        for (deflection, more_points_than) in [(0.01, 8), (f64::MAX, 2)] {
+            for along in [[one, other], [other, one]] {
+                assert_marched_on_both_and_on_its_side(
+                    run,
+                    along,
+                    deflection,
+                    more_points_than,
+                    picker,
                 );
             }
         }
+    }
+}
+
+fn assert_marched_on_both_and_on_its_side(
+    run: &NamedRun,
+    along: [&Surface; 2],
+    deflection: f64,
+    more_points_than: usize,
+    picker: &Picker,
+) {
+    let walked = walk(
+        run,
+        along,
+        Deflection::of(deflection).expect("a length above zero"),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    let walked = walked.unwrap_or_else(|refused| {
+        panic!("a loop is marched at a deflection of {deflection:e}, not refused {refused:?}")
+    });
+    assert!(
+        walked.points().len() > more_points_than,
+        "{deflection:e}: {run:?}"
+    );
+    let room = walked.deviation().magnitude();
+    for point in walked.points() {
+        for surface in along {
+            let off = how_far_off(surface, *point);
+            assert!(
+                off <= room,
+                "{point:?} is {off:e} off {surface:?}, past the published {room:e}"
+            );
+        }
+        assert_eq!(
+            picker.side_of_point(PredicatePoint::from(point.coordinates())),
+            Decision::Pos,
+            "{point:?} is on its own side of {picker:?}"
+        );
     }
 }
 
