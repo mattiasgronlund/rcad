@@ -178,7 +178,7 @@ pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 ///
 /// `every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bound`
 /// is the test §15.6 asks for. Over 158,623 walks and 8,462,349 points it finds
-/// a worst of **0.071 of this bound** — about `4.6 · ε · L`, on a random plane
+/// a worst of **0.075 of this bound** — about `4.8 · ε · L`, on a random plane
 /// against a random cone.
 ///
 /// **So halving this constant would not fail that test**, and the reason to
@@ -187,9 +187,9 @@ pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 /// the slope and the height alone gets 0.0392; adding the deflection over 21
 /// octaves, slopes off the eighths grid, planes barely steeper than a ruling,
 /// scales that are not powers of two and finally 120,000 random pairs walks it
-/// up to 0.0713. **Five families the old sweep never varied moved the number by
-/// 1.8x between them**, so the honest reading is that a search pins the constant
-/// to within a factor of about fourteen, not that it is tight. §15.6 says the
+/// up to 0.0750. **Five families the old sweep never varied moved the number by
+/// 1.9x between them**, so the honest reading is that a search pins the constant
+/// to within a factor of about thirteen, not that it is tight. §15.6 says the
 /// rest in as many words — *"that test cannot show a bound is tight — rounding
 /// errors cancel"* — and what makes `64 · ε` a bound here is the derivation
 /// above and not the search.
