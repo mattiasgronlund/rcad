@@ -248,29 +248,54 @@ fn a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_
 /// loops are `2.6e−8` clear of it, though that plane lies exactly in the flat
 /// of the two axes and so leans not at all.
 ///
-/// The thick bar less the thin one is refused
-/// `CurvedFaceWithAHoleGoesTooFarRound` meshing the thick wall, which the
-/// union keeps too and meshes. That fuse's mesh walks the wall's two rims with
-/// a corner every fifth of a turn, and `cut_a_ring_across` in `mesh.rs` moves
+/// The thick bar less the thin one is the one answer that keeps both the thick
+/// wall's strip between the two windows and the thin wall inside it, and those
+/// two faces bound the same narrow strip from the same two loops. Every mesh
+/// `Model::validate` asks of it from room `1.19` down to `0.037` draws the two
+/// faces' triangles there on the same three points, back to back, and is
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`. The
+/// strip they fold on shrinks towards where the windows pass, to `0.12` high
+/// at `0.037`, and is there at each of them. The meshes at `2.38` and `0.0186` cross on
+/// the thick wall instead, and the second ends the ladder, so the fuse is
+/// refused `CannotMeshAFace` with `BoundaryCrossesItself`.
+///
+/// Until Q2768 it was refused `CurvedFaceWithAHoleGoesTooFarRound` on the
+/// thick wall, at every mesh. That fuse's mesh walks the wall's two rims with a
+/// corner every fifth of a turn, and `cut_a_ring_across` in `mesh.rs` moved
 /// each of its four cuts from a quarter to the rims' nearest corner. The cut at
-/// `π` moves to `4π/5`, short of where the windows pass, and meets the window
-/// the cut at `2π/5` meets too, and `cut_a_ring_across` gives up at
-/// `the_legs_round_islands_stay_inside_a_ring`. A gap (§16.10): the solid is
-/// there, and cuts at `π/2` and `π`, each meeting one window, as the union's
-/// mesh cut it, would reach it.
+/// `π` moved to `4π/5`, short of where the windows pass, and met the window the
+/// cut at `2π/5` met too, and the cut gave up. It now moves a cut that cannot
+/// go round the windows to the corner the other side of its quarter.
 #[test]
-fn a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z_crosses_it_in_two_loops_that_pass_and_every_fuse_answers()
+fn a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z_answers_every_fuse_but_the_thick_bar_less_the_thin()
  {
     let build: Pair = a_thin_bar_resting_inside_a_thick_one_turned_a_radian_about_z;
     let mut model = a_model();
     let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
     assert_eq!(curves(&thick, &thin), Ok(2));
     assert_eq!(curves(&thin, &thick), Ok(2));
-    every_fuse_answers(
-        build,
-        [16.0 * PI, 8.0 * PI, bar_through_bar(2.0, 1.0, 1.0)],
-        [&[7], &[3], &[4], &[3, 3]],
-    );
+    for one in six_fuses() {
+        if matches!(one, (Rule::Difference, true)) {
+            let said = fuse(&mut a_model(), build, Rule::Difference, true);
+            assert!(
+                matches!(
+                    said,
+                    Err(rcad_topo::Error::CannotMeshAFace {
+                        why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
+                        ..
+                    })
+                ),
+                "the thick bar less the thin one: {said:?}"
+            );
+        } else {
+            the_fuse_answers(
+                build,
+                one,
+                [16.0 * PI, 8.0 * PI, bar_through_bar(2.0, 1.0, 1.0)],
+                [&[7], &[3], &[4], &[3, 3]],
+            );
+        }
+    }
 }
 
 /// [`a_thin_bar_resting_on_the_inside_of_a_thick_one_crosses_it_in_two_loops_that_meet_and_every_fuse_answers`]
