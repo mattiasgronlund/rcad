@@ -380,67 +380,6 @@ pub(crate) fn choose(
                         model, &solids, against, piece, policy, log,
                     )
                 });
-            if placed.is_none() {
-                let name = |s: &Surface| match s.as_plane() {
-                    Some(p) => format!("{:?}", p.coefficients()),
-                    None => "curved".to_string(),
-                };
-                eprintln!(
-                    "PROBE unplaced piece of solid {mine} against {against:?} on {}",
-                    name(&piece.surface)
-                );
-                for side in piece.wires.iter().flatten() {
-                    let end = match &side.ends[0] {
-                        MeetPoint::Existing { vertex, point } => {
-                            format!(
-                                "vertex {vertex:?} at {:?}",
-                                point.enclosure().map(|i| (i.lo() + i.hi()) / 2.0)
-                            )
-                        }
-                        MeetPoint::OfThreeSurfaces {
-                            surfaces, point, ..
-                        } => format!(
-                            "meet [{}, {}, {}] at {:?}",
-                            name(&surfaces[0]),
-                            name(&surfaces[1]),
-                            name(&surfaces[2]),
-                            point.enclosure().map(|i| (i.lo() + i.hi()) / 2.0)
-                        ),
-                        other => format!("{other:?}"),
-                    };
-                    eprintln!(
-                        "PROBE   side along {} from {end}",
-                        name(&side.carried_by[1])
-                    );
-                }
-                for &index in against {
-                    let read = TheCornersOfAPiece::of(piece, &solids, mine, index);
-                    eprintln!(
-                        "PROBE   read against {index}: {:?}",
-                        match &read {
-                            Some(TheCornersOfAPiece::ReadRoundACorner { theirs, .. }) =>
-                                format!("round a corner, theirs {theirs}"),
-                            Some(TheCornersOfAPiece::Meets(_)) => "meets".to_string(),
-                            None => "none".to_string(),
-                        }
-                    );
-                    if let Some(read) = &read {
-                        for face in &solids[index].faces {
-                            if let Some(outward) = outward_plane_of_face(face) {
-                                eprintln!(
-                                    "PROBE   against {index} plane {:?}: {:?}",
-                                    outward.coefficients(),
-                                    read.sides_of(outward)
-                                );
-                            }
-                        }
-                        eprintln!(
-                            "PROBE   placed by the planes of {index}: {:?}",
-                            placed_by_the_planes_of(solids[index], read)
-                        );
-                    }
-                }
-            }
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
@@ -512,48 +451,7 @@ pub(crate) fn choose(
             placed[piece] = Some(placement);
         }
     }
-    if std::env::var_os("Q2744B").is_some() {
-        let kept = kept_by(selection, &placed, scratch);
-        for (index, (piece, place)) in scratch.pieces.iter().zip(&placed).enumerate() {
-            let is_kept = kept.iter().any(|chosen| chosen.piece == index);
-            eprintln!(
-                "B PIECE {index} of {} on {} {place:?} kept {is_kept}: {}",
-                scratch.cut_from[index],
-                q2744b_plane(&piece.surface),
-                piece
-                    .wires
-                    .iter()
-                    .flatten()
-                    .map(|side| q2744b_end(&side.ends[0]))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-        }
-    }
     Ok(kept_by(selection, &placed, scratch))
-}
-
-pub(crate) fn q2744b_plane(surface: &Surface) -> String {
-    match surface.as_plane() {
-        Some(plane) => {
-            let [a, b, c, d] = plane.coefficients();
-            format!("({a:.3},{b:.3},{c:.3},{d:.3})")
-        }
-        None => "curved".to_string(),
-    }
-}
-
-pub(crate) fn q2744b_end(end: &MeetPoint) -> String {
-    match end {
-        MeetPoint::Existing { vertex, .. } => format!("V{vertex:?}"),
-        MeetPoint::OfThreeSurfaces { surfaces, .. } => format!(
-            "[{} {} {}]",
-            q2744b_plane(&surfaces[0]),
-            q2744b_plane(&surfaces[1]),
-            q2744b_plane(&surfaces[2])
-        ),
-        other => format!("{other:?}"),
-    }
 }
 
 /// The pieces `selection` keeps, from where each piece sits against the other
