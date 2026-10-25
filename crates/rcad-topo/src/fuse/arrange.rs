@@ -16056,6 +16056,12 @@ pub(super) enum ANodeReadRoundACorner {
     AMeet([Plane; 3]),
 }
 
+/// How many corners with four or more planes round them
+/// [`ACornerReadAsOnePoint::of`] has begun the exact arithmetic of a reading
+/// for.
+#[cfg(test)]
+static CORNERS_READ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 impl ACornerReadAsOnePoint {
     /// The reading of `corner`, or `None` where it has fewer than four planes
     /// round it, one that is not a plane, or every one of them running through
@@ -16065,6 +16071,8 @@ impl ACornerReadAsOnePoint {
         if corner.around.len() < 4 {
             return None;
         }
+        #[cfg(test)]
+        CORNERS_READ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let solved_from =
             Arrangement::the_three_planes_a_point_is_the_meet_of(corner.solved_from.as_ref()?)?;
         let around = corner
@@ -16072,7 +16080,7 @@ impl ACornerReadAsOnePoint {
             .iter()
             .map(|surface| surface.as_plane().copied())
             .collect::<Option<Vec<Plane>>>()?;
-        let room = super::bake::grown_by(corner.point, corner.room_its_planes_were_asked_with?);
+        let room = Self::room_of(corner)?;
         let handed = expansion_sign(&exactly_determinant(
             solved_from.map(|plane| normal_of(plane.coefficients())),
         )?);
@@ -16093,11 +16101,27 @@ impl ACornerReadAsOnePoint {
         one_misses.then_some(reading)
     }
 
+    /// The room of `corner`, its box grown by the room `bake` asked each plane
+    /// round it about it with, or `None` where `bake` asked none and the
+    /// corner has no reading.
+    ///
+    /// **Had without the exact arithmetic a reading costs**, so a caller with
+    /// many corners to try passes over each one whose room does not hold its
+    /// points before reading it. [`Arrangement::as_read_round_a_corner`] tries
+    /// every corner handed on to a face for every two nodes it puts in order
+    /// there. Reading each first, `pin_header_1x25` in
+    /// `rcad-step/tests/a_real_file_written_out_and_read_back_is_the_same_solid.rs`
+    /// ran past 580 s, where with no corner handed on it ran in 83 s (Q2744).
+    pub(super) fn room_of(corner: &BakedCorner) -> Option<PredicatePoint> {
+        Some(super::bake::grown_by(
+            corner.point,
+            corner.room_its_planes_were_asked_with?,
+        ))
+    }
+
     /// Whether every point of `point`'s box lies inside the corner's room.
     pub(super) fn holds(&self, point: PredicatePoint) -> bool {
-        let (point, room) = (point.enclosure(), self.room.enclosure());
-        (0..3)
-            .all(|axis| room[axis].lo() <= point[axis].lo() && point[axis].hi() <= room[axis].hi())
+        the_room_holds(self.room, point)
     }
 
     /// Which of two nodes on the line the `line`'s two planes cross in comes
@@ -16166,6 +16190,12 @@ impl ACornerReadAsOnePoint {
             [&[one[3]], &[two[3]], &[three[3]], &[fourth[3]]],
         )
     }
+}
+
+/// Whether every point of `point`'s box lies inside `room`.
+fn the_room_holds(room: PredicatePoint, point: PredicatePoint) -> bool {
+    let (point, room) = (point.enclosure(), room.enclosure());
+    (0..3).all(|axis| room[axis].lo() <= point[axis].lo() && point[axis].hi() <= room[axis].hi())
 }
 
 /// The four by four determinant of three planes and a fourth, each written as
@@ -19327,6 +19357,109 @@ mod tests {
             None,
             "a partner along the line"
         );
+    }
+
+    /// The top of a cube a pyramid pokes up through is cut by the pyramid's
+    /// four side faces, and each hands it the apex, a corner with four planes
+    /// round it ([`BakedFace::corners_of_the_solids_cutting_it`]). Every node
+    /// drawn on the top is a half or more from the apex, far outside its room,
+    /// so the top is split without the apex ever being read.
+    ///
+    /// Read for every two nodes put in order, a corner handed on so was what
+    /// made `pin_header_1x25` in
+    /// `rcad-step/tests/a_real_file_written_out_and_read_back_is_the_same_solid.rs`
+    /// run past 580 s. With the room asked first it ran in 73 s (Q2744).
+    #[test]
+    fn a_cube_top_a_pyramid_pokes_through_is_split_without_reading_the_apex_far_above_it() {
+        let (mut model, cube) = a_cube_of_side_two();
+        let pyramid = a_pyramid_from_inside_a_cube_of_side_two_to_one_above_it(&mut model);
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut solids = bake(&model, &[cube, pyramid], &policy, &mut log).expect("both bake");
+        crate::fuse::cuts::gather(&mut solids, &policy, &mut log).expect("they cut each other");
+        let top = solids[0]
+            .faces
+            .iter()
+            .find(|face| facing_up(face))
+            .expect("a cube has a top");
+        assert_eq!(
+            top.corners_of_the_solids_cutting_it.len(),
+            1,
+            "the apex is handed on to the top, once"
+        );
+
+        super::CORNERS_READ.store(0, std::sync::atomic::Ordering::Relaxed);
+        split(top);
+        assert_eq!(
+            super::CORNERS_READ.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "no node on the top lies inside the apex's room"
+        );
+    }
+
+    /// A square pyramid with its base on `z = 1`, from `(0.5, 0.5)` to
+    /// `(1.5, 1.5)`, and its apex at `(1, 1, 3)`: inside
+    /// [`a_cube_of_side_two`] up to its top, and one above it.
+    fn a_pyramid_from_inside_a_cube_of_side_two_to_one_above_it(model: &mut Model) -> SolidKey {
+        use rcad_geom::{EdgeRun, Orientation};
+
+        use crate::{DraftEdge, DraftStep, SolidBuilder};
+
+        let points = [
+            [1.0, 1.0, 3.0],
+            [0.5, 0.5, 1.0],
+            [1.5, 0.5, 1.0],
+            [1.5, 1.5, 1.0],
+            [0.5, 1.5, 1.0],
+        ]
+        .map(|[x, y, z]| Point::new(x, y, z));
+        // Counter-clockwise seen from outside, the apex first on every side face.
+        let faces: [&[usize]; 5] = [
+            &[0, 1, 2],
+            &[0, 2, 3],
+            &[0, 3, 4],
+            &[0, 4, 1],
+            &[1, 4, 3, 2],
+        ];
+        let mut builder = SolidBuilder::new();
+        let vertices = points.map(|point| builder.add_vertex(point).expect("a finite corner"));
+        let mut edges: Vec<([usize; 2], DraftEdge)> = Vec::new();
+        let drafted = faces.map(|face| {
+            let steps: Vec<DraftStep> = (0..face.len())
+                .map(|position| {
+                    let (from, to) = (face[position], face[(position + 1) % face.len()]);
+                    let (edge, orientation) =
+                        match edges.iter().find(|(ends, _)| *ends == [to, from]) {
+                            Some(&(_, edge)) => (edge, Orientation::Reversed),
+                            None => {
+                                let edge = builder
+                                    .add_edge(vertices[from], vertices[to], EdgeRun::Straight)
+                                    .expect("a side between two corners");
+                                edges.push(([from, to], edge));
+                                (edge, Orientation::Forward)
+                            }
+                        };
+                    DraftStep::Along(
+                        builder
+                            .add_coedge(edge, orientation)
+                            .expect("one use of a side"),
+                    )
+                })
+                .collect();
+            let wire = builder.add_wire(&steps).expect("a closed boundary");
+            let plane =
+                Plane::through_three_points(points[face[0]], points[face[1]], points[face[2]])
+                    .expect("three corners of a face not in a line");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a face of a pyramid")
+        });
+        builder
+            .add_shell(&drafted.map(|face| (face, Orientation::Forward)))
+            .expect("five faces close a pyramid");
+        builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a pyramid is a sound solid")
     }
 
     /// Whether a baked face is the flat one pointing up the z axis.
