@@ -4756,6 +4756,18 @@ fn lies_between_seen_down_the_axis(
 /// its ends or at one, where no half-line leaves both of them strictly on one
 /// side.
 ///
+/// # A corner on the half-line's line
+///
+/// **A point with no sign of which side of the half-line's line a corner is
+/// seen on is read again towards the next corner that may be aimed at**, as
+/// [`what_a_cone_face_seen_down_its_axis_holds`] reads a cone face (rows Q2634
+/// and Q2738). A box across the line from the corner aimed at through another
+/// corner is such a point, even with a sign of every side's own line, and the
+/// sides that corner ends cannot be counted from there. A count from any one
+/// corner that reads every sign it needs is the whole answer, so the first is
+/// kept, and the point is refused only when every corner that may be aimed at
+/// leaves a sign unread, with the first of those signs.
+///
 /// # A side right round a circle
 ///
 /// A [`WholeCurve`] is all of the circle a plane `W` cuts the sphere in, so it
@@ -4930,43 +4942,56 @@ fn what_a_ball_face_seen_from_a_point_of_its_sphere_holds(
             None
         }
     });
-    let aim = sides
+    let may_be_aimed_at = |corner: Point| {
+        on_a_chord.is_none_or(|(chord, _)| {
+            let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
+            matches!(
+                pole.sees(from, to, exactly(corner.coordinates())),
+                Decision::Pos | Decision::Neg
+            )
+        }) && sides.iter().zip(&along).all(|(side, beside)| {
+            !matches!(beside, Decision::Undecidable { .. }) || {
+                let [from, to] = seen_from(side, corner);
+                is_wholly_on_one_side_of_the_half_line(from, to)
+            }
+        })
+    };
+    let how_often_it_winds_seen_towards = |aim: Point| -> Result<i64, f64> {
+        let mut winding = winding;
+        for (index, side) in sides.iter().enumerate() {
+            let along = match on_a_chord {
+                Some((chord, away)) if chord == index => away,
+                _ => along[index],
+            };
+            let [from, to] = seen_from(side, aim);
+            if let Decision::Undecidable { .. } = along {
+                assert!(
+                    is_wholly_on_one_side_of_the_half_line(from, to),
+                    "the half-line was aimed with every side the point has no sign of wholly on \
+                     one side of it, and this one is not: {from:?} and {to:?}"
+                );
+                continue;
+            }
+            winding += crossing(from, to, along)
+                .ok_or_else(|| whichever_of_them_was_not_read(from, to))?;
+        }
+        Ok(winding)
+    };
+
+    let mut first_refusal = None;
+    for aim in sides
         .iter()
         .map(|side| side.start.placed)
-        .find(|&corner| {
-            on_a_chord.is_none_or(|(chord, _)| {
-                let [from, to] = [sides[chord].start.placed, sides[chord].end.placed];
-                matches!(
-                    pole.sees(from, to, exactly(corner.coordinates())),
-                    Decision::Pos | Decision::Neg
-                )
-            }) && sides.iter().zip(&along).all(|(side, beside)| {
-                !matches!(beside, Decision::Undecidable { .. }) || {
-                    let [from, to] = seen_from(side, corner);
-                    is_wholly_on_one_side_of_the_half_line(from, to)
-                }
-            })
-        })
-        .ok_or_else(|| unseen.map_or_else(cannot, gave_up_seeing))?;
-
-    for (index, side) in sides.iter().enumerate() {
-        let along = match on_a_chord {
-            Some((chord, away)) if chord == index => away,
-            _ => along[index],
-        };
-        let [from, to] = seen_from(side, aim);
-        if let Decision::Undecidable { .. } = along {
-            assert!(
-                is_wholly_on_one_side_of_the_half_line(from, to),
-                "the half-line was aimed with every side the point has no sign of wholly on one \
-                 side of it, and this one is not: {from:?} and {to:?}"
-            );
-            continue;
+        .filter(|&corner| may_be_aimed_at(corner))
+    {
+        match how_often_it_winds_seen_towards(aim) {
+            Ok(winding) => return Ok(held_where_it_winds(winding)),
+            Err(enclosure) => {
+                first_refusal.get_or_insert(enclosure);
+            }
         }
-        winding += crossing(from, to, along)
-            .ok_or_else(|| gave_up_seeing(whichever_of_them_was_not_read(from, to)))?;
     }
-    Ok(held_where_it_winds(winding))
+    Err(first_refusal.or(unseen).map_or_else(cannot, gave_up_seeing))
 }
 
 /// The name a turn read from a point of a ball goes by in provenance records.
@@ -14718,6 +14743,95 @@ mod tests {
                 .unwrap_or_else(|refused| panic!("{point:?}: {refused:?}"));
             assert_eq!(answer, is, "{point:?}");
         }
+    }
+
+    /// **A box across the line from the corner a ball face's half-line is
+    /// aimed at through another corner is placed from the next corner** (row
+    /// Q2738), as a cone face's is (row Q2634). The skin of
+    /// [`a_lens_of_a_ball_notched_at_a_corner`] is read from `(−3, 0, 0)`, and
+    /// its half-line is aimed first at its first corner, `(0.5, 1.5, −√6.5)`.
+    /// Each point asked is a point of the sphere on the plane through
+    /// `(−3, 0, 0)`, that corner and the corner `(1.2, 1.5, √5.31)` or
+    /// `(1.2, √7.47, 0.3)`, found by solving for it at the `x` given, and it is
+    /// given as a box 1e-9 wide across that plane. So it has no sign of which
+    /// side of the half-line's line that other corner is seen on, though it has
+    /// a sign of every side's own line. Inside the face the skin holds it, and
+    /// in the notch and below `y = 1.5` it does not.
+    #[test]
+    fn a_box_across_the_line_from_the_corner_a_ball_face_is_aimed_at_through_another_is_placed_from_the_next()
+     {
+        let across = |at: f64| Interval::new(at - 1e-9, at + 1e-9).expect("an interval");
+        let on = Interval::exactly;
+        let (model, solid, skin) = a_lens_of_a_ball_notched_at_a_corner();
+        let first = model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .find(|face| face.key() == skin)
+            .and_then(|face| face.wires().flat_map(WireView::points).next())
+            .expect("a corner")
+            .coordinates();
+        assert!(
+            first[0] == 0.5 && first[1] == 1.5 && first[2] < 0.0,
+            "the half-line aims first at the corner below the ball's middle, not at {first:?}"
+        );
+        let mut wrong = Vec::new();
+        for (point, is) in [
+            (
+                [
+                    on(1.5),
+                    across(1.847_406_065_973_128),
+                    on(-1.826_770_600_651_787_2),
+                ],
+                OnAFace::Held,
+            ),
+            (
+                [
+                    on(1.0),
+                    across(1.956_175_667_449_774_3),
+                    on(-2.042_884_421_125_539_7),
+                ],
+                OnAFace::Held,
+            ),
+            (
+                [
+                    on(1.0),
+                    across(2.729_541_612_378_405),
+                    on(0.741_351_864_025_912_7),
+                ],
+                OnAFace::Held,
+            ),
+            (
+                [
+                    on(1.8),
+                    across(1.770_987_494_198_324_4),
+                    on(1.619_754_084_851_506),
+                ],
+                OnAFace::NotHeld,
+            ),
+            (
+                [
+                    on(0.6),
+                    across(1.247_319_746_770_685),
+                    on(2.661_614_819_863_294),
+                ],
+                OnAFace::NotHeld,
+            ),
+        ] {
+            let answer = model
+                .solid(solid)
+                .expect("this model made the key")
+                .face_holds_the_point(
+                    skin,
+                    PredicatePoint::Constructed(point),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+            if answer.as_ref().ok() != Some(&is) {
+                wrong.push(format!("{point:?}: {answer:?}, not {is:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     /// A ball of radius 3 at the origin kept to the corner of a block where
