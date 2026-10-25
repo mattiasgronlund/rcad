@@ -11339,3 +11339,1107 @@ And what is not a row:
   second certificate for the same bytes checks.
 - The claim on `value` (4): `decide` needs only `y`.
 - `field` on these scripts' hints (464.10).
+
+### 464.18 The side of a plane with every product anywhere
+
+Q2684 took up `SIDE_OF_PLANE_ERROR_BOUND` again, in four lanes on
+2026-10-25, for what 464.8's 4 left unrun: two and three of
+`SideOfAFlatSurface`'s products below the normals at once, the zero branches
+(a zero factor, a sum that cancels to zero, `planev.g`'s zero offset), and a
+zero difference in orient2d. The first lane wrote `planeall.py`. The second
+ran every script it writes. The third wrote the controls for the cases with
+no normal product and the orient2d scripts, ran everything again, restated
+`plane.rs` and wrote 1 to 8. The fourth wrote 9 and 10, and ran every script
+again as 9 gives it, in a fresh tree.
+
+The bound is proved at the code's constant in every case of where the three
+products land, normal, zero or below the normals, with any of the sums
+cancelling, and on `value` with the offset zero. So `on_floats` does not need
+its three `product_is_normal` checks to give a right sign. They are kept, as
+Q2766 kept the sphere's (464.14), and the comment on them and the doc on the
+constant now say why (7). orient2d with a zero difference proves too, or has
+no normal bound for `decide` to compare against (5). Coq checks each proof,
+modulo its hints (8).
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, against
+`plane.rs`, `orient2d.rs` and `cascade.rs` at `6a4a814c`, through 464.13's
+`one.sh`, eight at a time. `u` is `2⁻⁵³`. Plane's `B = 4u + 32u²` is written
+`B = 4b-53 + 1b-101;` and orient2d's `3u + 16u²` `B = 3b-53 + 1b-102;`. Each
+script follows 464.8's pattern: one ratio hint per rounding of a normal
+number, the error split into one term per product so that Gappa averages
+them, 464.5's lemma for each product that rounds to a normal number and for
+`eb`, and what rounding a product below the normals cost carried as an
+amount, as `o2s.g` carries it.
+
+**1. What the proof guards.** `SideOfAFlatSurface` is the cascade's predicate
+for `which_side_of_a_flat_surface` (`plane.rs:816-832`), which
+`Plane::side_of_point` (`plane.rs:621-623`) and `HalfSpace::side_of_point`
+(`half_space.rs:352-360`) call, both public, and `three_surfaces.rs:3288` for
+a `Surface::Plane`.
+
+**2. `on_floats`, line for line.** `SideOfAFlatSurface::on_floats`
+(`plane.rs:847-869` at `6a4a814c`) returns `None` for a point that is not
+exact `f64`s, and unless `product_is_normal` holds for each of the three
+products (`plane.rs:854-856`). Then it takes the three products, `value = t0
++ t1 + t2 − offset` folded left to right, and `permanent = |t0| + |t1| + |t2|
++ |offset|` folded the same way (`plane.rs:858-868`). Each script writes it as
+464.8's `plane.g` does, with the check left out: a rounding for each product,
+one for each of the two sums, `y = s2 − off`, which the code rounds to
+`value`, and `P` the permanent with each of its three additions rounded.
+`product_is_normal(a, b)` is true when `a` or `b` is zero (`cascade.rs:67-69`),
+so a zero product gets through the check. `decide` compares only against a
+bound that is a normal number (`cascade.rs:125`), and the doc on
+`Filtered::error_bound` asks for the bound on `y`, the sum before `value`'s
+last rounding.
+
+**3. Every place the three products can land.** Each product is in one of
+four states:
+
+- `n`, normal: it rounds to at least `2⁻¹⁰²²`, as `product_is_normal` lets
+  through;
+- `z`, of a zero factor, which `product_is_normal` lets through too;
+- `p` and `m`, below the normals and positive or negative: the exact product
+  `X` is in `[2⁻²¹⁴⁸, 2⁻¹⁰²²]` or its negative, which `product_is_normal`
+  refuses.
+
+Those cover every product. A product of two doubles that are not zero is at
+least `2⁻²¹⁴⁸`, and one that rounds below `2⁻¹⁰²²` is below it itself, since
+rounding is monotone and `2⁻¹⁰²²` is a double. A `p` or `m` product is
+written `t = rnd(X)`, which may be zero, and what that rounding cost is an
+amount, `d`, that Gappa bounds whatever `t` is, so no split at `2⁻¹⁰⁷⁵` is
+needed, as 464.14's 6 needed one for its hints. A zero product is left out of
+both folds, adding zero to a double giving the double back (464.13's
+`addzero.g`).
+
+Each rounded sum of the products left is either at least `2⁻¹⁰⁷⁴`, since a
+sum of two doubles is a multiple of `2⁻¹⁰⁷⁴`, or it cancels to zero, rounds to
+itself, and is written unrounded, as 464.13's `flatcases.py` writes it. Every
+sum may cancel, not only one of two next to each other as in 464.13: a
+product below the normals can round to zero, so the product after a cancelled
+sum can be zero too. That makes 172 cases from the 64 states, 109 with a
+normal product and 63 without.
+
+- With a normal product, the step is 464.8's `planecases.py`'s, `(y − Ex) /
+  eb -> ((Σ e) / P3x) · (P3x / P) · (P / eb) + (Σ d) / eb`: the relative part
+  averaged over `P3x`, the products' part of the permanent with `X` in place
+  of each `t` below the normals, and what rounding each `X` cost an amount
+  that `eb` being normal keeps small. `plane_ppn.g`, whole in 9, is that form.
+- With none, a case is not vacuous, unlike the sphere's with no normal square
+  (464.14's 6): the offset is no product, so `|off|` alone can make `eb`
+  normal. Those are written with every error an amount, `y − Ex` the sum of
+  what each rounding cost, against `eb` at least `2⁻¹⁰²²`. `plane_ppp.g`,
+  whole in 9, is that form.
+
+`planev_off0.g` is the claim on `value` with the offset the double 0, all
+three products normal: `y` is then `s2` less zero, which is `s2`, so `value`
+is `y`.
+
+**4. What they print.** `allplane.sh` (9) runs them, on a load of 7 to 22 over
+24 cores.
+
+- Each of the 172 cases and `planev_off0.g` proves at the code's `B`, and
+  each `gappa -Bcoq` and `coqc` exits 0, in 45.4 s for all 173, and 43.0 s in
+  the fourth lane's run. None prints "pointless".
+- `plane_nnn.g` prints 464.8's `3u + 2u²` and `P −/ Phat` within `3u + 3u²`.
+- The 96 cases with a normal product and one below the normals each print
+  `P` at least `1125899906842623b-1021`, `(2⁵⁰ − 1) · 2⁻¹⁰²¹`, just under
+  `2⁻⁹⁷¹`; the `d` sum within `2⁻¹⁰⁷⁵` for one product below the normals and
+  `2⁻¹⁰⁷⁴` for two, each with a little more; and `(Σ e) / P3x` within `ku`
+  and some `u²`, `k` the most roundings a normal product's term goes through:
+  `3u` with no sum cancelling, `2u` with one or with the two below the normals
+  first, `u` with both.
+- The 63 cases with no normal product print `y − Ex` within `k · 2⁻¹⁰⁷⁵`, a
+  share of `2⁻¹⁰⁷⁵` for each product below the normals and each rounded sum:
+  `k` is 1 for 6 of them, 2 for 24, 3 for 28 and 5 for 4. `plane_zzz.g`
+  prints `[0, 0]`. With `eb` at least `2⁻¹⁰²²`, 5 of them is `5u` of `eb`.
+- `planev_off0.g` prints `value − y` in `[0, 0]`.
+
+So the bound holds with any number of products below the normals because a
+normal `eb` is `2⁻¹⁰²²` or more, which puts `P` at about `2⁻⁹⁷¹` or more: a
+product below the normals then costs at most `2⁻¹⁰⁷⁵` against it, `u` of
+`eb`, as 464.8's 2 and 4 found for one.
+
+**5. orient2d's zero differences.** 464.8's 2 split orient2d on where its two
+products land, and kept every difference not zero. A difference of two
+doubles is zero only when the two are equal, and is then exactly zero, and so
+is its product, so a zero difference makes `forwards` or `backwards` the
+double 0. `o2zero.py` (9) writes five cases, split at `2⁻¹⁰⁰⁰` as 464.8's 2
+splits:
+
+- `o2zf.g`, `forwards` zero and `acy · bcx` at least `2⁻¹⁰⁰⁰` in magnitude,
+  and `o2zb.g`, the same way round, each prove at the code's `B`, printing `e
+  / P` within `3.33067e-16`, `3u + 6u²` by `summary.py`'s count, as `o2s.g`
+  printed its relative part.
+- `o2zf_tiny.g` and `o2zb_tiny.g`, the other product at most `2⁻¹⁰⁰⁰`, and
+  `o2zfb.g`, both zero, each print "remaining results are pointless": `eb`
+  cannot then be normal, so `decide` does not compare.
+
+With 464.8's 2 that covers every input on which `decide` compares
+`Orient2d`'s value against its bound. Each `gappa -Bcoq` and `coqc` exits 0.
+
+**6. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each case is run again where it must fail:
+
+- Each of the 109 plane cases with a normal product, at `B = u / 2`
+  (`c_<name>_half.g`), exits 1, best `[−2k, 2k]` for its case's `ku`, which
+  `controls.py` checks for each. `c_planev_off0_half.g` exits 1, best
+  `[−6, 6]`.
+- Each of the 63 without, without `eb` normal (`c_<name>_noeb.g`), exits 1,
+  best `[-inf, inf]`. That shows the case needs `eb` normal, not that its
+  hypotheses do not contradict, so each is run again with every hypothesis
+  and the last goal `(y − Ex) / eb` within `2⁻⁶⁰` (`c_<name>_tight.g`), which
+  a real input misses: a product moved by `2⁻¹⁰⁷⁵` against `eb = 2⁻¹⁰²²` is
+  `2⁻⁵³` of `eb`. `plane_zzz.g`'s `y − Ex` is zero, so its tight goal is `off`
+  within `2⁻⁹⁰⁰` instead. Each of the 63 exits 1 and none prints "pointless".
+  Each best is `k · 2⁻⁵³` for its case's `k · 2⁻¹⁰⁷⁵`, which `controls.py`
+  checks, and `plane_zzz`'s the largest double.
+- `o2zf.g` and `o2zb.g` at `u / 2` exit 1, best `[-6, 6]`. The three
+  pointless ones without `eb` normal exit 1, best `[-inf, inf]`, the two tiny
+  ones printing `eb` at most `3b-1053`, `2^(-1051.41)`, and `o2zfb.g` `eb` in
+  `[0, 0]`. So what proves those three is the contradiction with `eb` normal
+  and nothing else, as 464.8's `o2tiny.g`.
+
+**7. What `plane.rs` said, and says now.** At `6a4a814c` the comment on the
+check, `plane.rs:851-853`, said "The bound below is a fraction of the
+permanent, which only bounds anything while every product keeps its relative
+accuracy. One of them in the subnormals and this level certifies a wrong
+sign." The doc on the constant, `plane.rs:924-928`, said the bound "holds
+only while nothing overflows or falls into the subnormals", and that
+`on_floats` "enforces the bottom end product by product through
+`product_is_normal`". By 4 both are false: without the check, `on_floats`
+would hand `decide` a number with one, two or three products below the
+normals, and `decide` would certify no wrong sign from it.
+
+So the three checks are not needed for a right sign. They are kept, a
+decision taken here, as Q2766 took it for the sphere (`edbb4601`): with them,
+level 1 answers only where the plain relative argument on the constant holds,
+and the 172 cases stay a second proof rather than the only one. Dropping them
+would move the inputs with a product below the normals from level 2 to level
+1, and whether that turns any refusal into an answer was not run. The comment
+on the check now says it is not needed for a right sign and what it does,
+and the doc on the constant keeps the relative argument and says how far
+down the bound holds, and why, citing this subsection. Comment only: lines
+that run 0.
+
+**8. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0, exit 0 on each script of 4
+and 5 that proves or prints "pointless". Gappa does not write the same proof
+each run (464.4), so the sizes are the third lane's:
+
+- the 109 plane cases with a normal product: 903 to 3782 lines, 10 to 18
+  hints;
+- the 63 without: 271 to 1070 lines, 1 hint each, the `y − Ex ->` one;
+- `planev_off0.g`: 3112 lines, 19 hints (3168 in the second lane's run);
+- `o2zf.g` and `o2zb.g`: 1111 and 1095 lines, 6 hints each;
+- `o2zf_tiny.g` and `o2zb_tiny.g`: 309 and 305 lines, 6 hints each, and
+  `o2zfb.g` 135 lines with no hints.
+
+The fourth lane's run gave the same but for three sizes: 903 to 3821 lines
+for the first, 3117 for `planev_off0.g` and 1109 for `o2zb.g`.
+
+Each hint enters the Coq file as a hypothesis with no condition attached, as
+in 464.4, so each proof stands on its hints, and on the divisors Gappa took to
+be nonzero, which its warnings name. `field` has not been run on these hints
+(464.10).
+
+**9. The scripts.** `planeall.py` writes the 172 cases, `planev_off0.g` and
+the 236 plane controls; `o2zero.py` the five orient2d cases and their five
+controls; `allplane.sh` and `o2run.sh` run them through `runmany.sh` and
+464.13's `one.sh`, unchanged; `summary.py` and `controls.py` read what they
+print. To run them again, save these seven and `one.sh` in one directory and
+run `bash allplane.sh` and `bash o2run.sh` there. The fourth lane took each from
+the text here, found it the same byte for byte as the file the third lane
+ran, and ran the two in a fresh tree: they printed the same counts as 4 to 6
+give, each case proving and each control failing. `plane_ppn.g`,
+`plane_ppp.g` and `o2zf.g`, whole at the end, are as that run wrote them.
+
+`planeall.py`, whole, as the third lane ran it: the first lane's, with the
+`_tight` controls added.
+
+```python
+"""Write SideOfAFlatSurface::on_floats in every case of where its three
+products land, as 464.8's planecases.py did for one product at a time:
+
+- each product in one of four states: n, normal, as product_is_normal lets
+  through; z, of a zero factor, which it lets through too; p and m, below the
+  normals and positive or negative, which it refuses;
+- each rounded sum of the products left either rounded, and then at least
+  2^-1074, or cancelling to zero, which rounds to itself, and is then written
+  unrounded;
+
+plane_<states>[_c<set>].g for each, <states> one letter per product, <set>
+naming the product each cancelling sum adds; c_<name>_half.g, each case with
+a normal product again at B = u / 2, which must fail; c_<name>_noeb.g, each
+case with none again without eb normal, which must fail; c_<name>_tight.g,
+each case with none again with every hypothesis but the last goal 2^-60 of eb,
+or for plane_zzz off within 2^-900, which must fail too, since a real input
+misses it; planev_off0.g, the claim on value with the offset zero; and
+c_planev_off0_half.g.
+
+Run as: python3 planeall.py; it writes beside itself.
+"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+B_CODE = "B = 4b-53 + 1b-101;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+STATES = "npmz"
+
+
+TIGHT = "  /\\ (y - Ex) / eb in [-1b-60, 1b-60]"
+TIGHT_ZZZ = "  /\\ off in [-1b-900, 1b-900]"
+
+
+def make(states, cancel=(), b=B_CODE, eb_normal=True, tight=False):
+    live = [k for k in range(3) if states[k] != "z"]
+    small = [k for k in live if states[k] in "pm"]
+    normal = [k for k in live if states[k] == "n"]
+
+    def x(k):
+        return f"X{k}" if k in small else f"n{k} * p{k}"
+
+    def abs_t(k):
+        return {"n": f"|t{k}|", "p": f"t{k}", "m": f"-t{k}"}[states[k]]
+
+    src = [
+        "# restates: crates/rcad-geom/src/plane.rs on_floats at 6a4a814c",
+        "# restates: crates/rcad-geom/src/plane.rs SIDE_OF_PLANE_ERROR_BOUND at 6a4a814c",
+        "# restates: crates/rcad-predicates/src/cascade.rs decide at 6a4a814c",
+        "# SideOfAFlatSurface::on_floats without its three product_is_normal checks:",
+        "# the sign of n . p - off. Products: "
+        + ", ".join(f"n{k} * p{k} {dict(n='normal', p='below the normals and positive', m='below the normals and negative', z='zero')[states[k]]}"
+                    for k in range(3)) + ".",
+    ]
+    if cancel:
+        src.append(f"# The sum{'s' if len(cancel) > 1 else ''} adding product{'s' if len(cancel) > 1 else ''} "
+                   f"{', '.join(map(str, cancel))} cancel{'' if len(cancel) > 1 else 's'} to zero, which rounds to itself.")
+    src += [
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The normal, the point and the offset, each an f64. A zero product has",
+        "# the double 0 for its point's coordinate; with the normal's zero instead,",
+        "# every number below is the same.",
+        "n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);",
+        " ".join(f"p{k} = 0;" if states[k] == "z" else f"p{k} = rnd(p{k}_);" for k in range(3)),
+        "off = rnd(off_);",
+        "",
+        "# What on_floats computes, line for line. Adding a zero product to a double",
+        "# gives that double back (464.13's addzero.g), so zero products are left",
+        "# out of both folds.",
+    ]
+    if small:
+        src.append(" ".join(f"X{k} = n{k} * p{k};" for k in small))
+    if live:
+        src.append(" ".join(f"t{k} = rnd({x(k)});" for k in live))
+    rounded = []
+    if live:
+        running = f"t{live[0]}"
+        for k in live[1:]:
+            src.append(f"S{k} = {running} + t{k};")
+            if k in cancel:
+                src.append(f"s{k} = S{k};")
+            else:
+                src.append(f"s{k} = rnd(S{k});")
+                rounded.append(k)
+            running = f"s{k}"
+        src.append(f"y = {running} - off;")
+    else:
+        src.append("y = -off;")
+    src.append("value = rnd(y);")
+    src += ["", "# The permanent folds the same products' magnitudes in the same order."]
+    if live:
+        perm = abs_t(live[0])
+        for k in live[1:]:
+            perm = f"rnd({perm} + {abs_t(k)})"
+        src.append(f"P = rnd({perm} + |off|);")
+        src.append("Phat = " + " + ".join(abs_t(k) for k in live) + " + |off|;")
+    else:
+        src.append("P = |off|;")
+    src += ["", b, "eb = rnd(B * P);", "", "# The true value of the same inputs."]
+    src.append("Ex = " + " + ".join(x(k) if k in small else f"n{k} * p{k}" for k in range(3)) + " - off;")
+
+    carry = {}
+    for i, k in enumerate(live):
+        enters = live[max(i, 1):]
+        carry[k] = [f"rs{j}" for j in rounded if j in enters]
+
+    def r(k):
+        return " * ".join(carry[k]) if carry[k] else "1"
+
+    hint_lines = []
+    goal = []
+    if normal:
+        src += ["", "# The products' part of the permanent, with no rounding of its own, and",
+                "# the same with X in place of what each product below the normals rounds to."]
+        src.append("P3 = " + " + ".join(abs_t(k) for k in live) + ";")
+        cs = []
+        for k in live:
+            cs.append({"n": f"c{k} = |t{k}|;", "p": f"c{k} = X{k};", "m": f"c{k} = -X{k};"}[states[k]])
+        src.append(" ".join(cs))
+        src.append("P3x = " + " + ".join(f"c{k}" for k in live) + ";")
+        src += ["", "# What each rounding multiplied its argument by."]
+        src.append(" ".join(f"rp{k} = t{k} / (n{k} * p{k});" for k in normal))
+        if rounded:
+            src.append(" ".join(f"rs{j} = s{j} / S{j};" for j in rounded))
+        src += ["", "# Each term as y carries it less the term: e as a fraction of the term,",
+                "# with X for each product below the normals, and d what rounding X cost."]
+        for k in live:
+            src.append(f"W{k} = {r(k)} - 1 / rp{k};" if k in normal else f"W{k} = {r(k)} - 1;")
+        src.append(" ".join(f"e{k} = t{k} * W{k};" if k in normal else f"e{k} = X{k} * W{k};" for k in live))
+        if small:
+            src.append(" ".join(f"d{k} = (t{k} - X{k}) * ({r(k)});" for k in small))
+        esum = " + ".join(f"e{k}" for k in live)
+        dsum = " + ".join(f"d{k}" for k in small)
+        hint_lines.append("# How far each rounding is from the identity.")
+        for k in normal:
+            hint_lines.append(f"t{k} / (n{k} * p{k}) -> 1 + (t{k} - n{k} * p{k}) / (n{k} * p{k});")
+        for j in rounded:
+            hint_lines.append(f"s{j} / S{j} -> 1 + (s{j} - S{j}) / S{j};")
+        hint_lines += [
+            "",
+            "# The relative part is averaged over P3x as in plane.g; what rounding each",
+            "# X cost is an amount, and eb being normal keeps it small against eb.",
+            f"(y - Ex) / eb -> (({esum}) / P3x) * (P3x / P) * (P / eb)" + (f" + ({dsum}) / eb;" if small else ";"),
+            f"({esum}) / P3x -> ((P3x + ({esum})) - P3x) / P3x;",
+            f"P3x + ({esum}) -> " + " + ".join(f"(c{k} + e{k})" for k in live) + ";",
+        ]
+        for k in live:
+            hint_lines.append(f"(c{k} + e{k}) - c{k} -> e{k};")
+        for k in live:
+            hint_lines.append({"n": f"e{k} / c{k} -> (t{k} / |t{k}|) * W{k};",
+                               "p": f"e{k} / c{k} -> W{k};", "m": f"e{k} / c{k} -> -W{k};"}[states[k]])
+        moved = "".join(f" + (X{k} - t{k}) / P" if states[k] == "p" else f" + (t{k} - X{k}) / P" for k in small)
+        hint_lines += [
+            f"P3x / P -> (P3 / Phat) * (Phat / P){moved};",
+            "P3 / Phat -> 1 / (1 + |off| / P3);",
+            "Phat / P -> 1 / (1 + (P - Phat) / Phat);",
+            "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));",
+        ]
+        if small:
+            hint_lines.append("P -> eb / (B * (1 + (eb - B * P) / (B * P)));")
+        goal.append(f"({esum}) / P3x in ?")
+        if small:
+            goal += [f"{dsum} in ?", "P in ?"]
+        else:
+            goal.append("P -/ Phat in ?")
+    elif live:
+        parts = [f"(t{k} - X{k})" for k in small] + [f"(s{j} - S{j})" for j in rounded]
+        src += ["", "# No product is normal, so every error is an amount: what rounding each",
+                "# X cost and what rounding each sum cost."]
+        hint_lines += [
+            "# y less the truth is what each rounding cost, as an amount.",
+            "y - Ex -> " + " + ".join(parts) + ";",
+        ]
+        goal.append("y - Ex in ? /\\ P in ?")
+    else:
+        hint_lines += ["# Every product is zero, so y is the truth.", "y - Ex -> 0;"]
+        goal.append("y - Ex in ?")
+
+    hyps = [("Every input is a finite f64.",
+             [[f"|n{k}| <= 1b1024" for k in range(3)],
+              [f"|p{k}| <= 1b1024" for k in range(3) if states[k] != "z"] + ["|off| <= 1b1024"]])]
+    if normal:
+        hyps.append(("No factor of a normal product is zero.",
+                     [[f"|n{k}| >= 1b-1074" for k in normal] + [f"|p{k}| >= 1b-1074" for k in normal]]))
+    if rounded:
+        hyps.append(("No rounded sum cancels to zero.", [[f"|S{j}| >= 1b-1074" for j in rounded]]))
+    if small:
+        hyps.append(("The products below the normals. A product of two doubles that are not\n"
+                     "  # zero is at least 2^-2148.",
+                     [[f"X{k} in [1b-2148, 1b-1022]" if states[k] == "p" else f"X{k} in [-1b-1022, -1b-2148]"
+                       for k in small]]))
+    if normal:
+        hyps.append(("The normal products, as product_is_normal has them.",
+                     [[f"|t{k}| >= 1b-1022" for k in normal]]))
+    if eb_normal:
+        hyps.append(("The bound is normal, which decide checks.", [["|eb| >= 1b-1022"]]))
+    lemma = [[f"t{k} -/ n{k} * p{k} {LEMMA}"] for k in normal]
+    if eb_normal and normal:
+        lemma.append([f"eb -/ B * P {LEMMA}"])
+    if lemma:
+        hyps.append(("What lemma.g proves each of those gives.", lemma))
+    if normal:
+        hyps.append(("x / |x| is in [-1, 1] for any x that is not zero.",
+                     [[f"t{k} / |t{k}| in [-1, 1]" for k in normal]]))
+
+    src += ["", "{"]
+    first = True
+    for comment, rows in hyps:
+        src.append(f"  # {comment}")
+        for row in rows:
+            src.append(("     " if first else "  /\\ ") + " /\\ ".join(row))
+            first = False
+    src.append("->")
+    src.append("  " + " /\\ ".join(goal))
+    if not tight:
+        src.append("  /\\ (y - Ex) / eb in [-1, 1]")
+    else:
+        src.append(TIGHT if live else TIGHT_ZZZ)
+    src += ["}", ""]
+    src += hint_lines
+    return "\n".join(src) + "\n"
+
+
+def make_value_off0(b=B_CODE):
+    """plane.g's claim taken on value, with the offset the double 0. Then y is
+    s012 less zero, which is s012 (addzero.g), so value is y."""
+    text = make("nnn", b=b)
+    text = text.replace("# the sign of n . p - off. Products: n0 * p0 normal, n1 * p1 normal, n2 * p2 normal.",
+                        "# the sign of n . p - off. Products: n0 * p0 normal, n1 * p1 normal, n2 * p2 normal.\n"
+                        "# The offset is zero, and the claim is on value, the double on_floats returns.")
+    for old, new in [
+        ("off = rnd(off_);", "off = 0;"),
+        ("y = s2 - off;\nvalue = rnd(y);", "y = s2 - off;\nvalue = rnd(y);"),
+        ("  /\\ (y - Ex) / eb in [-1, 1]", "  /\\ value - y in ? /\\ (value - Ex) / eb in [-1, 1]"),
+        ("P = rnd(rnd(rnd(|t0| + |t1|) + |t2|) + |off|);", "P = rnd(rnd(rnd(|t0| + |t1|) + |t2|) + |off|);"),
+    ]:
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    text = text.replace("     |n0| <= 1b1024 /\\ |n1| <= 1b1024 /\\ |n2| <= 1b1024\n  /\\ |p0| <= 1b1024 /\\ |p1| <= 1b1024 /\\ |p2| <= 1b1024 /\\ |off| <= 1b1024",
+                        "     |n0| <= 1b1024 /\\ |n1| <= 1b1024 /\\ |n2| <= 1b1024\n  /\\ |p0| <= 1b1024 /\\ |p1| <= 1b1024 /\\ |p2| <= 1b1024")
+    old = "(y - Ex) / eb -> ((e0 + e1 + e2) / P3x) * (P3x / P) * (P / eb);"
+    assert text.count(old) == 1
+    text = text.replace(old, "# value less zero is value, and so is its rounding.\n"
+                        "y -> s2;\n"
+                        "(value - Ex) / eb -> ((e0 + e1 + e2) / P3x) * (P3x / P) * (P / eb) + (value - y) / eb;")
+    return text
+
+
+def name_of(states, cancel):
+    return f"plane_{states}" + (f"_c{''.join(map(str, cancel))}" if cancel else "")
+
+
+if __name__ == "__main__":
+    proving, half, noeb = [], [], []
+    for states in ("".join(s) for s in itertools.product(STATES, repeat=3)):
+        live = [k for k in range(3) if states[k] != "z"]
+        sums = live[1:]
+        for n in range(len(sums) + 1):
+            for cancel in itertools.combinations(sums, n):
+                name = name_of(states, cancel)
+                open(f"{name}.g", "w").write(make(states, cancel))
+                proving.append(name)
+                if "n" in states:
+                    open(f"c_{name}_half.g", "w").write(make(states, cancel, b=B_HALF))
+                    half.append(name)
+                else:
+                    open(f"c_{name}_noeb.g", "w").write(make(states, cancel, eb_normal=False))
+                    open(f"c_{name}_tight.g", "w").write(make(states, cancel, tight=True))
+                    noeb.append(name)
+    open("planev_off0.g", "w").write(make_value_off0())
+    open("c_planev_off0_half.g", "w").write(make_value_off0(b=B_HALF))
+    print(f"{len(proving)} cases, {len(half)} controls at u / 2, {len(noeb)} controls without eb normal, "
+          f"{len(noeb)} with the goal too tight, and planev_off0.g")
+```
+
+`python3 planeall.py` prints `172 cases, 109 controls at u / 2, 63 controls
+without eb normal, 63 with the goal too tight, and planev_off0.g`.
+
+`summary.py`, which printed the figures of 4 from the `.out` files:
+
+```python
+"""Read every plane_*.out beside this file and print, one line per case, what
+Gappa printed for each goal: a relative goal as a u and u^2 count, an amount
+as a multiple of 2^-1075, and P's lower end as a power of two."""
+import math
+import os
+import re
+import sys
+from fractions import Fraction
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = Fraction(1, 2**53)
+NUM = re.compile(r"(-?\d+)(?:b(-?\d+))?")
+
+
+def value(text):
+    m = NUM.fullmatch(text)
+    mant, exp = int(m.group(1)), int(m.group(2) or 0)
+    return Fraction(mant) * (Fraction(2) ** exp)
+
+
+def interval(line):
+    m = re.search(r" in \[(-?\d+(?:b-?\d+)?)(?: \{[^}]*\})?, (-?\d+(?:b-?\d+)?)(?: \{[^}]*\})?\]", line)
+    return value(m.group(1)), value(m.group(2))
+
+
+def as_u(x):
+    k = math.floor(x / U)
+    rest = (x - k * U) / (U * U)
+    return f"{k}u+{float(rest):.4g}u2"
+
+
+def read(name):
+    text = open(f"{name}.out").read()
+    out = {}
+    if "Results:" not in text:
+        return {"ERR": "no results"}
+    for line in text.split("Results:", 1)[1].splitlines():
+        line = line.strip()
+        if " in " not in line:
+            continue
+        goal = line.split(" in ")[0]
+        lo, hi = interval(line)
+        if goal == "P":
+            out["P>="] = f"2^{math.log2(lo):.3f}" if lo > 0 else str(lo)
+        elif goal.startswith("y - Ex"):
+            out["y-Ex"] = f"{max(-lo, hi) * 2**1075}*2^-1075"
+        elif "/" in goal:
+            out[goal] = as_u(max(-lo, hi))
+        else:
+            out[goal] = f"{max(-lo, hi) * 2**1075}*2^-1075"
+    if "pointless" in text:
+        out["POINTLESS"] = "yes"
+    return out
+
+
+names = sys.argv[1:] or sorted(f[:-4] for f in os.listdir(".") if f.startswith("plane_") and f.endswith(".out"))
+for name in names:
+    r = read(name)
+    print(name, "  ".join(f"{k}: {v}" for k, v in r.items()))
+```
+
+`controls.py`, which printed `_half controls whose best is twice their case's
+u count: 109`, `_noeb controls: 63, bests: ['inf']` and `_tight controls whose
+best is their case's y - Ex over 2^-1022: 63`, with both lists of those that
+are not empty:
+
+```python
+"""For each control beside this file, print its best and, for each _half
+control, whether that best is twice the u count its case printed: a case that
+proves at B = 4u + 2^-101 with e within k u of P3x fails at B = u / 2 with a
+best of 2k. For each _tight control, whether its best is k 2^-53 for the
+k 2^-1075 its case printed y - Ex within, eb being 2^-1022 at the least; and
+for plane_zzz's, the largest double, since off is anything eb normal allows."""
+import os
+import re
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+summary = subprocess.run([sys.executable, "summary.py"], capture_output=True, text=True).stdout
+ucount, ycount = {}, {}
+for line in summary.splitlines():
+    name = line.split()[0]
+    m = re.search(r"(?:/ P3x|/ \(c[0-9 +c]*\)|/ \|t\d\|): (\d+)u", line)
+    ucount[name] = int(m.group(1)) if m else None
+    m = re.search(r"y-Ex: (\d+)\*2\^-1075", line)
+    ycount[name] = int(m.group(1)) if m else None
+
+agree, disagree, noeb, tight, tight_not = 0, [], [], 0, []
+for f in sorted(os.listdir(".")):
+    if not (f.startswith("c_plane_") and f.endswith(".out")):
+        continue
+    text = open(f).read()
+    best = re.search(r"best: \[([^,]+), ([^\]]+)\]", text).group(2)
+    name = f[2:-4]
+    if name.endswith("_half"):
+        case = name[: -len("_half")]
+        if ucount[case] is not None and float(best) == 2 * ucount[case]:
+            agree += 1
+        else:
+            disagree.append((name, best, ucount[case]))
+    elif name.endswith("_tight"):
+        case = name[: -len("_tight")]
+        want = 1.79769e308 if case == "plane_zzz" else ycount[case] * 2.0**-53
+        if abs(float(best) - want) <= 1e-5 * want:
+            tight += 1
+        else:
+            tight_not.append((name, best, ycount[case]))
+    else:
+        noeb.append((name, best))
+print(f"_half controls whose best is twice their case's u count: {agree}")
+print("_half controls that are not:", disagree)
+print(f"_noeb controls: {len(noeb)}, bests: {sorted(set(b for _, b in noeb))}")
+print(f"_tight controls whose best is their case's y - Ex over 2^-1022: {tight}")
+print("_tight controls that are not:", tight_not)
+```
+
+`o2zero.py`, which writes the five cases of 5 and their controls, whole:
+
+```python
+"""Write Orient2d::on_floats with a difference zero, the branch 464.8 left on
+paper. A difference of two doubles is zero only when the two are equal, and is
+then exactly zero, and so is its product; so a zero difference makes forwards
+or backwards the double 0.
+
+- o2zf.g: forwards zero and acy * bcx at least 2^-1000, which must prove.
+- o2zf_tiny.g: forwards zero and acy * bcx at most 2^-1000, where eb cannot be
+  normal, which must print that the rest is pointless.
+- o2zb.g and o2zb_tiny.g: the same with backwards zero.
+- o2zfb.g: both zero, which must print pointless too.
+- c_o2zf_half.g and c_o2zb_half.g: the two that prove again at B = u / 2,
+  which must fail; c_<name>_noeb.g: the three pointless ones again without eb
+  normal, which must fail.
+
+Run as: python3 o2zero.py; it writes beside itself.
+"""
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+B_CODE = "B = 3b-53 + 1b-102;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+HEAD = """# restates: crates/rcad-predicates/src/orient2d.rs on_floats at 6a4a814c
+# restates: crates/rcad-predicates/src/orient2d.rs ORIENT2D_ERROR_BOUND at 6a4a814c
+# restates: crates/rcad-predicates/src/cascade.rs decide at 6a4a814c
+"""
+
+# Each one-zero case, by which product is zero: the differences the other
+# product is made of, its name in on_floats, and its sign in y.
+ONE = {
+    "f": dict(zero="forwards", why="a and c share their x, so acx is zero; with b and c sharing\n# their y instead, bcy is zero",
+              ins=("ay", "bx", "cx", "cy"), d1=("Acy", "ay - cy", "acy"), d2=("Bcx", "bx - cx", "bcx"),
+              live="backwards", y="y = -backwards;", ex="Ex = -(Acy * Bcx);",
+              y_why="0 less backwards is -backwards", e="e = -(backwards * W);",
+              e_hint="e / P -> -((backwards / |backwards|) * W);"),
+    "b": dict(zero="backwards", why="a and c share their y, so acy is zero; with b and c sharing\n# their x instead, bcx is zero",
+              ins=("ax", "by", "cx", "cy"), d1=("Acx", "ax - cx", "acx"), d2=("Bcy", "by - cy", "bcy"),
+              live="forwards", y="y = forwards;", ex="Ex = Acx * Bcy;",
+              y_why="forwards less 0 is forwards", e="e = forwards * W;",
+              e_hint="e / P -> (forwards / |forwards|) * W;"),
+}
+
+
+def one_zero(which, tiny=False, b=B_CODE, eb_normal=True):
+    c = ONE[which]
+    (D1, d1_def, d1), (D2, d2_def, d2) = c["d1"], c["d2"]
+    live, zero = c["live"], c["zero"]
+    lines = [
+        HEAD.rstrip("\n"),
+        f"# Orient2d::on_floats where {c['why']}, and every number below is the",
+        f"# same. Either way {zero} is the double 0. {d1} * {d2} is at "
+        + ("most" if tiny else "least") + " 2^-1000.",
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The four coordinates left, each an f64.",
+        " ".join(f"{v} = rnd({v}_);" for v in c["ins"]),
+        "",
+        "# What on_floats computes, line for line. The zero difference is exactly",
+        f"# 0, and so is {zero}; {c['y_why']}, and |forwards| plus",
+        f"# |backwards| is |{live}| (464.13's addzero.g).",
+        f"{D1} = {d1_def}; {D2} = {d2_def};",
+        f"{d1} = rnd({D1}); {d2} = rnd({D2});",
+        f"G = {d1} * {d2};",
+        f"{live} = rnd(G);",
+        c["y"],
+        "value = rnd(y);",
+        f"P = |{live}|;",
+        "",
+        b,
+        "eb = rnd(B * P);",
+        "",
+        "# The true determinant of the same inputs, the zero difference being zero.",
+        c["ex"],
+        "",
+        "# What each rounding multiplied its argument by.",
+        f"r1 = {d1} / {D1}; r2 = {d2} / {D2}; rp = {live} / G;",
+        "",
+        f"# {live} less the product of the exact differences, as a fraction of it.",
+        "W = 1 - 1 / (r1 * r2 * rp);",
+        c["e"],
+        "",
+        "{",
+        "  # Every coordinate is a finite f64.",
+        "     " + " /\\ ".join(f"|{v}| <= 1b1024" for v in c["ins"]),
+        "  # The other two differences are not zero.",
+        f"  /\\ |{d1}| >= 1b-1074 /\\ |{d2}| >= 1b-1074",
+    ]
+    if tiny:
+        lines += [f"  # The case: {d1} * {d2} is at most 2^-1000.", "  /\\ |G| <= 1b-1000"]
+    else:
+        lines += [f"  # The case: {d1} * {d2} is far above the normals.", "  /\\ |G| >= 1b-1000"]
+    if eb_normal:
+        lines += ["  # The bound is normal, which decide checks.", "  /\\ |eb| >= 1b-1022"]
+        if not tiny:
+            lines += ["  # What lemma.g proves that gives.", f"  /\\ eb -/ B * P {LEMMA}"]
+    if not tiny:
+        lines += ["  # x / |x| is in [-1, 1] for any x that is not zero.", f"  /\\ {live} / |{live}| in [-1, 1]"]
+    lines += [
+        "->",
+        "  eb in ?" if tiny else "  e / P in ?",
+        "  /\\ (y - Ex) / eb in [-1, 1]",
+        "}",
+        "",
+        "# How far each rounding is from the identity.",
+        f"{d1} / {D1} -> 1 + ({d1} - {D1}) / {D1};",
+        f"{d2} / {D2} -> 1 + ({d2} - {D2}) / {D2};",
+        f"{live} / G -> 1 + ({live} - G) / G;",
+        "",
+        f"# {zero} is zero, so y less the truth is {live}'s error alone.",
+        "(y - Ex) / eb -> (e / P) * (P / eb);",
+        c["e_hint"],
+        "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def both_zero(eb_normal=True):
+    lines = [
+        HEAD.rstrip("\n"),
+        "# Orient2d::on_floats where both products are the double 0: one of acx and",
+        "# bcy is zero, and one of acy and bcx. Then forwards less backwards is 0,",
+        "# and so are the permanent and the true determinant, a zero difference",
+        "# being exactly zero.",
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "y = 0;",
+        "value = rnd(y);",
+        "P = 0;",
+        "",
+        B_CODE,
+        "eb = rnd(B * P);",
+        "",
+        "Ex = 0;",
+        "",
+        "{",
+    ]
+    if eb_normal:
+        lines += ["  # The bound is normal, which decide checks.", "     |eb| >= 1b-1022"]
+    else:
+        lines += ["  # Nothing: without eb normal there is no hypothesis left.", "     P in [0, 0]"]
+    lines += ["->", "  eb in ?", "  /\\ (y - Ex) / eb in [-1, 1]", "}"]
+    return "\n".join(lines) + "\n"
+
+
+if __name__ == "__main__":
+    for which in ONE:
+        open(f"o2z{which}.g", "w").write(one_zero(which))
+        open(f"c_o2z{which}_half.g", "w").write(one_zero(which, b=B_HALF))
+        open(f"o2z{which}_tiny.g", "w").write(one_zero(which, tiny=True))
+        open(f"c_o2z{which}_tiny_noeb.g", "w").write(one_zero(which, tiny=True, eb_normal=False))
+    open("o2zfb.g", "w").write(both_zero())
+    open("c_o2zfb_noeb.g", "w").write(both_zero(eb_normal=False))
+    print("5 cases and 5 controls")
+```
+
+`runmany.sh`, which runs a list of scripts through `one.sh` eight at a time:
+
+```sh
+#!/bin/bash
+# Run every .g named in $1 through one.sh, 8 at a time, appending to $1.log.
+cd "$(dirname "$0")"
+rm -f "$1.log"
+xargs -P 8 -I{} bash one.sh {} "$2" < "$1" >> "$1.log" 2>&1
+echo "done $(wc -l < "$1") files from $1"
+```
+
+`allplane.sh`, which printed `cases took 45.4s`, `cases exit 0: 173 of 173`,
+`cases coq ok: 173`, `cases pointless: 0`, `controls exit 1: 236 of 236`,
+`controls pointless: 0` and the lines of 4 and 6:
+
+```sh
+#!/bin/bash
+# Run every plane script planeall.py writes: the cases and planev_off0.g with
+# coq, the controls without, then count what each printed.
+cd "$(dirname "$0")"
+python3 planeall.py
+ls plane_*.g planev_off0.g > list_plane
+ls c_plane*.g > list_c
+start=$(date +%s.%N)
+bash runmany.sh list_plane coq
+end=$(date +%s.%N)
+printf 'cases took %.1fs\n' "$(echo "$end - $start" | bc)"
+bash runmany.sh list_c nocoq
+echo "cases exit 0: $(grep -c ' exit 0 [0-9.]*s$' list_plane.log) of $(wc -l < list_plane)"
+echo "cases coq ok: $(grep -c 'coq -Bcoq exit 0 coqc exit 0' list_plane.log)"
+echo "cases pointless: $(grep -l pointless plane_*.out planev_off0.out | wc -l)"
+echo "controls exit 1: $(grep -c ' exit 1 ' list_c.log) of $(wc -l < list_c)"
+echo "controls pointless: $(grep -l pointless c_plane*.out | wc -l)"
+grep '^planev_off0 coq' list_plane.log
+grep -h 'value - y in' planev_off0.out
+grep -h 'best' c_planev_off0_half.out
+python3 controls.py
+python3 summary.py > summary.txt
+echo "summary lines: $(wc -l < summary.txt)"
+```
+
+`o2run.sh`, which printed the lines of 5 and 6 for the orient2d scripts:
+
+```sh
+#!/bin/bash
+# Write and run the orient2d zero-difference scripts and their controls.
+cd "$(dirname "$0")"
+python3 o2zero.py
+ls o2z*.g > list_o2z
+ls c_o2z*.g > list_o2zc
+bash runmany.sh list_o2z coq
+bash runmany.sh list_o2zc nocoq
+sort list_o2z.log list_o2zc.log
+for f in o2z*.out c_o2z*.out; do
+  printf '%s pointless: %s\n' "${f%.out}" "$(grep -c pointless "$f")"
+  grep -E ' in \[|best' "$f"
+done
+```
+
+`plane_ppn.g`, as `planeall.py` writes it: the first two products below the
+normals and positive, the third normal, no sum cancelling. It prints `P` at
+least `1125899906842623b-1021`, `(e0 + e1 + e2) / P3x` within `2u + 3u²` by
+`summary.py`'s count, and `d0 + d1` within `9007199254740993b-1127`,
+`2⁻¹⁰⁷⁴ + 2⁻¹¹²⁷`.
+
+```gappa
+# restates: crates/rcad-geom/src/plane.rs on_floats at 6a4a814c
+# restates: crates/rcad-geom/src/plane.rs SIDE_OF_PLANE_ERROR_BOUND at 6a4a814c
+# restates: crates/rcad-predicates/src/cascade.rs decide at 6a4a814c
+# SideOfAFlatSurface::on_floats without its three product_is_normal checks:
+# the sign of n . p - off. Products: n0 * p0 below the normals and positive, n1 * p1 below the normals and positive, n2 * p2 normal.
+@rnd = float<ieee_64, ne>;
+
+# The normal, the point and the offset, each an f64. A zero product has
+# the double 0 for its point's coordinate; with the normal's zero instead,
+# every number below is the same.
+n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);
+p0 = rnd(p0_); p1 = rnd(p1_); p2 = rnd(p2_);
+off = rnd(off_);
+
+# What on_floats computes, line for line. Adding a zero product to a double
+# gives that double back (464.13's addzero.g), so zero products are left
+# out of both folds.
+X0 = n0 * p0; X1 = n1 * p1;
+t0 = rnd(X0); t1 = rnd(X1); t2 = rnd(n2 * p2);
+S1 = t0 + t1;
+s1 = rnd(S1);
+S2 = s1 + t2;
+s2 = rnd(S2);
+y = s2 - off;
+value = rnd(y);
+
+# The permanent folds the same products' magnitudes in the same order.
+P = rnd(rnd(rnd(t0 + t1) + |t2|) + |off|);
+Phat = t0 + t1 + |t2| + |off|;
+
+B = 4b-53 + 1b-101;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Ex = X0 + X1 + n2 * p2 - off;
+
+# The products' part of the permanent, with no rounding of its own, and
+# the same with X in place of what each product below the normals rounds to.
+P3 = t0 + t1 + |t2|;
+c0 = X0; c1 = X1; c2 = |t2|;
+P3x = c0 + c1 + c2;
+
+# What each rounding multiplied its argument by.
+rp2 = t2 / (n2 * p2);
+rs1 = s1 / S1; rs2 = s2 / S2;
+
+# Each term as y carries it less the term: e as a fraction of the term,
+# with X for each product below the normals, and d what rounding X cost.
+W0 = rs1 * rs2 - 1;
+W1 = rs1 * rs2 - 1;
+W2 = rs2 - 1 / rp2;
+e0 = X0 * W0; e1 = X1 * W1; e2 = t2 * W2;
+d0 = (t0 - X0) * (rs1 * rs2); d1 = (t1 - X1) * (rs1 * rs2);
+
+{
+  # Every input is a finite f64.
+     |n0| <= 1b1024 /\ |n1| <= 1b1024 /\ |n2| <= 1b1024
+  /\ |p0| <= 1b1024 /\ |p1| <= 1b1024 /\ |p2| <= 1b1024 /\ |off| <= 1b1024
+  # No factor of a normal product is zero.
+  /\ |n2| >= 1b-1074 /\ |p2| >= 1b-1074
+  # No rounded sum cancels to zero.
+  /\ |S1| >= 1b-1074 /\ |S2| >= 1b-1074
+  # The products below the normals. A product of two doubles that are not
+  # zero is at least 2^-2148.
+  /\ X0 in [1b-2148, 1b-1022] /\ X1 in [1b-2148, 1b-1022]
+  # The normal products, as product_is_normal has them.
+  /\ |t2| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those gives.
+  /\ t2 -/ n2 * p2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ t2 / |t2| in [-1, 1]
+->
+  (e0 + e1 + e2) / P3x in ? /\ d0 + d1 in ? /\ P in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+t2 / (n2 * p2) -> 1 + (t2 - n2 * p2) / (n2 * p2);
+s1 / S1 -> 1 + (s1 - S1) / S1;
+s2 / S2 -> 1 + (s2 - S2) / S2;
+
+# The relative part is averaged over P3x as in plane.g; what rounding each
+# X cost is an amount, and eb being normal keeps it small against eb.
+(y - Ex) / eb -> ((e0 + e1 + e2) / P3x) * (P3x / P) * (P / eb) + (d0 + d1) / eb;
+(e0 + e1 + e2) / P3x -> ((P3x + (e0 + e1 + e2)) - P3x) / P3x;
+P3x + (e0 + e1 + e2) -> (c0 + e0) + (c1 + e1) + (c2 + e2);
+(c0 + e0) - c0 -> e0;
+(c1 + e1) - c1 -> e1;
+(c2 + e2) - c2 -> e2;
+e0 / c0 -> W0;
+e1 / c1 -> W1;
+e2 / c2 -> (t2 / |t2|) * W2;
+P3x / P -> (P3 / Phat) * (Phat / P) + (X0 - t0) / P + (X1 - t1) / P;
+P3 / Phat -> 1 / (1 + |off| / P3);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+P -> eb / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+`plane_ppp.g`, as `planeall.py` writes it: all three products below the
+normals and positive, no sum cancelling. It prints `y − Ex` within
+`5b-1075`, one `2⁻¹⁰⁷⁵` for each of its five roundings.
+
+```gappa
+# restates: crates/rcad-geom/src/plane.rs on_floats at 6a4a814c
+# restates: crates/rcad-geom/src/plane.rs SIDE_OF_PLANE_ERROR_BOUND at 6a4a814c
+# restates: crates/rcad-predicates/src/cascade.rs decide at 6a4a814c
+# SideOfAFlatSurface::on_floats without its three product_is_normal checks:
+# the sign of n . p - off. Products: n0 * p0 below the normals and positive, n1 * p1 below the normals and positive, n2 * p2 below the normals and positive.
+@rnd = float<ieee_64, ne>;
+
+# The normal, the point and the offset, each an f64. A zero product has
+# the double 0 for its point's coordinate; with the normal's zero instead,
+# every number below is the same.
+n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);
+p0 = rnd(p0_); p1 = rnd(p1_); p2 = rnd(p2_);
+off = rnd(off_);
+
+# What on_floats computes, line for line. Adding a zero product to a double
+# gives that double back (464.13's addzero.g), so zero products are left
+# out of both folds.
+X0 = n0 * p0; X1 = n1 * p1; X2 = n2 * p2;
+t0 = rnd(X0); t1 = rnd(X1); t2 = rnd(X2);
+S1 = t0 + t1;
+s1 = rnd(S1);
+S2 = s1 + t2;
+s2 = rnd(S2);
+y = s2 - off;
+value = rnd(y);
+
+# The permanent folds the same products' magnitudes in the same order.
+P = rnd(rnd(rnd(t0 + t1) + t2) + |off|);
+Phat = t0 + t1 + t2 + |off|;
+
+B = 4b-53 + 1b-101;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Ex = X0 + X1 + X2 - off;
+
+# No product is normal, so every error is an amount: what rounding each
+# X cost and what rounding each sum cost.
+
+{
+  # Every input is a finite f64.
+     |n0| <= 1b1024 /\ |n1| <= 1b1024 /\ |n2| <= 1b1024
+  /\ |p0| <= 1b1024 /\ |p1| <= 1b1024 /\ |p2| <= 1b1024 /\ |off| <= 1b1024
+  # No rounded sum cancels to zero.
+  /\ |S1| >= 1b-1074 /\ |S2| >= 1b-1074
+  # The products below the normals. A product of two doubles that are not
+  # zero is at least 2^-2148.
+  /\ X0 in [1b-2148, 1b-1022] /\ X1 in [1b-2148, 1b-1022] /\ X2 in [1b-2148, 1b-1022]
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+->
+  y - Ex in ? /\ P in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# y less the truth is what each rounding cost, as an amount.
+y - Ex -> (t0 - X0) + (t1 - X1) + (t2 - X2) + (s1 - S1) + (s2 - S2);
+```
+
+`o2zf.g`, as `o2zero.py` writes it: `forwards` zero and `acy · bcx` at least
+`2⁻¹⁰⁰⁰` in magnitude. It prints `e / P` within `3.33067e-16`.
+
+```gappa
+# restates: crates/rcad-predicates/src/orient2d.rs on_floats at 6a4a814c
+# restates: crates/rcad-predicates/src/orient2d.rs ORIENT2D_ERROR_BOUND at 6a4a814c
+# restates: crates/rcad-predicates/src/cascade.rs decide at 6a4a814c
+# Orient2d::on_floats where a and c share their x, so acx is zero; with b and c sharing
+# their y instead, bcy is zero, and every number below is the
+# same. Either way forwards is the double 0. acy * bcx is at least 2^-1000.
+@rnd = float<ieee_64, ne>;
+
+# The four coordinates left, each an f64.
+ay = rnd(ay_); bx = rnd(bx_); cx = rnd(cx_); cy = rnd(cy_);
+
+# What on_floats computes, line for line. The zero difference is exactly
+# 0, and so is forwards; 0 less backwards is -backwards, and |forwards| plus
+# |backwards| is |backwards| (464.13's addzero.g).
+Acy = ay - cy; Bcx = bx - cx;
+acy = rnd(Acy); bcx = rnd(Bcx);
+G = acy * bcx;
+backwards = rnd(G);
+y = -backwards;
+value = rnd(y);
+P = |backwards|;
+
+B = 3b-53 + 1b-102;
+eb = rnd(B * P);
+
+# The true determinant of the same inputs, the zero difference being zero.
+Ex = -(Acy * Bcx);
+
+# What each rounding multiplied its argument by.
+r1 = acy / Acy; r2 = bcx / Bcx; rp = backwards / G;
+
+# backwards less the product of the exact differences, as a fraction of it.
+W = 1 - 1 / (r1 * r2 * rp);
+e = -(backwards * W);
+
+{
+  # Every coordinate is a finite f64.
+     |ay| <= 1b1024 /\ |bx| <= 1b1024 /\ |cx| <= 1b1024 /\ |cy| <= 1b1024
+  # The other two differences are not zero.
+  /\ |acy| >= 1b-1074 /\ |bcx| >= 1b-1074
+  # The case: acy * bcx is far above the normals.
+  /\ |G| >= 1b-1000
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves that gives.
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ backwards / |backwards| in [-1, 1]
+->
+  e / P in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+acy / Acy -> 1 + (acy - Acy) / Acy;
+bcx / Bcx -> 1 + (bcx - Bcx) / Bcx;
+backwards / G -> 1 + (backwards - G) / G;
+
+# forwards is zero, so y less the truth is backwards's error alone.
+(y - Ex) / eb -> (e / P) * (P / eb);
+e / P -> -((backwards / |backwards|) * W);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
+
+**10. What this leaves.** One row, filed from this write-up when it merges:
+
+- A row to restate the last paragraph of `ORIENT2D_ERROR_BOUND`'s doc
+  (`orient2d.rs:359-360` at `6a4a814c`), which says the bound "still holds
+  only while nothing overflows or falls into the subnormals". 464.8's 2
+  proves it with one or both products below the normals, and 5 here with a
+  difference zero, and 7 found the same words false in `plane.rs`. The
+  paragraph above it in the same doc already says so; the last one reads
+  against it.
+
+And what is not a row:
+
+- Q2760 is the same work for `SideOfAFlatSurfaceThroughAPoint`'s six
+  products, and is open.
+- Q2767, on the doc of `product_is_normal` in `cascade.rs`, already waits on
+  Q2684. 7 here is a second predicate, after 464.14's sphere, where that doc's
+  claim does not hold: without its checks, a product below the normals would
+  not make this filter certify a sign it has not earned.
+- Q2700 already waits on Q2684, and moves these scripts into `proofs/gappa/`
+  with the others that rows of 464 appended.
+- Whether dropping the three checks would turn a refusal at level 1 into an
+  answer was not run (7). The checks stay, so nothing asks for it (§13).
+- `ORIENT2D_ERROR_BOUND`'s doc says Gappa proves the bound "in every case of
+  where the two products can land" and cites 464.8 alone. With 5 that
+  sentence holds as it stands.
+- `field` on these scripts' hints (464.10).

@@ -9347,6 +9347,15 @@ check-fuzz-overnight-selftest:
     # silently drops tonight's scratch directory: the scratch is moved aside
     # with a timestamp, the persistent corpus is left exactly as it was, and
     # the night names it under TO LOOK AT (Q237 item 5).
+    #
+    # Shares twenty_one's exposure to `left`, computed once before the
+    # for-loop that starts every target and never refreshed inside it: a
+    # setup slow enough to eat the whole window skips every target,
+    # including the reader, before this arm's merge-failure path ever runs
+    # (§295.7). The grep right after `run` below is the same check
+    # twenty_one now makes, so a future skip under load fails with its own
+    # clear message instead of looking like a merge-failure symptom that
+    # never happened.
     nineteen() {
     : >"$dir/log"
     reader_persistent="$dir/corpus/no_step_file_makes_the_reader_panic"
@@ -9355,6 +9364,8 @@ check-fuzz-overnight-selftest:
     echo "an earlier night's minimized find" >"$reader_persistent/kept-from-before"
     status=0
     STUB_MERGE_FAIL=1 run 8 || status=$?
+    grep -q 'fuzz run no_step_file_makes_the_reader_panic .*max_total_time' "$dir/log" \
+        || fail "the night never started the reader target, so this arm proves nothing about the merge: $(cat "$dir/out")"
     [ "$status" -ne 0 ] \
         || fail "a failing reader-corpus merge did not fail the night"
     [ "$(cat "$reader_persistent/kept-from-before")" = "an earlier night's minimized find" ] \
