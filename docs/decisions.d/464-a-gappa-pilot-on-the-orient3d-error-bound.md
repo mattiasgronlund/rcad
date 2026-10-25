@@ -12443,3 +12443,252 @@ And what is not a row:
   where the two products can land" and cites 464.8 alone. With 5 that
   sentence holds as it stands.
 - `field` on these scripts' hints (464.10).
+
+### 464.19 Isometry::POINT_ROUNDOFF
+
+*Unfinished: Q2689's first lane, on 2026-10-25 at `ba0a654e`, handed over
+here. The script below proves its goal; its controls, `gappa -Bcoq` and
+`coqc` have not been run, and the write-up is to come.*
+
+`point.g` restates `Isometry::apply_to_point` (`isometry.rs:296-307`) on the
+`None` arm of `turned_by` (`isometry.rs:513-520`), which is nalgebra 0.35's
+`UnitQuaternion * Vector3` (`src/geometry/quaternion_ops.rs:377-388`): `t =
+(v × p) * 2`, `k = v × t`, `t * w + k + p`, each `cross` component `a*b −
+c*d` (`src/base/matrix.rs:2101-2106`), then `+ shift`. It writes the moved
+point's `x`; `y` and `z` are the same lines with the indices turned `0 → 1 →
+2 → 0`. The error is split into the eight terms of the exact value, each
+charged for every rounding it passes through, and averaged as `signed.g`
+averages (464.9). The shares sum to `D = L · (12|w|(|v₁| + |v₂|) + 14(|v₀|(|v₁|
++ |v₂|) + |v₁|² + |v₂|²) + 3)`, and the hint on `D / L` writes that as `109/5
+· q·q` less four squares, which `sos.py` checks in exact rationals. The
+largest `D / L` over unit quaternions is `10 + √219 = 24.80`.
+
+One run, `gappa -Eprecision=200 point.g` under 464.4's pin, exit 0: the goal
+`(out − Ex) / L in [-36b-53, 36b-53]`, the code's `18ε`, proves. It printed
+`D / L` in `[3, 24.8]` and `(out − Ex) / D` within `±1.28857e-16`, about
+`1.16u`, so the proof reaches about `28.8u`. No hint was reported as not an
+identity. `rt0` to `rt2`, the doubling, come out within `u` rather than at
+`1`, which is why `W1` prints `±7u` and not `±6u`.
+
+`point.g`, as it ran:
+
+```gappa
+# Isometry::apply_to_point and Isometry::POINT_ROUNDOFF,
+# crates/rcad-geom/src/isometry.rs at ba0a654e, through nalgebra 0.35's
+# UnitQuaternion * Vector3 (src/geometry/quaternion_ops.rs:377-388): the
+# moved point's x is within 18 * f64::EPSILON * L of what the same arithmetic
+# gives without rounding, L at least every |p_i| and |s_i|. y and z are this
+# with the indices turned 0 -> 1 -> 2 -> 0, which turns every line below into
+# its own kind.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v), the point and the shift's x, each an f64.
+w = rnd(w_); v0 = rnd(v0_); v1 = rnd(v1_); v2 = rnd(v2_);
+p0 = rnd(p0_); p1 = rnd(p1_); p2 = rnd(p2_);
+s0 = rnd(s0_);
+
+# c = v x p, as nalgebra's cross writes each component: a*b - c*d.
+P01 = v1 * p2; q01 = rnd(P01); P02 = v2 * p1; q02 = rnd(P02);
+C0 = q01 - q02; c0 = rnd(C0);
+P11 = v2 * p0; q11 = rnd(P11); P12 = v0 * p2; q12 = rnd(P12);
+C1 = q11 - q12; c1 = rnd(C1);
+P21 = v0 * p1; q21 = rnd(P21); P22 = v1 * p0; q22 = rnd(P22);
+C2 = q21 - q22; c2 = rnd(C2);
+
+# t = c * 2, which rounds nothing.
+t0 = rnd(c0 * 2); t1 = rnd(c1 * 2); t2 = rnd(c2 * 2);
+
+# k = v x t, its x.
+K1 = v1 * t2; k01 = rnd(K1); K2 = v2 * t1; k02 = rnd(K2);
+KK = k01 - k02; k0 = rnd(KK);
+
+# t * w + k + p, folded left to right, then + the shift.
+M = t0 * w; m0 = rnd(M);
+A = m0 + k0; a0 = rnd(A);
+R = a0 + p0; r0 = rnd(R);
+O = r0 + s0; out = rnd(O);
+
+# The same arithmetic without rounding.
+Ex = 2 * w * (v1 * p2 - v2 * p1)
+   + v1 * (2 * (v0 * p1 - v1 * p0)) - v2 * (2 * (v2 * p0 - v0 * p2))
+   + p0 + s0;
+
+# What each rounding multiplied its argument by.
+rq01 = q01 / P01; rq02 = q02 / P02; rq11 = q11 / P11; rq12 = q12 / P12;
+rq21 = q21 / P21; rq22 = q22 / P22;
+rc0 = c0 / C0; rc1 = c1 / C1; rc2 = c2 / C2;
+rk01 = k01 / K1; rk02 = k02 / K2; rk0 = k0 / KK;
+rm = m0 / M; ra = a0 / A; rr = r0 / R; ro = out / O;
+rt0 = t0 / (c0 * 2); rt1 = t1 / (c1 * 2); rt2 = t2 / (c2 * 2);
+
+# The eight terms of Ex, each as out carries it, less the term itself: six
+# roundings for the two through w, seven for the four through k, two for p0
+# and one for s0, and the doubling, which Gappa finds rounds nothing.
+W1 = ro * rr * ra * rm * rt0 * rc0 * rq01 - 1;
+W2 = ro * rr * ra * rm * rt0 * rc0 * rq02 - 1;
+W3 = ro * rr * ra * rk0 * rk01 * rt2 * rc2 * rq21 - 1;
+W4 = ro * rr * ra * rk0 * rk01 * rt2 * rc2 * rq22 - 1;
+W5 = ro * rr * ra * rk0 * rk02 * rt1 * rc1 * rq11 - 1;
+W6 = ro * rr * ra * rk0 * rk02 * rt1 * rc1 * rq12 - 1;
+W7 = ro * rr - 1;
+W8 = ro - 1;
+e1 = 2 * w * v1 * p2 * W1; e2 = -(2 * w * v2 * p1 * W2);
+e3 = 2 * v1 * v0 * p1 * W3; e4 = -(2 * v1 * v1 * p0 * W4);
+e5 = -(2 * v2 * v2 * p0 * W5); e6 = 2 * v2 * v0 * p2 * W6;
+e7 = p0 * W7 + s0 * W8;
+
+# Each term's share of the bound: its size with L for the point's coordinate,
+# times the roundings it meets. p0 and s0 share one, 2L + L, since Gappa
+# 1.8.0 aborts in ast.cpp printing a warning about a D that holds both.
+d1 = 12 * |w| * |v1| * L; d2 = 12 * |w| * |v2| * L;
+d3 = 14 * |v1| * |v0| * L; d4 = 14 * |v1| * |v1| * L;
+d5 = 14 * |v2| * |v2| * L; d6 = 14 * |v2| * |v0| * L;
+d7 = 3 * L;
+D = d1 + d2 + d3 + d4 + d5 + d6 + d7;
+
+# q.q, each square written as |x| * |x|, and the four squares D / L is
+# written with below.
+N4 = |w| * |w| + |v0| * |v0| + |v1| * |v1| + |v2| * |v2|;
+X = |w| - 30/109 * (|v1| + |v2|);
+Y = |v0| - 35/109 * (|v1| + |v2|);
+Z = |v1| - |v2|;
+
+{
+  # Every input is a finite f64.
+     |w| <= 1b1024 /\ |v0| <= 1b1024 /\ |v1| <= 1b1024 /\ |v2| <= 1b1024
+  /\ |p0| <= 1b1024 /\ |p1| <= 1b1024 /\ |p2| <= 1b1024 /\ |s0| <= 1b1024
+  # No factor of a product is zero.
+  /\ |w| >= 1b-1074 /\ |v0| >= 1b-1074 /\ |v1| >= 1b-1074 /\ |v2| >= 1b-1074
+  /\ |p0| >= 1b-1074 /\ |p1| >= 1b-1074 /\ |p2| >= 1b-1074
+  # No sum cancels to zero.
+  /\ |C0| >= 1b-1074 /\ |C1| >= 1b-1074 /\ |C2| >= 1b-1074 /\ |KK| >= 1b-1074
+  /\ |A| >= 1b-1074 /\ |R| >= 1b-1074 /\ |O| >= 1b-1074
+  # The nine products are normal, which apply_to_point does not check.
+  /\ |q01| >= 1b-1022 /\ |q02| >= 1b-1022 /\ |q11| >= 1b-1022
+  /\ |q12| >= 1b-1022 /\ |q21| >= 1b-1022 /\ |q22| >= 1b-1022
+  /\ |k01| >= 1b-1022 /\ |k02| >= 1b-1022 /\ |m0| >= 1b-1022
+  # What lemma.g proves each of those nine gives.
+  /\ q01 -/ P01 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q02 -/ P02 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q11 -/ P11 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q12 -/ P12 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q21 -/ P21 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q22 -/ P22 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ k01 -/ K1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ k02 -/ K2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ m0 -/ M in [-4503599627370497b-105, 4503599627370497b-105]
+  # L is at least every coordinate of the point and the shift.
+  /\ L in [1b-1074, 1b1024]
+  /\ p0 / L in [-1, 1] /\ p1 / L in [-1, 1] /\ p2 / L in [-1, 1]
+  /\ s0 / L in [-1, 1]
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53.
+  /\ N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ w / |w| in [-1, 1] /\ v0 / |v0| in [-1, 1]
+  /\ v1 / |v1| in [-1, 1] /\ v2 / |v2| in [-1, 1]
+->
+  W1 in ? /\ W3 in ? /\ W7 in ? /\ W8 in ? /\ D / L in ?
+  /\ (out - Ex) / D in ?
+  /\ (out - Ex) / L in [-36b-53, 36b-53]
+}
+
+# How far each rounding is from the identity.
+q01 / P01 -> 1 + (q01 - P01) / P01;
+q02 / P02 -> 1 + (q02 - P02) / P02;
+q11 / P11 -> 1 + (q11 - P11) / P11;
+q12 / P12 -> 1 + (q12 - P12) / P12;
+q21 / P21 -> 1 + (q21 - P21) / P21;
+q22 / P22 -> 1 + (q22 - P22) / P22;
+c0 / C0 -> 1 + (c0 - C0) / C0;
+c1 / C1 -> 1 + (c1 - C1) / C1;
+c2 / C2 -> 1 + (c2 - C2) / C2;
+t0 / (c0 * 2) -> 1 + (t0 - c0 * 2) / (c0 * 2);
+t1 / (c1 * 2) -> 1 + (t1 - c1 * 2) / (c1 * 2);
+t2 / (c2 * 2) -> 1 + (t2 - c2 * 2) / (c2 * 2);
+k01 / K1 -> 1 + (k01 - K1) / K1;
+k02 / K2 -> 1 + (k02 - K2) / K2;
+k0 / KK -> 1 + (k0 - KK) / KK;
+m0 / M -> 1 + (m0 - M) / M;
+a0 / A -> 1 + (a0 - A) / A;
+r0 / R -> 1 + (r0 - R) / R;
+out / O -> 1 + (out - O) / O;
+
+# The error is the sum of the seven shares' errors, each a fraction of its
+# own share of D; add_rr then averages them.
+(out - Ex) / L -> ((out - Ex) / D) * (D / L);
+(out - Ex) / D -> ((D + (out - Ex)) - D) / D;
+D + (out - Ex) -> (d1 + e1) + (d2 + e2) + (d3 + e3) + (d4 + e4)
+                + (d5 + e5) + (d6 + e6) + (d7 + e7);
+(d1 + e1) - d1 -> e1;
+(d2 + e2) - d2 -> e2;
+(d3 + e3) - d3 -> e3;
+(d4 + e4) - d4 -> e4;
+(d5 + e5) - d5 -> e5;
+(d6 + e6) - d6 -> e6;
+(d7 + e7) - d7 -> e7;
+e1 / d1 -> (w / |w|) * (v1 / |v1|) * (p2 / L) * (W1 / 6);
+e2 / d2 -> -((w / |w|) * (v2 / |v2|) * (p1 / L) * (W2 / 6));
+e3 / d3 -> (v1 / |v1|) * (v0 / |v0|) * (p1 / L) * (W3 / 7);
+e4 / d4 -> -((v1 / |v1|) * (v1 / |v1|) * (p0 / L) * (W4 / 7));
+e5 / d5 -> -((v2 / |v2|) * (v2 / |v2|) * (p0 / L) * (W5 / 7));
+e6 / d6 -> (v2 / |v2|) * (v0 / |v0|) * (p2 / L) * (W6 / 7);
+e7 / d7 -> ((p0 / L) * W7 + (s0 / L) * W8) / 3;
+
+# D / L is 3 and a quadratic in |w|, |v0|, |v1|, |v2|, and that quadratic is
+# 109/5 q.q less four squares: Gappa bounds each square below by zero.
+D / L -> 109/5 * N4 - (109/5 * (X * X) + 109/5 * (Y * Y) + 425/109 * (Z * Z)
+                       + 1/545 * (|v1| * |v1| + |v2| * |v2|)) + 3;
+```
+
+`sos.py`, as it ran:
+
+```python
+"""Check the identity point.g's D / L hint rests on, in exact rationals, at
+random points: 12|w|s + 14|v0|s + 14(|v1|^2 + |v2|^2), s = |v1| + |v2|,
+equals K N4 less four squares, K = 109/5, N4 = |w|^2 + |v0|^2 + |v1|^2 + |v2|^2.
+Then the largest D / L over unit quaternions, by a grid, against K + 3."""
+
+from fractions import Fraction as F
+import math
+import random
+
+K = F(109, 5)
+random.seed(1)
+for _ in range(1000):
+    aw, a0, a1, a2 = (F(random.randint(0, 10**6), 10**6) for _ in range(4))
+    s = a1 + a2
+    lhs = 12 * aw * s + 14 * a0 * s + 14 * (a1 * a1 + a2 * a2)
+    X = aw - F(30, 109) * s
+    Y = a0 - F(35, 109) * s
+    Z = a1 - a2
+    rhs = K * (aw * aw + a0 * a0 + a1 * a1 + a2 * a2) - (
+        K * X * X + K * Y * Y + F(425, 109) * Z * Z + F(1, 545) * (a1 * a1 + a2 * a2)
+    )
+    assert lhs == rhs
+print("identity holds at 1000 random points")
+print("K =", float(K), "root of K^2 - 14K - 170:", 7 + math.sqrt(219))
+
+best = 0.0
+n = 200
+for i in range(n + 1):
+    for j in range(n + 1):
+        for k in range(n + 1):
+            aw, a1, a2 = i / n, j / n, k / n
+            r = 1 - aw * aw - a1 * a1 - a2 * a2
+            if r < 0:
+                continue
+            a0 = math.sqrt(r)
+            s = a1 + a2
+            f = 12 * aw * s + 14 * a0 * s + 14 * (a1 * a1 + a2 * a2) + 3
+            best = max(best, f)
+print("largest D / L on a 200-step grid of unit quaternions:", best)
+```
+
+It printed:
+
+```text
+identity holds at 1000 random points
+K = 21.8 root of K^2 - 14K - 170: 21.798648586948744
+largest D / L on a 200-step grid of unit quaternions: 24.798304247747573
+```
