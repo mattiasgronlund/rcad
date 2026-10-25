@@ -9,7 +9,8 @@
 //!   which runs into the funnel's skin and out again, so the two cross in two
 //!   loops, one each side of a flat surface;
 //! - two pointed cones of one slope, one leaning a little off the other, whose
-//!   own directions overlap, so they cross in branches that run off for ever.
+//!   own directions overlap, so they cross in branches that run off for ever,
+//!   and which touch at two points, being mirror images of each other.
 //!
 //! Since row Q2667 `intersect` names the funnel and spout's two loops and
 //! `walk` marches them, and those fuses get further. **What each fuse gives now
@@ -58,6 +59,17 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_is_refused_by_every_rule() {
 /// height eight, and the second leans 0.3 radians about the `x` axis through
 /// the point four up the first's axis, less than either's half-angle of about
 /// 0.46 radians.
+///
+/// Turned about a point of the first's axis, the second is the first's mirror
+/// image across the flat surface halfway between their apexes, so the two
+/// **touch** at `(±1.5954, 0.1209, 3.2)`, inside both faces, and their crossing
+/// runs through itself there. The turn's `sin` and `cos` are rounded, so the
+/// two are not exact mirror images, and the branches pass by each other there
+/// rather than through: about `3e-8` apart for the same turn written out with
+/// `sin` and `cos` rounded once each, as `rcad-geom`'s tests write it.
+/// `two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`
+/// in `rcad-geom`
+/// shows the touch on a pair whose numbers are exact.
 ///
 /// Every fuse is refused where `intersect` names the crossing.
 #[test]
