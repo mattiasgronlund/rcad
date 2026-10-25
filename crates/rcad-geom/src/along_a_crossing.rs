@@ -2320,6 +2320,123 @@ mod tests {
         }
     }
 
+    /// A pipe steeper than a cone's skin and off its axis crosses it in two
+    /// loops, one on each nappe, and each runs once round the pipe's axis.
+    ///
+    /// Up `z` beside the apex: the cone of slope 1 with its apex at
+    /// `(1, 0, 0)` and the pipe of radius 4 about `z` cross where
+    /// `z² = 17 − 8 cos φ`, `φ` round the pipe. At `(0, 4, √17)` the cone's way
+    /// out is `(−1, 4, −√17)` and the pipe's `(0, 4, 0)`, so `∇S × ∇T` is
+    /// `(4√17, 0, −4)`: clockwise about `+z` on the loop ahead of the apex, and
+    /// at `(0, 4, −√17)` anticlockwise on the loop behind it.
+    ///
+    /// Leaning: the pipe of radius 2 through `(0, 1, 1)` along `(0, 3, 4)`, 37°
+    /// off the axis of the cone of slope 1 from the origin, whose half-angle is
+    /// 45°. The loop ahead of the apex winds clockwise about the pipe's
+    /// direction and the one behind it anticlockwise, and `ways_out_of_both`
+    /// works that out at each loop rather than taking it from here.
+    ///
+    /// Each pipe stored pointing back down its own axis changes nothing.
+    #[test]
+    fn the_two_loops_a_cone_and_a_steeper_pipe_off_its_axis_cross_in_run_opposite_ways() {
+        let beside_the_apex = (1.0, [0.0, 0.0, 0.0], 4.0, Vector::new(0.0, 0.0, 1.0));
+        let leaning = (0.0, [0.0, 1.0, 1.0], 2.0, Vector::new(0.0, 0.6, 0.8));
+        for (apex_out_along_x, through, radius, along) in [beside_the_apex, leaning] {
+            let cone = crate::Cone::new(
+                Axis::new(
+                    Point::new(apex_out_along_x, 0.0, 0.0),
+                    Vector::new(0.0, 0.0, 1.0),
+                )
+                .expect("an axis"),
+                1.0,
+            )
+            .expect("a slope");
+            for stored in [along, -along] {
+                let pipe = Cylinder::new(
+                    Axis::new(Point::from(through), stored).expect("an axis"),
+                    radius,
+                )
+                .expect("a radius");
+                for nappe in [1.0, -1.0] {
+                    a_loop_round_a_steeper_pipe_is_ordered_the_way_it_runs(
+                        &cone, &pipe, along, nappe,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Three points of the loop on `nappe`'s side of `cone`'s apex, none, one
+    /// and three eighths of a turn round `pipe` anticlockwise about `along`,
+    /// which is square to `x`, are ordered the way `∇S × ∇T` runs there, and
+    /// the pair the other way round orders them the other way.
+    fn a_loop_round_a_steeper_pipe_is_ordered_the_way_it_runs(
+        cone: &crate::Cone,
+        pipe: &Cylinder,
+        along: Vector,
+        nappe: f64,
+    ) {
+        let out = Vector::new(1.0, 0.0, 0.0);
+        let round = along.cross(out);
+        let apex = cone.apex();
+        let up = cone.axis().direction();
+        let slope_squared = cone.slope() * cone.slope();
+        let form = |step: Vector| {
+            let upward = step.dot(up);
+            step.length_squared() - upward * upward - slope_squared * upward * upward
+        };
+        let at = |eighths: i32| -> Point {
+            let angle = core::f64::consts::TAU * f64::from(eighths) / 8.0;
+            let wall =
+                pipe.axis().origin() + (out * angle.cos() + round * angle.sin()) * pipe.radius();
+            let from_the_apex = wall - apex;
+            let squared = form(along);
+            let halfway = from_the_apex.dot(along)
+                - from_the_apex.dot(up) * up.dot(along)
+                - slope_squared * from_the_apex.dot(up) * up.dot(along);
+            let reach = (halfway * halfway - squared * form(from_the_apex)).sqrt();
+            [(-halfway + reach) / squared, (-halfway - reach) / squared]
+                .map(|t| wall + along * t)
+                .into_iter()
+                .find(|point| (*point - apex).dot(up) * nappe > 0.0)
+                .expect("a line of a steeper pipe meets each nappe once")
+        };
+        let quarter = at(2);
+        let from_the_apex = quarter - apex;
+        let upward = from_the_apex.dot(up);
+        let out_of_the_cone = from_the_apex - up * upward - up * (slope_squared * upward);
+        let off_the_axis = quarter - pipe.axis().closest_point(quarter);
+        let runs = out_of_the_cone.cross(off_the_axis);
+        let anticlockwise = runs.dot(along.cross(off_the_axis)) > 0.0;
+        assert_eq!(
+            anticlockwise,
+            nappe < 0.0,
+            "∇S × ∇T is {runs:?} at {quarter:?}"
+        );
+
+        let [cone, pipe] = [Surface::Cone(*cone), Surface::Cylinder(*pipe)];
+        let point = |eighths| PredicatePoint::from(at(eighths).coordinates());
+        let (in_order, out_of_order) = if anticlockwise {
+            (Decision::Pos, Decision::Neg)
+        } else {
+            (Decision::Neg, Decision::Pos)
+        };
+        assert_eq!(
+            which_comes_first_round_a_crossing([&cone, &pipe], point(0), point(1), point(3)),
+            Ok(in_order),
+            "the loop on the nappe {nappe} of {cone:?} with {pipe:?}"
+        );
+        assert_eq!(
+            which_comes_first_round_a_crossing([&cone, &pipe], point(0), point(3), point(1)),
+            Ok(out_of_order)
+        );
+        assert_eq!(
+            which_comes_first_round_a_crossing([&pipe, &cone], point(0), point(1), point(3)),
+            Ok(out_of_order),
+            "and the pair the other way round runs the other way"
+        );
+    }
+
     /// A cone of slope 2 with its apex at `z = 2` and one of slope 1 from the
     /// origin cross where `2|z − 2| = |z|`: at `z = 4`, radius 4, ahead of the
     /// steep apex, and at `z = 4/3`, radius `4/3`, behind it. At `(0, 4, 4)`
