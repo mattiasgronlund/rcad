@@ -231,6 +231,12 @@ fn what_each_fuse_of_a_block_cornered_twice_on_a_round_tabs_rim_comes_to() {
 /// add up to the solid, and the area says that no face is counted twice. Until
 /// Q2790 both were refused `TwoPatchesOfTheMeshDrewTheSameSide`.
 ///
+/// Two of the sliver's three points are at one place, so its one triangle has
+/// no area. It is the one face that measures none, and it is answered with
+/// the charge the solid makes for it and an infinite centroid wobble: when
+/// `measure_one_face` first kept the pair, it panicked there instead, saying
+/// every face of a sound solid has area.
+///
 /// **The closed form.** The plate is the square `[0, 10]²` and three quarters
 /// of the tab's disc, `100 + 6.75π`, top and bottom; the square's sides out of
 /// the tab, `10 + 10 + 7 + 7`, and three quarters of the tab's wall, `4.5π`
@@ -276,22 +282,33 @@ fn a_block_cornered_twice_united_under_the_plates_floor_has_the_two_skins_less_i
             whole.area_error()
         );
         let mut faces = 0.0;
+        let mut with_no_area = Vec::new();
         for face in view.faces() {
-            faces += view
+            let measured = view
                 .measure_one_face(face.key(), deflection, &policy, &mut ProvenanceLog::new())
                 .unwrap_or_else(|why| {
                     panic!(
                         "plate first {plate_first}: face {:?} does not measure: {why:?}",
                         face.key()
                     )
-                })
-                .area();
+                });
+            if measured.area() == 0.0 {
+                with_no_area.push(measured);
+            }
+            faces += measured.area();
         }
         assert_eq!(
             faces.to_bits(),
             whole.surface_area().to_bits(),
             "plate first {plate_first}: its faces add up to {faces} and it measures {}",
             whole.surface_area()
+        );
+        let &[sliver] = &with_no_area[..] else {
+            panic!("plate first {plate_first}: faces with no area {with_no_area:?}")
+        };
+        assert!(
+            sliver.area_error() > 0.0 && sliver.centroid_wobble() == f64::INFINITY,
+            "plate first {plate_first}: the sliver measures {sliver:?}"
         );
     }
 }
