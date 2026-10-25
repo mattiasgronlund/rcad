@@ -656,12 +656,14 @@ fn off_its_axis_a_cone_names_a_ball_and_a_pipe_beside_it_and_refuses_a_pipe_alon
         };
         let facings: Vec<Option<Vector>> = runs
             .iter()
-            .map(|run| match run.run() {
-                EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
-                    [picker @ Picker::InFrontOfAFlatThrough(_)] => picker.facing_of_a_flat(),
-                    other => panic!("{pair:?}: one flat picks each loop, not {other:?}"),
-                },
-                other => panic!("{pair:?}: each loop is a piece of the crossing, not {other:?}"),
+            .map(|run| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("{pair:?}: each loop is a piece of the crossing, not {run:?}");
+                };
+                let [picker @ Picker::InFrontOfAFlatThrough(_)] = picked_by.as_slice() else {
+                    panic!("{pair:?}: one flat picks each loop, not {picked_by:?}");
+                };
+                picker.facing_of_a_flat()
             })
             .collect();
         assert_eq!(

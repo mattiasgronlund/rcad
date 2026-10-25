@@ -223,12 +223,14 @@ fn the_flats_that_pick(answer: Result<SurfaceMeet, Error>) -> Vec<Option<Vector>
         panic!("two loops, and not {answer:?}");
     };
     runs.iter()
-        .map(|run| match run.run() {
-            EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
-                [picker @ Picker::InFrontOfAFlatThrough(_)] => picker.facing_of_a_flat(),
-                other => panic!("one flat picks each loop, not {other:?}"),
-            },
-            other => panic!("each loop is a piece of the crossing, not {other:?}"),
+        .map(|run| {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                panic!("each loop is a piece of the crossing, not {run:?}");
+            };
+            let [picker @ Picker::InFrontOfAFlatThrough(_)] = picked_by.as_slice() else {
+                panic!("one flat picks each loop, not {picked_by:?}");
+            };
+            picker.facing_of_a_flat()
         })
         .collect()
 }

@@ -759,12 +759,14 @@ fn a_countersink_meeting_a_pipe_across_it_crosses_it_in_two_loops_one_each_side_
         };
         let facings: Vec<Option<Vector>> = runs
             .iter()
-            .map(|run| match run.run() {
-                EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
-                    [picker @ Picker::InFrontOfAFlatThrough(_)] => picker.facing_of_a_flat(),
-                    other => panic!("{along:?}: one flat picks each loop, not {other:?}"),
-                },
-                other => panic!("{along:?}: each loop is a piece of the crossing, not {other:?}"),
+            .map(|run| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("{along:?}: each loop is a piece of the crossing, not {run:?}");
+                };
+                let [picker @ Picker::InFrontOfAFlatThrough(_)] = picked_by.as_slice() else {
+                    panic!("{along:?}: one flat picks each loop, not {picked_by:?}");
+                };
+                picker.facing_of_a_flat()
             })
             .collect();
         assert_eq!(
