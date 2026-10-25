@@ -528,9 +528,12 @@ a tilted plane one at a time.
 ### 448.8 A corner whose planes miss one point, read as the point they all run through — 2026-10-25
 
 *Queue row Q2746, from Q2575, which built the reading (merged at
-`955f07d6`). Written down from the code at `2fbc7423`. Q2744's lane is
-widening the reading on a branch of its own. This is the reading before that,
-and a lane that changes it amends this.*
+`955f07d6`). Written down from the code at `2fbc7423`. This is the reading
+before Q2744 widened it (lane tip `1c5a029b1`): a face that a face of another
+solid cuts is read round that face's crowded corners too, and `by_a_plane`
+reads a piece inside the room of such a corner of the solid it is placed
+against. The doc comments of `as_read_round_a_corner`,
+`ACornerReadAsOnePoint` and `by_a_plane` say how.*
 
 **What the reading is.** Take a corner of the input with four or more planes
 round it (`BakedCorner::around`), one of which misses the point `bake` solved
@@ -681,11 +684,13 @@ settled place, so this section files nothing:
   run above).
 - The 2 of the 39 that are refused `Undecidable` on a speck of a wedge face by
   the apex. That face has no corner there, so it is drawn in the true planes:
-  Q2744.
+  Q2744, which draws it round the apex; both are refused at the range check
+  under `certified` now.
 - The 5 of the 8 placements where the order looped by the apex that
-  `tolerant(100)` refuses `ResultIsNotManifold`: Q2745, not traced. Its row
-  guesses that the wedge's edges by the apex, drawn in the true planes, do not
-  pair with the pyramid's, drawn as read.
+  `tolerant(100)` refuses `ResultIsNotManifold`: Q2745. Since Q2744 all five
+  answer by every rule. The `−y` wedge shifted after the turn 0.7 about
+  `(0.3, −1, 2)` is refused `TheFuseWroteABrokenAnswer` by the difference and
+  the union under `tolerant(100)` now: Q2783.
 - An order along a crossing by a node outside every corner's room, or by a
   corner with exactly three planes round it a rounding off the crossing's
   line, is still asked by `as_the_planes_say`, against each cut by that cut's
