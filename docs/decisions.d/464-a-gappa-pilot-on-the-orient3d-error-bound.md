@@ -19,7 +19,8 @@ and settles how the scripts join the tree and what notices the Rust moving
 under them. 464.11 is Q2675, which runs the branches where one of the nine
 differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
 464.13 is Q2678, on the side of a flat surface through a point. 464.14 is
-Q2679, on the side of rcad-geom's sphere.*
+Q2679, on the side of rcad-geom's sphere. 464.15 is Q2680, on the side of
+rcad-geom's cylinder.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -35,6 +36,7 @@ Q2679, on the side of rcad-geom's sphere.*
   464.12  The sphere of surface.rs' tests
   464.13  The side of a flat surface through a point
   464.14  The side of rcad-geom's sphere
+  464.15  The side of rcad-geom's cylinder
 
 ### 464.1 The bugs a bound prover is for
 
@@ -5946,3 +5948,265 @@ And what is not a row:
   10: `just src on_floats crates/rcad-geom/src/sphere.rs` prints the one item,
   at `sphere.rs:241`.
 - `field` on these scripts' hints (464.10).
+
+### 464.15 The side of rcad-geom's cylinder
+
+*Draft, unfinished: the first lane of Q2680 wrote this, and a lane after it
+carries it on. Nothing below is proved yet.*
+
+Q2680 takes up `SIDE_OF_CYLINDER_ERROR_BOUND` in
+`crates/rcad-geom/src/cylinder.rs`, read at `2a7ca9e7`. `u` is `2⁻⁵³`, and the
+code's `B = (10 + 80ε) ε` is `10u + 80u²`, written `B = 10b-53 + 5b-102;`.
+`80ε` is `5 · 2⁻⁴⁹`, a multiple of the ulp of 10, so the Rust's sum and
+product are exact and a double holds `B`.
+
+**What `on_floats` rounds** (`cylinder.rs:300-349`). Three differences `f =
+rnd(point − origin)`; six halves `h`, `k` of the cross product
+(`cross_product_halves`, `cylinder.rs:486-495`), each a rounded product; three
+components `q = rnd(h − k)`; three squares `s = rnd(q · q)`, summed left to
+right into `s012`; the direction's three squares `t = rnd(d · d)`, summed left
+to right into `D`; `rr = rnd(r · r)`; `skin = rnd(rr · D)`; and `value =
+rnd(s012 − skin)`. The permanent squares each component's reach, `v =
+rnd(n · n)` with `n = rnd(|h| + |k|)`, and sums `rnd(rnd(rnd(vx + vy) + vz) +
+skin)`. `product_is_normal` is checked on the six halves
+(`cross_product_halves_if_normal`, `cylinder.rs:467-480`), the three component
+squares, the three direction squares, `rr` and `skin` (`cylinder.rs:319-326`).
+It is not checked on the three reach squares `v`. The comment at
+`cylinder.rs:312-314` argues them from the components', since a reach is never
+below its component; that holds while the component is not zero, and a
+component that cancels to zero (`h == k`, both normal) leaves `v = rnd(4h²)`,
+which can be below the normals. That is the product `o2s.g`'s case split is
+for here.
+
+**How the error splits.** The square `y` carries for one component is `(h −
+k)² K`, `K` the product of the roundings of `q`, `s` and the sums after it.
+The true one is `(h a − k b)²`, `a` and `b` undoing the roundings of `f` and
+of `h` and `k`. Their difference is `h²(K − a²) + k²(K − b²) − 2hk(K − ab)`,
+three terms, one for each piece of the reach squared, `h²`, `k²` and `2|h||k|`.
+The radius term is three pieces that sum to `skin`, one for each direction
+square, each true piece `r² d²`. So the error is averaged over twelve pieces.
+
+**What the first lane ran.** `cyl.g`, below, whole, with every product normal
+and nothing zero, did not finish: `one.sh` (464.13's 9, the same bytes) printed
+`cyl exit 124 620.51s`, Gappa killed at its 600 s timeout, on a load of about
+24 over 24 cores. Where the time goes was not found. `t_axis.g`, one component
+alone with its three pieces, was written to time Gappa on a smaller average and
+not run.
+
+```gappa
+# restates: crates/rcad-geom/src/cylinder.rs on_floats at 2a7ca9e7
+# restates: crates/rcad-geom/src/cylinder.rs cross_product_halves_if_normal at 2a7ca9e7
+# restates: crates/rcad-geom/src/cylinder.rs cross_product_halves at 2a7ca9e7
+# restates: crates/rcad-geom/src/cylinder.rs SIDE_OF_CYLINDER_ERROR_BOUND at 2a7ca9e7
+# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 2a7ca9e7
+# restates: crates/rcad-predicates/src/cascade.rs decide at 2a7ca9e7
+# HowFarFromTheSkin::on_floats and SIDE_OF_CYLINDER_ERROR_BOUND, rcad-geom's cylinder.
+@rnd = float<ieee_64, ne>;
+
+# The point, the axis origin, the axis direction and the radius, each an f64.
+px = rnd(px_); py = rnd(py_); pz = rnd(pz_);
+ox = rnd(ox_); oy = rnd(oy_); oz = rnd(oz_);
+dx = rnd(dx_); dy = rnd(dy_); dz = rnd(dz_);
+r = rnd(r_);
+
+# What on_floats computes, line for line.
+Fx = px - ox; Fy = py - oy; Fz = pz - oz;
+fx = rnd(Fx); fy = rnd(Fy); fz = rnd(Fz);
+
+# cross_product_halves: h is each component's left half, k its right half.
+hx = rnd(fy * dz); kx = rnd(fz * dy);
+hy = rnd(fz * dx); ky = rnd(fx * dz);
+hz = rnd(fx * dy); kz = rnd(fy * dx);
+Qx = hx - kx; Qy = hy - ky; Qz = hz - kz;
+qx = rnd(Qx); qy = rnd(Qy); qz = rnd(Qz);
+
+# direction_squared, left to right as Rust adds it.
+tx = rnd(dx * dx); ty = rnd(dy * dy); tz = rnd(dz * dz);
+T01 = tx + ty; t01 = rnd(T01);
+T = t01 + tz; D = rnd(T);
+
+rr = rnd(r * r);
+skin = rnd(rr * D);
+sx = rnd(qx * qx); sy = rnd(qy * qy); sz = rnd(qz * qz);
+S01 = sx + sy; s01 = rnd(S01);
+S012 = s01 + sz; s012 = rnd(S012);
+y = s012 - skin;
+value = rnd(y);
+
+# The permanent: each half's reach squared, then the radius term.
+nx = rnd(|hx| + |kx|); ny = rnd(|hy| + |ky|); nz = rnd(|hz| + |kz|);
+vx = rnd(nx * nx); vy = rnd(ny * ny); vz = rnd(nz * nz);
+P = rnd(rnd(rnd(vx + vy) + vz) + skin);
+
+B = 10b-53 + 5b-102;
+eb = rnd(B * P);
+
+# The true value of the same inputs.
+Cx = Fy * dz - Fz * dy; Cy = Fz * dx - Fx * dz; Cz = Fx * dy - Fy * dx;
+Ex = Cx * Cx + Cy * Cy + Cz * Cz - r * r * (dx * dx + dy * dy + dz * dz);
+
+# The permanent with no rounding of its own.
+Phat = (|hx| + |kx|) * (|hx| + |kx|) + (|hy| + |ky|) * (|hy| + |ky|)
+     + (|hz| + |kz|) * (|hz| + |kz|) + skin;
+
+# What each rounding multiplied its argument by.
+rfx = fx / Fx; rfy = fy / Fy; rfz = fz / Fz;
+rhx = hx / (fy * dz); rkx = kx / (fz * dy);
+rhy = hy / (fz * dx); rky = ky / (fx * dz);
+rhz = hz / (fx * dy); rkz = kz / (fy * dx);
+rqx = qx / Qx; rqy = qy / Qy; rqz = qz / Qz;
+rsx = sx / (qx * qx); rsy = sy / (qy * qy); rsz = sz / (qz * qz);
+rs01 = s01 / S01; rs012 = s012 / S012;
+rtx = tx / (dx * dx); rty = ty / (dy * dy); rtz = tz / (dz * dz);
+rt01 = t01 / T01; rD = D / T;
+rrr = rr / (r * r); rsk = skin / (rr * D);
+
+# Each component's square, as y carries it, is (h - k)^2 times K; the true
+# one is (h a - k b)^2, a and b undoing the roundings of h and k.
+Kx = rqx * rqx * rsx * rs01 * rs012;
+Ky = rqy * rqy * rsy * rs01 * rs012;
+Kz = rqz * rqz * rsz * rs012;
+ax = 1 / (rfy * rhx); bx = 1 / (rfz * rkx);
+ay = 1 / (rfz * rhy); by = 1 / (rfx * rky);
+az = 1 / (rfx * rhz); bz = 1 / (rfy * rkz);
+
+# So each component's error is three terms, one for each piece of its
+# reach squared: h^2, k^2 and 2 |h| |k|. W is each term's error over its
+# piece.
+WHx = Kx - ax * ax; WKx = Kx - bx * bx; WXx = Kx - ax * bx;
+WHy = Ky - ay * ay; WKy = Ky - by * by; WXy = Ky - ay * by;
+WHz = Kz - az * az; WKz = Kz - bz * bz; WXz = Kz - az * bz;
+cHx = |hx| * |hx|; cKx = |kx| * |kx|; cXx = 2 * |hx| * |kx|;
+cHy = |hy| * |hy|; cKy = |ky| * |ky|; cXy = 2 * |hy| * |ky|;
+cHz = |hz| * |hz|; cKz = |kz| * |kz|; cXz = 2 * |hz| * |kz|;
+eHx = hx * hx * WHx; eKx = kx * kx * WKx; eXx = -(2 * hx * kx * WXx);
+eHy = hy * hy * WHy; eKy = ky * ky * WKy; eXy = -(2 * hy * ky * WXy);
+eHz = hz * hz * WHz; eKz = kz * kz * WKz; eXz = -(2 * hz * kz * WXz);
+
+# The radius term is three pieces, one for each direction component's
+# square, which sum to skin. Each true piece is r^2 d^2.
+cGx = rsk * rr * rD * rt01 * tx;
+cGy = rsk * rr * rD * rt01 * ty;
+cGz = rsk * rr * rD * tz;
+WGx = 1 / (rrr * rtx * rsk * rD * rt01) - 1;
+WGy = 1 / (rrr * rty * rsk * rD * rt01) - 1;
+WGz = 1 / (rrr * rtz * rsk * rD) - 1;
+eGx = cGx * WGx; eGy = cGy * WGy; eGz = cGz * WGz;
+
+# The same permanent, as the twelve pieces the error is averaged over.
+P12 = cHx + cKx + cXx + cHy + cKy + cXy + cHz + cKz + cXz + cGx + cGy + cGz;
+
+{
+  # Every input is a finite f64.
+     |px| <= 1b1024 /\ |py| <= 1b1024 /\ |pz| <= 1b1024
+  /\ |ox| <= 1b1024 /\ |oy| <= 1b1024 /\ |oz| <= 1b1024
+  /\ |dx| <= 1b1024 /\ |dy| <= 1b1024 /\ |dz| <= 1b1024
+  /\ |r| <= 1b1024
+  # No factor is zero, and no component cancels to zero. For an f64 that is
+  # the same as being at least the smallest subnormal.
+  /\ |fx| >= 1b-1074 /\ |fy| >= 1b-1074 /\ |fz| >= 1b-1074
+  /\ |dx| >= 1b-1074 /\ |dy| >= 1b-1074 /\ |dz| >= 1b-1074
+  /\ |r| >= 1b-1074
+  /\ |qx| >= 1b-1074 /\ |qy| >= 1b-1074 /\ |qz| >= 1b-1074
+  # product_is_normal on the six halves (cross_product_halves_if_normal),
+  # and on the three components, the three direction components, the
+  # radius and the radius term (stays_accurate).
+  /\ |hx| >= 1b-1022 /\ |kx| >= 1b-1022 /\ |hy| >= 1b-1022
+  /\ |ky| >= 1b-1022 /\ |hz| >= 1b-1022 /\ |kz| >= 1b-1022
+  /\ |sx| >= 1b-1022 /\ |sy| >= 1b-1022 /\ |sz| >= 1b-1022
+  /\ |tx| >= 1b-1022 /\ |ty| >= 1b-1022 /\ |tz| >= 1b-1022
+  /\ |rr| >= 1b-1022 /\ |skin| >= 1b-1022
+  # The permanent's three squares are normal too. The comment above
+  # stays_accurate argues it from the components': a reach is never below
+  # its component.
+  /\ |vx| >= 1b-1022 /\ |vy| >= 1b-1022 /\ |vz| >= 1b-1022
+  # The bound is normal, which decide checks.
+  /\ |eb| >= 1b-1022
+  # What lemma.g proves each of those gives.
+  /\ hx -/ fy * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ kx -/ fz * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hy -/ fz * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ ky -/ fx * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ hz -/ fx * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ kz -/ fy * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sx -/ qx * qx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sy -/ qy * qy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ sz -/ qz * qz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ tx -/ dx * dx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ ty -/ dy * dy in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ tz -/ dz * dz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ rr -/ r * r in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ skin -/ rr * D in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vx -/ nx * nx in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vy -/ ny * ny in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ vz -/ nz * nz in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ hx / |hx| in [-1, 1] /\ kx / |kx| in [-1, 1]
+  /\ hy / |hy| in [-1, 1] /\ ky / |ky| in [-1, 1]
+  /\ hz / |hz| in [-1, 1] /\ kz / |kz| in [-1, 1]
+->
+  (y - Ex) / P12 in ? /\ P -/ Phat in ?
+  /\ (y - Ex) / eb in [-1, 1]
+}
+
+# How far each rounding is from the identity.
+fx / Fx -> 1 + (fx - Fx) / Fx;
+fy / Fy -> 1 + (fy - Fy) / Fy;
+fz / Fz -> 1 + (fz - Fz) / Fz;
+hx / (fy * dz) -> 1 + (hx - fy * dz) / (fy * dz);
+kx / (fz * dy) -> 1 + (kx - fz * dy) / (fz * dy);
+hy / (fz * dx) -> 1 + (hy - fz * dx) / (fz * dx);
+ky / (fx * dz) -> 1 + (ky - fx * dz) / (fx * dz);
+hz / (fx * dy) -> 1 + (hz - fx * dy) / (fx * dy);
+kz / (fy * dx) -> 1 + (kz - fy * dx) / (fy * dx);
+qx / Qx -> 1 + (qx - Qx) / Qx;
+qy / Qy -> 1 + (qy - Qy) / Qy;
+qz / Qz -> 1 + (qz - Qz) / Qz;
+sx / (qx * qx) -> 1 + (sx - qx * qx) / (qx * qx);
+sy / (qy * qy) -> 1 + (sy - qy * qy) / (qy * qy);
+sz / (qz * qz) -> 1 + (sz - qz * qz) / (qz * qz);
+s01 / S01 -> 1 + (s01 - S01) / S01;
+s012 / S012 -> 1 + (s012 - S012) / S012;
+tx / (dx * dx) -> 1 + (tx - dx * dx) / (dx * dx);
+ty / (dy * dy) -> 1 + (ty - dy * dy) / (dy * dy);
+tz / (dz * dz) -> 1 + (tz - dz * dz) / (dz * dz);
+t01 / T01 -> 1 + (t01 - T01) / T01;
+D / T -> 1 + (D - T) / T;
+rr / (r * r) -> 1 + (rr - r * r) / (r * r);
+skin / (rr * D) -> 1 + (skin - rr * D) / (rr * D);
+
+# The error is the sum of the twelve pieces' errors, each a fraction of its
+# own piece of the permanent; add_rr then averages them.
+(y - Ex) / P12 -> ((P12 + (y - Ex)) - P12) / P12;
+P12 + (y - Ex) -> (cHx + eHx) + (cKx + eKx) + (cXx + eXx) + (cHy + eHy) + (cKy + eKy) + (cXy + eXy) + (cHz + eHz) + (cKz + eKz) + (cXz + eXz) + (cGx + eGx) + (cGy + eGy) + (cGz + eGz);
+(cHx + eHx) - cHx -> eHx;
+(cKx + eKx) - cKx -> eKx;
+(cXx + eXx) - cXx -> eXx;
+(cHy + eHy) - cHy -> eHy;
+(cKy + eKy) - cKy -> eKy;
+(cXy + eXy) - cXy -> eXy;
+(cHz + eHz) - cHz -> eHz;
+(cKz + eKz) - cKz -> eKz;
+(cXz + eXz) - cXz -> eXz;
+(cGx + eGx) - cGx -> eGx;
+(cGy + eGy) - cGy -> eGy;
+(cGz + eGz) - cGz -> eGz;
+eHx / cHx -> (hx / |hx|) * (hx / |hx|) * WHx;
+eKx / cKx -> (kx / |kx|) * (kx / |kx|) * WKx;
+eXx / cXx -> -((hx / |hx|) * (kx / |kx|) * WXx);
+eHy / cHy -> (hy / |hy|) * (hy / |hy|) * WHy;
+eKy / cKy -> (ky / |ky|) * (ky / |ky|) * WKy;
+eXy / cXy -> -((hy / |hy|) * (ky / |ky|) * WXy);
+eHz / cHz -> (hz / |hz|) * (hz / |hz|) * WHz;
+eKz / cKz -> (kz / |kz|) * (kz / |kz|) * WKz;
+eXz / cXz -> -((hz / |hz|) * (kz / |kz|) * WXz);
+eGx / cGx -> WGx;
+eGy / cGy -> WGy;
+eGz / cGz -> WGz;
+
+# From the twelve pieces to the permanent on_floats rounds, and on to eb.
+(y - Ex) / eb -> ((y - Ex) / P12) * (Phat / P) * (P / eb);
+Phat / P -> 1 / (1 + (P - Phat) / Phat);
+P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));
+```
