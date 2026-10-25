@@ -29,8 +29,8 @@
 //! halves said the same word. Since row Q1376 the namer no longer refuses the
 //! bend: it names the two circles the pipe's rim and the tube's share, and
 //! since row Q1396 the evaluator walks an arc of either, refusing only a whole
-//! circle named by the two faces alone. The countersink pair is unchanged,
-//! both halves still refusing it under its own name.
+//! circle named by the two faces alone. Since row Q2788 the countersink pair
+//! is named and walked too, as the two loops a pipe across it leaves.
 //!
 //! # Why tangency is an answer and not a band
 //!
@@ -731,43 +731,88 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
     }
 }
 
-/// The same for a cone, which the naming half refuses under its own name.
+/// The same for a cone, which both halves refused under its own name until row
+/// Q2788.
 ///
-/// A countersink met by a pipe: two faces a file can state and this crate can
-/// never name a crossing for.
+/// A countersink met by a pipe across it, half a unit thick at height two: the
+/// pipe goes into the cone on one side of its axis and out on the other, so
+/// the two cross in two loops, one each side of the flat through the apex that
+/// faces along the pipe. Each loop is named by that flat, and each is walked on
+/// its own side of it and on both surfaces. A run stated with nothing picking
+/// either is walked round one of them, as it is on a thin pipe through a fat
+/// one, and starts at the same place whichever face asks.
 #[test]
-fn a_countersink_meeting_a_pipe_is_refused_by_name_rather_than_crashing_the_evaluator() {
+fn a_countersink_meeting_a_pipe_across_it_crosses_it_in_two_loops_one_each_side_of_its_axis() {
     let countersink = Surface::Cone(rcad_geom::Cone::new(Axis::z(), 1.0).expect("a slope"));
     let pipe = a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 2.0], 0.5);
-
-    assert_eq!(
-        intersect(
-            &countersink,
-            &pipe,
-            &Policy::certified(),
-            &mut ProvenanceLog::new()
-        ),
-        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-    );
-
     let whole = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a closed curve is never a piece with nothing picking it");
+    let start = |along: [&Surface; 2]| {
+        where_a_closed_crossing_starts(&whole, along, &mut ProvenanceLog::new())
+            .expect("the first loop has a seed")
+    };
+    assert_eq!(start([&countersink, &pipe]), start([&pipe, &countersink]));
+
     for along in [[&countersink, &pipe], [&pipe, &countersink]] {
+        let SurfaceMeet::Curves(runs) = crossing(along[0], along[1]) else {
+            panic!("{along:?} cross in curves");
+        };
+        let facings: Vec<Option<Vector>> = runs
+            .iter()
+            .map(|run| match run.run() {
+                EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
+                    [picker @ Picker::InFrontOfAFlatThrough(_)] => picker.facing_of_a_flat(),
+                    other => panic!("{along:?}: one flat picks each loop, not {other:?}"),
+                },
+                other => panic!("{along:?}: each loop is a piece of the crossing, not {other:?}"),
+            })
+            .collect();
         assert_eq!(
-            walk(
-                &whole,
+            facings,
+            [
+                Some(Vector::new(1.0, 0.0, 0.0)),
+                Some(Vector::new(-1.0, 0.0, 0.0))
+            ],
+            "{along:?}"
+        );
+
+        for (run, way) in runs.iter().zip([1.0, -1.0]) {
+            let walked = walk(
+                run,
                 along,
                 Deflection::of(0.01).expect("a length"),
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )
-            .map(|walked| walked.points().len()),
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-        );
-        assert_eq!(
-            where_a_closed_crossing_starts(&whole, along, &mut ProvenanceLog::new()),
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-        );
+            .expect("each loop is walked");
+            assert!(walked.points().len() > 8, "{along:?} toward {way}");
+            for point in walked.points() {
+                let [x, y, z] = point.coordinates();
+                assert!(
+                    x * way > 0.0,
+                    "{along:?}: {point:?} is on its own loop's side"
+                );
+                assert!(how_far_off(&countersink, *point) < 1e-12, "{point:?}");
+                assert!((y.hypot(z - 2.0) - 0.5).abs() < 1e-12, "{point:?}");
+            }
+        }
+
+        let walked = walk(
+            &whole,
+            along,
+            Deflection::of(0.01).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the run is walked round the first loop");
+        let way = walked.points()[0].coordinates()[0].signum();
+        assert!(walked.points().len() > 8, "{along:?}");
+        for point in walked.points() {
+            let [x, y, z] = point.coordinates();
+            assert!(x * way > 0.0, "{along:?}: {point:?} is on the first loop");
+            assert!(how_far_off(&countersink, *point) < 1e-12, "{point:?}");
+            assert!((y.hypot(z - 2.0) - 0.5).abs() < 1e-12, "{point:?}");
+        }
     }
 }
 
@@ -797,19 +842,23 @@ fn a_bend(along: [f64; 3], centre: [f64; 3], ring: f64, tube: f64) -> Surface {
 /// All twenty-five ordered pairs of the five kinds of surface, past the naming
 /// half and both halves of the evaluator.
 ///
-/// Twelve of them are refused, and what this checks is that the namer, the
-/// walker and the starter all say so about the same twelve, and under the same
+/// Ten of them are refused, and what this checks is that the namer, the
+/// walker and the starter all say so about the same ten, and under the same
 /// name for each.
 ///
-/// **One of the twelve is refused on the kind of surface**, before a number is
+/// **One of the ten is refused on the kind of surface**, before a number is
 /// looked at: the bend against a second bend.
 ///
-/// **The other eleven are refused on where the two stand**: a cone against a
-/// pipe, a ball or a second cone, and a torus against a ball, a pipe or a
-/// cone. Each of those pairs crosses in circles and is named — by `intersect`
-/// and, since row Q1396 for a torus, walked — where the two share an axis, so
-/// every partner below stands off the other's axis, which is what makes it a
-/// refusal at all. A cone and a pipe that share an axis are
+/// **The other nine are refused on where the two stand**: a cone against a
+/// pipe running along one of the cone's own straight lines, a pipe whose skin
+/// runs through a cone's apex, and a second cone, each both ways round but the
+/// first two, and a torus against a ball, a pipe or a cone. Each of those pairs
+/// crosses in circles and is named — by `intersect` and, since row Q1396 for a
+/// torus, walked — where the two share an axis, so every partner below stands
+/// off the other's axis, which is what makes it a refusal at all. The ball and
+/// the cone off one axis were refused here too until row Q2666: the ball pokes
+/// out of the cone's side, so they cross in one loop, which is named and
+/// marched. A cone and a pipe that share an axis are
 /// `where_a_coaxial_cone_and_pipe_cross.rs`'s half. Reading this row as "these
 /// kinds are refused" would state something the dispatch contradicts, and the
 /// pair that used to sit here was coaxial and stopped being refused underneath
@@ -826,7 +875,7 @@ fn a_bend(along: [f64; 3], centre: [f64; 3], ring: f64, tube: f64) -> Surface {
 /// because they are not refused *on kind* — the same two kinds cross in a conic
 /// as often as in a line, and which one it is depends on the numbers.
 #[test]
-fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_under_the_same_name() {
+fn the_namer_and_the_evaluator_refuse_the_same_ten_pairs_under_the_same_name() {
     let one = [
         a_plane([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]),
         a_ball([0.0, 0.0, 0.0], 3.0),
@@ -903,9 +952,9 @@ fn the_namer_and_the_evaluator_refuse_the_same_twelve_pairs_under_the_same_name(
         }
     }
     assert_eq!(
-        refused, 12,
-        "one pair refused on kind, plus eleven refused for standing off one another's axis, is \
-         twelve of the twenty-five"
+        refused, 10,
+        "one pair refused on kind, plus nine refused for standing off one another's axis, is \
+         ten of the twenty-five"
     );
 }
 

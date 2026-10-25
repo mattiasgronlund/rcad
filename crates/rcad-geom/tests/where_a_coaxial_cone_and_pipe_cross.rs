@@ -1,27 +1,26 @@
-//! A cone and a pipe on one axis cross in two circles, and every other cone
-//! against a pipe is still refused.
+//! A cone and a pipe on one axis cross in two circles, and off one axis in the
+//! loops of a quartic, or are refused by name.
 //!
 //! The two circles sit `r/slope` along the axis from the apex either way, one in
 //! each nappe, and there is **no shape question**: a cone is double-napped and a
 //! pipe's radius is above zero, so `slope·|h| = r` has exactly two roots
 //! whatever the two surfaces are. So this file has no table of shapes to walk.
-//! What it has instead is the boundary: the pairs that share an axis are named,
-//! the pairs that lean or stand off it are refused, and a ball or a second cone
-//! keeps the same boundary (`a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs`
-//! is theirs).
+//! What it has instead is the boundary: the pairs that share an axis are named
+//! as two circles, a pipe beside the axis as a loop round each nappe, and a pipe
+//! along one of the cone's own lines is refused. A ball is named on the axis and
+//! off it, and a second cone only on it
+//! (`a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` is theirs).
 //!
 //! # Why the pairs are written on coordinate axes
 //!
 //! Sharing an axis is decided **exactly**, so a cone whose apex was written as
 //! `origin + t·ŵ` on a direction that is not a coordinate one lands an ulp or
-//! two off the stored line and is refused — correctly, because those two
-//! surfaces really do not share an axis as stored. That refusal answers the
-//! coaxiality question correctly; nothing is refused at that step. What is
-//! refused next is the quartic the placed pair really does cross in, and that
-//! quartic exists — so this is the row's standing gap (`docs/decisions.md`
-//! §16.10, §50.11), reached down a second road, and not a limit, and
-//! `an_apex_written_along_a_leaning_axis_lands_off_it_and_is_refused` is the row
-//! that pins it rather than leaving it as a sentence.
+//! two off the stored line, correctly, because those two surfaces really do not
+//! share an axis as stored. Since row Q2788 such a pair is named as the pair off
+//! one axis it is, two loops a hair off the two circles, where it was refused
+//! as a gap (`docs/decisions.md` §16.10, §50.11), and
+//! `an_apex_written_along_a_leaning_axis_lands_on_it_or_off_it_and_crosses_in_two_runs_either_way`
+//! pins both answers.
 
 use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, Error, HalfSpace, Picker, Point, Sphere, Surface, SurfaceMeet,
@@ -193,10 +192,11 @@ fn a_pipe_whose_axis_is_written_backwards_shares_the_axis_just_the_same() {
     assert_eq!(runs.len(), 2);
 }
 
-/// An apex off the pipe's axis is refused, and it is the second of the two sign
-/// questions that refuses it.
+/// An apex off the pipe's axis, on a parallel line, crosses it in two loops,
+/// one round each nappe, and not in two circles: the flat through the apex
+/// square to the axis holds them apart, and picks each.
 #[test]
-fn a_cone_beside_a_pipe_rather_than_down_it_is_refused() {
+fn a_cone_beside_a_pipe_rather_than_down_it_crosses_it_in_a_loop_round_each_nappe() {
     let cone = Cone::new(
         Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
         1.0,
@@ -206,11 +206,31 @@ fn a_cone_beside_a_pipe_rather_than_down_it_is_refused() {
 
     for answer in [crossed(&cone, &pipe), crossed_the_other_way(&cone, &pipe)] {
         assert_eq!(
-            answer,
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+            the_flats_that_pick(answer),
+            [
+                Some(Vector::new(0.0, 0.0, 1.0)),
+                Some(Vector::new(0.0, 0.0, -1.0))
+            ],
             "the axes are parallel but they are not the same line"
         );
     }
+}
+
+/// Which way the one flat through the apex that picks each run faces, for a
+/// pair off one axis that crosses in two loops.
+fn the_flats_that_pick(answer: Result<SurfaceMeet, Error>) -> Vec<Option<Vector>> {
+    let Ok(SurfaceMeet::Curves(runs)) = &answer else {
+        panic!("two loops, and not {answer:?}");
+    };
+    runs.iter()
+        .map(|run| match run.run() {
+            EdgeRun::PartOfWhereItCrosses { picked_by, .. } => match picked_by.as_slice() {
+                [picker @ Picker::InFrontOfAFlatThrough(_)] => picker.facing_of_a_flat(),
+                other => panic!("one flat picks each loop, not {other:?}"),
+            },
+            other => panic!("each loop is a piece of the crossing, not {other:?}"),
+        })
+        .collect()
 }
 
 /// A cone leaning against a pipe is refused, which is the row's standing gap.
@@ -265,19 +285,21 @@ fn a_pipe_laid_along_one_of_a_cones_rulings_is_refused_rather_than_named() {
     }
 }
 
-/// A ball and a second cone are named where they share the axis, as the pipe
-/// is, and refused where they do not.
+/// A ball is named on a cone's axis and off it, as the pipe is, and a second
+/// cone only where it shares the axis.
 ///
 /// On the axis they cross in circles square to it, or not at all: the ball of
 /// radius two four up sits inside the upper nappe, `4/√2` from its side, and
 /// misses it; the cone of slope two with its apex nine up meets the one of
 /// slope one where `|z| = 2|z − 9|`, at `z = 6` and `z = 18`. **No row of that
 /// holds a straight line**, which is what `rcad-topo`'s `assemble.rs` answers
-/// the whole cone-and-cone row with. Two cones meet along rulings only where
-/// they share an apex and their axes lean apart (`docs/decisions.md` §50.2 item
-/// 4), and the second cone off the axis here is that shape's refusal.
+/// the whole cone-and-cone row with. Off the axis, the ball centred at
+/// `(3, 1, 4)` reaches across the side of the upper nappe and crosses it in one
+/// loop right round. Two cones meet along rulings only where they share an
+/// apex and their axes lean apart (`docs/decisions.md` §50.2 item 4), and the
+/// second cone off the axis here is that shape's refusal.
 #[test]
-fn a_cone_against_a_ball_or_another_cone_is_named_on_the_axis_and_refused_off_it() {
+fn a_ball_is_named_on_a_cones_axis_and_off_it_and_a_second_cone_only_on_it() {
     let cone = a_cone_about_z(1.0);
     let on_the_axis = [
         Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 4.0), 2.0).expect("a radius")),
@@ -290,7 +312,7 @@ fn a_cone_against_a_ball_or_another_cone_is_named_on_the_axis_and_refused_off_it
             .expect("a slope"),
         ),
     ];
-    let off_it = [
+    let [ball_off_it, cone_off_it] = [
         Surface::Sphere(Sphere::new(Point::new(3.0, 1.0, 4.0), 2.0).expect("a radius")),
         Surface::Cone(
             Cone::new(
@@ -334,68 +356,86 @@ fn a_cone_against_a_ball_or_another_cone_is_named_on_the_axis_and_refused_off_it
         };
         assert_eq!(runs.len(), 2, "{pair:?}");
     }
-    for partner in off_it {
-        for pair in pairs(partner) {
-            assert_eq!(
-                intersect(
-                    &pair[0],
-                    &pair[1],
-                    &Policy::certified(),
-                    &mut ProvenanceLog::new()
-                ),
-                Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-                "{pair:?}"
-            );
-        }
+    for pair in pairs(ball_off_it) {
+        let named = intersect(
+            &pair[0],
+            &pair[1],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(runs)) = &named else {
+            panic!("one loop, and not {named:?}");
+        };
+        let runs: Vec<&EdgeRun> = runs.iter().map(|run| run.run()).collect();
+        assert_eq!(runs, [&EdgeRun::RightRoundWhereItsFacesCross], "{pair:?}");
+    }
+    for pair in pairs(cone_off_it) {
+        assert_eq!(
+            intersect(
+                &pair[0],
+                &pair[1],
+                &Policy::certified(),
+                &mut ProvenanceLog::new()
+            ),
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+            "{pair:?}"
+        );
     }
 }
 
 /// An apex built as `origin + t·ŵ` on a direction that is not a coordinate one
-/// usually lands off the stored line, and every one that does is refused.
+/// usually lands off the stored line, and every one that does is named as the
+/// pair off one axis it is.
 ///
-/// **A gap and not a limit** (§16.10). The multiply-and-add rounds, the apex it
-/// produces is genuinely not on the pipe's axis, and the coaxiality question is
-/// answered correctly there — nothing is refused at that step. What is refused
-/// is the quartic the placed pair really does cross in, and that quartic
-/// exists: it is the row's standing gap, reached here by a placement rather
-/// than by an axis someone wrote leaning on purpose. `intersect.rs`'s
-/// `a_frustum_in_a_bore_stops_sharing_its_axis_as_soon_as_it_is_turned_off_the_lattice`
-/// is the ordinary form of it — a frustum sitting in a bore, turned about a
-/// diagonal, loses the axis on 62 of 64 turns — and this row measures the same
-/// thing from a hand-written apex, which is why this is a test and not a
-/// paragraph. §50.11 measured 20 000 of 20 000 apexes drawn this way refused,
-/// worst miss `2.6e-14` on coordinates of order 100.
+/// The multiply-and-add rounds, the apex it produces is genuinely not on the
+/// pipe's axis, and the coaxiality question is answered correctly there. The
+/// pair then crosses in a loop round each nappe, a hair off the two circles,
+/// and the flat through the apex square to the cone's axis holds them apart and
+/// picks each. Until row Q2788 that quartic was refused, a gap reached by a
+/// placement rather than by an axis someone wrote leaning on purpose: §50.11
+/// measured 20 000 of 20 000 apexes drawn this way refused, worst miss
+/// `2.6e-14` on coordinates of order 100, and `intersect.rs`'s
+/// `a_frustum_in_a_bore_turned_off_the_lattice_stops_sharing_its_axis_and_crosses_in_two_loops`
+/// is the ordinary form of it.
 ///
-/// **Five of these seven, not seven of seven, and the split is the point.**
-/// `t = 1` and `t = 10` happen to scale this particular direction onto three
-/// `f64`s that are still exactly proportional to it, and those two are **named**
-/// — so the refusal tracks where the apex really landed rather than refusing the
-/// whole family. A blanket refusal would pass this row just as well and would be
-/// a worse kernel.
+/// **Five of these seven, not seven of seven, land off the line.** `t = 1` and
+/// `t = 10` happen to scale this particular direction onto three `f64`s that
+/// are still exactly proportional to it, and those two are named as two circles
+/// each picked by a half-space across the axis, so the answer tracks where the
+/// apex really landed.
 #[test]
-fn an_apex_written_along_a_leaning_axis_lands_off_it_and_is_refused() {
+fn an_apex_written_along_a_leaning_axis_lands_on_it_or_off_it_and_crosses_in_two_runs_either_way() {
     let direction = Vector::new(1.0, 2.0, 3.0)
         .normalized()
         .expect("a direction with a length");
     let axis = Axis::new(Point::origin(), direction).expect("a direction");
     let pipe = Cylinder::new(axis, 2.0).expect("a radius above zero");
-    let named_anyway = [1.0, 10.0];
+    let on_the_line = [1.0, 10.0];
 
     for along in [1.0, 3.0, 7.0, 10.0, 100.0, 1000.0, 12345.0] {
         let apex = Point::origin() + direction * along;
         let cone = Cone::new(Axis::new(apex, direction).expect("a direction"), 0.5)
             .expect("a slope above zero");
         let answer = crossed(&cone, &pipe);
-        if named_anyway.contains(&along) {
+        if on_the_line.contains(&along) {
             let named = answer.expect("this one landed on the line");
             let SurfaceMeet::Curves(runs) = &named else {
                 panic!("two circles, and not {named:?}");
             };
             assert_eq!(runs.len(), 2, "at {along} along the axis");
+            for run in runs {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("at {along}: each circle is a piece, not {run:?}");
+                };
+                assert!(
+                    matches!(picked_by.as_slice(), [Picker::InFrontOf(_)]),
+                    "at {along}: a half-space across the axis picks each circle, not {picked_by:?}"
+                );
+            }
         } else {
             assert_eq!(
-                answer,
-                Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+                the_flats_that_pick(answer),
+                [Some(direction), Some(direction * -1.0)],
                 "at {along} along the axis the apex is off the stored line"
             );
         }
