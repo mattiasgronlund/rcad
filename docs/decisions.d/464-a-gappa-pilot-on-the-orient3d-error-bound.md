@@ -8056,9 +8056,10 @@ that proves exits 0; a control must exit 1. What the lanes ran is `run0.sh` to
 bytes, or through `one1.sh`, which is `one.sh` with the timeout taken from `T`
 and no `coq`. `run3.sh` and `run4.sh` were started through `launch.sh`.
 `tally3.py` counts what `run3.sh` printed. `same.py` (below) checks every
-script appended here byte for byte against the file that was run, and that
-the two generators, run again from the text here, write what was run; its
-print ends this part. `truth.py` is in 6, and `same.py` checks it too. The
+script appended here byte for byte against the file that was run, that
+`tally3.py` run again prints the counts given here, and that the two
+generators, run again from the text here, write what was run; its print and
+what its 911 files are end this part. `truth.py` is in 6, and `same.py` checks it too. The
 probe's diff is not appended, since 6 gives the test whole.
 
 `cone.g`, whole, as every run of 3, 7 and 8 ran it:
@@ -9320,6 +9321,136 @@ coq ok: 384 of 384
 coq smallest (2325, 39, 'uuua') largest (17532, 64, 'nnnn') hints 37 64 times 6.68 51.46
 files with a line other than results and 'assumed to be nonzero': []
 ```
+
+`same.py`, whole:
+
+```python
+"""Check that each script 464.16 appends whole is byte for byte the file that
+was run, in q2681/; that one.sh is 464.13's block; that tally3.py, run again
+there, prints the counts 464.16 gives; and that conesplit.py and conecases.py,
+run again in a fresh directory from the appended text with the arguments of
+run1.sh and run2.sh, write what was run.
+Run as: python3 same.py <doc> <q2681 dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, q2681 = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+start = text.index("### 464.16")
+sec = text[start:]
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.16:", len(blocks))
+assert len(re.findall(r"^```", sec, re.M)) == 2 * len(blocks)
+
+# Which appended block is which file: by its first lines.
+marks = {
+    "cone.g": "# restates: crates/rcad-geom/src/cone.rs on_floats at 2538ee89\n# restates: crates/rcad-geom/src/cone.rs cross_product_halves_if_normal",
+    "sumexact.g": "# A sum of two doubles that is below the normals",
+    "conecases.py": '"""Write the scripts of 464.16 from cone.g',
+    "conesplit.py": '"""Write cone.g\'s case split',
+    "one1.sh": "#!/bin/bash\n# one.sh with the timeout taken from T",
+    "launch.sh": "#!/bin/bash\n# Start the script named by the first argument detached",
+    "run0.sh": "#!/bin/bash\n# cone.g, the case where nothing cancels",
+    "run1.sh": "#!/bin/bash\n# cone.g's bisection, B = 12u",
+    "run2.sh": "#!/bin/bash\n# cone.g's bisection, second round",
+    "run3a.sh": "#!/bin/bash\n# One case of each axial state",
+    "run3.sh": "#!/bin/bash\n# conesplit.py's 384 cases",
+    "run4.sh": "#!/bin/bash\n# The 108 second controls",
+    "tally3.py": '"""Tally run3.txt and the .out files of conesplit',
+    "truth.py": '"""The true sign of the cone probe',
+    "same.py": '"""Check that each script 464.16 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    if name == "same.py":
+        path = os.path.abspath(__file__)
+    else:
+        path = os.path.join(q2681, name)
+    if not os.path.exists(path):
+        print(name, "appended, no file to compare")
+        continue
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+s13 = text[text.index("### 464.13"):text.index("### 464.14")]
+one = [body for lang, body in FENCED.findall(s13)
+       if body.startswith("#!/bin/bash\n# Run one Gappa script under 464.4's pin")]
+assert len(one) == 1, len(one)
+print("one.sh is 464.13's block:", open(os.path.join(q2681, "one.sh")).read() == one[0])
+
+counts = [body for lang, body in blocks if lang == "text" and body.startswith("cases exit 0: ")]
+assert len(counts) == 1, len(counts)
+tally = subprocess.run(["python3", os.path.join(q2681, "tally3.py")], capture_output=True, text=True, check=True).stdout
+print("tally3.py run again ends with 464.16's counts:", tally.endswith("\n" + counts[0]))
+
+
+def compare(fresh, ran):
+    written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+    same = [f for f in written if os.path.exists(os.path.join(ran, f))
+            and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+    differ = [f for f in written if os.path.exists(os.path.join(ran, f)) and f not in same]
+    absent = [f for f in written if not os.path.exists(os.path.join(ran, f))]
+    return written, same, differ, absent
+
+
+fresh = tempfile.mkdtemp()
+for name in ("cone.g", "conecases.py", "conesplit.py"):
+    open(os.path.join(fresh, name), "w").write(found[name])
+subprocess.run(["python3", "conesplit.py"], cwd=fresh, check=True)
+subprocess.run(["python3", "conecases.py", "0", "40", "60", "80", "100", "120", "150", "200", "300", "400"], cwd=fresh, check=True)
+subprocess.run(["python3", "conecases.py", "0", "50", "90", "96", "97", "98", "99"], cwd=fresh, check=True)
+written, same, differ, absent = compare(fresh, q2681)
+print("written again:", len(written), "same as run:", len(same), "differ:", differ, "not in q2681:", absent)
+print("cone_nnnn.g is cone.g:", filecmp.cmp(os.path.join(fresh, "cone_nnnn.g"), os.path.join(fresh, "cone.g"), shallow=False))
+ran = sorted(f for f in os.listdir(q2681) if f.endswith(".g"))
+print(".g files in q2681 not written again:", [f for f in ran if f not in written])
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+code blocks in 464.16: 21
+cone.g same
+sumexact.g same
+conecases.py same
+conesplit.py same
+one1.sh same
+launch.sh same
+run0.sh same
+run1.sh same
+run2.sh same
+run3a.sh same
+run3.sh same
+run4.sh same
+tally3.py same
+truth.py same
+same.py same
+one.sh is 464.13's block: True
+tally3.py run again ends with 464.16's counts: True
+written again: 911 same as run: 911 differ: [] not in q2681: []
+cone_nnnn.g is cone.g: True
+.g files in q2681 not written again: ['sumexact.g']
+```
+
+The 911 are `cone.g` itself, the 384 cases, their 383 controls at `u / 2`,
+the 108 second controls at `u²`, the three controls of 7, and the 16 scripts
+each of `b_cone_` and `b11_cone_`. Neither generator writes `sumexact.g`; it
+is checked as appended above.
 
 **10. What this leaves.** Four rows, filed from this write-up, each after
 Q2681:
