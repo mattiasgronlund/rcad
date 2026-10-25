@@ -5847,35 +5847,7 @@ mod tests {
     #[test]
     fn a_parabola_written_tiny_is_walked_into_as_many_points_as_the_same_one_written_large() {
         let walked = |scale: f64| {
-            let skin = Surface::Cone(
-                Cone::new(
-                    crate::Axis::new(Point::origin(), Vector::new(0.0, 1.0, 1.0))
-                        .expect("a direction"),
-                    1.0,
-                )
-                .expect("a slope"),
-            );
-            let flat = Surface::Plane(
-                Plane::from_point_and_normal(
-                    Point::new(0.0, 0.0, -1.950_951_127_282_395e-303 * scale),
-                    Vector::new(0.0, 0.0, 1.0),
-                )
-                .expect("a unit normal"),
-            );
-            let mut log = ProvenanceLog::new();
-            let met = crate::intersect::intersect(&skin, &flat, &Policy::certified(), &mut log);
-            let Ok(SurfaceMeet::Curves(runs)) = met else {
-                panic!("a plane along a cone's side cuts a parabola: {met:?}");
-            };
-            assert_eq!(runs.len(), 1, "one parabola");
-            walk(
-                &runs[0],
-                [&skin, &flat],
-                Deflection::of(1e-305 * scale).expect("a length"),
-                &Policy::certified(),
-                &mut log,
-            )
-            .map(|along_it| along_it.points().len())
+            the_parabola_of_corpus_70fbff12_walked(scale).map(|along_it| along_it.points().len())
         };
 
         let large = walked(2.0_f64.powi(1006)).expect("an ordinary parabola is walked");
@@ -5888,6 +5860,76 @@ mod tests {
             [Ok(large), Ok(large)],
             "the same parabola written 2^1006 and 2^666 times smaller is walked into as many points"
         );
+    }
+
+    /// The points the parabola above is walked into, written `2^1006` and
+    /// `2^666` times larger, are the points the same parabola written that
+    /// much larger is walked into (Q2743).
+    ///
+    /// Each point was `vertex + across·s + bend·s²` with `s·s` worked out
+    /// first, and an `s` under about `1e-154` squares to under `2^-1022`. Here
+    /// it squared to about `1e-606`, which is nought, so every point came out
+    /// on the tangent at the vertex: `y` exactly nought, and the two ends
+    /// `2.68` off the large walk's once scaled up. The certified check could
+    /// not see it, since every sign it asks at that size is undecidable.
+    ///
+    /// **The bound is the large walk's own deviation**, `64ε` of its size:
+    /// scaling by a power of two is exact while nothing underflows, so a point
+    /// that is right scales onto the large walk's to within its rounding.
+    #[test]
+    fn a_parabola_written_tiny_is_walked_onto_the_points_of_the_same_one_written_large() {
+        let large =
+            the_parabola_of_corpus_70fbff12_walked(2.0_f64.powi(1006)).expect("an ordinary walk");
+        let bound = large.deviation().magnitude();
+
+        for (scale, up) in [
+            (1.0, 2.0_f64.powi(1006)),
+            (2.0_f64.powi(340), 2.0_f64.powi(666)),
+        ] {
+            let tiny = the_parabola_of_corpus_70fbff12_walked(scale).expect("a tiny walk");
+            assert_eq!(tiny.points().len(), large.points().len());
+            for (point, on_the_large_one) in tiny.points().iter().zip(large.points()) {
+                let scaled_up = Point::new(point.x() * up, point.y() * up, point.z() * up);
+                let apart = (scaled_up - *on_the_large_one).length();
+                assert!(
+                    apart <= bound,
+                    "{point:?} written {scale:e} times as large, scaled up by {up:e}, is \
+                     {apart:e} off {on_the_large_one:?}, over the {bound:e} the large walk allows"
+                );
+            }
+        }
+    }
+
+    /// Corpus `70fbff12`'s pair written `scale` times as large, cut and walked
+    /// with a deflection scaled with it.
+    fn the_parabola_of_corpus_70fbff12_walked(scale: f64) -> Result<PointsAlongACrossing> {
+        let skin = Surface::Cone(
+            Cone::new(
+                crate::Axis::new(Point::origin(), Vector::new(0.0, 1.0, 1.0)).expect("a direction"),
+                1.0,
+            )
+            .expect("a slope"),
+        );
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal(
+                Point::new(0.0, 0.0, -1.950_951_127_282_395e-303 * scale),
+                Vector::new(0.0, 0.0, 1.0),
+            )
+            .expect("a unit normal"),
+        );
+        let mut log = ProvenanceLog::new();
+        let met = crate::intersect::intersect(&skin, &flat, &Policy::certified(), &mut log);
+        let Ok(SurfaceMeet::Curves(runs)) = met else {
+            panic!("a plane along a cone's side cuts a parabola: {met:?}");
+        };
+        assert_eq!(runs.len(), 1, "one parabola");
+        walk(
+            &runs[0],
+            [&skin, &flat],
+            Deflection::of(1e-305 * scale).expect("a length"),
+            &Policy::certified(),
+            &mut log,
+        )
     }
 
     /// An arc up a pipe of radius `2^-999` is walked into as many points as the
