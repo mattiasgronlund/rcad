@@ -101,6 +101,26 @@ runs `pre-gate`'s few seconds first, and then `gate-lane` refuses.
   `mise-action` is in the same position. `gate-fresh` was not run for this:
   docker and a cold tree are ten minutes. The recipe now carries this
   paragraph's point beside `mise install`, and a row runs it once.
+
+  **Q1420 ran it, on main at `11b049277`.** The container selected mise
+  2026.10.19 (`mise: selected 2026.10.19 (minimum release age: 24h)`), newer
+  than the host's 2026.9.13 and newer than the 2026.10.4 this paragraph named
+  when it was written. `mise install` finished its tool installs and then
+  printed its own lockfile check inline, ending `mise lock ✓ 63 targets
+  checked`, with no `Updating` or write line before it — a check against the
+  tracked `mise.lock`, not a rewrite of it. `just gate quiet`'s first step,
+  `check-plugins`, started on the very next line, which is only reachable past
+  this same recipe's own dirty-tree refusal (§415.2): the refusal did not fire,
+  so the clone was still clean after `mise install`. The hypothesis this
+  paragraph named is answered: **no, the newer mise did not write `mise.lock`,**
+  and `gate-fresh` and `ci.yml`'s `mise-action` need no change for it.
+
+  The run's gate still failed, first on `check-status-selftest`, also on
+  `check-queue-selftest`, `check-clean-targets-selftest` and
+  `check-timing-hooked-calls` — none of them about `mise.lock` or a dirty tree,
+  and the run crossed 2026-10-25 into 2026-10-26 local time while `test` alone
+  ran 931.7s, so a date-boundary flake is one live hypothesis and an unrelated
+  regression is another; neither is checked here. Filed as a follow-up.
 - **The gate's own selftests run nested gates.** `check-gate-verdicts-selftest`
   already ran its gates in a scratch repository, with `GIT_DIR` and
   `GIT_WORK_TREE`. `check-gate-summary-selftest` now does the same. Its gates
@@ -178,4 +198,8 @@ is why the verifier keeps its gate.
 - `check-gate-docs-selftest` runs its nested `gate-docs` and `gate-lane` in a
   scratch repository, as the two selftests beside it do (§415.3). Filed.
 - One run of `just gate-fresh` after this lands, to see whether the container's
-  newer mise writes `mise.lock` (§415.3). Filed.
+  newer mise writes `mise.lock` (§415.3). Done, by Q1420: it does not.
+- Whether `check-status-selftest`, `check-queue-selftest`,
+  `check-clean-targets-selftest` and `check-timing-hooked-calls` failing
+  together in Q1420's `gate-fresh` run is a date-boundary flake (the run
+  crossed local midnight) or a real regression on `11b049277` (§415.3). Filed.
