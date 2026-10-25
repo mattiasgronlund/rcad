@@ -415,7 +415,16 @@ pub(crate) fn squared(value: Interval) -> Interval {
 /// The radius term travels a shorter chain — one rounding to square it and one
 /// to subtract it — so the six covers it too. The `48*epsilon^2` covers the
 /// higher-order terms and the rounding of the permanent itself, with room to
-/// spare: what it has to beat is about `15*epsilon`.
+/// spare. The higher-order terms start at `15*epsilon^2`. The permanent adds
+/// the four rounded squares in three additions, so it can sit up to about
+/// `3*epsilon` under their true sum, which costs `18*epsilon^2` against the
+/// `6*epsilon`, and multiplying it by this constant rounds once more, which
+/// costs `epsilon` of the bound and so `6*epsilon^2` of the permanent. What the
+/// `48` has to beat is `15 + 18 + 6 = 39`. Gappa proves the bound at this
+/// constant (`docs/decisions.md` §464.14); with every square normal the least
+/// constants it proves are `5*epsilon + 28*epsilon^2` on the sum before
+/// `value`'s last rounding, which is all `decide` needs, and
+/// `6*epsilon + 30*epsilon^2` on `value`.
 ///
 /// Every step of that argument is a *relative* one, so like every bound of this
 /// shape it holds only while nothing overflows or falls into the subnormals.

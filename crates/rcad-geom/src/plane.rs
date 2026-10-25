@@ -1048,9 +1048,18 @@ impl Predicate for SideOfAFlatSurfaceThroughAPoint {
 /// `15ε²` and less. The permanent is itself folded from six rounded numbers in
 /// five additions, so the computed one can sit up to about `6ε` under the true
 /// one, which costs another `36ε²` against the `6ε`, and multiplying by this
-/// constant rounds once more. The `128ε²` covers those 52 and change with room.
-/// The same relative argument as [`SIDE_OF_PLANE_ERROR_BOUND`], so it holds only
-/// while every product is a normal number, which `on_floats` checks.
+/// constant rounds once more, which costs `ε` of the bound and so `6ε²` of the
+/// permanent. The `128ε²` covers those `15 + 36 + 6 = 57` with room.
+///
+/// Gappa proves the bound at this constant (`docs/decisions.md` §464.13), on
+/// the sum before `value`'s last rounding, which is all `decide` needs, and on
+/// `value` too. With every product normal the least constants it proves on the
+/// two are `5ε + 38ε²` and `6ε + 48ε²`. The proof covers every case in which
+/// `on_floats` hands `decide` a number, not only that one: [`product_is_normal`]
+/// lets a product with a zero factor through, and the floor through the origin
+/// makes five of the six zero, yet the bound holds for any set of zero products
+/// and with any of the fold's sums cancelling to zero. Whether a product below
+/// the normals, which `on_floats` refuses, would break it has not been run.
 const SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (6.0 + 128.0 * epsilon) * epsilon
