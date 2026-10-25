@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use rcad_geom::{Surface, SurfaceMeet, intersect};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::StepFile;
-use rcad_topo::{Model, Rule};
+use rcad_topo::{Model, Rule, WireView};
 
 // `#[path]` and not `include!`, because the shared files open with a module doc
 // comment and an inner attribute, and neither of those can be pasted into the
@@ -595,10 +595,62 @@ fn a_model_for_the_writer(bytes: &[u8]) -> Result<Explained, String> {
     };
     Ok(Explained {
         target: NO_MODEL_MAKES_THE_WRITER_PANIC.to_owned(),
-        case: format!("AModel {{ {} }}", what_one_model_holds(&model)),
+        case: format!("AModel {{ {} }}", what_walking_one_model_sees(&model)),
         rebuild: format!("one_model_decoded_and_written({})", as_a_literal(bytes)),
         outcome,
     })
+}
+
+/// What walking one model in order sees: each solid's shell placement, each
+/// face's located surface, and each coedge's two corners and the edge run
+/// between them.
+///
+/// This is the shape a writer round trip is checked against, the way
+/// `target/q1210-probe`'s `print_model` checked it by hand (§410.5) — a count
+/// of entities says nothing about which placement or which corner came out
+/// different, and that is the question a writer bug raises.
+fn what_walking_one_model_sees(model: &Model) -> String {
+    model
+        .solids()
+        .map(|solid| {
+            let shells = solid
+                .shells()
+                .map(|shell| {
+                    format!(
+                        "shell {{ loc: {:?}, orient: {:?} }}",
+                        shell.location(),
+                        shell.orientation()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let faces = solid
+                .faces()
+                .map(|face| {
+                    let coedges = face
+                        .wires()
+                        .flat_map(WireView::coedges)
+                        .map(|coedge| {
+                            format!(
+                                "coedge {{ start: {:?}, end: {:?}, run: {:?} }}",
+                                coedge.start().point(),
+                                coedge.end().point(),
+                                coedge.edge().run()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "face {{ surface: {:?}, coedges: [{coedges}] }}",
+                        face.surface()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("solid {{ shells: [{shells}], faces: [{faces}] }}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A header byte and two halves, each decoded into a `Model` and fused against
