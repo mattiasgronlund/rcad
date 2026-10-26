@@ -98,6 +98,13 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
    line it printed. Read the first section instead of the diff by eye: a test
    or an assertion it shows removed or weakened with no word from the lane on
    why is a `fix_first`.
+
+   Before step 2's checkout, run `git checkout <base> -- docs/queue.md` if
+   unsure the tree still holds the base's copy of the queue. Run `mise exec --
+   just queue show <id>` once per id in the row, or each id of a bundle, and
+   build the union of each row's write-set column the way `writeSetOf` in `lanes.js` builds the write set above, and compare the two.
+   The write set above is the one the brief gave you.
+   List every file where they disagree in `write_set_mismatch`; it is empty when the two match exactly (§396).
 2. `git checkout --detach <branch>`.
 3. `mise exec -- just gate-lane` on the branch tip, including any docs commit —
    one plain Bash call, `timeout` 600000, no redirect and no pipe through `tail`.
