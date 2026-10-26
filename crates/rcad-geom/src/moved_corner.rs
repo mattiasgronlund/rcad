@@ -42,8 +42,9 @@ use crate::{Error, Result, Surface};
 /// The size to multiply by is the largest magnitude among the corner's
 /// coordinates before and after the move, the movement's own shift, and the
 /// numbers each surface places and sizes itself with before and after — a
-/// plane's offset, a ball's centre and radius, a pipe's axis origin and radius.
-/// Absolute in that size and never relative to the answer, for the reason
+/// plane's offset, a ball's centre and radius, a pipe's axis origin and radius,
+/// a cone's apex and slope, a torus's centre and `ring + tube`. Absolute in
+/// that size and never relative to the answer, for the reason
 /// [`Plane::SIGNED_DISTANCE_ROUNDOFF`](crate::Plane::SIGNED_DISTANCE_ROUNDOFF)
 /// opens with.
 ///
@@ -51,46 +52,73 @@ use crate::{Error, Result, Surface};
 ///
 /// §31.10 item 6 asks whether this is one [`Isometry::POINT_ROUNDOFF`] or two,
 /// "because `Surface::transformed` rounds the surface as well as the point".
-/// **It is neither: it is five, and the constant published here is seven.**
-/// Two slips add, and the second depends on which surface the corner sits on.
+/// **It is not a count of them at all**, for two reasons (§464.21 item 4).
+/// `POINT_ROUNDOFF` bounds each coordinate of a slip, not its length, so one
+/// slip is up to `√3` of them long. And the turn moves the corner against its
+/// surface even worked without rounding, by a share no `POINT_ROUNDOFF` counts.
+/// Gappa proves the sum instead, one script for each kind of surface but the
+/// cone (`docs/decisions.md` §464.21).
 ///
-/// **The point.** [`Isometry::apply_to_point`] puts `p` within
-/// `POINT_ROUNDOFF · L` of the true `M(p)`. That is one.
+/// Writing `u = f64::EPSILON / 2`, the constant is `256u`.
+/// [`where_a_corner_lands_after_moving`] hands back a box of half-width this
+/// times `L` on each coordinate, and a ball of radius `256u · L` lies inside
+/// that box, so the box meets the moved surface whenever the moved corner is
+/// within `256u · L` of it. That distance is what is proved. Per unit of `L`,
+/// it has three shares:
 ///
-/// **A ball.** `Sphere::transformed` moves the centre and carries the radius
-/// over exactly, so the stored moved ball is a ball of exactly the right size
-/// whose centre is `POINT_ROUNDOFF · L` out. Every point of the true moved ball
-/// is that far from it and no further. **One more.**
+/// - **The slips.** [`Isometry::apply_to_point`] puts the corner, and the
+///   centre or axis origin that places a ball, a pipe or a torus, each within
+///   `POINT_ROUNDOFF`, `36u`, of where the turn worked without rounding puts
+///   them, on each coordinate. So a slip is up to `√3 · 36u = 62.35u` long, and
+///   the corner's slip less the centre's or the origin's up to `124.7u`. A
+///   plane is placed by its normal and offset and not by a point, so it meets
+///   the corner's slip alone, and only along its normal.
+/// - **The turn's length share.** A turn is stored as a quaternion `q`, and
+///   worked without rounding it keeps a length only when `q·q` is exactly one,
+///   which a stored turn is only to within `6 · f64::EPSILON`. That takes the
+///   corner off its surface by up to `83.14u` on a plane, `24u` on a ball and a
+///   pipe, and `53.7u` on a torus.
+/// - **The turned normal or direction.** [`Isometry::apply_to_vector`] puts
+///   each component of a unit vector within `20u` of where the turn worked
+///   without rounding puts it (§464.20). A plane's normal slipped that far
+///   moves the plane by up to `60u` where the turned corner is, and the
+///   offset's own rounding adds `17u`. An axis tilted that far moves a corner
+///   by its distance from the axis origin times the tilt: a torus's corner is
+///   within about `L` of its centre, `34.6u`, but a pipe's can be `2√3 · L`
+///   from its origin, `120u`.
 ///
-/// **A plane.** `Plane::transformed` turns the normal and carries the offset
-/// over, adding `n' · t`. Writing `ν = Rn` and `Δ = δ + ν·t` for the true moved
-/// plane, and `u = f64::EPSILON / 2`, a point `x` on it satisfies
-/// `n'·x − δ' = (n' − ν)·x + (Δ − δ')`. The turned normal is a unit vector, so
-/// its slip is `POINT_ROUNDOFF` with `L = 1`, and the first term is at most
-/// `√3 · POINT_ROUNDOFF · L`. The second carries the same slip through the shift
-/// — another `√3 · POINT_ROUNDOFF · L` — plus the dot product's own `4u·√3·L`
-/// and the sum's `u·2L`. Divided by `|n'|`, which is one to within
-/// `POINT_ROUNDOFF`, that comes to under `2√3 · POINT_ROUNDOFF · L + 8u·L`,
-/// which is under **four** `POINT_ROUNDOFF · L`.
+/// Added up as each script bounds them:
 ///
-/// **A pipe.** `Axis::transformed` moves the origin and turns the direction and
-/// rescales neither, and the radius is carried over exactly. The origin slips
-/// `POINT_ROUNDOFF · L`; the direction slips `POINT_ROUNDOFF` as a unit vector,
-/// which moves the axis under a point at most `2L` away by
-/// `2 · POINT_ROUNDOFF · L`; and the certified radius does not move at all.
-/// **Three, and it used to be four.** The fourth was the radius term: the
-/// certified radius was `r/‖w‖`, which a turned direction moved by
-/// `r · POINT_ROUNDOFF / ‖w‖²`. §118.11 put `‖w‖²` on both sides of the pipe's
-/// comparison, so the certified radius is now the stored `r` and
-/// `Axis::transformed` carries it over untouched.
+/// - a plane, `62.35u + 83.14u + 60u + 17u`, over the turned normal's length:
+///   **`222.5u`**;
+/// - a ball, `124.7u + 24u`: **`148.7u`**;
+/// - a pipe, `86.6u + 120u + 24u`: **`230.6u`**, the worst, with `25.4u` to
+///   spare;
+/// - a torus, `124.7u + 34.6u + 53.7u`: **`213.0u`**.
 ///
-/// So the worst is the **plane's** four plus the point's one, which is
-/// `90 · f64::EPSILON · L`, the same total as before — a pipe used to tie with a
-/// plane and now comes in under it.
-/// The constant is `128`, about seven, and the room left over is the same room
-/// [`Isometry::POINT_ROUNDOFF`] leaves for second-order terms — a rounding is a
-/// relative slip of the *computed* value rather than of the true one — taken
-/// twice, because two of those chains compose here.
+/// **The pipe needs more than `POINT_ROUNDOFF` publishes.** Its slips are taken
+/// at `25u`, which Gappa proves of [`Isometry::apply_to_point`] under the same
+/// hypotheses as the published `36u` (§464.19, §464.21 item 5), and that puts
+/// the corner's slip less the origin's within `86.6u`. At `36u` it is `124.7u`,
+/// and the same argument comes to `268.7u`, past `256u`. So a change to
+/// [`Isometry::apply_to_point`] that stays inside `36u` but goes past `25u`
+/// leaves a corner on a moved pipe unproved.
+///
+/// **The cone is not proved.** [`Cone::transformed`](crate::Cone::transformed)
+/// moves its axis as a pipe's is moved, and the same argument, on paper, comes
+/// to about `290u`, past `256u` even with `25u` slips. A cone's `L` counts its
+/// apex and slope and not how far it reaches, so its corner can be `2√3 · L`
+/// from its axis, and the turn's length share there is about `83u`. That is an
+/// argument and not a demonstration that the bound fails (§16.10): the three
+/// shares need not reach their worst at once, and nobody has searched for a
+/// corner on a cone that a move puts past `256u` (Q2830).
+///
+/// Every proof stands on the hypotheses of the proofs it takes its slips from
+/// (§464.19, §464.20), and the pipe's and the torus's on one more that is
+/// unproved: the `20u` is proved for a vector with no component over one, and a
+/// stored axis direction is only within
+/// [`Plane::NORMAL_LENGTH_ROUNDOFF`](crate::Plane::NORMAL_LENGTH_ROUNDOFF) of
+/// length one, so a component can be about `1 + 64u` (Q2831).
 ///
 /// `a_corner_read_out_of_a_model_and_moved_is_a_box_around_where_it_lands.rs`
 /// measures the worst a search can find and prints the figure (§15.6).
@@ -129,10 +157,13 @@ pub const CORNER_AFTER_MOVING_ROUNDOFF: f64 = 128.0 * f64::EPSILON;
 /// normal, the direction and the radius being carried over untouched, which is
 /// what a shift does and a turn does not.
 /// [`HalfSpace::transformed`](crate::HalfSpace::transformed) is the general
-/// movement, and it mints no third constant: its normal and offset are the flat
-/// plane [`CORNER_AFTER_MOVING_ROUNDOFF`] already reckons with, under four
-/// [`Isometry::POINT_ROUNDOFF`](crate::Isometry::POINT_ROUNDOFF) for a unit
-/// normal. What a turn takes away that no bound describes is the exact
+/// movement, and it mints no third constant: it turns its normal and gains its
+/// offset by the same two lines as `Plane::transformed`, so a corner on its
+/// boundary, moved, lands within the `222.5u·L` that
+/// [`CORNER_AFTER_MOVING_ROUNDOFF`] proves for a plane, given a normal with no
+/// component over one and of length one to within
+/// [`Plane::NORMAL_LENGTH_ROUNDOFF`](crate::Plane::NORMAL_LENGTH_ROUNDOFF)
+/// (§464.21). What a turn takes away that no bound describes is the exact
 /// squareness of a picking normal (§32.3), and
 /// [`HalfSpace::transformed`](crate::HalfSpace::transformed) is where that is
 /// set out and demonstrated.
