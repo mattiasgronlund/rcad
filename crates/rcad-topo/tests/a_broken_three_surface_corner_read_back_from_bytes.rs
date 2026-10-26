@@ -1119,7 +1119,8 @@ fn a_sound_pyramid_shifted_after_a_turn_and_cut_by_a_wedge_over_the_plus_y_edge_
 
 /// **At the seven wedges and placements where Q2583's sweep found every rule
 /// refused under `tolerant(100)`, `tolerant(100)` now answers every rule past
-/// the range check, and `certified` refuses every rule at it.** The sweep fused
+/// the range check and `certified` refuses every rule at it, but at the sixth,
+/// where both answer every rule with nothing in the log.** The sweep fused
 /// the placed pyramid with each of four wedges at `every_placement` and at the
 /// turns 0.1, 0.7, 1.3 and 2.9 about `(1, 2, 3)`, `(−2, 1, 0.5)` and
 /// `(0.3, −1, 2)`, each also shifted to `(7, −5, 2.5)` after, 672 fuses in
@@ -1135,20 +1136,32 @@ fn a_sound_pyramid_shifted_after_a_turn_and_cut_by_a_wedge_over_the_plus_y_edge_
 /// Q2744's merge `4be293a5e` the first to answer it again.
 ///
 /// Under `certified`, two of the 21 answered at `f7bde708` with nothing in the
-/// log and are refused at the range check since Q2575's merge `955f07d66`, by
-/// bisect: the difference and the intersection with the wedge on one side of
-/// the `x` axis turned a tenth of a radian about `(−2, 1, 0.5)`. That refusal
-/// is a gap, and the test below says why. The other 19 are refused at the
-/// range check, as they were at `f7bde708`; they are not traced.
+/// log and were refused at the range check from Q2575's merge `955f07d66`, by
+/// bisect, to Q2815: the difference and the intersection of the sixth, the
+/// wedge on one side of the `x` axis turned a tenth of a radian about
+/// `(−2, 1, 0.5)`. That refusal was a gap, and the test below says why. Since
+/// Q2815 every rule there answers with nothing in the log under both
+/// policies, the union too, which `certified` refused at the range check
+/// before. The other 18 are refused at the range check, as they were at
+/// `f7bde708`; they are not traced.
 #[test]
 fn a_placed_pyramid_cut_by_a_wedge_through_its_apex_answers_under_tolerant_where_q2583_found_it_refused()
  {
-    use Came::{AnsweredPastTheRangeCheck, RefusedAtTheRangeCheck};
-    for (wedge, placement) in where_q2583_found_the_wedge_through_the_apex_refused() {
+    use Came::{Answered, AnsweredPastTheRangeCheck, RefusedAtTheRangeCheck};
+    for (which, (wedge, placement)) in where_q2583_found_the_wedge_through_the_apex_refused()
+        .into_iter()
+        .enumerate()
+    {
+        let the_sixth = which == 5;
+        let [under_certified, under_tolerant] = if the_sixth {
+            [Answered, Answered]
+        } else {
+            [RefusedAtTheRangeCheck, AnsweredPastTheRangeCheck]
+        };
         for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
             for (policy, came) in [
-                (Policy::certified(), RefusedAtTheRangeCheck),
-                (Policy::tolerant(100.0), AnsweredPastTheRangeCheck),
+                (Policy::certified(), under_certified),
+                (Policy::tolerant(100.0), under_tolerant),
             ] {
                 let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
                 assert_eq!(
@@ -1175,13 +1188,18 @@ fn a_placed_pyramid_cut_by_a_wedge_through_its_apex_answers_under_tolerant_where
 /// where the `−y`, `+x` and `−x` planes meet, and read round it with `+y`
 /// moved through that point (§448.8), the point is `2.6e−16` in front of the
 /// moved `+y`: the moved plane cut off the top a triangle whose corners are
-/// within `2e−15` of one another. Up to Q2815 the intersection kept it as a
-/// fifth face, 5 faces and 18 sides under `tolerant(100)`, the difference kept
-/// a stretch of it in its `+y` face, 8 faces and 34 sides, and `certified`
-/// refused both at the range check for it. Moved through the apex the other
-/// three meet in instead, `−y`, `+x` or `−x` leaves the point behind every
-/// other side plane, so `bake` solves the apex from three planes that put no
-/// such point on another side of a plane than the true planes do (§448.8).
+/// within `2e−15` of one another. Read so, the wedge's edge comes into the
+/// pyramid through the `+y` face, and neither wedge face cuts `+y` further
+/// down. Up to Q2815 `bake` took that apex: the intersection kept the
+/// triangle as a fifth face, 5 faces and 18 sides under `tolerant(100)`, the
+/// difference kept a stretch of it in its `+y` face, 8 faces and 34 sides, and
+/// `certified` refused both at the range check for it. Since Q2815 `bake`
+/// passes over a reading that lets a line where two planes of the fuse cross
+/// in through a face one of the two does not cut further from the corner, and
+/// takes the apex where `+x`, `+y` and `−x` meet, with `−y` moved: read so,
+/// the edge comes in through the `+x` face, as in the true planes, and both
+/// wedge faces cut `+x` further down, so they part from that point and the
+/// answer's top corner is where they meet (§448.8).
 #[test]
 fn a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes_do() {
     let wedge = A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS;
