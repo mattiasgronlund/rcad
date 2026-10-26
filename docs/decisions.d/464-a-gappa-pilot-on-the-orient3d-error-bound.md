@@ -14369,14 +14369,23 @@ the control `c_pipe_nobound.g`. `torus.g` proves at `36u`: `S` `1.38453e-14`
 `2.98325e-14`, `268.7u`. Every control exits 1; their bests are in the `.out`
 files and not yet written up.
 
-Not yet done: `gappa -Bcoq` aborts on `pipe.g` and `torus.g` with
-`src/parser/ast.cpp:255: std::string dump_real(const ast_real*, unsigned
-int): Assertion 'false' failed`, after it has written the eight and eleven
-hints, while `ball.g`, `plane.g` and the `r_point` runs pass `coqc`. Two
-variants are written and not yet run, in `variants.py` in the lane's scratch
-directory: `p_inline.g`, with no name bound to a number or to another name
-(`a0 = 0`, `y0 = RL`), and `p_named.g`, with the hint `NUMQ / DENQ -> …`
-written on a name. The cone, the write-up and `same.py`'s run remain.
+`gappa -Bcoq` aborted on `pipe.g` and `torus.g` as the two blocks below
+write them, with `src/parser/ast.cpp:255: std::string dump_real(const
+ast_real*, unsigned int): Assertion 'false' failed`, after it had written the
+eight and eleven hints, while `ball.g`, `plane.g` and the `r_point` runs
+passed `coqc`. Q2691's fifth lane ran the two variants `variants.py` writes.
+`p_inline.g`, `pipe.g` with `a0 = 0; a1 = 0; a2 = al;` and `y0 = RL; y1 =
+0; y2 = TL;` dropped and each name written in place, printed `p_inline exit 0
+0.36s` and `p_inline coq -Bcoq exit 0 coqc exit 0 2.31s lines 3280 hints 8`,
+with the same six bounds as `pipe.g`. `p_named.g` never reached `-Bcoq`: it
+names `NUMQ` before `NUMQ`'s own line, and Gappa stopped with `Error:
+redefinition of identifier 'NUMQ' at line 62 column 4`. So `pipe.g` and
+`torus.g` now write `a` and `y` in place, and `all.sh`, run again on them,
+printed `pipe coq -Bcoq exit 0 coqc exit 0 1.95s lines 3280 hints 8` and
+`torus coq -Bcoq exit 0 coqc exit 0 2.05s lines 3483 hints 11`, every other
+line as before and every bound the same. The two blocks below are still the
+named form that aborted; the lane that finishes this appends the in-place
+form. The cone, the write-up and `same.py`'s run remain.
 
 ```gappa
 # restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
