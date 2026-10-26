@@ -12590,10 +12590,11 @@ The `6ε` is what the record says of each route by which a turn reaches
   `held_near_length_one`'s count.
 - `inverse` (`isometry.rs:283-286`) turns by the conjugate, whose `q·q` is
   the same.
-- `From<na::Isometry3<f64>>` (`isometry.rs:667-671`), which is public, takes
-  whatever turn the caller's nalgebra isometry holds, and nalgebra's
-  `Unit::new_unchecked` holds a quaternion of any length. Nothing in the
-  workspace calls it at `ba0a654e`. Not run (10).
+- Since Q2803, the public route is `TryFrom<na::Isometry3<f64>>`
+  (`isometry.rs:401-414`), not `From`: it keeps a turn within
+  `TURN_LENGTH_DRIFT` of one bit for bit, and divides any other by its length
+  as stored parts are read (`isometry.rs:417-436`), refusing four zeros. The
+  `6ε` hypothesis holds on it too.
 
 **6. A turn of a cube.** When the turn is one of a cube's 24, `turned_by`
 moves each coordinate onto another and negates some, rounding nothing
@@ -13214,7 +13215,9 @@ lies between is `(v·n)²`. So with `|q·q − 1| ≤ 6ε` the share is within `
 and Gappa derives it. What it does not derive is the `6ε` itself, the same
 hypothesis as 464.19's 5: `compose` holds its turns there by
 `held_near_length_one`'s count, `Isometry::rotation`'s is measured
-(`TURN_LENGTH_DRIFT`), and `From<na::Isometry3<f64>>` holds any length.
+(`TURN_LENGTH_DRIFT`), and since Q2803 `TryFrom<na::Isometry3<f64>>` keeps a
+turn within `TURN_LENGTH_DRIFT` of one bit for bit and divides any other by
+its length as stored parts are read, so the `6ε` hypothesis holds on it too.
 
 The 64 holds for a turn within `7ε` of length one and not by this argument at
 `7.5ε`: `r_square_14.g`, `|q·q − 1| ≤ 14u`, proves, and `r_square_15.g`,
