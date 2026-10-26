@@ -534,7 +534,11 @@ at `d89061f2`, for what Q2744 changed (lane tip `1c5a029b1`, merged at
 face's crowded corners too, and `by_a_plane` reads a piece inside the room of
 such a corner of the solid it is placed against. The doc comments of
 `as_read_round_a_corner`, `ACornerReadAsOnePoint`, `by_a_plane` and
-`BakedFace::corners_of_the_solids_cutting_it` say how.*
+`BakedFace::corners_of_the_solids_cutting_it` say how. Amended by Q2815, read
+at `c3b3afeff`, for which three planes `bake` solves such a corner from (the
+paragraphs "Since Q2815" below); the doc comments of `derive_a_corner` and
+`ACornerReadAsOnePoint::lets_a_crossing_in_through_a_face_it_does_not_cut`
+say how.*
 
 **What the reading is.** Take a corner of the input with four or more planes
 round it (`BakedCorner::around`), one of which misses the point `bake` solved
@@ -720,6 +724,95 @@ in the stored offsets stays representation wobble (§17.3).
   (`a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_tells_its_cells_apart`,
   run above).
 
+**Since Q2815, which three planes the corner is solved from is a choice.**
+`bake` solved a corner with four or more planes round it from the three whose
+meet has the least box, and the reading moves the others through that meet.
+So which three it takes decides where the planes of the other solid cross the
+moved ones, and that can change the answer. Turned a tenth of a radian about
+`(−2, 1, 0.5)`, the sound pyramid cut through its apex by the wedge on one
+side of the `x` axis shows it. Exact fractions on the printed planes put the
+point where the wedge's edge crosses the `+x` side plane behind each of the
+other three, behind `+y` by `1.8e−17` of that plane's value. So in the true
+planes the edge comes into the pyramid through `+x`, and the intersection is
+four faces whose top corner is that point. The least box is where `−y`, `+x`
+and `−x` meet. Read round it, `+y` is moved, the point lands `2.6e−16` in
+front of the moved `+y`, and the edge comes in through `+y` instead. Neither
+wedge face cuts `+y` further down, so each cuts off the top of `+y` a triangle
+whose corners lie within `2e−15` of one another. The intersection kept it as a
+fifth face, 5 faces and 18 sides under `tolerant(100)`, and the difference
+kept a stretch of it, 8 faces and 34 sides. `certified` refused both at the
+range check, where before Q2575's merge `955f07d6` it answered them with
+nothing in the log, in 4 faces and 12 sides and 7 and 28.
+
+`derive_a_corner` now keeps the least box unless its reading lets a line where
+two planes of the fuse cross come into the corner through a face that one of
+the two does not cut further from the corner. A plane cuts a face further from
+the corner when it parts the far ends of the face's two edges at the corner.
+Then `derive_a_corner` takes the next triple by box whose reading does not let
+such a line in, and the least box when every triple does. Each triple is
+asked about every surface round the corner, as the least box is (448.3), and
+one a surface proves off is passed over. Under the pyramid above it takes `+x`,
+`+y` and `−x`, with `−y` moved. Read so, the edge comes in through `+x`, as in
+the true planes, and both wedge faces cut `+x` further down. The difference
+and the intersection answer in 7 faces and 28 sides and 4 and 12, with nothing
+in the log, under `certified` and `tolerant(100)` alike
+(`a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes_do`).
+The union there answers with nothing in the log too, which `certified` refused
+at the range check before
+(`a_placed_pyramid_cut_by_a_wedge_through_its_apex_answers_under_tolerant_where_q2583_found_it_refused`).
+
+**Why a line let in that way is a speck.** Two planes of the other solid
+whose line runs within a rounding of the corner meet the face that line comes
+in through in two lines from where it comes in. A plane that cuts the face
+further from the corner runs its line across the face. Where both do, the two
+lines part where the edge comes in, and the answer's corner is that point. A
+plane that does not cut it keeps its line within a rounding of the corner. It
+cuts off a piece of the face whose sides are a rounding long, which the answer
+keeps and `certified` refuses at the range check.
+
+**What it reads.** `the_plane_cuts_the_face_away_from_the_corner` in
+`fuse/arrange.rs` works from the normals alone, as exact determinants, so its
+answer is the same in every reading and in the true planes. Where the line
+comes in is asked of the reading, `ACornerReadAsOnePoint::side_of_a_meet`,
+exact as above. Any sign that cannot be worked out exactly, a face round the
+corner with other than two edges, or a nought determinant counts as letting a
+line in, so that triple is passed over. Three things narrow where it is asked:
+
+- Facing out of the solid is what tells a line coming into the corner from one
+  going past it. So it is asked only round a corner whose every surface is the
+  plane of one of its faces, and which `the_planes_round_a_convex_corner` in
+  `fuse/bake.rs` proves convex from the stored corners and planes. That holds
+  when the far end of every edge from it lies behind every face plane round it
+  but the two the edge runs between. Any other corner keeps the least box.
+- The planes it asks about are those of every flat face of every solid in the
+  fuse (`the_plane_of_every_face`) that run through the corner's room, less
+  the ones round the corner, either way round. So `Scratch::split_both_groups`
+  bakes the arguments and the tools in one call, and each solid's corners see
+  the other's planes.
+- The joined faces of a wholly flat solid, `corner_of_every_vertex_left`, make
+  no choice and keep the least box, as before Q2815.
+
+**Why it asks the reading and not the true planes.** The reading is what the
+face is drawn in. Shifted to `(7, −5, 2.5)` after a tenth of a radian about
+`(1, 2, 3)`, the edge of the wedge round the `x` axis comes in through `−y` in
+the true planes, and neither wedge face cuts `−y` further down: a speck the
+true planes make. Read round the least box, it lets in no such line, and the
+difference answers under `certified` with nothing in the log, as at the base.
+Q2815's lane asked of the true planes at `2f0c46e2e`. There `bake` took
+`−y`, `+x` and `−x`, the edge came in through `−y` as read too, the answer kept
+the true speck, and `certified` refused that difference at the range check
+(`a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_tells_its_cells_apart`
+failed there).
+
+**Why it is not a tolerance (448.3).** It takes no sign as near enough to
+another. It chooses only among triples whose corner every surface round it
+already passed 448.3's check for, and each corner read is the meet of three
+real planes. The answer is a certified answer and adds no provenance record.
+
+`mise exec -- just t -E
+'test(/a_broken_three_surface_corner_read_back_from_bytes::/)'`, at
+`c3b3afeff`: 28 tests run, 28 passed.
+
 **What it leaves.** A face of the other solid is read round a corner only
 where a face round that corner cuts it. Read round a corner of the piece's own
 solid, a plane of the solid it is placed against that is one of the planes
@@ -752,4 +845,13 @@ nothing:
   plane alone: Q2750.
 - 21 fuses of Q2583's 672-fuse sweep answered at `f7bde708` and refuse at
   `5afdb494`. The fuse changes between those include Q2575's merge, and they
-  are not bisected, so nothing here says the reading made them: Q2758.
+  are not bisected, so nothing here says the reading made them: Q2758. Q2758
+  has closed since. Its test says `tolerant(100)` answers all 21, and that
+  the two `certified` answered at `f7bde708` were refused at the range check
+  from Q2575's merge on. Those two are the difference and the intersection of
+  the pyramid above, and since Q2815 all three rules there answer with nothing
+  in the log under both policies. The other 18 are refused at the range check
+  under `certified`, as at `f7bde708`, and are not traced
+  (`a_placed_pyramid_cut_by_a_wedge_through_its_apex_answers_under_tolerant_where_q2583_found_it_refused`).
+- A corner of the joined faces of a wholly flat solid makes no choice. Whether
+  one needs it is not measured, and no shape found so far does.
