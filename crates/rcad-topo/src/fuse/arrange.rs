@@ -1059,10 +1059,11 @@ enum HowItRuns {
     /// which is a box round `from` wherever the two surfaces do not both
     /// certify it ([`where_the_crossing_starts`]).
     ///
-    /// `named_the_start` is a node of the crossing whose box alone holds
-    /// `from`, counted first round it in place of `node`
-    /// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), and
-    /// `None` where no node is that.
+    /// `named_the_start` is a node of the crossing counted first round it in
+    /// place of `node`
+    /// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]): the
+    /// one node whose box holds `from`, or, where no node's box holds it, the
+    /// one whose box lies inside `node`. `None` where no node is that.
     ///
     /// `wound_as` is the pair whose crossing is asked which way it winds: the
     /// face's surface and the partner, or, for a circle a ring shares with a
@@ -4357,9 +4358,30 @@ impl<'f> Arrangement<'f> {
         }
     }
 
-    /// Count each loop a plane cuts a pipe in from the one node whose box
-    /// holds where the loop starts, where no other node can lie between the
-    /// two: the `named_the_start` of [`HowItRuns::RoundAClosedCurve`].
+    /// Count each loop a plane cuts a pipe in from the one node at the place
+    /// it starts, where no other node can lie between the two: the
+    /// `named_the_start` of [`HowItRuns::RoundAClosedCurve`]. That is the one
+    /// node whose box holds the walked start, or, where no node's box holds
+    /// it, the one whose box lies inside `node`, the box the start is held as.
+    ///
+    /// **A node whose box misses the walked start can still be at it.** The
+    /// walked start is a rounding off the loop, and a node is a box round
+    /// another rounding, so the two boxes need not meet: a plate whose wall
+    /// stands on a line through a round tab's axis, the tab's cap leaning,
+    /// has that wall cross the cap's ellipse right where the ellipse is
+    /// walked from. Turned `29 · 0.05` about `z` with the lean `(0, 0.1, 1)`,
+    /// the ellipse is walked from `z = 0.9999999999999999` and the wall
+    /// corner's box is `[1, 1.0000000000000007]` in `z`, one ulp short of it,
+    /// and the union with a far block was refused on the order along a
+    /// crossing. Turned `0.05` with the lean `(0.1, 0, 1)`, the corner where
+    /// the wall `x = 10` crosses the cap's rim is exact and two ulps off the
+    /// start, the sweep put it third of the four round the rim, and the union
+    /// was refused `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`
+    /// (`a_bar_with_a_leaning_cap_cut_beside_its_rim_corner.rs`, Q2856). Both
+    /// corners lie inside `node`. A node whose box does so stands for a place
+    /// in `node`, as the start does, so the stretch below still ends in the
+    /// node's box and in `node`, and the same checks keep every other node
+    /// off it. Two such nodes name neither.
     ///
     /// **Nothing else can put that node in order.** The step from the start
     /// to it may be nothing, so the sweep straddles nought whichever node it
@@ -4489,8 +4511,19 @@ impl<'f> Arrangement<'f> {
             .iter()
             .copied()
             .filter(|&each| boxes_overlap(place(each), from));
-        let (Some(held), None) = (holding.next(), holding.next()) else {
-            return None;
+        let held = match (holding.next(), holding.next()) {
+            (Some(held), None) => held,
+            (Some(_), Some(_)) => return None,
+            (None, _) => {
+                let mut inside = on_it
+                    .iter()
+                    .copied()
+                    .filter(|&each| holds_every_point_of(node, place(each)));
+                let (Some(held), None) = (inside.next(), inside.next()) else {
+                    return None;
+                };
+                held
+            }
         };
         if square_to_the_run_at_the_start(wound_as, from, place(held)) {
             return None;
@@ -14485,7 +14518,8 @@ fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
 /// walked triple, and the node a crossing is given there, which is a box round
 /// that triple wherever the two surfaces do not both certify it. Both name the
 /// one place by construction, so this compares names rather than coordinates.
-/// Where one node's box alone holds the start, and no other node can lie
+/// Where one node's box alone holds the start, or none does and one alone
+/// lies inside the box the start is held as, and no other node can lie
 /// between the two, that node is handed in as `node` instead, and is counted
 /// first by the same name
 /// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]).
