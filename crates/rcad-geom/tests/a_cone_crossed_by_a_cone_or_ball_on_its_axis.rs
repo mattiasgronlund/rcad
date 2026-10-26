@@ -570,15 +570,24 @@ fn two_cones_on_one_apex_a_rounding_short_of_touching_cross_along_their_two_othe
 /// cuts both cones in two rulings next to it. The enclosure of how far apart
 /// those two spread holds nothing, so the namer cannot tell their four halves
 /// apart, and refuses — a **gap**, since the four halves are there.
+///
+/// The pitch cones of a pair of mitre gears, slope one about `z` and the same
+/// cone turned a quarter turn about `y` by `Isometry::rotation` and
+/// `FRAC_PI_2`, are the same: the turned axis is stored as `(1, 0, 2⁻⁵²)`,
+/// which leans a rounding short of a right angle off `z`, so the two cones
+/// cross past touching and are refused alike (Q2871).
 #[test]
 fn two_cones_on_one_apex_a_rounding_past_touching_are_refused() {
-    assert_eq!(
-        named(
-            &the_right_angled_cone(),
-            &a_cone([0.0; 3], [3.0, 0.0, 1.0], 0.5),
-        ),
-        Err(Error::CannotNameWhichPieceOfACrossingThisIs)
-    );
+    for lying in [
+        a_cone([0.0; 3], [3.0, 0.0, 1.0], 0.5),
+        a_cone([0.0; 3], [1.0, 0.0, 2.220446049250313e-16], 1.0),
+    ] {
+        assert_eq!(
+            named(&the_right_angled_cone(), &lying),
+            Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+            "{lying:?}"
+        );
+    }
 }
 
 /// The way out of the apex along each of `rulings`, and the way back.
