@@ -1356,6 +1356,7 @@ fn furthest_from_zero(value: Interval) -> Interval {
 mod tests {
     use super::*;
     use crate::Axis;
+    use rcad_predicates::expansion::{two_diff, two_product, two_sum};
     use rcad_predicates::{Decision, Point as PredicatePoint, SideOfSurface};
 
     fn a_ball(centre: [f64; 3], radius: f64) -> Surface {
@@ -2283,243 +2284,238 @@ mod tests {
             );
         }
     }
-}
 
-#[cfg(test)]
-mod probe_q2796 {
-    use super::*;
-    use crate::Axis;
-    use rcad_predicates::expansion::{two_diff, two_product, two_sum};
-
-    #[derive(Clone, Copy, Debug)]
-    struct Dd(f64, f64);
-    fn dd(x: f64) -> Dd {
-        Dd(x, 0.0)
-    }
-    fn add(a: Dd, b: Dd) -> Dd {
-        let (s, e) = two_sum(a.0, b.0);
-        let (s, e) = two_sum(s, e + a.1 + b.1);
-        Dd(s, e)
-    }
-    fn neg(a: Dd) -> Dd {
-        Dd(-a.0, -a.1)
-    }
-    fn mul(a: Dd, b: Dd) -> Dd {
-        let (p, e) = two_product(a.0, b.0);
-        let (p, e) = two_sum(p, e + a.0 * b.1 + a.1 * b.0);
-        Dd(p, e)
-    }
-    fn div(a: Dd, b: Dd) -> Dd {
-        let q1 = a.0 / b.0;
-        let r = add(a, neg(mul(dd(q1), b)));
-        let q2 = r.0 / b.0;
-        let r = add(r, neg(mul(dd(q2), b)));
-        let q3 = r.0 / b.0;
-        add(add(dd(q1), dd(q2)), dd(q3))
-    }
-    fn root(a: Dd) -> Dd {
-        let s = a.0.sqrt();
-        let r = add(a, neg(mul(dd(s), dd(s))));
-        add(dd(s), dd(r.0 / (2.0 * s)))
-    }
-    fn below(a: Dd, x: f64) -> bool {
-        let d = add(a, dd(-x));
-        d.0 < 0.0 || (d.0 == 0.0 && d.1 < 0.0)
-    }
-    fn above(a: Dd, x: f64) -> bool {
-        let d = add(a, dd(-x));
-        d.0 > 0.0 || (d.0 == 0.0 && d.1 > 0.0)
-    }
-
-    fn the_truth(cone: &Cone, at: Point) -> (Dd, Dd, [f64; 3]) {
-        let along = cone.axis().direction().components();
-        let apex = cone.apex().coordinates();
-        let at = at.coordinates();
-        let out: [Dd; 3] = core::array::from_fn(|i| {
-            let (d, e) = two_diff(at[i], apex[i]);
-            Dd(d, e)
-        });
-        let mut l2 = dd(0.0);
-        let mut dot = dd(0.0);
-        let mut o2 = dd(0.0);
-        for i in 0..3 {
-            l2 = add(l2, mul(dd(along[i]), dd(along[i])));
-            dot = add(dot, mul(out[i], dd(along[i])));
-            o2 = add(o2, mul(out[i], out[i]));
-        }
-        let up = div(dot, l2);
-        let reach = root(add(o2, neg(mul(mul(up, up), l2))));
-        let slope = dd(cone.slope());
-        let steep = root(add(dd(1.0), mul(slope, slope)));
-        let up_abs = if up.0 < 0.0 { neg(up) } else { up };
-        let off = div(add(reach, neg(mul(slope, up_abs))), steep);
-        let sign = up.0.signum();
-        let normal = core::array::from_fn(|i| {
-            ((out[i].0 + out[i].1 - along[i] * (up.0 + up.1)) / (reach.0 + reach.1)
-                - cone.slope() * sign * along[i] / (l2.0 + l2.1).sqrt())
-                / (steep.0 + steep.1)
-        });
-        (up, off, normal)
-    }
-
+    /// **A seed the settling cannot put on both surfaces is refused by
+    /// [`settled_with_a_bound`] as [`march`] refuses it** (§43.6, Q2796).
+    ///
+    /// The two pipes of `how_small_a_crossing_can_be_before_no_point_sits_on_it.rs`,
+    /// one of radius `2147482112` and one of radius `4.36e-106`, cross in two
+    /// loops far smaller than the spacing of the `f64` where they sit. Settled
+    /// from this seed, the point lands at `(-1.2e-7, 1786830731.7, -3.4e-8)`,
+    /// `1.27e-7` off the thin pipe's axis, and [`march`] turns it away.
+    /// [`settled_with_a_bound`] handed the same point back as settled onto both,
+    /// to a caller about to ask which piece of the crossing it was on.
+    ///
+    /// The seeds `(4.36e-106, ±1786830731.7039194, 0)` are no use here: they
+    /// refuse earlier, inside the settling.
     #[test]
-    fn probe_q2796_a_lopsided_up() {
-        let along = Vector::new(0.36, 0.48, 0.8);
-        let u = Vector::new(0.8, -0.6, 0.0);
-        let v = Vector::new(0.48, 0.64, -0.6);
-        for apex in [Point::new(0.0, 0.0, 0.0), Point::new(0.75, -1.25, 2.5)] {
-            for slope in [0.5, 1.0, 4.0, 100.0, 1e15, 1e17] {
-                let cone =
-                    Cone::new(Axis::new(apex, along).expect("an axis"), slope).expect("a cone");
-                let stored = cone.axis().direction();
-                let (mut straddles, mut lopsided, mut misses, mut wrong_signs, mut normal_misses) =
-                    (0, 0, 0, 0, 0);
-                let mut worst_miss_in_widths = 0.0_f64;
-                let mut example = None;
-                for radius in [1.0, 3.0, 1e-3] {
-                    let h = radius * f64::EPSILON;
-                    for turn in 0..64 {
-                        let angle = f64::from(turn) * core::f64::consts::TAU / 64.0;
-                        for k in -8..=8 {
-                            let at = apex
-                                + u * (radius * angle.cos())
-                                + v * (radius * angle.sin())
-                                + stored * (f64::from(k) * h);
-                            let along_i = exactly(stored.components());
-                            let up_i = quotient_or_everything(
-                                dot_enclosing(
-                                    gap_enclosing(apex.coordinates(), at.coordinates()),
-                                    along_i,
-                                ),
-                                squared_length_enclosing(along_i),
-                            );
-                            if !(up_i.lo() < 0.0 && up_i.hi() > 0.0) {
-                                continue;
-                            }
-                            straddles += 1;
-                            if -up_i.lo() > up_i.hi() {
-                                lopsided += 1;
-                            }
-                            let (off, normal) = how_far_off_a_cone_enclosing(&cone, at);
-                            let (up_t, off_t, normal_t) = the_truth(&cone, at);
-                            if below(off_t, off.lo()) || above(off_t, off.hi()) {
-                                misses += 1;
-                                let miss = (off.lo() - (off_t.0 + off_t.1)).max(0.0);
-                                worst_miss_in_widths = worst_miss_in_widths.max(miss / off.width());
-                                if example.is_none() {
-                                    example = Some((at, up_i, up_t, off, off_t));
-                                }
-                            }
-                            if (off.lo() > 0.0 && below(off_t, 0.0))
-                                || (off.hi() < 0.0 && above(off_t, 0.0))
-                            {
-                                wrong_signs += 1;
-                            }
-                            if (0..3).any(|i| {
-                                normal_t[i] < normal[i].lo() - 1e-9
-                                    || normal_t[i] > normal[i].hi() + 1e-9
-                            }) {
-                                normal_misses += 1;
-                            }
-                        }
-                    }
-                }
-                eprintln!(
-                    "apex {apex:?} slope {slope:e}: straddles {straddles}, lopsided {lopsided}, \
-                     truth outside the enclosure {misses} (worst {worst_miss_in_widths:e} widths \
-                     below), wrong signs {wrong_signs}, normal outside {normal_misses}"
-                );
-                if let Some((at, up_i, up_t, off, off_t)) = example {
-                    eprintln!(
-                        "  e.g. at {:?}: up [{:e}, {:e}] true {:e}; off [{:e}, {:e}] true {:e}",
-                        at.coordinates(),
-                        up_i.lo(),
-                        up_i.hi(),
-                        up_t.0 + up_t.1,
-                        off.lo(),
-                        off.hi(),
-                        off_t.0 + off_t.1
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn probe_q2796_pick_points() {
-        let along = Vector::new(0.36, 0.48, 0.8);
-        let u = Vector::new(0.8, -0.6, 0.0);
-        let apex = Point::new(0.0, 0.0, 0.0);
-        for slope in [1.0, 4.0, 57.28996163075943, 100.0, 1e4] {
-            let cone = Cone::new(Axis::new(apex, along).expect("an axis"), slope).expect("a cone");
-            let stored = cone.axis().direction();
-            eprintln!("slope {slope} stored {:?}", stored.components());
-            for k in 0..=12 {
-                let at = apex + u + Vector::new(0.0, 0.0, -f64::from(k) * 2.0_f64.powi(-57));
-                let along_i = exactly(stored.components());
-                let up_i = quotient_or_everything(
-                    dot_enclosing(gap_enclosing(apex.coordinates(), at.coordinates()), along_i),
-                    squared_length_enclosing(along_i),
-                );
-                let (off, normal) = how_far_off_a_cone_enclosing(&cone, at);
-                let (up_t, off_t, normal_t) = the_truth(&cone, at);
-                eprintln!(
-                    "k {k} at {:?} up [{:e}, {:e}] true {:e}; off [{:e}, {:e}] true {:e} below {}; \
-                     normal z [{:e}, {:e}] true {:e}",
-                    at.coordinates(),
-                    up_i.lo(),
-                    up_i.hi(),
-                    up_t.0 + up_t.1,
-                    off.lo(),
-                    off.hi(),
-                    off_t.0 + off_t.1,
-                    below(off_t, off.lo()),
-                    normal[2].lo(),
-                    normal[2].hi(),
-                    normal_t[2]
-                );
-            }
-        }
-    }
-
-    fn a_pipe(along: [f64; 3], through: [f64; 3], radius: f64) -> Surface {
-        Surface::Cylinder(
-            Cylinder::new(
-                Axis::new(Point::from(through), Vector::from(along)).expect("a direction"),
-                radius,
-            )
-            .expect("a radius"),
-        )
-    }
-
-    #[test]
-    fn probe_q2796_a_seed_that_settles_off_one_surface() {
+    fn a_seed_that_settles_off_one_surface_is_refused_as_the_march_refuses_it() {
         let fat = a_pipe([0.0, 0.0, 1.0], [1191182336.0, 0.0, 0.0], 2147482112.0);
         let thin = a_pipe([0.0, 1.0, 0.0], [0.0, 0.0, 0.0], 4.3601508761683463e-106);
-        for seed in [
-            Point::new(4.3601508761683463e-106, 1786830731.7039194, 0.0),
-            Point::new(0.0, 1786830731.7039194, 4.3601508761683463e-106),
-            Point::new(4.3601508761683463e-106, -1786830731.7039194, 0.0),
-        ] {
-            let surfaces = [&fat, &thin];
-            let marched = march(surfaces, seed, 1.0, 1000).map(|walked| walked.points.len());
-            let bounded = settled_with_a_bound(surfaces, seed);
-            eprintln!("seed {:?}: march {marched:?}", seed.coordinates());
-            match bounded {
-                Ok((settled, off)) => {
-                    let off_each = surfaces.map(|surface| {
-                        let (enclosed, _) = how_far_off_enclosing(surface, settled);
-                        (enclosed.lo(), enclosed.hi())
-                    });
-                    eprintln!(
-                        "  settled_with_a_bound Ok at {:?} bound {off:e}; off each {off_each:?}; \
-                         the march's seed check turns it away: {}",
-                        settled.coordinates(),
-                        the_settling_did_not_land_on_both(surfaces, settled)
-                    );
-                }
-                Err(why) => eprintln!("  settled_with_a_bound Err {why:?}"),
-            }
+        let surfaces = [&fat, &thin];
+        let seed = Point::new(0.0, 1786830731.7039194, 4.3601508761683463e-106);
+
+        assert_eq!(
+            march(surfaces, seed, 1.0, 1000).map(|walked| walked.points.len()),
+            Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces),
+            "the march turns this seed away once it has settled it",
+        );
+        assert_eq!(
+            settled_with_a_bound(surfaces, seed),
+            Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces),
+            "and a seed settled with a bound is the same seed, so it is turned away too",
+        );
+    }
+
+    /// **How far a point is off a cone is enclosed even where the arithmetic
+    /// cannot tell which side of the flat through the apex the point is on**
+    /// (§43.6, Q2796).
+    ///
+    /// The distance is `(‖x_perp‖ − slope·|up|)/√(1 + slope²)`, with `up` how
+    /// far the point is along the axis from the apex. Here `up` encloses to
+    /// either sign, further below zero than above. Taking the upper nappe for
+    /// any `up` that might be above zero put `−slope·up` where `−slope·|up|`
+    /// belongs, and at slope `100` the enclosure's low end came out at
+    /// `9.999500037496863e-3` with the true distance `9.999500037496853e-3`,
+    /// below it: the point was said to be further off the cone than it is. At
+    /// slope `1e17` the same miss gave the wrong sign.
+    #[test]
+    fn a_point_a_rounding_under_the_flat_through_a_cones_apex_has_its_distance_enclosed() {
+        let (cone, at, truth) =
+            a_cone_and_a_point_a_rounding_under_the_flat_through_its_apex(100.0);
+        let (off, _) = how_far_off_a_cone_enclosing(&cone, at);
+        assert!(
+            holds(off, truth.off),
+            "{at:?} is {:e} off the cone, and its enclosure is [{:e}, {:e}]",
+            truth.off.0,
+            off.lo(),
+            off.hi(),
+        );
+    }
+
+    /// **The normal at a point the arithmetic cannot place on either side of
+    /// the flat through a cone's apex is enclosed as either nappe's** (§43.6,
+    /// Q2796).
+    ///
+    /// Over that flat the cone's normal leans down the axis, and under it up.
+    /// Taking the upper nappe for any `up` that might be above zero enclosed
+    /// the upper nappe's normal alone, `z` in `[-0.5657, -0.5657]`, when the
+    /// point is truly under the flat and its normal's `z` is `+0.5657`. The
+    /// arithmetic cannot rule out either nappe here, so the enclosure holds
+    /// both.
+    #[test]
+    fn a_point_a_rounding_under_the_flat_through_a_cones_apex_has_its_normal_enclosed() {
+        let (cone, at, truth) = a_cone_and_a_point_a_rounding_under_the_flat_through_its_apex(1.0);
+        let (_, normal) = how_far_off_a_cone_enclosing(&cone, at);
+        for axis in 0..3 {
+            assert!(
+                holds(normal[axis], truth.normal[axis]),
+                "the normal at {at:?} has {:e} along axis {axis}, and its enclosure there is \
+                 [{:e}, {:e}]",
+                truth.normal[axis].0,
+                normal[axis].lo(),
+                normal[axis].hi(),
+            );
+        }
+    }
+
+    /// A cone of `slope` leaning along `(0.36, 0.48, 0.8)` from the origin, and a
+    /// point one unit out from the apex square to that axis and then nine
+    /// `2^-57` down `z`, with what is true there.
+    ///
+    /// The point is truly `2.3e-17` under the flat through the apex, and the
+    /// arithmetic encloses how far up the axis it is as `[-1.05e-16, 5.6e-18]`:
+    /// either side of the flat, and further under it than over. Both are
+    /// checked here, since the pins that use this point are about nothing else.
+    fn a_cone_and_a_point_a_rounding_under_the_flat_through_its_apex(
+        slope: f64,
+    ) -> (Cone, Point, WhatIsTrueBesideACone) {
+        let cone = Cone::new(
+            Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.36, 0.48, 0.8))
+                .expect("a direction"),
+            slope,
+        )
+        .expect("a slope");
+        let at = Point::new(0.8, -0.6, -9.0 * 2.0_f64.powi(-57));
+
+        let along = exactly(cone.axis().direction().components());
+        let up = quotient_or_everything(
+            dot_enclosing(
+                gap_enclosing(cone.apex().coordinates(), at.coordinates()),
+                along,
+            ),
+            squared_length_enclosing(along),
+        );
+        assert!(
+            up.lo() < 0.0 && up.hi() > 0.0 && -up.lo() > up.hi(),
+            "{at:?} was picked so that how far up the axis it is encloses to either side of \
+             zero, further under than over, and it encloses to [{:e}, {:e}]",
+            up.lo(),
+            up.hi(),
+        );
+        let truth = what_is_true_beside(&cone, at);
+        assert!(
+            truth.up.0 < 0.0,
+            "and {at:?} was picked to be truly under the flat, where it is {:e} up the axis",
+            truth.up.0,
+        );
+        (cone, at, truth)
+    }
+
+    /// How far up its axis a point is from a cone's apex, how far off the cone
+    /// it is, and the cone's unit normal there.
+    struct WhatIsTrueBesideACone {
+        up: Doubled,
+        off: Doubled,
+        normal: [Doubled; 3],
+    }
+
+    /// [`WhatIsTrueBesideACone`] at `at`, worked out in [`Doubled`] from the
+    /// same stored numbers the kernel reads.
+    fn what_is_true_beside(cone: &Cone, at: Point) -> WhatIsTrueBesideACone {
+        let along = cone.axis().direction().components().map(Doubled::of);
+        let apex = cone.apex().coordinates();
+        let at = at.coordinates();
+        let out: [Doubled; 3] = core::array::from_fn(|axis| {
+            let (difference, error) = two_diff(at[axis], apex[axis]);
+            Doubled(difference, error)
+        });
+        let dot = |one: [Doubled; 3], other: [Doubled; 3]| {
+            (0..3).fold(Doubled::of(0.0), |sum, axis| sum + one[axis] * other[axis])
+        };
+        let squared_direction = dot(along, along);
+        let up = dot(out, along) / squared_direction;
+        let sideways: [Doubled; 3] = core::array::from_fn(|axis| out[axis] - along[axis] * up);
+        let reach = dot(sideways, sideways).root();
+        let slope = Doubled::of(cone.slope());
+        let steepness = (Doubled::of(1.0) + slope * slope).root();
+        let leaning = Doubled::of(up.0.signum());
+        let up_either_way = if up.0 < 0.0 { -up } else { up };
+        WhatIsTrueBesideACone {
+            up,
+            off: (reach - slope * up_either_way) / steepness,
+            normal: core::array::from_fn(|axis| {
+                (sideways[axis] / reach - slope * leaning * along[axis] / squared_direction.root())
+                    / steepness
+            }),
+        }
+    }
+
+    /// Whether `exact` is inside `enclosure`, ends included. The sign of a
+    /// [`Doubled`]'s first part is the sign of the whole.
+    fn holds(enclosure: Interval, exact: Doubled) -> bool {
+        (exact - Doubled::of(enclosure.lo())).0 >= 0.0
+            && (Doubled::of(enclosure.hi()) - exact).0 >= 0.0
+    }
+
+    /// A number carried as the sum of two `f64`, about 106 bits, to judge an
+    /// enclosure against: each step here rounds at about `2^-104` of the
+    /// numbers it is made from, where an enclosure's ends round at `2^-53`.
+    #[derive(Clone, Copy, Debug)]
+    struct Doubled(f64, f64);
+
+    impl Doubled {
+        fn of(value: f64) -> Self {
+            Self(value, 0.0)
+        }
+
+        fn root(self) -> Self {
+            let first = self.0.sqrt();
+            let left = self - Self::of(first) * Self::of(first);
+            Self::of(first) + Self::of(left.0 / (2.0 * first))
+        }
+    }
+
+    impl core::ops::Add for Doubled {
+        type Output = Self;
+        fn add(self, other: Self) -> Self {
+            let (sum, error) = two_sum(self.0, other.0);
+            let (sum, error) = two_sum(sum, error + self.1 + other.1);
+            Self(sum, error)
+        }
+    }
+
+    impl core::ops::Neg for Doubled {
+        type Output = Self;
+        fn neg(self) -> Self {
+            Self(-self.0, -self.1)
+        }
+    }
+
+    impl core::ops::Sub for Doubled {
+        type Output = Self;
+        fn sub(self, other: Self) -> Self {
+            self + -other
+        }
+    }
+
+    impl core::ops::Mul for Doubled {
+        type Output = Self;
+        fn mul(self, other: Self) -> Self {
+            let (product, error) = two_product(self.0, other.0);
+            let (product, error) = two_sum(product, error + self.0 * other.1 + self.1 * other.0);
+            Self(product, error)
+        }
+    }
+
+    impl core::ops::Div for Doubled {
+        type Output = Self;
+        fn div(self, other: Self) -> Self {
+            let first = self.0 / other.0;
+            let left = self - Self::of(first) * other;
+            let second = left.0 / other.0;
+            let left = left - Self::of(second) * other;
+            Self::of(first) + Self::of(second) + Self::of(left.0 / other.0)
         }
     }
 }
