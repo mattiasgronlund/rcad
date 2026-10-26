@@ -4057,6 +4057,17 @@ check-lanes-workflow:
         'lines that run: 7')
     runs_empty='git diff printed nothing, so it shows nothing'
     many_want=$(echo 'test code lines removed: 0'; seq -f 'crates/k/src/lib.rs: +pub fn f%g() {}' 1 10; echo 'lines that run: 15')
+    cfg_want=$(printf '%s\n' \
+        'removed.rs: -#[cfg(test)]' \
+        'removed.rs: -mod stuff {' \
+        'removed.rs: -    #[test]' \
+        'removed.rs: -    fn t() {' \
+        'removed.rs: -        assert_eq!(super::kept(), 1);' \
+        'removed.rs: -    }' \
+        'removed.rs: -}' \
+        'test code lines removed: 7' \
+        'toggled.rs: +#[cfg(test)]' \
+        'lines that run: 1')
     notes_bound="    notes: { type: 'string', description: 'at most five lines, for the merger:"
     notes_rule='`notes` is at most five lines, for the merger: what it must act on and what no'
     runs_note_field="    lines_that_run_note: { type: 'string', description: 'your own note about the print above, if any"
@@ -4217,6 +4228,17 @@ check-lanes-workflow:
     commit "$many" base
     seq -f 'pub fn f%g() {}' 1 15 >> "$many/crates/k/src/lib.rs"
     commit "$many" branch
+    cfgtest="$dir/cfgtest"
+    mkdir -p "$cfgtest"
+    git -C "$cfgtest" init -q
+    printf '%s\n' 'pub fn kept() -> u32 {' '    1' '}' '' '#[cfg(test)]' 'mod stuff {' '    #[test]' \
+        '    fn t() {' '        assert_eq!(super::kept(), 1);' '    }' '}' \
+        > "$cfgtest/removed.rs"
+    printf '%s\n' 'pub fn helper() -> u32 {' '    5' '}' > "$cfgtest/toggled.rs"
+    commit "$cfgtest" base
+    printf '%s\n' 'pub fn kept() -> u32 {' '    1' '}' '' > "$cfgtest/removed.rs"
+    printf '%s\n' '#[cfg(test)]' 'pub fn helper() -> u32 {' '    5' '}' > "$cfgtest/toggled.rs"
+    commit "$cfgtest" branch
     scan() {
         local n t at prev line types prog got failed
         n=$(grep -cxF -- "$create" "$1" || true)
@@ -4427,6 +4449,15 @@ check-lanes-workflow:
             printf '%s\n' "$got"
             echo "and should have printed the first ten, then 'lines that run: 15'; a verifier copies the whole print into its report (§382)"
             return 17
+        fi
+        got=$(git -C "$cfgtest" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        if [ "$got" != "$cfg_want" ]; then
+            echo "the lines-that-run recipe in $4 printed, on a commit that removes a whole #[cfg(test)] module and separately gates an existing function behind one:"
+            printf '%s\n' "$got"
+            echo "and should have printed exactly:"
+            printf '%s\n' "$cfg_want"
+            echo "the #[cfg(test)] attribute line must be skipped when the item it heads is removed or added with it, and counted when it changes alone (§375)"
+            return 23
         fi
         if ! grep -qF -- "$notes_bound" "$1" || ! grep -qF -- "$notes_rule" "$2/verifier.md"; then
             echo "$1's verdict schema or $2/verifier.md no longer holds a verifier's notes to five lines; unbounded, they were about a third of its report (§382)"
