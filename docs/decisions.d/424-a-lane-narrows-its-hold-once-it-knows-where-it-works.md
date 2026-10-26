@@ -24,6 +24,7 @@ side by side.
   424.6   The rows
   424.7   What Q1530 built
   424.8   What Q1531 built
+  424.9   The two bars of 424.4, counted
 
 ### 424.1 What was measured
 
@@ -271,3 +272,27 @@ in the `queue` recipe's `blocked()`.
   same item twice, moved off `assemble.rs` onto `select.rs`, since `assemble.rs`
   is now shared and a same-item repeat there would not block until the second
   holder — a different fact, not the one that fixture was written to show.
+
+### 424.9 The two bars of 424.4, counted
+
+Over the first 20 pairs of different lanes holding `arrange.rs` or
+`assemble.rs` side by side since Q1531 landed (`f4a328a59`,
+2026-10-12T17:34:41Z), and again over the first 20 of those pairs in which
+both lanes committed a change to the file (in pairs 5 and 7, one lane
+committed nothing):
+
+- **0 needed a merger to fix a conflict**, checked by `git merge-tree` on all
+  32 of their land, catch-up and fold merges.
+- **0 lands failed from the two changes breaking each other.** No
+  `merge-*-after-land` branch reached `main` in the window, and 15 of the 18
+  land merges say `by just land`, so even if the 3 an Opus merger landed
+  (Q1818, Q1848-b, Q1898) had each failed, they could not have pushed the
+  count past 3.
+
+The one conflict in the window, the fold `316c736f0` of Q1738 into Q1884, is
+between rows that never held the file at once, so it counts against neither
+bar.
+
+Neither of 424.4's bars — more than half of 20 needing a merger, or more than
+3 lands failing — is passed. Both files stay shared between two lanes
+(§424.4).
